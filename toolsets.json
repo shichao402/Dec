@@ -1,0 +1,10 @@
+[
+  {
+    "name": "github-action-toolset",
+    "displayName": "GitHub Action AI 工具集",
+    "githubUrl": "https://github.com/shichao402/GithubActionAISelfBuilder.git",
+    "description": "GitHub Actions 构建和调试的 AI 规则工具集，帮助 AI 助手更好地完成 CI/CD 任务",
+    "version": "1.0.0"
+  }
+]
+
