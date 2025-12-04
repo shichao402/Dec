@@ -1,10 +1,115 @@
 # 更新日志
 
+## [v1.1.0] - 2024-12-04
+
+### 🎉 新增功能
+
+#### 包管理功能对齐 pip/brew
+
+##### 1. 卸载单个工具集 (`uninstall` 命令)
+- **精确卸载**: 支持卸载指定的单个工具集
+- **交互式确认**: 默认需要用户确认，防止误操作
+- **强制模式**: `--force` 参数跳过确认
+- **完整清理**: 同时删除源码、规则文件、脚本文件
+```bash
+cursortoolset uninstall <toolset-name>
+cursortoolset uninstall <toolset-name> --force
+```
+
+##### 2. 搜索工具集 (`search` 命令)
+- **关键词搜索**: 支持模糊匹配
+- **多字段搜索**: 搜索名称、显示名称、描述、仓库地址
+- **匹配高亮**: 显示哪些字段匹配了关键词
+- **状态显示**: 显示工具集是否已安装
+```bash
+cursortoolset search github
+cursortoolset search action
+```
+
+##### 3. 查看详细信息 (`info` 命令)
+- **完整信息展示**: 名称、版本、作者、许可证、关键词
+- **安装状态**: 显示是否已安装及安装路径
+- **安装目标**: 列出所有安装目标及其配置
+- **功能列表**: 展示工具集提供的功能特性
+- **文档链接**: 显示相关文档链接
+```bash
+cursortoolset info <toolset-name>
+```
+
+##### 4. 版本管理 (`install --version`)
+- **指定版本安装**: 支持 Git 标签或提交哈希
+- **版本切换**: 已安装时可切换到指定版本
+- **自动 fetch**: 自动获取远程标签
+```bash
+cursortoolset install <name> --version v1.0.0
+cursortoolset install <name> -v abc123
+```
+
+##### 5. SHA256 校验
+- **安全验证**: 支持在配置中指定 SHA256 校验和
+- **自动验证**: 安装时自动计算并比对
+- **失败保护**: 校验失败时中止安装
+- **配置方式**: 在 `available-toolsets.json` 中添加 `sha256` 字段
+
+##### 6. 依赖管理
+- **声明依赖**: 在配置中声明工具集依赖关系
+- **自动安装**: 安装工具集时自动安装所有依赖
+- **避免重复**: 智能检测已安装的依赖，避免重复安装
+- **依赖检查**: 安装前检查依赖是否存在
+- **配置方式**: 在 `available-toolsets.json` 中添加 `dependencies` 数组
+
+### 🔧 改进
+
+#### 类型系统扩展
+- `ToolsetInfo` 新增 `sha256` 和 `dependencies` 字段
+- `loader` 包新增 `ToolsetSearchResult` 类型
+- `loader` 包新增 `SearchToolset` 搜索函数
+
+#### 安装器增强
+- `Installer` 新增 `Version` 字段支持版本控制
+- 新增 `SetVersion` 方法设置安装版本
+- 新增 `checkoutVersion` 方法切换 Git 版本
+- 新增 `verifySHA256` 方法验证校验和
+- 新增 `calculateDirSHA256` 方法计算目录哈希
+- 新增 `UninstallToolset` 方法卸载工具集
+- 新增 `removeInstalledFiles` 和 `removeToolsetDir` 辅助方法
+
+#### 命令系统
+- 注册新命令: `uninstall`, `search`, `info`
+- 优化命令排序，更符合使用习惯
+- 完善帮助文档
+
+### 📚 文档
+
+#### 新增文档
+- **NEW_FEATURES.md**: 详细的新功能说明和使用示例
+- **DEMO.md**: 完整的功能演示和使用场景
+
+#### 更新文档
+- **README.md**: 更新功能列表和使用方法
+- **version.json**: 版本号更新为 v1.1.0
+
+### 🐛 修复
+
+- 无重大 Bug 修复（新功能版本）
+
+### ⚡ 性能
+
+- 搜索功能使用内存搜索，性能优秀
+- 依赖安装避免重复操作，提升效率
+
+### 🔒 安全
+
+- SHA256 校验确保工具集完整性
+- 交互式确认防止误删除
+
+---
+
 ## [v1.0.0] - 2024-12-04
 
 ### 🎉 新增功能
 
-#### 智能版本控制（最新）
+#### 智能版本控制
 - **版本比较引擎**: 新增 `pkg/version` 包，实现语义化版本号比较
 - **自动版本检查**: 更新前自动检查是否有新版本
 - **避免重复更新**: 已是最新版本时自动跳过更新

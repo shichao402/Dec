@@ -88,7 +88,10 @@ func GetVersion() string {
 
 func init() {
 	RootCmd.AddCommand(installCmd)
+	RootCmd.AddCommand(uninstallCmd)
 	RootCmd.AddCommand(listCmd)
+	RootCmd.AddCommand(searchCmd)
+	RootCmd.AddCommand(infoCmd)
 	RootCmd.AddCommand(cleanCmd)
 	RootCmd.AddCommand(updateCmd)
 }

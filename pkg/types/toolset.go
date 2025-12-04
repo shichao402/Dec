@@ -2,11 +2,13 @@ package types
 
 // ToolsetInfo 表示 available-toolsets.json 中的工具集概要信息
 type ToolsetInfo struct {
-	Name        string `json:"name"`
-	DisplayName string `json:"displayName,omitempty"`
-	GitHubURL   string `json:"githubUrl"`
-	Description string `json:"description,omitempty"`
-	Version     string `json:"version,omitempty"`
+	Name         string   `json:"name"`
+	DisplayName  string   `json:"displayName,omitempty"`
+	GitHubURL    string   `json:"githubUrl"`
+	Description  string   `json:"description,omitempty"`
+	Version      string   `json:"version,omitempty"`
+	SHA256       string   `json:"sha256,omitempty"`       // 工具集的 SHA256 校验和
+	Dependencies []string `json:"dependencies,omitempty"` // 依赖的工具集名称列表
 }
 
 // Toolset 表示完整的 toolset.json 内容

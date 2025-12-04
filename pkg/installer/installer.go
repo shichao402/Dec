@@ -1,8 +1,11 @@
 package installer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +19,7 @@ import (
 type Installer struct {
 	ToolsetsDir string // 工具集安装目录
 	WorkDir     string // 工作目录（项目根目录）
+	Version     string // 指定安装的版本（Git 标签或提交哈希）
 }
 
 // NewInstaller 创建新的安装器
@@ -24,6 +28,11 @@ func NewInstaller(toolsetsDir, workDir string) *Installer {
 		ToolsetsDir: toolsetsDir,
 		WorkDir:     workDir,
 	}
+}
+
+// SetVersion 设置要安装的版本
+func (i *Installer) SetVersion(version string) {
+	i.Version = version
 }
 
 // InstallToolset 安装指定的工具集
@@ -36,19 +45,96 @@ func (i *Installer) InstallToolset(toolsetInfo *types.ToolsetInfo) error {
 		return fmt.Errorf("下载工具集失败: %w", err)
 	}
 	
-	// 2. 读取 toolset.json
+	// 2. 验证 SHA256（如果提供）
+	if toolsetInfo.SHA256 != "" {
+		fmt.Printf("  🔒 验证 SHA256 校验和...\n")
+		if err := i.verifySHA256(toolsetPath, toolsetInfo.SHA256); err != nil {
+			return fmt.Errorf("SHA256 校验失败: %w", err)
+		}
+		fmt.Printf("  ✅ SHA256 校验通过\n")
+	}
+	
+	// 3. 读取 toolset.json
 	toolsetConfigPath := filepath.Join(toolsetPath, "toolset.json")
 	toolset, err := i.loadToolset(toolsetConfigPath)
 	if err != nil {
 		return fmt.Errorf("读取 toolset.json 失败: %w", err)
 	}
 	
-	// 3. 执行安装（拷贝文件）
+	// 4. 执行安装（拷贝文件）
 	if err := i.copyFiles(toolset, toolsetPath); err != nil {
 		return fmt.Errorf("拷贝文件失败: %w", err)
 	}
 	
 	fmt.Printf("✅ 工具集 %s 安装完成\n", toolsetInfo.DisplayName)
+	return nil
+}
+
+// UninstallToolset 卸载指定的工具集
+func (i *Installer) UninstallToolset(toolsetInfo *types.ToolsetInfo) error {
+	toolsetPath := filepath.Join(i.ToolsetsDir, toolsetInfo.Name)
+	
+	// 1. 读取 toolset.json
+	toolsetConfigPath := filepath.Join(toolsetPath, "toolset.json")
+	toolset, err := i.loadToolset(toolsetConfigPath)
+	if err != nil {
+		// 如果读取失败，只删除源码目录
+		fmt.Printf("  ⚠️  无法读取 toolset.json，只删除源码目录\n")
+		return i.removeToolsetDir(toolsetPath)
+	}
+	
+	// 2. 删除安装的文件
+	if err := i.removeInstalledFiles(toolset, toolsetPath); err != nil {
+		fmt.Printf("  ⚠️  删除安装文件时出错: %v\n", err)
+	}
+	
+	// 3. 删除工具集源码目录
+	if err := i.removeToolsetDir(toolsetPath); err != nil {
+		return err
+	}
+	
+	return nil
+}
+
+// removeInstalledFiles 删除工具集安装的文件
+func (i *Installer) removeInstalledFiles(toolset *types.Toolset, sourceDir string) error {
+	if len(toolset.Install.Targets) == 0 {
+		fmt.Printf("  ℹ️  没有需要删除的安装文件\n")
+		return nil
+	}
+	
+	for targetPath := range toolset.Install.Targets {
+		fullTargetPath := filepath.Join(i.WorkDir, targetPath)
+		
+		// 检查目标路径是否存在
+		if _, err := os.Stat(fullTargetPath); os.IsNotExist(err) {
+			fmt.Printf("  ⏭️  跳过不存在的目录: %s\n", targetPath)
+			continue
+		}
+		
+		// 删除目标目录
+		fmt.Printf("  🗑️  删除: %s\n", targetPath)
+		if err := os.RemoveAll(fullTargetPath); err != nil {
+			fmt.Printf("  ⚠️  删除失败: %v\n", err)
+			continue
+		}
+	}
+	
+	return nil
+}
+
+// removeToolsetDir 删除工具集源码目录
+func (i *Installer) removeToolsetDir(toolsetPath string) error {
+	if _, err := os.Stat(toolsetPath); os.IsNotExist(err) {
+		fmt.Printf("  ℹ️  工具集源码目录不存在\n")
+		return nil
+	}
+	
+	fmt.Printf("  🗑️  删除工具集源码: %s\n", toolsetPath)
+	if err := os.RemoveAll(toolsetPath); err != nil {
+		return fmt.Errorf("删除源码目录失败: %w", err)
+	}
+	
 	return nil
 }
 
@@ -61,6 +147,12 @@ func (i *Installer) cloneOrDownload(sourceURL, targetPath string) error {
 	
 	// 检查目标目录是否已存在
 	if _, err := os.Stat(targetPath); err == nil {
+		// 如果指定了版本，需要切换到该版本
+		if i.Version != "" {
+			fmt.Printf("  ℹ️  工具集已存在，切换到版本 %s...\n", i.Version)
+			return i.checkoutVersion(targetPath, i.Version)
+		}
+		
 		fmt.Printf("  ℹ️  工具集已存在，更新中...\n")
 		// 进入目录并拉取最新代码
 		cmd := exec.Command("git", "pull")
@@ -86,6 +178,34 @@ func (i *Installer) cloneOrDownload(sourceURL, targetPath string) error {
 	}
 	
 	fmt.Printf("  ✅ 克隆成功\n")
+	
+	// 如果指定了版本，切换到该版本
+	if i.Version != "" {
+		fmt.Printf("  🔄 切换到版本 %s...\n", i.Version)
+		return i.checkoutVersion(targetPath, i.Version)
+	}
+	
+	return nil
+}
+
+// checkoutVersion 切换到指定版本
+func (i *Installer) checkoutVersion(repoPath, version string) error {
+	// 先 fetch 所有标签
+	fetchCmd := exec.Command("git", "fetch", "--tags")
+	fetchCmd.Dir = repoPath
+	if err := fetchCmd.Run(); err != nil {
+		fmt.Printf("  ⚠️  获取标签失败: %v\n", err)
+	}
+	
+	// 切换到指定版本
+	checkoutCmd := exec.Command("git", "checkout", version)
+	checkoutCmd.Dir = repoPath
+	checkoutCmd.Stderr = os.Stderr
+	if err := checkoutCmd.Run(); err != nil {
+		return fmt.Errorf("切换到版本 %s 失败: %w", version, err)
+	}
+	
+	fmt.Printf("  ✅ 已切换到版本 %s\n", version)
 	return nil
 }
 
@@ -410,5 +530,67 @@ func (i *Installer) copyFile(source, target string, executable bool) error {
 	}
 	
 	return nil
+}
+
+// verifySHA256 验证工具集的 SHA256 校验和
+func (i *Installer) verifySHA256(toolsetPath, expectedSHA256 string) error {
+	// 计算工具集目录的 SHA256（排除 .git 目录）
+	actualSHA256, err := i.calculateDirSHA256(toolsetPath)
+	if err != nil {
+		return fmt.Errorf("计算 SHA256 失败: %w", err)
+	}
+	
+	// 比较校验和
+	if actualSHA256 != strings.ToLower(expectedSHA256) {
+		return fmt.Errorf("校验和不匹配\n  期望: %s\n  实际: %s", expectedSHA256, actualSHA256)
+	}
+	
+	return nil
+}
+
+// calculateDirSHA256 计算目录的 SHA256 校验和（排除 .git）
+func (i *Installer) calculateDirSHA256(dir string) (string, error) {
+	hasher := sha256.New()
+	
+	// 遍历目录下所有文件
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		
+		// 跳过 .git 目录
+		if info.IsDir() && info.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		
+		// 只处理文件
+		if !info.IsDir() {
+			// 添加相对路径到哈希（保证顺序一致性）
+			relPath, err := filepath.Rel(dir, path)
+			if err != nil {
+				return err
+			}
+			hasher.Write([]byte(relPath))
+			
+			// 添加文件内容到哈希
+			file, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+			
+			if _, err := io.Copy(hasher, file); err != nil {
+				return err
+			}
+		}
+		
+		return nil
+	})
+	
+	if err != nil {
+		return "", err
+	}
+	
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
