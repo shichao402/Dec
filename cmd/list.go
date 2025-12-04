@@ -46,7 +46,7 @@ var listCmd = &cobra.Command{
 			fmt.Printf("   仓库: %s\n", toolset.GitHubURL)
 			
 			// 检查是否已安装
-			toolsetPath := filepath.Join(workDir, "toolsets", toolset.Name)
+			toolsetPath := filepath.Join(workDir, ".cursor", "toolsets", toolset.Name)
 			if _, err := os.Stat(toolsetPath); err == nil {
 				fmt.Printf("   状态: ✅ 已安装\n")
 			} else {

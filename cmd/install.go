@@ -34,8 +34,9 @@ var installCmd = &cobra.Command{
 		}
 		
 		// 确定工具集安装目录
+		// 默认安装到 .cursor/toolsets/ 目录，统一管理所有 Cursor 相关内容
 		if installToolsetsDir == "" {
-			installToolsetsDir = filepath.Join(installWorkDir, "toolsets")
+			installToolsetsDir = filepath.Join(installWorkDir, ".cursor", "toolsets")
 		}
 		
 		// 加载工具集列表
@@ -82,7 +83,7 @@ var installCmd = &cobra.Command{
 }
 
 func init() {
-	installCmd.Flags().StringVarP(&installToolsetsDir, "toolsets-dir", "d", "", "工具集安装目录（默认: ./toolsets）")
+	installCmd.Flags().StringVarP(&installToolsetsDir, "toolsets-dir", "d", "", "工具集安装目录（默认: .cursor/toolsets）")
 	installCmd.Flags().StringVarP(&installWorkDir, "work-dir", "w", "", "工作目录（默认: 当前目录）")
 }
 

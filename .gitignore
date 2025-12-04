@@ -29,10 +29,7 @@ go.work
 .DS_Store
 Thumbs.db
 
-# Installed toolsets
-# 注意：Git 子模块需要被跟踪，所以不忽略整个 toolsets/ 目录
-# 但子模块的内容会被 Git 自动处理
-toolsets/*
-!toolsets/.gitmodules
+# Cursor 相关（安装后生成的内容）
+.cursor/
 
 

@@ -1,3 +1,0 @@
-[submodule "toolsets/github-action-toolset"]
-	path = toolsets/github-action-toolset
-	url = https://github.com/shichao402/GithubActionAISelfBuilder.git

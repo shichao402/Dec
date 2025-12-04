@@ -22,7 +22,7 @@ var cleanCmd = &cobra.Command{
 此命令会删除：
   1. .cursor/rules/ 中安装的规则文件
   2. scripts/toolsets/ 中安装的脚本
-  3. toolsets/ 目录（可选，使用 --keep-toolsets 保留）
+  3. .cursor/toolsets/ 目录（可选，使用 --keep-toolsets 保留）
 
 使用 --force 跳过确认提示。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -51,7 +51,7 @@ var cleanCmd = &cobra.Command{
 		}
 
 		if !cleanKeepToolsets {
-			dirsToClean = append(dirsToClean, filepath.Join(workDir, "toolsets"))
+			dirsToClean = append(dirsToClean, filepath.Join(workDir, ".cursor", "toolsets"))
 		}
 
 		// 显示将要清理的内容
@@ -89,7 +89,7 @@ var cleanCmd = &cobra.Command{
 		if cleaned > 0 {
 			fmt.Printf("✅ 清理完成！共清理 %d 个目录\n", cleaned)
 			if cleanKeepToolsets {
-				fmt.Println("💡 提示：toolsets/ 目录已保留")
+				fmt.Println("💡 提示：.cursor/toolsets/ 目录已保留")
 			}
 		} else {
 			fmt.Println("ℹ️  没有需要清理的内容")
@@ -100,7 +100,7 @@ var cleanCmd = &cobra.Command{
 }
 
 func init() {
-	cleanCmd.Flags().BoolVarP(&cleanKeepToolsets, "keep-toolsets", "k", false, "保留 toolsets/ 目录（只清理安装的文件）")
+	cleanCmd.Flags().BoolVarP(&cleanKeepToolsets, "keep-toolsets", "k", false, "保留 .cursor/toolsets/ 目录（只清理安装的文件）")
 	cleanCmd.Flags().BoolVarP(&cleanForce, "force", "f", false, "跳过确认提示，直接清理")
 }
 

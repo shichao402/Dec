@@ -30,21 +30,21 @@ func NewInstaller(toolsetsDir, workDir string) *Installer {
 func (i *Installer) InstallToolset(toolsetInfo *types.ToolsetInfo) error {
 	fmt.Printf("📦 开始安装工具集: %s\n", toolsetInfo.DisplayName)
 	
-	// 1. 作为 Git 子模块安装
-	submodulePath := filepath.Join(i.ToolsetsDir, toolsetInfo.Name)
-	if err := i.installAsSubmodule(toolsetInfo.GitHubURL, submodulePath); err != nil {
-		return fmt.Errorf("安装子模块失败: %w", err)
+	// 1. 克隆或下载工具集
+	toolsetPath := filepath.Join(i.ToolsetsDir, toolsetInfo.Name)
+	if err := i.cloneOrDownload(toolsetInfo.GitHubURL, toolsetPath); err != nil {
+		return fmt.Errorf("下载工具集失败: %w", err)
 	}
 	
 	// 2. 读取 toolset.json
-	toolsetPath := filepath.Join(submodulePath, "toolset.json")
-	toolset, err := i.loadToolset(toolsetPath)
+	toolsetConfigPath := filepath.Join(toolsetPath, "toolset.json")
+	toolset, err := i.loadToolset(toolsetConfigPath)
 	if err != nil {
 		return fmt.Errorf("读取 toolset.json 失败: %w", err)
 	}
 	
 	// 3. 执行安装（拷贝文件）
-	if err := i.copyFiles(toolset, submodulePath); err != nil {
+	if err := i.copyFiles(toolset, toolsetPath); err != nil {
 		return fmt.Errorf("拷贝文件失败: %w", err)
 	}
 	
@@ -52,98 +52,43 @@ func (i *Installer) InstallToolset(toolsetInfo *types.ToolsetInfo) error {
 	return nil
 }
 
-// installAsSubmodule 将 GitHub 仓库作为子模块安装
-func (i *Installer) installAsSubmodule(githubURL, targetPath string) error {
-	// 检查当前目录是否是 Git 仓库
-	if !i.isGitRepository() {
-		return fmt.Errorf("当前目录不是 Git 仓库。请先运行 'git init' 初始化仓库，或使用 'git clone' 克隆现有仓库")
-	}
-	
+// cloneOrDownload 克隆或下载工具集到指定目录
+func (i *Installer) cloneOrDownload(sourceURL, targetPath string) error {
 	// 确保 toolsets 目录存在
 	if err := os.MkdirAll(i.ToolsetsDir, 0755); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
 	}
 	
-	// 检查是否已经是子模块
-	if i.isSubmodule(targetPath) {
-		fmt.Printf("  ℹ️  子模块已存在，更新中...\n")
-		// 更新子模块
-		cmd := exec.Command("git", "submodule", "update", "--init", "--recursive", targetPath)
-		cmd.Dir = i.WorkDir
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("更新子模块失败: %w", err)
-		}
-		return nil
-	}
-	
-	// 如果目录已存在但不是子模块，先删除
+	// 检查目标目录是否已存在
 	if _, err := os.Stat(targetPath); err == nil {
-		fmt.Printf("  🗑️  删除已存在的目录（将作为子模块重新添加）...\n")
-		if err := os.RemoveAll(targetPath); err != nil {
-			return fmt.Errorf("删除已存在目录失败: %w", err)
+		fmt.Printf("  ℹ️  工具集已存在，更新中...\n")
+		// 进入目录并拉取最新代码
+		cmd := exec.Command("git", "pull")
+		cmd.Dir = targetPath
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("  ⚠️  更新失败，将重新克隆...\n")
+			// 删除旧目录
+			if err := os.RemoveAll(targetPath); err != nil {
+				return fmt.Errorf("删除旧目录失败: %w", err)
+			}
+		} else {
+			fmt.Printf("  ✅ 更新成功\n")
+			return nil
 		}
 	}
 	
-	// 添加子模块（使用 -f 强制添加，即使被 .gitignore 忽略）
-	// 使用相对路径，确保 .gitmodules 中的路径是相对路径
-	relPath, err := filepath.Rel(i.WorkDir, targetPath)
-	if err != nil {
-		return fmt.Errorf("计算相对路径失败: %w", err)
-	}
-	
-	fmt.Printf("  📥 添加 Git 子模块: %s\n", githubURL)
-	cmd := exec.Command("git", "submodule", "add", "-f", githubURL, relPath)
-	cmd.Dir = i.WorkDir
+	// 克隆仓库
+	fmt.Printf("  📥 克隆工具集: %s\n", sourceURL)
+	cmd := exec.Command("git", "clone", sourceURL, targetPath)
 	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("添加 Git 子模块失败: %w\n提示：请确保当前目录是 Git 仓库，并且有写入权限", err)
+		return fmt.Errorf("克隆失败: %w", err)
 	}
 	
-	fmt.Printf("  ✅ Git 子模块添加成功\n")
+	fmt.Printf("  ✅ 克隆成功\n")
 	return nil
 }
 
-// isGitRepository 检查当前目录是否是 Git 仓库
-func (i *Installer) isGitRepository() bool {
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
-	cmd.Dir = i.WorkDir
-	return cmd.Run() == nil
-}
-
-// isSubmodule 检查指定路径是否是 Git 子模块
-func (i *Installer) isSubmodule(path string) bool {
-	// 检查 .gitmodules 文件中是否包含该路径
-	gitmodulesPath := filepath.Join(i.WorkDir, ".gitmodules")
-	if _, err := os.Stat(gitmodulesPath); os.IsNotExist(err) {
-		return false
-	}
-	
-	// 读取 .gitmodules 文件
-	data, err := os.ReadFile(gitmodulesPath)
-	if err != nil {
-		return false
-	}
-	
-	// 检查路径是否在 .gitmodules 中
-	// 使用相对路径进行比较
-	relPath, err := filepath.Rel(i.WorkDir, path)
-	if err != nil {
-		return false
-	}
-	
-	return strings.Contains(string(data), fmt.Sprintf("path = %s", relPath))
-}
-
-// cloneRepository 直接克隆仓库（当不是 Git 仓库时使用）
-func (i *Installer) cloneRepository(githubURL, targetPath string) error {
-	cmd := exec.Command("git", "clone", githubURL, targetPath)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("克隆仓库失败: %w", err)
-	}
-	return nil
-}
 
 // loadToolset 加载 toolset.json
 func (i *Installer) loadToolset(toolsetPath string) (*types.Toolset, error) {

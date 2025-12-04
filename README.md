@@ -5,22 +5,15 @@ Cursor 工具集管理器 - 用于管理和安装 Cursor 工具集的命令行�
 ## 功能特性
 
 - 📦 从 `available-toolsets.json` 读取工具集列表
-- 🔧 **强制使用 Git 子模块方式安装**（确保版本管理和追踪）
+- 🔧 使用普通 Git 克隆方式安装（不依赖 Git 子模块）
+- 📁 默认安装到 `.cursor/toolsets/` 目录（统一管理所有 Cursor 相关内容）
 - 📋 根据 `toolset.json` 自动安装文件
 - 🎯 支持选择性安装特定工具集
 - 🧹 一键清理已安装的工具集
 - ✅ 完整的测试覆盖
-- ⚠️ 要求：当前目录必须是 Git 仓库（如果不是会提示错误）
+- 🚀 不需要 Git 仓库（可在任何目录运行）
 
 ## 安装
-
-### 前提条件
-
-- ✅ 当前目录必须是 Git 仓库
-- ✅ 如果当前目录不是 Git 仓库，请先运行：
-  ```bash
-  git init
-  ```
 
 ### 构建
 
@@ -51,6 +44,10 @@ cursortoolset install <toolset-name>
 ### 指定安装目录
 
 ```bash
+# 默认安装到 .cursor/toolsets/
+cursortoolset install
+
+# 自定义安装目录
 cursortoolset install --toolsets-dir ./my-toolsets
 ```
 
@@ -63,7 +60,7 @@ cursortoolset clean
 # 强制清理，不提示确认
 cursortoolset clean --force
 
-# 只清理安装的文件，保留 toolsets/ 目录
+# 只清理安装的文件，保留 .cursor/toolsets/ 目录
 cursortoolset clean --keep-toolsets
 ```
 
@@ -119,19 +116,30 @@ CursorToolset/
 │   ├── loader/      # 配置加载器
 │   └── installer/   # 安装器
 ├── available-toolsets.json    # 可用工具集列表
-├── .gitmodules      # Git 子模块配置（安装后自动生成）
 ├── go.mod
-└── main.go
+├── main.go
+├── README.md        # 项目文档
+├── ARCHITECTURE.md  # 架构设计文档
+└── MIGRATION.md     # 迁移指南
 ```
 
-### Git 子模块
+### 使用项目的目录结构
 
-工具集以 **Git 子模块** 的方式安装到 `toolsets/` 目录：
+当使用 CursorToolset 安装工具集后，目标项目的结构：
 
-- ✅ 版本追踪：每个工具集都有明确的提交版本
-- ✅ 版本管理：可以锁定特定版本的工具集
-- ✅ 更新方便：使用 `git submodule update` 更新
-- ✅ 协作友好：`.gitmodules` 文件记录所有子模块信息
+```
+your-project/
+├── .cursor/
+│   ├── toolsets/              # 工具集源码（默认安装位置）
+│   │   └── github-action-toolset/
+│   └── rules/                 # 工具集安装的规则文件
+│       └── github-actions/
+├── scripts/                   # 工具集安装的脚本（可选）
+│   └── toolsets/
+└── ...其他项目文件
+```
+
+**重要**：建议在项目的 `.gitignore` 中添加 `.cursor/` 目录
 
 ## 开发
 
