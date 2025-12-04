@@ -77,20 +77,45 @@ func SearchToolset(toolset *types.ToolsetInfo, keyword string) *ToolsetSearchRes
 }
 
 // GetToolsetsPath 获取 available-toolsets.json 的路径
+// 新版本：优先使用环境目录下的配置文件，向后兼容工作目录
 func GetToolsetsPath(workDir string) string {
-	// 首先尝试工作目录
+	// 首先尝试从 paths 包获取配置文件路径（推荐）
+	// 这个路径在 ~/.cursor/toolsets/config/available-toolsets.json
+	// 注意：为了避免循环导入，我们直接在这里实现逻辑
+	
+	// 1. 首先尝试环境目录（用户主目录）
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		// 检查环境变量
+		if rootDir := os.Getenv("CURSOR_TOOLSET_HOME"); rootDir != "" {
+			path := filepath.Join(rootDir, "config", "available-toolsets.json")
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
+		}
+		
+		// 使用默认环境目录（独立于 .cursor 系统目录）
+		path := filepath.Join(homeDir, ".cursortoolsets", "config", "available-toolsets.json")
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	
+	// 2. 向后兼容：尝试工作目录（开发环境）
 	path := filepath.Join(workDir, "available-toolsets.json")
 	if _, err := os.Stat(path); err == nil {
 		return path
 	}
 	
-	// 尝试项目根目录
-	path = filepath.Join(workDir, "..", "available-toolsets.json")
-	if _, err := os.Stat(path); err == nil {
-		return path
+	// 3. 返回环境目录路径（即使不存在，也应该创建在这里）
+	if homeDir != "" {
+		if rootDir := os.Getenv("CURSOR_TOOLSET_HOME"); rootDir != "" {
+			return filepath.Join(rootDir, "config", "available-toolsets.json")
+		}
+		return filepath.Join(homeDir, ".cursortoolsets", "config", "available-toolsets.json")
 	}
 	
-	// 返回默认路径
+	// 4. 最后fallback到工作目录
 	return filepath.Join(workDir, "available-toolsets.json")
 }
 

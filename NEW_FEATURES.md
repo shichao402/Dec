@@ -23,7 +23,7 @@ cursortoolset uninstall github-action-toolset -f
 ```
 
 ### 卸载内容
-- ✅ 工具集源码目录 (`.cursor/toolsets/<toolset-name>/`)
+- ✅ 工具集源码目录 (`.cursortoolsets/<toolset-name>/`)
 - ✅ 安装的规则文件 (`.cursor/rules/...`)
 - ✅ 安装的脚本文件 (`scripts/toolsets/...`)
 
@@ -32,7 +32,7 @@ cursortoolset uninstall github-action-toolset -f
 ```
 🗑️  准备卸载工具集: GitHub Action AI 工具集
    将删除:
-   - 工具集源码: /path/to/.cursor/toolsets/github-action-toolset
+   - 工具集源码: /path/to/.cursortoolsets/github-action-toolset
    - 安装的规则文件
    - 安装的脚本文件
 
@@ -40,7 +40,7 @@ cursortoolset uninstall github-action-toolset -f
 
 🗑️  开始卸载工具集: GitHub Action AI 工具集
   🗑️  删除: .cursor/rules/github-actions
-  🗑️  删除工具集源码: /path/to/.cursor/toolsets/github-action-toolset
+  🗑️  删除工具集源码: /path/to/.cursortoolsets/github-action-toolset
 ✅ 工具集 GitHub Action AI 工具集 卸载完成
 ```
 
@@ -129,7 +129,7 @@ $ cursortoolset info github-action-toolset
 
 ```
 状态: ✅ 已安装
-路径: /path/to/.cursor/toolsets/github-action-toolset
+路径: /path/to/.cursortoolsets/github-action-toolset
 
 作者: John Doe
 许可证: MIT
@@ -347,7 +347,7 @@ cursortoolset uninstall github-action-toolset
 #### 添加 SHA256 校验
 ```bash
 # 在工具集目录计算 SHA256（需要先克隆）
-cd .cursor/toolsets/github-action-toolset
+cd .cursortoolsets/github-action-toolset
 find . -type f ! -path "./.git/*" -exec sha256sum {} \; | sort | sha256sum
 
 # 将结果添加到 available-toolsets.json

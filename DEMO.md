@@ -202,7 +202,7 @@ $ cursortoolset uninstall github-action-toolset
 
 🗑️  准备卸载工具集: GitHub Action AI 工具集
    将删除:
-   - 工具集源码: /Users/user/.cursor/toolsets/github-action-toolset
+   - 工具集源码: /Users/user/.cursortoolsets/github-action-toolset
    - 安装的规则文件
    - 安装的脚本文件
 
@@ -210,7 +210,7 @@ $ cursortoolset uninstall github-action-toolset
 
 🗑️  开始卸载工具集: GitHub Action AI 工具集
   🗑️  删除: .cursor/rules/github-actions
-  🗑️  删除工具集源码: /Users/user/.cursor/toolsets/github-action-toolset
+  🗑️  删除工具集源码: /Users/user/.cursortoolsets/github-action-toolset
 ✅ 工具集 GitHub Action AI 工具集 卸载完成
 
 # 强制卸载（无需确认）
@@ -234,7 +234,7 @@ $ cursortoolset info github-action-toolset
 仓库: https://github.com/shichao402/GithubActionAISelfBuilder.git
 
 状态: ✅ 已安装
-路径: /Users/user/.cursor/toolsets/github-action-toolset
+路径: /Users/user/.cursortoolsets/github-action-toolset
 
 作者: John Doe
 许可证: MIT

@@ -36,13 +36,19 @@ main() {
     echo "╚═══════════════════════════════════════╝"
     echo ""
     
-    # 定义安装路径
-    INSTALL_DIR="${HOME}/.cursor/toolsets/CursorToolset"
+    # 定义安装路径（使用新的目录结构）
+    if [ -n "${CURSOR_TOOLSET_HOME}" ]; then
+        INSTALL_DIR="${CURSOR_TOOLSET_HOME}"
+    else
+        INSTALL_DIR="${HOME}/.cursortoolsets"
+    fi
     BIN_DIR="${INSTALL_DIR}/bin"
+    CONFIG_DIR="${INSTALL_DIR}/config"
+    REPOS_DIR="${INSTALL_DIR}/repos"
     BINARY_PATH="${BIN_DIR}/cursortoolset"
     
     # 检查是否已安装
-    if [[ ! -d "${INSTALL_DIR}" ]]; then
+    if [[ ! -d "${INSTALL_DIR}" ]] && [[ ! -f "${BINARY_PATH}" ]]; then
         print_warning "未找到安装目录: ${INSTALL_DIR}"
         print_info "CursorToolset 可能未安装或已卸载"
         exit 0
@@ -55,7 +61,8 @@ main() {
     print_warning "这将删除以下内容："
     echo "  - 安装目录: ${INSTALL_DIR}"
     echo "  - 可执行文件: ${BINARY_PATH}"
-    echo "  - 配置文件: ${INSTALL_DIR}/available-toolsets.json"
+    echo "  - 配置文件: ${CONFIG_DIR}/available-toolsets.json"
+    echo "  - 工具集仓库: ${REPOS_DIR}"
     echo ""
     read -p "确定要卸载 CursorToolset 吗？(y/N): " -n 1 -r
     echo ""

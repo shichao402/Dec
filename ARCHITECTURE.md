@@ -53,7 +53,7 @@ P/
 
 ### 3. Git 子模块的使用场景不合理
 
-- 在 `.cursor/toolsets/` 中使用 Git 子模块不太合适
+- 在 `.cursortoolsets/` 中使用 Git 子模块不太合适
 - `.cursor/` 目录通常应该被 `.gitignore` 忽略
 - 子模块应该只用于开发 M 本身，不应该用于安装 S
 
@@ -112,7 +112,7 @@ P/ (父项目 - 使用工具集的项目)
 - 可配置：`--toolsets-dir`
 
 **修改后**：
-- 默认：`./.cursor/toolsets/`
+- 默认：`./.cursortoolsets/`
 - 可配置：`--toolsets-dir`
 
 **理由**：
@@ -151,7 +151,7 @@ cursortoolset install
 
 **方式 2：集成到 P（推荐用于分发）**
 ```bash
-# 将 M 复制到 P 的 .cursor/toolsets/ 目录
+# 将 M 复制到 P 的 .cursortoolsets/ 目录
 P/
 └── .cursor/
     └── toolsets/
@@ -160,7 +160,7 @@ P/
             └── available-toolsets.json
 
 # 使用（在 P 的根目录执行）
-.cursor/toolsets/CursorToolset/cursortoolset install
+.cursortoolsets/CursorToolset/cursortoolset install
 ```
 
 #### 4. available-toolsets.json 的位置
@@ -168,7 +168,7 @@ P/
 **查找顺序**：
 1. 命令行参数指定的路径
 2. 当前目录 `./available-toolsets.json`
-3. `.cursor/toolsets/CursorToolset/available-toolsets.json`
+3. `.cursortoolsets/CursorToolset/available-toolsets.json`
 4. M 安装目录的 `available-toolsets.json`
 
 **理由**：
@@ -183,7 +183,7 @@ P/
 ```go
 // cmd/install.go
 if installToolsetsDir == "" {
-    // 默认安装到 .cursor/toolsets/
+    // 默认安装到 .cursortoolsets/
     installToolsetsDir = filepath.Join(installWorkDir, ".cursor", "toolsets")
 }
 ```
@@ -206,7 +206,7 @@ func (i *Installer) cloneOrDownload(toolsetInfo *types.ToolsetInfo, targetPath s
 // pkg/loader/loader.go
 func GetToolsetsPath(workDir string) string {
     // 1. 当前目录
-    // 2. .cursor/toolsets/CursorToolset/
+    // 2. .cursortoolsets/CursorToolset/
     // 3. M 的安装目录
 }
 ```
@@ -234,27 +234,27 @@ cd /path/to/my-project
 # 3. 使用 M 安装工具集
 /path/to/CursorToolset/cursortoolset install
 
-# 结果：工具集安装到 .cursor/toolsets/
+# 结果：工具集安装到 .cursortoolsets/
 ```
 
 ### 场景 2：团队分发（M 集成到 P）
 
 ```bash
-# 1. 在 P 中创建 .cursor/toolsets/ 目录
-mkdir -p .cursor/toolsets/CursorToolset
+# 1. 在 P 中创建 .cursortoolsets/ 目录
+mkdir -p .cursortoolsets/CursorToolset
 
 # 2. 复制 M 的可执行文件和配置
-cp /path/to/CursorToolset/cursortoolset .cursor/toolsets/CursorToolset/
-cp /path/to/CursorToolset/available-toolsets.json .cursor/toolsets/CursorToolset/
+cp /path/to/CursorToolset/cursortoolset .cursortoolsets/CursorToolset/
+cp /path/to/CursorToolset/available-toolsets.json .cursortoolsets/CursorToolset/
 
 # 3. 提交到仓库（可选）
-git add .cursor/toolsets/CursorToolset/
+git add .cursortoolsets/CursorToolset/
 git commit -m "Add CursorToolset"
 
 # 4. 团队成员克隆 P 后直接使用
 git clone https://github.com/team/project.git
 cd project
-.cursor/toolsets/CursorToolset/cursortoolset install
+.cursortoolsets/CursorToolset/cursortoolset install
 ```
 
 ### 场景 3：自定义工具集列表
@@ -287,7 +287,7 @@ cursortoolset clean --force
 
 # 2. 重新安装到新位置
 cursortoolset install
-# 默认会安装到 .cursor/toolsets/
+# 默认会安装到 .cursortoolsets/
 ```
 
 ### 向后兼容

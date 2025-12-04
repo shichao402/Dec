@@ -22,7 +22,7 @@ iwr -useb https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.
 - ✅ 自动检测操作系统和架构（linux/darwin/windows, amd64/arm64）
 - ✅ 自动从源码构建或下载预编译版本
 - ✅ 自动配置环境变量（添加到 PATH）
-- ✅ 统一安装位置：`~/.cursor/toolsets/CursorToolset/`
+- ✅ 统一安装位置：`~/.cursortoolsets/CursorToolset/`
 
 ### 2. 工具集管理 📦
 
@@ -40,7 +40,7 @@ cursortoolset install github-action-toolset
 
 **安装过程**：
 1. 从 `available-toolsets.json` 读取工具集信息
-2. 克隆工具集仓库到 `.cursor/toolsets/{toolset-name}/`
+2. 克隆工具集仓库到 `.cursortoolsets/{toolset-name}/`
 3. 读取工具集的 `toolset.json` 配置
 4. 根据配置复制文件到目标位置（规则、脚本等）
 
@@ -59,7 +59,7 @@ cursortoolset clean --keep-toolsets
 **清理内容**：
 - `.cursor/rules/` - 安装的规则文件
 - `scripts/toolsets/` - 安装的脚本
-- `.cursor/toolsets/` - 工具集源码（可选）
+- `.cursortoolsets/` - 工具集源码（可选）
 
 ### 3. 自动更新 🔄
 
@@ -130,13 +130,13 @@ CursorToolset/
 ### 目录设计
 
 #### 主项目 (M)
-- **位置**: `~/.cursor/toolsets/CursorToolset/`
+- **位置**: `~/.cursortoolsets/CursorToolset/`
 - **内容**: 
   - `bin/cursortoolset` - 可执行文件
   - `available-toolsets.json` - 工具集列表
 
 #### 工具集 (S)
-- **位置**: `.cursor/toolsets/{toolset-name}/`（在父项目 P 中）
+- **位置**: `.cursortoolsets/{toolset-name}/`（在父项目 P 中）
 - **内容**: 工具集的 Git 仓库
 
 #### 安装的文件

@@ -1,5 +1,131 @@
 # 更新日志
 
+## [v1.2.0] - 2024-12-04
+
+### 🎯 重大改进：目录结构重构（参考 pip/brew）
+
+#### 设计理念变更
+
+从"项目级工具"转变为"用户级包管理器"，参考 pip 和 Homebrew 的最佳实践。
+
+#### 新的目录结构
+
+**之前（v1.1.0）：**
+```
+~/.cursortoolsets/CursorToolset/    <- 根目录
+├── bin/cursortoolset
+└── available-toolsets.json
+```
+
+**现在（v1.2.0）：**
+```
+~/.cursortoolsets/                   <- 根目录（更简洁）
+├── bin/                              <- 可执行文件
+│   └── cursortoolset
+├── repos/                            <- 工具集仓库（类似 brew Cellar）
+│   └── github-action-toolset/
+└── config/                           <- 配置文件
+    └── available-toolsets.json
+```
+
+#### 环境变量更名
+
+- ❌ 旧版本：`CURSOR_TOOLSET_ROOT`（已废弃）
+- ✅ 新版本：`CURSOR_TOOLSET_HOME`（推荐）
+
+**理由：** 更符合业界惯例（类似 `PYTHONUSERBASE`、`HOMEBREW_PREFIX`）
+
+#### 核心改进
+
+1. **清晰的职责分离**
+   - `bin/` - 可执行文件
+   - `repos/` - 工具集源码（Git 仓库）
+   - `config/` - 配置文件
+
+2. **更简洁的路径**
+   - 去掉冗余的 `CursorToolset` 层级
+   - 类似 `/usr/local` 或 `~/.local` 的设计
+
+3. **更好的隔离**
+   - 开发环境：使用 `.root/` 目录（已添加到 `.gitignore`）
+   - 用户环境：使用 `~/.cursortoolsets/`
+
+4. **向后兼容**
+   - 安装脚本自动使用新路径
+   - 配置文件加载支持多个位置（优先级：环境目录 > 工作目录）
+
+#### 相关文件更新
+
+- ✅ `pkg/paths/paths.go` - 完全重构路径逻辑
+- ✅ `pkg/loader/loader.go` - 配置文件加载适配新路径
+- ✅ `install.sh` - 使用新目录结构
+- ✅ `install.ps1` - 使用新目录结构
+- ✅ `uninstall.sh` - 使用新目录结构
+- ✅ `uninstall.ps1` - 使用新目录结构
+- ✅ `ENV_VARIABLES.md` - 完整文档更新
+- ✅ 新增 `DIRECTORY_STRUCTURE.md` - 详细说明目录结构设计
+
+#### 开发体验改进
+
+**开发环境设置：**
+```bash
+# 使用项目本地目录（不影响系统安装）
+export CURSOR_TOOLSET_HOME=$(pwd)/.root
+go build -o cursortoolset .
+./cursortoolset install
+```
+
+**目录说明：**
+- `.root/repos/` - 测试安装的工具集
+- `.root/config/` - 测试配置文件
+- 已添加到 `.gitignore`
+
+#### 迁移指南
+
+**如果您使用旧版本（v1.1.0 或更早）：**
+
+1. **卸载旧版本：**
+   ```bash
+   # 使用旧版本的卸载脚本
+   curl -fsSL https://example.com/uninstall.sh | bash
+   ```
+
+2. **安装新版本：**
+   ```bash
+   # 自动使用新的目录结构
+   curl -fsSL https://example.com/install.sh | bash
+   ```
+
+3. **更新环境变量（如果有自定义）：**
+   ```bash
+   # 旧版本
+   export CURSOR_TOOLSET_ROOT=$HOME/.cursortoolsets/CursorToolset
+
+   # 新版本
+   export CURSOR_TOOLSET_HOME=$HOME/.cursortoolsets
+   ```
+
+#### 与其他包管理器的对比
+
+| 特性 | CursorToolset | pip | Homebrew |
+|-----|---------------|-----|----------|
+| **环境变量** | `CURSOR_TOOLSET_HOME` | `PYTHONUSERBASE` | `HOMEBREW_PREFIX` |
+| **默认路径** | `~/.cursortoolsets` | `~/.local` | `/usr/local` |
+| **包存储** | `repos/` | `lib/python3.x/site-packages/` | `Cellar/` |
+| **可执行文件** | `bin/` | `bin/` | `bin/` |
+| **配置文件** | `config/` | - | `etc/` |
+
+### 📚 新增文档
+
+- **DIRECTORY_STRUCTURE.md** - 详细的目录结构说明文档
+  - 设计理念
+  - 目录职责
+  - 工作流程
+  - 开发环境设置
+  - 常见问题
+
+---
+
 ## [v1.1.0] - 2024-12-04
 
 ### 🎉 新增功能
@@ -133,7 +259,7 @@ cursortoolset install <name> -v abc123
 - **Windows 特殊处理**: 解决文件占用问题
 
 #### 安装位置优化
-- **统一安装位置**: 所有平台统一使用 `~/.cursor/toolsets/CursorToolset/`
+- **统一安装位置**: 所有平台统一使用 `~/.cursortoolsets/CursorToolset/`
 - **环境变量集成**: 自动添加到系统 PATH
 - **全局可用**: 安装后可在任何位置运行
 

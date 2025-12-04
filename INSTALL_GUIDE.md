@@ -28,14 +28,14 @@ iwr -useb https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.
 ## 安装位置
 
 ### Linux / macOS
-- **安装目录**: `~/.cursor/toolsets/CursorToolset/`
-- **可执行文件**: `~/.cursor/toolsets/CursorToolset/bin/cursortoolset`
-- **配置文件**: `~/.cursor/toolsets/CursorToolset/available-toolsets.json`
+- **安装目录**: `~/.cursortoolsets/CursorToolset/`
+- **可执行文件**: `~/.cursortoolsets/CursorToolset/bin/cursortoolset`
+- **配置文件**: `~/.cursortoolsets/CursorToolset/available-toolsets.json`
 
 ### Windows
-- **安装目录**: `%USERPROFILE%\.cursor\toolsets\CursorToolset\`
-- **可执行文件**: `%USERPROFILE%\.cursor\toolsets\CursorToolset\bin\cursortoolset.exe`
-- **配置文件**: `%USERPROFILE%\.cursor\toolsets\CursorToolset\available-toolsets.json`
+- **安装目录**: `%USERPROFILE%\.cursortoolsets\CursorToolset\`
+- **可执行文件**: `%USERPROFILE%\.cursortoolsets\CursorToolset\bin\cursortoolset.exe`
+- **配置文件**: `%USERPROFILE%\.cursortoolsets\CursorToolset\available-toolsets.json`
 
 ## 手动安装
 
@@ -51,24 +51,24 @@ iwr -useb https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.
 
 ```bash
 # 1. 创建安装目录
-mkdir -p ~/.cursor/toolsets/CursorToolset/bin
+mkdir -p ~/.cursortoolsets/CursorToolset/bin
 
 # 2. 克隆仓库
 git clone https://github.com/firoyang/CursorToolset.git /tmp/cursortoolset-build
 
 # 3. 构建
 cd /tmp/cursortoolset-build
-go build -o ~/.cursor/toolsets/CursorToolset/bin/cursortoolset
+go build -o ~/.cursortoolsets/CursorToolset/bin/cursortoolset
 
 # 4. 复制配置文件
-cp available-toolsets.json ~/.cursor/toolsets/CursorToolset/
+cp available-toolsets.json ~/.cursortoolsets/CursorToolset/
 
 # 5. 清理临时目录
 cd ~
 rm -rf /tmp/cursortoolset-build
 
 # 6. 添加到 PATH
-echo 'export PATH="$HOME/.cursor/toolsets/CursorToolset/bin:$PATH"' >> ~/.zshrc
+echo 'export PATH="$HOME/.cursortoolsets/CursorToolset/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
@@ -142,7 +142,7 @@ cursortoolset update --toolsets
 
 ```bash
 # 1. 删除安装目录
-rm -rf ~/.cursor/toolsets/CursorToolset
+rm -rf ~/.cursortoolsets/CursorToolset
 
 # 2. 从 PATH 中移除（手动编辑配置文件）
 # 编辑 ~/.zshrc 或 ~/.bashrc，删除包含 cursortoolset 的行
@@ -177,7 +177,7 @@ $newPath = $path -replace [regex]::Escape("$env:USERPROFILE\.cursor\toolsets\Cur
 **解决方案**:
 ```bash
 # 确保可执行文件有执行权限
-chmod +x ~/.cursor/toolsets/CursorToolset/bin/cursortoolset
+chmod +x ~/.cursortoolsets/CursorToolset/bin/cursortoolset
 ```
 
 ### 问题 3: Go 未安装

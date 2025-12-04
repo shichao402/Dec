@@ -64,16 +64,19 @@ function Install-CursorToolset {
     $platform = Get-Platform
     Write-ColorOutput "检测到平台: $platform" -Type "Info"
     
-    # 定义安装路径
-    # 优先使用环境变量 CURSOR_TOOLSET_ROOT，如果未设置则使用默认路径
-    if ($env:CURSOR_TOOLSET_ROOT) {
-        $installDir = $env:CURSOR_TOOLSET_ROOT
-        Write-ColorOutput "使用环境变量 CURSOR_TOOLSET_ROOT: $installDir" -Type "Info"
+    # 定义安装路径（新设计：统一使用环境目录）
+    # 优先使用环境变量 CURSOR_TOOLSET_HOME，如果未设置则使用默认路径
+    if ($env:CURSOR_TOOLSET_HOME) {
+        $installDir = $env:CURSOR_TOOLSET_HOME
+        Write-ColorOutput "使用环境变量 CURSOR_TOOLSET_HOME: $installDir" -Type "Info"
     } else {
-        $installDir = Join-Path $env:USERPROFILE ".cursor\toolsets\CursorToolset"
+        $installDir = Join-Path $env:USERPROFILE ".cursortoolsets"
     }
     $binDir = Join-Path $installDir "bin"
+    $configDir = Join-Path $installDir "config"
+    $reposDir = Join-Path $installDir "repos"
     $binaryPath = Join-Path $binDir "cursortoolset.exe"
+    $configPath = Join-Path $configDir "available-toolsets.json"
     
     Write-ColorOutput "安装目录: $installDir" -Type "Info"
     
@@ -121,6 +124,8 @@ function Install-CursorToolset {
     # 创建安装目录
     Write-ColorOutput "创建安装目录..." -Type "Info"
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $reposDir | Out-Null
     
     # 构建下载 URL（使用版本号）
     $binaryName = "cursortoolset-$platform.exe"
@@ -138,11 +143,12 @@ function Install-CursorToolset {
         exit 1
     }
     
-    # 下载配置文件
+    # 下载配置文件到新位置
     Write-ColorOutput "下载配置文件..." -Type "Info"
     try {
         $configUrl = "https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/available-toolsets.json"
-        Invoke-WebRequest -Uri $configUrl -OutFile (Join-Path $installDir "available-toolsets.json")
+        Invoke-WebRequest -Uri $configUrl -OutFile $configPath
+        Write-ColorOutput "配置文件已保存到 $configPath" -Type "Success"
     } catch {
         Write-ColorOutput "配置文件下载失败，将使用默认配置" -Type "Warning"
     }

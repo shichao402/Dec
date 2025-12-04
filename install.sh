@@ -119,19 +119,27 @@ main() {
     PLATFORM=$(detect_platform)
     print_info "检测到平台: ${PLATFORM}"
     
-    # 定义安装路径
-    # 优先使用环境变量 CURSOR_TOOLSET_ROOT，如果未设置则使用默认路径
-    if [ -n "${CURSOR_TOOLSET_ROOT}" ]; then
-        INSTALL_DIR="${CURSOR_TOOLSET_ROOT}"
+    # 定义安装路径（新设计：统一使用环境目录）
+    # 优先使用环境变量 CURSOR_TOOLSET_HOME，如果未设置则使用默认路径
+    # 新路径设计（类似 pip/brew）：
+    # ~/.cursortoolsets/             <- 根目录 (独立于 .cursor 系统目录)
+    # ├── bin/                       <- CursorToolset 可执行文件
+    # ├── repos/                     <- 工具集仓库源码
+    # └── config/                    <- 配置文件
+    if [ -n "${CURSOR_TOOLSET_HOME}" ]; then
+        INSTALL_DIR="${CURSOR_TOOLSET_HOME}"
     else
-        INSTALL_DIR="${HOME}/.cursor/toolsets/CursorToolset"
+        INSTALL_DIR="${HOME}/.cursortoolsets"
     fi
     BIN_DIR="${INSTALL_DIR}/bin"
+    CONFIG_DIR="${INSTALL_DIR}/config"
+    REPOS_DIR="${INSTALL_DIR}/repos"
     BINARY_PATH="${BIN_DIR}/cursortoolset"
+    CONFIG_PATH="${CONFIG_DIR}/available-toolsets.json"
     
     print_info "安装目录: ${INSTALL_DIR}"
-    if [ -n "${CURSOR_TOOLSET_ROOT}" ]; then
-        print_info "使用环境变量 CURSOR_TOOLSET_ROOT: ${CURSOR_TOOLSET_ROOT}"
+    if [ -n "${CURSOR_TOOLSET_HOME}" ]; then
+        print_info "使用环境变量 CURSOR_TOOLSET_HOME: ${CURSOR_TOOLSET_HOME}"
     fi
     
     # 从 ReleaseLatest 分支获取版本号（唯一来源）
@@ -174,6 +182,8 @@ main() {
     # 创建安装目录
     print_info "创建安装目录..."
     mkdir -p "${BIN_DIR}"
+    mkdir -p "${CONFIG_DIR}"
+    mkdir -p "${REPOS_DIR}"
     
     # 构建下载 URL（使用版本号）
     BINARY_NAME="cursortoolset-${PLATFORM}"
@@ -191,11 +201,13 @@ main() {
     chmod +x "${BINARY_PATH}"
     print_success "预编译版本下载成功"
     
-    # 下载配置文件
+    # 下载配置文件到新位置
     print_info "下载配置文件..."
-    if ! curl -fsSL -o "${INSTALL_DIR}/available-toolsets.json" \
+    if ! curl -fsSL -o "${CONFIG_PATH}" \
         "https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/available-toolsets.json"; then
         print_warning "配置文件下载失败，将使用默认配置"
+    else
+        print_success "配置文件已保存到 ${CONFIG_PATH}"
     fi
     
     # 添加到 PATH

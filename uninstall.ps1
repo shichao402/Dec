@@ -27,13 +27,19 @@ function Uninstall-CursorToolset {
     Write-Host "╚═══════════════════════════════════════╝"
     Write-Host ""
     
-    # 定义安装路径
-    $installDir = Join-Path $env:USERPROFILE ".cursor\toolsets\CursorToolset"
+    # 定义安装路径（使用新的目录结构）
+    if ($env:CURSOR_TOOLSET_HOME) {
+        $installDir = $env:CURSOR_TOOLSET_HOME
+    } else {
+        $installDir = Join-Path $env:USERPROFILE ".cursortoolsets"
+    }
     $binDir = Join-Path $installDir "bin"
+    $configDir = Join-Path $installDir "config"
+    $reposDir = Join-Path $installDir "repos"
     $binaryPath = Join-Path $binDir "cursortoolset.exe"
     
     # 检查是否已安装
-    if (-not (Test-Path $installDir)) {
+    if (-not (Test-Path $installDir) -and -not (Test-Path $binaryPath)) {
         Write-ColorOutput "未找到安装目录: $installDir" -Type "Warning"
         Write-ColorOutput "CursorToolset 可能未安装或已卸载" -Type "Info"
         return
@@ -46,7 +52,8 @@ function Uninstall-CursorToolset {
     Write-ColorOutput "这将删除以下内容：" -Type "Warning"
     Write-Host "  - 安装目录: $installDir"
     Write-Host "  - 可执行文件: $binaryPath"
-    Write-Host "  - 配置文件: $(Join-Path $installDir 'available-toolsets.json')"
+    Write-Host "  - 配置文件: $(Join-Path $configDir 'available-toolsets.json')"
+    Write-Host "  - 工具集仓库: $reposDir"
     Write-Host ""
     $confirm = Read-Host "确定要卸载 CursorToolset 吗？(y/N)"
     

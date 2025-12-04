@@ -6,66 +6,82 @@ import (
 )
 
 const (
-	// EnvRootDir 环境变量名，用于指定 CursorToolset 安装根目录
-	EnvRootDir = "CURSOR_TOOLSET_ROOT"
+	// EnvRootDir 环境变量名，用于指定 CursorToolset 根目录
+	// 类似于 pip 的 PYTHONUSERBASE，brew 的 HOMEBREW_PREFIX
+	EnvRootDir = "CURSOR_TOOLSET_HOME"
 )
 
-// GetRootDir 获取 CursorToolset 安装根目录
+// 目录结构设计（参考 pip/brew）：
+// ~/.cursortoolsets/              <- CURSOR_TOOLSET_HOME（默认）
+// ├── repos/                      <- 工具集仓库源码（类似 brew 的 Cellar）
+// │   ├── github-action-toolset/
+// │   └── other-toolset/
+// ├── config/                     <- 配置文件
+// │   └── available-toolsets.json
+// └── bin/                        <- CursorToolset 自身的可执行文件（可选）
+//     └── cursortoolset
+
+// GetRootDir 获取 CursorToolset 根目录
+// 这是所有 CursorToolset 相关文件的根目录（类似 ~/.local 或 /usr/local）
 // 优先级：
-// 1. 环境变量 CURSOR_TOOLSET_ROOT（如果设置）
-// 2. 默认路径：~/.cursor/toolsets/CursorToolset
+// 1. 环境变量 CURSOR_TOOLSET_HOME（如果设置）
+// 2. 默认路径：~/.cursortoolsets
 func GetRootDir() (string, error) {
 	// 优先使用环境变量
 	if rootDir := os.Getenv(EnvRootDir); rootDir != "" {
 		return filepath.Abs(rootDir)
 	}
 
-	// 使用默认路径
+	// 使用默认路径（用户主目录下，独立于 .cursor 系统目录）
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 
-	return filepath.Join(homeDir, ".cursor", "toolsets", "CursorToolset"), nil
+	return filepath.Join(homeDir, ".cursortoolsets"), nil
 }
 
-// GetToolsetsDir 获取工具集安装目录
-// 优先级：
-// 1. 环境变量 CURSOR_TOOLSET_ROOT（如果设置，则使用 CURSOR_TOOLSET_ROOT/.cursor/toolsets）
-// 2. 工作目录下的 .cursor/toolsets（如果 workDir 不为空）
-// 3. 默认路径：~/.cursor/toolsets
-func GetToolsetsDir(workDir string) (string, error) {
-	// 如果设置了环境变量，使用环境变量下的 .cursor/toolsets
-	if rootDir := os.Getenv(EnvRootDir); rootDir != "" {
-		absRootDir, err := filepath.Abs(rootDir)
-		if err != nil {
-			return "", err
-		}
-		// 如果环境变量指向的是项目根目录，使用 .cursor/toolsets
-		return filepath.Join(absRootDir, ".cursor", "toolsets"), nil
-	}
-
-	// 如果提供了工作目录，使用工作目录下的 .cursor/toolsets
-	if workDir != "" {
-		return filepath.Join(workDir, ".cursor", "toolsets"), nil
-	}
-
-	// 使用默认路径
-	homeDir, err := os.UserHomeDir()
+// GetReposDir 获取工具集仓库目录
+// 这个目录存储所有工具集的 Git 仓库（类似 brew 的 Cellar）
+func GetReposDir() (string, error) {
+	rootDir, err := GetRootDir()
 	if err != nil {
 		return "", err
 	}
+	return filepath.Join(rootDir, "repos"), nil
+}
 
-	return filepath.Join(homeDir, ".cursor", "toolsets"), nil
+// GetConfigDir 获取配置文件目录
+func GetConfigDir() (string, error) {
+	rootDir, err := GetRootDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(rootDir, "config"), nil
 }
 
 // GetBinDir 获取可执行文件目录
-// 返回 CursorToolset 的 bin 目录路径
+// 返回 CursorToolset 自身的 bin 目录路径
 func GetBinDir() (string, error) {
 	rootDir, err := GetRootDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(rootDir, "bin"), nil
+}
+
+// GetToolsetsDir 获取工具集安装目录（为了向后兼容保留）
+// 现在实际上返回 repos 目录
+func GetToolsetsDir(workDir string) (string, error) {
+	return GetReposDir()
+}
+
+// GetToolsetConfigPath 获取 available-toolsets.json 配置文件路径
+func GetToolsetConfigPath() (string, error) {
+	configDir, err := GetConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configDir, "available-toolsets.json"), nil
 }
 

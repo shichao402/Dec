@@ -11,7 +11,7 @@
 - 使用 Git 子模块方式
 
 **新版本**：
-- 默认安装到 `./.cursor/toolsets/`
+- 默认安装到 `./.cursortoolsets/`
 - 使用普通 Git 克隆方式
 - 不再依赖 Git 子模块
 
@@ -82,7 +82,7 @@ go build -o cursortoolset
 # 回到项目目录
 cd your-project
 
-# 使用新版本安装（会自动安装到 .cursor/toolsets/）
+# 使用新版本安装（会自动安装到 .cursortoolsets/）
 cursortoolset install
 
 # 验证安装
@@ -100,7 +100,7 @@ echo ".cursor/" >> .gitignore
 
 ### Q1: 我的项目已经有 toolsets/ 目录，会冲突吗？
 
-A: 不会冲突。新版本默认安装到 `.cursor/toolsets/`，与旧的 `toolsets/` 目录完全独立。
+A: 不会冲突。新版本默认安装到 `.cursortoolsets/`，与旧的 `toolsets/` 目录完全独立。
 
 ### Q2: 我能继续使用旧的安装目录吗？
 
@@ -171,7 +171,7 @@ your-project/
             └── available-toolsets.json
 
 # 可以提交这部分到 Git（修改 .gitignore）
-!.cursor/toolsets/CursorToolset/
+!.cursortoolsets/CursorToolset/
 ```
 
 ## 验证迁移
@@ -184,7 +184,7 @@ cursortoolset list
 
 # 2. 检查目录结构
 ls -la .cursor/
-ls -la .cursor/toolsets/
+ls -la .cursortoolsets/
 ls -la .cursor/rules/
 
 # 3. 验证工具集功能
