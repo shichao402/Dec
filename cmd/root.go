@@ -1,7 +1,14 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
+)
+
+var (
+	appVersion   string
+	appBuildTime string
 )
 
 var RootCmd = &cobra.Command{
@@ -24,13 +31,44 @@ var RootCmd = &cobra.Command{
   cursortoolset install <toolset-name>
 
   # 清理已安装的工具集
-  cursortoolset clean`,
+  cursortoolset clean
+
+  # 更新 CursorToolset 和工具集
+  cursortoolset update`,
+	Version: getVersionString(),
+}
+
+// SetVersion 设置版本信息
+func SetVersion(v, bt string) {
+	appVersion = v
+	appBuildTime = bt
+	RootCmd.Version = getVersionString()
+}
+
+// getVersionString 获取版本字符串
+func getVersionString() string {
+	if appVersion == "" {
+		appVersion = "dev"
+	}
+	if appBuildTime != "" && appBuildTime != "unknown" {
+		return fmt.Sprintf("%s (built at %s)", appVersion, appBuildTime)
+	}
+	return appVersion
+}
+
+// GetVersion 获取当前版本号（供其他包使用）
+func GetVersion() string {
+	if appVersion != "" && appVersion != "unknown" {
+		return appVersion
+	}
+	return "dev"
 }
 
 func init() {
 	RootCmd.AddCommand(installCmd)
 	RootCmd.AddCommand(listCmd)
 	RootCmd.AddCommand(cleanCmd)
+	RootCmd.AddCommand(updateCmd)
 }
 
 

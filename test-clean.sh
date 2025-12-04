@@ -29,8 +29,8 @@ echo ""
 echo "检查规则文件："
 ls -lh .cursor/rules/github-actions/ 2>&1 || echo "   ❌ 规则文件目录不存在"
 echo ""
-echo "检查 toolsets 目录："
-ls -lh toolsets/ 2>&1 || echo "   ❌ toolsets 目录不存在"
+echo "检查 .cursor/toolsets 目录："
+ls -lh .cursor/toolsets/ 2>&1 || echo "   ❌ .cursor/toolsets 目录不存在"
 echo ""
 
 # 5. 测试 clean --keep-toolsets
@@ -38,12 +38,12 @@ echo "🧹 5. 测试 clean --keep-toolsets..."
 ./cursortoolset clean --keep-toolsets --force
 echo ""
 
-# 6. 验证 toolsets 目录保留
-echo "✅ 6. 验证 toolsets 目录保留..."
-if [ -d "toolsets/github-action-toolset" ]; then
-    echo "   ✅ toolsets 目录已保留"
+# 6. 验证 .cursor/toolsets 目录保留
+echo "✅ 6. 验证 .cursor/toolsets 目录保留..."
+if [ -d ".cursor/toolsets/github-action-toolset" ]; then
+    echo "   ✅ .cursor/toolsets 目录已保留"
 else
-    echo "   ❌ toolsets 目录被删除了！"
+    echo "   ❌ .cursor/toolsets 目录被删除了！"
     exit 1
 fi
 
@@ -62,11 +62,11 @@ echo ""
 
 # 8. 验证完全清理
 echo "✅ 8. 验证完全清理结果..."
-if [ -d "toolsets" ]; then
-    echo "   ❌ toolsets 目录应该被删除但还存在！"
+if [ -d ".cursor/toolsets" ]; then
+    echo "   ❌ .cursor/toolsets 目录应该被删除但还存在！"
     exit 1
 else
-    echo "   ✅ toolsets 目录已清理"
+    echo "   ✅ .cursor/toolsets 目录已清理"
 fi
 
 if [ -d ".cursor/rules" ]; then

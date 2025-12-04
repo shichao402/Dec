@@ -10,14 +10,40 @@ Cursor 工具集管理器 - 用于管理和安装 Cursor 工具集的命令行�
 - 📋 根据 `toolset.json` 自动安装文件
 - 🎯 支持选择性安装特定工具集
 - 🧹 一键清理已安装的工具集
+- 🔄 内置更新功能（自更新 + 更新工具集）
+- 📌 **智能版本控制**：自动检查版本号，只在需要时更新
+- 🚀 一键安装脚本（类似 Homebrew）
 - ✅ 完整的测试覆盖
-- 🚀 不需要 Git 仓库（可在任何目录运行）
+- 🌍 跨平台支持（Linux、macOS、Windows）
+- 💡 不需要 Git 仓库（可在任何目录运行）
 
-## 安装
+## 快速安装
 
-### 构建
+### 一键安装（推荐）
+
+#### Linux / macOS
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.sh | bash
+```
+
+#### Windows (PowerShell)
+
+以管理员身份运行：
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.ps1 | iex
+```
+
+安装完成后，重新打开终端即可使用。
+
+详细安装说明请查看 [INSTALL_GUIDE.md](./INSTALL_GUIDE.md)
+
+### 从源码构建
+
+```bash
+git clone https://github.com/firoyang/CursorToolset.git
+cd CursorToolset
 go build -o cursortoolset
 ```
 
@@ -63,6 +89,28 @@ cursortoolset clean --force
 # 只清理安装的文件，保留 .cursor/toolsets/ 目录
 cursortoolset clean --keep-toolsets
 ```
+
+### 更新
+
+```bash
+# 更新所有（CursorToolset + 配置 + 工具集）
+cursortoolset update
+
+# 只更新 CursorToolset 自身
+cursortoolset update --self
+
+# 只更新配置文件
+cursortoolset update --available
+
+# 只更新已安装的工具集
+cursortoolset update --toolsets
+```
+
+**智能版本控制**：
+- ✅ 自动检查版本号，只在有新版本时更新
+- ✅ 显示当前版本和最新版本对比
+- ✅ 避免不必要的下载和构建
+- 详细说明请查看 [VERSION_CONTROL.md](./VERSION_CONTROL.md)
 
 ## 配置文件
 
@@ -110,17 +158,22 @@ CursorToolset/
 │   ├── root.go      # 根命令
 │   ├── install.go   # 安装命令
 │   ├── list.go      # 列表命令
-│   └── clean.go     # 清理命令
+│   ├── clean.go     # 清理命令
+│   └── update.go    # 更新命令
 ├── pkg/              # 核心包
 │   ├── types/       # 数据类型定义
 │   ├── loader/      # 配置加载器
 │   └── installer/   # 安装器
 ├── available-toolsets.json    # 可用工具集列表
+├── install.sh       # Linux/macOS 一键安装脚本
+├── install.ps1      # Windows 一键安装脚本
 ├── go.mod
 ├── main.go
 ├── README.md        # 项目文档
 ├── ARCHITECTURE.md  # 架构设计文档
-└── MIGRATION.md     # 迁移指南
+├── MIGRATION.md     # 迁移指南
+├── INSTALL_GUIDE.md # 安装指南
+└── VERSION_CONTROL.md # 版本控制说明
 ```
 
 ### 使用项目的目录结构
@@ -140,6 +193,15 @@ your-project/
 ```
 
 **重要**：建议在项目的 `.gitignore` 中添加 `.cursor/` 目录
+
+## 安装位置
+
+CursorToolset 使用一键安装脚本后，会安装到：
+
+- **Linux/macOS**: `~/.cursor/toolsets/CursorToolset/`
+- **Windows**: `%USERPROFILE%\.cursor\toolsets\CursorToolset\`
+
+并自动添加到系统 PATH，可在任何位置运行。
 
 ## 开发
 

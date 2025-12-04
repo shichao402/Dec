@@ -38,7 +38,7 @@ ls -lh .cursor/rules/github-actions/ || echo "   ❌ 规则文件目录不存在
 echo ""
 
 echo "检查工具集目录："
-ls -lh toolsets/ || echo "   ❌ 工具集目录不存在"
+ls -lh .cursor/toolsets/ || echo "   ❌ 工具集目录不存在"
 echo ""
 
 # 6. 再次列出工具集（应显示已安装）
