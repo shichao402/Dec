@@ -208,13 +208,83 @@ CursorToolset 使用一键安装脚本后，会安装到：
 
 ## 开发
 
-```bash
-# 运行
-go run main.go install
+### 本地构建
 
-# 构建
-go build -o cursortoolset
+#### 方法 1: 使用构建脚本（推荐）
+
+```bash
+# 构建当前平台版本（自动清理、日志收集）
+./build.sh
+
+# 构建所有平台版本
+./build.sh --all
+
+# 指定输出和日志目录
+./build.sh -o build -l build-logs
+
+# 查看帮助
+./build.sh --help
 ```
+
+**特性**：
+- ✅ **日志可收集**：所有构建日志保存到 `logs/` 目录，带时间戳
+- ✅ **输出位置可确定**：构建产物统一输出到 `dist/` 目录（可配置）
+- ✅ **自动清理遗留文件**：构建前自动清理旧的构建产物
+- ✅ **构建信息记录**：生成 `BUILD_INFO.txt` 包含版本、时间、SHA256 等信息
+- ✅ **开发环境隔离**：自动设置 `CURSOR_TOOLSET_ROOT=.root`
+
+#### 方法 2: 使用 Makefile
+
+```bash
+# 构建当前平台版本（自动设置开发环境变量）
+make build
+
+# 构建所有平台版本
+make build-all
+
+# 运行测试
+make test
+
+# 格式化代码
+make fmt
+
+# 代码检查
+make lint
+
+# 查看所有可用命令
+make help
+```
+
+**注意**: 使用 `make` 命令时，会自动设置 `CURSOR_TOOLSET_ROOT=.root`，确保开发环境隔离。
+
+#### 方法 2: 直接使用 go build
+
+```bash
+# 基本构建
+go build -o cursortoolset .
+
+# 带版本信息构建
+go build -ldflags "-X main.Version=$(cat version.json | grep -o '\"version\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | cut -d'\"' -f4) -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')" -o cursortoolset .
+
+# 运行（不构建）
+go run main.go install
+```
+
+#### 开发环境变量
+
+开发时，Makefile 会自动设置 `CURSOR_TOOLSET_ROOT=.root`，所有操作都会使用项目本地的 `.root` 目录，不会影响系统安装。
+
+如果需要手动设置：
+
+```bash
+# Linux/macOS
+export CURSOR_TOOLSET_ROOT=$(pwd)/.root
+
+# Windows PowerShell
+$env:CURSOR_TOOLSET_ROOT = "$PWD\.root"
+```
+
+更多环境变量使用说明，请查看 [ENV_VARIABLES.md](ENV_VARIABLES.md)。
 
 ## 许可证
 

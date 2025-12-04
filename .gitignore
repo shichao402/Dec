@@ -35,4 +35,9 @@ Thumbs.db
 # 开发根目录（开发时使用）
 .root/
 
+# 构建产物
+dist/
+logs/
+*.log
+
 
