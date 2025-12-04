@@ -38,7 +38,14 @@ print_header() {
 # 默认配置
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 LOG_DIR="${LOG_DIR:-logs}"
-LOG_FILE="${LOG_DIR}/build-$(date +%Y%m%d-%H%M%S).log"
+
+# 确定日志文件名（如果指定了 GOOS/GOARCH，包含平台信息）
+if [ -n "${GOOS}" ] && [ -n "${GOARCH}" ]; then
+    LOG_FILE="${LOG_DIR}/build-${GOOS}-${GOARCH}-$(date -u +%Y%m%d-%H%M%S).log"
+else
+    LOG_FILE="${LOG_DIR}/build-$(date +%Y%m%d-%H%M%S).log"
+fi
+
 BINARY_NAME="cursortoolset"
 BUILD_ALL=false
 CLEAN_BEFORE=true
@@ -119,14 +126,24 @@ if [ ! -f "version.json" ]; then
     exit 1
 fi
 
-# 读取版本信息
-VERSION=$(cat version.json | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "dev")
-if [ -z "${VERSION}" ]; then
-    print_warning "无法从 version.json 读取版本号，使用默认值: dev"
-    VERSION="dev"
+# 读取版本信息（优先使用环境变量，否则从 version.json 读取）
+if [ -n "${VERSION}" ]; then
+    print_info "使用环境变量中的版本: ${VERSION}"
+else
+    VERSION=$(cat version.json | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "dev")
+    if [ -z "${VERSION}" ]; then
+        print_warning "无法从 version.json 读取版本号，使用默认值: dev"
+        VERSION="dev"
+    fi
 fi
 
-BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+# 构建时间（优先使用环境变量）
+if [ -n "${BUILD_TIME}" ]; then
+    print_info "使用环境变量中的构建时间: ${BUILD_TIME}"
+else
+    BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+fi
+
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
@@ -194,40 +211,74 @@ build_platform() {
     fi
 }
 
-# 构建当前平台
+# 构建指定平台（支持通过 GOOS/GOARCH 环境变量指定）
 build_current() {
-    print_header "构建当前平台版本"
+    # 检查是否通过环境变量指定了平台
+    local target_os="${GOOS:-}"
+    local target_arch="${GOARCH:-}"
     
-    local output_path="${OUTPUT_DIR}/${BINARY_NAME}"
-    if [ "$(uname -s)" = "Darwin" ] || [ "$(uname -s)" = "Linux" ]; then
-        # Unix-like 系统，不需要扩展名
-        output_path="${OUTPUT_DIR}/${BINARY_NAME}"
-    else
-        # Windows
-        output_path="${OUTPUT_DIR}/${BINARY_NAME}.exe"
-    fi
-    
-    print_info "构建当前平台: $(go env GOOS)-$(go env GOARCH)"
-    print_info "输出: ${output_path}"
-    
-    go build \
-        -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
-        -o "${output_path}" \
-        . 2>&1 | tee -a "${LOG_FILE}"
-    
-    if [ $? -eq 0 ]; then
-        local size=$(ls -lh "${output_path}" | awk '{print $5}')
-        print_success "构建完成 (${size})"
-        echo "${output_path}" >> "${OUTPUT_DIR}/.build-manifest"
+    if [ -n "${target_os}" ] && [ -n "${target_arch}" ]; then
+        # 使用环境变量指定的平台（CI 场景）
+        print_header "构建指定平台版本"
+        print_info "目标平台: ${target_os}-${target_arch}"
         
-        # 同时在根目录创建符号链接（Unix-like）或复制（Windows）
-        if [ "$(uname -s)" != "MINGW"* ] && [ "$(uname -s)" != "MSYS"* ]; then
-            ln -sf "$(realpath "${output_path}")" "${BINARY_NAME}"
-            print_info "已创建符号链接: ${BINARY_NAME} -> ${output_path}"
+        local ext=""
+        if [ "${target_os}" = "windows" ]; then
+            ext=".exe"
+        fi
+        
+        local output_name="${BINARY_NAME}-${target_os}-${target_arch}${ext}"
+        local output_path="${OUTPUT_DIR}/${output_name}"
+        
+        print_info "输出: ${output_path}"
+        
+        GOOS="${target_os}" GOARCH="${target_arch}" go build \
+            -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
+            -o "${output_path}" \
+            . 2>&1 | tee -a "${LOG_FILE}"
+        
+        if [ $? -eq 0 ]; then
+            local size=$(ls -lh "${output_path}" | awk '{print $5}')
+            print_success "构建完成: ${output_name} (${size})"
+            echo "${output_path}" >> "${OUTPUT_DIR}/.build-manifest"
+        else
+            print_error "构建失败"
+            exit 1
         fi
     else
-        print_error "构建失败"
-        exit 1
+        # 构建当前平台（本地开发场景）
+        print_header "构建当前平台版本"
+        
+        local current_os=$(go env GOOS)
+        local current_arch=$(go env GOARCH)
+        
+        local output_path="${OUTPUT_DIR}/${BINARY_NAME}"
+        if [ "${current_os}" = "windows" ]; then
+            output_path="${OUTPUT_DIR}/${BINARY_NAME}.exe"
+        fi
+        
+        print_info "构建当前平台: ${current_os}-${current_arch}"
+        print_info "输出: ${output_path}"
+        
+        go build \
+            -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
+            -o "${output_path}" \
+            . 2>&1 | tee -a "${LOG_FILE}"
+        
+        if [ $? -eq 0 ]; then
+            local size=$(ls -lh "${output_path}" | awk '{print $5}')
+            print_success "构建完成 (${size})"
+            echo "${output_path}" >> "${OUTPUT_DIR}/.build-manifest"
+            
+            # 同时在根目录创建符号链接（Unix-like）或复制（Windows）
+            if [ "$(uname -s)" != "MINGW"* ] && [ "$(uname -s)" != "MSYS"* ]; then
+                ln -sf "$(realpath "${output_path}")" "${BINARY_NAME}"
+                print_info "已创建符号链接: ${BINARY_NAME} -> ${output_path}"
+            fi
+        else
+            print_error "构建失败"
+            exit 1
+        fi
     fi
 }
 
@@ -260,7 +311,20 @@ build_all_platforms() {
 generate_manifest() {
     print_header "生成构建清单"
     
-    local manifest_file="${OUTPUT_DIR}/BUILD_INFO.txt"
+    # 确定构建平台信息
+    local build_os="${GOOS:-$(go env GOOS)}"
+    local build_arch="${GOARCH:-$(go env GOARCH)}"
+    local platform_info="${build_os}-${build_arch}"
+    
+    # 如果指定了平台，生成平台特定的构建信息文件（CI 场景）
+    # 否则生成通用的构建信息文件（本地场景）
+    local manifest_file
+    if [ -n "${GOOS}" ] && [ -n "${GOARCH}" ]; then
+        manifest_file="${OUTPUT_DIR}/BUILD_INFO-${build_os}-${build_arch}.txt"
+    else
+        manifest_file="${OUTPUT_DIR}/BUILD_INFO.txt"
+    fi
+    
     cat > "${manifest_file}" << EOF
 CursorToolset 构建信息
 ====================
@@ -269,20 +333,39 @@ CursorToolset 构建信息
 构建时间: ${BUILD_TIME}
 提交哈希: ${COMMIT}
 分支: ${BRANCH}
-构建平台: $(go env GOOS)-$(go env GOARCH)
+构建平台: ${platform_info}
 Go 版本: $(go version)
 
 构建产物:
 EOF
     
+    # 只包含当前构建的产物（从 .build-manifest 的最后一行读取）
     if [ -f "${OUTPUT_DIR}/.build-manifest" ]; then
-        while IFS= read -r file; do
-            if [ -f "${file}" ]; then
-                local size=$(ls -lh "${file}" | awk '{print $5}')
-                local sha256=$(sha256sum "${file}" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "${file}" 2>/dev/null | cut -d' ' -f1 || echo "N/A")
-                echo "  - $(basename "${file}") (${size}, SHA256: ${sha256})" >> "${manifest_file}"
+        # 如果指定了平台，只包含匹配的文件
+        if [ -n "${GOOS}" ] && [ -n "${GOARCH}" ]; then
+            local expected_name="${BINARY_NAME}-${build_os}-${build_arch}"
+            if [ "${build_os}" = "windows" ]; then
+                expected_name="${expected_name}.exe"
             fi
-        done < "${OUTPUT_DIR}/.build-manifest"
+            # 查找匹配的文件
+            while IFS= read -r file; do
+                if [ -f "${file}" ] && [[ "$(basename "${file}")" == "${expected_name}" ]]; then
+                    local size=$(ls -lh "${file}" | awk '{print $5}')
+                    local sha256=$(sha256sum "${file}" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "${file}" 2>/dev/null | cut -d' ' -f1 || echo "N/A")
+                    echo "  - $(basename "${file}") (${size}, SHA256: ${sha256})" >> "${manifest_file}"
+                    break
+                fi
+            done < "${OUTPUT_DIR}/.build-manifest"
+        else
+            # 本地构建，包含所有产物
+            while IFS= read -r file; do
+                if [ -f "${file}" ]; then
+                    local size=$(ls -lh "${file}" | awk '{print $5}')
+                    local sha256=$(sha256sum "${file}" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "${file}" 2>/dev/null | cut -d' ' -f1 || echo "N/A")
+                    echo "  - $(basename "${file}") (${size}, SHA256: ${sha256})" >> "${manifest_file}"
+                fi
+            done < "${OUTPUT_DIR}/.build-manifest"
+        fi
     fi
     
     print_success "构建清单已生成: ${manifest_file}"

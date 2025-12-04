@@ -106,29 +106,26 @@ jobs:
           go-version: '1.21'
           cache: true
       
-      - name: 构建
+      - name: 使用构建脚本构建
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
           VERSION: ${{ needs.build-info.outputs.version }}
           BUILD_TIME: ${{ needs.build-info.outputs.build_time }}
+          OUTPUT_DIR: dist
+          LOG_DIR: logs
         run: |
-          echo "🔨 开始构建 ${{ matrix.os }}-${{ matrix.arch }}"
-          echo "📌 版本: $VERSION"
+          # 确保构建脚本有执行权限
+          chmod +x build.sh
           
-          BINARY_NAME="cursortoolset-${{ matrix.os }}-${{ matrix.arch }}"
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            BINARY_NAME="${BINARY_NAME}.exe"
-          fi
-          
-          go build -ldflags "-X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME" -o "$BINARY_NAME" .
-          
-          echo "✅ 构建完成: $BINARY_NAME"
-          ls -lh "$BINARY_NAME"
+          # 直接调用构建脚本，它会自动检测 GOOS 和 GOARCH 环境变量
+          # 并构建指定的平台版本
+          ./build.sh --no-clean
         shell: bash
       
       - name: 测试可执行文件
         run: |
+          # 构建脚本已经生成了正确的文件名
           BINARY_NAME="cursortoolset-${{ matrix.os }}-${{ matrix.arch }}"
           if [ "${{ matrix.os }}" = "windows" ]; then
             BINARY_NAME="${BINARY_NAME}.exe"
@@ -154,31 +151,42 @@ jobs:
           esac
           
           if [ "$RUNNER_ARCH_NORM" = "$TARGET_ARCH" ]; then
-            chmod +x "$BINARY_NAME" || true
-            ./"$BINARY_NAME" --version
+            chmod +x "dist/$BINARY_NAME" || true
+            ./"dist/$BINARY_NAME" --version
             echo "✅ 可执行文件测试通过"
           else
             echo "⚠️  跳过跨架构测试（Runner: $RUNNER_ARCH_NORM, Target: $TARGET_ARCH）"
             echo "✅ 二进制文件已生成，架构验证通过"
-            ls -lh "$BINARY_NAME"
+            ls -lh "dist/$BINARY_NAME"
           fi
         shell: bash
       
       - name: 生成校验和
         run: |
+          # 构建脚本已经生成了 BUILD_INFO 文件，这里只需要生成校验和
           BINARY_NAME="cursortoolset-${{ matrix.os }}-${{ matrix.arch }}"
           if [ "${{ matrix.os }}" = "windows" ]; then
             BINARY_NAME="${BINARY_NAME}.exe"
           fi
           
+          BINARY_PATH="dist/$BINARY_NAME"
+          
+          # 生成校验和
           if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "$BINARY_NAME" > "$BINARY_NAME.sha256"
+            sha256sum "$BINARY_PATH" > "dist/$BINARY_NAME.sha256"
           else
-            shasum -a 256 "$BINARY_NAME" > "$BINARY_NAME.sha256"
+            shasum -a 256 "$BINARY_PATH" > "dist/$BINARY_NAME.sha256"
           fi
           
           echo "📋 校验和:"
-          cat "$BINARY_NAME.sha256"
+          cat "dist/$BINARY_NAME.sha256"
+          
+          # 构建脚本已经生成了 BUILD_INFO 文件
+          BUILD_INFO="dist/BUILD_INFO-${{ matrix.os }}-${{ matrix.arch }}.txt"
+          if [ -f "$BUILD_INFO" ]; then
+            echo "📄 构建信息文件（由 build.sh 生成）:"
+            cat "$BUILD_INFO"
+          fi
         shell: bash
       
       - name: 上传构建产物
@@ -186,8 +194,17 @@ jobs:
         with:
           name: cursortoolset-${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            cursortoolset-*
+            dist/cursortoolset-${{ matrix.os }}-${{ matrix.arch }}*
+            dist/BUILD_INFO-${{ matrix.os }}-${{ matrix.arch }}.txt
           retention-days: 30
+      
+      - name: 上传构建日志
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-logs-${{ matrix.os }}-${{ matrix.arch }}
+          path: logs/
+          retention-days: 7
   
   # 构建总结
   build-summary:
@@ -244,5 +261,9 @@ jobs:
       - name: 列出所有构建产物
         run: |
           echo "📦 所有构建产物:"
-          find artifacts -type f ! -name "*.sha256" -exec ls -lh {} \;
+          find artifacts -type f ! -name "*.sha256" ! -name "BUILD_INFO*.txt" -exec ls -lh {} \;
+          
+          echo ""
+          echo "📄 构建信息文件:"
+          find artifacts -name "BUILD_INFO*.txt" -exec cat {} \;
 
