@@ -63,34 +63,20 @@ cursortoolset update --self
 ```
 
 **流程**：
-1. 🔍 从 GitHub API 获取最新 Release 版本号
-2. 📌 显示当前版本和最新版本
-3. 🔄 比较版本号
-4. ✅ 如果已是最新版本，跳过更新
-5. 🆕 如果有新版本，执行更新
+1. 📌 从本地 version.json 读取当前版本
+2. 🔄 执行更新（克隆最新代码并重新构建）
+3. ✅ 更新完成
 
 **示例输出**：
 ```
 🔄 更新 CursorToolset...
-  🔍 检查新版本...
   📌 当前版本: v1.0.0
-  📌 最新版本: v1.1.0
-  🆕 发现新版本！
+  🔄 开始更新...
   📍 当前位置: /Users/xxx/.cursor/toolsets/CursorToolset/bin/cursortoolset
   📥 克隆最新代码...
   🔨 构建新版本...
   📦 替换旧版本...
   ✅ CursorToolset 更新完成
-```
-
-如果已是最新：
-```
-🔄 更新 CursorToolset...
-  🔍 检查新版本...
-  📌 当前版本: v1.1.0
-  📌 最新版本: v1.1.0
-  ✅ 已是最新版本，无需更新
-✅ CursorToolset 更新完成
 ```
 
 ### 2. 配置文件更新 (`--available`)
