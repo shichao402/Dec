@@ -21,22 +21,14 @@ Compare("v1.0.0", "v1.0.0")  // 返回 0  (版本相同)
 - ✅ 带后缀：`v1.0.0-beta`（忽略后缀部分）
 - ✅ 开发版本：`dev`、`unknown`（总是认为需要更新）
 
-#### GitHub API 集成
-```go
-// 获取最新 Release 版本
-release, err := version.GetLatestRelease("firoyang", "CursorToolset")
-if err == nil {
-    fmt.Println("最新版本:", release.TagName)
-    fmt.Println("发布说明:", release.Body)
-    fmt.Println("下载地址:", release.HTMLURL)
-}
-```
+#### 版本号读取
+版本号统一从 `version.json` 文件读取，这是唯一的数据源。
 
 **特点**：
-- ✅ 使用 GitHub REST API
-- ✅ 添加合适的 User-Agent 头
-- ✅ 错误处理（网络失败、无 Release 等）
-- ✅ 遵守 GitHub API 速率限制
+- ✅ 单一数据源：version.json
+- ✅ 本地文件，无需网络连接
+- ✅ 向上查找：从当前目录向上查找 version.json
+- ✅ 错误处理：读取失败时回退到编译时注入的版本
 
 ### 2. 智能自更新 (`update --self`)
 
@@ -44,16 +36,10 @@ if err == nil {
 
 **流程**：
 ```
-1. 🔍 检查新版本
-   ├─ 从 GitHub API 获取最新 Release
-   ├─ 显示当前版本和最新版本
-   └─ 比较版本号
+1. 📌 读取当前版本
+   └─ 从本地 version.json 读取
 
-2. 判断是否需要更新
-   ├─ ✅ 已是最新：跳过更新，节省时间
-   └─ 🆕 有新版本：继续更新流程
-
-3. 执行更新（仅在需要时）
+2. 🔄 执行更新
    ├─ 克隆最新代码
    ├─ 构建新版本
    └─ 替换旧版本
@@ -61,37 +47,16 @@ if err == nil {
 
 **示例输出**：
 
-需要更新时：
+更新流程：
 ```
 🔄 更新 CursorToolset...
-  🔍 检查新版本...
   📌 当前版本: v1.0.0
-  📌 最新版本: v1.1.0
-  🆕 发现新版本！
+  🔄 开始更新...
   📍 当前位置: ~/.cursor/toolsets/CursorToolset/bin/cursortoolset
   📥 克隆最新代码...
   🔨 构建新版本...
   📦 替换旧版本...
 ✅ CursorToolset 更新完成
-```
-
-已是最新时：
-```
-🔄 更新 CursorToolset...
-  🔍 检查新版本...
-  📌 当前版本: v1.1.0
-  📌 最新版本: v1.1.0
-  ✅ 已是最新版本，无需更新
-✅ CursorToolset 更新完成
-```
-
-网络失败时（优雅降级）：
-```
-🔄 更新 CursorToolset...
-  🔍 检查新版本...
-  ⚠️  无法检查版本: 请求超时
-  ℹ️  继续尝试更新...
-  （继续执行更新流程）
 ```
 
 ### 3. 配置文件更新检查 (`update --available`)
@@ -244,25 +209,22 @@ func Compare(v1, v2 string) int {
 - 符合语义化版本规范
 - 容错性强（处理各种格式）
 
-### 2. GitHub API 调用
+### 2. 版本号读取
 
 ```go
-func GetLatestRelease(owner, repo string) (*GitHubRelease, error) {
-    // 1. 构造 API URL
-    // 2. 添加必要的 HTTP 头
-    //    - User-Agent: 避免被 GitHub 拒绝
-    //    - Accept: 指定 API 版本
-    // 3. 发送请求
-    // 4. 处理响应（404, 403, 200）
-    // 5. 解析 JSON
+func GetVersion(workDir string) (string, error) {
+    // 1. 从当前目录向上查找 version.json
+    // 2. 读取文件内容
+    // 3. 解析 JSON 获取 version 字段
+    // 4. 返回版本号
 }
 ```
 
 **错误处理**：
-- ✅ 网络超时
-- ✅ API 限流（403）
-- ✅ 无 Release（404）
+- ✅ 文件不存在
 - ✅ JSON 解析失败
+- ✅ version 字段为空
+- ✅ 读取失败时回退到编译时版本
 
 ### 3. 文件内容比较
 
