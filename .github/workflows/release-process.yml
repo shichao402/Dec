@@ -39,20 +39,10 @@ jobs:
         with:
           fetch-depth: 0
       
-      - name: 验证版本号格式
+      - name: 读取并验证版本信息
         id: validate
         run: |
-          VERSION="${{ github.event.inputs.version }}"
           BUILD_BRANCH="${{ github.event.inputs.build_branch }}"
-          
-          # 验证版本号格式
-          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ 错误: 版本号格式不正确，应为 v1.0.1 格式"
-            exit 1
-          fi
-          
-          # 移除 v 前缀
-          VERSION_CLEAN="${VERSION#v}"
           
           # 检查 build 分支是否存在
           if ! git ls-remote --heads origin "$BUILD_BRANCH" | grep -q "$BUILD_BRANCH"; then
@@ -61,12 +51,37 @@ jobs:
             exit 1
           fi
           
+          # 从 build 分支读取 version.json
+          git fetch origin "$BUILD_BRANCH:$BUILD_BRANCH" || true
+          git checkout "$BUILD_BRANCH" || git checkout -b "$BUILD_BRANCH" origin/"$BUILD_BRANCH"
+          
+          if [ ! -f "version.json" ]; then
+            echo "❌ 错误: build 分支中未找到 version.json 文件"
+            exit 1
+          fi
+          
+          VERSION=$(cat version.json | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+          if [ -z "$VERSION" ]; then
+            echo "❌ 错误: version.json 中未找到 version 字段"
+            exit 1
+          fi
+          
+          # 验证版本号格式
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ 错误: version.json 中的版本号格式不正确，应为 v1.0.1 格式"
+            echo "   当前值: $VERSION"
+            exit 1
+          fi
+          
+          # 移除 v 前缀
+          VERSION_CLEAN="${VERSION#v}"
+          
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "version_clean=$VERSION_CLEAN" >> $GITHUB_OUTPUT
           echo "build_branch=$BUILD_BRANCH" >> $GITHUB_OUTPUT
           
           echo "✅ 验证通过"
-          echo "📌 版本号: $VERSION"
+          echo "📌 版本号（来自 version.json）: $VERSION"
           echo "🌿 Build 分支: $BUILD_BRANCH"
 
   # 创建 Release 分支

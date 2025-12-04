@@ -93,7 +93,18 @@ func updateSelfBinary() error {
 	// 检查是否有新版本
 	fmt.Printf("  🔍 检查新版本...\n")
 	
-	currentVer := GetVersion()
+	// 从 version.json 读取当前版本
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("获取工作目录失败: %w", err)
+	}
+	
+	currentVer, err := version.GetVersion(workDir)
+	if err != nil {
+		// 如果读取失败，使用编译时注入的版本
+		currentVer = GetVersion()
+		fmt.Printf("  ⚠️  无法读取 version.json，使用编译版本: %s\n", currentVer)
+	}
 	release, err := version.GetLatestRelease("firoyang", "CursorToolset")
 	if err != nil {
 		fmt.Printf("  ⚠️  无法检查版本: %v\n", err)

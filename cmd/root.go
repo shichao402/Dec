@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
+	"github.com/firoyang/CursorToolset/pkg/version"
 	"github.com/spf13/cobra"
 )
 
@@ -38,7 +40,7 @@ var RootCmd = &cobra.Command{
 	Version: getVersionString(),
 }
 
-// SetVersion 设置版本信息
+// SetVersion 设置版本信息（从编译参数注入）
 func SetVersion(v, bt string) {
 	appVersion = v
 	appBuildTime = bt
@@ -47,20 +49,40 @@ func SetVersion(v, bt string) {
 
 // getVersionString 获取版本字符串
 func getVersionString() string {
-	if appVersion == "" {
-		appVersion = "dev"
+	// 优先使用编译时注入的版本
+	if appVersion != "" && appVersion != "unknown" {
+		if appBuildTime != "" && appBuildTime != "unknown" {
+			return fmt.Sprintf("%s (built at %s)", appVersion, appBuildTime)
+		}
+		return appVersion
 	}
-	if appBuildTime != "" && appBuildTime != "unknown" {
-		return fmt.Sprintf("%s (built at %s)", appVersion, appBuildTime)
+
+	// 如果编译时未注入，尝试从 version.json 读取
+	workDir, err := os.Getwd()
+	if err == nil {
+		if ver, err := version.GetVersion(workDir); err == nil {
+			return ver
+		}
 	}
-	return appVersion
+
+	return "dev"
 }
 
 // GetVersion 获取当前版本号（供其他包使用）
 func GetVersion() string {
+	// 优先使用编译时注入的版本
 	if appVersion != "" && appVersion != "unknown" {
 		return appVersion
 	}
+
+	// 如果编译时未注入，尝试从 version.json 读取
+	workDir, err := os.Getwd()
+	if err == nil {
+		if ver, err := version.GetVersion(workDir); err == nil {
+			return ver
+		}
+	}
+
 	return "dev"
 }
 

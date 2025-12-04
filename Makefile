@@ -2,7 +2,9 @@
 
 # 变量定义
 BINARY_NAME=cursortoolset
-VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+
+# 从 version.json 读取版本号
+VERSION=$(shell cat version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "dev")
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
@@ -13,7 +15,12 @@ all: build
 # 构建当前平台版本
 .PHONY: build
 build:
+	@if [ ! -f "version.json" ]; then \
+		echo "❌ 错误: version.json 文件不存在"; \
+		exit 1; \
+	fi
 	@echo "🔨 构建 $(BINARY_NAME)..."
+	@echo "📌 版本: $(VERSION)"
 	go build $(LDFLAGS) -o $(BINARY_NAME) .
 	@echo "✅ 构建完成: $(BINARY_NAME)"
 
