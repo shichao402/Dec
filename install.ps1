@@ -83,19 +83,64 @@ function Install-CursorToolset {
     Write-ColorOutput "创建安装目录..." -Type "Info"
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
     
-    # 克隆仓库到临时目录
-    $tempDir = Join-Path $env:TEMP "cursortoolset-install-$(Get-Random)"
-    Write-ColorOutput "克隆仓库到临时目录: $tempDir" -Type "Info"
+    # 尝试从 GitHub Releases 下载预编译版本
+    Write-ColorOutput "尝试下载预编译版本..." -Type "Info"
     
+    # 从 ReleaseLatest 分支获取版本号
     try {
-        git clone --depth 1 https://github.com/firoyang/CursorToolset.git $tempDir
+        $versionJson = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/version.json" -ErrorAction Stop
+        $version = $versionJson.version
+        Write-ColorOutput "检测到版本: $version" -Type "Info"
     } catch {
-        Write-ColorOutput "克隆仓库失败: $_" -Type "Error"
-        exit 1
+        Write-ColorOutput "无法获取版本号，尝试使用 latest 标签" -Type "Warning"
+        $version = "latest"
     }
     
-    # 检查是否安装了 Go
-    if (Get-Command go -ErrorAction SilentlyContinue) {
+    # 构建下载 URL
+    $binaryName = "cursortoolset-$platform.exe"
+    if ($version -eq "latest") {
+        $downloadUrl = "https://github.com/firoyang/CursorToolset/releases/latest/download/$binaryName"
+    } else {
+        $downloadUrl = "https://github.com/firoyang/CursorToolset/releases/download/$version/$binaryName"
+    }
+    
+    # 尝试下载预编译版本
+    Write-ColorOutput "从 GitHub Releases 下载..." -Type "Info"
+    try {
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $binaryPath -ErrorAction Stop
+        Write-ColorOutput "预编译版本下载成功" -Type "Success"
+        
+        # 下载配置文件
+        Write-ColorOutput "下载配置文件..." -Type "Info"
+        try {
+            $configUrl = "https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/available-toolsets.json"
+            Invoke-WebRequest -Uri $configUrl -OutFile (Join-Path $installDir "available-toolsets.json")
+        } catch {
+            Write-ColorOutput "配置文件下载失败，将使用默认配置" -Type "Warning"
+        }
+    } catch {
+        Write-ColorOutput "预编译版本下载失败，尝试从源码构建..." -Type "Warning"
+        
+        # 回退到源码构建
+        $tempDir = Join-Path $env:TEMP "cursortoolset-install-$(Get-Random)"
+        Write-ColorOutput "克隆仓库到临时目录: $tempDir" -Type "Info"
+        
+        try {
+            git clone --depth 1 https://github.com/firoyang/CursorToolset.git $tempDir
+        } catch {
+            Write-ColorOutput "克隆仓库失败: $_" -Type "Error"
+            exit 1
+        }
+        
+        # 检查是否安装了 Go
+        if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+            Write-ColorOutput "Go 未安装，无法构建" -Type "Error"
+            Write-ColorOutput "请先安装 Go:" -Type "Error"
+            Write-ColorOutput "  下载地址: https://go.dev/dl/" -Type "Error"
+            Remove-Item -Recurse -Force $tempDir
+            exit 1
+        }
+        
         Write-ColorOutput "使用 Go 构建..." -Type "Info"
         
         Push-Location $tempDir
@@ -109,20 +154,14 @@ function Install-CursorToolset {
             exit 1
         }
         Pop-Location
-    } else {
-        Write-ColorOutput "Go 未安装，无法构建" -Type "Error"
-        Write-ColorOutput "请先安装 Go:" -Type "Error"
-        Write-ColorOutput "  下载地址: https://go.dev/dl/" -Type "Error"
+        
+        # 复制配置文件
+        Write-ColorOutput "复制配置文件..." -Type "Info"
+        Copy-Item (Join-Path $tempDir "available-toolsets.json") $installDir
+        
+        # 清理临时目录
         Remove-Item -Recurse -Force $tempDir
-        exit 1
     }
-    
-    # 复制配置文件
-    Write-ColorOutput "复制配置文件..." -Type "Info"
-    Copy-Item (Join-Path $tempDir "available-toolsets.json") $installDir
-    
-    # 清理临时目录
-    Remove-Item -Recurse -Force $tempDir
     
     # 添加到 PATH
     Write-ColorOutput "配置环境变量..." -Type "Info"

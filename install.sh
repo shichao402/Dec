@@ -105,18 +105,61 @@ main() {
     print_info "创建安装目录..."
     mkdir -p "${BIN_DIR}"
     
-    # 克隆仓库到临时目录
-    TEMP_DIR=$(mktemp -d)
-    print_info "克隆仓库到临时目录: ${TEMP_DIR}"
+    # 尝试从 GitHub Releases 下载预编译版本
+    print_info "尝试下载预编译版本..."
     
-    if ! git clone --depth 1 https://github.com/firoyang/CursorToolset.git "${TEMP_DIR}"; then
-        print_error "克隆仓库失败"
-        rm -rf "${TEMP_DIR}"
-        exit 1
+    # 从 ReleaseLatest 分支获取版本号
+    VERSION=$(curl -fsSL https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "")
+    
+    if [ -z "${VERSION}" ]; then
+        print_warning "无法获取版本号，尝试使用 latest 标签"
+        VERSION="latest"
+    else
+        print_info "检测到版本: ${VERSION}"
     fi
     
-    # 检查是否安装了 Go
-    if command -v go &> /dev/null; then
+    # 构建下载 URL
+    BINARY_NAME="cursortoolset-${PLATFORM}"
+    if [ "${VERSION}" = "latest" ]; then
+        DOWNLOAD_URL="https://github.com/firoyang/CursorToolset/releases/latest/download/${BINARY_NAME}"
+    else
+        DOWNLOAD_URL="https://github.com/firoyang/CursorToolset/releases/download/${VERSION}/${BINARY_NAME}"
+    fi
+    
+    # 尝试下载预编译版本
+    print_info "从 GitHub Releases 下载..."
+    if curl -fsSL -o "${BINARY_PATH}" "${DOWNLOAD_URL}" 2>/dev/null; then
+        chmod +x "${BINARY_PATH}"
+        print_success "预编译版本下载成功"
+        
+        # 下载配置文件
+        print_info "下载配置文件..."
+        curl -fsSL -o "${INSTALL_DIR}/available-toolsets.json" \
+            "https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/available-toolsets.json" 2>/dev/null || \
+            print_warning "配置文件下载失败，将使用默认配置"
+    else
+        print_warning "预编译版本下载失败，尝试从源码构建..."
+        
+        # 回退到源码构建
+        TEMP_DIR=$(mktemp -d)
+        print_info "克隆仓库到临时目录: ${TEMP_DIR}"
+        
+        if ! git clone --depth 1 https://github.com/firoyang/CursorToolset.git "${TEMP_DIR}"; then
+            print_error "克隆仓库失败"
+            rm -rf "${TEMP_DIR}"
+            exit 1
+        fi
+        
+        # 检查是否安装了 Go
+        if ! command -v go &> /dev/null; then
+            print_error "Go 未安装，无法构建"
+            print_error "请先安装 Go："
+            print_error "  macOS: brew install go"
+            print_error "  Linux: https://go.dev/doc/install"
+            rm -rf "${TEMP_DIR}"
+            exit 1
+        fi
+        
         print_info "使用 Go 构建..."
         cd "${TEMP_DIR}"
         
@@ -127,22 +170,14 @@ main() {
         fi
         
         print_success "构建成功"
-    else
-        print_error "Go 未安装，无法构建"
-        print_error "请先安装 Go："
-        print_error "  macOS: brew install go"
-        print_error "  Linux: https://go.dev/doc/install"
-        print_error "  Windows: https://go.dev/dl/"
+        
+        # 复制配置文件
+        print_info "复制配置文件..."
+        cp "${TEMP_DIR}/available-toolsets.json" "${INSTALL_DIR}/"
+        
+        # 清理临时目录
         rm -rf "${TEMP_DIR}"
-        exit 1
     fi
-    
-    # 复制配置文件
-    print_info "复制配置文件..."
-    cp "${TEMP_DIR}/available-toolsets.json" "${INSTALL_DIR}/"
-    
-    # 清理临时目录
-    rm -rf "${TEMP_DIR}"
     
     # 添加到 PATH
     print_info "配置环境变量..."
