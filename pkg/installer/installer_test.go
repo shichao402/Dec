@@ -9,257 +9,128 @@ import (
 )
 
 func TestNewInstaller(t *testing.T) {
-	toolsetsDir := "/tmp/toolsets"
-	workDir := "/tmp/work"
+	inst := NewInstaller()
 
-	installer := NewInstaller(toolsetsDir, workDir)
-
-	if installer.ToolsetsDir != toolsetsDir {
-		t.Errorf("Expected ToolsetsDir '%s', got '%s'", toolsetsDir, installer.ToolsetsDir)
+	if inst == nil {
+		t.Fatal("NewInstaller() returned nil")
 	}
 
-	if installer.WorkDir != workDir {
-		t.Errorf("Expected WorkDir '%s', got '%s'", workDir, installer.WorkDir)
+	if inst.downloader == nil {
+		t.Error("Installer.downloader should not be nil")
+	}
+
+	if !inst.useCache {
+		t.Error("Installer.useCache should be true by default")
 	}
 }
 
-func TestCopyFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	installer := NewInstaller(tmpDir, tmpDir)
+func TestInstaller_SetUseCache(t *testing.T) {
+	inst := NewInstaller()
 
-	// 创建源文件
-	sourceFile := filepath.Join(tmpDir, "source.txt")
-	content := []byte("test content")
-	if err := os.WriteFile(sourceFile, content, 0644); err != nil {
-		t.Fatalf("Failed to create source file: %v", err)
+	inst.SetUseCache(false)
+	if inst.useCache {
+		t.Error("SetUseCache(false) should set useCache to false")
 	}
 
-	// 测试拷贝普通文件
-	targetFile := filepath.Join(tmpDir, "target.txt")
-	if err := installer.copyFile(sourceFile, targetFile, false); err != nil {
-		t.Errorf("copyFile failed: %v", err)
+	inst.SetUseCache(true)
+	if !inst.useCache {
+		t.Error("SetUseCache(true) should set useCache to true")
 	}
+}
 
-	// 验证文件内容
-	targetContent, err := os.ReadFile(targetFile)
+func TestInstaller_IsInstalled(t *testing.T) {
+	inst := NewInstaller()
+
+	// 测试不存在的包
+	if inst.IsInstalled("non-existent-package-12345") {
+		t.Error("IsInstalled should return false for non-existent package")
+	}
+}
+
+func TestInstaller_Uninstall_NotInstalled(t *testing.T) {
+	inst := NewInstaller()
+
+	// 卸载不存在的包应该不报错
+	err := inst.Uninstall("non-existent-package-12345")
 	if err != nil {
-		t.Fatalf("Failed to read target file: %v", err)
-	}
-
-	if string(targetContent) != string(content) {
-		t.Errorf("Expected content '%s', got '%s'", content, targetContent)
-	}
-
-	// 验证文件权限（普通文件）
-	info, err := os.Stat(targetFile)
-	if err != nil {
-		t.Fatalf("Failed to stat target file: %v", err)
-	}
-	if info.Mode().Perm() != 0644 {
-		t.Errorf("Expected file mode 0644, got %o", info.Mode().Perm())
+		t.Errorf("Uninstall non-existent package should not return error, got: %v", err)
 	}
 }
 
-func TestCopyFileExecutable(t *testing.T) {
-	tmpDir := t.TempDir()
-	installer := NewInstaller(tmpDir, tmpDir)
+func TestInstaller_Install_InvalidManifest(t *testing.T) {
+	inst := NewInstaller()
 
-	// 创建源文件
-	sourceFile := filepath.Join(tmpDir, "source.sh")
-	content := []byte("#!/bin/bash\necho 'test'")
-	if err := os.WriteFile(sourceFile, content, 0644); err != nil {
-		t.Fatalf("Failed to create source file: %v", err)
+	// 测试无效的 manifest（没有 tarball）
+	manifest := &types.Manifest{
+		Name:    "test-package",
+		Version: "1.0.0",
+		Dist: types.Distribution{
+			Tarball: "", // 空的 tarball URL
+		},
 	}
 
-	// 测试拷贝可执行文件
-	targetFile := filepath.Join(tmpDir, "target.sh")
-	if err := installer.copyFile(sourceFile, targetFile, true); err != nil {
-		t.Errorf("copyFile failed: %v", err)
-	}
-
-	// 验证文件权限（可执行文件）
-	info, err := os.Stat(targetFile)
-	if err != nil {
-		t.Fatalf("Failed to stat target file: %v", err)
-	}
-	if info.Mode().Perm() != 0755 {
-		t.Errorf("Expected file mode 0755, got %o", info.Mode().Perm())
+	err := inst.Install(manifest)
+	if err == nil {
+		t.Error("Install with empty tarball URL should return error")
 	}
 }
 
-func TestGetPlatformSuffix(t *testing.T) {
-	installer := NewInstaller("", "")
-	suffix := installer.getPlatformSuffix()
+func TestInstaller_ClearCache(t *testing.T) {
+	inst := NewInstaller()
 
-	// 验证格式：应该是 "os-arch" 的形式
-	if suffix == "" {
-		t.Error("Platform suffix should not be empty")
-	}
-
-	// 应该包含连字符
-	if len(suffix) < 3 || suffix[0] == '-' || suffix[len(suffix)-1] == '-' {
-		t.Errorf("Platform suffix has invalid format: %s", suffix)
+	// 清理缓存不应该报错（即使缓存目录不存在）
+	err := inst.ClearCache()
+	if err != nil && !os.IsNotExist(err) {
+		t.Errorf("ClearCache should not return error, got: %v", err)
 	}
 }
 
-func TestIsPlatformSpecificFile(t *testing.T) {
-	installer := NewInstaller("", "")
+func TestInstallerCompat(t *testing.T) {
+	// 测试兼容层
+	tempDir := t.TempDir()
+	compat := NewInstallerCompat(tempDir, tempDir)
 
-	tests := []struct {
-		filename string
-		expected bool
-	}{
-		{"tool-darwin-amd64", true},
-		{"tool-darwin-arm64", true},
-		{"tool-linux-amd64", true},
-		{"tool-linux-arm64", true},
-		{"tool-windows-amd64", true},
-		{"tool", false},
-		{"tool.exe", false},
-		{"tool-v1.0.0", false},
+	if compat == nil {
+		t.Fatal("NewInstallerCompat returned nil")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.filename, func(t *testing.T) {
-			result := installer.isPlatformSpecificFile(tt.filename)
-			if result != tt.expected {
-				t.Errorf("isPlatformSpecificFile(%s) = %v, expected %v", tt.filename, result, tt.expected)
-			}
-		})
+	if compat.ToolsetsDir != tempDir {
+		t.Errorf("ToolsetsDir = %s, want %s", compat.ToolsetsDir, tempDir)
+	}
+
+	if compat.WorkDir != tempDir {
+		t.Errorf("WorkDir = %s, want %s", compat.WorkDir, tempDir)
+	}
+
+	// 测试 SetVersion
+	compat.SetVersion("1.0.0")
+	if compat.Version != "1.0.0" {
+		t.Errorf("Version = %s, want 1.0.0", compat.Version)
 	}
 }
 
-func TestGetBaseExecutableName(t *testing.T) {
-	installer := NewInstaller("", "")
+func TestInstallerCompat_InstallToolset_OldFormat(t *testing.T) {
+	tempDir := t.TempDir()
+	compat := NewInstallerCompat(tempDir, tempDir)
 
-	tests := []struct {
-		filename string
-		expected string
-	}{
-		{"tool-darwin-amd64", "tool"},
-		{"tool-linux-arm64", "tool"},
-		{"tool-windows-amd64.exe", "tool-windows-amd64"},
-		{"gh-action-debug-darwin-arm64", "gh-action-debug"},
-		{"simple-tool", "simple-tool"},
+	// 测试旧格式（只有 GitHubURL）应该报错
+	toolsetInfo := &types.ToolsetInfo{
+		Name:      "test",
+		GitHubURL: "https://github.com/test/test.git",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.filename, func(t *testing.T) {
-			result := installer.getBaseExecutableName(tt.filename)
-			if result != tt.expected {
-				t.Errorf("getBaseExecutableName(%s) = %s, expected %s", tt.filename, result, tt.expected)
-			}
-		})
+	err := compat.InstallToolset(toolsetInfo)
+	if err == nil {
+		t.Error("InstallToolset with old format should return error")
 	}
 }
 
-func TestCopyTargetWithNonExistentSource(t *testing.T) {
-	tmpDir := t.TempDir()
-	installer := NewInstaller(tmpDir, tmpDir)
-
-	target := types.InstallTarget{
-		Source:    "nonexistent/",
-		Files:     []string{"*.txt"},
-		Overwrite: false,
+// 辅助函数：创建测试目录结构
+func createTestDir(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("Failed to create test directory: %v", err)
 	}
-
-	// 应该不返回错误，只是警告
-	err := installer.copyTarget("target/", target, tmpDir)
-	if err != nil {
-		t.Errorf("Expected no error for non-existent source, got: %v", err)
-	}
+	return dir
 }
-
-func TestCopyFilesByPattern(t *testing.T) {
-	tmpDir := t.TempDir()
-	installer := NewInstaller(tmpDir, tmpDir)
-
-	sourceDir := filepath.Join(tmpDir, "source")
-	targetDir := filepath.Join(tmpDir, "target")
-
-	// 创建源目录和文件
-	if err := os.MkdirAll(sourceDir, 0755); err != nil {
-		t.Fatalf("Failed to create source dir: %v", err)
-	}
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		t.Fatalf("Failed to create target dir: %v", err)
-	}
-
-	// 创建测试文件
-	files := []string{"test1.txt", "test2.txt", "readme.md"}
-	for _, f := range files {
-		path := filepath.Join(sourceDir, f)
-		if err := os.WriteFile(path, []byte("content"), 0644); err != nil {
-			t.Fatalf("Failed to create test file: %v", err)
-		}
-	}
-
-	// 测试通配符匹配
-	config := types.InstallTarget{
-		Overwrite: false,
-	}
-
-	matched, err := installer.copyFilesByPattern(sourceDir, targetDir, "*.txt", config)
-	if err != nil {
-		t.Errorf("copyFilesByPattern failed: %v", err)
-	}
-
-	if !matched {
-		t.Error("Expected to match files, but got no match")
-	}
-
-	// 验证文件已拷贝
-	for _, f := range []string{"test1.txt", "test2.txt"} {
-		targetPath := filepath.Join(targetDir, f)
-		if _, err := os.Stat(targetPath); os.IsNotExist(err) {
-			t.Errorf("Expected file %s to exist", targetPath)
-		}
-	}
-
-	// readme.md 不应该被拷贝
-	if _, err := os.Stat(filepath.Join(targetDir, "readme.md")); err == nil {
-		t.Error("Expected readme.md NOT to be copied")
-	}
-}
-
-func TestCopyFilesByPatternSingleFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	installer := NewInstaller(tmpDir, tmpDir)
-
-	sourceDir := filepath.Join(tmpDir, "source")
-	targetDir := filepath.Join(tmpDir, "target")
-
-	// 创建源目录和文件
-	if err := os.MkdirAll(sourceDir, 0755); err != nil {
-		t.Fatalf("Failed to create source dir: %v", err)
-	}
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		t.Fatalf("Failed to create target dir: %v", err)
-	}
-
-	sourceFile := filepath.Join(sourceDir, "config.yaml")
-	if err := os.WriteFile(sourceFile, []byte("config content"), 0644); err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
-
-	// 测试单个文件匹配
-	config := types.InstallTarget{
-		Overwrite: false,
-	}
-
-	matched, err := installer.copyFilesByPattern(sourceDir, targetDir, "config.yaml", config)
-	if err != nil {
-		t.Errorf("copyFilesByPattern failed: %v", err)
-	}
-
-	if !matched {
-		t.Error("Expected to match file, but got no match")
-	}
-
-	// 验证文件已拷贝
-	targetPath := filepath.Join(targetDir, "config.yaml")
-	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
-		t.Error("Expected config.yaml to exist")
-	}
-}
-

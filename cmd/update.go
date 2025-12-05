@@ -6,40 +6,40 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 
-	"github.com/firoyang/CursorToolset/pkg/loader"
+	"github.com/firoyang/CursorToolset/pkg/installer"
 	"github.com/firoyang/CursorToolset/pkg/paths"
+	"github.com/firoyang/CursorToolset/pkg/registry"
 	"github.com/firoyang/CursorToolset/pkg/version"
 	"github.com/spf13/cobra"
 )
 
 var (
-	updateSelf      bool
-	updateToolsets  bool
-	updateAvailable bool
+	updateSelf     bool
+	updateRegistry bool
+	updatePackages bool
 )
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "更新 CursorToolset 或已安装的工具集",
+	Short: "更新管理器或已安装的包",
 	Long: `更新功能：
-  1. --self: 更新 CursorToolset 本身
-  2. --available: 更新 available-toolsets.json 配置文件
-  3. --toolsets: 更新所有已安装的工具集
+  --self       更新 CursorToolset 管理器本身
+  --registry   更新包索引
+  --packages   更新所有已安装的包
   
 如果不指定任何参数，将执行所有更新。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// 如果没有指定任何参数，则更新所有
-		if !updateSelf && !updateToolsets && !updateAvailable {
+		if !updateSelf && !updateRegistry && !updatePackages {
 			updateSelf = true
-			updateToolsets = true
-			updateAvailable = true
+			updateRegistry = true
+			updatePackages = true
 		}
 
 		var hasError bool
 
-		// 更新 CursorToolset 自身
+		// 更新管理器自身
 		if updateSelf {
 			fmt.Println("🔄 更新 CursorToolset...")
 			if err := updateSelfBinary(); err != nil {
@@ -51,26 +51,23 @@ var updateCmd = &cobra.Command{
 			fmt.Println()
 		}
 
-		// 更新 available-toolsets.json
-		if updateAvailable {
-			fmt.Println("🔄 更新 available-toolsets.json...")
-			if err := updateAvailableToolsets(); err != nil {
+		// 更新 registry
+		if updateRegistry {
+			fmt.Println("🔄 更新包索引...")
+			mgr := registry.NewManager()
+			if err := mgr.Update(); err != nil {
 				fmt.Printf("❌ 更新失败: %v\n", err)
 				hasError = true
-			} else {
-				fmt.Println("✅ available-toolsets.json 更新完成")
 			}
 			fmt.Println()
 		}
 
-		// 更新已安装的工具集
-		if updateToolsets {
-			fmt.Println("🔄 更新已安装的工具集...")
-			if err := updateInstalledToolsets(); err != nil {
+		// 更新已安装的包
+		if updatePackages {
+			fmt.Println("🔄 更新已安装的包...")
+			if err := updateInstalledPackages(); err != nil {
 				fmt.Printf("❌ 更新失败: %v\n", err)
 				hasError = true
-			} else {
-				fmt.Println("✅ 所有工具集更新完成")
 			}
 		}
 
@@ -85,13 +82,13 @@ var updateCmd = &cobra.Command{
 
 func init() {
 	updateCmd.Flags().BoolVarP(&updateSelf, "self", "s", false, "更新 CursorToolset 本身")
-	updateCmd.Flags().BoolVarP(&updateAvailable, "available", "a", false, "更新 available-toolsets.json")
-	updateCmd.Flags().BoolVarP(&updateToolsets, "toolsets", "t", false, "更新已安装的工具集")
+	updateCmd.Flags().BoolVarP(&updateRegistry, "registry", "r", false, "更新包索引")
+	updateCmd.Flags().BoolVarP(&updatePackages, "packages", "p", false, "更新已安装的包")
 }
 
-// updateSelfBinary 更新 CursorToolset 自身
+// updateSelfBinary 更新管理器自身
 func updateSelfBinary() error {
-	// 从 version.json 读取当前版本
+	// 获取当前版本
 	workDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("获取工作目录失败: %w", err)
@@ -99,15 +96,14 @@ func updateSelfBinary() error {
 
 	currentVer, err := version.GetVersion(workDir)
 	if err != nil {
-		// 如果读取失败，使用编译时注入的版本
 		currentVer = GetVersion()
-		fmt.Printf("  ⚠️  无法读取 version.json，使用编译版本: %s\n", currentVer)
+		fmt.Printf("  ⚠️  无法读取版本信息，使用: %s\n", currentVer)
 	}
 
 	fmt.Printf("  📌 当前版本: %s\n", currentVer)
 	fmt.Printf("  🔄 开始更新...\n")
 
-	// 获取当前可执行文件路径
+	// 获取可执行文件路径
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("获取可执行文件路径失败: %w", err)
@@ -121,7 +117,7 @@ func updateSelfBinary() error {
 	exeDir := filepath.Dir(exePath)
 	fmt.Printf("  📍 当前位置: %s\n", exePath)
 
-	// 检查是否是通过一键安装脚本安装的（在标准位置或环境变量指定的位置）
+	// 检查是否是标准安装位置
 	expectedBinDir, err := paths.GetBinDir()
 	if err != nil {
 		return fmt.Errorf("获取标准安装目录失败: %w", err)
@@ -134,8 +130,7 @@ func updateSelfBinary() error {
 		fmt.Printf("  ℹ️  标准位置: %s\n", expectedBinDir)
 		fmt.Printf("  ℹ️  当前位置: %s\n", exeDir)
 
-		// 询问用户是否继续
-		fmt.Print("  ⚠️  继续更新可能需要手动处理。是否继续？[y/N]: ")
+		fmt.Print("  ⚠️  继续更新？[y/N]: ")
 		var response string
 		fmt.Scanln(&response)
 		if response != "y" && response != "Y" {
@@ -177,35 +172,29 @@ func updateSelfBinary() error {
 		return fmt.Errorf("构建失败: %w", err)
 	}
 
-	// 处理 Windows 文件占用问题
+	// Windows 特殊处理
 	if runtime.GOOS == "windows" {
 		return updateOnWindows(exePath, newBinaryPath)
 	}
 
-	// Unix-like 系统直接替换
+	// Unix 系统直接替换
 	fmt.Printf("  📦 替换旧版本...\n")
 
-	// 备份旧文件
 	backupPath := exePath + ".backup"
 	if err := os.Rename(exePath, backupPath); err != nil {
 		return fmt.Errorf("备份旧文件失败: %w", err)
 	}
 
-	// 复制新文件
 	if err := copyFile(newBinaryPath, exePath); err != nil {
-		// 恢复备份
 		os.Rename(backupPath, exePath)
 		return fmt.Errorf("复制新文件失败: %w", err)
 	}
 
-	// 设置可执行权限
 	if err := os.Chmod(exePath, 0755); err != nil {
 		return fmt.Errorf("设置权限失败: %w", err)
 	}
 
-	// 删除备份
 	os.Remove(backupPath)
-
 	return nil
 }
 
@@ -213,7 +202,6 @@ func updateSelfBinary() error {
 func updateOnWindows(oldPath, newPath string) error {
 	fmt.Printf("  ⚠️  Windows 系统检测到文件可能被占用\n")
 
-	// 创建更新脚本
 	updateScript := filepath.Join(filepath.Dir(oldPath), "update-cursortoolset.bat")
 
 	scriptContent := fmt.Sprintf(`@echo off
@@ -240,173 +228,74 @@ if %%errorlevel%% equ 0 (
 	fmt.Printf("  📝 已创建更新脚本: %s\n", updateScript)
 	fmt.Printf("  ℹ️  程序将退出并自动完成更新\n")
 
-	// 启动更新脚本
 	cmd := exec.Command("cmd", "/c", "start", "/min", updateScript)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动更新脚本失败: %w", err)
 	}
 
-	// 退出当前程序
 	os.Exit(0)
 	return nil
 }
 
-// updateAvailableToolsets 更新 available-toolsets.json
-func updateAvailableToolsets() error {
-	// 查找 available-toolsets.json 位置
-	workDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("获取工作目录失败: %w", err)
+// updateInstalledPackages 更新已安装的包
+func updateInstalledPackages() error {
+	// 确保目录结构存在
+	if err := paths.EnsureAllDirs(); err != nil {
+		return fmt.Errorf("初始化目录失败: %w", err)
 	}
 
-	toolsetsPath := loader.GetToolsetsPath(workDir)
-	fmt.Printf("  📍 配置文件: %s\n", toolsetsPath)
-
-	// 检查远程文件是否有更新
-	fmt.Printf("  🔍 检查配置文件更新...\n")
-
-	// 获取本地文件的修改时间
-	localInfo, err := os.Stat(toolsetsPath)
-	if err != nil && !os.IsNotExist(err) {
-		fmt.Printf("  ⚠️  读取本地文件信息失败: %v\n", err)
+	// 加载 registry
+	mgr := registry.NewManager()
+	if err := mgr.Load(); err != nil {
+		return fmt.Errorf("加载包索引失败: %w", err)
 	}
 
-	// 检查是否是标准安装位置
-	rootDir, err := paths.GetRootDir()
-	if err != nil {
-		return fmt.Errorf("获取安装根目录失败: %w", err)
-	}
-
-	standardPath := filepath.Join(rootDir, "available-toolsets.json")
-
-	// 从 GitHub 下载最新版本
-	fmt.Printf("  📥 下载最新配置...\n")
-
-	tempFile := toolsetsPath + ".tmp"
-	cmd := exec.Command("curl", "-fsSL", "-o", tempFile,
-		"https://raw.githubusercontent.com/firoyang/CursorToolset/main/available-toolsets.json")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("下载失败: %w", err)
-	}
-
-	// 检查文件是否有变化
-	if localInfo != nil {
-		// 比较文件内容
-		oldContent, _ := os.ReadFile(toolsetsPath)
-		newContent, _ := os.ReadFile(tempFile)
-
-		if string(oldContent) == string(newContent) {
-			os.Remove(tempFile)
-			fmt.Printf("  ✅ 配置文件已是最新，无需更新\n")
-			return nil
-		}
-	}
-
-	// 替换旧文件
-	if err := os.Rename(tempFile, toolsetsPath); err != nil {
-		os.Remove(tempFile)
-		return fmt.Errorf("替换文件失败: %w", err)
-	}
-
-	fmt.Printf("  ✅ 配置文件已更新\n")
-
-	// 如果标准位置不同，也更新标准位置
-	if filepath.Clean(toolsetsPath) != filepath.Clean(standardPath) {
-		if err := copyFile(toolsetsPath, standardPath); err != nil {
-			fmt.Printf("  ⚠️  更新标准位置失败: %v\n", err)
-		}
-	}
-
-	return nil
-}
-
-// updateInstalledToolsets 更新已安装的工具集
-func updateInstalledToolsets() error {
-	workDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("获取工作目录失败: %w", err)
-	}
-
-	// 加载工具集列表
-	toolsetsPath := loader.GetToolsetsPath(workDir)
-	toolsets, err := loader.LoadToolsets(toolsetsPath)
-	if err != nil {
-		return fmt.Errorf("加载工具集列表失败: %w", err)
-	}
-
-	// 查找已安装的工具集
-	toolsetsDir, err := paths.GetToolsetsDir(workDir)
-	if err != nil {
-		return fmt.Errorf("获取工具集安装目录失败: %w", err)
-	}
+	inst := installer.NewInstaller()
+	packages := mgr.ListPackages()
 
 	updated := 0
+	skipped := 0
 	failed := 0
 
-	for _, toolset := range toolsets {
-		toolsetPath := filepath.Join(toolsetsDir, toolset.Name)
-
+	for _, item := range packages {
 		// 检查是否已安装
-		if _, err := os.Stat(toolsetPath); os.IsNotExist(err) {
+		if !inst.IsInstalled(item.Name) {
 			continue
 		}
 
-		fmt.Printf("  🔄 检查 %s...\n", toolset.DisplayName)
+		manifest := mgr.FindPackage(item.Name)
+		if manifest == nil {
+			fmt.Printf("  ⚠️  跳过 %s: 无法获取包信息\n", item.Name)
+			skipped++
+			continue
+		}
 
-		// 先 fetch 检查是否有更新
-		fetchCmd := exec.Command("git", "fetch")
-		fetchCmd.Dir = toolsetPath
-		if err := fetchCmd.Run(); err != nil {
-			fmt.Printf("    ⚠️  检查更新失败: %v\n", err)
+		// 检查版本
+		installedVer, _ := inst.GetInstalledVersion(item.Name)
+		if installedVer == manifest.Version {
+			fmt.Printf("  ✅ %s@%s 已是最新\n", item.Name, manifest.Version)
+			skipped++
+			continue
+		}
+
+		fmt.Printf("  🔄 更新 %s -> %s\n", item.Name, manifest.Version)
+		if err := inst.Install(manifest); err != nil {
+			fmt.Printf("  ❌ 更新失败: %v\n", err)
 			failed++
 			continue
 		}
 
-		// 检查是否有新的提交
-		statusCmd := exec.Command("git", "status", "-uno")
-		statusCmd.Dir = toolsetPath
-		output, err := statusCmd.Output()
-		if err != nil {
-			fmt.Printf("    ⚠️  获取状态失败: %v\n", err)
-			failed++
-			continue
-		}
-
-		// 检查输出中是否包含 "Your branch is behind"
-		statusStr := string(output)
-		if !strings.Contains(statusStr, "Your branch is behind") {
-			fmt.Printf("    ✅ 已是最新版本\n")
-			continue
-		}
-
-		fmt.Printf("    🆕 发现新版本，正在更新...\n")
-
-		// 拉取最新代码
-		pullCmd := exec.Command("git", "pull")
-		pullCmd.Dir = toolsetPath
-
-		if err := pullCmd.Run(); err != nil {
-			fmt.Printf("    ❌ 更新失败: %v\n", err)
-			failed++
-			continue
-		}
-
-		fmt.Printf("    ✅ 更新成功\n")
 		updated++
 	}
 
-	if updated > 0 {
-		fmt.Printf("\n  📊 更新统计: 成功 %d 个", updated)
-		if failed > 0 {
-			fmt.Printf(", 失败 %d 个", failed)
-		}
-		fmt.Println()
-	} else {
-		fmt.Println("  ℹ️  没有已安装的工具集")
+	fmt.Printf("\n📊 更新统计: 更新 %d, 跳过 %d", updated, skipped)
+	if failed > 0 {
+		fmt.Printf(", 失败 %d", failed)
 	}
+	fmt.Println()
 
 	if failed > 0 {
-		return fmt.Errorf("有 %d 个工具集更新失败", failed)
+		return fmt.Errorf("有 %d 个包更新失败", failed)
 	}
 
 	return nil
@@ -419,7 +308,6 @@ func copyFile(src, dst string) error {
 		return err
 	}
 
-	// 确保目标目录存在
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}

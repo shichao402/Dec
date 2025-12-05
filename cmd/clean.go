@@ -3,74 +3,43 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
-	"github.com/firoyang/CursorToolset/pkg/loader"
+	"github.com/firoyang/CursorToolset/pkg/installer"
 	"github.com/firoyang/CursorToolset/pkg/paths"
 	"github.com/spf13/cobra"
 )
 
 var (
-	cleanKeepToolsets bool
-	cleanForce        bool
+	cleanCache bool
+	cleanAll   bool
+	cleanForce bool
 )
 
 var cleanCmd = &cobra.Command{
 	Use:   "clean",
-	Short: "清理已安装的工具集",
-	Long: `清理所有已安装的工具集文件。
+	Short: "清理缓存或已安装的包",
+	Long: `清理缓存或已安装的包。
 
-此命令会删除：
-  1. .cursor/rules/ 中安装的规则文件
-  2. scripts/toolsets/ 中安装的脚本
-  3. .cursor/toolsets/ 目录（可选，使用 --keep-toolsets 保留）
-
-使用 --force 跳过确认提示。`,
+选项：
+  --cache    清理下载缓存
+  --all      清理所有（缓存 + 已安装的包）
+  
+默认只清理下载缓存。使用 --force 跳过确认提示。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// 确定工作目录
-		workDir, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("获取工作目录失败: %w", err)
+		// 默认清理缓存
+		if !cleanCache && !cleanAll {
+			cleanCache = true
 		}
-
-		// 加载工具集列表
-		toolsetsPath := loader.GetToolsetsPath(workDir)
-		toolsets, err := loader.LoadToolsets(toolsetsPath)
-		if err != nil {
-			return fmt.Errorf("加载工具集列表失败: %w", err)
-		}
-
-		if len(toolsets) == 0 {
-			fmt.Println("📋 没有找到工具集")
-			return nil
-		}
-
-		// 收集需要清理的目录
-		dirsToClean := []string{
-			filepath.Join(workDir, ".cursor", "rules"),
-			filepath.Join(workDir, "scripts", "toolsets"),
-		}
-
-		if !cleanKeepToolsets {
-			toolsetsDir, err := paths.GetToolsetsDir(workDir)
-			if err != nil {
-				return fmt.Errorf("获取工具集安装目录失败: %w", err)
-			}
-			dirsToClean = append(dirsToClean, toolsetsDir)
-		}
-
-		// 显示将要清理的内容
-		fmt.Printf("🧹 准备清理以下目录:\n\n")
-		for _, dir := range dirsToClean {
-			if _, err := os.Stat(dir); err == nil {
-				fmt.Printf("  📁 %s\n", dir)
-			}
-		}
-		fmt.Println()
 
 		// 确认操作
 		if !cleanForce {
-			fmt.Print("⚠️  此操作将删除已安装的工具集文件。是否继续？ [y/N]: ")
+			if cleanAll {
+				fmt.Println("⚠️  此操作将删除所有缓存和已安装的包！")
+			} else {
+				fmt.Println("⚠️  此操作将删除下载缓存。")
+			}
+			fmt.Print("是否继续？ [y/N]: ")
+
 			var response string
 			fmt.Scanln(&response)
 			if response != "y" && response != "Y" && response != "yes" {
@@ -79,49 +48,63 @@ var cleanCmd = &cobra.Command{
 			}
 		}
 
-		// 执行清理
 		fmt.Println()
-		cleaned := 0
-		for _, dir := range dirsToClean {
-			if err := cleanDirectory(dir); err != nil {
-				fmt.Printf("  ⚠️  清理 %s 失败: %v\n", dir, err)
-			} else {
-				cleaned++
+
+		// 清理缓存
+		if cleanCache || cleanAll {
+			if err := cleanCacheDir(); err != nil {
+				fmt.Printf("⚠️  清理缓存失败: %v\n", err)
 			}
 		}
 
-		fmt.Println()
-		if cleaned > 0 {
-			fmt.Printf("✅ 清理完成！共清理 %d 个目录\n", cleaned)
-			if cleanKeepToolsets {
-				fmt.Println("💡 提示：.cursor/toolsets/ 目录已保留")
+		// 清理已安装的包
+		if cleanAll {
+			if err := cleanReposDir(); err != nil {
+				fmt.Printf("⚠️  清理已安装包失败: %v\n", err)
 			}
-		} else {
-			fmt.Println("ℹ️  没有需要清理的内容")
 		}
 
+		fmt.Println("\n✅ 清理完成！")
 		return nil
 	},
 }
 
 func init() {
-	cleanCmd.Flags().BoolVarP(&cleanKeepToolsets, "keep-toolsets", "k", false, "保留 .cursor/toolsets/ 目录（只清理安装的文件）")
-	cleanCmd.Flags().BoolVarP(&cleanForce, "force", "f", false, "跳过确认提示，直接清理")
+	cleanCmd.Flags().BoolVar(&cleanCache, "cache", false, "清理下载缓存")
+	cleanCmd.Flags().BoolVar(&cleanAll, "all", false, "清理所有（缓存 + 已安装的包）")
+	cleanCmd.Flags().BoolVarP(&cleanForce, "force", "f", false, "跳过确认提示")
 }
 
-// cleanDirectory 清理指定目录
-func cleanDirectory(dir string) error {
-	// 检查目录是否存在
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		fmt.Printf("  ⏭️  跳过不存在的目录: %s\n", dir)
-		return nil
-	}
-
-	// 删除目录
-	fmt.Printf("  🗑️  删除: %s\n", dir)
-	if err := os.RemoveAll(dir); err != nil {
+// cleanCacheDir 清理缓存目录
+func cleanCacheDir() error {
+	cacheDir, err := paths.GetCacheDir()
+	if err != nil {
 		return err
 	}
 
-	return nil
+	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
+		fmt.Println("  ℹ️  缓存目录不存在")
+		return nil
+	}
+
+	fmt.Printf("  🗑️  清理缓存: %s\n", cacheDir)
+
+	inst := installer.NewInstaller()
+	return inst.ClearCache()
+}
+
+// cleanReposDir 清理已安装的包
+func cleanReposDir() error {
+	reposDir, err := paths.GetReposDir()
+	if err != nil {
+		return err
+	}
+
+	if _, err := os.Stat(reposDir); os.IsNotExist(err) {
+		fmt.Println("  ℹ️  没有已安装的包")
+		return nil
+	}
+
+	fmt.Printf("  🗑️  清理已安装包: %s\n", reposDir)
+	return os.RemoveAll(reposDir)
 }

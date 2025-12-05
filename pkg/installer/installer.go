@@ -1,646 +1,189 @@
 package installer
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
 
+	"github.com/firoyang/CursorToolset/pkg/downloader"
+	"github.com/firoyang/CursorToolset/pkg/paths"
 	"github.com/firoyang/CursorToolset/pkg/types"
 )
 
-// Installer 负责安装工具集
+// Installer 负责安装和卸载包
 type Installer struct {
-	ToolsetsDir string // 工具集安装目录
-	WorkDir     string // 工作目录（项目根目录）
-	Version     string // 指定安装的版本（Git 标签或提交哈希）
+	downloader *downloader.Downloader
+	useCache   bool
 }
 
 // NewInstaller 创建新的安装器
-func NewInstaller(toolsetsDir, workDir string) *Installer {
+func NewInstaller() *Installer {
 	return &Installer{
-		ToolsetsDir: toolsetsDir,
-		WorkDir:     workDir,
+		downloader: downloader.NewDownloader(),
+		useCache:   true,
 	}
 }
 
-// SetVersion 设置要安装的版本
-func (i *Installer) SetVersion(version string) {
-	i.Version = version
+// SetUseCache 设置是否使用缓存
+func (i *Installer) SetUseCache(use bool) {
+	i.useCache = use
+	i.downloader.SetUseCache(use)
 }
 
-// InstallToolset 安装指定的工具集
-func (i *Installer) InstallToolset(toolsetInfo *types.ToolsetInfo) error {
-	fmt.Printf("📦 开始安装工具集: %s\n", toolsetInfo.DisplayName)
-	
-	// 1. 克隆或下载工具集
-	toolsetPath := filepath.Join(i.ToolsetsDir, toolsetInfo.Name)
-	if err := i.cloneOrDownload(toolsetInfo.GitHubURL, toolsetPath); err != nil {
-		return fmt.Errorf("下载工具集失败: %w", err)
-	}
-	
-	// 2. 验证 SHA256（如果提供）
-	if toolsetInfo.SHA256 != "" {
-		fmt.Printf("  🔒 验证 SHA256 校验和...\n")
-		if err := i.verifySHA256(toolsetPath, toolsetInfo.SHA256); err != nil {
-			return fmt.Errorf("SHA256 校验失败: %w", err)
-		}
-		fmt.Printf("  ✅ SHA256 校验通过\n")
-	}
-	
-	// 3. 读取 toolset.json
-	toolsetConfigPath := filepath.Join(toolsetPath, "toolset.json")
-	toolset, err := i.loadToolset(toolsetConfigPath)
+// Install 安装包
+// 流程：下载 tarball → 验证 SHA256 → 解压到 repos 目录
+func (i *Installer) Install(manifest *types.Manifest) error {
+	fmt.Printf("📦 安装 %s@%s\n", manifest.Name, manifest.Version)
+
+	// 检查是否已安装
+	packagePath, err := paths.GetPackagePath(manifest.Name)
 	if err != nil {
-		return fmt.Errorf("读取 toolset.json 失败: %w", err)
+		return fmt.Errorf("获取包路径失败: %w", err)
 	}
-	
-	// 4. 执行构建脚本（如果定义）
-	if installScript, ok := toolset.Scripts["install"]; ok && installScript != "" {
-		fmt.Printf("  🔨 执行构建脚本...\n")
-		if err := i.runScript(installScript, toolsetPath); err != nil {
-			return fmt.Errorf("执行构建脚本失败: %w", err)
+
+	if _, err := os.Stat(packagePath); err == nil {
+		// 已安装，检查版本
+		fmt.Printf("  ℹ️  包已安装，将更新到 %s\n", manifest.Version)
+		// 删除旧版本
+		if err := os.RemoveAll(packagePath); err != nil {
+			return fmt.Errorf("删除旧版本失败: %w", err)
 		}
-		fmt.Printf("  ✅ 构建完成\n")
 	}
-	
-	// 5. 执行安装（拷贝文件）
-	if err := i.copyFiles(toolset, toolsetPath); err != nil {
-		return fmt.Errorf("拷贝文件失败: %w", err)
+
+	// 确保 repos 目录存在
+	reposDir, err := paths.GetReposDir()
+	if err != nil {
+		return fmt.Errorf("获取 repos 目录失败: %w", err)
 	}
-	
-	fmt.Printf("✅ 工具集 %s 安装完成\n", toolsetInfo.DisplayName)
+	if err := paths.EnsureDir(reposDir); err != nil {
+		return fmt.Errorf("创建 repos 目录失败: %w", err)
+	}
+
+	// 下载并解压
+	err = i.downloader.DownloadAndExtract(
+		manifest.Dist.Tarball,
+		manifest.Name,
+		manifest.Version,
+		manifest.Dist.SHA256,
+		packagePath,
+	)
+	if err != nil {
+		return fmt.Errorf("下载安装失败: %w", err)
+	}
+
+	fmt.Printf("✅ %s 安装完成\n", manifest.Name)
 	return nil
 }
 
-// UninstallToolset 卸载指定的工具集
-func (i *Installer) UninstallToolset(toolsetInfo *types.ToolsetInfo) error {
-	toolsetPath := filepath.Join(i.ToolsetsDir, toolsetInfo.Name)
-	
-	// 1. 读取 toolset.json
-	toolsetConfigPath := filepath.Join(toolsetPath, "toolset.json")
-	toolset, err := i.loadToolset(toolsetConfigPath)
-	if err != nil {
-		// 如果读取失败，只删除源码目录
-		fmt.Printf("  ⚠️  无法读取 toolset.json，只删除源码目录\n")
-		return i.removeToolsetDir(toolsetPath)
-	}
-	
-	// 2. 删除安装的文件
-	if err := i.removeInstalledFiles(toolset, toolsetPath); err != nil {
-		fmt.Printf("  ⚠️  删除安装文件时出错: %v\n", err)
-	}
-	
-	// 3. 删除工具集源码目录
-	if err := i.removeToolsetDir(toolsetPath); err != nil {
-		return err
-	}
-	
-	return nil
-}
+// Uninstall 卸载包
+func (i *Installer) Uninstall(packageName string) error {
+	fmt.Printf("🗑️  卸载 %s\n", packageName)
 
-// removeInstalledFiles 删除工具集安装的文件
-func (i *Installer) removeInstalledFiles(toolset *types.Toolset, sourceDir string) error {
-	if len(toolset.Install.Targets) == 0 {
-		fmt.Printf("  ℹ️  没有需要删除的安装文件\n")
+	packagePath, err := paths.GetPackagePath(packageName)
+	if err != nil {
+		return fmt.Errorf("获取包路径失败: %w", err)
+	}
+
+	// 检查是否已安装
+	if _, err := os.Stat(packagePath); os.IsNotExist(err) {
+		fmt.Printf("  ℹ️  包未安装\n")
 		return nil
 	}
-	
-	for targetPath := range toolset.Install.Targets {
-		fullTargetPath := filepath.Join(i.WorkDir, targetPath)
-		
-		// 检查目标路径是否存在
-		if _, err := os.Stat(fullTargetPath); os.IsNotExist(err) {
-			fmt.Printf("  ⏭️  跳过不存在的目录: %s\n", targetPath)
-			continue
-		}
-		
-		// 删除目标目录
-		fmt.Printf("  🗑️  删除: %s\n", targetPath)
-		if err := os.RemoveAll(fullTargetPath); err != nil {
-			fmt.Printf("  ⚠️  删除失败: %v\n", err)
-			continue
-		}
+
+	// 删除包目录
+	if err := os.RemoveAll(packagePath); err != nil {
+		return fmt.Errorf("删除包失败: %w", err)
 	}
-	
+
+	fmt.Printf("✅ %s 卸载完成\n", packageName)
 	return nil
 }
 
-// removeToolsetDir 删除工具集源码目录
-func (i *Installer) removeToolsetDir(toolsetPath string) error {
-	if _, err := os.Stat(toolsetPath); os.IsNotExist(err) {
-		fmt.Printf("  ℹ️  工具集源码目录不存在\n")
-		return nil
-	}
-	
-	fmt.Printf("  🗑️  删除工具集源码: %s\n", toolsetPath)
-	if err := os.RemoveAll(toolsetPath); err != nil {
-		return fmt.Errorf("删除源码目录失败: %w", err)
-	}
-	
-	return nil
-}
-
-// cloneOrDownload 克隆或下载工具集到指定目录
-func (i *Installer) cloneOrDownload(sourceURL, targetPath string) error {
-	// 确保 toolsets 目录存在
-	if err := os.MkdirAll(i.ToolsetsDir, 0755); err != nil {
-		return fmt.Errorf("创建目录失败: %w", err)
-	}
-	
-	// 检查目标目录是否已存在
-	if _, err := os.Stat(targetPath); err == nil {
-		// 如果指定了版本，需要切换到该版本
-		if i.Version != "" {
-			fmt.Printf("  ℹ️  工具集已存在，切换到版本 %s...\n", i.Version)
-			return i.checkoutVersion(targetPath, i.Version)
-		}
-		
-		fmt.Printf("  ℹ️  工具集已存在，更新中...\n")
-		// 进入目录并拉取最新代码
-		cmd := exec.Command("git", "pull")
-		cmd.Dir = targetPath
-		if err := cmd.Run(); err != nil {
-			fmt.Printf("  ⚠️  更新失败，将重新克隆...\n")
-			// 删除旧目录
-			if err := os.RemoveAll(targetPath); err != nil {
-				return fmt.Errorf("删除旧目录失败: %w", err)
-			}
-		} else {
-			fmt.Printf("  ✅ 更新成功\n")
-			return nil
-		}
-	}
-	
-	// 克隆仓库
-	fmt.Printf("  📥 克隆工具集: %s\n", sourceURL)
-	cmd := exec.Command("git", "clone", sourceURL, targetPath)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("克隆失败: %w", err)
-	}
-	
-	fmt.Printf("  ✅ 克隆成功\n")
-	
-	// 如果指定了版本，切换到该版本
-	if i.Version != "" {
-		fmt.Printf("  🔄 切换到版本 %s...\n", i.Version)
-		return i.checkoutVersion(targetPath, i.Version)
-	}
-	
-	return nil
-}
-
-// checkoutVersion 切换到指定版本
-func (i *Installer) checkoutVersion(repoPath, version string) error {
-	// 先 fetch 所有标签
-	fetchCmd := exec.Command("git", "fetch", "--tags")
-	fetchCmd.Dir = repoPath
-	if err := fetchCmd.Run(); err != nil {
-		fmt.Printf("  ⚠️  获取标签失败: %v\n", err)
-	}
-	
-	// 切换到指定版本
-	checkoutCmd := exec.Command("git", "checkout", version)
-	checkoutCmd.Dir = repoPath
-	checkoutCmd.Stderr = os.Stderr
-	if err := checkoutCmd.Run(); err != nil {
-		return fmt.Errorf("切换到版本 %s 失败: %w", version, err)
-	}
-	
-	fmt.Printf("  ✅ 已切换到版本 %s\n", version)
-	return nil
-}
-
-
-// loadToolset 加载 toolset.json
-func (i *Installer) loadToolset(toolsetPath string) (*types.Toolset, error) {
-	data, err := os.ReadFile(toolsetPath)
+// IsInstalled 检查包是否已安装
+func (i *Installer) IsInstalled(packageName string) bool {
+	packagePath, err := paths.GetPackagePath(packageName)
 	if err != nil {
-		return nil, fmt.Errorf("读取文件失败: %w", err)
+		return false
 	}
-	
-	var toolset types.Toolset
-	if err := json.Unmarshal(data, &toolset); err != nil {
-		return nil, fmt.Errorf("解析 JSON 失败: %w", err)
-	}
-	
-	return &toolset, nil
+	_, err = os.Stat(packagePath)
+	return err == nil
 }
 
-// copyFiles 根据 install.targets 拷贝文件
-func (i *Installer) copyFiles(toolset *types.Toolset, sourceDir string) error {
-	if len(toolset.Install.Targets) == 0 {
-		fmt.Printf("  ℹ️  没有需要安装的文件\n")
-		return nil
-	}
-	
-	for targetPath, target := range toolset.Install.Targets {
-		if err := i.copyTarget(targetPath, target, sourceDir); err != nil {
-			return fmt.Errorf("拷贝目标 %s 失败: %w", targetPath, err)
-		}
-	}
-	
-	return nil
-}
-
-// copyTarget 拷贝单个安装目标
-func (i *Installer) copyTarget(targetPath string, target types.InstallTarget, sourceDir string) error {
-	// 解析目标路径（相对于工作目录）
-	fullTargetPath := filepath.Join(i.WorkDir, targetPath)
-	
-	// 解析源路径
-	sourcePath := filepath.Join(sourceDir, target.Source)
-	
-	// 检查源路径是否存在
-	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-		fmt.Printf("  ⚠️  跳过目标 %s：源路径不存在 (%s)\n", targetPath, sourcePath)
-		fmt.Printf("      提示：可能需要先构建工具。请查看工具集文档。\n")
-		return nil // 不返回错误，允许继续安装其他目标
-	}
-	
-	// 确保目标目录存在
-	if err := os.MkdirAll(fullTargetPath, 0755); err != nil {
-		return fmt.Errorf("创建目标目录失败: %w", err)
-	}
-	
-	// 处理文件模式
-	if len(target.Files) == 0 {
-		// 如果没有指定文件，拷贝整个目录
-		return i.copyDirectory(sourcePath, fullTargetPath, target)
-	}
-	
-	// 拷贝指定文件
-	hasMatchedFiles := false
-	for _, filePattern := range target.Files {
-		matched, err := i.copyFilesByPattern(sourcePath, fullTargetPath, filePattern, target)
-		if err != nil {
-			return err
-		}
-		if matched {
-			hasMatchedFiles = true
-		}
-	}
-	
-	// 如果没有匹配到任何文件，给出提示
-	if !hasMatchedFiles && len(target.Files) > 0 {
-		fmt.Printf("  ⚠️  目标 %s：没有匹配到文件 (模式: %v)\n", targetPath, target.Files)
-		fmt.Printf("      提示：可能需要先构建工具或检查文件模式。\n")
-	}
-	
-	return nil
-}
-
-// copyDirectory 拷贝整个目录
-func (i *Installer) copyDirectory(source, target string, config types.InstallTarget) error {
-	// 检查源目录是否存在
-	sourceInfo, err := os.Stat(source)
-	if err != nil {
-		return fmt.Errorf("源目录不存在: %w", err)
-	}
-	
-	if !sourceInfo.IsDir() {
-		return fmt.Errorf("源路径不是目录: %s", source)
-	}
-	
-	fmt.Printf("  📋 拷贝目录: %s -> %s\n", source, target)
-	
-	// 使用简单的递归拷贝
-	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		
-		// 计算相对路径
-		relPath, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		
-		// 跳过根目录本身
-		if relPath == "." {
-			return nil
-		}
-		
-		targetPath := filepath.Join(target, relPath)
-		
-		if info.IsDir() {
-			return os.MkdirAll(targetPath, info.Mode())
-		}
-		
-		// 检查是否需要覆盖
-		if !config.Overwrite {
-			if _, err := os.Stat(targetPath); err == nil {
-				fmt.Printf("    ⏭️  跳过已存在文件: %s\n", relPath)
-				return nil
-			}
-		}
-		
-		// 拷贝文件
-		return i.copyFile(path, targetPath, config.Executable)
-	})
-}
-
-// copyFilesByPattern 根据模式拷贝文件，返回是否成功匹配到文件
-func (i *Installer) copyFilesByPattern(sourceDir, targetDir, pattern string, config types.InstallTarget) (bool, error) {
-	// 简单的通配符匹配（支持 *）
-	if strings.Contains(pattern, "*") {
-		return i.copyFilesByGlob(sourceDir, targetDir, pattern, config)
-	}
-	
-	// 单个文件
-	sourcePath := filepath.Join(sourceDir, pattern)
-	targetPath := filepath.Join(targetDir, pattern)
-	
-	// 检查源文件是否存在
-	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-		fmt.Printf("    ⚠️  源文件不存在: %s\n", sourcePath)
-		return false, nil
-	}
-	
-	// 检查是否需要覆盖
-	if !config.Overwrite {
-		if _, err := os.Stat(targetPath); err == nil {
-			fmt.Printf("    ⏭️  跳过已存在文件: %s\n", pattern)
-			return true, nil
-		}
-	}
-	
-	fmt.Printf("  📄 拷贝文件: %s -> %s\n", pattern, targetPath)
-	return true, i.copyFile(sourcePath, targetPath, config.Executable)
-}
-
-// copyFilesByGlob 使用 glob 模式拷贝文件，返回是否成功匹配到文件
-func (i *Installer) copyFilesByGlob(sourceDir, targetDir, pattern string, config types.InstallTarget) (bool, error) {
-	matches, err := filepath.Glob(filepath.Join(sourceDir, pattern))
-	if err != nil {
-		return false, err
-	}
-	
-	if len(matches) == 0 {
-		fmt.Printf("    ⚠️  没有匹配的文件: %s\n", pattern)
-		return false, nil
-	}
-	
-	// 如果可执行文件且匹配多个文件，尝试选择平台特定的文件
-	if config.Executable && len(matches) > 1 {
-		platformFile := i.selectPlatformFile(matches)
-		if platformFile != "" {
-			matches = []string{platformFile}
-		}
-	}
-	
-	copiedCount := 0
-	for _, match := range matches {
-		relPath, err := filepath.Rel(sourceDir, match)
-		if err != nil {
-			return false, err
-		}
-		
-		// 如果是可执行文件且是平台特定文件，使用基础名称
-		targetFileName := relPath
-		if config.Executable && i.isPlatformSpecificFile(match) {
-			// 提取基础名称（去掉平台后缀）
-			baseName := i.getBaseExecutableName(match)
-			if baseName != "" {
-				targetFileName = baseName
-			}
-		}
-		
-		targetPath := filepath.Join(targetDir, targetFileName)
-		
-		// 检查是否需要覆盖
-		if !config.Overwrite {
-			if _, err := os.Stat(targetPath); err == nil {
-				fmt.Printf("    ⏭️  跳过已存在文件: %s\n", targetFileName)
-				copiedCount++
-				continue
-			}
-		}
-		
-		fmt.Printf("  📄 拷贝文件: %s -> %s\n", relPath, targetPath)
-		if err := i.copyFile(match, targetPath, config.Executable); err != nil {
-			return false, err
-		}
-		copiedCount++
-	}
-	
-	return copiedCount > 0, nil
-}
-
-// selectPlatformFile 选择当前平台的特定文件
-func (i *Installer) selectPlatformFile(files []string) string {
-	platform := i.getPlatformSuffix()
-	
-	for _, file := range files {
-		if strings.Contains(file, platform) {
-			return file
-		}
-	}
-	
-	// 如果没有找到平台特定文件，返回第一个非平台特定文件
-	for _, file := range files {
-		if !i.isPlatformSpecificFile(file) {
-			return file
-		}
-	}
-	
-	// 如果都是平台特定文件，返回第一个
-	if len(files) > 0 {
-		return files[0]
-	}
-	
-	return ""
-}
-
-// isPlatformSpecificFile 检查文件是否是平台特定的
-func (i *Installer) isPlatformSpecificFile(file string) bool {
-	platforms := []string{
-		"darwin-amd64", "darwin-arm64",
-		"linux-amd64", "linux-arm64",
-		"windows-amd64",
-	}
-	
-	fileName := filepath.Base(file)
-	for _, platform := range platforms {
-		if strings.Contains(fileName, platform) {
-			return true
-		}
-	}
-	
-	return false
-}
-
-// getPlatformSuffix 获取当前平台的标识符
-func (i *Installer) getPlatformSuffix() string {
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
-	
-	// 标准化平台名称
-	if goos == "darwin" {
-		goos = "darwin"
-	} else if goos == "windows" {
-		goos = "windows"
-	}
-	
-	return fmt.Sprintf("%s-%s", goos, goarch)
-}
-
-// getBaseExecutableName 从平台特定文件名提取基础名称
-func (i *Installer) getBaseExecutableName(file string) string {
-	fileName := filepath.Base(file)
-	
-	// 移除平台后缀
-	platforms := []string{
-		"-darwin-amd64", "-darwin-arm64",
-		"-linux-amd64", "-linux-arm64",
-		"-windows-amd64",
-		".exe",
-	}
-	
-	result := fileName
-	for _, platform := range platforms {
-		if strings.HasSuffix(result, platform) {
-			result = strings.TrimSuffix(result, platform)
-			break
-		}
-	}
-	
-	return result
-}
-
-// copyFile 拷贝单个文件
-func (i *Installer) copyFile(source, target string, executable bool) error {
-	// 确保目标目录存在
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-		return err
-	}
-	
-	// 读取源文件
-	data, err := os.ReadFile(source)
-	if err != nil {
-		return err
-	}
-	
-	// 写入目标文件
-	mode := os.FileMode(0644)
-	if executable {
-		mode = 0755
-	}
-	
-	if err := os.WriteFile(target, data, mode); err != nil {
-		return err
-	}
-	
-	return nil
-}
-
-// verifySHA256 验证工具集的 SHA256 校验和
-func (i *Installer) verifySHA256(toolsetPath, expectedSHA256 string) error {
-	// 计算工具集目录的 SHA256（排除 .git 目录）
-	actualSHA256, err := i.calculateDirSHA256(toolsetPath)
-	if err != nil {
-		return fmt.Errorf("计算 SHA256 失败: %w", err)
-	}
-	
-	// 比较校验和
-	if actualSHA256 != strings.ToLower(expectedSHA256) {
-		return fmt.Errorf("校验和不匹配\n  期望: %s\n  实际: %s", expectedSHA256, actualSHA256)
-	}
-	
-	return nil
-}
-
-// calculateDirSHA256 计算目录的 SHA256 校验和（排除 .git）
-func (i *Installer) calculateDirSHA256(dir string) (string, error) {
-	hasher := sha256.New()
-	
-	// 遍历目录下所有文件
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		
-		// 跳过 .git 目录
-		if info.IsDir() && info.Name() == ".git" {
-			return filepath.SkipDir
-		}
-		
-		// 只处理文件
-		if !info.IsDir() {
-			// 添加相对路径到哈希（保证顺序一致性）
-			relPath, err := filepath.Rel(dir, path)
-			if err != nil {
-				return err
-			}
-			hasher.Write([]byte(relPath))
-			
-			// 添加文件内容到哈希
-			file, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-			
-			if _, err := io.Copy(hasher, file); err != nil {
-				return err
-			}
-		}
-		
-		return nil
-	})
-	
+// GetInstalledVersion 获取已安装包的版本
+// 通过读取包目录中的 toolset.json 获取版本信息
+func (i *Installer) GetInstalledVersion(packageName string) (string, error) {
+	packagePath, err := paths.GetPackagePath(packageName)
 	if err != nil {
 		return "", err
 	}
-	
-	return hex.EncodeToString(hasher.Sum(nil)), nil
+
+	// 检查包是否存在
+	if _, err := os.Stat(packagePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("包未安装")
+	}
+
+	// TODO: 读取 toolset.json 获取版本
+	// 目前返回空字符串表示已安装但版本未知
+	return "", nil
 }
 
-// runScript 执行安装脚本
-func (i *Installer) runScript(script, workDir string) error {
-	// 解析脚本命令（支持 bash script.sh 或直接 ./script.sh）
-	var cmd *exec.Cmd
-	
-	// 简单解析：如果以 bash 开头，分离出 bash 和脚本路径
-	parts := strings.Fields(script)
-	if len(parts) == 0 {
-		return fmt.Errorf("空脚本命令")
+// ClearCache 清理下载缓存
+func (i *Installer) ClearCache() error {
+	cacheDir, err := paths.GetPackageCacheDir()
+	if err != nil {
+		return err
 	}
-	
-	// 检查脚本文件是否存在
-	var scriptPath string
-	if parts[0] == "bash" || parts[0] == "sh" {
-		if len(parts) < 2 {
-			return fmt.Errorf("无效的脚本命令: %s", script)
-		}
-		scriptPath = filepath.Join(workDir, parts[1])
-		if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-			fmt.Printf("  ⚠️  脚本不存在: %s\n", parts[1])
-			fmt.Printf("      跳过构建步骤，如果工具集需要构建，请查看其文档\n")
-			return nil // 不返回错误，允许继续安装
-		}
-		cmd = exec.Command(parts[0], parts[1:]...)
-	} else {
-		scriptPath = filepath.Join(workDir, parts[0])
-		if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-			fmt.Printf("  ⚠️  脚本不存在: %s\n", parts[0])
-			fmt.Printf("      跳过构建步骤，如果工具集需要构建，请查看其文档\n")
-			return nil // 不返回错误，允许继续安装
-		}
-		cmd = exec.Command(parts[0], parts[1:]...)
-	}
-	
-	cmd.Dir = workDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	
-	return cmd.Run()
+
+	return os.RemoveAll(cacheDir)
 }
 
+// ========================================
+// 兼容旧版本的方法（逐步废弃）
+// ========================================
+
+// NewInstallerCompat 创建兼容旧版本的安装器
+// Deprecated: 使用 NewInstaller 替代
+func NewInstallerCompat(toolsetsDir, workDir string) *InstallerCompat {
+	return &InstallerCompat{
+		ToolsetsDir: toolsetsDir,
+		WorkDir:     workDir,
+		installer:   NewInstaller(),
+	}
+}
+
+// InstallerCompat 兼容旧版本的安装器
+// Deprecated: 使用 Installer 替代
+type InstallerCompat struct {
+	ToolsetsDir string
+	WorkDir     string
+	Version     string
+	installer   *Installer
+}
+
+// SetVersion 设置版本（兼容旧接口）
+func (i *InstallerCompat) SetVersion(version string) {
+	i.Version = version
+}
+
+// InstallToolset 安装工具集（兼容旧接口）
+func (i *InstallerCompat) InstallToolset(toolsetInfo *types.ToolsetInfo) error {
+	// 转换为新的 Manifest 格式
+	manifest := &types.Manifest{
+		Name:        toolsetInfo.Name,
+		DisplayName: toolsetInfo.DisplayName,
+		Version:     toolsetInfo.Version,
+		Description: toolsetInfo.Description,
+	}
+
+	// 如果有 ManifestURL，尝试获取完整信息
+	// 否则使用旧的 GitHubURL（不支持新安装方式）
+	if toolsetInfo.ManifestURL == "" && toolsetInfo.GitHubURL != "" {
+		return fmt.Errorf("旧版本包格式不再支持，请更新包到新格式")
+	}
+
+	return i.installer.Install(manifest)
+}
+
+// UninstallToolset 卸载工具集（兼容旧接口）
+func (i *InstallerCompat) UninstallToolset(toolsetInfo *types.ToolsetInfo) error {
+	return i.installer.Uninstall(toolsetInfo.Name)
+}

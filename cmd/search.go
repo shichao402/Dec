@@ -2,103 +2,108 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/firoyang/CursorToolset/pkg/loader"
+	"github.com/firoyang/CursorToolset/pkg/installer"
 	"github.com/firoyang/CursorToolset/pkg/paths"
+	"github.com/firoyang/CursorToolset/pkg/registry"
 	"github.com/spf13/cobra"
 )
 
 var searchCmd = &cobra.Command{
 	Use:   "search <keyword>",
-	Short: "搜索工具集",
-	Long: `根据关键词搜索工具集。
+	Short: "搜索包",
+	Long: `根据关键词搜索包。
 
 搜索范围包括：
-  - 工具集名称
+  - 包名称
   - 显示名称
   - 描述
-  - 关键词（如果有）`,
+  - 关键词`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		keyword := strings.ToLower(args[0])
+		keyword := args[0]
 
-		// 确定工作目录
-		workDir, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("获取工作目录失败: %w", err)
+		// 确保目录结构存在
+		if err := paths.EnsureAllDirs(); err != nil {
+			return fmt.Errorf("初始化目录失败: %w", err)
 		}
 
-		// 加载工具集列表
-		toolsetsPath := loader.GetToolsetsPath(workDir)
-		toolsets, err := loader.LoadToolsets(toolsetsPath)
-		if err != nil {
-			return fmt.Errorf("加载工具集列表失败: %w", err)
+		// 加载 registry
+		mgr := registry.NewManager()
+		if err := mgr.Load(); err != nil {
+			return fmt.Errorf("加载包索引失败: %w", err)
 		}
 
-		if len(toolsets) == 0 {
-			fmt.Println("available-toolsets.json 中没有找到工具集")
+		// 检查是否有本地缓存
+		if !mgr.HasLocalCache() {
+			fmt.Println("📦 本地包索引为空")
+			fmt.Println("\n提示: 运行 'cursortoolset registry update' 更新包索引")
 			return nil
 		}
 
-		// 搜索匹配的工具集
-		var matches []*loader.ToolsetSearchResult
-		for _, toolset := range toolsets {
-			if result := loader.SearchToolset(toolset, keyword); result != nil {
-				matches = append(matches, result)
+		// 搜索
+		results := mgr.SearchPackages(keyword)
+
+		if len(results) == 0 {
+			fmt.Printf("🔍 未找到匹配 \"%s\" 的包\n", keyword)
+			return nil
+		}
+
+		fmt.Printf("🔍 找到 %d 个匹配 \"%s\" 的包:\n\n", len(results), keyword)
+
+		inst := installer.NewInstaller()
+
+		for i, manifest := range results {
+			// 名称和版本
+			fmt.Printf("%d. %s", i+1, manifest.Name)
+			if manifest.Version != "" {
+				fmt.Printf("@%s", manifest.Version)
 			}
-		}
 
-		// 显示结果
-		if len(matches) == 0 {
-			fmt.Printf("🔍 未找到匹配 \"%s\" 的工具集\n", args[0])
-			return nil
-		}
-
-		fmt.Printf("🔍 找到 %d 个匹配 \"%s\" 的工具集:\n\n", len(matches), args[0])
-
-		// 获取安装目录以检查状态
-		toolsetsDir, err := paths.GetToolsetsDir(workDir)
-		if err != nil {
-			toolsetsDir = ""
-		}
-
-		for i, result := range matches {
-			toolset := result.Toolset
-			fmt.Printf("%d. %s", i+1, toolset.Name)
-			if toolset.DisplayName != "" {
-				fmt.Printf(" (%s)", toolset.DisplayName)
+			// 显示名称
+			if manifest.DisplayName != "" && manifest.DisplayName != manifest.Name {
+				fmt.Printf(" (%s)", manifest.DisplayName)
 			}
 			fmt.Println()
 
-			if toolset.Description != "" {
-				fmt.Printf("   描述: %s\n", toolset.Description)
+			// 描述（高亮匹配部分）
+			if manifest.Description != "" {
+				desc := highlightKeyword(manifest.Description, keyword)
+				fmt.Printf("   %s\n", desc)
 			}
 
-			// 显示匹配的字段
-			if len(result.MatchedFields) > 0 {
-				fmt.Printf("   匹配: %s\n", strings.Join(result.MatchedFields, ", "))
+			// 关键词
+			if len(manifest.Keywords) > 0 {
+				fmt.Printf("   关键词: %s\n", strings.Join(manifest.Keywords, ", "))
 			}
 
-			fmt.Printf("   仓库: %s\n", toolset.GitHubURL)
-
-			// 检查是否已安装
-			if toolsetsDir != "" {
-				toolsetPath := filepath.Join(toolsetsDir, toolset.Name)
-				if _, err := os.Stat(toolsetPath); err == nil {
-					fmt.Printf("   状态: ✅ 已安装\n")
-				} else {
-					fmt.Printf("   状态: ⏳ 未安装\n")
-				}
+			// 状态
+			if inst.IsInstalled(manifest.Name) {
+				fmt.Printf("   状态: ✅ 已安装\n")
+			} else {
+				fmt.Printf("   状态: ⏳ 未安装\n")
 			}
 
-			if i < len(matches)-1 {
+			if i < len(results)-1 {
 				fmt.Println()
 			}
 		}
 
 		return nil
 	},
+}
+
+// highlightKeyword 高亮关键词（简单实现，使用大写）
+func highlightKeyword(text, keyword string) string {
+	lowerText := strings.ToLower(text)
+	lowerKeyword := strings.ToLower(keyword)
+
+	idx := strings.Index(lowerText, lowerKeyword)
+	if idx == -1 {
+		return text
+	}
+
+	// 找到匹配位置，用 ** 包裹
+	return text[:idx] + "**" + text[idx:idx+len(keyword)] + "**" + text[idx+len(keyword):]
 }

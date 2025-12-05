@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "packages": [
+    {
+      "name": "github-action-toolset",
+      "manifestUrl": "https://raw.githubusercontent.com/shichao402/GithubActionAISelfBuilder/main/toolset.json"
+    }
+  ]
+}

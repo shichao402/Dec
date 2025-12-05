@@ -94,6 +94,7 @@ func init() {
 	RootCmd.AddCommand(infoCmd)
 	RootCmd.AddCommand(cleanCmd)
 	RootCmd.AddCommand(updateCmd)
+	// initCmd 和 registryCmd 在各自文件的 init() 中添加
 }
 
 

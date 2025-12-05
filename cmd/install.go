@@ -3,160 +3,189 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/firoyang/CursorToolset/pkg/installer"
-	"github.com/firoyang/CursorToolset/pkg/loader"
 	"github.com/firoyang/CursorToolset/pkg/paths"
+	"github.com/firoyang/CursorToolset/pkg/registry"
 	"github.com/spf13/cobra"
 )
 
 var (
-	installToolsetsDir string
-	installWorkDir     string
-	installVersion     string // 指定安装版本
+	installNoCache bool
 )
 
 var installCmd = &cobra.Command{
-	Use:   "install [toolset-name]",
-	Short: "安装工具集",
-	Long: `安装一个或多个工具集。
+	Use:   "install [package-name]",
+	Short: "安装工具集包",
+	Long: `安装一个或多个工具集包。
 
-如果不指定工具集名称，将安装 available-toolsets.json 中列出的所有工具集。
-如果指定了工具集名称，只安装该工具集。`,
+如果不指定包名，将安装所有可用的包。
+如果指定了包名，只安装该包。
+
+安装流程：
+  1. 从 registry 获取包信息
+  2. 下载包的 tarball 文件
+  3. 验证 SHA256 校验和
+  4. 解压到本地目录
+
+示例：
+  # 安装指定包
+  cursortoolset install github-action-toolset
+
+  # 安装所有可用包
+  cursortoolset install
+
+  # 不使用缓存安装
+  cursortoolset install github-action-toolset --no-cache`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// 确定工作目录
-		if installWorkDir == "" {
-			var err error
-			installWorkDir, err = os.Getwd()
-			if err != nil {
-				return fmt.Errorf("获取工作目录失败: %w", err)
+		// 确保目录结构存在
+		if err := paths.EnsureAllDirs(); err != nil {
+			return fmt.Errorf("初始化目录失败: %w", err)
+		}
+
+		// 加载 registry
+		mgr := registry.NewManager()
+		if err := mgr.Load(); err != nil {
+			return fmt.Errorf("加载包索引失败: %w", err)
+		}
+
+		// 检查是否有本地缓存
+		if !mgr.HasLocalCache() {
+			fmt.Println("📦 首次使用，正在更新包索引...")
+			if err := mgr.Update(); err != nil {
+				return fmt.Errorf("更新包索引失败: %w", err)
 			}
 		}
-		
-		// 确定工具集安装目录
-		// 优先使用环境变量 CURSOR_TOOLSET_ROOT，如果未设置则使用工作目录下的 .cursor/toolsets
-		if installToolsetsDir == "" {
-			var err error
-			installToolsetsDir, err = paths.GetToolsetsDir(installWorkDir)
-			if err != nil {
-				return fmt.Errorf("获取工具集安装目录失败: %w", err)
-			}
-		}
-		
-		// 加载工具集列表
-		toolsetsPath := loader.GetToolsetsPath(installWorkDir)
-		toolsets, err := loader.LoadToolsets(toolsetsPath)
-		if err != nil {
-			return fmt.Errorf("加载工具集列表失败: %w", err)
-		}
-		
-		if len(toolsets) == 0 {
-			return fmt.Errorf("available-toolsets.json 中没有找到工具集")
-		}
-		
+
 		// 创建安装器
-		inst := installer.NewInstaller(installToolsetsDir, installWorkDir)
-		
-		// 设置版本（如果指定）
-		if installVersion != "" {
-			inst.SetVersion(installVersion)
-		}
-		
-		// 安装工具集
+		inst := installer.NewInstaller()
+		inst.SetUseCache(!installNoCache)
+
 		if len(args) > 0 {
-			// 安装指定工具集
-			toolsetName := args[0]
-			toolset := loader.FindToolset(toolsets, toolsetName)
-			if toolset == nil {
-				return fmt.Errorf("未找到工具集: %s", toolsetName)
-			}
-			
-			// 安装依赖
-			if len(toolset.Dependencies) > 0 {
-				fmt.Printf("📦 安装依赖...\n")
-				for _, depName := range toolset.Dependencies {
-					dep := loader.FindToolset(toolsets, depName)
-					if dep == nil {
-						fmt.Printf("  ⚠️  未找到依赖: %s\n", depName)
-						continue
-					}
-					
-					// 检查依赖是否已安装
-					depPath := filepath.Join(installToolsetsDir, dep.Name)
-					if _, err := os.Stat(depPath); err == nil {
-						fmt.Printf("  ✅ 依赖 %s 已安装\n", dep.DisplayName)
-						continue
-					}
-					
-					fmt.Printf("  📦 安装依赖: %s\n", dep.DisplayName)
-					if err := inst.InstallToolset(dep); err != nil {
-						return fmt.Errorf("安装依赖 %s 失败: %w", dep.Name, err)
-					}
-				}
-				fmt.Println()
-			}
-			
-			return inst.InstallToolset(toolset)
-		} else {
-			// 安装所有工具集
-			fmt.Printf("📦 开始安装 %d 个工具集...\n\n", len(toolsets))
-			
-			// 记录已安装的工具集
-			installed := make(map[string]bool)
-			
-			for i, toolset := range toolsets {
-				fmt.Printf("[%d/%d] ", i+1, len(toolsets))
-				
-				// 检查是否已安装（包括作为依赖安装的）
-				if installed[toolset.Name] {
-					fmt.Printf("⏭️  %s 已作为依赖安装，跳过\n", toolset.DisplayName)
-					continue
-				}
-				
-				// 安装依赖
-				if len(toolset.Dependencies) > 0 {
-					for _, depName := range toolset.Dependencies {
-						if installed[depName] {
-							continue
-						}
-						
-						dep := loader.FindToolset(toolsets, depName)
-						if dep == nil {
-							fmt.Printf("  ⚠️  未找到依赖: %s\n", depName)
-							continue
-						}
-						
-						fmt.Printf("  📦 安装依赖: %s\n", dep.DisplayName)
-						if err := inst.InstallToolset(dep); err != nil {
-							return fmt.Errorf("安装依赖 %s 失败: %w", dep.Name, err)
-						}
-						installed[dep.Name] = true
-					}
-				}
-				
-				// 安装工具集本身
-				if err := inst.InstallToolset(toolset); err != nil {
-					return fmt.Errorf("安装工具集 %s 失败: %w", toolset.Name, err)
-				}
-				installed[toolset.Name] = true
-				
-				if i < len(toolsets)-1 {
-					fmt.Println()
-				}
-			}
-			fmt.Printf("\n✅ 所有工具集安装完成\n")
+			// 安装指定包
+			return installPackage(mgr, inst, args[0])
 		}
-		
-		return nil
+
+		// 安装所有包
+		return installAllPackages(mgr, inst)
 	},
 }
 
 func init() {
-	installCmd.Flags().StringVarP(&installToolsetsDir, "toolsets-dir", "d", "", "工具集安装目录（默认: .cursor/toolsets）")
-	installCmd.Flags().StringVarP(&installWorkDir, "work-dir", "w", "", "工作目录（默认: 当前目录）")
-	installCmd.Flags().StringVarP(&installVersion, "version", "v", "", "指定安装版本（Git 标签或提交哈希）")
+	installCmd.Flags().BoolVar(&installNoCache, "no-cache", false, "不使用缓存，强制重新下载")
 }
 
+// installPackage 安装指定包
+func installPackage(mgr *registry.Manager, inst *installer.Installer, packageName string) error {
+	// 查找包
+	manifest := mgr.FindPackage(packageName)
+	if manifest == nil {
+		return fmt.Errorf("未找到包: %s\n\n提示: 运行 'cursortoolset registry update' 更新包索引", packageName)
+	}
 
+	// 检查是否已安装
+	if inst.IsInstalled(packageName) {
+		installedVer, _ := inst.GetInstalledVersion(packageName)
+		if installedVer != "" && installedVer == manifest.Version {
+			fmt.Printf("✅ %s@%s 已是最新版本\n", packageName, manifest.Version)
+			return nil
+		}
+	}
+
+	// 安装依赖
+	if len(manifest.Dependencies) > 0 {
+		fmt.Printf("📦 安装依赖...\n")
+		for _, depName := range manifest.Dependencies {
+			if inst.IsInstalled(depName) {
+				fmt.Printf("  ✅ %s 已安装\n", depName)
+				continue
+			}
+
+			depManifest := mgr.FindPackage(depName)
+			if depManifest == nil {
+				fmt.Printf("  ⚠️  未找到依赖: %s\n", depName)
+				continue
+			}
+
+			if err := inst.Install(depManifest); err != nil {
+				return fmt.Errorf("安装依赖 %s 失败: %w", depName, err)
+			}
+		}
+		fmt.Println()
+	}
+
+	// 安装包
+	return inst.Install(manifest)
+}
+
+// installAllPackages 安装所有包
+func installAllPackages(mgr *registry.Manager, inst *installer.Installer) error {
+	packages := mgr.ListPackages()
+	if len(packages) == 0 {
+		fmt.Println("📦 没有可用的包")
+		fmt.Println("\n提示: 运行 'cursortoolset registry update' 更新包索引")
+		return nil
+	}
+
+	fmt.Printf("📦 开始安装 %d 个包...\n\n", len(packages))
+
+	installed := 0
+	skipped := 0
+	failed := 0
+
+	for _, item := range packages {
+		manifest := mgr.FindPackage(item.Name)
+		if manifest == nil {
+			fmt.Printf("⚠️  跳过 %s: 无法获取包信息\n", item.Name)
+			skipped++
+			continue
+		}
+
+		// 检查是否已安装最新版本
+		if inst.IsInstalled(item.Name) {
+			installedVer, _ := inst.GetInstalledVersion(item.Name)
+			if installedVer == manifest.Version {
+				fmt.Printf("⏭️  %s@%s 已安装\n", item.Name, manifest.Version)
+				skipped++
+				continue
+			}
+		}
+
+		if err := inst.Install(manifest); err != nil {
+			fmt.Printf("❌ 安装 %s 失败: %v\n", item.Name, err)
+			failed++
+			continue
+		}
+
+		installed++
+		fmt.Println()
+	}
+
+	// 显示统计
+	fmt.Println()
+	fmt.Printf("📊 安装统计: 成功 %d, 跳过 %d", installed, skipped)
+	if failed > 0 {
+		fmt.Printf(", 失败 %d", failed)
+	}
+	fmt.Println()
+
+	if failed > 0 {
+		return fmt.Errorf("有 %d 个包安装失败", failed)
+	}
+
+	return nil
+}
+
+// ========================================
+// 兼容旧版本的函数（逐步废弃）
+// ========================================
+
+// getWorkDir 获取工作目录（兼容旧代码）
+func getWorkDir() string {
+	workDir, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return workDir
+}

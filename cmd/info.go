@@ -1,164 +1,121 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/firoyang/CursorToolset/pkg/loader"
+	"github.com/firoyang/CursorToolset/pkg/installer"
 	"github.com/firoyang/CursorToolset/pkg/paths"
-	"github.com/firoyang/CursorToolset/pkg/types"
+	"github.com/firoyang/CursorToolset/pkg/registry"
 	"github.com/spf13/cobra"
 )
 
 var infoCmd = &cobra.Command{
-	Use:   "info <toolset-name>",
-	Short: "查看工具集详细信息",
-	Long: `显示指定工具集的详细信息，包括：
+	Use:   "info <package-name>",
+	Short: "查看包的详细信息",
+	Long: `显示指定包的详细信息，包括：
   - 基本信息（名称、版本、描述）
   - 仓库信息
   - 安装状态
-  - 安装目标（如果已安装）
-  - 功能列表（如果有）`,
+  - 下载信息`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		toolsetName := args[0]
+		packageName := args[0]
 
-		// 确定工作目录
-		workDir, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("获取工作目录失败: %w", err)
+		// 确保目录结构存在
+		if err := paths.EnsureAllDirs(); err != nil {
+			return fmt.Errorf("初始化目录失败: %w", err)
 		}
 
-		// 加载工具集列表
-		toolsetsPath := loader.GetToolsetsPath(workDir)
-		toolsets, err := loader.LoadToolsets(toolsetsPath)
-		if err != nil {
-			return fmt.Errorf("加载工具集列表失败: %w", err)
+		// 加载 registry
+		mgr := registry.NewManager()
+		if err := mgr.Load(); err != nil {
+			return fmt.Errorf("加载包索引失败: %w", err)
 		}
 
-		// 查找工具集
-		toolsetInfo := loader.FindToolset(toolsets, toolsetName)
-		if toolsetInfo == nil {
-			return fmt.Errorf("未找到工具集: %s", toolsetName)
+		// 查找包
+		manifest := mgr.FindPackage(packageName)
+		if manifest == nil {
+			return fmt.Errorf("未找到包: %s\n\n提示: 运行 'cursortoolset registry update' 更新包索引", packageName)
 		}
 
-		// 显示基本信息
-		fmt.Println("📋 工具集信息")
+		// 显示信息
+		fmt.Println("📋 包信息")
 		fmt.Println(strings.Repeat("=", 50))
 		fmt.Println()
 
-		fmt.Printf("名称: %s\n", toolsetInfo.Name)
-		if toolsetInfo.DisplayName != "" {
-			fmt.Printf("显示名称: %s\n", toolsetInfo.DisplayName)
+		// 基本信息
+		fmt.Printf("名称: %s\n", manifest.Name)
+		if manifest.DisplayName != "" {
+			fmt.Printf("显示名称: %s\n", manifest.DisplayName)
 		}
-		if toolsetInfo.Version != "" {
-			fmt.Printf("版本: %s\n", toolsetInfo.Version)
+		fmt.Printf("版本: %s\n", manifest.Version)
+		if manifest.Description != "" {
+			fmt.Printf("描述: %s\n", manifest.Description)
 		}
-		if toolsetInfo.Description != "" {
-			fmt.Printf("描述: %s\n", toolsetInfo.Description)
+		if manifest.Author != "" {
+			fmt.Printf("作者: %s\n", manifest.Author)
 		}
-		fmt.Printf("仓库: %s\n", toolsetInfo.GitHubURL)
+		if manifest.License != "" {
+			fmt.Printf("许可证: %s\n", manifest.License)
+		}
+		if len(manifest.Keywords) > 0 {
+			fmt.Printf("关键词: %s\n", strings.Join(manifest.Keywords, ", "))
+		}
 		fmt.Println()
 
-		// 检查安装状态
-		toolsetsDir, err := paths.GetToolsetsDir(workDir)
-		if err != nil {
-			fmt.Printf("⚠️  无法确定安装目录\n")
-			return nil
+		// 仓库信息
+		if manifest.Repository.URL != "" {
+			fmt.Println("📦 仓库")
+			fmt.Printf("   URL: %s\n", manifest.Repository.URL)
+			fmt.Println()
 		}
 
-		toolsetPath := filepath.Join(toolsetsDir, toolsetInfo.Name)
-		if _, err := os.Stat(toolsetPath); os.IsNotExist(err) {
+		// 下载信息
+		fmt.Println("📥 下载")
+		fmt.Printf("   Tarball: %s\n", manifest.Dist.Tarball)
+		if manifest.Dist.SHA256 != "" {
+			fmt.Printf("   SHA256: %s\n", manifest.Dist.SHA256)
+		}
+		if manifest.Dist.Size > 0 {
+			fmt.Printf("   大小: %.2f MB\n", float64(manifest.Dist.Size)/1024/1024)
+		}
+		fmt.Println()
+
+		// 安装状态
+		inst := installer.NewInstaller()
+		packagePath, _ := paths.GetPackagePath(packageName)
+
+		if inst.IsInstalled(packageName) {
+			fmt.Printf("状态: ✅ 已安装\n")
+			fmt.Printf("路径: %s\n", packagePath)
+		} else {
 			fmt.Printf("状态: ⏳ 未安装\n")
 			fmt.Println()
 			fmt.Println("💡 使用以下命令安装:")
-			fmt.Printf("   cursortoolset install %s\n", toolsetInfo.Name)
-			return nil
+			fmt.Printf("   cursortoolset install %s\n", packageName)
 		}
 
-		fmt.Printf("状态: ✅ 已安装\n")
-		fmt.Printf("路径: %s\n", toolsetPath)
-		fmt.Println()
-
-		// 读取 toolset.json 获取详细信息
-		toolsetConfigPath := filepath.Join(toolsetPath, "toolset.json")
-		toolset, err := loadToolsetConfig(toolsetConfigPath)
-		if err != nil {
-			fmt.Printf("⚠️  无法读取 toolset.json: %v\n", err)
-			return nil
-		}
-
-		// 显示详细信息
-		if toolset.Author != "" {
-			fmt.Printf("作者: %s\n", toolset.Author)
-		}
-		if toolset.License != "" {
-			fmt.Printf("许可证: %s\n", toolset.License)
-		}
-		if len(toolset.Keywords) > 0 {
-			fmt.Printf("关键词: %s\n", strings.Join(toolset.Keywords, ", "))
-		}
-		fmt.Println()
-
-		// 显示安装目标
-		if len(toolset.Install.Targets) > 0 {
-			fmt.Println("📦 安装目标:")
-			for targetPath, target := range toolset.Install.Targets {
-				fmt.Printf("  • %s\n", targetPath)
-				fmt.Printf("    源路径: %s\n", target.Source)
-				if len(target.Files) > 0 {
-					fmt.Printf("    文件: %v\n", target.Files)
-				}
-				if target.Description != "" {
-					fmt.Printf("    说明: %s\n", target.Description)
+		// 依赖
+		if len(manifest.Dependencies) > 0 {
+			fmt.Println()
+			fmt.Println("📦 依赖")
+			for _, dep := range manifest.Dependencies {
+				if inst.IsInstalled(dep) {
+					fmt.Printf("   ✅ %s\n", dep)
+				} else {
+					fmt.Printf("   ⏳ %s\n", dep)
 				}
 			}
-			fmt.Println()
 		}
 
-		// 显示功能列表
-		if len(toolset.Features) > 0 {
-			fmt.Println("✨ 功能列表:")
-			for _, feature := range toolset.Features {
-				essentialMark := ""
-				if feature.Essential {
-					essentialMark = " [核心]"
-				}
-				fmt.Printf("  • %s%s\n", feature.Name, essentialMark)
-				if feature.Description != "" {
-					fmt.Printf("    %s\n", feature.Description)
-				}
-			}
+		// 管理器兼容性
+		if manifest.CursorToolset.MinVersion != "" {
 			fmt.Println()
-		}
-
-		// 显示文档链接
-		if len(toolset.Documentation) > 0 {
-			fmt.Println("📚 文档:")
-			for docType, docURL := range toolset.Documentation {
-				fmt.Printf("  • %s: %s\n", docType, docURL)
-			}
-			fmt.Println()
+			fmt.Println("⚙️  兼容性")
+			fmt.Printf("   最低管理器版本: %s\n", manifest.CursorToolset.MinVersion)
 		}
 
 		return nil
 	},
-}
-
-// loadToolsetConfig 加载 toolset.json
-func loadToolsetConfig(toolsetPath string) (*types.Toolset, error) {
-	data, err := os.ReadFile(toolsetPath)
-	if err != nil {
-		return nil, fmt.Errorf("读取文件失败: %w", err)
-	}
-
-	var toolset types.Toolset
-	if err := json.Unmarshal(data, &toolset); err != nil {
-		return nil, fmt.Errorf("解析 JSON 失败: %w", err)
-	}
-
-	return &toolset, nil
 }
