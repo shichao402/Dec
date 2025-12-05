@@ -82,15 +82,26 @@ func runPack(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("✅ 验证通过: %s v%s\n\n", manifest.Name, manifest.Version)
 
-	// 2. 确定输出文件名
+	// 2. 确定输出文件名和路径
 	outputFile := packOutput
 	if outputFile == "" {
 		outputFile = fmt.Sprintf("%s-%s.tar.gz", manifest.Name, manifest.Version)
 	}
 
-	// 确保输出文件名不在要打包的目录内（避免递归）
-	outputAbs, _ := filepath.Abs(outputFile)
-	if strings.HasPrefix(outputAbs, absDir) {
+	// 获取当前工作目录
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("获取当前目录失败: %w", err)
+	}
+
+	// 如果输出文件是相对路径，将其放在当前工作目录下
+	if !filepath.IsAbs(outputFile) {
+		outputFile = filepath.Join(cwd, outputFile)
+	}
+
+	// 确保输出文件不在要打包的目录内（避免递归打包）
+	// 只有当打包目录不是当前目录时才检查
+	if absDir != cwd && strings.HasPrefix(outputFile, absDir+string(filepath.Separator)) {
 		return fmt.Errorf("输出文件不能在要打包的目录内: %s", outputFile)
 	}
 
