@@ -71,6 +71,10 @@ func (i *Installer) Install(manifest *types.Manifest) error {
 	}
 
 	fmt.Printf("✅ %s 安装完成\n", manifest.Name)
+	
+	// 友好提示：如何使用规则文件
+	printInstallTip(packagePath, manifest.Name)
+	
 	return nil
 }
 
@@ -96,6 +100,19 @@ func (i *Installer) Uninstall(packageName string) error {
 
 	fmt.Printf("✅ %s 卸载完成\n", packageName)
 	return nil
+}
+
+// printInstallTip 打印安装后的使用提示
+func printInstallTip(packagePath, packageName string) {
+	// 检查是否有 rules 目录
+	rulesPath := packagePath + "/rules"
+	if _, err := os.Stat(rulesPath); err == nil {
+		fmt.Printf("\n💡 使用提示:\n")
+		fmt.Printf("   链接规则文件到项目:\n")
+		fmt.Printf("   mkdir -p .cursor/rules\n")
+		fmt.Printf("   ln -sf %s .cursor/rules/%s\n", rulesPath, packageName)
+		fmt.Printf("\n   详细文档: https://github.com/firoyang/CursorToolset/blob/main/USAGE_EXAMPLE.md\n")
+	}
 }
 
 // IsInstalled 检查包是否已安装

@@ -209,6 +209,15 @@ cd CursorToolset
 go build -o cursortoolset .
 ```
 
+## 📚 文档
+
+- **[使用示例](USAGE_EXAMPLE.md)** - 完整的使用示例和最佳实践 ⭐
+- [安装指南](INSTALL_GUIDE.md) - 详细的安装步骤
+- [包开发指南](PACKAGE_DEV.md) - 创建和发布工具集包
+- [构建指南](BUILD_GUIDE.md) - 从源码构建
+- [架构设计](ARCHITECTURE.md) - 系统架构和设计理念
+- [测试指南](TESTING.md) - 运行和编写测试
+
 ## 许可证
 
 MIT
