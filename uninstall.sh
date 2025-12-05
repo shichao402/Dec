@@ -1,6 +1,6 @@
 #!/bin/bash
 # CursorToolset 卸载脚本 (Linux/macOS)
-# 使用方法: curl -fsSL https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/uninstall.sh | bash
+# 使用方法: curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/uninstall.sh | bash
 
 set -e
 

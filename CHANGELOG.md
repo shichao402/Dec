@@ -301,7 +301,7 @@ cursortoolset install <name> -v abc123
 
 **之前**: 需要手动克隆、构建、配置环境变量
 ```bash
-git clone https://github.com/firoyang/CursorToolset.git
+git clone https://github.com/shichao402/CursorToolset.git
 cd CursorToolset
 go build
 # 手动配置 PATH...
@@ -309,7 +309,7 @@ go build
 
 **现在**: 一条命令即可
 ```bash
-curl -fsSL https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/main/install.sh | bash
 ```
 
 ### 💡 技术亮点
@@ -349,6 +349,6 @@ curl -fsSL https://raw.githubusercontent.com/firoyang/CursorToolset/main/install
 ### 欢迎贡献
 
 如果你有好的想法或发现问题，欢迎：
-- 提交 Issue: https://github.com/firoyang/CursorToolset/issues
-- 提交 PR: https://github.com/firoyang/CursorToolset/pulls
+- 提交 Issue: https://github.com/shichao402/CursorToolset/issues
+- 提交 PR: https://github.com/shichao402/CursorToolset/pulls
 

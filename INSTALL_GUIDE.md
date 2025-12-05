@@ -5,7 +5,7 @@
 ### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/main/install.sh | bash
 ```
 
 安装完成后，运行以下命令使环境变量生效：
@@ -20,7 +20,7 @@ source ~/.bash_profile   # macOS bash
 以管理员身份运行 PowerShell，然后执行：
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/shichao402/CursorToolset/main/install.ps1 | iex
 ```
 
 安装完成后，重新打开 PowerShell 窗口。
@@ -54,7 +54,7 @@ iwr -useb https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.
 mkdir -p ~/.cursortoolsets/CursorToolset/bin
 
 # 2. 克隆仓库
-git clone https://github.com/firoyang/CursorToolset.git /tmp/cursortoolset-build
+git clone https://github.com/shichao402/CursorToolset.git /tmp/cursortoolset-build
 
 # 3. 构建
 cd /tmp/cursortoolset-build
@@ -79,7 +79,7 @@ source ~/.zshrc
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.cursor\toolsets\CursorToolset\bin"
 
 # 2. 克隆仓库
-git clone https://github.com/firoyang/CursorToolset.git "$env:TEMP\cursortoolset-build"
+git clone https://github.com/shichao402/CursorToolset.git "$env:TEMP\cursortoolset-build"
 
 # 3. 构建
 cd "$env:TEMP\cursortoolset-build"
@@ -228,7 +228,7 @@ $env:HTTPS_PROXY = "http://proxy.example.com:8080"
 
 ```bash
 # 克隆仓库
-git clone https://github.com/firoyang/CursorToolset.git
+git clone https://github.com/shichao402/CursorToolset.git
 cd CursorToolset
 
 # 构建

@@ -280,7 +280,7 @@ scripts/toolsets/github-actions/                # 工具（项目级）
 
 ## 🔗 相关链接
 
-- [CursorToolset 仓库](https://github.com/firoyang/CursorToolset)
+- [CursorToolset 仓库](https://github.com/shichao402/CursorToolset)
 - [github-action-toolset 仓库](https://github.com/shichao402/GithubActionAISelfBuilder)
 - [Homebrew Formula 指南](https://docs.brew.sh/Formula-Cookbook)
 - [Python Packaging 指南](https://packaging.python.org/)

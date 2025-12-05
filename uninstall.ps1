@@ -1,5 +1,5 @@
 # CursorToolset 卸载脚本 (Windows PowerShell)
-# 使用方法: iwr -useb https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/uninstall.ps1 | iex
+# 使用方法: iwr -useb https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/uninstall.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 

@@ -9,7 +9,17 @@ import (
 
 // 默认值
 const (
-	DefaultRegistryURL = "https://github.com/shichao402/CursorToolset/releases/download/registry/registry.json"
+	// RepoOwner 仓库所有者
+	RepoOwner = "shichao402"
+	// RepoName 仓库名称
+	RepoName = "CursorToolset"
+
+	// RepoURL 仓库地址
+	RepoURL = "https://github.com/" + RepoOwner + "/" + RepoName
+	// RepoGitURL 仓库 Git 地址
+	RepoGitURL = RepoURL + ".git"
+	// DefaultRegistryURL 默认的 registry 下载地址
+	DefaultRegistryURL = RepoURL + "/releases/download/registry/registry.json"
 )
 
 // Config 用户配置

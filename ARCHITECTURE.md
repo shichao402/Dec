@@ -224,7 +224,7 @@ func GetToolsetsPath(workDir string) string {
 
 ```bash
 # 1. 克隆并构建 M
-git clone https://github.com/firoyang/CursorToolset.git
+git clone https://github.com/shichao402/CursorToolset.git
 cd CursorToolset
 go build -o cursortoolset
 

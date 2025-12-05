@@ -113,7 +113,7 @@ shasum -a 256 my-awesome-toolset-1.0.0.tar.gz
 
 ### 6. 提交到 Registry
 
-1. Fork [CursorToolset](https://github.com/firoyang/CursorToolset) 仓库
+1. Fork [CursorToolset](https://github.com/shichao402/CursorToolset) 仓库
 
 2. 编辑 `registry.json`，添加你的包：
    ```json
@@ -313,4 +313,4 @@ openssl dgst -sha256 my-package.tar.gz
 ## 获取帮助
 
 - 查看示例包: [github-action-toolset](https://github.com/shichao402/GithubActionAISelfBuilder)
-- 提交 Issue: [CursorToolset Issues](https://github.com/firoyang/CursorToolset/issues)
+- 提交 Issue: [CursorToolset Issues](https://github.com/shichao402/CursorToolset/issues)

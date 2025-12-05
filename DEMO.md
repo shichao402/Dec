@@ -365,7 +365,7 @@ git push --tags
 cursortoolset update --self
 
 # 或重新下载安装脚本
-curl -fsSL https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/main/install.sh | bash
 ```
 
 无需额外配置，完全向后兼容！

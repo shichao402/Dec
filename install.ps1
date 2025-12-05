@@ -1,5 +1,5 @@
 # CursorToolset 一键安装脚本 (Windows PowerShell)
-# 使用方法: iwr -useb https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/install.ps1 | iex
+# 使用方法: iwr -useb https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
@@ -83,7 +83,7 @@ function Install-CursorToolset {
     # 从 ReleaseLatest 分支获取版本号（唯一来源）
     Write-ColorOutput "获取最新版本号..." -Type "Info"
     try {
-        $versionJson = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/version.json" -ErrorAction Stop
+        $versionJson = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/version.json" -ErrorAction Stop
         $latestVersion = $versionJson.version
         
         if (-not $latestVersion) {
@@ -129,7 +129,7 @@ function Install-CursorToolset {
     
     # 构建下载 URL（使用版本号）
     $binaryName = "cursortoolset-$platform.exe"
-    $downloadUrl = "https://github.com/firoyang/CursorToolset/releases/download/$latestVersion/$binaryName"
+    $downloadUrl = "https://github.com/shichao402/CursorToolset/releases/download/$latestVersion/$binaryName"
     
     # 下载预编译版本
     Write-ColorOutput "下载预编译版本..." -Type "Info"
@@ -146,7 +146,7 @@ function Install-CursorToolset {
     # 下载配置文件到新位置
     Write-ColorOutput "下载配置文件..." -Type "Info"
     try {
-        $configUrl = "https://raw.githubusercontent.com/firoyang/CursorToolset/ReleaseLatest/available-toolsets.json"
+        $configUrl = "https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/available-toolsets.json"
         Invoke-WebRequest -Uri $configUrl -OutFile $configPath
         Write-ColorOutput "配置文件已保存到 $configPath" -Type "Success"
     } catch {

@@ -71,7 +71,7 @@ go build -o cursortoolset
 
 # 2. 或者重新克隆
 cd ~/tools
-git clone https://github.com/firoyang/CursorToolset.git
+git clone https://github.com/shichao402/CursorToolset.git
 cd CursorToolset
 go build -o cursortoolset
 ```

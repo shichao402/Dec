@@ -10,12 +10,12 @@
 
 #### Linux / macOS
 ```bash
-curl -fsSL https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/main/install.sh | bash
 ```
 
 #### Windows (PowerShell)
 ```powershell
-iwr -useb https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/shichao402/CursorToolset/main/install.ps1 | iex
 ```
 
 **特点**：
@@ -300,8 +300,8 @@ cursortoolset install my-new-toolset
 
 ## 📞 联系方式
 
-- **GitHub**: https://github.com/firoyang/CursorToolset
-- **Issues**: https://github.com/firoyang/CursorToolset/issues
+- **GitHub**: https://github.com/shichao402/CursorToolset
+- **Issues**: https://github.com/shichao402/CursorToolset/issues
 
 ---
 

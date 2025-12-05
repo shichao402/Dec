@@ -15,13 +15,13 @@ Cursor 工具集管理器 - 一个简洁的包管理工具，用于管理和安�
 #### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/main/install.sh | bash
 ```
 
 #### Windows (PowerShell)
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/firoyang/CursorToolset/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/shichao402/CursorToolset/main/install.ps1 | iex
 ```
 
 ### 基本使用
@@ -204,7 +204,7 @@ Registry 是包的索引文件，托管在 GitHub Release 中：
 ## 从源码构建
 
 ```bash
-git clone https://github.com/firoyang/CursorToolset.git
+git clone https://github.com/shichao402/CursorToolset.git
 cd CursorToolset
 go build -o cursortoolset .
 ```

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/firoyang/CursorToolset/pkg/config"
 	"github.com/firoyang/CursorToolset/pkg/installer"
 	"github.com/firoyang/CursorToolset/pkg/paths"
 	"github.com/firoyang/CursorToolset/pkg/registry"
@@ -149,7 +150,7 @@ func updateSelfBinary() error {
 
 	// 克隆最新代码
 	cmd := exec.Command("git", "clone", "--depth", "1",
-		"https://github.com/firoyang/CursorToolset.git", tempDir)
+		config.RepoGitURL, tempDir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
