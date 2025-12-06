@@ -98,12 +98,11 @@ jobs:
           git checkout -B ReleaseLatest
           
           # 保留必要文件
-          cp version.json.release version.json
           cp scripts/install.sh scripts/install.sh.tmp
           cp config/system.json config/system.json.tmp
           
           git checkout --orphan ReleaseLatest-new
-          mv version.json version.json
+          mv version.json.release version.json
           mkdir -p scripts
           mv scripts/install.sh.tmp scripts/install.sh
           mkdir -p config
