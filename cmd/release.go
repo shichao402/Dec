@@ -25,7 +25,7 @@ var releaseCmd = &cobra.Command{
 
   1. 提升版本号（默认 patch）
   2. 打包并计算 SHA256
-  3. 更新 toolset.json
+  3. 更新 package.json
   4. 创建 Git commit 和 tag
   5. 推送到远程仓库
 
@@ -108,7 +108,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	if err := updateVersionInManifest(manifest, manifestPath, currentVersion, newVersion); err != nil {
 		return fmt.Errorf("更新版本号失败: %w", err)
 	}
-	fmt.Printf("   ✅ toolset.json 版本已更新为 %s\n\n", newVersion)
+	fmt.Printf("   ✅ package.json 版本已更新为 %s\n\n", newVersion)
 
 	// Step 2: 打包
 	fmt.Println("📦 Step 2: 打包")
@@ -123,7 +123,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	// Step 3: Git commit (SHA256 已在 pack --verify 中更新)
 	fmt.Println("📝 Step 3: Git commit")
 	commitMsg := fmt.Sprintf("chore: release v%s", newVersion)
-	if err := gitAdd("toolset.json"); err != nil {
+	if err := gitAdd("package.json"); err != nil {
 		return fmt.Errorf("git add 失败: %w", err)
 	}
 	if err := gitCommit(commitMsg); err != nil {

@@ -125,7 +125,7 @@ func bumpVersion(bumpType string) error {
 
 	currentVersion, ok := manifest["version"].(string)
 	if !ok || currentVersion == "" {
-		return fmt.Errorf("toolset.json 中缺少 version 字段")
+		return fmt.Errorf("package.json 中缺少 version 字段")
 	}
 
 	// 解析版本号
@@ -206,30 +206,30 @@ func updateVersion(manifest map[string]interface{}, manifestPath, oldVersion, ne
 	fmt.Println("\n💡 下一步：")
 	fmt.Println("   1. 运行 cursortoolset pack --verify 打包并更新 SHA256")
 	fmt.Println("   2. 提交更改并创建 Git Tag")
-	fmt.Printf("      git add toolset.json && git commit -m \"chore: bump version to %s\"\n", newVersion)
+	fmt.Printf("      git add package.json && git commit -m \"chore: bump version to %s\"\n", newVersion)
 	fmt.Printf("      git tag v%s\n", newVersion)
 
 	return nil
 }
 
-// loadManifest 加载 toolset.json
+// loadManifest 加载 package.json
 func loadManifest() (map[string]interface{}, string, error) {
-	// 查找 toolset.json
-	manifestPath := filepath.Join(".", "toolset.json")
+	// 查找 package.json
+	manifestPath := filepath.Join(".", "package.json")
 	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-		return nil, "", fmt.Errorf("当前目录不是工具集包项目（缺少 toolset.json）")
+		return nil, "", fmt.Errorf("当前目录不是工具集包项目（缺少 package.json）")
 	}
 
 	// 读取文件
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("读取 toolset.json 失败: %w", err)
+		return nil, "", fmt.Errorf("读取 package.json 失败: %w", err)
 	}
 
 	// 解析 JSON
 	var manifest map[string]interface{}
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil, "", fmt.Errorf("解析 toolset.json 失败: %w", err)
+		return nil, "", fmt.Errorf("解析 package.json 失败: %w", err)
 	}
 
 	return manifest, manifestPath, nil

@@ -24,7 +24,7 @@ var initCmd = &cobra.Command{
 	Long: `初始化一个新的工具集包项目，生成必要的配置文件和目录结构。
 
 生成的文件：
-  - toolset.json      包的自描述文件（元数据）
+  - package.json      包的元数据文件
   - README.md         包说明文档
   - .cursortoolset/   包开发规则和指南
 
@@ -52,8 +52,16 @@ var initCmd = &cobra.Command{
 		// 检查目录是否已存在
 		existingProject := false
 		if _, err := os.Stat(targetDir); err == nil {
-			// 检查是否已经初始化
+			// 检查是否已经初始化（支持新旧两种文件名）
+			packageJsonExists := false
+			if _, err := os.Stat(filepath.Join(targetDir, "package.json")); err == nil {
+				packageJsonExists = true
+			}
+			toolsetJsonExists := false
 			if _, err := os.Stat(filepath.Join(targetDir, "toolset.json")); err == nil {
+				toolsetJsonExists = true
+			}
+			if packageJsonExists || toolsetJsonExists {
 				if !initForce {
 					return fmt.Errorf("目录 %s 已经是一个工具集包项目\n\n提示: 使用 --force 强制重新初始化", targetDir)
 				}
@@ -79,7 +87,7 @@ var initCmd = &cobra.Command{
 			fmt.Println("\n✅ 工具集包初始化完成！")
 		}
 		fmt.Println("\n📝 下一步：")
-		fmt.Printf("   1. 编辑 %s/toolset.json 完善包信息\n", targetDir)
+		fmt.Printf("   1. 编辑 %s/package.json 完善包信息\n", targetDir)
 		fmt.Printf("   2. 在 %s 目录下开发你的工具集\n", targetDir)
 		fmt.Println("   3. 创建 GitHub Release 发布你的包")
 		fmt.Printf("\n📚 参考文档：%s#package-development\n", config.GetRepoURL())
@@ -126,14 +134,14 @@ func createPackageStructure(targetDir, packageName string, isReinit bool) error 
 		return err
 	}
 
-	// 创建/更新 toolset.json
-	if err := createToolsetJSON(targetDir, packageName, isReinit); err != nil {
-		return fmt.Errorf("创建 toolset.json 失败: %w", err)
+	// 创建/更新 package.json
+	if err := createPackageJSON(targetDir, packageName, isReinit); err != nil {
+		return fmt.Errorf("创建 package.json 失败: %w", err)
 	}
 	if isReinit {
-		fmt.Println("  ✅ 更新 toolset.json")
+		fmt.Println("  ✅ 更新 package.json")
 	} else {
-		fmt.Println("  ✅ 创建 toolset.json")
+		fmt.Println("  ✅ 创建 package.json")
 	}
 
 	// 创建 README.md（仅新项目或不存在时）
@@ -188,14 +196,19 @@ func createPackageStructure(targetDir, packageName string, isReinit bool) error 
 	return nil
 }
 
-// createToolsetJSON 创建或更新 toolset.json
-func createToolsetJSON(targetDir, packageName string, isReinit bool) error {
-	manifestPath := filepath.Join(targetDir, "toolset.json")
+// createPackageJSON 创建或更新 package.json
+func createPackageJSON(targetDir, packageName string, isReinit bool) error {
+	manifestPath := filepath.Join(targetDir, "package.json")
 
-	// 如果是重新初始化，读取现有配置并合并
+	// 如果是重新初始化，尝试读取现有配置（支持新旧两种文件名）
 	var existingData map[string]interface{}
 	if isReinit {
+		// 优先读取 package.json
 		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			// 回退到 toolset.json
+			data, err = os.ReadFile(filepath.Join(targetDir, "toolset.json"))
+		}
 		if err == nil {
 			_ = json.Unmarshal(data, &existingData)
 		}
@@ -215,8 +228,8 @@ func createToolsetJSON(targetDir, packageName string, isReinit bool) error {
 			"url":  fmt.Sprintf("https://github.com/YOUR_USERNAME/%s.git", packageName),
 		},
 		"dist": map[string]string{
-			"tarball": fmt.Sprintf("https://github.com/YOUR_USERNAME/%s/releases/download/v0.1.0/%s-0.1.0.tar.gz", packageName, packageName),
-			"sha256":  "TODO: 发布时填写 SHA256",
+			"tarball": fmt.Sprintf("%s-0.1.0.tar.gz", packageName),
+			"sha256":  "TODO: 发布时自动填写",
 		},
 		"cursortoolset": map[string]string{
 			"minVersion": "1.0.0",
@@ -244,6 +257,13 @@ func createToolsetJSON(targetDir, packageName string, isReinit bool) error {
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
+	}
+
+	// 如果存在旧的 toolset.json，删除它
+	oldPath := filepath.Join(targetDir, "toolset.json")
+	if _, err := os.Stat(oldPath); err == nil {
+		_ = os.Remove(oldPath)
+		fmt.Println("  🔄 迁移 toolset.json -> package.json")
 	}
 
 	return os.WriteFile(manifestPath, data, 0644)
@@ -275,18 +295,18 @@ TODO: 添加使用说明
 
 `+"```"+`
 %s/
-├── toolset.json          # 包配置文件
+├── package.json          # 包配置文件
 ├── .cursortoolset/       # AI 规则目录
-│   └── rules/            # 规则文件
+│   └── docs/             # 开发文档
 ├── rules/                # 你的规则文件
 └── README.md
 `+"```"+`
 
 ### 发布
 
-1. 更新 `+"`toolset.json`"+` 中的版本号
+1. 更新 `+"`package.json`"+` 中的版本号
 2. 创建 Git Tag: `+"`git tag v0.1.0`"+`
-3. 在 GitHub 创建 Release 并上传打包文件
+3. 推送 Tag 触发自动发布: `+"`git push origin v0.1.0`"+`
 
 ## 许可证
 
@@ -378,21 +398,20 @@ func createFallbackDevGuide(destDir, packageName string) error {
 
 本包遵循 CursorToolset 包规范：
 
-1. **toolset.json** - 包的元数据文件，包含：
+1. **package.json** - 包的元数据文件，包含：
    - name: 包名（必须与目录名一致）
    - version: 语义化版本号 (SemVer)
-   - dist.tarball: 下载地址
-   - dist.sha256: 校验和
+   - dist.tarball: 下载文件名（相对路径）
+   - dist.sha256: 校验和（发布时自动生成）
 
 2. **版本号规范** - 使用语义化版本：
    - MAJOR.MINOR.PATCH
    - 例如: 1.0.0, 1.2.3
 
 3. **发布流程**：
-   - 更新 toolset.json 中的 version
+   - 更新 package.json 中的 version
    - 创建 Git Tag (v1.0.0)
-   - 打包: cursortoolset pack
-   - 在 GitHub Release 发布
+   - 推送 Tag 触发自动发布
 
 ## 更多信息
 
@@ -462,10 +481,10 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
       
-      # 打包
+      # 打包（输出到 /tmp/release 避免打包时文件变化）
       - name: Create tarball
         run: |
-          PACKAGE_NAME=$(jq -r '.name' toolset.json)
+          PACKAGE_NAME=$(jq -r '.name' package.json)
           mkdir -p /tmp/release
           tar -czvf /tmp/release/${PACKAGE_NAME}-${{ steps.version.outputs.VERSION }}.tar.gz \
             --exclude='.git' \
@@ -473,10 +492,10 @@ jobs:
             --exclude='*.tar.gz' \
             .
       
-      # 计算 SHA256 并生成 package.json
-      - name: Generate package.json
+      # 计算 SHA256 并更新 package.json
+      - name: Generate release package.json
         run: |
-          PACKAGE_NAME=$(jq -r '.name' toolset.json)
+          PACKAGE_NAME=$(jq -r '.name' package.json)
           TARBALL="${PACKAGE_NAME}-${{ steps.version.outputs.VERSION }}.tar.gz"
           SHA256=$(sha256sum /tmp/release/$TARBALL | cut -d' ' -f1)
           SIZE=$(stat -c%s /tmp/release/$TARBALL)
@@ -486,7 +505,7 @@ jobs:
              --arg size "$SIZE" \
              --arg version "${{ steps.version.outputs.VERSION }}" \
              '.version = $version | .dist.tarball = $tarball | .dist.sha256 = $sha256 | .dist.size = ($size | tonumber)' \
-             toolset.json > /tmp/release/package.json
+             package.json > /tmp/release/package.json
       
       # 创建 Release
       - name: Create Release

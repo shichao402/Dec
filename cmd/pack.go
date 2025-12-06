@@ -28,11 +28,11 @@ var packCmd = &cobra.Command{
 	Long: `标准化打包工具集包，生成符合规范的 tar.gz 文件并计算 SHA256。
 
 功能：
-  - 验证 toolset.json 配置是否符合规范
+  - 验证 package.json 配置是否符合规范
   - 自动排除不需要的文件（.git、.DS_Store 等）
   - 生成 tar.gz 压缩包
   - 计算并显示 SHA256 校验和
-  - 可选：更新 toolset.json 中的 sha256 字段
+  - 可选：更新 package.json 中的 sha256 字段
 
 示例：
   # 打包当前目录
@@ -44,7 +44,7 @@ var packCmd = &cobra.Command{
   # 指定输出文件名
   cursortoolset pack --output my-toolset-1.0.0.tar.gz
 
-  # 打包并自动更新 toolset.json 中的 sha256
+  # 打包并自动更新 package.json 中的 sha256
   cursortoolset pack --verify`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPack,
@@ -52,7 +52,7 @@ var packCmd = &cobra.Command{
 
 func init() {
 	packCmd.Flags().StringVarP(&packOutput, "output", "o", "", "输出文件名（默认：<name>-<version>.tar.gz）")
-	packCmd.Flags().BoolVarP(&packVerify, "verify", "v", false, "验证并更新 toolset.json 中的 sha256")
+	packCmd.Flags().BoolVarP(&packVerify, "verify", "v", false, "验证并更新 package.json 中的 sha256")
 	packCmd.Flags().StringArrayVarP(&packExclude, "exclude", "e", []string{}, "额外排除的文件或目录")
 	RootCmd.AddCommand(packCmd)
 }
@@ -73,11 +73,11 @@ func runPack(cmd *cobra.Command, args []string) error {
 	fmt.Printf("📦 标准化打包工具集包\n")
 	fmt.Printf("   目录: %s\n\n", absDir)
 
-	// 1. 验证 toolset.json
-	manifestPath := filepath.Join(absDir, "toolset.json")
+	// 1. 验证 package.json
+	manifestPath := filepath.Join(absDir, "package.json")
 	manifest, err := loadAndValidateManifest(manifestPath)
 	if err != nil {
-		return fmt.Errorf("验证 toolset.json 失败: %w", err)
+		return fmt.Errorf("验证 package.json 失败: %w", err)
 	}
 
 	fmt.Printf("✅ 验证通过: %s v%s\n\n", manifest.Name, manifest.Version)
@@ -133,13 +133,13 @@ func runPack(cmd *cobra.Command, args []string) error {
 	fmt.Printf("📏 大小: %s\n", formatSize(fileInfo.Size()))
 	fmt.Printf("🔐 SHA256: %s\n", sha256sum)
 
-	// 7. 可选：验证并更新 toolset.json
+	// 7. 可选：验证并更新 package.json
 	if packVerify {
-		fmt.Printf("\n🔄 更新 toolset.json 中的 sha256...\n")
+		fmt.Printf("\n🔄 更新 package.json 中的 sha256...\n")
 		if err := updateManifestSHA256(manifestPath, sha256sum); err != nil {
 			fmt.Printf("⚠️  更新失败: %v\n", err)
 		} else {
-			fmt.Printf("✅ 已更新 toolset.json\n")
+			fmt.Printf("✅ 已更新 package.json\n")
 		}
 	}
 
@@ -147,7 +147,7 @@ func runPack(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n💡 下一步：\n")
 	fmt.Printf("   1. 在 GitHub 创建 Release (v%s)\n", manifest.Version)
 	fmt.Printf("   2. 上传 %s 到 Release\n", outputFile)
-	fmt.Printf("   3. 复制 SHA256 到 toolset.json 的 dist.sha256 字段\n")
+	fmt.Printf("   3. 复制 SHA256 到 package.json 的 dist.sha256 字段\n")
 	if !packVerify {
 		fmt.Printf("\n   或使用 --verify 自动更新: cursortoolset pack --verify\n")
 	}
@@ -161,7 +161,7 @@ func loadAndValidateManifest(path string) (*types.Manifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("toolset.json 不存在，请先运行 'cursortoolset init'")
+			return nil, fmt.Errorf("package.json 不存在，请先运行 'cursortoolset init'")
 		}
 		return nil, err
 	}
