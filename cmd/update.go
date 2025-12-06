@@ -133,7 +133,7 @@ func updateSelfBinary() error {
 
 		fmt.Print("  ⚠️  继续更新？[y/N]: ")
 		var response string
-		fmt.Scanln(&response)
+		_, _ = fmt.Scanln(&response)
 		if response != "y" && response != "Y" {
 			return fmt.Errorf("用户取消更新")
 		}
@@ -203,7 +203,7 @@ func updateSelfBinary() error {
 	}
 
 	if err := copyFile(newBinaryPath, exePath); err != nil {
-		os.Rename(backupPath, exePath)
+		_ = os.Rename(backupPath, exePath)
 		return fmt.Errorf("复制新文件失败: %w", err)
 	}
 
@@ -211,7 +211,7 @@ func updateSelfBinary() error {
 		return fmt.Errorf("设置权限失败: %w", err)
 	}
 
-	os.Remove(backupPath)
+	_ = os.Remove(backupPath)
 	return nil
 }
 

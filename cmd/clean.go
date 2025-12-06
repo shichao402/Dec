@@ -41,7 +41,7 @@ var cleanCmd = &cobra.Command{
 			fmt.Print("是否继续？ [y/N]: ")
 
 			var response string
-			fmt.Scanln(&response)
+			_, _ = fmt.Scanln(&response)
 			if response != "y" && response != "Y" && response != "yes" {
 				fmt.Println("❌ 操作已取消")
 				return nil

@@ -2,7 +2,6 @@ package installer
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/firoyang/CursorToolset/pkg/types"
@@ -123,14 +122,4 @@ func TestInstallerCompat_InstallToolset_OldFormat(t *testing.T) {
 	if err == nil {
 		t.Error("InstallToolset with old format should return error")
 	}
-}
-
-// 辅助函数：创建测试目录结构
-func createTestDir(t *testing.T, name string) string {
-	t.Helper()
-	dir := filepath.Join(t.TempDir(), name)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatalf("Failed to create test directory: %v", err)
-	}
-	return dir
 }

@@ -16,7 +16,6 @@ type Config struct {
 var (
 	globalConfig *Config
 	configOnce   sync.Once
-	configPath   string
 )
 
 // GetConfigPath 获取用户配置文件路径
@@ -45,7 +44,6 @@ func Load() (*Config, error) {
 			loadErr = err
 			return
 		}
-		configPath = path
 
 		data, err := os.ReadFile(path)
 		if err != nil {

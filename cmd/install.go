@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/firoyang/CursorToolset/pkg/installer"
 	"github.com/firoyang/CursorToolset/pkg/paths"
@@ -177,15 +176,3 @@ func installAllPackages(mgr *registry.Manager, inst *installer.Installer) error 
 	return nil
 }
 
-// ========================================
-// 兼容旧版本的函数（逐步废弃）
-// ========================================
-
-// getWorkDir 获取工作目录（兼容旧代码）
-func getWorkDir() string {
-	workDir, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return workDir
-}

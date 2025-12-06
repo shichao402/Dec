@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -188,9 +187,9 @@ func calculateNewVersion(current, bumpType string) (string, error) {
 	}
 
 	var major, minor, patch int
-	fmt.Sscanf(parts[0], "%d", &major)
-	fmt.Sscanf(parts[1], "%d", &minor)
-	fmt.Sscanf(parts[2], "%d", &patch)
+	_, _ = fmt.Sscanf(parts[0], "%d", &major)
+	_, _ = fmt.Sscanf(parts[1], "%d", &minor)
+	_, _ = fmt.Sscanf(parts[2], "%d", &patch)
 
 	switch bumpType {
 	case "major":
@@ -281,22 +280,4 @@ func gitPushTags() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-// getPackageDir 获取包目录
-func getPackageDir() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return cwd
-}
-
-// findToolsetJSON 查找 toolset.json
-func findToolsetJSON() (string, error) {
-	path := filepath.Join(".", "toolset.json")
-	if _, err := os.Stat(path); err != nil {
-		return "", fmt.Errorf("当前目录不是工具集包项目（缺少 toolset.json）")
-	}
-	return path, nil
 }

@@ -177,7 +177,7 @@ func createToolsetJSON(targetDir, packageName string, isReinit bool) error {
 	if isReinit {
 		data, err := os.ReadFile(manifestPath)
 		if err == nil {
-			json.Unmarshal(data, &existingData)
+			_ = json.Unmarshal(data, &existingData)
 		}
 	}
 

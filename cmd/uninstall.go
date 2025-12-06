@@ -38,7 +38,7 @@ var uninstallCmd = &cobra.Command{
 
 		// 获取包信息（用于显示）
 		mgr := registry.NewManager()
-		mgr.Load()
+		_ = mgr.Load()
 		manifest := mgr.FindPackage(packageName)
 
 		displayName := packageName
@@ -55,7 +55,7 @@ var uninstallCmd = &cobra.Command{
 			fmt.Print("⚠️  确认卸载？ [y/N]: ")
 
 			var response string
-			fmt.Scanln(&response)
+			_, _ = fmt.Scanln(&response)
 			if response != "y" && response != "Y" && response != "yes" {
 				fmt.Println("❌ 操作已取消")
 				return nil
