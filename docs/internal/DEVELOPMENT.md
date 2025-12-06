@@ -134,6 +134,63 @@ fmt.Println("⚠️  警告信息")
 fmt.Println("ℹ️  提示信息")
 ```
 
+### 交互式操作规范
+
+**重要：所有需要用户确认的操作必须提供 `--yes` 或 `--force` 选项跳过确认。**
+
+这是为了支持：
+- AI 辅助开发场景（AI 无法处理交互式输入）
+- 自动化脚本
+- CI/CD 流程
+
+```go
+// Go 命令示例
+var forceFlag bool
+
+func init() {
+    cmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "跳过确认提示")
+    // 或
+    cmd.Flags().BoolVarP(&yesFlag, "yes", "y", false, "跳过确认提示")
+}
+
+func runCommand() error {
+    if !forceFlag {
+        fmt.Print("确认操作？[y/N]: ")
+        var response string
+        fmt.Scanln(&response)
+        if response != "y" && response != "Y" {
+            return fmt.Errorf("用户取消")
+        }
+    }
+    // 执行操作...
+}
+```
+
+```bash
+# Shell 脚本示例
+SKIP_CONFIRM=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --yes|-y) SKIP_CONFIRM=true; shift ;;
+        *) shift ;;
+    esac
+done
+
+if [[ "${SKIP_CONFIRM}" != "true" ]]; then
+    read -p "确认？(y/N): " -n 1 -r
+    [[ ! $REPLY =~ ^[Yy]$ ]] && exit 0
+fi
+```
+
+**现有命令的跳过确认选项：**
+
+| 命令 | 选项 | 说明 |
+|------|------|------|
+| `clean` | `--force` / `-f` | 跳过清理确认 |
+| `uninstall` | `--force` / `-f` | 跳过卸载确认 |
+| `update --self` | `--yes` / `-y` | 跳过更新确认 |
+| `scripts/uninstall.sh` | `--yes` / `-y` | 跳过卸载确认 |
+
 ## 添加新命令
 
 1. 在 `cmd/` 下创建新文件

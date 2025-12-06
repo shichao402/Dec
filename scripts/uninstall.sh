@@ -1,8 +1,23 @@
 #!/bin/bash
 # CursorToolset 卸载脚本 (Linux/macOS)
 # 使用方法: curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/uninstall.sh | bash
+# 跳过确认: curl -fsSL ... | bash -s -- --yes
 
 set -e
+
+# 解析参数
+SKIP_CONFIRM=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --yes|-y)
+            SKIP_CONFIRM=true
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
 
 # 颜色输出
 RED='\033[0;31m'
@@ -64,12 +79,17 @@ main() {
     echo "  - 配置文件: ${CONFIG_DIR}/available-toolsets.json"
     echo "  - 工具集仓库: ${REPOS_DIR}"
     echo ""
-    read -p "确定要卸载 CursorToolset 吗？(y/N): " -n 1 -r
-    echo ""
     
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_info "取消卸载"
-        exit 0
+    if [[ "${SKIP_CONFIRM}" != "true" ]]; then
+        read -p "确定要卸载 CursorToolset 吗？(y/N): " -n 1 -r
+        echo ""
+        
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "取消卸载"
+            exit 0
+        fi
+    else
+        print_info "--yes 模式，跳过确认"
     fi
     
     # 从 PATH 中移除

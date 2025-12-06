@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +14,6 @@ import (
 	"github.com/firoyang/CursorToolset/pkg/installer"
 	"github.com/firoyang/CursorToolset/pkg/paths"
 	"github.com/firoyang/CursorToolset/pkg/registry"
-	"github.com/firoyang/CursorToolset/pkg/version"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +21,7 @@ var (
 	updateSelf     bool
 	updateRegistry bool
 	updatePackages bool
+	updateYes      bool
 )
 
 var updateCmd = &cobra.Command{
@@ -28,6 +31,7 @@ var updateCmd = &cobra.Command{
   --self       更新 CursorToolset 管理器本身
   --registry   更新包索引
   --packages   更新所有已安装的包
+  --yes        跳过确认提示（适用于自动化/AI 辅助场景）
   
 如果不指定任何参数，将执行所有更新。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -85,23 +89,29 @@ func init() {
 	updateCmd.Flags().BoolVarP(&updateSelf, "self", "s", false, "更新 CursorToolset 本身")
 	updateCmd.Flags().BoolVarP(&updateRegistry, "registry", "r", false, "更新包索引")
 	updateCmd.Flags().BoolVarP(&updatePackages, "packages", "p", false, "更新已安装的包")
+	updateCmd.Flags().BoolVarP(&updateYes, "yes", "y", false, "跳过确认提示")
 }
 
-// updateSelfBinary 更新管理器自身
+// updateSelfBinary 更新管理器自身（从 GitHub Releases 下载预编译二进制）
 func updateSelfBinary() error {
 	// 获取当前版本
-	workDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("获取工作目录失败: %w", err)
-	}
-
-	currentVer, err := version.GetVersion(workDir)
-	if err != nil {
-		currentVer = GetVersion()
-		fmt.Printf("  ⚠️  无法读取版本信息，使用: %s\n", currentVer)
-	}
-
+	currentVer := GetVersion()
 	fmt.Printf("  📌 当前版本: %s\n", currentVer)
+
+	// 获取最新版本号
+	fmt.Printf("  🔍 检查最新版本...\n")
+	latestVer, err := getLatestVersion()
+	if err != nil {
+		return fmt.Errorf("获取最新版本失败: %w", err)
+	}
+	fmt.Printf("  📌 最新版本: %s\n", latestVer)
+
+	// 比较版本
+	if currentVer == latestVer {
+		fmt.Printf("  ✅ 已是最新版本\n")
+		return nil
+	}
+
 	fmt.Printf("  🔄 开始更新...\n")
 
 	// 获取可执行文件路径
@@ -131,67 +141,63 @@ func updateSelfBinary() error {
 		fmt.Printf("  ℹ️  标准位置: %s\n", expectedBinDir)
 		fmt.Printf("  ℹ️  当前位置: %s\n", exeDir)
 
-		fmt.Print("  ⚠️  继续更新？[y/N]: ")
-		var response string
-		_, _ = fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			return fmt.Errorf("用户取消更新")
+		if !updateYes {
+			fmt.Print("  ⚠️  继续更新？[y/N]: ")
+			var response string
+			_, _ = fmt.Scanln(&response)
+			if response != "y" && response != "Y" {
+				return fmt.Errorf("用户取消更新")
+			}
+		} else {
+			fmt.Printf("  ⚠️  --yes 模式，自动继续\n")
 		}
 	}
 
-	// 创建临时目录
-	tempDir, err := os.MkdirTemp("", "cursortoolset-update-*")
-	if err != nil {
-		return fmt.Errorf("创建临时目录失败: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(tempDir) }()
-
-	fmt.Printf("  📥 克隆最新代码...\n")
-
-	// 从正式发布分支获取最新代码
-	branch := config.GetUpdateBranch()
-	fmt.Printf("  📡 更新分支: %s\n", branch)
-
-	// 克隆最新代码
-	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", branch,
-		config.GetRepoGitURL(), tempDir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("克隆仓库失败: %w", err)
-	}
-
-	fmt.Printf("  🔨 构建新版本...\n")
-
-	// 构建新版本
-	newBinaryPath := filepath.Join(tempDir, "cursortoolset")
+	// 构建下载 URL
+	platform := fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
+	binaryName := fmt.Sprintf("cursortoolset-%s", platform)
 	if runtime.GOOS == "windows" {
-		newBinaryPath += ".exe"
+		binaryName += ".exe"
 	}
 
-	// 读取版本号
-	newVer, err := version.GetVersion(tempDir)
+	cfg := config.GetSystemConfig()
+	downloadURL := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s",
+		cfg.RepoOwner, cfg.RepoName, latestVer, binaryName)
+
+	fmt.Printf("  📥 下载新版本...\n")
+	fmt.Printf("  📡 下载地址: %s\n", downloadURL)
+
+	// 创建临时文件
+	tempFile, err := os.CreateTemp("", "cursortoolset-update-*")
 	if err != nil {
-		fmt.Printf("  ⚠️  读取版本号失败: %v，使用 dev\n", err)
-		newVer = "dev"
-	} else {
-		fmt.Printf("  📌 新版本: %s\n", newVer)
+		return fmt.Errorf("创建临时文件失败: %w", err)
+	}
+	tempPath := tempFile.Name()
+	defer func() {
+		tempFile.Close()
+		os.Remove(tempPath)
+	}()
+
+	// 下载新版本
+	resp, err := http.Get(downloadURL)
+	if err != nil {
+		return fmt.Errorf("下载失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("下载失败: HTTP %d - 请确认版本 %s 已发布", resp.StatusCode, latestVer)
 	}
 
-	// 构建时注入版本号
-	ldflags := fmt.Sprintf("-X main.Version=%s -X main.BuildTime=%s",
-		newVer, "self-update")
-	buildCmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", newBinaryPath, ".")
-	buildCmd.Dir = tempDir
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("构建失败: %w", err)
+	_, err = io.Copy(tempFile, resp.Body)
+	if err != nil {
+		return fmt.Errorf("保存文件失败: %w", err)
 	}
+	tempFile.Close()
 
 	// Windows 特殊处理
 	if runtime.GOOS == "windows" {
-		return updateOnWindows(exePath, newBinaryPath)
+		return updateOnWindows(exePath, tempPath)
 	}
 
 	// Unix 系统直接替换
@@ -202,7 +208,7 @@ func updateSelfBinary() error {
 		return fmt.Errorf("备份旧文件失败: %w", err)
 	}
 
-	if err := copyFile(newBinaryPath, exePath); err != nil {
+	if err := copyFile(tempPath, exePath); err != nil {
 		_ = os.Rename(backupPath, exePath)
 		return fmt.Errorf("复制新文件失败: %w", err)
 	}
@@ -212,7 +218,34 @@ func updateSelfBinary() error {
 	}
 
 	_ = os.Remove(backupPath)
+
+	fmt.Printf("  ✅ 更新成功: %s -> %s\n", currentVer, latestVer)
 	return nil
+}
+
+// getLatestVersion 从更新分支获取最新版本号
+func getLatestVersion() (string, error) {
+	versionURL := config.GetVersionURL()
+
+	resp, err := http.Get(versionURL)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var versionInfo struct {
+		Version string `json:"version"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&versionInfo); err != nil {
+		return "", fmt.Errorf("解析版本信息失败: %w", err)
+	}
+
+	return versionInfo.Version, nil
 }
 
 // updateOnWindows Windows 特殊处理
