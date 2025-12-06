@@ -315,7 +315,7 @@ func (i *Installer) IsInstalled(packageName string) bool {
 }
 
 // GetInstalledVersion 获取已安装包的版本
-// 通过读取包目录中的 toolset.json 获取版本信息
+// 通过读取包目录中的 package.json 或 toolset.json 获取版本信息
 func (i *Installer) GetInstalledVersion(packageName string) (string, error) {
 	packagePath, err := paths.GetPackagePath(packageName)
 	if err != nil {
@@ -327,9 +327,27 @@ func (i *Installer) GetInstalledVersion(packageName string) (string, error) {
 		return "", fmt.Errorf("包未安装")
 	}
 
-	// TODO: 读取 toolset.json 获取版本
-	// 目前返回空字符串表示已安装但版本未知
-	return "", nil
+	// 尝试读取 package.json 或 toolset.json
+	var data []byte
+	packageJSONPath := filepath.Join(packagePath, "package.json")
+	toolsetJSONPath := filepath.Join(packagePath, "toolset.json")
+
+	if d, err := os.ReadFile(packageJSONPath); err == nil {
+		data = d
+	} else if d, err := os.ReadFile(toolsetJSONPath); err == nil {
+		data = d
+	} else {
+		return "", fmt.Errorf("未找到 package.json 或 toolset.json")
+	}
+
+	var pkgInfo struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &pkgInfo); err != nil {
+		return "", fmt.Errorf("解析版本信息失败: %w", err)
+	}
+
+	return pkgInfo.Version, nil
 }
 
 // ClearCache 清理下载缓存
