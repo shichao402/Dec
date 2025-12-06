@@ -366,24 +366,17 @@ echo -e "${BLUE}>>> 阶段 10: 初始化功能${NC}"
 # init 测试需要切换目录
 cd /tmp
 rm -rf test-init-pkg
-run_test "14" "init test-init-pkg" "$PROJECT_DIR/cursortoolset init test-init-pkg" verify_init
+run_test "14" "init test-init-pkg" "$PROJECT_DIR/dist/cursortoolset init test-init-pkg" verify_init
 
-run_simple_test "15" "init --force (重新初始化)" "$PROJECT_DIR/cursortoolset init test-init-pkg --force"
+run_simple_test "15" "init --force (重新初始化)" "$PROJECT_DIR/dist/cursortoolset init test-init-pkg --force"
 
 cd "$PROJECT_DIR"
 
 echo -e "${BLUE}>>> 阶段 11: 版本管理${NC}"
-# version 命令测试（需要在有 package.json 的目录）
-if [ -d "/Users/firo/workspace/cursortoolset-test-package" ]; then
-    cd /Users/firo/workspace/cursortoolset-test-package
-    run_simple_test "16" "version (显示版本)" "$PROJECT_DIR/cursortoolset version"
-    cd "$PROJECT_DIR"
-else
-    echo "=== 测试 16: version ==="
-    echo -e "${YELLOW}⏭️  跳过 - 测试包目录不存在${NC}"
-    ((SKIPPED++))
-    echo ""
-fi
+# version 命令测试（使用 init 创建的目录）
+cd /tmp/test-init-pkg
+run_simple_test "16" "version (显示版本)" "$PROJECT_DIR/dist/cursortoolset version"
+cd "$PROJECT_DIR"
 
 # 清理临时文件
 rm -f /tmp/test_output_*.txt
