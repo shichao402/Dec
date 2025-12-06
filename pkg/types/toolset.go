@@ -14,8 +14,6 @@ type Registry struct {
 type RegistryItem struct {
 	Name       string `json:"name"`       // 包名（唯一标识）
 	Repository string `json:"repository"` // 仓库地址（如 https://github.com/user/repo）
-	// Deprecated: 使用 Repository 替代，保留用于向后兼容
-	ManifestURL string `json:"manifestUrl,omitempty"` // 旧版：包自描述文件完整地址
 }
 
 // ========================================
@@ -109,66 +107,3 @@ type CachedManifest struct {
 	CachedAt string `json:"cachedAt"` // 缓存时间
 }
 
-// ========================================
-// 兼容旧版本的类型（逐步废弃）
-// ========================================
-
-// ToolsetInfo 表示 available-toolsets.json 中的工具集概要信息
-// Deprecated: 使用 RegistryItem + Manifest 替代
-type ToolsetInfo struct {
-	Name        string `json:"name"`
-	DisplayName string `json:"displayName,omitempty"`
-	GitHubURL   string `json:"githubUrl,omitempty"`   // 旧字段，兼容
-	ManifestURL string `json:"manifestUrl,omitempty"` // 新字段
-	Description string `json:"description,omitempty"`
-	Version     string `json:"version,omitempty"`
-	SHA256      string `json:"sha256,omitempty"`
-}
-
-// Toolset 表示完整的 toolset.json 内容
-// Deprecated: 使用 Manifest 替代
-type Toolset struct {
-	Name          string                 `json:"name"`
-	DisplayName   string                 `json:"displayName,omitempty"`
-	Version       string                 `json:"version"`
-	Description   string                 `json:"description,omitempty"`
-	Author        string                 `json:"author,omitempty"`
-	License       string                 `json:"license,omitempty"`
-	Keywords      []string               `json:"keywords,omitempty"`
-	Compatibility map[string]interface{} `json:"compatibility,omitempty"`
-	Requirements  map[string]interface{} `json:"requirements,omitempty"`
-	Install       InstallConfig          `json:"install"`
-	Features      []Feature              `json:"features,omitempty"`
-	Scripts       map[string]string      `json:"scripts,omitempty"`
-	Documentation map[string]string      `json:"documentation,omitempty"`
-	Repository    Repository             `json:"repository,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
-}
-
-// InstallConfig 表示安装配置
-// Deprecated: 新版本不再需要复杂的安装配置
-type InstallConfig struct {
-	Targets    map[string]InstallTarget `json:"targets"`
-	NpmScripts map[string]string        `json:"npm_scripts,omitempty"`
-}
-
-// InstallTarget 表示安装目标配置
-// Deprecated: 新版本直接解压，不再需要
-type InstallTarget struct {
-	Source      string   `json:"source"`
-	Files       []string `json:"files,omitempty"`
-	Merge       bool     `json:"merge,omitempty"`
-	Overwrite   bool     `json:"overwrite,omitempty"`
-	Executable  bool     `json:"executable,omitempty"`
-	Description string   `json:"description,omitempty"`
-}
-
-// Feature 表示工具集功能
-// Deprecated: 新版本简化，不再需要
-type Feature struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Files       []string `json:"files,omitempty"`
-	Essential   bool     `json:"essential,omitempty"`
-}

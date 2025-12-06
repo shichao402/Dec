@@ -153,8 +153,6 @@ var registryListCmd = &cobra.Command{
 			fmt.Printf("%d. %s\n", i+1, item.Name)
 			if item.Repository != "" {
 				fmt.Printf("   仓库: %s\n", item.Repository)
-			} else if item.ManifestURL != "" { //nolint:staticcheck // 向后兼容
-				fmt.Printf("   Manifest: %s\n", item.ManifestURL) //nolint:staticcheck // 向后兼容
 			}
 
 			// 显示缓存的 manifest 信息

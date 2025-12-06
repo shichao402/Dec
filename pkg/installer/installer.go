@@ -315,7 +315,7 @@ func (i *Installer) IsInstalled(packageName string) bool {
 }
 
 // GetInstalledVersion 获取已安装包的版本
-// 通过读取包目录中的 package.json 或 toolset.json 获取版本信息
+// 通过读取包目录中的 package.json 获取版本信息
 func (i *Installer) GetInstalledVersion(packageName string) (string, error) {
 	packagePath, err := paths.GetPackagePath(packageName)
 	if err != nil {
@@ -327,17 +327,11 @@ func (i *Installer) GetInstalledVersion(packageName string) (string, error) {
 		return "", fmt.Errorf("包未安装")
 	}
 
-	// 尝试读取 package.json 或 toolset.json
-	var data []byte
+	// 读取 package.json
 	packageJSONPath := filepath.Join(packagePath, "package.json")
-	toolsetJSONPath := filepath.Join(packagePath, "toolset.json")
-
-	if d, err := os.ReadFile(packageJSONPath); err == nil {
-		data = d
-	} else if d, err := os.ReadFile(toolsetJSONPath); err == nil {
-		data = d
-	} else {
-		return "", fmt.Errorf("未找到 package.json 或 toolset.json")
+	data, err := os.ReadFile(packageJSONPath)
+	if err != nil {
+		return "", fmt.Errorf("读取 package.json 失败: %w", err)
 	}
 
 	var pkgInfo struct {
@@ -364,50 +358,3 @@ func (i *Installer) ClearCache() error {
 // 兼容旧版本的方法（逐步废弃）
 // ========================================
 
-// NewInstallerCompat 创建兼容旧版本的安装器
-// Deprecated: 使用 NewInstaller 替代
-func NewInstallerCompat(toolsetsDir, workDir string) *InstallerCompat {
-	return &InstallerCompat{
-		ToolsetsDir: toolsetsDir,
-		WorkDir:     workDir,
-		installer:   NewInstaller(),
-	}
-}
-
-// InstallerCompat 兼容旧版本的安装器
-// Deprecated: 使用 Installer 替代
-type InstallerCompat struct {
-	ToolsetsDir string
-	WorkDir     string
-	Version     string
-	installer   *Installer
-}
-
-// SetVersion 设置版本（兼容旧接口）
-func (i *InstallerCompat) SetVersion(version string) {
-	i.Version = version
-}
-
-// InstallToolset 安装工具集（兼容旧接口）
-func (i *InstallerCompat) InstallToolset(toolsetInfo *types.ToolsetInfo) error {
-	// 转换为新的 Manifest 格式
-	manifest := &types.Manifest{
-		Name:        toolsetInfo.Name,
-		DisplayName: toolsetInfo.DisplayName,
-		Version:     toolsetInfo.Version,
-		Description: toolsetInfo.Description,
-	}
-
-	// 如果有 ManifestURL，尝试获取完整信息
-	// 否则使用旧的 GitHubURL（不支持新安装方式）
-	if toolsetInfo.ManifestURL == "" && toolsetInfo.GitHubURL != "" {
-		return fmt.Errorf("旧版本包格式不再支持，请更新包到新格式")
-	}
-
-	return i.installer.Install(manifest)
-}
-
-// UninstallToolset 卸载工具集（兼容旧接口）
-func (i *InstallerCompat) UninstallToolset(toolsetInfo *types.ToolsetInfo) error {
-	return i.installer.Uninstall(toolsetInfo.Name)
-}

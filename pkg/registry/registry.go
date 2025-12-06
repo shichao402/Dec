@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -191,44 +190,26 @@ func (m *Manager) updateManifest(item types.RegistryItem) error {
 // getManifestURL 获取包的 manifest URL
 // 从 repository 组装 GitHub Releases URL
 func (m *Manager) getManifestURL(item types.RegistryItem) string {
-	if item.Repository != "" {
-		// https://github.com/user/repo -> https://github.com/user/repo/releases/latest/download/package.json
-		repoURL := strings.TrimSuffix(item.Repository, "/")
-		repoURL = strings.TrimSuffix(repoURL, ".git")
-		// 添加时间戳参数绕过 CDN 缓存
-		return fmt.Sprintf("%s/releases/latest/download/package.json?t=%d", repoURL, time.Now().Unix())
+	if item.Repository == "" {
+		return ""
 	}
-
-	// 向后兼容：使用旧的 manifestUrl
-	//nolint:staticcheck // 向后兼容旧格式
-	if item.ManifestURL != "" {
-		// 添加时间戳参数绕过 CDN 缓存
-		return fmt.Sprintf("%s?t=%d", item.ManifestURL, time.Now().Unix())
-	}
-	return ""
+	// https://github.com/user/repo -> https://github.com/user/repo/releases/latest/download/package.json
+	repoURL := strings.TrimSuffix(item.Repository, "/")
+	repoURL = strings.TrimSuffix(repoURL, ".git")
+	// 添加时间戳参数绕过 CDN 缓存
+	return fmt.Sprintf("%s/releases/latest/download/package.json?t=%d", repoURL, time.Now().Unix())
 }
 
 // resolveTarballURL 解析 tarball 的完整 URL
 // 如果 tarball 是相对路径，根据 repository 组装完整 URL
 func (m *Manager) resolveTarballURL(item types.RegistryItem, tarball string, version string) string {
-	if item.Repository != "" {
-		// 新格式：从 repository 组装
-		// https://github.com/user/repo/releases/download/v1.0.0/package-1.0.0.tar.gz
-		repoURL := strings.TrimSuffix(item.Repository, "/")
-		repoURL = strings.TrimSuffix(repoURL, ".git")
-		return fmt.Sprintf("%s/releases/download/v%s/%s", repoURL, version, tarball)
+	if item.Repository == "" {
+		return tarball
 	}
-
-	// 旧格式：从 manifestUrl 推断基础路径
-	//nolint:staticcheck // 向后兼容旧格式
-	if item.ManifestURL != "" {
-		//nolint:staticcheck // 向后兼容旧格式
-		baseURL := path.Dir(item.ManifestURL)
-		return baseURL + "/" + tarball
-	}
-
-	// 无法解析，返回原值
-	return tarball
+	// https://github.com/user/repo/releases/download/v1.0.0/package-1.0.0.tar.gz
+	repoURL := strings.TrimSuffix(item.Repository, "/")
+	repoURL = strings.TrimSuffix(repoURL, ".git")
+	return fmt.Sprintf("%s/releases/download/v%s/%s", repoURL, version, tarball)
 }
 
 // GetRegistry 获取 registry

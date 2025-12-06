@@ -98,6 +98,12 @@ func updateSelfBinary() error {
 	currentVer := GetVersion()
 	fmt.Printf("  📌 当前版本: %s\n", currentVer)
 
+	// 开发版本不更新
+	if currentVer == "dev" {
+		fmt.Printf("  ℹ️  开发版本，跳过更新\n")
+		return nil
+	}
+
 	// 获取最新版本号
 	fmt.Printf("  🔍 检查最新版本...\n")
 	latestVer, err := getLatestVersion()
