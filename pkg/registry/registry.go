@@ -189,13 +189,9 @@ func (m *Manager) updateManifest(item types.RegistryItem) error {
 }
 
 // getManifestURL 获取包的 manifest URL
-// 支持两种格式：
-// 1. 新格式（repository）：自动组装 GitHub Releases URL
-// 2. 旧格式（manifestUrl）：直接使用完整 URL（向后兼容）
+// 从 repository 组装 GitHub Releases URL
 func (m *Manager) getManifestURL(item types.RegistryItem) string {
-	// 优先使用新格式
 	if item.Repository != "" {
-		// 将 GitHub 仓库地址转换为 Releases URL
 		// https://github.com/user/repo -> https://github.com/user/repo/releases/latest/download/package.json
 		repoURL := strings.TrimSuffix(item.Repository, "/")
 		repoURL = strings.TrimSuffix(repoURL, ".git")

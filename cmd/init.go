@@ -147,7 +147,7 @@ func createPackageStructure(targetDir, packageName string, isReinit bool) error 
 		fmt.Println("  ⏭️  跳过 README.md（已存在）")
 	}
 
-	// 创建 .cursortoolset 目录和规则文件（仅新项目或不存在时）
+	// 创建 .cursortoolset 目录和规则文件
 	cursorDir := filepath.Join(targetDir, ".cursortoolset")
 	if _, err := os.Stat(cursorDir); os.IsNotExist(err) {
 		if err := createCursorToolsetDir(targetDir, packageName); err != nil {
@@ -155,7 +155,11 @@ func createPackageStructure(targetDir, packageName string, isReinit bool) error 
 		}
 		fmt.Println("  ✅ 创建 .cursortoolset/ 规则目录")
 	} else if isReinit {
-		fmt.Println("  ⏭️  跳过 .cursortoolset/（已存在）")
+		// --force 模式：检查并补充缺失的文件
+		fmt.Println("  📂 检查 .cursortoolset/")
+		if err := ensureCursorToolsetFiles(targetDir, packageName); err != nil {
+			fmt.Printf("    ⚠️  补充文件失败: %v\n", err)
+		}
 	}
 
 	// 创建 .github/workflows/release.yml（仅新项目或不存在时）
@@ -308,6 +312,38 @@ func createCursorToolsetDir(targetDir, packageName string) error {
 		if err := createFallbackDevGuide(docsDir, packageName); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// ensureCursorToolsetFiles 检查并补充 .cursortoolset 目录中缺失的文件
+func ensureCursorToolsetFiles(targetDir, packageName string) error {
+	cursorDir := filepath.Join(targetDir, ".cursortoolset")
+	docsDir := filepath.Join(cursorDir, "docs")
+
+	// 检查 docs 目录
+	if _, err := os.Stat(docsDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(docsDir, 0755); err != nil {
+			return err
+		}
+		fmt.Println("    ✅ 补充 docs/ 目录")
+	}
+
+	// 检查 package-dev-guide.md
+	devGuidePath := filepath.Join(docsDir, "package-dev-guide.md")
+	if _, err := os.Stat(devGuidePath); os.IsNotExist(err) {
+		if err := copyPackageDevGuide(docsDir); err != nil {
+			// 复制失败，使用备用指南
+			if err := createFallbackDevGuide(docsDir, packageName); err != nil {
+				return err
+			}
+			fmt.Println("    ✅ 补充 docs/package-dev-guide.md（备用版）")
+		} else {
+			fmt.Println("    ✅ 补充 docs/package-dev-guide.md")
+		}
+	} else {
+		fmt.Println("    ⏭️  跳过 docs/package-dev-guide.md（已存在）")
 	}
 
 	return nil
