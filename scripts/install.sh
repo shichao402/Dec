@@ -190,7 +190,13 @@ main() {
     
     # 构建下载 URL（使用版本号）
     BINARY_NAME="cursortoolset-${PLATFORM}"
-    DOWNLOAD_URL="https://github.com/shichao402/CursorToolset/releases/download/${LATEST_VERSION}/${BINARY_NAME}"
+    # 测试分支使用 test-v* tag，正式分支使用 v* tag
+    if [ "${UPDATE_BRANCH}" = "ReleaseTest" ]; then
+        DOWNLOAD_TAG="test-${LATEST_VERSION}"
+    else
+        DOWNLOAD_TAG="${LATEST_VERSION}"
+    fi
+    DOWNLOAD_URL="https://github.com/shichao402/CursorToolset/releases/download/${DOWNLOAD_TAG}/${BINARY_NAME}"
     
     # 下载预编译版本
     print_info "下载预编译版本..."
