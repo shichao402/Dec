@@ -165,7 +165,16 @@ func updateSelfBinary() error {
 		newBinaryPath += ".exe"
 	}
 
-	buildCmd := exec.Command("go", "build", "-o", newBinaryPath, ".")
+	// 读取版本号
+	newVer, err := version.GetVersion(tempDir)
+	if err != nil {
+		newVer = "dev"
+	}
+
+	// 构建时注入版本号
+	ldflags := fmt.Sprintf("-X main.Version=%s -X main.BuildTime=%s",
+		newVer, "self-update")
+	buildCmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", newBinaryPath, ".")
 	buildCmd.Dir = tempDir
 	buildCmd.Stdout = os.Stdout
 	buildCmd.Stderr = os.Stderr
