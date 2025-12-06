@@ -60,15 +60,47 @@ git push origin test-v1.4.3
 
 ### 5. 验证测试版本
 
-从 GitHub Releases 下载测试版本进行验证：
+**重要：必须验证测试版本后才能发布正式版！**
+
+有两种验证方式：
+
+#### 方式一：使用测试渠道安装（推荐）
+
+通过环境变量使用测试渠道，安装到隔离目录，不影响生产环境：
 
 ```bash
-# 下载测试版本
-curl -L https://github.com/shichao402/CursorToolset/releases/download/test-v1.4.3/cursortoolset-darwin-arm64.tar.gz -o test.tar.gz
+# 下载安装脚本并使用测试渠道
+curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseTest/scripts/install.sh -o /tmp/install-test.sh
+CURSOR_TOOLSET_BRANCH=ReleaseTest CURSOR_TOOLSET_HOME=/tmp/test-install bash /tmp/install-test.sh
 
-# 解压并测试
-tar -xzf test.tar.gz
-./cursortoolset --version
+# 验证版本
+/tmp/test-install/bin/cursortoolset --version
+
+# 验证核心功能
+/tmp/test-install/bin/cursortoolset list
+/tmp/test-install/bin/cursortoolset registry update
+
+# 清理测试环境
+rm -rf /tmp/test-install /tmp/install-test.sh
+```
+
+**环境变量说明：**
+- `CURSOR_TOOLSET_BRANCH=ReleaseTest` - 使用测试分支（默认 ReleaseLatest）
+- `CURSOR_TOOLSET_HOME=/tmp/test-install` - 隔离安装目录（默认 ~/.cursortoolsets）
+
+#### 方式二：直接下载二进制验证
+
+```bash
+# 下载测试版本（注意：是直接二进制文件，不是压缩包）
+curl -L -o /tmp/cursortoolset-test \
+  "https://github.com/shichao402/CursorToolset/releases/download/test-v1.4.3/cursortoolset-darwin-arm64"
+chmod +x /tmp/cursortoolset-test
+
+# 验证版本
+/tmp/cursortoolset-test --version
+
+# 清理
+rm -f /tmp/cursortoolset-test
 ```
 
 ### 6. 正式发布
@@ -88,9 +120,11 @@ git push origin v1.4.3
 
 | 工作流 | 触发条件 | 动作 |
 |--------|----------|------|
-| `build.yml` | `test-v*` tag | 构建测试，发布 test 渠道 |
-| `release.yml` | `v*` tag | 从 test 下载产物，正式发布 |
+| `build.yml` | `test-v*` tag | 构建测试，发布到 ReleaseTest 分支 |
+| `release.yml` | `v*` tag | 从 test 下载产物，发布到 ReleaseLatest 分支 |
 | `release-registry.yml` | registry.json 变更 | 发布包索引 |
+
+**注意：** 推送到 `build` 分支不会触发任何构建！必须使用 tag 触发。
 
 ## 版本号规范
 
@@ -147,8 +181,8 @@ git push origin :refs/tags/v1.4.3
 
 ### Q: test tag 和正式 tag 有什么区别？
 
-- `test-v*`: 触发构建和测试，产物发布到 prerelease
-- `v*`: 不重新构建，直接使用 test 版本的产物发布
+- `test-v*`: 触发构建和测试，产物发布到 prerelease 和 ReleaseTest 分支
+- `v*`: 不重新构建，直接使用 test 版本的产物发布到 ReleaseLatest 分支
 
 ### Q: 为什么正式发布不重新构建？
 
@@ -159,6 +193,21 @@ git push origin :refs/tags/v1.4.3
 1. 在 main 上修复
 2. 直接创建正式 tag（跳过 test）
 3. 手动验证
+
+### Q: 推送到 build 分支会触发构建吗？
+
+**不会！** build 分支在当前 CI/CD 配置中没有触发作用。必须使用 tag：
+- 测试构建：`git tag test-vX.X.X && git push origin test-vX.X.X`
+- 正式发布：`git tag vX.X.X && git push origin vX.X.X`
+
+### Q: 测试渠道和正式渠道的区别？
+
+| 渠道 | 分支 | 用途 |
+|------|------|------|
+| 测试渠道 | ReleaseTest | 验证新版本，prerelease |
+| 正式渠道 | ReleaseLatest | 生产环境，stable release |
+
+用户可通过 `CURSOR_TOOLSET_BRANCH` 环境变量切换渠道。
 
 ## 相关文档
 

@@ -184,7 +184,8 @@ help:
 	@echo "  1. make build       - 本地构建检查"
 	@echo "  2. make test        - 运行测试"
 	@echo "  3. make install-dev - 本地安装验证"
-	@echo "  4. 提交代码到 build 分支"
-	@echo "  5. CI/CD 构建发布"
+	@echo "  4. 提交代码到 main 分支"
+	@echo "  5. 推送 test tag 触发 CI 构建"
+	@echo "  6. 测试通过后推送正式 tag 发布"
 	@echo ""
 
