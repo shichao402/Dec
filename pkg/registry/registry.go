@@ -148,7 +148,7 @@ func (m *Manager) updateManifest(item types.RegistryItem) error {
 
 	var manifest types.Manifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		os.Remove(manifestPath + ".tmp")
+		_ = os.Remove(manifestPath + ".tmp")
 		return fmt.Errorf("解析 manifest 失败: %w", err)
 	}
 
@@ -161,16 +161,16 @@ func (m *Manager) updateManifest(item types.RegistryItem) error {
 	// 保存缓存
 	cachedData, err := json.MarshalIndent(cached, "", "  ")
 	if err != nil {
-		os.Remove(manifestPath + ".tmp")
+		_ = os.Remove(manifestPath + ".tmp")
 		return err
 	}
 
 	if err := os.WriteFile(manifestPath, cachedData, 0644); err != nil {
-		os.Remove(manifestPath + ".tmp")
+		_ = os.Remove(manifestPath + ".tmp")
 		return err
 	}
 
-	os.Remove(manifestPath + ".tmp")
+	_ = os.Remove(manifestPath + ".tmp")
 	m.manifests[item.Name] = &cached
 	return nil
 }

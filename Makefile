@@ -153,11 +153,7 @@ fmt: .root
 lint: .root
 	@echo "🔍 代码检查..."
 	@echo "🔧 使用开发根目录: $(CURSOR_TOOLSET_ROOT)"
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./...; \
-	else \
-		echo "⚠️  golangci-lint 未安装，跳过"; \
-	fi
+	golangci-lint run ./...
 
 # 显示帮助
 .PHONY: help

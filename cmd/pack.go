@@ -322,15 +322,15 @@ func createTarGz(baseDir, outputFile string, files []string) error {
 	if err != nil {
 		return err
 	}
-	defer outFile.Close()
+	defer func() { _ = outFile.Close() }()
 
 	// 创建 gzip writer
 	gzipWriter := gzip.NewWriter(outFile)
-	defer gzipWriter.Close()
+	defer func() { _ = gzipWriter.Close() }()
 
 	// 创建 tar writer
 	tarWriter := tar.NewWriter(gzipWriter)
-	defer tarWriter.Close()
+	defer func() { _ = tarWriter.Close() }()
 
 	// 添加文件到 tar
 	for _, file := range files {
@@ -376,7 +376,7 @@ func addFileToTar(tw *tar.Writer, baseDir, file string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := io.Copy(tw, f); err != nil {
 		return err
@@ -391,7 +391,7 @@ func calculateSHA256(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {

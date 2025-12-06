@@ -74,7 +74,7 @@ func (d *Downloader) Download(url, packageName, version, expectedSHA256 string) 
 					}, nil
 				}
 				// SHA256 不匹配，删除缓存重新下载
-				os.Remove(cachePath)
+				_ = os.Remove(cachePath)
 			} else {
 				// 没有提供 SHA256，直接使用缓存
 				return &DownloadResult{
@@ -100,7 +100,7 @@ func (d *Downloader) Download(url, packageName, version, expectedSHA256 string) 
 	if err != nil {
 		return nil, fmt.Errorf("下载失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
@@ -113,8 +113,8 @@ func (d *Downloader) Download(url, packageName, version, expectedSHA256 string) 
 	}
 	tempPath := tempFile.Name()
 	defer func() {
-		tempFile.Close()
-		os.Remove(tempPath) // 清理临时文件
+		_ = tempFile.Close()
+		_ = os.Remove(tempPath) // 清理临时文件
 	}()
 
 	// 同时计算 SHA256 和写入文件
@@ -125,7 +125,7 @@ func (d *Downloader) Download(url, packageName, version, expectedSHA256 string) 
 	if err != nil {
 		return nil, fmt.Errorf("写入文件失败: %w", err)
 	}
-	tempFile.Close()
+	_ = tempFile.Close()
 
 	// 验证 SHA256
 	actualSHA256 := hex.EncodeToString(hasher.Sum(nil))
@@ -163,14 +163,14 @@ func (d *Downloader) Extract(tarballPath, destDir string) error {
 	if err != nil {
 		return fmt.Errorf("打开文件失败: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// 创建 gzip reader
 	gzReader, err := gzip.NewReader(file)
 	if err != nil {
 		return fmt.Errorf("创建 gzip reader 失败: %w", err)
 	}
-	defer gzReader.Close()
+	defer func() { _ = gzReader.Close() }()
 
 	// 创建 tar reader
 	tarReader := tar.NewReader(gzReader)
@@ -215,10 +215,10 @@ func (d *Downloader) Extract(tarballPath, destDir string) error {
 			}
 
 			if _, err := io.Copy(outFile, tarReader); err != nil {
-				outFile.Close()
+				_ = outFile.Close()
 				return fmt.Errorf("写入文件失败: %w", err)
 			}
-			outFile.Close()
+			_ = outFile.Close()
 
 		case tar.TypeSymlink:
 			// 创建符号链接
@@ -260,7 +260,7 @@ func (d *Downloader) DownloadFile(url, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("下载失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
@@ -276,7 +276,7 @@ func (d *Downloader) DownloadFile(url, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("创建文件失败: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if _, err := io.Copy(file, resp.Body); err != nil {
 		return fmt.Errorf("写入文件失败: %w", err)
@@ -291,7 +291,7 @@ func (d *Downloader) calculateFileSHA256(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {
@@ -307,13 +307,13 @@ func (d *Downloader) copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	_, err = io.Copy(dstFile, srcFile)
 	return err

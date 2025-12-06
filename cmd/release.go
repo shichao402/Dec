@@ -54,7 +54,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 
 	// 检查工作区是否干净
 	if !releaseDryRun && !isGitClean() {
-		return fmt.Errorf("Git 工作区有未提交的更改，请先提交或暂存")
+		return fmt.Errorf("git 工作区有未提交的更改，请先提交或暂存")
 	}
 
 	// 加载 manifest

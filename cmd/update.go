@@ -144,7 +144,7 @@ func updateSelfBinary() error {
 	if err != nil {
 		return fmt.Errorf("创建临时目录失败: %w", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	fmt.Printf("  📥 克隆最新代码...\n")
 

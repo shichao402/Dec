@@ -102,7 +102,10 @@ func validatePackageName(name string) error {
 
 	// 包名只能包含小写字母、数字和连字符
 	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+		isLowerLetter := c >= 'a' && c <= 'z'
+		isDigit := c >= '0' && c <= '9'
+		isHyphen := c == '-'
+		if !isLowerLetter && !isDigit && !isHyphen {
 			return fmt.Errorf("包名只能包含小写字母、数字和连字符: %s", name)
 		}
 	}

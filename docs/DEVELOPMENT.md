@@ -1,5 +1,23 @@
 # CursorToolset 开发指南
 
+## 环境准备
+
+开发前需安装以下工具：
+
+```bash
+# Go 1.21+
+go version
+
+# golangci-lint（代码检查，必须安装）
+brew install golangci-lint
+# 或: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# 验证安装
+golangci-lint --version
+```
+
+---
+
 ## 开发流程
 
 ```
@@ -22,6 +40,9 @@
 # 构建
 make build
 
+# 代码检查（lint）
+make lint
+
 # 运行测试
 make test
 
@@ -31,6 +52,8 @@ make install-dev
 # 带测试的安装
 make install-dev-test
 ```
+
+> **注意**: 提交前务必运行 `make lint`，CI 会检查 lint 错误。需要安装 [golangci-lint](https://golangci-lint.run/usage/install/)。
 
 ### 验证安装
 
@@ -165,6 +188,7 @@ CursorToolset/
 ```bash
 # 开发
 make build              # 构建
+make lint               # 代码检查
 make test               # 测试
 make install-dev        # 源码安装
 
