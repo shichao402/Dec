@@ -320,6 +320,43 @@ verify_clean_cache() {
     return 0
 }
 
+# 验证：pack 生成了 tar.gz 文件
+verify_pack() {
+    local pkg_dir="/tmp/test-init-pkg"
+    
+    # 检查是否生成了 tar.gz 文件
+    local tarball=$(ls "$pkg_dir"/*.tar.gz 2>/dev/null | head -1)
+    if [ -z "$tarball" ]; then
+        echo "  ⚠️  未生成 tar.gz 文件"
+        return 1
+    fi
+    
+    # 检查文件大小 > 0
+    local size=$(stat -f%z "$tarball" 2>/dev/null || stat -c%s "$tarball" 2>/dev/null)
+    if [ "$size" -eq 0 ]; then
+        echo "  ⚠️  tar.gz 文件为空"
+        return 1
+    fi
+    
+    echo "  ✓ 生成 tar.gz: $(basename "$tarball")"
+    echo "  ✓ 文件大小: $size bytes"
+    return 0
+}
+
+# 验证：release --dry-run 输出正确
+verify_release_dry_run() {
+    local output="/tmp/test_output_20.txt"
+    
+    # 检查输出包含预览信息
+    if ! grep -q "预览" "$output" && ! grep -q "dry" "$output" && ! grep -q "版本" "$output"; then
+        echo "  ⚠️  输出不包含预览信息"
+        return 1
+    fi
+    
+    echo "  ✓ dry-run 模式正常"
+    return 0
+}
+
 #==========================================
 # 执行测试
 #==========================================
@@ -369,6 +406,29 @@ echo -e "${BLUE}>>> 阶段 11: 版本管理${NC}"
 # version 命令测试（使用 init 创建的目录）
 cd /tmp/test-init-pkg
 run_simple_test "16" "version (显示版本)" "$PROJECT_DIR/dist/cursortoolset version"
+
+echo -e "${BLUE}>>> 阶段 12: 配置管理${NC}"
+cd "$PROJECT_DIR"
+run_simple_test "17" "config list" "./dist/cursortoolset config list"
+run_simple_test "18" "config get registry_url" "./dist/cursortoolset config get registry_url"
+
+echo -e "${BLUE}>>> 阶段 13: 打包功能${NC}"
+cd /tmp/test-init-pkg
+# 初始化 git 仓库（pack 需要）
+git init -q 2>/dev/null || true
+git add -A 2>/dev/null || true
+git commit -m "init" -q 2>/dev/null || true
+run_test "19" "pack" "$PROJECT_DIR/dist/cursortoolset pack" verify_pack
+cd "$PROJECT_DIR"
+
+echo -e "${BLUE}>>> 阶段 14: 发布功能（dry-run）${NC}"
+cd /tmp/test-init-pkg
+run_test "20" "release --dry-run" "$PROJECT_DIR/dist/cursortoolset release --dry-run" verify_release_dry_run
+cd "$PROJECT_DIR"
+
+echo -e "${BLUE}>>> 阶段 15: 同步功能${NC}"
+cd /tmp/test-init-pkg
+run_simple_test "21" "sync" "$PROJECT_DIR/dist/cursortoolset sync"
 cd "$PROJECT_DIR"
 
 # 清理临时文件
