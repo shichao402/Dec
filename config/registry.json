@@ -8,6 +8,10 @@
     {
       "name": "test-package",
       "repository": "https://github.com/shichao402/cursortoolset-test-package"
+    },
+    {
+      "name": "cursor-cold-start",
+      "repository": "https://github.com/shichao402/CursorColdStart"
     }
   ]
 }
