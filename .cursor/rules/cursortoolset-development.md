@@ -374,14 +374,40 @@ make clean
 make clean-root
 ```
 
-### 4. 发布新版本
+### 4. 发布新版本（三阶段流程）
+
+遵循 GitHub Actions CI/CD 规则，使用三阶段自动化发布：
+
 ```bash
+# 阶段1：构建
 # 1. 更新 version.json
-# 2. 构建所有平台版本：make build-all
-# 3. 创建 Git tag：git tag vX.Y.Z
-# 4. 推送 tag：git push --tags
-# 5. 在 GitHub Release 上传二进制文件
+# 2. 提交并推送
+git add version.json
+git commit -m "Bump version to X.Y.Z"
+git push
+
+# 3. 创建构建标签，触发 CI 构建
+git tag buildX.Y.Z
+git push --tags
+# 等待 GitHub Actions 构建完成
+
+# 阶段2：测试
+# 4. 创建测试标签，触发预发布
+git tag testX.Y.Z
+git push --tags
+# 等待预发布创建，验证功能正常
+
+# 阶段3：正式发布
+# 5. 创建发布标签，触发正式发布
+git tag vX.Y.Z
+git push --tags
+# GitHub Actions 自动创建正式 Release 并上传产物
 ```
+
+**注意**：
+- ❌ 禁止手动创建 GitHub Release
+- ❌ 禁止手动上传构建产物
+- ✅ 必须通过标签触发自动化流程
 
 ## 包开发规范
 
