@@ -27,15 +27,17 @@
 - [发布说明](changelog/releases/)
 
 ### 包开发文档
-- [包开发指南](../resources/public/package-dev-guide.md) - 创建和发布工具集包
-- [配置示例](../resources/public/examples/README.md) - 各种配置示例
+
+包开发文档和规则现已通过 **CursorColdStart** 的 `cursortoolset` pack 提供：
+
+```bash
+# 在包项目中启用
+coldstart enable cursortoolset
+coldstart init .
+```
 
 ## 文档维护
 
 - 所有文档统一管理在 `Documents/` 目录
 - 过程性文档放在 `Documents/temp/`（不提交到版本控制）
 - 定期更新文档索引
-
-## 注意
-
-`resources/public/` 目录是分发给包项目的资源文件（如开发指南模板、workflow 模板），不是本项目的文档。

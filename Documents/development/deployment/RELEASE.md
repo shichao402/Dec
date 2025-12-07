@@ -151,23 +151,66 @@ git push origin v1.4.3
 
 ## 发布包索引
 
-Registry 采用自动同步机制：
+Registry 采用自动化管理机制，包开发者无需手动编辑配置文件。
 
-### 自动同步
+### 新包注册（自动）
 
-1. **定时同步**：每小时自动同步所有包的最新信息
-2. **Issue 触发**：包开发者发布时自动创建 `[sync]` issue 触发立即同步
-3. **手动触发**：可在 GitHub Actions 页面手动触发 `sync-registry.yml`
+包开发者通过创建 Issue 自动注册新包：
 
-### 新包注册
+**步骤：**
 
-新包通过 `[auto-register]` issue 自动注册：
+1. 确保你的包已发布 Release，且 Release 中包含：
+   - `package.json`（必须包含 `name`、`version`、`dist.tarball`、`dist.sha256` 字段）
+   - 对应的 tarball 文件
 
-1. 包开发者使用推荐的 release workflow 模板
-2. 首次发布时自动创建 `[auto-register]` issue
-3. CI 验证包的有效性后自动添加到注册表
+2. 在 [CursorToolset 仓库](https://github.com/shichao402/CursorToolset/issues/new) 创建 Issue：
+   - **标题**：`[auto-register] 你的包名`
+   - **内容**：
+     ```
+     repository: https://github.com/your-username/your-repo
+     ```
 
-### 手动管理（维护者）
+3. CI 自动执行：
+   - 验证仓库可访问性
+   - 下载并验证 `package.json` 格式
+   - 添加到注册表
+   - 关闭 Issue 并回复结果
+
+**package.json 必需字段示例：**
+
+```json
+{
+  "name": "my-toolset",
+  "version": "1.0.0",
+  "description": "我的工具集",
+  "dist": {
+    "tarball": "my-toolset-1.0.0.tar.gz",
+    "sha256": "abc123..."
+  }
+}
+```
+
+### 同步更新（自动）
+
+已注册的包发布新版本后，有三种方式同步：
+
+**方式一：Issue 触发（立即生效）**
+
+创建 Issue：
+- **标题**：`[sync] owner/repo` 或 `[sync] https://github.com/owner/repo`
+- **内容**：可留空
+
+**方式二：定时同步**
+
+每小时自动同步所有包的最新信息，无需手动操作。
+
+**方式三：手动触发**
+
+在 GitHub Actions 页面手动运行 `sync-registry.yml` workflow。
+
+### 手动管理（仅维护者）
+
+维护者可通过命令行工具管理：
 
 ```bash
 # 添加包到 registry

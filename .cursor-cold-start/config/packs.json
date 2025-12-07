@@ -9,6 +9,9 @@
   "github-actions": {
     "enabled": true
   },
+  "github-issue": {
+    "enabled": true
+  },
   "logging": {
     "enabled": false
   },

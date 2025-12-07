@@ -176,6 +176,7 @@ if actualHash != expectedHash {
 
 ## 相关文档
 
-- [开发指南](DEVELOPMENT.md)
-- [测试指南](TESTING.md)
-- [包开发指南](../public/package-dev-guide.md)
+- [开发指南](../../development/setup/DEVELOPMENT.md)
+- [测试指南](../../development/testing/TESTING.md)
+
+> 💡 **包开发文档**：通过 CursorColdStart 的 `cursortoolset` pack 提供

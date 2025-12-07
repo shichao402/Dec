@@ -15,7 +15,7 @@
 - 包目录存在
 - `package.json` 存在
 - 二进制文件存在（如果有）
-- `.cursortoolset/docs/package-dev-guide.md` 存在
+- `.cursortoolset/` 目录存在
 
 ## 测试类型
 
@@ -101,7 +101,7 @@ CursorToolset 完整功能测试
 | 3 | 列出包 | `list` | 输出包含 test-package |
 | 4 | 搜索包 | `search <keyword>` | 找到匹配的包 |
 | 5 | 查看详情 | `info <package>` | 显示版本等完整信息 |
-| 6 | 安装包 | `install <package>` | 包目录完整（含 package-dev-guide.md） |
+| 6 | 安装包 | `install <package>` | 包目录完整 |
 | 7 | 已安装列表 | `list --installed` | 显示已安装的包 |
 | 8 | **编译时间验证** | `strings` | 二进制包含编译时间戳 |
 | 9 | 更新包 | `update --packages` | 检测并更新 |
@@ -121,17 +121,18 @@ CursorToolset 完整功能测试
 ✓ package.json 存在
 ✓ 二进制文件存在
 ✓ .cursortoolset 目录存在
-✓ package-dev-guide.md 存在  ← 关键！确保文档被正确分发
 ```
 
 **测试 14 (init) 的验证项**:
 ```
 ✓ package.json 存在且有效
 ✓ README.md 存在
-✓ .cursortoolset/docs/package-dev-guide.md 存在
+✓ .cursortoolset/ 目录存在
 ✓ .github/workflows/release.yml 存在
 ✓ .gitignore 存在
 ```
+
+> 💡 **注意**：包开发文档现已通过 CursorColdStart 的 `cursortoolset` pack 提供
 
 ## 手动测试步骤
 

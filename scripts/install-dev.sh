@@ -134,25 +134,10 @@ else
     print_warning "未找到 config/system.json，将使用内置默认值"
 fi
 
-# Step 6: 复制包开发指南
-print_step "安装包开发指南..."
-DOCS_DIR="${INSTALL_DIR}/docs"
-mkdir -p "${DOCS_DIR}"
-
-if [ -f "${PROJECT_DIR}/resources/public/package-dev-guide.md" ]; then
-    cp "${PROJECT_DIR}/resources/public/package-dev-guide.md" "${DOCS_DIR}/package-dev-guide.md"
-    print_success "包开发指南已安装"
-else
-    print_warning "未找到 resources/public/package-dev-guide.md"
-fi
-
-# Step 6.1: 复制 release workflow 模板
-if [ -f "${PROJECT_DIR}/resources/public/release-workflow-template.yml" ]; then
-    cp "${PROJECT_DIR}/resources/public/release-workflow-template.yml" "${DOCS_DIR}/release-workflow-template.yml"
-    print_success "Release workflow 模板已安装"
-else
-    print_warning "未找到 resources/public/release-workflow-template.yml"
-fi
+# Step 6: 包开发指南说明
+print_step "包开发指南..."
+print_info "包开发文档现已通过 CursorColdStart 的 cursortoolset pack 提供"
+print_info "在包项目中运行: coldstart enable cursortoolset && coldstart init ."
 
 # Step 7: 清理构建产物
 rm -f dist/cursortoolset

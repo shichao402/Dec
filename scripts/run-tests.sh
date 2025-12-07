@@ -196,17 +196,10 @@ verify_install_test_package() {
         return 1
     fi
     
-    # 5. 关键文档：package-dev-guide.md 存在
-    if [ ! -f "$pkg_dir/.cursortoolset/docs/package-dev-guide.md" ]; then
-        echo "  ⚠️  包开发指南文档不存在: .cursortoolset/docs/package-dev-guide.md"
-        return 1
-    fi
-    
     echo "  ✓ 包目录完整"
     echo "  ✓ package.json 存在"
     echo "  ✓ 二进制文件存在"
     echo "  ✓ .cursortoolset 目录存在"
-    echo "  ✓ package-dev-guide.md 存在"
     return 0
 }
 
@@ -290,9 +283,9 @@ verify_init() {
         return 1
     fi
     
-    # 5. 包开发指南存在
-    if [ ! -f "$pkg_dir/.cursortoolset/docs/package-dev-guide.md" ]; then
-        echo "  ⚠️  package-dev-guide.md 不存在"
+    # 5. .cursortoolset 目录存在
+    if [ ! -d "$pkg_dir/.cursortoolset" ]; then
+        echo "  ⚠️  .cursortoolset 目录不存在"
         return 1
     fi
     
@@ -310,7 +303,7 @@ verify_init() {
     
     echo "  ✓ package.json 存在且有效"
     echo "  ✓ README.md 存在"
-    echo "  ✓ .cursortoolset/docs/package-dev-guide.md 存在"
+    echo "  ✓ .cursortoolset/ 目录存在"
     echo "  ✓ .github/workflows/release.yml 存在"
     echo "  ✓ .gitignore 存在"
     return 0

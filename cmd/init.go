@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/firoyang/CursorToolset/pkg/config"
-	"github.com/firoyang/CursorToolset/pkg/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -304,106 +303,27 @@ MIT
 // createCursorToolsetDir 创建 .cursortoolset 目录
 func createCursorToolsetDir(targetDir, packageName string) error {
 	cursorDir := filepath.Join(targetDir, ".cursortoolset")
-	docsDir := filepath.Join(cursorDir, "docs")
 
-	if err := os.MkdirAll(docsDir, 0755); err != nil {
+	if err := os.MkdirAll(cursorDir, 0755); err != nil {
 		return err
-	}
-
-	// 尝试从安装目录复制包开发指南
-	if err := copyPackageDevGuide(docsDir); err != nil {
-		// 如果复制失败，生成一个简单的开发指南
-		fmt.Printf("  ⚠️  无法复制包开发指南: %v\n", err)
-		if err := createFallbackDevGuide(docsDir, packageName); err != nil {
-			return err
-		}
 	}
 
 	return nil
 }
 
-// ensureCursorToolsetFiles 检查并补充 .cursortoolset 目录中缺失的文件
+// ensureCursorToolsetFiles 检查 .cursortoolset 目录
 func ensureCursorToolsetFiles(targetDir, packageName string) error {
 	cursorDir := filepath.Join(targetDir, ".cursortoolset")
-	docsDir := filepath.Join(cursorDir, "docs")
 
-	// 检查 docs 目录
-	if _, err := os.Stat(docsDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(docsDir, 0755); err != nil {
+	// 检查目录是否存在
+	if _, err := os.Stat(cursorDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(cursorDir, 0755); err != nil {
 			return err
 		}
-		fmt.Println("    ✅ 补充 docs/ 目录")
-	}
-
-	// 检查 package-dev-guide.md
-	devGuidePath := filepath.Join(docsDir, "package-dev-guide.md")
-	if _, err := os.Stat(devGuidePath); os.IsNotExist(err) {
-		if err := copyPackageDevGuide(docsDir); err != nil {
-			// 复制失败，使用备用指南
-			if err := createFallbackDevGuide(docsDir, packageName); err != nil {
-				return err
-			}
-			fmt.Println("    ✅ 补充 docs/package-dev-guide.md（备用版）")
-		} else {
-			fmt.Println("    ✅ 补充 docs/package-dev-guide.md")
-		}
-	} else {
-		fmt.Println("    ⏭️  跳过 docs/package-dev-guide.md（已存在）")
+		fmt.Println("    ✅ 补充 .cursortoolset/ 目录")
 	}
 
 	return nil
-}
-
-// copyPackageDevGuide 从安装目录复制包开发指南
-func copyPackageDevGuide(destDir string) error {
-	// 获取安装目录的 docs 路径
-	rootDir, err := paths.GetRootDir()
-	if err != nil {
-		return err
-	}
-
-	srcPath := filepath.Join(rootDir, "docs", "package-dev-guide.md")
-	destPath := filepath.Join(destDir, "package-dev-guide.md")
-
-	// 读取源文件
-	data, err := os.ReadFile(srcPath)
-	if err != nil {
-		return fmt.Errorf("读取包开发指南失败: %w", err)
-	}
-
-	// 写入目标文件
-	return os.WriteFile(destPath, data, 0644)
-}
-
-// createFallbackDevGuide 创建备用开发指南
-func createFallbackDevGuide(destDir, packageName string) error {
-	devGuide := fmt.Sprintf(`# %s 开发指南
-
-## 包结构规范
-
-本包遵循 CursorToolset 包规范：
-
-1. **package.json** - 包的元数据文件，包含：
-   - name: 包名（必须与目录名一致）
-   - version: 语义化版本号 (SemVer)
-   - dist.tarball: 下载文件名（相对路径）
-   - dist.sha256: 校验和（发布时自动生成）
-
-2. **版本号规范** - 使用语义化版本：
-   - MAJOR.MINOR.PATCH
-   - 例如: 1.0.0, 1.2.3
-
-3. **发布流程**：
-   - 更新 package.json 中的 version
-   - 创建 Git Tag (v1.0.0)
-   - 推送 Tag 触发自动发布
-
-## 更多信息
-
-运行 cursortoolset update 更新管理器以获取完整的包开发指南。
-`, toDisplayName(packageName))
-
-	return os.WriteFile(filepath.Join(destDir, "package-dev-guide.md"), []byte(devGuide), 0644)
 }
 
 // createGitignore 创建 .gitignore
@@ -435,16 +355,7 @@ func createReleaseWorkflow(targetDir string) error {
 		return err
 	}
 
-	// 尝试从安装目录复制 workflow 模板
-	rootDir, err := paths.GetRootDir()
-	if err == nil {
-		srcPath := filepath.Join(rootDir, "docs", "release-workflow-template.yml")
-		if data, err := os.ReadFile(srcPath); err == nil {
-			return os.WriteFile(filepath.Join(workflowDir, "release.yml"), data, 0644)
-		}
-	}
-
-	// 如果复制失败，使用内置模板
+	// 使用内置模板
 	content := `name: Release
 
 on:

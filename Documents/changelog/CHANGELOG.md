@@ -16,7 +16,9 @@
 ### Changed
 - Registry 格式升级到 v4，包含 name/version/description/dist 等完整信息
 - `registry.go` 简化：从 registry 直接构建 manifest 缓存，无需逐个下载
-- 更新 `release-workflow-template.yml`：自动注册/同步到 CursorToolset
+- **包开发文档迁移到 CursorColdStart**：通过 `cursortoolset` pack 提供，不再随管理器分发
+- `sync` 命令简化：移除文档同步功能，保留配置迁移能力
+- `init` 命令简化：不再复制包开发指南文档
 
 ### Improved
 - 用户 `update` 性能大幅提升：从 N 次请求减少到 1 次
