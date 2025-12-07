@@ -75,3 +75,30 @@ jobs:
             /tmp/release/package.json
             /tmp/release/*.tar.gz
           generate_release_notes: true
+
+      # 注册/同步到 CursorToolset
+      - name: Register to CursorToolset
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 检查是否已注册（通过搜索已关闭的 issue）
+          REGISTERED=$(gh issue list --repo shichao402/CursorToolset \
+            --search "[auto-register] ${{ github.repository }} in:title" \
+            --state all --json number --jq 'length' 2>/dev/null || echo "0")
+          
+          if [ "$REGISTERED" = "0" ]; then
+            # 首次发布，创建注册 issue
+            gh issue create \
+              --repo shichao402/CursorToolset \
+              --title "[auto-register] ${{ github.repository }}" \
+              --body "repository: https://github.com/${{ github.repository }}"
+            echo "✅ 已提交注册请求"
+          else
+            # 已注册，创建同步 issue
+            gh issue create \
+              --repo shichao402/CursorToolset \
+              --title "[sync] ${{ github.repository }}" \
+              --body "Triggered by release ${{ steps.version.outputs.VERSION }}"
+            echo "✅ 已提交同步请求"
+          fi

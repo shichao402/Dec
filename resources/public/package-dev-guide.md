@@ -22,19 +22,39 @@ my-toolset/
 
 ## 注册表与发布规范
 
+### 自动注册机制
+
+使用推荐的 release workflow 模板，你的包会在首次发布时**自动注册**到 CursorToolset：
+
+1. **首次发布**：workflow 自动创建注册 issue，CI 验证后自动添加到注册表
+2. **后续发布**：workflow 自动创建同步 issue，CI 立即更新版本信息
+
+**无需手动操作**，完全自动化。
+
 ### 注册表格式
 
-包在 CursorToolset 注册表中只需提供仓库地址：
+注册表包含完整的包元信息（由 CI 自动同步）：
 
 ```json
 {
-  "repository": "https://github.com/USERNAME/my-toolset"
+  "version": "4",
+  "updated_at": "2024-12-07T10:00:00Z",
+  "packages": [
+    {
+      "repository": "https://github.com/USERNAME/my-toolset",
+      "name": "my-toolset",
+      "version": "1.0.0",
+      "description": "包描述",
+      "dist": {
+        "tarball": "my-toolset-1.0.0.tar.gz",
+        "sha256": "..."
+      }
+    }
+  ]
 }
 ```
 
-管理工具会自动组装 URL 获取包信息：
-- 最新版本：`https://github.com/{repo}/releases/latest/download/package.json`
-- 特定版本：`https://github.com/{repo}/releases/download/v1.0.0/package.json`
+用户执行 `cursortoolset update` 时只需下载一次注册表，即可获取所有包的最新信息。
 
 ### 发布产物结构
 
@@ -260,7 +280,9 @@ cursortoolset release --dry-run
 cursortoolset init my-toolset
 ```
 
-配置好后，`cursortoolset release` 推送 tag 后，GitHub Actions 会自动创建 Release 并上传文件。
+配置好后，`cursortoolset release` 推送 tag 后，GitHub Actions 会自动：
+1. 创建 Release 并上传文件
+2. 自动注册到 CursorToolset（首次发布）或同步版本信息（后续发布）
 
 ---
 

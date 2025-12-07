@@ -8,13 +8,18 @@
 ## [Unreleased]
 
 ### Added
-- 待添加的新功能
+- 新增自动注册机制：包开发者发布时自动注册到 CursorToolset
+- 新增 `auto-register.yml` workflow 处理 `[auto-register]` issue
+- 新增 `sync-registry.yml` workflow 支持定时同步和 `[sync]` issue 触发
+- Registry 新格式：包含完整包元信息，用户更新只需 1 次请求
 
 ### Changed
-- 待变更的内容
+- Registry 格式升级到 v4，包含 name/version/description/dist 等完整信息
+- `registry.go` 简化：从 registry 直接构建 manifest 缓存，无需逐个下载
+- 更新 `release-workflow-template.yml`：自动注册/同步到 CursorToolset
 
-### Fixed
-- 待修复的问题
+### Improved
+- 用户 `update` 性能大幅提升：从 N 次请求减少到 1 次
 
 ## [1.5.9] - 2024-12-07
 

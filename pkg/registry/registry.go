@@ -50,23 +50,10 @@ func (m *Manager) Update() error {
 		return fmt.Errorf("加载 registry 失败: %w", err)
 	}
 
-	// 更新所有包的 manifest 缓存
-	fmt.Println("🔄 更新包信息...")
-	for _, item := range m.registry.Packages {
-		repoName := item.GetRepoName()
-		if err := m.updateManifest(item); err != nil {
-			fmt.Printf("  ⚠️  更新 %s 失败: %v\n", repoName, err)
-			continue
-		}
-		// 显示实际包名
-		if manifest := m.GetManifestByRepo(repoName); manifest != nil {
-			fmt.Printf("  ✅ %s\n", manifest.Name)
-		} else {
-			fmt.Printf("  ✅ %s\n", repoName)
-		}
-	}
+	// 从 registry 构建 manifest 缓存（新格式已包含完整信息）
+	m.buildManifestsFromRegistry()
 
-	fmt.Println("✅ 包索引更新完成")
+	fmt.Printf("✅ 包索引更新完成，共 %d 个包\n", len(m.registry.Packages))
 	return nil
 }
 
@@ -75,7 +62,9 @@ func (m *Manager) Load() error {
 	if err := m.loadRegistry(); err != nil {
 		return err
 	}
-	return m.loadManifests()
+	// 从 registry 构建 manifest 缓存
+	m.buildManifestsFromRegistry()
+	return nil
 }
 
 // loadRegistry 加载本地 registry
@@ -90,7 +79,7 @@ func (m *Manager) loadRegistry() error {
 		if os.IsNotExist(err) {
 			// 首次使用，返回空 registry
 			m.registry = &types.Registry{
-				Version:  "1",
+				Version:  "4",
 				Packages: []types.RegistryItem{},
 			}
 			return nil
@@ -107,7 +96,49 @@ func (m *Manager) loadRegistry() error {
 	return nil
 }
 
-// loadManifests 加载所有缓存的 manifest
+// buildManifestsFromRegistry 从 registry 构建 manifest 缓存
+// 新格式的 registry 已包含完整的包信息，无需额外下载
+func (m *Manager) buildManifestsFromRegistry() {
+	if m.registry == nil {
+		return
+	}
+
+	for _, item := range m.registry.Packages {
+		// 跳过没有完整信息的条目（旧格式兼容）
+		if item.Name == "" {
+			continue
+		}
+
+		// 处理相对路径的 tarball URL
+		tarball := item.Dist.Tarball
+		if tarball != "" && !strings.HasPrefix(tarball, "http") {
+			tarball = m.resolveTarballURL(item, tarball, item.Version)
+		}
+
+		manifest := types.Manifest{
+			Name:        item.Name,
+			Version:     item.Version,
+			Description: item.Description,
+			Author:      item.Author,
+			Repository: types.Repository{
+				Type: "git",
+				URL:  item.Repository,
+			},
+			Dist: types.Distribution{
+				Tarball: tarball,
+				SHA256:  item.Dist.SHA256,
+				Size:    item.Dist.Size,
+			},
+		}
+
+		m.manifests[item.Name] = &types.CachedManifest{
+			Manifest: manifest,
+			CachedAt: m.registry.UpdatedAt,
+		}
+	}
+}
+
+// loadManifests 加载所有缓存的 manifest（保留用于兼容旧数据）
 func (m *Manager) loadManifests() error {
 	if m.registry == nil {
 		return nil
@@ -135,81 +166,6 @@ func (m *Manager) loadManifests() error {
 	}
 
 	return nil
-}
-
-// updateManifest 更新单个包的 manifest 缓存
-func (m *Manager) updateManifest(item types.RegistryItem) error {
-	repoName := item.GetRepoName()
-	manifestPath, err := paths.GetManifestPath(repoName)
-	if err != nil {
-		return err
-	}
-
-	// 获取 manifest URL
-	manifestURL := m.getManifestURL(item)
-	if manifestURL == "" {
-		return fmt.Errorf("无法确定 manifest URL")
-	}
-
-	// 下载 manifest
-	m.downloader.SetShowProgress(false)
-	if err := m.downloader.DownloadFile(manifestURL, manifestPath+".tmp"); err != nil {
-		return err
-	}
-
-	// 解析 manifest
-	data, err := os.ReadFile(manifestPath + ".tmp")
-	if err != nil {
-		return err
-	}
-
-	var manifest types.Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		_ = os.Remove(manifestPath + ".tmp")
-		return fmt.Errorf("解析 manifest 失败: %w", err)
-	}
-
-	// 处理相对路径的 tarball URL
-	if manifest.Dist.Tarball != "" && !strings.HasPrefix(manifest.Dist.Tarball, "http") {
-		// tarball 是相对路径，需要组装完整 URL
-		manifest.Dist.Tarball = m.resolveTarballURL(item, manifest.Dist.Tarball, manifest.Version)
-	}
-
-	// 创建带缓存时间的 manifest
-	cached := types.CachedManifest{
-		Manifest: manifest,
-		CachedAt: time.Now().Format(time.RFC3339),
-	}
-
-	// 保存缓存
-	cachedData, err := json.MarshalIndent(cached, "", "  ")
-	if err != nil {
-		_ = os.Remove(manifestPath + ".tmp")
-		return err
-	}
-
-	if err := os.WriteFile(manifestPath, cachedData, 0644); err != nil {
-		_ = os.Remove(manifestPath + ".tmp")
-		return err
-	}
-
-	_ = os.Remove(manifestPath + ".tmp")
-	// 使用实际包名作为 key
-	m.manifests[manifest.Name] = &cached
-	return nil
-}
-
-// getManifestURL 获取包的 manifest URL
-// 从 repository 组装 GitHub Releases URL
-func (m *Manager) getManifestURL(item types.RegistryItem) string {
-	if item.Repository == "" {
-		return ""
-	}
-	// https://github.com/user/repo -> https://github.com/user/repo/releases/latest/download/package.json
-	repoURL := strings.TrimSuffix(item.Repository, "/")
-	repoURL = strings.TrimSuffix(repoURL, ".git")
-	// 添加时间戳参数绕过 CDN 缓存
-	return fmt.Sprintf("%s/releases/latest/download/package.json?t=%d", repoURL, time.Now().Unix())
 }
 
 // resolveTarballURL 解析 tarball 的完整 URL

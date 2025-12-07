@@ -123,6 +123,8 @@ git push origin v1.4.3
 | `build.yml` | `test-v*` tag | 构建测试，发布到 ReleaseTest 分支 |
 | `release.yml` | `v*` tag | 从 test 下载产物，发布到 ReleaseLatest 分支 |
 | `release-registry.yml` | registry.json 变更 | 发布包索引 |
+| `auto-register.yml` | `[auto-register]` issue | 验证并注册新包 |
+| `sync-registry.yml` | 定时/`[sync]` issue/手动 | 同步包信息到注册表 |
 
 **注意：** 推送到 `build` 分支不会触发任何构建！必须使用 tag 触发。
 
@@ -149,19 +151,36 @@ git push origin v1.4.3
 
 ## 发布包索引
 
-当 `config/registry.json` 变更时，需要发布新的包索引：
+Registry 采用自动同步机制：
+
+### 自动同步
+
+1. **定时同步**：每小时自动同步所有包的最新信息
+2. **Issue 触发**：包开发者发布时自动创建 `[sync]` issue 触发立即同步
+3. **手动触发**：可在 GitHub Actions 页面手动触发 `sync-registry.yml`
+
+### 新包注册
+
+新包通过 `[auto-register]` issue 自动注册：
+
+1. 包开发者使用推荐的 release workflow 模板
+2. 首次发布时自动创建 `[auto-register]` issue
+3. CI 验证包的有效性后自动添加到注册表
+
+### 手动管理（维护者）
 
 ```bash
-# 修改 registry.json
-vim config/registry.json
+# 添加包到 registry
+cursortoolset registry add https://github.com/user/repo
 
-# 提交
-git add config/registry.json
-git commit -m "registry: add new-package"
-git push origin main
+# 移除包
+cursortoolset registry remove package-name
+
+# 导出 registry
+cursortoolset registry export > registry.json
 ```
 
-CI 会自动发布到 `registry` Release。
+修改 `config/registry.json` 后提交，CI 会自动发布到 `registry` Release。
 
 ## 回滚
 

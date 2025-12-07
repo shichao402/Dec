@@ -8,14 +8,20 @@ import "strings"
 
 // Registry 表示包注册表（发布在 GitHub Release 中）
 type Registry struct {
-	Version  string         `json:"version"`  // Registry 格式版本
-	Packages []RegistryItem `json:"packages"` // 包列表
+	Version   string         `json:"version"`              // Registry 格式版本
+	UpdatedAt string         `json:"updated_at,omitempty"` // 最后更新时间
+	Packages  []RegistryItem `json:"packages"`             // 包列表
 }
 
-// RegistryItem 表示注册表中的包条目（最小信息）
-// 只包含 repository，包名从下载的 manifest 获取
+// RegistryItem 表示注册表中的包条目
+// 包含完整的包元信息，由 CI 自动同步
 type RegistryItem struct {
-	Repository string `json:"repository"` // 仓库地址（如 https://github.com/user/repo）
+	Repository  string       `json:"repository"`            // 仓库地址（如 https://github.com/user/repo）
+	Name        string       `json:"name,omitempty"`        // 包名
+	Version     string       `json:"version,omitempty"`     // 当前版本
+	Description string       `json:"description,omitempty"` // 描述
+	Author      string       `json:"author,omitempty"`      // 作者
+	Dist        Distribution `json:"dist,omitempty"`        // 分发信息
 }
 
 // GetRepoName 从 repository URL 提取仓库名作为标识符

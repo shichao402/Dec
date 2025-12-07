@@ -247,38 +247,53 @@ mytool-helper process
    - 创建 tag: `git tag v1.0.0`
    - 上传 tarball 到 Release
 
-4. **提交到 Registry**
-   - Fork CursorToolset 仓库
-   - 编辑 `registry.json` 添加你的包
-   - 提交 PR
+4. **提交到 Registry（自动）**
+   - 使用推荐的 release workflow 模板
+   - 发布时自动注册/同步到 CursorToolset
 
 详细指南请查看 [包开发指南](resources/public/package-dev-guide.md)
 
 ## Registry
 
-Registry 是包的索引文件，托管在 GitHub Release 中：
+Registry 是包的索引文件，托管在 GitHub Release 中。新版本采用预构建索引，用户更新时只需 **1 次请求**：
 
 ```json
 {
-  "version": "1",
+  "version": "4",
+  "updated_at": "2024-12-07T10:00:00Z",
   "packages": [
     {
-      "name": "github-action-toolset",
-      "repository": "https://github.com/..."
+      "repository": "https://github.com/user/my-toolset",
+      "name": "my-toolset",
+      "version": "1.0.0",
+      "description": "包描述",
+      "dist": {
+        "tarball": "my-toolset-1.0.0.tar.gz",
+        "sha256": "..."
+      }
     }
   ]
 }
 ```
 
-管理器通过以下流程获取包：
+### 自动注册机制
+
+包开发者使用推荐的 release workflow 模板，发布时会**自动注册**到 CursorToolset：
+
+1. **首次发布**：自动创建注册 issue → CI 验证 → 添加到注册表
+2. **后续发布**：自动创建同步 issue → CI 立即更新版本信息
+3. **定时同步**：每小时自动同步所有包的最新信息
+
+**无需手动操作**，完全自动化。
+
+### 安装流程
 
 ```
-1. 下载 registry.json（从 GitHub Release）
-2. 获取包的 manifestUrl
-3. 下载 package.json（manifest）
-4. 从 manifest.dist.tarball 下载包
-5. 验证 SHA256
-6. 解压到本地
+1. 下载 registry.json（1 次请求，包含所有包信息）
+2. 本地比对版本，确定需要更新的包
+3. 从 dist.tarball 下载包
+4. 验证 SHA256
+5. 解压到本地
 ```
 
 ## 环境变量
