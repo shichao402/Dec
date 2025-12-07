@@ -168,7 +168,7 @@ git push origin v1.0.0
 # 更新 package.json 中的 dist.tarball 地址
 ```
 
-详见 [包开发指南](docs/public/package-dev-guide.md)
+详见 [包开发指南](resources/public/package-dev-guide.md)
 
 ### package.json 规范
 
@@ -228,7 +228,7 @@ mytool --help
 mytool-helper process
 ```
 
-详见 [包开发指南](docs/public/package-dev-guide.md)
+详见 [包开发指南](resources/public/package-dev-guide.md)
 
 ### 发布包
 
@@ -252,7 +252,7 @@ mytool-helper process
    - 编辑 `registry.json` 添加你的包
    - 提交 PR
 
-详细指南请查看 [包开发指南](docs/public/package-dev-guide.md)
+详细指南请查看 [包开发指南](resources/public/package-dev-guide.md)
 
 ## Registry
 
@@ -300,8 +300,8 @@ go build -o cursortoolset .
 详细文档请查看 [Documents/](Documents/) 目录。
 
 ### 包开发文档
-- [包开发指南](docs/public/package-dev-guide.md) - 创建和发布工具集包
-- [配置示例](docs/public/examples/README.md) - 各种配置示例
+- [包开发指南](resources/public/package-dev-guide.md) - 创建和发布工具集包
+- [配置示例](resources/public/examples/README.md) - 各种配置示例
 
 ### 开发者文档
 - [架构设计](Documents/design/architecture/ARCHITECTURE.md) - 系统架构和设计理念

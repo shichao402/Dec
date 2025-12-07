@@ -40,9 +40,9 @@ logs/
 # 测试环境
 .test-install/
 
-# 临时文档
-docs/temp/*
-!docs/temp/.gitkeep
+# 临时文件
+resources/temp/*
+!resources/temp/.gitkeep
 
 # 临时脚本目录
 scripts/temp/*

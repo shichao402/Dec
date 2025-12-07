@@ -61,7 +61,7 @@ func syncDocs(version string) error {
 	}
 
 	cfg := config.GetSystemConfig()
-	baseURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/docs/public",
+	baseURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/resources/public",
 		cfg.RepoOwner, cfg.RepoName, version)
 
 	for _, filename := range docFiles {
