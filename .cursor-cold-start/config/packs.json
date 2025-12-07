@@ -1,0 +1,24 @@
+{
+  "$schema": "功能包配置 - 运行 coldstart list packs 查看可用功能包",
+  "cursortoolset": {
+    "enabled": false
+  },
+  "documentation": {
+    "enabled": true
+  },
+  "github-actions": {
+    "enabled": true
+  },
+  "logging": {
+    "enabled": false
+  },
+  "update-module": {
+    "enabled": false
+  },
+  "version-management": {
+    "enabled": true,
+    "config": {
+      "sourceFile": "version.json"
+    }
+  }
+}

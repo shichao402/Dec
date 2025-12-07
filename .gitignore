@@ -44,4 +44,12 @@ logs/
 docs/temp/*
 !docs/temp/.gitkeep
 
+# 临时脚本目录
+scripts/temp/*
+!scripts/temp/.gitkeep
+
+# Documents 临时文档（如果使用 Documents 目录）
+Documents/temp/*
+!Documents/temp/.gitkeep
+
 

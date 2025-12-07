@@ -168,7 +168,7 @@ git push origin v1.0.0
 # 更新 package.json 中的 dist.tarball 地址
 ```
 
-详见：[标准化打包文档](docs/PACK_FEATURE.md) 📚
+详见 [包开发指南](docs/public/package-dev-guide.md)
 
 ### package.json 规范
 
@@ -228,7 +228,7 @@ mytool --help
 mytool-helper process
 ```
 
-详见 [Bin 功能文档](docs/BIN_FEATURE.md)
+详见 [包开发指南](docs/public/package-dev-guide.md)
 
 ### 发布包
 
@@ -252,7 +252,7 @@ mytool-helper process
    - 编辑 `registry.json` 添加你的包
    - 提交 PR
 
-详细指南请查看 [PACKAGE_DEV.md](./PACKAGE_DEV.md)
+详细指南请查看 [包开发指南](docs/public/package-dev-guide.md)
 
 ## Registry
 
@@ -297,20 +297,18 @@ go build -o cursortoolset .
 
 ## 📚 文档
 
-### 用户文档
-- **[使用示例](docs/USAGE_EXAMPLE.md)** - 完整的使用示例和最佳实践 ⭐
-- [安装指南](docs/INSTALL_GUIDE.md) - 详细的安装步骤
+详细文档请查看 [Documents/](Documents/) 目录。
 
 ### 包开发文档
-- [包开发指南](docs/PACKAGE_DEV.md) - 创建和发布工具集包
-- **[标准化打包文档](docs/PACK_FEATURE.md)** - 打包、发布流程 🆕
-- **[Bin 功能文档](docs/BIN_FEATURE.md)** - 可执行程序暴露功能 🆕
-- [配置示例](docs/examples/README.md) - 各种配置示例
+- [包开发指南](docs/public/package-dev-guide.md) - 创建和发布工具集包
+- [配置示例](docs/public/examples/README.md) - 各种配置示例
 
 ### 开发者文档
-- [构建指南](docs/BUILD_GUIDE.md) - 从源码构建
-- [架构设计](docs/ARCHITECTURE.md) - 系统架构和设计理念
-- [测试指南](docs/TESTING.md) - 运行和编写测试
+- [架构设计](Documents/design/architecture/ARCHITECTURE.md) - 系统架构和设计理念
+- [开发指南](Documents/development/setup/DEVELOPMENT.md) - 开发环境和流程
+- [构建指南](Documents/development/deployment/BUILD.md) - 从源码构建
+- [测试指南](Documents/development/testing/TESTING.md) - 运行和编写测试
+- [发布流程](Documents/development/deployment/RELEASE.md) - 版本发布流程
 - [开发规则](.cursor/rules/cursortoolset-development.md) - 项目开发规范
 
 ## 许可证

@@ -1,0 +1,6 @@
+{
+  "$schema": "项目基本信息配置",
+  "name": "CursorToolset",
+  "description": "Cursor 工具集管理器，类似 pip/brew 的包管理工具",
+  "version": "1.5.9"
+}
