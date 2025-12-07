@@ -38,8 +38,17 @@
       }
     },
     {
-      "repository": "https://github.com/shichao402/github-issue-pack"
+      "repository": "https://github.com/shichao402/github-issue-pack",
+      "name": "github-issue-pack",
+      "version": "0.1.4",
+      "description": "标准化的 GitHub Issue 创建与处理工具，支持项目间自动化协作。提供 Issue 打包/解包、状态管理、Gist 存储等功能。",
+      "author": "shichao402",
+      "dist": {
+        "sha256": "4aba9893234d062fffaa831ce21900c3e4213e67f4c7cc8f85ea370df54a3e27",
+        "tarball": "github-issue-pack-0.1.4.tar.gz",
+        "size": 14654910
+      }
     }
   ],
-  "updated_at": "2025-12-07T17:17:38Z"
+  "updated_at": "2025-12-07T17:23:11Z"
 }
