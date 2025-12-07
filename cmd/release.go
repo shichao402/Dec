@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -16,6 +17,7 @@ var (
 	releasePatch   bool
 	releaseDryRun  bool
 	releaseSkipTag bool
+	releaseWait    bool
 )
 
 var releaseCmd = &cobra.Command{
@@ -29,10 +31,14 @@ var releaseCmd = &cobra.Command{
   4. 创建 Git commit 和 tag
   5. 推送到远程仓库
 
+选项：
+  --wait       推送后等待 GitHub Actions 完成并确认 Release 创建成功
+
 示例：
   cursortoolset release              # 发布 patch 版本
   cursortoolset release --minor      # 发布 minor 版本
   cursortoolset release --major      # 发布 major 版本
+  cursortoolset release --wait       # 发布并等待 CI 完成
   cursortoolset release --dry-run    # 预览发布流程，不执行`,
 	RunE: runRelease,
 }
@@ -43,6 +49,7 @@ func init() {
 	releaseCmd.Flags().BoolVar(&releasePatch, "patch", false, "发布补丁版本 (0.0.x)")
 	releaseCmd.Flags().BoolVar(&releaseDryRun, "dry-run", false, "预览模式，不执行实际操作")
 	releaseCmd.Flags().BoolVar(&releaseSkipTag, "skip-tag", false, "跳过 Git tag 和 push")
+	releaseCmd.Flags().BoolVar(&releaseWait, "wait", false, "等待 GitHub Actions 完成并确认 Release 创建")
 	RootCmd.AddCommand(releaseCmd)
 }
 
@@ -159,12 +166,21 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	// 完成
 	fmt.Println("✅ 发布完成！")
 	fmt.Println()
-	fmt.Println("💡 下一步：")
-	fmt.Printf("   1. 在 GitHub 创建 Release (v%s)\n", newVersion)
-	fmt.Printf("   2. 上传 %s 到 Release\n", outputFile)
-	if releaseSkipTag {
-		fmt.Printf("   3. 创建并推送 Git tag:\n")
-		fmt.Printf("      git tag v%s && git push --tags\n", newVersion)
+
+	// --wait 模式：等待 GitHub Actions 完成
+	if releaseWait && !releaseSkipTag {
+		tagName := fmt.Sprintf("v%s", newVersion)
+		if err := waitForRelease(tagName); err != nil {
+			return fmt.Errorf("等待发布完成失败: %w", err)
+		}
+	} else {
+		fmt.Println("💡 下一步：")
+		fmt.Printf("   1. 在 GitHub 创建 Release (v%s)\n", newVersion)
+		fmt.Printf("   2. 上传 %s 到 Release\n", outputFile)
+		if releaseSkipTag {
+			fmt.Printf("   3. 创建并推送 Git tag:\n")
+			fmt.Printf("      git tag v%s && git push --tags\n", newVersion)
+		}
 	}
 
 	return nil
@@ -401,4 +417,192 @@ func gitPushTags() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// waitForRelease 等待 GitHub Actions 完成并确认 Release 创建
+func waitForRelease(tagName string) error {
+	// 检查 gh CLI 是否可用
+	if !isGhAvailable() {
+		return fmt.Errorf("gh CLI 未安装或未认证，请先安装并运行 'gh auth login'")
+	}
+
+	// 获取仓库信息
+	repo, err := getGitRemoteRepo()
+	if err != nil {
+		return fmt.Errorf("获取仓库信息失败: %w", err)
+	}
+
+	fmt.Printf("\n⏳ 等待 GitHub Actions 完成...\n")
+	fmt.Printf("   仓库: %s\n", repo)
+	fmt.Printf("   标签: %s\n", tagName)
+	fmt.Println()
+
+	// 轮询配置
+	const (
+		pollInterval = 10 * time.Second
+		maxWaitTime  = 30 * time.Minute
+	)
+
+	startTime := time.Now()
+	lastStatus := ""
+
+	for {
+		elapsed := time.Since(startTime)
+		if elapsed > maxWaitTime {
+			return fmt.Errorf("等待超时（%v），请手动检查 GitHub Actions 状态", maxWaitTime)
+		}
+
+		// 检查 workflow run 状态
+		status, conclusion, err := getWorkflowRunStatus(repo, tagName)
+		if err != nil {
+			// 可能 workflow 还没开始，继续等待
+			if elapsed < 30*time.Second {
+				fmt.Printf("   ⏳ 等待 workflow 启动... (%v)\n", elapsed.Round(time.Second))
+				time.Sleep(pollInterval)
+				continue
+			}
+			return fmt.Errorf("获取 workflow 状态失败: %w", err)
+		}
+
+		// 状态变化时输出
+		currentStatus := fmt.Sprintf("%s/%s", status, conclusion)
+		if currentStatus != lastStatus {
+			switch status {
+			case "queued":
+				fmt.Printf("   🔄 Workflow 排队中... (%v)\n", elapsed.Round(time.Second))
+			case "in_progress":
+				fmt.Printf("   🔄 Workflow 运行中... (%v)\n", elapsed.Round(time.Second))
+			case "completed":
+				switch conclusion {
+				case "success":
+					fmt.Printf("   ✅ Workflow 完成！\n")
+				case "failure":
+					return fmt.Errorf("workflow 执行失败，请检查 GitHub Actions 日志")
+				case "cancelled":
+					return fmt.Errorf("workflow 被取消")
+				default:
+					return fmt.Errorf("workflow 结束，状态: %s", conclusion)
+				}
+			}
+			lastStatus = currentStatus
+		}
+
+		// workflow 完成后检查 Release
+		if status == "completed" && conclusion == "success" {
+			fmt.Printf("\n⏳ 检查 Release 状态...\n")
+
+			// 等待 Release 创建（可能有延迟）
+			for i := 0; i < 6; i++ {
+				exists, releaseURL, err := checkReleaseExists(repo, tagName)
+				if err != nil {
+					fmt.Printf("   ⚠️  检查 Release 失败: %v\n", err)
+				}
+				if exists {
+					fmt.Printf("   ✅ Release 已创建: %s\n", releaseURL)
+					fmt.Println()
+					fmt.Println("🎉 发布完成！所有步骤已成功执行。")
+					return nil
+				}
+				if i < 5 {
+					fmt.Printf("   ⏳ Release 尚未创建，等待中... (%d/6)\n", i+1)
+					time.Sleep(5 * time.Second)
+				}
+			}
+
+			// Release 未创建，但 workflow 成功
+			fmt.Printf("   ⚠️  Workflow 成功但 Release 未找到\n")
+			fmt.Printf("   💡 请手动检查: https://github.com/%s/releases\n", repo)
+			return nil
+		}
+
+		time.Sleep(pollInterval)
+	}
+}
+
+// isGhAvailable 检查 gh CLI 是否可用
+func isGhAvailable() bool {
+	cmd := exec.Command("gh", "auth", "status")
+	return cmd.Run() == nil
+}
+
+// getGitRemoteRepo 获取 git remote 仓库信息 (owner/repo 格式)
+func getGitRemoteRepo() (string, error) {
+	cmd := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// getWorkflowRunStatus 获取指定 tag 触发的 workflow run 状态
+func getWorkflowRunStatus(repo, tagName string) (status, conclusion string, err error) {
+	// 使用 gh api 查询最近的 workflow runs
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("/repos/%s/actions/runs", repo),
+		"-q", fmt.Sprintf(".workflow_runs[] | select(.head_branch == \"%s\" or .head_branch == \"refs/tags/%s\") | {status: .status, conclusion: .conclusion}", tagName, tagName),
+		"--paginate",
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		// 尝试用 event=push 过滤
+		cmd = exec.Command("gh", "run", "list",
+			"--repo", repo,
+			"--branch", tagName,
+			"--json", "status,conclusion",
+			"--limit", "1",
+		)
+		output, err = cmd.Output()
+		if err != nil {
+			return "", "", err
+		}
+	}
+
+	outputStr := strings.TrimSpace(string(output))
+	if outputStr == "" || outputStr == "[]" {
+		return "", "", fmt.Errorf("未找到相关的 workflow run")
+	}
+
+	// 解析 JSON
+	var runs []struct {
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+	}
+
+	// 处理可能的多行 JSON 或数组
+	if strings.HasPrefix(outputStr, "[") {
+		if err := json.Unmarshal([]byte(outputStr), &runs); err != nil {
+			return "", "", fmt.Errorf("解析 workflow 状态失败: %w", err)
+		}
+	} else {
+		// 单个 JSON 对象
+		var run struct {
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+		}
+		if err := json.Unmarshal([]byte(outputStr), &run); err != nil {
+			return "", "", fmt.Errorf("解析 workflow 状态失败: %w", err)
+		}
+		runs = append(runs, run)
+	}
+
+	if len(runs) == 0 {
+		return "", "", fmt.Errorf("未找到相关的 workflow run")
+	}
+
+	return runs[0].Status, runs[0].Conclusion, nil
+}
+
+// checkReleaseExists 检查 Release 是否存在
+func checkReleaseExists(repo, tagName string) (exists bool, url string, err error) {
+	cmd := exec.Command("gh", "release", "view", tagName,
+		"--repo", repo,
+		"--json", "url",
+		"-q", ".url",
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return false, "", nil // Release 不存在
+	}
+	return true, strings.TrimSpace(string(output)), nil
 }

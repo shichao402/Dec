@@ -14,7 +14,88 @@
 2. **代码先提交到 main** - tag 基于 main 分支创建
 3. **必须通过测试** - 运行 `./scripts/run-tests.sh`
 
-## 发布步骤
+## 快速发布（推荐）
+
+使用 `cursortoolset release` 命令自动化发布流程：
+
+```bash
+# 发布 patch 版本并等待 CI 完成
+cursortoolset release --wait
+
+# 发布 minor 版本并等待
+cursortoolset release --minor --wait
+
+# 发布 major 版本并等待
+cursortoolset release --major --wait
+
+# 预览发布流程（不执行）
+cursortoolset release --dry-run
+```
+
+### release 命令说明
+
+`cursortoolset release` 自动完成以下步骤：
+
+1. 提升版本号（默认 patch）
+2. 打包并计算 SHA256
+3. 更新 package.json
+4. 创建 Git commit 和 tag
+5. 推送到远程仓库
+6. （可选）等待 GitHub Actions 完成
+
+**选项：**
+
+| 选项 | 说明 |
+|------|------|
+| `--major` | 发布主版本 (x.0.0) |
+| `--minor` | 发布次版本 (0.x.0) |
+| `--patch` | 发布补丁版本 (0.0.x)，默认 |
+| `--wait` | 等待 GitHub Actions 完成并确认 Release 创建 |
+| `--dry-run` | 预览模式，不执行实际操作 |
+| `--skip-tag` | 跳过 Git tag 和 push |
+
+### --wait 功能
+
+`--wait` 选项会在推送 tag 后自动轮询状态：
+
+```bash
+cursortoolset release --wait
+```
+
+输出示例：
+```
+🚀 发布 my-package
+   版本: 1.0.0 -> 1.0.1
+
+📝 Step 1: 更新版本号
+   ✅ package.json 版本已更新为 1.0.1
+
+📦 Step 2: 打包
+   ...
+
+✅ 发布完成！
+
+⏳ 等待 GitHub Actions 完成...
+   仓库: owner/repo
+   标签: v1.0.1
+
+   🔄 Workflow 排队中... (5s)
+   🔄 Workflow 运行中... (15s)
+   ✅ Workflow 完成！
+
+⏳ 检查 Release 状态...
+   ✅ Release 已创建: https://github.com/owner/repo/releases/tag/v1.0.1
+
+🎉 发布完成！所有步骤已成功执行。
+```
+
+**技术说明：**
+- 使用 `gh` CLI 查询 GitHub API（自动使用认证 token，避免 API 限流）
+- 轮询间隔：10 秒
+- 超时时间：30 分钟
+- 需要先安装并认证 `gh` CLI：`gh auth login`
+
+## 手动发布步骤
 
 ### 1. 完成开发并测试
 

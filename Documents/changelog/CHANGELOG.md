@@ -8,6 +8,10 @@
 ## [Unreleased]
 
 ### Added
+- 新增 `release --wait` 选项：发布后自动等待 GitHub Actions 完成并确认 Release 创建
+  - 使用 `gh` CLI 查询状态，避免 API 限流
+  - 实时输出 workflow 状态（排队中/运行中/完成）
+  - 支持超时控制（30分钟）
 - 新增自动注册机制：包开发者发布时自动注册到 CursorToolset
 - 新增 `auto-register.yml` workflow 处理 `[auto-register]` issue
 - 新增 `sync-registry.yml` workflow 支持定时同步和 `[sync]` issue 触发
