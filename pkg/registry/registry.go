@@ -138,36 +138,6 @@ func (m *Manager) buildManifestsFromRegistry() {
 	}
 }
 
-// loadManifests 加载所有缓存的 manifest（保留用于兼容旧数据）
-func (m *Manager) loadManifests() error {
-	if m.registry == nil {
-		return nil
-	}
-
-	for _, item := range m.registry.Packages {
-		repoName := item.GetRepoName()
-		manifestPath, err := paths.GetManifestPath(repoName)
-		if err != nil {
-			continue
-		}
-
-		data, err := os.ReadFile(manifestPath)
-		if err != nil {
-			continue
-		}
-
-		var cached types.CachedManifest
-		if err := json.Unmarshal(data, &cached); err != nil {
-			continue
-		}
-
-		// 使用实际包名作为 key
-		m.manifests[cached.Name] = &cached
-	}
-
-	return nil
-}
-
 // resolveTarballURL 解析 tarball 的完整 URL
 // 如果 tarball 是相对路径，根据 repository 组装完整 URL
 func (m *Manager) resolveTarballURL(item types.RegistryItem, tarball string, version string) string {
