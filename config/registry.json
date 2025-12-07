@@ -1,16 +1,13 @@
 {
-  "version": "2",
+  "version": "3",
   "packages": [
     {
-      "name": "github-action-toolset",
       "repository": "https://github.com/shichao402/GithubActionAISelfBuilder"
     },
     {
-      "name": "test-package",
       "repository": "https://github.com/shichao402/cursortoolset-test-package"
     },
     {
-      "name": "cursor-cold-start",
       "repository": "https://github.com/shichao402/CursorColdStart"
     }
   ]

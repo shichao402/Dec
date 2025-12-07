@@ -53,11 +53,17 @@ func (m *Manager) Update() error {
 	// 更新所有包的 manifest 缓存
 	fmt.Println("🔄 更新包信息...")
 	for _, item := range m.registry.Packages {
+		repoName := item.GetRepoName()
 		if err := m.updateManifest(item); err != nil {
-			fmt.Printf("  ⚠️  更新 %s 失败: %v\n", item.Name, err)
+			fmt.Printf("  ⚠️  更新 %s 失败: %v\n", repoName, err)
 			continue
 		}
-		fmt.Printf("  ✅ %s\n", item.Name)
+		// 显示实际包名
+		if manifest := m.GetManifestByRepo(repoName); manifest != nil {
+			fmt.Printf("  ✅ %s\n", manifest.Name)
+		} else {
+			fmt.Printf("  ✅ %s\n", repoName)
+		}
 	}
 
 	fmt.Println("✅ 包索引更新完成")
@@ -108,7 +114,8 @@ func (m *Manager) loadManifests() error {
 	}
 
 	for _, item := range m.registry.Packages {
-		manifestPath, err := paths.GetManifestPath(item.Name)
+		repoName := item.GetRepoName()
+		manifestPath, err := paths.GetManifestPath(repoName)
 		if err != nil {
 			continue
 		}
@@ -123,7 +130,8 @@ func (m *Manager) loadManifests() error {
 			continue
 		}
 
-		m.manifests[item.Name] = &cached
+		// 使用实际包名作为 key
+		m.manifests[cached.Name] = &cached
 	}
 
 	return nil
@@ -131,7 +139,8 @@ func (m *Manager) loadManifests() error {
 
 // updateManifest 更新单个包的 manifest 缓存
 func (m *Manager) updateManifest(item types.RegistryItem) error {
-	manifestPath, err := paths.GetManifestPath(item.Name)
+	repoName := item.GetRepoName()
+	manifestPath, err := paths.GetManifestPath(repoName)
 	if err != nil {
 		return err
 	}
@@ -185,7 +194,8 @@ func (m *Manager) updateManifest(item types.RegistryItem) error {
 	}
 
 	_ = os.Remove(manifestPath + ".tmp")
-	m.manifests[item.Name] = &cached
+	// 使用实际包名作为 key
+	m.manifests[manifest.Name] = &cached
 	return nil
 }
 
@@ -223,6 +233,18 @@ func (m *Manager) GetRegistry() *types.Registry {
 func (m *Manager) GetManifest(packageName string) *types.Manifest {
 	if cached, ok := m.manifests[packageName]; ok {
 		return &cached.Manifest
+	}
+	return nil
+}
+
+// GetManifestByRepo 根据仓库名查找 manifest
+func (m *Manager) GetManifestByRepo(repoName string) *types.Manifest {
+	// 遍历所有 manifest，找到匹配的
+	for _, cached := range m.manifests {
+		// 检查是否是通过这个仓库安装的
+		if cached.Repository.URL != "" && strings.Contains(cached.Repository.URL, repoName) {
+			return &cached.Manifest
+		}
 	}
 	return nil
 }
@@ -305,46 +327,63 @@ func (m *Manager) HasLocalCache() bool {
 // ========================================
 
 // AddPackage 添加包到 registry（用于发布）
-func (m *Manager) AddPackage(name, repository string) error {
+// 只需要 repository，包名从 manifest 获取
+func (m *Manager) AddPackage(repository string) error {
 	if m.registry == nil {
 		m.registry = &types.Registry{
-			Version:  "2",
+			Version:  "3",
 			Packages: []types.RegistryItem{},
 		}
 	}
 
+	// 规范化 repository URL
+	repository = strings.TrimSuffix(repository, "/")
+	repository = strings.TrimSuffix(repository, ".git")
+
 	// 检查是否已存在
-	for i, item := range m.registry.Packages {
-		if item.Name == name {
-			// 更新
-			m.registry.Packages[i].Repository = repository
-			return m.saveRegistry()
+	for _, item := range m.registry.Packages {
+		existingRepo := strings.TrimSuffix(item.Repository, "/")
+		existingRepo = strings.TrimSuffix(existingRepo, ".git")
+		if existingRepo == repository {
+			return fmt.Errorf("仓库已存在: %s", repository)
 		}
 	}
 
 	// 添加新包
 	m.registry.Packages = append(m.registry.Packages, types.RegistryItem{
-		Name:       name,
 		Repository: repository,
 	})
 
 	return m.saveRegistry()
 }
 
-// RemovePackage 从 registry 移除包
-func (m *Manager) RemovePackage(name string) error {
+// RemovePackage 从 registry 移除包（通过仓库地址或包名）
+func (m *Manager) RemovePackage(identifier string) error {
 	if m.registry == nil {
 		return nil
 	}
 
 	for i, item := range m.registry.Packages {
-		if item.Name == name {
+		repoName := item.GetRepoName()
+		// 匹配仓库名或完整 URL
+		if repoName == identifier || item.Repository == identifier || strings.Contains(item.Repository, identifier) {
 			m.registry.Packages = append(m.registry.Packages[:i], m.registry.Packages[i+1:]...)
 			return m.saveRegistry()
 		}
 	}
 
-	return nil
+	// 也尝试通过包名匹配
+	if manifest := m.FindPackage(identifier); manifest != nil {
+		// 找到对应的 registry item
+		for i, item := range m.registry.Packages {
+			if m.GetManifestByRepo(item.GetRepoName()) == manifest {
+				m.registry.Packages = append(m.registry.Packages[:i], m.registry.Packages[i+1:]...)
+				return m.saveRegistry()
+			}
+		}
+	}
+
+	return fmt.Errorf("未找到: %s", identifier)
 }
 
 // saveRegistry 保存 registry 到本地

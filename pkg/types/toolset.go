@@ -1,5 +1,7 @@
 package types
 
+import "strings"
+
 // ========================================
 // Registry 相关类型（包索引）
 // ========================================
@@ -11,9 +13,23 @@ type Registry struct {
 }
 
 // RegistryItem 表示注册表中的包条目（最小信息）
+// 只包含 repository，包名从下载的 manifest 获取
 type RegistryItem struct {
-	Name       string `json:"name"`       // 包名（唯一标识）
 	Repository string `json:"repository"` // 仓库地址（如 https://github.com/user/repo）
+}
+
+// GetRepoName 从 repository URL 提取仓库名作为标识符
+func (r RegistryItem) GetRepoName() string {
+	// https://github.com/user/repo -> repo
+	// https://github.com/user/repo.git -> repo
+	repo := r.Repository
+	repo = strings.TrimSuffix(repo, "/")
+	repo = strings.TrimSuffix(repo, ".git")
+	parts := strings.Split(repo, "/")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return ""
 }
 
 // ========================================

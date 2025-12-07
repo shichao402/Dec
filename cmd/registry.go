@@ -40,12 +40,8 @@ var registryUpdateCmd = &cobra.Command{
 	},
 }
 
-var (
-	registryAddRepository string
-)
-
 var registryAddCmd = &cobra.Command{
-	Use:   "add <package-name>",
+	Use:   "add <repository-url>",
 	Short: "添加包到 registry",
 	Long: `添加一个新包到本地 registry。
 
@@ -53,14 +49,10 @@ var registryAddCmd = &cobra.Command{
 添加后需要发布 registry 到 GitHub Release。
 
 示例：
-  cursortoolset registry add my-toolset --repository https://github.com/user/my-toolset`,
+  cursortoolset registry add https://github.com/user/my-toolset`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		packageName := args[0]
-
-		if registryAddRepository == "" {
-			return fmt.Errorf("必须指定 --repository")
-		}
+		repository := args[0]
 
 		// 确保目录结构存在
 		if err := paths.EnsureAllDirs(); err != nil {
@@ -72,11 +64,11 @@ var registryAddCmd = &cobra.Command{
 			return fmt.Errorf("加载 registry 失败: %w", err)
 		}
 
-		if err := mgr.AddPackage(packageName, registryAddRepository); err != nil {
+		if err := mgr.AddPackage(repository); err != nil {
 			return fmt.Errorf("添加包失败: %w", err)
 		}
 
-		fmt.Printf("✅ 已添加包 %s 到 registry\n", packageName)
+		fmt.Printf("✅ 已添加仓库 %s 到 registry\n", repository)
 		fmt.Println("\n下一步：")
 		fmt.Println("  1. 运行 'cursortoolset registry export' 导出 registry")
 		fmt.Println("  2. 将导出的 JSON 发布到 GitHub Release")
@@ -86,26 +78,28 @@ var registryAddCmd = &cobra.Command{
 }
 
 var registryRemoveCmd = &cobra.Command{
-	Use:   "remove <package-name>",
+	Use:   "remove <repository-or-package-name>",
 	Short: "从 registry 移除包",
 	Long: `从本地 registry 移除一个包。
 
 这个命令用于 registry 维护者移除包。
-移除后需要重新发布 registry 到 GitHub Release。`,
+移除后需要重新发布 registry 到 GitHub Release。
+
+可以使用仓库 URL、仓库名或包名来指定要移除的包。`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		packageName := args[0]
+		identifier := args[0]
 
 		mgr := registry.NewManager()
 		if err := mgr.Load(); err != nil {
 			return fmt.Errorf("加载 registry 失败: %w", err)
 		}
 
-		if err := mgr.RemovePackage(packageName); err != nil {
+		if err := mgr.RemovePackage(identifier); err != nil {
 			return fmt.Errorf("移除包失败: %w", err)
 		}
 
-		fmt.Printf("✅ 已从 registry 移除包 %s\n", packageName)
+		fmt.Printf("✅ 已从 registry 移除: %s\n", identifier)
 		return nil
 	},
 }
@@ -150,13 +144,12 @@ var registryListCmd = &cobra.Command{
 
 		fmt.Printf("📦 Registry 中有 %d 个包:\n\n", len(packages))
 		for i, item := range packages {
-			fmt.Printf("%d. %s\n", i+1, item.Name)
-			if item.Repository != "" {
-				fmt.Printf("   仓库: %s\n", item.Repository)
-			}
+			repoName := item.GetRepoName()
+			fmt.Printf("%d. %s\n", i+1, item.Repository)
 
 			// 显示缓存的 manifest 信息
-			if manifest := mgr.FindPackage(item.Name); manifest != nil {
+			if manifest := mgr.GetManifestByRepo(repoName); manifest != nil {
+				fmt.Printf("   包名: %s\n", manifest.Name)
 				if manifest.DisplayName != "" {
 					fmt.Printf("   名称: %s\n", manifest.DisplayName)
 				}
@@ -184,9 +177,6 @@ func init() {
 	registryCmd.AddCommand(registryRemoveCmd)
 	registryCmd.AddCommand(registryExportCmd)
 	registryCmd.AddCommand(registryListCmd)
-
-	// 添加 flags
-	registryAddCmd.Flags().StringVar(&registryAddRepository, "repository", "", "包的 GitHub 仓库地址（必需）")
 
 	// 添加到根命令
 	RootCmd.AddCommand(registryCmd)

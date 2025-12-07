@@ -314,27 +314,26 @@ func updateInstalledPackages() error {
 	failed := 0
 
 	for _, item := range packages {
-		// 检查是否已安装
-		if !inst.IsInstalled(item.Name) {
+		repoName := item.GetRepoName()
+		manifest := mgr.GetManifestByRepo(repoName)
+		if manifest == nil {
 			continue
 		}
 
-		manifest := mgr.FindPackage(item.Name)
-		if manifest == nil {
-			fmt.Printf("  ⚠️  跳过 %s: 无法获取包信息\n", item.Name)
-			skipped++
+		// 检查是否已安装
+		if !inst.IsInstalled(manifest.Name) {
 			continue
 		}
 
 		// 检查版本
-		installedVer, _ := inst.GetInstalledVersion(item.Name)
+		installedVer, _ := inst.GetInstalledVersion(manifest.Name)
 		if installedVer == manifest.Version {
-			fmt.Printf("  ✅ %s@%s 已是最新\n", item.Name, manifest.Version)
+			fmt.Printf("  ✅ %s@%s 已是最新\n", manifest.Name, manifest.Version)
 			skipped++
 			continue
 		}
 
-		fmt.Printf("  🔄 更新 %s -> %s\n", item.Name, manifest.Version)
+		fmt.Printf("  🔄 更新 %s -> %s\n", manifest.Name, manifest.Version)
 		if err := inst.Install(manifest); err != nil {
 			fmt.Printf("  ❌ 更新失败: %v\n", err)
 			failed++
