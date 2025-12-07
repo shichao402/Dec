@@ -38,8 +38,10 @@ func (m *Manager) Update() error {
 		return fmt.Errorf("获取 registry 路径失败: %w", err)
 	}
 
+	// 添加时间戳绕过 CDN 缓存
+	registryURL := fmt.Sprintf("%s?t=%d", config.GetRegistryURL(), time.Now().Unix())
 	m.downloader.SetShowProgress(true)
-	if err := m.downloader.DownloadFile(config.GetRegistryURL(), registryPath); err != nil {
+	if err := m.downloader.DownloadFile(registryURL, registryPath); err != nil {
 		return fmt.Errorf("下载 registry 失败: %w", err)
 	}
 
