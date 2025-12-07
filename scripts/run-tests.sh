@@ -233,6 +233,21 @@ verify_build_time() {
     return 0
 }
 
+# 验证：二进制文件中嵌入了编译时间（通过输出验证）
+verify_build_time_output() {
+    local output="/tmp/test_output_08.txt"
+    
+    # 检查输出包含时间戳格式
+    if ! grep -qE '^20[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}$' "$output"; then
+        echo "  ⚠️  未找到嵌入的编译时间"
+        return 1
+    fi
+    
+    local build_time=$(cat "$output" | head -1)
+    echo "  ✓ 编译时间: $build_time"
+    return 0
+}
+
 # 验证：卸载后包不存在
 verify_uninstall() {
     if [ -d "$INSTALL_DIR/repos/test-package" ]; then
@@ -347,13 +362,117 @@ verify_pack() {
 verify_release_dry_run() {
     local output="/tmp/test_output_20.txt"
     
-    # 检查输出包含预览信息
-    if ! grep -q "预览" "$output" && ! grep -q "dry" "$output" && ! grep -q "版本" "$output"; then
-        echo "  ⚠️  输出不包含预览信息"
+    # 检查输出包含预览信息（必须同时包含关键信息）
+    if ! grep -qE "(预览|dry|Dry)" "$output"; then
+        echo "  ⚠️  输出不包含预览/dry-run 标识"
         return 1
     fi
     
     echo "  ✓ dry-run 模式正常"
+    return 0
+}
+
+# 验证：update --packages 输出正确
+verify_update_packages() {
+    local output="/tmp/test_output_09.txt"
+    
+    # 检查输出包含更新统计信息
+    if ! grep -qE "(更新|update|统计)" "$output"; then
+        echo "  ⚠️  输出不包含更新统计信息"
+        return 1
+    fi
+    
+    echo "  ✓ 更新命令执行正常"
+    return 0
+}
+
+# 验证：批量安装后所有包都存在
+verify_install_all() {
+    local output="/tmp/test_output_12.txt"
+    
+    # 获取 registry 中的包数量
+    local registry_count=$(jq '.packages | length' "$INSTALL_DIR/config/registry.json" 2>/dev/null || echo "0")
+    
+    # 检查 repos 目录中的包数量
+    local installed_count=$(find "$INSTALL_DIR/repos" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+    
+    if [ "$installed_count" -lt "$registry_count" ]; then
+        echo "  ⚠️  安装的包数量 ($installed_count) 少于 registry 中的包数量 ($registry_count)"
+        return 1
+    fi
+    
+    echo "  ✓ 已安装 $installed_count 个包"
+    return 0
+}
+
+# 验证：init --force 覆盖了文件
+verify_init_force() {
+    local pkg_dir="/tmp/test-init-pkg"
+    
+    # 检查 package.json 存在
+    if [ ! -f "$pkg_dir/package.json" ]; then
+        echo "  ⚠️  package.json 不存在"
+        return 1
+    fi
+    
+    echo "  ✓ init --force 执行成功"
+    return 0
+}
+
+# 验证：version 在包目录中显示正确
+verify_version() {
+    local output="/tmp/test_output_16.txt"
+    
+    # 检查输出包含包名和版本
+    if ! grep -qE "(📦|版本|version)" "$output"; then
+        echo "  ⚠️  输出不包含版本信息"
+        return 1
+    fi
+    
+    echo "  ✓ version 显示正常"
+    return 0
+}
+
+# 验证：config list 输出配置
+verify_config_list() {
+    local output="/tmp/test_output_17.txt"
+    
+    # 检查输出包含 registry_url
+    if ! grep -q "registry_url" "$output"; then
+        echo "  ⚠️  输出不包含 registry_url"
+        return 1
+    fi
+    
+    echo "  ✓ config list 显示正常"
+    return 0
+}
+
+# 验证：config get 返回有效 URL
+verify_config_get() {
+    local output="/tmp/test_output_18.txt"
+    
+    # 检查输出是有效的 URL
+    if ! grep -qE "^https?://" "$output"; then
+        echo "  ⚠️  输出不是有效的 URL"
+        return 1
+    fi
+    
+    echo "  ✓ config get 返回有效 URL"
+    return 0
+}
+
+# 验证：sync 执行正常
+verify_sync() {
+    local output="/tmp/test_output_21.txt"
+    
+    # sync 在包目录中执行，应该有输出
+    # 即使没有变化也应该有提示
+    if [ ! -s "$output" ]; then
+        echo "  ⚠️  sync 无输出"
+        return 1
+    fi
+    
+    echo "  ✓ sync 执行正常"
     return 0
 }
 
@@ -377,17 +496,17 @@ run_test "06" "install test-package" "./dist/cursortoolset install test-package"
 run_test "07" "list --installed" "./dist/cursortoolset list --installed" verify_list_installed
 
 echo -e "${BLUE}>>> 阶段 5: 关键验证 - 二进制编译时间${NC}"
-run_test "08" "验证编译时间嵌入" "echo '检查二进制文件...'" verify_build_time
+run_test "08" "验证编译时间嵌入" "strings $INSTALL_DIR/repos/test-package/test-package | grep -E '^20[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}$' | head -1" verify_build_time_output
 
 echo -e "${BLUE}>>> 阶段 6: 更新功能${NC}"
-run_simple_test "09" "update --packages" "./dist/cursortoolset update --packages"
+run_test "09" "update --packages" "./dist/cursortoolset update --packages" verify_update_packages
 
 echo -e "${BLUE}>>> 阶段 7: 卸载功能${NC}"
 run_test "10" "uninstall test-package" "./dist/cursortoolset uninstall test-package --force" verify_uninstall
 run_test "11" "list --installed (确认卸载)" "./dist/cursortoolset list --installed" verify_list_installed_empty
 
 echo -e "${BLUE}>>> 阶段 8: 批量安装${NC}"
-run_simple_test "12" "install (所有包)" "./dist/cursortoolset install"
+run_test "12" "install (所有包)" "./dist/cursortoolset install" verify_install_all
 
 echo -e "${BLUE}>>> 阶段 9: 缓存管理${NC}"
 run_test "13" "clean --cache" "./dist/cursortoolset clean --cache --force" verify_clean_cache
@@ -398,19 +517,19 @@ cd /tmp
 rm -rf test-init-pkg
 run_test "14" "init test-init-pkg" "$PROJECT_DIR/dist/cursortoolset init test-init-pkg" verify_init
 
-run_simple_test "15" "init --force (重新初始化)" "$PROJECT_DIR/dist/cursortoolset init test-init-pkg --force"
+run_test "15" "init --force (重新初始化)" "$PROJECT_DIR/dist/cursortoolset init test-init-pkg --force" verify_init_force
 
 cd "$PROJECT_DIR"
 
 echo -e "${BLUE}>>> 阶段 11: 版本管理${NC}"
 # version 命令测试（使用 init 创建的目录）
 cd /tmp/test-init-pkg
-run_simple_test "16" "version (显示版本)" "$PROJECT_DIR/dist/cursortoolset version"
+run_test "16" "version (显示版本)" "$PROJECT_DIR/dist/cursortoolset version" verify_version
 
 echo -e "${BLUE}>>> 阶段 12: 配置管理${NC}"
 cd "$PROJECT_DIR"
-run_simple_test "17" "config list" "./dist/cursortoolset config list"
-run_simple_test "18" "config get registry_url" "./dist/cursortoolset config get registry_url"
+run_test "17" "config list" "./dist/cursortoolset config list" verify_config_list
+run_test "18" "config get registry_url" "./dist/cursortoolset config get registry_url" verify_config_get
 
 echo -e "${BLUE}>>> 阶段 13: 打包功能${NC}"
 cd /tmp/test-init-pkg
@@ -428,7 +547,7 @@ cd "$PROJECT_DIR"
 
 echo -e "${BLUE}>>> 阶段 15: 同步功能${NC}"
 cd /tmp/test-init-pkg
-run_simple_test "21" "sync" "$PROJECT_DIR/dist/cursortoolset sync"
+run_test "21" "sync" "$PROJECT_DIR/dist/cursortoolset sync" verify_sync
 cd "$PROJECT_DIR"
 
 # 清理临时文件
