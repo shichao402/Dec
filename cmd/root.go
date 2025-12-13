@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/shichao402/Dec/pkg/setup"
 	"github.com/shichao402/Dec/pkg/version"
 	"github.com/spf13/cobra"
 )
@@ -16,34 +15,30 @@ var (
 
 var RootCmd = &cobra.Command{
 	Use:   "dec",
-	Short: "Cursor 工具集管理器",
-	Long: `Dec - Cursor 工具集管理器
+	Short: "Dec - 规则和 MCP 工具管理器",
+	Long: `Dec - 规则和 MCP 工具管理器
 
-一个用于管理和安装 Cursor 工具集的命令行工具。
-项目根目录的 available-toolsets.json 文件定义了可用的工具集列表。
-每个工具集都包含一个 package.json 描述文件，定义了工具的安装和配置信息。
+管理 Cursor/IDE 的规则文件和 MCP 工具配置。
 
 使用示例:
-  # 列出所有可用工具集
+  # 初始化项目配置
+  dec init
+
+  # 同步规则和 MCP 配置
+  dec sync
+
+  # 链接本地开发包
+  dec link
+
+  # 列出可用包
   dec list
 
-  # 安装所有工具集
-  dec install
+  # 搜索包
+  dec search <keyword>
 
-  # 安装特定工具集
-  dec install <toolset-name>
-
-  # 清理已安装的工具集
-  dec clean
-
-  # 更新 Dec 和工具集
-  dec update`,
+  # 启动 MCP Server
+  dec serve`,
 	Version: getVersionString(),
-	// 每次执行命令前自动检查并同步文档
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// 静默执行，不打扰用户
-		_ = setup.EnsureDocs()
-	},
 }
 
 // SetVersion 设置版本信息（从编译参数注入）
@@ -93,14 +88,9 @@ func GetVersion() string {
 }
 
 func init() {
-	RootCmd.AddCommand(installCmd)
-	RootCmd.AddCommand(uninstallCmd)
+	// 查询命令
 	RootCmd.AddCommand(listCmd)
 	RootCmd.AddCommand(searchCmd)
 	RootCmd.AddCommand(infoCmd)
-	RootCmd.AddCommand(cleanCmd)
-	RootCmd.AddCommand(updateCmd)
-	// initCmd 和 registryCmd 在各自文件的 init() 中添加
+	// 其他命令在各自文件的 init() 中添加
 }
-
-

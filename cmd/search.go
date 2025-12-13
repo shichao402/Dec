@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/shichao402/Dec/pkg/installer"
 	"github.com/shichao402/Dec/pkg/paths"
 	"github.com/shichao402/Dec/pkg/registry"
+	"github.com/shichao402/Dec/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -17,70 +17,81 @@ var searchCmd = &cobra.Command{
 
 搜索范围包括：
   - 包名称
-  - 显示名称
   - 描述
-  - 关键词`,
+
+示例：
+  dec search github     # 搜索包含 github 的包
+  dec search rule       # 搜索规则相关的包`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		keyword := args[0]
+		keyword := strings.ToLower(args[0])
 
 		// 确保目录结构存在
 		if err := paths.EnsureAllDirs(); err != nil {
 			return fmt.Errorf("初始化目录失败: %w", err)
 		}
 
-		// 加载 registry
-		mgr := registry.NewManager()
+		// 使用多注册表管理器
+		mgr := registry.NewMultiRegistryManager()
 		if err := mgr.Load(); err != nil {
-			return fmt.Errorf("加载包索引失败: %w", err)
+			return fmt.Errorf("加载注册表失败: %w", err)
 		}
 
-		// 检查是否有本地缓存
-		if !mgr.HasLocalCache() {
-			fmt.Println("📦 本地包索引为空")
-			fmt.Println("\n提示: 运行 'dec registry update' 更新包索引")
-			return nil
-		}
+		// 获取所有包并搜索
+		packs := mgr.ListAllPacks()
+		var results []*types.ResolvedPack
 
-		// 搜索
-		results := mgr.SearchPackages(keyword)
+		for _, pack := range packs {
+			// 搜索名称和描述
+			if strings.Contains(strings.ToLower(pack.Name), keyword) ||
+				strings.Contains(strings.ToLower(pack.Description), keyword) {
+				results = append(results, pack)
+			}
+		}
 
 		if len(results) == 0 {
-			fmt.Printf("🔍 未找到匹配 \"%s\" 的包\n", keyword)
+			fmt.Printf("🔍 未找到匹配 \"%s\" 的包\n", args[0])
 			return nil
 		}
 
-		fmt.Printf("🔍 找到 %d 个匹配 \"%s\" 的包:\n\n", len(results), keyword)
+		fmt.Printf("🔍 找到 %d 个匹配 \"%s\" 的包:\n\n", len(results), args[0])
 
-		inst := installer.NewInstaller()
-
-		for i, manifest := range results {
-			// 名称和版本
-			fmt.Printf("%d. %s", i+1, manifest.Name)
-			if manifest.Version != "" {
-				fmt.Printf("@%s", manifest.Version)
+		for i, pack := range results {
+			// 类型图标
+			typeIcon := "📜"
+			if pack.Type == types.PackTypeMCP {
+				typeIcon = "🔧"
 			}
 
-			// 显示名称
-			if manifest.DisplayName != "" && manifest.DisplayName != manifest.Name {
-				fmt.Printf(" (%s)", manifest.DisplayName)
+			// 名称和版本
+			fmt.Printf("%d. %s %s", i+1, typeIcon, pack.Name)
+			if pack.Version != "" {
+				fmt.Printf("@%s", pack.Version)
+			}
+
+			// 来源标记
+			switch pack.Source {
+			case types.RegistryTypeLocal:
+				fmt.Print(" [local]")
+			case types.RegistryTypeTest:
+				fmt.Print(" [test]")
 			}
 			fmt.Println()
 
 			// 描述（高亮匹配部分）
-			if manifest.Description != "" {
-				desc := highlightKeyword(manifest.Description, keyword)
+			if pack.Description != "" {
+				desc := highlightKeyword(pack.Description, args[0])
 				fmt.Printf("   %s\n", desc)
 			}
 
-			// 关键词
-			if len(manifest.Keywords) > 0 {
-				fmt.Printf("   关键词: %s\n", strings.Join(manifest.Keywords, ", "))
-			}
+			// 类型
+			fmt.Printf("   类型: %s\n", pack.Type)
 
 			// 状态
-			if inst.IsInstalled(manifest.Name) {
+			if pack.IsInstalled {
 				fmt.Printf("   状态: ✅ 已安装\n")
+			} else if pack.Source == types.RegistryTypeLocal {
+				fmt.Printf("   状态: 🔗 已链接\n")
 			} else {
 				fmt.Printf("   状态: ⏳ 未安装\n")
 			}
@@ -94,7 +105,7 @@ var searchCmd = &cobra.Command{
 	},
 }
 
-// highlightKeyword 高亮关键词（简单实现，使用大写）
+// highlightKeyword 高亮关键词（简单实现，使用 ** 包裹）
 func highlightKeyword(text, keyword string) string {
 	lowerText := strings.ToLower(text)
 	lowerKeyword := strings.ToLower(keyword)
