@@ -93,19 +93,6 @@ type ReleaseConfig struct {
 	GitHub  bool     `json:"github,omitempty"`  // 是否发布到 GitHub Release
 }
 
-// Distribution 表示包的分发信息
-type Distribution struct {
-	Tarball string `json:"tarball"`        // 下载文件名（相对路径）或完整 URL（向后兼容）
-	SHA256  string `json:"sha256"`         // SHA256 校验和
-	Size    int64  `json:"size,omitempty"` // 文件大小（字节）
-}
-
-// Repository 表示仓库信息
-type Repository struct {
-	Type string `json:"type,omitempty"` // 仓库类型（git）
-	URL  string `json:"url"`            // 仓库地址
-}
-
 // ManagerCompat 表示管理器兼容性要求
 type ManagerCompat struct {
 	MinVersion string `json:"minVersion,omitempty"` // 最低管理器版本

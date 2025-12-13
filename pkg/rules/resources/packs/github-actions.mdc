@@ -1,0 +1,102 @@
+---
+alwaysApply: true
+---
+# GitHub Actions CI/CD 规则
+
+## 核心约束（强制）
+
+1. **CI/CD 流程必须完全自动化**
+2. **构建、测试、发布必须分离（三阶段流程）**
+3. **正式发布前必须经过测试验证**
+4. **构建产物必须包含校验信息（SHA256）**
+
+## 三阶段发布流程
+
+### 阶段1：构建（Build）
+
+**触发：** 推送 `build*` 标签（如 `build1.0.7`）
+
+**步骤：**
+1. 并行构建所有目标平台
+2. 运行单元测试
+3. 上传构建产物到 artifacts
+
+### 阶段2：测试（Test）
+
+**触发：** 推送 `test*` 标签（如 `test1.0.7`）
+
+**步骤：**
+1. 下载构建产物
+2. 创建预发布 Release（Pre-release）
+3. 执行集成测试/验收测试
+4. 人工验证（如需要）
+
+### 阶段3：发布（Release）
+
+**触发：** 推送 `v*` 标签（如 `v1.0.7`）
+
+**前置条件：** 测试阶段验证通过
+
+**步骤：**
+1. 下载已验证的构建产物
+2. 计算文件 SHA256
+3. 创建正式 GitHub Release
+4. 上传构建产物
+
+## 标签规范
+
+| 标签格式 | 用途 | 示例 |
+|---------|------|------|
+| `build{version}` | 触发构建 | `build1.0.7` |
+| `test{version}` | 触发测试发布 | `test1.0.7` |
+| `v{version}` | 触发正式发布 | `v1.0.7` |
+
+## 发布流程
+
+```pseudocode
+PROCEDURE release_workflow:
+    // 1. 构建阶段
+    UPDATE version_file
+    COMMIT "Bump version to x.y.z"
+    PUSH to main
+    CREATE tag "build{version}"
+    PUSH tag
+    WAIT for build to complete
+    
+    // 2. 测试阶段
+    CREATE tag "test{version}"
+    PUSH tag
+    WAIT for test release to complete
+    VERIFY pre-release works correctly
+    
+    // 3. 正式发布
+    CREATE tag "v{version}"
+    PUSH tag
+    // GitHub Actions 自动创建正式 Release
+END PROCEDURE
+```
+
+## 权限配置
+
+```yaml
+permissions:
+  contents: write  # 创建 release 和推送代码
+  actions: read    # 读取 artifacts
+```
+
+## 禁止行为
+
+- ❌ 手动创建 GitHub Release
+- ❌ 手动上传构建产物
+- ❌ 跳过测试阶段直接发布
+- ❌ 不计算文件 hash
+- ❌ 不验证测试结果就发布
+
+## 必须遵守
+
+- ✅ 使用三阶段发布流程（构建→测试→发布）
+- ✅ 构建标签：`build{version}`
+- ✅ 测试标签：`test{version}`
+- ✅ 发布标签：`v{version}`
+- ✅ 测试通过后才能正式发布
+- ✅ 计算并包含文件 SHA256 hash

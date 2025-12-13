@@ -1,0 +1,111 @@
+---
+alwaysApply: true
+---
+# 安全规则
+
+## 核心约束（强制）
+
+1. **所有敏感信息必须排除在版本控制之外**
+2. AI 必须主动检查并清理敏感信息
+3. 敏感信息包括：API 密钥、密码、令牌、私钥、证书、个人信息等
+
+## 敏感信息类型
+
+| 类型 | 示例 |
+|------|------|
+| 认证信息 | API 密钥、访问令牌、OAuth 密钥、JWT 密钥 |
+| 密码 | 数据库密码、服务密码、管理员密码 |
+| 密钥 | 私钥、加密密钥、签名密钥 |
+| 证书 | SSL 证书、客户端证书 |
+| 个人信息 | 邮箱、电话、身份证号、地址 |
+| 配置信息 | 包含认证信息的数据库连接字符串 |
+
+## 处理方式
+
+### 1. 使用环境变量
+
+```
+// ✅ 正确：使用环境变量
+apiKey = getEnv("API_KEY")
+databaseUrl = getEnv("DATABASE_URL")
+
+// ❌ 错误：硬编码敏感信息
+apiKey = "sk-1234567890abcdef"
+databaseUrl = "postgresql://user:password@localhost/db"
+```
+
+### 2. 使用配置文件模板
+
+提供模板文件（如 `.env.example`），不包含真实敏感信息：
+
+```
+# .env.example（提交到版本控制）
+API_KEY=your_api_key_here
+DATABASE_URL=your_database_url_here
+
+# .env（不提交到版本控制）
+API_KEY=sk-real-key-123456
+DATABASE_URL=postgresql://user:realpass@localhost/db
+```
+
+### 3. 配置 .gitignore
+
+必须排除的文件：
+- `.env`、`.env.local`、`.env.*.local`
+- `*.key`、`*.pem`、`*.cert`、`*.p12`
+- `secrets/`、`credentials/`
+- 任何包含敏感信息的配置文件
+
+## 敏感信息清洗
+
+### 日志清洗
+
+```
+// ✅ 正确：清洗敏感信息后输出
+function logRequest(url, headers):
+    safeHeaders = maskSensitiveHeaders(headers)
+    logger.log("Request: " + url + ", Headers: " + safeHeaders)
+
+// ❌ 错误：直接输出可能包含敏感信息
+function logRequest(url, headers):
+    logger.log("Request: " + url + ", Headers: " + headers)
+```
+
+### 错误消息清洗
+
+```
+// ✅ 正确：不暴露敏感信息
+try:
+    connectToDatabase(connectionString)
+catch error:
+    logger.logError("Database connection failed", error)
+    // 不输出 connectionString
+
+// ❌ 错误：暴露敏感信息
+catch error:
+    logger.logError("Failed: " + connectionString, error)
+```
+
+## 禁止行为
+
+- ❌ 在代码中硬编码敏感信息
+- ❌ 将敏感文件提交到版本控制
+- ❌ 在日志中输出敏感信息
+- ❌ 在错误消息中暴露敏感信息
+- ❌ 在注释中留下敏感信息
+
+## 必须遵守
+
+- ✅ 敏感信息通过环境变量或外部配置提供
+- ✅ 提供配置文件模板（如 `.env.example`）
+- ✅ 正确配置 `.gitignore`
+- ✅ 日志输出前清洗敏感信息
+- ✅ AI 主动检查并清理敏感信息
+
+## 提交前检查清单
+
+- [ ] 代码中无硬编码的敏感信息
+- [ ] 配置文件已添加到 `.gitignore`
+- [ ] 已提供配置文件模板
+- [ ] 日志输出无敏感信息
+- [ ] 错误消息无敏感信息
