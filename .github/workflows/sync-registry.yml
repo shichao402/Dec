@@ -153,17 +153,20 @@ jobs:
           NAME=$(jq -r '.name' /tmp/package.json)
           VERSION=$(jq -r '.version' /tmp/package.json)
           
-          # 更新 registry 中对应条目
+          # 更新 registry 中对应条目（保留 type 和 mcp 字段）
           jq --arg repo "$REPO" \
              --argjson pkg "$(cat /tmp/package.json)" \
-             '(.packages[] | select(.repository == $repo)) |= {
-               repository: $repo,
-               name: $pkg.name,
-               version: $pkg.version,
-               description: ($pkg.description // ""),
-               author: ($pkg.author // ""),
-               dist: $pkg.dist
-             }' config/registry.json > /tmp/registry.json
+             '(.packages[] | select(.repository == $repo)) |= (
+               . + {
+                 repository: $repo,
+                 name: $pkg.name,
+                 version: $pkg.version,
+                 type: ($pkg.type // .type // "rule"),
+                 description: ($pkg.description // ""),
+                 author: ($pkg.author // ""),
+                 dist: $pkg.dist
+               } + (if $pkg.mcp then {mcp: $pkg.mcp} else {} end)
+             )' config/registry.json > /tmp/registry.json
           mv /tmp/registry.json config/registry.json
           
           echo "name=$NAME" >> $GITHUB_OUTPUT
@@ -283,17 +286,20 @@ jobs:
             NAME=$(jq -r '.name' /tmp/package.json)
             VERSION=$(jq -r '.version' /tmp/package.json)
             
-            # 更新 registry
+            # 更新 registry（保留 type 和 mcp 字段）
             jq --arg repo "$REPO" \
                --argjson pkg "$(cat /tmp/package.json)" \
-               '(.packages[] | select(.repository == $repo)) |= {
-                 repository: $repo,
-                 name: $pkg.name,
-                 version: $pkg.version,
-                 description: ($pkg.description // ""),
-                 author: ($pkg.author // ""),
-                 dist: $pkg.dist
-               }' config/registry.json > /tmp/registry.json
+               '(.packages[] | select(.repository == $repo)) |= (
+                 . + {
+                   repository: $repo,
+                   name: $pkg.name,
+                   version: $pkg.version,
+                   type: ($pkg.type // .type // "rule"),
+                   description: ($pkg.description // ""),
+                   author: ($pkg.author // ""),
+                   dist: $pkg.dist
+                 } + (if $pkg.mcp then {mcp: $pkg.mcp} else {} end)
+               )' config/registry.json > /tmp/registry.json
             mv /tmp/registry.json config/registry.json
             
             echo "  ✅ $NAME@$VERSION"
