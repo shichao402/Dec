@@ -1,5 +1,6 @@
 # Binaries
 cursortoolset
+dec
 *.exe
 *.exe~
 *.dll
@@ -52,4 +53,13 @@ scripts/temp/*
 Documents/temp/*
 !Documents/temp/.gitkeep
 
-
+# IDE 生成的规则和 MCP 配置（由 dec sync 生成）
+.cursor/rules/
+.cursor/mcp.json
+.codebuddy/rules/
+.codebuddy/mcp.json
+.mcp.json
+.windsurf/rules/
+.windsurf/mcp.json
+.trae/rules/
+.trae/mcp.json
