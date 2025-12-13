@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/firoyang/CursorToolset/pkg/installer"
-	"github.com/firoyang/CursorToolset/pkg/paths"
-	"github.com/firoyang/CursorToolset/pkg/registry"
+	"github.com/shichao402/Dec/pkg/installer"
+	"github.com/shichao402/Dec/pkg/paths"
+	"github.com/shichao402/Dec/pkg/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -36,7 +36,7 @@ var infoCmd = &cobra.Command{
 		// 查找包
 		manifest := mgr.FindPackage(packageName)
 		if manifest == nil {
-			return fmt.Errorf("未找到包: %s\n\n提示: 运行 'cursortoolset registry update' 更新包索引", packageName)
+			return fmt.Errorf("未找到包: %s\n\n提示: 运行 'dec registry update' 更新包索引", packageName)
 		}
 
 		// 显示信息
@@ -93,7 +93,7 @@ var infoCmd = &cobra.Command{
 			fmt.Printf("状态: ⏳ 未安装\n")
 			fmt.Println()
 			fmt.Println("💡 使用以下命令安装:")
-			fmt.Printf("   cursortoolset install %s\n", packageName)
+			fmt.Printf("   dec install %s\n", packageName)
 		}
 
 		// 依赖
@@ -110,10 +110,10 @@ var infoCmd = &cobra.Command{
 		}
 
 		// 管理器兼容性
-		if manifest.CursorToolset.MinVersion != "" {
+		if manifest.Dec.MinVersion != "" {
 			fmt.Println()
 			fmt.Println("⚙️  兼容性")
-			fmt.Printf("   最低管理器版本: %s\n", manifest.CursorToolset.MinVersion)
+			fmt.Printf("   最低管理器版本: %s\n", manifest.Dec.MinVersion)
 		}
 
 		return nil

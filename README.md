@@ -1,4 +1,4 @@
-# CursorToolset
+# Dec
 
 Cursor 工具集管理器 - 一个简洁的包管理工具，用于管理和安装 Cursor AI 工具集。
 
@@ -20,40 +20,40 @@ Cursor 工具集管理器 - 一个简洁的包管理工具，用于管理和安�
 
 ## 快速开始
 
-### 安装 CursorToolset
+### 安装 Dec
 
 #### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash
 ```
 
 #### Windows (PowerShell)
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/scripts/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex
 ```
 
 ### 基本使用
 
 ```bash
 # 更新包索引
-cursortoolset registry update
+dec registry update
 
 # 列出可用包
-cursortoolset list
+dec list
 
 # 安装包
-cursortoolset install github-action-toolset
+dec install github-action-toolset
 
 # 搜索包
-cursortoolset search github
+dec search github
 
 # 查看包详情
-cursortoolset info github-action-toolset
+dec info github-action-toolset
 
 # 卸载包
-cursortoolset uninstall github-action-toolset
+dec uninstall github-action-toolset
 ```
 
 ## 命令参考
@@ -102,7 +102,7 @@ cursortoolset uninstall github-action-toolset
 ## 目录结构
 
 ```
-~/.cursortoolsets/
+~/.decs/
 ├── repos/                    # 已安装的包
 │   └── github-action-toolset/
 ├── cache/
@@ -111,7 +111,7 @@ cursortoolset uninstall github-action-toolset
 ├── config/
 │   └── registry.json         # 本地 registry
 └── bin/
-    └── cursortoolset
+    └── dec
 ```
 
 ## 开发包
@@ -120,7 +120,7 @@ cursortoolset uninstall github-action-toolset
 
 ```bash
 # 初始化新包
-cursortoolset init my-toolset
+dec init my-toolset
 cd my-toolset
 ```
 
@@ -129,7 +129,7 @@ cd my-toolset
 ```
 my-toolset/
 ├── package.json          # 包配置（必需）
-├── .cursortoolset/       # 开发规则
+├── .dec/       # 开发规则
 ├── README.md
 └── .gitignore
 ```
@@ -151,7 +151,7 @@ chmod +x bin/mytool
 
 ```bash
 # 验证配置并打包
-cursortoolset pack --verify
+dec pack --verify
 
 # 生成：my-toolset-1.0.0.tar.gz
 # 自动计算并更新 SHA256
@@ -168,7 +168,7 @@ git push origin v1.0.0
 # 更新 package.json 中的 dist.tarball 地址
 ```
 
-> 💡 **提示**：包开发完整指南请通过 CursorColdStart 获取：`coldstart enable cursortoolset`
+> 💡 **提示**：包开发完整指南请通过 CursorColdStart 获取：`coldstart enable dec`
 
 ### package.json 规范
 
@@ -197,7 +197,7 @@ git push origin v1.0.0
     "sha256": "abc123..."
   },
   
-  "cursortoolset": {
+  "dec": {
     "minVersion": "1.0.0"
   }
 }
@@ -216,19 +216,19 @@ git push origin v1.0.0
 ```
 
 安装后：
-1. 符号链接会创建到 `~/.cursortoolsets/bin/`
+1. 符号链接会创建到 `~/.decs/bin/`
 2. 用户将该目录添加到 PATH 后即可直接使用命令
 
 ```bash
 # 添加到 PATH（一次性配置）
-export PATH="$HOME/.cursortoolsets/bin:$PATH"
+export PATH="$HOME/.decs/bin:$PATH"
 
 # 直接使用命令
 mytool --help
 mytool-helper process
 ```
 
-> 💡 **提示**：包开发完整指南请通过 CursorColdStart 获取：`coldstart enable cursortoolset`
+> 💡 **提示**：包开发完整指南请通过 CursorColdStart 获取：`coldstart enable dec`
 
 ### 发布包
 
@@ -249,9 +249,9 @@ mytool-helper process
 
 4. **提交到 Registry（自动）**
    - 使用推荐的 release workflow 模板
-   - 发布时自动注册/同步到 CursorToolset
+   - 发布时自动注册/同步到 Dec
 
-> 💡 **提示**：包开发完整指南请通过 CursorColdStart 获取：`coldstart enable cursortoolset`
+> 💡 **提示**：包开发完整指南请通过 CursorColdStart 获取：`coldstart enable dec`
 
 ## Registry
 
@@ -278,7 +278,7 @@ Registry 是包的索引文件，托管在 GitHub Release 中。新版本采用�
 
 ### 自动注册机制
 
-包开发者使用推荐的 release workflow 模板，发布时会**自动注册**到 CursorToolset：
+包开发者使用推荐的 release workflow 模板，发布时会**自动注册**到 Dec：
 
 1. **首次发布**：自动创建注册 issue → CI 验证 → 添加到注册表
 2. **后续发布**：自动创建同步 issue → CI 立即更新版本信息
@@ -300,14 +300,14 @@ Registry 是包的索引文件，托管在 GitHub Release 中。新版本采用�
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `CURSOR_TOOLSET_HOME` | 安装根目录 | `~/.cursortoolsets` |
+| `DEC_HOME` | 安装根目录 | `~/.decs` |
 
 ## 从源码构建
 
 ```bash
-git clone https://github.com/shichao402/CursorToolset.git
-cd CursorToolset
-go build -o cursortoolset .
+git clone https://github.com/shichao402/Dec.git
+cd Dec
+go build -o dec .
 ```
 
 ## 📚 文档
@@ -316,11 +316,11 @@ go build -o cursortoolset .
 
 ### 包开发文档
 
-包开发文档和规则现已通过 **CursorColdStart** 的 `cursortoolset` pack 提供：
+包开发文档和规则现已通过 **CursorColdStart** 的 `dec` pack 提供：
 
 ```bash
 # 在包项目中启用
-coldstart enable cursortoolset
+coldstart enable dec
 coldstart init .
 ```
 
@@ -330,7 +330,7 @@ coldstart init .
 - [构建指南](Documents/development/deployment/BUILD.md) - 从源码构建
 - [测试指南](Documents/development/testing/TESTING.md) - 运行和编写测试
 - [发布流程](Documents/development/deployment/RELEASE.md) - 版本发布流程
-- [开发规则](.cursor/rules/cursortoolset-development.md) - 项目开发规范
+- [开发规则](.cursor/rules/dec-development.md) - 项目开发规范
 
 ## 许可证
 

@@ -32,7 +32,7 @@
   - 使用 `gh` CLI 查询状态，避免 API 限流
   - 实时输出 workflow 状态（排队中/运行中/完成）
   - 支持超时控制（30分钟）
-- 新增自动注册机制：包开发者发布时自动注册到 CursorToolset
+- 新增自动注册机制：包开发者发布时自动注册到 Dec
 - 新增 `auto-register.yml` workflow 处理 `[auto-register]` issue
 - 新增 `sync-registry.yml` workflow 支持定时同步和 `[sync]` issue 触发
 - Registry 新格式：包含完整包元信息，用户更新只需 1 次请求
@@ -40,7 +40,7 @@
 ### Changed
 - Registry 格式升级到 v4，包含 name/version/description/dist 等完整信息
 - `registry.go` 简化：从 registry 直接构建 manifest 缓存，无需逐个下载
-- **包开发文档迁移到 CursorColdStart**：通过 `cursortoolset` pack 提供，不再随管理器分发
+- **包开发文档迁移到 CursorColdStart**：通过 `dec` pack 提供，不再随管理器分发
 - `sync` 命令简化：移除文档同步功能，保留配置迁移能力
 - `init` 命令简化：不再复制包开发指南文档
 

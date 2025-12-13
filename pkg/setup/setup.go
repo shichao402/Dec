@@ -1,4 +1,4 @@
-// Package setup 负责 CursorToolset 的初始化和文档同步
+// Package setup 负责 Dec 的初始化和文档同步
 //
 // 设计原则：
 //   - 单一职责：只负责检测状态变化并同步文档
@@ -17,9 +17,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/firoyang/CursorToolset/pkg/config"
-	"github.com/firoyang/CursorToolset/pkg/paths"
-	"github.com/firoyang/CursorToolset/pkg/state"
+	"github.com/shichao402/Dec/pkg/config"
+	"github.com/shichao402/Dec/pkg/paths"
+	"github.com/shichao402/Dec/pkg/state"
 )
 
 // docFiles 需要同步的文档文件列表

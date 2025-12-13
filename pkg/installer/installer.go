@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/firoyang/CursorToolset/pkg/downloader"
-	"github.com/firoyang/CursorToolset/pkg/paths"
-	"github.com/firoyang/CursorToolset/pkg/types"
+	"github.com/shichao402/Dec/pkg/downloader"
+	"github.com/shichao402/Dec/pkg/paths"
+	"github.com/shichao402/Dec/pkg/types"
 )
 
 // Installer 负责安装和卸载包
@@ -130,7 +130,7 @@ func printInstallTip(packagePath, packageName string) {
 		fmt.Printf("   链接规则文件到项目:\n")
 		fmt.Printf("   mkdir -p .cursor/rules\n")
 		fmt.Printf("   ln -sf %s .cursor/rules/%s\n", rulesPath, packageName)
-		fmt.Printf("\n   详细文档: https://github.com/firoyang/CursorToolset/blob/main/USAGE_EXAMPLE.md\n")
+		fmt.Printf("\n   详细文档: https://github.com/shichao402/Dec/blob/main/USAGE_EXAMPLE.md\n")
 	}
 }
 

@@ -1,6 +1,6 @@
-# CursorToolset 发布指南
+# Dec 发布指南
 
-本文档描述 CursorToolset 的版本发布流程。
+本文档描述 Dec 的版本发布流程。
 
 ## 发布流程概览
 
@@ -16,25 +16,25 @@
 
 ## 快速发布（推荐）
 
-使用 `cursortoolset release` 命令自动化发布流程：
+使用 `dec release` 命令自动化发布流程：
 
 ```bash
 # 发布 patch 版本并等待 CI 完成
-cursortoolset release --wait
+dec release --wait
 
 # 发布 minor 版本并等待
-cursortoolset release --minor --wait
+dec release --minor --wait
 
 # 发布 major 版本并等待
-cursortoolset release --major --wait
+dec release --major --wait
 
 # 预览发布流程（不执行）
-cursortoolset release --dry-run
+dec release --dry-run
 ```
 
 ### release 命令说明
 
-`cursortoolset release` 自动完成以下步骤：
+`dec release` 自动完成以下步骤：
 
 1. 提升版本号（默认 patch）
 2. 打包并计算 SHA256
@@ -59,7 +59,7 @@ cursortoolset release --dry-run
 `--wait` 选项会在推送 tag 后自动轮询状态：
 
 ```bash
-cursortoolset release --wait
+dec release --wait
 ```
 
 输出示例：
@@ -151,37 +151,37 @@ git push origin test-v1.4.3
 
 ```bash
 # 下载安装脚本并使用测试渠道
-curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseTest/scripts/install.sh -o /tmp/install-test.sh
-CURSOR_TOOLSET_BRANCH=ReleaseTest CURSOR_TOOLSET_HOME=/tmp/test-install bash /tmp/install-test.sh
+curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseTest/scripts/install.sh -o /tmp/install-test.sh
+DEC_BRANCH=ReleaseTest DEC_HOME=/tmp/test-install bash /tmp/install-test.sh
 
 # 验证版本
-/tmp/test-install/bin/cursortoolset --version
+/tmp/test-install/bin/dec --version
 
 # 验证核心功能
-/tmp/test-install/bin/cursortoolset list
-/tmp/test-install/bin/cursortoolset registry update
+/tmp/test-install/bin/dec list
+/tmp/test-install/bin/dec registry update
 
 # 清理测试环境
 rm -rf /tmp/test-install /tmp/install-test.sh
 ```
 
 **环境变量说明：**
-- `CURSOR_TOOLSET_BRANCH=ReleaseTest` - 使用测试分支（默认 ReleaseLatest）
-- `CURSOR_TOOLSET_HOME=/tmp/test-install` - 隔离安装目录（默认 ~/.cursortoolsets）
+- `DEC_BRANCH=ReleaseTest` - 使用测试分支（默认 ReleaseLatest）
+- `DEC_HOME=/tmp/test-install` - 隔离安装目录（默认 ~/.decs）
 
 #### 方式二：直接下载二进制验证
 
 ```bash
 # 下载测试版本（注意：是直接二进制文件，不是压缩包）
-curl -L -o /tmp/cursortoolset-test \
-  "https://github.com/shichao402/CursorToolset/releases/download/test-v1.4.3/cursortoolset-darwin-arm64"
-chmod +x /tmp/cursortoolset-test
+curl -L -o /tmp/dec-test \
+  "https://github.com/shichao402/Dec/releases/download/test-v1.4.3/dec-darwin-arm64"
+chmod +x /tmp/dec-test
 
 # 验证版本
-/tmp/cursortoolset-test --version
+/tmp/dec-test --version
 
 # 清理
-rm -f /tmp/cursortoolset-test
+rm -f /tmp/dec-test
 ```
 
 ### 6. 正式发布
@@ -244,7 +244,7 @@ Registry 采用自动化管理机制，包开发者无需手动编辑配置文�
    - `package.json`（必须包含 `name`、`version`、`dist.tarball`、`dist.sha256` 字段）
    - 对应的 tarball 文件
 
-2. 在 [CursorToolset 仓库](https://github.com/shichao402/CursorToolset/issues/new) 创建 Issue：
+2. 在 [Dec 仓库](https://github.com/shichao402/Dec/issues/new) 创建 Issue：
    - **标题**：`[auto-register] 你的包名`
    - **内容**：
      ```
@@ -275,7 +275,7 @@ Registry 采用自动化管理机制，包开发者无需手动编辑配置文�
 
 **重要：包发布后会自动同步，无需任何手动操作。**
 
-使用 `cursortoolset init` 生成的 release workflow 会在发布成功后**自动创建 sync issue**，触发注册表同步。
+使用 `dec init` 生成的 release workflow 会在发布成功后**自动创建 sync issue**，触发注册表同步。
 
 #### 自动同步流程
 
@@ -284,7 +284,7 @@ Registry 采用自动化管理机制，包开发者无需手动编辑配置文�
    - Issue body 包含 `repository: https://github.com/owner/repo`
    - 自动检测已存在的 sync issue，避免重复创建
 
-2. **同步操作执行**（在 CursorToolset 仓库）：
+2. **同步操作执行**（在 Dec 仓库）：
    - `sync-registry.yml` workflow 检测到 `pack-sync` label 的 issue
    - 从 issue body 读取 `repository:` 字段
    - 下载最新的 `package.json`，更新 `config/registry.json`
@@ -302,13 +302,13 @@ Registry 采用自动化管理机制，包开发者无需手动编辑配置文�
 
 ```bash
 # 添加包到 registry
-cursortoolset registry add https://github.com/user/repo
+dec registry add https://github.com/user/repo
 
 # 移除包
-cursortoolset registry remove package-name
+dec registry remove package-name
 
 # 导出 registry
-cursortoolset registry export > registry.json
+dec registry export > registry.json
 ```
 
 修改 `config/registry.json` 后提交，CI 会自动发布到 `registry` Release。
@@ -357,7 +357,7 @@ git push origin :refs/tags/v1.4.3
 | 测试渠道 | ReleaseTest | 验证新版本，prerelease |
 | 正式渠道 | ReleaseLatest | 生产环境，stable release |
 
-用户可通过 `CURSOR_TOOLSET_BRANCH` 环境变量切换渠道。
+用户可通过 `DEC_BRANCH` 环境变量切换渠道。
 
 ## 相关文档
 

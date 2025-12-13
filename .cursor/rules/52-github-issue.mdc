@@ -10,7 +10,7 @@ alwaysApply: true
 ## 安装
 
 ```bash
-cursortoolset install github-issue
+dec install github-issue
 ```
 
 ## 环境配置
@@ -47,8 +47,8 @@ github-issue create --repo <owner/repo> --type <type> --title <title> [options]
 **Issue 类型：**
 - `feature-request` - 功能请求
 - `bug-report` - Bug 报告
-- `pack-register` - 包注册（CursorToolset）
-- `pack-sync` - 包同步（CursorToolset）
+- `pack-register` - 包注册（Dec）
+- `pack-sync` - 包同步（Dec）
 
 **示例：**
 ```bash
@@ -168,7 +168,7 @@ github-issue close 123 --result rejected --comment "不符合项目规范"
 
 1. **向其他项目提交请求** - 功能请求、Bug 报告
 2. **处理收到的 Issue** - 获取、更新状态、关闭
-3. **CursorToolset 包管理** - 注册新包、同步版本
+3. **Dec 包管理** - 注册新包、同步版本
 
 ### 工作流程
 

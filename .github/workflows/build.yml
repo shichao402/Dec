@@ -1,4 +1,4 @@
-# CursorToolset CI/CD 流水线
+# Dec CI/CD 流水线
 # 触发条件：推送 test-v* tag 或手动触发
 # 功能：构建、测试、发布到 test 渠道
 
@@ -106,7 +106,7 @@ jobs:
           BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
           LDFLAGS="-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}"
           
-          OUTPUT_NAME="cursortoolset-${{ matrix.goos }}-${{ matrix.goarch }}"
+          OUTPUT_NAME="dec-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             OUTPUT_NAME="${OUTPUT_NAME}.exe"
           fi
@@ -117,8 +117,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cursortoolset-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/cursortoolset-*
+          name: dec-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/dec-*
 
   # 发布到 test 渠道
   release-test:
@@ -162,7 +162,7 @@ jobs:
       - name: Generate SHA256 checksums
         run: |
           cd dist
-          for file in cursortoolset-*; do
+          for file in dec-*; do
             sha256sum "$file" > "${file}.sha256"
           done
           cat *.sha256
@@ -215,7 +215,7 @@ jobs:
             ```
           prerelease: true
           files: |
-            dist/cursortoolset-*
+            dist/dec-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

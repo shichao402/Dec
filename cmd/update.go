@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/firoyang/CursorToolset/pkg/config"
-	"github.com/firoyang/CursorToolset/pkg/installer"
-	"github.com/firoyang/CursorToolset/pkg/paths"
-	"github.com/firoyang/CursorToolset/pkg/registry"
-	"github.com/firoyang/CursorToolset/pkg/state"
+	"github.com/shichao402/Dec/pkg/config"
+	"github.com/shichao402/Dec/pkg/installer"
+	"github.com/shichao402/Dec/pkg/paths"
+	"github.com/shichao402/Dec/pkg/registry"
+	"github.com/shichao402/Dec/pkg/state"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +29,7 @@ var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "更新管理器或已安装的包",
 	Long: `更新功能：
-  --self       更新 CursorToolset 管理器本身
+  --self       更新 Dec 管理器本身
   --registry   更新包索引
   --packages   更新所有已安装的包
   --yes        跳过确认提示（适用于自动化/AI 辅助场景）
@@ -47,12 +47,12 @@ var updateCmd = &cobra.Command{
 
 		// 更新管理器自身
 		if updateSelf {
-			fmt.Println("🔄 更新 CursorToolset...")
+			fmt.Println("🔄 更新 Dec...")
 			if err := updateSelfBinary(); err != nil {
 				fmt.Printf("❌ 更新失败: %v\n", err)
 				hasError = true
 			} else {
-				fmt.Println("✅ CursorToolset 更新完成")
+				fmt.Println("✅ Dec 更新完成")
 			}
 			fmt.Println()
 		}
@@ -87,7 +87,7 @@ var updateCmd = &cobra.Command{
 }
 
 func init() {
-	updateCmd.Flags().BoolVarP(&updateSelf, "self", "s", false, "更新 CursorToolset 本身")
+	updateCmd.Flags().BoolVarP(&updateSelf, "self", "s", false, "更新 Dec 本身")
 	updateCmd.Flags().BoolVarP(&updateRegistry, "registry", "r", false, "更新包索引")
 	updateCmd.Flags().BoolVarP(&updatePackages, "packages", "p", false, "更新已安装的包")
 	updateCmd.Flags().BoolVarP(&updateYes, "yes", "y", false, "跳过确认提示")
@@ -162,7 +162,7 @@ func updateSelfBinary() error {
 
 	// 构建下载 URL
 	platform := fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
-	binaryName := fmt.Sprintf("cursortoolset-%s", platform)
+	binaryName := fmt.Sprintf("dec-%s", platform)
 	if runtime.GOOS == "windows" {
 		binaryName += ".exe"
 	}
@@ -175,7 +175,7 @@ func updateSelfBinary() error {
 	fmt.Printf("  📡 下载地址: %s\n", downloadURL)
 
 	// 创建临时文件
-	tempFile, err := os.CreateTemp("", "cursortoolset-update-*")
+	tempFile, err := os.CreateTemp("", "dec-update-*")
 	if err != nil {
 		return fmt.Errorf("创建临时文件失败: %w", err)
 	}
@@ -265,12 +265,12 @@ func getLatestVersion() (string, error) {
 func updateOnWindows(oldPath, newPath string) error {
 	fmt.Printf("  ⚠️  Windows 系统检测到文件可能被占用\n")
 
-	updateScript := filepath.Join(filepath.Dir(oldPath), "update-cursortoolset.bat")
+	updateScript := filepath.Join(filepath.Dir(oldPath), "update-dec.bat")
 
 	scriptContent := fmt.Sprintf(`@echo off
-echo Waiting for cursortoolset to exit...
+echo Waiting for dec to exit...
 timeout /t 2 /nobreak >nul
-echo Updating cursortoolset...
+echo Updating dec...
 move /y "%s" "%s.backup" >nul 2>&1
 move /y "%s" "%s"
 if %%errorlevel%% equ 0 (

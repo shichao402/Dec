@@ -1,5 +1,5 @@
-# CursorToolset 卸载脚本 (Windows PowerShell)
-# 使用方法: iwr -useb https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/uninstall.ps1 | iex
+# Dec 卸载脚本 (Windows PowerShell)
+# 使用方法: iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/uninstall.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
@@ -20,28 +20,28 @@ function Write-ColorOutput {
 }
 
 # 主卸载函数
-function Uninstall-CursorToolset {
+function Uninstall-Dec {
     Write-Host ""
     Write-Host "╔═══════════════════════════════════════╗"
-    Write-Host "║   CursorToolset 卸载脚本              ║"
+    Write-Host "║   Dec 卸载脚本              ║"
     Write-Host "╚═══════════════════════════════════════╝"
     Write-Host ""
     
     # 定义安装路径（使用新的目录结构）
-    if ($env:CURSOR_TOOLSET_HOME) {
-        $installDir = $env:CURSOR_TOOLSET_HOME
+    if ($env:DEC_HOME) {
+        $installDir = $env:DEC_HOME
     } else {
-        $installDir = Join-Path $env:USERPROFILE ".cursortoolsets"
+        $installDir = Join-Path $env:USERPROFILE ".decs"
     }
     $binDir = Join-Path $installDir "bin"
     $configDir = Join-Path $installDir "config"
     $reposDir = Join-Path $installDir "repos"
-    $binaryPath = Join-Path $binDir "cursortoolset.exe"
+    $binaryPath = Join-Path $binDir "dec.exe"
     
     # 检查是否已安装
     if (-not (Test-Path $installDir) -and -not (Test-Path $binaryPath)) {
         Write-ColorOutput "未找到安装目录: $installDir" -Type "Warning"
-        Write-ColorOutput "CursorToolset 可能未安装或已卸载" -Type "Info"
+        Write-ColorOutput "Dec 可能未安装或已卸载" -Type "Info"
         return
     }
     
@@ -55,7 +55,7 @@ function Uninstall-CursorToolset {
     Write-Host "  - 配置文件: $(Join-Path $configDir 'available-toolsets.json')"
     Write-Host "  - 工具集仓库: $reposDir"
     Write-Host ""
-    $confirm = Read-Host "确定要卸载 CursorToolset 吗？(y/N)"
+    $confirm = Read-Host "确定要卸载 Dec 吗？(y/N)"
     
     if ($confirm -ne "y" -and $confirm -ne "Y") {
         Write-ColorOutput "取消卸载" -Type "Info"
@@ -124,7 +124,7 @@ function Uninstall-CursorToolset {
     Write-Host "║         卸载完成！                    ║"
     Write-Host "╚═══════════════════════════════════════╝"
     Write-Host ""
-    Write-ColorOutput "CursorToolset 已成功卸载" -Type "Success"
+    Write-ColorOutput "Dec 已成功卸载" -Type "Success"
     Write-Host ""
     Write-ColorOutput "请重新打开 PowerShell 窗口以使环境变量更改生效" -Type "Info"
     Write-Host ""
@@ -132,7 +132,7 @@ function Uninstall-CursorToolset {
 
 # 运行主函数
 try {
-    Uninstall-CursorToolset
+    Uninstall-Dec
 } catch {
     Write-ColorOutput "卸载过程中发生错误: $_" -Type "Error"
     exit 1

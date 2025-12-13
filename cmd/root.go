@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/firoyang/CursorToolset/pkg/setup"
-	"github.com/firoyang/CursorToolset/pkg/version"
+	"github.com/shichao402/Dec/pkg/setup"
+	"github.com/shichao402/Dec/pkg/version"
 	"github.com/spf13/cobra"
 )
 
@@ -15,9 +15,9 @@ var (
 )
 
 var RootCmd = &cobra.Command{
-	Use:   "cursortoolset",
+	Use:   "dec",
 	Short: "Cursor 工具集管理器",
-	Long: `CursorToolset - Cursor 工具集管理器
+	Long: `Dec - Cursor 工具集管理器
 
 一个用于管理和安装 Cursor 工具集的命令行工具。
 项目根目录的 available-toolsets.json 文件定义了可用的工具集列表。
@@ -25,19 +25,19 @@ var RootCmd = &cobra.Command{
 
 使用示例:
   # 列出所有可用工具集
-  cursortoolset list
+  dec list
 
   # 安装所有工具集
-  cursortoolset install
+  dec install
 
   # 安装特定工具集
-  cursortoolset install <toolset-name>
+  dec install <toolset-name>
 
   # 清理已安装的工具集
-  cursortoolset clean
+  dec clean
 
-  # 更新 CursorToolset 和工具集
-  cursortoolset update`,
+  # 更新 Dec 和工具集
+  dec update`,
 	Version: getVersionString(),
 	// 每次执行命令前自动检查并同步文档
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {

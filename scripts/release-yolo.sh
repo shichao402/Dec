@@ -1,5 +1,5 @@
 #!/bin/bash
-# CursorToolset 一键发布脚本（鲁莽懒人版）
+# Dec 一键发布脚本（鲁莽懒人版）
 # 功能：从当前状态一路冲到正式版本发布
 # 用法：./scripts/release-yolo.sh [版本号]
 #
@@ -26,7 +26,7 @@ MAGENTA='\033[0;35m'
 NC='\033[0m'
 
 # 配置
-REPO="shichao402/CursorToolset"
+REPO="shichao402/Dec"
 POLL_INTERVAL=15  # CI 轮询间隔（秒）
 MAX_WAIT=600      # 最大等待时间（秒）
 
@@ -41,7 +41,7 @@ step()    { echo -e "\n${MAGENTA}━━━ $1 ━━━${NC}\n"; }
 banner() {
     echo -e "${CYAN}"
     echo "╔═══════════════════════════════════════════════════════╗"
-    echo "║     🚀 CursorToolset 一键发布（YOLO 模式）🚀          ║"
+    echo "║     🚀 Dec 一键发布（YOLO 模式）🚀          ║"
     echo "║                                                       ║"
     echo "║  ⚠️  此脚本会自动推送 tag 并发布新版本                 ║"
     echo "║  💡 适合懒人，不适合胆小鬼                            ║"
@@ -223,7 +223,7 @@ main() {
     # 本地构建测试
     step "Step 3/9: 本地构建 & 测试"
     info "运行 go build..."
-    go build -o dist/cursortoolset .
+    go build -o dist/dec .
     success "构建成功"
     
     info "运行单元测试..."
@@ -301,7 +301,7 @@ main() {
     echo "  curl -fsSL https://raw.githubusercontent.com/${REPO}/ReleaseLatest/scripts/install.sh | bash"
     echo ""
     info "更新命令:"
-    echo "  cursortoolset update --self"
+    echo "  dec update --self"
     echo ""
 }
 

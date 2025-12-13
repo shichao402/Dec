@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/firoyang/CursorToolset/pkg/config"
-	"github.com/firoyang/CursorToolset/pkg/downloader"
-	"github.com/firoyang/CursorToolset/pkg/paths"
-	"github.com/firoyang/CursorToolset/pkg/types"
+	"github.com/shichao402/Dec/pkg/config"
+	"github.com/shichao402/Dec/pkg/downloader"
+	"github.com/shichao402/Dec/pkg/paths"
+	"github.com/shichao402/Dec/pkg/types"
 )
 
 // Manager 管理包注册表

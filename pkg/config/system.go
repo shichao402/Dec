@@ -34,11 +34,11 @@ func GetSystemConfigPath() (string, error) {
 	}
 
 	// 优先使用环境变量
-	if rootDir := os.Getenv("CURSOR_TOOLSET_HOME"); rootDir != "" {
+	if rootDir := os.Getenv("DEC_HOME"); rootDir != "" {
 		return filepath.Join(rootDir, "config", "system.json"), nil
 	}
 
-	return filepath.Join(homeDir, ".cursortoolsets", "config", "system.json"), nil
+	return filepath.Join(homeDir, ".decs", "config", "system.json"), nil
 }
 
 // LoadSystemConfig 加载系统配置
@@ -87,8 +87,8 @@ func GetSystemConfig() *SystemConfig {
 func getDefaultSystemConfig() *SystemConfig {
 	return &SystemConfig{
 		RepoOwner:    "shichao402",
-		RepoName:     "CursorToolset",
-		RegistryURL:  "https://github.com/shichao402/CursorToolset/releases/download/registry/registry.json",
+		RepoName:     "Dec",
+		RegistryURL:  "https://github.com/shichao402/Dec/releases/download/registry/registry.json",
 		UpdateBranch: "ReleaseLatest",
 	}
 }

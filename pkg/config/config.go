@@ -26,11 +26,11 @@ func GetConfigPath() (string, error) {
 	}
 
 	// 优先使用环境变量
-	if rootDir := os.Getenv("CURSOR_TOOLSET_HOME"); rootDir != "" {
+	if rootDir := os.Getenv("DEC_HOME"); rootDir != "" {
 		return filepath.Join(rootDir, "config", "settings.json"), nil
 	}
 
-	return filepath.Join(homeDir, ".cursortoolsets", "config", "settings.json"), nil
+	return filepath.Join(homeDir, ".decs", "config", "settings.json"), nil
 }
 
 // Load 加载用户配置文件
@@ -97,7 +97,7 @@ func Save(cfg *Config) error {
 // 优先级：环境变量 > 用户配置 > 系统配置
 func GetRegistryURL() string {
 	// 1. 环境变量优先
-	if url := os.Getenv("CURSOR_TOOLSET_REGISTRY"); url != "" {
+	if url := os.Getenv("DEC_REGISTRY"); url != "" {
 		return url
 	}
 

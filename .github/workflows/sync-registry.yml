@@ -167,7 +167,7 @@ jobs:
           else
             gh release create registry \
               --title "Package Registry" \
-              --notes "This release contains the package registry for CursorToolset." \
+              --notes "This release contains the package registry for Dec." \
               config/registry.json
           fi
           echo "✅ Registry release 更新完成"
@@ -183,7 +183,7 @@ jobs:
             - **包名**: ${{ steps.sync.outputs.name }}
             - **版本**: ${{ steps.sync.outputs.version }}
 
-            用户运行 \`cursortoolset update\` 即可获取最新版本。"
+            用户运行 \`dec update\` 即可获取最新版本。"
           elif [ -n "${{ steps.sync.outputs.error }}" ]; then
             gh issue comment ${{ github.event.issue.number }} --body "❌ **同步失败**
 
@@ -306,7 +306,7 @@ jobs:
           else
             gh release create registry \
               --title "Package Registry" \
-              --notes "This release contains the package registry for CursorToolset." \
+              --notes "This release contains the package registry for Dec." \
               config/registry.json
           fi
           echo "✅ Registry release 更新完成"

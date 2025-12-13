@@ -1,5 +1,5 @@
 #!/bin/bash
-# CursorToolset 开发版安装脚本
+# Dec 开发版安装脚本
 # 用于从源码构建并安装到本地，覆盖现有安装
 # 使用方法: ./scripts/install-dev.sh
 
@@ -24,23 +24,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # 安装目录（与正式安装脚本保持一致）
-if [ -n "${CURSOR_TOOLSET_HOME}" ]; then
-    INSTALL_DIR="${CURSOR_TOOLSET_HOME}"
+if [ -n "${DEC_HOME}" ]; then
+    INSTALL_DIR="${DEC_HOME}"
 else
-    INSTALL_DIR="${HOME}/.cursortoolsets"
+    INSTALL_DIR="${HOME}/.decs"
 fi
 BIN_DIR="${INSTALL_DIR}/bin"
-BINARY_PATH="${BIN_DIR}/cursortoolset"
+BINARY_PATH="${BIN_DIR}/dec"
 
 echo ""
 echo "╔═══════════════════════════════════════╗"
-echo "║   CursorToolset 开发版安装脚本        ║"
+echo "║   Dec 开发版安装脚本        ║"
 echo "╚═══════════════════════════════════════╝"
 echo ""
 
 # 检查是否在项目目录
 if [ ! -f "${PROJECT_DIR}/go.mod" ] || [ ! -f "${PROJECT_DIR}/version.json" ]; then
-    print_error "请在 CursorToolset 项目目录中运行此脚本"
+    print_error "请在 Dec 项目目录中运行此脚本"
     exit 1
 fi
 
@@ -84,7 +84,7 @@ if [ "$1" = "--test" ] || [ "$1" = "-t" ]; then
 fi
 
 # Step 3: 构建
-print_step "构建 cursortoolset..."
+print_step "构建 dec..."
 BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS="-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}"
 
@@ -99,7 +99,7 @@ PLATFORM="${OS}-${ARCH}"
 print_info "目标平台: ${PLATFORM}"
 
 mkdir -p dist
-if go build -ldflags "${LDFLAGS}" -o dist/cursortoolset .; then
+if go build -ldflags "${LDFLAGS}" -o dist/dec .; then
     print_success "构建成功"
 else
     print_error "构建失败"
@@ -118,7 +118,7 @@ if [ -f "${BINARY_PATH}" ]; then
 fi
 
 # 复制新版本
-cp dist/cursortoolset "${BINARY_PATH}"
+cp dist/dec "${BINARY_PATH}"
 chmod +x "${BINARY_PATH}"
 print_success "安装完成"
 
@@ -136,11 +136,11 @@ fi
 
 # Step 6: 包开发指南说明
 print_step "包开发指南..."
-print_info "包开发文档现已通过 CursorColdStart 的 cursortoolset pack 提供"
-print_info "在包项目中运行: coldstart enable cursortoolset && coldstart init ."
+print_info "包开发文档现已通过 CursorColdStart 的 dec pack 提供"
+print_info "在包项目中运行: coldstart enable dec && coldstart init ."
 
 # Step 7: 清理构建产物
-rm -f dist/cursortoolset
+rm -f dist/dec
 print_info "已清理本地构建产物"
 
 # Step 8: 验证安装
@@ -156,8 +156,8 @@ echo ""
 print_info "安装位置: ${BINARY_PATH}"
 echo ""
 print_info "使用方法:"
-echo "  cursortoolset --help"
-echo "  cursortoolset list"
+echo "  dec --help"
+echo "  dec list"
 echo ""
 print_warning "注意: 这是开发版本，仅用于本地测试"
 echo ""

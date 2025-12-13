@@ -14,10 +14,10 @@
       }
     },
     {
-      "repository": "https://github.com/shichao402/cursortoolset-test-package",
+      "repository": "https://github.com/shichao402/dec-test-package",
       "name": "test-package",
       "version": "0.3.1",
-      "description": "用于验证 CursorToolset 包管理流程的测试包，包含一个输出编译时间的 Go 程序",
+      "description": "用于验证 Dec 包管理流程的测试包，包含一个输出编译时间的 Go 程序",
       "author": "shichao402",
       "dist": {
         "tarball": "test-package-0.3.1.tar.gz",

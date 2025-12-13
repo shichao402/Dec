@@ -6,13 +6,13 @@ import (
 )
 
 const (
-	// EnvRootDir 环境变量名，用于指定 CursorToolset 根目录
+	// EnvRootDir 环境变量名，用于指定 Dec 根目录
 	// 类似于 pip 的 PYTHONUSERBASE，brew 的 HOMEBREW_PREFIX
-	EnvRootDir = "CURSOR_TOOLSET_HOME"
+	EnvRootDir = "DEC_HOME"
 )
 
 // 目录结构设计（参考 pip/brew）：
-// ~/.cursortoolsets/              <- CURSOR_TOOLSET_HOME（默认）
+// ~/.decs/              <- DEC_HOME（默认）
 // ├── repos/                      <- 已安装的包（解压后的内容）
 // │   ├── github-action-toolset/
 // │   │   └── package.json        <- 包的自描述文件
@@ -21,20 +21,20 @@ const (
 // │   ├── packages/               <- 下载的 tarball 缓存
 // │   │   └── github-action-toolset-1.0.0.tar.gz
 // │   └── manifests/              <- manifest 缓存
-// │       └── github-action-toolset.jsoncursortoolset update --self
+// │       └── github-action-toolset.jsondec update --self
 
 // ├── config/                     <- 配置文件
 // │   └── registry.json           <- 本地 registry 缓存
-// ├── bin/                        <- 可执行文件（包暴露的命令 + cursortoolset）
-// │   ├── cursortoolset
+// ├── bin/                        <- 可执行文件（包暴露的命令 + dec）
+// │   ├── dec
 // │   └── gh-action-debug -> ../repos/github-action-toolset/...
 // └── docs/                       <- 包开发文档（供 init 命令复制）
 //     └── package-dev-guide.md
 
-// GetRootDir 获取 CursorToolset 根目录u
+// GetRootDir 获取 Dec 根目录u
 // 优先级：
-// 1. 环境变量 CURSOR_TOOLSET_HOME（如果设置）
-// 2. 默认路径：~/.cursortoolsets
+// 1. 环境变量 DEC_HOME（如果设置）
+// 2. 默认路径：~/.decs
 func GetRootDir() (string, error) {
 	if rootDir := os.Getenv(EnvRootDir); rootDir != "" {
 		return filepath.Abs(rootDir)
@@ -45,7 +45,7 @@ func GetRootDir() (string, error) {
 		return "", err
 	}
 
-	return filepath.Join(homeDir, ".cursortoolsets"), nil
+	return filepath.Join(homeDir, ".decs"), nil
 }
 
 // GetReposDir 获取已安装包的目录

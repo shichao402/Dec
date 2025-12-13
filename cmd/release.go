@@ -35,11 +35,11 @@ var releaseCmd = &cobra.Command{
   --wait       推送后等待 GitHub Actions 完成并确认 Release 创建成功
 
 示例：
-  cursortoolset release              # 发布 patch 版本
-  cursortoolset release --minor      # 发布 minor 版本
-  cursortoolset release --major      # 发布 major 版本
-  cursortoolset release --wait       # 发布并等待 CI 完成
-  cursortoolset release --dry-run    # 预览发布流程，不执行`,
+  dec release              # 发布 patch 版本
+  dec release --minor      # 发布 minor 版本
+  dec release --major      # 发布 major 版本
+  dec release --wait       # 发布并等待 CI 完成
+  dec release --dry-run    # 预览发布流程，不执行`,
 	RunE: runRelease,
 }
 

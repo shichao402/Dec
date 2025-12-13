@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/firoyang/CursorToolset/pkg/types"
+	"github.com/shichao402/Dec/pkg/types"
 )
 
 func TestNewInstaller(t *testing.T) {

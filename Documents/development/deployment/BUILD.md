@@ -1,6 +1,6 @@
-# CursorToolset 构建安装指南
+# Dec 构建安装指南
 
-本文档描述如何构建和安装 CursorToolset。
+本文档描述如何构建和安装 Dec。
 
 ## 从源码构建
 
@@ -13,14 +13,14 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/shichao402/CursorToolset.git
-cd CursorToolset
+git clone https://github.com/shichao402/Dec.git
+cd Dec
 
 # 构建
-go build -o cursortoolset .
+go build -o dec .
 
 # 验证
-./cursortoolset --version
+./dec --version
 ```
 
 ### 使用 Makefile
@@ -38,29 +38,29 @@ make install-dev    # 安装到系统
 #### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash
 ```
 
 #### Windows (PowerShell)
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/scripts/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex
 ```
 
 ### 方式二：手动安装
 
-1. 从 [Releases](https://github.com/shichao402/CursorToolset/releases) 下载对应平台的二进制
-2. 解压到 `~/.cursortoolsets/bin/`
+1. 从 [Releases](https://github.com/shichao402/Dec/releases) 下载对应平台的二进制
+2. 解压到 `~/.decs/bin/`
 3. 添加到 PATH
 
 ```bash
 # Linux/macOS
-mkdir -p ~/.cursortoolsets/bin
-tar -xzf cursortoolset-*.tar.gz -C ~/.cursortoolsets/bin/
-export PATH="$HOME/.cursortoolsets/bin:$PATH"
+mkdir -p ~/.decs/bin
+tar -xzf dec-*.tar.gz -C ~/.decs/bin/
+export PATH="$HOME/.decs/bin:$PATH"
 
 # 永久生效
-echo 'export PATH="$HOME/.cursortoolsets/bin:$PATH"' >> ~/.bashrc
+echo 'export PATH="$HOME/.decs/bin:$PATH"' >> ~/.bashrc
 ```
 
 ### 方式三：开发安装
@@ -68,7 +68,7 @@ echo 'export PATH="$HOME/.cursortoolsets/bin:$PATH"' >> ~/.bashrc
 从源码安装到系统（覆盖现有安装）：
 
 ```bash
-cd /path/to/CursorToolset
+cd /path/to/Dec
 make install-dev
 ```
 
@@ -77,9 +77,9 @@ make install-dev
 安装后的目录结构：
 
 ```
-~/.cursortoolsets/
+~/.decs/
 ├── bin/
-│   └── cursortoolset       # 可执行文件
+│   └── dec       # 可执行文件
 ├── repos/                   # 已安装的包
 │   └── github-action-toolset/
 ├── cache/
@@ -94,7 +94,7 @@ make install-dev
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `CURSOR_TOOLSET_HOME` | 安装根目录 | `~/.cursortoolsets` |
+| `DEC_HOME` | 安装根目录 | `~/.decs` |
 
 ## 交叉编译
 
@@ -102,16 +102,16 @@ make install-dev
 
 ```bash
 # macOS Intel
-GOOS=darwin GOARCH=amd64 go build -o cursortoolset-darwin-amd64 .
+GOOS=darwin GOARCH=amd64 go build -o dec-darwin-amd64 .
 
 # macOS Apple Silicon
-GOOS=darwin GOARCH=arm64 go build -o cursortoolset-darwin-arm64 .
+GOOS=darwin GOARCH=arm64 go build -o dec-darwin-arm64 .
 
 # Linux x64
-GOOS=linux GOARCH=amd64 go build -o cursortoolset-linux-amd64 .
+GOOS=linux GOARCH=amd64 go build -o dec-linux-amd64 .
 
 # Windows x64
-GOOS=windows GOARCH=amd64 go build -o cursortoolset-windows-amd64.exe .
+GOOS=windows GOARCH=amd64 go build -o dec-windows-amd64.exe .
 ```
 
 ## 版本注入
@@ -122,27 +122,27 @@ GOOS=windows GOARCH=amd64 go build -o cursortoolset-windows-amd64.exe .
 VERSION=$(cat version.json | jq -r '.version')
 BUILD_TIME=$(date '+%Y-%m-%d_%H:%M:%S')
 
-go build -ldflags "-X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME" -o cursortoolset .
+go build -ldflags "-X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME" -o dec .
 ```
 
 ## 验证安装
 
 ```bash
 # 检查版本
-cursortoolset --version
+dec --version
 
 # 更新包索引
-cursortoolset registry update
+dec registry update
 
 # 列出可用包
-cursortoolset list
+dec list
 ```
 
 ## 卸载
 
 ```bash
 # 删除安装目录
-rm -rf ~/.cursortoolsets
+rm -rf ~/.decs
 
 # 从 PATH 中移除（编辑 ~/.bashrc 或 ~/.zshrc）
 ```
@@ -151,16 +151,16 @@ rm -rf ~/.cursortoolsets
 
 ### Q: 命令找不到？
 
-确保 `~/.cursortoolsets/bin` 在 PATH 中：
+确保 `~/.decs/bin` 在 PATH 中：
 
 ```bash
-export PATH="$HOME/.cursortoolsets/bin:$PATH"
+export PATH="$HOME/.decs/bin:$PATH"
 ```
 
 ### Q: 权限被拒绝？
 
 ```bash
-chmod +x ~/.cursortoolsets/bin/cursortoolset
+chmod +x ~/.decs/bin/dec
 ```
 
 ### Q: 构建失败？

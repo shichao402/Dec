@@ -1,6 +1,6 @@
-# CursorToolset 测试指南
+# Dec 测试指南
 
-本文档描述 CursorToolset 的测试流程和规范。
+本文档描述 Dec 的测试流程和规范。
 
 ## 测试原则
 
@@ -15,7 +15,7 @@
 - 包目录存在
 - `package.json` 存在
 - 二进制文件存在（如果有）
-- `.cursortoolset/` 目录存在
+- `.dec/` 目录存在
 
 ## 测试类型
 
@@ -45,7 +45,7 @@
 
 ### 手动触发
 
-1. 访问 [GitHub Actions](https://github.com/shichao402/CursorToolset/actions/workflows/scheduled-test.yml)
+1. 访问 [GitHub Actions](https://github.com/shichao402/Dec/actions/workflows/scheduled-test.yml)
 2. 点击 "Run workflow"
 3. 可选择 "跳过变更检查" 强制运行
 
@@ -53,7 +53,7 @@
 
 ### 测试包仓库
 
-- **地址**: https://github.com/shichao402/cursortoolset-test-package
+- **地址**: https://github.com/shichao402/dec-test-package
 - **用途**: 专门用于验证包管理器功能
 - **特点**: 包含 Go 程序，输出编译时间，验证二进制编译
 
@@ -74,14 +74,14 @@ strings --help    # 二进制分析（验证编译时间）
 ### 运行自动化测试
 
 ```bash
-cd /path/to/CursorToolset
+cd /path/to/Dec
 ./scripts/run-tests.sh
 ```
 
 **预期输出**:
 ```
 ==========================================
-CursorToolset 完整功能测试
+Dec 完整功能测试
 ==========================================
 ...
 测试结果统计
@@ -120,46 +120,46 @@ CursorToolset 完整功能测试
 ✓ 包目录完整
 ✓ package.json 存在
 ✓ 二进制文件存在
-✓ .cursortoolset 目录存在
+✓ .dec 目录存在
 ```
 
 **测试 14 (init) 的验证项**:
 ```
 ✓ package.json 存在且有效
 ✓ README.md 存在
-✓ .cursortoolset/ 目录存在
+✓ .dec/ 目录存在
 ✓ .github/workflows/release.yml 存在
 ✓ .gitignore 存在
 ```
 
-> 💡 **注意**：包开发文档现已通过 CursorColdStart 的 `cursortoolset` pack 提供
+> 💡 **注意**：包开发文档现已通过 CursorColdStart 的 `dec` pack 提供
 
 ## 手动测试步骤
 
 ### 1. 构建管理器
 
 ```bash
-cd /path/to/CursorToolset
-go build -o cursortoolset .
-./cursortoolset --version
+cd /path/to/Dec
+go build -o dec .
+./dec --version
 ```
 
 ### 2. 清理环境
 
 ```bash
-./cursortoolset clean --all --force
+./dec clean --all --force
 ```
 
 ### 3. 更新包索引
 
 ```bash
-./cursortoolset registry update
+./dec registry update
 ```
 
 ### 4. 安装测试包
 
 ```bash
-./cursortoolset install test-package
+./dec install test-package
 ```
 
 ### 5. 验证编译时间 ⭐
@@ -168,7 +168,7 @@ go build -o cursortoolset .
 
 ```bash
 # 提取编译时间
-strings ~/.cursortoolsets/repos/test-package/test-package | grep -E '^20[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}$'
+strings ~/.decs/repos/test-package/test-package | grep -E '^20[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}$'
 ```
 
 **预期**: 显示 UTC 时间格式的编译时间，如 `2025-12-06_13:40:57`
@@ -176,7 +176,7 @@ strings ~/.cursortoolsets/repos/test-package/test-package | grep -E '^20[0-9]{2}
 ### 6. 本地编译验证
 
 ```bash
-cd ~/.cursortoolsets/repos/test-package
+cd ~/.decs/repos/test-package
 go build -ldflags "-X main.Version=local -X 'main.BuildTime=$(date '+%Y-%m-%d_%H:%M:%S')'" -o test-package-local .
 ./test-package-local
 ```
@@ -184,7 +184,7 @@ go build -ldflags "-X main.Version=local -X 'main.BuildTime=$(date '+%Y-%m-%d_%H
 **预期输出**:
 ```
 ╔════════════════════════════════════════════╗
-║    CursorToolset Test Package              ║
+║    Dec Test Package              ║
 ╚════════════════════════════════════════════╝
 
   版本: local
@@ -200,14 +200,14 @@ go build -ldflags "-X main.Version=local -X 'main.BuildTime=$(date '+%Y-%m-%d_%H
 ```bash
 cd /tmp
 rm -rf test-init-pkg
-cursortoolset init test-init-pkg
+dec init test-init-pkg
 ls -la test-init-pkg/
 ```
 
 **预期文件结构**:
 ```
 test-init-pkg/
-├── .cursortoolset/
+├── .dec/
 │   └── docs/
 ├── .github/
 │   └── workflows/
@@ -230,7 +230,7 @@ test-init-pkg/
 当需要更新测试包时：
 
 ```bash
-cd /path/to/cursortoolset-test-package
+cd /path/to/dec-test-package
 
 # 修改代码
 # ...
@@ -262,7 +262,7 @@ GitHub Actions 默认编译 Linux x86-64 版本。在 macOS 上：
 ### Q: 测试脚本报错？
 
 1. 检查网络连接
-2. 运行 `cursortoolset registry update`
+2. 运行 `dec registry update`
 3. 查看具体错误信息
 
 ### Q: 测试通过但功能有问题？
@@ -300,7 +300,7 @@ verify_xxx() {
 ### 目录结构说明
 
 ```
-~/.cursortoolsets/
+~/.decs/
 ├── repos/              # 已安装的包（clean --all 清理）
 ├── cache/
 │   ├── packages/       # 下载的 tarball（clean --cache 清理）

@@ -163,7 +163,7 @@ jobs:
 
           用户现在可以通过以下命令安装：
           \`\`\`bash
-          cursortoolset install ${{ steps.validate.outputs.name }}
+          dec install ${{ steps.validate.outputs.name }}
           \`\`\`"
           
           gh issue close ${{ github.event.issue.number }} --reason completed

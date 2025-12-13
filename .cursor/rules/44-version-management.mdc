@@ -37,11 +37,11 @@ alwaysApply: true
 
 ```json
 {
-  "cursortoolset": {
+  "dec": {
     "version": "1.0.7+13"
   },
   "compatibility": {
-    "min_cursortoolset_version": "1.0.6"
+    "min_dec_version": "1.0.6"
   }
 }
 ```

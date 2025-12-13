@@ -1,6 +1,6 @@
 {
   "$schema": "功能包配置 - 运行 coldstart list packs 查看可用功能包",
-  "cursortoolset": {
+  "dec": {
     "enabled": false
   },
   "documentation": {

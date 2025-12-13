@@ -3,14 +3,14 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/firoyang/CursorToolset/pkg/config"
+	"github.com/shichao402/Dec/pkg/config"
 	"github.com/spf13/cobra"
 )
 
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "管理配置",
-	Long:  `查看和修改 CursorToolset 配置。`,
+	Long:  `查看和修改 Dec 配置。`,
 }
 
 var configGetCmd = &cobra.Command{
@@ -42,7 +42,7 @@ var configSetCmd = &cobra.Command{
   registry_url  - Registry 源地址
 
 示例：
-  cursortoolset config set registry_url https://mirror.example.com/registry.json`,
+  dec config set registry_url https://mirror.example.com/registry.json`,
 	Args: cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
@@ -110,8 +110,8 @@ var configListCmd = &cobra.Command{
 
 		fmt.Println()
 		fmt.Println("环境变量:")
-		fmt.Println("  CURSOR_TOOLSET_HOME     - 自定义安装目录")
-		fmt.Println("  CURSOR_TOOLSET_REGISTRY - 自定义 Registry URL（优先级最高）")
+		fmt.Println("  DEC_HOME     - 自定义安装目录")
+		fmt.Println("  DEC_REGISTRY - 自定义 Registry URL（优先级最高）")
 	},
 }
 

@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/firoyang/CursorToolset/pkg/paths"
+	"github.com/shichao402/Dec/pkg/paths"
 )
 
 // Downloader 负责下载和解压包

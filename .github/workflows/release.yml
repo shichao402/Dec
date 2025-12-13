@@ -1,4 +1,4 @@
-# CursorToolset 正式发布流水线
+# Dec 正式发布流水线
 # 功能：将已测试通过的 test 版本提升为正式版本（不重新构建）
 # 触发：推送 v* tag
 
@@ -40,7 +40,7 @@ jobs:
           mkdir -p dist
           
           # 下载 test release 的所有资产
-          if ! gh release download "${TEST_TAG}" --dir dist --pattern "cursortoolset-*"; then
+          if ! gh release download "${TEST_TAG}" --dir dist --pattern "dec-*"; then
             echo "❌ 未找到测试版本 ${TEST_TAG}"
             echo "请先推送 test tag: git tag ${TEST_TAG} && git push origin ${TEST_TAG}"
             exit 1
@@ -55,11 +55,11 @@ jobs:
           
           # 检查必要的平台文件是否存在
           REQUIRED_FILES=(
-            "cursortoolset-linux-amd64"
-            "cursortoolset-linux-arm64"
-            "cursortoolset-darwin-amd64"
-            "cursortoolset-darwin-arm64"
-            "cursortoolset-windows-amd64.exe"
+            "dec-linux-amd64"
+            "dec-linux-arm64"
+            "dec-darwin-amd64"
+            "dec-darwin-arm64"
+            "dec-windows-amd64.exe"
           )
           
           for file in "${REQUIRED_FILES[@]}"; do
@@ -119,30 +119,30 @@ jobs:
           tag_name: ${{ steps.version.outputs.version }}
           name: "Release ${{ steps.version.outputs.version }}"
           body: |
-            ## CursorToolset ${{ steps.version.outputs.version }}
+            ## Dec ${{ steps.version.outputs.version }}
             
             > 此版本从测试版本 `${{ steps.version.outputs.test_tag }}` 提升而来，二进制文件完全相同。
             
             ### 安装
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/scripts/install.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash
             ```
             
             ### 更新
             ```bash
-            cursortoolset update
+            dec update
             ```
             
             ### 下载
             | 平台 | 架构 | 下载 |
             |------|------|------|
-            | Linux | AMD64 | [cursortoolset-linux-amd64](https://github.com/shichao402/CursorToolset/releases/download/${{ steps.version.outputs.version }}/cursortoolset-linux-amd64) |
-            | Linux | ARM64 | [cursortoolset-linux-arm64](https://github.com/shichao402/CursorToolset/releases/download/${{ steps.version.outputs.version }}/cursortoolset-linux-arm64) |
-            | macOS | AMD64 | [cursortoolset-darwin-amd64](https://github.com/shichao402/CursorToolset/releases/download/${{ steps.version.outputs.version }}/cursortoolset-darwin-amd64) |
-            | macOS | ARM64 | [cursortoolset-darwin-arm64](https://github.com/shichao402/CursorToolset/releases/download/${{ steps.version.outputs.version }}/cursortoolset-darwin-arm64) |
-            | Windows | AMD64 | [cursortoolset-windows-amd64.exe](https://github.com/shichao402/CursorToolset/releases/download/${{ steps.version.outputs.version }}/cursortoolset-windows-amd64.exe) |
+            | Linux | AMD64 | [dec-linux-amd64](https://github.com/shichao402/Dec/releases/download/${{ steps.version.outputs.version }}/dec-linux-amd64) |
+            | Linux | ARM64 | [dec-linux-arm64](https://github.com/shichao402/Dec/releases/download/${{ steps.version.outputs.version }}/dec-linux-arm64) |
+            | macOS | AMD64 | [dec-darwin-amd64](https://github.com/shichao402/Dec/releases/download/${{ steps.version.outputs.version }}/dec-darwin-amd64) |
+            | macOS | ARM64 | [dec-darwin-arm64](https://github.com/shichao402/Dec/releases/download/${{ steps.version.outputs.version }}/dec-darwin-arm64) |
+            | Windows | AMD64 | [dec-windows-amd64.exe](https://github.com/shichao402/Dec/releases/download/${{ steps.version.outputs.version }}/dec-windows-amd64.exe) |
           files: |
-            dist/cursortoolset-*
+            dist/dec-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

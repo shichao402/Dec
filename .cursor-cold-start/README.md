@@ -36,7 +36,7 @@
 - version-management: 版本管理
 - github-actions: GitHub Actions CI/CD
 - documentation: 文档管理
-- cursortoolset: CursorToolset 包管理
+- dec: Dec 包管理
 - update-module: 应用更新模块
 
 注意：安全规范、调试规范、脚本规范已内置在核心规则中，无需单独配置。

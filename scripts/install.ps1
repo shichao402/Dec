@@ -1,5 +1,5 @@
-# CursorToolset 一键安装脚本 (Windows PowerShell)
-# 使用方法: iwr -useb https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/install.ps1 | iex
+# Dec 一键安装脚本 (Windows PowerShell)
+# 使用方法: iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
@@ -53,10 +53,10 @@ function Compare-Versions {
 }
 
 # 主安装函数
-function Install-CursorToolset {
+function Install-Dec {
     Write-Host ""
     Write-Host "╔═══════════════════════════════════════╗"
-    Write-Host "║   CursorToolset 一键安装脚本          ║"
+    Write-Host "║   Dec 一键安装脚本          ║"
     Write-Host "╚═══════════════════════════════════════╝"
     Write-Host ""
     
@@ -65,17 +65,17 @@ function Install-CursorToolset {
     Write-ColorOutput "检测到平台: $platform" -Type "Info"
     
     # 定义安装路径（新设计：统一使用环境目录）
-    # 优先使用环境变量 CURSOR_TOOLSET_HOME，如果未设置则使用默认路径
-    if ($env:CURSOR_TOOLSET_HOME) {
-        $installDir = $env:CURSOR_TOOLSET_HOME
-        Write-ColorOutput "使用环境变量 CURSOR_TOOLSET_HOME: $installDir" -Type "Info"
+    # 优先使用环境变量 DEC_HOME，如果未设置则使用默认路径
+    if ($env:DEC_HOME) {
+        $installDir = $env:DEC_HOME
+        Write-ColorOutput "使用环境变量 DEC_HOME: $installDir" -Type "Info"
     } else {
-        $installDir = Join-Path $env:USERPROFILE ".cursortoolsets"
+        $installDir = Join-Path $env:USERPROFILE ".decs"
     }
     $binDir = Join-Path $installDir "bin"
     $configDir = Join-Path $installDir "config"
     $reposDir = Join-Path $installDir "repos"
-    $binaryPath = Join-Path $binDir "cursortoolset.exe"
+    $binaryPath = Join-Path $binDir "dec.exe"
     $configPath = Join-Path $configDir "available-toolsets.json"
     
     Write-ColorOutput "安装目录: $installDir" -Type "Info"
@@ -83,7 +83,7 @@ function Install-CursorToolset {
     # 从 ReleaseLatest 分支获取版本号（唯一来源）
     Write-ColorOutput "获取最新版本号..." -Type "Info"
     try {
-        $versionJson = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/version.json" -ErrorAction Stop
+        $versionJson = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/version.json" -ErrorAction Stop
         $latestVersion = $versionJson.version
         
         if (-not $latestVersion) {
@@ -128,8 +128,8 @@ function Install-CursorToolset {
     New-Item -ItemType Directory -Force -Path $reposDir | Out-Null
     
     # 构建下载 URL（使用版本号）
-    $binaryName = "cursortoolset-$platform.exe"
-    $downloadUrl = "https://github.com/shichao402/CursorToolset/releases/download/$latestVersion/$binaryName"
+    $binaryName = "dec-$platform.exe"
+    $downloadUrl = "https://github.com/shichao402/Dec/releases/download/$latestVersion/$binaryName"
     
     # 下载预编译版本
     Write-ColorOutput "下载预编译版本..." -Type "Info"
@@ -185,15 +185,15 @@ function Install-CursorToolset {
     Write-Host "  `$env:Path = [System.Environment]::GetEnvironmentVariable('Path','User')"
     Write-Host ""
     Write-ColorOutput "之后可以在任何位置运行：" -Type "Info"
-    Write-Host "  cursortoolset install"
-    Write-Host "  cursortoolset list"
-    Write-Host "  cursortoolset update"
+    Write-Host "  dec install"
+    Write-Host "  dec list"
+    Write-Host "  dec update"
     Write-Host ""
 }
 
 # 运行主函数
 try {
-    Install-CursorToolset
+    Install-Dec
 } catch {
     Write-ColorOutput "安装过程中发生错误: $_" -Type "Error"
     exit 1

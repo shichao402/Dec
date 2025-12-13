@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/firoyang/CursorToolset/pkg/installer"
-	"github.com/firoyang/CursorToolset/pkg/paths"
+	"github.com/shichao402/Dec/pkg/installer"
+	"github.com/shichao402/Dec/pkg/paths"
 	"github.com/spf13/cobra"
 )
 

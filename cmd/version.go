@@ -21,10 +21,10 @@ var versionCmd = &cobra.Command{
   set     设置指定版本号
 
 示例：
-  cursortoolset version bump --patch   # 1.0.0 -> 1.0.1
-  cursortoolset version bump --minor   # 1.0.1 -> 1.1.0
-  cursortoolset version bump --major   # 1.1.0 -> 2.0.0
-  cursortoolset version set 2.0.0      # 直接设置版本`,
+  dec version bump --patch   # 1.0.0 -> 1.0.1
+  dec version bump --minor   # 1.0.1 -> 1.1.0
+  dec version bump --major   # 1.1.0 -> 2.0.0
+  dec version set 2.0.0      # 直接设置版本`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// 默认显示当前版本
 		return showCurrentVersion()
@@ -43,9 +43,9 @@ var versionBumpCmd = &cobra.Command{
 	Long: `提升版本号，支持 major、minor、patch 三种方式。
 
 示例：
-  cursortoolset version bump --patch   # 1.0.0 -> 1.0.1
-  cursortoolset version bump --minor   # 1.0.1 -> 1.1.0
-  cursortoolset version bump --major   # 1.1.0 -> 2.0.0`,
+  dec version bump --patch   # 1.0.0 -> 1.0.1
+  dec version bump --minor   # 1.0.1 -> 1.1.0
+  dec version bump --major   # 1.1.0 -> 2.0.0`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// 确定提升类型
 		bumpType := ""
@@ -79,7 +79,7 @@ var versionSetCmd = &cobra.Command{
 	Long: `直接设置指定的版本号。
 
 示例：
-  cursortoolset version set 2.0.0`,
+  dec version set 2.0.0`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		newVersion := args[0]
@@ -189,7 +189,7 @@ func updateVersion(manifest map[string]interface{}, manifestPath, oldVersion, ne
 			dist["tarball"] = newTarball
 		}
 		// 清空 sha256（需要重新计算）
-		dist["sha256"] = "TODO: 运行 cursortoolset pack --verify 更新"
+		dist["sha256"] = "TODO: 运行 dec pack --verify 更新"
 	}
 
 	// 保存文件
@@ -204,7 +204,7 @@ func updateVersion(manifest map[string]interface{}, manifestPath, oldVersion, ne
 
 	fmt.Println("✅ 版本号已更新")
 	fmt.Println("\n💡 下一步：")
-	fmt.Println("   1. 运行 cursortoolset pack --verify 打包并更新 SHA256")
+	fmt.Println("   1. 运行 dec pack --verify 打包并更新 SHA256")
 	fmt.Println("   2. 提交更改并创建 Git Tag")
 	fmt.Printf("      git add package.json && git commit -m \"chore: bump version to %s\"\n", newVersion)
 	fmt.Printf("      git tag v%s\n", newVersion)

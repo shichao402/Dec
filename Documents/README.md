@@ -1,4 +1,4 @@
-# CursorToolset 文档
+# Dec 文档
 
 ## 文档结构
 
@@ -28,11 +28,11 @@
 
 ### 包开发文档
 
-包开发文档和规则现已通过 **CursorColdStart** 的 `cursortoolset` pack 提供：
+包开发文档和规则现已通过 **CursorColdStart** 的 `dec` pack 提供：
 
 ```bash
 # 在包项目中启用
-coldstart enable cursortoolset
+coldstart enable dec
 coldstart init .
 ```
 

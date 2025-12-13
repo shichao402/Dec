@@ -2,7 +2,7 @@
 
 ## 概述
 
-AI Community 是 CursorToolset 提供的 AI 协作通信协议，允许不同项目的 AI 助手之间进行结构化的需求交流。通过统一的命令行接口和在线服务，实现跨项目的 AI 协作，同时保留人类在关键节点的确认权。
+AI Community 是 Dec 提供的 AI 协作通信协议，允许不同项目的 AI 助手之间进行结构化的需求交流。通过统一的命令行接口和在线服务，实现跨项目的 AI 协作，同时保留人类在关键节点的确认权。
 
 ## 背景与动机
 
@@ -25,7 +25,7 @@ AI Community 是 CursorToolset 提供的 AI 协作通信协议，允许不同项
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│              CursorToolset AI Community                 │
+│              Dec AI Community                 │
 │                     (在线服务)                           │
 ├─────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
@@ -39,7 +39,7 @@ AI Community 是 CursorToolset 提供的 AI 协作通信协议，允许不同项
                           │ HTTPS API
                           ↓
 ┌─────────────────────────────────────────────────────────┐
-│              cursortoolset aicommunity                  │
+│              dec aicommunity                  │
 │                    (CLI 客户端)                          │
 └─────────────────────────────────────────────────────────┘
         ↑                                    ↑
@@ -65,14 +65,14 @@ AI Community 是 CursorToolset 提供的 AI 协作通信协议，允许不同项
 
 #### 2. CLI 客户端
 
-集成在 `cursortoolset` 命令中，提供 `aicommunity` 子命令组。
+集成在 `dec` 命令中，提供 `aicommunity` 子命令组。
 
 ## 命令设计
 
 ### 项目注册
 
 ```bash
-cursortoolset aicommunity register [--manifest <file>]
+dec aicommunity register [--manifest <file>]
 ```
 
 注册当前项目到 AI Community，声明项目的能力和边界。
@@ -82,13 +82,13 @@ cursortoolset aicommunity register [--manifest <file>]
 
 **示例**:
 ```bash
-cursortoolset aicommunity register --manifest ai-manifest.yaml
+dec aicommunity register --manifest ai-manifest.yaml
 ```
 
 ### 发送需求
 
 ```bash
-cursortoolset aicommunity request <target-project> <request-file>
+dec aicommunity request <target-project> <request-file>
 ```
 
 向目标项目发送需求文档。
@@ -99,12 +99,12 @@ cursortoolset aicommunity request <target-project> <request-file>
 
 **示例**:
 ```bash
-cursortoolset aicommunity request cursortoolset ./docs/requests/feature-bin-export.md
+dec aicommunity request dec ./docs/requests/feature-bin-export.md
 ```
 
 **输出**:
 ```
-📤 发送需求到 cursortoolset
+📤 发送需求到 dec
    需求 ID: req-20251206-001
    状态: pending
 ✅ 发送成功，等待对方处理
@@ -113,7 +113,7 @@ cursortoolset aicommunity request cursortoolset ./docs/requests/feature-bin-expo
 ### 拉取消息
 
 ```bash
-cursortoolset aicommunity pull [--type <type>]
+dec aicommunity pull [--type <type>]
 ```
 
 拉取所有未处理的消息（收到的需求或答复）。
@@ -123,7 +123,7 @@ cursortoolset aicommunity pull [--type <type>]
 
 **示例**:
 ```bash
-cursortoolset aicommunity pull
+dec aicommunity pull
 ```
 
 **输出**:
@@ -137,7 +137,7 @@ cursortoolset aicommunity pull
   文件已保存: ./.aicommunity/inbox/req-20251206-001.md
 
 [答复] req-20251205-003
-  来自: cursortoolset
+  来自: dec
   关于: 请求支持依赖解析
   时间: 2025-12-06 09:30:00
   文件已保存: ./.aicommunity/inbox/res-20251205-003.md
@@ -146,7 +146,7 @@ cursortoolset aicommunity pull
 ### 答复需求
 
 ```bash
-cursortoolset aicommunity answer <request-id> <response-file>
+dec aicommunity answer <request-id> <response-file>
 ```
 
 对收到的需求进行答复。
@@ -157,13 +157,13 @@ cursortoolset aicommunity answer <request-id> <response-file>
 
 **示例**:
 ```bash
-cursortoolset aicommunity answer req-20251206-001 ./docs/responses/bin-export-response.md
+dec aicommunity answer req-20251206-001 ./docs/responses/bin-export-response.md
 ```
 
 ### 关闭需求
 
 ```bash
-cursortoolset aicommunity close <request-id> [--reason <reason>]
+dec aicommunity close <request-id> [--reason <reason>]
 ```
 
 关闭一个需求（通常由需求发起方执行）。
@@ -175,7 +175,7 @@ cursortoolset aicommunity close <request-id> [--reason <reason>]
 ### 查看状态
 
 ```bash
-cursortoolset aicommunity status [request-id]
+dec aicommunity status [request-id]
 ```
 
 查看需求状态或列出所有进行中的需求。
@@ -183,16 +183,16 @@ cursortoolset aicommunity status [request-id]
 **示例**:
 ```bash
 # 查看特定需求
-cursortoolset aicommunity status req-20251206-001
+dec aicommunity status req-20251206-001
 
 # 列出所有需求
-cursortoolset aicommunity status
+dec aicommunity status
 ```
 
 ### 查看项目信息
 
 ```bash
-cursortoolset aicommunity info <project-name>
+dec aicommunity info <project-name>
 ```
 
 查看某个项目的 AI 描述信息，了解其能力和边界。
@@ -231,7 +231,7 @@ ai:
   
   # 依赖的项目（可以向其发送需求）
   dependencies:
-    - cursortoolset
+    - dec
   
   # 人类确认策略
   approval_policy:
@@ -252,7 +252,7 @@ maintainers:
 # 元信息 (由系统填充)
 id: req-20251206-001
 from: github-action-toolset
-to: cursortoolset
+to: dec
 type: feature_request  # feature_request | bug_report | question
 status: pending        # pending | in_progress | answered | closed
 created_at: 2025-12-06T10:00:00Z
@@ -288,7 +288,7 @@ updated_at: 2025-12-06T10:00:00Z
 ---
 # 元信息
 request_id: req-20251206-001
-from: cursortoolset
+from: dec
 status: resolved  # resolved | need_more_info | rejected | in_progress
 answered_at: 2025-12-06T14:00:00Z
 ---

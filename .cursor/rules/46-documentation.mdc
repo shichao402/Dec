@@ -15,7 +15,7 @@ alwaysApply: true
 ### 标准目录结构
 
 ```
-CursorToolset/
+Dec/
 ├── Documents/                    # 文档根目录（必须）
 │   ├── README.md                # 文档索引和说明
 │   ├── design/                  # 设计文档
@@ -192,7 +192,7 @@ Documents/temp/
 在 `Documents/` 目录下创建 `README.md` 作为文档索引：
 
 ```markdown
-# CursorToolset 文档
+# Dec 文档
 
 ## 文档结构
 
@@ -326,7 +326,7 @@ EOF
 示例：
 
 ```markdown
-# CursorToolset
+# Dec
 
 项目简介...
 

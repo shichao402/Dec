@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/firoyang/CursorToolset/pkg/types"
+	"github.com/shichao402/Dec/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -36,16 +36,16 @@ var packCmd = &cobra.Command{
 
 示例：
   # 打包当前目录
-  cursortoolset pack
+  dec pack
 
   # 打包指定目录
-  cursortoolset pack ./my-toolset
+  dec pack ./my-toolset
 
   # 指定输出文件名
-  cursortoolset pack --output my-toolset-1.0.0.tar.gz
+  dec pack --output my-toolset-1.0.0.tar.gz
 
   # 打包并自动更新 package.json 中的 sha256
-  cursortoolset pack --verify`,
+  dec pack --verify`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPack,
 }
@@ -149,7 +149,7 @@ func runPack(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   2. 上传 %s 到 Release\n", outputFile)
 	fmt.Printf("   3. 复制 SHA256 到 package.json 的 dist.sha256 字段\n")
 	if !packVerify {
-		fmt.Printf("\n   或使用 --verify 自动更新: cursortoolset pack --verify\n")
+		fmt.Printf("\n   或使用 --verify 自动更新: dec pack --verify\n")
 	}
 
 	return nil
@@ -161,7 +161,7 @@ func loadAndValidateManifest(path string) (*types.Manifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("package.json 不存在，请先运行 'cursortoolset init'")
+			return nil, fmt.Errorf("package.json 不存在，请先运行 'dec init'")
 		}
 		return nil, err
 	}

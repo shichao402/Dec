@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/firoyang/CursorToolset/pkg/config"
+	"github.com/shichao402/Dec/pkg/config"
 	"github.com/spf13/cobra"
 )
 
@@ -25,14 +25,14 @@ var initCmd = &cobra.Command{
 生成的文件：
   - package.json      包的元数据文件
   - README.md         包说明文档
-  - .cursortoolset/   包开发规则和指南
+  - .dec/   包开发规则和指南
 
 示例：
   # 在当前目录初始化
-  cursortoolset init my-toolset
+  dec init my-toolset
 
   # 在指定目录初始化
-  cursortoolset init my-toolset --dir ./packages/my-toolset`,
+  dec init my-toolset --dir ./packages/my-toolset`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		packageName := args[0]
@@ -150,17 +150,17 @@ func createPackageStructure(targetDir, packageName string, isReinit bool) error 
 		fmt.Println("  ⏭️  跳过 README.md（已存在）")
 	}
 
-	// 创建 .cursortoolset 目录和规则文件
-	cursorDir := filepath.Join(targetDir, ".cursortoolset")
+	// 创建 .dec 目录和规则文件
+	cursorDir := filepath.Join(targetDir, ".dec")
 	if _, err := os.Stat(cursorDir); os.IsNotExist(err) {
-		if err := createCursorToolsetDir(targetDir, packageName); err != nil {
-			return fmt.Errorf("创建 .cursortoolset 目录失败: %w", err)
+		if err := createDecDir(targetDir, packageName); err != nil {
+			return fmt.Errorf("创建 .dec 目录失败: %w", err)
 		}
-		fmt.Println("  ✅ 创建 .cursortoolset/ 规则目录")
+		fmt.Println("  ✅ 创建 .dec/ 规则目录")
 	} else if isReinit {
 		// --force 模式：检查并补充缺失的文件
-		fmt.Println("  📂 检查 .cursortoolset/")
-		if err := ensureCursorToolsetFiles(targetDir, packageName); err != nil {
+		fmt.Println("  📂 检查 .dec/")
+		if err := ensureDecFiles(targetDir, packageName); err != nil {
 			fmt.Printf("    ⚠️  补充文件失败: %v\n", err)
 		}
 	}
@@ -222,7 +222,7 @@ func createPackageJSON(targetDir, packageName string, isReinit bool) error {
 			"tarball": fmt.Sprintf("%s-0.1.0.tar.gz", packageName),
 			"sha256":  "TODO: 发布时自动填写",
 		},
-		"cursortoolset": map[string]string{
+		"dec": map[string]string{
 			"minVersion": "1.0.0",
 		},
 	}
@@ -262,7 +262,7 @@ func createReadme(targetDir, packageName string) error {
 ## 安装
 
 `+"```bash"+`
-cursortoolset install %s
+dec install %s
 `+"```"+`
 
 ## 功能
@@ -280,7 +280,7 @@ TODO: 添加使用说明
 `+"```"+`
 %s/
 ├── package.json          # 包配置文件
-├── .cursortoolset/       # AI 规则目录
+├── .dec/       # AI 规则目录
 │   └── docs/             # 开发文档
 ├── rules/                # 你的规则文件
 └── README.md
@@ -300,9 +300,9 @@ MIT
 	return os.WriteFile(filepath.Join(targetDir, "README.md"), []byte(content), 0644)
 }
 
-// createCursorToolsetDir 创建 .cursortoolset 目录
-func createCursorToolsetDir(targetDir, packageName string) error {
-	cursorDir := filepath.Join(targetDir, ".cursortoolset")
+// createDecDir 创建 .dec 目录
+func createDecDir(targetDir, packageName string) error {
+	cursorDir := filepath.Join(targetDir, ".dec")
 
 	if err := os.MkdirAll(cursorDir, 0755); err != nil {
 		return err
@@ -311,16 +311,16 @@ func createCursorToolsetDir(targetDir, packageName string) error {
 	return nil
 }
 
-// ensureCursorToolsetFiles 检查 .cursortoolset 目录
-func ensureCursorToolsetFiles(targetDir, packageName string) error {
-	cursorDir := filepath.Join(targetDir, ".cursortoolset")
+// ensureDecFiles 检查 .dec 目录
+func ensureDecFiles(targetDir, packageName string) error {
+	cursorDir := filepath.Join(targetDir, ".dec")
 
 	// 检查目录是否存在
 	if _, err := os.Stat(cursorDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(cursorDir, 0755); err != nil {
 			return err
 		}
-		fmt.Println("    ✅ 补充 .cursortoolset/ 目录")
+		fmt.Println("    ✅ 补充 .dec/ 目录")
 	}
 
 	return nil
@@ -436,7 +436,7 @@ jobs:
           
           # 检查是否已存在相同的 sync issue
           EXISTING_ISSUE=$(gh issue list \
-            --repo shichao402/CursorToolset \
+            --repo shichao402/Dec \
             --label "pack-sync" \
             --search "repo:$REPO_URL" \
             --state open \
@@ -448,7 +448,7 @@ jobs:
           else
             # 创建标准化的 sync issue
             gh issue create \
-              --repo shichao402/CursorToolset \
+              --repo shichao402/Dec \
               --title "Sync $REPO_URL" \
               --body "自动创建的同步请求，由 ${{ github.repository }}@$VERSION 发布触发。
 

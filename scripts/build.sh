@@ -1,5 +1,5 @@
 #!/bin/bash
-# CursorToolset 本地构建脚本
+# Dec 本地构建脚本
 # 功能：构建当前平台或所有平台版本，支持日志收集和输出位置配置
 
 set -e
@@ -46,7 +46,7 @@ else
     LOG_FILE="${LOG_DIR}/build-$(date +%Y%m%d-%H%M%S).log"
 fi
 
-BINARY_NAME="cursortoolset"
+BINARY_NAME="dec"
 BUILD_ALL=false
 CLEAN_BEFORE=true
 CLEAN_AFTER=false
@@ -76,7 +76,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --help|-h)
             cat << EOF
-CursorToolset 本地构建脚本
+Dec 本地构建脚本
 
 用法: $0 [选项]
 
@@ -91,7 +91,7 @@ CursorToolset 本地构建脚本
 环境变量:
   OUTPUT_DIR               输出目录（默认: dist）
   LOG_DIR                  日志目录（默认: logs）
-  CURSOR_TOOLSET_ROOT      开发根目录（默认: .root）
+  DEC_ROOT      开发根目录（默认: .root）
 
 示例:
   $0                      # 构建当前平台版本
@@ -114,7 +114,7 @@ mkdir -p "${LOG_DIR}"
 
 # 记录开始时间
 START_TIME=$(date +%s)
-print_header "CursorToolset 本地构建"
+print_header "Dec 本地构建"
 print_info "开始时间: $(date '+%Y-%m-%d %H:%M:%S')"
 print_info "输出目录: $(realpath "${OUTPUT_DIR}")"
 print_info "日志文件: $(realpath "${LOG_FILE}")"
@@ -177,10 +177,10 @@ if [ "${CLEAN_BEFORE}" = true ]; then
 fi
 
 # 设置开发环境变量
-if [ -z "${CURSOR_TOOLSET_ROOT}" ]; then
-    export CURSOR_TOOLSET_ROOT="$(pwd)/.root"
-    print_info "设置开发环境变量: CURSOR_TOOLSET_ROOT=${CURSOR_TOOLSET_ROOT}"
-    mkdir -p "${CURSOR_TOOLSET_ROOT}"
+if [ -z "${DEC_ROOT}" ]; then
+    export DEC_ROOT="$(pwd)/.root"
+    print_info "设置开发环境变量: DEC_ROOT=${DEC_ROOT}"
+    mkdir -p "${DEC_ROOT}"
 fi
 
 # 构建函数
@@ -326,7 +326,7 @@ generate_manifest() {
     fi
     
     cat > "${manifest_file}" << EOF
-CursorToolset 构建信息
+Dec 构建信息
 ====================
 
 版本: ${VERSION}

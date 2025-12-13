@@ -36,7 +36,7 @@ jobs:
             echo "Creating new registry release..."
             gh release create registry \
               --title "Package Registry" \
-              --notes "This release contains the package registry for CursorToolset. Do not delete this release." \
+              --notes "This release contains the package registry for Dec. Do not delete this release." \
               config/registry.json
           fi
           echo "✅ Registry released successfully"

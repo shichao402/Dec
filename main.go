@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/firoyang/CursorToolset/cmd"
+	"github.com/shichao402/Dec/cmd"
 )
 
 var (

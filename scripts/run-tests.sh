@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# CursorToolset 完整功能测试脚本
+# Dec 完整功能测试脚本
 # 使用方法: ./scripts/run-tests.sh
 #
 # 测试原则：
@@ -12,8 +12,8 @@
 set -e
 
 # 清除开发环境变量，使用生产环境
-unset CURSOR_TOOLSET_ROOT
-unset CURSOR_TOOLSET_HOME
+unset DEC_ROOT
+unset DEC_HOME
 
 # 颜色定义
 RED='\033[0;31m'
@@ -28,13 +28,13 @@ FAILED=0
 SKIPPED=0
 
 # 安装目录（生产环境）
-INSTALL_DIR="$HOME/.cursortoolsets"
+INSTALL_DIR="$HOME/.decs"
 
 cd "$(dirname "$0")/.."
 PROJECT_DIR=$(pwd)
 
 echo "=========================================="
-echo "CursorToolset 完整功能测试"
+echo "Dec 完整功能测试"
 echo "=========================================="
 echo "项目目录: $PROJECT_DIR"
 echo "安装目录: $INSTALL_DIR"
@@ -43,8 +43,8 @@ echo ""
 # 构建（不使用 make，避免开发环境变量）
 echo ">>> 构建管理器..."
 mkdir -p dist
-go build -o dist/cursortoolset .
-echo "✅ 构建完成: dist/cursortoolset"
+go build -o dist/dec .
+echo "✅ 构建完成: dist/dec"
 echo ""
 
 # 测试函数：运行命令并验证
@@ -190,16 +190,16 @@ verify_install_test_package() {
         return 1
     fi
     
-    # 4. .cursortoolset 目录存在
-    if [ ! -d "$pkg_dir/.cursortoolset" ]; then
-        echo "  ⚠️  .cursortoolset 目录不存在"
+    # 4. .dec 目录存在
+    if [ ! -d "$pkg_dir/.dec" ]; then
+        echo "  ⚠️  .dec 目录不存在"
         return 1
     fi
     
     echo "  ✓ 包目录完整"
     echo "  ✓ package.json 存在"
     echo "  ✓ 二进制文件存在"
-    echo "  ✓ .cursortoolset 目录存在"
+    echo "  ✓ .dec 目录存在"
     return 0
 }
 
@@ -292,15 +292,15 @@ verify_init() {
         return 1
     fi
     
-    # 4. .cursortoolset 目录存在
-    if [ ! -d "$pkg_dir/.cursortoolset" ]; then
-        echo "  ⚠️  .cursortoolset 目录不存在"
+    # 4. .dec 目录存在
+    if [ ! -d "$pkg_dir/.dec" ]; then
+        echo "  ⚠️  .dec 目录不存在"
         return 1
     fi
     
-    # 5. .cursortoolset 目录存在
-    if [ ! -d "$pkg_dir/.cursortoolset" ]; then
-        echo "  ⚠️  .cursortoolset 目录不存在"
+    # 5. .dec 目录存在
+    if [ ! -d "$pkg_dir/.dec" ]; then
+        echo "  ⚠️  .dec 目录不存在"
         return 1
     fi
     
@@ -318,7 +318,7 @@ verify_init() {
     
     echo "  ✓ package.json 存在且有效"
     echo "  ✓ README.md 存在"
-    echo "  ✓ .cursortoolset/ 目录存在"
+    echo "  ✓ .dec/ 目录存在"
     echo "  ✓ .github/workflows/release.yml 存在"
     echo "  ✓ .gitignore 存在"
     return 0
@@ -481,55 +481,55 @@ verify_sync() {
 #==========================================
 
 echo -e "${BLUE}>>> 阶段 1: 清理环境${NC}"
-run_test "01" "clean --all" "./dist/cursortoolset clean --all --force" verify_clean_all
+run_test "01" "clean --all" "./dist/dec clean --all --force" verify_clean_all
 
 echo -e "${BLUE}>>> 阶段 2: 索引管理${NC}"
-run_test "02" "registry update" "./dist/cursortoolset registry update" verify_registry_update
+run_test "02" "registry update" "./dist/dec registry update" verify_registry_update
 
 echo -e "${BLUE}>>> 阶段 3: 查询功能${NC}"
-run_test "03" "list" "./dist/cursortoolset list" verify_list
-run_test "04" "search test" "./dist/cursortoolset search test" verify_search
-run_test "05" "info test-package" "./dist/cursortoolset info test-package" verify_info
+run_test "03" "list" "./dist/dec list" verify_list
+run_test "04" "search test" "./dist/dec search test" verify_search
+run_test "05" "info test-package" "./dist/dec info test-package" verify_info
 
 echo -e "${BLUE}>>> 阶段 4: 安装功能${NC}"
-run_test "06" "install test-package" "./dist/cursortoolset install test-package" verify_install_test_package
-run_test "07" "list --installed" "./dist/cursortoolset list --installed" verify_list_installed
+run_test "06" "install test-package" "./dist/dec install test-package" verify_install_test_package
+run_test "07" "list --installed" "./dist/dec list --installed" verify_list_installed
 
 echo -e "${BLUE}>>> 阶段 5: 关键验证 - 二进制编译时间${NC}"
 run_test "08" "验证编译时间嵌入" "strings $INSTALL_DIR/repos/test-package/test-package | grep -E '^20[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2}$' | head -1" verify_build_time_output
 
 echo -e "${BLUE}>>> 阶段 6: 更新功能${NC}"
-run_test "09" "update --packages" "./dist/cursortoolset update --packages" verify_update_packages
+run_test "09" "update --packages" "./dist/dec update --packages" verify_update_packages
 
 echo -e "${BLUE}>>> 阶段 7: 卸载功能${NC}"
-run_test "10" "uninstall test-package" "./dist/cursortoolset uninstall test-package --force" verify_uninstall
-run_test "11" "list --installed (确认卸载)" "./dist/cursortoolset list --installed" verify_list_installed_empty
+run_test "10" "uninstall test-package" "./dist/dec uninstall test-package --force" verify_uninstall
+run_test "11" "list --installed (确认卸载)" "./dist/dec list --installed" verify_list_installed_empty
 
 echo -e "${BLUE}>>> 阶段 8: 批量安装${NC}"
-run_test "12" "install (所有包)" "./dist/cursortoolset install" verify_install_all
+run_test "12" "install (所有包)" "./dist/dec install" verify_install_all
 
 echo -e "${BLUE}>>> 阶段 9: 缓存管理${NC}"
-run_test "13" "clean --cache" "./dist/cursortoolset clean --cache --force" verify_clean_cache
+run_test "13" "clean --cache" "./dist/dec clean --cache --force" verify_clean_cache
 
 echo -e "${BLUE}>>> 阶段 10: 初始化功能${NC}"
 # init 测试需要切换目录
 cd /tmp
 rm -rf test-init-pkg
-run_test "14" "init test-init-pkg" "$PROJECT_DIR/dist/cursortoolset init test-init-pkg" verify_init
+run_test "14" "init test-init-pkg" "$PROJECT_DIR/dist/dec init test-init-pkg" verify_init
 
-run_test "15" "init --force (重新初始化)" "$PROJECT_DIR/dist/cursortoolset init test-init-pkg --force" verify_init_force
+run_test "15" "init --force (重新初始化)" "$PROJECT_DIR/dist/dec init test-init-pkg --force" verify_init_force
 
 cd "$PROJECT_DIR"
 
 echo -e "${BLUE}>>> 阶段 11: 版本管理${NC}"
 # version 命令测试（使用 init 创建的目录）
 cd /tmp/test-init-pkg
-run_test "16" "version (显示版本)" "$PROJECT_DIR/dist/cursortoolset version" verify_version
+run_test "16" "version (显示版本)" "$PROJECT_DIR/dist/dec version" verify_version
 
 echo -e "${BLUE}>>> 阶段 12: 配置管理${NC}"
 cd "$PROJECT_DIR"
-run_test "17" "config list" "./dist/cursortoolset config list" verify_config_list
-run_test "18" "config get registry_url" "./dist/cursortoolset config get registry_url" verify_config_get
+run_test "17" "config list" "./dist/dec config list" verify_config_list
+run_test "18" "config get registry_url" "./dist/dec config get registry_url" verify_config_get
 
 echo -e "${BLUE}>>> 阶段 13: 打包功能${NC}"
 cd /tmp/test-init-pkg
@@ -537,17 +537,17 @@ cd /tmp/test-init-pkg
 git init -q 2>/dev/null || true
 git add -A 2>/dev/null || true
 git commit -m "init" -q 2>/dev/null || true
-run_test "19" "pack" "$PROJECT_DIR/dist/cursortoolset pack" verify_pack
+run_test "19" "pack" "$PROJECT_DIR/dist/dec pack" verify_pack
 cd "$PROJECT_DIR"
 
 echo -e "${BLUE}>>> 阶段 14: 发布功能（dry-run）${NC}"
 cd /tmp/test-init-pkg
-run_test "20" "release --dry-run" "$PROJECT_DIR/dist/cursortoolset release --dry-run" verify_release_dry_run
+run_test "20" "release --dry-run" "$PROJECT_DIR/dist/dec release --dry-run" verify_release_dry_run
 cd "$PROJECT_DIR"
 
 echo -e "${BLUE}>>> 阶段 15: 同步功能${NC}"
 cd /tmp/test-init-pkg
-run_test "21" "sync" "$PROJECT_DIR/dist/cursortoolset sync" verify_sync
+run_test "21" "sync" "$PROJECT_DIR/dist/dec sync" verify_sync
 cd "$PROJECT_DIR"
 
 # 清理临时文件

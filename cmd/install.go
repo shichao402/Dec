@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/firoyang/CursorToolset/pkg/installer"
-	"github.com/firoyang/CursorToolset/pkg/paths"
-	"github.com/firoyang/CursorToolset/pkg/registry"
+	"github.com/shichao402/Dec/pkg/installer"
+	"github.com/shichao402/Dec/pkg/paths"
+	"github.com/shichao402/Dec/pkg/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -29,16 +29,16 @@ var installCmd = &cobra.Command{
 
 示例：
   # 安装单个包
-  cursortoolset install github-action-toolset
+  dec install github-action-toolset
 
   # 安装多个包
-  cursortoolset install github-action-toolset test-package cursor-cold-start
+  dec install github-action-toolset test-package cursor-cold-start
 
   # 安装所有可用包
-  cursortoolset install
+  dec install
 
   # 不使用缓存安装
-  cursortoolset install github-action-toolset --no-cache`,
+  dec install github-action-toolset --no-cache`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// 确保目录结构存在
 		if err := paths.EnsureAllDirs(); err != nil {
@@ -87,7 +87,7 @@ func installPackage(mgr *registry.Manager, inst *installer.Installer, packageNam
 	// 查找包
 	manifest := mgr.FindPackage(packageName)
 	if manifest == nil {
-		return fmt.Errorf("未找到包: %s\n\n提示: 运行 'cursortoolset registry update' 更新包索引", packageName)
+		return fmt.Errorf("未找到包: %s\n\n提示: 运行 'dec registry update' 更新包索引", packageName)
 	}
 
 	// 检查是否已安装
@@ -130,7 +130,7 @@ func installAllPackages(mgr *registry.Manager, inst *installer.Installer) error 
 	packages := mgr.ListPackages()
 	if len(packages) == 0 {
 		fmt.Println("📦 没有可用的包")
-		fmt.Println("\n提示: 运行 'cursortoolset registry update' 更新包索引")
+		fmt.Println("\n提示: 运行 'dec registry update' 更新包索引")
 		return nil
 	}
 

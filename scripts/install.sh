@@ -1,6 +1,6 @@
 #!/bin/bash
-# CursorToolset 一键安装脚本 (Linux/macOS)
-# 使用方法: curl -fsSL https://raw.githubusercontent.com/shichao402/CursorToolset/ReleaseLatest/install.sh | bash
+# Dec 一键安装脚本 (Linux/macOS)
+# 使用方法: curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/install.sh | bash
 
 set -e
 
@@ -108,7 +108,7 @@ compare_versions() {
 main() {
     echo ""
     echo "╔═══════════════════════════════════════╗"
-    echo "║   CursorToolset 一键安装脚本          ║"
+    echo "║   Dec 一键安装脚本          ║"
     echo "╚═══════════════════════════════════════╗"
     echo ""
     
@@ -120,34 +120,34 @@ main() {
     print_info "检测到平台: ${PLATFORM}"
     
     # 定义安装路径（新设计：统一使用环境目录）
-    # 优先使用环境变量 CURSOR_TOOLSET_HOME，如果未设置则使用默认路径
+    # 优先使用环境变量 DEC_HOME，如果未设置则使用默认路径
     # 新路径设计（类似 pip/brew）：
-    # ~/.cursortoolsets/             <- 根目录 (独立于 .cursor 系统目录)
-    # ├── bin/                       <- CursorToolset 可执行文件
+    # ~/.decs/             <- 根目录 (独立于 .cursor 系统目录)
+    # ├── bin/                       <- Dec 可执行文件
     # ├── repos/                     <- 工具集仓库源码
     # └── config/                    <- 配置文件
-    if [ -n "${CURSOR_TOOLSET_HOME}" ]; then
-        INSTALL_DIR="${CURSOR_TOOLSET_HOME}"
+    if [ -n "${DEC_HOME}" ]; then
+        INSTALL_DIR="${DEC_HOME}"
     else
-        INSTALL_DIR="${HOME}/.cursortoolsets"
+        INSTALL_DIR="${HOME}/.decs"
     fi
     BIN_DIR="${INSTALL_DIR}/bin"
     CONFIG_DIR="${INSTALL_DIR}/config"
     REPOS_DIR="${INSTALL_DIR}/repos"
-    BINARY_PATH="${BIN_DIR}/cursortoolset"
+    BINARY_PATH="${BIN_DIR}/dec"
     
     # 更新分支（正式版使用 ReleaseLatest，测试版使用 ReleaseTest）
-    UPDATE_BRANCH="${CURSOR_TOOLSET_BRANCH:-ReleaseLatest}"
+    UPDATE_BRANCH="${DEC_BRANCH:-ReleaseLatest}"
     
     print_info "安装目录: ${INSTALL_DIR}"
     print_info "更新分支: ${UPDATE_BRANCH}"
-    if [ -n "${CURSOR_TOOLSET_HOME}" ]; then
-        print_info "使用环境变量 CURSOR_TOOLSET_HOME: ${CURSOR_TOOLSET_HOME}"
+    if [ -n "${DEC_HOME}" ]; then
+        print_info "使用环境变量 DEC_HOME: ${DEC_HOME}"
     fi
     
     # 从更新分支获取版本号
     print_info "获取最新版本号..."
-    VERSION_JSON=$(curl -fsSL "https://raw.githubusercontent.com/shichao402/CursorToolset/${UPDATE_BRANCH}/version.json" 2>/dev/null)
+    VERSION_JSON=$(curl -fsSL "https://raw.githubusercontent.com/shichao402/Dec/${UPDATE_BRANCH}/version.json" 2>/dev/null)
     
     if [ -z "${VERSION_JSON}" ]; then
         print_error "无法从 ${UPDATE_BRANCH} 分支获取版本信息"
@@ -189,14 +189,14 @@ main() {
     mkdir -p "${REPOS_DIR}"
     
     # 构建下载 URL（使用版本号）
-    BINARY_NAME="cursortoolset-${PLATFORM}"
+    BINARY_NAME="dec-${PLATFORM}"
     # 测试分支使用 test-v* tag，正式分支使用 v* tag
     if [ "${UPDATE_BRANCH}" = "ReleaseTest" ]; then
         DOWNLOAD_TAG="test-${LATEST_VERSION}"
     else
         DOWNLOAD_TAG="${LATEST_VERSION}"
     fi
-    DOWNLOAD_URL="https://github.com/shichao402/CursorToolset/releases/download/${DOWNLOAD_TAG}/${BINARY_NAME}"
+    DOWNLOAD_URL="https://github.com/shichao402/Dec/releases/download/${DOWNLOAD_TAG}/${BINARY_NAME}"
     
     # 下载预编译版本
     print_info "下载预编译版本..."
@@ -218,7 +218,7 @@ main() {
     
     # 下载系统配置文件
     print_info "下载系统配置..."
-    SYSTEM_CONFIG_URL="https://raw.githubusercontent.com/shichao402/CursorToolset/${UPDATE_BRANCH}/config/system.json"
+    SYSTEM_CONFIG_URL="https://raw.githubusercontent.com/shichao402/Dec/${UPDATE_BRANCH}/config/system.json"
     SYSTEM_CONFIG_PATH="${CONFIG_DIR}/system.json"
     
     if curl -fsSL -o "${SYSTEM_CONFIG_PATH}" "${SYSTEM_CONFIG_URL}"; then
@@ -252,9 +252,9 @@ main() {
     
     if [[ -n "${SHELL_RC}" ]]; then
         # 检查是否已经添加
-        if ! grep -q "cursortoolset" "${SHELL_RC}" 2>/dev/null; then
+        if ! grep -q "dec" "${SHELL_RC}" 2>/dev/null; then
             echo "" >> "${SHELL_RC}"
-            echo "# CursorToolset" >> "${SHELL_RC}"
+            echo "# Dec" >> "${SHELL_RC}"
             echo "export PATH=\"${BIN_DIR}:\$PATH\"" >> "${SHELL_RC}"
             print_success "已添加到 ${SHELL_RC}"
         else
@@ -288,9 +288,9 @@ main() {
     echo "  ${BINARY_PATH} --help"
     echo ""
     print_info "之后可以在任何位置运行："
-    echo "  cursortoolset install"
-    echo "  cursortoolset list"
-    echo "  cursortoolset update"
+    echo "  dec install"
+    echo "  dec list"
+    echo "  dec update"
     echo ""
 }
 

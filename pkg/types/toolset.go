@@ -73,7 +73,7 @@ type Manifest struct {
 	Release *ReleaseConfig `json:"release,omitempty"` // 发布配置
 
 	// 管理器兼容性
-	CursorToolset ManagerCompat `json:"cursortoolset,omitempty"` // 管理器兼容性要求
+	Dec ManagerCompat `json:"dec,omitempty"` // 管理器兼容性要求
 
 	// 依赖（可选）
 	Dependencies []string `json:"dependencies,omitempty"` // 依赖的包名列表

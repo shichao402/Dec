@@ -1,8 +1,8 @@
-# CursorToolset 项目开发规则
+# Dec 项目开发规则
 
 ## 项目概述
 
-CursorToolset 是一个 Cursor 工具集管理器，采用 Go 语言开发，类似 pip/brew 的包管理工具。
+Dec 是一个 Cursor 工具集管理器，采用 Go 语言开发，类似 pip/brew 的包管理工具。
 
 **核心设计理念**：
 - **简单** - 像 pip/brew 一样简单：下载、解压、完成
@@ -16,7 +16,7 @@ CursorToolset 是一个 Cursor 工具集管理器，采用 Go 语言开发，类
 每个组件只负责自己的事情，通过状态文件解耦通信：
 
 ```
-~/.cursortoolsets/
+~/.decs/
 ├── .state/
 │   ├── version          # 二进制版本（install.sh / update --self 写入）
 │   └── docs_version     # 文档版本（setup 包写入）
@@ -69,7 +69,7 @@ state.NeedDocsUpdate()  // 检查是否需要更新文档
 ## 项目结构
 
 ```
-CursorToolset/
+Dec/
 ├── cmd/                    # 命令行子命令实现
 │   ├── root.go            # 根命令和版本管理
 │   ├── install.go         # 安装命令
@@ -104,7 +104,7 @@ CursorToolset/
 ├── registry.json         # 包注册表
 └── version.json          # 版本信息
 
-运行时目录结构 (~/.cursortoolsets/):
+运行时目录结构 (~/.decs/):
 ├── .state/                # 状态文件（版本同步用）
 │   ├── version            # 当前安装的二进制版本
 │   └── docs_version       # 文档版本
@@ -157,7 +157,7 @@ if err != nil {
 }
 
 // ✅ 推荐：友好的错误提示
-return fmt.Errorf("未找到包: %s\n\n提示: 运行 'cursortoolset registry update' 更新包索引", packageName)
+return fmt.Errorf("未找到包: %s\n\n提示: 运行 'dec registry update' 更新包索引", packageName)
 ```
 
 #### 用户交互输出
@@ -193,7 +193,7 @@ type Registry struct {
 ### 3. 开发环境规范
 
 #### Makefile 使用
-- **开发时必须设置环境变量**: `CURSOR_TOOLSET_ROOT=$(pwd)/.root`
+- **开发时必须设置环境变量**: `DEC_ROOT=$(pwd)/.root`
 - 所有命令都应通过 `.root` 目标确保开发根目录存在
 - 使用 emoji 增强输出可读性
 
@@ -225,9 +225,9 @@ build: .root
 ```
 
 **安装流程：**
-1. 解压包到 `~/.cursortoolsets/repos/<package-name>/`
+1. 解压包到 `~/.decs/repos/<package-name>/`
 2. 读取 `bin` 配置
-3. 为每个命令创建符号链接：`~/.cursortoolsets/bin/<command>` -> `repos/<package>/bin/xxx`
+3. 为每个命令创建符号链接：`~/.decs/bin/<command>` -> `repos/<package>/bin/xxx`
 4. 设置可执行权限（Unix 系统）
 5. 提示用户将 bin 目录添加到 PATH
 
@@ -326,8 +326,8 @@ fmt.Printf("   详细文档: %s\n", url)
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `CURSOR_TOOLSET_ROOT` | 运行时根目录 | `~/.cursortoolsets` |
-| `CURSOR_TOOLSET_REGISTRY` | Registry URL | GitHub Release URL |
+| `DEC_ROOT` | 运行时根目录 | `~/.decs` |
+| `DEC_REGISTRY` | Registry URL | GitHub Release URL |
 
 ## 开发流程
 
@@ -437,7 +437,7 @@ git push --tags
     "another-cmd": "scripts/another.sh"
   },
   
-  "cursortoolset": {
+  "dec": {
     "minVersion": "1.0.0"
   },
   
@@ -449,7 +449,7 @@ git push --tags
 - 配置需要暴露的可执行程序
 - 键：命令名称（用户在终端中输入的命令）
 - 值：包内可执行文件的相对路径
-- 安装时会自动创建符号链接到 `~/.cursortoolsets/bin/`
+- 安装时会自动创建符号链接到 `~/.decs/bin/`
 - 卸载时会自动清理符号链接
 
 ## 文档规范
@@ -462,7 +462,7 @@ git push --tags
 ## 常见问题
 
 ### Q: 如何调试开发版本？
-A: 使用 `make build` 构建，会自动设置 `CURSOR_TOOLSET_ROOT=.root`
+A: 使用 `make build` 构建，会自动设置 `DEC_ROOT=.root`
 
 ### Q: 如何添加新的包到 registry？
 A: 
@@ -478,7 +478,7 @@ A: 保留旧的类型定义，标记为 `Deprecated`，提供新的实现
 ❌ **不要执行任何安装脚本** - 只做文件分发，保证安全性
 ❌ **不要在包中包含二进制文件** - 只分发源代码和配置文件
 ❌ **不要跳过 SHA256 校验** - 安全第一
-❌ **不要修改用户的全局配置** - 所有内容安装在 `~/.cursortoolsets/`
+❌ **不要修改用户的全局配置** - 所有内容安装在 `~/.decs/`
 ❌ **不要在生产代码中使用 panic** - 使用 error 返回
 
 ## 最佳实践
@@ -493,7 +493,7 @@ A: 保留旧的类型定义，标记为 `Deprecated`，提供新的实现
 
 ## 相关资源
 
-- 项目仓库: https://github.com/shichao402/CursorToolset
+- 项目仓库: https://github.com/shichao402/Dec
 - 文档目录: ./docs/
 - 示例: USAGE_EXAMPLE.md
 - 包开发指南: PACKAGE_DEV.md

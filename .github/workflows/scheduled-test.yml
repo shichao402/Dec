@@ -1,4 +1,4 @@
-# CursorToolset 定时测试流水线
+# Dec 定时测试流水线
 # 触发条件：
 #   - 北京时间每天早上 8:00 (UTC 0:00)
 #   - 仅当 main 分支有变更时运行
@@ -137,8 +137,8 @@ jobs:
       - name: Build
         run: |
           mkdir -p dist
-          go build -o dist/cursortoolset .
-          chmod +x dist/cursortoolset
+          go build -o dist/dec .
+          chmod +x dist/dec
 
       - name: Run functional tests
         run: |
@@ -190,7 +190,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          OUTPUT_NAME="cursortoolset-${{ matrix.goos }}-${{ matrix.goarch }}"
+          OUTPUT_NAME="dec-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             OUTPUT_NAME="${OUTPUT_NAME}.exe"
           fi

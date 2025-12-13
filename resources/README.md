@@ -1,6 +1,6 @@
-# CursorToolset 资源目录
+# Dec 资源目录
 
-本目录包含 CursorToolset 项目的资源文件。
+本目录包含 Dec 项目的资源文件。
 
 > **注意**：项目开发文档请查看 [Documents/README.md](../Documents/README.md)。
 
@@ -15,13 +15,13 @@ resources/
 
 ## 包开发指南
 
-包开发文档和规则现已通过 **CursorColdStart** 的 `cursortoolset` pack 提供。
+包开发文档和规则现已通过 **CursorColdStart** 的 `dec` pack 提供。
 
 **获取包开发指南：**
 
 ```bash
-# 在包项目中启用 cursortoolset pack
-coldstart enable cursortoolset
+# 在包项目中启用 dec pack
+coldstart enable dec
 coldstart init .
 ```
 
@@ -29,5 +29,5 @@ coldstart init .
 
 ## 快速链接
 
-- **我要开发一个包** → 运行 `coldstart enable cursortoolset`
-- **我要参与开发 CursorToolset** → [../Documents/README.md](../Documents/README.md)
+- **我要开发一个包** → 运行 `coldstart enable dec`
+- **我要参与开发 Dec** → [../Documents/README.md](../Documents/README.md)

@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/firoyang/CursorToolset/pkg/paths"
-	"github.com/firoyang/CursorToolset/pkg/registry"
+	"github.com/shichao402/Dec/pkg/paths"
+	"github.com/shichao402/Dec/pkg/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -49,7 +49,7 @@ var registryAddCmd = &cobra.Command{
 添加后需要发布 registry 到 GitHub Release。
 
 示例：
-  cursortoolset registry add https://github.com/user/my-toolset`,
+  dec registry add https://github.com/user/my-toolset`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repository := args[0]
@@ -70,7 +70,7 @@ var registryAddCmd = &cobra.Command{
 
 		fmt.Printf("✅ 已添加仓库 %s 到 registry\n", repository)
 		fmt.Println("\n下一步：")
-		fmt.Println("  1. 运行 'cursortoolset registry export' 导出 registry")
+		fmt.Println("  1. 运行 'dec registry export' 导出 registry")
 		fmt.Println("  2. 将导出的 JSON 发布到 GitHub Release")
 
 		return nil
@@ -138,7 +138,7 @@ var registryListCmd = &cobra.Command{
 		packages := mgr.ListPackages()
 		if len(packages) == 0 {
 			fmt.Println("📦 registry 为空")
-			fmt.Println("\n提示: 运行 'cursortoolset registry update' 更新包索引")
+			fmt.Println("\n提示: 运行 'dec registry update' 更新包索引")
 			return nil
 		}
 

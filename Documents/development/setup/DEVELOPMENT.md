@@ -1,6 +1,6 @@
-# CursorToolset 开发指南
+# Dec 开发指南
 
-本文档面向 CursorToolset 项目的开发者。
+本文档面向 Dec 项目的开发者。
 
 ## 环境准备
 
@@ -31,7 +31,7 @@ brew install gh
 ## 项目结构
 
 ```
-CursorToolset/
+Dec/
 ├── cmd/                    # 命令行命令
 │   ├── root.go            # 根命令
 │   ├── install.go         # install 命令
@@ -98,8 +98,8 @@ make install-dev
 ### 验证安装
 
 ```bash
-cursortoolset --version
-cursortoolset list
+dec --version
+dec list
 ```
 
 ## 代码规范
@@ -120,7 +120,7 @@ if err != nil {
 }
 
 // 用户友好的错误信息
-return fmt.Errorf("未找到包: %s\n\n提示: 运行 'cursortoolset registry update' 更新包索引", name)
+return fmt.Errorf("未找到包: %s\n\n提示: 运行 'dec registry update' 更新包索引", name)
 ```
 
 ### 输出规范
@@ -232,7 +232,7 @@ func init() {
 ```json
 {
   "repo_owner": "shichao402",
-  "repo_name": "CursorToolset",
+  "repo_name": "Dec",
   "registry_url": "https://github.com/.../registry.json",
   "update_branch": "ReleaseLatest"
 }
