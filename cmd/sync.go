@@ -1,78 +1,85 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/shichao402/Dec/pkg/service"
 	"github.com/spf13/cobra"
 )
 
-var syncCmd = &cobra.Command{
+var syncNewCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "同步更新已有包项目的配置",
-	Long: `同步更新已有包项目的配置到最新版本。
+	Short: "同步规则和 MCP 配置",
+	Long: `根据项目配置同步规则文件和 MCP 配置。
 
-此命令用于同步包项目中的配置信息，例如迁移旧版本配置格式等。
-
-注意：包开发文档和规则现已通过 CursorColdStart 的 dec pack 提供，
-请使用 coldstart enable dec 获取完整的开发指南。
-
-必须在包项目根目录（包含 package.json）下执行。
+此命令会：
+1. 读取 .dec/config/ 中的配置
+2. 生成 .cursor/rules/*.mdc 规则文件
+3. 生成 .cursor/mcp.json MCP 配置
 
 示例：
   dec sync`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// 检查当前目录是否是一个包项目
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("获取当前目录失败: %w", err)
-		}
-
-		packageJSONPath := filepath.Join(cwd, "package.json")
-		if _, err := os.Stat(packageJSONPath); os.IsNotExist(err) {
-			return fmt.Errorf("当前目录不是 Dec 包项目（未找到 package.json）\n\n提示: 请在包项目根目录下执行此命令")
-		}
-
-		// 读取 package.json 获取包名
-		packageName, err := getPackageNameFromJSON(packageJSONPath)
-		if err != nil {
-			return fmt.Errorf("读取 package.json 失败: %w", err)
-		}
-
-		fmt.Printf("🔄 同步包项目: %s\n\n", packageName)
-
-		// TODO: 添加具体的同步逻辑（配置迁移等）
-		fmt.Println("ℹ️  当前没有需要同步的配置")
-		fmt.Println("\n💡 提示：包开发文档和规则现已通过 CursorColdStart 提供")
-		fmt.Println("   请运行: coldstart enable dec && coldstart init .")
-
-		return nil
-	},
+	RunE: runSyncRules,
 }
 
 func init() {
-	RootCmd.AddCommand(syncCmd)
+	RootCmd.AddCommand(syncNewCmd)
 }
 
-// getPackageNameFromJSON 从 package.json 读取包名
-func getPackageNameFromJSON(path string) (string, error) {
-	data, err := os.ReadFile(path)
+func runSyncRules(cmd *cobra.Command, args []string) error {
+	// 获取当前目录
+	cwd, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return fmt.Errorf("获取当前目录失败: %w", err)
 	}
 
-	var pkg struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(data, &pkg); err != nil {
-		return "", err
+	fmt.Println("🔄 同步规则和 MCP 配置...")
+	fmt.Println()
+
+	// 创建同步服务并执行
+	svc := service.NewSyncService(cwd)
+	result, err := svc.Sync()
+	if err != nil {
+		return err
 	}
 
-	if pkg.Name == "" {
-		return "", fmt.Errorf("package.json 中缺少 name 字段")
+	// 打印结果
+	printSyncResult(result)
+
+	return nil
+}
+
+// printSyncResult 打印同步结果
+func printSyncResult(result *service.SyncResult) {
+	fmt.Printf("📦 项目: %s\n", result.ProjectName)
+	fmt.Printf("🎯 目标 IDE: %v\n", result.IDEs)
+
+	for ideName, ideResult := range result.IDEResults {
+		fmt.Printf("\n━━━ %s ━━━\n", ideName)
+
+		// 规则
+		fmt.Printf("📜 生成规则文件...\n")
+		fmt.Printf("  ✅ 核心规则 (%d 个)\n", ideResult.CoreRulesCount)
+
+		for _, name := range ideResult.BuiltinPacks {
+			fmt.Printf("  ✅ %s (内置)\n", name)
+		}
+
+		for _, name := range ideResult.ExternalPacks {
+			fmt.Printf("  ✅ %s\n", name)
+		}
+
+		// MCP
+		fmt.Printf("🔌 生成 MCP 配置 (%d 个包)...\n", len(ideResult.MCPPacks)+1) // +1 for dec itself
+		fmt.Printf("  ✅ dec\n")
+		for _, name := range ideResult.MCPPacks {
+			fmt.Printf("  ✅ %s\n", name)
+		}
+
+		fmt.Printf("   规则目录: %s\n", ideResult.RulesDir)
+		fmt.Printf("   MCP 配置: %s\n", ideResult.MCPConfigPath)
 	}
 
-	return pkg.Name, nil
+	fmt.Println("\n✅ 同步完成！")
 }
