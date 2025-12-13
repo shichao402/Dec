@@ -1,0 +1,14 @@
+{
+  "name": "dec",
+  "version": "1.0.0",
+  "description": "Dec - 包管理工具，支持规则和 MCP 工具",
+  "type": "mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shichao402/Dec"
+  },
+  "mcp": {
+    "command": "dec",
+    "args": ["serve"]
+  }
+}
