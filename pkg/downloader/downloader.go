@@ -11,22 +11,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/shichao402/Dec/pkg/paths"
 )
 
 // Downloader 负责下载和解压包
 type Downloader struct {
-	client    *http.Client
-	useCache  bool
+	client       *http.Client
+	useCache     bool
 	showProgress bool
 }
 
 // NewDownloader 创建新的下载器
 func NewDownloader() *Downloader {
 	return &Downloader{
-		client:    &http.Client{},
-		useCache:  true,
+		client: &http.Client{
+			Timeout: 30 * time.Second, // 30 秒超时
+		},
+		useCache:     true,
 		showProgress: true,
 	}
 }

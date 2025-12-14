@@ -72,11 +72,9 @@ func (s *SyncService) Sync() (*SyncResult, error) {
 		return nil, fmt.Errorf("加载包配置失败: %w", err)
 	}
 
-	// 加载注册表
-	if err := s.registryMgr.Load(); err != nil {
-		// 尝试自动更新，忽略错误，继续使用内置规则
-		_ = s.registryMgr.UpdateOfficial()
-	}
+	// 加载注册表（仅使用本地缓存，不自动更新）
+	// 注册表加载失败时继续使用内置规则，不自动更新避免网络问题导致卡住
+	_ = s.registryMgr.Load()
 
 	// 解析包
 	rulePacks, mcpPacks, enabledBuiltinPacks := s.resolvePacks(packsConfig)
