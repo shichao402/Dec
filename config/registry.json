@@ -29,24 +29,26 @@
     },
     {
       "repository": "https://github.com/shichao402/github-issue-pack",
-      "name": "github-issue-pack",
+      "name": "github-issue",
       "version": "0.2.0",
       "type": "mcp",
-      "description": "GitHub Issue 协作工具，支持 MCP 协议。提供 Issue 创建、列表、获取、更新、关闭等功能。",
+      "description": "标准化的 GitHub Issue 创建与处理工具，支持项目间自动化协作。提供 MCP Server 模式供 AI 调用。",
       "author": "shichao402",
       "mcp": {
         "command": "bin/github-issue",
-        "args": ["serve"],
+        "args": [
+          "serve"
+        ],
         "env": {
           "GITHUB_TOKEN": "${GITHUB_TOKEN}"
         }
       },
       "dist": {
-        "sha256": "c4cee0ae92791ad3df8315ce20d2c298c5ebb4b8431fe92d009e53d7dc531efa",
         "tarball": "github-issue-0.2.0.tar.gz",
+        "sha256": "c4cee0ae92791ad3df8315ce20d2c298c5ebb4b8431fe92d009e53d7dc531efa",
         "size": 14730372
       }
     }
   ],
-  "updated_at": "2025-12-14T02:05:00Z"
+  "updated_at": "2025-12-14T02:06:22Z"
 }
