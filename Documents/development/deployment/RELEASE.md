@@ -14,88 +14,7 @@
 2. **代码先提交到 main** - tag 基于 main 分支创建
 3. **必须通过测试** - 运行 `./scripts/run-tests.sh`
 
-## 快速发布（推荐）
-
-使用 `dec release` 命令自动化发布流程：
-
-```bash
-# 发布 patch 版本并等待 CI 完成
-dec release --wait
-
-# 发布 minor 版本并等待
-dec release --minor --wait
-
-# 发布 major 版本并等待
-dec release --major --wait
-
-# 预览发布流程（不执行）
-dec release --dry-run
-```
-
-### release 命令说明
-
-`dec release` 自动完成以下步骤：
-
-1. 提升版本号（默认 patch）
-2. 打包并计算 SHA256
-3. 更新 package.json
-4. 创建 Git commit 和 tag
-5. 推送到远程仓库
-6. （可选）等待 GitHub Actions 完成
-
-**选项：**
-
-| 选项 | 说明 |
-|------|------|
-| `--major` | 发布主版本 (x.0.0) |
-| `--minor` | 发布次版本 (0.x.0) |
-| `--patch` | 发布补丁版本 (0.0.x)，默认 |
-| `--wait` | 等待 GitHub Actions 完成并确认 Release 创建 |
-| `--dry-run` | 预览模式，不执行实际操作 |
-| `--skip-tag` | 跳过 Git tag 和 push |
-
-### --wait 功能
-
-`--wait` 选项会在推送 tag 后自动轮询状态：
-
-```bash
-dec release --wait
-```
-
-输出示例：
-```
-🚀 发布 my-package
-   版本: 1.0.0 -> 1.0.1
-
-📝 Step 1: 更新版本号
-   ✅ package.json 版本已更新为 1.0.1
-
-📦 Step 2: 打包
-   ...
-
-✅ 发布完成！
-
-⏳ 等待 GitHub Actions 完成...
-   仓库: owner/repo
-   标签: v1.0.1
-
-   🔄 Workflow 排队中... (5s)
-   🔄 Workflow 运行中... (15s)
-   ✅ Workflow 完成！
-
-⏳ 检查 Release 状态...
-   ✅ Release 已创建: https://github.com/owner/repo/releases/tag/v1.0.1
-
-🎉 发布完成！所有步骤已成功执行。
-```
-
-**技术说明：**
-- 使用 `gh` CLI 查询 GitHub API（自动使用认证 token，避免 API 限流）
-- 轮询间隔：10 秒
-- 超时时间：30 分钟
-- 需要先安装并认证 `gh` CLI：`gh auth login`
-
-## 手动发布步骤
+## 发布步骤
 
 ### 1. 完成开发并测试
 
@@ -159,7 +78,7 @@ DEC_BRANCH=ReleaseTest DEC_HOME=/tmp/test-install bash /tmp/install-test.sh
 
 # 验证核心功能
 /tmp/test-install/bin/dec list
-/tmp/test-install/bin/dec registry update
+/tmp/test-install/bin/dec sync
 
 # 清理测试环境
 rm -rf /tmp/test-install /tmp/install-test.sh
@@ -167,7 +86,7 @@ rm -rf /tmp/test-install /tmp/install-test.sh
 
 **环境变量说明：**
 - `DEC_BRANCH=ReleaseTest` - 使用测试分支（默认 ReleaseLatest）
-- `DEC_HOME=/tmp/test-install` - 隔离安装目录（默认 ~/.decs）
+- `DEC_HOME=/tmp/test-install` - 隔离安装目录（默认 ~/.dec）
 
 #### 方式二：直接下载二进制验证
 
@@ -206,6 +125,7 @@ git push origin v1.4.3
 | `release-registry.yml` | registry.json 变更 | 发布包索引 |
 | `auto-register.yml` | `[auto-register]` issue | 验证并注册新包 |
 | `sync-registry.yml` | 定时/`[sync]` issue/手动 | 同步包信息到注册表 |
+| `scheduled-test.yml` | 每天定时 | 运行完整测试（有变更时） |
 
 **注意：** 推送到 `build` 分支不会触发任何构建！必须使用 tag 触发。
 
@@ -275,14 +195,21 @@ Registry 采用自动化管理机制，包开发者无需手动编辑配置文�
 
 **重要：包发布后会自动同步，无需任何手动操作。**
 
-使用 `dec init` 生成的 release workflow 会在发布成功后**自动创建 sync issue**，触发注册表同步。
+使用 `dec publish-notify` 命令可以手动触发同步：
+
+```bash
+# 在包目录下执行，通知 Dec 注册表更新
+dec publish-notify
+
+# 预览模式（不实际创建 Issue）
+dec publish-notify --dry-run
+```
 
 #### 自动同步流程
 
-1. **Release 创建成功后**，workflow 自动创建 sync issue：
+1. **Release 创建成功后**，执行 `dec publish-notify` 创建 sync issue：
    - 使用 `gh` CLI 创建 issue（带 `pack-sync` label）
    - Issue body 包含 `repository: https://github.com/owner/repo`
-   - 自动检测已存在的 sync issue，避免重复创建
 
 2. **同步操作执行**（在 Dec 仓库）：
    - `sync-registry.yml` workflow 检测到 `pack-sync` label 的 issue
@@ -292,26 +219,23 @@ Registry 采用自动化管理机制，包开发者无需手动编辑配置文�
 
 #### 补充同步机制
 
-- **定时同步**：每小时自动同步所有包的最新信息（作为补充，确保不遗漏）
-
-**开发者无需任何手动操作，发布后会自动同步到注册表。**
+- **定时同步**：每天自动同步所有包的最新信息（作为补充，确保不遗漏）
 
 ### 手动管理（仅维护者）
 
-维护者可通过命令行工具管理：
+维护者可直接编辑 `config/registry.json` 文件：
 
 ```bash
-# 添加包到 registry
-dec registry add https://github.com/user/repo
+# 编辑 registry.json
+vim config/registry.json
 
-# 移除包
-dec registry remove package-name
-
-# 导出 registry
-dec registry export > registry.json
+# 提交更改
+git add config/registry.json
+git commit -m "chore: update registry"
+git push origin main
 ```
 
-修改 `config/registry.json` 后提交，CI 会自动发布到 `registry` Release。
+提交后，`release-registry.yml` 会自动发布到 `registry` Release。
 
 ## 回滚
 
@@ -361,6 +285,6 @@ git push origin :refs/tags/v1.4.3
 
 ## 相关文档
 
-- [开发指南](DEVELOPMENT.md)
-- [测试指南](TESTING.md)
+- [开发指南](../setup/DEVELOPMENT.md)
+- [测试指南](../testing/TESTING.md)
 - [构建安装指南](BUILD.md)

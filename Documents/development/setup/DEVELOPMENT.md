@@ -34,13 +34,18 @@ brew install gh
 Dec/
 ├── cmd/                    # 命令行命令
 │   ├── root.go            # 根命令
-│   ├── install.go         # install 命令
 │   ├── init.go            # init 命令
+│   ├── sync.go            # sync 命令
+│   ├── link.go            # link 命令
+│   ├── serve.go           # MCP Server
 │   └── ...
 ├── pkg/                    # 核心包
 │   ├── config/            # 配置管理
-│   ├── installer/         # 安装器
-│   ├── registry/          # 包索引
+│   ├── generator/         # MCP 配置生成
+│   ├── installer/         # MCP Server 安装
+│   ├── registry/          # 多注册表管理
+│   ├── rules/             # 规则生成
+│   ├── service/           # 同步服务
 │   ├── paths/             # 路径管理
 │   ├── types/             # 类型定义
 │   └── version/           # 版本管理
@@ -51,10 +56,7 @@ Dec/
 │   ├── install.sh         # 正式安装脚本
 │   ├── install-dev.sh     # 开发安装脚本
 │   └── run-tests.sh       # 测试脚本
-├── docs/
-│   ├── public/            # 公开文档
-│   ├── internal/          # 内部文档
-│   └── temp/              # 临时文档
+├── Documents/             # 项目文档
 ├── .github/workflows/     # CI/CD
 ├── version.json           # 版本信息
 ├── Makefile
@@ -100,6 +102,7 @@ make install-dev
 ```bash
 dec --version
 dec list
+dec sync  # 在项目目录中
 ```
 
 ## 代码规范
@@ -120,7 +123,7 @@ if err != nil {
 }
 
 // 用户友好的错误信息
-return fmt.Errorf("未找到包: %s\n\n提示: 运行 'dec registry update' 更新包索引", name)
+return fmt.Errorf("未找到包: %s\n\n提示: 检查包名是否正确，或运行 'dec list' 查看可用包", name)
 ```
 
 ### 输出规范
@@ -186,9 +189,7 @@ fi
 
 | 命令 | 选项 | 说明 |
 |------|------|------|
-| `clean` | `--force` / `-f` | 跳过清理确认 |
-| `uninstall` | `--force` / `-f` | 跳过卸载确认 |
-| `update --self` | `--yes` / `-y` | 跳过更新确认 |
+| `unlink --all` | `--force` / `-f` | 跳过确认 |
 | `scripts/uninstall.sh` | `--yes` / `-y` | 跳过卸载确认 |
 
 ## 添加新命令
@@ -254,7 +255,7 @@ make clean              # 清理构建产物
 
 ## 相关文档
 
-- [测试指南](TESTING.md)
-- [构建安装指南](BUILD.md)
-- [发布指南](RELEASE.md)
-- [架构设计](ARCHITECTURE.md)
+- [测试指南](../testing/TESTING.md)
+- [构建安装指南](../deployment/BUILD.md)
+- [发布指南](../deployment/RELEASE.md)
+- [架构设计](../../design/architecture/ARCHITECTURE.md)

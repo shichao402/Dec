@@ -15,19 +15,31 @@ resources/
 
 ## 包开发指南
 
-包开发文档和规则现已通过 **CursorColdStart** 的 `dec` pack 提供。
+### 创建规则包
 
-**获取包开发指南：**
+1. 创建 `package.json`：
 
-```bash
-# 在包项目中启用 dec pack
-coldstart enable dec
-coldstart init .
+```json
+{
+  "name": "my-pack",
+  "version": "1.0.0",
+  "type": "rule",
+  "description": "我的规则包",
+  "rules": ["rules/my-rules.mdc"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/my-pack"
+  }
+}
 ```
 
-这将生成 AI 规则文件，包含完整的包开发、打包、发布和注册流程指南。
+2. 创建规则文件 `rules/my-rules.mdc`
+
+3. 链接到本地测试：`dec link`
+
+4. 发布后通知注册表：`dec publish-notify`
 
 ## 快速链接
 
-- **我要开发一个包** → 运行 `coldstart enable dec`
-- **我要参与开发 Dec** → [../Documents/README.md](../Documents/README.md)
+- **我要开发一个包** → 查看 [README.md](../README.md) 的"开发包"部分
+- **我要参与开发 Dec** → [Documents/README.md](../Documents/README.md)

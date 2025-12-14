@@ -50,17 +50,18 @@ iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts
 ### 方式二：手动安装
 
 1. 从 [Releases](https://github.com/shichao402/Dec/releases) 下载对应平台的二进制
-2. 解压到 `~/.decs/bin/`
+2. 解压到 `~/.dec/bin/`
 3. 添加到 PATH
 
 ```bash
 # Linux/macOS
-mkdir -p ~/.decs/bin
-tar -xzf dec-*.tar.gz -C ~/.decs/bin/
-export PATH="$HOME/.decs/bin:$PATH"
+mkdir -p ~/.dec/bin
+mv dec-* ~/.dec/bin/dec
+chmod +x ~/.dec/bin/dec
+export PATH="$HOME/.dec/bin:$PATH"
 
 # 永久生效
-echo 'export PATH="$HOME/.decs/bin:$PATH"' >> ~/.bashrc
+echo 'export PATH="$HOME/.dec/bin:$PATH"' >> ~/.bashrc
 ```
 
 ### 方式三：开发安装
@@ -77,24 +78,24 @@ make install-dev
 安装后的目录结构：
 
 ```
-~/.decs/
+~/.dec/
 ├── bin/
-│   └── dec       # 可执行文件
-├── repos/                   # 已安装的包
-│   └── github-action-toolset/
-├── cache/
-│   ├── packages/           # 下载缓存
-│   └── manifests/          # manifest 缓存
+│   └── dec                   # 可执行文件
+├── registry/                 # 注册表
+│   ├── registry.json         # 正式注册表
+│   ├── test.json             # 测试注册表
+│   └── local.json            # 本地开发包链接
+├── mcp/                      # MCP Server 安装目录
+│   └── <package-name>/
 └── config/
-    ├── registry.json       # 本地包索引
-    └── system.json         # 系统配置
+    └── system.json           # 系统配置
 ```
 
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `DEC_HOME` | 安装根目录 | `~/.decs` |
+| `DEC_HOME` | 安装根目录 | `~/.dec` |
 
 ## 交叉编译
 
@@ -131,18 +132,18 @@ go build -ldflags "-X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME" -o de
 # 检查版本
 dec --version
 
-# 更新包索引
-dec registry update
-
 # 列出可用包
 dec list
+
+# 同步规则（在项目目录中）
+dec sync
 ```
 
 ## 卸载
 
 ```bash
 # 删除安装目录
-rm -rf ~/.decs
+rm -rf ~/.dec
 
 # 从 PATH 中移除（编辑 ~/.bashrc 或 ~/.zshrc）
 ```
@@ -151,16 +152,16 @@ rm -rf ~/.decs
 
 ### Q: 命令找不到？
 
-确保 `~/.decs/bin` 在 PATH 中：
+确保 `~/.dec/bin` 在 PATH 中：
 
 ```bash
-export PATH="$HOME/.decs/bin:$PATH"
+export PATH="$HOME/.dec/bin:$PATH"
 ```
 
 ### Q: 权限被拒绝？
 
 ```bash
-chmod +x ~/.decs/bin/dec
+chmod +x ~/.dec/bin/dec
 ```
 
 ### Q: 构建失败？
@@ -173,5 +174,5 @@ go version  # 需要 1.21+
 
 ## 相关文档
 
-- [开发指南](DEVELOPMENT.md)
-- [测试指南](TESTING.md)
+- [开发指南](../setup/DEVELOPMENT.md)
+- [测试指南](../testing/TESTING.md)
