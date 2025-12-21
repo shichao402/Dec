@@ -1,0 +1,54 @@
+{
+  "version": "4",
+  "packages": [
+    {
+      "repository": "https://github.com/shichao402/GithubActionAISelfBuilder",
+      "name": "github-action-toolset",
+      "version": "1.0.8",
+      "type": "rule",
+      "description": "帮助 AI 助手完成 GitHub Actions CI/CD 任务",
+      "author": "shichao402",
+      "dist": {
+        "sha256": "f7dac2d64cb2286065e7526adfcea73c5f0289ea2fb103c3d8da7ad34d977a35",
+        "size": 30474856,
+        "tarball": "github-action-toolset-1.0.8.tar.gz"
+      }
+    },
+    {
+      "repository": "https://github.com/shichao402/dec-test-package",
+      "name": "test-package",
+      "version": "0.3.1",
+      "type": "rule",
+      "description": "用于验证 Dec 包管理流程的测试包，包含一个输出编译时间的 Go 程序",
+      "author": "shichao402",
+      "dist": {
+        "tarball": "test-package-0.3.1.tar.gz",
+        "sha256": "e5a12ac23f5f9806f8ed97b35a814b6f5560adbed4cbcefb5048de1d66445163",
+        "size": 1121522
+      }
+    },
+    {
+      "repository": "https://github.com/shichao402/github-issue-pack",
+      "name": "github-issue",
+      "version": "0.2.0",
+      "type": "mcp",
+      "description": "标准化的 GitHub Issue 创建与处理工具，支持项目间自动化协作。提供 MCP Server 模式供 AI 调用。",
+      "author": "shichao402",
+      "mcp": {
+        "command": "bin/github-issue",
+        "args": [
+          "serve"
+        ],
+        "env": {
+          "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+        }
+      },
+      "dist": {
+        "tarball": "github-issue-0.2.0.tar.gz",
+        "sha256": "c4cee0ae92791ad3df8315ce20d2c298c5ebb4b8431fe92d009e53d7dc531efa",
+        "size": 14730372
+      }
+    }
+  ],
+  "updated_at": "2025-12-21T02:06:15Z"
+}

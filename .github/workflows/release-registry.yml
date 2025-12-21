@@ -1,0 +1,52 @@
+name: Release Registry
+
+on:
+  push:
+    paths:
+      - 'config/registry.json'
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release-registry:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate registry.json
+        run: |
+          echo "Validating registry.json..."
+          cat config/registry.json | jq .
+          echo "✅ registry.json is valid JSON"
+
+      - name: Create or Update Registry Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 检查 registry release 是否存在
+          if gh release view registry &>/dev/null; then
+            echo "Updating existing registry release..."
+            gh release upload registry config/registry.json --clobber
+          else
+            echo "Creating new registry release..."
+            gh release create registry \
+              --title "Package Registry" \
+              --notes "This release contains the package registry for Dec. Do not delete this release." \
+              config/registry.json
+          fi
+          echo "✅ Registry released successfully"
+
+      - name: Verify Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Verifying release..."
+          gh release view registry
+          echo ""
+          echo "Download URL:"
+          echo "https://github.com/${{ github.repository }}/releases/download/registry/registry.json"

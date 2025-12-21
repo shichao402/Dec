@@ -1,0 +1,12 @@
+# MCP 配置
+# enabled: true 启用，enabled: false 禁用
+
+# Dec MCP 工具包（推荐启用）
+dec:
+  enabled: true
+
+# 示例：启用其他 MCP
+# github:
+#   enabled: true
+#   config:
+#     token: your_token_here

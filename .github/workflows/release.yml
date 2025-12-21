@@ -1,0 +1,159 @@
+# Dec 正式发布流水线
+# 功能：将已测试通过的 test 版本提升为正式版本（不重新构建）
+# 触发：推送 v* tag
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          TEST_TAG="test-${VERSION}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "test_tag=${TEST_TAG}" >> $GITHUB_OUTPUT
+          echo "📌 Release Version: ${VERSION}"
+          echo "📌 Test Tag: ${TEST_TAG}"
+
+      - name: Download artifacts from test release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TEST_TAG="${{ steps.version.outputs.test_tag }}"
+          
+          echo "📥 从 ${TEST_TAG} 下载构建产物..."
+          mkdir -p dist
+          
+          # 下载 test release 的所有资产
+          if ! gh release download "${TEST_TAG}" --dir dist --pattern "dec-*"; then
+            echo "❌ 未找到测试版本 ${TEST_TAG}"
+            echo "请先推送 test tag: git tag ${TEST_TAG} && git push origin ${TEST_TAG}"
+            exit 1
+          fi
+          
+          echo "📦 下载的文件:"
+          ls -la dist/
+
+      - name: Verify artifacts
+        run: |
+          echo "🔍 验证构建产物..."
+          
+          # 检查必要的平台文件是否存在
+          REQUIRED_FILES=(
+            "dec-linux-amd64"
+            "dec-linux-arm64"
+            "dec-darwin-amd64"
+            "dec-darwin-arm64"
+            "dec-windows-amd64.exe"
+          )
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "dist/${file}" ]; then
+              echo "❌ 缺少必要文件: ${file}"
+              exit 1
+            fi
+            echo "✅ ${file}"
+          done
+          
+          # 验证 SHA256（如果存在）
+          cd dist
+          for sha_file in *.sha256; do
+            if [ -f "$sha_file" ]; then
+              if sha256sum -c "$sha_file"; then
+                echo "✅ SHA256 验证通过: $sha_file"
+              else
+                echo "❌ SHA256 验证失败: $sha_file"
+                exit 1
+              fi
+            fi
+          done
+
+      - name: Update ReleaseLatest branch
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          # 更新 version.json
+          echo "{\"version\": \"${VERSION}\"}" > version.json.release
+          
+          # 创建或更新 ReleaseLatest 分支
+          git fetch origin ReleaseLatest || true
+          git checkout -B ReleaseLatest
+          
+          # 保留必要文件
+          cp scripts/install.sh scripts/install.sh.tmp
+          cp config/system.json config/system.json.tmp
+          
+          git checkout --orphan ReleaseLatest-new
+          mv version.json.release version.json
+          mkdir -p scripts
+          mv scripts/install.sh.tmp scripts/install.sh
+          mkdir -p config
+          mv config/system.json.tmp config/system.json
+          
+          git add version.json scripts/install.sh config/system.json
+          git commit -m "Release ${VERSION} (from ${{ steps.version.outputs.test_tag }})"
+          
+          git push -f origin HEAD:ReleaseLatest
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: "Release ${{ steps.version.outputs.version }}"
+          body: |
+            ## Dec ${{ steps.version.outputs.version }}
+            
+            > 此版本从测试版本 `${{ steps.version.outputs.test_tag }}` 提升而来，二进制文件完全相同。
+            
+            ### 安装
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash
+            ```
+            
+            ### 更新
+            ```bash
+            dec update
+            ```
+            
+            ### 下载
+            | 平台 | 架构 | 下载 |
+            |------|------|------|
+            | Linux | AMD64 | [dec-linux-amd64](https://github.com/shichao402/Dec/releases/download/${{ steps.version.outputs.version }}/dec-linux-amd64) |
+            | Linux | ARM64 | [dec-linux-arm64](https://github.com/shichao402/Dec/releases/download/${{ steps.version.outputs.version }}/dec-linux-arm64) |
+            | macOS | AMD64 | [dec-darwin-amd64](https://github.com/shichao402/Dec/releases/download/${{ steps.version.outputs.version }}/dec-darwin-amd64) |
+            | macOS | ARM64 | [dec-darwin-arm64](https://github.com/shichao402/Dec/releases/download/${{ steps.version.outputs.version }}/dec-darwin-arm64) |
+            | Windows | AMD64 | [dec-windows-amd64.exe](https://github.com/shichao402/Dec/releases/download/${{ steps.version.outputs.version }}/dec-windows-amd64.exe) |
+          files: |
+            dist/dec-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- From test: ${{ steps.version.outputs.test_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **同一构建产物，测试通过后直接发布**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          ls -la dist/ >> $GITHUB_STEP_SUMMARY

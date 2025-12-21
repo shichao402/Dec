@@ -1,0 +1,351 @@
+name: Sync Registry
+
+on:
+  # 定时同步（每天 UTC 0:00，作为兜底机制）
+  schedule:
+    - cron: '0 0 * * *'
+  
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: '指定仓库 URL（留空则同步全部）'
+        required: false
+        type: string
+  
+  # Issue 触发（单包同步）
+  # 支持：
+  # - dec publish-notify 创建的 [pack-sync] Issue
+  # - 手动创建的带 pack-sync label 的 Issue
+  issues:
+    types: [opened]
+
+  # Repository dispatch 触发（包发布后自动同步）
+  repository_dispatch:
+    types: [package-released]
+
+jobs:
+  # 单包同步（通过 issue 触发）
+  sync-single:
+    # 支持两种触发方式：
+    # 1. Issue 带有 pack-sync label（推荐，dec publish-notify 使用）
+    # 2. Issue 标题以 [pack-sync] 或 [sync] 开头（兼容手动创建）
+    if: |
+      github.event_name == 'issues' && (
+        contains(github.event.issue.labels.*.name, 'pack-sync') ||
+        startsWith(github.event.issue.title, '[pack-sync]') ||
+        startsWith(github.event.issue.title, '[sync]')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse issue
+        id: parse
+        run: |
+          # 支持多种 Issue 格式：
+          # 1. dec publish-notify 创建的 JSON 代码块格式
+          # 2. github-issue 工具创建的 Gist payload 格式
+          # 3. 手动创建的 repository: https://... 格式
+          # 4. 标题中的 [sync] owner/repo 格式
+          
+          BODY="${{ github.event.issue.body }}"
+          TITLE="${{ github.event.issue.title }}"
+          
+          # 方案 1: 从 JSON 代码块中提取 repository（dec publish-notify 格式）
+          echo "📦 尝试从 JSON 代码块解析..."
+          REPO=$(echo "$BODY" | sed -n '/```json/,/```/p' | grep -oP '"repository":\s*"\K[^"]+' | head -1 || echo "")
+          
+          if [ -n "$REPO" ] && [ "$REPO" != "null" ]; then
+            echo "✅ 从 JSON 代码块读取到 repository: $REPO"
+            # 规范化
+            REPO=$(echo "$REPO" | sed 's/\.git$//' | sed 's/\/$//')
+            echo "repository=$REPO" >> $GITHUB_OUTPUT
+            echo "📦 Repository: $REPO"
+            exit 0
+          fi
+          
+          # 方案 2: 从 Gist URL 读取 payload（github-issue 工具格式）
+          GIST_URL=$(echo "$BODY" | grep -oP 'https://gist\.github\.com/[^\s\)]+' | head -1 || echo "")
+          
+          if [ -n "$GIST_URL" ]; then
+            echo "📦 从 Gist 读取 payload..."
+            GIST_ID=$(echo "$GIST_URL" | sed 's|https://gist.github.com/||' | awk '{print $1}')
+            PAYLOAD_URL="https://gist.githubusercontent.com/$GIST_ID/raw"
+            if curl -sfL "$PAYLOAD_URL" -o /tmp/payload.json; then
+              REPO=$(jq -r '.repository // empty' /tmp/payload.json)
+              if [ -n "$REPO" ] && [ "$REPO" != "null" ]; then
+                echo "✅ 从 Gist payload 读取到 repository: $REPO"
+                REPO=$(echo "$REPO" | sed 's/\.git$//' | sed 's/\/$//')
+                echo "repository=$REPO" >> $GITHUB_OUTPUT
+                echo "📦 Repository: $REPO"
+                exit 0
+              fi
+            fi
+          fi
+          
+          # 方案 3: 从 body 提取 repository: https://... 格式
+          echo "📦 从 issue body 解析 repository..."
+          REPO=$(echo "$BODY" | grep -oP 'repository:\s*\K(https://github.com/[^\s\)\"]+)' | head -1 || echo "")
+          
+          if [ -n "$REPO" ]; then
+            echo "✅ 从 body 读取到 repository: $REPO"
+            REPO=$(echo "$REPO" | sed 's/\.git$//' | sed 's/\/$//')
+            echo "repository=$REPO" >> $GITHUB_OUTPUT
+            echo "📦 Repository: $REPO"
+            exit 0
+          fi
+          
+          # 方案 4: 从 title 解析（[sync] 或 [pack-sync] 前缀）
+          echo "📦 从 issue title 解析 repository..."
+          REPO=$(echo "$TITLE" | sed 's/^\[sync\]\s*//' | sed 's/^\[pack-sync\]\s*//' | xargs)
+          
+          # 移除版本号（匹配 @1.2.3 或 v1.2.3 或 1.2.3 格式）
+          REPO=$(echo "$REPO" | sed 's/@[0-9].*$//' | sed 's/\s*v[0-9].*$//' | sed 's/\s*[0-9]\+\.[0-9]\+\.[0-9].*$//')
+          
+          if [[ "$REPO" =~ ^https://github.com/ ]]; then
+            # 已经是完整 URL
+            :
+          elif [[ "$REPO" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+$ ]]; then
+            # owner/repo 格式，补全为完整 URL
+            REPO="https://github.com/$REPO"
+          else
+            # 可能是包名，尝试从 registry 查找
+            PKG_NAME="$REPO"
+            REPO=$(jq -r --arg name "$PKG_NAME" '.packages[] | select(.name == $name) | .repository' config/registry.json 2>/dev/null || echo "")
+          fi
+          
+          # 规范化
+          REPO=$(echo "$REPO" | sed 's/\.git$//' | sed 's/\/$//')
+          
+          if [ -z "$REPO" ]; then
+            echo "error=无法从 issue 中提取 repository URL" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "repository=$REPO" >> $GITHUB_OUTPUT
+          echo "📦 Repository: $REPO"
+
+      - name: Sync package
+        id: sync
+        run: |
+          REPO="${{ steps.parse.outputs.repository }}"
+          
+          # 检查仓库是否在 registry 中
+          if ! jq -e ".packages[] | select(.repository == \"$REPO\")" config/registry.json > /dev/null 2>&1; then
+            echo "error=仓库未注册，请先使用 [auto-register] 注册" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # 下载最新的 package.json
+          PKG_URL="$REPO/releases/latest/download/package.json"
+          if ! curl -sfL "$PKG_URL" -o /tmp/package.json; then
+            echo "error=无法下载 package.json" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # 提取信息
+          NAME=$(jq -r '.name' /tmp/package.json)
+          VERSION=$(jq -r '.version' /tmp/package.json)
+          
+          # 更新 registry 中对应条目（保留 type 和 mcp 字段）
+          jq --arg repo "$REPO" \
+             --argjson pkg "$(cat /tmp/package.json)" \
+             '(.packages[] | select(.repository == $repo)) |= (
+               . + {
+                 repository: $repo,
+                 name: $pkg.name,
+                 version: $pkg.version,
+                 type: ($pkg.type // .type // "rule"),
+                 description: ($pkg.description // ""),
+                 author: ($pkg.author // ""),
+                 dist: $pkg.dist
+               } + (if $pkg.mcp then {mcp: $pkg.mcp} else {} end)
+             )' config/registry.json > /tmp/registry.json
+          mv /tmp/registry.json config/registry.json
+          
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "synced=true" >> $GITHUB_OUTPUT
+          echo "✅ 已同步: $NAME@$VERSION"
+
+      - name: Commit and push
+        if: steps.sync.outputs.synced == 'true'
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add config/registry.json
+          
+          # 检查是否有变化
+          if git diff --cached --quiet; then
+            echo "ℹ️ 无变化，跳过提交"
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            git commit -m "chore: sync ${{ steps.sync.outputs.name }}@${{ steps.sync.outputs.version }}"
+            git push
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update registry release
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📦 更新 registry release..."
+          if gh release view registry &>/dev/null; then
+            gh release upload registry config/registry.json --clobber
+          else
+            gh release create registry \
+              --title "Package Registry" \
+              --notes "This release contains the package registry for Dec." \
+              config/registry.json
+          fi
+          echo "✅ Registry release 更新完成"
+
+      - name: Comment result
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ steps.sync.outputs.synced }}" == "true" ]; then
+            gh issue comment ${{ github.event.issue.number }} --body "✅ **同步成功！**
+
+            - **包名**: ${{ steps.sync.outputs.name }}
+            - **版本**: ${{ steps.sync.outputs.version }}
+
+            用户运行 \`dec update\` 即可获取最新版本。"
+          elif [ -n "${{ steps.sync.outputs.error }}" ]; then
+            gh issue comment ${{ github.event.issue.number }} --body "❌ **同步失败**
+
+            ${{ steps.sync.outputs.error }}"
+          fi
+          
+          gh issue close ${{ github.event.issue.number }}
+
+  # 全量同步（定时或手动触发）或单包同步（repository_dispatch）
+  sync-all:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Sync all packages
+        run: |
+          echo "🔄 开始同步所有包..."
+          
+          # 如果指定了单个仓库（来自 workflow_dispatch 或 repository_dispatch）
+          SINGLE_REPO="${{ github.event.inputs.repository }}"
+          
+          # repository_dispatch 触发时从 client_payload 获取仓库
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            SINGLE_REPO="${{ github.event.client_payload.repository }}"
+            echo "📦 触发来源: repository_dispatch"
+            echo "📦 同步仓库: $SINGLE_REPO"
+          fi
+          
+          # 获取所有仓库
+          REPOS=$(jq -r '.packages[].repository' config/registry.json)
+          
+          UPDATED=0
+          FAILED=0
+          
+          for REPO in $REPOS; do
+            # 如果指定了单个仓库，跳过其他
+            if [ -n "$SINGLE_REPO" ] && [ "$REPO" != "$SINGLE_REPO" ]; then
+              continue
+            fi
+            
+            echo ""
+            echo "📦 同步: $REPO"
+            
+            # 下载 package.json
+            PKG_URL="$REPO/releases/latest/download/package.json"
+            if ! curl -sfL "$PKG_URL" -o /tmp/package.json 2>/dev/null; then
+              echo "  ⚠️ 跳过（无法下载 package.json）"
+              FAILED=$((FAILED + 1))
+              continue
+            fi
+            
+            # 验证 JSON
+            if ! jq -e '.name' /tmp/package.json > /dev/null 2>&1; then
+              echo "  ⚠️ 跳过（package.json 格式错误）"
+              FAILED=$((FAILED + 1))
+              continue
+            fi
+            
+            NAME=$(jq -r '.name' /tmp/package.json)
+            VERSION=$(jq -r '.version' /tmp/package.json)
+            
+            # 更新 registry（保留 type 和 mcp 字段）
+            jq --arg repo "$REPO" \
+               --argjson pkg "$(cat /tmp/package.json)" \
+               '(.packages[] | select(.repository == $repo)) |= (
+                 . + {
+                   repository: $repo,
+                   name: $pkg.name,
+                   version: $pkg.version,
+                   type: ($pkg.type // .type // "rule"),
+                   description: ($pkg.description // ""),
+                   author: ($pkg.author // ""),
+                   dist: $pkg.dist
+                 } + (if $pkg.mcp then {mcp: $pkg.mcp} else {} end)
+               )' config/registry.json > /tmp/registry.json
+            mv /tmp/registry.json config/registry.json
+            
+            echo "  ✅ $NAME@$VERSION"
+            UPDATED=$((UPDATED + 1))
+          done
+          
+          echo ""
+          echo "📊 同步完成: $UPDATED 成功, $FAILED 失败"
+
+      - name: Update registry version
+        run: |
+          # 更新 registry 的时间戳
+          jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+             '.updated_at = $ts' config/registry.json > /tmp/registry.json
+          mv /tmp/registry.json config/registry.json
+
+      - name: Commit and push
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add config/registry.json
+          
+          # 检查是否有变化
+          if git diff --cached --quiet; then
+            echo "ℹ️ 无变化，跳过提交"
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            git commit -m "chore: sync registry $(date -u +%Y-%m-%d)"
+            git push
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update registry release
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📦 更新 registry release..."
+          # 检查 registry release 是否存在
+          if gh release view registry &>/dev/null; then
+            gh release upload registry config/registry.json --clobber
+          else
+            gh release create registry \
+              --title "Package Registry" \
+              --notes "This release contains the package registry for Dec." \
+              config/registry.json
+          fi
+          echo "✅ Registry release 更新完成"

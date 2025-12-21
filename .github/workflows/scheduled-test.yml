@@ -1,0 +1,248 @@
+# Dec 定时测试流水线
+# 触发条件：
+#   - 北京时间每天早上 8:00 (UTC 0:00)
+#   - 仅当 main 分支有变更时运行
+#   - 支持手动触发
+
+name: Scheduled Test
+
+on:
+  schedule:
+    # 北京时间 8:00 = UTC 0:00
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      skip_change_check:
+        description: '跳过变更检查，强制运行测试'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  # 检查是否有变更
+  check-changes:
+    name: Check Changes
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.check.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes in last 24 hours
+        id: check
+        run: |
+          # 手动触发且跳过检查
+          if [ "${{ github.event.inputs.skip_change_check }}" = "true" ]; then
+            echo "手动触发，跳过变更检查"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # 获取 24 小时前的时间戳
+          SINCE=$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -v-24H '+%Y-%m-%dT%H:%M:%SZ')
+          
+          # 检查是否有新提交
+          COMMITS=$(git log --since="$SINCE" --oneline main 2>/dev/null | wc -l)
+          
+          if [ "$COMMITS" -gt 0 ]; then
+            echo "发现 $COMMITS 个新提交"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "过去 24 小时无新提交，跳过测试"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+  # 单元测试
+  unit-test:
+    name: Unit Test
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run unit tests
+        run: go test ./... -v -cover -coverprofile=coverage.out
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
+
+  # 代码检查
+  lint:
+    name: Lint
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=5m
+
+  # 功能测试
+  functional-test:
+    name: Functional Test
+    needs: [check-changes, unit-test]
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Build
+        run: |
+          mkdir -p dist
+          go build -o dist/dec .
+          chmod +x dist/dec
+
+      - name: Run functional tests
+        run: |
+          chmod +x scripts/run-tests.sh
+          ./scripts/run-tests.sh
+        env:
+          # 确保使用生产环境
+          HOME: /home/runner
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            /tmp/test_output_*.txt
+          if-no-files-found: ignore
+
+  # 跨平台构建测试
+  build-test:
+    name: Build Test
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build for ${{ matrix.goos }}-${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          OUTPUT_NAME="dec-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTPUT_NAME="${OUTPUT_NAME}.exe"
+          fi
+          go build -o "dist/${OUTPUT_NAME}" .
+          echo "✅ Built: dist/${OUTPUT_NAME}"
+          ls -la dist/
+
+  # 汇总报告
+  summary:
+    name: Test Summary
+    needs: [check-changes, unit-test, lint, functional-test, build-test]
+    if: always() && needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## 定时测试报告" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**运行时间**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**北京时间**: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 测试结果" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 测试项 | 状态 |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 单元测试 | ${{ needs.unit-test.result == 'success' && '✅ 通过' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 代码检查 | ${{ needs.lint.result == 'success' && '✅ 通过' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 功能测试 | ${{ needs.functional-test.result == 'success' && '✅ 通过' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 构建测试 | ${{ needs.build-test.result == 'success' && '✅ 通过' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check overall status
+        run: |
+          if [ "${{ needs.unit-test.result }}" != "success" ] || \
+             [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.functional-test.result }}" != "success" ] || \
+             [ "${{ needs.build-test.result }}" != "success" ]; then
+            echo "❌ 部分测试失败"
+            exit 1
+          fi
+          echo "✅ 所有测试通过"
+
+  # 无变更时的通知
+  no-changes:
+    name: No Changes
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report no changes
+        run: |
+          echo "## 定时测试跳过" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "过去 24 小时 main 分支无新提交，跳过测试。" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**检查时间**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

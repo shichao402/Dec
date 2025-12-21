@@ -1,0 +1,234 @@
+# Dec CI/CD 流水线
+# 触发条件：推送 test-v* tag 或手动触发
+# 功能：构建、测试、发布到 test 渠道
+
+name: Build and Test
+
+on:
+  push:
+    tags:
+      - 'test-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (留空则从 version.json 读取)'
+        required: false
+        type: string
+  pull_request:
+    branches:
+      - main
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  # 代码检查和测试
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test ./... -v -cover
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=5m
+
+  # 构建所有平台
+  build:
+    name: Build
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Get version
+        id: version
+        run: |
+          # 优先从 tag 获取版本，其次从输入，最后从 version.json
+          if [[ "${GITHUB_REF}" == refs/tags/test-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/test-}"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=$(cat version.json | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+          LDFLAGS="-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}"
+          
+          OUTPUT_NAME="dec-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTPUT_NAME="${OUTPUT_NAME}.exe"
+          fi
+          
+          go build -ldflags "${LDFLAGS}" -o "dist/${OUTPUT_NAME}" .
+          echo "Built: dist/${OUTPUT_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dec-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/dec-*
+
+  # 发布到 test 渠道
+  release-test:
+    name: Release to Test Channel
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/test-v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          # 优先从 tag 获取版本
+          if [[ "${GITHUB_REF}" == refs/tags/test-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/test-}"
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            TAG_NAME="test-${VERSION}"
+          else
+            VERSION=$(cat version.json | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+            TAG_NAME="test-${VERSION}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd dist
+          for file in dec-*; do
+            sha256sum "$file" > "${file}.sha256"
+          done
+          cat *.sha256
+
+      - name: Update ReleaseTest branch
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # 创建或更新 ReleaseTest 分支
+          git fetch origin ReleaseTest || true
+          git checkout -B ReleaseTest
+          
+          # 复制必要文件
+          cp version.json version.json.tmp
+          cp scripts/install.sh scripts/install.sh.tmp
+          cp config/system.json config/system.json.tmp
+          
+          # 清理并添加新文件
+          git checkout --orphan ReleaseTest-new
+          mv version.json.tmp version.json
+          mkdir -p scripts
+          mv scripts/install.sh.tmp scripts/install.sh
+          mkdir -p config
+          mv config/system.json.tmp config/system.json
+          
+          git add version.json scripts/install.sh config/system.json
+          git commit -m "Release test version ${{ steps.version.outputs.version }}"
+          
+          # 强制推送到 ReleaseTest 分支
+          git push -f origin HEAD:ReleaseTest
+
+      - name: Create test release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Test Release ${{ steps.version.outputs.version }}"
+          body: |
+            ## 测试版本 ${{ steps.version.outputs.version }}
+            
+            构建时间: ${{ github.event.head_commit.timestamp }}
+            提交: ${{ github.sha }}
+            
+            ⚠️ **这是测试版本，仅用于测试目的**
+            
+            测试通过后，推送正式 tag 发布：
+            ```bash
+            git tag ${{ steps.version.outputs.version }}
+            git push origin ${{ steps.version.outputs.version }}
+            ```
+          prerelease: true
+          files: |
+            dist/dec-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## Test Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tag: ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "测试通过后，推送正式 tag: git tag ${{ steps.version.outputs.version }} && git push origin ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          ls -la dist/ >> $GITHUB_STEP_SUMMARY

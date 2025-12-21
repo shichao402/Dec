@@ -1,0 +1,6 @@
+{
+  "name": "dec",
+  "description": "Dec 工具的 MCP Server，提供规则和配置管理能力",
+  "command": "dec",
+  "args": ["serve"]
+}

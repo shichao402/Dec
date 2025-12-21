@@ -1,0 +1,20 @@
+# 技术栈配置
+# 取消注释即可启用对应选项
+
+# 编程语言
+languages:
+  - go
+
+# 框架
+frameworks:
+  # - flutter
+  # - react
+
+# 目标平台
+platforms:
+  - cli
+
+# 设计模式
+patterns:
+  - command
+  - repository

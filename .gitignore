@@ -1,0 +1,64 @@
+# Binaries
+dec
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 开发根目录（开发时使用）
+.root/
+
+# 构建产物
+dist/
+logs/
+*.log
+
+# 测试环境
+.test-install/
+
+# 临时文件
+resources/temp/*
+!resources/temp/.gitkeep
+
+# 临时脚本目录
+scripts/temp/*
+!scripts/temp/.gitkeep
+
+# Documents 临时文档（如果使用 Documents 目录）
+Documents/temp/*
+!Documents/temp/.gitkeep
+
+# IDE 生成的规则和 MCP 配置（由 dec sync 生成）
+.cursor/rules/
+.cursor/mcp.json
+.codebuddy/rules/
+.codebuddy/mcp.json
+.mcp.json
+.windsurf/rules/
+.windsurf/mcp.json
+.trae/rules/
+.trae/mcp.json

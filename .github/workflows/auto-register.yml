@@ -1,0 +1,218 @@
+name: Auto Register Package
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  register:
+    # 只处理 [auto-register] 开头的 issue
+    if: startsWith(github.event.issue.title, '[auto-register]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse issue
+        id: parse
+        run: |
+          # 从 issue body 提取 repository URL
+          BODY="${{ github.event.issue.body }}"
+          REPO=$(echo "$BODY" | grep -oP 'repository:\s*\K(https://github.com/[^\s]+)' || echo "")
+          
+          if [ -z "$REPO" ]; then
+            echo "error=无法从 issue 中提取 repository URL" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # 规范化 URL
+          REPO=$(echo "$REPO" | sed 's/\.git$//' | sed 's/\/$//')
+          echo "repository=$REPO" >> $GITHUB_OUTPUT
+          echo "📦 Repository: $REPO"
+
+      - name: Validate package
+        id: validate
+        if: steps.parse.outputs.repository != ''
+        run: |
+          REPO="${{ steps.parse.outputs.repository }}"
+          
+          # 检查仓库是否可访问
+          echo "检查仓库可访问性..."
+          if ! curl -sf "$REPO" > /dev/null; then
+            echo "error=仓库不可访问: $REPO" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "✅ 仓库可访问"
+          
+          # 检查是否有 release
+          PKG_URL="$REPO/releases/latest/download/package.json"
+          echo "检查 package.json: $PKG_URL"
+          
+          if ! curl -sfL "$PKG_URL" -o /tmp/package.json; then
+            echo "error=未找到 release 或 package.json，请先发布一个 release" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "✅ package.json 已下载"
+          
+          # 验证 package.json 格式
+          if ! jq -e '.name' /tmp/package.json > /dev/null; then
+            echo "error=package.json 缺少 name 字段" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          if ! jq -e '.version' /tmp/package.json > /dev/null; then
+            echo "error=package.json 缺少 version 字段" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          if ! jq -e '.dist.tarball' /tmp/package.json > /dev/null; then
+            echo "error=package.json 缺少 dist.tarball 字段" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          if ! jq -e '.dist.sha256' /tmp/package.json > /dev/null; then
+            echo "error=package.json 缺少 dist.sha256 字段" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # 提取包信息
+          NAME=$(jq -r '.name' /tmp/package.json)
+          VERSION=$(jq -r '.version' /tmp/package.json)
+          DESCRIPTION=$(jq -r '.description // ""' /tmp/package.json)
+          
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
+          echo "valid=true" >> $GITHUB_OUTPUT
+          
+          echo "✅ 包验证通过"
+          echo "  名称: $NAME"
+          echo "  版本: $VERSION"
+
+      - name: Check if already registered
+        id: check
+        if: steps.validate.outputs.valid == 'true'
+        run: |
+          REPO="${{ steps.parse.outputs.repository }}"
+          
+          # 检查是否已在 registry 中
+          if jq -e ".packages[] | select(.repository == \"$REPO\")" config/registry.json > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️ 仓库已注册"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "✅ 仓库未注册，可以添加"
+          fi
+
+      - name: Add to registry
+        id: add
+        if: steps.validate.outputs.valid == 'true' && steps.check.outputs.exists == 'false'
+        run: |
+          REPO="${{ steps.parse.outputs.repository }}"
+          NAME="${{ steps.validate.outputs.name }}"
+          VERSION="${{ steps.validate.outputs.version }}"
+          DESCRIPTION="${{ steps.validate.outputs.description }}"
+          
+          # 读取 package.json 获取完整信息
+          PKG_URL="$REPO/releases/latest/download/package.json"
+          curl -sfL "$PKG_URL" -o /tmp/package.json
+          
+          # 构建新的 package 条目（包含完整元信息）
+          NEW_ENTRY=$(jq -n \
+            --arg repo "$REPO" \
+            --argjson pkg "$(cat /tmp/package.json)" \
+            '{
+              repository: $repo,
+              name: $pkg.name,
+              version: $pkg.version,
+              description: ($pkg.description // ""),
+              author: ($pkg.author // ""),
+              dist: $pkg.dist
+            }')
+          
+          # 添加到 registry
+          jq ".packages += [$NEW_ENTRY]" config/registry.json > /tmp/registry.json
+          mv /tmp/registry.json config/registry.json
+          
+          echo "✅ 已添加到 registry"
+          echo "added=true" >> $GITHUB_OUTPUT
+
+      - name: Commit and push
+        if: steps.add.outputs.added == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add config/registry.json
+          git commit -m "feat: register ${{ steps.validate.outputs.name }}"
+          git push
+
+      - name: Comment success
+        if: steps.add.outputs.added == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment ${{ github.event.issue.number }} --body "✅ **注册成功！**
+
+          - **包名**: ${{ steps.validate.outputs.name }}
+          - **版本**: ${{ steps.validate.outputs.version }}
+          - **仓库**: ${{ steps.parse.outputs.repository }}
+
+          用户现在可以通过以下命令安装：
+          \`\`\`bash
+          dec install ${{ steps.validate.outputs.name }}
+          \`\`\`"
+          
+          gh issue close ${{ github.event.issue.number }} --reason completed
+
+      - name: Comment already exists
+        if: steps.check.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment ${{ github.event.issue.number }} --body "ℹ️ **仓库已注册**
+
+          该仓库已经在注册表中，无需重复注册。
+
+          如果你是要同步最新版本信息，请创建一个新 issue，标题为：
+          \`[sync] ${{ steps.parse.outputs.repository }}\`"
+          
+          gh issue close ${{ github.event.issue.number }} --reason "not planned"
+
+      - name: Comment validation error
+        if: steps.validate.outputs.error != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment ${{ github.event.issue.number }} --body "❌ **注册失败**
+
+          ${{ steps.validate.outputs.error }}
+
+          请检查：
+          1. 仓库地址是否正确
+          2. 是否已发布 Release
+          3. Release 中是否包含 \`package.json\`
+          4. \`package.json\` 是否包含必需字段（name, version, dist.tarball, dist.sha256）
+
+          修复后请重新创建 issue。"
+          
+          gh issue close ${{ github.event.issue.number }} --reason "not planned"
+
+      - name: Comment parse error
+        if: steps.parse.outputs.error != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment ${{ github.event.issue.number }} --body "❌ **注册失败**
+
+          ${{ steps.parse.outputs.error }}
+
+          请确保 issue body 包含正确格式：
+          \`\`\`
+          repository: https://github.com/your-username/your-repo
+          \`\`\`"
+          
+          gh issue close ${{ github.event.issue.number }} --reason "not planned"

@@ -1,0 +1,35 @@
+# 批处理文件使用 CRLF 换行符（Windows）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 脚本文件使用 LF 换行符（Unix）
+*.sh text eol=lf
+*.py text eol=lf
+
+# Go 源代码使用 LF
+*.go text eol=lf
+
+# 配置文件使用 LF
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+
+# Markdown 文件使用 LF
+*.md text eol=lf
+*.mdc text eol=lf
+
+# Makefile 使用 LF
+Makefile text eol=lf
+
+# 二进制文件
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.tar.gz binary
+*.zip binary
