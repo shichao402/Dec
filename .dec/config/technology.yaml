@@ -1,5 +1,9 @@
 # 技术栈配置
-# 取消注释即可启用对应选项
+# 取消注释启用对应选项
+# 支持两种格式:
+#   - name           # 简单格式
+#   - name:          # 带变量格式
+#       var1: value1
 
 # 编程语言
 languages:
@@ -18,3 +22,4 @@ platforms:
 patterns:
   - command
   - repository
+

@@ -1,12 +1,9 @@
 # MCP 配置
-# enabled: true 启用，enabled: false 禁用
+# 取消注释启用对应 MCP
+# 支持两种格式:
+#   - name           # 简单格式
+#   - name:          # 带变量格式
+#       var1: value1
 
-# Dec MCP 工具包（推荐启用）
-dec:
-  enabled: true
-
-# 示例：启用其他 MCP
-# github:
-#   enabled: true
-#   config:
-#     token: your_token_here
+mcps:
+  - dec
