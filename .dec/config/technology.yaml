@@ -1,32 +1,20 @@
 # 技术栈配置
-# 根据项目实际情况修改，注释/取消注释即可开关
+# 取消注释即可启用对应选项
 
 # 编程语言
-# 可选: go, dart, typescript, javascript, python, java, kotlin, swift, rust, c, cpp
 languages:
   - go
 
 # 框架
-# 可选: flutter, react, vue, angular, django, fastapi, gin, echo, spring, nextjs
-frameworks: []
+frameworks:
+  # - flutter
+  # - react
 
 # 目标平台
-# 可选: cli, web, android, ios, macos, windows, linux, embedded
 platforms:
   - cli
 
-# 设计模式（项目的主要设计模式）
-# 可选值及适用场景:
-#   command   - CLI 工具、命令分发、操作系统
-#   pipeline  - 数据处理流、编译器、ETL
-#   mvc       - Web 应用、传统后端
-#   mvvm      - 前端框架、数据绑定、GUI
-#   repository - 数据访问层、领域驱动设计
-#   factory   - 对象创建、依赖注入
-#   strategy  - 算法可切换、策略模式
-#   observer  - 事件驱动、发布订阅
-#   plugin    - 插件系统、可扩展架构
-#   decorator - 功能增强、中间件
-#   adapter   - 接口适配、兼容层
+# 设计模式
 patterns:
   - command
+  - repository

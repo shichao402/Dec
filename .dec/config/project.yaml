@@ -1,8 +1,0 @@
-# 项目配置
-name: Dec
-
-# 目标 IDE
-# 可选: cursor, codebuddy, windsurf, trae
-ides:
-  - cursor
-  - codebuddy

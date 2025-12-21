@@ -6,12 +6,10 @@ import (
 	"path/filepath"
 
 	"github.com/shichao402/Dec/pkg/config"
-	"github.com/shichao402/Dec/pkg/types"
 	"github.com/spf13/cobra"
 )
 
 var (
-	initProjectName string
 	initProjectIDEs []string
 )
 
@@ -22,20 +20,21 @@ var initNewCmd = &cobra.Command{
 
 生成的配置文件：
   .dec/config/
-  ├── project.yaml      项目信息
-  ├── technology.yaml   技术栈配置（带注释说明）
-  └── packs.yaml        启用的包配置
+  ├── ides.yaml         目标 IDE 配置
+  ├── technology.yaml   技术栈配置
+  └── mcp.yaml          MCP 配置
+
+配置文件根据已缓存的包自动生成可用选项。
+如果没有可用的包，请先运行 'dec update' 更新包缓存。
 
 示例：
-  dec init                        # 交互式初始化
-  dec init --name my-project      # 指定项目名
+  dec init                        # 初始化
   dec init --ide cursor           # 指定目标 IDE`,
 	RunE: runInitProject,
 }
 
 func init() {
 	RootCmd.AddCommand(initNewCmd)
-	initNewCmd.Flags().StringVar(&initProjectName, "name", "", "项目名称")
 	initNewCmd.Flags().StringSliceVar(&initProjectIDEs, "ide", []string{"cursor"}, "目标 IDE (cursor, codebuddy, windsurf, trae)")
 }
 
@@ -47,7 +46,7 @@ func runInitProject(cmd *cobra.Command, args []string) error {
 	}
 
 	// 检查是否已初始化
-	mgr := config.NewProjectConfigManager(cwd)
+	mgr := config.NewProjectConfigManagerV2(cwd)
 	if mgr.Exists() {
 		fmt.Println("⚠️  项目已初始化")
 		fmt.Println()
@@ -55,57 +54,35 @@ func runInitProject(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// 确定项目名称
-	projectName := initProjectName
-	if projectName == "" {
-		projectName = filepath.Base(cwd)
+	// 检查是否有可用的包
+	scanner, err := config.NewScanner()
+	if err == nil && !scanner.HasPackages() {
+		fmt.Println("⚠️  没有可用的包缓存")
+		fmt.Println()
+		fmt.Println("请先运行 'dec update' 更新包缓存，然后再初始化项目。")
+		return nil
 	}
+
+	projectName := filepath.Base(cwd)
 
 	fmt.Printf("📦 初始化 Dec 配置: %s\n", projectName)
 	fmt.Printf("   目录: %s\n\n", cwd)
 
 	// 初始化项目
-	if err := mgr.InitProject(projectName, initProjectIDEs); err != nil {
+	if err := mgr.InitProject(initProjectIDEs); err != nil {
 		return fmt.Errorf("初始化失败: %w", err)
 	}
 
-	fmt.Println("  ✅ 创建 .dec/config/project.yaml")
+	fmt.Println("  ✅ 创建 .dec/config/ides.yaml")
 	fmt.Println("  ✅ 创建 .dec/config/technology.yaml")
-	fmt.Println("  ✅ 创建 .dec/config/packs.yaml")
+	fmt.Println("  ✅ 创建 .dec/config/mcp.yaml")
 
 	fmt.Println("\n✅ 初始化完成！")
 	fmt.Println("\n📝 下一步：")
-	fmt.Println("   1. 编辑 .dec/config/technology.yaml 配置技术栈")
-	fmt.Println("   2. 编辑 .dec/config/packs.yaml 启用需要的包")
-	fmt.Println("   3. 运行 dec sync 同步规则和 MCP 配置")
+	fmt.Println("   1. 编辑 .dec/config/ides.yaml 配置目标 IDE")
+	fmt.Println("   2. 编辑 .dec/config/technology.yaml 配置技术栈")
+	fmt.Println("   3. 编辑 .dec/config/mcp.yaml 启用需要的 MCP")
+	fmt.Println("   4. 运行 dec sync 同步规则和 MCP 配置")
 
 	return nil
-}
-
-// DetectTechnology 检测项目技术栈
-func DetectTechnology(projectRoot string) *types.TechnologyConfig {
-	tech := &types.TechnologyConfig{}
-
-	// 检测语言
-	if fileExists(filepath.Join(projectRoot, "go.mod")) {
-		tech.Languages = append(tech.Languages, "go")
-	}
-	if fileExists(filepath.Join(projectRoot, "pubspec.yaml")) {
-		tech.Languages = append(tech.Languages, "dart")
-		tech.Frameworks = append(tech.Frameworks, "flutter")
-	}
-	if fileExists(filepath.Join(projectRoot, "package.json")) {
-		// 可能是 Node.js 项目
-		tech.Languages = append(tech.Languages, "typescript")
-	}
-	if fileExists(filepath.Join(projectRoot, "requirements.txt")) || fileExists(filepath.Join(projectRoot, "pyproject.toml")) {
-		tech.Languages = append(tech.Languages, "python")
-	}
-
-	return tech
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

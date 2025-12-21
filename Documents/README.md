@@ -26,16 +26,6 @@
 - [CHANGELOG](changelog/CHANGELOG.md)
 - [发布说明](changelog/releases/)
 
-### 包开发文档
-
-包开发文档和规则现已通过 **CursorColdStart** 的 `dec` pack 提供：
-
-```bash
-# 在包项目中启用
-coldstart enable dec
-coldstart init .
-```
-
 ## 文档维护
 
 - 所有文档统一管理在 `Documents/` 目录

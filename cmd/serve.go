@@ -188,37 +188,10 @@ func handleToolsList(request *jsonRPCRequest) *jsonRPCResponse {
 			},
 		},
 		{
-			Name:        "dec_search",
-			Description: "搜索 Dec 包",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]property{
-					"keyword": {
-						Type:        "string",
-						Description: "搜索关键词",
-					},
-				},
-				Required: []string{"keyword"},
-			},
-		},
-		{
 			Name:        "dec_sync",
 			Description: "同步项目的规则和 MCP 配置",
 			InputSchema: inputSchema{
 				Type: "object",
-			},
-		},
-		{
-			Name:        "dec_link",
-			Description: "链接本地开发包到 Dec",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]property{
-					"path": {
-						Type:        "string",
-						Description: "包路径（默认当前目录）",
-					},
-				},
 			},
 		},
 	}
@@ -249,12 +222,8 @@ func handleToolsCall(request *jsonRPCRequest) *jsonRPCResponse {
 	switch params.Name {
 	case "dec_list":
 		result = executeDecList(params.Arguments)
-	case "dec_search":
-		result = executeDecSearch(params.Arguments)
 	case "dec_sync":
 		result = executeDecSync(params.Arguments)
-	case "dec_link":
-		result = executeDecLink(params.Arguments)
 	default:
 		result = callToolResult{
 			Content: []contentItem{{Type: "text", Text: fmt.Sprintf("未知的工具: %s", params.Name)}},
@@ -279,45 +248,12 @@ func executeDecList(args map[string]interface{}) callToolResult {
 	}
 }
 
-func executeDecSearch(args map[string]interface{}) callToolResult {
-	keyword, _ := args["keyword"].(string)
-	if keyword == "" {
-		return callToolResult{
-			Content: []contentItem{{Type: "text", Text: "请提供搜索关键词"}},
-			IsError: true,
-		}
-	}
-
-	// TODO: 实现实际的搜索逻辑
-	return callToolResult{
-		Content: []contentItem{{
-			Type: "text",
-			Text: fmt.Sprintf("搜索 '%s' 的结果:\n暂无匹配的包", keyword),
-		}},
-	}
-}
-
 func executeDecSync(args map[string]interface{}) callToolResult {
 	// TODO: 实现实际的同步逻辑
 	return callToolResult{
 		Content: []contentItem{{
 			Type: "text",
-			Text: "请在终端运行 dec sync-rules 命令同步配置",
-		}},
-	}
-}
-
-func executeDecLink(args map[string]interface{}) callToolResult {
-	path, _ := args["path"].(string)
-	if path == "" {
-		path = "当前目录"
-	}
-
-	// TODO: 实现实际的链接逻辑
-	return callToolResult{
-		Content: []contentItem{{
-			Type: "text",
-			Text: fmt.Sprintf("请在终端运行 dec link --path %s 命令链接包", path),
+			Text: "请在终端运行 dec sync 命令同步配置",
 		}},
 	}
 }

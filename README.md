@@ -44,11 +44,14 @@ dec sync
 # 列出可用包
 dec list
 
-# 搜索包
-dec search github
+# 更新包缓存
+dec update
 
-# 查看包详情
-dec info github
+# 查看/切换包源
+dec source [url]
+
+# 切换版本
+dec use <version>
 ```
 
 ## 命令参考
@@ -57,11 +60,10 @@ dec info github
 |------|------|
 | `init` | 初始化项目配置（创建 `.dec/config/`） |
 | `sync` | 同步规则文件和 MCP 配置到 IDE |
-| `list` | 列出可用/已安装的包 |
-| `search <keyword>` | 搜索包 |
-| `info <name>` | 查看包详情 |
-| `link` | 链接本地开发包 |
-| `unlink <name>` | 移除本地链接 |
+| `list` | 列出可用的规则和 MCP 包 |
+| `update` | 更新包缓存 |
+| `source [url]` | 查看/切换包源 |
+| `use <version>` | 切换版本 (latest / v1.2.0) |
 | `publish-notify` | 通知注册表更新（发布后执行） |
 | `serve` | 启动 MCP Server 模式 |
 
@@ -71,26 +73,26 @@ Dec 使用 `.dec/config/` 目录存储项目配置：
 
 ```
 .dec/config/
-├── project.yaml      # 项目信息 + 目标 IDE
+├── ides.yaml         # 目标 IDE 配置
 ├── technology.yaml   # 技术栈（语言/框架/平台/设计模式）
-└── packs.yaml        # 规则包 + MCP 工具启用/配置
+└── mcp.yaml          # MCP 工具配置
 ```
 
-### packs.yaml 示例
+### technology.yaml 示例
 
 ```yaml
-# 规则包配置
-documentation:
-  enabled: true
+languages:
+  - go
+  - python
 
-version-management:
-  enabled: true
+frameworks:
+  - flutter
 
-github:
-  enabled: true
+platforms:
+  - cli
 
-dec:
-  enabled: true
+patterns:
+  - command
 ```
 
 ## 规则分层
@@ -99,61 +101,21 @@ dec:
 |------|------|------|
 | Layer 0 | 核心规则 | 始终启用（principles, security, git-config 等） |
 | Layer 1 | 技术栈规则 | 根据 technology.yaml 自动启用 |
-| Layer 2 | 功能规则 | 用户在 packs.yaml 中选择启用 |
 
 ## 目录结构
 
 ```
 ~/.dec/
-├── registry/                 # 注册表
-│   ├── registry.json         # 正式注册表
-│   ├── test.json             # 测试注册表
-│   └── local.json            # 本地开发包链接
-├── mcp/                      # MCP Server 安装目录
-│   └── <package-name>/
+├── config.yaml              # 全局配置（包源、版本）
+├── cache/
+│   └── packages-v1.0.0/     # 包缓存（按版本）
+│       ├── rules/
+│       └── mcp/
 └── bin/
     └── dec
 ```
 
-## 开发包
-
-### 包类型
-
-| 类型 | 说明 |
-|------|------|
-| `rule` | 规则包，包含 `.mdc` 规则文件 |
-| `mcp` | MCP 工具包，提供 MCP Server |
-
-### package.json 示例
-
-```json
-{
-  "name": "my-pack",
-  "version": "1.0.0",
-  "type": "rule",
-  "description": "我的规则包",
-  "rules": ["rules/my-rules.mdc"],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/user/my-pack"
-  }
-}
-```
-
-### 本地开发
-
-```bash
-# 在包目录下链接到本地注册表
-dec link
-
-# 查看已链接的包
-dec link --list
-
-# 移除链接
-dec unlink my-pack
-```
-
-### 发布包
+## 发布包
 
 1. 创建 GitHub Release
 2. 执行 `dec publish-notify` 通知注册表更新

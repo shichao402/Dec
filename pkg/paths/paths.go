@@ -17,11 +17,11 @@ const (
 // │   └── github-issue/
 // │       ├── bin/
 // │       ├── rules/
-// │       └── package.json
+// │       └── dec_package.json
 // ├── rules/                     <- 规则包安装目录
 // │   └── documentation/
 // │       ├── rules/
-// │       └── package.json
+// │       └── dec_package.json
 // ├── registry/                  <- 多注册表目录
 // │   ├── local.json             <- 本地开发注册表
 // │   ├── test.json              <- 测试注册表
@@ -36,9 +36,9 @@ const (
 //
 // 项目配置目录：
 // <project>/.dec/config/
-// ├── project.yaml              <- 项目信息
+// ├── ides.yaml                 <- IDE 配置
 // ├── technology.yaml           <- 技术栈
-// └── packs.yaml                <- 启用的包
+// └── mcp.yaml                  <- MCP 配置
 
 // GetRootDir 获取 Dec 根目录
 // 优先级：
@@ -115,6 +115,15 @@ func GetConfigDir() (string, error) {
 	return filepath.Join(rootDir, "config"), nil
 }
 
+// GetCoreRulesDir 获取核心规则目录
+func GetCoreRulesDir() (string, error) {
+	configDir, err := GetConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configDir, "core"), nil
+}
+
 // GetBinDir 获取可执行文件目录
 func GetBinDir() (string, error) {
 	rootDir, err := GetRootDir()
@@ -122,68 +131,6 @@ func GetBinDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(rootDir, "bin"), nil
-}
-
-// ========================================
-// 注册表路径
-// ========================================
-
-// GetLocalRegistryPath 获取本地开发注册表路径
-func GetLocalRegistryPath() (string, error) {
-	registryDir, err := GetRegistryDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(registryDir, "local.json"), nil
-}
-
-// GetTestRegistryPath 获取测试注册表路径
-func GetTestRegistryPath() (string, error) {
-	registryDir, err := GetRegistryDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(registryDir, "test.json"), nil
-}
-
-// GetOfficialRegistryPath 获取正式注册表路径
-func GetOfficialRegistryPath() (string, error) {
-	registryDir, err := GetRegistryDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(registryDir, "registry.json"), nil
-}
-
-// ========================================
-// 包安装路径
-// ========================================
-
-// GetMCPPackPath 获取 MCP 工具包的安装路径
-func GetMCPPackPath(packName string) (string, error) {
-	mcpDir, err := GetMCPDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(mcpDir, packName), nil
-}
-
-// GetRulePackPath 获取规则包的安装路径
-func GetRulePackPath(packName string) (string, error) {
-	rulesDir, err := GetRulesDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(rulesDir, packName), nil
-}
-
-// GetPackageCachePath 获取下载包的缓存路径
-func GetPackageCachePath(packageName, version string) (string, error) {
-	cacheDir, err := GetPackageCacheDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cacheDir, packageName+"-"+version+".tar.gz"), nil
 }
 
 // ========================================
@@ -195,19 +142,19 @@ func GetProjectConfigDir(projectRoot string) string {
 	return filepath.Join(projectRoot, ".dec", "config")
 }
 
-// GetProjectConfigPath 获取项目配置文件路径
-func GetProjectConfigPath(projectRoot string) string {
-	return filepath.Join(GetProjectConfigDir(projectRoot), "project.yaml")
-}
-
 // GetTechnologyConfigPath 获取技术栈配置文件路径
 func GetTechnologyConfigPath(projectRoot string) string {
 	return filepath.Join(GetProjectConfigDir(projectRoot), "technology.yaml")
 }
 
-// GetPacksConfigPath 获取包配置文件路径
-func GetPacksConfigPath(projectRoot string) string {
-	return filepath.Join(GetProjectConfigDir(projectRoot), "packs.yaml")
+// GetMCPConfigPath 获取 MCP 配置文件路径
+func GetMCPConfigPath(projectRoot string) string {
+	return filepath.Join(GetProjectConfigDir(projectRoot), "mcp.yaml")
+}
+
+// GetIDEsConfigPath 获取 IDE 配置文件路径
+func GetIDEsConfigPath(projectRoot string) string {
+	return filepath.Join(GetProjectConfigDir(projectRoot), "ides.yaml")
 }
 
 // ========================================
@@ -251,6 +198,20 @@ func GetCursorMCPConfigPath(projectRoot string) string {
 }
 
 // ========================================
+// 技术栈配置路径
+// ========================================
+
+// GetTechStackDir 获取技术栈配置目录
+// 返回 Dec 安装目录下的 config/techstack 目录
+func GetTechStackDir() (string, error) {
+	configDir, err := GetConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configDir, "techstack"), nil
+}
+
+// ========================================
 // 工具函数
 // ========================================
 
@@ -283,52 +244,4 @@ func EnsureAllDirs() error {
 	return nil
 }
 
-// ========================================
-// 兼容旧版本（待移除）
-// ========================================
 
-// GetReposDir 获取已安装包的目录（兼容旧版本）
-// Deprecated: 使用 GetMCPDir 或 GetRulesDir
-func GetReposDir() (string, error) {
-	rootDir, err := GetRootDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(rootDir, "repos"), nil
-}
-
-// GetManifestCacheDir 获取 manifest 缓存目录（兼容旧版本）
-// Deprecated: 不再需要单独缓存 manifest
-func GetManifestCacheDir() (string, error) {
-	cacheDir, err := GetCacheDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cacheDir, "manifests"), nil
-}
-
-// GetRegistryPath 获取本地 registry 缓存文件路径（兼容旧版本）
-// Deprecated: 使用 GetOfficialRegistryPath
-func GetRegistryPath() (string, error) {
-	return GetOfficialRegistryPath()
-}
-
-// GetManifestPath 获取指定包的 manifest 缓存路径（兼容旧版本）
-// Deprecated: 不再需要单独缓存 manifest
-func GetManifestPath(packageName string) (string, error) {
-	manifestDir, err := GetManifestCacheDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(manifestDir, packageName+".json"), nil
-}
-
-// GetPackagePath 获取已安装包的路径（兼容旧版本）
-// Deprecated: 使用 GetMCPPackPath 或 GetRulePackPath
-func GetPackagePath(packageName string) (string, error) {
-	reposDir, err := GetReposDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(reposDir, packageName), nil
-}

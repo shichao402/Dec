@@ -72,12 +72,9 @@ Dec 完整功能测试
 |---|------|------|--------|
 | 1 | 初始化项目 | `init` | `.dec/config/` 目录和配置文件存在 |
 | 2 | 列出包 | `list` | 输出包含可用包信息 |
-| 3 | 搜索包 | `search <keyword>` | 找到匹配的包 |
-| 4 | 查看详情 | `info <package>` | 显示版本等完整信息 |
-| 5 | 同步规则 | `sync` | 规则文件生成到 `.cursor/rules/` |
-| 6 | MCP 配置 | `sync` | `.cursor/mcp.json` 正确生成 |
-| 7 | 链接包 | `link` | 包添加到本地注册表 |
-| 8 | 版本显示 | `--version` | 显示当前版本 |
+| 3 | 同步规则 | `sync` | 规则文件生成到 `.cursor/rules/` |
+| 4 | MCP 配置 | `sync` | `.cursor/mcp.json` 正确生成 |
+| 5 | 版本显示 | `--version` | 显示当前版本 |
 
 ## 手动测试步骤
 
@@ -101,8 +98,8 @@ ls -la .dec/config/
 **预期文件结构**:
 ```
 .dec/config/
-├── packs.yaml
-├── project.yaml
+├── ides.yaml
+├── mcp.yaml
 └── technology.yaml
 ```
 
@@ -122,16 +119,6 @@ cat .cursor/mcp.json
 
 ```bash
 /path/to/dec list
-/path/to/dec search github
-/path/to/dec info github
-```
-
-### 5. 测试本地链接
-
-```bash
-cd /path/to/your-package
-/path/to/dec link
-/path/to/dec link --list
 ```
 
 ## 测试检查清单

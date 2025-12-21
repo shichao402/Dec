@@ -21,20 +21,23 @@ var RootCmd = &cobra.Command{
 管理 Cursor/IDE 的规则文件和 MCP 工具配置。
 
 使用示例:
+  # 更新包缓存
+  dec update
+
+  # 列出可用包
+  dec list
+
   # 初始化项目配置
   dec init
 
   # 同步规则和 MCP 配置
   dec sync
 
-  # 链接本地开发包
-  dec link
+  # 查看/切换包源
+  dec source [url]
 
-  # 列出可用包
-  dec list
-
-  # 搜索包
-  dec search <keyword>
+  # 切换版本
+  dec use <version>
 
   # 启动 MCP Server
   dec serve`,
@@ -90,7 +93,5 @@ func GetVersion() string {
 func init() {
 	// 查询命令
 	RootCmd.AddCommand(listCmd)
-	RootCmd.AddCommand(searchCmd)
-	RootCmd.AddCommand(infoCmd)
 	// 其他命令在各自文件的 init() 中添加
 }

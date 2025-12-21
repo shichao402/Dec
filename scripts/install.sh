@@ -121,15 +121,15 @@ main() {
     
     # 定义安装路径（新设计：统一使用环境目录）
     # 优先使用环境变量 DEC_HOME，如果未设置则使用默认路径
-    # 新路径设计（类似 pip/brew）：
-    # ~/.decs/             <- 根目录 (独立于 .cursor 系统目录)
-    # ├── bin/                       <- Dec 可执行文件
-    # ├── repos/                     <- 工具集仓库源码
-    # └── config/                    <- 配置文件
+    # 路径设计：
+    # ~/.dec/              <- 根目录
+    # ├── bin/             <- Dec 可执行文件
+    # ├── repos/           <- 工具集仓库源码
+    # └── config/          <- 配置文件
     if [ -n "${DEC_HOME}" ]; then
         INSTALL_DIR="${DEC_HOME}"
     else
-        INSTALL_DIR="${HOME}/.decs"
+        INSTALL_DIR="${HOME}/.dec"
     fi
     BIN_DIR="${INSTALL_DIR}/bin"
     CONFIG_DIR="${INSTALL_DIR}/config"

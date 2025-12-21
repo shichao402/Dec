@@ -1,5 +1,20 @@
 package types
 
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+)
+
+// ========================================
+// 包元数据文件名常量
+// ========================================
+
+const (
+	// DecPackageFile Dec 包元数据文件名
+	DecPackageFile = "dec_package.json"
+)
+
 // ========================================
 // 包类型常量
 // ========================================
@@ -19,7 +34,7 @@ const (
 )
 
 // ========================================
-// 统一包元数据类型（package.json）
+// 统一包元数据类型（dec_package.json）
 // ========================================
 
 // Pack 表示包的元数据定义（规则包或 MCP 工具包）
@@ -104,11 +119,9 @@ type Repository struct {
 // 项目配置类型（.dec/config/）
 // ========================================
 
-// ProjectConfig 表示项目配置（project.yaml）
-type ProjectConfig struct {
-	Name        string   `yaml:"name" json:"name"`                            // 项目名称
-	Description string   `yaml:"description,omitempty" json:"description,omitempty"` // 项目描述
-	IDEs        []string `yaml:"ides,omitempty" json:"ides,omitempty"`        // 目标 IDE: cursor, codebuddy, windsurf, trae
+// IDEsConfig 表示 IDE 配置（ides.yaml）
+type IDEsConfig struct {
+	IDEs []string `yaml:"ides,omitempty" json:"ides,omitempty"` // 目标 IDE: cursor, codebuddy, windsurf, trae
 }
 
 // TechnologyConfig 表示技术栈配置（technology.yaml）
@@ -119,11 +132,11 @@ type TechnologyConfig struct {
 	Patterns   []string `yaml:"patterns,omitempty" json:"patterns,omitempty"`     // 设计模式: command, pipeline, mvc, repository 等
 }
 
-// PacksConfig 表示包配置（packs.yaml）
-type PacksConfig map[string]PackEntry
+// MCPUserConfig 表示用户 MCP 配置（mcp.yaml）
+type MCPUserConfig map[string]PackEntry
 
 // PackEntry 表示单个包的配置
-// 注意：包类型由包自身的 package.json 定义，用户只需指定是否启用和配置
+// 注意：包类型由包自身的 dec_package.json 定义，用户只需指定是否启用和配置
 type PackEntry struct {
 	Enabled bool                   `yaml:"enabled" json:"enabled"`                   // 是否启用
 	Config  map[string]interface{} `yaml:"config,omitempty" json:"config,omitempty"` // 用户配置
@@ -146,44 +159,20 @@ type MCPServer struct {
 }
 
 // ========================================
-// 多注册表类型
+// 包元数据加载工具
 // ========================================
 
-// RegistryType 注册表类型
-type RegistryType string
+// LoadPackFromPath 从路径加载包元数据（dec_package.json）
+func LoadPackFromPath(packPath string) (*Pack, error) {
+	decPackagePath := filepath.Join(packPath, DecPackageFile)
+	data, err := os.ReadFile(decPackagePath)
+	if err != nil {
+		return nil, err
+	}
 
-const (
-	RegistryTypeLocal    RegistryType = "local"    // 本地开发注册表
-	RegistryTypeTest     RegistryType = "test"     // 测试注册表
-	RegistryTypeOfficial RegistryType = "official" // 正式注册表
-)
-
-// PackRegistry 表示包注册表
-type PackRegistry struct {
-	Version   string                  `json:"version"`              // 注册表版本
-	UpdatedAt string                  `json:"updated_at,omitempty"` // 更新时间
-	Packs     map[string]PackMetadata `json:"packs"`                // 包列表（key 为包名）
-}
-
-// PackMetadata 表示注册表中的包元数据
-type PackMetadata struct {
-	Name        string `json:"name"`                  // 包名
-	Description string `json:"description,omitempty"` // 描述
-	Type        string `json:"type"`                  // 类型: rule, mcp
-	Category    string `json:"category,omitempty"`    // 分类
-	Builtin     bool   `json:"builtin,omitempty"`     // 是否内置
-	Repository  string `json:"repository,omitempty"`  // 仓库地址（外部包）
-	Version     string `json:"version,omitempty"`     // 版本
-
-	// 本地开发包特有字段
-	LocalPath string `json:"local_path,omitempty"` // 本地路径（仅 local registry）
-	LinkedAt  string `json:"linked_at,omitempty"`  // 链接时间（仅 local registry）
-}
-
-// ResolvedPack 表示解析后的包信息（包含来源）
-type ResolvedPack struct {
-	PackMetadata
-	Source       RegistryType `json:"source"`                  // 来源注册表
-	InstallPath  string       `json:"install_path,omitempty"`  // 安装路径
-	IsInstalled  bool         `json:"is_installed"`            // 是否已安装
+	var pack Pack
+	if err := json.Unmarshal(data, &pack); err != nil {
+		return nil, err
+	}
+	return &pack, nil
 }

@@ -81,14 +81,11 @@ make install-dev
 ~/.dec/
 ├── bin/
 │   └── dec                   # 可执行文件
-├── registry/                 # 注册表
-│   ├── registry.json         # 正式注册表
-│   ├── test.json             # 测试注册表
-│   └── local.json            # 本地开发包链接
-├── mcp/                      # MCP Server 安装目录
-│   └── <package-name>/
-└── config/
-    └── system.json           # 系统配置
+├── config.yaml               # 全局配置
+└── cache/
+    └── packages-v1.0.0/      # 包缓存
+        ├── rules/
+        └── mcp/
 ```
 
 ## 环境变量

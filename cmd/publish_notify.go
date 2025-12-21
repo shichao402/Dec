@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/shichao402/Dec/pkg/types"
@@ -23,13 +21,13 @@ var publishNotifyCmd = &cobra.Command{
 	Long: `发布包后，通知 Dec 注册表更新包版本。
 
 此命令会：
-1. 读取当前目录的 package.json
+1. 读取当前目录的 dec_package.json
 2. 向 Dec 仓库创建一个 pack-sync Issue
 3. Dec 的 CI 会自动处理 Issue 并更新注册表
 
 前置条件：
 - 已安装 gh CLI 并登录
-- 当前目录有 package.json
+- 当前目录有 dec_package.json
 
 示例：
   dec publish-notify              # 通知更新
@@ -50,32 +48,26 @@ func runPublishNotify(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("获取当前目录失败: %w", err)
 	}
 
-	// 读取 package.json
-	packageJSONPath := filepath.Join(cwd, "package.json")
-	data, err := os.ReadFile(packageJSONPath)
+	// 读取包元数据
+	pack, err := types.LoadPackFromPath(cwd)
 	if err != nil {
-		return fmt.Errorf("读取 package.json 失败: %w\n\n请确保在包目录中运行此命令", err)
-	}
-
-	var pack types.Pack
-	if err := json.Unmarshal(data, &pack); err != nil {
-		return fmt.Errorf("解析 package.json 失败: %w", err)
+		return fmt.Errorf("加载包元数据失败: %w\n\n请确保在包目录中运行此命令", err)
 	}
 
 	// 验证必要字段
 	if pack.Name == "" {
-		return fmt.Errorf("package.json 缺少 name 字段")
+		return fmt.Errorf("包元数据缺少 name 字段")
 	}
 	if pack.Version == "" {
-		return fmt.Errorf("package.json 缺少 version 字段")
+		return fmt.Errorf("包元数据缺少 version 字段")
 	}
 	if pack.Repository.URL == "" {
-		return fmt.Errorf("package.json 缺少 repository.url 字段")
+		return fmt.Errorf("包元数据缺少 repository.url 字段")
 	}
 
 	// 构建 Issue 内容
 	issueTitle := fmt.Sprintf("[pack-sync] %s@%s", pack.Name, pack.Version)
-	issueBody := buildIssueBody(&pack)
+	issueBody := buildIssueBody(pack)
 
 	fmt.Println("📦 发布通知")
 	fmt.Println()

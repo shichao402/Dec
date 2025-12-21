@@ -36,19 +36,23 @@ Dec/
 │   ├── root.go            # 根命令
 │   ├── init.go            # init 命令
 │   ├── sync.go            # sync 命令
-│   ├── link.go            # link 命令
+│   ├── list.go            # list 命令
+│   ├── update.go          # update 命令
+│   ├── source.go          # source 命令
+│   ├── use.go             # use 命令
 │   ├── serve.go           # MCP Server
-│   └── ...
+│   └── publish_notify.go  # publish-notify 命令
 ├── pkg/                    # 核心包
-│   ├── config/            # 配置管理
-│   ├── generator/         # MCP 配置生成
-│   ├── installer/         # MCP Server 安装
-│   ├── registry/          # 多注册表管理
-│   ├── rules/             # 规则生成
+│   ├── config/            # 全局配置、项目配置、包获取
+│   ├── packages/          # 包扫描、占位符解析
 │   ├── service/           # 同步服务
+│   ├── ide/               # IDE 抽象层
 │   ├── paths/             # 路径管理
 │   ├── types/             # 类型定义
 │   └── version/           # 版本管理
+├── dec-packages/          # 内置包（规则和 MCP）
+│   ├── rules/
+│   └── mcp/
 ├── config/
 │   ├── registry.json      # 包注册表
 │   └── system.json        # 系统配置模板
@@ -169,29 +173,6 @@ func runCommand() error {
 }
 ```
 
-```bash
-# Shell 脚本示例
-SKIP_CONFIRM=false
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --yes|-y) SKIP_CONFIRM=true; shift ;;
-        *) shift ;;
-    esac
-done
-
-if [[ "${SKIP_CONFIRM}" != "true" ]]; then
-    read -p "确认？(y/N): " -n 1 -r
-    [[ ! $REPLY =~ ^[Yy]$ ]] && exit 0
-fi
-```
-
-**现有命令的跳过确认选项：**
-
-| 命令 | 选项 | 说明 |
-|------|------|------|
-| `unlink --all` | `--force` / `-f` | 跳过确认 |
-| `scripts/uninstall.sh` | `--yes` / `-y` | 跳过卸载确认 |
-
 ## 添加新命令
 
 1. 在 `cmd/` 下创建新文件
@@ -221,22 +202,12 @@ func init() {
 
 ## 配置管理
 
-### 配置优先级
+### 全局配置
 
-1. 环境变量
-2. 用户配置 (`settings.json`)
-3. 系统配置 (`system.json`)
-4. 内置默认值
-
-### system.json
-
-```json
-{
-  "repo_owner": "shichao402",
-  "repo_name": "Dec",
-  "registry_url": "https://github.com/.../registry.json",
-  "update_branch": "ReleaseLatest"
-}
+```yaml
+# ~/.dec/config.yaml
+packages_source: "https://github.com/shichao402/MyDecPackage"
+packages_version: "latest"
 ```
 
 ## 常用命令速查
