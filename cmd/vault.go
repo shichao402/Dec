@@ -145,12 +145,15 @@ func runVaultSave(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("📦 保存 %s: %s\n", itemType, sourcePath)
 
-	savedName, err := v.Save(itemType, sourcePath, vaultTags)
+	savedName, warnings, err := v.Save(itemType, sourcePath, vaultTags)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("✅ 已保存到 Vault 并推送到远程仓库\n")
+	fmt.Printf("✅ 已保存到 Vault\n")
+	for _, warning := range warnings {
+		fmt.Printf("⚠️  %s\n", warning)
+	}
 
 	// 更新本地追踪
 	cwd, err := os.Getwd()

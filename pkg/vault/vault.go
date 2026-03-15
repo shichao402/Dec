@@ -189,15 +189,15 @@ func ManagedName(name string) string {
 }
 
 // Save 保存资产到 vault
-func (v *Vault) Save(itemType, sourcePath string, tags []string) (string, error) {
+func (v *Vault) Save(itemType, sourcePath string, tags []string) (string, []string, error) {
 	absSource, err := filepath.Abs(sourcePath)
 	if err != nil {
-		return "", fmt.Errorf("解析路径失败: %w", err)
+		return "", nil, fmt.Errorf("解析路径失败: %w", err)
 	}
 
 	info, err := os.Stat(absSource)
 	if err != nil {
-		return "", fmt.Errorf("源路径不存在: %w", err)
+		return "", nil, fmt.Errorf("源路径不存在: %w", err)
 	}
 
 	var name, description, destRelPath string
@@ -206,26 +206,26 @@ func (v *Vault) Save(itemType, sourcePath string, tags []string) (string, error)
 	case "skill":
 		name, description, err = v.saveSkill(absSource, info)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		destRelPath = filepath.Join("skills", name)
 
 	case "rule":
 		name, description, err = v.saveRule(absSource)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		destRelPath = filepath.Join("rules", name+".mdc")
 
 	case "mcp":
 		name, description, err = v.saveMCP(absSource)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		destRelPath = filepath.Join("mcp", name+".json")
 
 	default:
-		return "", fmt.Errorf("不支持的资产类型: %s (支持: skill, rule, mcp)", itemType)
+		return "", nil, fmt.Errorf("不支持的资产类型: %s (支持: skill, rule, mcp)", itemType)
 	}
 
 	v.Index.AddOrUpdate(VaultItem{
@@ -237,23 +237,28 @@ func (v *Vault) Save(itemType, sourcePath string, tags []string) (string, error)
 	})
 
 	if err := v.Index.Save(v.Dir); err != nil {
-		return "", fmt.Errorf("更新索引失败: %w", err)
+		return "", nil, fmt.Errorf("更新索引失败: %w", err)
 	}
 
 	if err := v.Git.Add("."); err != nil {
-		return "", fmt.Errorf("Git add 失败: %w", err)
+		return "", nil, fmt.Errorf("Git add 失败: %w", err)
 	}
 	if err := v.Git.Commit(fmt.Sprintf("save: %s %s", itemType, name)); err != nil {
-		return "", fmt.Errorf("Git commit 失败: %w", err)
+		return "", nil, fmt.Errorf("Git commit 失败: %w", err)
 	}
 
-	if hasRemote, _ := v.Git.HasRemote(); hasRemote {
+	var warnings []string
+	hasRemote, err := v.Git.HasRemote()
+	if err != nil {
+		return "", nil, fmt.Errorf("检查 Git 远程失败: %w", err)
+	}
+	if hasRemote {
 		if err := v.Git.Push(); err != nil {
-			return "", fmt.Errorf("Git push 失败: %w", err)
+			warnings = append(warnings, fmt.Sprintf("推送到远程仓库失败，资产已保存到本地: %v", err))
 		}
 	}
 
-	return name, nil
+	return name, warnings, nil
 }
 
 // saveSkill 保存 skill 到 vault（skill 是目录）

@@ -67,22 +67,8 @@ func (s *SyncServiceV2) Sync() (*SyncResultV2, error) {
 
 	for _, ideName := range idesConfig.IDEs {
 		ideImpl := ide.Get(ideName)
-
-		if err := s.cleanManagedRules(ideImpl); err != nil {
-			return nil, fmt.Errorf("清理 %s 旧规则失败: %w", ideName, err)
-		}
-		if err := s.cleanManagedSkills(ideImpl); err != nil {
-			return nil, fmt.Errorf("清理 %s 旧 Skills 失败: %w", ideName, err)
-		}
-
-		if err := s.syncVaultSkills(assets.Vault, ideImpl, assets.Skills); err != nil {
-			return nil, fmt.Errorf("同步 %s Skills 失败: %w", ideName, err)
-		}
-		if err := s.syncVaultRules(assets.Vault, ideImpl, assets.Rules); err != nil {
-			return nil, fmt.Errorf("同步 %s Rules 失败: %w", ideName, err)
-		}
-		if err := s.syncVaultMCPs(assets.Vault, ideImpl, assets.MCPs); err != nil {
-			return nil, fmt.Errorf("同步 %s MCPs 失败: %w", ideName, err)
+		if err := s.syncIDE(ideName, ideImpl, assets); err != nil {
+			return nil, err
 		}
 	}
 
@@ -98,6 +84,179 @@ func (s *SyncServiceV2) Sync() (*SyncResultV2, error) {
 		MCPsCount:   len(assets.MCPs),
 		Warnings:    warnings,
 	}, nil
+}
+
+type ideSyncBackup struct {
+	tempDir          string
+	mcpConfigExisted bool
+}
+
+func (b *ideSyncBackup) cleanup() {
+	if b == nil || b.tempDir == "" {
+		return
+	}
+	_ = os.RemoveAll(b.tempDir)
+}
+
+func (s *SyncServiceV2) syncIDE(ideName string, ideImpl ide.IDE, assets *resolvedVaultAssets) error {
+	backup, err := s.createIDEBackup(ideImpl)
+	if err != nil {
+		return fmt.Errorf("备份 %s 当前托管资产失败: %w", ideName, err)
+	}
+	defer backup.cleanup()
+
+	if err := s.cleanManagedRules(ideImpl); err != nil {
+		return s.restoreIDEOnFailure(ideName, ideImpl, backup, fmt.Errorf("清理 %s 旧规则失败: %w", ideName, err))
+	}
+	if err := s.cleanManagedSkills(ideImpl); err != nil {
+		return s.restoreIDEOnFailure(ideName, ideImpl, backup, fmt.Errorf("清理 %s 旧 Skills 失败: %w", ideName, err))
+	}
+	if err := s.syncVaultSkills(assets.Vault, ideImpl, assets.Skills); err != nil {
+		return s.restoreIDEOnFailure(ideName, ideImpl, backup, fmt.Errorf("同步 %s Skills 失败: %w", ideName, err))
+	}
+	if err := s.syncVaultRules(assets.Vault, ideImpl, assets.Rules); err != nil {
+		return s.restoreIDEOnFailure(ideName, ideImpl, backup, fmt.Errorf("同步 %s Rules 失败: %w", ideName, err))
+	}
+	if err := s.syncVaultMCPs(assets.Vault, ideImpl, assets.MCPs); err != nil {
+		return s.restoreIDEOnFailure(ideName, ideImpl, backup, fmt.Errorf("同步 %s MCPs 失败: %w", ideName, err))
+	}
+
+	return nil
+}
+
+func (s *SyncServiceV2) createIDEBackup(ideImpl ide.IDE) (*ideSyncBackup, error) {
+	tempDir, err := os.MkdirTemp("", "dec-sync-backup-")
+	if err != nil {
+		return nil, err
+	}
+
+	backup := &ideSyncBackup{tempDir: tempDir}
+
+	skillsDir := ideImpl.SkillsDir(s.projectRoot)
+	if entries, err := os.ReadDir(skillsDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "dec-") {
+				continue
+			}
+			srcPath := filepath.Join(skillsDir, entry.Name())
+			dstPath := filepath.Join(tempDir, "skills", entry.Name())
+			if err := vault.CopyDir(srcPath, dstPath); err != nil {
+				return nil, err
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	rulesDir := ideImpl.RulesDir(s.projectRoot)
+	if entries, err := os.ReadDir(rulesDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasPrefix(entry.Name(), "dec-") {
+				continue
+			}
+			srcPath := filepath.Join(rulesDir, entry.Name())
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return nil, err
+			}
+			dstPath := filepath.Join(tempDir, "rules", entry.Name())
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(dstPath, data, 0644); err != nil {
+				return nil, err
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	mcpConfigPath := ideImpl.MCPConfigPath(s.projectRoot)
+	if data, err := os.ReadFile(mcpConfigPath); err == nil {
+		backup.mcpConfigExisted = true
+		dstPath := filepath.Join(tempDir, "mcp.json")
+		if err := os.WriteFile(dstPath, data, 0644); err != nil {
+			return nil, err
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	return backup, nil
+}
+
+func (s *SyncServiceV2) restoreIDEOnFailure(ideName string, ideImpl ide.IDE, backup *ideSyncBackup, cause error) error {
+	if backup == nil {
+		return cause
+	}
+	if err := s.restoreIDEBackup(ideImpl, backup); err != nil {
+		return fmt.Errorf("%v；恢复 %s 原有托管资产失败: %v", cause, ideName, err)
+	}
+	return cause
+}
+
+func (s *SyncServiceV2) restoreIDEBackup(ideImpl ide.IDE, backup *ideSyncBackup) error {
+	if err := s.cleanManagedRules(ideImpl); err != nil {
+		return err
+	}
+	if err := s.cleanManagedSkills(ideImpl); err != nil {
+		return err
+	}
+
+	skillsBackupDir := filepath.Join(backup.tempDir, "skills")
+	if entries, err := os.ReadDir(skillsBackupDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			dstPath := filepath.Join(ideImpl.SkillsDir(s.projectRoot), entry.Name())
+			if err := vault.CopyDir(filepath.Join(skillsBackupDir, entry.Name()), dstPath); err != nil {
+				return err
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	rulesBackupDir := filepath.Join(backup.tempDir, "rules")
+	if entries, err := os.ReadDir(rulesBackupDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(rulesBackupDir, entry.Name()))
+			if err != nil {
+				return err
+			}
+			dstPath := filepath.Join(ideImpl.RulesDir(s.projectRoot), entry.Name())
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(dstPath, data, 0644); err != nil {
+				return err
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	mcpConfigPath := ideImpl.MCPConfigPath(s.projectRoot)
+	if backup.mcpConfigExisted {
+		data, err := os.ReadFile(filepath.Join(backup.tempDir, "mcp.json"))
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(mcpConfigPath), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(mcpConfigPath, data, 0644); err != nil {
+			return err
+		}
+	} else if err := os.Remove(mcpConfigPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	return nil
 }
 
 func (s *SyncServiceV2) loadResolvedVaultAssets(config *types.VaultConfigV2) (*resolvedVaultAssets, []string, error) {

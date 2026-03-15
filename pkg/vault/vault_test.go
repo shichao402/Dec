@@ -3,7 +3,9 @@ package vault
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/pkg/types"
@@ -169,5 +171,51 @@ func TestLoadMCPServerRejectsFullMCPConfig(t *testing.T) {
 
 	if _, err := loadMCPServer(path); err == nil {
 		t.Fatalf("完整 mcp.json 不应被视为单个 MCP server 片段")
+	}
+}
+
+func TestSaveReturnsWarningWhenPushFails(t *testing.T) {
+	vaultDir := t.TempDir()
+	sourceDir := t.TempDir()
+	sourcePath := filepath.Join(sourceDir, "my-rule.mdc")
+	if err := os.WriteFile(sourcePath, []byte("# my rule\n"), 0644); err != nil {
+		t.Fatalf("写入源 rule 失败: %v", err)
+	}
+
+	for _, args := range [][]string{{"init"}, {"config", "user.email", "test@example.com"}, {"config", "user.name", "Test User"}, {"remote", "add", "origin", "https://invalid.example.com/nonexistent.git"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = vaultDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("执行 git %v 失败: %v (%s)", args, err, strings.TrimSpace(string(output)))
+		}
+	}
+
+	v := &Vault{
+		Dir: vaultDir,
+		Index: &VaultIndex{
+			Version: indexVersion,
+		},
+		Git: NewGitOps(vaultDir),
+	}
+
+	name, warnings, err := v.Save("rule", sourcePath, nil)
+	if err != nil {
+		t.Fatalf("Save 不应因 push 失败而返回错误: %v", err)
+	}
+	if name != "my-rule" {
+		t.Fatalf("保存名称错误: %s", name)
+	}
+	if len(warnings) == 0 || !strings.Contains(warnings[0], "资产已保存到本地") {
+		t.Fatalf("期望 push 失败 warning, 得到: %v", warnings)
+	}
+	if v.Index.Get("rule", "my-rule") == nil {
+		t.Fatalf("保存后索引中应存在 rule")
+	}
+}
+
+func TestHasRemoteReturnsErrorForInvalidRepo(t *testing.T) {
+	gitOps := NewGitOps(t.TempDir())
+	if _, err := gitOps.HasRemote(); err == nil {
+		t.Fatalf("非 git 仓库应返回错误")
 	}
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,8 +39,13 @@ func TestRunVaultPullAddsItemToVaultConfig(t *testing.T) {
 	t.Setenv("DEC_HOME", decHome)
 
 	vaultDir := filepath.Join(decHome, "vault")
-	if err := os.MkdirAll(filepath.Join(vaultDir, ".git"), 0755); err != nil {
-		t.Fatalf("创建 vault git 目录失败: %v", err)
+	if err := os.MkdirAll(vaultDir, 0755); err != nil {
+		t.Fatalf("创建 vault 目录失败: %v", err)
+	}
+	gitCmd := exec.Command("git", "init")
+	gitCmd.Dir = vaultDir
+	if output, err := gitCmd.CombinedOutput(); err != nil {
+		t.Fatalf("初始化 vault git 仓库失败: %v (%s)", err, strings.TrimSpace(string(output)))
 	}
 
 	skillDir := filepath.Join(vaultDir, "skills", "create-api-test")

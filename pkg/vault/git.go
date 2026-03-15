@@ -80,7 +80,7 @@ func (g *GitOps) IsClean() (bool, error) {
 func (g *GitOps) HasRemote() (bool, error) {
 	output, err := g.run("remote", "-v")
 	if err != nil {
-		return false, nil
+		return false, err
 	}
 	return output != "", nil
 }

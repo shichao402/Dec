@@ -199,6 +199,133 @@ func TestSyncFallsBackToLocalVaultWhenRefreshFails(t *testing.T) {
 	}
 }
 
+func TestSyncRestoresManagedAssetsOnSyncFailure(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
+
+	decHome := os.Getenv("DEC_HOME")
+	vaultDir := filepath.Join(decHome, "vault")
+	if err := os.MkdirAll(vaultDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd := exec.Command("git", "init")
+	gitCmd.Dir = vaultDir
+	if output, err := gitCmd.CombinedOutput(); err != nil {
+		t.Fatalf("初始化 vault git 仓库失败: %v (%s)", err, strings.TrimSpace(string(output)))
+	}
+
+	skillDir := filepath.Join(vaultDir, "skills", "new-skill")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: new-skill\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(vaultDir, "rules"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vaultDir, "rules", "new-rule.mdc"), []byte("# new rule\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(vaultDir, "mcp"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vaultDir, "mcp", "broken-tool.json"), []byte(`{"args":["missing-command"]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	indexJSON := `{
+  "version": "v1",
+  "items": [
+    {
+      "name": "new-skill",
+      "type": "skill",
+      "path": "skills/new-skill",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "name": "new-rule",
+      "type": "rule",
+      "path": "rules/new-rule.mdc",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "name": "broken-tool",
+      "type": "mcp",
+      "path": "mcp/broken-tool.json",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(vaultDir, "vault.json"), []byte(indexJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectRoot := t.TempDir()
+	configDir := filepath.Join(projectRoot, ".dec", "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "ides.yaml"), []byte("ides:\n  - cursor\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "vault.yaml"), []byte("vault_skills:\n  - new-skill\nvault_rules:\n  - new-rule\nvault_mcps:\n  - broken-tool\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	managedSkill := filepath.Join(projectRoot, ".cursor", "skills", "dec-old-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(managedSkill), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedSkill, []byte("old skill"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	managedRule := filepath.Join(projectRoot, ".cursor", "rules", "dec-old-rule.mdc")
+	if err := os.MkdirAll(filepath.Dir(managedRule), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedRule, []byte("old rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mcpPath := filepath.Join(projectRoot, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(mcpPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	originalMCP := `{"mcpServers":{"user-helper":{"command":"npx","args":["-y","user-helper"]},"dec-old-helper":{"command":"npx","args":["-y","old-helper"]}}}`
+	if err := os.WriteFile(mcpPath, []byte(originalMCP), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &SyncServiceV2{
+		projectRoot: projectRoot,
+		configMgr:   config.NewProjectConfigManagerV2(projectRoot),
+	}
+
+	if _, err := svc.Sync(); err == nil {
+		t.Fatalf("期望 sync 因损坏 MCP 失败")
+	}
+
+	data, err := os.ReadFile(managedSkill)
+	if err != nil || string(data) != "old skill" {
+		t.Fatalf("失败后应恢复旧 skill, err=%v content=%q", err, string(data))
+	}
+	data, err = os.ReadFile(managedRule)
+	if err != nil || string(data) != "old rule" {
+		t.Fatalf("失败后应恢复旧 rule, err=%v content=%q", err, string(data))
+	}
+	data, err = os.ReadFile(mcpPath)
+	if err != nil || string(data) != originalMCP {
+		t.Fatalf("失败后应恢复旧 MCP 配置, err=%v content=%q", err, string(data))
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-new-skill")); !os.IsNotExist(err) {
+		t.Fatalf("失败后不应保留新 skill 副本")
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "rules", "dec-new-rule.mdc")); !os.IsNotExist(err) {
+		t.Fatalf("失败后不应保留新 rule 副本")
+	}
+}
+
 func TestSyncRemovesUndeclaredManagedMCPs(t *testing.T) {
 	projectRoot := t.TempDir()
 	configDir := filepath.Join(projectRoot, ".dec", "config")
