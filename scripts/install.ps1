@@ -185,9 +185,9 @@ function Install-Dec {
     Write-Host "  `$env:Path = [System.Environment]::GetEnvironmentVariable('Path','User')"
     Write-Host ""
     Write-ColorOutput "之后可以在任何位置运行：" -Type "Info"
-    Write-Host "  dec install"
-    Write-Host "  dec list"
-    Write-Host "  dec update"
+    Write-Host "  dec init"
+    Write-Host "  dec vault init --create my-dec-vault"
+    Write-Host "  dec sync"
     Write-Host ""
 }
 

@@ -1,9 +1,0 @@
-# MCP 配置
-# 取消注释启用对应 MCP
-# 支持两种格式:
-#   - name           # 简单格式
-#   - name:          # 带变量格式
-#       var1: value1
-
-mcps:
-  - dec

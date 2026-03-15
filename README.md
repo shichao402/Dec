@@ -1,20 +1,13 @@
 # Dec
 
-Dec 是一个规则和 MCP 工具管理器，用于管理 Cursor/IDE 的规则文件和 MCP 工具配置。
+Dec 是一个个人 AI 知识仓库工具，用来保存、查找和复用 Skills、Rules、MCP 配置，并把这些资产同步到 Cursor、Windsurf、CodeBuddy、Trae 等 IDE。
 
-## 设计理念
+## 核心思路
 
-- **规则是编程规范，MCP 是工具能力**
-- **工具使用说明由 MCP 自描述，不需要规则文件**
-- **配置即声明，修改配置就是管理规则和工具**
-
-## 特性
-
-- 📦 **规则管理** - 核心规则、技术栈规则、功能规则分层管理
-- 🔧 **MCP 工具** - 自动配置 MCP Server，AI 可直接调用
-- 🌍 **跨平台** - 支持 Linux、macOS、Windows
-- 🔗 **多 IDE 支持** - Cursor、CodeBuddy、Windsurf 等
-- 📚 **包注册表** - 中心化的包索引，易于发现和管理
+- 资产长期保存在个人 Vault（Git 仓库）中
+- 项目只提交声明式配置，不提交 Dec 生成的托管副本
+- `.dec/config/vault.yaml` 是项目级唯一真相源
+- `dec sync` 负责把声明的资产部署到所有配置的 IDE
 
 ## 快速开始
 
@@ -35,91 +28,97 @@ iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts
 ### 基本使用
 
 ```bash
-# 初始化项目配置
+# 1. 初始化项目配置
 dec init
 
-# 同步规则和 MCP 配置
+# 2. 初始化个人知识仓库
+dec vault init --repo https://github.com/<user>/<repo>
+# 或
+dec vault init --create my-dec-vault
+
+# 3. 保存资产到 Vault
+dec vault save skill .cursor/skills/my-skill
+dec vault save rule .cursor/rules/my-rule.mdc
+dec vault save mcp ./postgres-tool.json
+
+# 4. 搜索和拉取已有资产
+dec vault find "api test"
+dec vault pull skill create-api-test
+
+# 5. 根据项目声明同步到所有 IDE
 dec sync
-
-# 列出可用包
-dec list
-
-# 更新包缓存
-dec update
-
-# 查看/切换包源
-dec source [url]
-
-# 切换版本
-dec use <version>
 ```
 
 ## 命令参考
 
 | 命令 | 说明 |
 |------|------|
-| `init` | 初始化项目配置（创建 `.dec/config/`） |
-| `sync` | 同步规则文件和 MCP 配置到 IDE |
-| `list` | 列出可用的规则和 MCP 包 |
-| `update` | 更新包缓存 |
-| `source [url]` | 查看/切换包源 |
-| `use <version>` | 切换版本 (latest / v1.2.0) |
-| `publish-notify` | 通知注册表更新（发布后执行） |
-| `serve` | 启动 MCP Server 模式 |
+| `init` | 初始化项目配置（创建 `.dec/config/ides.yaml` 和 `.dec/config/vault.yaml`） |
+| `sync` | 根据 `vault.yaml` 同步项目声明的资产到所有 IDE |
+| `vault init` | 初始化个人知识仓库 |
+| `vault save` | 保存 skill / rule / mcp 到个人 Vault |
+| `vault find` | 搜索 Vault 中的资产 |
+| `vault pull` | 拉取资产到项目，并自动写入 `vault.yaml` |
+| `vault list` | 列出 Vault 中的资产 |
+| `vault status` | 检查当前项目已追踪资产的本地变更 |
+| `vault push` | 手动推送 Vault 变更到远程仓库 |
 
 ## 项目配置
 
 Dec 使用 `.dec/config/` 目录存储项目配置：
 
-```
+```text
 .dec/config/
 ├── ides.yaml         # 目标 IDE 配置
-├── technology.yaml   # 技术栈（语言/框架/平台/设计模式）
-└── mcp.yaml          # MCP 工具配置
+└── vault.yaml        # 项目声明的 Vault 资产
 ```
 
-### technology.yaml 示例
+### `ides.yaml` 示例
 
 ```yaml
-languages:
-  - go
-  - python
-
-frameworks:
-  - flutter
-
-platforms:
-  - cli
-
-patterns:
-  - command
+ides:
+  - cursor
+  - windsurf
 ```
 
-## 规则分层
+### `vault.yaml` 示例
 
-| 层级 | 类型 | 说明 |
-|------|------|------|
-| Layer 0 | 核心规则 | 始终启用（principles, security, git-config 等） |
-| Layer 1 | 技术栈规则 | 根据 technology.yaml 自动启用 |
+```yaml
+vault_skills:
+  - create-api-test
+
+vault_rules:
+  - my-security-rule
+
+vault_mcps:
+  - postgres-tool
+```
+
+## MCP 资产格式
+
+Vault 中的 MCP 资产保存为单个 MCP server 片段 JSON，而不是整份 `mcp.json`：
+
+```json
+{
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-postgres"],
+  "env": {
+    "DATABASE_URL": "${DATABASE_URL}"
+  }
+}
+```
+
+`dec sync` 和 `dec vault pull mcp ...` 都会把它作为托管的 `dec-*` server 合并进 IDE 的 live `mcp.json`。
 
 ## 目录结构
 
-```
+```text
 ~/.dec/
-├── config.yaml              # 全局配置（包源、版本）
-├── cache/
-│   └── packages-v1.0.0/     # 包缓存（按版本）
-│       ├── rules/
-│       └── mcp/
+├── config.yaml      # 全局配置（vault_source）
+├── vault/           # 个人知识仓库（Git 管理）
 └── bin/
     └── dec
 ```
-
-## 发布包
-
-1. 创建 GitHub Release
-2. 执行 `dec publish-notify` 通知注册表更新
-3. 或创建 Issue（标题 `[pack-sync] 包名`）触发同步
 
 ## 从源码构建
 

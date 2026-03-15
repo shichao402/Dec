@@ -18,17 +18,29 @@ type IDE interface {
 	// RulesDir 返回规则输出目录
 	RulesDir(projectRoot string) string
 
+	// SkillsDir 返回 Skills 输出目录
+	SkillsDir(projectRoot string) string
+
 	// MCPConfigPath 返回 MCP 配置文件路径
 	MCPConfigPath(projectRoot string) string
 
 	// WriteRules 写入规则文件到 IDE 目录
 	WriteRules(projectRoot string, rules []RuleFile) error
 
+	// WriteSkill 写入单个 Skill 目录到 IDE Skills 目录
+	WriteSkill(projectRoot string, skillName string, files []SkillFile) error
+
 	// WriteMCPConfig 写入 MCP 配置到 IDE 目录
 	WriteMCPConfig(projectRoot string, config *types.MCPConfig) error
 
 	// LoadMCPConfig 加载现有的 MCP 配置
 	LoadMCPConfig(projectRoot string) (*types.MCPConfig, error)
+}
+
+// SkillFile 表示 Skill 中的一个文件
+type SkillFile struct {
+	RelPath string // 相对于 skill 目录的路径
+	Content []byte // 文件内容
 }
 
 // RuleFile 表示一个规则文件
@@ -52,6 +64,10 @@ func (b *baseIDE) RulesDir(projectRoot string) string {
 	return filepath.Join(projectRoot, b.dirKey, "rules")
 }
 
+func (b *baseIDE) SkillsDir(projectRoot string) string {
+	return filepath.Join(projectRoot, b.dirKey, "skills")
+}
+
 func (b *baseIDE) MCPConfigPath(projectRoot string) string {
 	if b.mcpConfigPath != "" {
 		return filepath.Join(projectRoot, b.mcpConfigPath)
@@ -71,6 +87,26 @@ func (b *baseIDE) WriteRules(projectRoot string, rules []RuleFile) error {
 	for _, rule := range rules {
 		rulePath := filepath.Join(rulesDir, rule.Name)
 		if err := os.WriteFile(rulePath, []byte(rule.Content), 0644); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (b *baseIDE) WriteSkill(projectRoot string, skillName string, files []SkillFile) error {
+	skillDir := filepath.Join(b.SkillsDir(projectRoot), skillName)
+
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return err
+	}
+
+	for _, f := range files {
+		fullPath := filepath.Join(skillDir, f.RelPath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(fullPath, f.Content, 0644); err != nil {
 			return err
 		}
 	}

@@ -288,9 +288,9 @@ main() {
     echo "  ${BINARY_PATH} --help"
     echo ""
     print_info "之后可以在任何位置运行："
-    echo "  dec install"
-    echo "  dec list"
-    echo "  dec update"
+    echo "  dec init"
+    echo "  dec vault init --create my-dec-vault"
+    echo "  dec sync"
     echo ""
 }
 

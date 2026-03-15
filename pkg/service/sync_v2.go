@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,258 +9,266 @@ import (
 
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/ide"
-	"github.com/shichao402/Dec/pkg/packages"
 	"github.com/shichao402/Dec/pkg/types"
+	"github.com/shichao402/Dec/pkg/vault"
 )
 
-// SyncServiceV2 新版同步服务
+// SyncServiceV2 同步服务
 type SyncServiceV2 struct {
 	projectRoot string
 	configMgr   *config.ProjectConfigManagerV2
-	scanner     *packages.Scanner
-	parser      *packages.PlaceholderParser
 }
 
-// NewSyncServiceV2 创建新版同步服务
+// NewSyncServiceV2 创建同步服务
 func NewSyncServiceV2(projectRoot string) (*SyncServiceV2, error) {
-	scanner, err := config.NewScanner()
-	if err != nil {
-		return nil, err
-	}
-
 	return &SyncServiceV2{
 		projectRoot: projectRoot,
 		configMgr:   config.NewProjectConfigManagerV2(projectRoot),
-		scanner:     scanner,
-		parser:      packages.NewPlaceholderParser(),
 	}, nil
 }
 
 // SyncResultV2 同步结果
 type SyncResultV2 struct {
-	ProjectName    string
-	IDEs           []string
-	CoreRulesCount int
-	TechRulesCount int
-	MCPCount       int
+	ProjectName string
+	IDEs        []string
+	SkillsCount int
+	RulesCount  int
+	MCPsCount   int
+	Warnings    []string
+}
+
+type resolvedVaultAssets struct {
+	Vault  *vault.Vault
+	Skills []vault.VaultItem
+	Rules  []vault.VaultItem
+	MCPs   []vault.VaultItem
 }
 
 // Sync 执行同步操作
 func (s *SyncServiceV2) Sync() (*SyncResultV2, error) {
-	// 检查项目是否已初始化
 	if !s.configMgr.Exists() {
 		return nil, fmt.Errorf("项目未初始化\n\n💡 运行 dec init 初始化项目")
 	}
 
-	// 检查是否有可用的包
-	if !s.scanner.HasPackages() {
-		return nil, fmt.Errorf("没有可用的包缓存\n\n💡 运行 dec update 更新包缓存")
-	}
-
-	// 加载配置
 	idesConfig, err := s.configMgr.LoadIDEsConfig()
 	if err != nil {
 		return nil, fmt.Errorf("加载 IDE 配置失败: %w", err)
 	}
 
-	techConfig, err := s.configMgr.LoadTechnologyConfig()
+	vaultConfig, err := s.configMgr.LoadVaultConfig()
 	if err != nil {
-		return nil, fmt.Errorf("加载技术栈配置失败: %w", err)
+		return nil, fmt.Errorf("加载 Vault 配置失败: %w", err)
 	}
 
-	mcpConfig, err := s.configMgr.LoadMCPConfig()
+	assets, warnings, err := s.loadResolvedVaultAssets(vaultConfig)
 	if err != nil {
-		return nil, fmt.Errorf("加载 MCP 配置失败: %w", err)
+		return nil, err
 	}
 
-	// 扫描所有规则
-	allRules, err := s.scanner.ScanRules()
-	if err != nil {
-		return nil, fmt.Errorf("扫描规则失败: %w", err)
-	}
-
-	// 扫描所有 MCP
-	allMCPs, err := s.scanner.ScanMCPs()
-	if err != nil {
-		return nil, fmt.Errorf("扫描 MCP 失败: %w", err)
-	}
-
-	// 筛选要注入的规则
-	var rulesToInject []packages.RuleInfo
-	coreCount := 0
-	techCount := 0
-
-	for _, rule := range allRules {
-		if rule.IsCore {
-			// 核心规则总是注入
-			rulesToInject = append(rulesToInject, rule)
-			coreCount++
-		} else if s.isRuleEnabled(rule, techConfig) {
-			// 检查是否在配置中启用
-			rulesToInject = append(rulesToInject, rule)
-			techCount++
-		}
-	}
-
-	// 筛选要启用的 MCP
-	var mcpsToEnable []packages.MCPInfo
-	for _, mcp := range allMCPs {
-		if s.isMCPEnabled(mcp.Name, mcpConfig) {
-			mcpsToEnable = append(mcpsToEnable, mcp)
-		}
-	}
-
-	// 为每个 IDE 生成配置
 	for _, ideName := range idesConfig.IDEs {
 		ideImpl := ide.Get(ideName)
 
-		// 清理旧的托管规则
 		if err := s.cleanManagedRules(ideImpl); err != nil {
 			return nil, fmt.Errorf("清理 %s 旧规则失败: %w", ideName, err)
 		}
-
-		// 生成规则文件
-		if err := s.generateRules(ideImpl, rulesToInject, techConfig); err != nil {
-			return nil, fmt.Errorf("生成 %s 规则失败: %w", ideName, err)
+		if err := s.cleanManagedSkills(ideImpl); err != nil {
+			return nil, fmt.Errorf("清理 %s 旧 Skills 失败: %w", ideName, err)
 		}
 
-		// 生成 MCP 配置
-		if err := s.generateMCPConfig(ideImpl, mcpsToEnable, mcpConfig); err != nil {
-			return nil, fmt.Errorf("生成 %s MCP 配置失败: %w", ideName, err)
+		if err := s.syncVaultSkills(assets.Vault, ideImpl, assets.Skills); err != nil {
+			return nil, fmt.Errorf("同步 %s Skills 失败: %w", ideName, err)
 		}
+		if err := s.syncVaultRules(assets.Vault, ideImpl, assets.Rules); err != nil {
+			return nil, fmt.Errorf("同步 %s Rules 失败: %w", ideName, err)
+		}
+		if err := s.syncVaultMCPs(assets.Vault, ideImpl, assets.MCPs); err != nil {
+			return nil, fmt.Errorf("同步 %s MCPs 失败: %w", ideName, err)
+		}
+	}
+
+	if err := s.trackSyncedAssets(idesConfig.IDEs, assets); err != nil {
+		return nil, fmt.Errorf("更新同步追踪失败: %w", err)
 	}
 
 	return &SyncResultV2{
-		ProjectName:    filepath.Base(s.projectRoot),
-		IDEs:           idesConfig.IDEs,
-		CoreRulesCount: coreCount,
-		TechRulesCount: techCount,
-		MCPCount:       len(mcpsToEnable),
+		ProjectName: filepath.Base(s.projectRoot),
+		IDEs:        idesConfig.IDEs,
+		SkillsCount: len(assets.Skills),
+		RulesCount:  len(assets.Rules),
+		MCPsCount:   len(assets.MCPs),
+		Warnings:    warnings,
 	}, nil
 }
 
-// isRuleEnabled 检查规则是否在配置中启用
-func (s *SyncServiceV2) isRuleEnabled(rule packages.RuleInfo, techConfig *types.NewTechnologyConfigV2) bool {
-	enabledNames := techConfig.GetEnabledNames(rule.Category)
-	for _, name := range enabledNames {
-		if name == rule.Name {
-			return true
-		}
+func (s *SyncServiceV2) loadResolvedVaultAssets(config *types.VaultConfigV2) (*resolvedVaultAssets, []string, error) {
+	assets := &resolvedVaultAssets{}
+	if !hasVaultDeclarations(config) {
+		return assets, nil, nil
 	}
-	return false
+
+	v, err := vault.Open()
+	if err != nil {
+		return nil, nil, fmt.Errorf("打开 Vault 失败: %w", err)
+	}
+
+	var warnings []string
+	if err := v.Refresh(); err != nil {
+		warnings = append(warnings, fmt.Sprintf("同步 Vault 远程状态失败，已回退到本地缓存: %v", err))
+	}
+
+	skills, err := resolveDeclaredItems(v, config.VaultSkills, "skill")
+	if err != nil {
+		return nil, warnings, err
+	}
+	rules, err := resolveDeclaredItems(v, config.VaultRules, "rule")
+	if err != nil {
+		return nil, warnings, err
+	}
+	mcps, err := resolveDeclaredItems(v, config.VaultMCPs, "mcp")
+	if err != nil {
+		return nil, warnings, err
+	}
+
+	assets.Vault = v
+	assets.Skills = skills
+	assets.Rules = rules
+	assets.MCPs = mcps
+
+	return assets, warnings, nil
 }
 
-// isMCPEnabled 检查 MCP 是否在配置中启用
-func (s *SyncServiceV2) isMCPEnabled(name string, mcpConfig *types.NewMCPConfigV2) bool {
-	for _, item := range mcpConfig.MCPs {
-		if item.Name == name {
-			return true
-		}
+func hasVaultDeclarations(config *types.VaultConfigV2) bool {
+	if config == nil {
+		return false
 	}
-	return false
+	return len(config.VaultSkills) > 0 || len(config.VaultRules) > 0 || len(config.VaultMCPs) > 0
 }
 
-// getMCPVars 获取 MCP 的变量配置
-func (s *SyncServiceV2) getMCPVars(name string, mcpConfig *types.NewMCPConfigV2) map[string]interface{} {
-	for _, item := range mcpConfig.MCPs {
-		if item.Name == name {
-			return item.Vars
+func resolveDeclaredItems(v *vault.Vault, names []string, itemType string) ([]vault.VaultItem, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	items := make([]vault.VaultItem, 0, len(names))
+	for _, name := range names {
+		item := v.Index.Get(itemType, name)
+		if item == nil {
+			return nil, fmt.Errorf("Vault 中未找到声明的 %s: %s", itemType, name)
+		}
+		items = append(items, *item)
+	}
+
+	return items, nil
+}
+
+// syncVaultSkills 将 vault 中的 skills 同步到 IDE 目录
+func (s *SyncServiceV2) syncVaultSkills(v *vault.Vault, ideImpl ide.IDE, items []vault.VaultItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if v == nil {
+		return fmt.Errorf("Vault 未就绪")
+	}
+
+	skillsDir := ideImpl.SkillsDir(s.projectRoot)
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		return err
+	}
+
+	for _, item := range items {
+		srcPath := filepath.Join(v.Dir, item.Path)
+		if _, err := os.Stat(srcPath); err != nil {
+			return fmt.Errorf("Vault Skill 不存在: %s", item.Name)
+		}
+		destDir := filepath.Join(skillsDir, vault.ManagedName(item.Name))
+		if err := vault.CopyDir(srcPath, destDir); err != nil {
+			return fmt.Errorf("同步 Vault Skill %s 失败: %w", item.Name, err)
 		}
 	}
+
 	return nil
 }
 
-// generateRules 生成规则文件
-func (s *SyncServiceV2) generateRules(ideImpl ide.IDE, rules []packages.RuleInfo, techConfig *types.NewTechnologyConfigV2) error {
+// syncVaultRules 将 vault 中的 rules 同步到 IDE 目录
+func (s *SyncServiceV2) syncVaultRules(v *vault.Vault, ideImpl ide.IDE, items []vault.VaultItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if v == nil {
+		return fmt.Errorf("Vault 未就绪")
+	}
+
 	rulesDir := ideImpl.RulesDir(s.projectRoot)
 	if err := os.MkdirAll(rulesDir, 0755); err != nil {
 		return err
 	}
 
-	for _, rule := range rules {
-		// 读取规则内容
-		content, err := os.ReadFile(rule.FilePath)
+	for _, item := range items {
+		srcPath := filepath.Join(v.Dir, item.Path)
+		content, err := os.ReadFile(srcPath)
 		if err != nil {
-			return fmt.Errorf("读取规则 %s 失败: %w", rule.Name, err)
+			return fmt.Errorf("读取 Vault Rule %s 失败: %w", item.Name, err)
 		}
-
-		// 获取变量配置
-		vars := techConfig.GetItemVars(rule.Category, rule.Name)
-
-		// 替换占位符
-		processedContent := s.parser.Replace(string(content), vars)
-
-		// 生成输出文件名
-		outputName := fmt.Sprintf("dec-%s-%s.mdc", rule.Category, rule.Name)
-		outputPath := filepath.Join(rulesDir, outputName)
-
-		// 写入文件
-		if err := os.WriteFile(outputPath, []byte(processedContent), 0644); err != nil {
-			return fmt.Errorf("写入规则 %s 失败: %w", rule.Name, err)
+		destPath := filepath.Join(rulesDir, vault.ManagedName(item.Name)+".mdc")
+		if err := os.WriteFile(destPath, content, 0644); err != nil {
+			return fmt.Errorf("同步 Vault Rule %s 失败: %w", item.Name, err)
 		}
 	}
 
 	return nil
 }
 
-// generateMCPConfig 生成 MCP 配置
-func (s *SyncServiceV2) generateMCPConfig(ideImpl ide.IDE, mcps []packages.MCPInfo, mcpConfig *types.NewMCPConfigV2) error {
-	mcpServers := make(map[string]types.MCPServer)
+// syncVaultMCPs 将 vault 中的 MCP 配置合并到 IDE 的 mcp.json
+func (s *SyncServiceV2) syncVaultMCPs(v *vault.Vault, ideImpl ide.IDE, items []vault.VaultItem) error {
+	managedServers := make(map[string]types.MCPServer)
 
-	// 添加 dec 自身
-	mcpServers["dec"] = types.MCPServer{
-		Command: "dec",
-		Args:    []string{"serve"},
-	}
-
-	// 添加启用的 MCP
-	for _, mcp := range mcps {
-		vars := s.getMCPVars(mcp.Name, mcpConfig)
-
-		// 处理命令
-		command := s.parser.Replace(mcp.Command, vars)
-
-		// 处理参数
-		var args []string
-		for _, arg := range mcp.Args {
-			args = append(args, s.parser.Replace(arg, vars))
+	if len(items) > 0 {
+		if v == nil {
+			return fmt.Errorf("Vault 未就绪")
 		}
 
-		// 处理环境变量
-		env := make(map[string]string)
-		for k, v := range mcp.Env {
-			env[k] = s.parser.Replace(v, vars)
-		}
+		for _, item := range items {
+			srcPath := filepath.Join(v.Dir, item.Path)
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return fmt.Errorf("读取 Vault MCP %s 失败: %w", item.Name, err)
+			}
 
-		mcpServers[mcp.Name] = types.MCPServer{
-			Command: command,
-			Args:    args,
-			Env:     env,
+			var server types.MCPServer
+			if err := json.Unmarshal(data, &server); err != nil {
+				return fmt.Errorf("解析 Vault MCP %s 失败: %w", item.Name, err)
+			}
+			if server.Command == "" {
+				return fmt.Errorf("Vault MCP %s 缺少 command 字段", item.Name)
+			}
+			managedServers[vault.ManagedName(item.Name)] = server
 		}
 	}
 
-	// 加载现有配置并合并（保留用户手动添加的）
-	existingConfig, _ := ideImpl.LoadMCPConfig(s.projectRoot)
-	finalConfig := s.mergeConfig(existingConfig, mcpServers)
+	existingConfig, err := ideImpl.LoadMCPConfig(s.projectRoot)
+	if err != nil {
+		return fmt.Errorf("加载现有 MCP 配置失败: %w", err)
+	}
+	finalConfig := mergeConfig(existingConfig, managedServers)
 
-	// 写入配置
 	return ideImpl.WriteMCPConfig(s.projectRoot, finalConfig)
 }
 
-// mergeConfig 合并 MCP 配置
-func (s *SyncServiceV2) mergeConfig(existing *types.MCPConfig, managed map[string]types.MCPServer) *types.MCPConfig {
+// mergeConfig 合并 MCP 配置（托管配置优先，保留用户手动添加的）
+func mergeConfig(existing *types.MCPConfig, managed map[string]types.MCPServer) *types.MCPConfig {
 	result := &types.MCPConfig{
 		MCPServers: make(map[string]types.MCPServer),
 	}
 
-	// 添加托管的配置
 	for name, server := range managed {
 		result.MCPServers[name] = server
 	}
 
-	// 保留用户手动添加的配置
 	if existing != nil {
 		for name, server := range existing.MCPServers {
+			if strings.HasPrefix(name, "dec-") {
+				continue
+			}
 			if _, isManaged := managed[name]; !isManaged {
 				result.MCPServers[name] = server
 			}
@@ -267,6 +276,110 @@ func (s *SyncServiceV2) mergeConfig(existing *types.MCPConfig, managed map[strin
 	}
 
 	return result
+}
+
+func (s *SyncServiceV2) trackSyncedAssets(ideNames []string, assets *resolvedVaultAssets) error {
+	if assets == nil {
+		return nil
+	}
+
+	td, err := vault.LoadTracking(s.projectRoot)
+	if err != nil {
+		return err
+	}
+
+	for _, item := range assets.Skills {
+		if err := s.trackAssetPaths(td, ideNames, item, false); err != nil {
+			return err
+		}
+	}
+	for _, item := range assets.Rules {
+		if err := s.trackAssetPaths(td, ideNames, item, false); err != nil {
+			return err
+		}
+	}
+	for _, item := range assets.MCPs {
+		if err := s.trackAssetPaths(td, ideNames, item, true); err != nil {
+			return err
+		}
+	}
+
+	return td.Save(s.projectRoot)
+}
+
+func (s *SyncServiceV2) trackAssetPaths(td *vault.TrackingData, ideNames []string, item vault.VaultItem, singlePath bool) error {
+	localPaths, err := s.managedLocalPaths(ideNames, item.Type, item.Name)
+	if err != nil {
+		return err
+	}
+	if singlePath && len(localPaths) > 1 {
+		localPaths = localPaths[:1]
+	}
+
+	hash := ""
+	if len(localPaths) > 0 {
+		hash, err = vault.HashPath(filepath.Join(s.projectRoot, localPaths[0]))
+		if err != nil {
+			return err
+		}
+	}
+
+	td.TrackPaths(item.Name, item.Type, localPaths, hash)
+	return nil
+}
+
+func (s *SyncServiceV2) managedLocalPaths(ideNames []string, itemType, name string) ([]string, error) {
+	localPaths := make([]string, 0, len(ideNames))
+	for _, ideName := range ideNames {
+		ideImpl := ide.Get(ideName)
+
+		var fullPath string
+		switch itemType {
+		case "skill":
+			fullPath = filepath.Join(ideImpl.SkillsDir(s.projectRoot), vault.ManagedName(name))
+		case "rule":
+			fullPath = filepath.Join(ideImpl.RulesDir(s.projectRoot), vault.ManagedName(name)+".mdc")
+		case "mcp":
+			fullPath = ideImpl.MCPConfigPath(s.projectRoot)
+		default:
+			return nil, fmt.Errorf("不支持的资产类型: %s", itemType)
+		}
+
+		relPath, err := filepath.Rel(s.projectRoot, fullPath)
+		if err != nil {
+			return nil, err
+		}
+		localPaths = append(localPaths, relPath)
+	}
+
+	return localPaths, nil
+}
+
+// cleanManagedSkills 清理托管的 Skill 目录
+func (s *SyncServiceV2) cleanManagedSkills(ideImpl ide.IDE) error {
+	skillsDir := ideImpl.SkillsDir(s.projectRoot)
+
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(entry.Name(), "dec-") {
+			path := filepath.Join(skillsDir, entry.Name())
+			if err := os.RemoveAll(path); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // cleanManagedRules 清理托管的规则文件
@@ -285,7 +398,6 @@ func (s *SyncServiceV2) cleanManagedRules(ideImpl ide.IDE) error {
 		if entry.IsDir() {
 			continue
 		}
-		// 清理 dec- 前缀的文件
 		if strings.HasPrefix(entry.Name(), "dec-") {
 			path := filepath.Join(rulesDir, entry.Name())
 			if err := os.Remove(path); err != nil {

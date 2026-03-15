@@ -10,14 +10,13 @@ import (
 
 var syncNewCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "同步规则和 MCP 配置",
-	Long: `根据项目配置同步规则文件和 MCP 配置。
+	Short: "同步 Vault 资产到 IDE",
+	Long: `根据项目配置，从个人知识仓库同步资产到 IDE 目录。
 
 此命令会：
-1. 读取 .dec/config/ 中的配置
-2. 从包缓存中读取规则和 MCP
-3. 根据配置生成规则文件到 IDE 目录
-4. 生成 MCP 配置文件
+1. 读取 .dec/config/vault.yaml 中的声明
+2. 从 Vault 拉取声明的 Skills、Rules、MCPs
+3. 部署到所有配置的 IDE 目录
 
 示例：
   dec sync`,
@@ -29,16 +28,14 @@ func init() {
 }
 
 func runSyncRules(cmd *cobra.Command, args []string) error {
-	// 获取当前目录
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("获取当前目录失败: %w", err)
 	}
 
-	fmt.Println("🔄 同步规则和 MCP 配置...")
+	fmt.Println("🔄 同步 Vault 资产...")
 	fmt.Println()
 
-	// 创建新版同步服务并执行
 	svc, err := service.NewSyncServiceV2(cwd)
 	if err != nil {
 		return fmt.Errorf("创建同步服务失败: %w", err)
@@ -49,25 +46,35 @@ func runSyncRules(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 打印结果
-	printSyncResultV2(result)
+	for _, warning := range result.Warnings {
+		fmt.Printf("⚠️  %s\n", warning)
+	}
+	if len(result.Warnings) > 0 {
+		fmt.Println()
+	}
 
-	return nil
-}
-
-// printSyncResultV2 打印同步结果
-func printSyncResultV2(result *service.SyncResultV2) {
 	fmt.Printf("📦 项目: %s\n", result.ProjectName)
 	fmt.Printf("🎯 目标 IDE: %v\n", result.IDEs)
 	fmt.Println()
 
-	fmt.Printf("📜 规则:\n")
-	fmt.Printf("   核心规则: %d 个\n", result.CoreRulesCount)
-	fmt.Printf("   技术栈规则: %d 个\n", result.TechRulesCount)
-	fmt.Println()
-
-	fmt.Printf("🔧 MCP: %d 个\n", result.MCPCount)
-	fmt.Println()
+	total := result.SkillsCount + result.RulesCount + result.MCPsCount
+	if total > 0 {
+		if result.SkillsCount > 0 {
+			fmt.Printf("🧠 Skills: %d 个\n", result.SkillsCount)
+		}
+		if result.RulesCount > 0 {
+			fmt.Printf("📜 Rules: %d 个\n", result.RulesCount)
+		}
+		if result.MCPsCount > 0 {
+			fmt.Printf("🔧 MCPs: %d 个\n", result.MCPsCount)
+		}
+		fmt.Println()
+	} else {
+		fmt.Println("（未声明任何 Vault 资产，编辑 .dec/config/vault.yaml 添加）")
+		fmt.Println()
+	}
 
 	fmt.Println("✅ 同步完成！")
+
+	return nil
 }
