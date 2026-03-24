@@ -91,7 +91,6 @@ Dec 本地构建脚本
 环境变量:
   OUTPUT_DIR               输出目录（默认: dist）
   LOG_DIR                  日志目录（默认: logs）
-  DEC_ROOT      开发根目录（默认: .root）
 
 示例:
   $0                      # 构建当前平台版本
@@ -174,13 +173,6 @@ if [ "${CLEAN_BEFORE}" = true ]; then
     fi
     
     echo "" | tee -a "${LOG_FILE}"
-fi
-
-# 设置开发环境变量
-if [ -z "${DEC_ROOT}" ]; then
-    export DEC_ROOT="$(pwd)/.root"
-    print_info "设置开发环境变量: DEC_ROOT=${DEC_ROOT}"
-    mkdir -p "${DEC_ROOT}"
 fi
 
 # 构建函数

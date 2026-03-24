@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### Changed
+- 关闭仓库中的 GitHub Actions workflow，发布流程改为本地构建与手动发布。
+- 重写 `Documents/` 中的架构、开发、测试、构建、发布文档，使其与当前 `init` / `sync` / `vault` 实现一致。
+- 统一 `Makefile`、安装脚本、卸载脚本、开发安装脚本到 `DEC_HOME` / `~/.dec` 目录模型。
+- 将 `scripts/release-yolo.sh` 调整为本地发布前检查脚本，不再依赖 CI。
+
+### Removed
+- 移除过时的 `dec_package.json` 元数据文件。
+
 ## [1.7.3] - 2025-12-13
 
 ### Fixed

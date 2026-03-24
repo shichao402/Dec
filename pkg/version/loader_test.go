@@ -10,14 +10,14 @@ func TestLoadVersionInfo(t *testing.T) {
 	// 创建临时目录和 version.json
 	tempDir := t.TempDir()
 	versionPath := filepath.Join(tempDir, "version.json")
-	
+
 	versionJSON := `{
   "version": "v1.0.0",
   "build_time": "2024-12-04_11:00:00",
   "commit": "abc123",
   "branch": "main"
 }`
-	
+
 	if err := os.WriteFile(versionPath, []byte(versionJSON), 0644); err != nil {
 		t.Fatalf("创建测试文件失败: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestFindVersionFile(t *testing.T) {
 func TestGetVersion(t *testing.T) {
 	tempDir := t.TempDir()
 	versionPath := filepath.Join(tempDir, "version.json")
-	
+
 	versionJSON := `{"version": "v1.2.3"}`
 	if err := os.WriteFile(versionPath, []byte(versionJSON), 0644); err != nil {
 		t.Fatalf("创建测试文件失败: %v", err)
@@ -77,7 +77,7 @@ func TestGetVersion(t *testing.T) {
 func TestUpdateVersionInfo(t *testing.T) {
 	tempDir := t.TempDir()
 	versionPath := filepath.Join(tempDir, "version.json")
-	
+
 	versionJSON := `{
   "version": "v1.0.0",
   "build_time": "",
@@ -110,4 +110,3 @@ func TestUpdateVersionInfo(t *testing.T) {
 		t.Errorf("提交哈希未更新: 期望 def456, 得到 %s", info.Commit)
 	}
 }
-

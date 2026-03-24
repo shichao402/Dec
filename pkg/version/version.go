@@ -12,7 +12,7 @@ func Compare(v1, v2 string) int {
 	// 移除 'v' 前缀
 	v1 = strings.TrimPrefix(v1, "v")
 	v2 = strings.TrimPrefix(v2, "v")
-	
+
 	// 处理特殊版本
 	if v1 == "dev" || v1 == "unknown" {
 		return -1 // dev 版本总是认为需要更新
@@ -20,11 +20,11 @@ func Compare(v1, v2 string) int {
 	if v2 == "dev" || v2 == "unknown" {
 		return 1
 	}
-	
+
 	// 分割版本号
 	parts1 := strings.Split(v1, ".")
 	parts2 := strings.Split(v2, ".")
-	
+
 	// 确保至少有 3 个部分（major.minor.patch）
 	for len(parts1) < 3 {
 		parts1 = append(parts1, "0")
@@ -32,13 +32,13 @@ func Compare(v1, v2 string) int {
 	for len(parts2) < 3 {
 		parts2 = append(parts2, "0")
 	}
-	
+
 	// 比较每个部分
 	for i := 0; i < 3; i++ {
 		// 提取数字部分（忽略后缀如 -rc1, -beta）
 		num1 := extractNumber(parts1[i])
 		num2 := extractNumber(parts2[i])
-		
+
 		if num1 > num2 {
 			return 1
 		}
@@ -46,7 +46,7 @@ func Compare(v1, v2 string) int {
 			return -1
 		}
 	}
-	
+
 	return 0
 }
 
@@ -59,14 +59,13 @@ func extractNumber(s string) int {
 			break
 		}
 	}
-	
+
 	num, err := strconv.Atoi(s)
 	if err != nil {
 		return 0
 	}
 	return num
 }
-
 
 // NeedUpdate 检查是否需要更新
 func NeedUpdate(currentVersion, latestVersion string) bool {
@@ -83,4 +82,3 @@ func FormatVersion(version, buildTime string) string {
 	}
 	return version
 }
-

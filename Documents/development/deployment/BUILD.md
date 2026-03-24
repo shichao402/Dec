@@ -1,6 +1,6 @@
 # Dec 构建安装指南
 
-本文档描述如何构建和安装 Dec。
+本文档描述当前代码库的构建、安装与卸载方式。
 
 ## 从源码构建
 
@@ -8,32 +8,43 @@
 
 - Go 1.21+
 - Git
+- Python 3（仅在运行 `./scripts/run-tests.sh` 时需要）
 
-### 构建步骤
+### 直接构建
 
 ```bash
-# 克隆仓库
 git clone https://github.com/shichao402/Dec.git
 cd Dec
-
-# 构建
-go build -o dec .
-
-# 验证
-./dec --version
+go build -o dist/dec .
+./dist/dec --version
 ```
 
 ### 使用 Makefile
 
 ```bash
-make build          # 构建
-make clean          # 清理
-make install-dev    # 安装到系统
+make build          # 构建当前平台版本
+make build-all      # 构建全部平台版本
+make test           # 运行 Go 单元测试
+make test-self-host # 运行自托管流程测试
 ```
+
+### 使用构建脚本
+
+```bash
+./scripts/build.sh
+./scripts/build.sh --all
+```
+
+`scripts/build.sh` 会：
+
+- 读取 `version.json`
+- 注入构建时间与版本号
+- 输出构建日志到 `logs/`
+- 生成 `dist/BUILD_INFO*.txt`
 
 ## 安装方式
 
-### 方式一：一键安装（推荐）
+### 方式一：在线安装（推荐）
 
 #### Linux / macOS
 
@@ -41,135 +52,93 @@ make install-dev    # 安装到系统
 curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash
 ```
 
-#### Windows (PowerShell)
+#### Windows PowerShell
 
 ```powershell
 iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex
 ```
 
-### 方式二：手动安装
-
-1. 从 [Releases](https://github.com/shichao402/Dec/releases) 下载对应平台的二进制
-2. 解压到 `~/.dec/bin/`
-3. 添加到 PATH
+### 方式二：开发安装
 
 ```bash
-# Linux/macOS
-mkdir -p ~/.dec/bin
-mv dec-* ~/.dec/bin/dec
-chmod +x ~/.dec/bin/dec
-export PATH="$HOME/.dec/bin:$PATH"
-
-# 永久生效
-echo 'export PATH="$HOME/.dec/bin:$PATH"' >> ~/.bashrc
+./scripts/install-dev.sh
 ```
 
-### 方式三：开发安装
-
-从源码安装到系统（覆盖现有安装）：
+如需安装前先跑单元测试：
 
 ```bash
-cd /path/to/Dec
-make install-dev
+./scripts/install-dev.sh --test
 ```
 
-## 目录结构
+## 安装目录
 
-安装后的目录结构：
+默认安装到 `~/.dec`，也可通过 `DEC_HOME` 覆盖：
 
+```bash
+export DEC_HOME=/custom/path
 ```
+
+当前目录布局如下：
+
+```text
 ~/.dec/
 ├── bin/
-│   └── dec                   # 可执行文件
-├── config.yaml               # 全局配置
-└── cache/
-    └── packages-v1.0.0/      # 包缓存
-        ├── rules/
-        └── mcp/
+│   └── dec
+├── config/
+│   └── system.json
+├── config.yaml      # 首次执行 vault 相关命令后可能生成
+└── vault/           # 执行 dec vault init 后生成
 ```
 
-## 环境变量
+## 相关环境变量
 
 | 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `DEC_HOME` | 安装根目录 | `~/.dec` |
-
-## 交叉编译
-
-构建其他平台的二进制：
-
-```bash
-# macOS Intel
-GOOS=darwin GOARCH=amd64 go build -o dec-darwin-amd64 .
-
-# macOS Apple Silicon
-GOOS=darwin GOARCH=arm64 go build -o dec-darwin-arm64 .
-
-# Linux x64
-GOOS=linux GOARCH=amd64 go build -o dec-linux-amd64 .
-
-# Windows x64
-GOOS=windows GOARCH=amd64 go build -o dec-windows-amd64.exe .
-```
-
-## 版本注入
-
-构建时注入版本信息：
-
-```bash
-VERSION=$(cat version.json | jq -r '.version')
-BUILD_TIME=$(date '+%Y-%m-%d_%H:%M:%S')
-
-go build -ldflags "-X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME" -o dec .
-```
+|---|---|---|
+| `DEC_HOME` | Dec 根目录 | `~/.dec` |
+| `DEC_BRANCH` | 安装脚本读取的发布分支 | `ReleaseLatest` |
 
 ## 验证安装
 
 ```bash
-# 检查版本
 dec --version
+dec --help
+dec init
+```
 
-# 列出可用包
-dec list
+如果你只想确认 Vault 子命令可用，也可以执行：
 
-# 同步规则（在项目目录中）
-dec sync
+```bash
+dec vault list
 ```
 
 ## 卸载
 
-```bash
-# 删除安装目录
-rm -rf ~/.dec
+### Linux / macOS
 
-# 从 PATH 中移除（编辑 ~/.bashrc 或 ~/.zshrc）
+```bash
+curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/uninstall.sh | bash
 ```
+
+### Windows PowerShell
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/uninstall.ps1 | iex
+```
+
+**注意**：卸载会删除整个 `DEC_HOME` 目录，因此也会删除其中的本地 Vault 与全局配置。
 
 ## 常见问题
 
-### Q: 命令找不到？
+### 找不到 `dec`
 
-确保 `~/.dec/bin` 在 PATH 中：
+确保 `~/.dec/bin` 已加入 PATH，或重新打开终端。
 
-```bash
-export PATH="$HOME/.dec/bin:$PATH"
-```
-
-### Q: 权限被拒绝？
+### 想用隔离目录安装测试版本
 
 ```bash
-chmod +x ~/.dec/bin/dec
+DEC_HOME=/tmp/dec-test DEC_BRANCH=ReleaseTest bash ./scripts/install.sh
 ```
 
-### Q: 构建失败？
+### 安装成功但 `vault` 还不存在
 
-检查 Go 版本：
-
-```bash
-go version  # 需要 1.21+
-```
-
-## 相关文档
-
-- [开发指南](../setup/DEVELOPMENT.md)
-- [测试指南](../testing/TESTING.md)
+这是正常现象。只有在执行 `dec vault init` 后，本地 `vault/` 目录才会创建。

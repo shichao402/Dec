@@ -70,4 +70,3 @@ func TestExtractNumber(t *testing.T) {
 		}
 	}
 }
-

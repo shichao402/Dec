@@ -111,4 +111,3 @@ func UpdateVersionInfo(workDir string, updates map[string]string) error {
 
 	return nil
 }
-
