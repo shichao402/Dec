@@ -108,8 +108,8 @@ dec vault save rule .cursor/rules/my-rule.mdc
 # 保存 MCP
 dec vault save mcp ./postgres-tool.json
 
-# 保存时加标签
-dec vault save skill .cursor/skills/my-skill --tag testing --tag api
+# 保存到指定 Vault（关联多个 Vault 时必填）
+dec vault save skill .cursor/skills/my-skill --vault github-tools
 ```
 
 #### 搜索 Vault 中的资产
@@ -118,13 +118,10 @@ dec vault save skill .cursor/skills/my-skill --tag testing --tag api
 dec vault search "api test"
 ```
 
-#### 列出 Vault 中的所有资产
+#### 列出所有 Vault 空间
 
 ```bash
 dec vault list
-dec vault list --type skill
-dec vault list --type rule
-dec vault list --type mcp
 ```
 
 #### 从项目中移除资产
@@ -135,13 +132,13 @@ dec vault remove rule my-logging-standard
 dec vault remove mcp postgres-tool
 ```
 
-#### 推送 Vault 变更到远程
+#### 推送项目中修改的资产回 Vault
 
 ```bash
 dec vault push
 ```
 
-这在你本地修改了 Vault 资产但推送失败时使用。
+此命令检测项目中已追踪的资产修改，将变更复制回对应的 Vault 并推送到远程。在你本地编辑了 `dec-*` 资产后使用。
 
 ## 推荐工作流
 
@@ -215,11 +212,18 @@ dec repo https://github.com/<user>/<your-vault-repo>
 
 #### `dec vault init <vault-name>`
 
-（已弃用/内部命令）创建一个新的本地 Vault。通常不需要手动使用，用 `dec repo` 代替。
+在连接的仓库中创建一个新的 Vault 空间。
+
+```bash
+dec vault init github-tools
+dec vault init common-rules
+```
+
+一个仓库可以包含多个 Vault，用于分类管理不同领域的资产。
 
 ### Vault 资产管理
 
-#### `dec vault save <type> <path> [--tag <tag>...]`
+#### `dec vault save <type> <path> [--vault <vault>]`
 
 保存本地资产到 Vault。
 
@@ -227,7 +231,7 @@ dec repo https://github.com/<user>/<your-vault-repo>
 dec vault save skill .cursor/skills/my-skill
 dec vault save rule .cursor/rules/my-rule.mdc
 dec vault save mcp ./postgres-tool.json
-dec vault save skill .cursor/skills/my-skill --tag testing --tag api
+dec vault save skill .cursor/skills/my-skill --vault github-tools
 ```
 
 支持类型：
@@ -240,7 +244,7 @@ dec vault save skill .cursor/skills/my-skill --tag testing --tag api
 
 - 保存成功后会提交到本地 Vault Git 仓库
 - 如果远程 push 失败，保存仍然视为成功，但会输出 warning
-- 使用 `--tag` 为资产添加标签，便于后续搜索
+- 关联多个 Vault 时，使用 `--vault` 指定目标 Vault
 
 #### `dec vault pull <type> <name>`
 
@@ -280,33 +284,51 @@ dec vault search "logging"
 
 - 资产名称
 - 资产描述
-- 资产标签
 
-#### `dec vault list [--type <type>]`
+#### `dec vault list`
 
-列出 Vault 中的所有资产。
+列出当前仓库中的所有 Vault 空间及其资产统计。
 
 ```bash
 dec vault list
-dec vault list --type skill
-dec vault list --type rule
-dec vault list --type mcp
 ```
 
 #### `dec vault push`
 
-将 Vault 的本地变更推送到远程仓库。
+将项目中修改的资产推送回 Vault 并同步到远程仓库。
 
 ```bash
 dec vault push
 ```
 
+此命令会：
+
+1. 检测 `.dec/assets.yaml` 中已追踪的所有资产
+2. 将项目中修改的资产复制回对应的 Vault
+3. 提交并推送到远程仓库
+
 说明：
 
-- 如果本地 Vault 没有配置远程仓库，会报错
-- 当 `dec vault save` 输出 push warning 时，可用此命令重试
+- 当你在项目中编辑了 `dec-*` 资产后，使用此命令将变更同步回 Vault
+- 当 `dec vault save` 输出 push warning 时，也可用此命令重试推送
 
 ### 其他命令
+
+#### `dec config global [--ide <ide>...]`
+
+为本机 IDE 配置 Dec 全局 Skill。
+
+```bash
+dec config global                              # 配置所有支持的 IDE
+dec config global --ide cursor                 # 只配置 Cursor
+dec config global --ide cursor --ide codebuddy # 配置多个 IDE
+```
+
+行为：
+
+- 为每个指定 IDE 安装 Dec 的 Agent Skill
+- 默认配置所有支持的 IDE（Cursor、CodeBuddy）
+- 已存在的配置会被强制覆盖更新
 
 #### `dec update`
 
@@ -439,7 +461,6 @@ Dec 在部署 MCP 时采用智能合并：
 
 ```bash
 dec vault list
-dec vault list --type skill
 dec vault search "security"
 ```
 

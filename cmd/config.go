@@ -34,18 +34,18 @@ var configCmd = &cobra.Command{
 var configGlobalCmd = &cobra.Command{
 	Use:   "global",
 	Short: "配置全局 IDE",
-	Long: `为本机所有支持的 IDE 配置 Dec Skill 和 MCP。
+	Long: `为本机所有支持的 IDE 配置 Dec Skill。
 
-默认配置所有支持的 IDE (cursor, codebuddy, windsurf, trae)。
+默认配置所有支持的 IDE (cursor, codebuddy)。
 可以通过 --ide 标志指定要配置的 IDE 子集。
 
-配置会为每个 IDE 安装 Dec 的 Skill 和 MCP，
-这样在任何项目中都可以使用 Dec 的功能。
+配置会为每个 IDE 安装 Dec 的 Agent Skill，
+这样 AI 助手可以在任何项目中协助使用 Dec 的功能。
 
 示例:
-  dec config global                    # 配置所有 IDE
-  dec config global --ide cursor       # 只配置 Cursor
-  dec config global --ide cursor --ide windsurf  # 配置多个 IDE`,
+  dec config global                              # 配置所有 IDE
+  dec config global --ide cursor                 # 只配置 Cursor
+  dec config global --ide cursor --ide codebuddy # 配置多个 IDE`,
 	RunE: runConfigGlobal,
 }
 

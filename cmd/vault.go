@@ -16,10 +16,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	vaultTags []string
-)
-
 var vaultCmd = &cobra.Command{
 	Use:   "vault",
 	Short: "管理 Vault 空间和资产",
@@ -1018,7 +1014,6 @@ func copyDir(src, dst string) error {
 func init() {
 	// vault save 标志
 	vaultSaveCmd.Flags().StringVar(&saveVault, "vault", "", "目标 Vault（项目关联多个时必填）")
-	vaultSaveCmd.Flags().StringSliceVar(&vaultTags, "tag", nil, "资产标签（可多次指定）")
 
 	// vault remove 标志
 	vaultRemoveCmd.Flags().BoolVar(&removeRemote, "remote", false, "同时删除远程 Vault 中的资产")
