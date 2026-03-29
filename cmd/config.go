@@ -123,15 +123,8 @@ func installDecSkillForIDE(ideName string) error {
 		return fmt.Errorf("创建 %s skills 目录失败: %w", ideName, err)
 	}
 
-	// 创建 Dec Skill 目录（dec-agent）
+	// 创建 Dec Skill 目录（dec-agent），已存在则覆盖
 	decSkillDir := filepath.Join(skillsDir, "dec-agent")
-
-	// 如果已存在则跳过
-	if _, err := os.Stat(decSkillDir); err == nil {
-		return nil // 已安装
-	}
-
-	// 创建 Dec Skill 基础结构
 	if err := os.MkdirAll(decSkillDir, 0755); err != nil {
 		return fmt.Errorf("创建 Dec Skill 目录失败: %w", err)
 	}
