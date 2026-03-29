@@ -66,7 +66,7 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 		targetIDEs = configIDEs
 	} else {
 		// 使用所有支持的 IDE
-		knownIDEs := []string{"cursor", "codebuddy", "windsurf", "trae"}
+		knownIDEs := []string{"cursor", "codebuddy"}
 		targetIDEs = knownIDEs
 	}
 
@@ -104,7 +104,11 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 	fmt.Println("\n✅ 全局 IDE 配置完成")
 	fmt.Println("\n后续步骤:")
 	fmt.Println("  dec vault init <vault-name>   # 创建 Vault 空间")
-	fmt.Println("  或在项目中 dec vault init <vault-name> 关联 Vault")
+	fmt.Println("  dec vault list                # 查看已有 Vault 和资产")
+	fmt.Println("  dec vault search <keyword>    # 搜索 Vault 中的资产")
+	fmt.Println("\n在项目中使用:")
+	fmt.Println("  dec vault pull <type> <name>  # 拉取资产到当前项目")
+	fmt.Println("  dec vault save <type> <path>  # 保存资产到 Vault")
 
 	return nil
 }
@@ -249,7 +253,7 @@ func installDecSkillForIDE(ideName string) error {
 
 // validateIDEName 验证 IDE 名称有效性
 func validateIDEName(ideName string) error {
-	validIDEs := []string{"cursor", "codebuddy", "windsurf", "trae"}
+	validIDEs := []string{"cursor", "codebuddy"}
 	for _, valid := range validIDEs {
 		if ideName == valid {
 			return nil
