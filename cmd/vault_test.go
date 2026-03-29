@@ -1,0 +1,961 @@
+package cmd
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/shichao402/Dec/pkg/ide"
+	"github.com/shichao402/Dec/pkg/types"
+)
+
+// ========================================
+// isValidAssetType
+// ========================================
+
+func TestIsValidAssetType(t *testing.T) {
+	valid := []string{"skill", "rule", "mcp"}
+	for _, v := range valid {
+		if !isValidAssetType(v) {
+			t.Fatalf("期望 %q 是合法类型", v)
+		}
+	}
+
+	invalid := []string{"", "skills", "rules", "mcps", "unknown", "Skill"}
+	for _, v := range invalid {
+		if isValidAssetType(v) {
+			t.Fatalf("期望 %q 不是合法类型", v)
+		}
+	}
+}
+
+// ========================================
+// managedName
+// ========================================
+
+func TestManagedName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"my-skill", "dec-my-skill"},
+		{"dec-my-skill", "dec-my-skill"}, // 不重复添加
+		{"", "dec-"},
+		{"dec-", "dec-"},
+	}
+	for _, tt := range tests {
+		got := managedName(tt.input)
+		if got != tt.want {
+			t.Fatalf("managedName(%q) = %q, 期望 %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// ========================================
+// resolveTargetVault
+// ========================================
+
+func TestResolveTargetVault_Explicit(t *testing.T) {
+	pc := &types.ProjectConfig{Vaults: []string{"v1", "v2"}}
+	got, err := resolveTargetVault(pc, "explicit-vault")
+	if err != nil {
+		t.Fatalf("不应返回错误: %v", err)
+	}
+	if got != "explicit-vault" {
+		t.Fatalf("期望 explicit-vault, 得到 %s", got)
+	}
+}
+
+func TestResolveTargetVault_SingleVault(t *testing.T) {
+	pc := &types.ProjectConfig{Vaults: []string{"only-vault"}}
+	got, err := resolveTargetVault(pc, "")
+	if err != nil {
+		t.Fatalf("不应返回错误: %v", err)
+	}
+	if got != "only-vault" {
+		t.Fatalf("期望 only-vault, 得到 %s", got)
+	}
+}
+
+func TestResolveTargetVault_MultipleVaultsNoExplicit(t *testing.T) {
+	pc := &types.ProjectConfig{Vaults: []string{"v1", "v2"}}
+	_, err := resolveTargetVault(pc, "")
+	if err == nil {
+		t.Fatalf("多个 Vault 未指定 --vault 应返回错误")
+	}
+}
+
+func TestResolveTargetVault_NoVaults(t *testing.T) {
+	pc := &types.ProjectConfig{Vaults: nil}
+	_, err := resolveTargetVault(pc, "")
+	if err == nil {
+		t.Fatalf("没有 Vault 应返回错误")
+	}
+}
+
+// ========================================
+// getAssetPath
+// ========================================
+
+func TestGetAssetPath(t *testing.T) {
+	repoDir := "/fake/repo"
+
+	tests := []struct {
+		itemType  string
+		assetName string
+		want      string
+	}{
+		{"skill", "my-skill", filepath.Join(repoDir, "v1", "skills", "my-skill")},
+		{"rule", "my-rule", filepath.Join(repoDir, "v1", "rules", "my-rule.mdc")},
+		{"mcp", "my-mcp", filepath.Join(repoDir, "v1", "mcp", "my-mcp.json")},
+		{"unknown", "x", ""},
+	}
+	for _, tt := range tests {
+		got := getAssetPath(repoDir, "v1", tt.itemType, tt.assetName)
+		if got != tt.want {
+			t.Fatalf("getAssetPath(%q, %q) = %q, 期望 %q", tt.itemType, tt.assetName, got, tt.want)
+		}
+	}
+}
+
+// ========================================
+// listVaultAssets
+// ========================================
+
+func TestListVaultAssets(t *testing.T) {
+	vaultDir := t.TempDir()
+
+	// 创建 vault 目录结构
+	os.MkdirAll(filepath.Join(vaultDir, "skills", "api-test"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "skills", "api-test", "SKILL.md"), []byte("test"), 0644)
+	os.MkdirAll(filepath.Join(vaultDir, "rules"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "rules", "logging.mdc"), []byte("# logging"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "rules", ".gitkeep"), []byte(""), 0644)
+	os.MkdirAll(filepath.Join(vaultDir, "mcp"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "mcp", "postgres.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "mcp", ".gitkeep"), []byte(""), 0644)
+
+	assets := listVaultAssets(vaultDir, "test-vault")
+
+	if len(assets) != 3 {
+		t.Fatalf("期望 3 个资产, 得到 %d: %+v", len(assets), assets)
+	}
+
+	// 检查 .gitkeep 被跳过
+	for _, a := range assets {
+		if a.Name == ".gitkeep" {
+			t.Fatalf(".gitkeep 不应出现在列表中")
+		}
+	}
+
+	// 验证类型和名称
+	found := map[string]string{}
+	for _, a := range assets {
+		found[a.Name] = a.Type
+	}
+	if found["api-test"] != "skill" {
+		t.Fatalf("期望 api-test 类型为 skill, 得到 %s", found["api-test"])
+	}
+	if found["logging"] != "rule" {
+		t.Fatalf("期望 logging 类型为 rule, 得到 %s", found["logging"])
+	}
+	if found["postgres"] != "mcp" {
+		t.Fatalf("期望 postgres 类型为 mcp, 得到 %s", found["postgres"])
+	}
+}
+
+func TestListVaultAssets_EmptyVault(t *testing.T) {
+	vaultDir := t.TempDir()
+	for _, sub := range []string{"skills", "rules", "mcp"} {
+		os.MkdirAll(filepath.Join(vaultDir, sub), 0755)
+		os.WriteFile(filepath.Join(vaultDir, sub, ".gitkeep"), []byte(""), 0644)
+	}
+
+	assets := listVaultAssets(vaultDir, "empty")
+	if len(assets) != 0 {
+		t.Fatalf("空 vault 应返回 0 个资产, 得到 %d", len(assets))
+	}
+}
+
+func TestListVaultAssets_MissingSubDirs(t *testing.T) {
+	vaultDir := t.TempDir()
+	// 不创建任何子目录
+	assets := listVaultAssets(vaultDir, "missing")
+	if len(assets) != 0 {
+		t.Fatalf("缺少子目录应返回 0 个资产, 得到 %d", len(assets))
+	}
+}
+
+// ========================================
+// collectAllAssets
+// ========================================
+
+func TestCollectAllAssets(t *testing.T) {
+	ac := &types.AssetsConfig{
+		Skills: []types.AssetEntry{
+			{Name: "s1", Vault: "v1"},
+			{Name: "s2", Vault: "v2"},
+		},
+		Rules: []types.AssetEntry{
+			{Name: "r1", Vault: "v1"},
+		},
+		MCPs: []types.AssetEntry{
+			{Name: "m1", Vault: "v1"},
+		},
+	}
+
+	all := collectAllAssets(ac)
+	if len(all) != 4 {
+		t.Fatalf("期望 4 个资产, 得到 %d", len(all))
+	}
+
+	// 验证类型分布
+	typeCounts := map[string]int{}
+	for _, a := range all {
+		typeCounts[a.Type]++
+	}
+	if typeCounts["skill"] != 2 {
+		t.Fatalf("期望 2 个 skill, 得到 %d", typeCounts["skill"])
+	}
+	if typeCounts["rule"] != 1 {
+		t.Fatalf("期望 1 个 rule, 得到 %d", typeCounts["rule"])
+	}
+	if typeCounts["mcp"] != 1 {
+		t.Fatalf("期望 1 个 mcp, 得到 %d", typeCounts["mcp"])
+	}
+}
+
+func TestCollectAllAssets_Empty(t *testing.T) {
+	ac := &types.AssetsConfig{}
+	all := collectAllAssets(ac)
+	if len(all) != 0 {
+		t.Fatalf("空配置应返回 0 个资产, 得到 %d", len(all))
+	}
+}
+
+// ========================================
+// getLocalAssetPath
+// ========================================
+
+func TestGetLocalAssetPath(t *testing.T) {
+	projectRoot := "/fake/project"
+	cursorIDE := ide.Get("cursor")
+
+	tests := []struct {
+		itemType string
+		name     string
+		want     string
+	}{
+		{"skill", "my-skill", filepath.Join(projectRoot, ".cursor", "skills", "dec-my-skill")},
+		{"rule", "my-rule", filepath.Join(projectRoot, ".cursor", "rules", "dec-my-rule.mdc")},
+		{"mcp", "my-mcp", filepath.Join(projectRoot, ".cursor", "mcp.json")},
+		{"unknown", "x", ""},
+	}
+	for _, tt := range tests {
+		got := getLocalAssetPath(tt.itemType, tt.name, projectRoot, cursorIDE)
+		if got != tt.want {
+			t.Fatalf("getLocalAssetPath(%q, %q) = %q, 期望 %q", tt.itemType, tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestGetLocalAssetPath_CodeBuddy(t *testing.T) {
+	projectRoot := "/fake/project"
+	codebuddyIDE := ide.Get("codebuddy")
+
+	// CodeBuddy MCP 路径特殊：项目根 .mcp.json
+	got := getLocalAssetPath("mcp", "pg", projectRoot, codebuddyIDE)
+	want := filepath.Join(projectRoot, ".mcp.json")
+	if got != want {
+		t.Fatalf("CodeBuddy MCP 路径应为 %q, 得到 %q", want, got)
+	}
+
+	// CodeBuddy skill 路径
+	got = getLocalAssetPath("skill", "my-skill", projectRoot, codebuddyIDE)
+	want = filepath.Join(projectRoot, ".codebuddy", "skills", "dec-my-skill")
+	if got != want {
+		t.Fatalf("CodeBuddy skill 路径应为 %q, 得到 %q", want, got)
+	}
+}
+
+// ========================================
+// saveSkillToVault
+// ========================================
+
+func TestSaveSkillToVault(t *testing.T) {
+	sourceDir := t.TempDir()
+	skillDir := filepath.Join(sourceDir, "my-skill")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: my-skill\n---\n"), 0644)
+	os.WriteFile(filepath.Join(skillDir, "helper.py"), []byte("print('hello')"), 0644)
+
+	vaultDir := t.TempDir()
+	os.MkdirAll(filepath.Join(vaultDir, "skills"), 0755)
+
+	info, _ := os.Stat(skillDir)
+	name, err := saveSkillToVault(skillDir, info, vaultDir)
+	if err != nil {
+		t.Fatalf("保存 skill 失败: %v", err)
+	}
+	if name != "my-skill" {
+		t.Fatalf("期望名称 my-skill, 得到 %s", name)
+	}
+
+	// 验证文件已复制
+	if _, err := os.Stat(filepath.Join(vaultDir, "skills", "my-skill", "SKILL.md")); err != nil {
+		t.Fatalf("SKILL.md 未复制到 vault: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(vaultDir, "skills", "my-skill", "helper.py")); err != nil {
+		t.Fatalf("helper.py 未复制到 vault: %v", err)
+	}
+}
+
+func TestSaveSkillToVault_StripDecPrefix(t *testing.T) {
+	sourceDir := t.TempDir()
+	skillDir := filepath.Join(sourceDir, "dec-my-skill")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("test"), 0644)
+
+	vaultDir := t.TempDir()
+	os.MkdirAll(filepath.Join(vaultDir, "skills"), 0755)
+
+	info, _ := os.Stat(skillDir)
+	name, err := saveSkillToVault(skillDir, info, vaultDir)
+	if err != nil {
+		t.Fatalf("保存 skill 失败: %v", err)
+	}
+	if name != "my-skill" {
+		t.Fatalf("应去掉 dec- 前缀, 期望 my-skill, 得到 %s", name)
+	}
+}
+
+func TestSaveSkillToVault_NotDir(t *testing.T) {
+	sourceDir := t.TempDir()
+	filePath := filepath.Join(sourceDir, "not-a-dir.md")
+	os.WriteFile(filePath, []byte("test"), 0644)
+
+	vaultDir := t.TempDir()
+
+	info, _ := os.Stat(filePath)
+	_, err := saveSkillToVault(filePath, info, vaultDir)
+	if err == nil {
+		t.Fatalf("非目录应返回错误")
+	}
+}
+
+func TestSaveSkillToVault_MissingSkillMD(t *testing.T) {
+	sourceDir := t.TempDir()
+	skillDir := filepath.Join(sourceDir, "bad-skill")
+	os.MkdirAll(skillDir, 0755)
+	// 不创建 SKILL.md
+
+	vaultDir := t.TempDir()
+
+	info, _ := os.Stat(skillDir)
+	_, err := saveSkillToVault(skillDir, info, vaultDir)
+	if err == nil {
+		t.Fatalf("缺少 SKILL.md 应返回错误")
+	}
+}
+
+// ========================================
+// saveRuleToVault
+// ========================================
+
+func TestSaveRuleToVault(t *testing.T) {
+	sourceDir := t.TempDir()
+	rulePath := filepath.Join(sourceDir, "logging.mdc")
+	os.WriteFile(rulePath, []byte("# Logging Rule\ncontent here"), 0644)
+
+	vaultDir := t.TempDir()
+	os.MkdirAll(filepath.Join(vaultDir, "rules"), 0755)
+
+	name, err := saveRuleToVault(rulePath, vaultDir)
+	if err != nil {
+		t.Fatalf("保存 rule 失败: %v", err)
+	}
+	if name != "logging" {
+		t.Fatalf("期望名称 logging, 得到 %s", name)
+	}
+
+	// 验证文件已复制
+	data, err := os.ReadFile(filepath.Join(vaultDir, "rules", "logging.mdc"))
+	if err != nil {
+		t.Fatalf("rule 文件未复制到 vault: %v", err)
+	}
+	if string(data) != "# Logging Rule\ncontent here" {
+		t.Fatalf("rule 内容不匹配")
+	}
+}
+
+func TestSaveRuleToVault_StripDecPrefix(t *testing.T) {
+	sourceDir := t.TempDir()
+	rulePath := filepath.Join(sourceDir, "dec-my-rule.mdc")
+	os.WriteFile(rulePath, []byte("test"), 0644)
+
+	vaultDir := t.TempDir()
+	os.MkdirAll(filepath.Join(vaultDir, "rules"), 0755)
+
+	name, err := saveRuleToVault(rulePath, vaultDir)
+	if err != nil {
+		t.Fatalf("保存 rule 失败: %v", err)
+	}
+	if name != "my-rule" {
+		t.Fatalf("应去掉 dec- 前缀, 期望 my-rule, 得到 %s", name)
+	}
+}
+
+func TestSaveRuleToVault_WrongExtension(t *testing.T) {
+	sourceDir := t.TempDir()
+	rulePath := filepath.Join(sourceDir, "rule.txt")
+	os.WriteFile(rulePath, []byte("test"), 0644)
+
+	vaultDir := t.TempDir()
+
+	_, err := saveRuleToVault(rulePath, vaultDir)
+	if err == nil {
+		t.Fatalf("非 .mdc 文件应返回错误")
+	}
+}
+
+// ========================================
+// saveMCPToVault
+// ========================================
+
+func TestSaveMCPToVault(t *testing.T) {
+	sourceDir := t.TempDir()
+	mcpPath := filepath.Join(sourceDir, "postgres.json")
+	os.WriteFile(mcpPath, []byte(`{"command":"npx","args":["-y","pg-tool"]}`), 0644)
+
+	vaultDir := t.TempDir()
+	os.MkdirAll(filepath.Join(vaultDir, "mcp"), 0755)
+
+	name, err := saveMCPToVault(mcpPath, vaultDir)
+	if err != nil {
+		t.Fatalf("保存 MCP 失败: %v", err)
+	}
+	if name != "postgres" {
+		t.Fatalf("期望名称 postgres, 得到 %s", name)
+	}
+
+	// 验证文件已复制
+	if _, err := os.Stat(filepath.Join(vaultDir, "mcp", "postgres.json")); err != nil {
+		t.Fatalf("MCP 文件未复制到 vault: %v", err)
+	}
+}
+
+func TestSaveMCPToVault_StripDecPrefix(t *testing.T) {
+	sourceDir := t.TempDir()
+	mcpPath := filepath.Join(sourceDir, "dec-pg.json")
+	os.WriteFile(mcpPath, []byte(`{"command":"npx"}`), 0644)
+
+	vaultDir := t.TempDir()
+	os.MkdirAll(filepath.Join(vaultDir, "mcp"), 0755)
+
+	name, err := saveMCPToVault(mcpPath, vaultDir)
+	if err != nil {
+		t.Fatalf("保存 MCP 失败: %v", err)
+	}
+	if name != "pg" {
+		t.Fatalf("应去掉 dec- 前缀, 期望 pg, 得到 %s", name)
+	}
+}
+
+func TestSaveMCPToVault_WrongExtension(t *testing.T) {
+	sourceDir := t.TempDir()
+	mcpPath := filepath.Join(sourceDir, "mcp.yaml")
+	os.WriteFile(mcpPath, []byte("test"), 0644)
+
+	vaultDir := t.TempDir()
+	_, err := saveMCPToVault(mcpPath, vaultDir)
+	if err == nil {
+		t.Fatalf("非 .json 文件应返回错误")
+	}
+}
+
+func TestSaveMCPToVault_InvalidJSON(t *testing.T) {
+	sourceDir := t.TempDir()
+	mcpPath := filepath.Join(sourceDir, "bad.json")
+	os.WriteFile(mcpPath, []byte("not json"), 0644)
+
+	vaultDir := t.TempDir()
+	os.MkdirAll(filepath.Join(vaultDir, "mcp"), 0755)
+
+	_, err := saveMCPToVault(mcpPath, vaultDir)
+	if err == nil {
+		t.Fatalf("无效 JSON 应返回错误")
+	}
+}
+
+func TestSaveMCPToVault_MissingCommand(t *testing.T) {
+	sourceDir := t.TempDir()
+	mcpPath := filepath.Join(sourceDir, "no-cmd.json")
+	os.WriteFile(mcpPath, []byte(`{"args":["foo"]}`), 0644)
+
+	vaultDir := t.TempDir()
+	os.MkdirAll(filepath.Join(vaultDir, "mcp"), 0755)
+
+	_, err := saveMCPToVault(mcpPath, vaultDir)
+	if err == nil {
+		t.Fatalf("缺少 command 字段应返回错误")
+	}
+}
+
+// ========================================
+// findAssetInVaults
+// ========================================
+
+func TestFindAssetInVaults_InAssociatedVault(t *testing.T) {
+	repoDir := t.TempDir()
+
+	// 创建 vault 并放入 skill
+	skillDir := filepath.Join(repoDir, "v1", "skills", "api-test")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("test"), 0644)
+
+	foundVault, foundPath, err := findAssetInVaults(repoDir, []string{"v1"}, "skill", "api-test")
+	if err != nil {
+		t.Fatalf("查找失败: %v", err)
+	}
+	if foundVault != "v1" {
+		t.Fatalf("期望 v1, 得到 %s", foundVault)
+	}
+	if foundPath != filepath.Join(repoDir, "v1", "skills", "api-test") {
+		t.Fatalf("路径不匹配: %s", foundPath)
+	}
+}
+
+func TestFindAssetInVaults_FallbackToAllVaults(t *testing.T) {
+	repoDir := t.TempDir()
+
+	// 在 v2（未关联）中放入资产
+	os.MkdirAll(filepath.Join(repoDir, "v1", "skills"), 0755)
+	ruleDir := filepath.Join(repoDir, "v2", "rules")
+	os.MkdirAll(ruleDir, 0755)
+	os.WriteFile(filepath.Join(ruleDir, "logging.mdc"), []byte("test"), 0644)
+
+	// 关联 v1，但资产在 v2 中
+	foundVault, _, err := findAssetInVaults(repoDir, []string{"v1"}, "rule", "logging")
+	if err != nil {
+		t.Fatalf("查找失败: %v", err)
+	}
+	if foundVault != "v2" {
+		t.Fatalf("应回退到全扫描找到 v2, 得到 %s", foundVault)
+	}
+}
+
+func TestFindAssetInVaults_NotFound(t *testing.T) {
+	repoDir := t.TempDir()
+	os.MkdirAll(filepath.Join(repoDir, "v1", "skills"), 0755)
+
+	_, _, err := findAssetInVaults(repoDir, []string{"v1"}, "skill", "nonexistent")
+	if err == nil {
+		t.Fatalf("不存在的资产应返回错误")
+	}
+}
+
+func TestFindAssetInVaults_SkipsHiddenDirs(t *testing.T) {
+	repoDir := t.TempDir()
+
+	// 在隐藏目录中放入资产（不应被发现）
+	os.MkdirAll(filepath.Join(repoDir, ".git", "skills", "hidden-skill"), 0755)
+
+	_, _, err := findAssetInVaults(repoDir, nil, "skill", "hidden-skill")
+	if err == nil {
+		t.Fatalf("隐藏目录中的资产不应被找到")
+	}
+}
+
+func TestFindAssetInVaults_MCPType(t *testing.T) {
+	repoDir := t.TempDir()
+	os.MkdirAll(filepath.Join(repoDir, "v1", "mcp"), 0755)
+	os.WriteFile(filepath.Join(repoDir, "v1", "mcp", "pg-tool.json"), []byte(`{"command":"npx"}`), 0644)
+
+	foundVault, _, err := findAssetInVaults(repoDir, []string{"v1"}, "mcp", "pg-tool")
+	if err != nil {
+		t.Fatalf("查找 MCP 失败: %v", err)
+	}
+	if foundVault != "v1" {
+		t.Fatalf("期望 v1, 得到 %s", foundVault)
+	}
+}
+
+// ========================================
+// installAssetToIDE / removeAssetFromIDE
+// ========================================
+
+func TestInstallSkillToIDE(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	// 准备 vault 中的 skill 源
+	srcDir := t.TempDir()
+	os.WriteFile(filepath.Join(srcDir, "SKILL.md"), []byte("---\nname: test\n---"), 0644)
+	os.WriteFile(filepath.Join(srcDir, "helper.py"), []byte("pass"), 0644)
+
+	cursorIDE := ide.Get("cursor")
+	err := installAssetToIDE("skill", "my-skill", srcDir, projectRoot, cursorIDE)
+	if err != nil {
+		t.Fatalf("安装 skill 失败: %v", err)
+	}
+
+	// 验证使用 dec- 前缀
+	destDir := filepath.Join(projectRoot, ".cursor", "skills", "dec-my-skill")
+	if _, err := os.Stat(filepath.Join(destDir, "SKILL.md")); err != nil {
+		t.Fatalf("SKILL.md 未安装: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "helper.py")); err != nil {
+		t.Fatalf("helper.py 未安装: %v", err)
+	}
+
+	// 不应创建不带前缀的目录
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "my-skill")); !os.IsNotExist(err) {
+		t.Fatalf("不应创建不带 dec- 前缀的目录")
+	}
+}
+
+func TestInstallRuleToIDE(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "logging.mdc")
+	os.WriteFile(srcPath, []byte("# logging rule"), 0644)
+
+	cursorIDE := ide.Get("cursor")
+	err := installAssetToIDE("rule", "logging", srcPath, projectRoot, cursorIDE)
+	if err != nil {
+		t.Fatalf("安装 rule 失败: %v", err)
+	}
+
+	destPath := filepath.Join(projectRoot, ".cursor", "rules", "dec-logging.mdc")
+	data, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatalf("rule 未安装: %v", err)
+	}
+	if string(data) != "# logging rule" {
+		t.Fatalf("rule 内容不匹配")
+	}
+}
+
+func TestInstallMCPToIDE(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	// 创建已有的 MCP 配置
+	existingConfig := types.MCPConfig{
+		MCPServers: map[string]types.MCPServer{
+			"user-tool": {Command: "npx", Args: []string{"-y", "user-tool"}},
+		},
+	}
+	mcpDir := filepath.Join(projectRoot, ".cursor")
+	os.MkdirAll(mcpDir, 0755)
+	data, _ := json.Marshal(existingConfig)
+	os.WriteFile(filepath.Join(mcpDir, "mcp.json"), data, 0644)
+
+	// 准备 MCP 源文件
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "pg-tool.json")
+	os.WriteFile(srcPath, []byte(`{"command":"npx","args":["-y","pg-tool"]}`), 0644)
+
+	cursorIDE := ide.Get("cursor")
+	err := installAssetToIDE("mcp", "pg-tool", srcPath, projectRoot, cursorIDE)
+	if err != nil {
+		t.Fatalf("安装 MCP 失败: %v", err)
+	}
+
+	// 验证合并结果
+	resultData, err := os.ReadFile(filepath.Join(mcpDir, "mcp.json"))
+	if err != nil {
+		t.Fatalf("读取 MCP 配置失败: %v", err)
+	}
+	var result types.MCPConfig
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		t.Fatalf("解析 MCP 配置失败: %v", err)
+	}
+
+	// 用户的 MCP 条目保留
+	if _, ok := result.MCPServers["user-tool"]; !ok {
+		t.Fatalf("用户 MCP 条目被覆盖")
+	}
+	// 新条目使用 dec- 前缀
+	if _, ok := result.MCPServers["dec-pg-tool"]; !ok {
+		t.Fatalf("托管 MCP 条目未写入")
+	}
+}
+
+func TestInstallMCPToIDE_NoExistingConfig(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "tool.json")
+	os.WriteFile(srcPath, []byte(`{"command":"node","args":["server.js"]}`), 0644)
+
+	cursorIDE := ide.Get("cursor")
+	err := installAssetToIDE("mcp", "tool", srcPath, projectRoot, cursorIDE)
+	if err != nil {
+		t.Fatalf("安装 MCP 到空项目失败: %v", err)
+	}
+
+	resultData, err := os.ReadFile(filepath.Join(projectRoot, ".cursor", "mcp.json"))
+	if err != nil {
+		t.Fatalf("MCP 配置未创建: %v", err)
+	}
+	var result types.MCPConfig
+	json.Unmarshal(resultData, &result)
+	if _, ok := result.MCPServers["dec-tool"]; !ok {
+		t.Fatalf("托管 MCP 条目未写入")
+	}
+}
+
+func TestRemoveSkillFromIDE(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	// 先安装
+	skillDir := filepath.Join(projectRoot, ".cursor", "skills", "dec-my-skill")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("test"), 0644)
+
+	cursorIDE := ide.Get("cursor")
+	err := removeAssetFromIDE("skill", "my-skill", projectRoot, cursorIDE)
+	if err != nil {
+		t.Fatalf("移除 skill 失败: %v", err)
+	}
+
+	if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
+		t.Fatalf("skill 目录应被删除")
+	}
+}
+
+func TestRemoveRuleFromIDE(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	rulePath := filepath.Join(projectRoot, ".cursor", "rules", "dec-logging.mdc")
+	os.MkdirAll(filepath.Dir(rulePath), 0755)
+	os.WriteFile(rulePath, []byte("test"), 0644)
+
+	cursorIDE := ide.Get("cursor")
+	err := removeAssetFromIDE("rule", "logging", projectRoot, cursorIDE)
+	if err != nil {
+		t.Fatalf("移除 rule 失败: %v", err)
+	}
+
+	if _, err := os.Stat(rulePath); !os.IsNotExist(err) {
+		t.Fatalf("rule 文件应被删除")
+	}
+}
+
+func TestRemoveMCPFromIDE(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	existingConfig := types.MCPConfig{
+		MCPServers: map[string]types.MCPServer{
+			"user-tool":    {Command: "npx"},
+			"dec-pg-tool":  {Command: "npx"},
+		},
+	}
+	mcpDir := filepath.Join(projectRoot, ".cursor")
+	os.MkdirAll(mcpDir, 0755)
+	data, _ := json.Marshal(existingConfig)
+	os.WriteFile(filepath.Join(mcpDir, "mcp.json"), data, 0644)
+
+	cursorIDE := ide.Get("cursor")
+	err := removeAssetFromIDE("mcp", "pg-tool", projectRoot, cursorIDE)
+	if err != nil {
+		t.Fatalf("移除 MCP 失败: %v", err)
+	}
+
+	resultData, _ := os.ReadFile(filepath.Join(mcpDir, "mcp.json"))
+	var result types.MCPConfig
+	json.Unmarshal(resultData, &result)
+
+	// 用户条目保留
+	if _, ok := result.MCPServers["user-tool"]; !ok {
+		t.Fatalf("用户 MCP 不应被删除")
+	}
+	// 托管条目已删除
+	if _, ok := result.MCPServers["dec-pg-tool"]; ok {
+		t.Fatalf("托管 MCP 应被删除")
+	}
+}
+
+func TestRemoveAssetFromIDE_NotExists(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	cursorIDE := ide.Get("cursor")
+
+	// 删除不存在的资产不应报错
+	if err := removeAssetFromIDE("skill", "nonexistent", projectRoot, cursorIDE); err != nil {
+		t.Fatalf("删除不存在的 skill 不应报错: %v", err)
+	}
+	if err := removeAssetFromIDE("rule", "nonexistent", projectRoot, cursorIDE); err != nil {
+		t.Fatalf("删除不存在的 rule 不应报错: %v", err)
+	}
+}
+
+// ========================================
+// installAssetToIDE — 多 IDE
+// ========================================
+
+func TestInstallSkillToMultipleIDEs(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	srcDir := t.TempDir()
+	os.WriteFile(filepath.Join(srcDir, "SKILL.md"), []byte("test"), 0644)
+
+	for _, ideName := range []string{"cursor", "windsurf"} {
+		ideImpl := ide.Get(ideName)
+		if err := installAssetToIDE("skill", "cross-ide", srcDir, projectRoot, ideImpl); err != nil {
+			t.Fatalf("安装到 %s 失败: %v", ideName, err)
+		}
+	}
+
+	// 两个 IDE 目录都应有文件
+	for _, dir := range []string{".cursor", ".windsurf"} {
+		path := filepath.Join(projectRoot, dir, "skills", "dec-cross-ide", "SKILL.md")
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("%s 下 skill 未安装: %v", dir, err)
+		}
+	}
+}
+
+// ========================================
+// copyFile / copyDir
+// ========================================
+
+func TestCopyFile(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	srcPath := filepath.Join(srcDir, "test.txt")
+	os.WriteFile(srcPath, []byte("hello world"), 0644)
+
+	dstPath := filepath.Join(dstDir, "sub", "test.txt")
+	err := copyFile(srcPath, dstPath)
+	if err != nil {
+		t.Fatalf("复制文件失败: %v", err)
+	}
+
+	data, err := os.ReadFile(dstPath)
+	if err != nil {
+		t.Fatalf("读取目标文件失败: %v", err)
+	}
+	if string(data) != "hello world" {
+		t.Fatalf("内容不匹配: %s", string(data))
+	}
+}
+
+func TestCopyFile_CreatesParentDirs(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	srcPath := filepath.Join(srcDir, "src.txt")
+	os.WriteFile(srcPath, []byte("test"), 0644)
+
+	dstPath := filepath.Join(dstDir, "a", "b", "c", "dst.txt")
+	err := copyFile(srcPath, dstPath)
+	if err != nil {
+		t.Fatalf("应自动创建父目录: %v", err)
+	}
+	if _, err := os.Stat(dstPath); err != nil {
+		t.Fatalf("目标文件不存在: %v", err)
+	}
+}
+
+func TestCopyDir(t *testing.T) {
+	srcDir := t.TempDir()
+	os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("aaa"), 0644)
+	os.MkdirAll(filepath.Join(srcDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(srcDir, "sub", "b.txt"), []byte("bbb"), 0644)
+
+	dstDir := filepath.Join(t.TempDir(), "copy")
+	err := copyDir(srcDir, dstDir)
+	if err != nil {
+		t.Fatalf("复制目录失败: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dstDir, "a.txt"))
+	if string(data) != "aaa" {
+		t.Fatalf("顶层文件内容不匹配")
+	}
+	data, _ = os.ReadFile(filepath.Join(dstDir, "sub", "b.txt"))
+	if string(data) != "bbb" {
+		t.Fatalf("子目录文件内容不匹配")
+	}
+}
+
+func TestCopyDir_OverwritesExisting(t *testing.T) {
+	srcDir := t.TempDir()
+	os.WriteFile(filepath.Join(srcDir, "file.txt"), []byte("new"), 0644)
+
+	dstDir := t.TempDir()
+	os.WriteFile(filepath.Join(dstDir, "file.txt"), []byte("old"), 0644)
+
+	err := copyDir(srcDir, dstDir)
+	if err != nil {
+		t.Fatalf("复制目录失败: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dstDir, "file.txt"))
+	if string(data) != "new" {
+		t.Fatalf("应覆盖已有文件, 得到: %s", string(data))
+	}
+}
+
+// ========================================
+// saveAssetToVault 分发
+// ========================================
+
+func TestSaveAssetToVault_Dispatch(t *testing.T) {
+	sourceDir := t.TempDir()
+	vaultDir := t.TempDir()
+	for _, sub := range []string{"skills", "rules", "mcp"} {
+		os.MkdirAll(filepath.Join(vaultDir, sub), 0755)
+	}
+
+	// skill
+	skillDir := filepath.Join(sourceDir, "test-skill")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("test"), 0644)
+	name, err := saveAssetToVault("skill", skillDir, vaultDir)
+	if err != nil {
+		t.Fatalf("保存 skill 失败: %v", err)
+	}
+	if name != "test-skill" {
+		t.Fatalf("skill 名称错误: %s", name)
+	}
+
+	// rule
+	rulePath := filepath.Join(sourceDir, "test-rule.mdc")
+	os.WriteFile(rulePath, []byte("# rule"), 0644)
+	name, err = saveAssetToVault("rule", rulePath, vaultDir)
+	if err != nil {
+		t.Fatalf("保存 rule 失败: %v", err)
+	}
+	if name != "test-rule" {
+		t.Fatalf("rule 名称错误: %s", name)
+	}
+
+	// mcp
+	mcpPath := filepath.Join(sourceDir, "test-mcp.json")
+	os.WriteFile(mcpPath, []byte(`{"command":"node"}`), 0644)
+	name, err = saveAssetToVault("mcp", mcpPath, vaultDir)
+	if err != nil {
+		t.Fatalf("保存 MCP 失败: %v", err)
+	}
+	if name != "test-mcp" {
+		t.Fatalf("MCP 名称错误: %s", name)
+	}
+
+	// unknown type
+	_, err = saveAssetToVault("unknown", rulePath, vaultDir)
+	if err == nil {
+		t.Fatalf("未知类型应返回错误")
+	}
+}
+
+func TestSaveAssetToVault_SourceNotExist(t *testing.T) {
+	vaultDir := t.TempDir()
+	_, err := saveAssetToVault("rule", "/nonexistent/path.mdc", vaultDir)
+	if err == nil {
+		t.Fatalf("不存在的源路径应返回错误")
+	}
+}
