@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/shichao402/Dec/pkg/update"
 	"github.com/shichao402/Dec/pkg/version"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +30,16 @@ var RootCmd = &cobra.Command{
   dec vault pull skill my-skill     # 下载 Skill 到项目
   dec sync                          # 按配置批量同步资产到 IDE`,
 	Version: getVersionString(),
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// 跳过 update 和 version 命令自身的检查
+		if cmd.Name() == "update" || cmd.Name() == "version" {
+			return
+		}
+		// 后台检查新版本
+		if result := update.CheckBackground(GetVersion()); result != nil {
+			fmt.Fprintf(os.Stderr, "\n💡 %s\n\n", update.FormatUpdateHint(result))
+		}
+	},
 }
 
 // SetVersion 设置版本信息（从编译参数注入）
