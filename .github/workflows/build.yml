@@ -156,3 +156,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           files: dist/*
           generate_release_notes: true
+
+      - name: Sync ReleaseLatest branch
+        run: |
+          git push origin HEAD:refs/heads/ReleaseLatest --force
