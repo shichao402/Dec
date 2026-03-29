@@ -138,6 +138,8 @@ func runVaultInit(cmd *cobra.Command, args []string) error {
 
 var (
 	saveVault string
+	pullAll   bool
+	pullVault string
 )
 
 var vaultSaveCmd = &cobra.Command{
@@ -240,7 +242,7 @@ func runVaultSave(cmd *cobra.Command, args []string) error {
 var vaultListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "列出所有 Vault 空间",
-	Long: `列出当前仓库中的所有 Vault 空间。
+	Long: `列出当前仓库中的所有 Vault 空间及其资产详情。
 
 示例：
   dec vault list`,
@@ -277,10 +279,12 @@ func runVaultList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("📦 Vault 空间 (%d 个):\n\n", len(vaults))
+	fmt.Printf("📦 Vault 空间 (%d 个):\n", len(vaults))
 	for _, v := range vaults {
 		vaultDir := filepath.Join(repoDir, v)
 		assets := listVaultAssets(vaultDir, v)
+
+		// 按类型统计
 		skillCount, ruleCount, mcpCount := 0, 0, 0
 		for _, a := range assets {
 			switch a.Type {
@@ -306,7 +310,14 @@ func runVaultList(cmd *cobra.Command, args []string) error {
 		if len(parts) > 0 {
 			summary = strings.Join(parts, ", ")
 		}
-		fmt.Printf("  %-24s %s\n", v, summary)
+		fmt.Printf("\n  %s  (%s)\n", v, summary)
+
+		// 展示每个资产的详情
+		if len(assets) > 0 {
+			for _, a := range assets {
+				fmt.Printf("    [%-5s] %s\n", a.Type, a.Name)
+			}
+		}
 	}
 
 	return nil
@@ -383,7 +394,7 @@ func runVaultSearch(cmd *cobra.Command, args []string) error {
 // ========================================
 
 var vaultPullCmd = &cobra.Command{
-	Use:   "pull <type> <name>",
+	Use:   "pull [<type> <name>]",
 	Short: "从 Vault 下载资产到项目",
 	Long: `从 Vault 下载资产到当前项目。
 
@@ -392,17 +403,34 @@ pull 会：
 2. 复制到项目的 IDE 目录
 3. 记录到 .dec/assets.yaml
 
-示例：
+使用 --all 批量拉取所有资产：
+  dec vault pull --all                    # 拉取所有 Vault 的所有资产
+  dec vault pull --all --vault my-vault   # 拉取指定 Vault 的所有资产
+
+拉取单个资产：
   dec vault pull skill my-skill
   dec vault pull rule logging-standard`,
-	Args: cobra.ExactArgs(2),
+	Args: cobra.ArbitraryArgs,
 	RunE: runVaultPull,
 }
 
 func runVaultPull(cmd *cobra.Command, args []string) error {
+	if pullAll {
+		return runVaultPullAll()
+	}
+
+	// 单个资产模式：需要恰好 2 个参数
+	if len(args) != 2 {
+		return fmt.Errorf("需要指定 <type> <name>，或使用 --all 批量拉取")
+	}
+
 	itemType := args[0]
 	assetName := args[1]
 
+	return pullSingleAsset(itemType, assetName)
+}
+
+func pullSingleAsset(itemType, assetName string) error {
 	if !isValidAssetType(itemType) {
 		return fmt.Errorf("不支持的资产类型: %s (支持: skill, rule, mcp)", itemType)
 	}
@@ -459,6 +487,121 @@ func runVaultPull(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("✅ %s '%s' 已下载到项目 (IDE: %s)\n", itemType, assetName, strings.Join(ideNames, ", "))
+
+	return nil
+}
+
+func runVaultPullAll() error {
+	// 先从远程拉取最新
+	if err := repo.Pull(); err != nil {
+		fmt.Printf("⚠️  拉取远程最新失败: %v\n", err)
+	}
+
+	repoDir, err := repo.GetRepoDir()
+	if err != nil {
+		return err
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("获取当前目录失败: %w", err)
+	}
+
+	mgr := config.NewProjectConfigManager(cwd)
+	projectConfig, err := mgr.LoadProjectConfig()
+	if err != nil {
+		return fmt.Errorf("加载项目配置失败: %w", err)
+	}
+
+	// 确定目标 IDE 列表
+	ideNames, err := config.GetEffectiveIDEs(projectConfig)
+	if err != nil {
+		ideNames = []string{"cursor"}
+	}
+
+	// 收集要拉取的 Vault 列表
+	var targetVaults []string
+	if pullVault != "" {
+		// 指定了 --vault，验证该 Vault 存在
+		vaultDir := filepath.Join(repoDir, pullVault)
+		if _, err := os.Stat(vaultDir); os.IsNotExist(err) {
+			return fmt.Errorf("Vault '%s' 不存在", pullVault)
+		}
+		targetVaults = []string{pullVault}
+	} else {
+		// 扫描所有 Vault
+		entries, err := os.ReadDir(repoDir)
+		if err != nil {
+			return fmt.Errorf("读取仓库目录失败: %w", err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+				targetVaults = append(targetVaults, entry.Name())
+			}
+		}
+	}
+
+	if len(targetVaults) == 0 {
+		fmt.Println("仓库中还没有 Vault 空间")
+		return nil
+	}
+
+	// 收集所有资产
+	var allAssets []vaultAssetInfo
+	for _, v := range targetVaults {
+		vaultDir := filepath.Join(repoDir, v)
+		assets := listVaultAssets(vaultDir, v)
+		allAssets = append(allAssets, assets...)
+	}
+
+	if len(allAssets) == 0 {
+		fmt.Println("没有可拉取的资产")
+		return nil
+	}
+
+	fmt.Printf("📥 批量拉取 %d 个资产 (来自 %d 个 Vault)...\n\n", len(allAssets), len(targetVaults))
+
+	assetsConfig, _ := mgr.LoadAssetsConfig()
+	pulled := 0
+	failed := 0
+
+	for _, asset := range allAssets {
+		assetPath := getAssetPath(repoDir, asset.Vault, asset.Type, asset.Name)
+		if assetPath == "" {
+			continue
+		}
+
+		// 为每个 IDE 安装
+		installOK := true
+		for _, ideName := range ideNames {
+			ideImpl := ide.Get(ideName)
+			if err := installAssetToIDE(asset.Type, asset.Name, assetPath, cwd, ideImpl); err != nil {
+				fmt.Printf("  ⚠️  [%-5s] %s (安装到 %s 失败: %v)\n", asset.Type, asset.Name, ideName, err)
+				installOK = false
+			}
+		}
+
+		if installOK {
+			fmt.Printf("  ✅ [%-5s] %s  (from %s)\n", asset.Type, asset.Name, asset.Vault)
+			assetsConfig.AddAsset(asset.Type, asset.Name, asset.Vault, time.Now().Format(time.RFC3339))
+			pulled++
+		} else {
+			failed++
+		}
+	}
+
+	// 保存 assets.yaml
+	if pulled > 0 {
+		if err := mgr.SaveAssetsConfig(assetsConfig); err != nil {
+			fmt.Printf("⚠️  更新资产追踪失败: %v\n", err)
+		}
+	}
+
+	fmt.Printf("\n✅ 完成：%d 个资产已拉取", pulled)
+	if failed > 0 {
+		fmt.Printf("，%d 个失败", failed)
+	}
+	fmt.Printf(" (IDE: %s)\n", strings.Join(ideNames, ", "))
 
 	return nil
 }
@@ -1013,6 +1156,10 @@ func copyDir(src, dst string) error {
 func init() {
 	// vault save 标志
 	vaultSaveCmd.Flags().StringVar(&saveVault, "vault", "", "目标 Vault（项目关联多个时必填）")
+
+	// vault pull 标志
+	vaultPullCmd.Flags().BoolVar(&pullAll, "all", false, "批量拉取所有资产")
+	vaultPullCmd.Flags().StringVar(&pullVault, "vault", "", "指定 Vault（配合 --all 使用）")
 
 	// vault remove 标志
 	vaultRemoveCmd.Flags().BoolVar(&removeRemote, "remote", false, "同时删除远程 Vault 中的资产")

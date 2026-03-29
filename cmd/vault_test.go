@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/pkg/ide"
@@ -957,5 +958,201 @@ func TestSaveAssetToVault_SourceNotExist(t *testing.T) {
 	_, err := saveAssetToVault("rule", "/nonexistent/path.mdc", vaultDir)
 	if err == nil {
 		t.Fatalf("不存在的源路径应返回错误")
+	}
+}
+
+// ========================================
+// vault list — 详情展示（通过 listVaultAssets 间接测试）
+// ========================================
+
+func TestListVaultAssets_DetailOutput(t *testing.T) {
+	// 测试 listVaultAssets 返回的资产包含正确的名称和类型
+	vaultDir := t.TempDir()
+
+	// 创建多种资产
+	os.MkdirAll(filepath.Join(vaultDir, "skills", "api-test"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "skills", "api-test", "SKILL.md"), []byte("test"), 0644)
+	os.MkdirAll(filepath.Join(vaultDir, "skills", "code-review"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "skills", "code-review", "SKILL.md"), []byte("test"), 0644)
+	os.MkdirAll(filepath.Join(vaultDir, "rules"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "rules", "logging.mdc"), []byte("# logging"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "rules", "security.mdc"), []byte("# security"), 0644)
+	os.MkdirAll(filepath.Join(vaultDir, "mcp"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "mcp", "postgres.json"), []byte("{}"), 0644)
+
+	assets := listVaultAssets(vaultDir, "test-vault")
+
+	if len(assets) != 5 {
+		t.Fatalf("期望 5 个资产, 得到 %d: %+v", len(assets), assets)
+	}
+
+	// 验证每个资产都有名称和类型
+	nameTypeMap := map[string]string{}
+	for _, a := range assets {
+		nameTypeMap[a.Name] = a.Type
+		if a.Vault != "test-vault" {
+			t.Fatalf("资产 %s 的 Vault 应为 test-vault, 得到 %s", a.Name, a.Vault)
+		}
+	}
+
+	expectedAssets := map[string]string{
+		"api-test":    "skill",
+		"code-review": "skill",
+		"logging":     "rule",
+		"security":    "rule",
+		"postgres":    "mcp",
+	}
+	for name, expectedType := range expectedAssets {
+		gotType, ok := nameTypeMap[name]
+		if !ok {
+			t.Fatalf("缺少资产: %s", name)
+		}
+		if gotType != expectedType {
+			t.Fatalf("资产 %s 类型应为 %s, 得到 %s", name, expectedType, gotType)
+		}
+	}
+}
+
+// ========================================
+// vault pull --all（通过 runVaultPullAll 间接测试其核心逻辑）
+// ========================================
+
+func TestPullAllCollectsAssetsFromMultipleVaults(t *testing.T) {
+	// 测试从多个 Vault 收集所有资产的逻辑
+	repoDir := t.TempDir()
+
+	// Vault 1: 2 skills, 1 rule
+	os.MkdirAll(filepath.Join(repoDir, "v1", "skills", "skill-a"), 0755)
+	os.WriteFile(filepath.Join(repoDir, "v1", "skills", "skill-a", "SKILL.md"), []byte("test"), 0644)
+	os.MkdirAll(filepath.Join(repoDir, "v1", "skills", "skill-b"), 0755)
+	os.WriteFile(filepath.Join(repoDir, "v1", "skills", "skill-b", "SKILL.md"), []byte("test"), 0644)
+	os.MkdirAll(filepath.Join(repoDir, "v1", "rules"), 0755)
+	os.WriteFile(filepath.Join(repoDir, "v1", "rules", "rule-a.mdc"), []byte("# rule"), 0644)
+
+	// Vault 2: 1 mcp
+	os.MkdirAll(filepath.Join(repoDir, "v2", "mcp"), 0755)
+	os.WriteFile(filepath.Join(repoDir, "v2", "mcp", "pg.json"), []byte(`{"command":"npx"}`), 0644)
+
+	// 隐藏目录不应被扫描
+	os.MkdirAll(filepath.Join(repoDir, ".git", "skills", "hidden"), 0755)
+
+	// 扫描所有非隐藏目录
+	entries, _ := os.ReadDir(repoDir)
+	var vaults []string
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			vaults = append(vaults, entry.Name())
+		}
+	}
+
+	var allAssets []vaultAssetInfo
+	for _, v := range vaults {
+		vaultDir := filepath.Join(repoDir, v)
+		assets := listVaultAssets(vaultDir, v)
+		allAssets = append(allAssets, assets...)
+	}
+
+	if len(allAssets) != 4 {
+		t.Fatalf("期望 4 个资产（跨 2 个 Vault）, 得到 %d: %+v", len(allAssets), allAssets)
+	}
+
+	// 验证资产来自正确的 Vault
+	v1Count, v2Count := 0, 0
+	for _, a := range allAssets {
+		switch a.Vault {
+		case "v1":
+			v1Count++
+		case "v2":
+			v2Count++
+		}
+	}
+	if v1Count != 3 {
+		t.Fatalf("v1 应有 3 个资产, 得到 %d", v1Count)
+	}
+	if v2Count != 1 {
+		t.Fatalf("v2 应有 1 个资产, 得到 %d", v2Count)
+	}
+}
+
+func TestPullAllFilterByVault(t *testing.T) {
+	// 测试 --vault 过滤：只收集指定 Vault 的资产
+	repoDir := t.TempDir()
+
+	// Vault 1
+	os.MkdirAll(filepath.Join(repoDir, "v1", "skills", "skill-a"), 0755)
+	os.WriteFile(filepath.Join(repoDir, "v1", "skills", "skill-a", "SKILL.md"), []byte("test"), 0644)
+
+	// Vault 2
+	os.MkdirAll(filepath.Join(repoDir, "v2", "rules"), 0755)
+	os.WriteFile(filepath.Join(repoDir, "v2", "rules", "rule-b.mdc"), []byte("test"), 0644)
+
+	// 只获取 v2 的资产
+	targetVaults := []string{"v2"}
+	var allAssets []vaultAssetInfo
+	for _, v := range targetVaults {
+		vaultDir := filepath.Join(repoDir, v)
+		assets := listVaultAssets(vaultDir, v)
+		allAssets = append(allAssets, assets...)
+	}
+
+	if len(allAssets) != 1 {
+		t.Fatalf("指定 v2 应只有 1 个资产, 得到 %d", len(allAssets))
+	}
+	if allAssets[0].Vault != "v2" {
+		t.Fatalf("资产应来自 v2, 得到 %s", allAssets[0].Vault)
+	}
+	if allAssets[0].Name != "rule-b" {
+		t.Fatalf("资产名应为 rule-b, 得到 %s", allAssets[0].Name)
+	}
+}
+
+func TestPullAllInstallsToIDE(t *testing.T) {
+	// 测试 pull --all 的完整安装流程
+	repoDir := t.TempDir()
+	projectRoot := t.TempDir()
+
+	// 创建 Vault 资产
+	os.MkdirAll(filepath.Join(repoDir, "v1", "skills", "my-skill"), 0755)
+	os.WriteFile(filepath.Join(repoDir, "v1", "skills", "my-skill", "SKILL.md"), []byte("---\nname: my-skill\n---"), 0644)
+	os.MkdirAll(filepath.Join(repoDir, "v1", "rules"), 0755)
+	os.WriteFile(filepath.Join(repoDir, "v1", "rules", "my-rule.mdc"), []byte("# my rule"), 0644)
+
+	// 收集资产
+	assets := listVaultAssets(filepath.Join(repoDir, "v1"), "v1")
+
+	cursorIDE := ide.Get("cursor")
+
+	// 逐个安装
+	for _, asset := range assets {
+		assetPath := getAssetPath(repoDir, asset.Vault, asset.Type, asset.Name)
+		err := installAssetToIDE(asset.Type, asset.Name, assetPath, projectRoot, cursorIDE)
+		if err != nil {
+			t.Fatalf("安装 %s/%s 失败: %v", asset.Type, asset.Name, err)
+		}
+	}
+
+	// 验证 skill 已安装
+	skillPath := filepath.Join(projectRoot, ".cursor", "skills", "dec-my-skill", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("skill 未安装到 IDE: %v", err)
+	}
+
+	// 验证 rule 已安装
+	rulePath := filepath.Join(projectRoot, ".cursor", "rules", "dec-my-rule.mdc")
+	if _, err := os.Stat(rulePath); err != nil {
+		t.Fatalf("rule 未安装到 IDE: %v", err)
+	}
+}
+
+func TestPullAllEmptyVault(t *testing.T) {
+	// 空 Vault 不应产生任何资产
+	repoDir := t.TempDir()
+	os.MkdirAll(filepath.Join(repoDir, "empty-vault", "skills"), 0755)
+	os.MkdirAll(filepath.Join(repoDir, "empty-vault", "rules"), 0755)
+	os.MkdirAll(filepath.Join(repoDir, "empty-vault", "mcp"), 0755)
+
+	assets := listVaultAssets(filepath.Join(repoDir, "empty-vault"), "empty-vault")
+	if len(assets) != 0 {
+		t.Fatalf("空 Vault 应返回 0 个资产, 得到 %d", len(assets))
 	}
 }

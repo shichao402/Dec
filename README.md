@@ -94,6 +94,13 @@ dec vault pull mcp postgres-tool
 
 `dec vault pull` 会自动将资产部署到当前目录的 IDE（Cursor、CodeBuddy）。
 
+批量拉取所有资产：
+
+```bash
+dec vault pull --all                    # 拉取所有 Vault 的所有资产
+dec vault pull --all --vault my-vault   # 拉取指定 Vault 的所有资产
+```
+
 ### 4. 管理你的 Vault
 
 #### 保存资产到 Vault
@@ -118,7 +125,7 @@ dec vault save skill .cursor/skills/my-skill --vault github-tools
 dec vault search "api test"
 ```
 
-#### 列出所有 Vault 空间
+#### 列出所有 Vault 空间及资产详情
 
 ```bash
 dec vault list
@@ -246,14 +253,23 @@ dec vault save skill .cursor/skills/my-skill --vault github-tools
 - 如果远程 push 失败，保存仍然视为成功，但会输出 warning
 - 关联多个 Vault 时，使用 `--vault` 指定目标 Vault
 
-#### `dec vault pull <type> <name>`
+#### `dec vault pull <type> <name>` / `dec vault pull --all`
 
 从 Vault 下载资产到当前项目。
+
+拉取单个资产：
 
 ```bash
 dec vault pull skill create-api-test
 dec vault pull rule my-logging-standard
 dec vault pull mcp postgres-tool
+```
+
+批量拉取所有资产：
+
+```bash
+dec vault pull --all                    # 拉取所有 Vault 的所有资产
+dec vault pull --all --vault my-vault   # 拉取指定 Vault 的所有资产
 ```
 
 行为：
@@ -287,11 +303,13 @@ dec vault search "logging"
 
 #### `dec vault list`
 
-列出当前仓库中的所有 Vault 空间及其资产统计。
+列出当前仓库中的所有 Vault 空间及其资产详情。
 
 ```bash
 dec vault list
 ```
+
+输出每个 Vault 下的所有资产（类型和名称），方便了解可以 pull 的内容。
 
 #### `dec vault push`
 
