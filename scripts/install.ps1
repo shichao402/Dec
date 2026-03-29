@@ -148,9 +148,14 @@ function Install-Dec {
 
     try {
         $installedVersion = & $binaryPath --version 2>&1
+        if ($installedVersion -notmatch 'v\d+\.\d+\.\d+') {
+            Write-ColorOutput "安装失败：无法验证已安装的二进制文件" -Type "Error"
+            exit 1
+        }
         Write-ColorOutput "安装成功，版本: $installedVersion" -Type "Success"
     } catch {
-        Write-ColorOutput "安装成功，但版本验证失败" -Type "Warning"
+        Write-ColorOutput "安装失败：无法执行已下载的二进制文件" -Type "Error"
+        exit 1
     }
 
     Write-Host ""

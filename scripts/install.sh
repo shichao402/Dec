@@ -213,7 +213,11 @@ main() {
 
     print_info "验证安装..."
     local installed_version
-    installed_version=$("${binary_path}" --version 2>&1 || echo "unknown")
+    installed_version=$("${binary_path}" --version 2>&1) || true
+    if [ -z "${installed_version}" ] || ! echo "${installed_version}" | grep -q 'v[0-9]\+\.[0-9]\+\.[0-9]\+'; then
+        print_error "安装失败：无法验证已安装的二进制文件"
+        exit 1
+    fi
     print_success "安装成功，版本: ${installed_version}"
 
     echo ""
