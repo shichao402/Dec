@@ -1,8 +1,0 @@
-# IDE 配置
-# 取消注释启用对应 IDE
-
-ides:
-  - cursor
-  # - codebuddy
-  # - windsurf
-  # - trae

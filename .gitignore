@@ -73,3 +73,6 @@ Documents/temp/*
 
 # Dec Vault 追踪文件
 .dec/tracking.json
+
+# Dec 项目配置
+.dec/
