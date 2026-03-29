@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 
@@ -181,11 +182,18 @@ func (v *Vault) ensureDirs() error {
 }
 
 // ManagedName 返回 Dec 托管资源名称
+// 始终确保名称带有 "dec-" 前缀
 func ManagedName(name string) string {
 	if strings.HasPrefix(name, "dec-") {
 		return name
 	}
 	return "dec-" + name
+}
+
+// NormalizeName 去除托管前缀，返回基础名称
+// 用于确保 vault 中存储的名称不含 "dec-" 前缀，避免 ManagedName 产生 "dec-dec"
+func NormalizeName(name string) string {
+	return strings.TrimPrefix(name, "dec-")
 }
 
 // Save 保存资产到 vault
@@ -208,21 +216,21 @@ func (v *Vault) Save(itemType, sourcePath string, tags []string) (string, []stri
 		if err != nil {
 			return "", nil, err
 		}
-		destRelPath = filepath.Join("skills", name)
+		destRelPath = pathpkg.Join("skills", name)
 
 	case "rule":
 		name, description, err = v.saveRule(absSource)
 		if err != nil {
 			return "", nil, err
 		}
-		destRelPath = filepath.Join("rules", name+".mdc")
+		destRelPath = pathpkg.Join("rules", name+".mdc")
 
 	case "mcp":
 		name, description, err = v.saveMCP(absSource)
 		if err != nil {
 			return "", nil, err
 		}
-		destRelPath = filepath.Join("mcp", name+".json")
+		destRelPath = pathpkg.Join("mcp", name+".json")
 
 	default:
 		return "", nil, fmt.Errorf("不支持的资产类型: %s (支持: skill, rule, mcp)", itemType)
@@ -276,6 +284,7 @@ func (v *Vault) saveSkill(absSource string, info os.FileInfo) (string, string, e
 	if name == "" {
 		name = filepath.Base(absSource)
 	}
+	name = NormalizeName(name) // 规范化：去除 dec- 前缀
 
 	destDir := filepath.Join(v.Dir, "skills", name)
 	if err := CopyDir(absSource, destDir); err != nil {
@@ -292,7 +301,8 @@ func (v *Vault) saveRule(absSource string) (string, string, error) {
 	}
 
 	name := strings.TrimSuffix(filepath.Base(absSource), ".mdc")
-	destPath := filepath.Join(v.Dir, "rules", filepath.Base(absSource))
+	name = NormalizeName(name) // 规范化：去除 dec- 前缀
+	destPath := filepath.Join(v.Dir, "rules", name+".mdc")
 
 	if err := copyFile(absSource, destPath); err != nil {
 		return "", "", fmt.Errorf("复制 rule 失败: %w", err)
@@ -317,7 +327,8 @@ func (v *Vault) saveMCP(absSource string) (string, string, error) {
 	}
 
 	name := strings.TrimSuffix(filepath.Base(absSource), ".json")
-	destPath := filepath.Join(v.Dir, "mcp", filepath.Base(absSource))
+	name = NormalizeName(name) // 规范化：去除 dec- 前缀，避免 ManagedName 产生 dec-dec
+	destPath := filepath.Join(v.Dir, "mcp", name+".json")
 
 	if err := copyFile(absSource, destPath); err != nil {
 		return "", "", fmt.Errorf("复制 MCP 配置失败: %w", err)
@@ -393,7 +404,13 @@ func (v *Vault) Pull(itemType, name, projectRoot string, ideNames []string) ([]s
 			if existingConfig.MCPServers == nil {
 				existingConfig.MCPServers = make(map[string]types.MCPServer)
 			}
-			existingConfig.MCPServers[ManagedName(name)] = server
+			managedKey := ManagedName(name)
+			existingConfig.MCPServers[managedKey] = server
+			// 去重：如果用户手动配置了同名条目（不带 dec- 前缀），删除它以避免重复
+			baseName := NormalizeName(name)
+			if baseName != managedKey {
+				delete(existingConfig.MCPServers, baseName)
+			}
 
 			if err := ideImpl.WriteMCPConfig(projectRoot, existingConfig); err != nil {
 				return nil, fmt.Errorf("写入 MCP 配置到项目失败: %w", err)

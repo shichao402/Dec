@@ -335,7 +335,7 @@ func (s *SyncServiceV2) syncVaultSkills(v *vault.Vault, ideImpl ide.IDE, items [
 	}
 
 	for _, item := range items {
-		srcPath := filepath.Join(v.Dir, item.Path)
+		srcPath := filepath.Join(v.Dir, filepath.FromSlash(item.Path))
 		if _, err := os.Stat(srcPath); err != nil {
 			return fmt.Errorf("Vault Skill 不存在: %s", item.Name)
 		}
@@ -363,7 +363,7 @@ func (s *SyncServiceV2) syncVaultRules(v *vault.Vault, ideImpl ide.IDE, items []
 	}
 
 	for _, item := range items {
-		srcPath := filepath.Join(v.Dir, item.Path)
+		srcPath := filepath.Join(v.Dir, filepath.FromSlash(item.Path))
 		content, err := os.ReadFile(srcPath)
 		if err != nil {
 			return fmt.Errorf("读取 Vault Rule %s 失败: %w", item.Name, err)
@@ -387,7 +387,7 @@ func (s *SyncServiceV2) syncVaultMCPs(v *vault.Vault, ideImpl ide.IDE, items []v
 		}
 
 		for _, item := range items {
-			srcPath := filepath.Join(v.Dir, item.Path)
+			srcPath := filepath.Join(v.Dir, filepath.FromSlash(item.Path))
 			data, err := os.ReadFile(srcPath)
 			if err != nil {
 				return fmt.Errorf("读取 Vault MCP %s 失败: %w", item.Name, err)
@@ -419,13 +419,21 @@ func mergeConfig(existing *types.MCPConfig, managed map[string]types.MCPServer) 
 		MCPServers: make(map[string]types.MCPServer),
 	}
 
+	// 第 1 步：添加所有托管服务
 	for name, server := range managed {
 		result.MCPServers[name] = server
 	}
 
+	// 第 2 步：保留用户手动添加的配置，去重冲突项
 	if existing != nil {
 		for name, server := range existing.MCPServers {
+			// 跳过已有的 dec- 前缀配置（由 Dec 托管）
 			if strings.HasPrefix(name, "dec-") {
+				continue
+			}
+			// 跳过与托管版本冲突的用户配置
+			// 例如：用户手动添加了 "dec"，Vault 托管了 "dec-dec"，优先保留托管版本
+			if _, isConflict := managed["dec-"+name]; isConflict {
 				continue
 			}
 			if _, isManaged := managed[name]; !isManaged {

@@ -8,8 +8,8 @@ vault_skills:
 
 # Rules（Agent 行为规则）
 vault_rules:
-  # - my-security-rule
+  - 00-private-overview
 
 # MCPs（外部工具配置）
 vault_mcps:
-  # - my-database-mcp
+  - dec
