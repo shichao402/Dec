@@ -140,25 +140,140 @@ func installDecSkillForIDE(ideName string) error {
 	skillMD := filepath.Join(decSkillDir, "SKILL.md")
 	skillContent := `---
 name: dec-agent
-description: Dec 个人知识仓库代理
+description: >
+  Dec 个人 AI 知识仓库代理。支持跨项目复用 Skills、Rules、MCP 配置。
+  推荐用户保存新创建的资产、搜索已有资产、或在新项目中拉取所需资产。
 ---
 
 # Dec 代理
 
-Dec 个人知识仓库的代理 Skill，使 IDE 能够感知和使用 Dec 管理的资产。
+Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skills、Rules、MCP 配置）。
 
-## 功能
+## 何时使用
 
-- 自动发现已安装的 Vault 资产
-- 支持 Vault 搜索和资产管理命令
-- 集成项目级 IDE 配置
+### 主动建议用户的场景
 
-## 使用
+1. **用户创建或修改了 Skill/Rule**
+   - 建议运行 ` + "`" + `dec vault save skill <path>` + "`" + ` 保存以供后续项目复用
+   - 可添加标签便于搜索：` + "`" + `--tag <tag1> --tag <tag2>` + "`" + `
 
-在项目中运行:
-  dec vault list        # 列出可用资产
-  dec vault search      # 搜索资产
-  dec vault pull        # 下载资产到项目
+2. **用户提到需要之前做过的工具/配置**
+   - 运行 ` + "`" + `dec vault search "<query>"` + "`" + ` 搜索已有资产
+   - 或用 ` + "`" + `dec vault list` + "`" + ` 列出所有资产
+
+3. **用户在新项目中需要标准工具**
+   - 运行 ` + "`" + `dec vault pull <type> <name>` + "`" + ` 下载资产到当前项目
+   - 类型：skill、rule、mcp
+
+4. **用户修改了已拉取的资产**
+   - 建议运行 ` + "`" + `dec vault save` + "`" + ` 回写到 Vault
+   - 这样其他项目能获取最新版本
+
+## 快速参考
+
+### Vault 资产管理
+
+| 操作 | 命令 | 说明 |
+|------|------|------|
+| 列出所有资产 | ` + "`" + `dec vault list` + "`" + ` | 显示 Vault 中的所有 Skills、Rules、MCP |
+| 按类型列出 | ` + "`" + `dec vault list --type skill` + "`" + ` | 只列出 skill、rule 或 mcp |
+| 搜索资产 | ` + "`" + `dec vault search "<query>"` + "`" + ` | 按名称、描述或标签搜索 |
+| 保存 Skill | ` + "`" + `dec vault save skill <dir-path>` + "`" + ` | 目录需包含 SKILL.md |
+| 保存 Rule | ` + "`" + `dec vault save rule <file.mdc>` + "`" + ` | Rule 文件格式 |
+| 保存 MCP | ` + "`" + `dec vault save mcp <server.json>` + "`" + ` | MCP server 片段 |
+| 添加标签 | ` + "`" + `dec vault save skill <path> --tag <tag>` + "`" + ` | 支持多个 --tag |
+| 拉取到项目 | ` + "`" + `dec vault pull skill <name>` + "`" + ` | 自动部署到当前 IDE |
+| 推送更新 | ` + "`" + `dec vault push` + "`" + ` | 本地修改推送到远程 |
+
+### 连接和初始化
+
+| 操作 | 命令 | 说明 |
+|------|------|------|
+| 关联 Vault | ` + "`" + `dec repo <url>` + "`" + ` | 连接个人 Vault 仓库（GitHub URL） |
+| 配置全局 IDE | ` + "`" + `dec config global` + "`" + ` | 为本机 IDE 配置 Dec Skill |
+| 查询帮助 | ` + "`" + `dec vault --help` + "`" + ` | 查看所有 Vault 命令 |
+
+## 资产格式
+
+### Skill（目录）
+
+Skill 必须是一个包含 ` + "`" + `SKILL.md` + "`" + ` 的目录：
+
+` + "`" + `` + "`" + `` + "`" + `
+my-skill/
+├── SKILL.md        # 必须
+├── main.py
+├── utils.js
+└── ...
+` + "`" + `` + "`" + `` + "`" + `
+
+在 ` + "`" + `SKILL.md` + "`" + ` 的 front matter 中定义：
+
+` + "`" + `` + "`" + `` + "`" + `yaml
+---
+name: my-skill
+description: 做什么的
+---
+` + "`" + `` + "`" + `` + "`" + `
+
+### Rule（文件）
+
+Rule 是单个 ` + "`" + `.mdc` + "`" + ` 文件：
+
+` + "`" + `` + "`" + `` + "`" + `bash
+dec vault save rule .cursor/rules/my-rule.mdc
+` + "`" + `` + "`" + `` + "`" + `
+
+### MCP（JSON 片段）
+
+MCP 必须是单个 server 片段，而非完整的 ` + "`" + `mcp.json` + "`" + `：
+
+` + "`" + `` + "`" + `` + "`" + `json
+{
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-postgres"],
+  "env": {
+    "DATABASE_URL": "\${DATABASE_URL}"
+  }
+}
+` + "`" + `` + "`" + `` + "`" + `
+
+## 故障排查
+
+### "Vault 未连接"
+
+运行 ` + "`" + `dec repo <url>` + "`" + ` 关联你的 Vault 仓库。
+
+### "找不到资产"
+
+1. 确认资产名称：` + "`" + `dec vault search "<partial-name>"` + "`" + `
+2. 列出所有资产：` + "`" + `dec vault list`
+3. 按类型筛选：` + "`" + `dec vault list --type skill` + "`" + `
+
+### "拉取失败"
+
+1. 检查 Vault 连接：` + "`" + `dec repo --help` + "`" + `
+2. 验证资产存在：` + "`" + `dec vault search <name>` + "`" + `
+3. 查看详细错误：运行命令时会输出诊断信息
+
+### "保存失败"
+
+常见原因：
+- Skill 目录缺少 ` + "`" + `SKILL.md` + "`" + `
+- Rule 文件不是 ` + "`" + `.mdc` + "`" + ` 格式
+- MCP JSON 无效或缺少必要字段
+
+## 最佳实践
+
+1. **定期保存**：完成一个可复用工具后立即保存，不要等到忘记
+2. **使用标签**：为资产添加描述性标签（` + "`" + `--tag testing`、` + "`" + `--tag api` + "`" + `），便于搜索
+3. **资产版本化**：保存时 Vault 自动 Git 提交，方便追踪变更历史
+4. **团队共享**：将 Vault 仓库 URL 分享给团队成员，他们可以获取同样的资产
+
+## 相关文档
+
+- 完整指南：项目中运行 ` + "`" + `dec --help` + "`" + ` 或 ` + "`" + `dec vault --help` + "`" + `
+- Vault 仓库地址：通过 ` + "`" + `dec repo` + "`" + ` 指定
 `
 
 	if err := os.WriteFile(skillMD, []byte(skillContent), 0644); err != nil {
