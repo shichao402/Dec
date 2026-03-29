@@ -124,6 +124,32 @@ main() {
                 print_success "已是最新版本，无需更新"
                 exit 0
             fi
+            # 版本较旧，提示用户选择
+            if [ -t 0 ]; then
+                # 终端模式，交互式提示
+                printf "${YELLOW}?${NC}  检测到旧版本 ${current_version}，最新版本为 ${latest_version}，是否覆盖安装？[Y/n] "
+                read -r answer
+                if [ "${answer}" = "n" ] || [ "${answer}" = "N" ]; then
+                    print_info "已跳过安装"
+                    exit 0
+                fi
+            else
+                # 管道模式（如 curl | bash），默认覆盖安装
+                print_info "检测到旧版本 ${current_version}，将自动覆盖安装为 ${latest_version}"
+            fi
+        else
+            # 版本解析失败，提示用户选择
+            print_warning "检测到已安装的 Dec，但无法获取版本号"
+            if [ -t 0 ]; then
+                printf "${YELLOW}?${NC}  是否覆盖安装？[Y/n] "
+                read -r answer
+                if [ "${answer}" = "n" ] || [ "${answer}" = "N" ]; then
+                    print_info "已跳过安装"
+                    exit 0
+                fi
+            else
+                print_info "将自动覆盖安装为 ${latest_version}"
+            fi
         fi
     fi
 

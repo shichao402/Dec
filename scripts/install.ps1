@@ -87,8 +87,29 @@ function Install-Dec {
                     Write-ColorOutput "已是最新版本，无需更新" -Type "Success"
                     exit 0
                 }
+                # 版本较旧，提示用户选择
+                $answer = Read-Host "检测到旧版本 $currentVersion，最新版本为 $latestVersion，是否覆盖安装？[Y/n]"
+                if ($answer -eq 'n' -or $answer -eq 'N') {
+                    Write-ColorOutput "已跳过安装" -Type "Info"
+                    exit 0
+                }
+            } else {
+                # 版本解析失败，提示用户选择
+                Write-ColorOutput "检测到已安装的 Dec，但无法获取版本号" -Type "Warning"
+                $answer = Read-Host "是否覆盖安装？[Y/n]"
+                if ($answer -eq 'n' -or $answer -eq 'N') {
+                    Write-ColorOutput "已跳过安装" -Type "Info"
+                    exit 0
+                }
             }
         } catch {
+            # 执行失败，提示用户选择
+            Write-ColorOutput "检测到已安装的 Dec，但无法获取版本号" -Type "Warning"
+            $answer = Read-Host "是否覆盖安装？[Y/n]"
+            if ($answer -eq 'n' -or $answer -eq 'N') {
+                Write-ColorOutput "已跳过安装" -Type "Info"
+                exit 0
+            }
         }
     }
 

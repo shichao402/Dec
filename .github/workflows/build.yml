@@ -1,0 +1,142 @@
+name: Build & Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ── push 到 main 时：自增版本号、提交、打 tag ──
+  bump-version:
+    name: Bump Version
+    if: github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip ci]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          CURRENT=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+
+          # 去掉 v 前缀，拆分 major.minor.patch
+          BASE="${CURRENT#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+          PATCH=$((PATCH + 1))
+          NEW="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "new=${NEW}" >> "$GITHUB_OUTPUT"
+
+          # 写回 version.json
+          python3 -c "
+          import json
+          data = json.load(open('version.json'))
+          data['version'] = '${NEW}'
+          with open('version.json', 'w') as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+              f.write('\n')
+          "
+          echo "版本号: ${CURRENT} -> ${NEW}"
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.json
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new }} [skip ci]"
+          git tag "${{ steps.bump.outputs.new }}"
+          git push origin main --tags
+
+  # ── tag 推送时：测试 ──
+  test:
+    name: Test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Run tests
+        run: go test ./... -v
+
+  # ── tag 推送时：跨平台构建 ──
+  build:
+    name: Build (${{ matrix.goos }}-${{ matrix.goarch }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Read version from version.json
+        id: version
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+          OUTPUT="dec-${GOOS}-${GOARCH}${EXT}"
+          go build -ldflags "-X main.Version=${{ steps.version.outputs.version }} -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')" -o "$OUTPUT" .
+          echo "artifact=${OUTPUT}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dec-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ env.artifact }}
+
+  # ── tag 推送时：创建 Release ──
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

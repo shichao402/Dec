@@ -1,6 +1,6 @@
 #!/bin/bash
 # Dec 发布准备脚本
-# 说明：仓库中的 GitHub Actions 已停用，本脚本只做本地校验与构建准备。
+# 说明：推送 tag 后 GitHub Actions 会自动构建并创建 Release，本脚本用于本地校验与构建准备。
 # 用法：./scripts/release-yolo.sh [版本号]
 
 set -e
@@ -37,7 +37,7 @@ normalize_version() {
 }
 
 current_version() {
-    grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' version.json | cut -d'"' -f4
+    python3 -c "import json; print(json.load(open('version.json'))['version'])"
 }
 
 main() {
@@ -82,14 +82,15 @@ PY
     ./scripts/build.sh --all
     success "构建完成"
 
-    step "后续手动发布步骤"
+    step "后续步骤"
     echo "1. 检查 dist/ 目录中的二进制与 BUILD_INFO 文件"
     echo "2. 更新 CHANGELOG 与 README（如有需要）"
-    echo "3. 手动创建并推送 tag: git tag ${target} && git push origin ${target}"
-    echo "4. 手动创建 GitHub Release，并上传 dist/*"
-    echo "5. 如依赖在线安装，请同步维护 ReleaseLatest 分支中的 version.json 与 scripts/"
+    echo "3. 提交并推送到 main，GitHub Actions 会自动自增版本号、打 tag、构建并创建 Release"
     echo ""
-    warn "本脚本不会自动推送 tag，也不会等待 GitHub Actions，因为仓库工作流已停用。"
+    echo "   或手动指定版本发布："
+    echo "   git tag ${target} && git push origin ${target}"
+    echo ""
+    warn "推送到 main 后 GitHub Actions 会自动完成版本自增与发布，通常无需手动打 tag。"
 }
 
 main "$@"
