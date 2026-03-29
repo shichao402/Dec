@@ -179,12 +179,9 @@ main() {
     fi
     print_success "二进制下载完成"
 
-    local system_config_url="https://raw.githubusercontent.com/shichao402/Dec/${update_branch}/config/system.json"
-    local system_config_path="${config_dir}/system.json"
-    if curl -fsSL -o "${system_config_path}" "${system_config_url}"; then
-        print_success "系统配置下载完成"
-    else
-        print_warning "系统配置下载失败，将使用程序内置默认值"
+    # 清理旧版残留的系统配置文件
+    if [ -f "${config_dir}/system.json" ]; then
+        rm -f "${config_dir}/system.json"
     fi
 
     local shell_rc=""
@@ -222,9 +219,8 @@ main() {
     echo ""
     print_info "之后可以运行："
     echo "  dec --help"
-    echo "  dec init"
-    echo "  dec vault init --create my-dec-vault"
-    echo "  dec sync"
+    echo "  dec repo <your-vault-repo-url>"
+    echo "  dec vault list"
     echo ""
 }
 

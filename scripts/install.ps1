@@ -129,13 +129,10 @@ function Install-Dec {
         exit 1
     }
 
-    $systemConfigUrl = "https://raw.githubusercontent.com/shichao402/Dec/$updateBranch/config/system.json"
+    # 清理旧版残留的系统配置文件
     $systemConfigPath = Join-Path $configDir "system.json"
-    try {
-        Invoke-WebRequest -Uri $systemConfigUrl -OutFile $systemConfigPath -ErrorAction Stop
-        Write-ColorOutput "系统配置下载完成" -Type "Success"
-    } catch {
-        Write-ColorOutput "系统配置下载失败，将使用程序内置默认值" -Type "Warning"
+    if (Test-Path $systemConfigPath) {
+        Remove-Item -Force $systemConfigPath
     }
 
     Write-ColorOutput "配置环境变量..." -Type "Info"
@@ -159,9 +156,8 @@ function Install-Dec {
     Write-Host ""
     Write-ColorOutput "之后可以运行：" -Type "Info"
     Write-Host "  dec --help"
-    Write-Host "  dec init"
-    Write-Host "  dec vault init --create my-dec-vault"
-    Write-Host "  dec sync"
+    Write-Host "  dec repo <your-vault-repo-url>"
+    Write-Host "  dec vault list"
     Write-Host ""
 }
 
