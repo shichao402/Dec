@@ -16,6 +16,8 @@ jobs:
     name: Bump Version
     if: github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,14 +29,12 @@ jobs:
           CURRENT=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
           echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
 
-          # 去掉 v 前缀，拆分 major.minor.patch
           BASE="${CURRENT#v}"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
           PATCH=$((PATCH + 1))
           NEW="v${MAJOR}.${MINOR}.${PATCH}"
           echo "new=${NEW}" >> "$GITHUB_OUTPUT"
 
-          # 写回 version.json
           python3 -c "
           import json
           data = json.load(open('version.json'))
@@ -54,13 +54,18 @@ jobs:
           git tag "${{ steps.bump.outputs.new }}"
           git push origin main --tags
 
-  # ── tag 推送时：测试 ──
+  # ── 测试（push main 或 tag 推送均触发）──
   test:
     name: Test
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [bump-version]
+    # bump-version 成功后运行，或被跳过时（tag 推送）也运行
+    if: always() && (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # tag 推送时用 tag 对应的 ref；push main 时用自增后的 tag
+          ref: ${{ needs.bump-version.outputs.new_version || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -70,11 +75,11 @@ jobs:
       - name: Run tests
         run: go test ./... -v
 
-  # ── tag 推送时：跨平台构建 ──
+  # ── 跨平台构建 ──
   build:
     name: Build (${{ matrix.goos }}-${{ matrix.goarch }})
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
+    needs: [bump-version, test]
+    if: always() && needs.test.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -91,6 +96,8 @@ jobs:
             goarch: amd64
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.new_version || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -120,14 +127,22 @@ jobs:
           name: dec-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.artifact }}
 
-  # ── tag 推送时：创建 Release ──
+  # ── 创建 Release ──
   release:
     name: Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [bump-version, build]
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.new_version || github.ref }}
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          TAG="${{ needs.bump-version.outputs.new_version || github.ref_name }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -138,5 +153,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.tag }}
           files: dist/*
           generate_release_notes: true
