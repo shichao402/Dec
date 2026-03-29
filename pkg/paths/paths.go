@@ -63,44 +63,6 @@ func GetVaultConfigPath(projectRoot string) string {
 }
 
 // ========================================
-// IDE 输出路径
-// ========================================
-
-var ideDirectories = map[string]string{
-	"cursor":    ".cursor",
-	"codebuddy": ".codebuddy",
-	"windsurf":  ".windsurf",
-	"trae":      ".trae",
-}
-
-// GetIDERulesDir 获取指定 IDE 的规则输出目录
-func GetIDERulesDir(projectRoot, ide string) string {
-	dir, ok := ideDirectories[ide]
-	if !ok {
-		dir = "." + ide
-	}
-	return filepath.Join(projectRoot, dir, "rules")
-}
-
-// GetIDEMCPConfigPath 获取指定 IDE 的 MCP 配置文件路径
-func GetIDEMCPConfigPath(projectRoot, ide string) string {
-	dir, ok := ideDirectories[ide]
-	if !ok {
-		dir = "." + ide
-	}
-	return filepath.Join(projectRoot, dir, "mcp.json")
-}
-
-// GetIDESkillsDir 获取指定 IDE 的 Skills 输出目录
-func GetIDESkillsDir(projectRoot, ide string) string {
-	dir, ok := ideDirectories[ide]
-	if !ok {
-		dir = "." + ide
-	}
-	return filepath.Join(projectRoot, dir, "skills")
-}
-
-// ========================================
 // 工具函数
 // ========================================
 

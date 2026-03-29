@@ -6,9 +6,17 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/paths"
 	"github.com/shichao402/Dec/pkg/types"
 	"gopkg.in/yaml.v3"
+)
+
+// 配置示例：初始化 vault.yaml 时作为注释模板展示给用户
+var (
+	sampleSkills = []string{"create-api-test", "fix-cors-issue"}
+	sampleRules  = []string{"my-security-rule", "my-code-style"}
+	sampleMCPs   = []string{"my-database-mcp"}
 )
 
 // ProjectConfigManagerV2 项目配置管理器
@@ -142,8 +150,12 @@ func (m *ProjectConfigManagerV2) createIDEsConfig(ides []string) error {
 	}
 
 	enabledSet := make(map[string]bool)
-	for _, ide := range ides {
-		enabledSet[ide] = true
+	for _, ideName := range ides {
+		if !ide.IsValid(ideName) {
+			registered := strings.Join(ide.List(), ", ")
+			return fmt.Errorf("不支持的 IDE: %s（已知 IDE: %s）", ideName, registered)
+		}
+		enabledSet[ideName] = true
 	}
 	if len(enabledSet) == 0 {
 		enabledSet["cursor"] = true
@@ -154,12 +166,12 @@ func (m *ProjectConfigManagerV2) createIDEsConfig(ides []string) error {
 	sb.WriteString("# 取消注释启用对应 IDE\n\n")
 	sb.WriteString("ides:\n")
 
-	availableIDEs := []string{"cursor", "codebuddy", "windsurf", "trae"}
-	for _, ide := range availableIDEs {
-		if enabledSet[ide] {
-			sb.WriteString(fmt.Sprintf("  - %s\n", ide))
+	knownIDEs := []string{"cursor", "codebuddy", "windsurf", "trae"}
+	for _, ideName := range knownIDEs {
+		if enabledSet[ideName] {
+			sb.WriteString(fmt.Sprintf("  - %s\n", ideName))
 		} else {
-			sb.WriteString(fmt.Sprintf("  # - %s\n", ide))
+			sb.WriteString(fmt.Sprintf("  # - %s\n", ideName))
 		}
 	}
 
@@ -224,17 +236,9 @@ func renderVaultConfig(config *types.VaultConfigV2) string {
 	sb.WriteString("#\n")
 	sb.WriteString("# 使用 dec vault list 查看所有可用资产\n\n")
 
-	writeVaultSection(&sb, "Skills（Agent 能力包）", "vault_skills", config.VaultSkills, []string{
-		"create-api-test",
-		"fix-cors-issue",
-	})
-	writeVaultSection(&sb, "Rules（Agent 行为规则）", "vault_rules", config.VaultRules, []string{
-		"my-security-rule",
-		"my-code-style",
-	})
-	writeVaultSection(&sb, "MCPs（外部工具配置）", "vault_mcps", config.VaultMCPs, []string{
-		"my-database-mcp",
-	})
+	writeVaultSection(&sb, "Skills（Agent 能力包）", "vault_skills", config.VaultSkills, sampleSkills)
+	writeVaultSection(&sb, "Rules（Agent 行为规则）", "vault_rules", config.VaultRules, sampleRules)
+	writeVaultSection(&sb, "MCPs（外部工具配置）", "vault_mcps", config.VaultMCPs, sampleMCPs)
 
 	return sb.String()
 }

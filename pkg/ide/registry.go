@@ -32,6 +32,14 @@ func Get(name string) IDE {
 	}
 }
 
+// IsValid 检查指定名称的 IDE 是否已注册
+func IsValid(name string) bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	_, ok := registry[name]
+	return ok
+}
+
 // List 列出所有已注册的 IDE 名称
 func List() []string {
 	mu.RLock()

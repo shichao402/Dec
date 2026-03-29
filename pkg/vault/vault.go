@@ -111,31 +111,31 @@ func Init(repoURL string) (*Vault, error) {
 }
 
 // InitCreate 创建新的 GitHub 仓库并初始化 vault
-func InitCreate(repoName string) (*Vault, error) {
+func InitCreate(repoName string) (*Vault, []string, error) {
 	vaultDir, err := GetVaultDir()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if _, err := os.Stat(filepath.Join(vaultDir, ".git")); err == nil {
-		return nil, fmt.Errorf("Vault 已初始化: %s", vaultDir)
+		return nil, nil, fmt.Errorf("Vault 已初始化: %s", vaultDir)
 	}
 
 	repoURL, err := CreateGitHubRepo(repoName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := os.MkdirAll(vaultDir, 0755); err != nil {
-		return nil, fmt.Errorf("创建 vault 目录失败: %w", err)
+		return nil, nil, fmt.Errorf("创建 vault 目录失败: %w", err)
 	}
 
 	git := NewGitOps(vaultDir)
 	if err := git.Init(); err != nil {
-		return nil, fmt.Errorf("初始化 Git 仓库失败: %w", err)
+		return nil, nil, fmt.Errorf("初始化 Git 仓库失败: %w", err)
 	}
 	if err := git.SetRemote(repoURL); err != nil {
-		return nil, fmt.Errorf("设置远程仓库失败: %w", err)
+		return nil, nil, fmt.Errorf("设置远程仓库失败: %w", err)
 	}
 
 	v := &Vault{
@@ -145,29 +145,32 @@ func InitCreate(repoName string) (*Vault, error) {
 	}
 
 	if err := v.ensureDirs(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := v.Index.Save(vaultDir); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 创建 README
 	readme := "# Dec Vault\n\n个人 AI 知识仓库，由 [Dec](https://github.com/shichao402/Dec) 管理。\n"
 	if err := os.WriteFile(filepath.Join(vaultDir, "README.md"), []byte(readme), 0644); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := git.Add("."); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := git.Commit("init: 初始化 Dec Vault"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// 尝试推送，失败不阻塞（可能远程仓库还没准备好）
-	_ = git.Push()
+	// 尝试推送，失败不阻塞但返回警告
+	var warnings []string
+	if err := git.Push(); err != nil {
+		warnings = append(warnings, fmt.Sprintf("推送到远程仓库失败，Vault 已保存到本地: %v", err))
+	}
 
-	return v, nil
+	return v, warnings, nil
 }
 
 // ensureDirs 确保 vault 子目录存在
@@ -308,10 +311,9 @@ func (v *Vault) saveRule(absSource string) (string, string, error) {
 		return "", "", fmt.Errorf("复制 rule 失败: %w", err)
 	}
 
-	desc := ""
-	if d, err := parseRuleDescription(absSource); err == nil {
-		desc = d
-	}
+	desc, _ := parseRuleDescription(absSource)
+	// parseRuleDescription 返回 "" 表示文件中未找到描述（正常情况），
+	// 返回 error 仅在文件读取失败时发生，此处忽略因为文件已验证存在。
 
 	return name, desc, nil
 }
@@ -562,7 +564,7 @@ func copyFile(src, dst string) error {
 	}
 	defer srcFile.Close()
 
-	dstFile, err := os.Create(dst)
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
@@ -586,6 +588,18 @@ func CopyDir(src, dst string) error {
 	for _, entry := range entries {
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
+
+		// 处理符号链接：保留链接而非跟随目标
+		if entry.Type()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(srcPath)
+			if err != nil {
+				return fmt.Errorf("读取符号链接失败 %s: %w", srcPath, err)
+			}
+			if err := os.Symlink(target, dstPath); err != nil {
+				return fmt.Errorf("创建符号链接失败 %s: %w", dstPath, err)
+			}
+			continue
+		}
 
 		if entry.IsDir() {
 			if err := CopyDir(srcPath, dstPath); err != nil {

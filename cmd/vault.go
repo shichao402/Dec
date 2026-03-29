@@ -75,13 +75,19 @@ func runVaultInit(cmd *cobra.Command, args []string) error {
 	if vaultRepo != "" {
 		fmt.Printf("📦 克隆仓库: %s\n", vaultRepo)
 		v, err = vault.Init(vaultRepo)
+		if err != nil {
+			return err
+		}
 	} else {
 		fmt.Printf("📦 创建仓库: %s\n", vaultCreate)
-		v, err = vault.InitCreate(vaultCreate)
-	}
-
-	if err != nil {
-		return err
+		var warnings []string
+		v, warnings, err = vault.InitCreate(vaultCreate)
+		if err != nil {
+			return err
+		}
+		for _, warning := range warnings {
+			fmt.Printf("⚠️  %s\n", warning)
+		}
 	}
 
 	fmt.Printf("✅ Vault 已初始化: %s\n", v.Dir)

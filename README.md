@@ -432,6 +432,27 @@ dec vault push
 - 如果 Vault 没有配置远程仓库，会直接报错
 - 这是显式推送命令，不依赖项目目录
 
+## `dec update`
+
+检查并更新 Dec 到最新版本。
+
+```bash
+dec update
+```
+
+行为：
+
+- 检查 GitHub Release 上的最新版本
+- 如已是最新版本，输出提示并退出
+- 如有新版本，自动下载并替换当前二进制
+- 更新过程包含备份原始二进制，失败时可恢复
+
+说明：
+
+- 自动检查：Dec 会在每次命令执行时后台检查新版本（每天最多一次）
+- 发现新版本时会输出提示，建议运行 `dec update` 更新
+- 支持平台：Linux (amd64/arm64)、macOS (amd64/arm64)、Windows (amd64)
+
 ## 配置文件说明
 
 ## 项目级配置
@@ -772,13 +793,14 @@ go test ./...
 
 ## 项目文档
 
-更详细的设计、开发、构建与测试文档见 `Documents/`：
+详细的架构设计文档见：
 
-- `Documents/design/architecture/ARCHITECTURE.md`
-- `Documents/development/setup/DEVELOPMENT.md`
-- `Documents/development/deployment/BUILD.md`
-- `Documents/development/testing/TESTING.md`
-- `Documents/development/deployment/RELEASE.md`
+- `Documents/ARCHITECTURE.md`：Dec 的架构设计、模块划分、核心流程说明
+
+开发、构建与测试相关的脚本和工具见：
+
+- `scripts/` 目录：包含构建、测试、安装脚本
+- `Makefile`：开发工作流自动化
 
 ## 许可证
 

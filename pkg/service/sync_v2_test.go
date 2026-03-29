@@ -389,3 +389,111 @@ func TestSyncRemovesUndeclaredManagedMCPs(t *testing.T) {
 		t.Fatalf("未声明的 dec-* MCP 应被删除")
 	}
 }
+
+// ========================================
+// mergeConfig 边界条件测试
+// ========================================
+
+func TestMergeConfigUserAndManagedConflict(t *testing.T) {
+	// 场景：用户配置 "db" + 托管 "dec-db" → 用户 "db" 应被跳过
+	existing := &types.MCPConfig{
+		MCPServers: map[string]types.MCPServer{
+			"db": {Command: "npx", Args: []string{"user-db"}},
+		},
+	}
+	managed := map[string]types.MCPServer{
+		"dec-db": {Command: "npx", Args: []string{"managed-db"}},
+	}
+
+	result := mergeConfig(existing, managed)
+
+	if _, ok := result.MCPServers["db"]; ok {
+		t.Fatalf("用户配置 'db' 应因与托管 'dec-db' 冲突而被跳过")
+	}
+	if server, ok := result.MCPServers["dec-db"]; !ok || server.Args[0] != "managed-db" {
+		t.Fatalf("托管配置 'dec-db' 应被保留")
+	}
+}
+
+func TestMergeConfigExistingNil(t *testing.T) {
+	// 场景：existing 为 nil → 只返回 managed
+	managed := map[string]types.MCPServer{
+		"dec-tool": {Command: "npx", Args: []string{"tool"}},
+	}
+
+	result := mergeConfig(nil, managed)
+
+	if len(result.MCPServers) != 1 {
+		t.Fatalf("existing 为 nil 时应只返回 managed，得到 %d 个", len(result.MCPServers))
+	}
+	if _, ok := result.MCPServers["dec-tool"]; !ok {
+		t.Fatalf("应保留 managed 配置")
+	}
+}
+
+func TestMergeConfigEmptyManaged(t *testing.T) {
+	// 场景：managed 为空 → 只保留非 dec- 的用户配置
+	existing := &types.MCPConfig{
+		MCPServers: map[string]types.MCPServer{
+			"user-tool":     {Command: "npx", Args: []string{"user"}},
+			"dec-old-tool":  {Command: "npx", Args: []string{"old"}},
+		},
+	}
+	managed := map[string]types.MCPServer{}
+
+	result := mergeConfig(existing, managed)
+
+	if _, ok := result.MCPServers["user-tool"]; !ok {
+		t.Fatalf("用户配置应被保留")
+	}
+	if _, ok := result.MCPServers["dec-old-tool"]; ok {
+		t.Fatalf("旧的 dec-* 配置应被移除")
+	}
+}
+
+func TestMergeConfigUserDecPrefixRemoved(t *testing.T) {
+	// 场景：用户手动添加了 "dec-custom" → 应被移除（dec- 前缀由 Dec 托管）
+	existing := &types.MCPConfig{
+		MCPServers: map[string]types.MCPServer{
+			"dec-custom":  {Command: "npx", Args: []string{"custom"}},
+			"my-tool":     {Command: "npx", Args: []string{"mine"}},
+		},
+	}
+	managed := map[string]types.MCPServer{
+		"dec-other": {Command: "npx", Args: []string{"other"}},
+	}
+
+	result := mergeConfig(existing, managed)
+
+	if _, ok := result.MCPServers["dec-custom"]; ok {
+		t.Fatalf("用户手动添加的 dec-custom 应被移除（dec- 前缀由 Dec 管理）")
+	}
+	if _, ok := result.MCPServers["my-tool"]; !ok {
+		t.Fatalf("用户配置 my-tool 应被保留")
+	}
+	if _, ok := result.MCPServers["dec-other"]; !ok {
+		t.Fatalf("托管配置 dec-other 应被保留")
+	}
+}
+
+func TestMergeConfigSameNameConflict(t *testing.T) {
+	// 场景：用户配置 "tool" + 托管也有 "tool" → 托管优先
+	existing := &types.MCPConfig{
+		MCPServers: map[string]types.MCPServer{
+			"tool": {Command: "npx", Args: []string{"user-version"}},
+		},
+	}
+	managed := map[string]types.MCPServer{
+		"tool": {Command: "npx", Args: []string{"managed-version"}},
+	}
+
+	result := mergeConfig(existing, managed)
+
+	server, ok := result.MCPServers["tool"]
+	if !ok {
+		t.Fatalf("tool 应存在于结果中")
+	}
+	if server.Args[0] != "managed-version" {
+		t.Fatalf("同名配置应优先使用托管版本，得到 %s", server.Args[0])
+	}
+}
