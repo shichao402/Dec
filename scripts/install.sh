@@ -114,6 +114,10 @@ main() {
     print_info "最新版本: ${latest_version}"
 
     if [ -x "${binary_path}" ]; then
+        # macOS: 先清除可能存在的扩展属性，避免 --version 挂起
+        if [ "$(uname -s)" = "Darwin" ]; then
+            xattr -cr "${binary_path}" 2>/dev/null || true
+        fi
         local current_version
         current_version=$("${binary_path}" --version 2>&1 | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1 || true)
         if [ -n "${current_version}" ]; then
@@ -169,6 +173,10 @@ main() {
         exit 1
     fi
     chmod +x "${binary_path}"
+    # macOS: 清除下载的扩展属性（com.apple.provenance 等），否则二进制可能被系统阻止执行
+    if [ "$(uname -s)" = "Darwin" ]; then
+        xattr -cr "${binary_path}" 2>/dev/null || true
+    fi
     print_success "二进制下载完成"
 
     local system_config_url="https://raw.githubusercontent.com/shichao402/Dec/${update_branch}/config/system.json"

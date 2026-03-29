@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -245,6 +246,11 @@ func replaceBinary(newPath, targetPath string) error {
 		_ = os.Remove(targetPath)
 		_ = os.Rename(backupPath, targetPath)
 		return fmt.Errorf("设置权限失败: %w", err)
+	}
+
+	// macOS: 清除下载的扩展属性（com.apple.provenance 等），避免被系统阻止执行
+	if runtime.GOOS == "darwin" {
+		_ = exec.Command("xattr", "-cr", targetPath).Run()
 	}
 
 	// 清理备份

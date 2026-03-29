@@ -62,6 +62,10 @@ print_step "安装到本地目录..."
 mkdir -p "${BIN_DIR}" "${CONFIG_DIR}"
 cp dist/dec "${BINARY_PATH}"
 chmod +x "${BINARY_PATH}"
+# macOS: 清除可能的扩展属性以避免系统阻止执行
+if [ "$(uname -s)" = "Darwin" ]; then
+    xattr -cr "${BINARY_PATH}" 2>/dev/null || true
+fi
 print_success "已写入 ${BINARY_PATH}"
 
 if [ -f "${PROJECT_DIR}/config/system.json" ]; then
