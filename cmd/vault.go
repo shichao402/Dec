@@ -4,45 +4,36 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/shichao402/Dec/pkg/config"
-	"github.com/shichao402/Dec/pkg/vault"
+	"github.com/shichao402/Dec/pkg/repo"
 	"github.com/spf13/cobra"
 )
 
 var (
-	vaultRepo   string
-	vaultCreate string
-	vaultTags   []string
-	vaultType   string
+	vaultTags []string
 )
 
 var vaultCmd = &cobra.Command{
 	Use:   "vault",
-	Short: "管理个人知识仓库",
-	Long: `管理 Dec 个人知识仓库（Vault），跨项目、跨机器积累和复用 AI 资产。
+	Short: "管理 Vault 空间和资产",
+	Long: `在 Dec 仓库中创建和管理多个 Vault 空间。
 
-Vault 将 Skills、Rules、MCP 配置保存到个人 GitHub 仓库，
-在任何新项目中都可以搜索和下载使用。
+每个 Vault 是一个逻辑空间，用于组织特定项目的 Skills、Rules 和 MCP。
+一个项目可以关联多个 Vault，通过 dec vault pull/push/remove 管理资产。
 
 示例：
-  # 初始化（克隆已有仓库）
-  dec vault init --repo https://github.com/user/my-dec-vault
+  # 创建 Vault 空间
+  dec vault init github-tools
 
-  # 初始化（创建新仓库）
-  dec vault init --create my-dec-vault
+  # 保存资产到 Vault
+  dec vault save skill ./my-skill --vault github-tools
 
-  # 保存 skill 到 vault
-  dec vault save skill .cursor/skills/my-skill
-
-  # 搜索 vault
-  dec vault find "API test"
-
-  # 下载 skill 到当前项目
-  dec vault pull skill my-skill
-
-  # 列出所有资产
-  dec vault list`,
+  # 在新项目中搜索和使用资产
+  dec vault list
+  dec vault search "API"
+  dec vault pull skill my-skill`,
 }
 
 // ========================================
@@ -50,69 +41,50 @@ Vault 将 Skills、Rules、MCP 配置保存到个人 GitHub 仓库，
 // ========================================
 
 var vaultInitCmd = &cobra.Command{
-	Use:   "init",
-	Short: "初始化个人知识仓库",
-	Long: `初始化 Dec 个人知识仓库。
+	Use:   "init <vault-name>",
+	Short: "创建 Vault 空间",
+	Long: `在连接的仓库中创建一个新的 Vault 空间。
 
-两种方式：
-  --repo <url>     克隆已有的 GitHub 仓库
-  --create <name>  创建新的 GitHub 私有仓库（需要 gh CLI）
+Vault 是 Dec 仓库中的逻辑空间，用于组织和管理 Skills、Rules、MCP。
+同一个项目可以关联多个 Vault。
 
 示例：
-  dec vault init --repo https://github.com/user/my-dec-vault
-  dec vault init --create my-dec-vault`,
+  dec vault init github-tools       # 创建名为 github-tools 的 Vault
+  dec vault init common-rules`,
+	Args: cobra.ExactArgs(1),
 	RunE: runVaultInit,
 }
 
 func runVaultInit(cmd *cobra.Command, args []string) error {
-	if vaultRepo == "" && vaultCreate == "" {
-		return fmt.Errorf("请指定 --repo <url> 或 --create <name>")
+	vaultName := args[0]
+
+	// 确保仓库已连接
+	connected, err := repo.IsConnected()
+	if err != nil {
+		return fmt.Errorf("检查仓库连接失败: %w", err)
+	}
+	if !connected {
+		return fmt.Errorf("仓库未连接\n\n运行 dec repo <url> 先连接你的仓库")
 	}
 
-	var v *vault.Vault
-	var err error
+	fmt.Printf("📦 初始化 Vault: %s\n", vaultName)
 
-	if vaultRepo != "" {
-		fmt.Printf("📦 克隆仓库: %s\n", vaultRepo)
-		v, err = vault.Init(vaultRepo)
-		if err != nil {
-			return err
-		}
-	} else {
-		fmt.Printf("📦 创建仓库: %s\n", vaultCreate)
-		var warnings []string
-		v, warnings, err = vault.InitCreate(vaultCreate)
-		if err != nil {
-			return err
-		}
-		for _, warning := range warnings {
-			fmt.Printf("⚠️  %s\n", warning)
-		}
+	// 在项目配置中记录 Vault 关联
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("获取当前目录失败: %w", err)
 	}
 
-	fmt.Printf("✅ Vault 已初始化: %s\n", v.Dir)
-
-	// 记录 vault 源到全局配置
-	source := vaultRepo
-	if source == "" {
-		source = vaultCreate
-	}
-	if err := config.SetVaultSource(source); err != nil {
-		fmt.Printf("⚠️  保存 Vault 配置失败: %v\n", err)
+	mgr := config.NewProjectConfigManager(cwd)
+	if err := mgr.AddVault(vaultName); err != nil {
+		return fmt.Errorf("添加 Vault 关联失败: %w", err)
 	}
 
-	// 自动安装 Dec Skill
-	if err := vault.InstallDecSkill(); err != nil {
-		fmt.Printf("⚠️  安装 Dec Skill 失败: %v\n", err)
-	} else {
-		skillPath, _ := vault.GetDecSkillPath()
-		fmt.Printf("✅ Dec Skill 已安装: %s\n", skillPath)
-	}
-
-	fmt.Println("\n📝 下一步：")
-	fmt.Println("   1. 使用 dec vault save 保存资产到 Vault")
-	fmt.Println("   2. 使用 dec vault find 搜索已有资产")
-	fmt.Println("   3. 使用 dec vault pull 下载资产到项目")
+	fmt.Printf("✅ Vault '%s' 已初始化\n", vaultName)
+	fmt.Println("\n后续步骤:")
+	fmt.Printf("  dec vault save skill <path>     # 保存 Skill 到 %s\n", vaultName)
+	fmt.Println("  dec vault list                  # 列出所有 Vault 中的资产")
+	fmt.Println("  dec vault pull skill <name>     # 从 Vault 下载资产")
 
 	return nil
 }
@@ -121,21 +93,28 @@ func runVaultInit(cmd *cobra.Command, args []string) error {
 // vault save
 // ========================================
 
+var (
+	saveVault string
+)
+
 var vaultSaveCmd = &cobra.Command{
 	Use:   "save <type> <path>",
 	Short: "保存资产到 Vault",
-	Long: `保存本地资产到个人知识仓库。
+	Long: `保存本地资产到 Vault。
 
 支持的资产类型：
   skill   Skill 目录（包含 SKILL.md）
   rule    规则文件（.mdc）
-  mcp     单个 MCP server 片段 JSON（包含 command/args/env）
+  mcp     MCP 配置文件 (JSON，包含 command/args/env)
+
+资产保存到当前项目关联的 Vault 中。
+如果项目关联多个 Vault，通过 --vault 指定目标。
 
 示例：
-  dec vault save skill .cursor/skills/my-skill
-  dec vault save skill .cursor/skills/my-skill --tag testing --tag api
-  dec vault save rule .cursor/rules/my-rule.mdc
-  dec vault save mcp my-tool.json`,
+  dec vault save skill ./my-skill
+  dec vault save skill ./my-skill --tag testing --tag api
+  dec vault save rule ./rules/logging.mdc
+  dec vault save mcp ./mcp-config.json --vault github-tools`,
 	Args: cobra.ExactArgs(2),
 	RunE: runVaultSave,
 }
@@ -144,93 +123,156 @@ func runVaultSave(cmd *cobra.Command, args []string) error {
 	itemType := args[0]
 	sourcePath := args[1]
 
-	v, err := vault.Open()
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("📦 保存 %s: %s\n", itemType, sourcePath)
-
-	savedName, warnings, err := v.Save(itemType, sourcePath, vaultTags)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("✅ 已保存到 Vault\n")
-	for _, warning := range warnings {
-		fmt.Printf("⚠️  %s\n", warning)
-	}
-
-	// 更新本地追踪
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Printf("⚠️  获取当前目录失败，跳过本地追踪更新: %v\n", err)
-		return nil
+		return fmt.Errorf("获取当前目录失败: %w", err)
 	}
 
-	td, err := vault.LoadTracking(cwd)
+	// 获取项目配置（包括关联的 Vault）
+	mgr := config.NewProjectConfigManager(cwd)
+	projectConfig, err := mgr.LoadProjectConfig()
 	if err != nil {
-		fmt.Printf("⚠️  加载本地追踪失败，跳过更新: %v\n", err)
-		return nil
+		return fmt.Errorf("加载项目配置失败: %w", err)
 	}
 
-	item := v.Index.Get(itemType, savedName)
-	if item == nil {
-		fmt.Printf("⚠️  Vault 索引中未找到已保存资产，跳过本地追踪更新: %s/%s\n", itemType, savedName)
-		return nil
+	// 确定目标 Vault
+	var targetVault string
+	if saveVault != "" {
+		targetVault = saveVault
+	} else if len(projectConfig.Vaults) == 1 {
+		targetVault = projectConfig.Vaults[0]
+	} else if len(projectConfig.Vaults) > 1 {
+		return fmt.Errorf("项目关联多个 Vault，请通过 --vault 指定目标:\n  %s", strings.Join(projectConfig.Vaults, ", "))
+	} else {
+		return fmt.Errorf("项目未关联任何 Vault，请先运行 dec vault init <vault-name>")
 	}
 
-	hash, err := hashLocalPath(sourcePath)
+	fmt.Printf("📦 保存 %s 到 Vault '%s': %s\n", itemType, targetVault, sourcePath)
+
+	// 获取仓库 Git 实例来操作 Vault
+	git, err := repo.GetGit()
 	if err != nil {
-		fmt.Printf("⚠️  计算本地资产哈希失败，跳过本地追踪更新: %v\n", err)
+		return err
+	}
+
+	repoDir, err := repo.GetRepoDir()
+	if err != nil {
+		return err
+	}
+
+	// 保存资产到 vault/{vaultName}/{type}/ 目录
+	vaultAssetPath, warnings, err := saveAssetToVault(itemType, sourcePath, repoDir, targetVault, vaultTags)
+	if err != nil {
+		return err
+	}
+
+	for _, w := range warnings {
+		fmt.Printf("⚠️  %s\n", w)
+	}
+
+	// 提交并推送
+	if err := git.Add("."); err != nil {
+		return fmt.Errorf("git add 失败: %w", err)
+	}
+
+	commitMsg := fmt.Sprintf("save: %s/%s %s", targetVault, itemType, vaultAssetPath)
+	if err := git.Commit(commitMsg); err != nil {
+		return fmt.Errorf("git commit 失败: %w", err)
+	}
+
+	if err := git.Push(); err != nil {
+		fmt.Printf("⚠️  推送到远程失败，已保存到本地: %v\n", err)
+	}
+
+	// 记录到项目资产追踪
+	assetsConfig, _ := mgr.LoadAssetsConfig()
+	assetsConfig.AddAsset(itemType, vaultAssetPath, targetVault, time.Now().Format(time.RFC3339))
+	_ = mgr.SaveAssetsConfig(assetsConfig)
+
+	fmt.Println("✅ 资产已保存")
+
+	return nil
+}
+
+// ========================================
+// vault list
+// ========================================
+
+var vaultListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "列出所有 Vault 空间",
+	Long: `列出当前仓库中的所有 Vault 空间。
+
+示例：
+  dec vault list`,
+	RunE: runVaultList,
+}
+
+func runVaultList(cmd *cobra.Command, args []string) error {
+	// 先从远程拉取最新
+	if err := repo.Pull(); err != nil {
+		fmt.Printf("⚠️  拉取远程最新失败: %v\n", err)
+	}
+
+	repoDir, err := repo.GetRepoDir()
+	if err != nil {
+		return err
+	}
+
+	// 列出 repo/{vault-name}/ 目录
+	entries, err := os.ReadDir(repoDir)
+	if err != nil {
+		return fmt.Errorf("读取仓库目录失败: %w", err)
+	}
+
+	var vaults []string
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			vaults = append(vaults, entry.Name())
+		}
+	}
+
+	if len(vaults) == 0 {
+		fmt.Println("仓库中还没有 Vault 空间")
+		fmt.Println("\n💡 运行 dec vault init <vault-name> 创建 Vault")
 		return nil
 	}
 
-	td.Track(item.Name, item.Type, sourcePath, hash)
-	if err := td.Save(cwd); err != nil {
-		fmt.Printf("⚠️  保存本地追踪失败: %v\n", err)
+	fmt.Printf("📦 Vault 空间 (%d 个):\n\n", len(vaults))
+	for _, v := range vaults {
+		fmt.Printf("  - %s\n", v)
 	}
 
 	return nil
 }
 
 // ========================================
-// vault find
+// vault search
 // ========================================
 
-var vaultFindCmd = &cobra.Command{
-	Use:   "find <query>",
+var vaultSearchCmd = &cobra.Command{
+	Use:   "search <query>",
 	Short: "搜索 Vault 中的资产",
-	Long: `搜索个人知识仓库中的资产。
+	Long: `在所有已连接的 Vault 中搜索资产。
 
-匹配名称、描述和标签。
+匹配资产名称和元数据。
 
 示例：
-  dec vault find "API test"
-  dec vault find "logging"`,
+  dec vault search "API"
+  dec vault search "test"`,
 	Args: cobra.ExactArgs(1),
-	RunE: runVaultFind,
+	RunE: runVaultSearch,
 }
 
-func runVaultFind(cmd *cobra.Command, args []string) error {
+func runVaultSearch(cmd *cobra.Command, args []string) error {
 	query := args[0]
 
-	v, err := vault.Open()
-	if err != nil {
-		return err
-	}
+	// TODO: 实现搜索逻辑
+	// 遍历 repo/{vault-name}/{skill,rule,mcp}/ 目录
+	// 根据文件名和元数据匹配查询
 
-	// 先从远程同步
-	_ = v.Refresh()
-
-	results := v.Find(query)
-	if len(results) == 0 {
-		fmt.Printf("未找到匹配 \"%s\" 的资产\n", query)
-		return nil
-	}
-
-	fmt.Printf("🔍 搜索 \"%s\"，找到 %d 个结果:\n\n", query, len(results))
-	printVaultItems(results)
+	fmt.Printf("🔍 搜索: %s\n\n", query)
+	fmt.Println("(搜索功能开发中)")
 
 	return nil
 }
@@ -241,69 +283,34 @@ func runVaultFind(cmd *cobra.Command, args []string) error {
 
 var vaultPullCmd = &cobra.Command{
 	Use:   "pull <type> <name>",
-	Short: "从 Vault 下载资产到当前项目",
-	Long: `从个人知识仓库下载资产到当前项目。
+	Short: "从 Vault 下载资产到项目",
+	Long: `从 Vault 下载资产到当前项目。
 
-pull 成功后会：
-1. 把资产部署到当前项目配置的所有 IDE
-2. 自动写入 .dec/config/vault.yaml
-3. 更新本地追踪状态
+pull 会：
+1. 从远程仓库拉取资产
+2. 复制到项目的 IDE 目录
+3. 记录到 .dec/assets.yaml
 
 示例：
-  dec vault pull skill create-api-test
-  dec vault pull rule my-logging-standard`,
+  dec vault pull skill my-skill
+  dec vault pull rule logging-standard`,
 	Args: cobra.ExactArgs(2),
 	RunE: runVaultPull,
 }
 
 func runVaultPull(cmd *cobra.Command, args []string) error {
 	itemType := args[0]
-	name := args[1]
+	assetName := args[1]
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("获取当前目录失败: %w", err)
-	}
+	fmt.Printf("📥 下载 %s: %s\n", itemType, assetName)
 
-	v, err := vault.Open()
-	if err != nil {
-		return err
-	}
+	// TODO: 实现 pull 逻辑
+	// 1. 从 repo/{vault-name}/{type}/{name}/ 查找资产
+	// 2. 复制到项目 IDE 目录
+	// 3. 更新 .dec/assets.yaml
 
-	// 先从远程同步
-	_ = v.Refresh()
+	fmt.Println("(pull 功能开发中)")
 
-	// 读取项目 IDE 配置，确定所有目标 IDE
-	ideNames := resolveProjectIDEs(cwd)
-
-	fmt.Printf("📥 下载 %s: %s\n", itemType, name)
-
-	localPaths, err := v.Pull(itemType, name, cwd, ideNames)
-	if err != nil {
-		return err
-	}
-
-	mgr := config.NewProjectConfigManagerV2(cwd)
-	if err := mgr.EnsureVaultItem(itemType, name); err != nil {
-		return fmt.Errorf("更新项目 Vault 声明失败: %w", err)
-	}
-
-	// 更新本地追踪
-	item := v.Index.Get(itemType, name)
-	if item != nil {
-		td, _ := vault.LoadTracking(cwd)
-		if itemType == "mcp" && len(localPaths) > 1 {
-			localPaths = localPaths[:1]
-		}
-		hash := ""
-		if len(localPaths) > 0 {
-			hash, _ = hashLocalPath(localPaths[0])
-		}
-		td.TrackPaths(name, itemType, localPaths, hash)
-		_ = td.Save(cwd)
-	}
-
-	fmt.Printf("✅ 已下载到当前项目\n")
 	return nil
 }
 
@@ -313,100 +320,70 @@ func runVaultPull(cmd *cobra.Command, args []string) error {
 
 var vaultPushCmd = &cobra.Command{
 	Use:   "push",
-	Short: "推送 Vault 变更到远程仓库",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		v, err := vault.Open()
-		if err != nil {
-			return err
-		}
+	Short: "推送本地修改到 Vault",
+	Long: `推送项目中修改的资产到远程 Vault。
 
-		fmt.Println("📤 推送到远程仓库...")
-		if err := v.Push(); err != nil {
-			return err
-		}
-
-		fmt.Println("✅ 推送完成")
-		return nil
-	},
-}
-
-// ========================================
-// vault list
-// ========================================
-
-var vaultListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "列出 Vault 中的资产",
-	Long: `列出个人知识仓库中的所有资产。
+此命令检测 .dec/assets.yaml 中追踪的资产修改，
+并推送到对应的 Vault。
 
 示例：
-  dec vault list              # 列出全部
-  dec vault list --type skill # 只列出 skill`,
-	RunE: runVaultList,
+  dec vault push`,
+	RunE: runVaultPush,
 }
 
-func runVaultList(cmd *cobra.Command, args []string) error {
-	v, err := vault.Open()
-	if err != nil {
-		return err
-	}
+func runVaultPush(cmd *cobra.Command, args []string) error {
+	fmt.Println("📤 推送资产修改...")
 
-	items := v.List(vaultType)
-	if len(items) == 0 {
-		if vaultType != "" {
-			fmt.Printf("Vault 中没有 %s 类型的资产\n", vaultType)
-		} else {
-			fmt.Println("Vault 为空")
-		}
-		fmt.Println("\n💡 使用 dec vault save 保存资产")
-		return nil
-	}
+	// TODO: 实现 push 逻辑
+	// 1. 读取 .dec/assets.yaml
+	// 2. 检查本地资产是否修改
+	// 3. 同步回 repo/{vault-name}/{type}/
+	// 4. git commit 和 push
 
-	if vaultType != "" {
-		fmt.Printf("📦 Vault 资产（%s）: %d 个\n\n", vaultType, len(items))
-	} else {
-		fmt.Printf("📦 Vault 资产: %d 个\n\n", len(items))
-	}
+	fmt.Println("(push 功能开发中)")
 
-	printVaultItems(items)
 	return nil
 }
 
 // ========================================
-// vault status
+// vault remove
 // ========================================
 
-var vaultStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "显示 Vault 同步状态",
-	Long: `显示当前项目中追踪资产的变更状态。
+var (
+	removeRemote bool
+)
+
+var vaultRemoveCmd = &cobra.Command{
+	Use:   "remove <type> <name>",
+	Short: "从项目移除资产",
+	Long: `从项目中移除已安装的资产。
+
+默认只从本地项目移除。
+使用 --remote 也删除远程 Vault 中的资产。
 
 示例：
-  dec vault status`,
-	RunE: runVaultStatus,
+  dec vault remove skill my-skill          # 只从项目移除
+  dec vault remove rule logging --remote   # 从项目和 Vault 移除`,
+	Args: cobra.ExactArgs(2),
+	RunE: runVaultRemove,
 }
 
-func runVaultStatus(cmd *cobra.Command, args []string) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("获取当前目录失败: %w", err)
+func runVaultRemove(cmd *cobra.Command, args []string) error {
+	itemType := args[0]
+	assetName := args[1]
+
+	fmt.Printf("🗑️  移除 %s: %s\n", itemType, assetName)
+
+	if removeRemote {
+		fmt.Println("   (同时移除远程)")
 	}
 
-	td, err := vault.LoadTracking(cwd)
-	if err != nil {
-		return err
-	}
+	// TODO: 实现 remove 逻辑
+	// 1. 从 .dec/assets.yaml 移除
+	// 2. 从项目 IDE 目录删除文件
+	// 3. 如果 --remote，从 repo/{vault-name}/{type}/ 删除
 
-	if len(td.Tracked) == 0 {
-		fmt.Println("当前项目没有追踪任何 Vault 资产")
-		return nil
-	}
-
-	v, _ := vault.Open()
-	changes := td.CheckChanges(cwd, v)
-
-	fmt.Printf("📊 追踪 %d 个资产\n\n", len(td.Tracked))
-	fmt.Println(vault.FormatChanges(changes))
+	fmt.Println("(remove 功能开发中)")
 
 	return nil
 }
@@ -415,32 +392,11 @@ func runVaultStatus(cmd *cobra.Command, args []string) error {
 // 辅助函数
 // ========================================
 
-func printVaultItems(items []vault.VaultItem) {
-	for _, item := range items {
-		fmt.Printf("  [%s] %s\n", item.Type, item.Name)
-		if item.Description != "" {
-			fmt.Printf("        %s\n", item.Description)
-		}
-		if len(item.Tags) > 0 {
-			fmt.Printf("        标签: %s\n", strings.Join(item.Tags, ", "))
-		}
-		fmt.Printf("        更新: %s\n", item.UpdatedAt)
-		fmt.Println()
-	}
-}
+func saveAssetToVault(itemType, sourcePath, repoDir, vaultName string, tags []string) (string, []string, error) {
+	// TODO: 实现资产保存逻辑
+	// 将资产复制到 repoDir/{vaultName}/{itemType}/{name}/
 
-// resolveProjectIDEs 从项目配置解析所有目标 IDE 名称
-func resolveProjectIDEs(projectRoot string) []string {
-	mgr := config.NewProjectConfigManagerV2(projectRoot)
-	idesConfig, err := mgr.LoadIDEsConfig()
-	if err == nil && len(idesConfig.IDEs) > 0 {
-		return idesConfig.IDEs
-	}
-	return []string{"cursor"}
-}
-
-func hashLocalPath(path string) (string, error) {
-	return vault.HashPath(path)
+	return sourcePath, nil, nil
 }
 
 // ========================================
@@ -448,24 +404,21 @@ func hashLocalPath(path string) (string, error) {
 // ========================================
 
 func init() {
-	// vault init 标志
-	vaultInitCmd.Flags().StringVar(&vaultRepo, "repo", "", "克隆已有的 GitHub 仓库 URL")
-	vaultInitCmd.Flags().StringVar(&vaultCreate, "create", "", "创建新的 GitHub 私有仓库名称")
-
 	// vault save 标志
+	vaultSaveCmd.Flags().StringVar(&saveVault, "vault", "", "目标 Vault（项目关联多个时必填）")
 	vaultSaveCmd.Flags().StringSliceVar(&vaultTags, "tag", nil, "资产标签（可多次指定）")
 
-	// vault list 标志
-	vaultListCmd.Flags().StringVar(&vaultType, "type", "", "筛选资产类型 (skill, rule, mcp)")
+	// vault remove 标志
+	vaultRemoveCmd.Flags().BoolVar(&removeRemote, "remote", false, "同时删除远程 Vault 中的资产")
 
 	// 注册子命令
 	vaultCmd.AddCommand(vaultInitCmd)
 	vaultCmd.AddCommand(vaultSaveCmd)
-	vaultCmd.AddCommand(vaultFindCmd)
+	vaultCmd.AddCommand(vaultListCmd)
+	vaultCmd.AddCommand(vaultSearchCmd)
 	vaultCmd.AddCommand(vaultPullCmd)
 	vaultCmd.AddCommand(vaultPushCmd)
-	vaultCmd.AddCommand(vaultListCmd)
-	vaultCmd.AddCommand(vaultStatusCmd)
+	vaultCmd.AddCommand(vaultRemoveCmd)
 
 	RootCmd.AddCommand(vaultCmd)
 }

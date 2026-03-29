@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/pkg/ide"
-	"github.com/shichao402/Dec/pkg/paths"
+	"github.com/shichao402/Dec/pkg/repo"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
@@ -23,7 +23,7 @@ type Vault struct {
 
 // GetVaultDir 获取 vault 本地目录 (~/.dec/vault/)
 func GetVaultDir() (string, error) {
-	rootDir, err := paths.GetRootDir()
+	rootDir, err := repo.GetRootDir()
 	if err != nil {
 		return "", err
 	}

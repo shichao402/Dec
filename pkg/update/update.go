@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/shichao402/Dec/pkg/config"
-	"github.com/shichao402/Dec/pkg/paths"
+	"github.com/shichao402/Dec/pkg/repo"
 	"github.com/shichao402/Dec/pkg/version"
 )
 
@@ -280,7 +280,7 @@ func copyFilePath(src, dst string) error {
 // ── 状态文件读写 ──
 
 func getStatePath() (string, error) {
-	rootDir, err := paths.GetRootDir()
+	rootDir, err := repo.GetRootDir()
 	if err != nil {
 		return "", err
 	}
