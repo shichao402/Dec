@@ -155,7 +155,6 @@ var vaultSaveCmd = &cobra.Command{
 
 示例：
   dec vault save skill ./my-skill
-  dec vault save skill ./my-skill --tag testing --tag api
   dec vault save rule ./rules/logging.mdc
   dec vault save mcp ./mcp-config.json --vault github-tools`,
 	Args: cobra.ExactArgs(2),
