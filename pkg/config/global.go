@@ -179,12 +179,12 @@ func GetSystemConfig() *SystemConfig {
 	return &SystemConfig{
 		RepoOwner:    "shichao402",
 		RepoName:     "Dec",
-		VersionURL:   "https://api.github.com/repos/shichao402/Dec/releases/latest",
-		UpdateBranch: "main",
+		VersionURL:   "https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/version.json",
+		UpdateBranch: "ReleaseLatest",
 	}
 }
 
 // GetVersionURL 获取版本检查 URL
 func GetVersionURL() string {
-	return "https://api.github.com/repos/shichao402/Dec/releases/latest"
+	return "https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/version.json"
 }
