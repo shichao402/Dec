@@ -226,9 +226,14 @@ func runVaultSave(cmd *cobra.Command, args []string) error {
 	}
 
 	// 记录到项目资产追踪
-	assetsConfig, _ := mgr.LoadAssetsConfig()
+	assetsConfig, err := mgr.LoadAssetsConfig()
+	if err != nil {
+		return fmt.Errorf("加载资产追踪失败: %w", err)
+	}
 	assetsConfig.AddAsset(itemType, assetName, targetVault, time.Now().Format(time.RFC3339))
-	_ = mgr.SaveAssetsConfig(assetsConfig)
+	if err := mgr.SaveAssetsConfig(assetsConfig); err != nil {
+		return fmt.Errorf("保存资产追踪失败: %w", err)
+	}
 
 	fmt.Printf("✅ %s '%s' 已保存到 Vault '%s'\n", itemType, assetName, targetVault)
 
@@ -470,20 +475,18 @@ func pullSingleAsset(itemType, assetName string) error {
 		ideNames = []string{"cursor"}
 	}
 
-	// 为每个 IDE 安装资产
-	for _, ideName := range ideNames {
-		ideImpl := ide.Get(ideName)
-		if err := installAssetToIDE(itemType, assetName, assetPath, cwd, ideImpl); err != nil {
-			fmt.Printf("⚠️  安装到 %s 失败: %v\n", ideName, err)
-			continue
-		}
+	if err := installAssetToIDEs(itemType, assetName, assetPath, cwd, ideNames); err != nil {
+		return err
 	}
 
 	// 更新 assets.yaml
-	assetsConfig, _ := mgr.LoadAssetsConfig()
+	assetsConfig, err := mgr.LoadAssetsConfig()
+	if err != nil {
+		return fmt.Errorf("加载资产追踪失败: %w", err)
+	}
 	assetsConfig.AddAsset(itemType, assetName, foundVault, time.Now().Format(time.RFC3339))
 	if err := mgr.SaveAssetsConfig(assetsConfig); err != nil {
-		fmt.Printf("⚠️  更新资产追踪失败: %v\n", err)
+		return fmt.Errorf("保存资产追踪失败: %w", err)
 	}
 
 	fmt.Printf("✅ %s '%s' 已下载到项目 (IDE: %s)\n", itemType, assetName, strings.Join(ideNames, ", "))
@@ -561,7 +564,10 @@ func runVaultPullAll() error {
 
 	fmt.Printf("📥 批量拉取 %d 个资产 (来自 %d 个 Vault)...\n\n", len(allAssets), len(targetVaults))
 
-	assetsConfig, _ := mgr.LoadAssetsConfig()
+	assetsConfig, err := mgr.LoadAssetsConfig()
+	if err != nil {
+		return fmt.Errorf("加载资产追踪失败: %w", err)
+	}
 	pulled := 0
 	failed := 0
 
@@ -572,20 +578,12 @@ func runVaultPullAll() error {
 		}
 
 		// 为每个 IDE 安装
-		installOK := true
-		for _, ideName := range ideNames {
-			ideImpl := ide.Get(ideName)
-			if err := installAssetToIDE(asset.Type, asset.Name, assetPath, cwd, ideImpl); err != nil {
-				fmt.Printf("  ⚠️  [%-5s] %s (安装到 %s 失败: %v)\n", asset.Type, asset.Name, ideName, err)
-				installOK = false
-			}
-		}
-
-		if installOK {
+		if err := installAssetToIDEs(asset.Type, asset.Name, assetPath, cwd, ideNames); err == nil {
 			fmt.Printf("  ✅ [%-5s] %s  (from %s)\n", asset.Type, asset.Name, asset.Vault)
 			assetsConfig.AddAsset(asset.Type, asset.Name, asset.Vault, time.Now().Format(time.RFC3339))
 			pulled++
 		} else {
+			fmt.Printf("  ⚠️  [%-5s] %s (%v)\n", asset.Type, asset.Name, err)
 			failed++
 		}
 	}
@@ -593,7 +591,7 @@ func runVaultPullAll() error {
 	// 保存 assets.yaml
 	if pulled > 0 {
 		if err := mgr.SaveAssetsConfig(assetsConfig); err != nil {
-			fmt.Printf("⚠️  更新资产追踪失败: %v\n", err)
+			return fmt.Errorf("保存资产追踪失败: %w", err)
 		}
 	}
 
@@ -774,10 +772,15 @@ func runVaultRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	// 从 assets.yaml 移除
-	assetsConfig, _ := mgr.LoadAssetsConfig()
+	assetsConfig, err := mgr.LoadAssetsConfig()
+	if err != nil {
+		return fmt.Errorf("加载资产追踪失败: %w", err)
+	}
 	removed := assetsConfig.RemoveAsset(itemType, assetName)
 	if removed {
-		_ = mgr.SaveAssetsConfig(assetsConfig)
+		if err := mgr.SaveAssetsConfig(assetsConfig); err != nil {
+			return fmt.Errorf("保存资产追踪失败: %w", err)
+		}
 		local = true
 	}
 
@@ -1083,6 +1086,43 @@ func managedName(name string) string {
 		return name
 	}
 	return "dec-" + name
+}
+
+// installAssetToIDEs 将资产安装到多个 IDE；如果中途失败，会回滚已安装的 IDE
+func installAssetToIDEs(itemType, assetName, srcPath, projectRoot string, ideNames []string) error {
+	installed := make([]ide.IDE, 0, len(ideNames))
+
+	for _, ideName := range ideNames {
+		ideImpl := ide.Get(ideName)
+		if err := installAssetToIDE(itemType, assetName, srcPath, projectRoot, ideImpl); err != nil {
+			rollbackErrors := rollbackInstalledAsset(itemType, assetName, projectRoot, installed)
+			if len(rollbackErrors) > 0 {
+				return fmt.Errorf("安装到 %s 失败: %v；回滚失败: %s", ideName, err, strings.Join(rollbackErrors, "; "))
+			}
+			return fmt.Errorf("安装到 %s 失败: %w", ideName, err)
+		}
+		installed = append(installed, ideImpl)
+	}
+
+	return nil
+}
+
+func rollbackInstalledAsset(itemType, assetName, projectRoot string, installed []ide.IDE) []string {
+	var rollbackErrors []string
+
+	for i := len(installed) - 1; i >= 0; i-- {
+		ideImpl := installed[i]
+		removed, err := removeAssetFromIDE(itemType, assetName, projectRoot, ideImpl)
+		if err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Sprintf("%s: %v", ideImpl.Name(), err))
+			continue
+		}
+		if !removed {
+			rollbackErrors = append(rollbackErrors, fmt.Sprintf("%s: 未找到已安装资产", ideImpl.Name()))
+		}
+	}
+
+	return rollbackErrors
 }
 
 // installAssetToIDE 将资产安装到指定 IDE 的项目目录

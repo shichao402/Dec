@@ -2,14 +2,83 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/types"
 )
+
+type failingMCPIDE struct {
+	name string
+}
+
+func (f *failingMCPIDE) Name() string {
+	return f.name
+}
+
+func (f *failingMCPIDE) RulesDir(projectRoot string) string {
+	return filepath.Join(projectRoot, "."+f.name, "rules")
+}
+
+func (f *failingMCPIDE) SkillsDir(projectRoot string) string {
+	return filepath.Join(projectRoot, "."+f.name, "skills")
+}
+
+func (f *failingMCPIDE) MCPConfigPath(projectRoot string) string {
+	return filepath.Join(projectRoot, "."+f.name, "mcp.json")
+}
+
+func (f *failingMCPIDE) WriteRules(projectRoot string, rules []ide.RuleFile) error {
+	return nil
+}
+
+func (f *failingMCPIDE) WriteSkill(projectRoot string, skillName string, files []ide.SkillFile) error {
+	return nil
+}
+
+func (f *failingMCPIDE) WriteMCPConfig(projectRoot string, config *types.MCPConfig) error {
+	return nil
+}
+
+func (f *failingMCPIDE) LoadMCPConfig(projectRoot string) (*types.MCPConfig, error) {
+	return nil, fmt.Errorf("mock MCP load failure")
+}
+
+func chdirForTest(t *testing.T, dir string) {
+	t.Helper()
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("获取当前目录失败: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("切换目录失败: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWD)
+	})
+}
+
+func setEnvForTest(t *testing.T, key, value string) {
+	t.Helper()
+
+	oldValue, existed := os.LookupEnv(key)
+	if err := os.Setenv(key, value); err != nil {
+		t.Fatalf("设置环境变量失败: %v", err)
+	}
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv(key, oldValue)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
+}
 
 // ========================================
 // isValidAssetType
@@ -749,8 +818,8 @@ func TestRemoveMCPFromIDE(t *testing.T) {
 
 	existingConfig := types.MCPConfig{
 		MCPServers: map[string]types.MCPServer{
-			"user-tool":    {Command: "npx"},
-			"dec-pg-tool":  {Command: "npx"},
+			"user-tool":   {Command: "npx"},
+			"dec-pg-tool": {Command: "npx"},
 		},
 	}
 	mcpDir := filepath.Join(projectRoot, ".cursor")
@@ -815,6 +884,91 @@ func TestInstallSkillToMultipleIDEs(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("%s 下 skill 未安装: %v", dir, err)
 		}
+	}
+}
+
+func TestPullSingleAsset_RollsBackInstalledIDEsOnFailure(t *testing.T) {
+	decHome := t.TempDir()
+	projectRoot := t.TempDir()
+	failingIDEName := "failing-mcp-rollback"
+
+	setEnvForTest(t, "DEC_HOME", decHome)
+	chdirForTest(t, projectRoot)
+	ide.Register(&failingMCPIDE{name: failingIDEName})
+
+	repoMCPDir := filepath.Join(decHome, "repo", "v1", "mcp")
+	if err := os.MkdirAll(repoMCPDir, 0755); err != nil {
+		t.Fatalf("创建测试仓库失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoMCPDir, "pg-tool.json"), []byte(`{"command":"npx","args":["-y","pg-tool"]}`), 0644); err != nil {
+		t.Fatalf("写入测试 MCP 失败: %v", err)
+	}
+
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.InitProject("v1", []string{"cursor", failingIDEName}); err != nil {
+		t.Fatalf("初始化项目失败: %v", err)
+	}
+
+	err := pullSingleAsset("mcp", "pg-tool")
+	if err == nil {
+		t.Fatalf("期望安装失败并触发回滚")
+	}
+	if !strings.Contains(err.Error(), "安装到 failing-mcp-rollback 失败") {
+		t.Fatalf("错误信息应包含失败 IDE, 得到: %v", err)
+	}
+
+	assetsConfig, err := mgr.LoadAssetsConfig()
+	if err != nil {
+		t.Fatalf("读取资产追踪失败: %v", err)
+	}
+	if asset := assetsConfig.FindAsset("mcp", "pg-tool"); asset != nil {
+		t.Fatalf("回滚后不应写入资产追踪: %+v", *asset)
+	}
+
+	cursorConfigPath := filepath.Join(projectRoot, ".cursor", "mcp.json")
+	data, err := os.ReadFile(cursorConfigPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatalf("读取 cursor MCP 配置失败: %v", err)
+	}
+
+	var cfg types.MCPConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("解析 cursor MCP 配置失败: %v", err)
+	}
+	if _, ok := cfg.MCPServers["dec-pg-tool"]; ok {
+		t.Fatalf("回滚后 cursor 不应保留托管 MCP 条目")
+	}
+}
+
+func TestRunVaultRemove_ReturnsAssetsLoadError(t *testing.T) {
+	projectRoot := t.TempDir()
+	chdirForTest(t, projectRoot)
+
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{Vaults: []string{"v1"}, IDEs: []string{"cursor"}}); err != nil {
+		t.Fatalf("写入项目配置失败: %v", err)
+	}
+
+	assetsPath := filepath.Join(mgr.GetDecDir(), "assets.yaml")
+	if err := os.MkdirAll(assetsPath, 0755); err != nil {
+		t.Fatalf("创建损坏的 assets.yaml 目录失败: %v", err)
+	}
+
+	oldRemoveRemote := removeRemote
+	removeRemote = false
+	t.Cleanup(func() {
+		removeRemote = oldRemoveRemote
+	})
+
+	err := runVaultRemove(nil, []string{"skill", "missing"})
+	if err == nil {
+		t.Fatalf("期望返回资产追踪加载错误")
+	}
+	if !strings.Contains(err.Error(), "加载资产追踪失败") {
+		t.Fatalf("错误信息不正确: %v", err)
 	}
 }
 

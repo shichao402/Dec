@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/shichao402/Dec/pkg/types"
 	"gopkg.in/yaml.v3"
@@ -185,7 +186,8 @@ func (m *ProjectConfigManager) ensureGitignore() error {
 	}
 
 	// 检查是否已有 .dec/ 规则
-	for _, line := range filepath.SplitList(content) {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
 		if line == ".dec/" || line == ".dec" {
 			return nil
 		}
