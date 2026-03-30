@@ -56,16 +56,27 @@ func fetchLatestVersion() (string, error) {
 
 	var info struct {
 		Version string `json:"version"`
+		TagName string `json:"tag_name"`
+		Name    string `json:"name"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return "", fmt.Errorf("解析版本信息失败: %w", err)
 	}
 
-	if info.Version == "" {
+	// 支持多种版本字段格式
+	version := info.Version
+	if version == "" {
+		version = info.TagName
+	}
+	if version == "" {
+		version = info.Name
+	}
+
+	if version == "" {
 		return "", fmt.Errorf("远程版本号为空")
 	}
 
-	return info.Version, nil
+	return version, nil
 }
 
 // Check 检查是否有新版本可用
