@@ -716,7 +716,7 @@ func TestRemoveSkillFromIDE(t *testing.T) {
 	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("test"), 0644)
 
 	cursorIDE := ide.Get("cursor")
-	err := removeAssetFromIDE("skill", "my-skill", projectRoot, cursorIDE)
+	_, err := removeAssetFromIDE("skill", "my-skill", projectRoot, cursorIDE)
 	if err != nil {
 		t.Fatalf("移除 skill 失败: %v", err)
 	}
@@ -734,7 +734,7 @@ func TestRemoveRuleFromIDE(t *testing.T) {
 	os.WriteFile(rulePath, []byte("test"), 0644)
 
 	cursorIDE := ide.Get("cursor")
-	err := removeAssetFromIDE("rule", "logging", projectRoot, cursorIDE)
+	_, err := removeAssetFromIDE("rule", "logging", projectRoot, cursorIDE)
 	if err != nil {
 		t.Fatalf("移除 rule 失败: %v", err)
 	}
@@ -759,7 +759,7 @@ func TestRemoveMCPFromIDE(t *testing.T) {
 	os.WriteFile(filepath.Join(mcpDir, "mcp.json"), data, 0644)
 
 	cursorIDE := ide.Get("cursor")
-	err := removeAssetFromIDE("mcp", "pg-tool", projectRoot, cursorIDE)
+	_, err := removeAssetFromIDE("mcp", "pg-tool", projectRoot, cursorIDE)
 	if err != nil {
 		t.Fatalf("移除 MCP 失败: %v", err)
 	}
@@ -784,10 +784,10 @@ func TestRemoveAssetFromIDE_NotExists(t *testing.T) {
 	cursorIDE := ide.Get("cursor")
 
 	// 删除不存在的资产不应报错
-	if err := removeAssetFromIDE("skill", "nonexistent", projectRoot, cursorIDE); err != nil {
+	if _, err := removeAssetFromIDE("skill", "nonexistent", projectRoot, cursorIDE); err != nil {
 		t.Fatalf("删除不存在的 skill 不应报错: %v", err)
 	}
-	if err := removeAssetFromIDE("rule", "nonexistent", projectRoot, cursorIDE); err != nil {
+	if _, err := removeAssetFromIDE("rule", "nonexistent", projectRoot, cursorIDE); err != nil {
 		t.Fatalf("删除不存在的 rule 不应报错: %v", err)
 	}
 }
