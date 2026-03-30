@@ -763,10 +763,13 @@ func runVaultRemove(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("🗑️  移除 %s '%s'\n", itemType, assetName)
 
+	local := false
 	for _, ideName := range ideNames {
 		ideImpl := ide.Get(ideName)
-		if err := removeAssetFromIDE(itemType, assetName, cwd, ideImpl); err != nil {
+		if removed, err := removeAssetFromIDE(itemType, assetName, cwd, ideImpl); err != nil {
 			fmt.Printf("⚠️  从 %s 移除失败: %v\n", ideName, err)
+		} else if removed {
+			local = true
 		}
 	}
 
@@ -775,8 +778,10 @@ func runVaultRemove(cmd *cobra.Command, args []string) error {
 	removed := assetsConfig.RemoveAsset(itemType, assetName)
 	if removed {
 		_ = mgr.SaveAssetsConfig(assetsConfig)
+		local = true
 	}
 
+	remote := false
 	// 如果 --remote，也从 vault 仓库中删除
 	if removeRemote {
 		repoDir, err := repo.GetRepoDir()
@@ -784,27 +789,35 @@ func runVaultRemove(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("获取仓库目录失败: %w", err)
 		}
 
-		// 查找资产在哪个 vault 中
-		vaultName, assetPath, err := findAssetInVaults(repoDir, projectConfig.Vaults, itemType, assetName)
-		if err != nil {
-			fmt.Printf("⚠️  远程资产未找到: %v\n", err)
+		// 查找所有 vault 中的资产并删除
+		results := findAllAssetInVaults(repoDir, projectConfig.Vaults, itemType, assetName)
+		if len(results) == 0 {
+			fmt.Printf("⚠️  远程资产未找到\n")
 		} else {
-			// 删除文件
-			if err := os.RemoveAll(assetPath); err != nil {
-				return fmt.Errorf("删除远程资产失败: %w", err)
-			}
+			for _, result := range results {
+				// 删除文件
+				if err := os.RemoveAll(result.path); err != nil {
+					return fmt.Errorf("删除远程资产失败: %w", err)
+				}
 
-			commitMsg := fmt.Sprintf("remove: %s/%s/%s", vaultName, itemType, assetName)
-			warnings, err := repo.CommitAndPush(commitMsg)
-			if err != nil {
-				return fmt.Errorf("提交失败: %w", err)
-			}
-			for _, w := range warnings {
-				fmt.Printf("⚠️  %s\n", w)
-			}
+				commitMsg := fmt.Sprintf("remove: %s/%s/%s", result.vault, itemType, assetName)
+				warnings, err := repo.CommitAndPush(commitMsg)
+				if err != nil {
+					return fmt.Errorf("提交失败: %w", err)
+				}
+				for _, w := range warnings {
+					fmt.Printf("⚠️  %s\n", w)
+				}
 
-			fmt.Printf("  已从远程 Vault '%s' 删除\n", vaultName)
+				fmt.Printf("  已从远程 Vault '%s' 删除\n", result.vault)
+				remote = true
+			}
 		}
+	}
+
+	// 只在真的删除了东西时才显示成功
+	if !local && !remote {
+		return fmt.Errorf("%s '%s' 不存在或已被删除", itemType, assetName)
 	}
 
 	fmt.Printf("✅ %s '%s' 已移除\n", itemType, assetName)
@@ -944,6 +957,44 @@ func findAssetInVaults(repoDir string, vaults []string, itemType, assetName stri
 	return "", "", fmt.Errorf("未找到 %s '%s'", itemType, assetName)
 }
 
+// findAllAssetInVaults 在所有 vault 中查找所有匹配的资产（用于删除重复）
+type vaultResult struct {
+	vault string
+	path  string
+}
+
+func findAllAssetInVaults(repoDir string, vaults []string, itemType, assetName string) []vaultResult {
+	var results []vaultResult
+	visited := make(map[string]bool)
+
+	// 首先查找关联的 vault
+	for _, v := range vaults {
+		assetPath := getAssetPath(repoDir, v, itemType, assetName)
+		if _, err := os.Stat(assetPath); err == nil {
+			results = append(results, vaultResult{vault: v, path: assetPath})
+			visited[v] = true
+		}
+	}
+
+	// 遍历所有 vault
+	entries, err := os.ReadDir(repoDir)
+	if err != nil {
+		return results
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || visited[entry.Name()] {
+			continue
+		}
+		assetPath := getAssetPath(repoDir, entry.Name(), itemType, assetName)
+		if _, err := os.Stat(assetPath); err == nil {
+			results = append(results, vaultResult{vault: entry.Name(), path: assetPath})
+			visited[entry.Name()] = true
+		}
+	}
+
+	return results
+}
+
 // getAssetPath 获取资产在 vault 中的路径
 func getAssetPath(repoDir, vaultName, itemType, assetName string) string {
 	switch itemType {
@@ -1074,31 +1125,48 @@ func installAssetToIDE(itemType, assetName, srcPath, projectRoot string, ideImpl
 	return nil
 }
 
-// removeAssetFromIDE 从指定 IDE 的项目目录中删除资产
-func removeAssetFromIDE(itemType, assetName, projectRoot string, ideImpl ide.IDE) error {
+// removeAssetFromIDE 从指定 IDE 的项目目录中删除资产，返回是否真的删除了东西
+func removeAssetFromIDE(itemType, assetName, projectRoot string, ideImpl ide.IDE) (bool, error) {
 	managed := managedName(assetName)
 
 	switch itemType {
 	case "skill":
 		destDir := filepath.Join(ideImpl.SkillsDir(projectRoot), managed)
-		return os.RemoveAll(destDir)
+		_, err := os.Stat(destDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return false, nil // 目录不存在
+			}
+			return false, err
+		}
+		// 目录存在，删除它
+		return true, os.RemoveAll(destDir)
 
 	case "rule":
 		destPath := filepath.Join(ideImpl.RulesDir(projectRoot), managed+".mdc")
-		if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
-			return err
+		err := os.Remove(destPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return false, nil // 文件不存在
+			}
+			return false, err
 		}
-		return nil
+		return true, nil // 文件被删除
 
 	case "mcp":
 		existingConfig, err := ideImpl.LoadMCPConfig(projectRoot)
 		if err != nil {
-			return nil // 配置不存在则跳过
+			return false, nil // 配置不存在则跳过
 		}
+		_, exists := existingConfig.MCPServers[managed]
+		if !exists {
+			return false, nil // 条目不存在
+		}
+		// 条目存在，删除它
 		delete(existingConfig.MCPServers, managed)
-		return ideImpl.WriteMCPConfig(projectRoot, existingConfig)
+		return true, ideImpl.WriteMCPConfig(projectRoot, existingConfig)
 	}
-	return nil
+	return false, nil
 }
 
 // ========================================
