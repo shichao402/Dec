@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -163,8 +164,102 @@ func (g *GitOps) Push() error {
 
 // Pull 从远程仓库拉取
 func (g *GitOps) Pull() error {
-	_, err := g.run("pull")
-	return err
+	if err := g.ensureNoSyncInProgress(); err != nil {
+		return err
+	}
+
+	branch, err := g.currentBranch()
+	if err != nil {
+		return err
+	}
+	remoteRef := "origin/" + branch
+
+	if err := g.fetchBranch(branch); err != nil {
+		return err
+	}
+
+	ahead, behind, err := g.aheadBehind(remoteRef)
+	if err != nil {
+		return err
+	}
+
+	switch {
+	case behind == 0:
+		return nil
+	case ahead == 0:
+		_, err = g.run("merge", "--ff-only", remoteRef)
+		return err
+	default:
+		_, err = g.run("merge", "--no-edit", remoteRef)
+		if err != nil {
+			return fmt.Errorf("自动合并远端更新失败: %w", err)
+		}
+		return nil
+	}
+}
+
+func (g *GitOps) currentBranch() (string, error) {
+	branch, err := g.run("branch", "--show-current")
+	if err != nil {
+		return "", err
+	}
+	if branch == "" {
+		return "", fmt.Errorf("当前仓库不在分支上，无法同步")
+	}
+	return branch, nil
+}
+
+func (g *GitOps) fetchBranch(branch string) error {
+	_, err := g.run("fetch", "--prune", "origin", branch)
+	if err != nil {
+		return fmt.Errorf("拉取远端引用失败: %w", err)
+	}
+	return nil
+}
+
+func (g *GitOps) aheadBehind(remoteRef string) (int, int, error) {
+	output, err := g.run("rev-list", "--left-right", "--count", fmt.Sprintf("HEAD...%s", remoteRef))
+	if err != nil {
+		return 0, 0, fmt.Errorf("检查本地与远端分叉状态失败: %w", err)
+	}
+
+	parts := strings.Fields(output)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("无法解析分叉状态: %s", output)
+	}
+
+	ahead, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("解析本地提交数失败: %w", err)
+	}
+	behind, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("解析远端提交数失败: %w", err)
+	}
+
+	return ahead, behind, nil
+}
+
+func (g *GitOps) ensureNoSyncInProgress() error {
+	gitDir := filepath.Join(g.workDir, ".git")
+	markers := []struct {
+		path    string
+		message string
+	}{
+		{filepath.Join(gitDir, "MERGE_HEAD"), "仓库中存在未完成的 merge，请先处理 ~/.dec/repo 中的同步冲突"},
+		{filepath.Join(gitDir, "rebase-merge"), "仓库中存在未完成的 rebase，请先处理 ~/.dec/repo 中的同步冲突"},
+		{filepath.Join(gitDir, "rebase-apply"), "仓库中存在未完成的 rebase，请先处理 ~/.dec/repo 中的同步冲突"},
+	}
+
+	for _, marker := range markers {
+		if _, err := os.Stat(marker.path); err == nil {
+			return fmt.Errorf(marker.message)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("检查仓库同步状态失败: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // IsClean 检查工作区是否干净
