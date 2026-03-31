@@ -23,7 +23,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	fmt.Println("🔍 检查最新版本...")
 	result, err := update.Check(currentVersion)
 	if err != nil {
-		return fmt.Errorf("检查更新失败: %w", err)
+		return fmt.Errorf("检查更新失败: %w\n\n如果当前版本过旧或自更新异常，可先手动覆盖安装：\n  %s", err, update.ManualInstallCommand())
 	}
 
 	if !result.NeedUpdate {
@@ -35,7 +35,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	fmt.Println("⬇️  下载更新中...")
 
 	if err := update.DoUpdate(currentVersion); err != nil {
-		return fmt.Errorf("更新失败: %w", err)
+		return fmt.Errorf("更新失败: %w\n\n如果当前版本过旧或自更新异常，可先手动覆盖安装：\n  %s", err, update.ManualInstallCommand())
 	}
 
 	fmt.Printf("✅ 更新成功！已更新到 %s\n", result.LatestVersion)

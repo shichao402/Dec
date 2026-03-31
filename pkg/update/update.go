@@ -175,6 +175,24 @@ func DoUpdate(currentVersion string) error {
 	return nil
 }
 
+// ManualInstallCommand 返回手动覆盖安装命令
+func ManualInstallCommand() string {
+	return manualInstallCommand(runtime.GOOS)
+}
+
+func manualInstallCommand(goos string) string {
+	branch := config.GetSystemConfig().UpdateBranch
+	if branch == "" {
+		branch = "ReleaseLatest"
+	}
+
+	base := fmt.Sprintf("https://raw.githubusercontent.com/shichao402/Dec/%s/scripts", branch)
+	if goos == "windows" {
+		return fmt.Sprintf("iwr -useb %s/install.ps1 | iex", base)
+	}
+	return fmt.Sprintf("curl -fsSL %s/install.sh | bash", base)
+}
+
 // buildDownloadURL 根据平台构建下载 URL
 func buildDownloadURL(version string) (string, error) {
 	goos := runtime.GOOS
