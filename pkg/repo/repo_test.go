@@ -96,6 +96,64 @@ func TestGitOpsPull_FailsClearlyWhenMergeInProgress(t *testing.T) {
 	}
 }
 
+func TestCommitAndPush_AutoMergesRemoteAdvance(t *testing.T) {
+	localDir, remoteWorkDir, decHome := setupCommitAndPushTestRepos(t)
+	setEnvForTest(t, "DEC_HOME", decHome)
+
+	writeFile(t, filepath.Join(localDir, "local.txt"), "from local\n")
+	writeFile(t, filepath.Join(remoteWorkDir, "remote.txt"), "from remote\n")
+	runGit(t, remoteWorkDir, "add", ".")
+	runGit(t, remoteWorkDir, "commit", "-m", "remote change")
+	runGit(t, remoteWorkDir, "push", "origin", "main")
+
+	warnings, err := CommitAndPush("local change")
+	if err != nil {
+		t.Fatalf("CommitAndPush 应自动合并远端更新: %v", err)
+	}
+	if len(warnings) == 0 || !strings.Contains(warnings[0], "已自动合并") {
+		t.Fatalf("应返回自动合并提示，得到: %v", warnings)
+	}
+
+	for _, path := range []string{"local.txt", "remote.txt"} {
+		if _, err := os.Stat(filepath.Join(localDir, path)); err != nil {
+			t.Fatalf("推送后应保留 %s: %v", path, err)
+		}
+	}
+
+	if counts := strings.Fields(runGit(t, localDir, "rev-list", "--left-right", "--count", "HEAD...origin/main")); len(counts) != 2 || counts[0] != "0" || counts[1] != "0" {
+		t.Fatalf("自动合并并推送后应与远端一致，得到: %v", counts)
+	}
+}
+
+func TestCommitAndPush_ReturnsClearErrorOnMergeConflict(t *testing.T) {
+	localDir, remoteWorkDir, decHome := setupCommitAndPushTestRepos(t)
+	setEnvForTest(t, "DEC_HOME", decHome)
+
+	sharedPath := filepath.Join(localDir, "shared.txt")
+	writeFile(t, sharedPath, "local change\n")
+	writeFile(t, filepath.Join(remoteWorkDir, "shared.txt"), "remote change\n")
+	runGit(t, remoteWorkDir, "add", ".")
+	runGit(t, remoteWorkDir, "commit", "-m", "remote conflict")
+	runGit(t, remoteWorkDir, "push", "origin", "main")
+
+	warnings, err := CommitAndPush("local conflict")
+	if err == nil {
+		t.Fatalf("真实冲突时应返回错误")
+	}
+	if warnings != nil {
+		t.Fatalf("冲突时不应返回 warning: %v", warnings)
+	}
+	if !strings.Contains(err.Error(), "自动合并远端更新失败") {
+		t.Fatalf("错误信息应说明自动合并失败，得到: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(localDir, ".git", "MERGE_HEAD")); !os.IsNotExist(statErr) {
+		t.Fatalf("冲突后应自动 abort merge，MERGE_HEAD 不应存在: %v", statErr)
+	}
+	if status := runGit(t, localDir, "status", "--porcelain"); status != "" {
+		t.Fatalf("自动 abort merge 后工作区应恢复干净，得到: %q", status)
+	}
+}
+
 func setupGitOpsTestRepos(t *testing.T) (string, string) {
 	t.Helper()
 
@@ -125,10 +183,55 @@ func setupGitOpsTestRepos(t *testing.T) (string, string) {
 	return localDir, remoteWorkDir
 }
 
+func setupCommitAndPushTestRepos(t *testing.T) (string, string, string) {
+	t.Helper()
+
+	decHome := t.TempDir()
+	root := t.TempDir()
+	remoteBareDir := filepath.Join(root, "remote.git")
+	seedDir := filepath.Join(root, "seed")
+	localDir := filepath.Join(decHome, "repo")
+	remoteWorkDir := filepath.Join(root, "remote-work")
+
+	runGitNoDir(t, "init", "--bare", remoteBareDir)
+	runGitNoDir(t, "clone", remoteBareDir, seedDir)
+	configureGitUser(t, seedDir)
+	writeFile(t, filepath.Join(seedDir, "shared.txt"), "base\n")
+	runGit(t, seedDir, "add", ".")
+	runGit(t, seedDir, "commit", "-m", "initial commit")
+	runGit(t, seedDir, "branch", "-M", "main")
+	runGit(t, seedDir, "push", "-u", "origin", "main")
+	runGitNoDir(t, "--git-dir", remoteBareDir, "symbolic-ref", "HEAD", "refs/heads/main")
+
+	runGitNoDir(t, "clone", remoteBareDir, localDir)
+	configureGitUser(t, localDir)
+	runGit(t, localDir, "config", "pull.rebase", "true")
+
+	runGitNoDir(t, "clone", remoteBareDir, remoteWorkDir)
+	configureGitUser(t, remoteWorkDir)
+
+	return localDir, remoteWorkDir, decHome
+}
+
 func configureGitUser(t *testing.T, dir string) {
 	t.Helper()
 	runGit(t, dir, "config", "user.name", "Dec Test")
 	runGit(t, dir, "config", "user.email", "dec-test@example.com")
+}
+
+func setEnvForTest(t *testing.T, key, value string) {
+	t.Helper()
+	oldValue, existed := os.LookupEnv(key)
+	if err := os.Setenv(key, value); err != nil {
+		t.Fatalf("设置环境变量失败: %v", err)
+	}
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv(key, oldValue)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
 }
 
 func writeFile(t *testing.T, path, content string) {

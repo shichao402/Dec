@@ -112,6 +112,12 @@ func CommitAndPush(message string) ([]string, error) {
 	}
 
 	var warnings []string
+	syncWarnings, err := git.syncForWrite()
+	if err != nil {
+		return nil, err
+	}
+	warnings = append(warnings, syncWarnings...)
+
 	if err := git.Push(); err != nil {
 		warnings = append(warnings, fmt.Sprintf("推送到远程仓库失败，已保存到本地: %v", err))
 	}
@@ -196,6 +202,51 @@ func (g *GitOps) Pull() error {
 		}
 		return nil
 	}
+}
+
+func (g *GitOps) syncForWrite() ([]string, error) {
+	if err := g.ensureNoSyncInProgress(); err != nil {
+		return nil, err
+	}
+
+	branch, err := g.currentBranch()
+	if err != nil {
+		return nil, err
+	}
+	remoteRef := "origin/" + branch
+
+	if err := g.fetchBranch(branch); err != nil {
+		return nil, err
+	}
+
+	ahead, behind, err := g.aheadBehind(remoteRef)
+	if err != nil {
+		return nil, err
+	}
+	if behind == 0 {
+		return nil, nil
+	}
+	if ahead == 0 {
+		return nil, fmt.Errorf("远端已有新提交，请先同步后重试")
+	}
+
+	if _, err := g.run("merge", "--no-edit", remoteRef); err != nil {
+		abortErr := g.abortMerge()
+		if abortErr != nil {
+			return nil, fmt.Errorf("自动合并远端更新失败: %v；回滚失败: %w", err, abortErr)
+		}
+		return nil, fmt.Errorf("自动合并远端更新失败，请处理 ~/.dec/repo 中的冲突后重试: %w", err)
+	}
+
+	return []string{"检测到远端已有更新，已自动合并到本地 Vault 仓库"}, nil
+}
+
+func (g *GitOps) abortMerge() error {
+	_, err := g.run("merge", "--abort")
+	if err != nil {
+		return fmt.Errorf("git merge --abort 失败: %w", err)
+	}
+	return nil
 }
 
 func (g *GitOps) currentBranch() (string, error) {
