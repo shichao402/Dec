@@ -4,68 +4,51 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
+    paths:
+      - "version.json"
 
 permissions:
   contents: write
 
 jobs:
-  # ── push 到 main 时：自增版本号、提交、打 tag ──
-  bump-version:
-    name: Bump Version
-    if: github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip ci]')
+  validate:
+    name: Validate Release
     runs-on: ubuntu-latest
     outputs:
-      new_version: ${{ steps.bump.outputs.new }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
-      - name: Bump patch version
-        id: bump
+      - name: Read version from version.json
+        id: version
         run: |
-          CURRENT=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
-          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+          VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-          BASE="${CURRENT#v}"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
-          PATCH=$((PATCH + 1))
-          NEW="v${MAJOR}.${MINOR}.${PATCH}"
-          echo "new=${NEW}" >> "$GITHUB_OUTPUT"
-
-          python3 -c "
-          import json
-          data = json.load(open('version.json'))
-          data['version'] = '${NEW}'
-          with open('version.json', 'w') as f:
-              json.dump(data, f, ensure_ascii=False, indent=2)
-              f.write('\n')
-          "
-          echo "版本号: ${CURRENT} -> ${NEW}"
-
-      - name: Commit and tag
+      - name: Validate version format
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add version.json
-          git commit -m "chore: bump version to ${{ steps.bump.outputs.new }} [skip ci]"
-          git tag "${{ steps.bump.outputs.new }}"
-          git push origin main --tags
+          VERSION="${{ steps.version.outputs.version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::无效版本号格式: ${VERSION}，期望格式为 vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
 
-  # ── 测试（push main 或 tag 推送均触发）──
+      - name: Ensure tag does not already exist
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"; then
+            echo "::error::Tag ${VERSION} 已存在，请先修改 version.json"
+            exit 1
+          fi
+
   test:
     name: Test
-    needs: [bump-version]
-    # bump-version 成功后运行，或被跳过时（tag 推送）也运行
-    if: always() && (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped')
+    needs: [validate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          # tag 推送时用 tag 对应的 ref；push main 时用自增后的 tag
-          ref: ${{ needs.bump-version.outputs.new_version || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -75,11 +58,10 @@ jobs:
       - name: Run tests
         run: go test ./... -v
 
-  # ── 跨平台构建 ──
   build:
     name: Build (${{ matrix.goos }}-${{ matrix.goarch }})
-    needs: [bump-version, test]
-    if: always() && needs.test.result == 'success'
+    needs: [test, validate]
+    if: ${{ needs.test.result == 'success' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -96,19 +78,16 @@ jobs:
             goarch: amd64
     steps:
       - uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.bump-version.outputs.new_version || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: "1.21"
 
-      - name: Read version from version.json
+      - name: Use validated version
         id: version
         run: |
-          VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${{ needs.validate.outputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: Build
         env:
@@ -127,22 +106,24 @@ jobs:
           name: dec-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.artifact }}
 
-  # ── 创建 Release ──
   release:
     name: Release
-    needs: [bump-version, build]
-    if: always() && needs.build.result == 'success'
+    needs: [build, validate]
+    if: ${{ needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ needs.bump-version.outputs.new_version || github.ref }}
+          fetch-depth: 0
 
-      - name: Resolve tag name
-        id: tag
+      - name: Create git tag
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          TAG="${{ needs.bump-version.outputs.new_version || github.ref_name }}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${VERSION}"
+          git push origin "refs/tags/${VERSION}"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v6
@@ -153,7 +134,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
+          tag_name: ${{ needs.validate.outputs.version }}
           files: dist/*
           generate_release_notes: true
 
