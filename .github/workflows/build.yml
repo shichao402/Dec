@@ -10,6 +10,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   validate:
     name: Validate Release
@@ -126,13 +129,13 @@ jobs:
           git push origin "refs/tags/${VERSION}"
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           path: dist/
           merge-multiple: true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.6.1
         with:
           tag_name: ${{ needs.validate.outputs.version }}
           files: dist/*
