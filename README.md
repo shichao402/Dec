@@ -75,9 +75,9 @@ dec repo https://github.com/<user>/<your-vault-repo>
 ```
 
 这个命令会：
-- 在本地克隆或更新你的 Vault 仓库
+- 在本地创建并维护一个 bare repo（默认位于 `~/.dec/repo.git`）
 - 将 Vault 地址记录到全局配置
-- 打印你的 Vault 根目录位置
+- 打印你的本地 Vault 仓库位置
 
 ### 3. 从 Vault 获取资产
 
@@ -103,20 +103,20 @@ dec vault pull --all --vault my-vault   # 拉取指定 Vault 的所有资产
 
 ### 4. 管理你的 Vault
 
-#### 保存资产到 Vault
+#### 导入资产到 Vault
 
 ```bash
 # 保存 Skill
-dec vault save skill .cursor/skills/my-skill
+dec vault import skill .cursor/skills/my-skill
 
 # 保存 Rule  
-dec vault save rule .cursor/rules/my-rule.mdc
+dec vault import rule .cursor/rules/my-rule.mdc
 
 # 保存 MCP
-dec vault save mcp ./postgres-tool.json
+dec vault import mcp ./postgres-tool.json
 
 # 保存到指定 Vault（关联多个 Vault 时必填）
-dec vault save skill .cursor/skills/my-skill --vault github-tools
+dec vault import skill .cursor/skills/my-skill --vault github-tools
 ```
 
 #### 搜索 Vault 中的资产
@@ -159,9 +159,9 @@ dec vault push
 dec repo https://github.com/<user>/<your-vault-repo>
 
 # 3. 把常用资产保存进去
-dec vault save skill .cursor/skills/create-api-test
-dec vault save rule .cursor/rules/my-security-rule.mdc
-dec vault save mcp ./postgres-tool.json
+dec vault import skill .cursor/skills/create-api-test
+dec vault import rule .cursor/rules/my-security-rule.mdc
+dec vault import mcp ./postgres-tool.json
 
 # 4. 推送到远程
 dec vault push
@@ -186,7 +186,7 @@ dec vault pull mcp postgres-tool
 ```bash
 # 1. 在项目的 IDE 中编辑托管资产（如 .cursor/skills/dec-create-api-test）
 # 2. 将更改保存回 Vault
-dec vault save skill .cursor/skills/dec-create-api-test
+dec vault import skill .cursor/skills/dec-create-api-test
 
 # 3. 推送到远程（可选）
 dec vault push
@@ -210,8 +210,9 @@ dec repo https://github.com/<user>/<your-vault-repo>
 
 作用：
 
-- 克隆或更新本地 Vault 副本
+- 创建或更新本地 bare repo 缓存（默认 `~/.dec/repo.git`）
 - 将 Vault 地址保存到全局配置
+- 后续命令在短生命周期临时 worktree 中完成读写，结束后自动清理
 
 #### `dec vault`
 
@@ -230,15 +231,15 @@ dec vault init common-rules
 
 ### Vault 资产管理
 
-#### `dec vault save <type> <path> [--vault <vault>]`
+#### `dec vault import <type> <path> [--vault <vault>]`
 
-保存本地资产到 Vault。
+导入本地资产到 Vault。
 
 ```bash
-dec vault save skill .cursor/skills/my-skill
-dec vault save rule .cursor/rules/my-rule.mdc
-dec vault save mcp ./postgres-tool.json
-dec vault save skill .cursor/skills/my-skill --vault github-tools
+dec vault import skill .cursor/skills/my-skill
+dec vault import rule .cursor/rules/my-rule.mdc
+dec vault import mcp ./postgres-tool.json
+dec vault import skill .cursor/skills/my-skill --vault github-tools
 ```
 
 支持类型：
@@ -249,8 +250,8 @@ dec vault save skill .cursor/skills/my-skill --vault github-tools
 
 说明：
 
-- 保存成功后会提交到本地 Vault Git 仓库
-- 如果远程 push 失败，保存仍然视为成功，但会输出 warning
+- 导入成功后会在临时 worktree 中提交并推送到远程 Vault
+- 本地长期保留的是 bare repo 缓存，命令执行期间会创建临时 worktree，结束后自动清理
 - 关联多个 Vault 时，使用 `--vault` 指定目标 Vault
 
 #### `dec vault pull <type> <name>` / `dec vault pull --all`
@@ -328,7 +329,7 @@ dec vault push
 说明：
 
 - 当你在项目中编辑了 `dec-*` 资产后，使用此命令将变更同步回 Vault
-- 当 `dec vault save` 输出 push warning 时，也可用此命令重试推送
+- 当 `dec vault import` 或 `dec vault push` 因远端冲突失败时，可先重新拉取或重试推送
 
 ### 其他命令
 
@@ -418,7 +419,7 @@ Rule 必须是单个 `.mdc` 文件。
 例如：
 
 ```bash
-dec vault save rule .cursor/rules/my-rule.mdc
+dec vault import rule .cursor/rules/my-rule.mdc
 ```
 
 Dec 会尝试从 front matter 或一级标题中提取描述。
@@ -485,7 +486,7 @@ dec vault search "security"
 ### 场景 2：保存新 Skill 并在别的项目复用
 
 ```bash
-dec vault save skill .cursor/skills/my-new-skill
+dec vault import skill .cursor/skills/my-new-skill
 cd ../another-project
 dec vault pull skill my-new-skill
 ```
@@ -496,9 +497,9 @@ dec vault pull skill my-new-skill
 
 先执行 `dec repo <url>` 关联你的 Vault 仓库。
 
-### `dec vault save` 输出 warning
+### `dec vault import` / `dec vault push` 同步失败
 
-如果出现"推送到远程仓库失败"的提示，说明本地保存已成功，只是远程 push 失败。稍后执行 `dec vault push` 重试即可。
+如果出现远端冲突或推送失败，说明本次事务没有成功同步到远端。Dec 会清理临时 worktree，不保留中间工作区。处理方式通常是重新执行命令，或先用 `dec vault pull` / `dec vault list` 确认远端最新状态后再重试。
 
 ## 安装、构建与测试
 

@@ -14,7 +14,7 @@ Dec 自举验收脚本。
    - dec vault pull 同步到全部 IDE，并写回 vault.yaml
    - pull 后再次 dec sync 不会丢失资产
    - MCP 资产通过 live mcp.json 合并，不再写 sidecar
-   - dec vault save 将项目内 skill 保存回 vault
+   - dec vault import 将项目内 skill 导入到 vault
    - dec vault status 能检测本地修改
 """
 
@@ -450,13 +450,13 @@ def run_story(project_root: Path, keep_artifacts: bool) -> None:
             run_command([str(binary_path), "sync"], cwd=project_root, env=env)
             verify_pull_outputs(project_root)
 
-            print_step("运行 dec vault save")
+            print_step("运行 dec vault import")
             created_skill_dir = create_user_skill(project_root, "story-created-skill")
             run_command(
                 [
                     str(binary_path),
                     "vault",
-                    "save",
+                    "import",
                     "skill",
                     str(created_skill_dir),
                     "--tag",

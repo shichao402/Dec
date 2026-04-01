@@ -10,15 +10,6 @@ import (
 	"strings"
 )
 
-// GetRepoDir 获取本地仓库克隆目录
-func GetRepoDir() (string, error) {
-	rootDir, err := GetRootDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(rootDir, "repo"), nil
-}
-
 // GetRootDir 获取 Dec 根目录 (~/.dec/)
 func GetRootDir() (string, error) {
 	if rootDir := os.Getenv("DEC_HOME"); rootDir != "" {
@@ -31,98 +22,38 @@ func GetRootDir() (string, error) {
 	return filepath.Join(homeDir, ".dec"), nil
 }
 
-// IsConnected 检查仓库是否已连接
+// IsConnected 检查 bare repo 是否已连接。
 func IsConnected() (bool, error) {
-	repoDir, err := GetRepoDir()
-	if err != nil {
+	if err := MigrateToBare(); err != nil {
 		return false, err
 	}
-	gitDir := filepath.Join(repoDir, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
-		return false, nil
-	}
-	return true, nil
+	return IsBareConnected()
 }
 
-// Connect 连接用户的仓库
+// Connect 连接用户的仓库。
 func Connect(repoURL string) error {
-	repoDir, err := GetRepoDir()
-	if err != nil {
+	if err := MigrateToBare(); err != nil {
 		return err
 	}
-
-	// 检查是否已连接
-	if _, err := os.Stat(filepath.Join(repoDir, ".git")); err == nil {
-		return fmt.Errorf("仓库已连接: %s\n\n如需重新连接，请先删除 %s", repoDir, repoDir)
-	}
-
-	// 克隆仓库
-	if err := gitClone(repoURL, repoDir); err != nil {
-		return fmt.Errorf("克隆仓库失败: %w", err)
-	}
-
-	return nil
+	return ConnectBare(repoURL)
 }
 
-// GetGit 获取 repo 的 Git 操作实例
+// GetGit 已废弃。bare repo 模式下请使用事务接口。
 func GetGit() (*GitOps, error) {
-	repoDir, err := GetRepoDir()
-	if err != nil {
-		return nil, err
-	}
-	ok, err := IsConnected()
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("仓库未连接\n\n运行 dec repo <url> 连接仓库")
-	}
-	return NewGitOps(repoDir), nil
+	return nil, fmt.Errorf("bare repo 模式下不支持直接获取工作区，请使用事务接口")
 }
 
-// Pull 拉取远端最新内容
+// Pull 拉取远端最新内容。
 func Pull() error {
-	git, err := GetGit()
-	if err != nil {
+	if err := MigrateToBare(); err != nil {
 		return err
 	}
-	return git.Pull()
+	return FetchBare()
 }
 
-// CommitAndPush 提交并推送变更
+// CommitAndPush 已废弃。bare repo 模式下请使用事务接口。
 func CommitAndPush(message string) ([]string, error) {
-	git, err := GetGit()
-	if err != nil {
-		return nil, err
-	}
-
-	clean, err := git.IsClean()
-	if err != nil {
-		return nil, err
-	}
-	if clean {
-		return nil, nil // 无变更
-	}
-
-	if err := git.Add("."); err != nil {
-		return nil, fmt.Errorf("git add 失败: %w", err)
-	}
-	if err := git.Commit(message); err != nil {
-		return nil, fmt.Errorf("git commit 失败: %w", err)
-	}
-
-	var warnings []string
-	syncWarnings, err := git.syncForWrite()
-	if err != nil {
-		return nil, err
-	}
-	warnings = append(warnings, syncWarnings...)
-
-	if err := git.Push(); err != nil {
-		warnings = append(warnings, fmt.Sprintf("推送到远程仓库失败，已保存到本地: %v", err))
-	}
-
-	return warnings, nil
+	return nil, fmt.Errorf("bare repo 模式下不支持直接提交，请使用事务接口")
 }
 
 // ========================================
@@ -291,15 +222,29 @@ func (g *GitOps) aheadBehind(remoteRef string) (int, int, error) {
 	return ahead, behind, nil
 }
 
+func (g *GitOps) gitDir() (string, error) {
+	gitDir, err := g.run("rev-parse", "--git-dir")
+	if err != nil {
+		return "", fmt.Errorf("获取 git 目录失败: %w", err)
+	}
+	if filepath.IsAbs(gitDir) {
+		return gitDir, nil
+	}
+	return filepath.Join(g.workDir, gitDir), nil
+}
+
 func (g *GitOps) ensureNoSyncInProgress() error {
-	gitDir := filepath.Join(g.workDir, ".git")
+	gitDir, err := g.gitDir()
+	if err != nil {
+		return err
+	}
 	markers := []struct {
 		path    string
 		message string
 	}{
-		{filepath.Join(gitDir, "MERGE_HEAD"), "仓库中存在未完成的 merge，请先处理 ~/.dec/repo 中的同步冲突"},
-		{filepath.Join(gitDir, "rebase-merge"), "仓库中存在未完成的 rebase，请先处理 ~/.dec/repo 中的同步冲突"},
-		{filepath.Join(gitDir, "rebase-apply"), "仓库中存在未完成的 rebase，请先处理 ~/.dec/repo 中的同步冲突"},
+		{filepath.Join(gitDir, "MERGE_HEAD"), "仓库中存在未完成的 merge，请先处理同步冲突后重试"},
+		{filepath.Join(gitDir, "rebase-merge"), "仓库中存在未完成的 rebase，请先处理同步冲突后重试"},
+		{filepath.Join(gitDir, "rebase-apply"), "仓库中存在未完成的 rebase，请先处理同步冲突后重试"},
 	}
 
 	for _, marker := range markers {

@@ -36,8 +36,8 @@ func runRepo(cmd *cobra.Command, args []string) error {
 		fmt.Printf("⚠️  保存配置失败: %v\n", err)
 	}
 
-	repoDir, _ := repo.GetRepoDir()
-	fmt.Printf("✅ 仓库已连接: %s\n", repoDir)
+	bareDir, _ := repo.GetBareRepoDir()
+	fmt.Printf("✅ 仓库已连接: %s\n", bareDir)
 	fmt.Println("\n后续步骤:")
 	fmt.Println("  dec config global          # 配置本机 IDE")
 	fmt.Println("  dec vault init <name>      # 创建 Vault 空间")

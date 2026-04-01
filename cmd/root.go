@@ -26,7 +26,7 @@ var RootCmd = &cobra.Command{
   dec repo <url>                    # 连接个人仓库
   dec config global                 # 配置本机 IDE
   dec vault init <name>             # 创建 Vault 空间
-  dec vault save skill <path>       # 保存 Skill 到 Vault
+  dec vault import skill <path>     # 导入 Skill 到 Vault
   dec vault search <query>          # 搜索 Vault 中的资产
   dec vault pull skill <name>       # 下载 Skill 到项目`,
 	Version: getVersionString(),

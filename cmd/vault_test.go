@@ -889,7 +889,7 @@ func TestInstallSkillToMultipleIDEs(t *testing.T) {
 }
 
 func TestPullSingleAsset_RollsBackInstalledIDEsOnFailure(t *testing.T) {
-	decHome := t.TempDir()
+	decHome, repoDir := setupVaultRemoveRemoteTestRepo(t)
 	projectRoot := t.TempDir()
 	failingIDEName := "failing-mcp-rollback"
 
@@ -897,13 +897,16 @@ func TestPullSingleAsset_RollsBackInstalledIDEsOnFailure(t *testing.T) {
 	chdirForTest(t, projectRoot)
 	ide.Register(&failingMCPIDE{name: failingIDEName})
 
-	repoMCPDir := filepath.Join(decHome, "repo", "v1", "mcp")
+	repoMCPDir := filepath.Join(repoDir, "v1", "mcp")
 	if err := os.MkdirAll(repoMCPDir, 0755); err != nil {
 		t.Fatalf("创建测试仓库失败: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repoMCPDir, "pg-tool.json"), []byte(`{"command":"npx","args":["-y","pg-tool"]}`), 0644); err != nil {
 		t.Fatalf("写入测试 MCP 失败: %v", err)
 	}
+	runVaultTestGit(t, repoDir, "add", ".")
+	runVaultTestGit(t, repoDir, "commit", "-m", "seed rollback mcp")
+	runVaultTestGit(t, repoDir, "push", "origin", "main")
 
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.InitProject("v1", []string{"cursor", failingIDEName}); err != nil {
@@ -1002,6 +1005,7 @@ func TestRunVaultRemove_RemoteUsesTrackedVault(t *testing.T) {
 	if err := runVaultRemove(nil, []string{"rule", "shared"}); err != nil {
 		t.Fatalf("远程删除追踪资产失败: %v", err)
 	}
+	runVaultTestGit(t, repoDir, "pull", "--ff-only")
 
 	if _, err := os.Stat(filepath.Join(repoDir, "v1", "rules", "shared.mdc")); !os.IsNotExist(err) {
 		t.Fatalf("追踪来源 v1 中的远程资产应被删除")
@@ -1048,6 +1052,7 @@ func TestRunVaultRemove_RemoteFallbackWhenNotTracked(t *testing.T) {
 	if err := runVaultRemove(nil, []string{"rule", "shared"}); err != nil {
 		t.Fatalf("远程删除未追踪资产失败: %v", err)
 	}
+	runVaultTestGit(t, repoDir, "pull", "--ff-only")
 
 	if _, err := os.Stat(filepath.Join(repoDir, "v1", "rules", "shared.mdc")); !os.IsNotExist(err) {
 		t.Fatalf("fallback 应只删除关联 vault 中找到的首个匹配")
@@ -1085,6 +1090,7 @@ func TestRunVaultRemove_RemoteNotFoundWhenTrackedButMissing(t *testing.T) {
 	if err := runVaultRemove(nil, []string{"rule", "shared"}); err != nil {
 		t.Fatalf("追踪来源远程缺失时不应失败: %v", err)
 	}
+	runVaultTestGit(t, repoDir, "pull", "--ff-only")
 
 	if _, err := os.Stat(filepath.Join(repoDir, "v2", "rules", "shared.mdc")); err != nil {
 		t.Fatalf("追踪来源缺失时不应删除其他 vault 的同名资产: %v", err)
@@ -1099,6 +1105,97 @@ func TestRunVaultRemove_RemoteNotFoundWhenTrackedButMissing(t *testing.T) {
 	}
 }
 
+func TestBareWorkflow_EndToEnd(t *testing.T) {
+	decHome := t.TempDir()
+	root := t.TempDir()
+	remoteBareDir := filepath.Join(root, "remote.git")
+	seedDir := filepath.Join(root, "seed")
+	inspectDir := filepath.Join(root, "inspect")
+
+	runVaultTestGitNoDir(t, "init", "--bare", remoteBareDir)
+	runVaultTestGitNoDir(t, "clone", remoteBareDir, seedDir)
+	configureVaultTestGitUser(t, seedDir)
+	writeVaultTestFile(t, filepath.Join(seedDir, "README.md"), "init\n")
+	runVaultTestGit(t, seedDir, "add", ".")
+	runVaultTestGit(t, seedDir, "commit", "-m", "initial commit")
+	runVaultTestGit(t, seedDir, "branch", "-M", "main")
+	runVaultTestGit(t, seedDir, "push", "-u", "origin", "main")
+	runVaultTestGitNoDir(t, "--git-dir", remoteBareDir, "symbolic-ref", "HEAD", "refs/heads/main")
+	runVaultTestGitNoDir(t, "clone", remoteBareDir, inspectDir)
+	configureVaultTestGitUser(t, inspectDir)
+	setEnvForTest(t, "DEC_HOME", decHome)
+
+	projectOne := t.TempDir()
+	chdirForTest(t, projectOne)
+
+	if err := runRepo(nil, []string{remoteBareDir}); err != nil {
+		t.Fatalf("runRepo 失败: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(decHome, "repo.git", "HEAD")); err != nil {
+		t.Fatalf("连接后应创建 bare repo: %v", err)
+	}
+
+	if err := runVaultInit(nil, []string{"team-vault"}); err != nil {
+		t.Fatalf("runVaultInit 失败: %v", err)
+	}
+	refreshInspectRepo(t, inspectDir)
+	for _, sub := range []string{"skills", "rules", "mcp"} {
+		if _, err := os.Stat(filepath.Join(inspectDir, "team-vault", sub, ".gitkeep")); err != nil {
+			t.Fatalf("vault 初始化后缺少 %s/.gitkeep: %v", sub, err)
+		}
+	}
+
+	skillDir := filepath.Join(projectOne, "my-skill")
+	writeVaultTestFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: my-skill\n---\n")
+	writeVaultTestFile(t, filepath.Join(skillDir, "helper.py"), "print('v1')\n")
+	if err := runVaultImport(nil, []string{"skill", skillDir}); err != nil {
+		t.Fatalf("runVaultImport 失败: %v", err)
+	}
+	refreshInspectRepo(t, inspectDir)
+	if _, err := os.Stat(filepath.Join(inspectDir, "team-vault", "skills", "my-skill", "SKILL.md")); err != nil {
+		t.Fatalf("保存后远端应存在 skill: %v", err)
+	}
+
+	projectTwo := t.TempDir()
+	chdirForTest(t, projectTwo)
+	if err := runVaultInit(nil, []string{"team-vault"}); err != nil {
+		t.Fatalf("第二个项目 runVaultInit 失败: %v", err)
+	}
+	if err := runVaultPull(nil, []string{"skill", "my-skill"}); err != nil {
+		t.Fatalf("runVaultPull 失败: %v", err)
+	}
+
+	localSkillDir := getLocalAssetPath("skill", "my-skill", projectTwo, ide.Get("cursor"))
+	localHelper := filepath.Join(localSkillDir, "helper.py")
+	if data, err := os.ReadFile(localHelper); err != nil {
+		t.Fatalf("拉取后本地应存在 helper.py: %v", err)
+	} else if !strings.Contains(string(data), "v1") {
+		t.Fatalf("拉取后内容不正确: %s", string(data))
+	}
+
+	writeVaultTestFile(t, localHelper, "print('v2')\n")
+	if err := runVaultPush(nil, nil); err != nil {
+		t.Fatalf("runVaultPush 失败: %v", err)
+	}
+	refreshInspectRepo(t, inspectDir)
+	if data, err := os.ReadFile(filepath.Join(inspectDir, "team-vault", "skills", "my-skill", "helper.py")); err != nil {
+		t.Fatalf("推送后远端应存在 helper.py: %v", err)
+	} else if !strings.Contains(string(data), "v2") {
+		t.Fatalf("推送后内容未更新: %s", string(data))
+	}
+
+	oldRemoveRemote := removeRemote
+	removeRemote = true
+	defer func() { removeRemote = oldRemoveRemote }()
+	if err := runVaultRemove(nil, []string{"skill", "my-skill"}); err != nil {
+		t.Fatalf("runVaultRemove --remote 失败: %v", err)
+	}
+	refreshInspectRepo(t, inspectDir)
+	if _, err := os.Stat(filepath.Join(inspectDir, "team-vault", "skills", "my-skill")); !os.IsNotExist(err) {
+		t.Fatalf("远端 skill 应被删除")
+	}
+}
+
 func setupVaultRemoveRemoteTestRepo(t *testing.T) (string, string) {
 	t.Helper()
 
@@ -1106,7 +1203,8 @@ func setupVaultRemoveRemoteTestRepo(t *testing.T) (string, string) {
 	root := t.TempDir()
 	remoteBareDir := filepath.Join(root, "remote.git")
 	seedDir := filepath.Join(root, "seed")
-	repoDir := filepath.Join(decHome, "repo")
+	inspectDir := filepath.Join(root, "inspect")
+	localBareDir := filepath.Join(decHome, "repo.git")
 
 	runVaultTestGitNoDir(t, "init", "--bare", remoteBareDir)
 	runVaultTestGitNoDir(t, "clone", remoteBareDir, seedDir)
@@ -1118,11 +1216,20 @@ func setupVaultRemoveRemoteTestRepo(t *testing.T) (string, string) {
 	runVaultTestGit(t, seedDir, "push", "-u", "origin", "main")
 	runVaultTestGitNoDir(t, "--git-dir", remoteBareDir, "symbolic-ref", "HEAD", "refs/heads/main")
 
-	runVaultTestGitNoDir(t, "clone", remoteBareDir, repoDir)
-	configureVaultTestGitUser(t, repoDir)
-	runVaultTestGit(t, repoDir, "config", "pull.rebase", "true")
+	runVaultTestGitNoDir(t, "clone", "--bare", remoteBareDir, localBareDir)
+	runVaultTestGitNoDir(t, "--git-dir", localBareDir, "config", "user.name", "Dec Vault Test")
+	runVaultTestGitNoDir(t, "--git-dir", localBareDir, "config", "user.email", "dec-vault-test@example.com")
 
-	return decHome, repoDir
+	runVaultTestGitNoDir(t, "clone", remoteBareDir, inspectDir)
+	configureVaultTestGitUser(t, inspectDir)
+	runVaultTestGit(t, inspectDir, "config", "pull.rebase", "true")
+
+	return decHome, inspectDir
+}
+
+func refreshInspectRepo(t *testing.T, dir string) {
+	t.Helper()
+	runVaultTestGit(t, dir, "pull", "--ff-only")
 }
 
 func configureVaultTestGitUser(t *testing.T, dir string) {

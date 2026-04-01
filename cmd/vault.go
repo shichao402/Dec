@@ -28,8 +28,8 @@ var vaultCmd = &cobra.Command{
   # 创建 Vault 空间
   dec vault init github-tools
 
-  # 保存资产到 Vault
-  dec vault save skill ./my-skill --vault github-tools
+  # 导入资产到 Vault
+  dec vault import skill ./my-skill --vault github-tools
 
   # 在新项目中搜索和使用资产
   dec vault list
@@ -68,36 +68,30 @@ func runVaultInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("仓库未连接\n\n运行 dec repo <url> 先连接你的仓库")
 	}
 
-	repoDir, err := repo.GetRepoDir()
-	if err != nil {
-		return err
-	}
+	if err := withWriteRepo(func(tx *repo.Transaction) error {
+		vaultDir := filepath.Join(tx.WorkDir(), vaultName)
+		if _, err := os.Stat(vaultDir); err == nil {
+			fmt.Printf("Vault '%s' 已存在于仓库中，跳过创建\n", vaultName)
+			return nil
+		}
 
-	// 在 repo 中创建 vault 目录结构
-	vaultDir := filepath.Join(repoDir, vaultName)
-	if _, err := os.Stat(vaultDir); err == nil {
-		fmt.Printf("Vault '%s' 已存在于仓库中，跳过创建\n", vaultName)
-	} else {
 		fmt.Printf("📦 创建 Vault 空间: %s\n", vaultName)
 		for _, sub := range []string{"skills", "rules", "mcp"} {
 			if err := os.MkdirAll(filepath.Join(vaultDir, sub), 0755); err != nil {
 				return fmt.Errorf("创建 %s/%s 目录失败: %w", vaultName, sub, err)
 			}
-			// 添加 .gitkeep 保证空目录被 git 跟踪
 			gitkeep := filepath.Join(vaultDir, sub, ".gitkeep")
 			if err := os.WriteFile(gitkeep, []byte(""), 0644); err != nil {
 				return fmt.Errorf("创建 .gitkeep 失败: %w", err)
 			}
 		}
 
-		// 提交到仓库
-		warnings, err := repo.CommitAndPush(fmt.Sprintf("vault: 创建 %s", vaultName))
-		if err != nil {
+		if err := tx.CommitAndPush(fmt.Sprintf("vault: 创建 %s", vaultName)); err != nil {
 			return fmt.Errorf("提交失败: %w", err)
 		}
-		for _, w := range warnings {
-			fmt.Printf("⚠️  %s\n", w)
-		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// 在项目中创建 .dec/ 配置
@@ -125,7 +119,7 @@ func runVaultInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("✅ Vault '%s' 已初始化\n", vaultName)
 	fmt.Println("\n后续步骤:")
-	fmt.Printf("  dec vault save skill <path>     # 保存 Skill 到 %s\n", vaultName)
+	fmt.Printf("  dec vault import skill <path>   # 导入 Skill 到 %s\n", vaultName)
 	fmt.Println("  dec vault list                  # 列出所有 Vault")
 	fmt.Println("  dec vault pull skill <name>     # 从 Vault 下载资产")
 
@@ -133,37 +127,37 @@ func runVaultInit(cmd *cobra.Command, args []string) error {
 }
 
 // ========================================
-// vault save
+// vault import
 // ========================================
 
 var (
-	saveVault string
-	pullAll   bool
-	pullVault string
+	importVault string
+	pullAll     bool
+	pullVault   string
 )
 
-var vaultSaveCmd = &cobra.Command{
-	Use:   "save <type> <path>",
-	Short: "保存资产到 Vault",
-	Long: `保存本地资产到 Vault。
+var vaultImportCmd = &cobra.Command{
+	Use:   "import <type> <path>",
+	Short: "导入资产到 Vault",
+	Long: `导入本地资产到 Vault。
 
 支持的资产类型：
   skill   Skill 目录（包含 SKILL.md）
   rule    规则文件（.mdc）
   mcp     MCP 配置文件 (JSON，包含 command/args/env)
 
-资产保存到当前项目关联的 Vault 中。
+资产导入到当前项目关联的 Vault 中。
 如果项目关联多个 Vault，通过 --vault 指定目标。
 
 示例：
-  dec vault save skill ./my-skill
-  dec vault save rule ./rules/logging.mdc
-  dec vault save mcp ./mcp-config.json --vault github-tools`,
+  dec vault import skill ./my-skill
+  dec vault import rule ./rules/logging.mdc
+  dec vault import mcp ./mcp-config.json --vault github-tools`,
 	Args: cobra.ExactArgs(2),
-	RunE: runVaultSave,
+	RunE: runVaultImport,
 }
 
-func runVaultSave(cmd *cobra.Command, args []string) error {
+func runVaultImport(cmd *cobra.Command, args []string) error {
 	itemType := args[0]
 	sourcePath := args[1]
 
@@ -185,20 +179,9 @@ func runVaultSave(cmd *cobra.Command, args []string) error {
 	}
 
 	// 确定目标 Vault
-	targetVault, err := resolveTargetVault(projectConfig, saveVault)
+	targetVault, err := resolveTargetVault(projectConfig, importVault)
 	if err != nil {
 		return err
-	}
-
-	repoDir, err := repo.GetRepoDir()
-	if err != nil {
-		return err
-	}
-
-	// 验证 vault 目录存在
-	vaultDir := filepath.Join(repoDir, targetVault)
-	if _, err := os.Stat(vaultDir); os.IsNotExist(err) {
-		return fmt.Errorf("Vault '%s' 不存在于仓库中\n\n运行 dec vault init %s 先创建 Vault", targetVault, targetVault)
 	}
 
 	// 解析源路径
@@ -207,22 +190,27 @@ func runVaultSave(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("解析路径失败: %w", err)
 	}
 
-	// 保存资产到 vault 目录
-	assetName, err := saveAssetToVault(itemType, absSource, vaultDir)
-	if err != nil {
+	var assetName string
+	if err := withWriteRepo(func(tx *repo.Transaction) error {
+		vaultDir := filepath.Join(tx.WorkDir(), targetVault)
+		if _, err := os.Stat(vaultDir); os.IsNotExist(err) {
+			return fmt.Errorf("Vault '%s' 不存在于仓库中\n\n运行 dec vault init %s 先创建 Vault", targetVault, targetVault)
+		}
+
+		name, err := saveAssetToVault(itemType, absSource, vaultDir)
+		if err != nil {
+			return err
+		}
+		assetName = name
+
+		fmt.Printf("📦 导入 %s '%s' 到 Vault '%s'\n", itemType, assetName, targetVault)
+		commitMsg := fmt.Sprintf("import: %s/%s/%s", targetVault, itemType, assetName)
+		if err := tx.CommitAndPush(commitMsg); err != nil {
+			return fmt.Errorf("提交失败: %w", err)
+		}
+		return nil
+	}); err != nil {
 		return err
-	}
-
-	fmt.Printf("📦 保存 %s '%s' 到 Vault '%s'\n", itemType, assetName, targetVault)
-
-	// 提交并推送
-	commitMsg := fmt.Sprintf("save: %s/%s/%s", targetVault, itemType, assetName)
-	warnings, err := repo.CommitAndPush(commitMsg)
-	if err != nil {
-		return fmt.Errorf("提交失败: %w", err)
-	}
-	for _, w := range warnings {
-		fmt.Printf("⚠️  %s\n", w)
 	}
 
 	// 记录到项目资产追踪
@@ -235,7 +223,7 @@ func runVaultSave(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("保存资产追踪失败: %w", err)
 	}
 
-	fmt.Printf("✅ %s '%s' 已保存到 Vault '%s'\n", itemType, assetName, targetVault)
+	fmt.Printf("✅ %s '%s' 已导入到 Vault '%s'\n", itemType, assetName, targetVault)
 
 	return nil
 }
@@ -255,77 +243,66 @@ var vaultListCmd = &cobra.Command{
 }
 
 func runVaultList(cmd *cobra.Command, args []string) error {
-	// 先从远程拉取最新
-	if err := repo.Pull(); err != nil {
-		fmt.Printf("⚠️  拉取远程最新失败: %v\n", err)
-	}
-
-	repoDir, err := repo.GetRepoDir()
-	if err != nil {
-		return err
-	}
-
-	// 列出 repo/{vault-name}/ 目录
-	entries, err := os.ReadDir(repoDir)
-	if err != nil {
-		return fmt.Errorf("读取仓库目录失败: %w", err)
-	}
-
-	var vaults []string
-	for _, entry := range entries {
-		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
-			vaults = append(vaults, entry.Name())
+	return withReadRepoDir(func(repoDir string) error {
+		entries, err := os.ReadDir(repoDir)
+		if err != nil {
+			return fmt.Errorf("读取仓库目录失败: %w", err)
 		}
-	}
 
-	if len(vaults) == 0 {
-		fmt.Println("仓库中还没有 Vault 空间")
-		fmt.Println("\n💡 运行 dec vault init <vault-name> 创建 Vault")
-		return nil
-	}
-
-	fmt.Printf("📦 Vault 空间 (%d 个):\n", len(vaults))
-	for _, v := range vaults {
-		vaultDir := filepath.Join(repoDir, v)
-		assets := listVaultAssets(vaultDir, v)
-
-		// 按类型统计
-		skillCount, ruleCount, mcpCount := 0, 0, 0
-		for _, a := range assets {
-			switch a.Type {
-			case "skill":
-				skillCount++
-			case "rule":
-				ruleCount++
-			case "mcp":
-				mcpCount++
+		var vaults []string
+		for _, entry := range entries {
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+				vaults = append(vaults, entry.Name())
 			}
 		}
-		var parts []string
-		if skillCount > 0 {
-			parts = append(parts, fmt.Sprintf("%d skills", skillCount))
-		}
-		if ruleCount > 0 {
-			parts = append(parts, fmt.Sprintf("%d rules", ruleCount))
-		}
-		if mcpCount > 0 {
-			parts = append(parts, fmt.Sprintf("%d mcps", mcpCount))
-		}
-		summary := "(空)"
-		if len(parts) > 0 {
-			summary = strings.Join(parts, ", ")
-		}
-		fmt.Printf("\n  %s  (%s)\n", v, summary)
 
-		// 展示每个资产的详情
-		if len(assets) > 0 {
+		if len(vaults) == 0 {
+			fmt.Println("仓库中还没有 Vault 空间")
+			fmt.Println("\n💡 运行 dec vault init <vault-name> 创建 Vault")
+			return nil
+		}
+
+		fmt.Printf("📦 Vault 空间 (%d 个):\n", len(vaults))
+		for _, v := range vaults {
+			vaultDir := filepath.Join(repoDir, v)
+			assets := listVaultAssets(vaultDir, v)
+
+			skillCount, ruleCount, mcpCount := 0, 0, 0
 			for _, a := range assets {
-				fmt.Printf("    [%-5s] %s\n", a.Type, a.Name)
+				switch a.Type {
+				case "skill":
+					skillCount++
+				case "rule":
+					ruleCount++
+				case "mcp":
+					mcpCount++
+				}
+			}
+			var parts []string
+			if skillCount > 0 {
+				parts = append(parts, fmt.Sprintf("%d skills", skillCount))
+			}
+			if ruleCount > 0 {
+				parts = append(parts, fmt.Sprintf("%d rules", ruleCount))
+			}
+			if mcpCount > 0 {
+				parts = append(parts, fmt.Sprintf("%d mcps", mcpCount))
+			}
+			summary := "(空)"
+			if len(parts) > 0 {
+				summary = strings.Join(parts, ", ")
+			}
+			fmt.Printf("\n  %s  (%s)\n", v, summary)
+
+			if len(assets) > 0 {
+				for _, a := range assets {
+					fmt.Printf("    [%-5s] %s\n", a.Type, a.Name)
+				}
 			}
 		}
-	}
 
-	return nil
+		return nil
+	})
 }
 
 // ========================================
@@ -349,49 +326,39 @@ var vaultSearchCmd = &cobra.Command{
 func runVaultSearch(cmd *cobra.Command, args []string) error {
 	query := strings.ToLower(args[0])
 
-	// 先从远程拉取最新
-	if err := repo.Pull(); err != nil {
-		fmt.Printf("⚠️  拉取远程最新失败: %v\n", err)
-	}
-
-	repoDir, err := repo.GetRepoDir()
-	if err != nil {
-		return err
-	}
-
-	// 遍历所有 vault，搜索匹配的资产
-	entries, err := os.ReadDir(repoDir)
-	if err != nil {
-		return fmt.Errorf("读取仓库目录失败: %w", err)
-	}
-
-	var results []vaultAssetInfo
-	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
-			continue
+	return withReadRepoDir(func(repoDir string) error {
+		entries, err := os.ReadDir(repoDir)
+		if err != nil {
+			return fmt.Errorf("读取仓库目录失败: %w", err)
 		}
-		vaultDir := filepath.Join(repoDir, entry.Name())
-		assets := listVaultAssets(vaultDir, entry.Name())
-		for _, a := range assets {
-			if strings.Contains(strings.ToLower(a.Name), query) {
-				results = append(results, a)
+
+		var results []vaultAssetInfo
+		for _, entry := range entries {
+			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			vaultDir := filepath.Join(repoDir, entry.Name())
+			assets := listVaultAssets(vaultDir, entry.Name())
+			for _, a := range assets {
+				if strings.Contains(strings.ToLower(a.Name), query) {
+					results = append(results, a)
+				}
 			}
 		}
-	}
 
-	if len(results) == 0 {
-		fmt.Printf("未找到匹配 \"%s\" 的资产\n", args[0])
+		if len(results) == 0 {
+			fmt.Printf("未找到匹配 \"%s\" 的资产\n", args[0])
+			return nil
+		}
+
+		fmt.Printf("🔍 搜索 \"%s\"，找到 %d 个结果:\n\n", args[0], len(results))
+		for _, r := range results {
+			fmt.Printf("  [%s] %-24s  (vault: %s)\n", r.Type, r.Name, r.Vault)
+		}
+
+		fmt.Println("\n💡 使用 dec vault pull <type> <name> 下载资产")
 		return nil
-	}
-
-	fmt.Printf("🔍 搜索 \"%s\"，找到 %d 个结果:\n\n", args[0], len(results))
-	for _, r := range results {
-		fmt.Printf("  [%s] %-24s  (vault: %s)\n", r.Type, r.Name, r.Vault)
-	}
-
-	fmt.Println("\n💡 使用 dec vault pull <type> <name> 下载资产")
-
-	return nil
+	})
 }
 
 // ========================================
@@ -440,11 +407,6 @@ func pullSingleAsset(itemType, assetName string) error {
 		return fmt.Errorf("不支持的资产类型: %s (支持: skill, rule, mcp)", itemType)
 	}
 
-	// 先从远程拉取最新
-	if err := repo.Pull(); err != nil {
-		fmt.Printf("⚠️  拉取远程最新失败: %v\n", err)
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("获取当前目录失败: %w", err)
@@ -456,30 +418,30 @@ func pullSingleAsset(itemType, assetName string) error {
 		return fmt.Errorf("加载项目配置失败: %w", err)
 	}
 
-	repoDir, err := repo.GetRepoDir()
-	if err != nil {
+	var foundVault string
+	if err := withReadRepoDir(func(repoDir string) error {
+		vaultName, assetPath, err := findAssetInVaults(repoDir, projectConfig.Vaults, itemType, assetName)
+		if err != nil {
+			return err
+		}
+		foundVault = vaultName
+
+		fmt.Printf("📥 从 Vault '%s' 下载 %s '%s'\n", foundVault, itemType, assetName)
+
+		ideNames, err := config.GetEffectiveIDEs(projectConfig)
+		if err != nil {
+			ideNames = []string{"cursor"}
+		}
+		if err := installAssetToIDEs(itemType, assetName, assetPath, cwd, ideNames); err != nil {
+			return err
+		}
+
+		fmt.Printf("✅ %s '%s' 已下载到项目 (IDE: %s)\n", itemType, assetName, strings.Join(ideNames, ", "))
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	// 查找资产所在的 vault
-	foundVault, assetPath, err := findAssetInVaults(repoDir, projectConfig.Vaults, itemType, assetName)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("📥 从 Vault '%s' 下载 %s '%s'\n", foundVault, itemType, assetName)
-
-	// 确定目标 IDE 列表
-	ideNames, err := config.GetEffectiveIDEs(projectConfig)
-	if err != nil {
-		ideNames = []string{"cursor"}
-	}
-
-	if err := installAssetToIDEs(itemType, assetName, assetPath, cwd, ideNames); err != nil {
-		return err
-	}
-
-	// 更新 assets.yaml
 	assetsConfig, err := mgr.LoadAssetsConfig()
 	if err != nil {
 		return fmt.Errorf("加载资产追踪失败: %w", err)
@@ -489,22 +451,10 @@ func pullSingleAsset(itemType, assetName string) error {
 		return fmt.Errorf("保存资产追踪失败: %w", err)
 	}
 
-	fmt.Printf("✅ %s '%s' 已下载到项目 (IDE: %s)\n", itemType, assetName, strings.Join(ideNames, ", "))
-
 	return nil
 }
 
 func runVaultPullAll() error {
-	// 先从远程拉取最新
-	if err := repo.Pull(); err != nil {
-		fmt.Printf("⚠️  拉取远程最新失败: %v\n", err)
-	}
-
-	repoDir, err := repo.GetRepoDir()
-	if err != nil {
-		return err
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("获取当前目录失败: %w", err)
@@ -516,79 +466,83 @@ func runVaultPullAll() error {
 		return fmt.Errorf("加载项目配置失败: %w", err)
 	}
 
-	// 确定目标 IDE 列表
 	ideNames, err := config.GetEffectiveIDEs(projectConfig)
 	if err != nil {
 		ideNames = []string{"cursor"}
 	}
 
-	// 收集要拉取的 Vault 列表
-	var targetVaults []string
-	if pullVault != "" {
-		// 指定了 --vault，验证该 Vault 存在
-		vaultDir := filepath.Join(repoDir, pullVault)
-		if _, err := os.Stat(vaultDir); os.IsNotExist(err) {
-			return fmt.Errorf("Vault '%s' 不存在", pullVault)
-		}
-		targetVaults = []string{pullVault}
-	} else {
-		// 扫描所有 Vault
-		entries, err := os.ReadDir(repoDir)
-		if err != nil {
-			return fmt.Errorf("读取仓库目录失败: %w", err)
-		}
-		for _, entry := range entries {
-			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
-				targetVaults = append(targetVaults, entry.Name())
-			}
-		}
-	}
-
-	if len(targetVaults) == 0 {
-		fmt.Println("仓库中还没有 Vault 空间")
-		return nil
-	}
-
-	// 收集所有资产
-	var allAssets []vaultAssetInfo
-	for _, v := range targetVaults {
-		vaultDir := filepath.Join(repoDir, v)
-		assets := listVaultAssets(vaultDir, v)
-		allAssets = append(allAssets, assets...)
-	}
-
-	if len(allAssets) == 0 {
-		fmt.Println("没有可拉取的资产")
-		return nil
-	}
-
-	fmt.Printf("📥 批量拉取 %d 个资产 (来自 %d 个 Vault)...\n\n", len(allAssets), len(targetVaults))
-
 	assetsConfig, err := mgr.LoadAssetsConfig()
 	if err != nil {
 		return fmt.Errorf("加载资产追踪失败: %w", err)
 	}
+
 	pulled := 0
 	failed := 0
-
-	for _, asset := range allAssets {
-		assetPath := getAssetPath(repoDir, asset.Vault, asset.Type, asset.Name)
-		if assetPath == "" {
-			continue
-		}
-
-		// 为每个 IDE 安装
-		if err := installAssetToIDEs(asset.Type, asset.Name, assetPath, cwd, ideNames); err == nil {
-			fmt.Printf("  ✅ [%-5s] %s  (from %s)\n", asset.Type, asset.Name, asset.Vault)
-			assetsConfig.AddAsset(asset.Type, asset.Name, asset.Vault, time.Now().Format(time.RFC3339))
-			pulled++
+	processed := false
+	if err := withReadRepoDir(func(repoDir string) error {
+		var targetVaults []string
+		if pullVault != "" {
+			vaultDir := filepath.Join(repoDir, pullVault)
+			if _, err := os.Stat(vaultDir); os.IsNotExist(err) {
+				return fmt.Errorf("Vault '%s' 不存在", pullVault)
+			}
+			targetVaults = []string{pullVault}
 		} else {
-			fmt.Printf("  ⚠️  [%-5s] %s (%v)\n", asset.Type, asset.Name, err)
-			failed++
+			entries, err := os.ReadDir(repoDir)
+			if err != nil {
+				return fmt.Errorf("读取仓库目录失败: %w", err)
+			}
+			for _, entry := range entries {
+				if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+					targetVaults = append(targetVaults, entry.Name())
+				}
+			}
 		}
+
+		if len(targetVaults) == 0 {
+			fmt.Println("仓库中还没有 Vault 空间")
+			return nil
+		}
+
+		var allAssets []vaultAssetInfo
+		for _, v := range targetVaults {
+			vaultDir := filepath.Join(repoDir, v)
+			assets := listVaultAssets(vaultDir, v)
+			allAssets = append(allAssets, assets...)
+		}
+
+		if len(allAssets) == 0 {
+			fmt.Println("没有可拉取的资产")
+			return nil
+		}
+
+		processed = true
+		fmt.Printf("📥 批量拉取 %d 个资产 (来自 %d 个 Vault)...\n\n", len(allAssets), len(targetVaults))
+		for _, asset := range allAssets {
+			assetPath := getAssetPath(repoDir, asset.Vault, asset.Type, asset.Name)
+			if assetPath == "" {
+				continue
+			}
+
+			if err := installAssetToIDEs(asset.Type, asset.Name, assetPath, cwd, ideNames); err == nil {
+				fmt.Printf("  ✅ [%-5s] %s  (from %s)\n", asset.Type, asset.Name, asset.Vault)
+				assetsConfig.AddAsset(asset.Type, asset.Name, asset.Vault, time.Now().Format(time.RFC3339))
+				pulled++
+			} else {
+				fmt.Printf("  ⚠️  [%-5s] %s (%v)\n", asset.Type, asset.Name, err)
+				failed++
+			}
+		}
+
+		return nil
+	}); err != nil {
+		return err
 	}
 
-	// 保存 assets.yaml
+	if !processed {
+		return nil
+	}
+
 	if pulled > 0 {
 		if err := mgr.SaveAssetsConfig(assetsConfig); err != nil {
 			return fmt.Errorf("保存资产追踪失败: %w", err)
@@ -638,17 +592,11 @@ func runVaultPush(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("加载项目配置失败: %w", err)
 	}
 
-	repoDir, err := repo.GetRepoDir()
-	if err != nil {
-		return err
-	}
-
 	ideNames, err := config.GetEffectiveIDEs(projectConfig)
 	if err != nil {
 		ideNames = []string{"cursor"}
 	}
 
-	// 收集所有已追踪的资产
 	allAssets := collectAllAssets(assetsConfig)
 	if len(allAssets) == 0 {
 		fmt.Println("当前项目没有追踪的 Vault 资产")
@@ -658,56 +606,57 @@ func runVaultPush(cmd *cobra.Command, args []string) error {
 	fmt.Printf("📤 检查 %d 个已追踪资产...\n\n", len(allAssets))
 
 	pushed := 0
-	for _, asset := range allAssets {
-		// 找到本地资产路径（从第一个 IDE 目录）
-		ideImpl := ide.Get(ideNames[0])
-		localPath := getLocalAssetPath(asset.Type, asset.Name, cwd, ideImpl)
-
-		if _, err := os.Stat(localPath); os.IsNotExist(err) {
-			continue // 本地文件不存在，跳过
-		}
-
-		// 复制回 repo
-		vaultDir := filepath.Join(repoDir, asset.Vault)
-		if _, err := os.Stat(vaultDir); os.IsNotExist(err) {
-			continue // vault 不存在，跳过
-		}
-
-		destPath := getAssetPath(repoDir, asset.Vault, asset.Type, asset.Name)
-		switch asset.Type {
-		case "skill":
-			if err := copyDir(localPath, destPath); err != nil {
-				fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
+	if err := withWriteRepo(func(tx *repo.Transaction) error {
+		repoDir := tx.WorkDir()
+		for _, asset := range allAssets {
+			ideImpl := ide.Get(ideNames[0])
+			localPath := getLocalAssetPath(asset.Type, asset.Name, cwd, ideImpl)
+			if _, err := os.Stat(localPath); os.IsNotExist(err) {
 				continue
 			}
-		case "rule", "mcp":
-			if err := copyFile(localPath, destPath); err != nil {
-				fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
+
+			vaultDir := filepath.Join(repoDir, asset.Vault)
+			if _, err := os.Stat(vaultDir); os.IsNotExist(err) {
 				continue
 			}
+
+			destPath := getAssetPath(repoDir, asset.Vault, asset.Type, asset.Name)
+			switch asset.Type {
+			case "skill":
+				if err := copyDir(localPath, destPath); err != nil {
+					fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
+					continue
+				}
+			case "rule", "mcp":
+				if err := copyFile(localPath, destPath); err != nil {
+					fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
+					continue
+				}
+			}
+
+			fmt.Printf("  [%s] %s -> %s\n", asset.Type, asset.Name, asset.Vault)
+			pushed++
 		}
 
-		fmt.Printf("  [%s] %s -> %s\n", asset.Type, asset.Name, asset.Vault)
-		pushed++
+		if pushed == 0 {
+			fmt.Println("没有需要推送的变更")
+			return nil
+		}
+
+		commitMsg := fmt.Sprintf("push: 更新 %d 个资产", pushed)
+		if err := tx.CommitAndPush(commitMsg); err != nil {
+			return fmt.Errorf("提交失败: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if pushed == 0 {
-		fmt.Println("没有需要推送的变更")
 		return nil
 	}
 
-	// 提交并推送
-	commitMsg := fmt.Sprintf("push: 更新 %d 个资产", pushed)
-	warnings, err := repo.CommitAndPush(commitMsg)
-	if err != nil {
-		return fmt.Errorf("提交失败: %w", err)
-	}
-	for _, w := range warnings {
-		fmt.Printf("⚠️  %s\n", w)
-	}
-
 	fmt.Printf("\n✅ 已推送 %d 个资产到远程仓库\n", pushed)
-
 	return nil
 }
 
@@ -788,51 +737,50 @@ func runVaultRemove(cmd *cobra.Command, args []string) error {
 	remote := false
 	// 如果 --remote，也从 vault 仓库中删除
 	if removeRemote {
-		repoDir, err := repo.GetRepoDir()
-		if err != nil {
-			return fmt.Errorf("获取仓库目录失败: %w", err)
-		}
+		if err := withWriteRepo(func(tx *repo.Transaction) error {
+			repoDir := tx.WorkDir()
+			var targetVault string
+			var assetPath string
 
-		var targetVault string
-		var assetPath string
-
-		if trackedAsset != nil && trackedAsset.Vault != "" {
-			targetVault = trackedAsset.Vault
-			assetPath = getAssetPath(repoDir, targetVault, itemType, assetName)
-			if _, err := os.Stat(assetPath); err != nil {
-				if os.IsNotExist(err) {
-					fmt.Printf("⚠️  远程资产未找到（vault: %s）\n", targetVault)
-				} else {
-					return fmt.Errorf("检查远程资产失败: %w", err)
+			if trackedAsset != nil && trackedAsset.Vault != "" {
+				targetVault = trackedAsset.Vault
+				assetPath = getAssetPath(repoDir, targetVault, itemType, assetName)
+				if _, err := os.Stat(assetPath); err != nil {
+					if os.IsNotExist(err) {
+						fmt.Printf("⚠️  远程资产未找到（vault: %s）\n", targetVault)
+					} else {
+						return fmt.Errorf("检查远程资产失败: %w", err)
+					}
+					targetVault = ""
+					assetPath = ""
 				}
-				targetVault = ""
-				assetPath = ""
+			} else {
+				foundVault, foundPath, err := findAssetInVaults(repoDir, projectConfig.Vaults, itemType, assetName)
+				if err != nil {
+					fmt.Printf("⚠️  远程资产未找到\n")
+				} else {
+					targetVault = foundVault
+					assetPath = foundPath
+				}
 			}
-		} else {
-			targetVault, assetPath, err = findAssetInVaults(repoDir, projectConfig.Vaults, itemType, assetName)
-			if err != nil {
-				fmt.Printf("⚠️  远程资产未找到\n")
-				targetVault = ""
-				assetPath = ""
-			}
-		}
 
-		if targetVault != "" && assetPath != "" {
+			if targetVault == "" || assetPath == "" {
+				return nil
+			}
 			if err := os.RemoveAll(assetPath); err != nil {
 				return fmt.Errorf("删除远程资产失败: %w", err)
 			}
 
 			commitMsg := fmt.Sprintf("remove: %s/%s/%s", targetVault, itemType, assetName)
-			warnings, err := repo.CommitAndPush(commitMsg)
-			if err != nil {
+			if err := tx.CommitAndPush(commitMsg); err != nil {
 				return fmt.Errorf("提交失败: %w", err)
-			}
-			for _, w := range warnings {
-				fmt.Printf("⚠️  %s\n", w)
 			}
 
 			fmt.Printf("  已从远程 Vault '%s' 删除\n", targetVault)
 			remote = true
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 
@@ -844,6 +792,24 @@ func runVaultRemove(cmd *cobra.Command, args []string) error {
 	fmt.Printf("✅ %s '%s' 已移除\n", itemType, assetName)
 
 	return nil
+}
+
+func withReadRepoDir(fn func(string) error) error {
+	tx, err := repo.NewReadTransaction()
+	if err != nil {
+		return err
+	}
+	defer tx.Close()
+	return fn(tx.WorkDir())
+}
+
+func withWriteRepo(fn func(*repo.Transaction) error) error {
+	tx, err := repo.NewWriteTransaction()
+	if err != nil {
+		return err
+	}
+	defer tx.Close()
+	return fn(tx)
 }
 
 // ========================================
@@ -1280,8 +1246,8 @@ func copyDir(src, dst string) error {
 // ========================================
 
 func init() {
-	// vault save 标志
-	vaultSaveCmd.Flags().StringVar(&saveVault, "vault", "", "目标 Vault（项目关联多个时必填）")
+	// vault import 标志
+	vaultImportCmd.Flags().StringVar(&importVault, "vault", "", "目标 Vault（项目关联多个时必填）")
 
 	// vault pull 标志
 	vaultPullCmd.Flags().BoolVar(&pullAll, "all", false, "批量拉取所有资产")
@@ -1292,7 +1258,7 @@ func init() {
 
 	// 注册子命令
 	vaultCmd.AddCommand(vaultInitCmd)
-	vaultCmd.AddCommand(vaultSaveCmd)
+	vaultCmd.AddCommand(vaultImportCmd)
 	vaultCmd.AddCommand(vaultListCmd)
 	vaultCmd.AddCommand(vaultSearchCmd)
 	vaultCmd.AddCommand(vaultPullCmd)

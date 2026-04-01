@@ -108,7 +108,7 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 	fmt.Println("  dec vault search <keyword>    # 搜索 Vault 中的资产")
 	fmt.Println("\n在项目中使用:")
 	fmt.Println("  dec vault pull <type> <name>  # 拉取资产到当前项目")
-	fmt.Println("  dec vault save <type> <path>  # 保存资产到 Vault")
+	fmt.Println("  dec vault import <type> <path>  # 导入资产到 Vault")
 
 	return nil
 }
@@ -151,7 +151,7 @@ func installDecSkillForIDE(ideName string) error {
 		"### 主动建议用户的场景\n" +
 		"\n" +
 		"1. **用户创建或修改了 Skill/Rule**\n" +
-		"   - 建议运行 `dec vault save skill <path>` 保存以供后续项目复用\n" +
+		"   - 建议运行 `dec vault import skill <path>` 导入以供后续项目复用\n" +
 		"   - 可添加标签便于搜索：`--tag <tag1> --tag <tag2>`\n" +
 		"\n" +
 		"2. **用户提到需要之前做过的工具/配置**\n" +
@@ -163,7 +163,7 @@ func installDecSkillForIDE(ideName string) error {
 		"   - 类型：skill、rule、mcp\n" +
 		"\n" +
 		"4. **用户修改了已拉取的资产**\n" +
-		"   - 建议运行 `dec vault save` 回写到 Vault\n" +
+		"   - 建议运行 `dec vault push` 回写到 Vault\n" +
 		"   - 这样其他项目能获取最新版本\n" +
 		"\n" +
 		"## 快速参考\n" +
@@ -175,10 +175,10 @@ func installDecSkillForIDE(ideName string) error {
 		"| 列出所有资产 | `dec vault list` | 显示 Vault 中的所有 Skills、Rules、MCP |\n" +
 		"| 按类型列出 | `dec vault list --type skill` | 只列出 skill、rule 或 mcp |\n" +
 		"| 搜索资产 | `dec vault search \"<query>\"` | 按名称、描述或标签搜索 |\n" +
-		"| 保存 Skill | `dec vault save skill <dir-path>` | 目录需包含 SKILL.md |\n" +
-		"| 保存 Rule | `dec vault save rule <file.mdc>` | Rule 文件格式 |\n" +
-		"| 保存 MCP | `dec vault save mcp <server.json>` | MCP server 片段 |\n" +
-		"| 添加标签 | `dec vault save skill <path> --tag <tag>` | 支持多个 --tag |\n" +
+		"| 导入 Skill | `dec vault import skill <dir-path>` | 目录需包含 SKILL.md |\n" +
+		"| 导入 Rule | `dec vault import rule <file.mdc>` | Rule 文件格式 |\n" +
+		"| 导入 MCP | `dec vault import mcp <server.json>` | MCP server 片段 |\n" +
+		"| 添加标签 | `dec vault import skill <path> --tag <tag>` | 支持多个 --tag |\n" +
 		"| 拉取到项目 | `dec vault pull skill <name>` | 自动部署到当前 IDE |\n" +
 		"| 推送更新 | `dec vault push` | 本地修改推送到远程 |\n" +
 		"\n" +
@@ -202,7 +202,7 @@ func installDecSkillForIDE(ideName string) error {
 		"\n" +
 		"Rule 是单个 `.mdc` 文件。使用命令保存：\n" +
 		"\n" +
-		"    dec vault save rule .cursor/rules/my-rule.mdc\n" +
+		"    dec vault import rule .cursor/rules/my-rule.mdc\n" +
 		"\n" +
 		"### MCP（JSON 片段）\n" +
 		"\n" +
