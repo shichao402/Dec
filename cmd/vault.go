@@ -776,6 +776,7 @@ func runVaultRemove(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("加载资产追踪失败: %w", err)
 	}
+	trackedAsset := assetsConfig.FindAsset(itemType, assetName)
 	removed := assetsConfig.RemoveAsset(itemType, assetName)
 	if removed {
 		if err := mgr.SaveAssetsConfig(assetsConfig); err != nil {
@@ -792,29 +793,46 @@ func runVaultRemove(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("获取仓库目录失败: %w", err)
 		}
 
-		// 查找所有 vault 中的资产并删除
-		results := findAllAssetInVaults(repoDir, projectConfig.Vaults, itemType, assetName)
-		if len(results) == 0 {
-			fmt.Printf("⚠️  远程资产未找到\n")
-		} else {
-			for _, result := range results {
-				// 删除文件
-				if err := os.RemoveAll(result.path); err != nil {
-					return fmt.Errorf("删除远程资产失败: %w", err)
-				}
+		var targetVault string
+		var assetPath string
 
-				commitMsg := fmt.Sprintf("remove: %s/%s/%s", result.vault, itemType, assetName)
-				warnings, err := repo.CommitAndPush(commitMsg)
-				if err != nil {
-					return fmt.Errorf("提交失败: %w", err)
+		if trackedAsset != nil && trackedAsset.Vault != "" {
+			targetVault = trackedAsset.Vault
+			assetPath = getAssetPath(repoDir, targetVault, itemType, assetName)
+			if _, err := os.Stat(assetPath); err != nil {
+				if os.IsNotExist(err) {
+					fmt.Printf("⚠️  远程资产未找到（vault: %s）\n", targetVault)
+				} else {
+					return fmt.Errorf("检查远程资产失败: %w", err)
 				}
-				for _, w := range warnings {
-					fmt.Printf("⚠️  %s\n", w)
-				}
-
-				fmt.Printf("  已从远程 Vault '%s' 删除\n", result.vault)
-				remote = true
+				targetVault = ""
+				assetPath = ""
 			}
+		} else {
+			targetVault, assetPath, err = findAssetInVaults(repoDir, projectConfig.Vaults, itemType, assetName)
+			if err != nil {
+				fmt.Printf("⚠️  远程资产未找到\n")
+				targetVault = ""
+				assetPath = ""
+			}
+		}
+
+		if targetVault != "" && assetPath != "" {
+			if err := os.RemoveAll(assetPath); err != nil {
+				return fmt.Errorf("删除远程资产失败: %w", err)
+			}
+
+			commitMsg := fmt.Sprintf("remove: %s/%s/%s", targetVault, itemType, assetName)
+			warnings, err := repo.CommitAndPush(commitMsg)
+			if err != nil {
+				return fmt.Errorf("提交失败: %w", err)
+			}
+			for _, w := range warnings {
+				fmt.Printf("⚠️  %s\n", w)
+			}
+
+			fmt.Printf("  已从远程 Vault '%s' 删除\n", targetVault)
+			remote = true
 		}
 	}
 

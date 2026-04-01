@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -970,6 +971,195 @@ func TestRunVaultRemove_ReturnsAssetsLoadError(t *testing.T) {
 	if !strings.Contains(err.Error(), "加载资产追踪失败") {
 		t.Fatalf("错误信息不正确: %v", err)
 	}
+}
+
+func TestRunVaultRemove_RemoteUsesTrackedVault(t *testing.T) {
+	decHome, repoDir := setupVaultRemoveRemoteTestRepo(t)
+	setEnvForTest(t, "DEC_HOME", decHome)
+
+	writeVaultTestFile(t, filepath.Join(repoDir, "v1", "rules", "shared.mdc"), "from v1\n")
+	writeVaultTestFile(t, filepath.Join(repoDir, "v2", "rules", "shared.mdc"), "from v2\n")
+	runVaultTestGit(t, repoDir, "add", ".")
+	runVaultTestGit(t, repoDir, "commit", "-m", "seed duplicate rules")
+	runVaultTestGit(t, repoDir, "push", "origin", "main")
+
+	projectRoot := t.TempDir()
+	chdirForTest(t, projectRoot)
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{Vaults: []string{"v1", "v2"}, IDEs: []string{"cursor"}}); err != nil {
+		t.Fatalf("写入项目配置失败: %v", err)
+	}
+	if err := mgr.SaveAssetsConfig(&types.AssetsConfig{Rules: []types.AssetEntry{{Name: "shared", Vault: "v1", InstalledAt: "2026-04-01T00:00:00Z"}}}); err != nil {
+		t.Fatalf("写入资产追踪失败: %v", err)
+	}
+
+	oldRemoveRemote := removeRemote
+	removeRemote = true
+	t.Cleanup(func() {
+		removeRemote = oldRemoveRemote
+	})
+
+	if err := runVaultRemove(nil, []string{"rule", "shared"}); err != nil {
+		t.Fatalf("远程删除追踪资产失败: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(repoDir, "v1", "rules", "shared.mdc")); !os.IsNotExist(err) {
+		t.Fatalf("追踪来源 v1 中的远程资产应被删除")
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "v2", "rules", "shared.mdc")); err != nil {
+		t.Fatalf("其他 vault 中的同名资产不应被删除: %v", err)
+	}
+
+	assetsConfig, err := mgr.LoadAssetsConfig()
+	if err != nil {
+		t.Fatalf("读取资产追踪失败: %v", err)
+	}
+	if asset := assetsConfig.FindAsset("rule", "shared"); asset != nil {
+		t.Fatalf("移除后不应保留资产追踪: %+v", *asset)
+	}
+}
+
+func TestRunVaultRemove_RemoteFallbackWhenNotTracked(t *testing.T) {
+	decHome, repoDir := setupVaultRemoveRemoteTestRepo(t)
+	setEnvForTest(t, "DEC_HOME", decHome)
+
+	writeVaultTestFile(t, filepath.Join(repoDir, "v1", "rules", "shared.mdc"), "from v1\n")
+	writeVaultTestFile(t, filepath.Join(repoDir, "v2", "rules", "shared.mdc"), "from v2\n")
+	runVaultTestGit(t, repoDir, "add", ".")
+	runVaultTestGit(t, repoDir, "commit", "-m", "seed duplicate fallback rules")
+	runVaultTestGit(t, repoDir, "push", "origin", "main")
+
+	projectRoot := t.TempDir()
+	chdirForTest(t, projectRoot)
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{Vaults: []string{"v1"}, IDEs: []string{"cursor"}}); err != nil {
+		t.Fatalf("写入项目配置失败: %v", err)
+	}
+	if err := mgr.SaveAssetsConfig(&types.AssetsConfig{}); err != nil {
+		t.Fatalf("写入空资产追踪失败: %v", err)
+	}
+
+	oldRemoveRemote := removeRemote
+	removeRemote = true
+	t.Cleanup(func() {
+		removeRemote = oldRemoveRemote
+	})
+
+	if err := runVaultRemove(nil, []string{"rule", "shared"}); err != nil {
+		t.Fatalf("远程删除未追踪资产失败: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(repoDir, "v1", "rules", "shared.mdc")); !os.IsNotExist(err) {
+		t.Fatalf("fallback 应只删除关联 vault 中找到的首个匹配")
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "v2", "rules", "shared.mdc")); err != nil {
+		t.Fatalf("未追踪 fallback 不应删除其他 vault 的同名资产: %v", err)
+	}
+}
+
+func TestRunVaultRemove_RemoteNotFoundWhenTrackedButMissing(t *testing.T) {
+	decHome, repoDir := setupVaultRemoveRemoteTestRepo(t)
+	setEnvForTest(t, "DEC_HOME", decHome)
+
+	writeVaultTestFile(t, filepath.Join(repoDir, "v2", "rules", "shared.mdc"), "from v2\n")
+	runVaultTestGit(t, repoDir, "add", ".")
+	runVaultTestGit(t, repoDir, "commit", "-m", "seed alternate vault rule")
+	runVaultTestGit(t, repoDir, "push", "origin", "main")
+
+	projectRoot := t.TempDir()
+	chdirForTest(t, projectRoot)
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{Vaults: []string{"v1", "v2"}, IDEs: []string{"cursor"}}); err != nil {
+		t.Fatalf("写入项目配置失败: %v", err)
+	}
+	if err := mgr.SaveAssetsConfig(&types.AssetsConfig{Rules: []types.AssetEntry{{Name: "shared", Vault: "v1", InstalledAt: "2026-04-01T00:00:00Z"}}}); err != nil {
+		t.Fatalf("写入资产追踪失败: %v", err)
+	}
+
+	oldRemoveRemote := removeRemote
+	removeRemote = true
+	t.Cleanup(func() {
+		removeRemote = oldRemoveRemote
+	})
+
+	if err := runVaultRemove(nil, []string{"rule", "shared"}); err != nil {
+		t.Fatalf("追踪来源远程缺失时不应失败: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(repoDir, "v2", "rules", "shared.mdc")); err != nil {
+		t.Fatalf("追踪来源缺失时不应删除其他 vault 的同名资产: %v", err)
+	}
+
+	assetsConfig, err := mgr.LoadAssetsConfig()
+	if err != nil {
+		t.Fatalf("读取资产追踪失败: %v", err)
+	}
+	if asset := assetsConfig.FindAsset("rule", "shared"); asset != nil {
+		t.Fatalf("移除后不应保留资产追踪: %+v", *asset)
+	}
+}
+
+func setupVaultRemoveRemoteTestRepo(t *testing.T) (string, string) {
+	t.Helper()
+
+	decHome := t.TempDir()
+	root := t.TempDir()
+	remoteBareDir := filepath.Join(root, "remote.git")
+	seedDir := filepath.Join(root, "seed")
+	repoDir := filepath.Join(decHome, "repo")
+
+	runVaultTestGitNoDir(t, "init", "--bare", remoteBareDir)
+	runVaultTestGitNoDir(t, "clone", remoteBareDir, seedDir)
+	configureVaultTestGitUser(t, seedDir)
+	writeVaultTestFile(t, filepath.Join(seedDir, "README.md"), "init\n")
+	runVaultTestGit(t, seedDir, "add", ".")
+	runVaultTestGit(t, seedDir, "commit", "-m", "initial commit")
+	runVaultTestGit(t, seedDir, "branch", "-M", "main")
+	runVaultTestGit(t, seedDir, "push", "-u", "origin", "main")
+	runVaultTestGitNoDir(t, "--git-dir", remoteBareDir, "symbolic-ref", "HEAD", "refs/heads/main")
+
+	runVaultTestGitNoDir(t, "clone", remoteBareDir, repoDir)
+	configureVaultTestGitUser(t, repoDir)
+	runVaultTestGit(t, repoDir, "config", "pull.rebase", "true")
+
+	return decHome, repoDir
+}
+
+func configureVaultTestGitUser(t *testing.T, dir string) {
+	t.Helper()
+	runVaultTestGit(t, dir, "config", "user.name", "Dec Vault Test")
+	runVaultTestGit(t, dir, "config", "user.email", "dec-vault-test@example.com")
+}
+
+func writeVaultTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("写入文件失败: %v", err)
+	}
+}
+
+func runVaultTestGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s 失败: %v\n%s", strings.Join(args, " "), err, string(output))
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func runVaultTestGitNoDir(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s 失败: %v\n%s", strings.Join(args, " "), err, string(output))
+	}
+	return strings.TrimSpace(string(output))
 }
 
 // ========================================
