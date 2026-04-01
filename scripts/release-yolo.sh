@@ -1,7 +1,9 @@
 #!/bin/bash
 # Dec 发布准备脚本
-# 说明：推送 tag 后 GitHub Actions 会自动构建并创建 Release，本脚本用于本地校验与构建准备。
+# 说明：版本号在本地写入 version.json，推送包含 version.json 变更的 main 提交后，GitHub Actions 会自动校验、打 tag、构建并创建 Release。
 # 用法：./scripts/release-yolo.sh [版本号]
+#       不传版本号时，仅执行本地测试与构建检查。
+#       传入版本号时，会先更新 version.json。
 
 set -e
 
@@ -36,6 +38,14 @@ normalize_version() {
     echo "$v"
 }
 
+validate_version() {
+    local v="$1"
+    if [[ ! "$v" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        error "无效版本号格式: ${v}（期望: vMAJOR.MINOR.PATCH）"
+        exit 1
+    fi
+}
+
 current_version() {
     python3 -c "import json; print(json.load(open('version.json'))['version'])"
 }
@@ -57,6 +67,7 @@ main() {
 
     if [ -n "$1" ]; then
         target=$(normalize_version "$1")
+        validate_version "$target"
         python3 - <<'PY' "$target"
 import json, sys
 path = 'version.json'
@@ -85,12 +96,21 @@ PY
     step "后续步骤"
     echo "1. 检查 dist/ 目录中的二进制与 BUILD_INFO 文件"
     echo "2. 更新 CHANGELOG 与 README（如有需要）"
-    echo "3. 提交并推送到 main，GitHub Actions 会自动自增版本号、打 tag、构建并创建 Release"
+    echo "3. 提交本次变更并推送到 main"
     echo ""
-    echo "   或手动指定版本发布："
-    echo "   git tag ${target} && git push origin ${target}"
+    echo "   说明："
+    echo "   - 只有 version.json 发生变更时，GitHub Actions 才会执行发布"
+    echo "   - 发布流程会自动校验版本号、创建 tag、构建并创建 GitHub Release"
+    echo "   - 无需手动打 tag"
     echo ""
-    warn "推送到 main 后 GitHub Actions 会自动完成版本自增与发布，通常无需手动打 tag。"
+    if [ -n "$1" ]; then
+        echo "   推荐命令："
+        echo "   git add version.json <其他变更>"
+        echo "   git commit -m \"chore: release ${target}\""
+        echo "   git push origin main"
+    else
+        warn "本次未修改 version.json；如果直接 push，GitHub Actions 不会触发发布。"
+    fi
 }
 
 main "$@"
