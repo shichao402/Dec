@@ -1131,9 +1131,11 @@ func TestBareWorkflow_EndToEnd(t *testing.T) {
 	if err := runRepo(nil, []string{remoteBareDir}); err != nil {
 		t.Fatalf("runRepo 失败: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(decHome, "repo.git", "HEAD")); err != nil {
+	bareDir := filepath.Join(decHome, "repo.git")
+	if _, err := os.Stat(filepath.Join(bareDir, "HEAD")); err != nil {
 		t.Fatalf("连接后应创建 bare repo: %v", err)
 	}
+	configureVaultTestBareGitUser(t, bareDir)
 
 	if err := runVaultInit(nil, []string{"team-vault"}); err != nil {
 		t.Fatalf("runVaultInit 失败: %v", err)
@@ -1236,6 +1238,12 @@ func configureVaultTestGitUser(t *testing.T, dir string) {
 	t.Helper()
 	runVaultTestGit(t, dir, "config", "user.name", "Dec Vault Test")
 	runVaultTestGit(t, dir, "config", "user.email", "dec-vault-test@example.com")
+}
+
+func configureVaultTestBareGitUser(t *testing.T, bareDir string) {
+	t.Helper()
+	runVaultTestGitNoDir(t, "--git-dir", bareDir, "config", "user.name", "Dec Vault Test")
+	runVaultTestGitNoDir(t, "--git-dir", bareDir, "config", "user.email", "dec-vault-test@example.com")
 }
 
 func writeVaultTestFile(t *testing.T, path, content string) {
