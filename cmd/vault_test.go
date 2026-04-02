@@ -1175,7 +1175,9 @@ func TestBareWorkflow_EndToEnd(t *testing.T) {
 		t.Fatalf("拉取后内容不正确: %s", string(data))
 	}
 
-	writeVaultTestFile(t, localHelper, "print('v2')\n")
+	// 修改模板文件（push 从 .dec/templates/ 读取）
+	templateHelper := filepath.Join(projectTwo, ".dec", "templates", "team-vault", "skills", "my-skill", "helper.py")
+	writeVaultTestFile(t, templateHelper, "print('v2')\n")
 	if err := runVaultPush(nil, nil); err != nil {
 		t.Fatalf("runVaultPush 失败: %v", err)
 	}

@@ -224,6 +224,14 @@ func runVaultImport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("保存资产追踪失败: %w", err)
 	}
 
+	// 保存模板到 .dec/templates/
+	if err := withReadRepoDir(func(repoDir string) error {
+		assetPath := getAssetPath(repoDir, targetVault, itemType, assetName)
+		return saveAssetTemplate(itemType, assetName, assetPath, cwd, targetVault)
+	}); err != nil {
+		fmt.Printf("⚠️  保存模板失败: %v\n", err)
+	}
+
 	fmt.Printf("✅ %s '%s' 已导入到 Vault '%s'\n", itemType, assetName, targetVault)
 
 	return nil
@@ -430,6 +438,11 @@ func pullSingleAsset(itemType, assetName string) error {
 
 		fmt.Printf("📥 从 Vault '%s' 下载 %s '%s'\n", foundVault, itemType, assetName)
 
+		// 保存原始模板到 .dec/templates/
+		if err := saveAssetTemplate(itemType, assetName, assetPath, cwd, foundVault); err != nil {
+			return fmt.Errorf("保存模板失败: %w", err)
+		}
+
 		ideNames, err = config.GetEffectiveIDEs(projectConfig)
 		if err != nil {
 			ideNames = []string{"cursor"}
@@ -444,17 +457,14 @@ func pullSingleAsset(itemType, assetName string) error {
 		return err
 	}
 
-	// 占位符替换
-	varsUsed := substituteAssetVars(itemType, assetName, cwd, ideNames, mgr)
+	// 占位符替换（对 IDE 目录中的文件）
+	substituteAssetVars(itemType, assetName, cwd, ideNames, mgr)
 
 	assetsConfig, err := mgr.LoadAssetsConfig()
 	if err != nil {
 		return fmt.Errorf("加载资产追踪失败: %w", err)
 	}
-	entry := assetsConfig.AddAsset(itemType, assetName, foundVault, time.Now().Format(time.RFC3339))
-	if len(varsUsed) > 0 && entry != nil {
-		entry.VarsUsed = varsUsed
-	}
+	assetsConfig.AddAsset(itemType, assetName, foundVault, time.Now().Format(time.RFC3339))
 	if err := mgr.SaveAssetsConfig(assetsConfig); err != nil {
 		return fmt.Errorf("保存资产追踪失败: %w", err)
 	}
@@ -533,12 +543,13 @@ func runVaultPullAll() error {
 			}
 
 			if err := installAssetToIDEs(asset.Type, asset.Name, assetPath, cwd, ideNames); err == nil {
-				varsUsed := substituteAssetVars(asset.Type, asset.Name, cwd, ideNames, mgr)
-				fmt.Printf("  ✅ [%-5s] %s  (from %s)\n", asset.Type, asset.Name, asset.Vault)
-				entry := assetsConfig.AddAsset(asset.Type, asset.Name, asset.Vault, time.Now().Format(time.RFC3339))
-				if len(varsUsed) > 0 && entry != nil {
-					entry.VarsUsed = varsUsed
+				// 保存原始模板
+				if err := saveAssetTemplate(asset.Type, asset.Name, assetPath, cwd, asset.Vault); err != nil {
+					fmt.Printf("  ⚠️  保存模板失败 %s/%s: %v\n", asset.Type, asset.Name, err)
 				}
+				substituteAssetVars(asset.Type, asset.Name, cwd, ideNames, mgr)
+				fmt.Printf("  ✅ [%-5s] %s  (from %s)\n", asset.Type, asset.Name, asset.Vault)
+				assetsConfig.AddAsset(asset.Type, asset.Name, asset.Vault, time.Now().Format(time.RFC3339))
 				pulled++
 			} else {
 				fmt.Printf("  ⚠️  [%-5s] %s (%v)\n", asset.Type, asset.Name, err)
@@ -599,16 +610,6 @@ func runVaultPush(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("加载资产追踪失败: %w", err)
 	}
 
-	projectConfig, err := mgr.LoadProjectConfig()
-	if err != nil {
-		return fmt.Errorf("加载项目配置失败: %w", err)
-	}
-
-	ideNames, err := config.GetEffectiveIDEs(projectConfig)
-	if err != nil {
-		ideNames = []string{"cursor"}
-	}
-
 	allAssets := collectAllAssets(assetsConfig)
 	if len(allAssets) == 0 {
 		fmt.Println("当前项目没有追踪的 Vault 资产")
@@ -621,9 +622,9 @@ func runVaultPush(cmd *cobra.Command, args []string) error {
 	if err := withWriteRepo(func(tx *repo.Transaction) error {
 		repoDir := tx.WorkDir()
 		for _, asset := range allAssets {
-			ideImpl := ide.Get(ideNames[0])
-			localPath := getLocalAssetPath(asset.Type, asset.Name, cwd, ideImpl)
-			if _, err := os.Stat(localPath); os.IsNotExist(err) {
+			// 从 .dec/templates/ 读取原始模板
+			templatePath := getTemplatePath(cwd, asset.Vault, asset.Type, asset.Name)
+			if _, err := os.Stat(templatePath); os.IsNotExist(err) {
 				continue
 			}
 
@@ -632,38 +633,15 @@ func runVaultPush(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			// 查找该资产的 varsUsed（用于反向替换）
-			trackedAsset := assetsConfig.FindAsset(asset.Type, asset.Name)
-			var varsUsed map[string]string
-			if trackedAsset != nil {
-				varsUsed = trackedAsset.VarsUsed
-			}
-
 			destPath := getAssetPath(repoDir, asset.Vault, asset.Type, asset.Name)
 			switch asset.Type {
 			case "skill":
-				if err := copyDir(localPath, destPath); err != nil {
+				if err := copyDir(templatePath, destPath); err != nil {
 					fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
 					continue
 				}
-				if len(varsUsed) > 0 {
-					if err := vars.RestoreDir(destPath, varsUsed); err != nil {
-						fmt.Printf("⚠️  还原占位符失败 %s/%s: %v\n", asset.Type, asset.Name, err)
-					}
-				}
-			case "rule":
-				if err := copyFile(localPath, destPath); err != nil {
-					fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
-					continue
-				}
-				if len(varsUsed) > 0 {
-					if err := vars.RestoreFile(destPath, varsUsed); err != nil {
-						fmt.Printf("⚠️  还原占位符失败 %s/%s: %v\n", asset.Type, asset.Name, err)
-					}
-				}
-			case "mcp":
-				// MCP 需要从 IDE 的 mcp.json 中提取对应条目
-				if err := pushMCPAsset(localPath, destPath, asset.Name, varsUsed, ideImpl, cwd); err != nil {
+			case "rule", "mcp":
+				if err := copyFile(templatePath, destPath); err != nil {
 					fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
 					continue
 				}
@@ -761,6 +739,12 @@ func runVaultRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("加载资产追踪失败: %w", err)
 	}
 	trackedAsset := assetsConfig.FindAsset(itemType, assetName)
+
+	// 清理 .dec/templates/ 中的模板
+	if trackedAsset != nil && trackedAsset.Vault != "" {
+		removeAssetTemplate(itemType, assetName, cwd, trackedAsset.Vault)
+	}
+
 	removed := assetsConfig.RemoveAsset(itemType, assetName)
 	if removed {
 		if err := mgr.SaveAssetsConfig(assetsConfig); err != nil {
@@ -1281,8 +1265,7 @@ func copyDir(src, dst string) error {
 // ========================================
 
 // substituteAssetVars 对已安装到 IDE 目录的资产执行变量替换
-// 返回实际使用的变量映射
-func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []string, mgr *config.ProjectConfigManager) map[string]string {
+func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []string, mgr *config.ProjectConfigManager) {
 	// 加载变量定义
 	globalVars, _ := config.LoadGlobalVars()
 	projectVars, _ := mgr.LoadVarsConfig()
@@ -1294,11 +1277,9 @@ func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []str
 		} else if projectVars != nil && projectVars.Assets != nil {
 			// 可能有资产级变量，继续
 		} else {
-			return nil
+			return
 		}
 	}
-
-	var allUsed map[string]string
 
 	for _, ideName := range ideNames {
 		ideImpl := ide.Get(ideName)
@@ -1311,12 +1292,11 @@ func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []str
 				continue
 			}
 			resolved := vars.ResolveVars(globalVars, projectVars, itemType, assetName, placeholders)
-			used, missing, err := vars.SubstituteDir(localPath, resolved)
+			_, missing, err := vars.SubstituteDir(localPath, resolved)
 			if err != nil {
 				fmt.Printf("  ⚠️  变量替换失败 (%s): %v\n", ideName, err)
 				continue
 			}
-			allUsed = mergeUsed(allUsed, used)
 			printMissingVars(missing)
 
 		case "rule":
@@ -1326,22 +1306,19 @@ func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []str
 				continue
 			}
 			resolved := vars.ResolveVars(globalVars, projectVars, itemType, assetName, placeholders)
-			used, missing, err := vars.SubstituteFile(localPath, resolved)
+			_, missing, err := vars.SubstituteFile(localPath, resolved)
 			if err != nil {
 				fmt.Printf("  ⚠️  变量替换失败 (%s): %v\n", ideName, err)
 				continue
 			}
-			allUsed = mergeUsed(allUsed, used)
 			printMissingVars(missing)
 
 		case "mcp":
 			used, missing := substituteMCPVars(assetName, projectRoot, ideImpl, globalVars, projectVars)
-			allUsed = mergeUsed(allUsed, used)
+			_ = used
 			printMissingVars(missing)
 		}
 	}
-
-	return allUsed
 }
 
 // substituteMCPVars 对 MCP 配置中的指定条目执行变量替换
@@ -1422,56 +1399,39 @@ func substituteMCPVars(assetName, projectRoot string, ideImpl ide.IDE, globalVar
 	return used, missing
 }
 
-// pushMCPAsset 从 IDE 的 mcp.json 中提取对应条目，反向替换后写入 vault
-func pushMCPAsset(mcpConfigPath, destPath, assetName string, varsUsed map[string]string, ideImpl ide.IDE, projectRoot string) error {
-	managed := managedName(assetName)
-
-	existingConfig, err := ideImpl.LoadMCPConfig(projectRoot)
-	if err != nil {
-		return fmt.Errorf("加载 MCP 配置失败: %w", err)
+// saveAssetTemplate 保存原始模板到 .dec/templates/{vault}/{type}/{name}
+func saveAssetTemplate(itemType, assetName, srcPath, projectRoot, vaultName string) error {
+	destPath := getTemplatePath(projectRoot, vaultName, itemType, assetName)
+	switch itemType {
+	case "skill":
+		return copyDir(srcPath, destPath)
+	case "rule", "mcp":
+		return copyFile(srcPath, destPath)
 	}
-
-	server, ok := existingConfig.MCPServers[managed]
-	if !ok {
-		return fmt.Errorf("MCP 条目 %s 不存在", managed)
-	}
-
-	// 反向替换
-	if len(varsUsed) > 0 {
-		if server.Env != nil {
-			for k, v := range server.Env {
-				server.Env[k] = vars.Restore(v, varsUsed)
-			}
-		}
-		for i, arg := range server.Args {
-			server.Args[i] = vars.Restore(arg, varsUsed)
-		}
-		server.Command = vars.Restore(server.Command, varsUsed)
-	}
-
-	// 序列化单个 server 写入 vault
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(server, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(destPath, append(data, '\n'), 0644)
+	return nil
 }
 
-// mergeUsed 合并两个 used map
-func mergeUsed(dst, src map[string]string) map[string]string {
-	if len(src) == 0 {
-		return dst
+// getTemplatePath 获取资产模板在 .dec/templates/ 中的路径
+func getTemplatePath(projectRoot, vaultName, itemType, assetName string) string {
+	base := filepath.Join(projectRoot, ".dec", "templates", vaultName)
+	switch itemType {
+	case "skill":
+		return filepath.Join(base, "skills", assetName)
+	case "rule":
+		return filepath.Join(base, "rules", assetName+".mdc")
+	case "mcp":
+		return filepath.Join(base, "mcp", assetName+".json")
 	}
-	if dst == nil {
-		dst = make(map[string]string)
+	return ""
+}
+
+// removeAssetTemplate 从 .dec/templates/ 中删除资产模板
+func removeAssetTemplate(itemType, assetName, projectRoot, vaultName string) {
+	templatePath := getTemplatePath(projectRoot, vaultName, itemType, assetName)
+	if templatePath == "" {
+		return
 	}
-	for k, v := range src {
-		dst[k] = v
-	}
-	return dst
+	os.RemoveAll(templatePath)
 }
 
 // printMissingVars 打印缺失变量的警告（去重）

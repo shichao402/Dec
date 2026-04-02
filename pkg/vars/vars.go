@@ -1,5 +1,5 @@
 // Package vars 提供占位符替换逻辑
-// Vault 模板中使用 {{VAR_NAME}} 占位符，pull 时替换为实际值，push 时还原
+// Vault 模板中使用 {{VAR_NAME}} 占位符，pull 时替换为实际值
 package vars
 
 import (
@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 
 	"github.com/shichao402/Dec/pkg/types"
 	"gopkg.in/yaml.v3"
@@ -142,37 +141,6 @@ func Substitute(content string, vars map[string]string) (string, map[string]stri
 	return result, used, missing
 }
 
-// Restore 反向替换：将实际值还原为占位符
-// 使用 varsUsed 作为已知替换映射
-func Restore(content string, varsUsed map[string]string) string {
-	if len(varsUsed) == 0 {
-		return content
-	}
-
-	// 按值长度从长到短排序，防止短值误替换长值的子串
-	type kv struct {
-		key string
-		val string
-	}
-	var pairs []kv
-	for k, v := range varsUsed {
-		if v != "" {
-			pairs = append(pairs, kv{k, v})
-		}
-	}
-	sort.Slice(pairs, func(i, j int) bool {
-		return len(pairs[i].val) > len(pairs[j].val)
-	})
-
-	result := content
-	for _, p := range pairs {
-		placeholder := "{{" + p.key + "}}"
-		result = strings.ReplaceAll(result, p.val, placeholder)
-	}
-
-	return result
-}
-
 // SubstituteFile 对单个文件执行占位符替换（就地修改）
 // 返回实际使用的变量映射和缺失的变量列表
 func SubstituteFile(filePath string, vars map[string]string) (map[string]string, []string, error) {
@@ -219,32 +187,6 @@ func SubstituteDir(dirPath string, vars map[string]string) (map[string]string, [
 	})
 
 	return allUsed, allMissing, err
-}
-
-// RestoreFile 对单个文件执行反向替换（就地修改）
-func RestoreFile(filePath string, varsUsed map[string]string) error {
-	if len(varsUsed) == 0 {
-		return nil
-	}
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-	result := Restore(string(data), varsUsed)
-	return os.WriteFile(filePath, []byte(result), 0644)
-}
-
-// RestoreDir 对目录下所有文件递归执行反向替换
-func RestoreDir(dirPath string, varsUsed map[string]string) error {
-	if len(varsUsed) == 0 {
-		return nil
-	}
-	return filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err
-		}
-		return RestoreFile(path, varsUsed)
-	})
 }
 
 // ExtractPlaceholdersFromFile 从文件中提取占位符

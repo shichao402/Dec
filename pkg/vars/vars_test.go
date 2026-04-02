@@ -140,55 +140,6 @@ func TestSubstitute(t *testing.T) {
 	}
 }
 
-func TestRestore(t *testing.T) {
-	tests := []struct {
-		name     string
-		content  string
-		varsUsed map[string]string
-		want     string
-	}{
-		{
-			name:     "basic restore",
-			content:  "url: http://example.com, token: abc123",
-			varsUsed: map[string]string{"MY_URL": "http://example.com", "MY_TOKEN": "abc123"},
-			want:     "url: {{MY_URL}}, token: {{MY_TOKEN}}",
-		},
-		{
-			name:     "empty varsUsed",
-			content:  "unchanged",
-			varsUsed: nil,
-			want:     "unchanged",
-		},
-		{
-			name:     "empty value skipped",
-			content:  "foo bar",
-			varsUsed: map[string]string{"FOO": ""},
-			want:     "foo bar",
-		},
-		{
-			name:     "longer values replaced first",
-			content:  "http://vikunja.example.com/api/v1 and http://vikunja.example.com",
-			varsUsed: map[string]string{"FULL_URL": "http://vikunja.example.com/api/v1", "BASE_URL": "http://vikunja.example.com"},
-			want:     "{{FULL_URL}} and {{BASE_URL}}",
-		},
-		{
-			name:     "JSON restore",
-			content:  `{"VIKUNJA_URL": "http://vikunja.local/api/v1"}`,
-			varsUsed: map[string]string{"VIKUNJA_URL": "http://vikunja.local/api/v1"},
-			want:     `{"VIKUNJA_URL": "{{VIKUNJA_URL}}"}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := Restore(tt.content, tt.varsUsed)
-			if got != tt.want {
-				t.Errorf("Restore() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestResolveVars(t *testing.T) {
 	global := &types.VarsConfig{
 		Vars: map[string]string{
@@ -322,27 +273,6 @@ func TestSubstituteFileNoPlaceholders(t *testing.T) {
 	}
 }
 
-func TestRestoreFile(t *testing.T) {
-	dir := t.TempDir()
-	filePath := filepath.Join(dir, "test.mdc")
-
-	content := "url: http://example.com\ntoken: secret\n"
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	varsUsed := map[string]string{"MY_URL": "http://example.com", "MY_TOKEN": "secret"}
-	if err := RestoreFile(filePath, varsUsed); err != nil {
-		t.Fatal(err)
-	}
-
-	data, _ := os.ReadFile(filePath)
-	expected := "url: {{MY_URL}}\ntoken: {{MY_TOKEN}}\n"
-	if string(data) != expected {
-		t.Errorf("file content = %q, want %q", string(data), expected)
-	}
-}
-
 func TestSubstituteDir(t *testing.T) {
 	dir := t.TempDir()
 
@@ -369,26 +299,6 @@ func TestSubstituteDir(t *testing.T) {
 	data2, _ := os.ReadFile(filepath.Join(subDir, "b.md"))
 	if string(data1) != "foo-val" || string(data2) != "bar-val" {
 		t.Errorf("files not substituted correctly")
-	}
-}
-
-func TestRestoreDir(t *testing.T) {
-	dir := t.TempDir()
-	subDir := filepath.Join(dir, "sub")
-	os.MkdirAll(subDir, 0755)
-
-	os.WriteFile(filepath.Join(dir, "a.md"), []byte("foo-val"), 0644)
-	os.WriteFile(filepath.Join(subDir, "b.md"), []byte("bar-val"), 0644)
-
-	varsUsed := map[string]string{"FOO": "foo-val", "BAR": "bar-val"}
-	if err := RestoreDir(dir, varsUsed); err != nil {
-		t.Fatal(err)
-	}
-
-	data1, _ := os.ReadFile(filepath.Join(dir, "a.md"))
-	data2, _ := os.ReadFile(filepath.Join(subDir, "b.md"))
-	if string(data1) != "{{FOO}}" || string(data2) != "{{BAR}}" {
-		t.Errorf("files not restored correctly: a=%q b=%q", string(data1), string(data2))
 	}
 }
 
@@ -441,8 +351,8 @@ assets:
 	})
 }
 
-func TestRoundTrip(t *testing.T) {
-	// Simulate: template -> substitute -> restore -> should equal original
+func TestSubstituteVerify(t *testing.T) {
+	// Verify that substitution produces correct results
 	template := `# Config
 URL: {{VIKUNJA_URL}}
 Token: {{VIKUNJA_API_TOKEN}}
@@ -454,15 +364,20 @@ Project: {{PROJECT_NAME}}
 		"PROJECT_NAME":      "my-project",
 	}
 
-	// Substitute
 	substituted, used, missing := Substitute(template, vars)
 	if len(missing) != 0 {
 		t.Errorf("unexpected missing: %v", missing)
 	}
+	if len(used) != 3 {
+		t.Errorf("expected 3 used vars, got %d", len(used))
+	}
 
-	// Restore
-	restored := Restore(substituted, used)
-	if restored != template {
-		t.Errorf("round trip failed:\n  original: %q\n  restored: %q", template, restored)
+	expected := `# Config
+URL: http://vikunja.local/api/v1
+Token: tk_abc123
+Project: my-project
+`
+	if substituted != expected {
+		t.Errorf("substitution failed:\n  got:  %q\n  want: %q", substituted, expected)
 	}
 }
