@@ -24,9 +24,201 @@ var configCmd = &cobra.Command{
 	Long: `管理 Dec 全局和项目级配置。
 
 示例:
+  dec config show                      # 显示当前配置
   dec config global                    # 配置全局 IDE（所有支持的 IDE）
   dec config global --ide cursor       # 只配置 Cursor
   dec config global --ide cursor --ide codebuddy  # 配置多个 IDE`,
+}
+
+// ========================================
+// config show
+// ========================================
+
+var configShowCmd = &cobra.Command{
+	Use:   "show",
+	Short: "显示当前配置",
+	Long: `显示 Dec 的全局配置和项目级配置。
+
+会展示以下信息:
+  - Dec 根目录和仓库状态
+  - 全局配置（RepoURL、机器级 IDE）
+  - 项目配置（如果在 Dec 项目中）
+  - 已安装的 Skills、Rules、MCP
+
+示例:
+  dec config show     # 显示完整配置`,
+	RunE: runConfigShow,
+}
+
+func runConfigShow(cmd *cobra.Command, args []string) error {
+	fmt.Println("📋 Dec 配置信息")
+	fmt.Println(strings.Repeat("=", 50))
+
+	// ========================================
+	// Dec 根目录和仓库状态
+	// ========================================
+	fmt.Println()
+	fmt.Println("🏠 Dec 根目录和仓库")
+	fmt.Println("-" + strings.Repeat("-", 48))
+
+	decRootDir, err := repo.GetRootDir()
+	if err != nil {
+		return fmt.Errorf("获取 Dec 根目录失败: %w", err)
+	}
+	fmt.Printf("  根目录: %s\n", decRootDir)
+
+	connected, err := repo.IsConnected()
+	if err != nil {
+		return fmt.Errorf("检查仓库连接失败: %w", err)
+	}
+	status := "❌ 未连接"
+	if connected {
+		status = "✅ 已连接"
+	}
+	fmt.Printf("  仓库状态: %s\n", status)
+
+	if connected {
+		bareRepoDir, err := repo.GetBareRepoDir()
+		if err == nil {
+			fmt.Printf("  裸仓库路径: %s\n", bareRepoDir)
+		}
+
+		defaultBranch, err := repo.GetDefaultBranch()
+		if err == nil {
+			fmt.Printf("  默认分支: %s\n", defaultBranch)
+		}
+	}
+
+	// ========================================
+	// 全局配置
+	// ========================================
+	fmt.Println()
+	fmt.Println("🌍 全局配置")
+	fmt.Println("-" + strings.Repeat("-", 48))
+
+	globalConfig, err := config.LoadGlobalConfig()
+	if err != nil {
+		return fmt.Errorf("加载全局配置失败: %w", err)
+	}
+
+	if globalConfig.RepoURL != "" {
+		fmt.Printf("  Repo URL: %s\n", globalConfig.RepoURL)
+	} else {
+		fmt.Println("  Repo URL: (未配置)")
+	}
+
+	globalConfigPath, err := config.GetGlobalConfigPath()
+	if err == nil {
+		fmt.Printf("  配置文件: %s\n", globalConfigPath)
+	}
+
+	// ========================================
+	// 机器级 IDE 配置
+	// ========================================
+	fmt.Println()
+	fmt.Println("💻 机器级 IDE 配置")
+	fmt.Println("-" + strings.Repeat("-", 48))
+
+	localConfig, err := config.LoadLocalConfig()
+	if err != nil {
+		return fmt.Errorf("加载本机配置失败: %w", err)
+	}
+
+	localConfigPath, err := config.GetLocalConfigPath()
+	if err == nil {
+		fmt.Printf("  配置文件: %s\n", localConfigPath)
+	}
+
+	if len(localConfig.IDEs) > 0 {
+		fmt.Printf("  IDE 列表: %s\n", strings.Join(localConfig.IDEs, ", "))
+	} else {
+		fmt.Println("  IDE 列表: (使用默认: cursor)")
+	}
+
+	// ========================================
+	// 项目配置（如果在项目中）
+	// ========================================
+	cwd, err := os.Getwd()
+	if err == nil {
+		projectMgr := config.NewProjectConfigManager(cwd)
+
+		if projectMgr.Exists() {
+			fmt.Println()
+			fmt.Println("📦 项目配置")
+			fmt.Println("-" + strings.Repeat("-", 48))
+
+			projectConfig, err := projectMgr.LoadProjectConfig()
+			if err != nil {
+				fmt.Printf("  ⚠️  加载项目配置失败: %v\n", err)
+			} else {
+				decDir := projectMgr.GetDecDir()
+				fmt.Printf("  项目路径: %s\n", cwd)
+				fmt.Printf("  .dec 目录: %s\n", decDir)
+
+				if len(projectConfig.Vaults) > 0 {
+					fmt.Printf("  关联 Vaults: %s\n", strings.Join(projectConfig.Vaults, ", "))
+				} else {
+					fmt.Println("  关联 Vaults: (无)")
+				}
+
+				if len(projectConfig.IDEs) > 0 {
+					fmt.Printf("  IDE 覆盖: %s\n", strings.Join(projectConfig.IDEs, ", "))
+				} else {
+					fmt.Println("  IDE 覆盖: (使用全局默认)")
+				}
+
+				// 显示有效的 IDE（应用继承规则）
+				effectiveIDEs, err := config.GetEffectiveIDEs(projectConfig)
+				if err == nil {
+					fmt.Printf("  有效 IDE: %s\n", strings.Join(effectiveIDEs, ", "))
+				}
+			}
+
+			// ========================================
+			// 已安装资产
+			// ========================================
+			assetsConfig, err := projectMgr.LoadAssetsConfig()
+			if err != nil {
+				fmt.Printf("  ⚠️  加载资产配置失败: %v\n", err)
+			} else {
+				fmt.Println()
+				fmt.Println("📚 已安装资产")
+				fmt.Println("-" + strings.Repeat("-", 48))
+
+				if len(assetsConfig.Skills) > 0 {
+					fmt.Println("  Skills:")
+					for _, skill := range assetsConfig.Skills {
+						fmt.Printf("    • %s (from %s, %s)\n", skill.Name, skill.Vault, skill.InstalledAt)
+					}
+				} else {
+					fmt.Println("  Skills: (无)")
+				}
+
+				if len(assetsConfig.Rules) > 0 {
+					fmt.Println("  Rules:")
+					for _, rule := range assetsConfig.Rules {
+						fmt.Printf("    • %s (from %s, %s)\n", rule.Name, rule.Vault, rule.InstalledAt)
+					}
+				} else {
+					fmt.Println("  Rules: (无)")
+				}
+
+				if len(assetsConfig.MCPs) > 0 {
+					fmt.Println("  MCPs:")
+					for _, mcp := range assetsConfig.MCPs {
+						fmt.Printf("    • %s (from %s, %s)\n", mcp.Name, mcp.Vault, mcp.InstalledAt)
+					}
+				} else {
+					fmt.Println("  MCPs: (无)")
+				}
+			}
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("=" + strings.Repeat("=", 48))
+
+	return nil
 }
 
 // ========================================
@@ -272,6 +464,7 @@ func init() {
 	configGlobalCmd.Flags().StringSliceVar(&configIDEs, "ide", nil, "指定要配置的 IDE（可多次指定，默认配置所有支持的 IDE）")
 
 	// 注册子命令
+	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configGlobalCmd)
 
 	RootCmd.AddCommand(configCmd)
