@@ -1,0 +1,125 @@
+name: Release Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_draft_release:
+        description: "Create and then clean up a draft GitHub release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  prepare:
+    name: Prepare Smoke Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      smoke_tag: ${{ steps.version.outputs.smoke_tag }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Read version from version.json
+        id: version
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "smoke_tag=smoke-${VERSION}-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Test
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.21"
+
+      - name: Run tests
+        run: go test ./... -v
+
+  build:
+    name: Build Smoke Artifact
+    needs: [prepare, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.21"
+
+      - name: Build linux-amd64 artifact
+        run: |
+          go build -ldflags "-X main.Version=${{ needs.prepare.outputs.version }} -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')" -o dec-linux-amd64 .
+
+      - name: Upload smoke artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: smoke-linux-amd64
+          path: dec-linux-amd64
+
+  verify-artifacts:
+    name: Verify Downloaded Artifact
+    needs: [build, prepare]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download smoke artifact
+        uses: actions/download-artifact@v8
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Verify artifact exists
+        run: |
+          test -f dist/dec-linux-amd64
+          ls -lah dist
+
+  draft-release:
+    name: Create Draft Release
+    needs: [prepare, verify-artifacts]
+    if: ${{ inputs.create_draft_release }}
+    runs-on: ubuntu-latest
+    outputs:
+      smoke_tag: ${{ needs.prepare.outputs.smoke_tag }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download smoke artifact
+        uses: actions/download-artifact@v8
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Create draft GitHub release
+        uses: softprops/action-gh-release@v2.6.1
+        with:
+          tag_name: ${{ needs.prepare.outputs.smoke_tag }}
+          target_commitish: ${{ github.sha }}
+          name: Smoke ${{ needs.prepare.outputs.smoke_tag }}
+          draft: true
+          prerelease: true
+          files: dist/*
+
+  cleanup-draft-release:
+    name: Cleanup Draft Release
+    needs: [prepare, draft-release]
+    if: ${{ always() && inputs.create_draft_release }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete draft release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SMOKE_TAG: ${{ needs.prepare.outputs.smoke_tag }}
+        run: |
+          gh release delete "$SMOKE_TAG" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY"
