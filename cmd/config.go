@@ -322,15 +322,15 @@ func installDecSkillForIDE(ideName string) error {
 		return fmt.Errorf("创建 %s skills 目录失败: %w", ideName, err)
 	}
 
-	// 创建 Dec Skill 目录（dec-agent），已存在则覆盖
-	decSkillDir := filepath.Join(skillsDir, "dec-agent")
+	// 创建 Dec Skill 目录，已存在则覆盖
+	decSkillDir := filepath.Join(skillsDir, "dec")
 	if err := os.MkdirAll(decSkillDir, 0755); err != nil {
 		return fmt.Errorf("创建 Dec Skill 目录失败: %w", err)
 	}
 
 	// 写入 SKILL.md
 	skillMD := filepath.Join(decSkillDir, "SKILL.md")
-	skillContent := assets.DecAgentSkillContent
+	skillContent := assets.DecSkillContent
 
 	if err := os.WriteFile(skillMD, []byte(skillContent), 0644); err != nil {
 		return fmt.Errorf("写入 SKILL.md 失败: %w", err)

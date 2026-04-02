@@ -2,5 +2,5 @@ package assets
 
 import _ "embed"
 
-//go:embed dec-agent/SKILL.md
-var DecAgentSkillContent string
+//go:embed dec/SKILL.md
+var DecSkillContent string
