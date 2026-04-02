@@ -49,6 +49,14 @@ Dec 目前支持以下 IDE：
 |-----|-----------|----------|---------|
 | Cursor | `.cursor/skills/` | `.cursor/rules/` | `.cursor/mcp.json` |
 | CodeBuddy | `.codebuddy/skills/` | `.codebuddy/rules/` | `.mcp.json` |
+| Windsurf | `.windsurf/skills/` | `.windsurf/rules/` | `.windsurf/mcp.json` |
+| Trae | `.trae/skills/` | `.trae/rules/` | `.trae/mcp.json` |
+| Claude | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
+| Claude Internal | `.claude-internal/skills/` | `.claude-internal/rules/` | `.claude-internal/mcp.json` |
+| Codex | `.codex/skills/` | `.codex/rules/` | `.codex/mcp.json` |
+| Codex Internal | `.codex-internal/skills/` | `.codex-internal/rules/` | `.codex-internal/mcp.json` |
+
+更详细的使用语义见 `pkg/assets/dec/SKILL.md`，实现与存储结构见 `Documents/ARCHITECTURE.md`。
 
 ## 快速开始
 
@@ -92,7 +100,7 @@ dec vault pull rule my-logging-standard
 dec vault pull mcp postgres-tool
 ```
 
-`dec vault pull` 会自动将资产部署到当前目录的 IDE（Cursor、CodeBuddy）。
+`dec vault pull` 会按以下优先级自动部署资产：项目 `.dec/config.yaml` 的 IDE 配置 > 本机 `~/.dec/local/config.yaml` 的 IDE 配置 > 默认 `cursor`。
 
 批量拉取所有资产：
 
@@ -198,6 +206,8 @@ dec vault pull skill create-api-test
 
 ## 命令参考
 
+完整的 Skill 使用说明见 `pkg/assets/dec/SKILL.md`，架构与内部实现见 `Documents/ARCHITECTURE.md`。
+
 ### 顶级命令
 
 #### `dec repo <url>`
@@ -276,7 +286,7 @@ dec vault pull --all --vault my-vault   # 拉取指定 Vault 的所有资产
 行为：
 
 - 从 Vault 下载指定资产
-- 自动部署到当前项目的 IDE（Cursor、CodeBuddy）
+- 自动部署到有效 IDE（项目配置优先，其次本机配置，未配置时默认 `cursor`）
 - 本地文件遵循 `dec-<name>` 命名约定
 
 #### `dec vault remove <type> <name>`
@@ -299,8 +309,7 @@ dec vault search "logging"
 
 搜索范围：
 
-- 资产名称
-- 资产描述
+- 当前实现按资产名称匹配
 
 #### `dec vault list`
 
@@ -314,7 +323,7 @@ dec vault list
 
 #### `dec vault push`
 
-将项目中修改的资产推送回 Vault 并同步到远程仓库。
+将项目中已追踪模板的本地内容推送回 Vault 并同步到远程仓库。
 
 ```bash
 dec vault push
@@ -322,13 +331,14 @@ dec vault push
 
 此命令会：
 
-1. 检测 `.dec/assets.yaml` 中已追踪的所有资产
-2. 将项目中修改的资产复制回对应的 Vault
+1. 读取 `.dec/assets.yaml` 中已追踪的所有资产
+2. 以项目 `.dec/templates/` 中的模板为源，复制回对应的 Vault
 3. 提交并推送到远程仓库
 
 说明：
 
-- 当你在项目中编辑了 `dec-*` 资产后，使用此命令将变更同步回 Vault
+- 如果你是显式修改某个已拉取资产，优先使用 `dec vault import <type> <path>` 回写
+- `dec vault push` 更适合统一推送当前项目中已追踪的模板内容
 - 当 `dec vault import` 或 `dec vault push` 因远端冲突失败时，可先重新拉取或重试推送
 
 ### 其他命令
@@ -346,8 +356,9 @@ dec config global --ide cursor --ide codebuddy # 配置多个 IDE
 行为：
 
 - 为每个指定 IDE 安装 Dec 的 Agent Skill
-- 默认配置所有支持的 IDE（Cursor、CodeBuddy）
-- 已存在的配置会被强制覆盖更新
+- 默认配置所有支持的 IDE（cursor、codebuddy、windsurf、trae、claude、claude-internal、codex、codex-internal）
+- 将所选 IDE 列表写入本机配置 `~/.dec/local/config.yaml`
+- 已存在的配置会被覆盖更新
 
 #### `dec update`
 
@@ -546,9 +557,10 @@ go test ./...
 
 ## 项目文档
 
-详细的架构设计文档见：
+详细文档见：
 
-- `Documents/ARCHITECTURE.md`：Dec 的架构设计、模块划分、核心流程说明
+- `pkg/assets/dec/SKILL.md`：Dec Skill 资产的完整使用说明
+- `Documents/ARCHITECTURE.md`：Dec 的架构设计、模块划分和运行机制说明
 
 开发、构建与测试相关的脚本和工具见：
 

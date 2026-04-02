@@ -26,10 +26,11 @@ Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skill
    - 类型：skill、rule、mcp
 
 4. **用户修改了已拉取的资产（更新已有）**
-   - 只修改当前 IDE 使用的那一份文件（如 `.codebuddy/rules/` 下的文件）
-   - 运行 `dec vault push` 推送修改到 Vault
+   - 在项目中的托管副本上完成修改（如 `.codebuddy/rules/` 下的文件）
+   - 对显式修改过的资产，优先使用 `dec vault import <type> <path>` 回写到 Vault
+   - 如需把已追踪模板统一推送到远端，再运行 `dec vault push`
    - 运行 `dec vault pull <type> <name>` 拉取更新，同步到其他 IDE
-   - **禁止**手动去修改其他 IDE 目录（如 `.cursor/rules/`）下的同名文件，由 pull 自动同步
+   - **禁止**手动去修改其他 IDE 目录中的同名文件，统一通过 dec 命令同步
 
 ## 快速参考
 
@@ -38,7 +39,7 @@ Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skill
 | 操作 | 命令 | 说明 |
 |------|------|------|
 | 列出所有资产 | `dec vault list` | 显示 Vault 中的所有 Skills、Rules、MCP |
-| 搜索资产 | `dec vault search "<query>"` | 按名称和元数据搜索 |
+| 搜索资产 | `dec vault search "<query>"` | 当前实现按资产名称搜索 |
 | 导入新资产 | `dec vault import <type> <path>` | 首次将本地资产入库到 Vault |
 | 指定 Vault | `dec vault import <type> <path> --vault <name>` | 多 Vault 时指定目标 |
 | 拉取到项目 | `dec vault pull <type> <name>` | 从 Vault 下载资产到当前项目 |
@@ -70,7 +71,7 @@ Rule 是单个 `.mdc` 文件。使用命令导入：
 
 ### MCP（JSON 片段）
 
-MCP 必须是单个 server 片段 JSON，包含 command、args、env 字段。
+MCP 必须是单个 server 片段 JSON，其中 `command` 必填，`args`、`env` 按需提供。
 
 ## 故障排查
 
@@ -85,7 +86,7 @@ MCP 必须是单个 server 片段 JSON，包含 command、args、env 字段。
 
 ### "拉取失败"
 
-1. 检查 Vault 连接：`dec repo --help`
+1. 检查 Vault 连接：`dec config show`，必要时重新执行 `dec repo <url>`
 2. 验证资产存在：`dec vault search <name>`
 3. 查看详细错误：运行命令时会输出诊断信息
 
@@ -100,18 +101,20 @@ MCP 必须是单个 server 片段 JSON，包含 command、args、env 字段。
 
 当需要修改已拉取到项目中的资产时，严格按以下顺序操作：
 
-1. **只修改当前 IDE 的那份文件**（如 `.codebuddy/rules/xxx.mdc`），不要手动同步到其他 IDE 目录
-2. **推送到 Vault**：`dec vault push`
-3. **拉取更新**：`dec vault pull <type> <name>`，由 dec 自动同步到所有 IDE 目录
+1. **在项目中的托管副本上完成修改**（如 `.codebuddy/rules/xxx.mdc`），不要手动同步到其他 IDE 目录
+2. **显式回写该资产**：`dec vault import <type> <path>`
+3. **按需统一推送已追踪模板**：`dec vault push`
+4. **拉取更新**：`dec vault pull <type> <name>`，由 dec 自动同步到其他 IDE 目录
 
-**禁止**：直接操作 `.dec/repo` 或其他底层 git 仓库。所有操作必须通过 `dec` CLI 完成。
+**禁止**：直接操作 `~/.dec/repo.git`、项目 `.dec/templates/` 或其他底层缓存目录。所有操作必须通过 `dec` CLI 完成。
 如果 `dec` 命令失败，将错误反馈给用户，由用户决定处理方式。
 
 ## 最佳实践
 
-1. 及时入库：新建资产后立即用 `dec vault import` 导入；修改后用 `dec vault push` 推送
-2. 资产版本化：Vault 自动 Git 提交，方便追踪变更
-3. 团队共享：将 Vault 仓库 URL 分享给团队成员
+1. 及时入库：新建资产后立即用 `dec vault import` 导入；显式修改资产后优先继续用 `dec vault import` 回写
+2. 统一同步：需要把已追踪模板批量回推远端时，再使用 `dec vault push`
+3. 资产版本化：Vault 自动 Git 提交，方便追踪变更
+4. 团队共享：将 Vault 仓库 URL 分享给团队成员
 
 ## 更多信息
 

@@ -145,7 +145,7 @@ var vaultImportCmd = &cobra.Command{
 支持的资产类型：
   skill   Skill 目录（包含 SKILL.md）
   rule    规则文件（.mdc）
-  mcp     MCP 配置文件 (JSON，包含 command/args/env)
+  mcp     MCP 配置文件（JSON，至少包含 command）
 
 资产导入到当前项目关联的 Vault 中。
 如果项目关联多个 Vault，通过 --vault 指定目标。
@@ -323,7 +323,7 @@ var vaultSearchCmd = &cobra.Command{
 	Short: "搜索 Vault 中的资产",
 	Long: `在所有已连接的 Vault 中搜索资产。
 
-匹配资产名称和元数据。
+当前实现按资产名称匹配。
 
 示例：
   dec vault search "API"
@@ -920,7 +920,7 @@ func saveMCPToVault(absSource, vaultDir string) (string, error) {
 	}
 	var server types.MCPServer
 	if err := json.Unmarshal(data, &server); err != nil {
-		return "", fmt.Errorf("MCP 配置必须是合法 JSON（包含 command/args/env）: %w", err)
+		return "", fmt.Errorf("MCP 配置必须是合法 JSON（至少包含 command）: %w", err)
 	}
 	if server.Command == "" {
 		return "", fmt.Errorf("MCP 配置缺少 command 字段")
