@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/pkg/config"
+	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
 	"github.com/shichao402/Dec/pkg/types"
 	"github.com/spf13/cobra"
@@ -36,7 +38,7 @@ var configGlobalCmd = &cobra.Command{
 	Short: "配置全局 IDE",
 	Long: `为本机所有支持的 IDE 配置 Dec Skill。
 
-默认配置所有支持的 IDE (cursor, codebuddy)。
+默认配置所有支持的 IDE (cursor, codebuddy, windsurf, trae, claude, claude-internal, codex, codex-internal)。
 可以通过 --ide 标志指定要配置的 IDE 子集。
 
 配置会为每个 IDE 安装 Dec 的 Agent Skill，
@@ -66,7 +68,7 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 		targetIDEs = configIDEs
 	} else {
 		// 使用所有支持的 IDE
-		knownIDEs := []string{"cursor", "codebuddy"}
+		knownIDEs := []string{"cursor", "codebuddy", "windsurf", "trae", "claude", "claude-internal", "codex", "codex-internal"}
 		targetIDEs = knownIDEs
 	}
 
@@ -253,12 +255,11 @@ func installDecSkillForIDE(ideName string) error {
 
 // validateIDEName 验证 IDE 名称有效性
 func validateIDEName(ideName string) error {
-	validIDEs := []string{"cursor", "codebuddy"}
-	for _, valid := range validIDEs {
-		if ideName == valid {
-			return nil
-		}
+	if ide.IsValid(ideName) {
+		return nil
 	}
+	validIDEs := ide.List()
+	sort.Strings(validIDEs)
 	return fmt.Errorf("不支持的 IDE: %s (支持: %s)", ideName, strings.Join(validIDEs, ", "))
 }
 

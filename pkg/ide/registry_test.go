@@ -25,7 +25,7 @@ func TestGetUnregisteredIDEReturnsFallback(t *testing.T) {
 }
 
 func TestIsValidRegistered(t *testing.T) {
-	for _, name := range []string{"cursor", "codebuddy", "windsurf", "trae"} {
+	for _, name := range []string{"cursor", "codebuddy", "windsurf", "trae", "claude", "claude-internal", "codex", "codex-internal"} {
 		if !IsValid(name) {
 			t.Fatalf("已注册 IDE %s 应返回 IsValid=true", name)
 		}
@@ -45,7 +45,7 @@ func TestListContainsAllRegistered(t *testing.T) {
 	names := List()
 	sort.Strings(names)
 
-	expected := []string{"codebuddy", "cursor", "trae", "windsurf"}
+	expected := []string{"claude", "claude-internal", "codebuddy", "codex", "codex-internal", "cursor", "trae", "windsurf"}
 	if len(names) != len(expected) {
 		t.Fatalf("期望 %d 个 IDE，得到 %d 个: %v", len(expected), len(names), names)
 	}
@@ -82,6 +82,10 @@ func TestIDEDirectoryStructure(t *testing.T) {
 		{"codebuddy", "/project/.codebuddy/rules", "/project/.codebuddy/skills"},
 		{"windsurf", "/project/.windsurf/rules", "/project/.windsurf/skills"},
 		{"trae", "/project/.trae/rules", "/project/.trae/skills"},
+		{"claude", "/project/.claude/rules", "/project/.claude/skills"},
+		{"claude-internal", "/project/.claude-internal/rules", "/project/.claude-internal/skills"},
+		{"codex", "/project/.codex/rules", "/project/.codex/skills"},
+		{"codex-internal", "/project/.codex-internal/rules", "/project/.codex-internal/skills"},
 	}
 
 	for _, tt := range tests {
