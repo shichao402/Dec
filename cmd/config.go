@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/shichao402/Dec/pkg/assets"
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
@@ -327,116 +328,9 @@ func installDecSkillForIDE(ideName string) error {
 		return fmt.Errorf("创建 Dec Skill 目录失败: %w", err)
 	}
 
-	// 创建 SKILL.md - 使用字符串拼接避免转义问题
+	// 写入 SKILL.md
 	skillMD := filepath.Join(decSkillDir, "SKILL.md")
-	skillContent := "---\n" +
-		"name: dec-agent\n" +
-		"description: >\n" +
-		"  Dec 个人 AI 知识仓库代理。支持跨项目复用 Skills、Rules、MCP 配置。\n" +
-		"  推荐用户保存新创建的资产、搜索已有资产、或在新项目中拉取所需资产。\n" +
-		"---\n" +
-		"\n" +
-		"# Dec 代理\n" +
-		"\n" +
-		"Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skills、Rules、MCP 配置）。\n" +
-		"\n" +
-		"## 何时使用\n" +
-		"\n" +
-		"### 主动建议用户的场景\n" +
-		"\n" +
-		"1. **用户创建或修改了 Skill/Rule**\n" +
-		"   - 建议运行 `dec vault import skill <path>` 导入以供后续项目复用\n" +
-		"   - 可添加标签便于搜索：`--tag <tag1> --tag <tag2>`\n" +
-		"\n" +
-		"2. **用户提到需要之前做过的工具/配置**\n" +
-		"   - 运行 `dec vault search \"<query>\"` 搜索已有资产\n" +
-		"   - 或用 `dec vault list` 列出所有资产\n" +
-		"\n" +
-		"3. **用户在新项目中需要标准工具**\n" +
-		"   - 运行 `dec vault pull <type> <name>` 下载资产到当前项目\n" +
-		"   - 类型：skill、rule、mcp\n" +
-		"\n" +
-		"4. **用户修改了已拉取的资产**\n" +
-		"   - 建议运行 `dec vault push` 回写到 Vault\n" +
-		"   - 这样其他项目能获取最新版本\n" +
-		"\n" +
-		"## 快速参考\n" +
-		"\n" +
-		"### Vault 资产管理\n" +
-		"\n" +
-		"| 操作 | 命令 | 说明 |\n" +
-		"|------|------|------|\n" +
-		"| 列出所有资产 | `dec vault list` | 显示 Vault 中的所有 Skills、Rules、MCP |\n" +
-		"| 按类型列出 | `dec vault list --type skill` | 只列出 skill、rule 或 mcp |\n" +
-		"| 搜索资产 | `dec vault search \"<query>\"` | 按名称、描述或标签搜索 |\n" +
-		"| 导入 Skill | `dec vault import skill <dir-path>` | 目录需包含 SKILL.md |\n" +
-		"| 导入 Rule | `dec vault import rule <file.mdc>` | Rule 文件格式 |\n" +
-		"| 导入 MCP | `dec vault import mcp <server.json>` | MCP server 片段 |\n" +
-		"| 添加标签 | `dec vault import skill <path> --tag <tag>` | 支持多个 --tag |\n" +
-		"| 拉取到项目 | `dec vault pull skill <name>` | 自动部署到当前 IDE |\n" +
-		"| 推送更新 | `dec vault push` | 本地修改推送到远程 |\n" +
-		"\n" +
-		"### 连接和初始化\n" +
-		"\n" +
-		"| 操作 | 命令 | 说明 |\n" +
-		"|------|------|------|\n" +
-		"| 关联 Vault | `dec repo <url>` | 连接个人 Vault 仓库（GitHub URL） |\n" +
-		"| 配置全局 IDE | `dec config global` | 为本机 IDE 配置 Dec Skill |\n" +
-		"| 查询帮助 | `dec vault --help` | 查看所有 Vault 命令 |\n" +
-		"\n" +
-		"## 资产格式\n" +
-		"\n" +
-		"### Skill（目录）\n" +
-		"\n" +
-		"Skill 必须是一个包含 `SKILL.md` 的目录。\n" +
-		"\n" +
-		"在 `SKILL.md` 的 front matter 中定义 name 和 description。\n" +
-		"\n" +
-		"### Rule（文件）\n" +
-		"\n" +
-		"Rule 是单个 `.mdc` 文件。使用命令保存：\n" +
-		"\n" +
-		"    dec vault import rule .cursor/rules/my-rule.mdc\n" +
-		"\n" +
-		"### MCP（JSON 片段）\n" +
-		"\n" +
-		"MCP 必须是单个 server 片段 JSON，包含 command、args、env 字段。\n" +
-		"\n" +
-		"## 故障排查\n" +
-		"\n" +
-		"### \"Vault 未连接\"\n" +
-		"\n" +
-		"运行 `dec repo <url>` 关联你的 Vault 仓库。\n" +
-		"\n" +
-		"### \"找不到资产\"\n" +
-		"\n" +
-		"1. 确认资产名称：`dec vault search \"<partial-name>\"`\n" +
-		"2. 列出所有资产：`dec vault list`\n" +
-		"3. 按类型筛选：`dec vault list --type skill`\n" +
-		"\n" +
-		"### \"拉取失败\"\n" +
-		"\n" +
-		"1. 检查 Vault 连接：`dec repo --help`\n" +
-		"2. 验证资产存在：`dec vault search <name>`\n" +
-		"3. 查看详细错误：运行命令时会输出诊断信息\n" +
-		"\n" +
-		"### \"保存失败\"\n" +
-		"\n" +
-		"常见原因：\n" +
-		"- Skill 目录缺少 `SKILL.md`\n" +
-		"- Rule 文件不是 `.mdc` 格式\n" +
-		"- MCP JSON 无效或缺少必要字段\n" +
-		"\n" +
-		"## 最佳实践\n" +
-		"\n" +
-		"1. 定期保存：完成工具后立即保存，不要等到忘记\n" +
-		"2. 使用标签：添加描述性标签便于搜索（--tag testing、--tag api）\n" +
-		"3. 资产版本化：Vault 自动 Git 提交，方便追踪变更\n" +
-		"4. 团队共享：将 Vault 仓库 URL 分享给团队成员\n" +
-		"\n" +
-		"## 更多信息\n" +
-		"\n" +
-		"运行 `dec --help` 或 `dec vault --help` 查看完整帮助。\n"
+	skillContent := assets.DecAgentSkillContent
 
 	if err := os.WriteFile(skillMD, []byte(skillContent), 0644); err != nil {
 		return fmt.Errorf("写入 SKILL.md 失败: %w", err)
