@@ -99,6 +99,30 @@ func (m *ProjectConfigManager) AddVault(vaultName string) error {
 }
 
 // ========================================
+// 项目变量定义 (.dec/vars.yaml)
+// ========================================
+
+// LoadVarsConfig 加载项目变量定义
+func (m *ProjectConfigManager) LoadVarsConfig() (*types.VarsConfig, error) {
+	varsPath := filepath.Join(m.GetDecDir(), "vars.yaml")
+
+	data, err := os.ReadFile(varsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &types.VarsConfig{}, nil
+		}
+		return nil, fmt.Errorf("读取变量定义失败: %w", err)
+	}
+
+	var cfg types.VarsConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("解析变量定义失败: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+// ========================================
 // 资产追踪 (.dec/assets.yaml)
 // ========================================
 

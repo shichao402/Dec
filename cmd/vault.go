@@ -13,6 +13,7 @@ import (
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
 	"github.com/shichao402/Dec/pkg/types"
+	"github.com/shichao402/Dec/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
@@ -419,6 +420,7 @@ func pullSingleAsset(itemType, assetName string) error {
 	}
 
 	var foundVault string
+	var ideNames []string
 	if err := withReadRepoDir(func(repoDir string) error {
 		vaultName, assetPath, err := findAssetInVaults(repoDir, projectConfig.Vaults, itemType, assetName)
 		if err != nil {
@@ -428,7 +430,7 @@ func pullSingleAsset(itemType, assetName string) error {
 
 		fmt.Printf("📥 从 Vault '%s' 下载 %s '%s'\n", foundVault, itemType, assetName)
 
-		ideNames, err := config.GetEffectiveIDEs(projectConfig)
+		ideNames, err = config.GetEffectiveIDEs(projectConfig)
 		if err != nil {
 			ideNames = []string{"cursor"}
 		}
@@ -442,11 +444,17 @@ func pullSingleAsset(itemType, assetName string) error {
 		return err
 	}
 
+	// 占位符替换
+	varsUsed := substituteAssetVars(itemType, assetName, cwd, ideNames, mgr)
+
 	assetsConfig, err := mgr.LoadAssetsConfig()
 	if err != nil {
 		return fmt.Errorf("加载资产追踪失败: %w", err)
 	}
-	assetsConfig.AddAsset(itemType, assetName, foundVault, time.Now().Format(time.RFC3339))
+	entry := assetsConfig.AddAsset(itemType, assetName, foundVault, time.Now().Format(time.RFC3339))
+	if len(varsUsed) > 0 && entry != nil {
+		entry.VarsUsed = varsUsed
+	}
 	if err := mgr.SaveAssetsConfig(assetsConfig); err != nil {
 		return fmt.Errorf("保存资产追踪失败: %w", err)
 	}
@@ -525,8 +533,12 @@ func runVaultPullAll() error {
 			}
 
 			if err := installAssetToIDEs(asset.Type, asset.Name, assetPath, cwd, ideNames); err == nil {
+				varsUsed := substituteAssetVars(asset.Type, asset.Name, cwd, ideNames, mgr)
 				fmt.Printf("  ✅ [%-5s] %s  (from %s)\n", asset.Type, asset.Name, asset.Vault)
-				assetsConfig.AddAsset(asset.Type, asset.Name, asset.Vault, time.Now().Format(time.RFC3339))
+				entry := assetsConfig.AddAsset(asset.Type, asset.Name, asset.Vault, time.Now().Format(time.RFC3339))
+				if len(varsUsed) > 0 && entry != nil {
+					entry.VarsUsed = varsUsed
+				}
 				pulled++
 			} else {
 				fmt.Printf("  ⚠️  [%-5s] %s (%v)\n", asset.Type, asset.Name, err)
@@ -620,6 +632,13 @@ func runVaultPush(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
+			// 查找该资产的 varsUsed（用于反向替换）
+			trackedAsset := assetsConfig.FindAsset(asset.Type, asset.Name)
+			var varsUsed map[string]string
+			if trackedAsset != nil {
+				varsUsed = trackedAsset.VarsUsed
+			}
+
 			destPath := getAssetPath(repoDir, asset.Vault, asset.Type, asset.Name)
 			switch asset.Type {
 			case "skill":
@@ -627,8 +646,24 @@ func runVaultPush(cmd *cobra.Command, args []string) error {
 					fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
 					continue
 				}
-			case "rule", "mcp":
+				if len(varsUsed) > 0 {
+					if err := vars.RestoreDir(destPath, varsUsed); err != nil {
+						fmt.Printf("⚠️  还原占位符失败 %s/%s: %v\n", asset.Type, asset.Name, err)
+					}
+				}
+			case "rule":
 				if err := copyFile(localPath, destPath); err != nil {
+					fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
+					continue
+				}
+				if len(varsUsed) > 0 {
+					if err := vars.RestoreFile(destPath, varsUsed); err != nil {
+						fmt.Printf("⚠️  还原占位符失败 %s/%s: %v\n", asset.Type, asset.Name, err)
+					}
+				}
+			case "mcp":
+				// MCP 需要从 IDE 的 mcp.json 中提取对应条目
+				if err := pushMCPAsset(localPath, destPath, asset.Name, varsUsed, ideImpl, cwd); err != nil {
 					fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
 					continue
 				}
@@ -1239,6 +1274,215 @@ func copyDir(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+// ========================================
+// 占位符替换
+// ========================================
+
+// substituteAssetVars 对已安装到 IDE 目录的资产执行变量替换
+// 返回实际使用的变量映射
+func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []string, mgr *config.ProjectConfigManager) map[string]string {
+	// 加载变量定义
+	globalVars, _ := config.LoadGlobalVars()
+	projectVars, _ := mgr.LoadVarsConfig()
+
+	// 如果两者都为空，跳过
+	if (globalVars == nil || len(globalVars.Vars) == 0) && (projectVars == nil || len(projectVars.Vars) == 0) {
+		if globalVars != nil && globalVars.Assets != nil {
+			// 可能有资产级变量，继续
+		} else if projectVars != nil && projectVars.Assets != nil {
+			// 可能有资产级变量，继续
+		} else {
+			return nil
+		}
+	}
+
+	var allUsed map[string]string
+
+	for _, ideName := range ideNames {
+		ideImpl := ide.Get(ideName)
+
+		switch itemType {
+		case "skill":
+			localPath := filepath.Join(ideImpl.SkillsDir(projectRoot), managedName(assetName))
+			placeholders := vars.ExtractPlaceholdersFromDir(localPath)
+			if len(placeholders) == 0 {
+				continue
+			}
+			resolved := vars.ResolveVars(globalVars, projectVars, itemType, assetName, placeholders)
+			used, missing, err := vars.SubstituteDir(localPath, resolved)
+			if err != nil {
+				fmt.Printf("  ⚠️  变量替换失败 (%s): %v\n", ideName, err)
+				continue
+			}
+			allUsed = mergeUsed(allUsed, used)
+			printMissingVars(missing)
+
+		case "rule":
+			localPath := filepath.Join(ideImpl.RulesDir(projectRoot), managedName(assetName)+".mdc")
+			placeholders := vars.ExtractPlaceholdersFromFile(localPath)
+			if len(placeholders) == 0 {
+				continue
+			}
+			resolved := vars.ResolveVars(globalVars, projectVars, itemType, assetName, placeholders)
+			used, missing, err := vars.SubstituteFile(localPath, resolved)
+			if err != nil {
+				fmt.Printf("  ⚠️  变量替换失败 (%s): %v\n", ideName, err)
+				continue
+			}
+			allUsed = mergeUsed(allUsed, used)
+			printMissingVars(missing)
+
+		case "mcp":
+			used, missing := substituteMCPVars(assetName, projectRoot, ideImpl, globalVars, projectVars)
+			allUsed = mergeUsed(allUsed, used)
+			printMissingVars(missing)
+		}
+	}
+
+	return allUsed
+}
+
+// substituteMCPVars 对 MCP 配置中的指定条目执行变量替换
+func substituteMCPVars(assetName, projectRoot string, ideImpl ide.IDE, globalVars, projectVars *types.VarsConfig) (map[string]string, []string) {
+	managed := managedName(assetName)
+
+	existingConfig, err := ideImpl.LoadMCPConfig(projectRoot)
+	if err != nil {
+		return nil, nil
+	}
+
+	server, ok := existingConfig.MCPServers[managed]
+	if !ok {
+		return nil, nil
+	}
+
+	// 收集所有占位符
+	var allContent string
+	if server.Env != nil {
+		for _, v := range server.Env {
+			allContent += v + "\n"
+		}
+	}
+	for _, arg := range server.Args {
+		allContent += arg + "\n"
+	}
+	allContent += server.Command
+
+	placeholders := vars.ExtractPlaceholders(allContent)
+	if len(placeholders) == 0 {
+		return nil, nil
+	}
+
+	resolved := vars.ResolveVars(globalVars, projectVars, "mcp", assetName, placeholders)
+
+	used := make(map[string]string)
+	var missing []string
+
+	// 替换 env 值中的占位符
+	if server.Env != nil {
+		newEnv := make(map[string]string)
+		for k, v := range server.Env {
+			newVal, u, m := vars.Substitute(v, resolved)
+			newEnv[k] = newVal
+			for uk, uv := range u {
+				used[uk] = uv
+			}
+			missing = append(missing, m...)
+		}
+		server.Env = newEnv
+	}
+
+	// 替换 args 中的占位符
+	for i, arg := range server.Args {
+		newArg, u, m := vars.Substitute(arg, resolved)
+		server.Args[i] = newArg
+		for uk, uv := range u {
+			used[uk] = uv
+		}
+		missing = append(missing, m...)
+	}
+
+	// 替换 command 中的占位符
+	newCmd, u, m := vars.Substitute(server.Command, resolved)
+	server.Command = newCmd
+	for uk, uv := range u {
+		used[uk] = uv
+	}
+	missing = append(missing, m...)
+
+	if len(used) > 0 {
+		existingConfig.MCPServers[managed] = server
+		if err := ideImpl.WriteMCPConfig(projectRoot, existingConfig); err != nil {
+			fmt.Printf("  ⚠️  写入 MCP 配置失败: %v\n", err)
+		}
+	}
+
+	return used, missing
+}
+
+// pushMCPAsset 从 IDE 的 mcp.json 中提取对应条目，反向替换后写入 vault
+func pushMCPAsset(mcpConfigPath, destPath, assetName string, varsUsed map[string]string, ideImpl ide.IDE, projectRoot string) error {
+	managed := managedName(assetName)
+
+	existingConfig, err := ideImpl.LoadMCPConfig(projectRoot)
+	if err != nil {
+		return fmt.Errorf("加载 MCP 配置失败: %w", err)
+	}
+
+	server, ok := existingConfig.MCPServers[managed]
+	if !ok {
+		return fmt.Errorf("MCP 条目 %s 不存在", managed)
+	}
+
+	// 反向替换
+	if len(varsUsed) > 0 {
+		if server.Env != nil {
+			for k, v := range server.Env {
+				server.Env[k] = vars.Restore(v, varsUsed)
+			}
+		}
+		for i, arg := range server.Args {
+			server.Args[i] = vars.Restore(arg, varsUsed)
+		}
+		server.Command = vars.Restore(server.Command, varsUsed)
+	}
+
+	// 序列化单个 server 写入 vault
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(server, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(destPath, append(data, '\n'), 0644)
+}
+
+// mergeUsed 合并两个 used map
+func mergeUsed(dst, src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[string]string)
+	}
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+// printMissingVars 打印缺失变量的警告（去重）
+func printMissingVars(missing []string) {
+	seen := map[string]bool{}
+	for _, m := range missing {
+		if !seen[m] {
+			fmt.Printf("  ⚠️  变量 {{%s}} 未定义 (在 .dec/vars.yaml 中添加)\n", m)
+			seen[m] = true
+		}
+	}
 }
 
 // ========================================

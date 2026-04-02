@@ -184,6 +184,35 @@ func GetSystemConfig() *SystemConfig {
 	}
 }
 
+// ========================================
+// 全局变量定义 (~/.dec/local/vars.yaml)
+// ========================================
+
+// LoadGlobalVars 加载机器级全局变量定义
+func LoadGlobalVars() (*types.VarsConfig, error) {
+	rootDir, err := repo.GetRootDir()
+	if err != nil {
+		return &types.VarsConfig{}, nil
+	}
+	varsPath := filepath.Join(rootDir, "local", "vars.yaml")
+	return loadVarsFile(varsPath)
+}
+
+func loadVarsFile(path string) (*types.VarsConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &types.VarsConfig{}, nil
+		}
+		return nil, fmt.Errorf("读取变量定义失败: %w", err)
+	}
+	var cfg types.VarsConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("解析变量定义失败: %w", err)
+	}
+	return &cfg, nil
+}
+
 // GetVersionURL 获取版本检查 URL
 func GetVersionURL() string {
 	return "https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/version.json"
