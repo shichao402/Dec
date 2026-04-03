@@ -52,19 +52,3 @@ scripts/temp/*
 Documents/temp/*
 !Documents/temp/.gitkeep
 
-# IDE 生成的规则、Skills 和 MCP 配置（由 dec 生成）
-.cursor/rules/
-.cursor/skills/dec-*
-.cursor/mcp-configs/dec-*
-.cursor/mcp.json
-.codebuddy/rules/
-.codebuddy/skills/dec-*
-.codebuddy/mcp-configs/dec-*
-.codebuddy/mcp.json
-.mcp.json
-
-# Dec Vault 追踪文件
-.dec/tracking.json
-
-# Dec 项目配置
-.dec/

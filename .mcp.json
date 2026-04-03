@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "vikunja": {
+      "command": "npx",
+      "args": ["-y", "@aimbitgmbh/vikunja-mcp"],
+      "env": {
+        "VIKUNJA_URL": "http://vikunja.firoyang.com/api/v1",
+        "VIKUNJA_API_TOKEN": "tk_9c3f7b00d4b1b22320b0bd1baf6c62a0d787575e"
+      }
+    }
+  }
+}

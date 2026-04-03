@@ -1,0 +1,14 @@
+# Dec 已安装资产
+# 由 dec vault pull/remove 自动管理，请勿手动编辑
+
+rules:
+    - name: cli-release-rules
+      vault: cli
+      installed_at: "2026-04-01T14:20:21+08:00"
+    - name: vikunja-integration
+      vault: vikunja
+      installed_at: "2026-04-03T09:47:48+08:00"
+mcps:
+    - name: vikunja-mcp
+      vault: vikunja
+      installed_at: "2026-04-02T19:00:38+08:00"

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/shichao402/Dec/pkg/types"
 	"gopkg.in/yaml.v3"
@@ -190,43 +189,6 @@ func (m *ProjectConfigManager) InitProject(vaultName string, ides []string) erro
 	// 创建空的 assets.yaml
 	if err := m.SaveAssetsConfig(&types.AssetsConfig{}); err != nil {
 		return err
-	}
-
-	// 确保 .dec 被添加到 .gitignore
-	if err := m.ensureGitignore(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// ensureGitignore 确保 .dec/ 在项目 .gitignore 中
-func (m *ProjectConfigManager) ensureGitignore() error {
-	gitignorePath := filepath.Join(m.projectRoot, ".gitignore")
-
-	content := ""
-	if data, err := os.ReadFile(gitignorePath); err == nil {
-		content = string(data)
-	}
-
-	// 检查是否已有 .dec/ 规则
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == ".dec/" || line == ".dec" {
-			return nil
-		}
-	}
-
-	// 追加 .dec/ 到 .gitignore
-	entry := "\n# Dec 项目配置\n.dec/\n"
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("写入 .gitignore 失败: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := f.WriteString(entry); err != nil {
-		return fmt.Errorf("写入 .gitignore 失败: %w", err)
 	}
 
 	return nil

@@ -46,8 +46,14 @@ Dec 是一个命令驱动的个人 AI 资产管理工具，用于把 Skills、Ru
 .dec/
 ├── config.yaml              # 项目配置（Vault 列表、项目级 IDE 覆盖）
 ├── assets.yaml              # 已安装资产追踪
-└── templates/              # 已拉取/已导入资产的原始模板缓存
+└── templates/               # 已拉取/已导入资产的原始模板基线（未替换占位符）
 ```
+
+在当前项目语义下，`.dec/` 适合作为共享配置的一部分纳入版本控制：
+
+- `config.yaml`：记录项目关联的 Vault 与项目级 IDE 覆盖
+- `assets.yaml`：记录当前项目已追踪的资产
+- `templates/`：作为原始模板基线，也是 `dec vault push` 的推送来源
 
 ### IDE 托管输出
 
@@ -63,6 +69,8 @@ Dec 是一个命令驱动的个人 AI 资产管理工具，用于把 Skills、Ru
 | Codex Internal | `.codex-internal/skills/` | `.codex-internal/rules/` | `.codex-internal/mcp.json` |
 
 Dec 托管产物统一使用 `dec-` 前缀，以便和用户手工维护的内容区分。
+
+这些 IDE 目录中的文件既是 Dec 托管输出，也是项目可共享的实际配置；如果团队需要统一规则和 MCP 配置，适合直接纳入版本控制。
 
 ## 关键运行机制
 

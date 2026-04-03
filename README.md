@@ -471,19 +471,19 @@ Dec 在部署 MCP 时采用智能合并：
 - 用户自己添加的 MCP 条目会被保留
 - 旧的、已移除的 `dec-*` MCP 会被自动清理
 
-## 建议的 `.gitignore`
+## 项目共享配置
 
-建议忽略 Dec 生成的托管副本和追踪文件。
+如果你把 Dec 用作项目共享配置的一部分，建议把以下目录一起提交到版本控制：
 
-```gitignore
-.cursor/rules/
-.cursor/skills/dec-*
-.cursor/mcp.json
-.codebuddy/rules/
-.codebuddy/skills/dec-*
-.mcp.json
-.dec/
-```
+- `.dec/`：项目级 Vault 关联、资产追踪和原始模板基线
+- IDE 目录（如 `.cursor/`、`.codebuddy/`、`.windsurf/` 等）：项目实际使用的规则、Skills、MCP 配置
+
+其中：
+
+- `.dec/templates/` 保存的是**未替换占位符的原始模板**，也是 `dec vault push` 的推送来源
+- IDE 目录保存的是**部署到各 IDE 后的最终文件**，可能已经完成占位符替换
+
+如果你的团队希望共享这些配置，**不要**在 `.gitignore` 中忽略 `.dec/` 或这些 IDE 目录。
 
 ## 常见场景
 
