@@ -40,6 +40,9 @@ logs/
 # 测试环境
 .test-install/
 
+# 本地环境变量
+.env
+
 # 临时文件
 resources/temp/*
 !resources/temp/.gitkeep
