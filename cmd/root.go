@@ -42,6 +42,16 @@ var RootCmd = &cobra.Command{
 	},
 }
 
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "显示当前 Dec 的版本号",
+	Long: `显示当前 Dec 的版本号。
+
+示例：
+  dec version`,
+	RunE: runVersion,
+}
+
 // SetVersion 设置版本信息（从编译参数注入）
 func SetVersion(v, bt string) {
 	appVersion = v
@@ -49,9 +59,13 @@ func SetVersion(v, bt string) {
 	RootCmd.Version = getVersionString()
 }
 
+func hasInjectedVersion() bool {
+	return appVersion != "" && appVersion != "unknown" && appVersion != "dev"
+}
+
 // getVersionString 获取版本字符串
 func getVersionString() string {
-	if appVersion != "" && appVersion != "unknown" {
+	if hasInjectedVersion() {
 		if appBuildTime != "" && appBuildTime != "unknown" {
 			return fmt.Sprintf("%s (built at %s)", appVersion, appBuildTime)
 		}
@@ -70,7 +84,7 @@ func getVersionString() string {
 
 // GetVersion 获取当前版本号（供其他包使用）
 func GetVersion() string {
-	if appVersion != "" && appVersion != "unknown" {
+	if hasInjectedVersion() {
 		return appVersion
 	}
 
@@ -82,4 +96,13 @@ func GetVersion() string {
 	}
 
 	return "dev"
+}
+
+func runVersion(cmd *cobra.Command, args []string) error {
+	cmd.Println(GetVersion())
+	return nil
+}
+
+func init() {
+	RootCmd.AddCommand(versionCmd)
 }
