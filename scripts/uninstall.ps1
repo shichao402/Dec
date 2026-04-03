@@ -33,9 +33,8 @@ function Uninstall-Dec {
     $installDir = if ($env:DEC_HOME) { $env:DEC_HOME } else { Join-Path $env:USERPROFILE ".dec" }
     $binDir = Join-Path $installDir "bin"
     $binaryPath = Join-Path $binDir "dec.exe"
-    $systemConfigPath = Join-Path $installDir "config\system.json"
     $globalConfigPath = Join-Path $installDir "config.yaml"
-    $vaultDir = Join-Path $installDir "vault"
+    $bareRepoPath = Join-Path $installDir "repo.git"
 
     if (-not (Test-Path $installDir) -and -not (Test-Path $binaryPath)) {
         Write-ColorOutput "未找到安装目录: $installDir" -Type "Warning"
@@ -44,9 +43,8 @@ function Uninstall-Dec {
 
     Write-ColorOutput "这将删除整个 Dec 根目录，包括：" -Type "Warning"
     Write-Host "  - 可执行文件: $binaryPath"
-    Write-Host "  - 系统配置: $systemConfigPath"
     Write-Host "  - 全局配置: $globalConfigPath"
-    Write-Host "  - 本地 Vault: $vaultDir"
+    Write-Host "  - 本地 bare repo: $bareRepoPath"
     Write-Host ""
 
     if (-not $Yes) {

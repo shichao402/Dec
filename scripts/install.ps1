@@ -56,7 +56,6 @@ function Install-Dec {
     $platform = Get-Platform
     $installDir = if ($env:DEC_HOME) { $env:DEC_HOME } else { Join-Path $env:USERPROFILE ".dec" }
     $binDir = Join-Path $installDir "bin"
-    $configDir = Join-Path $installDir "config"
     $binaryPath = Join-Path $binDir "dec.exe"
     $updateBranch = if ($env:DEC_BRANCH) { $env:DEC_BRANCH } else { "ReleaseLatest" }
 
@@ -115,7 +114,6 @@ function Install-Dec {
     }
 
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-    New-Item -ItemType Directory -Force -Path $configDir | Out-Null
 
     $downloadTag = if ($updateBranch -eq "ReleaseTest") { "test-$latestVersion" } else { $latestVersion }
     $binaryName = "dec-$platform.exe"
@@ -128,12 +126,6 @@ function Install-Dec {
     } catch {
         Write-ColorOutput "下载失败: $downloadUrl" -Type "Error"
         exit 1
-    }
-
-    # 清理旧版残留的系统配置文件
-    $systemConfigPath = Join-Path $configDir "system.json"
-    if (Test-Path $systemConfigPath) {
-        Remove-Item -Force $systemConfigPath
     }
 
     Write-ColorOutput "配置环境变量..." -Type "Info"
