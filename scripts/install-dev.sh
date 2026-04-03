@@ -21,7 +21,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 INSTALL_DIR="${DEC_HOME:-${HOME}/.dec}"
 BIN_DIR="${INSTALL_DIR}/bin"
-CONFIG_DIR="${INSTALL_DIR}/config"
 BINARY_PATH="${BIN_DIR}/dec"
 
 if [ ! -f "${PROJECT_DIR}/go.mod" ] || [ ! -f "${PROJECT_DIR}/version.json" ]; then
@@ -59,7 +58,7 @@ else
 fi
 
 print_step "安装到本地目录..."
-mkdir -p "${BIN_DIR}" "${CONFIG_DIR}"
+mkdir -p "${BIN_DIR}"
 cp dist/dec "${BINARY_PATH}"
 chmod +x "${BINARY_PATH}"
 # macOS: 清除可能的扩展属性以避免系统阻止执行
@@ -67,13 +66,6 @@ if [ "$(uname -s)" = "Darwin" ]; then
     xattr -cr "${BINARY_PATH}" 2>/dev/null || true
 fi
 print_success "已写入 ${BINARY_PATH}"
-
-if [ -f "${PROJECT_DIR}/config/system.json" ]; then
-    cp "${PROJECT_DIR}/config/system.json" "${CONFIG_DIR}/system.json"
-    print_success "已更新系统配置"
-else
-    print_warning "未找到 config/system.json，跳过系统配置更新"
-fi
 
 rm -f dist/dec
 print_step "验证安装..."

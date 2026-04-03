@@ -39,9 +39,8 @@ main() {
     INSTALL_DIR="${DEC_HOME:-${HOME}/.dec}"
     BIN_DIR="${INSTALL_DIR}/bin"
     BINARY_PATH="${BIN_DIR}/dec"
-    SYSTEM_CONFIG_PATH="${INSTALL_DIR}/config/system.json"
     GLOBAL_CONFIG_PATH="${INSTALL_DIR}/config.yaml"
-    VAULT_DIR="${INSTALL_DIR}/vault"
+    BARE_REPO_PATH="${INSTALL_DIR}/repo.git"
 
     if [[ ! -d "${INSTALL_DIR}" ]] && [[ ! -f "${BINARY_PATH}" ]]; then
         print_warning "未找到安装目录: ${INSTALL_DIR}"
@@ -50,9 +49,8 @@ main() {
 
     print_warning "这将删除整个 Dec 根目录，包括："
     echo "  - 可执行文件: ${BINARY_PATH}"
-    echo "  - 系统配置: ${SYSTEM_CONFIG_PATH}"
     echo "  - 全局配置: ${GLOBAL_CONFIG_PATH}"
-    echo "  - 本地 Vault: ${VAULT_DIR}"
+    echo "  - 本地 bare repo: ${BARE_REPO_PATH}"
     echo ""
 
     if [[ "${SKIP_CONFIRM}" != "true" ]]; then

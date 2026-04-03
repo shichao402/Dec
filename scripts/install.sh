@@ -90,7 +90,6 @@ main() {
     platform=$(detect_platform)
     local install_dir="${DEC_HOME:-${HOME}/.dec}"
     local bin_dir="${install_dir}/bin"
-    local config_dir="${install_dir}/config"
     local binary_path="${bin_dir}/dec"
     local update_branch="${DEC_BRANCH:-ReleaseLatest}"
 
@@ -157,7 +156,7 @@ main() {
         fi
     fi
 
-    mkdir -p "${bin_dir}" "${config_dir}"
+    mkdir -p "${bin_dir}"
 
     local download_tag="${latest_version}"
     if [ "${update_branch}" = "ReleaseTest" ]; then
@@ -178,11 +177,6 @@ main() {
         xattr -cr "${binary_path}" 2>/dev/null || true
     fi
     print_success "二进制下载完成"
-
-    # 清理旧版残留的系统配置文件
-    if [ -f "${config_dir}/system.json" ]; then
-        rm -f "${config_dir}/system.json"
-    fi
 
     local shell_rc=""
     case "${SHELL}" in
