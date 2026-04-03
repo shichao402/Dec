@@ -11,7 +11,6 @@ import (
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
-	"github.com/shichao402/Dec/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -42,7 +41,7 @@ var configShowCmd = &cobra.Command{
 
 会展示以下信息:
   - Dec 根目录和仓库状态
-  - 全局配置（RepoURL、机器级 IDE）
+  - 全局配置（RepoURL、默认 IDE）
   - 项目配置（如果在 Dec 项目中）
   - 已安装的 Skills、Rules、MCP
 
@@ -113,27 +112,10 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  配置文件: %s\n", globalConfigPath)
 	}
 
-	// ========================================
-	// 机器级 IDE 配置
-	// ========================================
-	fmt.Println()
-	fmt.Println("💻 机器级 IDE 配置")
-	fmt.Println("-" + strings.Repeat("-", 48))
-
-	localConfig, err := config.LoadLocalConfig()
-	if err != nil {
-		return fmt.Errorf("加载本机配置失败: %w", err)
-	}
-
-	localConfigPath, err := config.GetLocalConfigPath()
-	if err == nil {
-		fmt.Printf("  配置文件: %s\n", localConfigPath)
-	}
-
-	if len(localConfig.IDEs) > 0 {
-		fmt.Printf("  IDE 列表: %s\n", strings.Join(localConfig.IDEs, ", "))
+	if len(globalConfig.IDEs) > 0 {
+		fmt.Printf("  默认 IDE: %s\n", strings.Join(globalConfig.IDEs, ", "))
 	} else {
-		fmt.Println("  IDE 列表: (使用默认: cursor)")
+		fmt.Println("  默认 IDE: (使用默认: cursor)")
 	}
 
 	// ========================================
@@ -288,11 +270,13 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 		// 这里可能需要更多的 IDE 特定配置逻辑
 	}
 
-	// 保存配置到全局 IDE 列表
-	localConfig := &types.LocalConfig{
-		IDEs: targetIDEs,
+	// 保存配置到全局配置文件
+	globalConfig, err := config.LoadGlobalConfig()
+	if err != nil {
+		return fmt.Errorf("加载全局配置失败: %w", err)
 	}
-	if err := config.SaveLocalConfig(localConfig); err != nil {
+	globalConfig.IDEs = targetIDEs
+	if err := config.SaveGlobalConfig(globalConfig); err != nil {
 		return fmt.Errorf("保存 IDE 配置失败: %w", err)
 	}
 

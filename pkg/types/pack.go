@@ -19,12 +19,8 @@ type MCPServer struct {
 
 // GlobalConfig 全局配置结构 (~/.dec/config.yaml)
 type GlobalConfig struct {
-	RepoURL string `yaml:"repo_url,omitempty"`
-}
-
-// LocalConfig 本机全局配置 (~/.dec/local/config.yaml)
-type LocalConfig struct {
-	IDEs []string `yaml:"ides,omitempty"`
+	RepoURL string   `yaml:"repo_url,omitempty"`
+	IDEs    []string `yaml:"ides,omitempty"`
 }
 
 // ProjectConfig 项目配置 (<project>/.dec/config.yaml)

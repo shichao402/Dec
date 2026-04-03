@@ -100,7 +100,7 @@ dec vault pull rule my-logging-standard
 dec vault pull mcp postgres-tool
 ```
 
-`dec vault pull` 会按以下优先级自动部署资产：项目 `.dec/config.yaml` 的 IDE 配置 > 本机 `~/.dec/local/config.yaml` 的 IDE 配置 > 默认 `cursor`。
+`dec vault pull` 会按以下优先级自动部署资产：项目 `.dec/config.yaml` 的 IDE 配置 > 全局 `~/.dec/config.yaml` 的 IDE 配置 > 默认 `cursor`。
 
 批量拉取所有资产：
 
@@ -357,7 +357,7 @@ dec config global --ide cursor --ide codebuddy # 配置多个 IDE
 
 - 为每个指定 IDE 安装 Dec 的 Agent Skill
 - 默认配置所有支持的 IDE（cursor、codebuddy、windsurf、trae、claude、claude-internal、codex、codex-internal）
-- 将所选 IDE 列表写入本机配置 `~/.dec/local/config.yaml`
+- 将所选 IDE 列表写入全局配置 `~/.dec/config.yaml`
 - 已存在的配置会被覆盖更新
 
 #### `dec update`

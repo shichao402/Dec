@@ -23,31 +23,39 @@ func GetGlobalConfigPath() (string, error) {
 	return filepath.Join(rootDir, "config.yaml"), nil
 }
 
-// LoadGlobalConfig 加载全局配置
+// LoadGlobalConfig 加载全局配置。
+// 兼容旧版本 ~/.dec/local/config.yaml 中的 IDE 配置，并在内存中合并到返回值。
 func LoadGlobalConfig() (*types.GlobalConfig, error) {
 	configPath, err := GetGlobalConfigPath()
 	if err != nil {
 		return nil, err
 	}
 
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return &types.GlobalConfig{}, nil
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
+	config := &types.GlobalConfig{}
+	if _, err := os.Stat(configPath); err == nil {
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("读取全局配置失败: %w", err)
+		}
+		if err := yaml.Unmarshal(data, config); err != nil {
+			return nil, fmt.Errorf("解析全局配置失败: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("读取全局配置失败: %w", err)
 	}
 
-	var config types.GlobalConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("解析全局配置失败: %w", err)
+	legacyIDEs, err := loadLegacyLocalIDEs()
+	if err != nil {
+		return nil, err
+	}
+	if len(config.IDEs) == 0 && len(legacyIDEs) > 0 {
+		config.IDEs = legacyIDEs
 	}
 
-	return &config, nil
+	return config, nil
 }
 
-// SaveGlobalConfig 保存全局配置
+// SaveGlobalConfig 保存全局配置，并在成功后清理旧版 ~/.dec/local/config.yaml。
 func SaveGlobalConfig(config *types.GlobalConfig) error {
 	configPath, err := GetGlobalConfigPath()
 	if err != nil {
@@ -63,9 +71,13 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 		return fmt.Errorf("序列化配置失败: %w", err)
 	}
 
-	header := "# Dec 全局配置\n\n"
+	header := "# Dec 全局配置\n# Repo URL 与默认 IDE 列表\n\n"
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入全局配置失败: %w", err)
+	}
+
+	if err := removeLegacyLocalConfig(); err != nil {
+		return err
 	}
 
 	return nil
@@ -81,67 +93,6 @@ func SetRepoURL(url string) error {
 	return SaveGlobalConfig(config)
 }
 
-// ========================================
-// 本机 IDE 配置 (~/.dec/local/config.yaml)
-// ========================================
-
-// GetLocalConfigPath 获取本机配置文件路径
-func GetLocalConfigPath() (string, error) {
-	rootDir, err := repo.GetRootDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(rootDir, "local", "config.yaml"), nil
-}
-
-// LoadLocalConfig 加载本机 IDE 配置
-func LoadLocalConfig() (*types.LocalConfig, error) {
-	configPath, err := GetLocalConfigPath()
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return &types.LocalConfig{}, nil
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("读取本机配置失败: %w", err)
-	}
-
-	var config types.LocalConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("解析本机配置失败: %w", err)
-	}
-
-	return &config, nil
-}
-
-// SaveLocalConfig 保存本机 IDE 配置
-func SaveLocalConfig(config *types.LocalConfig) error {
-	configPath, err := GetLocalConfigPath()
-	if err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
-		return fmt.Errorf("创建配置目录失败: %w", err)
-	}
-
-	data, err := yaml.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("序列化配置失败: %w", err)
-	}
-
-	header := "# Dec 本机 IDE 配置\n# 全局默认 IDE 列表，项目级可覆盖\n\n"
-	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
-		return fmt.Errorf("写入本机配置失败: %w", err)
-	}
-
-	return nil
-}
-
 // GetEffectiveIDEs 获取有效的 IDE 列表（项目级覆盖全局）
 func GetEffectiveIDEs(projectConfig *types.ProjectConfig) ([]string, error) {
 	// 项目级有配置则优先
@@ -150,16 +101,62 @@ func GetEffectiveIDEs(projectConfig *types.ProjectConfig) ([]string, error) {
 	}
 
 	// 回退到全局配置
-	localConfig, err := LoadLocalConfig()
+	globalConfig, err := LoadGlobalConfig()
 	if err != nil {
 		return nil, err
 	}
-	if len(localConfig.IDEs) > 0 {
-		return localConfig.IDEs, nil
+	if len(globalConfig.IDEs) > 0 {
+		return globalConfig.IDEs, nil
 	}
 
 	// 默认 cursor
 	return []string{"cursor"}, nil
+}
+
+func getLegacyLocalConfigPath() (string, error) {
+	rootDir, err := repo.GetRootDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(rootDir, "local", "config.yaml"), nil
+}
+
+func loadLegacyLocalIDEs() ([]string, error) {
+	legacyPath, err := getLegacyLocalConfigPath()
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := os.Stat(legacyPath); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("读取旧本机配置失败: %w", err)
+	}
+
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取旧本机配置失败: %w", err)
+	}
+
+	var legacy struct {
+		IDEs []string `yaml:"ides,omitempty"`
+	}
+	if err := yaml.Unmarshal(data, &legacy); err != nil {
+		return nil, fmt.Errorf("解析旧本机配置失败: %w", err)
+	}
+
+	return legacy.IDEs, nil
+}
+
+func removeLegacyLocalConfig() error {
+	legacyPath, err := getLegacyLocalConfigPath()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(legacyPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("清理旧本机配置失败: %w", err)
+	}
+	return nil
 }
 
 // ========================================
@@ -168,9 +165,9 @@ func GetEffectiveIDEs(projectConfig *types.ProjectConfig) ([]string, error) {
 
 // SystemConfig 系统配置
 type SystemConfig struct {
-	RepoOwner   string
-	RepoName    string
-	VersionURL  string
+	RepoOwner    string
+	RepoName     string
+	VersionURL   string
 	UpdateBranch string
 }
 
