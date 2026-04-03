@@ -166,7 +166,7 @@ func (g *GitOps) syncForWrite() ([]string, error) {
 		if abortErr != nil {
 			return nil, fmt.Errorf("自动合并远端更新失败: %v；回滚失败: %w", err, abortErr)
 		}
-		return nil, fmt.Errorf("自动合并远端更新失败，请处理 ~/.dec/repo 中的冲突后重试: %w", err)
+		return nil, fmt.Errorf("自动合并远端更新失败，请处理 ~/.dec/repo.git 中的冲突后重试: %w", err)
 	}
 
 	return []string{"检测到远端已有更新，已自动合并到本地 Vault 仓库"}, nil
