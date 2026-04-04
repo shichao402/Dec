@@ -169,13 +169,36 @@ func MigrateToBare() error {
 	if err := os.MkdirAll(filepath.Dir(bareDir), 0755); err != nil {
 		return fmt.Errorf("创建 bare repo 父目录失败: %w", err)
 	}
+	// 迁移前先读取旧仓库的真正远程 URL
+	originURL, err := legacyGit.getRemoteURL("origin")
+	if err != nil {
+		return fmt.Errorf("读取旧仓库远程 URL 失败: %w", err)
+	}
+
 	if err := gitCloneBare(legacyDir, bareDir); err != nil {
 		return fmt.Errorf("从旧仓库迁移 bare repo 失败: %w", err)
 	}
+
+	// clone --bare 后 origin 指向旧的本地路径，需要恢复为真正的远程 URL
+	if originURL != "" {
+		if err := setBareRemoteURL(bareDir, "origin", originURL); err != nil {
+			return fmt.Errorf("迁移成功，但更新远程 URL 失败: %w", err)
+		}
+	}
+
 	if err := os.RemoveAll(legacyDir); err != nil {
 		return fmt.Errorf("迁移成功，但删除旧仓库失败: %w", err)
 	}
 
+	return nil
+}
+
+func setBareRemoteURL(bareDir, remote, url string) error {
+	cmd := exec.Command("git", "--git-dir", bareDir, "remote", "set-url", remote, url)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git remote set-url 失败: %s", strings.TrimSpace(string(output)))
+	}
 	return nil
 }
 

@@ -231,6 +231,7 @@ func (t *Transaction) CommitAndPush(message string) error {
 		return fmt.Errorf("git commit 失败: %w", err)
 	}
 	if _, err := git.run("push", "origin", fmt.Sprintf("HEAD:%s", t.branch)); err == nil {
+		t.syncBareRef(git)
 		return nil
 	} else if !isNonFastForwardPushError(err) {
 		return fmt.Errorf("git push 失败: %w", err)
@@ -249,5 +250,16 @@ func (t *Transaction) CommitAndPush(message string) error {
 	if _, err := git.run("push", "origin", fmt.Sprintf("HEAD:%s", t.branch)); err != nil {
 		return fmt.Errorf("git push 失败: %w", err)
 	}
+	t.syncBareRef(git)
 	return nil
+}
+
+// syncBareRef 将 worktree 的 HEAD 同步到 bare repo 的目标分支
+func (t *Transaction) syncBareRef(git *GitOps) {
+	hash, err := git.run("rev-parse", "HEAD")
+	if err != nil {
+		return
+	}
+	cmd := exec.Command("git", "--git-dir", t.bareDir, "update-ref", fmt.Sprintf("refs/heads/%s", t.branch), hash)
+	_ = cmd.Run()
 }

@@ -258,6 +258,15 @@ func (g *GitOps) ensureNoSyncInProgress() error {
 	return nil
 }
 
+// getRemoteURL 获取指定 remote 的 URL
+func (g *GitOps) getRemoteURL(remote string) (string, error) {
+	url, err := g.run("config", "--get", fmt.Sprintf("remote.%s.url", remote))
+	if err != nil {
+		return "", err
+	}
+	return url, nil
+}
+
 // IsClean 检查工作区是否干净
 func (g *GitOps) IsClean() (bool, error) {
 	output, err := g.run("status", "--porcelain")

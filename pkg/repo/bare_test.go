@@ -163,6 +163,12 @@ func TestMigrateToBare_MigratesLegacyRepo(t *testing.T) {
 	if migratedHead != legacyHead || migratedHead != remoteHead {
 		t.Fatalf("迁移后 HEAD 不一致, migrated=%s legacy=%s remote=%s", migratedHead, legacyHead, remoteHead)
 	}
+
+	// 验证迁移后 origin URL 指向真正的远程仓库，而非旧的本地路径
+	originURL := runGitNoDir(t, "--git-dir", bareDir, "config", "--get", "remote.origin.url")
+	if originURL != remoteBareDir {
+		t.Fatalf("迁移后 origin URL 应指向远程仓库 %q, got %q", remoteBareDir, originURL)
+	}
 }
 
 func TestMigrateToBare_FailsWhenLegacyRepoDirty(t *testing.T) {

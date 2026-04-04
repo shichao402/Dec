@@ -103,6 +103,13 @@ func TestTransactionCommitAndPush_Succeeds(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(remoteWorkDir, "feature.txt")); err != nil {
 		t.Fatalf("远端工作区应看到提交文件: %v", err)
 	}
+
+	// 验证 bare repo 的 main 分支已同步到推送后的 commit
+	bareHead := runGitNoDir(t, "--git-dir", bareDir, "rev-parse", "refs/heads/main")
+	remoteHead := runGit(t, remoteWorkDir, "rev-parse", "HEAD")
+	if bareHead != remoteHead {
+		t.Fatalf("bare repo main 应与远端同步, bare=%s remote=%s", bareHead, remoteHead)
+	}
 }
 
 func TestTransactionCommitAndPush_MergesRemoteAdvance(t *testing.T) {
