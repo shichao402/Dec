@@ -38,7 +38,7 @@ func (m *ProjectConfigManager) Exists() bool {
 // 项目配置 (.dec/config.yaml)
 // ========================================
 
-// LoadProjectConfig 加载项目配置
+// LoadProjectConfig 加载项目配置，自动去重
 func (m *ProjectConfigManager) LoadProjectConfig() (*types.ProjectConfig, error) {
 	configPath := filepath.Join(m.GetDecDir(), "config.yaml")
 
@@ -52,7 +52,15 @@ func (m *ProjectConfigManager) LoadProjectConfig() (*types.ProjectConfig, error)
 
 	var config types.ProjectConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("解析项目配置失败: %w", err)
+		return nil, fmt.Errorf("解析项目配置失败: %w\n\n请检查 %s 的 YAML 格式是否正确", err, configPath)
+	}
+
+	// 自动去重（同名以靠后的为准）
+	if config.Available != nil {
+		config.Available.Dedup()
+	}
+	if config.Enabled != nil {
+		config.Enabled.Dedup()
 	}
 
 	return &config, nil
@@ -70,31 +78,13 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 		return fmt.Errorf("序列化项目配置失败: %w", err)
 	}
 
-	header := "# Dec 项目配置\n# vaults: 关联的 vault 列表\n# ides: IDE 覆盖配置（留空则使用全局默认）\n\n"
+	header := "# Dec 项目配置\n# available: 仓库中所有可用资产（dec config init 自动生成）\n# enabled: 已启用资产（从 available 复制到这里即为启用）\n\n"
 	configPath := filepath.Join(decDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入项目配置失败: %w", err)
 	}
 
 	return nil
-}
-
-// AddVault 添加 vault 到项目配置
-func (m *ProjectConfigManager) AddVault(vaultName string) error {
-	config, err := m.LoadProjectConfig()
-	if err != nil {
-		return err
-	}
-
-	// 去重
-	for _, v := range config.Vaults {
-		if v == vaultName {
-			return nil // 已存在
-		}
-	}
-	config.Vaults = append(config.Vaults, vaultName)
-
-	return m.SaveProjectConfig(config)
 }
 
 // ========================================
@@ -119,77 +109,4 @@ func (m *ProjectConfigManager) LoadVarsConfig() (*types.VarsConfig, error) {
 	}
 
 	return &cfg, nil
-}
-
-// ========================================
-// 资产追踪 (.dec/assets.yaml)
-// ========================================
-
-// LoadAssetsConfig 加载资产追踪配置
-func (m *ProjectConfigManager) LoadAssetsConfig() (*types.AssetsConfig, error) {
-	assetsPath := filepath.Join(m.GetDecDir(), "assets.yaml")
-
-	data, err := os.ReadFile(assetsPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &types.AssetsConfig{}, nil
-		}
-		return nil, fmt.Errorf("读取资产配置失败: %w", err)
-	}
-
-	var config types.AssetsConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("解析资产配置失败: %w", err)
-	}
-
-	return &config, nil
-}
-
-// SaveAssetsConfig 保存资产追踪配置
-func (m *ProjectConfigManager) SaveAssetsConfig(config *types.AssetsConfig) error {
-	decDir := m.GetDecDir()
-	if err := os.MkdirAll(decDir, 0755); err != nil {
-		return fmt.Errorf("创建 .dec 目录失败: %w", err)
-	}
-
-	data, err := yaml.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("序列化资产配置失败: %w", err)
-	}
-
-	header := "# Dec 已安装资产\n# 由 dec vault pull/remove 自动管理，请勿手动编辑\n\n"
-	assetsPath := filepath.Join(decDir, "assets.yaml")
-	if err := os.WriteFile(assetsPath, []byte(header+string(data)), 0644); err != nil {
-		return fmt.Errorf("写入资产配置失败: %w", err)
-	}
-
-	return nil
-}
-
-// ========================================
-// 初始化项目
-// ========================================
-
-// InitProject 初始化项目 Dec 配置
-func (m *ProjectConfigManager) InitProject(vaultName string, ides []string) error {
-	decDir := m.GetDecDir()
-	if err := os.MkdirAll(decDir, 0755); err != nil {
-		return fmt.Errorf("创建 .dec 目录失败: %w", err)
-	}
-
-	// 创建 config.yaml
-	config := &types.ProjectConfig{
-		Vaults: []string{vaultName},
-		IDEs:   ides,
-	}
-	if err := m.SaveProjectConfig(config); err != nil {
-		return err
-	}
-
-	// 创建空的 assets.yaml
-	if err := m.SaveAssetsConfig(&types.AssetsConfig{}); err != nil {
-		return err
-	}
-
-	return nil
 }

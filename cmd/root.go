@@ -23,12 +23,13 @@ var RootCmd = &cobra.Command{
 跨项目、跨设备复用，效率持续积累。
 
 使用示例:
-  dec repo <url>                    # 连接个人仓库
+  dec config repo <url>             # 连接个人仓库
   dec config global                 # 配置本机 IDE
-  dec vault init <name>             # 创建 Vault 空间
-  dec vault import skill <path>     # 导入 Skill 到 Vault
-  dec vault search <query>          # 搜索 Vault 中的资产
-  dec vault pull skill <name>       # 下载 Skill 到项目`,
+  dec config init                   # 初始化项目配置
+  dec list                          # 列出所有 Vault 和资产
+  dec search <query>                # 搜索资产
+  dec pull skill <name>             # 拉取资产到项目
+  dec push                          # 推送修改到仓库`,
 	Version: getVersionString(),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// 跳过 update 和 version 命令自身的检查

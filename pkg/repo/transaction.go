@@ -26,6 +26,23 @@ func NewReadTransaction() (*Transaction, error) {
 	return newTransaction(true)
 }
 
+// NewReadTransactionAt 创建指定版本的只读事务。
+// ref 可以是 commit hash、tag 或 branch 名称。
+func NewReadTransactionAt(ref string) (*Transaction, error) {
+	tx, err := newTransaction(true)
+	if err != nil {
+		return nil, err
+	}
+
+	git := NewGitOps(tx.worktreeDir)
+	if _, err := git.run("checkout", ref); err != nil {
+		tx.Close()
+		return nil, fmt.Errorf("切换到版本 %s 失败: %w", ref, err)
+	}
+
+	return tx, nil
+}
+
 // NewWriteTransaction 创建可写事务。
 func NewWriteTransaction() (*Transaction, error) {
 	return newTransaction(false)
@@ -144,6 +161,16 @@ func isNonFastForwardPushError(err error) bool {
 // WorkDir 返回事务工作目录
 func (t *Transaction) WorkDir() string {
 	return t.worktreeDir
+}
+
+// CommitHash 返回当前事务工作目录的 HEAD commit hash
+func (t *Transaction) CommitHash() string {
+	git := NewGitOps(t.worktreeDir)
+	hash, err := git.run("rev-parse", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return hash
 }
 
 // Rollback 终止事务并清理临时目录。

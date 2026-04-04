@@ -25,22 +25,140 @@ type GlobalConfig struct {
 
 // ProjectConfig 项目配置 (<project>/.dec/config.yaml)
 type ProjectConfig struct {
-	Vaults []string `yaml:"vaults"`
-	IDEs   []string `yaml:"ides,omitempty"`
+	IDEs      []string      `yaml:"ides,omitempty"`
+	Available *AssetList    `yaml:"available,omitempty"`
+	Enabled   *AssetList    `yaml:"enabled,omitempty"`
 }
 
-// AssetsConfig 项目已安装资产追踪 (<project>/.dec/assets.yaml)
-type AssetsConfig struct {
-	Skills []AssetEntry `yaml:"skills,omitempty"`
-	Rules  []AssetEntry `yaml:"rules,omitempty"`
-	MCPs   []AssetEntry `yaml:"mcps,omitempty"`
+// AssetList 资产列表（available 和 enabled 共用）
+type AssetList struct {
+	Skills []AssetRef `yaml:"skills,omitempty"`
+	Rules  []AssetRef `yaml:"rules,omitempty"`
+	MCPs   []AssetRef `yaml:"mcps,omitempty"`
 }
 
-// AssetEntry 单个已安装资产记录
-type AssetEntry struct {
-	Name        string `yaml:"name"`
-	Vault       string `yaml:"vault"`
-	InstalledAt string `yaml:"installed_at"`
+// AssetRef 资产引用
+type AssetRef struct {
+	Name  string `yaml:"name"`
+	Vault string `yaml:"vault"`
+}
+
+// Dedup 去重，同名资产以靠后的为准
+func (l *AssetList) Dedup() {
+	if l == nil {
+		return
+	}
+	l.Skills = dedupRefs(l.Skills)
+	l.Rules = dedupRefs(l.Rules)
+	l.MCPs = dedupRefs(l.MCPs)
+}
+
+// IsEmpty 是否为空
+func (l *AssetList) IsEmpty() bool {
+	if l == nil {
+		return true
+	}
+	return len(l.Skills) == 0 && len(l.Rules) == 0 && len(l.MCPs) == 0
+}
+
+// Count 资产总数
+func (l *AssetList) Count() int {
+	if l == nil {
+		return 0
+	}
+	return len(l.Skills) + len(l.Rules) + len(l.MCPs)
+}
+
+// All 返回所有资产（带类型标记）
+func (l *AssetList) All() []TypedAssetRef {
+	if l == nil {
+		return nil
+	}
+	var all []TypedAssetRef
+	for _, s := range l.Skills {
+		all = append(all, TypedAssetRef{Type: "skill", AssetRef: s})
+	}
+	for _, r := range l.Rules {
+		all = append(all, TypedAssetRef{Type: "rule", AssetRef: r})
+	}
+	for _, m := range l.MCPs {
+		all = append(all, TypedAssetRef{Type: "mcp", AssetRef: m})
+	}
+	return all
+}
+
+// FindAsset 查找资产
+func (l *AssetList) FindAsset(assetType, name string) *AssetRef {
+	if l == nil {
+		return nil
+	}
+	var list []AssetRef
+	switch assetType {
+	case "skill":
+		list = l.Skills
+	case "rule":
+		list = l.Rules
+	case "mcp":
+		list = l.MCPs
+	}
+	for i := range list {
+		if list[i].Name == name {
+			return &list[i]
+		}
+	}
+	return nil
+}
+
+// RemoveAsset 移除资产
+func (l *AssetList) RemoveAsset(assetType, name string) bool {
+	if l == nil {
+		return false
+	}
+	switch assetType {
+	case "skill":
+		for i, s := range l.Skills {
+			if s.Name == name {
+				l.Skills = append(l.Skills[:i], l.Skills[i+1:]...)
+				return true
+			}
+		}
+	case "rule":
+		for i, r := range l.Rules {
+			if r.Name == name {
+				l.Rules = append(l.Rules[:i], l.Rules[i+1:]...)
+				return true
+			}
+		}
+	case "mcp":
+		for i, m := range l.MCPs {
+			if m.Name == name {
+				l.MCPs = append(l.MCPs[:i], l.MCPs[i+1:]...)
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TypedAssetRef 带类型信息的资产引用
+type TypedAssetRef struct {
+	Type string
+	AssetRef
+}
+
+// dedupRefs 去重，同名以靠后的为准
+func dedupRefs(refs []AssetRef) []AssetRef {
+	seen := make(map[string]int) // name -> last index
+	for i, r := range refs {
+		seen[r.Name] = i
+	}
+	var result []AssetRef
+	for i, r := range refs {
+		if seen[r.Name] == i {
+			result = append(result, r)
+		}
+	}
+	return result
 }
 
 // VarsConfig 变量定义配置，用于占位符替换
@@ -59,77 +177,4 @@ type AssetVars struct {
 // AssetVarEntry 单个资产的变量覆盖
 type AssetVarEntry struct {
 	Vars map[string]string `yaml:"vars,omitempty"`
-}
-
-// FindAsset 在资产列表中查找
-func (a *AssetsConfig) FindAsset(assetType, name string) *AssetEntry {
-	var list []AssetEntry
-	switch assetType {
-	case "skill":
-		list = a.Skills
-	case "rule":
-		list = a.Rules
-	case "mcp":
-		list = a.MCPs
-	}
-	for i := range list {
-		if list[i].Name == name {
-			return &list[i]
-		}
-	}
-	return nil
-}
-
-// AddAsset 添加资产记录（去重）
-func (a *AssetsConfig) AddAsset(assetType, name, vault, installedAt string) {
-	entry := AssetEntry{Name: name, Vault: vault, InstalledAt: installedAt}
-	switch assetType {
-	case "skill":
-		a.Skills = addOrUpdateEntry(a.Skills, entry)
-	case "rule":
-		a.Rules = addOrUpdateEntry(a.Rules, entry)
-	case "mcp":
-		a.MCPs = addOrUpdateEntry(a.MCPs, entry)
-	}
-}
-
-// RemoveAsset 删除资产记录
-func (a *AssetsConfig) RemoveAsset(assetType, name string) bool {
-	switch assetType {
-	case "skill":
-		if n, ok := removeEntry(a.Skills, name); ok {
-			a.Skills = n
-			return true
-		}
-	case "rule":
-		if n, ok := removeEntry(a.Rules, name); ok {
-			a.Rules = n
-			return true
-		}
-	case "mcp":
-		if n, ok := removeEntry(a.MCPs, name); ok {
-			a.MCPs = n
-			return true
-		}
-	}
-	return false
-}
-
-func addOrUpdateEntry(list []AssetEntry, entry AssetEntry) []AssetEntry {
-	for i, e := range list {
-		if e.Name == entry.Name {
-			list[i] = entry
-			return list
-		}
-	}
-	return append(list, entry)
-}
-
-func removeEntry(list []AssetEntry, name string) ([]AssetEntry, bool) {
-	for i, e := range list {
-		if e.Name == name {
-			return append(list[:i], list[i+1:]...), true
-		}
-	}
-	return list, false
 }

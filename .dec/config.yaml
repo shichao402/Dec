@@ -1,0 +1,23 @@
+# Dec 项目配置
+# available: 仓库中所有可用资产（dec config init 自动生成）
+# enabled: 已启用资产（从 available 复制到这里即为启用）
+
+available:
+  rules:
+    - name: cli-release-rules
+      vault: cli
+    - name: vikunja-integration
+      vault: vikunja
+  mcps:
+    - name: vikunja-mcp
+      vault: vikunja
+
+enabled:
+  rules:
+    - name: cli-release-rules
+      vault: cli
+    - name: vikunja-integration
+      vault: vikunja
+  mcps:
+    - name: vikunja-mcp
+      vault: vikunja

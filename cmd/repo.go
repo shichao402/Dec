@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var repoCmd = &cobra.Command{
+var configRepoCmd = &cobra.Command{
 	Use:   "repo <url>",
 	Short: "连接个人仓库",
 	Long: `连接用户准备好的 GitHub 仓库作为 Dec 的资产存储。
@@ -16,13 +16,13 @@ var repoCmd = &cobra.Command{
 仓库可以是空仓库，Dec 会在其中按 vault 名称创建目录结构。
 
 示例:
-  dec repo https://github.com/user/my-dec-repo
-  dec repo git@github.com:user/my-dec-repo.git`,
+  dec config repo https://github.com/user/my-dec-repo
+  dec config repo git@github.com:user/my-dec-repo.git`,
 	Args: cobra.ExactArgs(1),
-	RunE: runRepo,
+	RunE: runConfigRepo,
 }
 
-func runRepo(cmd *cobra.Command, args []string) error {
+func runConfigRepo(cmd *cobra.Command, args []string) error {
 	repoURL := args[0]
 
 	fmt.Printf("📦 连接仓库: %s\n", repoURL)
@@ -40,11 +40,7 @@ func runRepo(cmd *cobra.Command, args []string) error {
 	fmt.Printf("✅ 仓库已连接: %s\n", bareDir)
 	fmt.Println("\n后续步骤:")
 	fmt.Println("  dec config global          # 配置本机 IDE")
-	fmt.Println("  dec vault init <name>      # 创建 Vault 空间")
+	fmt.Println("  dec config init            # 初始化项目配置")
 
 	return nil
-}
-
-func init() {
-	RootCmd.AddCommand(repoCmd)
 }

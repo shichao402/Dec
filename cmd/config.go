@@ -9,8 +9,10 @@ import (
 
 	"github.com/shichao402/Dec/pkg/assets"
 	"github.com/shichao402/Dec/pkg/config"
+	"github.com/shichao402/Dec/pkg/editor"
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -24,10 +26,11 @@ var configCmd = &cobra.Command{
 	Long: `管理 Dec 全局和项目级配置。
 
 示例:
-  dec config show                      # 显示当前配置
-  dec config global                    # 配置全局 IDE（所有支持的 IDE）
-  dec config global --ide cursor       # 只配置 Cursor
-  dec config global --ide cursor --ide codebuddy  # 配置多个 IDE`,
+  dec config repo <url>              # 连接个人仓库
+  dec config show                    # 显示当前配置
+  dec config global                  # 配置全局 IDE（所有支持的 IDE）
+  dec config global --ide cursor     # 只配置 Cursor
+  dec config init                    # 初始化项目配置`,
 }
 
 // ========================================
@@ -138,11 +141,13 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  项目路径: %s\n", cwd)
 				fmt.Printf("  .dec 目录: %s\n", decDir)
 
-				if len(projectConfig.Vaults) > 0 {
-					fmt.Printf("  关联 Vaults: %s\n", strings.Join(projectConfig.Vaults, ", "))
-				} else {
-					fmt.Println("  关联 Vaults: (无)")
+				availableCount := 0
+				if projectConfig.Available != nil {
+					availableCount = projectConfig.Available.Count()
 				}
+				enabledCount := projectConfig.Enabled.Count()
+				fmt.Printf("  可用资产: %d 个\n", availableCount)
+				fmt.Printf("  已启用: %d 个\n", enabledCount)
 
 				if len(projectConfig.IDEs) > 0 {
 					fmt.Printf("  IDE 覆盖: %s\n", strings.Join(projectConfig.IDEs, ", "))
@@ -158,41 +163,33 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 			}
 
 			// ========================================
-			// 已安装资产
+			// 已启用资产
 			// ========================================
-			assetsConfig, err := projectMgr.LoadAssetsConfig()
-			if err != nil {
-				fmt.Printf("  ⚠️  加载资产配置失败: %v\n", err)
+			fmt.Println()
+			fmt.Println("📚 已启用资产")
+			fmt.Println("-" + strings.Repeat("-", 48))
+
+			if projectConfig.Enabled.IsEmpty() {
+				fmt.Println("  (无)")
 			} else {
-				fmt.Println()
-				fmt.Println("📚 已安装资产")
-				fmt.Println("-" + strings.Repeat("-", 48))
-
-				if len(assetsConfig.Skills) > 0 {
+				enabled := projectConfig.Enabled
+				if len(enabled.Skills) > 0 {
 					fmt.Println("  Skills:")
-					for _, skill := range assetsConfig.Skills {
-						fmt.Printf("    • %s (from %s, %s)\n", skill.Name, skill.Vault, skill.InstalledAt)
+					for _, s := range enabled.Skills {
+						fmt.Printf("    - %s  (vault: %s)\n", s.Name, s.Vault)
 					}
-				} else {
-					fmt.Println("  Skills: (无)")
 				}
-
-				if len(assetsConfig.Rules) > 0 {
+				if len(enabled.Rules) > 0 {
 					fmt.Println("  Rules:")
-					for _, rule := range assetsConfig.Rules {
-						fmt.Printf("    • %s (from %s, %s)\n", rule.Name, rule.Vault, rule.InstalledAt)
+					for _, r := range enabled.Rules {
+						fmt.Printf("    - %s  (vault: %s)\n", r.Name, r.Vault)
 					}
-				} else {
-					fmt.Println("  Rules: (无)")
 				}
-
-				if len(assetsConfig.MCPs) > 0 {
+				if len(enabled.MCPs) > 0 {
 					fmt.Println("  MCPs:")
-					for _, mcp := range assetsConfig.MCPs {
-						fmt.Printf("    • %s (from %s, %s)\n", mcp.Name, mcp.Vault, mcp.InstalledAt)
+					for _, m := range enabled.MCPs {
+						fmt.Printf("    - %s  (vault: %s)\n", m.Name, m.Vault)
 					}
-				} else {
-					fmt.Println("  MCPs: (无)")
 				}
 			}
 		}
@@ -202,6 +199,139 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	fmt.Println("=" + strings.Repeat("=", 48))
 
 	return nil
+}
+
+// ========================================
+// config init
+// ========================================
+
+var configInitCmd = &cobra.Command{
+	Use:   "init",
+	Short: "初始化项目配置",
+	Long: `初始化当前项目的 Dec 配置。
+
+从远程仓库获取所有可用资产，生成配置模板文件，
+并打开编辑器让你选择需要的资产。
+
+保存并关闭编辑器后，配置即生效。
+之后运行 dec pull 即可拉取选中的资产。
+
+示例:
+  dec config init`,
+	RunE: runConfigInit,
+}
+
+func runConfigInit(cmd *cobra.Command, args []string) error {
+	// 确保仓库已连接
+	connected, err := repo.IsConnected()
+	if err != nil {
+		return fmt.Errorf("检查仓库连接失败: %w", err)
+	}
+	if !connected {
+		return fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 先连接你的仓库")
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("获取当前目录失败: %w", err)
+	}
+
+	mgr := config.NewProjectConfigManager(cwd)
+
+	// 如果已有配置，保留 enabled
+	var existingEnabled *types.AssetList
+	if mgr.Exists() {
+		existingConfig, err := mgr.LoadProjectConfig()
+		if err == nil && !existingConfig.Enabled.IsEmpty() {
+			existingEnabled = existingConfig.Enabled
+		}
+		fmt.Println("⚠️  项目已配置过 (.dec/config.yaml 已存在)")
+		fmt.Println("   将更新 available 列表，保留已有的 enabled 配置。")
+	}
+
+	// 从 repo 获取所有资产
+	var allAssets []repoAssetInfo
+	if err := withReadRepoDir(func(repoDir string) error {
+		folders, err := readFolderEntries(repoDir)
+		if err != nil {
+			return fmt.Errorf("读取仓库失败: %w", err)
+		}
+		for _, f := range folders {
+			assets := listFolderAssets(f.path, f.name)
+			allAssets = append(allAssets, assets...)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if len(allAssets) == 0 {
+		fmt.Println("仓库中还没有资产。请先通过其他方式添加资产到仓库。")
+		return nil
+	}
+
+	// 构建 available 列表
+	available := buildAssetList(allAssets)
+
+	// 生成配置文件，保留已有 enabled
+	enabled := &types.AssetList{}
+	if existingEnabled != nil {
+		enabled = existingEnabled
+	}
+	projectConfig := &types.ProjectConfig{
+		Available: available,
+		Enabled:   enabled,
+	}
+	if err := mgr.SaveProjectConfig(projectConfig); err != nil {
+		return fmt.Errorf("写入配置失败: %w", err)
+	}
+
+	configPath := filepath.Join(mgr.GetDecDir(), "config.yaml")
+	fmt.Printf("📝 配置已生成: %s\n", configPath)
+	fmt.Println("   将 available 中的资产复制到 enabled 即为启用。")
+	fmt.Println()
+
+	// 打开编辑器
+	if err := editor.Open(configPath); err != nil {
+		fmt.Printf("⚠️  无法打开编辑器: %v\n", err)
+		fmt.Printf("   请手动编辑 %s 后运行 dec pull\n", configPath)
+		return nil
+	}
+
+	// 解析编辑后的配置
+	projectConfig, err = mgr.LoadProjectConfig()
+	if err != nil {
+		return fmt.Errorf("解析配置失败: %w", err)
+	}
+
+	enabledCount := projectConfig.Enabled.Count()
+	fmt.Println("\n✅ 项目配置已完成")
+	if enabledCount > 0 {
+		fmt.Printf("   已启用 %d 个资产\n", enabledCount)
+	} else {
+		fmt.Println("   未启用任何资产（可稍后编辑 .dec/config.yaml）")
+	}
+	fmt.Println("\n后续步骤:")
+	fmt.Println("  dec pull                     # 拉取所有已启用的资产")
+
+	return nil
+}
+
+// buildAssetList 从扫描结果构建 AssetList
+func buildAssetList(allAssets []repoAssetInfo) *types.AssetList {
+	list := &types.AssetList{}
+	for _, a := range allAssets {
+		ref := types.AssetRef{Name: a.Name, Vault: a.Vault}
+		switch a.Type {
+		case "skill":
+			list.Skills = append(list.Skills, ref)
+		case "rule":
+			list.Rules = append(list.Rules, ref)
+		case "mcp":
+			list.MCPs = append(list.MCPs, ref)
+		}
+	}
+	return list
 }
 
 // ========================================
@@ -282,12 +412,11 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("\n✅ 全局 IDE 配置完成")
 	fmt.Println("\n后续步骤:")
-	fmt.Println("  dec vault init <vault-name>   # 创建 Vault 空间")
-	fmt.Println("  dec vault list                # 查看已有 Vault 和资产")
-	fmt.Println("  dec vault search <keyword>    # 搜索 Vault 中的资产")
+	fmt.Println("  dec config init              # 初始化项目配置")
+	fmt.Println("  dec list                     # 查看已有 Vault 和资产")
+	fmt.Println("  dec search <keyword>         # 搜索资产")
 	fmt.Println("\n在项目中使用:")
-	fmt.Println("  dec vault pull <type> <name>  # 拉取资产到当前项目")
-	fmt.Println("  dec vault import <type> <path>  # 导入资产到 Vault")
+	fmt.Println("  dec pull                     # 拉取资产到当前项目")
 
 	return nil
 }
@@ -344,6 +473,8 @@ func init() {
 	// 注册子命令
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configGlobalCmd)
+	configCmd.AddCommand(configRepoCmd)
+	configCmd.AddCommand(configInitCmd)
 
 	RootCmd.AddCommand(configCmd)
 }
