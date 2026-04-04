@@ -1,0 +1,401 @@
+---
+description: CLI 项目版本管理、构建、发布与自更新规则（通用，无语言绑定，无平台耦合）
+globs: version.json, package.json, pyproject.toml, Cargo.toml, Makefile, **/version/**, **/update/**, **/updater/**, **/release/**
+alwaysApply: false
+---
+
+# CLI 项目版本管理、构建与发布规则
+
+> 适用于任何命令行工具项目，无论开发语言（Go、Rust、Python、Node.js、C++ 等）或代码托管平台。
+
+---
+
+## 一、版本号管理
+
+### 1.1 单一版本来源 (Single Source of Truth)
+
+项目必须有且仅有一个权威版本定义位置，所有引用（编译注入、CI、文档）都从此处读取，禁止硬编码版本号到多个文件。
+
+**推荐文件**：`version.json`
+
+```json
+{
+  "version": "v1.2.3"
+}
+```
+
+**多语言版本源对照**：
+
+| 语言/生态 | 版本源文件 | 备注 |
+|-----------|-----------|------|
+| Go | `version.json` | Go 模块自身不携带产品版本 |
+| Node.js | `package.json` 的 `version` 字段 | npm 生态原生支持 |
+| Python | `pyproject.toml` 的 `[project] version` | 或构建时生成 `_version.py` |
+| Rust | `Cargo.toml` 的 `version` | cargo 生态原生支持 |
+| C/C++ | `version.json` 或 `VERSION` 文件 | 需构建时注入 |
+
+### 1.2 语义化版本 (SemVer)
+
+格式：`vMAJOR.MINOR.PATCH[-PRERELEASE]`（带 `v` 前缀用于 Git tag）
+
+- **PATCH**：向后兼容的修复
+- **MINOR**：向后兼容的新功能
+- **MAJOR**：破坏性变更
+
+示例：`v1.0.0`、`v2.1.0-beta.1`、`v1.2.3-rc.2`
+
+### 1.3 编译时注入版本
+
+构建产物应在编译时注入版本号，而非运行时读文件。
+
+**各语言示例**：
+
+| 语言 | 方式 |
+|------|------|
+| Go | `-ldflags "-X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME"` |
+| Rust | `env!("CARGO_PKG_VERSION")` 或 `build.rs` |
+| Python | `importlib.metadata.version()` 或构建时写入 `_version.py` |
+| Node.js | `process.env` 或 `require('./package.json').version` |
+| C/C++ | `-DVERSION=\"$VERSION\"` 预处理器宏 |
+
+**版本提取脚本**（推荐使用 `jq`）：
+
+```bash
+VERSION=$(jq -r '.version' version.json)
+BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+```
+
+### 1.4 版本回退策略
+
+代码中应设默认值，按以下优先级获取版本：
+
+1. **编译时注入的版本**（生产环境）
+2. **本地版本源文件**（开发环境，`go run` / `python -m` 等）
+3. **硬编码 `"dev"`**（兜底）
+
+### 1.5 版本比较
+
+- 去掉 `v` 前缀，按 major.minor.patch 三段数值比较
+- `dev`、`unknown`、空值应始终视为需要更新
+- 预发布版本：`-alpha < -beta < -rc < 正式版`
+
+---
+
+## 二、构建流程
+
+### 2.1 多平台构建矩阵
+
+CLI 工具应至少支持以下平台：
+
+| OS | 架构 | 文件名后缀 | 优先级 |
+|----|------|-----------|--------|
+| Linux | amd64 | `-linux-amd64` | 必须 |
+| Linux | arm64 | `-linux-arm64` | 必须 |
+| macOS | amd64 | `-darwin-amd64` | 必须 |
+| macOS | arm64 | `-darwin-arm64` | 必须 |
+| Windows | amd64 | `-windows-amd64.exe` | 推荐 |
+
+### 2.2 构建产物目录
+
+```
+dist/
+  mycli-v1.2.3-linux-amd64
+  mycli-v1.2.3-linux-arm64
+  mycli-v1.2.3-darwin-amd64
+  mycli-v1.2.3-darwin-arm64
+  mycli-v1.2.3-windows-amd64.exe
+  checksums.txt              # SHA256 校验和
+```
+
+**校验和生成**：
+
+```bash
+cd dist && sha256sum mycli-* > checksums.txt
+```
+
+### 2.3 构建脚本参数化
+
+构建脚本应接受环境变量：
+
+```bash
+VERSION          # 版本号（默认从 version.json 读取）
+BUILD_TIME       # 构建时间（默认当前时间）
+COMMIT           # git commit hash（默认自动获取）
+BUILD_PLATFORMS  # 目标平台（默认全量）
+OUTPUT_DIR       # 输出目录（默认 ./dist）
+```
+
+---
+
+## 三、发布流程
+
+### 3.1 版本驱动发布 (Version-Driven Release)
+
+CI/CD 应监听版本文件变更，自动触发发布：
+
+```
+修改 version.json → 推送到 main → CI 检测变更 → 校验 → 测试 → 构建 → 创建 tag → 上传产物
+```
+
+### 3.2 发布产物托管（不绑定特定平台）
+
+**核心原则**：发布产物应托管在纯静态 HTTP 服务器，不依赖任何后端服务或特定平台 API。
+
+**支持的托管方式**：
+- ✅ 任意 HTTP 服务器（Nginx、Caddy）
+- ✅ 对象存储（S3、OSS、COS）
+- ✅ CDN 边缘节点
+- ✅ 静态站点托管（GitHub Pages、GitLab Pages）
+- ✅ 内网文件服务器
+- ❌ 特定平台专有 API（如 GitHub Releases API）
+
+### 3.3 版本元数据 API
+
+提供统一的版本元数据 JSON 端点：
+
+```json
+{
+  "latest": "v1.2.3",
+  "channels": {
+    "stable": "v1.2.3",
+    "beta": "v1.3.0-beta.1",
+    "nightly": "v1.12.0-dev.20260401"
+  },
+  "minimum_version": "v1.0.0",
+  "artifacts": {
+    "v1.2.3": {
+      "linux-amd64": {
+        "url": "https://releases.example.com/mycli/v1.2.3/mycli-linux-amd64",
+        "sha256": "abc123...",
+        "size": 10485760
+      }
+    }
+  }
+}
+```
+
+**字段说明**：
+
+| 字段 | 必须 | 说明 |
+|------|------|------|
+| `latest` | ✓ | 最新正式版版本号 |
+| `channels` | ✓ | 渠道映射（stable/beta/nightly） |
+| `minimum_version` | ✓ | 最低支持版本，低于此版本应强制更新 |
+| `artifacts` | ✓ | 各版本的产物清单（含 URL、校验和、大小） |
+
+### 3.4 发布目录结构
+
+```
+https://releases.example.com/mycli/
+  version.json                    # 版本元数据
+  channels/
+    stable.json                   # {"version": "v1.2.3"}
+    beta.json
+  releases/
+    v1.2.3/
+      mycli-linux-amd64
+      mycli-darwin-arm64
+      checksums.txt
+      RELEASE_NOTES.md
+```
+
+---
+
+## 四、安装机制
+
+### 4.1 一键安装脚本
+
+**Linux/macOS** (`install.sh`)：
+
+```bash
+#!/bin/bash
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+case $ARCH in x86_64) ARCH="amd64" ;; aarch64|arm64) ARCH="arm64" ;; esac
+
+UPDATE_URL="${UPDATE_URL:-https://releases.example.com/mycli/version.json}"
+VERSION=$(curl -fsSL "$UPDATE_URL" | jq -r '.latest')
+
+RELEASE_BASE="${RELEASE_BASE:-https://releases.example.com/mycli}"
+DOWNLOAD_URL="${RELEASE_BASE}/releases/${VERSION}/mycli-${OS}-${ARCH}"
+
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+mkdir -p "$INSTALL_DIR"
+curl -fsSL -o "$INSTALL_DIR/mycli" "$DOWNLOAD_URL"
+chmod +x "$INSTALL_DIR/mycli"
+```
+
+**关键**：安装脚本应支持通过环境变量自定义源，便于企业内网部署。
+
+### 4.2 安装路径
+
+| 平台 | 安装路径 | 配置路径 |
+|------|----------|----------|
+| Linux/macOS | `~/.local/bin/` 或 `/usr/local/bin/` | `~/.config/mycli/` |
+| Windows | `%LOCALAPPDATA%\mycli\bin\` | `%APPDATA%\mycli\` |
+
+---
+
+## 五、自更新机制
+
+### 5.1 后台版本检查
+
+```
+启动 CLI（非 update/version 命令）
+  → 检查状态文件中的上次检查时间
+  → 距离上次检查 > 24 小时？
+      是 → 后台发起 HTTP 请求（不阻塞主流程）
+         → 比较版本 → 有新版本则输出提示
+      否 → 使用缓存版本比较
+```
+
+**状态文件**（如 `~/.mycli/update_state.json`）：
+
+```json
+{
+  "last_check": "2026-03-29T10:00:00Z",
+  "latest_version": "v1.2.3"
+}
+```
+
+**注意**：
+- 后台检查只提示，不自动更新
+- 显式 `update` 命令才执行更新
+- HTTP 请求超时建议 3-5 秒
+
+### 5.2 自更新流程
+
+```
+用户执行 mycli update
+  → 获取远程版本信息
+  → 比较版本
+      无新版本 → 提示已是最新
+      有新版本 →
+        1. 下载新版本到临时文件
+        2. 验证校验和（SHA256）
+        3. 备份当前二进制为 .bak
+        4. 复制新文件覆盖当前路径
+        5. 设置执行权限 (chmod 0755)
+        6. [macOS] 执行 xattr -cr 清除隔离属性
+        7. 验证新版本可执行
+        8. 成功 → 删除备份；失败 → 从 .bak 恢复
+```
+
+### 5.3 平台特殊处理
+
+- **macOS**：需执行 `xattr -cr` 清除 Gatekeeper 隔离属性
+- **Windows**：无法直接覆盖正在运行的 exe，需使用 rename-then-replace 策略：
+  1. 将当前 exe 重命名为 `.old`
+  2. 将新 exe 放到原路径
+  3. 删除 `.old`（可能需要重启后删除）
+
+### 5.4 更新源配置化
+
+更新源应可配置，支持环境变量覆盖：
+
+```bash
+export MYCLI_UPDATE_URL="https://internal.company.com/mycli/version.json"
+export MYCLI_CHANNEL="beta"
+```
+
+或配置文件（`~/.mycli/config.yaml`）：
+
+```yaml
+update:
+  url: https://internal.company.com/mycli/version.json
+  channel: stable
+  check_interval_hours: 24
+```
+
+**优先级**：命令行参数 > 环境变量 > 配置文件 > 硬编码默认值
+
+### 5.5 代理环境支持
+
+更新检查和下载应支持标准代理环境变量：
+
+- `HTTP_PROXY` / `http_proxy`
+- `HTTPS_PROXY` / `https_proxy`
+- `NO_PROXY` / `no_proxy`
+
+---
+
+## 六、渠道管理
+
+### 6.1 渠道定义
+
+| 渠道 | 说明 | 更新频率 | 目标用户 |
+|------|------|---------|----------|
+| `stable` | 经过充分测试的正式版 | 每月 1-4 次 | 所有用户（默认） |
+| `beta` | 预发布版，含新功能但可能有 bug | 每周 1-2 次 | 早期使用者 |
+| `nightly` | 开发版，最新特性但不稳定 | 每天 | 开发者 |
+
+### 6.2 渠道切换
+
+```bash
+# 切换到 beta 渠道
+mycli update --channel beta
+
+# 或通过配置
+export MYCLI_CHANNEL=beta
+```
+
+---
+
+## 七、安全考量
+
+### 7.1 校验和验证
+
+- 下载后必须验证 SHA256
+- 验证失败应中止更新并保留备份
+- 发布时同步生成 `checksums.txt`
+
+### 7.2 可选：签名验证
+
+对于安全敏感场景，可使用 Ed25519/RSA 签名：
+
+1. 发布时对二进制签名，生成 `.sig` 文件
+2. 公钥编译进客户端
+3. 下载时同时获取 `.sig` 文件验证
+
+---
+
+## 八、检查清单
+
+### 项目初期
+
+- [ ] 创建 `version.json`，版本初值 `v0.1.0`
+- [ ] 实现 `--version` 命令
+- [ ] 编写构建脚本，支持编译时注入版本
+- [ ] 实现多平台构建
+- [ ] 编写安装脚本
+
+### 发布前
+
+- [ ] 修改 `version.json` 中的版本号
+- [ ] 运行完整测试
+- [ ] 本地构建所有平台，验证产物
+- [ ] 生成校验和文件
+
+### 发布后
+
+- [ ] 验证用户可通过安装脚本获取最新版
+- [ ] 验证 `mycli update` 可成功更新
+
+---
+
+## 九、与特定平台解耦要点
+
+本规则集设计为不依赖任何特定平台。关键：
+
+1. **不使用平台专有 API**（如 GitHub Releases API）
+2. **版本检查使用静态 JSON 文件**
+3. **下载 URL 可配置**
+4. **安装脚本支持自定义源**
+
+```bash
+# 企业内网安装
+UPDATE_URL=https://internal.company.com/mycli/version.json ./install.sh
+```
+
+这样设计后，项目可在 GitHub、GitLab、Gitea、自建服务器等任意平台托管和分发。
