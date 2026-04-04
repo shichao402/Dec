@@ -6,10 +6,10 @@
 
 **所有资产的安装、更新、推送操作必须通过 `dec` CLI 命令完成，禁止直接操作底层 git 仓库。**
 
-- 初始化项目配置：`dec config init`
-- 拉取已启用资产：`dec pull`
-- 推送修改到远程：`dec push`
-- 搜索资产：`dec search "<query>"`
+- 安装/拉取资产：`dec vault pull <type> <name>`
+- 保存资产变更：`dec vault import <type> <path>`
+- 推送到远程：`dec vault push`
+- 搜索资产：`dec vault search "<query>"`
 
 如果 `dec` 命令执行失败，应将错误信息反馈给用户，由用户决定如何处理，而不是绕过 `dec` 直接操作 git。
 

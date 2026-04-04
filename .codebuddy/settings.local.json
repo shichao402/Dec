@@ -1,7 +1,7 @@
 {
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
-    "vikunja"
+    "dec-vikunja-mcp"
   ],
   "disabledMcpjsonServers": []
 }

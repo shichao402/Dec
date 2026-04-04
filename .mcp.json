@@ -1,11 +1,14 @@
 {
   "mcpServers": {
-    "vikunja": {
+    "dec-vikunja-mcp": {
       "command": "npx",
-      "args": ["-y", "@aimbitgmbh/vikunja-mcp"],
+      "args": [
+        "-y",
+        "@aimbitgmbh/vikunja-mcp"
+      ],
       "env": {
-        "VIKUNJA_URL": "${VIKUNJA_URL}",
-        "VIKUNJA_API_TOKEN": "${VIKUNJA_API_TOKEN}"
+        "VIKUNJA_API_TOKEN": "${VIKUNJA_API_TOKEN}",
+        "VIKUNJA_URL": "${VIKUNJA_URL}"
       }
     }
   }
