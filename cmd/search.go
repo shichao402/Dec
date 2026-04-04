@@ -10,7 +10,7 @@ import (
 var searchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "搜索资产",
-	Long: `在所有 Vault 中搜索资产。
+	Long: `在仓库中搜索资产。
 
 当前实现按资产名称匹配。
 

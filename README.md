@@ -2,7 +2,7 @@
 
 Dec 是一个个人 AI 知识仓库工具。
 
-它把你在 Cursor、CodeBuddy 等 IDE 中积累的 Skills、Rules、MCP 配置统一保存到一个个人 Vault（Git 仓库）里。然后你可以在不同项目中快速获取这些资产，实现跨项目、跨机器复用自己的 AI 资产，而不是在每个仓库里重复维护一份。
+它把你在 Cursor、CodeBuddy 等 IDE 中积累的 Skills、Rules、MCP 配置统一保存到一个个人仓库（Git 仓库）里。然后你可以在不同项目中快速获取这些资产，实现跨项目、跨机器复用自己的 AI 资产，而不是在每个仓库里重复维护一份。
 
 ## 这是什么问题的解法
 
@@ -15,25 +15,46 @@ Dec 是一个个人 AI 知识仓库工具。
 
 Dec 的解决方案：
 
-- 个人维度：通过 `dec repo` 关联你的 Vault（个人知识库）
-- 项目维度：使用 `dec vault pull` 从 Vault 中获取需要的资产
+- 个人维度：通过 `dec config repo` 关联你的仓库
+- 项目维度：使用 `dec config init` + `dec pull` 选择并拉取资产
 - IDE 维度：Dec 自动将资产部署到配置的 IDE 目录
 
 ## 核心概念
 
-### 1. Vault（个人知识库）
+### 1. 资产仓库
 
-Vault 是你的个人知识仓库，底层是一个 Git 仓库。使用 `dec repo <url>` 关联到你的 Vault。
+使用 `dec config repo <url>` 关联你的资产仓库，底层是一个 Git 仓库。
 
-Vault 中目前支持三类资产：
+仓库中支持三类资产：
 
 - `skill`：技能脚本（目录，包含 SKILL.md）
 - `rule`：规则文件（.mdc 文件）
 - `mcp`：MCP 服务配置（JSON 片段）
 
-### 2. 资产部署
+### 2. 项目配置
 
-通过 `dec vault pull <type> <name>` 将资产从 Vault 部署到当前项目的配置 IDE。
+项目配置位于 `.dec/config.yaml`，采用 **available/enabled** 双区结构：
+
+```yaml
+available:          # 仓库中所有可用资产（dec config init 自动生成）
+  rules:
+    - name: my-rule
+      vault: my-vault
+
+enabled:            # 已启用资产（从 available 复制到这里即为启用）
+  rules:
+    - name: my-rule
+      vault: my-vault
+```
+
+- `dec config init` 扫描仓库填充 available，重复执行时保留已有 enabled
+- 用户从 available 复制想要的资产到 enabled
+- `dec pull` 只拉取 enabled 中的资产
+- pull 时自动校验 enabled vs available，清理不再启用的旧资产
+
+### 3. 资产部署
+
+`dec pull` 将资产部署到当前项目的配置 IDE。
 
 Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 
@@ -41,9 +62,7 @@ Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 - `.cursor/rules/dec-my-rule.mdc`
 - `.cursor/mcp.json` 中的 `dec-postgres-tool`
 
-### 3. 支持的 IDE
-
-Dec 目前支持以下 IDE：
+### 4. 支持的 IDE
 
 | IDE | Skills 路径 | Rules 路径 | MCP 配置 |
 |-----|-----------|----------|---------|
@@ -74,372 +93,122 @@ curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/script
 iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex
 ```
 
-安装脚本会下载预编译二进制并加入 PATH。若你希望自定义运行目录，可以提前设置 `DEC_HOME`。
-
-### 2. 关联个人 Vault
+### 2. 连接个人仓库
 
 ```bash
-dec repo https://github.com/<user>/<your-vault-repo>
+dec config repo https://github.com/<user>/<your-repo>
 ```
 
-这个命令会：
-- 在本地创建并维护一个 bare repo（默认位于 `~/.dec/repo.git`）
-- 将 Vault 地址记录到全局配置
-- 打印你的本地 Vault 仓库位置
-
-### 3. 从 Vault 获取资产
+### 3. 配置全局 IDE
 
 ```bash
-# 获取 Skill
-dec vault pull skill create-api-test
-
-# 获取 Rule
-dec vault pull rule my-logging-standard
-
-# 获取 MCP
-dec vault pull mcp postgres-tool
+dec config global                    # 配置所有支持的 IDE
+dec config global --ide cursor       # 只配置 Cursor
 ```
 
-`dec vault pull` 会按以下优先级自动部署资产：项目 `.dec/config.yaml` 的 IDE 配置 > 全局 `~/.dec/config.yaml` 的 IDE 配置 > 默认 `cursor`。
-
-批量拉取所有资产：
+### 4. 初始化项目
 
 ```bash
-dec vault pull --all                    # 拉取所有 Vault 的所有资产
-dec vault pull --all --vault my-vault   # 拉取指定 Vault 的所有资产
+dec config init
 ```
 
-### 4. 管理你的 Vault
+这会扫描仓库中所有可用资产，生成 `.dec/config.yaml`，并打开编辑器让你选择。将 available 中想要的资产复制到 enabled 后保存即可。
 
-#### 导入资产到 Vault
+### 5. 拉取资产
 
 ```bash
-# 保存 Skill
-dec vault import skill .cursor/skills/my-skill
-
-# 保存 Rule  
-dec vault import rule .cursor/rules/my-rule.mdc
-
-# 保存 MCP
-dec vault import mcp ./postgres-tool.json
-
-# 保存到指定 Vault（关联多个 Vault 时必填）
-dec vault import skill .cursor/skills/my-skill --vault github-tools
+dec pull
 ```
 
-#### 搜索 Vault 中的资产
+根据 `.dec/config.yaml` 中 enabled 的资产，自动拉取并安装到 IDE。
+
+### 6. 推送修改
 
 ```bash
-dec vault search "api test"
+dec push                              # 推送缓存中的修改到远程
+dec push --remove skill my-skill      # 删除远程资产（需确认）
 ```
-
-#### 列出所有 Vault 空间及资产详情
-
-```bash
-dec vault list
-```
-
-#### 从项目中移除资产
-
-```bash
-dec vault remove skill create-api-test
-dec vault remove rule my-logging-standard
-dec vault remove mcp postgres-tool
-```
-
-#### 推送项目中修改的资产回 Vault
-
-```bash
-dec vault push
-```
-
-此命令检测项目中已追踪的资产修改，将变更复制回对应的 Vault 并推送到远程。在你本地编辑了 `dec-*` 资产后使用。
 
 ## 推荐工作流
 
-### 工作流 A：第一次设置个人 Vault
+### 工作流 A：第一次设置
 
 ```bash
-# 1. 创建或初始化你的 Vault 仓库
-# （在 GitHub 或 GitLab 上创建一个空仓库）
+# 1. 连接仓库
+dec config repo https://github.com/<user>/<your-repo>
 
-# 2. 在本机关联到 Dec
-dec repo https://github.com/<user>/<your-vault-repo>
+# 2. 配置 IDE
+dec config global
 
-# 3. 把常用资产保存进去
-dec vault import skill .cursor/skills/create-api-test
-dec vault import rule .cursor/rules/my-security-rule.mdc
-dec vault import mcp ./postgres-tool.json
+# 3. 在项目中初始化
+dec config init
 
-# 4. 推送到远程
-dec vault push
+# 4. 拉取选中的资产
+dec pull
 ```
 
-### 工作流 B：在新项目中复用 Vault 资产
+### 工作流 B：在新项目中复用
 
 ```bash
-# 1. 进入新项目目录
 cd my-new-project
-
-# 2. 从 Vault 获取所需资产
-dec vault pull skill create-api-test
-dec vault pull rule my-security-rule
-dec vault pull mcp postgres-tool
-
-# 现在你的 IDE（.cursor/.codebuddy）已经自动获得这些资产
+dec config init       # 扫描仓库，选择资产
+dec pull              # 拉取到项目
 ```
 
 ### 工作流 C：更新已有资产
 
 ```bash
-# 1. 在项目的 IDE 中编辑托管资产（如 .cursor/skills/dec-create-api-test）
-# 2. 将更改保存回 Vault
-dec vault import skill .cursor/skills/dec-create-api-test
+# 1. 修改 .dec/cache/ 中的缓存文件
+# 2. 推送到远程
+dec push
 
-# 3. 推送到远程（可选）
-dec vault push
-
-# 4. 在其他项目中重新拉取最新版本
+# 3. 在其他项目中拉取最新版本
 cd ../another-project
-dec vault pull skill create-api-test
+dec pull
 ```
 
 ## 命令参考
 
-完整的 Skill 使用说明见 `pkg/assets/dec/SKILL.md`，架构与内部实现见 `Documents/ARCHITECTURE.md`。
+### 配置命令
 
-### 顶级命令
+| 命令 | 说明 |
+|------|------|
+| `dec config repo <url>` | 连接个人仓库 |
+| `dec config global [--ide]` | 配置全局 IDE |
+| `dec config init` | 初始化项目配置（扫描仓库，打开编辑器选择资产） |
+| `dec config show` | 显示当前配置 |
 
-#### `dec repo <url>`
+### 资产命令
 
-关联你的 Vault 仓库（Git 地址）。
-
-```bash
-dec repo https://github.com/<user>/<your-vault-repo>
-```
-
-作用：
-
-- 创建或更新本地 bare repo 缓存（默认 `~/.dec/repo.git`）
-- 将 Vault 地址保存到全局配置
-- 后续命令在短生命周期临时 worktree 中完成读写，结束后自动清理
-
-#### `dec vault`
-
-管理 Vault 中的资产。包含以下子命令。
-
-#### `dec vault init <vault-name>`
-
-在连接的仓库中创建一个新的 Vault 空间。
-
-```bash
-dec vault init github-tools
-dec vault init common-rules
-```
-
-一个仓库可以包含多个 Vault，用于分类管理不同领域的资产。
-
-### Vault 资产管理
-
-#### `dec vault import <type> <path> [--vault <vault>]`
-
-导入本地资产到 Vault。
-
-```bash
-dec vault import skill .cursor/skills/my-skill
-dec vault import rule .cursor/rules/my-rule.mdc
-dec vault import mcp ./postgres-tool.json
-dec vault import skill .cursor/skills/my-skill --vault github-tools
-```
-
-支持类型：
-
-- `skill`：目录，且必须包含 `SKILL.md`
-- `rule`：单个 `.mdc` 文件
-- `mcp`：单个 MCP server 片段 JSON
-
-说明：
-
-- 导入成功后会在临时 worktree 中提交并推送到远程 Vault
-- 本地长期保留的是 bare repo 缓存，命令执行期间会创建临时 worktree，结束后自动清理
-- 关联多个 Vault 时，使用 `--vault` 指定目标 Vault
-
-#### `dec vault pull <type> <name>` / `dec vault pull --all`
-
-从 Vault 下载资产到当前项目。
-
-拉取单个资产：
-
-```bash
-dec vault pull skill create-api-test
-dec vault pull rule my-logging-standard
-dec vault pull mcp postgres-tool
-```
-
-批量拉取所有资产：
-
-```bash
-dec vault pull --all                    # 拉取所有 Vault 的所有资产
-dec vault pull --all --vault my-vault   # 拉取指定 Vault 的所有资产
-```
-
-行为：
-
-- 从 Vault 下载指定资产
-- 自动部署到有效 IDE（项目配置优先，其次本机配置，未配置时默认 `cursor`）
-- 本地文件遵循 `dec-<name>` 命名约定
-
-#### `dec vault remove <type> <name>`
-
-从项目中移除已拉取的资产。
-
-```bash
-dec vault remove skill create-api-test
-dec vault remove rule my-logging-standard
-```
-
-#### `dec vault search <query>`
-
-搜索 Vault 中的资产。
-
-```bash
-dec vault search "api test"
-dec vault search "logging"
-```
-
-搜索范围：
-
-- 当前实现按资产名称匹配
-
-#### `dec vault list`
-
-列出当前仓库中的所有 Vault 空间及其资产详情。
-
-```bash
-dec vault list
-```
-
-输出每个 Vault 下的所有资产（类型和名称），方便了解可以 pull 的内容。
-
-#### `dec vault push`
-
-将项目中已追踪模板的本地内容推送回 Vault 并同步到远程仓库。
-
-```bash
-dec vault push
-```
-
-此命令会：
-
-1. 读取 `.dec/assets.yaml` 中已追踪的所有资产
-2. 以项目 `.dec/templates/` 中的模板为源，复制回对应的 Vault
-3. 提交并推送到远程仓库
-
-说明：
-
-- 如果你是显式修改某个已拉取资产，优先使用 `dec vault import <type> <path>` 回写
-- `dec vault push` 更适合统一推送当前项目中已追踪的模板内容
-- 当 `dec vault import` 或 `dec vault push` 因远端冲突失败时，可先重新拉取或重试推送
+| 命令 | 说明 |
+|------|------|
+| `dec list` | 列出仓库中所有资产 |
+| `dec search <query>` | 搜索资产 |
+| `dec pull` | 拉取 enabled 中的资产到项目 |
+| `dec pull --version <ref>` | 拉取指定版本 |
+| `dec push` | 推送缓存中的修改到远程 |
+| `dec push --remove <type> <name>` | 删除远程资产（需交互确认） |
 
 ### 其他命令
 
-#### `dec config global [--ide <ide>...]`
-
-为本机 IDE 配置 Dec 全局 Skill。
-
-```bash
-dec config global                              # 配置所有支持的 IDE
-dec config global --ide cursor                 # 只配置 Cursor
-dec config global --ide cursor --ide codebuddy # 配置多个 IDE
-```
-
-行为：
-
-- 为每个指定 IDE 安装 Dec 的 Agent Skill
-- 默认配置所有支持的 IDE（cursor、codebuddy、windsurf、trae、claude、claude-internal、codex、codex-internal）
-- 将所选 IDE 列表写入全局配置 `~/.dec/config.yaml`
-- 已存在的配置会被覆盖更新
-
-#### `dec update`
-
-检查并更新 Dec 到最新版本。
-
-```bash
-dec update
-```
-
-行为：
-
-- 检查 GitHub Release 上的最新版本
-- 如已是最新版本，输出提示并退出
-- 如有新版本，自动下载并替换当前二进制
-
-说明：
-
-- 支持平台：Linux (amd64/arm64)、macOS (amd64/arm64)、Windows (amd64)
-- 自动检查：Dec 会在每次命令执行后台检查新版本（每天最多一次）
-
-#### `dec version`
-
-显示当前 Dec 的版本号。
-
-```bash
-dec version
-```
-
-#### `dec help`
-
-显示帮助信息。
-
-```bash
-dec help
-dec vault help
-```
-
-## 配置文件说明
-
-### 全局配置
-
-全局配置位于 Dec 根目录下（`DEC_HOME` 或默认用户目录），用于记录 Vault 仓库地址等信息。
+| 命令 | 说明 |
+|------|------|
+| `dec update` | 更新 Dec 到最新版本 |
+| `dec version` | 显示版本号 |
 
 ## 资产格式要求
 
-## Skill
+### Skill
 
-Skill 必须是目录，并且包含 `SKILL.md`。
+Skill 必须是目录，包含 `SKILL.md`。
 
-例如：
-
-```text
-my-skill/
-├── SKILL.md
-└── ...
-```
-
-Dec 会尝试从 `SKILL.md` 的 front matter 中读取：
-
-- `name`
-- `description`
-
-如果没有 `name`，则使用目录名。
-
-## Rule
+### Rule
 
 Rule 必须是单个 `.mdc` 文件。
 
-例如：
+### MCP
 
-```bash
-dec vault import rule .cursor/rules/my-rule.mdc
-```
-
-Dec 会尝试从 front matter 或一级标题中提取描述。
-
-## MCP
-
-MCP 必须是单个 server 片段 JSON，而不是完整的 `mcp.json`。
-
-正确示例：
+MCP 必须是单个 server 片段 JSON，`command` 必填：
 
 ```json
 {
@@ -451,70 +220,33 @@ MCP 必须是单个 server 片段 JSON，而不是完整的 `mcp.json`。
 }
 ```
 
-错误示例：
+## 项目目录结构
 
-```json
-{
-  "mcpServers": {
-    "postgres": {
-      "command": "npx"
-    }
-  }
-}
 ```
-
-## MCP 合并策略
-
-Dec 在部署 MCP 时采用智能合并：
-
-- `dec-*` 前缀的 MCP 条目由 Dec 托管
-- 用户自己添加的 MCP 条目会被保留
-- 旧的、已移除的 `dec-*` MCP 会被自动清理
-
-## 项目共享配置
-
-如果你把 Dec 用作项目共享配置的一部分，建议把以下目录一起提交到版本控制：
-
-- `.dec/`：项目级 Vault 关联、资产追踪和原始模板基线
-- IDE 目录（如 `.cursor/`、`.codebuddy/`、`.windsurf/` 等）：项目实际使用的规则、Skills、MCP 配置
-
-其中：
-
-- `.dec/templates/` 保存的是**未替换占位符的原始模板**，也是 `dec vault push` 的推送来源
-- IDE 目录保存的是**部署到各 IDE 后的最终文件**，可能已经完成占位符替换
-
-如果你的团队希望共享这些配置，**不要**在 `.gitignore` 中忽略 `.dec/` 或这些 IDE 目录。
-
-## 常见场景
-
-### 场景 1：查看 Vault 中的资产
-
-```bash
-dec vault list
-dec vault search "security"
-```
-
-### 场景 2：保存新 Skill 并在别的项目复用
-
-```bash
-dec vault import skill .cursor/skills/my-new-skill
-cd ../another-project
-dec vault pull skill my-new-skill
+.dec/
+├── config.yaml      # 项目配置（available + enabled）
+├── cache/           # 资产缓存（pull 时写入，push 时读取）
+├── .version         # 当前 pull 的版本记录
+└── vars.yaml        # 变量定义（可选，用于占位符替换）
 ```
 
 ## 故障排查
 
-### Vault 未关联
+### 仓库未连接
 
-先执行 `dec repo <url>` 关联你的 Vault 仓库。
+执行 `dec config repo <url>` 连接仓库。
 
-### `dec vault import` / `dec vault push` 同步失败
+### 配置校验警告
 
-如果出现远端冲突或推送失败，说明本次事务没有成功同步到远端。Dec 会清理临时 worktree，不保留中间工作区。处理方式通常是重新执行命令，或先用 `dec vault pull` / `dec vault list` 确认远端最新状态后再重试。
+pull 前会校验 enabled 中的资产是否在 available 中存在。如果看到警告，检查拼写或运行 `dec config init` 更新 available。
+
+### 推送/拉取失败
+
+如果出现远端冲突，重新执行命令即可。Dec 使用临时 worktree，不会留下中间状态。
 
 ## 安装、构建与测试
 
-## 从源码构建
+### 从源码构建
 
 ```bash
 git clone https://github.com/shichao402/Dec.git
@@ -522,34 +254,13 @@ cd Dec
 go build -o dec .
 ```
 
-## 直接运行 Go 测试
+### 运行测试
 
 ```bash
 go test ./...
 ```
 
-## 使用统一测试入口
-
-```bash
-./scripts/run-tests.sh
-```
-
-它会执行：
-
-1. `go test ./...`
-2. `scripts/self_host_test.py`
-
-可选参数：
-
-```bash
-./scripts/run-tests.sh --skip-go-test
-./scripts/run-tests.sh --skip-self-host
-./scripts/run-tests.sh --keep-self-host-artifacts
-```
-
 ## 平台支持
-
-安装脚本和预编译发布目前覆盖：
 
 - macOS `amd64` / `arm64`
 - Linux `amd64` / `arm64`
@@ -557,15 +268,8 @@ go test ./...
 
 ## 项目文档
 
-详细文档见：
-
-- `pkg/assets/dec/SKILL.md`：Dec Skill 资产的完整使用说明
-- `Documents/ARCHITECTURE.md`：Dec 的架构设计、模块划分和运行机制说明
-
-开发、构建与测试相关的脚本和工具见：
-
-- `scripts/` 目录：包含构建、测试、安装脚本
-- `Makefile`：开发工作流自动化
+- `pkg/assets/dec/SKILL.md`：Dec Skill 的完整使用说明
+- `Documents/ARCHITECTURE.md`：架构设计与模块说明
 
 ## 许可证
 

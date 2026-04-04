@@ -45,8 +45,7 @@ var configShowCmd = &cobra.Command{
 会展示以下信息:
   - Dec 根目录和仓库状态
   - 全局配置（RepoURL、默认 IDE）
-  - 项目配置（如果在 Dec 项目中）
-  - 已安装的 Skills、Rules、MCP
+  - 项目配置（可用资产、已启用资产）
 
 示例:
   dec config show     # 显示完整配置`,

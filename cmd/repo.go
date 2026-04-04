@@ -11,9 +11,9 @@ import (
 var configRepoCmd = &cobra.Command{
 	Use:   "repo <url>",
 	Short: "连接个人仓库",
-	Long: `连接用户准备好的 GitHub 仓库作为 Dec 的资产存储。
+	Long: `连接用户准备好的 Git 仓库作为 Dec 的资产存储。
 
-仓库可以是空仓库，Dec 会在其中按 vault 名称创建目录结构。
+仓库可以是空仓库或已有资产的仓库。
 
 示例:
   dec config repo https://github.com/user/my-dec-repo
