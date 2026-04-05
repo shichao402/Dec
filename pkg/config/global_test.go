@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/pkg/types"
@@ -131,5 +132,44 @@ func TestGetEffectiveIDEs_PrefersProjectThenGlobalThenDefault(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, []string{"cursor"}) {
 		t.Fatalf("默认 IDE = %#v, 期望 %#v", got, []string{"cursor"})
+	}
+}
+
+func TestEnsureGlobalVarsTemplate_CreatesDefaultFile(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+
+	created, err := EnsureGlobalVarsTemplate()
+	if err != nil {
+		t.Fatalf("EnsureGlobalVarsTemplate() 失败: %v", err)
+	}
+	if !created {
+		t.Fatal("首次调用应创建 vars.yaml")
+	}
+
+	varsPath, err := GetGlobalVarsPath()
+	if err != nil {
+		t.Fatalf("GetGlobalVarsPath() 失败: %v", err)
+	}
+	data, err := os.ReadFile(varsPath)
+	if err != nil {
+		t.Fatalf("读取全局 vars.yaml 失败: %v", err)
+	}
+	content := string(data)
+	if content == "" {
+		t.Fatal("全局 vars.yaml 不应为空")
+	}
+	for _, part := range []string{"vars:", "assets:", "{{VAR_NAME}}", "skill:", "rule:", "mcp:"} {
+		if !strings.Contains(content, part) {
+			t.Fatalf("全局 vars.yaml 模板缺少 %q: %q", part, content)
+		}
+	}
+
+	created, err = EnsureGlobalVarsTemplate()
+	if err != nil {
+		t.Fatalf("EnsureGlobalVarsTemplate() 二次调用失败: %v", err)
+	}
+	if created {
+		t.Fatal("已有全局 vars.yaml 时不应重复创建")
 	}
 }

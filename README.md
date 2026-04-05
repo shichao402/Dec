@@ -106,13 +106,15 @@ dec config global                    # 配置所有支持的 IDE
 dec config global --ide cursor       # 只配置 Cursor
 ```
 
+这一步还会创建 `~/.dec/local/vars.yaml` 模板，用于填写机器级占位符变量，例如本机 API Token、数据库地址等。
+
 ### 4. 初始化项目
 
 ```bash
 dec config init
 ```
 
-这会扫描仓库中所有可用资产，生成 `.dec/config.yaml`，并打开编辑器让你选择。将 available 中想要的资产复制到 enabled 后保存即可。
+这会扫描仓库中所有可用资产，生成 `.dec/config.yaml` 和 `.dec/vars.yaml`，并打开编辑器让你选择。将 available 中想要的资产复制到 enabled 后保存即可。
 
 ### 5. 拉取资产
 
@@ -122,12 +124,35 @@ dec pull
 
 根据 `.dec/config.yaml` 中 enabled 的资产，自动拉取并安装到 IDE。
 
+如果资产模板里包含 `{{VAR_NAME}}` 形式的占位符，`dec pull` 会按以下优先级替换：
+
+1. `.dec/vars.yaml` 中的 `assets.<type>.<name>.vars`
+2. `.dec/vars.yaml` 中的 `vars`
+3. `~/.dec/local/vars.yaml` 中的机器级变量
+
+未定义的占位符会保留原样，并在 pull 时提示补充变量配置。
+
 ### 6. 推送修改
 
 ```bash
 dec push                              # 推送缓存中的修改到远程
 dec push --remove skill my-skill      # 删除远程资产（需确认）
 ```
+
+如果要新增资产，直接在已初始化项目的 `.dec/` 目录中组织并编写即可：
+
+1. 在 `.dec/config.yaml` 的 `enabled` 中加入新资产。
+2. 在 `.dec/cache/<vault>/` 下创建对应文件：
+
+```text
+.dec/cache/<vault>/skills/<name>/SKILL.md
+.dec/cache/<vault>/rules/<name>.mdc
+.dec/cache/<vault>/mcp/<name>.json
+```
+
+3. 执行 `dec push` 推送到远程仓库。
+
+`dec push` 的读取源是 `.dec/cache/`，不是 `.cursor/`、`.codex/` 等 IDE 目录。
 
 ## 推荐工作流
 
@@ -167,6 +192,21 @@ cd ../another-project
 dec pull
 ```
 
+### 工作流 D：新增资产
+
+```bash
+# 1. 确保项目已执行过初始化
+dec config init
+
+# 2. 编辑 .dec/config.yaml，把新资产加入 enabled
+# 3. 在 .dec/cache/<vault>/ 下创建资产文件
+# 4. 推送到远程仓库
+dec push
+
+# 5. 如需刷新 available 列表
+dec config init
+```
+
 ## 命令参考
 
 ### 配置命令
@@ -198,6 +238,8 @@ dec pull
 
 ## 资产格式要求
 
+资产模板支持 `{{VAR_NAME}}` 占位符，变量名必须以大写字母开头，只能包含大写字母、数字和下划线。
+
 ### Skill
 
 Skill 必须是目录，包含 `SKILL.md`。
@@ -227,7 +269,22 @@ MCP 必须是单个 server 片段 JSON，`command` 必填：
 ├── config.yaml      # 项目配置（available + enabled）
 ├── cache/           # 资产缓存（pull 时写入，push 时读取）
 ├── .version         # 当前 pull 的版本记录
-└── vars.yaml        # 变量定义（可选，用于占位符替换）
+└── vars.yaml        # 项目变量定义（config init 自动创建）
+```
+
+机器级变量文件位于 `~/.dec/local/vars.yaml`，由 `dec config global` 自动创建。
+
+项目级变量文件示例：
+
+```yaml
+vars:
+  API_BASE_URL: "https://api.example.com"
+
+assets:
+  mcp:
+    my-mcp:
+      vars:
+        API_TOKEN: "<TOKEN>"
 ```
 
 ## 故障排查

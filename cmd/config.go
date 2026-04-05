@@ -209,7 +209,7 @@ var configInitCmd = &cobra.Command{
 	Short: "初始化项目配置",
 	Long: `初始化当前项目的 Dec 配置。
 
-从远程仓库获取所有可用资产，生成配置模板文件，
+从远程仓库获取所有可用资产，生成项目配置和变量模板文件，
 并打开编辑器让你选择需要的资产。
 
 保存并关闭编辑器后，配置即生效。
@@ -284,10 +284,20 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	if err := mgr.SaveProjectConfig(projectConfig); err != nil {
 		return fmt.Errorf("写入配置失败: %w", err)
 	}
+	varsCreated, err := mgr.EnsureVarsConfigTemplate()
+	if err != nil {
+		return fmt.Errorf("写入变量定义模板失败: %w", err)
+	}
 
 	configPath := filepath.Join(mgr.GetDecDir(), "config.yaml")
 	fmt.Printf("📝 配置已生成: %s\n", configPath)
+	if varsCreated {
+		fmt.Printf("📝 变量模板已生成: %s\n", mgr.GetVarsPath())
+	} else {
+		fmt.Printf("📝 变量模板已保留: %s\n", mgr.GetVarsPath())
+	}
 	fmt.Println("   将 available 中的资产复制到 enabled 即为启用。")
+	fmt.Println("   如资产模板包含 {{VAR_NAME}}，在 vars.yaml 中填写对应变量。")
 	fmt.Println()
 
 	// 打开编辑器
@@ -311,6 +321,7 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 		fmt.Println("   未启用任何资产（可稍后编辑 .dec/config.yaml）")
 	}
 	fmt.Println("\n后续步骤:")
+	fmt.Println("  编辑 .dec/vars.yaml          # 如资产使用了 {{VAR_NAME}} 占位符")
 	fmt.Println("  dec pull                     # 拉取所有已启用的资产")
 
 	return nil
@@ -347,6 +358,7 @@ var configGlobalCmd = &cobra.Command{
 
 配置会为每个 IDE 安装 Dec 的 Agent Skill，
 这样 AI 助手可以在任何项目中协助使用 Dec 的功能。
+同时会创建 ~/.dec/local/vars.yaml 模板，用于机器级占位符变量。
 
 示例:
   dec config global                              # 配置所有 IDE
@@ -408,12 +420,26 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 	if err := config.SaveGlobalConfig(globalConfig); err != nil {
 		return fmt.Errorf("保存 IDE 配置失败: %w", err)
 	}
+	varsCreated, err := config.EnsureGlobalVarsTemplate()
+	if err != nil {
+		return fmt.Errorf("写入本机变量定义模板失败: %w", err)
+	}
+	globalVarsPath, err := config.GetGlobalVarsPath()
+	if err != nil {
+		return fmt.Errorf("获取本机变量定义路径失败: %w", err)
+	}
 
 	fmt.Println("\n✅ 全局 IDE 配置完成")
+	if varsCreated {
+		fmt.Printf("📝 本机变量模板已生成: %s\n", globalVarsPath)
+	} else {
+		fmt.Printf("📝 本机变量模板已保留: %s\n", globalVarsPath)
+	}
 	fmt.Println("\n后续步骤:")
 	fmt.Println("  dec config init              # 初始化项目配置")
 	fmt.Println("  dec list                     # 查看已有 Vault 和资产")
 	fmt.Println("  dec search <keyword>         # 搜索资产")
+	fmt.Printf("  编辑 %s  # 填写机器级占位符变量\n", globalVarsPath)
 	fmt.Println("\n在项目中使用:")
 	fmt.Println("  dec pull                     # 拉取资产到当前项目")
 

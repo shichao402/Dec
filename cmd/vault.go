@@ -337,7 +337,7 @@ func printMissingVars(missing []string) {
 	seen := map[string]bool{}
 	for _, m := range missing {
 		if !seen[m] {
-			fmt.Printf("  ⚠️  变量 {{%s}} 未定义 (在 .dec/vars.yaml 中添加)\n", m)
+			fmt.Printf("  ⚠️  变量 {{%s}} 未定义 (在 .dec/vars.yaml 或 ~/.dec/local/vars.yaml 中添加)\n", m)
 			seen[m] = true
 		}
 	}

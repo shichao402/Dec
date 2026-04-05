@@ -10,6 +10,29 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const globalVarsTemplate = `# Dec 本机变量定义
+# 资产模板中的 {{VAR_NAME}} 会在 dec pull 时替换
+# 这里适合放不希望提交到项目仓库的机器级变量
+
+vars:
+  # API_TOKEN: "<TOKEN>"
+  # DATABASE_URL: "postgres://user:pass@localhost:5432/db"
+
+assets:
+  skill:
+    # my-skill:
+    #   vars:
+    #     API_TOKEN: "<TOKEN>"
+  rule:
+    # my-rule:
+    #   vars:
+    #     DATABASE_URL: "postgres://localhost:5432/db"
+  mcp:
+    # my-mcp:
+    #   vars:
+    #     API_TOKEN: "<TOKEN>"
+`
+
 // ========================================
 // 全局配置 (~/.dec/config.yaml)
 // ========================================
@@ -185,13 +208,45 @@ func GetSystemConfig() *SystemConfig {
 // 全局变量定义 (~/.dec/local/vars.yaml)
 // ========================================
 
+// GetGlobalVarsPath 获取机器级变量定义文件路径
+func GetGlobalVarsPath() (string, error) {
+	rootDir, err := repo.GetRootDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(rootDir, "local", "vars.yaml"), nil
+}
+
+// EnsureGlobalVarsTemplate 确保机器级变量定义模板存在，不覆盖已有文件。
+func EnsureGlobalVarsTemplate() (bool, error) {
+	varsPath, err := GetGlobalVarsPath()
+	if err != nil {
+		return false, err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(varsPath), 0755); err != nil {
+		return false, fmt.Errorf("创建变量定义目录失败: %w", err)
+	}
+
+	if _, err := os.Stat(varsPath); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("检查变量定义文件失败: %w", err)
+	}
+
+	if err := os.WriteFile(varsPath, []byte(globalVarsTemplate), 0644); err != nil {
+		return false, fmt.Errorf("写入变量定义模板失败: %w", err)
+	}
+
+	return true, nil
+}
+
 // LoadGlobalVars 加载机器级全局变量定义
 func LoadGlobalVars() (*types.VarsConfig, error) {
-	rootDir, err := repo.GetRootDir()
+	varsPath, err := GetGlobalVarsPath()
 	if err != nil {
 		return &types.VarsConfig{}, nil
 	}
-	varsPath := filepath.Join(rootDir, "local", "vars.yaml")
 	return loadVarsFile(varsPath)
 }
 

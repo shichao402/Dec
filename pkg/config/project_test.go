@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/pkg/types"
@@ -90,4 +91,46 @@ func TestSaveProjectConfig_DoesNotModifyGitignore(t *testing.T) {
 	if string(data) != original {
 		t.Fatalf("不应修改 .gitignore")
 	}
+}
+
+func TestEnsureVarsConfigTemplate_CreatesDefaultFile(t *testing.T) {
+	projectRoot := t.TempDir()
+	mgr := NewProjectConfigManager(projectRoot)
+
+	created, err := mgr.EnsureVarsConfigTemplate()
+	if err != nil {
+		t.Fatalf("EnsureVarsConfigTemplate() 失败: %v", err)
+	}
+	if !created {
+		t.Fatal("首次调用应创建 vars.yaml")
+	}
+
+	data, err := os.ReadFile(mgr.GetVarsPath())
+	if err != nil {
+		t.Fatalf("读取 vars.yaml 失败: %v", err)
+	}
+	content := string(data)
+	if content == "" {
+		t.Fatal("vars.yaml 不应为空")
+	}
+	if !containsAll(content, []string{"vars:", "assets:", "{{VAR_NAME}}", "skill:", "rule:", "mcp:"}) {
+		t.Fatalf("vars.yaml 模板内容不完整: %q", content)
+	}
+
+	created, err = mgr.EnsureVarsConfigTemplate()
+	if err != nil {
+		t.Fatalf("EnsureVarsConfigTemplate() 二次调用失败: %v", err)
+	}
+	if created {
+		t.Fatal("已有 vars.yaml 时不应重复创建")
+	}
+}
+
+func containsAll(content string, parts []string) bool {
+	for _, part := range parts {
+		if !strings.Contains(content, part) {
+			return false
+		}
+	}
+	return true
 }

@@ -18,6 +18,29 @@ type ProjectConfigManager struct {
 	projectRoot string
 }
 
+const projectVarsTemplate = `# Dec 项目变量定义
+# 资产模板中的 {{VAR_NAME}} 会在 dec pull 时替换
+# 优先级：assets.<type>.<name>.vars > vars > 机器级变量 (~/.dec/local/vars.yaml)
+
+vars:
+  # API_BASE_URL: "https://api.example.com"
+  # API_TOKEN: "<TOKEN>"
+
+assets:
+  skill:
+    # my-skill:
+    #   vars:
+    #     API_TOKEN: "<TOKEN>"
+  rule:
+    # my-rule:
+    #   vars:
+    #     API_BASE_URL: "https://api.example.com"
+  mcp:
+    # my-mcp:
+    #   vars:
+    #     API_TOKEN: "<TOKEN>"
+`
+
 // NewProjectConfigManager 创建项目配置管理器
 func NewProjectConfigManager(projectRoot string) *ProjectConfigManager {
 	return &ProjectConfigManager{projectRoot: projectRoot}
@@ -26,6 +49,11 @@ func NewProjectConfigManager(projectRoot string) *ProjectConfigManager {
 // GetDecDir 获取项目 .dec/ 目录
 func (m *ProjectConfigManager) GetDecDir() string {
 	return filepath.Join(m.projectRoot, ".dec")
+}
+
+// GetVarsPath 获取项目变量定义文件路径
+func (m *ProjectConfigManager) GetVarsPath() string {
+	return filepath.Join(m.GetDecDir(), "vars.yaml")
 }
 
 // Exists 检查项目配置是否已存在
@@ -87,13 +115,34 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 	return nil
 }
 
+// EnsureVarsConfigTemplate 确保项目变量定义模板存在，不覆盖已有文件。
+func (m *ProjectConfigManager) EnsureVarsConfigTemplate() (bool, error) {
+	decDir := m.GetDecDir()
+	if err := os.MkdirAll(decDir, 0755); err != nil {
+		return false, fmt.Errorf("创建 .dec 目录失败: %w", err)
+	}
+
+	varsPath := m.GetVarsPath()
+	if _, err := os.Stat(varsPath); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("检查变量定义文件失败: %w", err)
+	}
+
+	if err := os.WriteFile(varsPath, []byte(projectVarsTemplate), 0644); err != nil {
+		return false, fmt.Errorf("写入变量定义模板失败: %w", err)
+	}
+
+	return true, nil
+}
+
 // ========================================
 // 项目变量定义 (.dec/vars.yaml)
 // ========================================
 
 // LoadVarsConfig 加载项目变量定义
 func (m *ProjectConfigManager) LoadVarsConfig() (*types.VarsConfig, error) {
-	varsPath := filepath.Join(m.GetDecDir(), "vars.yaml")
+	varsPath := m.GetVarsPath()
 
 	data, err := os.ReadFile(varsPath)
 	if err != nil {
