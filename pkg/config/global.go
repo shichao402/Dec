@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/shichao402/Dec/pkg/editor"
 	"github.com/shichao402/Dec/pkg/repo"
 	"github.com/shichao402/Dec/pkg/types"
 	"gopkg.in/yaml.v3"
@@ -94,7 +96,7 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 		return fmt.Errorf("序列化配置失败: %w", err)
 	}
 
-	header := "# Dec 全局配置\n# Repo URL 与默认 IDE 列表\n\n"
+	header := "# Dec 全局配置\n# repo_url: 个人资产仓库地址\n# ides: 默认 IDE 列表\n# editor: 交互式编辑器命令（如 vim / vi / code --wait）\n\n"
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入全局配置失败: %w", err)
 	}
@@ -134,6 +136,25 @@ func GetEffectiveIDEs(projectConfig *types.ProjectConfig) ([]string, error) {
 
 	// 默认 cursor
 	return []string{"cursor"}, nil
+}
+
+// GetEffectiveEditor 获取有效的交互编辑器（项目级覆盖全局）。
+func GetEffectiveEditor(projectConfig *types.ProjectConfig) (string, error) {
+	if projectConfig != nil {
+		if editorCmd := strings.TrimSpace(projectConfig.Editor); editorCmd != "" {
+			return editorCmd, nil
+		}
+	}
+
+	globalConfig, err := LoadGlobalConfig()
+	if err != nil {
+		return "", err
+	}
+	if editorCmd := strings.TrimSpace(globalConfig.Editor); editorCmd != "" {
+		return editorCmd, nil
+	}
+
+	return editor.DefaultCommand(), nil
 }
 
 func getLegacyLocalConfigPath() (string, error) {

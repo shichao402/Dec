@@ -21,13 +21,15 @@ type MCPServer struct {
 type GlobalConfig struct {
 	RepoURL string   `yaml:"repo_url,omitempty"`
 	IDEs    []string `yaml:"ides,omitempty"`
+	Editor  string   `yaml:"editor,omitempty"`
 }
 
 // ProjectConfig 项目配置 (<project>/.dec/config.yaml)
 type ProjectConfig struct {
-	IDEs      []string      `yaml:"ides,omitempty"`
-	Available *AssetList    `yaml:"available,omitempty"`
-	Enabled   *AssetList    `yaml:"enabled,omitempty"`
+	IDEs      []string   `yaml:"ides,omitempty"`
+	Editor    string     `yaml:"editor,omitempty"`
+	Available *AssetList `yaml:"available,omitempty"`
+	Enabled   *AssetList `yaml:"enabled,omitempty"`
 }
 
 // AssetList 资产列表（available 和 enabled 共用）

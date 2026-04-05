@@ -106,7 +106,7 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 		return fmt.Errorf("序列化项目配置失败: %w", err)
 	}
 
-	header := "# Dec 项目配置\n# available: 仓库中所有可用资产（dec config init 自动生成）\n# enabled: 已启用资产（从 available 复制到这里即为启用）\n\n"
+	header := "# Dec 项目配置\n# ides: 项目级 IDE 覆盖（可选）\n# editor: 项目级交互式编辑器，覆盖全局配置（可选）\n# available: 仓库中所有可用资产（dec config init 自动生成）\n# enabled: 已启用资产（从 available 复制到这里即为启用）\n\n"
 	configPath := filepath.Join(decDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入项目配置失败: %w", err)

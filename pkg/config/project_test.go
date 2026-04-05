@@ -14,6 +14,8 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 	mgr := NewProjectConfigManager(projectRoot)
 
 	cfg := &types.ProjectConfig{
+		IDEs:   []string{"cursor"},
+		Editor: "vim",
 		Available: &types.AssetList{
 			Rules: []types.AssetRef{
 				{Name: "rule-a", Vault: "v1"},
@@ -41,6 +43,12 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 	}
 	if loaded.Enabled.Count() != 1 {
 		t.Fatalf("enabled 应有 1 个, 得到 %d", loaded.Enabled.Count())
+	}
+	if loaded.Editor != "vim" {
+		t.Fatalf("editor = %q, 期望 %q", loaded.Editor, "vim")
+	}
+	if loaded.IDEs[0] != "cursor" {
+		t.Fatalf("ides[0] = %q, 期望 %q", loaded.IDEs[0], "cursor")
 	}
 }
 

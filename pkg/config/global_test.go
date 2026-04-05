@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shichao402/Dec/pkg/editor"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
@@ -70,6 +71,7 @@ func TestSaveGlobalConfig_RemovesLegacyLocalConfig(t *testing.T) {
 	cfg := &types.GlobalConfig{
 		RepoURL: "https://example.com/repo.git",
 		IDEs:    []string{"cursor", "windsurf"},
+		Editor:  "vim",
 	}
 	if err := SaveGlobalConfig(cfg); err != nil {
 		t.Fatalf("SaveGlobalConfig() 失败: %v", err)
@@ -97,6 +99,9 @@ func TestSaveGlobalConfig_RemovesLegacyLocalConfig(t *testing.T) {
 	}
 	if !reflect.DeepEqual(loaded.IDEs, cfg.IDEs) {
 		t.Fatalf("IDEs = %#v, 期望 %#v", loaded.IDEs, cfg.IDEs)
+	}
+	if loaded.Editor != cfg.Editor {
+		t.Fatalf("Editor = %q, 期望 %q", loaded.Editor, cfg.Editor)
 	}
 }
 
@@ -132,6 +137,41 @@ func TestGetEffectiveIDEs_PrefersProjectThenGlobalThenDefault(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, []string{"cursor"}) {
 		t.Fatalf("默认 IDE = %#v, 期望 %#v", got, []string{"cursor"})
+	}
+}
+
+func TestGetEffectiveEditor_PrefersProjectThenGlobalThenDefault(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+
+	got, err := GetEffectiveEditor(&types.ProjectConfig{Editor: "vi"})
+	if err != nil {
+		t.Fatalf("GetEffectiveEditor() 返回错误: %v", err)
+	}
+	if got != "vi" {
+		t.Fatalf("项目覆盖编辑器 = %q, 期望 %q", got, "vi")
+	}
+
+	if err := SaveGlobalConfig(&types.GlobalConfig{Editor: "vim"}); err != nil {
+		t.Fatalf("写入全局编辑器配置失败: %v", err)
+	}
+	got, err = GetEffectiveEditor(&types.ProjectConfig{})
+	if err != nil {
+		t.Fatalf("GetEffectiveEditor() 返回错误: %v", err)
+	}
+	if got != "vim" {
+		t.Fatalf("全局编辑器 = %q, 期望 %q", got, "vim")
+	}
+
+	if err := os.Remove(filepath.Join(decHome, "config.yaml")); err != nil {
+		t.Fatalf("删除全局配置失败: %v", err)
+	}
+	got, err = GetEffectiveEditor(&types.ProjectConfig{})
+	if err != nil {
+		t.Fatalf("GetEffectiveEditor() 返回错误: %v", err)
+	}
+	if got != editor.DefaultCommand() {
+		t.Fatalf("默认编辑器 = %q, 期望 %q", got, editor.DefaultCommand())
 	}
 }
 

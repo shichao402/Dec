@@ -120,6 +120,14 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 		fmt.Println("  默认 IDE: (使用默认: cursor)")
 	}
 
+	if strings.TrimSpace(globalConfig.Editor) != "" {
+		fmt.Printf("  默认编辑器: %s\n", globalConfig.Editor)
+	} else if defaultEditor := editor.DefaultCommand(); defaultEditor != "" {
+		fmt.Printf("  默认编辑器: (使用默认: %s)\n", defaultEditor)
+	} else {
+		fmt.Println("  默认编辑器: (未配置，且未检测到可用编辑器)")
+	}
+
 	// ========================================
 	// 项目配置（如果在项目中）
 	// ========================================
@@ -154,10 +162,25 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 					fmt.Println("  IDE 覆盖: (使用全局默认)")
 				}
 
+				if strings.TrimSpace(projectConfig.Editor) != "" {
+					fmt.Printf("  编辑器覆盖: %s\n", projectConfig.Editor)
+				} else {
+					fmt.Println("  编辑器覆盖: (使用全局默认)")
+				}
+
 				// 显示有效的 IDE（应用继承规则）
 				effectiveIDEs, err := config.GetEffectiveIDEs(projectConfig)
 				if err == nil {
 					fmt.Printf("  有效 IDE: %s\n", strings.Join(effectiveIDEs, ", "))
+				}
+
+				effectiveEditor, err := config.GetEffectiveEditor(projectConfig)
+				if err == nil {
+					if strings.TrimSpace(effectiveEditor) != "" {
+						fmt.Printf("  有效编辑器: %s\n", effectiveEditor)
+					} else {
+						fmt.Println("  有效编辑器: (未配置，且未检测到可用编辑器)")
+					}
 				}
 			}
 
@@ -237,15 +260,15 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 
 	mgr := config.NewProjectConfigManager(cwd)
 
-	// 如果已有配置，保留 enabled
-	var existingEnabled *types.AssetList
+	// 如果已有配置，保留已有的顶层自定义字段
+	var existingConfig *types.ProjectConfig
 	if mgr.Exists() {
-		existingConfig, err := mgr.LoadProjectConfig()
-		if err == nil && !existingConfig.Enabled.IsEmpty() {
-			existingEnabled = existingConfig.Enabled
+		loadedConfig, err := mgr.LoadProjectConfig()
+		if err == nil {
+			existingConfig = loadedConfig
 		}
 		fmt.Println("⚠️  项目已配置过 (.dec/config.yaml 已存在)")
-		fmt.Println("   将更新 available 列表，保留已有的 enabled 配置。")
+		fmt.Println("   将更新 available 列表，保留已有的 enabled / editor / ides 配置。")
 	}
 
 	// 从 repo 获取所有资产
@@ -272,12 +295,20 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	// 构建 available 列表
 	available := buildAssetList(allAssets)
 
-	// 生成配置文件，保留已有 enabled
+	// 生成配置文件，保留已有 enabled / editor / ides
 	enabled := &types.AssetList{}
-	if existingEnabled != nil {
-		enabled = existingEnabled
+	projectEditor := ""
+	var projectIDEs []string
+	if existingConfig != nil {
+		if !existingConfig.Enabled.IsEmpty() {
+			enabled = existingConfig.Enabled
+		}
+		projectEditor = existingConfig.Editor
+		projectIDEs = existingConfig.IDEs
 	}
 	projectConfig := &types.ProjectConfig{
+		IDEs:      projectIDEs,
+		Editor:    projectEditor,
 		Available: available,
 		Enabled:   enabled,
 	}
@@ -300,8 +331,13 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("   如资产模板包含 {{VAR_NAME}}，在 vars.yaml 中填写对应变量。")
 	fmt.Println()
 
+	interactiveEditor, err := config.GetEffectiveEditor(projectConfig)
+	if err != nil {
+		return fmt.Errorf("获取交互编辑器配置失败: %w", err)
+	}
+
 	// 打开编辑器
-	if err := editor.Open(configPath); err != nil {
+	if err := editor.Open(configPath, interactiveEditor); err != nil {
 		fmt.Printf("⚠️  无法打开编辑器: %v\n", err)
 		fmt.Printf("   请手动编辑 %s 后运行 dec pull\n", configPath)
 		return nil
