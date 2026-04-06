@@ -65,11 +65,11 @@ func newTransaction(readOnly bool) (*Transaction, error) {
 		return nil, fmt.Errorf("仓库未连接\n\n运行 dec repo <url> 连接仓库")
 	}
 
-	branch, err := GetDefaultBranch()
-	if err != nil {
+	if err := FetchBare(); err != nil {
 		return nil, err
 	}
-	if err := FetchBare(); err != nil {
+	branch, err := GetDefaultBranch()
+	if err != nil {
 		return nil, err
 	}
 

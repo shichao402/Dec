@@ -67,7 +67,10 @@ func ConnectBare(repoURL string) error {
 		return err
 	}
 	if ok {
-		return fmt.Errorf("仓库已连接: %s\n\n如需重新连接，请先删除 %s", bareDir, bareDir)
+		if err := upsertBareRemoteURL(bareDir, "origin", repoURL); err != nil {
+			return fmt.Errorf("更新仓库连接失败: %w", err)
+		}
+		return nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(bareDir), 0755); err != nil {
@@ -100,7 +103,26 @@ func FetchBare() error {
 	if err != nil {
 		return fmt.Errorf("git fetch --prune origin: %s", strings.TrimSpace(string(output)))
 	}
+	if err := syncBareHeadToRemote(bareDir); err != nil {
+		return err
+	}
 	return nil
+}
+
+// GetBareRemoteURL 获取 bare repo 的 origin URL。
+func GetBareRemoteURL() (string, error) {
+	bareDir, err := GetBareRepoDir()
+	if err != nil {
+		return "", err
+	}
+	ok, err := isBareRepo(bareDir)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("仓库未连接\n\n运行 dec repo <url> 连接仓库")
+	}
+	return getBareRemoteURL(bareDir, "origin")
 }
 
 // GetDefaultBranch 获取默认分支名
@@ -200,6 +222,98 @@ func setBareRemoteURL(bareDir, remote, url string) error {
 		return fmt.Errorf("git remote set-url 失败: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func addBareRemoteURL(bareDir, remote, url string) error {
+	cmd := exec.Command("git", "--git-dir", bareDir, "remote", "add", remote, url)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git remote add 失败: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func hasBareRemote(bareDir, remote string) (bool, error) {
+	cmd := exec.Command("git", "--git-dir", bareDir, "remote")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("git remote 失败: %s", strings.TrimSpace(string(output)))
+	}
+	for _, name := range strings.Fields(string(output)) {
+		if name == remote {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func getBareRemoteURL(bareDir, remote string) (string, error) {
+	cmd := exec.Command("git", "--git-dir", bareDir, "config", "--get", fmt.Sprintf("remote.%s.url", remote))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("读取 remote %s URL 失败: %s", remote, strings.TrimSpace(string(output)))
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func upsertBareRemoteURL(bareDir, remote, url string) error {
+	exists, err := hasBareRemote(bareDir, remote)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return addBareRemoteURL(bareDir, remote, url)
+	}
+
+	currentURL, err := getBareRemoteURL(bareDir, remote)
+	if err == nil && strings.TrimSpace(currentURL) == strings.TrimSpace(url) {
+		return nil
+	}
+
+	return setBareRemoteURL(bareDir, remote, url)
+}
+
+func syncBareHeadToRemote(bareDir string) error {
+	branch, err := getRemoteHeadBranch(bareDir)
+	if err != nil {
+		return err
+	}
+	if branch == "" {
+		return nil
+	}
+
+	cmd := exec.Command("git", "--git-dir", bareDir, "symbolic-ref", "HEAD", fmt.Sprintf("refs/heads/%s", branch))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("同步默认分支失败: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func getRemoteHeadBranch(bareDir string) (string, error) {
+	cmd := exec.Command("git", "--git-dir", bareDir, "ls-remote", "--symref", "origin", "HEAD")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("读取远端默认分支失败: %s", strings.TrimSpace(string(output)))
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "ref: ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		ref := fields[1]
+		if !strings.HasPrefix(ref, "refs/heads/") {
+			continue
+		}
+		return strings.TrimPrefix(ref, "refs/heads/"), nil
+	}
+
+	return "", nil
 }
 
 func gitCloneBare(url, targetDir string) error {

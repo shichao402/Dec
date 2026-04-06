@@ -122,6 +122,39 @@ func TestCommitAndPush_ReturnsLegacyInterfaceError(t *testing.T) {
 	}
 }
 
+func TestEnsureConnectedRepoMatches_RepointsBareOriginWhenConfigChanged(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForTest(t, "DEC_HOME", decHome)
+	remoteA := setupRemoteBareRepo(t)
+	remoteB := setupRemoteBareRepo(t)
+
+	if err := Connect(remoteA); err != nil {
+		t.Fatalf("Connect(remoteA) 失败: %v", err)
+	}
+	if err := EnsureConnectedRepoMatches(remoteB); err != nil {
+		t.Fatalf("EnsureConnectedRepoMatches(remoteB) 失败: %v", err)
+	}
+
+	bareDir, err := GetBareRepoDir()
+	if err != nil {
+		t.Fatalf("GetBareRepoDir 失败: %v", err)
+	}
+	originURL := runGitNoDir(t, "--git-dir", bareDir, "config", "--get", "remote.origin.url")
+	if originURL != remoteB {
+		t.Fatalf("origin URL 应更新为 %q, got %q", remoteB, originURL)
+	}
+	connected, err := IsConnected()
+	if err != nil {
+		t.Fatalf("IsConnected() 返回错误: %v", err)
+	}
+	if !connected {
+		t.Fatalf("修复 origin 后应仍保持已连接")
+	}
+	if !RepoURLsEquivalent("https://github.com/example/demo.git", "git@github.com:example/demo.git") {
+		t.Fatalf("GitHub 仓库 URL 规范化失败")
+	}
+}
+
 func setupGitOpsTestRepos(t *testing.T) (string, string) {
 	t.Helper()
 

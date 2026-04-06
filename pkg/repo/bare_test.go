@@ -71,10 +71,31 @@ func TestConnectBare_FailsWhenAlreadyConnected(t *testing.T) {
 	if err := ConnectBare(remoteBareDir); err != nil {
 		t.Fatalf("首次 ConnectBare 失败: %v", err)
 	}
-	if err := ConnectBare(remoteBareDir); err == nil {
-		t.Fatalf("重复 ConnectBare 应失败")
-	} else if !strings.Contains(err.Error(), "仓库已连接") {
-		t.Fatalf("错误信息应提示已连接, got: %v", err)
+	if err := ConnectBare(remoteBareDir); err != nil {
+		t.Fatalf("重复 ConnectBare 应幂等成功: %v", err)
+	}
+}
+
+func TestConnectBare_RepointsExistingOriginURL(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForTest(t, "DEC_HOME", decHome)
+	remoteA := setupRemoteBareRepo(t)
+	remoteB := setupRemoteBareRepo(t)
+
+	if err := ConnectBare(remoteA); err != nil {
+		t.Fatalf("首次 ConnectBare 失败: %v", err)
+	}
+	if err := ConnectBare(remoteB); err != nil {
+		t.Fatalf("重新指向新远端失败: %v", err)
+	}
+
+	bareDir, err := GetBareRepoDir()
+	if err != nil {
+		t.Fatalf("GetBareRepoDir 失败: %v", err)
+	}
+	originURL := runGitNoDir(t, "--git-dir", bareDir, "config", "--get", "remote.origin.url")
+	if originURL != remoteB {
+		t.Fatalf("origin URL 应更新为 %q, got %q", remoteB, originURL)
 	}
 }
 
@@ -99,6 +120,27 @@ func TestFetchBare_UpdatesLocalHeads(t *testing.T) {
 	}
 	if after != remote {
 		t.Fatalf("FetchBare 后本地分支应与远端一致, got %s want %s", after, remote)
+	}
+}
+
+func TestFetchBare_SyncsDefaultBranchToRemoteHead(t *testing.T) {
+	_, localBareDir, remoteBareDir, remoteWorkDir := setupBareRepoFixture(t)
+
+	writeFile(t, filepath.Join(remoteWorkDir, "release.txt"), "release\n")
+	runGit(t, remoteWorkDir, "add", ".")
+	runGit(t, remoteWorkDir, "commit", "-m", "release branch seed")
+	runGit(t, remoteWorkDir, "push", "origin", "main")
+	runGit(t, remoteWorkDir, "checkout", "-b", "release")
+	runGit(t, remoteWorkDir, "push", "-u", "origin", "release")
+	runGitNoDir(t, "--git-dir", remoteBareDir, "symbolic-ref", "HEAD", "refs/heads/release")
+
+	if err := FetchBare(); err != nil {
+		t.Fatalf("FetchBare 失败: %v", err)
+	}
+
+	headRef := runGitNoDir(t, "--git-dir", localBareDir, "symbolic-ref", "--short", "HEAD")
+	if headRef != "release" {
+		t.Fatalf("FetchBare 后默认分支应跟随远端 HEAD, got %q", headRef)
 	}
 }
 

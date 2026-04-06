@@ -102,11 +102,30 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("加载全局配置失败: %w", err)
 	}
+	if connected && strings.TrimSpace(globalConfig.RepoURL) != "" {
+		if err := repo.EnsureConnectedRepoMatches(globalConfig.RepoURL); err != nil {
+			return fmt.Errorf("校准仓库连接失败: %w", err)
+		}
+	}
 
 	if globalConfig.RepoURL != "" {
 		fmt.Printf("  Repo URL: %s\n", globalConfig.RepoURL)
 	} else {
 		fmt.Println("  Repo URL: (未配置)")
+	}
+
+	if connected {
+		bareRemoteURL, err := repo.GetBareRemoteURL()
+		if err == nil {
+			fmt.Printf("  当前远端: %s\n", bareRemoteURL)
+			if globalConfig.RepoURL != "" {
+				if repo.RepoURLsEquivalent(bareRemoteURL, globalConfig.RepoURL) {
+					fmt.Println("  连接校验: ✅ 与全局配置一致")
+				} else {
+					fmt.Println("  连接校验: ⚠️ 与全局 repo_url 不一致")
+				}
+			}
+		}
 	}
 
 	globalConfigPath, err := config.GetGlobalConfigPath()

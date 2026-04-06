@@ -157,6 +157,13 @@ func getLocalAssetPath(itemType, assetName, projectRoot string, ideImpl ide.IDE)
 // ========================================
 
 func withReadRepoDir(fn func(string) error) error {
+	globalConfig, err := config.LoadGlobalConfig()
+	if err == nil {
+		if err := repo.EnsureConnectedRepoMatches(globalConfig.RepoURL); err != nil {
+			return err
+		}
+	}
+
 	tx, err := repo.NewReadTransaction()
 	if err != nil {
 		return err
@@ -166,6 +173,13 @@ func withReadRepoDir(fn func(string) error) error {
 }
 
 func withWriteRepo(fn func(*repo.Transaction) error) error {
+	globalConfig, err := config.LoadGlobalConfig()
+	if err == nil {
+		if err := repo.EnsureConnectedRepoMatches(globalConfig.RepoURL); err != nil {
+			return err
+		}
+	}
+
 	tx, err := repo.NewWriteTransaction()
 	if err != nil {
 		return err

@@ -10,6 +10,55 @@ import (
 	"strings"
 )
 
+func normalizeRepoURL(url string) string {
+	trimmed := strings.TrimSpace(url)
+	trimmed = strings.TrimSuffix(trimmed, "/")
+	trimmed = strings.TrimSuffix(trimmed, ".git")
+	trimmed = strings.TrimPrefix(trimmed, "git@github.com:")
+	trimmed = strings.TrimPrefix(trimmed, "ssh://git@github.com/")
+	trimmed = strings.TrimPrefix(trimmed, "https://github.com/")
+	trimmed = strings.TrimPrefix(trimmed, "http://github.com/")
+	trimmed = strings.TrimPrefix(trimmed, "git://github.com/")
+	return trimmed
+}
+
+func RepoURLsEquivalent(a, b string) bool {
+	if strings.TrimSpace(a) == "" || strings.TrimSpace(b) == "" {
+		return false
+	}
+	return normalizeRepoURL(a) == normalizeRepoURL(b)
+}
+
+// EnsureConnectedRepoMatches 检查本地 bare repo 的 remote 是否与期望 URL 一致；不一致时自动修复。
+func EnsureConnectedRepoMatches(expectedURL string) error {
+	trimmed := strings.TrimSpace(expectedURL)
+	if trimmed == "" {
+		return nil
+	}
+
+	if err := MigrateToBare(); err != nil {
+		return err
+	}
+
+	connected, err := IsBareConnected()
+	if err != nil {
+		return err
+	}
+	if !connected {
+		return nil
+	}
+
+	currentURL, err := GetBareRemoteURL()
+	if err != nil {
+		return err
+	}
+	if RepoURLsEquivalent(currentURL, trimmed) {
+		return nil
+	}
+
+	return ConnectBare(trimmed)
+}
+
 // GetRootDir 获取 Dec 根目录 (~/.dec/)
 func GetRootDir() (string, error) {
 	if rootDir := os.Getenv("DEC_HOME"); rootDir != "" {
