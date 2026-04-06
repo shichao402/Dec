@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,13 +17,15 @@ type failingMCPIDE struct {
 	name string
 }
 
-func (f *failingMCPIDE) Name() string                        { return f.name }
-func (f *failingMCPIDE) RulesDir(pr string) string           { return filepath.Join(pr, "."+f.name, "rules") }
-func (f *failingMCPIDE) SkillsDir(pr string) string          { return filepath.Join(pr, "."+f.name, "skills") }
-func (f *failingMCPIDE) MCPConfigPath(pr string) string      { return filepath.Join(pr, "."+f.name, "mcp.json") }
-func (f *failingMCPIDE) WriteRules(string, []ide.RuleFile) error { return nil }
+func (f *failingMCPIDE) Name() string               { return f.name }
+func (f *failingMCPIDE) RulesDir(pr string) string  { return filepath.Join(pr, "."+f.name, "rules") }
+func (f *failingMCPIDE) SkillsDir(pr string) string { return filepath.Join(pr, "."+f.name, "skills") }
+func (f *failingMCPIDE) MCPConfigPath(pr string) string {
+	return filepath.Join(pr, "."+f.name, "mcp.json")
+}
+func (f *failingMCPIDE) WriteRules(string, []ide.RuleFile) error          { return nil }
 func (f *failingMCPIDE) WriteSkill(string, string, []ide.SkillFile) error { return nil }
-func (f *failingMCPIDE) WriteMCPConfig(string, *types.MCPConfig) error { return nil }
+func (f *failingMCPIDE) WriteMCPConfig(string, *types.MCPConfig) error    { return nil }
 func (f *failingMCPIDE) LoadMCPConfig(string) (*types.MCPConfig, error) {
 	return nil, fmt.Errorf("mock MCP load failure")
 }
@@ -395,6 +398,65 @@ func TestAssetListFindAndRemove(t *testing.T) {
 	}
 	if len(list.Rules) != 1 {
 		t.Fatalf("移除后应剩 1 个, 得到 %d", len(list.Rules))
+	}
+}
+
+func TestPrintMissingVars_IncludesConcreteFileTargets(t *testing.T) {
+	projectRoot := t.TempDir()
+	projectVarsPath := filepath.Join(projectRoot, ".dec", "vars.yaml")
+	globalVarsPath := filepath.Join(projectRoot, ".dec-home", "local", "vars.yaml")
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("创建 stdout pipe 失败: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = oldStdout }()
+
+	printMissingVars(
+		"skill",
+		"vikunja-workflow",
+		[]string{"TASK_DOCS_DIR", "TASK_DOCS_DIR"},
+		map[string][]string{
+			"TASK_DOCS_DIR": {
+				filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "SKILL.md"),
+				filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "templates", "task.md"),
+			},
+		},
+		projectVarsPath,
+		globalVarsPath,
+	)
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("关闭写端失败: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("读取输出失败: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Count(out, "变量 {{TASK_DOCS_DIR}} 未定义") != 1 {
+		t.Fatalf("缺失变量提示应去重, 实际输出:\n%s", out)
+	}
+	for _, want := range []string{
+		"资产: [skill] vikunja-workflow",
+		filepath.Clean(filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "SKILL.md")),
+		filepath.Clean(filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "templates", "task.md")),
+		projectVarsPath + " -> vars.TASK_DOCS_DIR 或 assets.skill.vikunja-workflow.vars.TASK_DOCS_DIR",
+		globalVarsPath + " -> vars.TASK_DOCS_DIR 或 assets.skill.vikunja-workflow.vars.TASK_DOCS_DIR",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("输出缺少 %q, 实际输出:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "SKILL.md") > strings.Index(out, "templates/task.md") {
+		t.Fatalf("来源路径应按字典序稳定输出, 实际输出:\n%s", out)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("关闭读端失败: %v", err)
 	}
 }
 

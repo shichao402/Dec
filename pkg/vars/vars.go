@@ -218,3 +218,60 @@ func ExtractPlaceholdersFromDir(dirPath string) []string {
 
 	return result
 }
+
+// ExtractPlaceholderLocationsFromFile 从文件中提取占位符及其所在文件路径
+func ExtractPlaceholderLocationsFromFile(filePath string) map[string][]string {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil
+	}
+	return extractPlaceholderLocations(string(data), filePath)
+}
+
+// ExtractPlaceholderLocationsFromDir 从目录中递归提取占位符及其所在文件路径
+func ExtractPlaceholderLocationsFromDir(dirPath string) map[string][]string {
+	locations := make(map[string][]string)
+
+	filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		mergePlaceholderLocations(locations, ExtractPlaceholderLocationsFromFile(path))
+		return nil
+	})
+
+	if len(locations) == 0 {
+		return nil
+	}
+	return locations
+}
+
+func extractPlaceholderLocations(content, location string) map[string][]string {
+	placeholders := ExtractPlaceholders(content)
+	if len(placeholders) == 0 {
+		return nil
+	}
+
+	locations := make(map[string][]string, len(placeholders))
+	for _, placeholder := range placeholders {
+		locations[placeholder] = []string{location}
+	}
+	return locations
+}
+
+func mergePlaceholderLocations(dst, src map[string][]string) {
+	for name, paths := range src {
+		for _, path := range paths {
+			exists := false
+			for _, existing := range dst[name] {
+				if existing == path {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				dst[name] = append(dst[name], path)
+			}
+		}
+	}
+}

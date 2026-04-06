@@ -96,7 +96,7 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 		return fmt.Errorf("序列化配置失败: %w", err)
 	}
 
-	header := "# Dec 全局配置\n# repo_url: 个人资产仓库地址\n# ides: 默认 IDE 列表\n# editor: 交互式编辑器命令（如 vim / vi / code --wait）\n\n"
+	header := "# Dec 全局配置\n# repo_url: 个人资产仓库地址\n# ides: 默认 IDE 列表，例如：\n#   ides:\n#     - cursor\n#     - codebuddy\n# editor: 交互式编辑器命令（如 vim / vi / code --wait），例如：\n#   editor: code --wait\n\n"
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入全局配置失败: %w", err)
 	}

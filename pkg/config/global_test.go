@@ -85,6 +85,9 @@ func TestSaveGlobalConfig_RemovesLegacyLocalConfig(t *testing.T) {
 	if string(data) == "" {
 		t.Fatalf("全局配置不应为空")
 	}
+	if !strings.Contains(string(data), "#   ides:") || !strings.Contains(string(data), "#   editor: code --wait") {
+		t.Fatalf("全局配置头注释应包含 ides/editor 示例, 实际内容:\n%s", string(data))
+	}
 
 	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
 		t.Fatalf("旧本机配置应被清理, 实际错误: %v", err)

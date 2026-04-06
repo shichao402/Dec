@@ -381,3 +381,47 @@ Project: my-project
 		t.Errorf("substitution failed:\n  got:  %q\n  want: %q", substituted, expected)
 	}
 }
+
+func TestExtractPlaceholderLocationsFromFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rule.mdc")
+	content := "path: {{TASK_DOCS_DIR}}\nproject: {{VIKUNJA_PROJECT}}\npath again: {{TASK_DOCS_DIR}}\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ExtractPlaceholderLocationsFromFile(path)
+	want := map[string][]string{
+		"TASK_DOCS_DIR":   {path},
+		"VIKUNJA_PROJECT": {path},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ExtractPlaceholderLocationsFromFile() = %#v, want %#v", got, want)
+	}
+}
+
+func TestExtractPlaceholderLocationsFromDir(t *testing.T) {
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "SKILL.md")
+	fileB := filepath.Join(dir, "templates", "task.md")
+	if err := os.MkdirAll(filepath.Dir(fileB), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fileA, []byte("{{TASK_DOCS_DIR}}\n{{COMMON_VAR}}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fileB, []byte("{{COMMON_VAR}}\n{{VIKUNJA_PROJECT}}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ExtractPlaceholderLocationsFromDir(dir)
+	if !reflect.DeepEqual(got["TASK_DOCS_DIR"], []string{fileA}) {
+		t.Fatalf("TASK_DOCS_DIR 位置不正确: %#v", got["TASK_DOCS_DIR"])
+	}
+	if !reflect.DeepEqual(got["VIKUNJA_PROJECT"], []string{fileB}) {
+		t.Fatalf("VIKUNJA_PROJECT 位置不正确: %#v", got["VIKUNJA_PROJECT"])
+	}
+	if !reflect.DeepEqual(got["COMMON_VAR"], []string{fileA, fileB}) {
+		t.Fatalf("COMMON_VAR 位置不正确: %#v", got["COMMON_VAR"])
+	}
+}

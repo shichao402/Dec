@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/pkg/config"
@@ -207,6 +208,8 @@ func removeCachedAsset(itemType, assetName, projectRoot, vault string) {
 func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []string, mgr *config.ProjectConfigManager) {
 	globalVars, _ := config.LoadGlobalVars()
 	projectVars, _ := mgr.LoadVarsConfig()
+	projectVarsPath := mgr.GetVarsPath()
+	globalVarsPath, _ := config.GetGlobalVarsPath()
 
 	if (globalVars == nil || len(globalVars.Vars) == 0) && (projectVars == nil || len(projectVars.Vars) == 0) {
 		if globalVars != nil && globalVars.Assets != nil {
@@ -225,6 +228,7 @@ func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []str
 		case "skill":
 			localPath := filepath.Join(ideImpl.SkillsDir(projectRoot), managedName(assetName))
 			placeholders := vars.ExtractPlaceholdersFromDir(localPath)
+			locations := vars.ExtractPlaceholderLocationsFromDir(localPath)
 			if len(placeholders) == 0 {
 				continue
 			}
@@ -234,11 +238,12 @@ func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []str
 				fmt.Printf("  ⚠️  变量替换失败 (%s): %v\n", ideName, err)
 				continue
 			}
-			printMissingVars(missing)
+			printMissingVars(itemType, assetName, missing, locations, projectVarsPath, globalVarsPath)
 
 		case "rule":
 			localPath := filepath.Join(ideImpl.RulesDir(projectRoot), managedName(assetName)+".mdc")
 			placeholders := vars.ExtractPlaceholdersFromFile(localPath)
+			locations := vars.ExtractPlaceholderLocationsFromFile(localPath)
 			if len(placeholders) == 0 {
 				continue
 			}
@@ -248,28 +253,29 @@ func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []str
 				fmt.Printf("  ⚠️  变量替换失败 (%s): %v\n", ideName, err)
 				continue
 			}
-			printMissingVars(missing)
+			printMissingVars(itemType, assetName, missing, locations, projectVarsPath, globalVarsPath)
 
 		case "mcp":
-			used, missing := substituteMCPVars(assetName, projectRoot, ideImpl, globalVars, projectVars)
+			used, missing, locations := substituteMCPVars(assetName, projectRoot, ideImpl, globalVars, projectVars)
 			_ = used
-			printMissingVars(missing)
+			printMissingVars(itemType, assetName, missing, locations, projectVarsPath, globalVarsPath)
 		}
 	}
 }
 
 // substituteMCPVars 对 MCP 配置中的指定条目执行变量替换
-func substituteMCPVars(assetName, projectRoot string, ideImpl ide.IDE, globalVars, projectVars *types.VarsConfig) (map[string]string, []string) {
+func substituteMCPVars(assetName, projectRoot string, ideImpl ide.IDE, globalVars, projectVars *types.VarsConfig) (map[string]string, []string, map[string][]string) {
 	managed := managedName(assetName)
+	configPath := ideImpl.MCPConfigPath(projectRoot)
 
 	existingConfig, err := ideImpl.LoadMCPConfig(projectRoot)
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	server, ok := existingConfig.MCPServers[managed]
 	if !ok {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	var allContent string
@@ -285,7 +291,12 @@ func substituteMCPVars(assetName, projectRoot string, ideImpl ide.IDE, globalVar
 
 	placeholders := vars.ExtractPlaceholders(allContent)
 	if len(placeholders) == 0 {
-		return nil, nil
+		return nil, nil, nil
+	}
+
+	locations := make(map[string][]string, len(placeholders))
+	for _, placeholder := range placeholders {
+		locations[placeholder] = []string{configPath}
 	}
 
 	resolved := vars.ResolveVars(globalVars, projectVars, "mcp", assetName, placeholders)
@@ -329,18 +340,42 @@ func substituteMCPVars(assetName, projectRoot string, ideImpl ide.IDE, globalVar
 		}
 	}
 
-	return used, missing
+	return used, missing, locations
 }
 
 // printMissingVars 打印缺失变量的警告（去重）
-func printMissingVars(missing []string) {
+func printMissingVars(itemType, assetName string, missing []string, locations map[string][]string, projectVarsPath, globalVarsPath string) {
 	seen := map[string]bool{}
 	for _, m := range missing {
-		if !seen[m] {
-			fmt.Printf("  ⚠️  变量 {{%s}} 未定义 (在 .dec/vars.yaml 或 ~/.dec/local/vars.yaml 中添加)\n", m)
-			seen[m] = true
+		if seen[m] {
+			continue
 		}
+		fmt.Printf("  ⚠️  变量 {{%s}} 未定义\n", m)
+		fmt.Printf("      资产: [%s] %s\n", itemType, assetName)
+		for _, location := range formatPlaceholderLocations(locations[m]) {
+			fmt.Printf("      来源: %s\n", location)
+		}
+		fmt.Printf("      项目级: %s -> vars.%s 或 assets.%s.%s.vars.%s\n", projectVarsPath, m, itemType, assetName, m)
+		if strings.TrimSpace(globalVarsPath) != "" {
+			fmt.Printf("      本机级: %s -> vars.%s 或 assets.%s.%s.vars.%s\n", globalVarsPath, m, itemType, assetName, m)
+		}
+		seen[m] = true
 	}
+}
+
+func formatPlaceholderLocations(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	ordered := append([]string(nil), paths...)
+	sort.Strings(ordered)
+
+	formatted := make([]string, 0, len(ordered))
+	for _, path := range ordered {
+		formatted = append(formatted, filepath.Clean(path))
+	}
+	return formatted
 }
 
 // ========================================

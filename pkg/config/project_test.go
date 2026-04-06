@@ -33,6 +33,15 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 		t.Fatalf("保存失败: %v", err)
 	}
 
+	raw, err := os.ReadFile(filepath.Join(projectRoot, ".dec", "config.yaml"))
+	if err != nil {
+		t.Fatalf("读取保存后的配置失败: %v", err)
+	}
+	content := string(raw)
+	if !strings.Contains(content, "#   ides:") || !strings.Contains(content, "#   editor: code --wait") {
+		t.Fatalf("项目配置头注释应包含 ides/editor 示例, 实际内容:\n%s", content)
+	}
+
 	loaded, err := mgr.LoadProjectConfig()
 	if err != nil {
 		t.Fatalf("加载失败: %v", err)
