@@ -348,15 +348,22 @@ func TestAssetListDedup(t *testing.T) {
 		Rules: []types.AssetRef{
 			{Name: "r1", Vault: "v1"},
 			{Name: "r1", Vault: "v2"},
+			{Name: "r1", Vault: "v2"},
 			{Name: "r2", Vault: "v1"},
 		},
 	}
 	list.Dedup()
-	if len(list.Rules) != 2 {
-		t.Fatalf("去重后应有 2 个, 得到 %d", len(list.Rules))
+	if len(list.Rules) != 3 {
+		t.Fatalf("不同 vault 的同名资产应保留，重复项才去重，得到 %d", len(list.Rules))
 	}
-	if list.Rules[0].Vault != "v2" {
-		t.Fatalf("r1 应以靠后的为准, 得到 %s", list.Rules[0].Vault)
+	if list.Rules[0].Vault != "v1" {
+		t.Fatalf("第一个 r1 应保留 v1, 得到 %s", list.Rules[0].Vault)
+	}
+	if list.Rules[1].Vault != "v2" {
+		t.Fatalf("第二个 r1 应保留 v2, 得到 %s", list.Rules[1].Vault)
+	}
+	if list.Rules[2].Name != "r2" {
+		t.Fatalf("最后一个应为 r2, 得到 %s", list.Rules[2].Name)
 	}
 }
 
@@ -388,16 +395,25 @@ func TestAssetListAll(t *testing.T) {
 
 func TestAssetListFindAndRemove(t *testing.T) {
 	list := &types.AssetList{
-		Rules: []types.AssetRef{{Name: "r1", Vault: "v1"}, {Name: "r2", Vault: "v1"}},
+		Rules: []types.AssetRef{{Name: "r1", Vault: "v1"}, {Name: "r1", Vault: "v2"}, {Name: "r2", Vault: "v1"}},
+	}
+	if ref := list.FindAsset("rule", "r1", "v2"); ref == nil || ref.Vault != "v2" {
+		t.Fatal("应找到 v2 中的 r1")
 	}
 	if ref := list.FindAsset("rule", "r1"); ref == nil {
 		t.Fatal("应找到 r1")
 	}
-	if list.RemoveAsset("rule", "r1") != true {
+	if list.RemoveAsset("rule", "r1", "v2") != true {
 		t.Fatal("应成功移除")
 	}
-	if len(list.Rules) != 1 {
-		t.Fatalf("移除后应剩 1 个, 得到 %d", len(list.Rules))
+	if len(list.Rules) != 2 {
+		t.Fatalf("移除后应剩 2 个, 得到 %d", len(list.Rules))
+	}
+	if list.FindAsset("rule", "r1", "v2") != nil {
+		t.Fatal("v2 中的 r1 应已被移除")
+	}
+	if list.FindAsset("rule", "r1", "v1") == nil {
+		t.Fatal("v1 中的 r1 不应被误删")
 	}
 }
 

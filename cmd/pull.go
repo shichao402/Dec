@@ -62,8 +62,8 @@ func runPull(cmd *cobra.Command, args []string) error {
 	if projectConfig.Available != nil && !projectConfig.Available.IsEmpty() {
 		var warnings []string
 		for _, asset := range enabledAssets {
-			if projectConfig.Available.FindAsset(asset.Type, asset.Name) == nil {
-				warnings = append(warnings, fmt.Sprintf("  ⚠️  [%-5s] %s — 不在 available 中（可能拼写错误或已被删除）", asset.Type, asset.Name))
+			if projectConfig.Available.FindAsset(asset.Type, asset.Name, asset.Vault) == nil {
+				warnings = append(warnings, fmt.Sprintf("  ⚠️  [%-5s] %s (vault: %s) — 不在 available 中（可能拼写错误或已被删除）", asset.Type, asset.Name, asset.Vault))
 			} else {
 				validAssets = append(validAssets, asset)
 			}
@@ -166,10 +166,10 @@ func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRe
 		return
 	}
 
-	// 构建 enabled 集合：key = "type:name"
+	// 构建 enabled 集合：key = "vault:type:name"
 	enabledSet := make(map[string]bool)
 	for _, a := range enabledAssets {
-		enabledSet[a.Type+":"+a.Name] = true
+		enabledSet[a.Vault+":"+a.Type+":"+a.Name] = true
 	}
 
 	// 遍历 cache 目录，找出不在 enabled 中的资产
@@ -198,7 +198,7 @@ func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRe
 					assetType = "skill"
 				}
 
-				key := assetType + ":" + name
+				key := vaultName + ":" + assetType + ":" + name
 				if !enabledSet[key] {
 					// 从 IDE 中移除
 					for _, ideName := range ideNames {
@@ -207,7 +207,7 @@ func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRe
 					}
 					// 删除缓存
 					os.RemoveAll(filepath.Join(subDir, e.Name()))
-					removed = append(removed, fmt.Sprintf("[%-5s] %s", assetType, name))
+					removed = append(removed, fmt.Sprintf("[%-5s] %s (vault: %s)", assetType, name, vaultName))
 				}
 			}
 		}

@@ -387,14 +387,7 @@ func buildAssetList(allAssets []repoAssetInfo) *types.AssetList {
 	list := &types.AssetList{}
 	for _, a := range allAssets {
 		ref := types.AssetRef{Name: a.Name, Vault: a.Vault}
-		switch a.Type {
-		case "skill":
-			list.Skills = append(list.Skills, ref)
-		case "rule":
-			list.Rules = append(list.Rules, ref)
-		case "mcp":
-			list.MCPs = append(list.MCPs, ref)
-		}
+		list.Add(a.Type, ref)
 	}
 	return list
 }

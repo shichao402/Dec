@@ -126,6 +126,8 @@ func runPushRemove(itemType, assetName string) error {
 		return nil
 	}
 
+	removedVault := ""
+
 	if err := withWriteRepo(func(tx *repo.Transaction) error {
 		repoDir := tx.WorkDir()
 
@@ -133,6 +135,7 @@ func runPushRemove(itemType, assetName string) error {
 		if err != nil {
 			return fmt.Errorf("远程资产未找到: %w", err)
 		}
+		removedVault = foundVault
 
 		if err := os.RemoveAll(fullPath); err != nil {
 			return fmt.Errorf("删除远程资产失败: %w", err)
@@ -154,14 +157,14 @@ func runPushRemove(itemType, assetName string) error {
 	projectConfig, err := mgr.LoadProjectConfig()
 	if err == nil {
 		changed := false
-		ref := projectConfig.Enabled.FindAsset(itemType, assetName)
+		ref := projectConfig.Enabled.FindAsset(itemType, assetName, removedVault)
 		if ref != nil {
 			removeCachedAsset(itemType, assetName, cwd, ref.Vault)
 		}
-		if projectConfig.Enabled.RemoveAsset(itemType, assetName) {
+		if projectConfig.Enabled.RemoveAsset(itemType, assetName, removedVault) {
 			changed = true
 		}
-		if projectConfig.Available != nil && projectConfig.Available.RemoveAsset(itemType, assetName) {
+		if projectConfig.Available != nil && projectConfig.Available.RemoveAsset(itemType, assetName, removedVault) {
 			changed = true
 		}
 		if changed {

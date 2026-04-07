@@ -24,8 +24,11 @@ type GlobalConfig struct {
 	Editor  string   `yaml:"editor,omitempty"`
 }
 
+const ProjectConfigVersionV2 = "v2"
+
 // ProjectConfig 项目配置 (<project>/.dec/config.yaml)
 type ProjectConfig struct {
+	Version   string     `yaml:"version,omitempty"`
 	IDEs      []string   `yaml:"ides,omitempty"`
 	Editor    string     `yaml:"editor,omitempty"`
 	Available *AssetList `yaml:"available,omitempty"`
@@ -89,12 +92,31 @@ func (l *AssetList) All() []TypedAssetRef {
 	return all
 }
 
-// FindAsset 查找资产
-func (l *AssetList) FindAsset(assetType, name string) *AssetRef {
+// Add 添加资产引用。
+func (l *AssetList) Add(assetType string, ref AssetRef) {
+	if l == nil {
+		return
+	}
+	switch assetType {
+	case "skill":
+		l.Skills = append(l.Skills, ref)
+	case "rule":
+		l.Rules = append(l.Rules, ref)
+	case "mcp":
+		l.MCPs = append(l.MCPs, ref)
+	}
+}
+
+// FindAsset 查找资产。可选传入 vault，仅匹配指定 Vault。
+func (l *AssetList) FindAsset(assetType, name string, vault ...string) *AssetRef {
 	if l == nil {
 		return nil
 	}
 	var list []AssetRef
+	targetVault := ""
+	if len(vault) > 0 {
+		targetVault = vault[0]
+	}
 	switch assetType {
 	case "skill":
 		list = l.Skills
@@ -104,36 +126,40 @@ func (l *AssetList) FindAsset(assetType, name string) *AssetRef {
 		list = l.MCPs
 	}
 	for i := range list {
-		if list[i].Name == name {
+		if list[i].Name == name && (targetVault == "" || list[i].Vault == targetVault) {
 			return &list[i]
 		}
 	}
 	return nil
 }
 
-// RemoveAsset 移除资产
-func (l *AssetList) RemoveAsset(assetType, name string) bool {
+// RemoveAsset 移除资产。可选传入 vault，仅移除指定 Vault 中的资产。
+func (l *AssetList) RemoveAsset(assetType, name string, vault ...string) bool {
 	if l == nil {
 		return false
+	}
+	targetVault := ""
+	if len(vault) > 0 {
+		targetVault = vault[0]
 	}
 	switch assetType {
 	case "skill":
 		for i, s := range l.Skills {
-			if s.Name == name {
+			if s.Name == name && (targetVault == "" || s.Vault == targetVault) {
 				l.Skills = append(l.Skills[:i], l.Skills[i+1:]...)
 				return true
 			}
 		}
 	case "rule":
 		for i, r := range l.Rules {
-			if r.Name == name {
+			if r.Name == name && (targetVault == "" || r.Vault == targetVault) {
 				l.Rules = append(l.Rules[:i], l.Rules[i+1:]...)
 				return true
 			}
 		}
 	case "mcp":
 		for i, m := range l.MCPs {
-			if m.Name == name {
+			if m.Name == name && (targetVault == "" || m.Vault == targetVault) {
 				l.MCPs = append(l.MCPs[:i], l.MCPs[i+1:]...)
 				return true
 			}
@@ -150,13 +176,13 @@ type TypedAssetRef struct {
 
 // dedupRefs 去重，同名以靠后的为准
 func dedupRefs(refs []AssetRef) []AssetRef {
-	seen := make(map[string]int) // name -> last index
+	seen := make(map[string]int) // vault+name -> last index
 	for i, r := range refs {
-		seen[r.Name] = i
+		seen[r.Vault+"\x00"+r.Name] = i
 	}
 	var result []AssetRef
 	for i, r := range refs {
-		if seen[r.Name] == i {
+		if seen[r.Vault+"\x00"+r.Name] == i {
 			result = append(result, r)
 		}
 	}

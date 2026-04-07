@@ -33,9 +33,11 @@ Dec 的解决方案：
 
 ### 2. 项目配置
 
-项目配置位于 `.dec/config.yaml`，采用 **available/enabled** 双区结构：
+项目配置位于 `.dec/config.yaml`，采用 **available/enabled** 双区结构。当前版本为 `v2`，按 `vault -> item -> type` 组织：
 
 ```yaml
+version: v2
+
 ides:               # 可选；当前项目覆盖全局 IDE 列表
   - cursor
   - codex
@@ -43,17 +45,20 @@ ides:               # 可选；当前项目覆盖全局 IDE 列表
 editor: code --wait # 可选；也可写成 vim / vi
 
 available:          # 仓库中所有可用资产（dec config init 自动生成）
-  rules:
-    - name: my-rule
-      vault: my-vault
+  my-vault:
+    my-rule:
+      rules: true
+    postgres-tool:
+      mcp: true
 
 enabled:            # 已启用资产（从 available 复制到这里即为启用）
-  rules:
-    - name: my-rule
-      vault: my-vault
+  my-vault:
+    my-rule:
+      rules: true
 ```
 
 - `dec config init` 扫描仓库填充 available，重复执行时保留已有 enabled / editor / ides
+- 启动时读到没有 `version` 的旧配置会按 `v1` 处理，自动迁移成 `v2` 后再继续读取
 - `ides` 可选，填写当前项目要部署到的 IDE 列表；不写则继承 `~/.dec/config.yaml`。支持值见 `dec config global --ide ...`，例如 `cursor`、`codebuddy`、`windsurf`、`trae`、`claude`、`codex`
 - `editor` 可选，支持在项目级指定交互式编辑器，例如 `vim`、`vi`、`code --wait`
 - 用户从 available 复制想要的资产到 enabled
@@ -207,6 +212,7 @@ dec pull
 dec config init
 
 # 2. 编辑 .dec/config.yaml，把新资产加入 enabled
+#    例如：my-vault -> my-skill -> skills: true
 # 3. 在 .dec/cache/<vault>/ 下创建资产文件
 # 4. 推送到远程仓库
 dec push

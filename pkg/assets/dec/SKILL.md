@@ -60,9 +60,11 @@ Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skill
 
 ## 配置文件格式
 
-项目配置位于 `.dec/config.yaml`，采用 available/enabled 双区结构：
+项目配置位于 `.dec/config.yaml`，采用 available/enabled 双区结构。当前版本为 `v2`，按 `vault -> item -> type` 组织：
 
 ```yaml
+version: v2
+
 ides:               # 可选；当前项目覆盖全局 IDE 列表
   - cursor
   - codex
@@ -70,20 +72,20 @@ ides:               # 可选；当前项目覆盖全局 IDE 列表
 editor: code --wait # 可选；也可写成 vim / vi
 
 available:          # 仓库中所有可用资产（dec config init 自动生成）
-  rules:
-    - name: my-rule
-      vault: my-vault
-  mcps:
-    - name: my-mcp
-      vault: my-vault
+  my-vault:
+    my-rule:
+      rules: true
+    my-mcp:
+      mcp: true
 
 enabled:            # 已启用资产（从 available 复制到这里即为启用）
-  rules:
-    - name: my-rule
-      vault: my-vault
+  my-vault:
+    my-rule:
+      rules: true
 ```
 
 - `dec config init` 自动填充 available，enabled 留空
+- 读取到没有 `version` 的旧配置时，Dec 会按 `v1` 自动迁移到 `v2` 后再继续执行
 - `ides` 可选，填写当前项目要部署到的 IDE 列表；不写则继承全局配置
 - `editor` 可选，项目级可覆盖全局交互式编辑器
 - 用户从 available 复制想要的资产到 enabled
