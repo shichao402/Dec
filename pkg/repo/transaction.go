@@ -62,7 +62,7 @@ func newTransaction(readOnly bool) (*Transaction, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("仓库未连接\n\n运行 dec repo <url> 连接仓库")
+		return nil, fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 连接仓库")
 	}
 
 	if err := FetchBare(); err != nil {

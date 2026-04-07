@@ -154,8 +154,8 @@ function Install-Dec {
     Write-Host ""
     Write-ColorOutput "之后可以运行：" -Type "Info"
     Write-Host "  dec --help"
-    Write-Host "  dec repo <your-vault-repo-url>"
-    Write-Host "  dec vault list"
+    Write-Host "  dec config repo <your-vault-repo-url>"
+    Write-Host "  dec list"
     Write-Host ""
 }
 

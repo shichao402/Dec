@@ -130,6 +130,20 @@ assets:
 
 1. 先确保项目已经执行过 `dec config init`。
 2. 编辑 `.dec/config.yaml`，把新资产写入 `enabled`。
+   例如：
+
+   ```yaml
+   version: v2
+
+   enabled:
+     my-vault:
+       my-skill:
+         skills: true
+       my-rule:
+         rules: true
+       my-mcp:
+         mcp: true
+   ```
 3. 如需避免当前项目后续 `dec pull` 出现 available 校验警告，也把同一项写入 `available`，或在 push 后再执行一次 `dec config init` 刷新 available。
 4. 在 `.dec/cache/` 下按类型创建资产文件：
 

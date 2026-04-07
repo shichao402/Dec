@@ -7,15 +7,13 @@ Dec 自举验收脚本。
 2. 在临时 HOME / DEC_HOME 中运行，避免污染用户环境
 3. 备份并恢复项目中的 .dec / .cursor / .windsurf 等目录
 4. 验证以下关键 story：
-   - dec init 创建项目配置并安装 Dec Skill
-   - dec vault init 连接个人 vault
-   - dec sync 根据 vault.yaml 拉取 vault 资产到全部 IDE
+   - dec config repo 连接个人仓库
+   - dec config global 安装用户级 Dec Skill
+   - dec config init 生成 v2 项目配置
+   - dec pull 根据 enabled 拉取资产到多个 IDE
    - 托管资产使用 dec-* 命名且不覆盖用户原始内容
-   - dec vault pull 同步到全部 IDE，并写回 vault.yaml
-   - pull 后再次 dec sync 不会丢失资产
-   - MCP 资产通过 live mcp.json 合并，不再写 sidecar
-   - dec vault import 将项目内 skill 导入到 vault
-   - dec vault status 能检测本地修改
+   - MCP 资产通过 live mcp.json 合并
+   - dec push 将 .dec/cache 中的新增资产推送到远端
 """
 
 from __future__ import annotations
@@ -61,6 +59,7 @@ def run_command(
     cwd: Path,
     env: dict[str, str],
     check: bool = True,
+    input_text: str | None = None,
 ) -> CommandResult:
     completed = subprocess.run(
         command,
@@ -68,6 +67,7 @@ def run_command(
         env=env,
         capture_output=True,
         text=True,
+        input=input_text,
     )
     result = CommandResult(
         command=command,
@@ -165,11 +165,6 @@ def build_binary(project_root: Path, work_root: Path, env: dict[str, str]) -> Pa
     return binary_path
 
 
-def make_vault_index(items: list[dict[str, str]]) -> str:
-    payload = {"version": "v1", "items": items}
-    return json.dumps(payload, indent=2, ensure_ascii=False)
-
-
 def setup_local_vault_remote(work_root: Path, env: dict[str, str]) -> Path:
     print_step("准备本地 vault remote")
     src_repo = work_root / "vault-src"
@@ -180,15 +175,15 @@ def setup_local_vault_remote(work_root: Path, env: dict[str, str]) -> Path:
     ensure_file(src_repo / "README.md", "# Dec Vault\n")
 
     ensure_file(
-        src_repo / "skills" / "reusable-skill" / "SKILL.md",
+        src_repo / "team" / "skills" / "reusable-skill" / "SKILL.md",
         "---\nname: reusable-skill\ndescription: reusable vault skill\n---\n# reusable skill\n",
     )
     ensure_file(
-        src_repo / "skills" / "pulled-skill" / "SKILL.md",
-        "---\nname: pulled-skill\ndescription: pull target skill\n---\n# pulled skill\n",
+        src_repo / "team" / "rules" / "api-style.mdc",
+        "---\ndescription: api style rule\n---\n# api style\n",
     )
     ensure_file(
-        src_repo / "mcp" / "reusable-mcp.json",
+        src_repo / "team" / "mcp" / "reusable-mcp.json",
         json.dumps(
             {
                 "command": "npx",
@@ -200,55 +195,6 @@ def setup_local_vault_remote(work_root: Path, env: dict[str, str]) -> Path:
         )
         + "\n",
     )
-    ensure_file(
-        src_repo / "mcp" / "pulled-mcp.json",
-        json.dumps(
-            {
-                "command": "npx",
-                "args": ["-y", "pulled-mcp"],
-                "env": {"PULLED_TOKEN": "${PULLED_TOKEN}"},
-            },
-            indent=2,
-            ensure_ascii=False,
-        )
-        + "\n",
-    )
-
-    vault_items = [
-        {
-            "name": "reusable-skill",
-            "type": "skill",
-            "description": "reusable vault skill",
-            "path": "skills/reusable-skill",
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": "2026-01-01T00:00:00Z",
-        },
-        {
-            "name": "pulled-skill",
-            "type": "skill",
-            "description": "pull target skill",
-            "path": "skills/pulled-skill",
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": "2026-01-01T00:00:00Z",
-        },
-        {
-            "name": "reusable-mcp",
-            "type": "mcp",
-            "description": "reusable vault mcp",
-            "path": "mcp/reusable-mcp.json",
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": "2026-01-01T00:00:00Z",
-        },
-        {
-            "name": "pulled-mcp",
-            "type": "mcp",
-            "description": "pull target mcp",
-            "path": "mcp/pulled-mcp.json",
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": "2026-01-01T00:00:00Z",
-        },
-    ]
-    ensure_file(src_repo / "vault.json", make_vault_index(vault_items))
 
     run_command(["git", "add", "."], cwd=src_repo, env=env)
     run_command(["git", "commit", "-m", "init vault"], cwd=src_repo, env=env)
@@ -265,13 +211,33 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def overwrite_vault_config(project_root: Path) -> None:
-    print_step("写入项目级 vault.yaml 声明")
+def write_project_config(project_root: Path) -> None:
+    print_step("写入项目级 v2 配置")
     ensure_file(
-        project_root / ".dec" / "config" / "vault.yaml",
-        "vault_skills:\n  - reusable-skill\n\nvault_mcps:\n  - reusable-mcp\n",
+        project_root / ".dec" / "config.yaml",
+        """version: v2
+ides:
+  - cursor
+  - windsurf
+available:
+  team:
+    reusable-skill:
+      skills: true
+    api-style:
+      rules: true
+    reusable-mcp:
+      mcp: true
+enabled:
+  team:
+    reusable-skill:
+      skills: true
+    api-style:
+      rules: true
+    reusable-mcp:
+      mcp: true
+""",
     )
-    print_ok("vault.yaml 已声明 reusable-skill 和 reusable-mcp")
+    print_ok(".dec/config.yaml 已写入 v2 配置")
 
 
 def create_user_skill(project_root: Path, name: str) -> Path:
@@ -283,8 +249,8 @@ def create_user_skill(project_root: Path, name: str) -> Path:
     return skill_dir
 
 
-def verify_sync_outputs(project_root: Path) -> None:
-    print_step("验证 sync 输出")
+def verify_pull_outputs(project_root: Path) -> None:
+    print_step("验证 pull 输出")
     assert_exists(
         project_root / ".cursor" / "skills" / "dec-reusable-skill" / "SKILL.md",
         "Cursor 托管 reusable skill",
@@ -294,12 +260,8 @@ def verify_sync_outputs(project_root: Path) -> None:
         "Windsurf 托管 reusable skill",
     )
     assert_exists(
-        project_root / ".cursor" / "skills" / "local-story-skill" / "SKILL.md",
-        "用户原始本地 skill",
-    )
-    assert_not_exists(
-        project_root / ".windsurf" / "skills" / "reusable-skill",
-        "未托管名称的 reusable skill 副本",
+        project_root / ".cursor" / "rules" / "dec-api-style.mdc",
+        "Cursor 托管 rule",
     )
     assert_file_contains(
         project_root / ".cursor" / "mcp.json",
@@ -311,57 +273,84 @@ def verify_sync_outputs(project_root: Path) -> None:
         '"dec-reusable-mcp"',
         "Windsurf live mcp.json 已包含托管 reusable MCP",
     )
-
-
-def verify_pull_outputs(project_root: Path) -> None:
-    print_step("验证 pull 输出")
     assert_exists(
-        project_root / ".cursor" / "skills" / "dec-pulled-skill" / "SKILL.md",
-        "Cursor pull 托管 skill",
-    )
-    assert_exists(
-        project_root / ".windsurf" / "skills" / "dec-pulled-skill" / "SKILL.md",
-        "Windsurf pull 托管 skill",
-    )
-    assert_file_contains(
-        project_root / ".cursor" / "mcp.json",
-        '"dec-pulled-mcp"',
-        "Cursor pull 托管 MCP",
-    )
-    assert_file_contains(
-        project_root / ".windsurf" / "mcp.json",
-        '"dec-pulled-mcp"',
-        "Windsurf pull 托管 MCP",
+        project_root / ".cursor" / "skills" / "local-story-skill" / "SKILL.md",
+        "用户原始本地 skill",
     )
     assert_not_exists(
-        project_root / ".cursor" / "mcp-configs" / "dec-pulled-mcp.json",
-        "旧 sidecar MCP 文件",
+        project_root / ".windsurf" / "skills" / "reusable-skill",
+        "未托管名称的 reusable skill 副本",
+    )
+    assert_exists(
+        project_root / ".dec" / "cache" / "team" / "skills" / "reusable-skill" / "SKILL.md",
+        "缓存中的 skill",
+    )
+    assert_exists(
+        project_root / ".dec" / "cache" / "team" / "rules" / "api-style.mdc",
+        "缓存中的 rule",
+    )
+    assert_exists(
+        project_root / ".dec" / "cache" / "team" / "mcp" / "reusable-mcp.json",
+        "缓存中的 mcp",
     )
 
 
-def verify_pull_updates_vault_config(project_root: Path) -> None:
-    print_step("验证 pull 自动更新 vault.yaml")
-    vault_config = read_text(project_root / ".dec" / "config" / "vault.yaml")
-    assert_contains(vault_config, "pulled-skill", "vault.yaml 已声明 pulled-skill")
-    assert_contains(vault_config, "pulled-mcp", "vault.yaml 已声明 pulled-mcp")
+def create_new_assets(project_root: Path) -> None:
+    print_step("创建待 push 的新资产")
+    config_path = project_root / ".dec" / "config.yaml"
+    config_text = read_text(config_path)
+    marker = "enabled:\n  team:\n"
+    addition = (
+        "    story-skill:\n"
+        "      skills: true\n"
+        "    story-rule:\n"
+        "      rules: true\n"
+        "    story-mcp:\n"
+        "      mcp: true\n"
+    )
+    if addition not in config_text:
+        config_text = config_text.replace(marker, marker + addition)
+        config_path.write_text(config_text, encoding="utf-8")
+
+    ensure_file(
+        project_root / ".dec" / "cache" / "team" / "skills" / "story-skill" / "SKILL.md",
+        "---\nname: story-skill\ndescription: pushed story skill\n---\n# story skill\n",
+    )
+    ensure_file(
+        project_root / ".dec" / "cache" / "team" / "rules" / "story-rule.mdc",
+        "---\ndescription: pushed story rule\n---\n# story rule\n",
+    )
+    ensure_file(
+        project_root / ".dec" / "cache" / "team" / "mcp" / "story-mcp.json",
+        json.dumps(
+            {
+                "command": "npx",
+                "args": ["-y", "story-mcp"],
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+    )
+    print_ok("已创建 story-skill / story-rule / story-mcp")
 
 
-def verify_saved_to_remote(work_root: Path, remote_repo: Path, env: dict[str, str]) -> None:
-    print_step("验证保存后的 vault remote 内容")
+def verify_pushed_to_remote(work_root: Path, remote_repo: Path, env: dict[str, str]) -> None:
+    print_step("验证 push 后的远端内容")
     inspect_dir = work_root / "vault-inspect"
     run_command(["git", "clone", str(remote_repo), str(inspect_dir)], cwd=work_root, env=env)
-    vault_json = read_text(inspect_dir / "vault.json")
-    assert_contains(vault_json, "\"story-created-skill\"", "remote vault 已包含 story-created-skill")
     assert_exists(
-        inspect_dir / "skills" / "story-created-skill" / "SKILL.md",
+        inspect_dir / "team" / "skills" / "story-skill" / "SKILL.md",
         "remote vault skill 目录",
     )
-
-
-def verify_status_output(status_output: str) -> None:
-    print_step("验证 vault status 输出")
-    assert_contains(status_output, "story-created-skill", "status 输出包含已修改 skill")
-    assert_contains(status_output, "[M]", "status 输出包含 modified 标记")
+    assert_exists(
+        inspect_dir / "team" / "rules" / "story-rule.mdc",
+        "remote vault rule 文件",
+    )
+    assert_exists(
+        inspect_dir / "team" / "mcp" / "story-mcp.json",
+        "remote vault mcp 文件",
+    )
 
 
 def run_story(project_root: Path, keep_artifacts: bool) -> None:
@@ -384,6 +373,7 @@ def run_story(project_root: Path, keep_artifacts: bool) -> None:
                 "GIT_AUTHOR_EMAIL": "dec-self-host@example.com",
                 "GIT_COMMITTER_NAME": "Dec Self Host Test",
                 "GIT_COMMITTER_EMAIL": "dec-self-host@example.com",
+                "EDITOR": "true",
             }
         )
 
@@ -407,77 +397,43 @@ def run_story(project_root: Path, keep_artifacts: bool) -> None:
             binary_path = build_binary(project_root, work_root, env)
             remote_repo = setup_local_vault_remote(work_root, env)
 
-            print_step("运行 dec init")
+            print_step("运行 dec config repo")
             run_command(
-                [str(binary_path), "init", "--ide", "cursor", "--ide", "windsurf"],
+                [str(binary_path), "config", "repo", str(remote_repo)],
                 cwd=project_root,
                 env=env,
             )
-            assert_exists(project_root / ".dec" / "config" / "vault.yaml", "vault.yaml")
+
+            print_step("运行 dec config global")
+            run_command(
+                [str(binary_path), "config", "global", "--ide", "cursor", "--ide", "windsurf"],
+                cwd=project_root,
+                env=env,
+            )
             assert_exists(home_dir / ".cursor" / "skills" / "dec" / "SKILL.md", "用户级 Dec Skill")
 
-            print_step("运行 dec vault init")
+            print_step("运行 dec config init")
             run_command(
-                [str(binary_path), "vault", "init", "--repo", str(remote_repo)],
+                [str(binary_path), "config", "init"],
                 cwd=project_root,
                 env=env,
             )
-            assert_exists(dec_home / "vault" / ".git", "本地 vault clone")
+            assert_exists(project_root / ".dec" / "config.yaml", "项目配置文件")
+            assert_exists(project_root / ".dec" / "vars.yaml", "项目变量文件")
+            assert_file_contains(project_root / ".dec" / "config.yaml", "version: v2", "项目配置为 v2")
 
-            overwrite_vault_config(project_root)
+            write_project_config(project_root)
             create_user_skill(project_root, "local-story-skill")
 
-            print_step("运行 dec sync")
-            run_command([str(binary_path), "sync"], cwd=project_root, env=env)
-            verify_sync_outputs(project_root)
-
-            print_step("运行 dec vault pull skill pulled-skill")
-            run_command(
-                [str(binary_path), "vault", "pull", "skill", "pulled-skill"],
-                cwd=project_root,
-                env=env,
-            )
-            print_step("运行 dec vault pull mcp pulled-mcp")
-            run_command(
-                [str(binary_path), "vault", "pull", "mcp", "pulled-mcp"],
-                cwd=project_root,
-                env=env,
-            )
-            verify_pull_outputs(project_root)
-            verify_pull_updates_vault_config(project_root)
-
-            print_step("pull 后再次运行 dec sync")
-            run_command([str(binary_path), "sync"], cwd=project_root, env=env)
+            print_step("运行 dec pull")
+            run_command([str(binary_path), "pull"], cwd=project_root, env=env)
             verify_pull_outputs(project_root)
 
-            print_step("运行 dec vault import")
-            created_skill_dir = create_user_skill(project_root, "story-created-skill")
-            run_command(
-                [
-                    str(binary_path),
-                    "vault",
-                    "import",
-                    "skill",
-                    str(created_skill_dir),
-                    "--tag",
-                    "story",
-                ],
-                cwd=project_root,
-                env=env,
-            )
-            verify_saved_to_remote(work_root, remote_repo, env)
+            create_new_assets(project_root)
 
-            print_step("修改已保存 skill 后运行 dec vault status")
-            ensure_file(
-                created_skill_dir / "notes.md",
-                "# changed\n",
-            )
-            status_result = run_command(
-                [str(binary_path), "vault", "status"],
-                cwd=project_root,
-                env=env,
-            )
-            verify_status_output(status_result.stdout)
+            print_step("运行 dec push")
+            run_command([str(binary_path), "push"], cwd=project_root, env=env)
+            verify_pushed_to_remote(work_root, remote_repo, env)
 
             print("\n[SUCCESS] 自举验收通过")
         finally:

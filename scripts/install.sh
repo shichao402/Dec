@@ -217,8 +217,8 @@ main() {
     echo ""
     print_info "之后可以运行："
     echo "  dec --help"
-    echo "  dec repo <your-vault-repo-url>"
-    echo "  dec vault list"
+    echo "  dec config repo <your-vault-repo-url>"
+    echo "  dec list"
     echo ""
 }
 

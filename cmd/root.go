@@ -28,7 +28,7 @@ var RootCmd = &cobra.Command{
   dec config init                   # 初始化项目配置
   dec list                          # 列出所有 Vault 和资产
   dec search <query>                # 搜索资产
-  dec pull skill <name>             # 拉取资产到项目
+  dec pull                          # 拉取已启用资产到项目
   dec push                          # 推送修改到仓库`,
 	Version: getVersionString(),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {

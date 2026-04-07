@@ -155,6 +155,18 @@ dec push --remove skill my-skill      # 删除远程资产（需确认）
 如果要新增资产，直接在已初始化项目的 `.dec/` 目录中组织并编写即可：
 
 1. 在 `.dec/config.yaml` 的 `enabled` 中加入新资产。
+   例如：
+
+   ```yaml
+   enabled:
+     my-vault:
+       my-skill:
+         skills: true
+       my-rule:
+         rules: true
+       my-mcp:
+         mcp: true
+   ```
 2. 在 `.dec/cache/<vault>/` 下创建对应文件：
 
 ```text
@@ -313,6 +325,21 @@ assets:
     my-mcp:
       vars:
         API_TOKEN: "<TOKEN>"
+```
+
+项目配置示例：
+
+```yaml
+version: v2
+
+enabled:
+  my-vault:
+    my-skill:
+      skills: true
+    my-rule:
+      rules: true
+    my-mcp:
+      mcp: true
 ```
 
 ## 故障排查

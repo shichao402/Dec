@@ -422,7 +422,7 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("检查仓库连接失败: %w", err)
 	}
 	if !connected {
-		return fmt.Errorf("仓库未连接\n\n运行 dec repo <url> 先连接你的仓库")
+		return fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 先连接你的仓库")
 	}
 
 	// 确定要配置的 IDE 列表
