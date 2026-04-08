@@ -5,7 +5,7 @@ Dec 自举验收脚本。
 目标：
 1. 使用当前仓库自身作为项目目录
 2. 在临时 HOME / DEC_HOME 中运行，避免污染用户环境
-3. 备份并恢复项目中的 .dec / .cursor / .windsurf 等目录
+3. 备份并恢复项目中的 .dec / .cursor / .claude 等目录
 4. 验证以下关键 story：
    - dec config repo 连接个人仓库
    - dec config global 安装用户级 Dec Skill
@@ -218,7 +218,7 @@ def write_project_config(project_root: Path) -> None:
         """version: v2
 ides:
   - cursor
-  - windsurf
+  - claude
 available:
   team:
     reusable-skill:
@@ -256,8 +256,8 @@ def verify_pull_outputs(project_root: Path) -> None:
         "Cursor 托管 reusable skill",
     )
     assert_exists(
-        project_root / ".windsurf" / "skills" / "dec-reusable-skill" / "SKILL.md",
-        "Windsurf 托管 reusable skill",
+        project_root / ".claude" / "skills" / "dec-reusable-skill" / "SKILL.md",
+        "Claude 托管 reusable skill",
     )
     assert_exists(
         project_root / ".cursor" / "rules" / "dec-api-style.mdc",
@@ -269,16 +269,16 @@ def verify_pull_outputs(project_root: Path) -> None:
         "Cursor live mcp.json 已包含托管 reusable MCP",
     )
     assert_file_contains(
-        project_root / ".windsurf" / "mcp.json",
+        project_root / ".claude" / "mcp.json",
         '"dec-reusable-mcp"',
-        "Windsurf live mcp.json 已包含托管 reusable MCP",
+        "Claude live mcp.json 已包含托管 reusable MCP",
     )
     assert_exists(
         project_root / ".cursor" / "skills" / "local-story-skill" / "SKILL.md",
         "用户原始本地 skill",
     )
     assert_not_exists(
-        project_root / ".windsurf" / "skills" / "reusable-skill",
+        project_root / ".claude" / "skills" / "reusable-skill",
         "未托管名称的 reusable skill 副本",
     )
     assert_exists(
@@ -383,9 +383,8 @@ def run_story(project_root: Path, keep_artifacts: bool) -> None:
             [
                 ".dec",
                 ".cursor",
-                ".windsurf",
+                ".claude",
                 ".codebuddy",
-                ".trae",
             ],
         )
 
@@ -406,7 +405,7 @@ def run_story(project_root: Path, keep_artifacts: bool) -> None:
 
             print_step("运行 dec config global")
             run_command(
-                [str(binary_path), "config", "global", "--ide", "cursor", "--ide", "windsurf"],
+                [str(binary_path), "config", "global", "--ide", "cursor", "--ide", "claude"],
                 cwd=project_root,
                 env=env,
             )

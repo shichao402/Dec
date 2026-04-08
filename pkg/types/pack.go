@@ -5,16 +5,34 @@ type IDEsConfig struct {
 	IDEs []string `yaml:"ides,omitempty" json:"ides,omitempty"`
 }
 
-// MCPConfig 表示 MCP 配置文件（.cursor/mcp.json）
+// MCPConfig 表示 IDE 的 MCP 配置。
+//
+// 对于大多数 IDE，对应的是 JSON 文件（例如 .cursor/mcp.json）；
+// 对于 Codex，对应的是 config.toml 中的 [mcp_servers] 段。
 type MCPConfig struct {
 	MCPServers map[string]MCPServer `json:"mcpServers"`
+	Extra      map[string]any       `json:"-"`
 }
 
 // MCPServer 表示单个 MCP Server 配置
 type MCPServer struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	Command           string            `json:"command,omitempty"`
+	Args              []string          `json:"args,omitempty"`
+	Env               map[string]string `json:"env,omitempty"`
+	EnvVars           []string          `json:"env_vars,omitempty"`
+	Cwd               string            `json:"cwd,omitempty"`
+	URL               string            `json:"url,omitempty"`
+	BearerTokenEnvVar string            `json:"bearer_token_env_var,omitempty"`
+	HTTPHeaders       map[string]string `json:"http_headers,omitempty"`
+	EnvHTTPHeaders    map[string]string `json:"env_http_headers,omitempty"`
+	StartupTimeoutSec *int              `json:"startup_timeout_sec,omitempty"`
+	ToolTimeoutSec    *int              `json:"tool_timeout_sec,omitempty"`
+	Enabled           *bool             `json:"enabled,omitempty"`
+	Required          *bool             `json:"required,omitempty"`
+	EnabledTools      []string          `json:"enabled_tools,omitempty"`
+	DisabledTools     []string          `json:"disabled_tools,omitempty"`
+	Scopes            []string          `json:"scopes,omitempty"`
+	Extra             map[string]any    `json:"-"`
 }
 
 // GlobalConfig 全局配置结构 (~/.dec/config.yaml)

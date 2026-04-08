@@ -122,7 +122,7 @@ func SetRepoURL(url string) error {
 func GetEffectiveIDEs(projectConfig *types.ProjectConfig) ([]string, error) {
 	// 项目级有配置则优先
 	if projectConfig != nil && len(projectConfig.IDEs) > 0 {
-		return projectConfig.IDEs, nil
+		return validateConfiguredIDEs(projectConfig.IDEs)
 	}
 
 	// 回退到全局配置
@@ -131,11 +131,37 @@ func GetEffectiveIDEs(projectConfig *types.ProjectConfig) ([]string, error) {
 		return nil, err
 	}
 	if len(globalConfig.IDEs) > 0 {
-		return globalConfig.IDEs, nil
+		return validateConfiguredIDEs(globalConfig.IDEs)
 	}
 
 	// 默认 cursor
 	return []string{"cursor"}, nil
+}
+
+var removedBuiltInIDEs = map[string]struct{}{
+	"windsurf": {},
+	"trae":     {},
+}
+
+func validateConfiguredIDEs(ideNames []string) ([]string, error) {
+	validated := make([]string, 0, len(ideNames))
+	seen := make(map[string]struct{}, len(ideNames))
+	for _, ideName := range ideNames {
+		name := strings.TrimSpace(ideName)
+		if name == "" {
+			continue
+		}
+		if _, removed := removedBuiltInIDEs[name]; removed {
+			return nil, fmt.Errorf("IDE 已移除内置支持: %s", name)
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		validated = append(validated, name)
+	}
+
+	return validated, nil
 }
 
 // GetEffectiveEditor 获取有效的交互编辑器（项目级覆盖全局）。

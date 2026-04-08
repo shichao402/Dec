@@ -134,7 +134,12 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(globalConfig.IDEs) > 0 {
-		fmt.Printf("  默认 IDE: %s\n", strings.Join(globalConfig.IDEs, ", "))
+		effectiveGlobalIDEs, err := config.GetEffectiveIDEs(nil)
+		if err == nil {
+			fmt.Printf("  默认 IDE: %s\n", strings.Join(effectiveGlobalIDEs, ", "))
+		} else {
+			fmt.Printf("  默认 IDE: 配置错误: %v\n", err)
+		}
 	} else {
 		fmt.Println("  默认 IDE: (使用默认: cursor)")
 	}
@@ -191,6 +196,8 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 				effectiveIDEs, err := config.GetEffectiveIDEs(projectConfig)
 				if err == nil {
 					fmt.Printf("  有效 IDE: %s\n", strings.Join(effectiveIDEs, ", "))
+				} else {
+					fmt.Printf("  有效 IDE: 配置错误: %v\n", err)
 				}
 
 				effectiveEditor, err := config.GetEffectiveEditor(projectConfig)
@@ -401,7 +408,7 @@ var configGlobalCmd = &cobra.Command{
 	Short: "配置全局 IDE",
 	Long: `为本机所有支持的 IDE 配置 Dec Skill。
 
-默认配置所有支持的 IDE (cursor, codebuddy, windsurf, trae, claude, claude-internal, codex, codex-internal)。
+默认配置所有当前支持的 IDE。
 可以通过 --ide 标志指定要配置的 IDE 子集。
 
 配置会为每个 IDE 安装 Dec 的 Agent Skill，
@@ -432,8 +439,8 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 		targetIDEs = configIDEs
 	} else {
 		// 使用所有支持的 IDE
-		knownIDEs := []string{"cursor", "codebuddy", "windsurf", "trae", "claude", "claude-internal", "codex", "codex-internal"}
-		targetIDEs = knownIDEs
+		targetIDEs = ide.List()
+		sort.Strings(targetIDEs)
 	}
 
 	// 验证 IDE 名称有效性
@@ -501,9 +508,11 @@ func installDecSkillForIDE(ideName string) error {
 		return fmt.Errorf("获取用户主目录失败: %w", err)
 	}
 
-	// 构建 IDE 用户级 skills 目录
-	// 约定：~/.{ide-name}/skills/
-	skillsDir := filepath.Join(homeDir, "."+ideName, "skills")
+	// 构建 IDE 用户级 skills 目录。
+	// codex-internal 在用户目录使用 ~/.codex-internal，
+	// 但项目级目录仍然复用 .codex。
+	userDirKey := "." + ideName
+	skillsDir := filepath.Join(homeDir, userDirKey, "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
 		return fmt.Errorf("创建 %s skills 目录失败: %w", ideName, err)
 	}

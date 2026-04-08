@@ -87,7 +87,19 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	ideNames, err := config.GetEffectiveIDEs(projectConfig)
 	if err != nil {
-		ideNames = []string{"cursor"}
+		return fmt.Errorf("解析有效 IDE 失败: %w", err)
+	}
+
+	migrationNotes, err := migrateLegacyProjectLayouts(cwd, ideNames)
+	if err != nil {
+		return fmt.Errorf("迁移旧版项目布局失败: %w", err)
+	}
+	if len(migrationNotes) > 0 {
+		fmt.Println("🔄 检测到旧版 Codex 项目布局，已自动迁移:")
+		for _, note := range migrationNotes {
+			fmt.Printf("  %s\n", note)
+		}
+		fmt.Println()
 	}
 
 	// 清理不再启用的旧资产
@@ -228,6 +240,15 @@ func saveVersionMeta(projectRoot, commitHash string) {
 	content := fmt.Sprintf("commit: %s\npulled_at: \"%s\"\n", commitHash, time.Now().Format(time.RFC3339))
 	_ = os.MkdirAll(filepath.Dir(versionPath), 0755)
 	_ = os.WriteFile(versionPath, []byte(content), 0644)
+}
+
+func migrateLegacyProjectLayouts(projectRoot string, ideNames []string) ([]string, error) {
+	for _, ideName := range ideNames {
+		if ideName == "codex" || ideName == "codex-internal" {
+			return ide.MigrateLegacyCodexProject(projectRoot)
+		}
+	}
+	return nil, nil
 }
 
 // installAssetToIDEs 将资产安装到多个 IDE

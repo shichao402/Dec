@@ -70,7 +70,7 @@ func TestSaveGlobalConfig_RemovesLegacyLocalConfig(t *testing.T) {
 
 	cfg := &types.GlobalConfig{
 		RepoURL: "https://example.com/repo.git",
-		IDEs:    []string{"cursor", "windsurf"},
+		IDEs:    []string{"cursor", "claude"},
 		Editor:  "vim",
 	}
 	if err := SaveGlobalConfig(cfg); err != nil {
@@ -140,6 +140,40 @@ func TestGetEffectiveIDEs_PrefersProjectThenGlobalThenDefault(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, []string{"cursor"}) {
 		t.Fatalf("默认 IDE = %#v, 期望 %#v", got, []string{"cursor"})
+	}
+}
+
+func TestGetEffectiveIDEs_RejectsRemovedIDE(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+
+	if _, err := GetEffectiveIDEs(&types.ProjectConfig{IDEs: []string{"windsurf"}}); err == nil {
+		t.Fatal("项目级配置已移除的 IDE 时应返回错误")
+	} else if !strings.Contains(err.Error(), "windsurf") {
+		t.Fatalf("错误信息应包含 windsurf, 实际: %v", err)
+	}
+
+	if err := SaveGlobalConfig(&types.GlobalConfig{IDEs: []string{"trae"}}); err != nil {
+		t.Fatalf("写入全局 IDE 配置失败: %v", err)
+	}
+
+	if _, err := GetEffectiveIDEs(&types.ProjectConfig{}); err == nil {
+		t.Fatal("全局配置已移除的 IDE 时应返回错误")
+	} else if !strings.Contains(err.Error(), "trae") {
+		t.Fatalf("错误信息应包含 trae, 实际: %v", err)
+	}
+}
+
+func TestGetEffectiveIDEs_AllowsCustomFallbackIDE(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+
+	got, err := GetEffectiveIDEs(&types.ProjectConfig{IDEs: []string{"my-custom-ide"}})
+	if err != nil {
+		t.Fatalf("自定义 fallback IDE 不应报错: %v", err)
+	}
+	if !reflect.DeepEqual(got, []string{"my-custom-ide"}) {
+		t.Fatalf("自定义 fallback IDE = %#v, 期望 %#v", got, []string{"my-custom-ide"})
 	}
 }
 

@@ -25,7 +25,7 @@ func TestGetUnregisteredIDEReturnsFallback(t *testing.T) {
 }
 
 func TestIsValidRegistered(t *testing.T) {
-	for _, name := range []string{"cursor", "codebuddy", "windsurf", "trae", "claude", "claude-internal", "codex", "codex-internal"} {
+	for _, name := range []string{"cursor", "codebuddy", "claude", "claude-internal", "codex", "codex-internal"} {
 		if !IsValid(name) {
 			t.Fatalf("已注册 IDE %s 应返回 IsValid=true", name)
 		}
@@ -36,6 +36,12 @@ func TestIsValidUnregistered(t *testing.T) {
 	if IsValid("nonexistent") {
 		t.Fatalf("未注册 IDE 应返回 IsValid=false")
 	}
+	if IsValid("windsurf") {
+		t.Fatalf("已移除的 IDE windsurf 应返回 IsValid=false")
+	}
+	if IsValid("trae") {
+		t.Fatalf("已移除的 IDE trae 应返回 IsValid=false")
+	}
 	if IsValid("") {
 		t.Fatalf("空字符串应返回 IsValid=false")
 	}
@@ -45,7 +51,7 @@ func TestListContainsAllRegistered(t *testing.T) {
 	names := List()
 	sort.Strings(names)
 
-	expected := []string{"claude", "claude-internal", "codebuddy", "codex", "codex-internal", "cursor", "trae", "windsurf"}
+	expected := []string{"claude", "claude-internal", "codebuddy", "codex", "codex-internal", "cursor"}
 	if len(names) != len(expected) {
 		t.Fatalf("期望 %d 个 IDE，得到 %d 个: %v", len(expected), len(names), names)
 	}
@@ -72,6 +78,27 @@ func TestCursorMCPConfigPath(t *testing.T) {
 	}
 }
 
+func TestCodexMCPConfigPath(t *testing.T) {
+	codex := Get("codex")
+	path := codex.MCPConfigPath("/project")
+	if path != "/project/.codex/config.toml" {
+		t.Fatalf("Codex MCP 配置路径应为 /project/.codex/config.toml，得到 %s", path)
+	}
+}
+
+func TestCodexInternalProjectUsesCodexPath(t *testing.T) {
+	impl := Get("codex-internal")
+	if rulesDir := impl.RulesDir("/project"); rulesDir != "/project/.codex/rules" {
+		t.Fatalf("codex-internal 项目级 RulesDir 应复用 /project/.codex/rules，得到 %s", rulesDir)
+	}
+	if skillsDir := impl.SkillsDir("/project"); skillsDir != "/project/.codex/skills" {
+		t.Fatalf("codex-internal 项目级 SkillsDir 应复用 /project/.codex/skills，得到 %s", skillsDir)
+	}
+	if path := impl.MCPConfigPath("/project"); path != "/project/.codex/config.toml" {
+		t.Fatalf("codex-internal 项目级 MCP 配置应复用 /project/.codex/config.toml，得到 %s", path)
+	}
+}
+
 func TestIDEDirectoryStructure(t *testing.T) {
 	tests := []struct {
 		ide       string
@@ -80,12 +107,10 @@ func TestIDEDirectoryStructure(t *testing.T) {
 	}{
 		{"cursor", "/project/.cursor/rules", "/project/.cursor/skills"},
 		{"codebuddy", "/project/.codebuddy/rules", "/project/.codebuddy/skills"},
-		{"windsurf", "/project/.windsurf/rules", "/project/.windsurf/skills"},
-		{"trae", "/project/.trae/rules", "/project/.trae/skills"},
 		{"claude", "/project/.claude/rules", "/project/.claude/skills"},
 		{"claude-internal", "/project/.claude-internal/rules", "/project/.claude-internal/skills"},
 		{"codex", "/project/.codex/rules", "/project/.codex/skills"},
-		{"codex-internal", "/project/.codex-internal/rules", "/project/.codex-internal/skills"},
+		{"codex-internal", "/project/.codex/rules", "/project/.codex/skills"},
 	}
 
 	for _, tt := range tests {

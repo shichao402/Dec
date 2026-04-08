@@ -1,23 +1,42 @@
 # Dec 项目配置
-# available: 仓库中所有可用资产（dec config init 自动生成）
-# enabled: 已启用资产（从 available 复制到这里即为启用）
+# version: 配置结构版本；当前固定为 v2
+# ides: 项目级 IDE 覆盖（可选），例如：
+#   ides:
+#     - cursor
+#     - codex
+# editor: 项目级交互式编辑器，覆盖全局配置（可选），例如：
+#   editor: code --wait
+#   editor: vim
+# available / enabled: 按 vault -> item -> type 组织，type 使用 skills / rules / mcp
+#   my-vault:
+#     my-asset:
+#       skills: true
+#       rules: true
 
+version: v2
 available:
-  rules:
-    - name: cli-release-rules
-      vault: cli
-    - name: vikunja-integration
-      vault: vikunja
-  mcps:
-    - name: vikunja-mcp
-      vault: vikunja
-
+    cli:
+        cli-release-rules:
+            rules: true
+        cli-release-workflow:
+            skills: true
+    vikunja:
+        vikunja-integration:
+            rules: true
+        vikunja-mcp:
+            mcp: true
+        vikunja-workflow:
+            skills: true
 enabled:
-  rules:
-    - name: cli-release-rules
-      vault: cli
-    - name: vikunja-integration
-      vault: vikunja
-  mcps:
-    - name: vikunja-mcp
-      vault: vikunja
+    cli:
+        cli-release-rules:
+            rules: true
+        cli-release-workflow:
+            skills: true
+    vikunja:
+        vikunja-integration:
+            rules: true
+        vikunja-mcp:
+            mcp: true
+        vikunja-workflow:
+            skills: true

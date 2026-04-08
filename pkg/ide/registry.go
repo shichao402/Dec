@@ -57,10 +57,10 @@ func init() {
 	Register(&baseIDE{name: "cursor", dirKey: ".cursor"})
 	// CodeBuddy 的 MCP 配置在根目录 .mcp.json
 	Register(&baseIDE{name: "codebuddy", dirKey: ".codebuddy", mcpConfigPath: ".mcp.json"})
-	Register(&baseIDE{name: "windsurf", dirKey: ".windsurf"})
-	Register(&baseIDE{name: "trae", dirKey: ".trae"})
 	Register(&baseIDE{name: "claude", dirKey: ".claude"})
 	Register(&baseIDE{name: "claude-internal", dirKey: ".claude-internal"})
-	Register(&baseIDE{name: "codex", dirKey: ".codex"})
-	Register(&baseIDE{name: "codex-internal", dirKey: ".codex-internal"})
+	Register(newCodexIDE("codex"))
+	// codex-internal 在用户目录使用 ~/.codex-internal，
+	// 但项目级配置仍然落在 .codex/ 下。
+	Register(newCodexIDE("codex-internal"))
 }

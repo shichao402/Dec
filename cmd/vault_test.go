@@ -278,6 +278,86 @@ func TestInstallMCPToIDE(t *testing.T) {
 	}
 }
 
+func TestInstallMCPToCodexInternalIDEUsesProjectCodexConfig(t *testing.T) {
+	projectRoot := t.TempDir()
+	configPath := filepath.Join(projectRoot, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatalf("创建 .codex 目录失败: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`model = "gpt-5.4"
+
+[mcp_servers.user]
+command = "npx"
+`), 0644); err != nil {
+		t.Fatalf("写入现有 Codex config.toml 失败: %v", err)
+	}
+
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "pg.json")
+	if err := os.WriteFile(srcPath, []byte(`{"command":"npx","args":["-y","pg"]}`), 0644); err != nil {
+		t.Fatalf("写入 MCP 片段失败: %v", err)
+	}
+
+	impl := ide.Get("codex-internal")
+	if err := installAssetToIDE("mcp", "pg", srcPath, projectRoot, impl); err != nil {
+		t.Fatalf("安装失败: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("读取 Codex config.toml 失败: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `[mcp_servers.user]`) {
+		t.Fatalf("用户自定义 Codex MCP 配置不应丢失:\n%s", content)
+	}
+	if !strings.Contains(content, `[mcp_servers.dec-pg]`) {
+		t.Fatalf("托管的 Codex MCP 配置未写入 .codex/config.toml:\n%s", content)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".codex-internal", "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("项目级 codex-internal 不应写入 .codex-internal/config.toml: %v", err)
+	}
+}
+
+func TestRemoveMCPFromCodexIDEPreservesUserConfig(t *testing.T) {
+	projectRoot := t.TempDir()
+	configPath := filepath.Join(projectRoot, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatalf("创建 .codex 目录失败: %v", err)
+	}
+	content := `[mcp_servers.user]
+command = "user"
+
+[mcp_servers.dec-pg]
+command = "npx"
+args = ["-y","pg"]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("写入 Codex config.toml 失败: %v", err)
+	}
+
+	impl := ide.Get("codex")
+	removed, err := removeAssetFromIDE("mcp", "pg", projectRoot, impl)
+	if err != nil {
+		t.Fatalf("移除失败: %v", err)
+	}
+	if !removed {
+		t.Fatal("应返回 true")
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("读取 Codex config.toml 失败: %v", err)
+	}
+	result := string(data)
+	if !strings.Contains(result, `[mcp_servers.user]`) {
+		t.Fatalf("用户自定义 Codex MCP 配置不应被删除:\n%s", result)
+	}
+	if strings.Contains(result, `[mcp_servers.dec-pg]`) {
+		t.Fatalf("托管的 Codex MCP 配置应被删除:\n%s", result)
+	}
+}
+
 func TestRemoveSkillFromIDE(t *testing.T) {
 	projectRoot := t.TempDir()
 	skillDir := filepath.Join(projectRoot, ".cursor", "skills", "dec-my-skill")
