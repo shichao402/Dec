@@ -30,7 +30,9 @@ var RootCmd = &cobra.Command{
   dec search <query>                # 搜索资产
   dec pull                          # 拉取已启用资产到项目
   dec push                          # 推送修改到仓库`,
-	Version: getVersionString(),
+	SilenceErrors: true,
+	SilenceUsage:  true,
+	Version:       getVersionString(),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// 跳过 update 和 version 命令自身的检查
 		if cmd.Name() == "update" || cmd.Name() == "version" {

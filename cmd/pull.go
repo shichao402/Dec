@@ -85,10 +85,17 @@ func runPull(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	ideNames, err := config.GetEffectiveIDEs(projectConfig)
+	ideSelection, err := config.ResolveEffectiveIDEs(projectConfig)
 	if err != nil {
 		return fmt.Errorf("解析有效 IDE 失败: %w", err)
 	}
+	for _, warning := range ideSelection.Warnings {
+		printWarningBlock(cmd.ErrOrStderr(), warning)
+	}
+	if len(ideSelection.Warnings) > 0 {
+		fmt.Fprintln(cmd.ErrOrStderr())
+	}
+	ideNames := ideSelection.IDEs
 
 	migrationNotes, err := migrateLegacyProjectLayouts(cwd, ideNames)
 	if err != nil {

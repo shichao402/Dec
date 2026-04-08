@@ -143,24 +143,103 @@ func TestGetEffectiveIDEs_PrefersProjectThenGlobalThenDefault(t *testing.T) {
 	}
 }
 
-func TestGetEffectiveIDEs_RejectsRemovedIDE(t *testing.T) {
+func TestGetEffectiveIDEs_IgnoresRemovedIDE(t *testing.T) {
 	decHome := t.TempDir()
 	setEnvForGlobalTest(t, "DEC_HOME", decHome)
 
-	if _, err := GetEffectiveIDEs(&types.ProjectConfig{IDEs: []string{"windsurf"}}); err == nil {
-		t.Fatal("项目级配置已移除的 IDE 时应返回错误")
-	} else if !strings.Contains(err.Error(), "windsurf") {
-		t.Fatalf("错误信息应包含 windsurf, 实际: %v", err)
+	got, err := GetEffectiveIDEs(&types.ProjectConfig{IDEs: []string{"cursor", "windsurf", "cursor", "trae"}})
+	if err != nil {
+		t.Fatalf("GetEffectiveIDEs() 返回错误: %v", err)
+	}
+	if !reflect.DeepEqual(got, []string{"cursor"}) {
+		t.Fatalf("过滤后的 IDE = %#v, 期望 %#v", got, []string{"cursor"})
+	}
+
+	if err := SaveGlobalConfig(&types.GlobalConfig{IDEs: []string{"trae", "claude", "trae"}}); err != nil {
+		t.Fatalf("写入全局 IDE 配置失败: %v", err)
+	}
+	got, err = GetEffectiveIDEs(&types.ProjectConfig{})
+	if err != nil {
+		t.Fatalf("GetEffectiveIDEs() 返回错误: %v", err)
+	}
+	if !reflect.DeepEqual(got, []string{"claude"}) {
+		t.Fatalf("全局过滤后的 IDE = %#v, 期望 %#v", got, []string{"claude"})
 	}
 
 	if err := SaveGlobalConfig(&types.GlobalConfig{IDEs: []string{"trae"}}); err != nil {
 		t.Fatalf("写入全局 IDE 配置失败: %v", err)
 	}
+	got, err = GetEffectiveIDEs(&types.ProjectConfig{})
+	if err != nil {
+		t.Fatalf("GetEffectiveIDEs() 返回错误: %v", err)
+	}
+	if !reflect.DeepEqual(got, []string{"cursor"}) {
+		t.Fatalf("仅剩已移除 IDE 时应回退默认 cursor, 实际 %#v", got)
+	}
+}
 
-	if _, err := GetEffectiveIDEs(&types.ProjectConfig{}); err == nil {
-		t.Fatal("全局配置已移除的 IDE 时应返回错误")
-	} else if !strings.Contains(err.Error(), "trae") {
-		t.Fatalf("错误信息应包含 trae, 实际: %v", err)
+func TestResolveEffectiveIDEs_WarnsWhenProjectContainsRemovedIDE(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+
+	selection, err := ResolveEffectiveIDEs(&types.ProjectConfig{IDEs: []string{"cursor", "windsurf", "trae"}})
+	if err != nil {
+		t.Fatalf("ResolveEffectiveIDEs() 返回错误: %v", err)
+	}
+	if !reflect.DeepEqual(selection.IDEs, []string{"cursor"}) {
+		t.Fatalf("过滤后的 IDE = %#v, 期望 %#v", selection.IDEs, []string{"cursor"})
+	}
+	if len(selection.Warnings) != 1 {
+		t.Fatalf("应返回 1 条警告，得到 %#v", selection.Warnings)
+	}
+	if !strings.Contains(selection.Warnings[0], "windsurf") || !strings.Contains(selection.Warnings[0], "trae") {
+		t.Fatalf("警告应包含已移除的 IDE 名称, 实际: %v", selection.Warnings)
+	}
+}
+
+func TestResolveEffectiveIDEs_WarnsWhenProjectFallsBackToGlobal(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+
+	if err := SaveGlobalConfig(&types.GlobalConfig{IDEs: []string{"claude"}}); err != nil {
+		t.Fatalf("写入全局 IDE 配置失败: %v", err)
+	}
+
+	selection, err := ResolveEffectiveIDEs(&types.ProjectConfig{IDEs: []string{"windsurf"}})
+	if err != nil {
+		t.Fatalf("ResolveEffectiveIDEs() 返回错误: %v", err)
+	}
+	if !reflect.DeepEqual(selection.IDEs, []string{"claude"}) {
+		t.Fatalf("回退后的 IDE = %#v, 期望 %#v", selection.IDEs, []string{"claude"})
+	}
+	if len(selection.Warnings) != 1 {
+		t.Fatalf("应返回 1 条警告，得到 %#v", selection.Warnings)
+	}
+	if !strings.Contains(selection.Warnings[0], "windsurf") || !strings.Contains(selection.Warnings[0], "将回退到全局配置") {
+		t.Fatalf("警告应包含 windsurf 与全局回退说明, 实际: %v", selection.Warnings)
+	}
+}
+
+func TestResolveEffectiveIDEs_WarnsWhenGlobalFallsBackToDefault(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+
+	if err := SaveGlobalConfig(&types.GlobalConfig{IDEs: []string{"trae"}}); err != nil {
+		t.Fatalf("写入全局 IDE 配置失败: %v", err)
+	}
+
+	selection, err := ResolveEffectiveIDEs(&types.ProjectConfig{})
+	if err != nil {
+		t.Fatalf("ResolveEffectiveIDEs() 返回错误: %v", err)
+	}
+	if !reflect.DeepEqual(selection.IDEs, []string{"cursor"}) {
+		t.Fatalf("默认 IDE = %#v, 期望 %#v", selection.IDEs, []string{"cursor"})
+	}
+	if len(selection.Warnings) != 1 {
+		t.Fatalf("应返回 1 条警告，得到 %#v", selection.Warnings)
+	}
+	if !strings.Contains(selection.Warnings[0], "trae") || !strings.Contains(selection.Warnings[0], "将回退到默认 IDE cursor") {
+		t.Fatalf("警告应包含 trae 与默认回退说明, 实际: %v", selection.Warnings)
 	}
 }
 

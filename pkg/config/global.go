@@ -118,24 +118,18 @@ func SetRepoURL(url string) error {
 	return SaveGlobalConfig(config)
 }
 
+type EffectiveIDESelection struct {
+	IDEs     []string
+	Warnings []string
+}
+
 // GetEffectiveIDEs 获取有效的 IDE 列表（项目级覆盖全局）
 func GetEffectiveIDEs(projectConfig *types.ProjectConfig) ([]string, error) {
-	// 项目级有配置则优先
-	if projectConfig != nil && len(projectConfig.IDEs) > 0 {
-		return validateConfiguredIDEs(projectConfig.IDEs)
-	}
-
-	// 回退到全局配置
-	globalConfig, err := LoadGlobalConfig()
+	selection, err := ResolveEffectiveIDEs(projectConfig)
 	if err != nil {
 		return nil, err
 	}
-	if len(globalConfig.IDEs) > 0 {
-		return validateConfiguredIDEs(globalConfig.IDEs)
-	}
-
-	// 默认 cursor
-	return []string{"cursor"}, nil
+	return selection.IDEs, nil
 }
 
 var removedBuiltInIDEs = map[string]struct{}{
@@ -143,25 +137,96 @@ var removedBuiltInIDEs = map[string]struct{}{
 	"trae":     {},
 }
 
-func validateConfiguredIDEs(ideNames []string) ([]string, error) {
-	validated := make([]string, 0, len(ideNames))
-	seen := make(map[string]struct{}, len(ideNames))
+// ResolveEffectiveIDEs 获取有效 IDE 列表，并返回被忽略的已移除 IDE 警告。
+func ResolveEffectiveIDEs(projectConfig *types.ProjectConfig) (*EffectiveIDESelection, error) {
+	selection := &EffectiveIDESelection{}
+
+	var projectConfigured configuredIDEs
+	if projectConfig != nil && len(projectConfig.IDEs) > 0 {
+		projectConfigured = filterConfiguredIDEs(projectConfig.IDEs)
+		if len(projectConfigured.IDEs) > 0 {
+			if len(projectConfigured.Removed) > 0 {
+				selection.Warnings = append(selection.Warnings, formatRemovedIDEWarning("项目配置", projectConfigured.Removed, ""))
+			}
+			selection.IDEs = projectConfigured.IDEs
+			return selection, nil
+		}
+	}
+
+	globalConfig, err := LoadGlobalConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	var globalConfigured configuredIDEs
+	if len(globalConfig.IDEs) > 0 {
+		globalConfigured = filterConfiguredIDEs(globalConfig.IDEs)
+	}
+
+	if len(projectConfigured.Removed) > 0 && len(projectConfigured.IDEs) == 0 {
+		fallbackTarget := "默认 IDE cursor"
+		if len(globalConfigured.IDEs) > 0 {
+			fallbackTarget = "全局配置"
+		}
+		selection.Warnings = append(selection.Warnings, formatRemovedIDEWarning("项目配置", projectConfigured.Removed, "将回退到"+fallbackTarget))
+	}
+
+	if len(globalConfig.IDEs) > 0 {
+		if len(globalConfigured.IDEs) > 0 {
+			if len(globalConfigured.Removed) > 0 {
+				selection.Warnings = append(selection.Warnings, formatRemovedIDEWarning("全局配置", globalConfigured.Removed, ""))
+			}
+			selection.IDEs = globalConfigured.IDEs
+			return selection, nil
+		}
+		if len(globalConfigured.Removed) > 0 {
+			selection.Warnings = append(selection.Warnings, formatRemovedIDEWarning("全局配置", globalConfigured.Removed, "将回退到默认 IDE cursor"))
+		}
+	}
+
+	selection.IDEs = []string{"cursor"}
+	return selection, nil
+}
+
+type configuredIDEs struct {
+	IDEs    []string
+	Removed []string
+}
+
+func filterConfiguredIDEs(ideNames []string) configuredIDEs {
+	result := configuredIDEs{IDEs: make([]string, 0, len(ideNames))}
+	seenValid := make(map[string]struct{}, len(ideNames))
+	seenRemoved := make(map[string]struct{}, len(ideNames))
+
 	for _, ideName := range ideNames {
 		name := strings.TrimSpace(ideName)
 		if name == "" {
 			continue
 		}
 		if _, removed := removedBuiltInIDEs[name]; removed {
-			return nil, fmt.Errorf("IDE 已移除内置支持: %s", name)
-		}
-		if _, ok := seen[name]; ok {
+			if _, ok := seenRemoved[name]; ok {
+				continue
+			}
+			seenRemoved[name] = struct{}{}
+			result.Removed = append(result.Removed, name)
 			continue
 		}
-		seen[name] = struct{}{}
-		validated = append(validated, name)
+		if _, ok := seenValid[name]; ok {
+			continue
+		}
+		seenValid[name] = struct{}{}
+		result.IDEs = append(result.IDEs, name)
 	}
 
-	return validated, nil
+	return result
+}
+
+func formatRemovedIDEWarning(scope string, ideNames []string, suffix string) string {
+	message := fmt.Sprintf("%s中的 IDE 已移除内置支持，已忽略: %s", scope, strings.Join(ideNames, ", "))
+	if strings.TrimSpace(suffix) == "" {
+		return message
+	}
+	return message + "；" + suffix
 }
 
 // GetEffectiveEditor 获取有效的交互编辑器（项目级覆盖全局）。

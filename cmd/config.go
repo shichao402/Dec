@@ -134,9 +134,12 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(globalConfig.IDEs) > 0 {
-		effectiveGlobalIDEs, err := config.GetEffectiveIDEs(nil)
+		globalSelection, err := config.ResolveEffectiveIDEs(nil)
 		if err == nil {
-			fmt.Printf("  默认 IDE: %s\n", strings.Join(effectiveGlobalIDEs, ", "))
+			fmt.Printf("  默认 IDE: %s\n", strings.Join(globalSelection.IDEs, ", "))
+			for _, warning := range globalSelection.Warnings {
+				fmt.Printf("  IDE 警告: %s\n", warning)
+			}
 		} else {
 			fmt.Printf("  默认 IDE: 配置错误: %v\n", err)
 		}
@@ -193,9 +196,23 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 				}
 
 				// 显示有效的 IDE（应用继承规则）
-				effectiveIDEs, err := config.GetEffectiveIDEs(projectConfig)
+				var effectiveIDEs []string
+				var ideWarnings []string
+				if len(projectConfig.IDEs) > 0 {
+					selection, selectionErr := config.ResolveEffectiveIDEs(projectConfig)
+					if selectionErr == nil {
+						effectiveIDEs = selection.IDEs
+						ideWarnings = selection.Warnings
+					}
+					err = selectionErr
+				} else {
+					effectiveIDEs, err = config.GetEffectiveIDEs(projectConfig)
+				}
 				if err == nil {
 					fmt.Printf("  有效 IDE: %s\n", strings.Join(effectiveIDEs, ", "))
+					for _, warning := range ideWarnings {
+						fmt.Printf("  IDE 警告: %s\n", warning)
+					}
 				} else {
 					fmt.Printf("  有效 IDE: 配置错误: %v\n", err)
 				}
