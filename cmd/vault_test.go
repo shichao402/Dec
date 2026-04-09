@@ -319,6 +319,50 @@ command = "npx"
 	}
 }
 
+func TestInstallMCPToClaudeInternalIDEUsesProjectClaudeConfig(t *testing.T) {
+	projectRoot := t.TempDir()
+	configPath := filepath.Join(projectRoot, ".claude", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatalf("创建 .claude 目录失败: %v", err)
+	}
+	data, err := json.Marshal(types.MCPConfig{MCPServers: map[string]types.MCPServer{"user": {Command: "npx"}}})
+	if err != nil {
+		t.Fatalf("序列化现有 Claude MCP 配置失败: %v", err)
+	}
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatalf("写入现有 .claude/mcp.json 失败: %v", err)
+	}
+
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "pg.json")
+	if err := os.WriteFile(srcPath, []byte(`{"command":"npx","args":["-y","pg"]}`), 0644); err != nil {
+		t.Fatalf("写入 MCP 片段失败: %v", err)
+	}
+
+	impl := ide.Get("claude-internal")
+	if err := installAssetToIDE("mcp", "pg", srcPath, projectRoot, impl); err != nil {
+		t.Fatalf("安装失败: %v", err)
+	}
+
+	resultData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("读取 .claude/mcp.json 失败: %v", err)
+	}
+	var result types.MCPConfig
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		t.Fatalf("解析 .claude/mcp.json 失败: %v", err)
+	}
+	if _, ok := result.MCPServers["user"]; !ok {
+		t.Fatal("用户条目被覆盖")
+	}
+	if _, ok := result.MCPServers["dec-pg"]; !ok {
+		t.Fatal("托管条目未写入 .claude/mcp.json")
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".claude-internal", "mcp.json")); !os.IsNotExist(err) {
+		t.Fatalf("项目级 claude-internal 不应写入 .claude-internal/mcp.json: %v", err)
+	}
+}
+
 func TestRemoveMCPFromCodexIDEPreservesUserConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	configPath := filepath.Join(projectRoot, ".codex", "config.toml")

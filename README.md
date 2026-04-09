@@ -82,13 +82,13 @@ Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 | Cursor | `.cursor/skills/` | `.cursor/rules/` | `.cursor/mcp.json` |
 | CodeBuddy | `.codebuddy/skills/` | `.codebuddy/rules/` | `.mcp.json` |
 | Claude | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
-| Claude Internal | `.claude-internal/skills/` | `.claude-internal/rules/` | `.claude-internal/mcp.json` |
+| Claude Internal | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 | Codex Internal | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 
 更详细的使用语义见 `pkg/assets/dec/SKILL.md`，实现与存储结构见 `Documents/ARCHITECTURE.md`。
 
-说明：`codex-internal` 的项目级部署复用 `.codex/`；只有用户级目录仍然是 `~/.codex-internal/`。对于 Codex，MCP 不是写入 `mcp.json`，而是写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
+说明：`claude-internal` 的项目级部署复用 `.claude/`，只有用户级目录仍然是 `~/.claude-internal/`。`codex-internal` 的项目级部署复用 `.codex/`，只有用户级目录仍然是 `~/.codex-internal/`。对于 Codex，MCP 不是写入 `mcp.json`，而是写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
 
 ## 快速开始
 

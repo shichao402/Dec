@@ -96,13 +96,15 @@ func runPull(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.ErrOrStderr())
 	}
 	ideNames := ideSelection.IDEs
+	projectIDEs := uniqueProjectIDEs(cwd, ideNames)
+	projectIDELabels := projectIDENames(projectIDEs)
 
-	migrationNotes, err := migrateLegacyProjectLayouts(cwd, ideNames)
+	migrationNotes, err := migrateLegacyProjectLayouts(cwd, projectIDEs)
 	if err != nil {
 		return fmt.Errorf("迁移旧版项目布局失败: %w", err)
 	}
 	if len(migrationNotes) > 0 {
-		fmt.Println("🔄 检测到旧版 Codex 项目布局，已自动迁移:")
+		fmt.Println("🔄 检测到旧版项目布局，已自动迁移:")
 		for _, note := range migrationNotes {
 			fmt.Printf("  %s\n", note)
 		}
@@ -110,7 +112,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	// 清理不再启用的旧资产
-	cleanupRemovedAssets(cwd, enabledAssets, ideNames)
+	cleanupRemovedAssets(cwd, enabledAssets, projectIDEs)
 
 	// 创建事务
 	createTx := func() (*repo.Transaction, error) {
@@ -150,14 +152,14 @@ func runPull(cmd *cobra.Command, args []string) error {
 		}
 
 		// 安装到 IDE
-		if err := installAssetToIDEs(asset.Type, asset.Name, fullPath, cwd, ideNames); err != nil {
+		if err := installAssetToIDEs(asset.Type, asset.Name, fullPath, cwd, projectIDEs); err != nil {
 			fmt.Printf("  ⚠️  [%-5s] %s (%v)\n", asset.Type, asset.Name, err)
 			failed++
 			continue
 		}
 
 		// 占位符替换
-		substituteAssetVars(asset.Type, asset.Name, cwd, ideNames, mgr)
+		substituteAssetVars(asset.Type, asset.Name, cwd, projectIDEs, mgr)
 
 		fmt.Printf("  ✅ [%-5s] %s  (vault: %s)\n", asset.Type, asset.Name, asset.Vault)
 		pulled++
@@ -173,13 +175,13 @@ func runPull(cmd *cobra.Command, args []string) error {
 	if failed > 0 {
 		fmt.Printf("，%d 个失败", failed)
 	}
-	fmt.Printf(" (IDE: %s)\n", strings.Join(ideNames, ", "))
+	fmt.Printf(" (IDE: %s)\n", strings.Join(projectIDELabels, ", "))
 
 	return nil
 }
 
 // cleanupRemovedAssets 清理不再启用的旧资产（对比 cache 目录 vs 当前 enabled）
-func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRef, ideNames []string) {
+func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE) {
 	cacheDir := filepath.Join(projectRoot, ".dec", "cache")
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
 		return
@@ -220,8 +222,7 @@ func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRe
 				key := vaultName + ":" + assetType + ":" + name
 				if !enabledSet[key] {
 					// 从 IDE 中移除
-					for _, ideName := range ideNames {
-						ideImpl := ide.Get(ideName)
+					for _, ideImpl := range projectIDEs {
 						removeAssetFromIDE(assetType, name, projectRoot, ideImpl)
 					}
 					// 删除缓存
@@ -249,27 +250,51 @@ func saveVersionMeta(projectRoot, commitHash string) {
 	_ = os.WriteFile(versionPath, []byte(content), 0644)
 }
 
-func migrateLegacyProjectLayouts(projectRoot string, ideNames []string) ([]string, error) {
-	for _, ideName := range ideNames {
-		if ideName == "codex" || ideName == "codex-internal" {
-			return ide.MigrateLegacyCodexProject(projectRoot)
+func migrateLegacyProjectLayouts(projectRoot string, projectIDEs []ide.IDE) ([]string, error) {
+	var notes []string
+	needClaude := false
+	needCodex := false
+
+	claudeMCPPath := filepath.Join(projectRoot, ".claude", "mcp.json")
+	codexMCPPath := filepath.Join(projectRoot, ".codex", "config.toml")
+	for _, ideImpl := range projectIDEs {
+		switch filepath.Clean(ideImpl.MCPConfigPath(projectRoot)) {
+		case claudeMCPPath:
+			needClaude = true
+		case codexMCPPath:
+			needCodex = true
 		}
 	}
-	return nil, nil
+
+	if needClaude {
+		migrated, err := ide.MigrateLegacyClaudeProject(projectRoot)
+		if err != nil {
+			return nil, err
+		}
+		notes = append(notes, migrated...)
+	}
+	if needCodex {
+		migrated, err := ide.MigrateLegacyCodexProject(projectRoot)
+		if err != nil {
+			return nil, err
+		}
+		notes = append(notes, migrated...)
+	}
+
+	return notes, nil
 }
 
 // installAssetToIDEs 将资产安装到多个 IDE
-func installAssetToIDEs(itemType, assetName, srcPath, projectRoot string, ideNames []string) error {
-	installed := make([]ide.IDE, 0, len(ideNames))
+func installAssetToIDEs(itemType, assetName, srcPath, projectRoot string, projectIDEs []ide.IDE) error {
+	installed := make([]ide.IDE, 0, len(projectIDEs))
 
-	for _, ideName := range ideNames {
-		ideImpl := ide.Get(ideName)
+	for _, ideImpl := range projectIDEs {
 		if err := installAssetToIDE(itemType, assetName, srcPath, projectRoot, ideImpl); err != nil {
 			rollbackErrors := rollbackInstalledAsset(itemType, assetName, projectRoot, installed)
 			if len(rollbackErrors) > 0 {
-				return fmt.Errorf("安装到 %s 失败: %v；回滚失败: %s", ideName, err, strings.Join(rollbackErrors, "; "))
+				return fmt.Errorf("安装到 %s 失败: %v；回滚失败: %s", ideImpl.Name(), err, strings.Join(rollbackErrors, "; "))
 			}
-			return fmt.Errorf("安装到 %s 失败: %w", ideName, err)
+			return fmt.Errorf("安装到 %s 失败: %w", ideImpl.Name(), err)
 		}
 		installed = append(installed, ideImpl)
 	}

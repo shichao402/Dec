@@ -54,7 +54,7 @@ func MigrateLegacyCodexProject(projectRoot string) ([]string, error) {
 		{src: filepath.Join(projectRoot, ".codex-internal", "skills"), dst: filepath.Join(projectRoot, ".codex", "skills")},
 		{src: filepath.Join(projectRoot, ".codex-internal", "rules"), dst: filepath.Join(projectRoot, ".codex", "rules")},
 	} {
-		moved, err := migrateLegacyCodexDir(pair.src, pair.dst)
+		moved, err := migrateLegacyProjectDir(pair.src, pair.dst)
 		if err != nil {
 			return nil, err
 		}
@@ -205,7 +205,7 @@ func migrateLegacyCodexMCPJSON(projectRoot, legacyPath string) (string, error) {
 	return fmt.Sprintf("%s -> .codex/config.toml", relProjectPath(projectRoot, legacyPath)), nil
 }
 
-func migrateLegacyCodexDir(srcRoot, dstRoot string) (int, error) {
+func migrateLegacyProjectDir(srcRoot, dstRoot string) (int, error) {
 	entries, err := os.ReadDir(srcRoot)
 	if err != nil {
 		if os.IsNotExist(err) {

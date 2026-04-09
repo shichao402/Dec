@@ -40,3 +40,22 @@ func TestInstallDecSkillForCodexInternalUsesInternalUserDir(t *testing.T) {
 		t.Fatalf("codex-internal 的用户级 Skill 不应写到 ~/.codex: %v", err)
 	}
 }
+
+func TestInstallDecSkillForClaudeInternalUsesInternalUserDir(t *testing.T) {
+	homeDir := t.TempDir()
+	setHomeForConfigTest(t, homeDir)
+
+	if err := installDecSkillForIDE("claude-internal"); err != nil {
+		t.Fatalf("安装 claude-internal 全局 Skill 失败: %v", err)
+	}
+
+	internalSkill := filepath.Join(homeDir, ".claude-internal", "skills", "dec", "SKILL.md")
+	if _, err := os.Stat(internalSkill); err != nil {
+		t.Fatalf("应写入 ~/.claude-internal/skills/dec/SKILL.md: %v", err)
+	}
+
+	wrongSkill := filepath.Join(homeDir, ".claude", "skills", "dec", "SKILL.md")
+	if _, err := os.Stat(wrongSkill); !os.IsNotExist(err) {
+		t.Fatalf("claude-internal 的用户级 Skill 不应写到 ~/.claude: %v", err)
+	}
+}

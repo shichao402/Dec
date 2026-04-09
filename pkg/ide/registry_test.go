@@ -108,7 +108,7 @@ func TestIDEDirectoryStructure(t *testing.T) {
 		{"cursor", "/project/.cursor/rules", "/project/.cursor/skills"},
 		{"codebuddy", "/project/.codebuddy/rules", "/project/.codebuddy/skills"},
 		{"claude", "/project/.claude/rules", "/project/.claude/skills"},
-		{"claude-internal", "/project/.claude-internal/rules", "/project/.claude-internal/skills"},
+		{"claude-internal", "/project/.claude/rules", "/project/.claude/skills"},
 		{"codex", "/project/.codex/rules", "/project/.codex/skills"},
 		{"codex-internal", "/project/.codex/rules", "/project/.codex/skills"},
 	}

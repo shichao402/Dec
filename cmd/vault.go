@@ -219,7 +219,7 @@ func removeCachedAsset(itemType, assetName, projectRoot, vault string) {
 // ========================================
 
 // substituteAssetVars 对已安装到 IDE 目录的资产执行变量替换
-func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []string, mgr *config.ProjectConfigManager) {
+func substituteAssetVars(itemType, assetName, projectRoot string, projectIDEs []ide.IDE, mgr *config.ProjectConfigManager) {
 	globalVars, _ := config.LoadGlobalVars()
 	projectVars, _ := mgr.LoadVarsConfig()
 	projectVarsPath := mgr.GetVarsPath()
@@ -235,8 +235,8 @@ func substituteAssetVars(itemType, assetName, projectRoot string, ideNames []str
 		}
 	}
 
-	for _, ideName := range ideNames {
-		ideImpl := ide.Get(ideName)
+	for _, ideImpl := range projectIDEs {
+		ideName := ideImpl.Name()
 
 		switch itemType {
 		case "skill":

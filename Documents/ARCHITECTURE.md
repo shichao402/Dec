@@ -113,11 +113,13 @@ Dec 通过扫描这些目录发现资产，不依赖额外索引文件。
 | Cursor | `.cursor/skills/` | `.cursor/rules/` | `.cursor/mcp.json` |
 | CodeBuddy | `.codebuddy/skills/` | `.codebuddy/rules/` | `.mcp.json` |
 | Claude | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
-| Claude Internal | `.claude-internal/skills/` | `.claude-internal/rules/` | `.claude-internal/mcp.json` |
+| Claude Internal | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 | Codex Internal | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 
 Dec 托管产物统一使用 `dec-` 前缀，以便和用户手工维护的内容区分。
+
+其中 `claude-internal` 在项目级复用 `.claude/`，`codex-internal` 在项目级复用 `.codex/`；只有用户级目录仍然分别是 `~/.claude-internal/` 和 `~/.codex-internal/`。
 
 ## 关键运行机制
 
