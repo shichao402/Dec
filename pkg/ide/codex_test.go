@@ -92,6 +92,132 @@ args = ["-y", "user-mcp"]
 	}
 }
 
+func TestCodexWriteMCPConfigPromotesEnvRefsToEnvVars(t *testing.T) {
+	projectRoot := t.TempDir()
+	configPath := filepath.Join(projectRoot, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+
+	impl := Get("codex")
+	if err := impl.WriteMCPConfig(projectRoot, &types.MCPConfig{MCPServers: map[string]types.MCPServer{
+		"dec-vikunja": {
+			Command: "npx",
+			Args:    []string{"-y", "@aimbitgmbh/vikunja-mcp"},
+			Env: map[string]string{
+				"VIKUNJA_URL":       "${VIKUNJA_URL}",
+				"VIKUNJA_API_TOKEN": "${VIKUNJA_API_TOKEN}",
+			},
+		},
+	}}); err != nil {
+		t.Fatalf("写入 Codex MCP 配置失败: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("读取 Codex config.toml 失败: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`enabled = true`,
+		`env_vars = ["VIKUNJA_API_TOKEN","VIKUNJA_URL"]`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("config.toml 缺少 %q:\n%s", want, content)
+		}
+	}
+	for _, notWant := range []string{
+		`[mcp_servers.dec-vikunja.env]`,
+		`VIKUNJA_URL = "${VIKUNJA_URL}"`,
+		`VIKUNJA_API_TOKEN = "${VIKUNJA_API_TOKEN}"`,
+	} {
+		if strings.Contains(content, notWant) {
+			t.Fatalf("config.toml 不应包含 %q:\n%s", notWant, content)
+		}
+	}
+
+	loaded, err := impl.LoadMCPConfig(projectRoot)
+	if err != nil {
+		t.Fatalf("重新加载 Codex MCP 配置失败: %v", err)
+	}
+	server, ok := loaded.MCPServers["dec-vikunja"]
+	if !ok {
+		t.Fatalf("应能读取 dec-vikunja 条目: %#v", loaded.MCPServers)
+	}
+	if len(server.EnvVars) != 2 || server.EnvVars[0] != "VIKUNJA_API_TOKEN" || server.EnvVars[1] != "VIKUNJA_URL" {
+		t.Fatalf("EnvVars = %#v", server.EnvVars)
+	}
+	if len(server.Env) != 0 {
+		t.Fatalf("Env 应为空, 得到 %#v", server.Env)
+	}
+	if server.Enabled == nil || !*server.Enabled {
+		t.Fatalf("Enabled = %#v, 期望 true", server.Enabled)
+	}
+}
+
+func TestCodexWriteMCPConfigPromotesHTTPEnvRefs(t *testing.T) {
+	projectRoot := t.TempDir()
+	configPath := filepath.Join(projectRoot, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+
+	impl := Get("codex")
+	if err := impl.WriteMCPConfig(projectRoot, &types.MCPConfig{MCPServers: map[string]types.MCPServer{
+		"dec-http": {
+			URL: "https://example.com/mcp",
+			HTTPHeaders: map[string]string{
+				"Authorization": "Bearer ${API_TOKEN}",
+				"X-Workspace":   "${WORKSPACE_ID}",
+				"X-Static":      "keep-me",
+			},
+		},
+	}}); err != nil {
+		t.Fatalf("写入 Codex MCP 配置失败: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("读取 Codex config.toml 失败: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`enabled = true`,
+		`bearer_token_env_var = "API_TOKEN"`,
+		`[mcp_servers.dec-http.http_headers]`,
+		`X-Static = "keep-me"`,
+		`[mcp_servers.dec-http.env_http_headers]`,
+		`X-Workspace = "WORKSPACE_ID"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("config.toml 缺少 %q:\n%s", want, content)
+		}
+	}
+	for _, notWant := range []string{
+		`Authorization = "Bearer ${API_TOKEN}"`,
+		`"X-Workspace" = "${WORKSPACE_ID}"`,
+	} {
+		if strings.Contains(content, notWant) {
+			t.Fatalf("config.toml 不应包含 %q:\n%s", notWant, content)
+		}
+	}
+
+	loaded, err := impl.LoadMCPConfig(projectRoot)
+	if err != nil {
+		t.Fatalf("重新加载 Codex MCP 配置失败: %v", err)
+	}
+	server := loaded.MCPServers["dec-http"]
+	if server.BearerTokenEnvVar != "API_TOKEN" {
+		t.Fatalf("BearerTokenEnvVar = %q", server.BearerTokenEnvVar)
+	}
+	if server.EnvHTTPHeaders["X-Workspace"] != "WORKSPACE_ID" {
+		t.Fatalf("EnvHTTPHeaders = %#v", server.EnvHTTPHeaders)
+	}
+	if server.HTTPHeaders["X-Static"] != "keep-me" {
+		t.Fatalf("HTTPHeaders = %#v", server.HTTPHeaders)
+	}
+}
+
 func TestCodexWriteMCPConfigReplacesManagedSectionsOnly(t *testing.T) {
 	projectRoot := t.TempDir()
 	configPath := filepath.Join(projectRoot, ".codex", "config.toml")

@@ -1,7 +1,5 @@
 [mcp_servers.dec-vikunja-mcp]
 command = "npx"
 args = ["-y","@aimbitgmbh/vikunja-mcp"]
-
-[mcp_servers.dec-vikunja-mcp.env]
-VIKUNJA_API_TOKEN = "${VIKUNJA_API_TOKEN}"
-VIKUNJA_URL = "${VIKUNJA_URL}"
+env_vars = ["VIKUNJA_API_TOKEN","VIKUNJA_URL"]
+enabled = true

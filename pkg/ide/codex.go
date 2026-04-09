@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +18,11 @@ import (
 type codexIDE struct {
 	baseIDE
 }
+
+var (
+	codexExactEnvRefRe  = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
+	codexBearerEnvRefRe = regexp.MustCompile(`^Bearer \$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
+)
 
 func newCodexIDE(name string) IDE {
 	return &codexIDE{baseIDE: baseIDE{
@@ -368,7 +374,167 @@ func renderManagedCodexMCPServers(config *types.MCPConfig) (string, error) {
 	return strings.Join(blocks, "\n\n"), nil
 }
 
+func normalizeCodexMCPServer(server types.MCPServer) types.MCPServer {
+	if server.Enabled == nil {
+		enabled := true
+		server.Enabled = &enabled
+	}
+
+	if strings.TrimSpace(server.Command) != "" {
+		server = normalizeCodexStdioServer(server)
+	}
+	if strings.TrimSpace(server.URL) != "" {
+		server = normalizeCodexHTTPServer(server)
+	}
+
+	return server
+}
+
+func normalizeCodexStdioServer(server types.MCPServer) types.MCPServer {
+	if len(server.Env) == 0 {
+		if len(server.EnvVars) > 1 {
+			server.EnvVars = dedupeSortedStrings(server.EnvVars)
+		}
+		return server
+	}
+
+	env := cloneStringMap(server.Env)
+	envVarsSet := make(map[string]bool, len(server.EnvVars))
+	for _, name := range server.EnvVars {
+		trimmed := strings.TrimSpace(name)
+		if trimmed != "" {
+			envVarsSet[trimmed] = true
+		}
+	}
+
+	changed := false
+	for key, value := range server.Env {
+		refName, ok := parseCodexEnvReference(value)
+		if !ok || key != refName {
+			continue
+		}
+		envVarsSet[refName] = true
+		delete(env, key)
+		changed = true
+	}
+
+	if len(envVarsSet) != len(server.EnvVars) {
+		changed = true
+	}
+
+	if !changed {
+		return server
+	}
+
+	server.Env = env
+	if len(server.Env) == 0 {
+		server.Env = nil
+	}
+	server.EnvVars = sortedStringSet(envVarsSet)
+	return server
+}
+
+func normalizeCodexHTTPServer(server types.MCPServer) types.MCPServer {
+	if len(server.HTTPHeaders) == 0 {
+		return server
+	}
+
+	headers := cloneStringMap(server.HTTPHeaders)
+	envHeaders := cloneStringMap(server.EnvHTTPHeaders)
+	changed := false
+
+	for name, value := range server.HTTPHeaders {
+		if strings.EqualFold(name, "Authorization") && strings.TrimSpace(server.BearerTokenEnvVar) == "" {
+			if tokenEnv, ok := parseCodexBearerEnvReference(value); ok {
+				server.BearerTokenEnvVar = tokenEnv
+				delete(headers, name)
+				changed = true
+				continue
+			}
+		}
+
+		envName, ok := parseCodexEnvReference(value)
+		if !ok {
+			continue
+		}
+		if envHeaders == nil {
+			envHeaders = make(map[string]string)
+		}
+		if existing, exists := envHeaders[name]; !exists || strings.TrimSpace(existing) == "" {
+			envHeaders[name] = envName
+		}
+		delete(headers, name)
+		changed = true
+	}
+
+	if !changed {
+		return server
+	}
+
+	server.HTTPHeaders = headers
+	if len(server.HTTPHeaders) == 0 {
+		server.HTTPHeaders = nil
+	}
+	server.EnvHTTPHeaders = envHeaders
+	if len(server.EnvHTTPHeaders) == 0 {
+		server.EnvHTTPHeaders = nil
+	}
+	return server
+}
+
+func parseCodexEnvReference(value string) (string, bool) {
+	matches := codexExactEnvRefRe.FindStringSubmatch(strings.TrimSpace(value))
+	if len(matches) != 2 {
+		return "", false
+	}
+	return matches[1], true
+}
+
+func parseCodexBearerEnvReference(value string) (string, bool) {
+	matches := codexBearerEnvRefRe.FindStringSubmatch(strings.TrimSpace(value))
+	if len(matches) != 2 {
+		return "", false
+	}
+	return matches[1], true
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func dedupeSortedStrings(values []string) []string {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			set[trimmed] = true
+		}
+	}
+	return sortedStringSet(set)
+}
+
+func sortedStringSet(values map[string]bool) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
 func renderCodexMCPServer(name string, server types.MCPServer) (string, error) {
+	server = normalizeCodexMCPServer(server)
+
 	var lines []string
 	sectionKey := formatTOMLKey(name)
 	root := fmt.Sprintf("[mcp_servers.%s]", sectionKey)
