@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,6 +17,12 @@ import (
 )
 
 var pullVersion string
+
+var execCommand = exec.Command
+
+const defaultMiseLocalTomlContent = `[env]
+DEC_PLACEHOLDER = "replace-me"
+`
 
 var pullCmd = &cobra.Command{
 	Use:   "pull",
@@ -171,6 +178,29 @@ func runPull(cmd *cobra.Command, args []string) error {
 		saveVersionMeta(cwd, commitHash)
 	}
 
+	if pulled > 0 {
+		createdMise, err := ensureMiseLocalTomlFile(cwd)
+		if createdMise {
+			fmt.Println("📝 已创建 mise.local.toml")
+		}
+		if err != nil {
+			fmt.Printf("  ⚠️  %v\n", err)
+		} else {
+			updatedGitignore, err := ensureMiseLocalTomlGitignore(cwd)
+			if updatedGitignore {
+				fmt.Println("🙈 已将 mise.local.toml 加入 .gitignore")
+			}
+			if err != nil {
+				fmt.Printf("  ⚠️  %v\n", err)
+			}
+			if err := trustMiseLocalToml(cwd); err != nil {
+				fmt.Printf("  ⚠️  %v\n", err)
+			} else {
+				fmt.Println("🔐 已执行 mise trust mise.local.toml")
+			}
+		}
+	}
+
 	fmt.Printf("\n✅ 完成：%d 个资产已拉取", pulled)
 	if failed > 0 {
 		fmt.Printf("，%d 个失败", failed)
@@ -248,6 +278,84 @@ func saveVersionMeta(projectRoot, commitHash string) {
 	content := fmt.Sprintf("commit: %s\npulled_at: \"%s\"\n", commitHash, time.Now().Format(time.RFC3339))
 	_ = os.MkdirAll(filepath.Dir(versionPath), 0755)
 	_ = os.WriteFile(versionPath, []byte(content), 0644)
+}
+
+func ensureMiseLocalTomlFile(projectRoot string) (bool, error) {
+	trustFile := filepath.Join(projectRoot, "mise.local.toml")
+	if _, err := os.Stat(trustFile); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("检查 mise.local.toml 失败: %w", err)
+	}
+
+	if err := os.WriteFile(trustFile, []byte(defaultMiseLocalTomlContent), 0644); err != nil {
+		return false, fmt.Errorf("创建 mise.local.toml 失败: %w", err)
+	}
+
+	return true, nil
+}
+
+func ensureMiseLocalTomlGitignore(projectRoot string) (bool, error) {
+	gitignorePath := filepath.Join(projectRoot, ".gitignore")
+	data, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return false, fmt.Errorf("读取 .gitignore 失败: %w", err)
+		}
+		if err := os.WriteFile(gitignorePath, []byte("mise.local.toml\n"), 0644); err != nil {
+			return false, fmt.Errorf("写入 .gitignore 失败: %w", err)
+		}
+		return true, nil
+	}
+
+	content := string(data)
+	if gitignoreHasMiseLocalTomlEntry(content) {
+		return false, nil
+	}
+
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += "mise.local.toml\n"
+
+	if err := os.WriteFile(gitignorePath, []byte(content), 0644); err != nil {
+		return false, fmt.Errorf("更新 .gitignore 失败: %w", err)
+	}
+
+	return true, nil
+}
+
+func gitignoreHasMiseLocalTomlEntry(content string) bool {
+	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "mise.local.toml" || trimmed == "/mise.local.toml" {
+			return true
+		}
+	}
+	return false
+}
+
+func trustMiseLocalToml(projectRoot string) error {
+	trustFile := filepath.Join(projectRoot, "mise.local.toml")
+	if _, err := os.Stat(trustFile); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("未找到 mise.local.toml")
+		}
+		return fmt.Errorf("检查 mise.local.toml 失败: %w", err)
+	}
+
+	cmd := execCommand("mise", "trust", "mise.local.toml")
+	cmd.Dir = projectRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(output))
+		if msg != "" {
+			return fmt.Errorf("执行 mise trust mise.local.toml 失败: %w: %s", err, msg)
+		}
+		return fmt.Errorf("执行 mise trust mise.local.toml 失败: %w", err)
+	}
+
+	return nil
 }
 
 func migrateLegacyProjectLayouts(projectRoot string, projectIDEs []ide.IDE) ([]string, error) {
