@@ -55,3 +55,4 @@ scripts/temp/*
 Documents/temp/*
 !Documents/temp/.gitkeep
 
+mise.local.toml

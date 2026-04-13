@@ -1,0 +1,461 @@
+# Dec TUI 架构设计
+
+状态：Draft
+
+## 1. 背景与目标
+
+Dec 当前是一个以 Cobra 为入口的命令行工具，核心能力已经完整，但交互体验仍然是“命令 + 文本输出 + 外部编辑器”的组合：
+
+- `dec config init` 先生成 `.dec/config.yaml`，再打开外部编辑器，让用户手动把 `available` 复制到 `enabled`
+- `dec push --remove` 直接从 `stdin` 读取确认
+- `dec list` / `dec search` / `dec pull` / `dec push` 都把流程状态直接打印到终端
+
+这套方式对熟悉命令行的用户足够有效，但对于高频使用场景，存在几个明显问题：
+
+- 用户需要记忆命令和参数，发现路径长
+- 资产选择、预览、启用、确认被拆散在多个命令和文件编辑里
+- pull / push / remove 等关键动作缺少统一的状态视图和操作反馈
+- 交互逻辑写在 `cmd/*` 中，后续想加 richer UI 复用成本高
+
+本设计的目标是把 Dec 升级为“默认进入 TUI 的命令行工具”，保留 CLI 的自动化能力，但把日常交互迁移到内置文本界面中。
+
+目标如下：
+
+- `dec` 默认进入 TUI，不新增 `dec tui` 子命令
+- 继续保留 `dec pull`、`dec push`、`dec version` 等脚本友好的子命令
+- 用内置 TUI 替代 `config init` 对外部编辑器的强依赖
+- 为 pull / push / search / remove 提供统一的键盘交互、预览、确认与进度反馈
+- 不引入 Node.js 或前端运行时，继续保持单二进制分发
+
+非目标：
+
+- 不把 Dec 改造成图形桌面应用
+- 不牺牲现有 CLI 自动化接口来换 TUI
+- 不在第一阶段重写所有底层仓库/配置逻辑
+
+## 2. 关键决策
+
+### 2.1 入口决策
+
+结论：`dec` 在交互式终端中默认启动 TUI；只有显式使用子命令或非 TTY 场景时，才走传统 CLI。
+
+建议行为：
+
+- `dec`：启动 TUI
+- `dec pull`：继续执行 CLI 子命令
+- `dec push --remove skill foo`：继续执行 CLI 子命令
+- `dec --help` / `dec version`：继续显示 CLI 帮助与版本
+- `dec` 运行在非 TTY 中：不启动 TUI，回退到帮助或经典 CLI 路径
+
+建议保留一个隐藏逃生口，但不是新命令：
+
+- `DEC_NO_TUI=1 dec`
+- 或隐藏 flag：`dec --no-tui`
+
+这不是为了暴露新入口，而是为了调试、CI、损坏终端环境下的应急回退。
+
+### 2.2 架构决策
+
+结论：TUI 不能直接包住当前 `cmd/*` 输出，必须先抽离应用服务层。
+
+原因：
+
+- 当前 `cmd/*` 里混合了参数解析、业务编排、磁盘操作、Git 事务、终端输出
+- TUI 需要结构化状态，而不是 `fmt.Printf` 的行输出
+- 如果 TUI 通过 shell out 调自己去跑 `dec pull`，后续状态同步、错误处理、测试都会变差
+
+因此要把架构重构为：
+
+- `cmd/*`：CLI 适配层
+- `pkg/app/*`：可复用用例层
+- `pkg/config` / `pkg/repo` / `pkg/ide` / `pkg/vars`：底层能力层
+- `internal/tui/*`：TUI 展示层
+
+### 2.3 交互决策
+
+结论：TUI 不是“命令帮助页”，而是 Dec 的主工作台。
+
+它应该覆盖这些高频行为：
+
+- 查看仓库连接状态、当前项目状态、默认 IDE
+- 浏览 vault / asset 列表
+- 搜索与过滤资产
+- 启用/禁用资产并保存配置
+- 执行 pull / push / remove / update
+- 查看变量缺失、仓库错误、IDE 警告
+
+## 3. 技术栈调研
+
+### 3.1 候选方案对比
+
+| 方案 | 优点 | 缺点 | 结论 |
+|---|---|---|---|
+| `Bubble Tea` + `Bubbles` + `Lip Gloss` | Go TUI 生态最成熟；事件模型清晰；组件丰富；适合复杂交互与状态驱动；视觉质量上限高 | 需要建立状态管理和消息流，不是“拿来即用表单” | 推荐 |
+| `tview` + `tcell` | 上手快，基础控件齐全，适合后台管理式界面 | API 偏命令式；样式系统弱；更容易做成传统表格式 UI；后续做细腻交互和品牌感成本高 | 不推荐作为主方案 |
+| `promptui` / `survey` | 很适合单步 prompt、确认框、表单提问 | 不适合构建多页面、持续驻留的应用 shell | 不适合作为主架构 |
+| `huh` | 表单体验比 survey 更现代，和 Bubble Tea 同生态 | 更偏 wizard/form，不适合承载整个应用框架 | 可选，不作为主框架 |
+| 继续使用 Cobra + 外部编辑器 | 改动最小 | 无法实现“默认 TUI 工作台”的目标 | 否 |
+
+### 3.2 推荐技术栈
+
+推荐组合：
+
+- `github.com/charmbracelet/bubbletea`
+- `github.com/charmbracelet/bubbles`
+- `github.com/charmbracelet/lipgloss`
+- `golang.org/x/term`
+
+可选补充：
+
+- `github.com/creack/pty`：用于 TUI 集成测试
+- `github.com/charmbracelet/huh`：仅在未来需要独立表单向导时引入
+
+### 3.3 选择理由
+
+Bubble Tea 适合 Dec 的原因，不在于“它最流行”，而在于它和 Dec 的产品目标匹配：
+
+- Dec 是状态驱动工具：仓库状态、项目配置、可用资产、已启用资产、变量缺失、任务进度都天然适合消息驱动模型
+- Dec 需要常驻工作台，而不是一次性 prompt
+- Dec 的长任务较多：读仓库、fetch、copy、写配置、merge MCP，都需要异步任务和进度反馈
+- Dec 需要把 CLI 专业感保留下来，Bubble Tea 可以让页面布局更像终端工作台，而不是问答脚本
+
+## 4. 目标体验设计
+
+### 4.1 首页工作台
+
+`dec` 启动后的首页应该直接回答三个问题：
+
+- 当前仓库是否已连接
+- 当前目录是否已经初始化 `.dec/config.yaml`
+- 下一步最合理的动作是什么
+
+建议布局：
+
+- 左侧：主导航
+- 中间：当前页面主体
+- 右侧：详情 / 预览 / 变量缺失提示
+- 底部：快捷键帮助、任务状态、最近日志
+
+主导航建议包含：
+
+- `Home`
+- `Assets`
+- `Project`
+- `Run`
+- `Settings`
+
+### 4.2 资产浏览与启用
+
+TUI 应直接替代 `config init` 中“打开 YAML 自己复制”的流程。
+
+推荐流程：
+
+1. 扫描远端仓库得到 `available`
+2. 在 TUI 中按 vault / type / keyword 过滤
+3. 用户用 `space` 切换启用状态
+4. 右侧显示资产详情、安装目标 IDE、占位符摘要
+5. 保存时自动写回 `.dec/config.yaml`
+6. 保存后可直接触发 `pull`
+
+这一步仍可保留“打开 YAML 原始编辑”的高级入口，但它应该是辅助能力，而不是主流程。
+
+### 4.3 执行页
+
+`pull` / `push` / `update` / `remove` 这类操作需要统一的执行页：
+
+- 顶部显示当前任务、目标项目、目标 IDE
+- 中间滚动显示结构化日志
+- 底部显示当前阶段和进度
+- 失败时给出可重试动作
+
+不要在 TUI 中直接复用现有 stdout 文本；应改为结构化事件流。
+
+### 4.4 搜索和命令面板
+
+为了保留命令行的效率，建议加一个 command palette：
+
+- `Ctrl+P` 或 `:` 打开动作面板
+- 可以快速执行 `Pull assets`、`Push cache`、`Connect repo`、`Edit vars`、`Search assets`
+
+这样既保留专业用户的速度，也不要求记住所有 CLI 命令。
+
+## 5. 目标架构
+
+### 5.1 模块分层
+
+建议新增如下结构：
+
+```text
+cmd/
+  root.go                 # CLI 入口与默认 TUI 路由
+  *.go                    # 保留脚本友好子命令，但变薄
+
+pkg/app/
+  bootstrap.go            # 启动上下文、环境探测
+  overview.go             # 首页状态聚合
+  assets.go               # list/search/enable/disable/save
+  project.go              # config init / project status / vars status
+  operations.go           # pull / push / remove / update
+  events.go               # 结构化事件与 reporter 接口
+
+pkg/config/
+pkg/repo/
+pkg/ide/
+pkg/vars/
+pkg/types/
+
+internal/tui/
+  app.go                  # tea.Program 启动
+  model.go                # 全局 model
+  theme/
+  pages/
+    home.go
+    assets.go
+    project.go
+    run.go
+    settings.go
+  components/
+    sidebar.go
+    statusbar.go
+    logview.go
+    filterinput.go
+    confirm.go
+```
+
+### 5.2 分层职责
+
+`pkg/app` 的职责：
+
+- 编排现有底层能力
+- 返回结构化数据，而不是直接打印文本
+- 把操作过程以事件流形式暴露给 CLI/TUI
+
+`internal/tui` 的职责：
+
+- 管理页面状态和焦点
+- 订阅长任务进度
+- 渲染布局、颜色、键位帮助和确认框
+
+`cmd/*` 的职责：
+
+- 参数解析
+- 调用 `pkg/app`
+- 将结构化结果渲染为传统 CLI 文本
+
+### 5.3 结构化事件模型
+
+建议定义统一事件模型，替代当前散落在命令中的 `fmt.Printf`：
+
+```go
+type EventLevel string
+
+const (
+    EventInfo EventLevel = "info"
+    EventWarn EventLevel = "warn"
+    EventError EventLevel = "error"
+)
+
+type OperationEvent struct {
+    Time      time.Time
+    Level     EventLevel
+    Scope     string
+    Message   string
+    Progress  *Progress
+}
+
+type Reporter interface {
+    Emit(OperationEvent)
+}
+```
+
+这样同一个 `PullAssets()` 用例可以：
+
+- 在 CLI 中被渲染成文本日志
+- 在 TUI 中被渲染成进度条、日志流、状态标签
+
+### 5.4 启动路由
+
+建议在入口层按下面的规则分流：
+
+```text
+if len(os.Args) == 1 && stdio 都是 TTY && TERM != dumb && DEC_NO_TUI != 1:
+    run TUI
+else:
+    run Cobra CLI
+```
+
+这能满足两个目标：
+
+- `dec` 默认就是 TUI
+- 自动化脚本和现有命令不会被破坏
+
+## 6. 对现有代码的重构建议
+
+### 6.1 首先抽离 `cmd/config.go`
+
+当前 `config init` 的主要问题不是功能缺失，而是流程硬编码在命令处理函数中：
+
+- 扫描 repo
+- 构建 `available`
+- 保存项目配置
+- 创建 vars 模板
+- 打开编辑器
+- 再次读取配置
+
+这部分应抽成 `pkg/app/project.go` 中的用例，例如：
+
+- `LoadProjectOverview()`
+- `ScanAvailableAssets()`
+- `SaveProjectSelection()`
+- `EnsureProjectVarsTemplate()`
+
+### 6.2 然后抽离 `pull` / `push`
+
+`pull` 与 `push` 现在大量依赖顺序打印。TUI 落地前必须把这些操作变成：
+
+- 接收参数
+- 执行过程向 `Reporter` 发事件
+- 返回结构化结果
+
+尤其是 `push --remove`，当前直接读 `stdin`，在 TUI 下要改为统一 confirm modal。
+
+### 6.3 保留现有底层包
+
+以下包不需要因为 TUI 而整体重写：
+
+- `pkg/repo`
+- `pkg/config`
+- `pkg/ide`
+- `pkg/vars`
+
+这几个包本质上已经是可复用能力层。问题主要在 `cmd/*` 过厚，而不是底层实现方向错误。
+
+## 7. 默认 TUI 交互流
+
+### 7.1 首次使用
+
+1. 用户运行 `dec`
+2. TUI 检查是否已连接 repo
+3. 若未连接，进入 repo connect 向导
+4. 然后进入 global settings，选择 IDE
+5. 如果当前目录未初始化，提示初始化项目
+6. 进入资产选择页，完成启用
+7. 立即执行 pull
+
+### 7.2 已有项目
+
+1. 用户运行 `dec`
+2. 首页显示当前项目启用资产数、有效 IDE、最近 pull commit
+3. 用户可直接进入 Assets 调整选择
+4. 或在 Run 页执行 pull / push
+
+### 7.3 删除资产
+
+1. 用户在资产详情页触发 remove
+2. TUI 打开 confirm modal，展示 vault / type / name
+3. 确认后调用 remove 用例
+4. 成功后自动刷新 `available` / `enabled` / cache 状态
+
+## 8. 实施路线
+
+### 阶段 1：铺底层
+
+- 新增 `pkg/app` 用例层
+- 把 `cmd/config.go`、`cmd/pull.go`、`cmd/push.go` 中的业务编排迁出
+- 引入统一 `Reporter` / `OperationEvent`
+- 让现有 CLI 先跑在新用例层之上
+
+验收标准：
+
+- 不改用户行为的前提下，CLI 仍可正常运行
+- `cmd/*` 中的打印逻辑明显变薄
+
+### 阶段 2：引入 TUI Shell
+
+- 接入 Bubble Tea 根程序
+- 做首页、导航、状态栏、日志面板
+- 完成默认入口路由
+
+验收标准：
+
+- `dec` 在交互终端中进入 TUI
+- `dec pull` 等命令保持原样可用
+
+### 阶段 3：替换 `config init` 主流程
+
+- 做资产树、筛选、启用切换、保存
+- 在 TUI 中替代外部编辑器主路径
+- 保留“打开 YAML”高级入口
+
+验收标准：
+
+- 大多数用户不再需要手动编辑 `.dec/config.yaml`
+
+### 阶段 4：接管长任务与危险操作
+
+- 将 pull / push / remove / update 全部接入执行页
+- 提供统一确认框、错误重试、日志查看
+
+验收标准：
+
+- 不再需要在交互流程中手写 `stdin` confirm
+
+### 阶段 5：打磨与测试
+
+- 响应式 terminal width 适配
+- Windows / macOS / Linux 行为校验
+- 集成测试、快照测试、回退策略测试
+
+## 9. 测试策略
+
+建议增加三类测试：
+
+- 用例层单测：验证 `pkg/app` 的状态编排和错误处理
+- TUI model 测试：验证 `Update` 状态迁移和关键快捷键
+- PTY 集成测试：验证 `dec` 在真实伪终端中能启动、导航、退出
+
+推荐做法：
+
+- 保留当前命令测试，确保 CLI 兼容
+- 为 TUI 页面补 snapshot 测试，固定常见宽度如 100 / 140 columns
+- 对默认入口写分流测试：TTY、非 TTY、`--help`、`DEC_NO_TUI=1`
+
+## 10. 风险与应对
+
+### 风险 1：TUI 卡住长任务
+
+应对：所有 Git / IO 操作都通过 `tea.Cmd` 异步执行，禁止在 `Update` 里直接做阻塞调用。
+
+### 风险 2：CLI 与 TUI 双入口导致逻辑分叉
+
+应对：强制所有业务动作都通过 `pkg/app`，禁止 TUI 直接调用 `cmd/*`。
+
+### 风险 3：中文宽字符和终端宽度导致布局错位
+
+应对：统一走 Lip Gloss 和 Bubble Tea 生态的宽度计算，不自己手写 rune 宽度逻辑。
+
+### 风险 4：默认 TUI 影响现有用户习惯
+
+应对：
+
+- 只在交互式无参数启动时进入 TUI
+- 所有原子命令继续保留
+- 提供隐藏回退开关 `DEC_NO_TUI=1`
+
+## 11. 最终建议
+
+建议按下面的原则推进：
+
+1. 先做架构分层，再做页面
+2. 默认入口改为 TUI，但不新增 `dec tui`
+3. 保留 CLI 子命令作为自动化接口，而不是兼容包袱
+4. 技术栈选择 Bubble Tea 生态，不走 prompt 式方案拼装
+5. 第一优先级不是“界面好看”，而是替代 `config init` 的 YAML 编辑链路
+
+如果只选一个最关键的里程碑，应先完成：
+
+- `config init` 的 TUI 化
+- `dec` 默认进入 TUI
+- `pull` 的执行页化
+
+这三项完成后，Dec 的产品形态就会从“命令工具”升级为“终端中的资产工作台”。
