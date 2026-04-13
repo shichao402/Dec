@@ -119,7 +119,7 @@ dec config global                    # 配置所有支持的 IDE
 dec config global --ide cursor       # 只配置 Cursor
 ```
 
-这一步还会创建 `~/.dec/local/vars.yaml` 模板，用于填写机器级占位符变量，例如本机 API Token、数据库地址等。
+这一步会把 Dec 跟随分发的内置 Skills 安装到用户级 IDE 目录。当前包括 `dec` 和 `dec-extract-asset`。同时还会创建 `~/.dec/local/vars.yaml` 模板，用于填写机器级占位符变量，例如本机 API Token、数据库地址等。
 
 ### 4. 初始化项目
 
@@ -178,6 +178,8 @@ dec push --remove skill my-skill      # 删除远程资产（需确认）
 3. 执行 `dec push` 推送到远程仓库。
 
 `dec push` 的读取源是 `.dec/cache/`，不是 `.cursor/`、`.codex/` 等 IDE 目录。
+
+如果用户已经在当前项目里做出了一个很好用的本地 Skill，希望把它抽象成可复用资产后放进 Dec，可以直接让 agent 使用内置的 `dec-extract-asset` skill。它的目标是把项目特有内容提炼成通用版本，写入 `.dec/cache/<vault>/skills/<name>/`，更新 `.dec/config.yaml`，然后执行 `dec push`。
 
 ## 推荐工作流
 
@@ -381,6 +383,7 @@ go test ./...
 ## 项目文档
 
 - `pkg/assets/dec/SKILL.md`：Dec Skill 的完整使用说明
+- `pkg/assets/dec-extract-asset/SKILL.md`：把当前项目能力沉淀为 Dec 资产的内置 Skill
 - `Documents/ARCHITECTURE.md`：架构设计与模块说明
 
 ## 许可证

@@ -123,3 +123,21 @@ func TestIDEDirectoryStructure(t *testing.T) {
 		}
 	}
 }
+
+func TestInternalIDEUserRoots(t *testing.T) {
+	tests := []struct {
+		ide      string
+		homeDir  string
+		wantRoot string
+	}{
+		{"claude-internal", "/home/dev", "/home/dev/.claude-internal"},
+		{"codex-internal", "/home/dev", "/home/dev/.codex-internal"},
+	}
+
+	for _, tt := range tests {
+		impl := Get(tt.ide)
+		if root := impl.UserRootDir(tt.homeDir); root != tt.wantRoot {
+			t.Fatalf("%s UserRootDir: 期望 %s，得到 %s", tt.ide, tt.wantRoot, root)
+		}
+	}
+}

@@ -60,7 +60,7 @@ func init() {
 	Register(&baseIDE{name: "claude", dirKey: ".claude"})
 	// claude-internal 在用户目录使用 ~/.claude-internal，
 	// 但项目级配置仍然落在 .claude/ 下。
-	Register(&baseIDE{name: "claude-internal", dirKey: ".claude"})
+	Register(&baseIDE{name: "claude-internal", dirKey: ".claude", userDirKey: ".claude-internal"})
 	Register(newCodexIDE("codex"))
 	// codex-internal 在用户目录使用 ~/.codex-internal，
 	// 但项目级配置仍然落在 .codex/ 下。

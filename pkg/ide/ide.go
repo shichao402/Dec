@@ -15,6 +15,9 @@ type IDE interface {
 	// Name 返回 IDE 名称
 	Name() string
 
+	// UserRootDir 返回用户级根目录
+	UserRootDir(homeDir string) string
+
 	// RulesDir 返回规则输出目录
 	RulesDir(projectRoot string) string
 
@@ -52,12 +55,17 @@ type RuleFile struct {
 // baseIDE 提供 IDE 接口的基础实现
 type baseIDE struct {
 	name          string
-	dirKey        string // 目录名（如 .cursor, .codebuddy）
+	dirKey        string // 项目级目录名（如 .cursor, .codebuddy）
+	userDirKey    string // 用户级目录名；为空时复用 dirKey
 	mcpConfigPath string // MCP 配置文件路径（可选，为空则使用默认 {dirKey}/mcp.json）
 }
 
 func (b *baseIDE) Name() string {
 	return b.name
+}
+
+func (b *baseIDE) UserRootDir(homeDir string) string {
+	return filepath.Join(homeDir, b.userDirKeyOrDefault())
 }
 
 func (b *baseIDE) RulesDir(projectRoot string) string {
@@ -73,6 +81,13 @@ func (b *baseIDE) MCPConfigPath(projectRoot string) string {
 		return filepath.Join(projectRoot, b.mcpConfigPath)
 	}
 	return filepath.Join(projectRoot, b.dirKey, "mcp.json")
+}
+
+func (b *baseIDE) userDirKeyOrDefault() string {
+	if b.userDirKey != "" {
+		return b.userDirKey
+	}
+	return b.dirKey
 }
 
 func (b *baseIDE) WriteRules(projectRoot string, rules []RuleFile) error {

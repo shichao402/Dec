@@ -28,6 +28,7 @@ func newCodexIDE(name string) IDE {
 	return &codexIDE{baseIDE: baseIDE{
 		name:          name,
 		dirKey:        ".codex",
+		userDirKey:    "." + name,
 		mcpConfigPath: filepath.Join(".codex", "config.toml"),
 	}}
 }

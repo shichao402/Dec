@@ -2,7 +2,7 @@
 name: dec
 description: >
   Dec 个人 AI 知识仓库代理。支持跨项目复用 Skills、Rules、MCP 配置。
-  推荐用户保存新创建的资产、搜索已有资产、或在新项目中拉取所需资产。
+  推荐用户保存新创建的资产、搜索已有资产、或把当前项目中已经验证过的能力沉淀进 Dec。
 ---
 
 # Dec 代理
@@ -28,11 +28,17 @@ Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skill
    - **禁止**手动去修改其他 IDE 目录中的同名文件，统一通过 dec 命令同步
 
 4. **用户需要新增资产**
-   - 在已初始化项目的 `.dec/config.yaml` 中把资产写入 `enabled`
-   - 在 `.dec/cache/<vault>/` 下按类型创建资产内容
+   - 如果用户是要把当前项目里已经存在的好用能力抽出来复用，优先使用 `dec-extract-asset` skill
+   - 否则按 Dec 资产流程在 `.dec/cache/<vault>/` 下创建内容
+   - 把资产写入 `.dec/config.yaml` 的 `enabled`
    - 运行 `dec push` 推送到远程仓库
 
-5. **用户需要删除远程资产**
+5. **用户需要从当前项目中沉淀已有能力**
+   - 优先使用 `dec-extract-asset` skill 做抽象和入库
+   - 确保结果最终落在 `.dec/cache/`，而不是只留在 IDE 目录
+   - 完成后运行 `dec push`
+
+6. **用户需要删除远程资产**
    - 运行 `dec push --remove <type> <name>` 删除（需交互确认）
 
 ## 快速参考
@@ -54,7 +60,7 @@ Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skill
 | 操作 | 命令 | 说明 |
 |------|------|------|
 | 连接仓库 | `dec config repo <url>` | 连接个人仓库（GitHub URL） |
-| 配置全局 IDE | `dec config global` | 为本机 IDE 配置 Dec Skill，并创建 `~/.dec/local/vars.yaml` 模板 |
+| 配置全局 IDE | `dec config global` | 为本机 IDE 安装 Dec 内置 Skills，并创建 `~/.dec/local/vars.yaml` 模板 |
 | 初始化项目 | `dec config init` | 生成项目配置和 `.dec/vars.yaml` 模板，选择启用的资产 |
 | 查看配置 | `dec config show` | 显示全局和项目配置 |
 

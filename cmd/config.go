@@ -423,13 +423,14 @@ func buildAssetList(allAssets []repoAssetInfo) *types.AssetList {
 var configGlobalCmd = &cobra.Command{
 	Use:   "global",
 	Short: "配置全局 IDE",
-	Long: `为本机所有支持的 IDE 配置 Dec Skill。
+	Long: `为本机所有支持的 IDE 安装 Dec 内置资产。
 
 默认配置所有当前支持的 IDE。
 可以通过 --ide 标志指定要配置的 IDE 子集。
 
-配置会为每个 IDE 安装 Dec 的 Agent Skill，
-这样 AI 助手可以在任何项目中协助使用 Dec 的功能。
+配置会为每个 IDE 安装 Dec 跟随分发的内置 Skills，
+当前包括 dec 和 dec-extract-asset。
+这样 AI 助手可以在任何项目中协助使用 Dec，并把当前项目里的可复用能力沉淀回 Dec。
 同时会创建 ~/.dec/local/vars.yaml 模板，用于机器级占位符变量。
 
 示例:
@@ -469,18 +470,14 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("🔧 配置 IDE: %s\n\n", strings.Join(targetIDEs, ", "))
 
-	// 为每个 IDE 安装 Dec Skill
+	// 为每个 IDE 安装 Dec 内置资产
 	for _, ideName := range targetIDEs {
 		fmt.Printf("  配置 %s...\n", ideName)
 
-		// 在每个 IDE 的用户级 skills 目录安装 Dec Skill
-		if err := installDecSkillForIDE(ideName); err != nil {
+		if err := installBuiltinAssetsForIDE(ideName); err != nil {
 			fmt.Printf("    ⚠️  %s\n", err.Error())
 			continue
 		}
-
-		// TODO: 安装 Dec MCP 到每个 IDE
-		// 这里可能需要更多的 IDE 特定配置逻辑
 	}
 
 	// 保存配置到全局配置文件
@@ -518,34 +515,93 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// installDecSkillForIDE 为指定 IDE 安装 Dec Skill
-func installDecSkillForIDE(ideName string) error {
+// installBuiltinAssetsForIDE 为指定 IDE 安装 Dec 跟随分发的内置资产。
+// 当前实际分发的是 Skills，同时为未来内置 Rule / MCP 预留安装入口。
+func installBuiltinAssetsForIDE(ideName string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("获取用户主目录失败: %w", err)
 	}
 
-	// 构建 IDE 用户级 skills 目录。
-	// codex-internal 在用户目录使用 ~/.codex-internal，
-	// 但项目级目录仍然复用 .codex。
-	userDirKey := "." + ideName
-	skillsDir := filepath.Join(homeDir, userDirKey, "skills")
+	ideImpl := ide.Get(ideName)
+	userRoot := ideImpl.UserRootDir(homeDir)
+	bundle := assets.GlobalAssets()
+
+	if err := installBuiltinSkills(filepath.Join(userRoot, "skills"), bundle.Skills); err != nil {
+		return fmt.Errorf("安装内置 skills 失败: %w", err)
+	}
+	if err := installBuiltinRules(filepath.Join(userRoot, "rules"), bundle.Rules); err != nil {
+		return fmt.Errorf("安装内置 rules 失败: %w", err)
+	}
+	if err := installBuiltinMCPs(ideName, userRoot, bundle.MCPs); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func installBuiltinSkills(skillsDir string, skills []assets.SkillAsset) error {
+	if len(skills) == 0 {
+		return nil
+	}
+
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
-		return fmt.Errorf("创建 %s skills 目录失败: %w", ideName, err)
+		return fmt.Errorf("创建 skills 目录失败: %w", err)
 	}
 
-	// 创建 Dec Skill 目录，已存在则覆盖
-	decSkillDir := filepath.Join(skillsDir, "dec")
-	if err := os.MkdirAll(decSkillDir, 0755); err != nil {
-		return fmt.Errorf("创建 Dec Skill 目录失败: %w", err)
+	for _, skill := range skills {
+		skillDir := filepath.Join(skillsDir, skill.Name)
+		if err := os.RemoveAll(skillDir); err != nil {
+			return fmt.Errorf("清理 skill %s 目录失败: %w", skill.Name, err)
+		}
+		if err := writeBuiltinFiles(skillDir, skill.Files); err != nil {
+			return fmt.Errorf("安装 skill %s 失败: %w", skill.Name, err)
+		}
 	}
 
-	// 写入 SKILL.md
-	skillMD := filepath.Join(decSkillDir, "SKILL.md")
-	skillContent := assets.DecSkillContent
+	return nil
+}
 
-	if err := os.WriteFile(skillMD, []byte(skillContent), 0644); err != nil {
-		return fmt.Errorf("写入 SKILL.md 失败: %w", err)
+func installBuiltinRules(rulesDir string, rules []assets.RuleAsset) error {
+	if len(rules) == 0 {
+		return nil
+	}
+
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		return fmt.Errorf("创建 rules 目录失败: %w", err)
+	}
+
+	for _, rule := range rules {
+		rulePath := filepath.Join(rulesDir, rule.Name+".mdc")
+		if err := os.WriteFile(rulePath, rule.Content, 0644); err != nil {
+			return fmt.Errorf("写入 rule %s 失败: %w", rule.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func installBuiltinMCPs(ideName, userRoot string, mcps []assets.MCPAsset) error {
+	if len(mcps) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("IDE %s 暂未实现内置 MCP 分发（用户级根目录: %s）", ideName, userRoot)
+}
+
+func writeBuiltinFiles(rootDir string, files []assets.FileAsset) error {
+	if err := os.MkdirAll(rootDir, 0755); err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		fullPath := filepath.Join(rootDir, filepath.FromSlash(file.RelPath))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(fullPath, file.Content, 0644); err != nil {
+			return err
+		}
 	}
 
 	return nil

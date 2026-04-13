@@ -8,7 +8,7 @@ Dec 自举验收脚本。
 3. 备份并恢复项目中的 .dec / .cursor / .claude 等目录
 4. 验证以下关键 story：
    - dec config repo 连接个人仓库
-   - dec config global 安装用户级 Dec Skill
+   - dec config global 安装用户级 Dec 内置 skills
    - dec config init 生成 v2 项目配置
    - dec pull 根据 enabled 拉取资产到多个 IDE
    - 托管资产使用 dec-* 命名且不覆盖用户原始内容
@@ -410,6 +410,7 @@ def run_story(project_root: Path, keep_artifacts: bool) -> None:
                 env=env,
             )
             assert_exists(home_dir / ".cursor" / "skills" / "dec" / "SKILL.md", "用户级 Dec Skill")
+            assert_exists(home_dir / ".cursor" / "skills" / "dec-extract-asset" / "SKILL.md", "用户级 Dec Extract Skill")
 
             print_step("运行 dec config init")
             run_command(

@@ -17,9 +17,10 @@ type failingMCPIDE struct {
 	name string
 }
 
-func (f *failingMCPIDE) Name() string               { return f.name }
-func (f *failingMCPIDE) RulesDir(pr string) string  { return filepath.Join(pr, "."+f.name, "rules") }
-func (f *failingMCPIDE) SkillsDir(pr string) string { return filepath.Join(pr, "."+f.name, "skills") }
+func (f *failingMCPIDE) Name() string                   { return f.name }
+func (f *failingMCPIDE) UserRootDir(home string) string { return filepath.Join(home, "."+f.name) }
+func (f *failingMCPIDE) RulesDir(pr string) string      { return filepath.Join(pr, "."+f.name, "rules") }
+func (f *failingMCPIDE) SkillsDir(pr string) string     { return filepath.Join(pr, "."+f.name, "skills") }
 func (f *failingMCPIDE) MCPConfigPath(pr string) string {
 	return filepath.Join(pr, "."+f.name, "mcp.json")
 }
