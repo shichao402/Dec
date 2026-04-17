@@ -239,6 +239,19 @@ MCP 采用非覆盖式合并：
 - `vault.go`：共享的 Vault 扫描、缓存路径、安装辅助函数
 - `update.go`：版本检查与自更新
 
+`cmd/*` 当前仍是 CLI 适配层，但 `config init` 的非交互编排已经开始下沉到 `pkg/app/`，后续 `pull` / `push` / 默认 TUI 会继续沿这条边界演进。
+
+### `pkg/app/`
+
+用例层，负责把底层 repo/config/ide 能力编排成可复用的结构化操作结果，而不是直接向终端打印文本。
+
+当前已落地的边界：
+
+- `project.go`：`config init` 的仓库扫描、项目配置写入、vars 模板准备
+- `events.go`：初版 `Reporter` / `OperationEvent` 事件模型，供 CLI 与后续 TUI 共享执行过程
+
+当前 CLI 仍保留交互式编辑器打开、最终输出和用户提示；`pkg/app` 只承接非交互的业务步骤。
+
 ### `pkg/config/`
 
 配置读写与优先级解析。

@@ -7,12 +7,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/shichao402/Dec/pkg/app"
 	"github.com/shichao402/Dec/pkg/assets"
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/editor"
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
-	"github.com/shichao402/Dec/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -287,107 +287,51 @@ var configInitCmd = &cobra.Command{
 }
 
 func runConfigInit(cmd *cobra.Command, args []string) error {
-	// 确保仓库已连接
-	connected, err := repo.IsConnected()
-	if err != nil {
-		return fmt.Errorf("检查仓库连接失败: %w", err)
-	}
-	if !connected {
-		return fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 先连接你的仓库")
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("获取当前目录失败: %w", err)
 	}
 
-	mgr := config.NewProjectConfigManager(cwd)
+	prepared, err := app.PrepareProjectConfigInit(cwd, nil)
+	if err != nil {
+		return err
+	}
 
-	// 如果已有配置，保留已有的顶层自定义字段
-	var existingConfig *types.ProjectConfig
-	if mgr.Exists() {
-		loadedConfig, err := mgr.LoadProjectConfig()
-		if err == nil {
-			existingConfig = loadedConfig
-		}
+	if prepared.ExistingConfig {
 		fmt.Println("⚠️  项目已配置过 (.dec/config.yaml 已存在)")
 		fmt.Println("   将更新 available 列表，保留已有的 enabled / editor / ides 配置。")
 	}
 
-	// 从 repo 获取所有资产
-	var allAssets []repoAssetInfo
-	if err := withReadRepoDir(func(repoDir string) error {
-		folders, err := readFolderEntries(repoDir)
-		if err != nil {
-			return fmt.Errorf("读取仓库失败: %w", err)
-		}
-		for _, f := range folders {
-			assets := listFolderAssets(f.path, f.name)
-			allAssets = append(allAssets, assets...)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	if len(allAssets) == 0 {
+	if prepared.AssetCount == 0 {
 		fmt.Println("仓库中还没有资产。请先通过其他方式添加资产到仓库。")
 		return nil
 	}
 
-	// 构建 available 列表
-	available := buildAssetList(allAssets)
-
-	// 生成配置文件，保留已有 enabled / editor / ides
-	enabled := &types.AssetList{}
-	projectEditor := ""
-	var projectIDEs []string
-	if existingConfig != nil {
-		if !existingConfig.Enabled.IsEmpty() {
-			enabled = existingConfig.Enabled
-		}
-		projectEditor = existingConfig.Editor
-		projectIDEs = existingConfig.IDEs
-	}
-	projectConfig := &types.ProjectConfig{
-		IDEs:      projectIDEs,
-		Editor:    projectEditor,
-		Available: available,
-		Enabled:   enabled,
-	}
-	if err := mgr.SaveProjectConfig(projectConfig); err != nil {
-		return fmt.Errorf("写入配置失败: %w", err)
-	}
-	varsCreated, err := mgr.EnsureVarsConfigTemplate()
-	if err != nil {
-		return fmt.Errorf("写入变量定义模板失败: %w", err)
-	}
-
-	configPath := filepath.Join(mgr.GetDecDir(), "config.yaml")
-	fmt.Printf("📝 配置已生成: %s\n", configPath)
-	if varsCreated {
-		fmt.Printf("📝 变量模板已生成: %s\n", mgr.GetVarsPath())
+	mgr := config.NewProjectConfigManager(cwd)
+	fmt.Printf("📝 配置已生成: %s\n", prepared.ConfigPath)
+	if prepared.VarsCreated {
+		fmt.Printf("📝 变量模板已生成: %s\n", prepared.VarsPath)
 	} else {
-		fmt.Printf("📝 变量模板已保留: %s\n", mgr.GetVarsPath())
+		fmt.Printf("📝 变量模板已保留: %s\n", prepared.VarsPath)
 	}
 	fmt.Println("   将 available 中的资产复制到 enabled 即为启用。")
 	fmt.Println("   如资产模板包含 {{VAR_NAME}}，在 vars.yaml 中填写对应变量。")
 	fmt.Println()
 
-	interactiveEditor, err := config.GetEffectiveEditor(projectConfig)
+	interactiveEditor, err := config.GetEffectiveEditor(prepared.ProjectConfig)
 	if err != nil {
 		return fmt.Errorf("获取交互编辑器配置失败: %w", err)
 	}
 
 	// 打开编辑器
-	if err := editor.Open(configPath, interactiveEditor); err != nil {
+	if err := editor.Open(prepared.ConfigPath, interactiveEditor); err != nil {
 		fmt.Printf("⚠️  无法打开编辑器: %v\n", err)
-		fmt.Printf("   请手动编辑 %s 后运行 dec pull\n", configPath)
+		fmt.Printf("   请手动编辑 %s 后运行 dec pull\n", prepared.ConfigPath)
 		return nil
 	}
 
 	// 解析编辑后的配置
-	projectConfig, err = mgr.LoadProjectConfig()
+	projectConfig, err := mgr.LoadProjectConfig()
 	if err != nil {
 		return fmt.Errorf("解析配置失败: %w", err)
 	}
@@ -404,16 +348,6 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("  dec pull                     # 拉取所有已启用的资产")
 
 	return nil
-}
-
-// buildAssetList 从扫描结果构建 AssetList
-func buildAssetList(allAssets []repoAssetInfo) *types.AssetList {
-	list := &types.AssetList{}
-	for _, a := range allAssets {
-		ref := types.AssetRef{Name: a.Name, Vault: a.Vault}
-		list.Add(a.Type, ref)
-	}
-	return list
 }
 
 // ========================================
