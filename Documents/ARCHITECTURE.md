@@ -10,7 +10,7 @@
 
 ## 概览
 
-Dec 是一个命令驱动的个人 AI 资产管理工具，用于把 Skills、Rules、MCP 配置保存在个人 Vault 中，并在不同项目、不同 IDE 间复用。
+Dec 是一个以 Cobra CLI 为自动化接口、并在交互式无参启动时默认进入 TUI Shell 的个人 AI 资产管理工具，用于把 Skills、Rules、MCP 配置保存在个人 Vault 中，并在不同项目、不同 IDE 间复用。
 
 当前命令体系围绕四类动作展开：
 
@@ -229,8 +229,9 @@ MCP 采用非覆盖式合并：
 ### `cmd/`
 
 命令行入口层，负责参数解析、命令编排和用户输出。
+同时，根入口还负责在默认 TUI 和传统 CLI 之间做分流。
 
-- `root.go`：根命令与版本信息
+- `root.go`：根命令、版本信息，以及 `dec` 无参启动时的入口分流
 - `repo.go`：仓库连接命令
 - `config.go`：配置初始化、展示与全局 IDE 配置
 - `pull.go`：项目拉取与安装
@@ -248,9 +249,23 @@ MCP 采用非覆盖式合并：
 当前已落地的边界：
 
 - `project.go`：`config init` 的仓库扫描、项目配置写入、vars 模板准备
+- `overview.go`：TUI 首页所需的项目概览聚合，包括仓库连接、项目配置、启用资产数、有效 IDE 和编辑器
 - `events.go`：初版 `Reporter` / `OperationEvent` 事件模型，供 CLI 与后续 TUI 共享执行过程
 
 当前 CLI 仍保留交互式编辑器打开、最终输出和用户提示；`pkg/app` 只承接非交互的业务步骤。
+
+### `internal/tui/`
+
+交互式展示层，当前承接默认入口下的最小可用 TUI Shell。
+
+- `app.go`：Bubble Tea 程序启动与 IO 绑定
+- `model.go`：全局 Shell model，负责首页、导航、状态栏、日志区与刷新逻辑
+
+当前阶段只接入了最小骨架：
+
+- `dec` 在交互式无参数场景下进入 TUI
+- 首页展示仓库/项目概览、导航、状态栏和最近日志
+- `Assets` / `Project` / `Run` / `Settings` 页面仍是占位页，等待后续阶段接管具体操作流程
 
 ### `pkg/config/`
 

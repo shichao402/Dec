@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -195,5 +196,153 @@ func TestRunConfigShowRepairsRepoConnectionAndPrintsCurrentRemote(t *testing.T) 
 	}
 	if bareRemote != remoteB {
 		t.Fatalf("runConfigShow 后 bare origin 应被修复为 %q, got %q", remoteB, bareRemote)
+	}
+}
+
+func stubEntryExecutionForRootTest(t *testing.T) {
+	t.Helper()
+
+	oldDetectTTY := detectTTY
+	oldGetWorkingDir := getWorkingDir
+	oldRunCLIMode := runCLIMode
+	oldRunTUIMode := runTUIMode
+	oldEmitUpdateHint := emitUpdateHint
+
+	t.Cleanup(func() {
+		detectTTY = oldDetectTTY
+		getWorkingDir = oldGetWorkingDir
+		runCLIMode = oldRunCLIMode
+		runTUIMode = oldRunTUIMode
+		emitUpdateHint = oldEmitUpdateHint
+	})
+
+	emitUpdateHint = func(io.Writer) {}
+}
+
+func TestExecuteRoutesInteractiveNoArgsToTUI(t *testing.T) {
+	stubEntryExecutionForRootTest(t)
+	setEnvForRootTest(t, "TERM", "xterm-256color")
+	setEnvForRootTest(t, "DEC_NO_TUI", "")
+
+	projectRoot := t.TempDir()
+	detectTTY = func(*os.File) bool { return true }
+	getWorkingDir = func() (string, error) { return projectRoot, nil }
+
+	cliCalled := false
+	runCLIMode = func(args []string, stdout, stderr io.Writer) error {
+		cliCalled = true
+		return nil
+	}
+
+	var gotProjectRoot string
+	runTUIMode = func(projectRoot string, input io.Reader, output io.Writer) error {
+		gotProjectRoot = projectRoot
+		return nil
+	}
+
+	if err := Execute(nil, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		t.Fatalf("Execute() 返回错误: %v", err)
+	}
+	if cliCalled {
+		t.Fatal("无参交互式终端应进入 TUI，而不是 CLI")
+	}
+	if gotProjectRoot != projectRoot {
+		t.Fatalf("TUI projectRoot = %q, 期望 %q", gotProjectRoot, projectRoot)
+	}
+}
+
+func TestExecuteRoutesToCLIWhenSubcommandRequested(t *testing.T) {
+	stubEntryExecutionForRootTest(t)
+	setEnvForRootTest(t, "TERM", "xterm-256color")
+	detectTTY = func(*os.File) bool { return true }
+
+	var gotArgs []string
+	runCLIMode = func(args []string, stdout, stderr io.Writer) error {
+		gotArgs = append([]string(nil), args...)
+		return nil
+	}
+	runTUIMode = func(projectRoot string, input io.Reader, output io.Writer) error {
+		t.Fatal("显式子命令应走 CLI")
+		return nil
+	}
+
+	if err := Execute([]string{"pull"}, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		t.Fatalf("Execute() 返回错误: %v", err)
+	}
+	if len(gotArgs) != 1 || gotArgs[0] != "pull" {
+		t.Fatalf("CLI args = %#v, 期望 %#v", gotArgs, []string{"pull"})
+	}
+}
+
+func TestExecuteRoutesToCLIWhenDisabledByEnv(t *testing.T) {
+	stubEntryExecutionForRootTest(t)
+	setEnvForRootTest(t, "TERM", "xterm-256color")
+	setEnvForRootTest(t, "DEC_NO_TUI", "1")
+	detectTTY = func(*os.File) bool { return true }
+
+	cliCalled := false
+	runCLIMode = func(args []string, stdout, stderr io.Writer) error {
+		cliCalled = true
+		return nil
+	}
+	runTUIMode = func(projectRoot string, input io.Reader, output io.Writer) error {
+		t.Fatal("DEC_NO_TUI=1 时不应进入 TUI")
+		return nil
+	}
+
+	if err := Execute(nil, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		t.Fatalf("Execute() 返回错误: %v", err)
+	}
+	if !cliCalled {
+		t.Fatal("DEC_NO_TUI=1 时应回退到 CLI")
+	}
+}
+
+func TestExecuteRoutesToCLIWhenStdoutIsNotTTY(t *testing.T) {
+	stubEntryExecutionForRootTest(t)
+	setEnvForRootTest(t, "TERM", "xterm-256color")
+
+	detectTTY = func(file *os.File) bool {
+		return file != os.Stdout
+	}
+
+	cliCalled := false
+	runCLIMode = func(args []string, stdout, stderr io.Writer) error {
+		cliCalled = true
+		return nil
+	}
+	runTUIMode = func(projectRoot string, input io.Reader, output io.Writer) error {
+		t.Fatal("非 TTY 输出时不应进入 TUI")
+		return nil
+	}
+
+	if err := Execute(nil, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		t.Fatalf("Execute() 返回错误: %v", err)
+	}
+	if !cliCalled {
+		t.Fatal("非 TTY 输出时应回退到 CLI")
+	}
+}
+
+func TestExecuteRoutesToCLIWhenHelpRequested(t *testing.T) {
+	stubEntryExecutionForRootTest(t)
+	setEnvForRootTest(t, "TERM", "xterm-256color")
+	detectTTY = func(*os.File) bool { return true }
+
+	var gotArgs []string
+	runCLIMode = func(args []string, stdout, stderr io.Writer) error {
+		gotArgs = append([]string(nil), args...)
+		return nil
+	}
+	runTUIMode = func(projectRoot string, input io.Reader, output io.Writer) error {
+		t.Fatal("--help 应走 CLI")
+		return nil
+	}
+
+	if err := Execute([]string{"--help"}, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		t.Fatalf("Execute() 返回错误: %v", err)
+	}
+	if len(gotArgs) != 1 || gotArgs[0] != "--help" {
+		t.Fatalf("CLI args = %#v, 期望 %#v", gotArgs, []string{"--help"})
 	}
 }

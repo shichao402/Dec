@@ -2,16 +2,51 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
+	"github.com/shichao402/Dec/internal/tui"
 	"github.com/shichao402/Dec/pkg/update"
 	"github.com/shichao402/Dec/pkg/version"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
 	appVersion   string
 	appBuildTime string
+)
+
+type entryMode int
+
+const (
+	entryModeCLI entryMode = iota
+	entryModeTUI
+)
+
+type entryContext struct {
+	Args      []string
+	Term      string
+	NoTUI     string
+	StdinTTY  bool
+	StdoutTTY bool
+	StderrTTY bool
+}
+
+var (
+	detectTTY      = isTerminalFile
+	getWorkingDir  = os.Getwd
+	runCLIMode     = executeCLI
+	runTUIMode     = executeTUI
+	emitUpdateHint = func(w io.Writer) {
+		if w == nil {
+			return
+		}
+		if result := update.CheckBackground(GetVersion()); result != nil {
+			fmt.Fprintf(w, "\n💡 %s\n\n", update.FormatUpdateHint(result))
+		}
+	}
 )
 
 var RootCmd = &cobra.Command{
@@ -34,14 +69,10 @@ var RootCmd = &cobra.Command{
 	SilenceUsage:  true,
 	Version:       getVersionString(),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// 跳过 update 和 version 命令自身的检查
 		if cmd.Name() == "update" || cmd.Name() == "version" {
 			return
 		}
-		// 后台检查新版本
-		if result := update.CheckBackground(GetVersion()); result != nil {
-			fmt.Fprintf(os.Stderr, "\n💡 %s\n\n", update.FormatUpdateHint(result))
-		}
+		emitUpdateHint(cmd.ErrOrStderr())
 	},
 }
 
@@ -104,6 +135,63 @@ func GetVersion() string {
 func runVersion(cmd *cobra.Command, args []string) error {
 	cmd.Println(GetVersion())
 	return nil
+}
+
+// Execute 根据终端环境在 Cobra CLI 和默认 TUI 入口之间分流。
+func Execute(args []string, stdin, stdout, stderr *os.File) error {
+	mode := decideEntryMode(entryContext{
+		Args:      append([]string(nil), args...),
+		Term:      os.Getenv("TERM"),
+		NoTUI:     os.Getenv("DEC_NO_TUI"),
+		StdinTTY:  detectTTY(stdin),
+		StdoutTTY: detectTTY(stdout),
+		StderrTTY: detectTTY(stderr),
+	})
+
+	if mode == entryModeTUI {
+		projectRoot, err := getWorkingDir()
+		if err != nil {
+			return fmt.Errorf("获取当前目录失败: %w", err)
+		}
+		emitUpdateHint(stderr)
+		return runTUIMode(projectRoot, stdin, stdout)
+	}
+
+	return runCLIMode(args, stdout, stderr)
+}
+
+func decideEntryMode(ctx entryContext) entryMode {
+	if len(ctx.Args) != 0 {
+		return entryModeCLI
+	}
+	if strings.TrimSpace(ctx.NoTUI) == "1" {
+		return entryModeCLI
+	}
+	if strings.EqualFold(strings.TrimSpace(ctx.Term), "dumb") {
+		return entryModeCLI
+	}
+	if !ctx.StdinTTY || !ctx.StdoutTTY || !ctx.StderrTTY {
+		return entryModeCLI
+	}
+	return entryModeTUI
+}
+
+func executeCLI(args []string, stdout, stderr io.Writer) error {
+	RootCmd.SetArgs(args)
+	RootCmd.SetOut(stdout)
+	RootCmd.SetErr(stderr)
+	return RootCmd.Execute()
+}
+
+func executeTUI(projectRoot string, input io.Reader, output io.Writer) error {
+	return tui.Run(projectRoot, input, output)
+}
+
+func isTerminalFile(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+	return term.IsTerminal(int(file.Fd()))
 }
 
 func init() {

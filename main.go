@@ -17,7 +17,7 @@ func main() {
 	// 设置版本信息
 	cmd.SetVersion(Version, BuildTime)
 
-	if err := cmd.RootCmd.Execute(); err != nil {
+	if err := cmd.Execute(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		cmd.PrintCommandError(os.Stderr, os.Args[1:], err)
 		os.Exit(1)
 	}
