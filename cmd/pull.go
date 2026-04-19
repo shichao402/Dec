@@ -3,15 +3,15 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/shichao402/Dec/pkg/config"
+	"github.com/shichao402/Dec/pkg/app"
 	"github.com/shichao402/Dec/pkg/ide"
-	"github.com/shichao402/Dec/pkg/repo"
 	"github.com/shichao402/Dec/pkg/types"
 	"github.com/spf13/cobra"
 )
@@ -51,163 +51,116 @@ func runPull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("获取当前目录失败: %w", err)
 	}
 
-	mgr := config.NewProjectConfigManager(cwd)
-	projectConfig, err := mgr.LoadProjectConfig()
-	if err != nil {
-		return err
+	printer := newPullCLIPrinter(cmd.OutOrStdout(), cmd.ErrOrStderr())
+	_, err = app.PullProjectAssets(cwd, pullVersion, app.ReporterFunc(printer.Emit))
+	return err
+}
+
+type pullCLIPrinter struct {
+	out               io.Writer
+	err               io.Writer
+	printedConfigWarn bool
+	printedIDEWarn    bool
+	printedMigration  bool
+	printedCleanup    bool
+}
+
+func newPullCLIPrinter(out, err io.Writer) *pullCLIPrinter {
+	return &pullCLIPrinter{out: out, err: err}
+}
+
+func (p *pullCLIPrinter) Emit(event app.OperationEvent) {
+	message := strings.TrimSpace(event.Message)
+	if message == "" {
+		return
 	}
 
-	if projectConfig.Enabled.IsEmpty() {
-		fmt.Println("config.yaml 中没有已启用的资产")
-		fmt.Println("\n运行 dec config init 选择需要的资产")
-		return nil
-	}
-
-	// 校验 enabled 中的资产是否在 available 中存在
-	enabledAssets := projectConfig.Enabled.All()
-	var validAssets []types.TypedAssetRef
-	if projectConfig.Available != nil && !projectConfig.Available.IsEmpty() {
-		var warnings []string
-		for _, asset := range enabledAssets {
-			if projectConfig.Available.FindAsset(asset.Type, asset.Name, asset.Vault) == nil {
-				warnings = append(warnings, fmt.Sprintf("  ⚠️  [%-5s] %s (vault: %s) — 不在 available 中（可能拼写错误或已被删除）", asset.Type, asset.Name, asset.Vault))
-			} else {
-				validAssets = append(validAssets, asset)
-			}
+	switch event.Scope {
+	case "pull.ide":
+		printWarningBlock(p.err, message)
+		p.printedIDEWarn = true
+	case "pull.validate":
+		if !p.printedConfigWarn {
+			p.finishIDEWarnings()
+			fmt.Fprintln(p.out, "配置校验:")
+			p.printedConfigWarn = true
 		}
-		if len(warnings) > 0 {
-			fmt.Println("配置校验:")
-			for _, w := range warnings {
-				fmt.Println(w)
-			}
-			fmt.Println()
+		fmt.Fprintf(p.out, "  ⚠️  %s\n", message)
+	case "pull.migrate":
+		p.finishPreSections()
+		if !p.printedMigration {
+			fmt.Fprintln(p.out, "🔄 检测到旧版项目布局，已自动迁移:")
+			p.printedMigration = true
 		}
-	} else {
-		// 没有 available 则跳过校验，全部尝试拉取
-		validAssets = enabledAssets
-	}
-
-	if len(validAssets) == 0 {
-		fmt.Println("没有有效的已启用资产可拉取")
-		return nil
-	}
-
-	ideSelection, err := config.ResolveEffectiveIDEs(projectConfig)
-	if err != nil {
-		return fmt.Errorf("解析有效 IDE 失败: %w", err)
-	}
-	for _, warning := range ideSelection.Warnings {
-		printWarningBlock(cmd.ErrOrStderr(), warning)
-	}
-	if len(ideSelection.Warnings) > 0 {
-		fmt.Fprintln(cmd.ErrOrStderr())
-	}
-	ideNames := ideSelection.IDEs
-	projectIDEs := uniqueProjectIDEs(cwd, ideNames)
-	projectIDELabels := projectIDENames(projectIDEs)
-
-	migrationNotes, err := migrateLegacyProjectLayouts(cwd, projectIDEs)
-	if err != nil {
-		return fmt.Errorf("迁移旧版项目布局失败: %w", err)
-	}
-	if len(migrationNotes) > 0 {
-		fmt.Println("🔄 检测到旧版项目布局，已自动迁移:")
-		for _, note := range migrationNotes {
-			fmt.Printf("  %s\n", note)
+		fmt.Fprintf(p.out, "  %s\n", message)
+	case "pull.cleanup":
+		p.finishPreSections()
+		if strings.HasPrefix(message, "🧹") {
+			fmt.Fprintln(p.out, message)
+			p.printedCleanup = true
+			return
 		}
-		fmt.Println()
-	}
-
-	// 清理不再启用的旧资产
-	cleanupRemovedAssets(cwd, enabledAssets, projectIDEs)
-
-	// 创建事务
-	createTx := func() (*repo.Transaction, error) {
-		if pullVersion != "" {
-			return repo.NewReadTransactionAt(pullVersion)
+		if !p.printedCleanup {
+			fmt.Fprintln(p.out, "🧹 清理不再启用的资产:")
+			p.printedCleanup = true
 		}
-		return repo.NewReadTransaction()
+		fmt.Fprintf(p.out, "  %s\n", message)
+	case "pull.start":
+		p.finishPreSections()
+		fmt.Fprintf(p.out, "%s\n\n", message)
+	case "pull.asset":
+		fmt.Fprintf(p.out, "  %s\n", message)
+	case "pull.finalize":
+		fmt.Fprintln(p.out, message)
+	case "pull.finish":
+		fmt.Fprintf(p.out, "\n%s\n", message)
+	case "pull.prepare":
+		if strings.HasPrefix(message, "运行 dec config init") {
+			fmt.Fprintf(p.out, "\n%s\n", message)
+			return
+		}
+		fmt.Fprintln(p.out, message)
+	case "pull.vars":
+		printIndentedEventWarning(p.out, message)
+	default:
+		fmt.Fprintln(p.out, message)
 	}
+}
 
-	tx, err := createTx()
-	if err != nil {
-		return err
+func (p *pullCLIPrinter) finishIDEWarnings() {
+	if !p.printedIDEWarn {
+		return
 	}
-	defer tx.Close()
+	fmt.Fprintln(p.err)
+	p.printedIDEWarn = false
+}
 
-	repoDir := tx.WorkDir()
-	pulled := 0
-	failed := 0
+func (p *pullCLIPrinter) finishConfigWarnings() {
+	if !p.printedConfigWarn {
+		return
+	}
+	fmt.Fprintln(p.out)
+	p.printedConfigWarn = false
+}
 
-	fmt.Printf("📥 拉取 %d 个已启用资产...\n\n", len(validAssets))
+func (p *pullCLIPrinter) finishPreSections() {
+	p.finishIDEWarnings()
+	p.finishConfigWarnings()
+}
 
-	for _, asset := range validAssets {
-		fullPath := resolveAssetFile(repoDir, asset.Vault, asset.Type, asset.Name)
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-			fmt.Printf("  ⚠️  [%-5s] %s (vault: %s) — 远程不存在\n", asset.Type, asset.Name, asset.Vault)
-			failed++
+func printIndentedEventWarning(w io.Writer, message string) {
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(message), "\r\n", "\n"), "\n")
+	for idx, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
 			continue
 		}
-
-		// 缓存到 .dec/cache/
-		cachePath := getCachePath(cwd, asset.Vault, asset.Type, asset.Name)
-		switch asset.Type {
-		case "skill":
-			_ = copyDir(fullPath, cachePath)
-		case "rule", "mcp":
-			_ = copyFile(fullPath, cachePath)
-		}
-
-		// 安装到 IDE
-		if err := installAssetToIDEs(asset.Type, asset.Name, fullPath, cwd, projectIDEs); err != nil {
-			fmt.Printf("  ⚠️  [%-5s] %s (%v)\n", asset.Type, asset.Name, err)
-			failed++
+		if idx == 0 {
+			fmt.Fprintf(w, "  ⚠️  %s\n", trimmed)
 			continue
 		}
-
-		// 占位符替换
-		substituteAssetVars(asset.Type, asset.Name, cwd, projectIDEs, mgr)
-
-		fmt.Printf("  ✅ [%-5s] %s  (vault: %s)\n", asset.Type, asset.Name, asset.Vault)
-		pulled++
+		fmt.Fprintf(w, "      %s\n", trimmed)
 	}
-
-	// 记录版本
-	commitHash := tx.CommitHash()
-	if commitHash != "" {
-		saveVersionMeta(cwd, commitHash)
-	}
-
-	if pulled > 0 {
-		createdMise, err := ensureMiseLocalTomlFile(cwd)
-		if createdMise {
-			fmt.Println("📝 已创建 mise.local.toml")
-		}
-		if err != nil {
-			fmt.Printf("  ⚠️  %v\n", err)
-		} else {
-			updatedGitignore, err := ensureMiseLocalTomlGitignore(cwd)
-			if updatedGitignore {
-				fmt.Println("🙈 已将 mise.local.toml 加入 .gitignore")
-			}
-			if err != nil {
-				fmt.Printf("  ⚠️  %v\n", err)
-			}
-			if err := trustMiseLocalToml(cwd); err != nil {
-				fmt.Printf("  ⚠️  %v\n", err)
-			} else {
-				fmt.Println("🔐 已执行 mise trust mise.local.toml")
-			}
-		}
-	}
-
-	fmt.Printf("\n✅ 完成：%d 个资产已拉取", pulled)
-	if failed > 0 {
-		fmt.Printf("，%d 个失败", failed)
-	}
-	fmt.Printf(" (IDE: %s)\n", strings.Join(projectIDELabels, ", "))
-
-	return nil
 }
 
 // cleanupRemovedAssets 清理不再启用的旧资产（对比 cache 目录 vs 当前 enabled）

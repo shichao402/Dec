@@ -38,6 +38,19 @@ type assetsSavedMsg struct {
 	err    error
 }
 
+type runEventMsg struct {
+	event app.OperationEvent
+}
+
+type runCompletedMsg struct {
+	result *app.PullProjectAssetsResult
+	err    error
+}
+
+var runPullOperation = func(projectRoot string, reporter app.Reporter) (*app.PullProjectAssetsResult, error) {
+	return app.PullProjectAssets(projectRoot, "", reporter)
+}
+
 type model struct {
 	projectRoot      string
 	pages            []string
@@ -54,6 +67,12 @@ type model struct {
 	assetFilterInput bool
 	assetsDirty      bool
 	savingAssets     bool
+	runningPull      bool
+	runProgress      *app.Progress
+	runEvents        []string
+	runResult        *app.PullProjectAssetsResult
+	runErr           error
+	runStream        <-chan tea.Msg
 }
 
 func newModel(projectRoot string) model {
@@ -109,6 +128,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.result != nil {
 			m.pushLog(fmt.Sprintf("Asset selection saved: %d enabled / %d available", msg.result.EnabledCount, msg.result.AvailableCount))
+		}
+		return m, m.refreshCmd()
+	case runEventMsg:
+		m.recordRunEvent(msg.event)
+		if m.runStream != nil {
+			return m, waitRunMsg(m.runStream)
+		}
+		return m, nil
+	case runCompletedMsg:
+		m.runningPull = false
+		m.runStream = nil
+		m.runResult = msg.result
+		m.runErr = msg.err
+		if msg.err != nil {
+			m.pushLog("Run pull failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.result != nil {
+			m.pushLog(fmt.Sprintf("Run pull finished: %d pulled / %d failed", msg.result.PulledCount, msg.result.FailedCount))
 		}
 		return m, m.refreshCmd()
 	case tea.KeyMsg:
@@ -174,6 +212,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.savingAssets = true
 				m.pushLog("Saving asset selection")
 				return m, saveAssetsCmd(m.projectRoot, cloneAssetSelectionItems(m.assets.Items))
+			}
+			if m.isRunPage() && !m.runningPull {
+				return m, m.startPullRun()
+			}
+			return m, nil
+		case "p":
+			if m.isRunPage() && !m.runningPull {
+				return m, m.startPullRun()
 			}
 			return m, nil
 		}
@@ -249,6 +295,29 @@ func saveAssetsCmd(projectRoot string, items []app.AssetSelectionItem) tea.Cmd {
 	}
 }
 
+func startPullRunCmd(projectRoot string, stream chan<- tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		go func() {
+			result, err := runPullOperation(projectRoot, app.ReporterFunc(func(event app.OperationEvent) {
+				stream <- runEventMsg{event: event}
+			}))
+			stream <- runCompletedMsg{result: result, err: err}
+			close(stream)
+		}()
+		return nil
+	}
+}
+
+func waitRunMsg(stream <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-stream
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
 func cloneAssetSelectionItems(items []app.AssetSelectionItem) []app.AssetSelectionItem {
 	return append([]app.AssetSelectionItem(nil), items...)
 }
@@ -275,6 +344,49 @@ func (m model) handleAssetFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.normalizeAssetCursor()
 	}
 	return m, nil
+}
+
+func (m *model) startPullRun() tea.Cmd {
+	stream := make(chan tea.Msg, 64)
+	m.runningPull = true
+	m.runProgress = nil
+	m.runEvents = nil
+	m.runResult = nil
+	m.runErr = nil
+	m.runStream = stream
+	m.pushLog("Run page started pull")
+	return tea.Batch(startPullRunCmd(m.projectRoot, stream), waitRunMsg(stream))
+}
+
+func (m *model) recordRunEvent(event app.OperationEvent) {
+	if event.Progress != nil {
+		progress := *event.Progress
+		m.runProgress = &progress
+	}
+	for _, line := range splitRunMessage(event.Message) {
+		m.runEvents = append(m.runEvents, line)
+		if len(m.runEvents) > 12 {
+			m.runEvents = append([]string(nil), m.runEvents[len(m.runEvents)-12:]...)
+		}
+		m.pushLog(line)
+	}
+}
+
+func splitRunMessage(message string) []string {
+	normalized := strings.ReplaceAll(strings.TrimSpace(message), "\r\n", "\n")
+	if normalized == "" {
+		return nil
+	}
+	parts := strings.Split(normalized, "\n")
+	lines := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		lines = append(lines, trimmed)
+	}
+	return lines
 }
 
 func trimLastRune(value string) string {
@@ -427,10 +539,37 @@ func (m model) renderProjectPage(width int) string {
 }
 
 func (m model) renderRunPage(width int) string {
-	return wrapLines(width, []string{
-		"执行页将在后续阶段接管 pull / push / remove / update。",
-		"本阶段先让 Assets 页替代手改 YAML 的主路径，不改变现有 CLI 子命令语义。",
-	})
+	lines := []string{
+		fmt.Sprintf("状态: %s", m.runStatusLabel()),
+		shellMutedStyle.Render("快捷键：p 执行 pull · s 也可触发当前页主动作 · r 刷新概览"),
+	}
+	if m.runProgress != nil {
+		lines = append(lines, fmt.Sprintf("阶段: %s (%d/%d)", fallbackValue(m.runProgress.Phase, "working"), m.runProgress.Current, m.runProgress.Total))
+	}
+	if m.runResult != nil {
+		lines = append(lines,
+			fmt.Sprintf("结果: 请求 %d | 成功 %d | 失败 %d", m.runResult.RequestedCount, m.runResult.PulledCount, m.runResult.FailedCount),
+			fmt.Sprintf("IDE: %s", fallbackValue(strings.Join(m.runResult.EffectiveIDEs, ", "), "<none>")),
+		)
+		if strings.TrimSpace(m.runResult.VersionCommit) != "" {
+			lines = append(lines, fmt.Sprintf("Commit: %s", m.runResult.VersionCommit))
+		}
+	}
+	if m.runErr != nil {
+		lines = append(lines, shellWarnStyle.Render("错误: "+m.runErr.Error()))
+	}
+	if len(m.runEvents) == 0 {
+		lines = append(lines, shellMutedStyle.Render("执行日志会显示在这里。当前阶段先接入 pull，后续再覆盖 push / remove / update。"))
+		return wrapLines(width, lines)
+	}
+
+	formatted := make([]string, 0, len(lines)+len(m.runEvents)+2)
+	formatted = append(formatted, lines...)
+	formatted = append(formatted, shellTitleStyle.Render("Execution Log"))
+	for _, line := range m.runEvents {
+		formatted = append(formatted, "- "+line)
+	}
+	return wrapLines(width, formatted)
 }
 
 func (m model) renderSettingsPage(width int) string {
@@ -619,6 +758,10 @@ func (m model) isAssetsPage() bool {
 	return m.pages[m.pageIndex] == "Assets"
 }
 
+func (m model) isRunPage() bool {
+	return m.pages[m.pageIndex] == "Run"
+}
+
 func (m model) renderLogs(width, height int) string {
 	start := 0
 	if len(m.logs) > height-2 {
@@ -643,6 +786,11 @@ func (m model) renderStatusBar(width int) string {
 		}
 		if m.assetFilterInput {
 			right += " | filter"
+		}
+	} else if m.isRunPage() {
+		right = fmt.Sprintf("%s | %s", right, m.runStatusLabel())
+		if m.runProgress != nil {
+			right += fmt.Sprintf(" | %s %d/%d", fallbackValue(m.runProgress.Phase, "working"), m.runProgress.Current, m.runProgress.Total)
 		}
 	} else if m.overview != nil {
 		right = fmt.Sprintf("%s | enabled %d", right, m.overview.EnabledCount)
@@ -670,6 +818,18 @@ func (m model) currentSummary() string {
 		}
 		return fmt.Sprintf("Assets ready, %d enabled", m.countEnabledAssets())
 	}
+	if m.isRunPage() {
+		if m.runningPull {
+			return "Pull running"
+		}
+		if m.runErr != nil {
+			return "Last pull failed"
+		}
+		if m.runResult != nil {
+			return fmt.Sprintf("Last pull: %d ok / %d failed", m.runResult.PulledCount, m.runResult.FailedCount)
+		}
+		return "Run page ready"
+	}
 	if m.overview == nil {
 		return "Loading project state"
 	}
@@ -695,7 +855,20 @@ func suggestNextAction(overview *app.ProjectOverview) string {
 	if overview.EnabledCount == 0 {
 		return "当前还没有启用资产，先切到 Assets 页选择并保存"
 	}
-	return "可以继续执行 dec pull，同步已启用资产"
+	return "可以切到 Run 页执行 pull，或继续使用 dec pull"
+}
+
+func (m model) runStatusLabel() string {
+	switch {
+	case m.runningPull:
+		return shellGoodStyle.Render("执行中")
+	case m.runErr != nil:
+		return shellWarnStyle.Render("失败")
+	case m.runResult != nil:
+		return shellGoodStyle.Render("已完成")
+	default:
+		return shellMutedStyle.Render("空闲")
+	}
 }
 
 func formatWarnings(warnings []string) string {
