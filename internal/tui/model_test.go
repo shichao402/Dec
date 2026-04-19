@@ -47,27 +47,105 @@ func TestModelViewRendersHomeOverview(t *testing.T) {
 	}
 }
 
-func TestModelNavigationSwitchesPages(t *testing.T) {
+func TestModelAssetsPageRendersSelectionState(t *testing.T) {
 	m := newModel("/tmp/dec-project")
-	m.overview = &app.ProjectOverview{}
+	m.pageIndex = 1
+	m.width = 110
+	m.height = 32
+	m.assets = &app.AssetSelectionState{
+		ExistingConfig: true,
+		ConfigPath:     "/tmp/dec-project/.dec/config.yaml",
+		VarsPath:       "/tmp/dec-project/.dec/vars.yaml",
+		Items: []app.AssetSelectionItem{
+			{Name: "project-workflow", Type: "skill", Vault: "default", Enabled: true},
+			{Name: "cli-release-rules", Type: "rule", Vault: "cli", Enabled: false},
+		},
+	}
+	m.normalizeAssetCursor()
+
+	view := m.View()
+	checks := []string{
+		"Asset List",
+		"Details",
+		"[x] default / skill / project-workflow",
+		"[ ] cli / rule / cli-release-rules",
+		"快捷键：j/k 移动",
+	}
+	for _, check := range checks {
+		if !strings.Contains(view, check) {
+			t.Fatalf("Assets View() 缺少 %q:\n%s", check, view)
+		}
+	}
+}
+
+func TestModelToggleCurrentAssetMarksDirty(t *testing.T) {
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 1
+	m.assets = &app.AssetSelectionState{
+		Items: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
+	}
+	m.normalizeAssetCursor()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = updated.(model)
+	if !m.assets.Items[0].Enabled {
+		t.Fatal("space 应切换当前资产为 enabled")
+	}
+	if !m.assetsDirty {
+		t.Fatal("切换资产后应标记为 dirty")
+	}
+}
+
+func TestModelFilterInputNarrowsAssets(t *testing.T) {
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 1
+	m.assets = &app.AssetSelectionState{
+		Items: []app.AssetSelectionItem{
+			{Name: "project-workflow", Type: "skill", Vault: "default"},
+			{Name: "cli-release-rules", Type: "rule", Vault: "cli"},
+		},
+	}
+	m.normalizeAssetCursor()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(model)
+	if !m.assetFilterInput {
+		t.Fatal("/ 应进入筛选输入状态")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c', 'l', 'i'}})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	visible := m.filteredAssetIndices()
+	if len(visible) != 1 {
+		t.Fatalf("筛选后可见资产数 = %d, 期望 1", len(visible))
+	}
+	if got := m.assets.Items[visible[0]].Name; got != "cli-release-rules" {
+		t.Fatalf("筛选命中资产 = %q, 期望 %q", got, "cli-release-rules")
+	}
+}
+
+func TestModelAssetsPageDoesNotLeavePageWithoutVisibleAssets(t *testing.T) {
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 1
+	m.assets = &app.AssetSelectionState{
+		Items: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
+	}
+	m.assetFilter = "missing"
+	m.normalizeAssetCursor()
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = updated.(model)
 	if m.pageIndex != 1 {
-		t.Fatalf("pageIndex = %d, 期望 1", m.pageIndex)
+		t.Fatalf("无可见资产时按 down 不应切出 Assets 页, pageIndex = %d", m.pageIndex)
 	}
 
-	m.width = 100
-	m.height = 28
-	view := m.View()
-	if !strings.Contains(view, "阶段 2 只接入了 Shell 骨架") {
-		t.Fatalf("Assets 页应展示占位文案:\n%s", view)
-	}
-
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m = updated.(model)
-	if m.pageIndex != 0 {
-		t.Fatalf("pageIndex = %d, 期望回到 0", m.pageIndex)
+	if m.pageIndex != 1 {
+		t.Fatalf("无可见资产时按 up 不应切出 Assets 页, pageIndex = %d", m.pageIndex)
 	}
 }
 
@@ -75,10 +153,10 @@ func TestSuggestNextAction(t *testing.T) {
 	if got := suggestNextAction(&app.ProjectOverview{}); !strings.Contains(got, "dec config repo") {
 		t.Fatalf("未连接仓库时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}); !strings.Contains(got, "dec config init") {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}); !strings.Contains(got, "Assets 页") {
 		t.Fatalf("未初始化项目时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true, EnabledCount: 0}); !strings.Contains(got, "enabled") {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true, EnabledCount: 0}); !strings.Contains(got, "Assets 页") {
 		t.Fatalf("无已启用资产时建议动作错误: %q", got)
 	}
 	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true, EnabledCount: 2}); !strings.Contains(got, "dec pull") {

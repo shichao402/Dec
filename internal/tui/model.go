@@ -10,15 +10,17 @@ import (
 )
 
 var (
-	shellTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230"))
-	shellMutedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("248"))
-	shellCardStyle  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("67")).Padding(1, 2)
-	shellActiveNav  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230")).Background(lipgloss.Color("24")).Padding(0, 1)
-	shellNavStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Padding(0, 1)
-	shellStatusBar  = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("24")).Padding(0, 1)
-	shellLogStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	shellWarnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	shellGoodStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("78")).Bold(true)
+	shellTitleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230"))
+	shellMutedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("248"))
+	shellCardStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("67")).Padding(1, 2)
+	shellActiveNav   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230")).Background(lipgloss.Color("24")).Padding(0, 1)
+	shellNavStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Padding(0, 1)
+	shellStatusBar   = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("24")).Padding(0, 1)
+	shellLogStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	shellWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	shellGoodStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("78")).Bold(true)
+	shellSelectedRow = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("24")).Bold(true)
+	shellEnabledRow  = lipgloss.NewStyle().Foreground(lipgloss.Color("78"))
 )
 
 type overviewLoadedMsg struct {
@@ -26,15 +28,32 @@ type overviewLoadedMsg struct {
 	err      error
 }
 
+type assetsLoadedMsg struct {
+	state *app.AssetSelectionState
+	err   error
+}
+
+type assetsSavedMsg struct {
+	result *app.SaveAssetSelectionResult
+	err    error
+}
+
 type model struct {
-	projectRoot string
-	pages       []string
-	pageIndex   int
-	width       int
-	height      int
-	overview    *app.ProjectOverview
-	err         error
-	logs        []string
+	projectRoot      string
+	pages            []string
+	pageIndex        int
+	width            int
+	height           int
+	overview         *app.ProjectOverview
+	overviewErr      error
+	assets           *app.AssetSelectionState
+	assetsErr        error
+	logs             []string
+	assetCursor      int
+	assetFilter      string
+	assetFilterInput bool
+	assetsDirty      bool
+	savingAssets     bool
 }
 
 func newModel(projectRoot string) model {
@@ -44,12 +63,13 @@ func newModel(projectRoot string) model {
 		logs: []string{
 			"TUI shell ready",
 			"Loading project overview...",
+			"Loading asset selection...",
 		},
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return loadOverviewCmd(m.projectRoot)
+	return m.refreshCmd()
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -59,30 +79,103 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case overviewLoadedMsg:
-		m.err = msg.err
 		m.overview = msg.overview
+		m.overviewErr = msg.err
 		if msg.err != nil {
 			m.pushLog("Overview load failed: " + msg.err.Error())
 			return m, nil
 		}
 		m.pushLog(fmt.Sprintf("Overview loaded: %d enabled / %d available assets", msg.overview.EnabledCount, msg.overview.AvailableCount))
 		return m, nil
+	case assetsLoadedMsg:
+		m.assets = msg.state
+		m.assetsErr = msg.err
+		m.savingAssets = false
+		m.assetsDirty = false
+		if msg.err != nil {
+			m.pushLog("Asset selection load failed: " + msg.err.Error())
+			return m, nil
+		}
+		m.normalizeAssetCursor()
+		if msg.state != nil {
+			m.pushLog(fmt.Sprintf("Asset selection loaded: %d items", len(msg.state.Items)))
+		}
+		return m, nil
+	case assetsSavedMsg:
+		m.savingAssets = false
+		if msg.err != nil {
+			m.pushLog("Asset selection save failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.result != nil {
+			m.pushLog(fmt.Sprintf("Asset selection saved: %d enabled / %d available", msg.result.EnabledCount, msg.result.AvailableCount))
+		}
+		return m, m.refreshCmd()
 	case tea.KeyMsg:
+		if m.assetFilterInput && m.isAssetsPage() {
+			return m.handleAssetFilterInput(msg)
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.pushLog("Exit requested")
 			return m, tea.Quit
-		case "j", "down", "tab", "l", "right":
+		case "tab", "l", "right":
 			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
 			return m, nil
-		case "k", "up", "shift+tab", "h", "left":
+		case "shift+tab", "h", "left":
+			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
+			m.pushLog("Switched to " + m.pages[m.pageIndex])
+			return m, nil
+		case "j", "down":
+			if m.isAssetsPage() {
+				if m.canNavigateAssets() {
+					m.moveAssetCursor(1)
+				}
+				return m, nil
+			}
+			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
+			m.pushLog("Switched to " + m.pages[m.pageIndex])
+			return m, nil
+		case "k", "up":
+			if m.isAssetsPage() {
+				if m.canNavigateAssets() {
+					m.moveAssetCursor(-1)
+				}
+				return m, nil
+			}
 			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
 			return m, nil
 		case "r":
-			m.pushLog("Refreshing project overview")
-			return m, loadOverviewCmd(m.projectRoot)
+			m.pushLog("Refreshing project overview and asset selection")
+			return m, m.refreshCmd()
+		case "/":
+			if m.isAssetsPage() {
+				m.assetFilterInput = true
+				m.pushLog("Asset filter input opened")
+			}
+			return m, nil
+		case "c":
+			if m.isAssetsPage() && strings.TrimSpace(m.assetFilter) != "" {
+				m.assetFilter = ""
+				m.normalizeAssetCursor()
+				m.pushLog("Asset filter cleared")
+			}
+			return m, nil
+		case " ", "enter":
+			if m.isAssetsPage() && !m.savingAssets {
+				m.toggleCurrentAsset()
+			}
+			return m, nil
+		case "s":
+			if m.isAssetsPage() && !m.savingAssets && m.assets != nil && m.assetsErr == nil {
+				m.savingAssets = true
+				m.pushLog("Saving asset selection")
+				return m, saveAssetsCmd(m.projectRoot, cloneAssetSelectionItems(m.assets.Items))
+			}
+			return m, nil
 		}
 	}
 
@@ -131,11 +224,65 @@ func (m model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, content, statusBar)
 }
 
+func (m model) refreshCmd() tea.Cmd {
+	return tea.Batch(loadOverviewCmd(m.projectRoot), loadAssetsCmd(m.projectRoot))
+}
+
 func loadOverviewCmd(projectRoot string) tea.Cmd {
 	return func() tea.Msg {
 		overview, err := app.LoadProjectOverview(projectRoot)
 		return overviewLoadedMsg{overview: overview, err: err}
 	}
+}
+
+func loadAssetsCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		state, err := app.LoadAssetSelection(projectRoot, nil)
+		return assetsLoadedMsg{state: state, err: err}
+	}
+}
+
+func saveAssetsCmd(projectRoot string, items []app.AssetSelectionItem) tea.Cmd {
+	return func() tea.Msg {
+		result, err := app.SaveAssetSelection(projectRoot, items, nil)
+		return assetsSavedMsg{result: result, err: err}
+	}
+}
+
+func cloneAssetSelectionItems(items []app.AssetSelectionItem) []app.AssetSelectionItem {
+	return append([]app.AssetSelectionItem(nil), items...)
+}
+
+func (m model) handleAssetFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.assetFilterInput = false
+		m.pushLog("Asset filter input closed")
+		return m, nil
+	case tea.KeyEnter:
+		m.assetFilterInput = false
+		m.normalizeAssetCursor()
+		m.pushLog("Asset filter applied: " + m.currentAssetFilterLabel())
+		return m, nil
+	case tea.KeyBackspace, tea.KeyCtrlH:
+		m.assetFilter = trimLastRune(m.assetFilter)
+		m.normalizeAssetCursor()
+		return m, nil
+	}
+
+	if len(msg.Runes) > 0 && !msg.Alt {
+		m.assetFilter += string(msg.Runes)
+		m.normalizeAssetCursor()
+	}
+	return m, nil
+}
+
+func trimLastRune(value string) string {
+	runes := []rune(value)
+	if len(runes) == 0 {
+		return ""
+	}
+	return string(runes[:len(runes)-1])
 }
 
 func (m *model) pushLog(line string) {
@@ -152,7 +299,7 @@ func (m *model) pushLog(line string) {
 func (m model) renderSidebar(width, height int) string {
 	items := make([]string, 0, len(m.pages)+2)
 	items = append(items, shellTitleStyle.Render("Dec Shell"))
-	items = append(items, shellMutedStyle.Render("j/k or Tab to switch"))
+	items = append(items, shellMutedStyle.Render("tab switch / j k move"))
 	for idx, page := range m.pages {
 		style := shellNavStyle
 		if idx == m.pageIndex {
@@ -181,49 +328,295 @@ func (m model) renderMain(width, height int) string {
 }
 
 func (m model) renderPageBody(width int) string {
-	if m.err != nil {
-		return shellWarnStyle.Render("Failed to load overview") + "\n\n" + m.err.Error()
+	switch m.pages[m.pageIndex] {
+	case "Home":
+		return m.renderHomePage(width)
+	case "Assets":
+		return m.renderAssetsPage(width)
+	case "Project":
+		return m.renderProjectPage(width)
+	case "Run":
+		return m.renderRunPage(width)
+	default:
+		return m.renderSettingsPage(width)
+	}
+}
+
+func (m model) renderHomePage(width int) string {
+	if m.overviewErr != nil {
+		return shellWarnStyle.Render("Failed to load overview") + "\n\n" + m.overviewErr.Error()
 	}
 	if m.overview == nil {
 		return shellMutedStyle.Render("Loading project overview...")
 	}
 
-	switch m.pages[m.pageIndex] {
-	case "Home":
-		return wrapLines(width, []string{
-			fmt.Sprintf("仓库: %s", formatReady(m.overview.RepoConnected, "已连接", "未连接")),
-			fmt.Sprintf("远端仓库: %s", fallbackValue(m.overview.RepoRemoteURL, "未连接")),
-			fmt.Sprintf("项目配置: %s", formatReady(m.overview.ProjectConfigReady, "已初始化", "未初始化")),
-			fmt.Sprintf("变量文件: %s", formatReady(m.overview.VarsFileReady, "已存在", "未生成")),
-			fmt.Sprintf("可用资产: %d", m.overview.AvailableCount),
-			fmt.Sprintf("已启用资产: %d", m.overview.EnabledCount),
-			fmt.Sprintf("默认 IDE: %s", strings.Join(m.overview.IDEs, ", ")),
-			fmt.Sprintf("编辑器: %s", fallbackValue(m.overview.Editor, "未配置")),
-			fmt.Sprintf("建议下一步: %s", suggestNextAction(m.overview)),
-			formatWarnings(m.overview.IDEWarnings),
-		})
-	case "Assets":
-		return wrapLines(width, []string{
-			"阶段 2 只接入了 Shell 骨架，资产浏览页将在下一阶段承接。",
-			"当前可以继续使用 dec config init / dec pull 维持现有 CLI 流程。",
-		})
-	case "Project":
-		return wrapLines(width, []string{
-			fmt.Sprintf("项目配置路径: %s", m.overview.ProjectConfigPath),
-			fmt.Sprintf("变量文件路径: %s", m.overview.VarsPath),
-			"后续阶段会把项目初始化、变量编辑和 IDE 选择迁到此页。",
-		})
-	case "Run":
-		return wrapLines(width, []string{
-			"执行页将在后续阶段接管 pull / push / remove / update。",
-			"本阶段先落默认入口和统一 shell，不改变现有 CLI 子命令语义。",
-		})
-	default:
-		return wrapLines(width, []string{
-			"Settings 页当前只保留占位，用于承接后续全局设置与调试开关。",
-			"可通过 DEC_NO_TUI=1 临时回退到传统 CLI。",
-		})
+	return wrapLines(width, []string{
+		fmt.Sprintf("仓库: %s", formatReady(m.overview.RepoConnected, "已连接", "未连接")),
+		fmt.Sprintf("远端仓库: %s", fallbackValue(m.overview.RepoRemoteURL, "未连接")),
+		fmt.Sprintf("项目配置: %s", formatReady(m.overview.ProjectConfigReady, "已初始化", "未初始化")),
+		fmt.Sprintf("变量文件: %s", formatReady(m.overview.VarsFileReady, "已存在", "未生成")),
+		fmt.Sprintf("可用资产: %d", m.overview.AvailableCount),
+		fmt.Sprintf("已启用资产: %d", m.overview.EnabledCount),
+		fmt.Sprintf("默认 IDE: %s", strings.Join(m.overview.IDEs, ", ")),
+		fmt.Sprintf("编辑器: %s", fallbackValue(m.overview.Editor, "未配置")),
+		fmt.Sprintf("建议下一步: %s", suggestNextAction(m.overview)),
+		formatWarnings(m.overview.IDEWarnings),
+	})
+}
+
+func (m model) renderAssetsPage(width int) string {
+	if m.assetsErr != nil {
+		return shellWarnStyle.Render("无法加载资产选择") + "\n\n" + m.assetsErr.Error()
 	}
+	if m.assets == nil {
+		return shellMutedStyle.Render("Loading asset selection...")
+	}
+
+	summary := []string{
+		fmt.Sprintf("筛选: %s", m.currentAssetFilterLabel()),
+		fmt.Sprintf("资产总数: %d | 已启用: %d", len(m.assets.Items), m.countEnabledAssets()),
+	}
+	if m.assetsDirty {
+		summary = append(summary, shellWarnStyle.Render("当前有未保存修改，按 s 保存。"))
+	} else {
+		summary = append(summary, shellMutedStyle.Render("当前资产选择与磁盘一致。"))
+	}
+	if m.assetFilterInput {
+		summary = append(summary, shellMutedStyle.Render("筛选输入中：输入关键字后按 Enter 应用，Esc 退出。"))
+	} else {
+		summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · space/enter 切换 · s 保存 · / 筛选 · c 清空筛选"))
+	}
+	if !m.assets.ExistingConfig {
+		summary = append(summary, shellMutedStyle.Render("首次保存会创建 .dec/config.yaml 与 .dec/vars.yaml。"))
+	}
+
+	if len(m.assets.Items) == 0 {
+		return strings.Join(append(summary, "", "仓库中还没有可选资产。"), "\n")
+	}
+
+	visible := m.filteredAssetIndices()
+	if len(visible) == 0 {
+		return strings.Join(append(summary, "", "当前筛选没有结果。"), "\n")
+	}
+
+	list := m.renderAssetList(visible)
+	detail := m.renderAssetDetails()
+	if width < 88 {
+		return strings.Join(append(summary, "", list, "", detail), "\n")
+	}
+
+	leftWidth := width / 2
+	rightWidth := width - leftWidth - 2
+	left := lipgloss.NewStyle().Width(leftWidth).Render(list)
+	right := lipgloss.NewStyle().Width(rightWidth).Render(detail)
+	return strings.Join(summary, "\n") + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+}
+
+func (m model) renderProjectPage(width int) string {
+	if m.overviewErr != nil {
+		return shellWarnStyle.Render("Failed to load project details") + "\n\n" + m.overviewErr.Error()
+	}
+	if m.overview == nil {
+		return shellMutedStyle.Render("Loading project overview...")
+	}
+	return wrapLines(width, []string{
+		fmt.Sprintf("项目配置路径: %s", m.overview.ProjectConfigPath),
+		fmt.Sprintf("变量文件路径: %s", m.overview.VarsPath),
+		"后续阶段会把项目初始化、变量编辑和 IDE 选择迁到此页。",
+	})
+}
+
+func (m model) renderRunPage(width int) string {
+	return wrapLines(width, []string{
+		"执行页将在后续阶段接管 pull / push / remove / update。",
+		"本阶段先让 Assets 页替代手改 YAML 的主路径，不改变现有 CLI 子命令语义。",
+	})
+}
+
+func (m model) renderSettingsPage(width int) string {
+	return wrapLines(width, []string{
+		"Settings 页当前只保留占位，用于承接后续全局设置与调试开关。",
+		"可通过 DEC_NO_TUI=1 临时回退到传统 CLI。",
+	})
+}
+
+func (m model) renderAssetList(visible []int) string {
+	lines := []string{shellTitleStyle.Render("Asset List")}
+	for _, idx := range visible {
+		item := m.assets.Items[idx]
+		marker := " "
+		if idx == m.assetCursor {
+			marker = ">"
+		}
+		checked := " "
+		if item.Enabled {
+			checked = "x"
+		}
+		line := fmt.Sprintf("%s [%s] %s / %s / %s", marker, checked, item.Vault, item.Type, item.Name)
+		switch {
+		case idx == m.assetCursor:
+			lines = append(lines, shellSelectedRow.Render(line))
+		case item.Enabled:
+			lines = append(lines, shellEnabledRow.Render(line))
+		default:
+			lines = append(lines, shellLogStyle.Render(line))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) renderAssetDetails() string {
+	lines := []string{shellTitleStyle.Render("Details")}
+	item, ok := m.currentAssetItem()
+	if ok {
+		lines = append(lines,
+			fmt.Sprintf("Vault: %s", item.Vault),
+			fmt.Sprintf("Type: %s", item.Type),
+			fmt.Sprintf("Name: %s", item.Name),
+			fmt.Sprintf("Enabled: %s", formatReady(item.Enabled, "yes", "no")),
+		)
+	} else {
+		lines = append(lines, "当前没有匹配的资产。")
+	}
+
+	if m.assets != nil {
+		lines = append(lines,
+			"",
+			fmt.Sprintf("Config: %s", m.assets.ConfigPath),
+			fmt.Sprintf("Vars: %s", m.assets.VarsPath),
+		)
+		if !m.assets.VarsFileReady {
+			lines = append(lines, "Vars 模板会在首次保存时创建。")
+		}
+	}
+	if m.savingAssets {
+		lines = append(lines, "", shellWarnStyle.Render("正在保存资产选择..."))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) currentAssetItem() (app.AssetSelectionItem, bool) {
+	if m.assets == nil {
+		return app.AssetSelectionItem{}, false
+	}
+	visible := m.filteredAssetIndices()
+	if len(visible) == 0 {
+		return app.AssetSelectionItem{}, false
+	}
+	for _, idx := range visible {
+		if idx == m.assetCursor {
+			return m.assets.Items[idx], true
+		}
+	}
+	return m.assets.Items[visible[0]], true
+}
+
+func (m model) filteredAssetIndices() []int {
+	if m.assets == nil {
+		return nil
+	}
+	filter := strings.ToLower(strings.TrimSpace(m.assetFilter))
+	visible := make([]int, 0, len(m.assets.Items))
+	for idx, item := range m.assets.Items {
+		if filter == "" {
+			visible = append(visible, idx)
+			continue
+		}
+		haystack := strings.ToLower(strings.Join([]string{item.Vault, item.Type, item.Name}, " "))
+		if strings.Contains(haystack, filter) {
+			visible = append(visible, idx)
+		}
+	}
+	return visible
+}
+
+func (m model) canNavigateAssets() bool {
+	return m.assets != nil && len(m.filteredAssetIndices()) > 0
+}
+
+func (m *model) normalizeAssetCursor() {
+	visible := m.filteredAssetIndices()
+	if len(visible) == 0 {
+		m.assetCursor = 0
+		return
+	}
+	for _, idx := range visible {
+		if idx == m.assetCursor {
+			return
+		}
+	}
+	m.assetCursor = visible[0]
+}
+
+func (m *model) moveAssetCursor(delta int) {
+	visible := m.filteredAssetIndices()
+	if len(visible) == 0 {
+		return
+	}
+	position := 0
+	found := false
+	for idx, assetIndex := range visible {
+		if assetIndex == m.assetCursor {
+			position = idx
+			found = true
+			break
+		}
+	}
+	if !found {
+		m.assetCursor = visible[0]
+		return
+	}
+	position += delta
+	if position < 0 {
+		position = 0
+	}
+	if position >= len(visible) {
+		position = len(visible) - 1
+	}
+	m.assetCursor = visible[position]
+}
+
+func (m *model) toggleCurrentAsset() {
+	if m.assets == nil {
+		return
+	}
+	m.normalizeAssetCursor()
+	if m.assetCursor < 0 || m.assetCursor >= len(m.assets.Items) {
+		return
+	}
+	m.assets.Items[m.assetCursor].Enabled = !m.assets.Items[m.assetCursor].Enabled
+	m.assetsDirty = true
+	item := m.assets.Items[m.assetCursor]
+	state := "disabled"
+	if item.Enabled {
+		state = "enabled"
+	}
+	m.pushLog(fmt.Sprintf("Asset %s: %s / %s / %s", state, item.Vault, item.Type, item.Name))
+}
+
+func (m model) countEnabledAssets() int {
+	if m.assets == nil {
+		return 0
+	}
+	count := 0
+	for _, item := range m.assets.Items {
+		if item.Enabled {
+			count++
+		}
+	}
+	return count
+}
+
+func (m model) currentAssetFilterLabel() string {
+	filter := strings.TrimSpace(m.assetFilter)
+	if filter == "" {
+		return "<none>"
+	}
+	return filter
+}
+
+func (m model) isAssetsPage() bool {
+	return m.pages[m.pageIndex] == "Assets"
 }
 
 func (m model) renderLogs(width, height int) string {
@@ -241,9 +634,17 @@ func (m model) renderLogs(width, height int) string {
 }
 
 func (m model) renderStatusBar(width int) string {
-	left := "q quit | r refresh | j/k switch"
+	left := "q quit | tab switch | r refresh"
 	right := fmt.Sprintf("page %s", m.pages[m.pageIndex])
-	if m.overview != nil {
+	if m.isAssetsPage() && m.assets != nil {
+		right = fmt.Sprintf("%s | %d/%d enabled", right, m.countEnabledAssets(), len(m.assets.Items))
+		if m.assetsDirty {
+			right += " | modified"
+		}
+		if m.assetFilterInput {
+			right += " | filter"
+		}
+	} else if m.overview != nil {
 		right = fmt.Sprintf("%s | enabled %d", right, m.overview.EnabledCount)
 	}
 	available := width - lipgloss.Width(left) - lipgloss.Width(right)
@@ -254,8 +655,20 @@ func (m model) renderStatusBar(width int) string {
 }
 
 func (m model) currentSummary() string {
-	if m.err != nil {
+	if m.overviewErr != nil {
 		return "Overview unavailable"
+	}
+	if m.isAssetsPage() {
+		if m.assetsErr != nil {
+			return "Asset selection unavailable"
+		}
+		if m.assets == nil {
+			return "Loading asset selection"
+		}
+		if m.assetsDirty {
+			return fmt.Sprintf("Unsaved selection: %d enabled", m.countEnabledAssets())
+		}
+		return fmt.Sprintf("Assets ready, %d enabled", m.countEnabledAssets())
 	}
 	if m.overview == nil {
 		return "Loading project state"
@@ -277,10 +690,10 @@ func suggestNextAction(overview *app.ProjectOverview) string {
 		return "先运行 dec config repo <url> 连接资产仓库"
 	}
 	if !overview.ProjectConfigReady {
-		return "先运行 dec config init 初始化项目配置"
+		return "先切到 Assets 页选择资产并保存，或运行 dec config init"
 	}
 	if overview.EnabledCount == 0 {
-		return "当前还没有启用资产，先用 dec config init 调整 enabled"
+		return "当前还没有启用资产，先切到 Assets 页选择并保存"
 	}
 	return "可以继续执行 dec pull，同步已启用资产"
 }
