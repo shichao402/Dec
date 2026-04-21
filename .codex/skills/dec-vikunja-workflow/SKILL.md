@@ -1,95 +1,186 @@
 ---
 name: vikunja-workflow
 description: >
-  使用 Vikunja MCP 工具推进项目任务的完整工作流。
-  涵盖选条目、建 Plan、实现、验证、回写、提交、闭环的完整生命周期。
+  Execute one complete Vikunja-backed delivery round inside one confirmed project.
+  Use when an AI agent needs to choose the next task, keep a working plan,
+  implement or analyze one increment, verify it, write traceability back, and close the loop.
+  Always confirm the exact target project before any write action.
 ---
 
-# Vikunja 项目推进工作流
+# Vikunja Workflow
 
-## 项目配置
+Use this skill to advance work through a reusable Vikunja workflow instead of a repository-local markdown board.
 
-- **项目**：`{{VIKUNJA_PROJECT}}`（所有条目统一在此，用 `bug`/`improvement`/`feature` 标签区分类型）
-- **任务文件目录**：`{{TASK_DOCS_DIR}}`（每个条目的执行计划，命名格式 `VK-<id>.md`）
+## Scope Boundary
 
-## 推进生命周期
+- operate inside one explicitly confirmed Vikunja project for the current round
+- advance one main item per round unless repository rules explicitly allow parallel work
+- use `$vikunja-issue` when the main job is to file or triage a new issue
+- use `$vikunja-project-bootstrap` when the main job is to create or normalize project structure
 
-```
-1. 选条目  ── Vikunja Backlog 按优先级选取
-       ↓
-2. 建 Plan ── 在 {{TASK_DOCS_DIR}}/VK-<id>.md 创建执行计划
-       ↓       Vikunja 状态 → 执行中
-3. 实现    ── 按 plan 编码
-       ↓
-4. 验证    ── 达到停止条件（能跑、能验、不卡下一步）
-       ↓
-5. Review  ── 审查代码变更，确认无遗漏
-       ↓
-6. 回写    ── 更新架构文档 + task plan
-       ↓
-7. 提交    ── commit [VK-<id>] + push
-       ↓
-8. 闭环    ── Vikunja 条目 → 已完成，附 commit hash
-```
+## Inputs To Confirm
 
-## 选条目规则
+Before acting, identify or confirm:
 
-通过 Vikunja MCP 工具查询 `{{VIKUNJA_PROJECT}}`，按优先级排序，选择第一个满足以下条件的条目：
+- the exact target Vikunja project name or ID for this round
+- the exact Vikunja project ID once resolved
+- any repository default project such as `Dec`
+- the repository's working-plan policy
+- any repository docs that define lifecycle, architecture, and completion rules
 
-- 标签含 `执行中` 或 `可开工`
-- **不含** `观察中` 标签
-- 不是纯细化/优化
+If any of these are unclear, resolve them before implementation.
 
-**单条目原则**：每轮只选取并推进**一个**条目。仅在以下条件全部满足时允许并行：
-- 各条目互不依赖，改动模块完全不重叠
-- 每个条目都是简单修复（one-liner、配置调整），不涉及架构变更
-- 在 plan 阶段明确列出并论证了可并行的理由
+## Non-Negotiables
 
-## 建 Plan
+- confirm the exact target project, then resolve the exact project ID, before any write action
+- treat repository defaults such as `Dec` as defaults only, never as universal truth
+- query and mutate tasks inside the confirmed project scope; do not treat a global task list as the current backlog
+- keep the working plan in Vikunja by default; create `docs/tasks/VK-<id>.md` only when repository rules require it or the round needs durable repo-local design or verification notes
+- use Vikunja's built-in `done` field as the completion truth; a visual done lane is presentation, not a second completion system
 
-在 `{{TASK_DOCS_DIR}}/VK-<id>.md` 创建执行计划，内容包括：
+Operating on the wrong project is a hard failure.
 
-- 条目标题和 Vikunja 链接
-- 本轮停止条件
-- 实施步骤
-- 测试口径
-- 涉及的文件和模块
+## Canonical Tracker Model
 
-创建 plan 后，将 Vikunja 条目标签更新为 `执行中`。
+Shared assets assume one canonical model.
 
-## 闭环动作
+- urgency comes from the built-in priority field
+- buckets describe process stage, not work type
+- active delivery buckets are `待分诊`, `待补充`, `待研判`, `待排期`, `执行中`, and `阻塞`
+- canonical type labels are `type:bug`, `type:feature`, `type:improvement`, `type:research`, `type:decision`, and `type:follow-up`
+- tasks in `待分诊` or `待补充` are clarification rounds, not coding rounds
+- tasks in `待研判`, or tasks labeled `type:research` or `type:decision`, are analysis or decision rounds unless repository rules say otherwise
+- tasks in `待排期` or `执行中` are the normal implementation candidates
+- `阻塞` stays parked unless the blocking condition changed or the user explicitly wants to work it
+- repository-local parked markers such as observation labels may exist, but they belong in repository rules, not in the shared asset
 
-完成后执行以下两步（缺一不可）：
+If a project still depends on legacy ready labels, plain `bug/feature/improvement` labels, or extra completion semantics, keep that as repository-local policy or normalize the project. Do not reintroduce those compatibility rules here.
 
-1. `git commit` 格式：`<type>(<scope>): <description> [VK-<id>]`
-2. 在 Vikunja 将条目标记为 `done`，描述中补充 commit hash 和改动摘要
+## Source Of Truth Order
 
-## Issue-First 原则
+When instructions differ, use this order:
 
-发现 bug、改进点时：
+1. explicit user instruction for this round
+2. repository-local workflow docs or agent instructions
+3. project-local Dec vars such as `Dec` and `docs/tasks`
+4. the generic defaults in this skill
 
-1. **先在 `{{VIKUNJA_PROJECT}}` 创建任务，打上 `bug` 或 `improvement` 标签**，不直接修复
-2. 创建前先搜索避免重复——同现象同根因则追加到已有 issue
-3. 只有当前推进条目内的问题、或 P0 阻塞时，才在同一轮直接处理
+When behavior still conflicts, prefer executable code and tests over docs.
 
-## 状态标签约定
+## Working Plan Location
 
-| 标签 | 含义 |
-|------|------|
-| `执行中` | 当前主线，优先推进 |
-| `可开工` | 无更高优先级阻塞时可接手 |
-| `先规划` | 先出方案，本轮不深挖实现 |
-| `观察中` | 只在出现真实问题时才推进 |
-| `阻塞中` | 依赖外部条件，不主动推进 |
-| `已完成` | 当前阶段达标，转维护态 |
+Keep the working plan in Vikunja by default.
+Create a repo-local task doc only when repository rules require it or when the round clearly needs durable repo-local design or verification notes.
 
-优先级：`P0`（紧急）> `P1`（高）> `P2`（普通）
+## Default Execution Flow
 
-## 推进原则
+1. Read any repository-specific advancement rules and instructions if they exist.
+2. Resolve the exact Vikunja project for this round and confirm its project ID.
+3. Query actionable items inside that confirmed project, sorted by priority.
+4. Exclude blocked items, intake items, and repository-local parked items unless the user directs otherwise.
+5. Analyze the top candidates, but lock only one item for execution.
+6. Create or update the working plan in Vikunja first. Add a local task doc only when repository rules require it or the round clearly benefits from durable repo-local notes.
+7. Mark the task as actively in progress in Vikunja if the workflow expects that.
+8. Implement or analyze only the chosen increment.
+9. Verify against the stop condition.
+10. Review for regressions, missing coverage, and required doc updates.
+11. Inspect `git status --short` and make sure only intended files are in scope.
+12. Commit and push using the repository's traceability rules.
+13. Write the commit hash, verification summary, and closeout note back to Vikunja.
+14. Mark the task done only after write-back is complete.
 
-- 先规划，再动手
-- 先框架，再细节
-- 先跑通，再优化
-- 一轮只收口一个里程碑
-- 如果当前里程碑已基本达标且不阻塞后续，切到下一条主线，不继续局部抛光
-- 没有 failing sample、没有明确验收缺口时，不默认追加微优化
+## Query And Selection Rules
+
+- prefer items already accepted into delivery, normally in `执行中` or `待排期`
+- do not treat topic-local notes, checklists, or design docs as the project backlog
+- use project-scoped endpoints or explicit `project_id` filters whenever possible
+- if project lookup is ambiguous, stop and ask the user
+- if an exact-name lookup misses, check nearby names or visibility differences before declaring the project missing
+- analyze multiple items if needed, but execute only one item by default
+
+Before the exact project ID is confirmed, do not perform write operations.
+
+## Round Type
+
+Decide the round type before coding:
+
+- tasks in `待分诊` or `待补充` are not implementation-ready; the round should clarify evidence, scope, or ownership first
+- tasks in `待研判`, or tasks labeled `type:research` or `type:decision`, may end with analysis, options, recommendation, and tracker updates rather than code
+- only tasks already accepted into delivery, usually in buckets like `待排期` or `执行中`, should default to implementation
+
+If the selected item is still mostly problem discovery, stay in a research or decision round and do not force implementation just to keep momentum.
+
+## Query Failures And Ambiguity
+
+When the user-mentioned project, configured default project, or search results appear to be missing, do not jump straight to `not found`.
+
+1. Check whether the miss is caused by naming differences such as case, abbreviations, prefixes, suffixes, spaces, hyphens, or parent-child project paths.
+2. Check whether the miss is caused by visibility such as archived state, child-project placement, or an overly strict filter.
+3. If you find close candidates, ask the user to confirm instead of guessing.
+4. Only after those checks fail should you say that the target is not currently found.
+
+Recommended phrasing:
+
+- `I did not find that exact Vikunja project. It may be renamed, archived, or nested under a parent project.`
+- `I found multiple similar projects. Confirm which one to operate on before I continue.`
+- `I did not find this exact target. If you want, I can search nearby names or related keywords next.`
+
+Forbidden behavior:
+
+- do not conclude the backlog is empty just because an exact-name query missed
+- do not switch to a similar-looking project without confirmation
+- do not perform create, update, comment, complete, delete, or relation operations before the project is confirmed
+- do not phrase a miss as certainty that the target does not exist
+
+## Stop Condition Rules
+
+Stop when the current increment reaches one of these states:
+
+- minimal runnable version that does not block the next step
+- planning output with boundaries, interfaces, and acceptance documented
+- bug fix with a real failing case covered by verification
+
+Do not stay in a local optimization loop once the milestone is good enough.
+
+## Repository Traceability
+
+- run `git status --short` before staging and again before closeout
+- stage only files owned by the active task
+- if the repository does not define a stricter commit convention, include the tracker ID in the commit subject, for example `feat(VK-47): ...`
+- push before closing the tracker item when remote push is part of the normal workflow
+- write the resulting commit hash back to Vikunja before marking the item fully closed
+- if commit or push cannot be completed, leave the tracker item explicitly open with a note about what remains
+
+## Issue Handling Rules
+
+- file newly discovered bugs or improvements in the confirmed project before fixing them unless the repository defines a narrower exception
+- search existing tracker items first to avoid duplicates
+- use canonical `type:*` labels for new items
+- fix immediately only if the issue is a critical blocker or clearly belongs to the active task
+
+## Kanban Mutation Safety
+
+- when a workflow needs a real kanban card move, use the dedicated project/view/bucket task-move endpoint for the confirmed project
+- do not assume bulk task updates that write `bucket_id` will move the card correctly in board view
+
+## Output Expectations
+
+When the user asks to continue or summarize project work:
+
+- state which Vikunja project was targeted, ideally with both name and project ID
+- state which task was selected and why
+- state where the working plan lives for this round
+- state the round's stop condition
+- report verification performed
+- mention the commit hash or explicitly say that commit or push did not happen
+- mention whether architecture docs or tracker state were updated
+
+## Anti-Patterns
+
+- do not guess the target Vikunja project from loose context
+- do not infer the target project from the current repository name alone
+- do not rely on global task search as a substitute for project confirmation
+- do not create repository-local task docs by default when the tracker plan is enough
+- do not reintroduce legacy compatibility rules into the shared asset
+- do not batch unrelated workstreams into one round without an explicit reason
+- do not close a tracker item before commit, write-back, and final state update are all complete

@@ -34,7 +34,7 @@ args = ["-y", "user-mcp"]
 	config := &types.MCPConfig{MCPServers: map[string]types.MCPServer{
 		"dec-vikunja": {
 			Command:           "npx",
-			Args:              []string{"-y", "@aimbitgmbh/vikunja-mcp"},
+			Args:              []string{"-y", "@shichao402/vikunja-mcp"},
 			Env:               map[string]string{"VIKUNJA_URL": "{{VIKUNJA_URL}}", "VIKUNJA_API_TOKEN": "{{VIKUNJA_API_TOKEN}}"},
 			EnvVars:           []string{"OPENAI_API_KEY"},
 			StartupTimeoutSec: &startupTimeout,
@@ -57,7 +57,7 @@ args = ["-y", "user-mcp"]
 		`[projects."/tmp/project"]`,
 		`[mcp_servers.user]`,
 		`[mcp_servers.dec-vikunja]`,
-		`args = ["-y","@aimbitgmbh/vikunja-mcp"]`,
+		`args = ["-y","@shichao402/vikunja-mcp"]`,
 		`env_vars = ["OPENAI_API_KEY"]`,
 		`startup_timeout_sec = 20`,
 		`enabled = true`,
@@ -81,8 +81,8 @@ args = ["-y", "user-mcp"]
 	if server.Command != "npx" {
 		t.Fatalf("Command = %q, 期望 %q", server.Command, "npx")
 	}
-	if len(server.Args) != 2 || server.Args[1] != "@aimbitgmbh/vikunja-mcp" {
-		t.Fatalf("Args = %#v, 期望包含 @aimbitgmbh/vikunja-mcp", server.Args)
+	if len(server.Args) != 2 || server.Args[1] != "@shichao402/vikunja-mcp" {
+		t.Fatalf("Args = %#v, 期望包含 @shichao402/vikunja-mcp", server.Args)
 	}
 	if server.Env["VIKUNJA_URL"] != "{{VIKUNJA_URL}}" {
 		t.Fatalf("Env[VIKUNJA_URL] = %q", server.Env["VIKUNJA_URL"])
@@ -103,7 +103,7 @@ func TestCodexWriteMCPConfigPromotesEnvRefsToEnvVars(t *testing.T) {
 	if err := impl.WriteMCPConfig(projectRoot, &types.MCPConfig{MCPServers: map[string]types.MCPServer{
 		"dec-vikunja": {
 			Command: "npx",
-			Args:    []string{"-y", "@aimbitgmbh/vikunja-mcp"},
+			Args:    []string{"-y", "@shichao402/vikunja-mcp"},
 			Env: map[string]string{
 				"VIKUNJA_URL":       "${VIKUNJA_URL}",
 				"VIKUNJA_API_TOKEN": "${VIKUNJA_API_TOKEN}",

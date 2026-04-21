@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vikunja Workflow"
+  short_description: "Advance Vikunja projects safely"
+  default_prompt: "Use $vikunja-workflow to select and advance the next task in the correct Vikunja project without cross-project mistakes."

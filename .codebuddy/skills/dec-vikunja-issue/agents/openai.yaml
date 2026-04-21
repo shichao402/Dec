@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vikunja Issue"
+  short_description: "File issues into the correct Vikunja project"
+  default_prompt: "Use $vikunja-issue to resolve the correct Vikunja project, search for duplicates, and create or update the right issue safely."

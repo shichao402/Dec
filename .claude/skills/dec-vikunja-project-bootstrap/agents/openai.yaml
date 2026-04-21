@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vikunja Project Bootstrap"
+  short_description: "Set up reusable Vikunja project structure"
+  default_prompt: "Use $vikunja-project-bootstrap to create or normalize one Vikunja project's views, buckets, and labels without hard-coding a repository-specific project binding."

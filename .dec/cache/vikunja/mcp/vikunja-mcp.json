@@ -1,6 +1,6 @@
 {
-  "command": "npx",
-  "args": ["-y", "@aimbitgmbh/vikunja-mcp"],
+  "command": "mise",
+  "args": ["exec", "node@20", "--", "npx", "-y", "@shichao402/vikunja-mcp"],
   "env": {
     "VIKUNJA_URL": "${VIKUNJA_URL}",
     "VIKUNJA_API_TOKEN": "${VIKUNJA_API_TOKEN}"

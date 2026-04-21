@@ -20,11 +20,20 @@ available:
             rules: true
         cli-release-workflow:
             skills: true
+    default:
+        helloworld:
+            skills: true
+        project-workflow:
+            skills: true
     vikunja:
         vikunja-integration:
             rules: true
+        vikunja-issue:
+            skills: true
         vikunja-mcp:
             mcp: true
+        vikunja-project-bootstrap:
+            skills: true
         vikunja-workflow:
             skills: true
 enabled:
@@ -33,10 +42,19 @@ enabled:
             rules: true
         cli-release-workflow:
             skills: true
+    default:
+        helloworld:
+            skills: true
+        project-workflow:
+            skills: true
     vikunja:
         vikunja-integration:
             rules: true
+        vikunja-issue:
+            skills: true
         vikunja-mcp:
             mcp: true
+        vikunja-project-bootstrap:
+            skills: true
         vikunja-workflow:
             skills: true

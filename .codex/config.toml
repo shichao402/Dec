@@ -1,5 +1,5 @@
 [mcp_servers.dec-vikunja-mcp]
-command = "npx"
-args = ["-y","@aimbitgmbh/vikunja-mcp"]
+command = "mise"
+args = ["exec","node@20","--","npx","-y","@shichao402/vikunja-mcp"]
 env_vars = ["VIKUNJA_API_TOKEN","VIKUNJA_URL"]
 enabled = true

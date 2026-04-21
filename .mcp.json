@@ -1,10 +1,14 @@
 {
   "mcpServers": {
     "dec-vikunja-mcp": {
-      "command": "npx",
+      "command": "mise",
       "args": [
+        "exec",
+        "node@20",
+        "--",
+        "npx",
         "-y",
-        "@aimbitgmbh/vikunja-mcp"
+        "@shichao402/vikunja-mcp"
       ],
       "env": {
         "VIKUNJA_API_TOKEN": "${VIKUNJA_API_TOKEN}",

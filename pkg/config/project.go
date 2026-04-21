@@ -24,6 +24,9 @@ const projectVarsTemplate = `# Dec 项目变量定义
 # 优先级：assets.<type>.<name>.vars > vars > 机器级变量 (~/.dec/local/vars.yaml)
 
 vars:
+  # TASK_DOCS_DIR: "docs/tasks"
+  # VIKUNJA_PROJECT: "MyProject"
+  # 稳定的流程 bucket / type label 由共享资产固化，不需要写进 vars
   # API_BASE_URL: "https://api.example.com"
   # API_TOKEN: "<TOKEN>"
 

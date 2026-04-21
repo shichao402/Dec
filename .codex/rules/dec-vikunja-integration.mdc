@@ -1,95 +1,177 @@
 # Vikunja MCP 集成规则
 
-当项目加载 vikunja-mcp 资产时，遵循以下规则确保顺利集成。
+当项目加载 Vikunja 相关共享资产时，遵循以下规则。
 
-## ⚠️ 重要约束
+## ⚠️ Dec 约束
 
-**所有资产的安装、更新、推送操作必须通过 `dec` CLI 命令完成，禁止直接操作底层 git 仓库。**
+所有远端资产的安装、更新、推送都必须通过 `dec` CLI 完成。不要直接操作 Dec 远端仓库。
 
-- 安装/拉取资产：`dec vault pull <type> <name>`
-- 保存资产变更：`dec vault import <type> <path>`
-- 推送到远程：`dec vault push`
-- 搜索资产：`dec vault search "<query>"`
+常用命令：
 
-如果 `dec` 命令执行失败，应将错误信息反馈给用户，由用户决定如何处理，而不是绕过 `dec` 直接操作 git。
+- `dec pull`：拉取当前项目已启用资产
+- `dec push`：推送 `.dec/cache/` 中的资产变更
+- `dec search "<query>"`：搜索远端资产
+- `dec list`：查看当前项目资产
 
-## 🔒 项目绑定（强制）
+如果 `dec` 不可用或执行失败，应把情况反馈给用户，而不是绕过 `dec` 修改远端资产。
 
-Agent 在执行任何 Vikunja 任务操作前，**必须先确定当前仓库对应的 Vikunja 项目**。禁止跳过此步骤。
+## 🧩 变量化原则
 
-### 项目匹配流程
+共享 Vikunja 资产只保留真正会随项目变化的值为变量，其余流程约定直接固化。
 
-1. 获取当前 git 仓库的名称（取仓库根目录的目录名）。
-2. 调用 `projects_list` 查询所有 Vikunja 项目。
-3. 在返回的项目列表中，查找与当前仓库名称**完全匹配**（不区分大小写）的项目。
-4. **仅当找到唯一匹配时**，才可继续操作，并将该项目的 `projectId` 作为后续所有操作的目标。
+- 允许变量化的通常只有默认项目名、可选任务文档目录这类项目本地值
+- 项目本地取值写入 `.dec/vars.yaml`
+- `dec pull` 时再把这些变量渲染进 IDE 安装副本
+- 不要把稳定 bucket、稳定 type label、默认视图名做成变量
+- 当用户确认了项目本地默认值，应优先整理进 vars，而不是回写进共享资产文案
+
+共享资产保存的是抽象后的方法，不是某个仓库的一次性配置。
+
+## 🗂️ 仓库本地文档边界
+
+共享 Vikunja 资产应该能独立成立。仓库本地文档只保留真正项目相关的信息。
+
+适合保留在仓库里的通常只有：
+
+- 默认目标项目名
+- 可选的任务文档目录
+- commit traceability 格式
+- 哪些改动必须同步更新架构文档
+- 项目自己的 parked / skip 规则
+
+不要在每个仓库里再复制一份完整生命周期、通用 bucket 含义、通用 issue 流程。
+
+## 🔒 目标项目确认
+
+Agent 在执行任何 Vikunja 写操作前，必须先确认本轮操作的目标项目。
+
+这里的“确认”是指拿到唯一、可复核的项目名称或项目 ID，而不是凭上下文猜测。
+
+### 允许的目标来源
+
+按优先级从高到低，允许使用以下来源确认目标项目：
+
+1. 用户明确提供的项目名称或项目 ID
+2. 当前任务、评论、链接里已经明确指向的项目
+3. 仓库文档里声明的默认 Vikunja 项目
+4. 项目级变量，例如 `VIKUNJA_PROJECT`，但它只是默认值
+
+### 明确禁止的推断方式
+
+以下方式都不能单独作为目标确认依据：
+
+- 直接把当前仓库目录名当成 Vikunja 项目名
+- 因为“当前就在这个仓库里”就默认只对应一个项目
+- 因为某个项目最近操作过，就继续对它写入
+- 在多个相似项目之间自行挑一个最像的
+
+### 项目确认流程
+
+1. 先收集显式目标来源。
+2. 调用 `vikunja_list_projects` 查询候选项目。
+3. 用明确的项目名或项目 ID 解析唯一目标。
+4. 如果存在多个相似候选，停下来让用户确认。
+5. 只有在目标唯一确认后，才允许 `create`、`update`、`comment`、`move`、`complete`、`delete` 等写操作。
 
 ### 强制约束
 
-- **创建任务时，必须使用匹配到的 `projectId`。** 禁止将任务创建到其他项目。
-- **查询任务时，必须指定匹配到的 `projectId` 进行过滤。** 禁止使用全局查询返回其他项目的任务。
-- **禁止对非匹配项目执行任何写操作**（包括 `project_update`、`project_delete`、`project_archive` 等）。
-- **禁止自行推断、猜测或假设 `projectId`。** 必须严格通过上述匹配流程获取。
+- 创建任务时，必须使用已确认项目的 `project_id`
+- 查询任务时，优先使用项目内接口，或显式使用 `project_id` 过滤
+- 禁止对未确认项目执行任何写操作
+- 如果本轮要切换项目，必须重新确认目标
 
 ### 必须中断的情况
 
-以下任何一种情况发生时，**必须立即停止操作并等待用户明确指示**，禁止自行决定：
+以下任一情况出现时，必须立即停止并等待用户明确指示：
 
-- `projects_list` 中找不到与当前仓库名称匹配的项目
-- 找到多个名称匹配的项目（无法确定唯一目标）
-- 用户的请求明确指向了与当前匹配项目不同的项目
-- 任何可能导致任务被创建到错误项目的模糊指令
+- 没有足够信息确认本轮目标项目
+- 找到多个名称相近或语义相近的候选项目
+- 用户请求同时涉及多个项目，但没有明确指出当前这一轮要操作哪个
+- 仓库默认项目与用户本轮明确指定的项目冲突且无法自动化解
+- 任何可能导致任务、评论或状态被写入错误项目的模糊指令
 
-**中断时的回复模板：**
+中断时建议直接说明：目前还不能唯一确认这轮操作的 Vikunja 项目，请用户提供项目名称或 ID。
 
-> 无法自动确定当前仓库对应的 Vikunja 项目。请明确：
-> 1. 你希望使用哪个 Vikunja 项目？（请提供项目名称或 ID）
-> 2. 或者，是否需要在 Vikunja 中新建一个与当前仓库对应的项目？
+## 🧱 Canonical 项目结构
 
-## 📌 环境配置
+共享资产只描述一套 canonical 结构。
+如果某个项目仍然保留旧 bucket、旧标签或旧完成约定，应整顿项目本身，而不是把旧结构继续写进共享规则。
 
-### 必需的环境变量
+### 结构原则
 
-在项目的 `.env` 文件或 `config.yaml` 中配置以下变量（二选一即可）：
+- bucket 表示流程阶段，不表示工作类型
+- label 表示事项类型，不表示流程阶段
+- priority 字段表示紧急度，不再复制一套优先级标签
+- 如果团队需要跨项目 intake，应单独建立 intake 项目，而不是把普通项目混成一个总 inbox
 
-#### 方式 1: .env 文件（推荐本地开发）
+### Active Buckets
+
+- `待分诊`
+- `待补充`
+- `待研判`
+- `待排期`
+- `执行中`
+- `阻塞`
+
+完成语义使用 Vikunja 的 `done` 字段。
+如果项目需要可视化完成列，应该把该列配置成看板的 done bucket，而不是额外再发明完成标签。
+明确关闭但不交付的事项可以放入项目自己的终态 bucket，例如 `已关闭`，但这不是共享选择逻辑的一部分。
+
+### Type Labels
+
+- `type:bug`
+- `type:feature`
+- `type:improvement`
+- `type:research`
+- `type:decision`
+- `type:follow-up`
+
+可按团队需要补充少量标签，例如 `type:chore`，但不要再复制 source、priority、stage 这类体系。
+新条目和新项目统一使用 `type:*` 标签，不要继续给新工作加 plain `bug`、`feature`、`improvement` 这类旧标签。
+
+### 最小视图集
+
+每个项目至少保留：
+
+- 一个列表视图，用于排序、批量检查和搜索
+- 一个看板视图，用于 bucket 驱动的推进
+
+如需把项目真正初始化或整顿到这套结构，使用 `$vikunja-project-bootstrap`。
+
+## 📌 共享 MCP 环境变量
+
+共享 Vikunja MCP 资产统一使用以下环境变量：
 
 ```bash
-VIKUNJA_URL=http://vikunja.example.com/api/v1
+VIKUNJA_URL=https://vikunja.example.com
 VIKUNJA_API_TOKEN=your-api-token-here
 ```
 
-#### 方式 2: config.yaml（推荐生产/容器化）
+在 `config.yaml` 中也可以这样提供：
 
 ```yaml
 secrets:
-  VIKUNJA_URL: "http://vikunja.example.com/api/v1"
+  VIKUNJA_URL: "https://vikunja.example.com"
   VIKUNJA_API_TOKEN: "your-token-here"
 ```
 
-### URL 格式规范
+### URL 规范
 
-- ✅ 正确: `http://vikunja.example.com/api/v1`
-- ✅ 正确: `https://vikunja.example.com/api/v1`
-- ❌ 错误: `http://vikunja.example.com`（缺少 `/api/v1`）
-- ❌ 错误: `http://vikunja.example.com/api/v1/`（不要末尾斜杠）
+- `VIKUNJA_URL` 使用实例根地址
+- 必须包含 `http://` 或 `https://`
+- 不要把 `/api/v1` 当成共享 MCP 配置标准写法
+- 如果某个应用自己的 REST 代理配置需要 `/api/v1`，把它保留在应用本地运行时配置里，不要和共享 MCP 约定混用
 
 ## 🔧 配置集成
 
-### 集成方式选择
-
-#### 选项 A: .mcp.json（单项目 / 单 Agent）
-
-适用场景：项目中只需要一个 MCP 服务器配置
-
-在项目根目录创建或编辑 `.mcp.json`：
+### 选项 A：`.mcp.json`
 
 ```json
 {
   "mcpServers": {
     "vikunja": {
-      "command": "npx",
-      "args": ["-y", "@aimbitgmbh/vikunja-mcp"],
+      "command": "mise",
+      "args": ["exec", "node@20", "--", "npx", "-y", "@shichao402/vikunja-mcp"],
       "env": {
         "VIKUNJA_URL": "${VIKUNJA_URL}",
         "VIKUNJA_API_TOKEN": "${VIKUNJA_API_TOKEN}"
@@ -99,30 +181,15 @@ secrets:
 }
 ```
 
-然后在 IDE 配置中加载此文件（CodeBuddy Code 会自动识别）。
-
-#### 选项 B: agents.yaml（多 Agent 场景）
-
-适用场景：项目中多个 Agent 需要使用 Vikunja，或需要灵活配置不同 Agent 的权限
-
-在 `agents.yaml` 中为需要的 Agent 添加 Vikunja 插件：
+### 选项 B：`agents.yaml`
 
 ```yaml
 agents:
   planning-agent:
     plugins:
       vikunja:
-        command: npx
-        args: ["-y", "@aimbitgmbh/vikunja-mcp"]
-        env:
-          VIKUNJA_URL: ${VIKUNJA_URL}
-          VIKUNJA_API_TOKEN: ${VIKUNJA_API_TOKEN}
-
-  execution-agent:
-    plugins:
-      vikunja:
-        command: npx
-        args: ["-y", "@aimbitgmbh/vikunja-mcp"]
+        command: mise
+        args: ["exec", "node@20", "--", "npx", "-y", "@shichao402/vikunja-mcp"]
         env:
           VIKUNJA_URL: ${VIKUNJA_URL}
           VIKUNJA_API_TOKEN: ${VIKUNJA_API_TOKEN}
@@ -130,46 +197,34 @@ agents:
 
 ## ✅ 启动检查清单
 
-加载 Vikunja MCP 后，按以下步骤验证：
-
-### 1. 环境变量验证
+1. 验证环境变量：
 
 ```bash
 echo "VIKUNJA_URL=${VIKUNJA_URL}"
-echo "VIKUNJA_API_TOKEN=${VIKUNJA_API_TOKEN:0:10}***"  # 只输出前 10 个字符用于验证
+echo "VIKUNJA_API_TOKEN=${VIKUNJA_API_TOKEN:0:10}***"
 ```
 
-**预期结果**:
-- VIKUNJA_URL 显示正确的 URL
-- VIKUNJA_API_TOKEN 显示 token 的前 10 个字符
-
-### 2. 网络连通性测试
+2. 验证实例可达：
 
 ```bash
-curl -s "${VIKUNJA_URL}/status" | jq .
+curl -s "${VIKUNJA_URL}/api/v1/info" | jq .
 ```
 
-**预期结果**：返回 JSON 格式的 Vikunja 状态信息
+3. 验证 MCP 包可启动：
 
-### 3. MCP 服务启动验证
+```bash
+mise exec node@20 -- npx -y @shichao402/vikunja-mcp --help
+```
 
-启动 IDE 后，观察控制台日志：
+4. 在 Agent 中验证工具：
 
-- ✅ 成功：`[MCP] vikunja server started`
-- ❌ 失败：查看错误日志，常见错误见"故障排除"章节
-
-### 4. MCP 工具可用性验证
-
-在 Agent 中尝试使用 Vikunja 工具（如果 IDE 支持）：
-- 列出项目：`list_projects`
-- 查询任务：`get_tasks`
-- 创建任务：`create_task`
+- 列出项目：`vikunja_list_projects`
+- 查询任务：`vikunja_list_tasks`
+- 创建任务：`vikunja_create_task`
 
 ## 🔄 常见操作规范
 
 ### 创建任务
-
-通过 MCP 工具 `create_task` 创建任务时的规范：
 
 ```json
 {
@@ -177,130 +232,70 @@ curl -s "${VIKUNJA_URL}/status" | jq .
   "title": "Task Title",
   "description": "Task description with context",
   "priority": 3,
-  "labels": ["backend", "feature"]
+  "due_date": "2026-04-30T12:00:00+08:00"
 }
 ```
 
-**字段说明**:
-- `project_id`: 必需，通过 `list_projects` 获取
-- `title`: 必需，不超过 200 字符
-- `description`: 可选，支持 Markdown 格式
-- `priority`: 可选，范围 0-5（0 最低，5 最高）
-- `labels`: 可选，数组格式
+如需标签，先通过 `vikunja_list_labels` / `vikunja_create_label` 获取或创建，再调用 `vikunja_add_label_to_task`。
 
-### 更新任务状态
+### 查询项目内任务
+
+`vikunja_list_tasks` 默认会跨 token 可见项目检索。
+如果只查询当前目标项目，必须显式带 `filter`：
 
 ```json
 {
+  "filter": "project_id = 123",
+  "sort_by": ["priority", "due_date"],
+  "order_by": "desc"
+}
+```
+
+### 更新任务
+
+```json
+{
+  "task_id": 123,
   "done": true,
   "description": "更新的描述信息"
 }
 ```
 
-**常见字段**:
-- `done`: 标记任务完成/未完成
-- `priority`: 修改优先级
-- `labels`: 更新标签
-- `description`: 更新描述
+### 移动看板卡片
 
-### 任务关联和链接
+真实的看板卡片移动应使用 bucket 任务移动接口：
 
-Vikunja 支持任务间的关系定义（前置、后置、阻塞等），通过 API 的 `relations` 字段配置：
+- `POST /projects/{project}/views/{view}/buckets/{bucket}/tasks`
 
-```json
-{
-  "kind": "relates",
-  "target_task_id": 123
-}
-```
+不要单纯写 `bucket_id` 后就假设看板位置已经同步。
 
-**关系类型**:
-- `relates`: 相关
-- `subtask`: 子任务
-- `blocks`: 阻塞
-- `blocked_by`: 被阻塞
-- `duplicates`: 重复
+### 任务关系
+
+任务关系通常通过原始 REST 工具暴露，例如 `vikunja_api_put_tasks_task_id_relations`。
+使用时以工具 schema 为准，通常需要当前任务 ID、关系类型、关联任务 ID。
 
 ## 🐛 故障排除
 
-### 错误 1: "无法连接到 Vikunja 服务"
+### 无法连接到 Vikunja 服务
 
-**原因**: URL 或网络不可达
+检查顺序：
 
-**检查步骤**:
-1. 验证 `VIKUNJA_URL` 是否正确
-2. 确认末尾包含 `/api/v1`
-3. 测试网络：`ping vikunja.example.com`
-4. 测试 API：`curl -v ${VIKUNJA_URL}/status`
+1. `VIKUNJA_URL` 是否为完整 URL
+2. 实例是否可达：`curl -v "${VIKUNJA_URL}/api/v1/info"`
+3. 网络或 DNS 是否正常
 
-### 错误 2: "认证失败 (401 Unauthorized)"
+### 认证失败
 
-**原因**: Token 无效或已过期
+检查 `VIKUNJA_API_TOKEN` 是否有效，必要时重新生成。
 
-**解决方案**:
-1. 登录 Vikunja 界面 → 用户设置 → API Token
-2. 删除旧 Token，生成新 Token
-3. 更新 `.env` 或 `config.yaml` 中的 `VIKUNJA_API_TOKEN`
-4. 重启 IDE 或 Agent
+### MCP 服务启动失败
 
-### 错误 3: "MCP 服务启动失败"
+检查顺序：
 
-**原因**: Node.js 或包安装问题
+1. `mise` 是否可用
+2. `node@20` 是否可执行
+3. `mise exec node@20 -- npx -y @shichao402/vikunja-mcp --help` 是否成功
 
-**解决方案**:
-1. 检查 Node.js 版本：`node --version`（需要 v14+）
-2. 清除 npx 缓存：`npx cache clean --force`
-3. 手动安装包：`npm install -g @aimbitgmbh/vikunja-mcp`
-4. 查看完整错误日志
+### 找不到项目或任务
 
-### 错误 4: "找不到项目 / 任务"
-
-**原因**: 项目 ID 或任务 ID 不存在
-
-**解决方案**:
-1. 使用 `list_projects` 获取有效的项目 ID
-2. 使用 `get_tasks` 列出项目下的所有任务
-3. 确认权限：当前 Token 对目标项目是否有访问权限
-
-## 📚 API 工具清单
-
-当前 Vikunja MCP 提供的主要工具（具体工具列表取决于 `@aimbitgmbh/vikunja-mcp` 版本）：
-
-| 工具名 | 功能 | 参数 |
-|-------|------|------|
-| `list_projects` | 列出所有项目 | 无 |
-| `get_tasks` | 获取项目任务列表 | `project_id`, `filter`, `sort_by` |
-| `get_task` | 获取单个任务详情 | `task_id` |
-| `create_task` | 创建新任务 | `project_id`, `title`, `description` 等 |
-| `update_task` | 更新任务信息 | `task_id`, `title`, `done`, `priority` 等 |
-| `delete_task` | 删除任务 | `task_id` |
-| `add_label` | 添加标签 | `task_id`, `label_title` |
-| `remove_label` | 移除标签 | `task_id`, `label_id` |
-
-具体支持的工具和参数请查阅 [@aimbitgmbh/vikunja-mcp 文档](https://www.npmjs.com/package/@aimbitgmbh/vikunja-mcp)。
-
-## 🔐 安全建议
-
-1. **不要提交含有真实 Token 的配置文件**
-   - `.env` 文件添加到 `.gitignore`
-   - `config.yaml` 中的 secrets 部分不要提交
-
-2. **定期轮换 Token**
-   - 尤其在多人协作或泄露风险后
-
-3. **限制 Token 权限**（如果 Vikunja 支持）
-   - 只赋予必要的权限（如只读、特定项目等）
-
-4. **监控 Token 使用**
-   - 在 Vikunja 日志中审查 API 调用
-
-## 📞 获取帮助
-
-- **Vikunja 文档**: https://vikunja.io/docs/
-- **MCP 规范**: https://modelcontextprotocol.io/
-- **@aimbitgmbh/vikunja-mcp**: https://www.npmjs.com/package/@aimbitgmbh/vikunja-mcp
-- **项目示例**: 参考当前项目的 `.mcp.json` 配置
-
----
-
-**最后更新**: 2026-04-02 | **版本**: 1.0
+先确认目标项目是否唯一，再用 `vikunja_list_projects` / `vikunja_list_tasks` 复查，不要把全局结果直接当作当前项目的 backlog。

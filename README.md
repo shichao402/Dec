@@ -145,6 +145,10 @@ dec pull
 
 未定义的占位符会保留原样，并在 pull 时提示补充变量配置。
 
+变量只应用在确实会按项目变化、但又需要保留的值，例如默认项目名、任务文档目录、实例地址。
+像稳定的流程 bucket 名、type label 名、默认视图名这类共享约定，不要默认变量化。
+
+
 ### 6. 推送修改
 
 ```bash
@@ -179,7 +183,7 @@ dec push --remove skill my-skill      # 删除远程资产（需确认）
 
 `dec push` 的读取源是 `.dec/cache/`，不是 `.cursor/`、`.codex/` 等 IDE 目录。
 
-如果用户已经在当前项目里做出了一个很好用的本地 Skill，希望把它抽象成可复用资产后放进 Dec，可以直接让 agent 使用内置的 `dec-extract-asset` skill。它的目标是把项目特有内容提炼成通用版本，写入 `.dec/cache/<vault>/skills/<name>/`，更新 `.dec/config.yaml`，然后执行 `dec push`。
+如果用户已经在当前项目里做出了一个很好用的本地 Skill，希望把它抽象成可复用资产后放进 Dec，可以直接让 agent 使用内置的 `dec-extract-asset` skill。它的目标是把项目特有内容提炼成通用版本，只把确实会跨项目变化的值改成 `{{VAR_NAME}}`，写入 `.dec/cache/<vault>/skills/<name>/`，更新 `.dec/config.yaml`，然后执行 `dec push`。
 
 ## 推荐工作流
 
