@@ -3,15 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/pkg/app"
-	"github.com/shichao402/Dec/pkg/assets"
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/editor"
-	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
 	"github.com/spf13/cobra"
 )
@@ -375,180 +371,42 @@ var configGlobalCmd = &cobra.Command{
 }
 
 func runConfigGlobal(cmd *cobra.Command, args []string) error {
-	// 确保仓库已连接
-	connected, err := repo.IsConnected()
+	result, err := app.SaveGlobalSettings(app.SaveGlobalSettingsInput{IDEs: configIDEs}, nil)
 	if err != nil {
-		return fmt.Errorf("检查仓库连接失败: %w", err)
-	}
-	if !connected {
-		return fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 先连接你的仓库")
+		return err
 	}
 
-	// 确定要配置的 IDE 列表
-	var targetIDEs []string
-	if len(configIDEs) > 0 {
-		// 用户指定了具体 IDE
-		targetIDEs = configIDEs
-	} else {
-		// 使用所有支持的 IDE
-		targetIDEs = ide.List()
-		sort.Strings(targetIDEs)
-	}
-
-	// 验证 IDE 名称有效性
-	for _, ideName := range targetIDEs {
-		if err := validateIDEName(ideName); err != nil {
-			return err
-		}
-	}
-
-	fmt.Printf("🔧 配置 IDE: %s\n\n", strings.Join(targetIDEs, ", "))
-
-	// 为每个 IDE 安装 Dec 内置资产
-	for _, ideName := range targetIDEs {
+	fmt.Printf("🔧 配置 IDE: %s\n\n", strings.Join(result.IDEs, ", "))
+	for _, ideName := range result.IDEs {
 		fmt.Printf("  配置 %s...\n", ideName)
-
-		if err := installBuiltinAssetsForIDE(ideName); err != nil {
-			fmt.Printf("    ⚠️  %s\n", err.Error())
-			continue
-		}
 	}
-
-	// 保存配置到全局配置文件
-	globalConfig, err := config.LoadGlobalConfig()
-	if err != nil {
-		return fmt.Errorf("加载全局配置失败: %w", err)
-	}
-	globalConfig.IDEs = targetIDEs
-	if err := config.SaveGlobalConfig(globalConfig); err != nil {
-		return fmt.Errorf("保存 IDE 配置失败: %w", err)
-	}
-	varsCreated, err := config.EnsureGlobalVarsTemplate()
-	if err != nil {
-		return fmt.Errorf("写入本机变量定义模板失败: %w", err)
-	}
-	globalVarsPath, err := config.GetGlobalVarsPath()
-	if err != nil {
-		return fmt.Errorf("获取本机变量定义路径失败: %w", err)
+	for _, warning := range result.InstallWarnings {
+		fmt.Printf("    ⚠️  %s\n", warning)
 	}
 
 	fmt.Println("\n✅ 全局 IDE 配置完成")
-	if varsCreated {
-		fmt.Printf("📝 本机变量模板已生成: %s\n", globalVarsPath)
+	if result.VarsCreated {
+		fmt.Printf("📝 本机变量模板已生成: %s\n", result.VarsPath)
 	} else {
-		fmt.Printf("📝 本机变量模板已保留: %s\n", globalVarsPath)
+		fmt.Printf("📝 本机变量模板已保留: %s\n", result.VarsPath)
 	}
 	fmt.Println("\n后续步骤:")
 	fmt.Println("  dec config init              # 初始化项目配置")
 	fmt.Println("  dec list                     # 查看已有 Vault 和资产")
 	fmt.Println("  dec search <keyword>         # 搜索资产")
-	fmt.Printf("  编辑 %s  # 填写机器级占位符变量\n", globalVarsPath)
+	fmt.Printf("  编辑 %s  # 填写机器级占位符变量\n", result.VarsPath)
 	fmt.Println("\n在项目中使用:")
 	fmt.Println("  dec pull                     # 拉取资产到当前项目")
 
 	return nil
 }
 
-// installBuiltinAssetsForIDE 为指定 IDE 安装 Dec 跟随分发的内置资产。
-// 当前实际分发的是 Skills，同时为未来内置 Rule / MCP 预留安装入口。
 func installBuiltinAssetsForIDE(ideName string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("获取用户主目录失败: %w", err)
-	}
-
-	ideImpl := ide.Get(ideName)
-	userRoot := ideImpl.UserRootDir(homeDir)
-	bundle := assets.GlobalAssets()
-
-	if err := installBuiltinSkills(filepath.Join(userRoot, "skills"), bundle.Skills); err != nil {
-		return fmt.Errorf("安装内置 skills 失败: %w", err)
-	}
-	if err := installBuiltinRules(filepath.Join(userRoot, "rules"), bundle.Rules); err != nil {
-		return fmt.Errorf("安装内置 rules 失败: %w", err)
-	}
-	if err := installBuiltinMCPs(ideName, userRoot, bundle.MCPs); err != nil {
-		return err
-	}
-
-	return nil
+	return app.InstallBuiltinAssetsForIDE(ideName)
 }
 
-func installBuiltinSkills(skillsDir string, skills []assets.SkillAsset) error {
-	if len(skills) == 0 {
-		return nil
-	}
-
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
-		return fmt.Errorf("创建 skills 目录失败: %w", err)
-	}
-
-	for _, skill := range skills {
-		skillDir := filepath.Join(skillsDir, skill.Name)
-		if err := os.RemoveAll(skillDir); err != nil {
-			return fmt.Errorf("清理 skill %s 目录失败: %w", skill.Name, err)
-		}
-		if err := writeBuiltinFiles(skillDir, skill.Files); err != nil {
-			return fmt.Errorf("安装 skill %s 失败: %w", skill.Name, err)
-		}
-	}
-
-	return nil
-}
-
-func installBuiltinRules(rulesDir string, rules []assets.RuleAsset) error {
-	if len(rules) == 0 {
-		return nil
-	}
-
-	if err := os.MkdirAll(rulesDir, 0755); err != nil {
-		return fmt.Errorf("创建 rules 目录失败: %w", err)
-	}
-
-	for _, rule := range rules {
-		rulePath := filepath.Join(rulesDir, rule.Name+".mdc")
-		if err := os.WriteFile(rulePath, rule.Content, 0644); err != nil {
-			return fmt.Errorf("写入 rule %s 失败: %w", rule.Name, err)
-		}
-	}
-
-	return nil
-}
-
-func installBuiltinMCPs(ideName, userRoot string, mcps []assets.MCPAsset) error {
-	if len(mcps) == 0 {
-		return nil
-	}
-
-	return fmt.Errorf("IDE %s 暂未实现内置 MCP 分发（用户级根目录: %s）", ideName, userRoot)
-}
-
-func writeBuiltinFiles(rootDir string, files []assets.FileAsset) error {
-	if err := os.MkdirAll(rootDir, 0755); err != nil {
-		return err
-	}
-
-	for _, file := range files {
-		fullPath := filepath.Join(rootDir, filepath.FromSlash(file.RelPath))
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(fullPath, file.Content, 0644); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// validateIDEName 验证 IDE 名称有效性
 func validateIDEName(ideName string) error {
-	if ide.IsValid(ideName) {
-		return nil
-	}
-	validIDEs := ide.List()
-	sort.Strings(validIDEs)
-	return fmt.Errorf("不支持的 IDE: %s (支持: %s)", ideName, strings.Join(validIDEs, ", "))
+	return app.ValidateIDEName(ideName)
 }
 
 // ========================================

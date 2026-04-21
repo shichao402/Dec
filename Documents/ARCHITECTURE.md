@@ -269,7 +269,7 @@ MCP 采用非覆盖式合并：
 - `vault.go`：共享的 Vault 扫描、缓存路径、安装辅助函数
 - `update.go`：版本检查与自更新
 
-`cmd/*` 当前仍是 CLI 适配层，但 `config init` 与 `pull` 的非交互编排已经开始下沉到 `pkg/app/`，后续 `push` / 默认 TUI 会继续沿这条边界演进。
+`cmd/*` 当前仍是 CLI 适配层，但 `config init`、`config repo`、`config global` 与 `pull` 的非交互编排已经开始下沉到 `pkg/app/`，后续 `push` / 默认 TUI 会继续沿这条边界演进。
 
 ### `pkg/app/`
 
@@ -281,16 +281,17 @@ MCP 采用非覆盖式合并：
 - `overview.go`：TUI 首页所需的项目概览聚合，包括仓库连接、项目配置、启用资产数、有效 IDE 和编辑器
 - `assets.go`：TUI Assets 页所需的资产选择状态加载与保存，包括 enabled 切换持久化、保留 IDE/editor、确保 vars 模板
 - `operations.go`：`pull` 的复用编排层，负责配置校验、旧布局迁移、清理失效资产、缓存写入、IDE 安装、变量替换、mise 收尾与结构化结果汇总
+- `settings.go`：全局设置与仓库连接用例，负责 repo connect、默认 IDE 保存、用户级内置资产安装与全局 vars 模板准备
 - `events.go`：`Reporter` / `OperationEvent` 事件模型，供 CLI 与 TUI 共享执行过程
 
-当前 CLI 仍保留交互式编辑器打开、最终输出和用户提示；`pkg/app` 负责承接可复用的非交互业务步骤，供 CLI 与 TUI 共享，其中 `config init` 与 `pull` 已经走到这条边界上。
+当前 CLI 仍保留交互式编辑器打开、最终输出和用户提示；`pkg/app` 负责承接可复用的非交互业务步骤，供 CLI 与 TUI 共享，其中 `config init`、`config repo`、`config global` 与 `pull` 已经走到这条边界上。
 
 ### `internal/tui/`
 
 交互式展示层，当前承接默认入口下的最小可用 TUI Shell。
 
 - `app.go`：Bubble Tea 程序启动与 IO 绑定
-- `model.go`：全局 Shell model，负责首页、导航、Assets / Run 页交互、状态栏、日志区与刷新逻辑
+- `model.go`：全局 Shell model，负责首页、导航、Assets / Run / Settings 页交互、状态栏、日志区与刷新逻辑
 
 当前阶段已经接入：
 
@@ -298,7 +299,8 @@ MCP 采用非覆盖式合并：
 - 首页展示仓库/项目概览、导航、状态栏和最近日志
 - `Assets` 页可加载仓库资产、按关键字筛选、切换启用状态，并保存到 `.dec/config.yaml`
 - `Run` 页可触发一次 `pull`，展示阶段进度、执行日志和最近一次结果
-- `pull` 完成后会刷新首页概览与资产状态，`Project` / `Settings` 仍保留占位页
+- `Settings` 页可编辑 repo URL、勾选默认 IDE，并通过同一用例层完成仓库连接、内置资产安装与全局 vars 模板准备
+- `pull` 或 `Settings` 保存完成后会刷新首页概览、资产状态与全局设置；`Project` 页仍保留占位页
 
 ### `pkg/config/`
 

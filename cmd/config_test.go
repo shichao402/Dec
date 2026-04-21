@@ -170,6 +170,49 @@ func TestRunConfigInitWritesConfigBeforeManualEditFallback(t *testing.T) {
 	}
 }
 
+func TestRunConfigRepoUsesAppLayerAndPersistsGlobalConfig(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForRootTest(t, "DEC_HOME", decHome)
+	remote := setupRemoteBareRepoRootTest(t)
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("创建 stdout pipe 失败: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = oldStdout
+		_ = r.Close()
+	}()
+
+	if err := runConfigRepo(configRepoCmd, []string{remote}); err != nil {
+		t.Fatalf("runConfigRepo() 失败: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("关闭写端失败: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("读取输出失败: %v", err)
+	}
+	_ = r.Close()
+
+	out := buf.String()
+	if !strings.Contains(out, "✅ 仓库已连接:") {
+		t.Fatalf("runConfigRepo 输出缺少连接成功提示:\n%s", out)
+	}
+
+	globalConfig, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig() 失败: %v", err)
+	}
+	if globalConfig.RepoURL != remote {
+		t.Fatalf("repo_url = %q, 期望 %q", globalConfig.RepoURL, remote)
+	}
+}
+
 func setupRemoteBareRepoConfigInitTest(t *testing.T, files map[string]string) string {
 	t.Helper()
 

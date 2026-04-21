@@ -38,6 +38,16 @@ type assetsSavedMsg struct {
 	err    error
 }
 
+type settingsLoadedMsg struct {
+	state *app.GlobalSettingsState
+	err   error
+}
+
+type settingsSavedMsg struct {
+	result *app.SaveGlobalSettingsResult
+	err    error
+}
+
 type runEventMsg struct {
 	event app.OperationEvent
 }
@@ -51,28 +61,44 @@ var runPullOperation = func(projectRoot string, reporter app.Reporter) (*app.Pul
 	return app.PullProjectAssets(projectRoot, "", reporter)
 }
 
+var loadGlobalSettingsOperation = func(reporter app.Reporter) (*app.GlobalSettingsState, error) {
+	return app.LoadGlobalSettings(reporter)
+}
+
+var saveGlobalSettingsOperation = func(input app.SaveGlobalSettingsInput, reporter app.Reporter) (*app.SaveGlobalSettingsResult, error) {
+	return app.SaveGlobalSettings(input, reporter)
+}
+
 type model struct {
-	projectRoot      string
-	pages            []string
-	pageIndex        int
-	width            int
-	height           int
-	overview         *app.ProjectOverview
-	overviewErr      error
-	assets           *app.AssetSelectionState
-	assetsErr        error
-	logs             []string
-	assetCursor      int
-	assetFilter      string
-	assetFilterInput bool
-	assetsDirty      bool
-	savingAssets     bool
-	runningPull      bool
-	runProgress      *app.Progress
-	runEvents        []string
-	runResult        *app.PullProjectAssetsResult
-	runErr           error
-	runStream        <-chan tea.Msg
+	projectRoot          string
+	pages                []string
+	pageIndex            int
+	width                int
+	height               int
+	overview             *app.ProjectOverview
+	overviewErr          error
+	assets               *app.AssetSelectionState
+	assetsErr            error
+	settings             *app.GlobalSettingsState
+	settingsErr          error
+	logs                 []string
+	assetCursor          int
+	assetFilter          string
+	assetFilterInput     bool
+	assetsDirty          bool
+	savingAssets         bool
+	settingsCursor       int
+	settingsDirty        bool
+	savingSettings       bool
+	settingsRepoInput    string
+	settingsRepoEditing  bool
+	settingsSelectedIDEs []string
+	runningPull          bool
+	runProgress          *app.Progress
+	runEvents            []string
+	runResult            *app.PullProjectAssetsResult
+	runErr               error
+	runStream            <-chan tea.Msg
 }
 
 func newModel(projectRoot string) model {
@@ -83,6 +109,7 @@ func newModel(projectRoot string) model {
 			"TUI shell ready",
 			"Loading project overview...",
 			"Loading asset selection...",
+			"Loading global settings...",
 		},
 	}
 }
@@ -130,6 +157,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Asset selection saved: %d enabled / %d available", msg.result.EnabledCount, msg.result.AvailableCount))
 		}
 		return m, m.refreshCmd()
+	case settingsLoadedMsg:
+		m.settings = msg.state
+		m.settingsErr = msg.err
+		m.savingSettings = false
+		m.settingsRepoEditing = false
+		m.settingsDirty = false
+		if msg.err != nil {
+			m.pushLog("Global settings load failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.state != nil {
+			m.settingsRepoInput = msg.state.RepoURL
+			m.settingsSelectedIDEs = cloneStrings(msg.state.SelectedIDEs)
+			m.normalizeSettingsCursor()
+			m.syncSettingsDirty()
+			m.pushLog(fmt.Sprintf("Global settings loaded: %d IDEs selected", len(m.settingsSelectedIDEs)))
+		}
+		return m, nil
+	case settingsSavedMsg:
+		m.savingSettings = false
+		if msg.err != nil {
+			m.pushLog("Global settings save failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.result != nil {
+			m.pushLog(fmt.Sprintf("Global settings saved: %d IDEs", len(msg.result.IDEs)))
+			for _, warning := range msg.result.InstallWarnings {
+				m.pushLog("Install warning: " + warning)
+			}
+		}
+		return m, m.refreshCmd()
 	case runEventMsg:
 		m.recordRunEvent(msg.event)
 		if m.runStream != nil {
@@ -153,6 +211,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.assetFilterInput && m.isAssetsPage() {
 			return m.handleAssetFilterInput(msg)
 		}
+		if m.settingsRepoEditing && m.isSettingsPage() {
+			return m.handleSettingsRepoInput(msg)
+		}
 
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -173,6 +234,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if m.isSettingsPage() {
+				if m.canNavigateSettings() {
+					m.moveSettingsCursor(1)
+				}
+				return m, nil
+			}
 			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
 			return m, nil
@@ -183,11 +250,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if m.isSettingsPage() {
+				if m.canNavigateSettings() {
+					m.moveSettingsCursor(-1)
+				}
+				return m, nil
+			}
 			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
 			return m, nil
 		case "r":
-			m.pushLog("Refreshing project overview and asset selection")
+			m.pushLog("Refreshing project overview, assets, and global settings")
 			return m, m.refreshCmd()
 		case "/":
 			if m.isAssetsPage() {
@@ -205,6 +278,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case " ", "enter":
 			if m.isAssetsPage() && !m.savingAssets {
 				m.toggleCurrentAsset()
+				return m, nil
+			}
+			if m.isSettingsPage() && !m.savingSettings {
+				if m.settingsCursor == 0 {
+					if msg.String() == "enter" {
+						m.beginSettingsRepoEdit()
+					}
+				} else {
+					m.toggleCurrentSettingsIDE()
+				}
+			}
+			return m, nil
+		case "e":
+			if m.isSettingsPage() && !m.savingSettings {
+				m.beginSettingsRepoEdit()
 			}
 			return m, nil
 		case "s":
@@ -212,6 +300,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.savingAssets = true
 				m.pushLog("Saving asset selection")
 				return m, saveAssetsCmd(m.projectRoot, cloneAssetSelectionItems(m.assets.Items))
+			}
+			if m.isSettingsPage() && !m.savingSettings && m.settings != nil && m.settingsErr == nil {
+				m.savingSettings = true
+				m.pushLog("Saving global settings")
+				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), cloneStrings(m.settingsSelectedIDEs))
 			}
 			if m.isRunPage() && !m.runningPull {
 				return m, m.startPullRun()
@@ -271,7 +364,7 @@ func (m model) View() string {
 }
 
 func (m model) refreshCmd() tea.Cmd {
-	return tea.Batch(loadOverviewCmd(m.projectRoot), loadAssetsCmd(m.projectRoot))
+	return tea.Batch(loadOverviewCmd(m.projectRoot), loadAssetsCmd(m.projectRoot), loadSettingsCmd())
 }
 
 func loadOverviewCmd(projectRoot string) tea.Cmd {
@@ -292,6 +385,20 @@ func saveAssetsCmd(projectRoot string, items []app.AssetSelectionItem) tea.Cmd {
 	return func() tea.Msg {
 		result, err := app.SaveAssetSelection(projectRoot, items, nil)
 		return assetsSavedMsg{result: result, err: err}
+	}
+}
+
+func loadSettingsCmd() tea.Cmd {
+	return func() tea.Msg {
+		state, err := loadGlobalSettingsOperation(nil)
+		return settingsLoadedMsg{state: state, err: err}
+	}
+}
+
+func saveSettingsCmd(repoURL string, ides []string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := saveGlobalSettingsOperation(app.SaveGlobalSettingsInput{RepoURL: repoURL, IDEs: cloneStrings(ides)}, nil)
+		return settingsSavedMsg{result: result, err: err}
 	}
 }
 
@@ -322,6 +429,13 @@ func cloneAssetSelectionItems(items []app.AssetSelectionItem) []app.AssetSelecti
 	return append([]app.AssetSelectionItem(nil), items...)
 }
 
+func cloneStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return append([]string{}, values...)
+}
+
 func (m model) handleAssetFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
@@ -342,6 +456,31 @@ func (m model) handleAssetFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if len(msg.Runes) > 0 && !msg.Alt {
 		m.assetFilter += string(msg.Runes)
 		m.normalizeAssetCursor()
+	}
+	return m, nil
+}
+
+func (m model) handleSettingsRepoInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.settingsRepoEditing = false
+		m.syncSettingsDirty()
+		m.pushLog("Repo URL input closed")
+		return m, nil
+	case tea.KeyEnter:
+		m.settingsRepoEditing = false
+		m.syncSettingsDirty()
+		m.pushLog("Repo URL updated: " + fallbackValue(strings.TrimSpace(m.settingsRepoInput), "<empty>"))
+		return m, nil
+	case tea.KeyBackspace, tea.KeyCtrlH:
+		m.settingsRepoInput = trimLastRune(m.settingsRepoInput)
+		m.syncSettingsDirty()
+		return m, nil
+	}
+
+	if len(msg.Runes) > 0 && !msg.Alt {
+		m.settingsRepoInput += string(msg.Runes)
+		m.syncSettingsDirty()
 	}
 	return m, nil
 }
@@ -573,10 +712,101 @@ func (m model) renderRunPage(width int) string {
 }
 
 func (m model) renderSettingsPage(width int) string {
-	return wrapLines(width, []string{
-		"Settings 页当前只保留占位，用于承接后续全局设置与调试开关。",
-		"可通过 DEC_NO_TUI=1 临时回退到传统 CLI。",
-	})
+	if m.settingsErr != nil {
+		return shellWarnStyle.Render("无法加载全局设置") + "\n\n" + m.settingsErr.Error()
+	}
+	if m.settings == nil {
+		return shellMutedStyle.Render("Loading global settings...")
+	}
+
+	summary := []string{
+		fmt.Sprintf("Repo URL: %s", fallbackValue(strings.TrimSpace(m.settingsRepoInput), "<none>")),
+		fmt.Sprintf("当前远端: %s", fallbackValue(m.settings.ConnectedRepoURL, "未连接")),
+		fmt.Sprintf("已选 IDE: %s", fallbackValue(strings.Join(normalizedStringList(m.settingsSelectedIDEs), ", "), "<none>")),
+		fmt.Sprintf("生效 IDE: %s", fallbackValue(strings.Join(settingsEffectivePreview(m.settings, m.settingsSelectedIDEs), ", "), "<none>")),
+		fmt.Sprintf("全局配置: %s", m.settings.ConfigPath),
+		fmt.Sprintf("本机 Vars: %s", m.settings.VarsPath),
+		formatWarnings(m.settings.IDEWarnings),
+	}
+	if m.settingsDirty {
+		summary = append(summary, shellWarnStyle.Render("当前有未保存修改，按 s 保存。"))
+	} else {
+		summary = append(summary, shellMutedStyle.Render("当前全局设置与磁盘一致。"))
+	}
+	if m.settingsRepoEditing {
+		summary = append(summary, shellMutedStyle.Render("Repo URL 输入中：输入后按 Enter 应用，Esc 退出。"))
+	} else {
+		summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · e 编辑 repo · space 切换 IDE · s 保存"))
+	}
+	if !m.settings.VarsFileReady {
+		summary = append(summary, shellMutedStyle.Render("首次保存会创建 ~/.dec/local/vars.yaml 模板。"))
+	}
+	if m.savingSettings {
+		summary = append(summary, shellWarnStyle.Render("正在保存全局设置..."))
+	}
+
+	list := m.renderSettingsList()
+	detail := m.renderSettingsDetails()
+	if width < 88 {
+		return strings.Join(append(summary, "", list, "", detail), "\n")
+	}
+
+	leftWidth := width / 2
+	rightWidth := width - leftWidth - 2
+	left := lipgloss.NewStyle().Width(leftWidth).Render(list)
+	right := lipgloss.NewStyle().Width(rightWidth).Render(detail)
+	return strings.Join(summary, "\n") + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+}
+
+func (m model) renderSettingsList() string {
+	lines := []string{shellTitleStyle.Render("Global Settings")}
+	repoLine := fmt.Sprintf("%s Repo URL: %s", settingsCursorMarker(m.settingsCursor == 0), fallbackValue(strings.TrimSpace(m.settingsRepoInput), "<none>"))
+	if m.settingsCursor == 0 {
+		lines = append(lines, shellSelectedRow.Render(repoLine))
+	} else {
+		lines = append(lines, shellLogStyle.Render(repoLine))
+	}
+	for idx, ideName := range m.settings.AvailableIDEs {
+		selected := settingsContainsIDE(m.settingsSelectedIDEs, ideName)
+		checked := " "
+		if selected {
+			checked = "x"
+		}
+		line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.settingsCursor == idx+1), checked, ideName)
+		switch {
+		case m.settingsCursor == idx+1:
+			lines = append(lines, shellSelectedRow.Render(line))
+		case selected:
+			lines = append(lines, shellEnabledRow.Render(line))
+		default:
+			lines = append(lines, shellLogStyle.Render(line))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) renderSettingsDetails() string {
+	lines := []string{shellTitleStyle.Render("Details")}
+	if m.settingsCursor == 0 {
+		lines = append(lines,
+			fmt.Sprintf("当前远端: %s", fallbackValue(m.settings.ConnectedRepoURL, "未连接")),
+			fmt.Sprintf("Bare Repo: %s", fallbackValue(m.settings.ConnectedBarePath, "未连接")),
+			fmt.Sprintf("配置文件: %s", m.settings.ConfigPath),
+			fmt.Sprintf("本机 Vars: %s", m.settings.VarsPath),
+			"保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。",
+		)
+	} else {
+		ideName := m.currentSettingsIDEName()
+		lines = append(lines,
+			fmt.Sprintf("IDE: %s", ideName),
+			"保存时会在用户级目录安装内置 dec / dec-extract-asset。",
+			fmt.Sprintf("当前状态: %s", formatReady(settingsContainsIDE(m.settingsSelectedIDEs, ideName), "已选中", "未选中")),
+		)
+	}
+	if m.settingsRepoEditing {
+		lines = append(lines, "", shellWarnStyle.Render("Repo URL 输入模式已开启。"))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) renderAssetList(visible []int) string {
@@ -634,6 +864,17 @@ func (m model) renderAssetDetails() string {
 	return strings.Join(lines, "\n")
 }
 
+func (m model) currentSettingsIDEName() string {
+	if m.settings == nil || m.settingsCursor <= 0 {
+		return ""
+	}
+	idx := m.settingsCursor - 1
+	if idx < 0 || idx >= len(m.settings.AvailableIDEs) {
+		return ""
+	}
+	return m.settings.AvailableIDEs[idx]
+}
+
 func (m model) currentAssetItem() (app.AssetSelectionItem, bool) {
 	if m.assets == nil {
 		return app.AssetSelectionItem{}, false
@@ -667,6 +908,17 @@ func (m model) filteredAssetIndices() []int {
 		}
 	}
 	return visible
+}
+
+func (m model) canNavigateSettings() bool {
+	return m.settings != nil && m.settingsRowCount() > 0
+}
+
+func (m model) settingsRowCount() int {
+	if m.settings == nil {
+		return 0
+	}
+	return 1 + len(m.settings.AvailableIDEs)
 }
 
 func (m model) canNavigateAssets() bool {
@@ -715,6 +967,137 @@ func (m *model) moveAssetCursor(delta int) {
 	m.assetCursor = visible[position]
 }
 
+func (m *model) normalizeSettingsCursor() {
+	if m.settingsRowCount() == 0 {
+		m.settingsCursor = 0
+		return
+	}
+	if m.settingsCursor < 0 || m.settingsCursor >= m.settingsRowCount() {
+		m.settingsCursor = 0
+	}
+}
+
+func (m *model) moveSettingsCursor(delta int) {
+	if !m.canNavigateSettings() {
+		return
+	}
+	m.normalizeSettingsCursor()
+	m.settingsCursor += delta
+	if m.settingsCursor < 0 {
+		m.settingsCursor = 0
+	}
+	if m.settingsCursor >= m.settingsRowCount() {
+		m.settingsCursor = m.settingsRowCount() - 1
+	}
+}
+
+func (m *model) beginSettingsRepoEdit() {
+	if m.settings == nil {
+		return
+	}
+	m.settingsCursor = 0
+	m.settingsRepoEditing = true
+	m.pushLog("Repo URL input opened")
+}
+
+func (m *model) toggleCurrentSettingsIDE() {
+	ideName := m.currentSettingsIDEName()
+	if strings.TrimSpace(ideName) == "" {
+		return
+	}
+	if settingsContainsIDE(m.settingsSelectedIDEs, ideName) {
+		m.settingsSelectedIDEs = settingsRemoveIDE(m.settingsSelectedIDEs, ideName)
+		m.pushLog("IDE disabled: " + ideName)
+	} else {
+		m.settingsSelectedIDEs = append(m.settingsSelectedIDEs, ideName)
+		m.pushLog("IDE enabled: " + ideName)
+	}
+	m.syncSettingsDirty()
+}
+
+func (m *model) syncSettingsDirty() {
+	if m.settings == nil {
+		m.settingsDirty = false
+		return
+	}
+	currentRepo := strings.TrimSpace(m.settingsRepoInput)
+	loadedRepo := strings.TrimSpace(m.settings.RepoURL)
+	m.settingsDirty = currentRepo != loadedRepo || !equalNormalizedStrings(m.settingsSelectedIDEs, m.settings.SelectedIDEs)
+}
+
+func settingsContainsIDE(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func settingsRemoveIDE(values []string, target string) []string {
+	target = strings.TrimSpace(target)
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			continue
+		}
+		result = append(result, value)
+	}
+	return result
+}
+
+func equalNormalizedStrings(left, right []string) bool {
+	leftNorm := normalizedStringList(left)
+	rightNorm := normalizedStringList(right)
+	if len(leftNorm) != len(rightNorm) {
+		return false
+	}
+	for idx := range leftNorm {
+		if leftNorm[idx] != rightNorm[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizedStringList(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func settingsEffectivePreview(state *app.GlobalSettingsState, selected []string) []string {
+	if len(selected) > 0 {
+		return normalizedStringList(selected)
+	}
+	if state == nil {
+		return nil
+	}
+	if len(state.EffectiveIDEs) > 0 {
+		return normalizedStringList(state.EffectiveIDEs)
+	}
+	return normalizedStringList(state.SelectedIDEs)
+}
+
+func settingsCursorMarker(active bool) string {
+	if active {
+		return ">"
+	}
+	return " "
+}
+
 func (m *model) toggleCurrentAsset() {
 	if m.assets == nil {
 		return
@@ -758,6 +1141,10 @@ func (m model) isAssetsPage() bool {
 	return m.pages[m.pageIndex] == "Assets"
 }
 
+func (m model) isSettingsPage() bool {
+	return m.pages[m.pageIndex] == "Settings"
+}
+
 func (m model) isRunPage() bool {
 	return m.pages[m.pageIndex] == "Run"
 }
@@ -786,6 +1173,17 @@ func (m model) renderStatusBar(width int) string {
 		}
 		if m.assetFilterInput {
 			right += " | filter"
+		}
+	} else if m.isSettingsPage() && m.settings != nil {
+		right = fmt.Sprintf("%s | %d IDEs", right, len(normalizedStringList(m.settingsSelectedIDEs)))
+		if m.settingsDirty {
+			right += " | modified"
+		}
+		if m.settingsRepoEditing {
+			right += " | repo-input"
+		}
+		if m.savingSettings {
+			right += " | saving"
 		}
 	} else if m.isRunPage() {
 		right = fmt.Sprintf("%s | %s", right, m.runStatusLabel())
@@ -818,6 +1216,24 @@ func (m model) currentSummary() string {
 		}
 		return fmt.Sprintf("Assets ready, %d enabled", m.countEnabledAssets())
 	}
+	if m.isSettingsPage() {
+		if m.settingsErr != nil {
+			return "Global settings unavailable"
+		}
+		if m.settings == nil {
+			return "Loading global settings"
+		}
+		if m.savingSettings {
+			return "Saving global settings"
+		}
+		if m.settingsRepoEditing {
+			return "Editing repo URL"
+		}
+		if m.settingsDirty {
+			return fmt.Sprintf("Unsaved settings: %d IDEs", len(normalizedStringList(m.settingsSelectedIDEs)))
+		}
+		return fmt.Sprintf("Settings ready, %d IDEs", len(normalizedStringList(m.settingsSelectedIDEs)))
+	}
 	if m.isRunPage() {
 		if m.runningPull {
 			return "Pull running"
@@ -847,7 +1263,7 @@ func suggestNextAction(overview *app.ProjectOverview) string {
 		return "等待项目概览加载完成"
 	}
 	if !overview.RepoConnected {
-		return "先运行 dec config repo <url> 连接资产仓库"
+		return "先切到 Settings 页连接资产仓库，或运行 dec config repo <url>"
 	}
 	if !overview.ProjectConfigReady {
 		return "先切到 Assets 页选择资产并保存，或运行 dec config init"

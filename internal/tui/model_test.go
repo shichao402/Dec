@@ -260,8 +260,166 @@ func TestModelRunPageProcessesStreamedEventsAndSchedulesRefresh(t *testing.T) {
 	if !ok {
 		t.Fatalf("refreshCmd() = %T, 期望 tea.BatchMsg", refreshCmd())
 	}
-	if len(batchMsg) != 2 {
-		t.Fatalf("BatchMsg 长度 = %d, 期望 2", len(batchMsg))
+	if len(batchMsg) != 3 {
+		t.Fatalf("BatchMsg 长度 = %d, 期望 3", len(batchMsg))
+	}
+}
+
+func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 4
+	m.width = 120
+	m.height = 32
+	m.settings = &app.GlobalSettingsState{
+		ConfigPath:       "/tmp/.dec/config.yaml",
+		VarsPath:         "/tmp/.dec/local/vars.yaml",
+		RepoConnected:    true,
+		RepoURL:          "git@github.com:demo/dec.git",
+		ConnectedRepoURL: "git@github.com:demo/dec.git",
+		AvailableIDEs:    []string{"codex", "cursor"},
+		SelectedIDEs:     []string{"cursor"},
+		EffectiveIDEs:    []string{"cursor"},
+	}
+	m.settingsRepoInput = m.settings.RepoURL
+	m.settingsSelectedIDEs = []string{"cursor"}
+	m.normalizeSettingsCursor()
+
+	view := m.View()
+	checks := []string{
+		"Global Settings",
+		"Repo URL:",
+		"当前远端:",
+		"[x] cursor",
+		"[ ] codex",
+		"快捷键：j/k 移动",
+	}
+	for _, check := range checks {
+		if !strings.Contains(view, check) {
+			t.Fatalf("Settings View() 缺少 %q:\n%s", check, view)
+		}
+	}
+}
+
+func TestModelSettingsHotkeysToggleIDEAndStartEdit(t *testing.T) {
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 4
+	m.settings = &app.GlobalSettingsState{
+		RepoURL:       "git@github.com:demo/dec.git",
+		AvailableIDEs: []string{"cursor", "codex"},
+		SelectedIDEs:  []string{"cursor"},
+	}
+	m.settingsRepoInput = m.settings.RepoURL
+	m.settingsSelectedIDEs = []string{"cursor"}
+	m.settingsCursor = 2
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = updated.(model)
+	if !settingsContainsIDE(m.settingsSelectedIDEs, "codex") {
+		t.Fatal("space 应切换当前 IDE 为选中")
+	}
+	if !m.settingsDirty {
+		t.Fatal("切换 IDE 后应标记 settings dirty")
+	}
+
+	m.settingsCursor = 0
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	m = updated.(model)
+	if !m.settingsRepoEditing {
+		t.Fatal("e 应进入 repo URL 输入状态")
+	}
+}
+
+func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
+	oldSave := saveGlobalSettingsOperation
+	defer func() { saveGlobalSettingsOperation = oldSave }()
+
+	called := false
+	saveGlobalSettingsOperation = func(input app.SaveGlobalSettingsInput, reporter app.Reporter) (*app.SaveGlobalSettingsResult, error) {
+		called = true
+		if input.RepoURL != "git@github.com:demo/dec.git" {
+			t.Fatalf("RepoURL = %q, 期望 %q", input.RepoURL, "git@github.com:demo/dec.git")
+		}
+		if len(input.IDEs) != 1 || input.IDEs[0] != "cursor" {
+			t.Fatalf("IDEs = %#v, 期望 %#v", input.IDEs, []string{"cursor"})
+		}
+		return &app.SaveGlobalSettingsResult{IDEs: []string{"cursor"}}, nil
+	}
+
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 4
+	m.settings = &app.GlobalSettingsState{
+		RepoURL:       "git@github.com:demo/dec.git",
+		AvailableIDEs: []string{"cursor"},
+		SelectedIDEs:  []string{"cursor"},
+	}
+	m.settingsRepoInput = m.settings.RepoURL
+	m.settingsSelectedIDEs = []string{"cursor"}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(model)
+	if !m.savingSettings {
+		t.Fatal("Settings 页保存后应进入 saving 状态")
+	}
+	if cmd == nil {
+		t.Fatal("Settings 页保存后应返回执行命令")
+	}
+	msg := cmd()
+	resultMsg, ok := msg.(settingsSavedMsg)
+	if !ok {
+		t.Fatalf("saveSettingsCmd 返回 = %T, 期望 settingsSavedMsg", msg)
+	}
+	if resultMsg.err != nil {
+		t.Fatalf("settingsSavedMsg.err = %v", resultMsg.err)
+	}
+	if !called {
+		t.Fatal("应调用 saveGlobalSettingsOperation")
+	}
+}
+
+func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
+	oldSave := saveGlobalSettingsOperation
+	defer func() { saveGlobalSettingsOperation = oldSave }()
+
+	called := false
+	saveGlobalSettingsOperation = func(input app.SaveGlobalSettingsInput, reporter app.Reporter) (*app.SaveGlobalSettingsResult, error) {
+		called = true
+		if input.IDEs == nil {
+			t.Fatal("IDEs 不应被折叠为 nil")
+		}
+		if len(input.IDEs) != 0 {
+			t.Fatalf("IDEs = %#v, 期望显式空切片", input.IDEs)
+		}
+		return &app.SaveGlobalSettingsResult{}, nil
+	}
+
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 4
+	m.settings = &app.GlobalSettingsState{
+		RepoURL:       "git@github.com:demo/dec.git",
+		AvailableIDEs: []string{"cursor"},
+		SelectedIDEs:  []string{"cursor"},
+	}
+	m.settingsRepoInput = m.settings.RepoURL
+	m.settingsSelectedIDEs = []string{}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(model)
+	if !m.savingSettings {
+		t.Fatal("Settings 页保存后应进入 saving 状态")
+	}
+	if cmd == nil {
+		t.Fatal("Settings 页保存后应返回执行命令")
+	}
+	msg := cmd()
+	resultMsg, ok := msg.(settingsSavedMsg)
+	if !ok {
+		t.Fatalf("saveSettingsCmd 返回 = %T, 期望 settingsSavedMsg", msg)
+	}
+	if resultMsg.err != nil {
+		t.Fatalf("settingsSavedMsg.err = %v", resultMsg.err)
+	}
+	if !called {
+		t.Fatal("应调用 saveGlobalSettingsOperation")
 	}
 }
 

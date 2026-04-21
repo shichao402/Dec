@@ -3,8 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/shichao402/Dec/pkg/config"
-	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/app"
 	"github.com/spf13/cobra"
 )
 
@@ -27,17 +26,12 @@ func runConfigRepo(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("📦 连接仓库: %s\n", repoURL)
 
-	if err := repo.Connect(repoURL); err != nil {
+	result, err := app.ConnectRepo(repoURL, nil)
+	if err != nil {
 		return err
 	}
 
-	// 保存仓库 URL 到全局配置
-	if err := config.SetRepoURL(repoURL); err != nil {
-		fmt.Printf("⚠️  保存配置失败: %v\n", err)
-	}
-
-	bareDir, _ := repo.GetBareRepoDir()
-	fmt.Printf("✅ 仓库已连接: %s\n", bareDir)
+	fmt.Printf("✅ 仓库已连接: %s\n", result.BareRepo)
 	fmt.Println("\n后续步骤:")
 	fmt.Println("  dec config global          # 配置本机 IDE")
 	fmt.Println("  dec config init            # 初始化项目配置")
