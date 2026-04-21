@@ -455,13 +455,24 @@ func (m model) View() string {
 		height = 30
 	}
 
+	// 宽度自适应：优先保证 main 区不被 sidebar 挤到横溢出。
+	// - <80 列：sidebar 缩到 14，给主区最多可用空间
+	// - 80-109 列：常规 18
+	// - >=110 列：宽终端给 22，强化导航可读性
 	sidebarWidth := 18
-	if width >= 110 {
+	switch {
+	case width < 80:
+		sidebarWidth = 14
+	case width >= 110:
 		sidebarWidth = 22
 	}
-	mainWidth := width - sidebarWidth - 1
-	if mainWidth < 42 {
-		mainWidth = 42
+	// 主区宽度扣除：侧边栏 + 两个卡片 border 各占 1 列（sidebar 右 + main 左）。
+	// lipgloss.RoundedBorder 在横向分别贡献 1 列的边角，共 4 列（2 个卡片 × 2 边 / 2）。
+	// 这里以保守常量 4 做扣除，保证 sidebar_card + main_card 水平合计 <= width。
+	mainWidth := width - sidebarWidth - 4
+	// 软下界：极窄终端下宁可窄，也不横溢出超过 width。
+	if mainWidth < 20 {
+		mainWidth = 20
 	}
 
 	statusBar := m.renderStatusBar(width)
@@ -1693,7 +1704,21 @@ func (m model) renderStatusBar(width int) string {
 	} else if m.overview != nil {
 		right = fmt.Sprintf("%s | enabled %d", right, m.overview.EnabledCount)
 	}
-	available := width - lipgloss.Width(left) - lipgloss.Width(right)
+	// shellStatusBar 的 Padding(0, 1) 会在左右各占 1 列，实际可写内容宽度 = width - 2。
+	// 必须按内容区预算，否则在窄终端下会被 lipgloss 的 Width() 悄悄换行，右侧页面状态被截断。
+	innerWidth := width - 2
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	// 预算保护：右侧状态承载页面信息更关键。
+	// 当 left + right 已超内容区宽度（含中文宽字符），丢弃左侧快捷键提示，避免页面状态被截断。
+	rightWidth := lipgloss.Width(right)
+	leftWidth := lipgloss.Width(left)
+	if leftWidth+rightWidth+1 > innerWidth {
+		left = ""
+		leftWidth = 0
+	}
+	available := innerWidth - leftWidth - rightWidth
 	if available < 1 {
 		available = 1
 	}
