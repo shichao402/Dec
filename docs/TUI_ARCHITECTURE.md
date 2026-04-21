@@ -396,9 +396,16 @@ else:
 - 将 pull / push / remove / update 全部接入执行页
 - 提供统一确认框、错误重试、日志查看
 
+当前进度：
+
+- 阶段 4A（pull）与 4B（push）已落地，Run 页具备结构化执行骨架（Reporter / OperationEvent）
+- 阶段 4C（remove）已落地：`pkg/app/remove.go` 提供独立用例层，输出 `remove.prepare / repo / ide / cache / config / finish` 事件；`cmd/push.go --remove` 已改为复用该用例层；TUI Run 页新增 `x` 触发的选择器 → 二次确认 → 执行闭环，遵循用例层 `Confirmed=true` 约束
+- 阶段 4D（update）留待后续
+
 验收标准：
 
 - 不再需要在交互流程中手写 `stdin` confirm
+- remove 通过 `app.RemoveAsset` 一条路径驱动 CLI 与 TUI，不出现逻辑分叉
 
 ### 阶段 5：打磨与测试
 

@@ -57,8 +57,21 @@ type runCompletedMsg struct {
 	err    error
 }
 
+type removeEventMsg struct {
+	event app.OperationEvent
+}
+
+type removeCompletedMsg struct {
+	result *app.RemoveAssetResult
+	err    error
+}
+
 var runPullOperation = func(projectRoot string, reporter app.Reporter) (*app.PullProjectAssetsResult, error) {
 	return app.PullProjectAssets(projectRoot, "", reporter)
+}
+
+var runRemoveOperation = func(input app.RemoveAssetInput, reporter app.Reporter) (*app.RemoveAssetResult, error) {
+	return app.RemoveAsset(input, reporter)
 }
 
 var loadGlobalSettingsOperation = func(reporter app.Reporter) (*app.GlobalSettingsState, error) {
@@ -99,6 +112,15 @@ type model struct {
 	runResult            *app.PullProjectAssetsResult
 	runErr               error
 	runStream            <-chan tea.Msg
+	runMode              string // "pull" | "remove"
+	removeStage          string // "", "select", "confirm", "running"
+	removeCursor         int
+	removeFilter         string
+	removeFilterInput    bool
+	removeTarget         *app.AssetSelectionItem
+	runningRemove        bool
+	removeResult         *app.RemoveAssetResult
+	removeErr            error
 }
 
 func newModel(projectRoot string) model {
@@ -207,12 +229,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Run pull finished: %d pulled / %d failed", msg.result.PulledCount, msg.result.FailedCount))
 		}
 		return m, m.refreshCmd()
+	case removeEventMsg:
+		m.recordRunEvent(msg.event)
+		if m.runStream != nil {
+			return m, waitRunMsg(m.runStream)
+		}
+		return m, nil
+	case removeCompletedMsg:
+		m.runningRemove = false
+		m.runStream = nil
+		m.removeResult = msg.result
+		m.removeErr = msg.err
+		m.removeStage = ""
+		m.removeTarget = nil
+		if msg.err != nil {
+			m.pushLog("Run remove failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.result != nil {
+			m.pushLog(fmt.Sprintf("Run remove finished: [%s] %s (vault: %s)", msg.result.Type, msg.result.Name, msg.result.Vault))
+		}
+		return m, m.refreshCmd()
 	case tea.KeyMsg:
 		if m.assetFilterInput && m.isAssetsPage() {
 			return m.handleAssetFilterInput(msg)
 		}
 		if m.settingsRepoEditing && m.isSettingsPage() {
 			return m.handleSettingsRepoInput(msg)
+		}
+		if m.removeFilterInput && m.isRunPage() {
+			return m.handleRemoveFilterInput(msg)
+		}
+		if m.isRunPage() && m.removeStage != "" && !m.runningRemove {
+			return m.handleRemoveStageKey(msg)
 		}
 
 		switch msg.String() {
@@ -306,13 +355,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pushLog("Saving global settings")
 				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), cloneStrings(m.settingsSelectedIDEs))
 			}
-			if m.isRunPage() && !m.runningPull {
+			if m.isRunPage() && !m.runningPull && !m.runningRemove {
 				return m, m.startPullRun()
 			}
 			return m, nil
 		case "p":
-			if m.isRunPage() && !m.runningPull {
+			if m.isRunPage() && !m.runningPull && !m.runningRemove {
 				return m, m.startPullRun()
+			}
+			return m, nil
+		case "x":
+			if m.isRunPage() && !m.runningPull && !m.runningRemove {
+				m.beginRemoveSelection()
 			}
 			return m, nil
 		}
@@ -488,6 +542,7 @@ func (m model) handleSettingsRepoInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *model) startPullRun() tea.Cmd {
 	stream := make(chan tea.Msg, 64)
 	m.runningPull = true
+	m.runMode = "pull"
 	m.runProgress = nil
 	m.runEvents = nil
 	m.runResult = nil
@@ -495,6 +550,194 @@ func (m *model) startPullRun() tea.Cmd {
 	m.runStream = stream
 	m.pushLog("Run page started pull")
 	return tea.Batch(startPullRunCmd(m.projectRoot, stream), waitRunMsg(stream))
+}
+
+func (m *model) beginRemoveSelection() {
+	if m.assets == nil || len(m.enabledRemoveCandidates()) == 0 {
+		m.pushLog("没有可删除的已启用资产")
+		return
+	}
+	m.removeStage = "select"
+	m.removeCursor = 0
+	m.removeFilter = ""
+	m.removeFilterInput = false
+	m.removeTarget = nil
+	m.removeResult = nil
+	m.removeErr = nil
+	m.pushLog("Remove 选择器已打开")
+}
+
+func (m model) enabledRemoveCandidates() []app.AssetSelectionItem {
+	if m.assets == nil {
+		return nil
+	}
+	items := make([]app.AssetSelectionItem, 0, len(m.assets.Items))
+	filter := strings.ToLower(strings.TrimSpace(m.removeFilter))
+	for _, item := range m.assets.Items {
+		if !item.Enabled {
+			continue
+		}
+		if filter != "" {
+			haystack := strings.ToLower(strings.Join([]string{item.Vault, item.Type, item.Name}, " "))
+			if !strings.Contains(haystack, filter) {
+				continue
+			}
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func (m model) handleRemoveStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.removeStage {
+	case "select":
+		return m.handleRemoveSelectKey(msg)
+	case "confirm":
+		return m.handleRemoveConfirmKey(msg)
+	}
+	return m, nil
+}
+
+func (m model) handleRemoveSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	candidates := m.enabledRemoveCandidates()
+	switch msg.String() {
+	case "esc":
+		m.removeStage = ""
+		m.removeTarget = nil
+		m.removeFilter = ""
+		m.pushLog("Remove 选择已取消")
+		return m, nil
+	case "/":
+		m.removeFilterInput = true
+		m.pushLog("Remove 筛选输入已打开")
+		return m, nil
+	case "c":
+		if strings.TrimSpace(m.removeFilter) != "" {
+			m.removeFilter = ""
+			if m.removeCursor >= len(m.enabledRemoveCandidates()) {
+				m.removeCursor = 0
+			}
+			m.pushLog("Remove 筛选已清空")
+		}
+		return m, nil
+	case "j", "down":
+		if len(candidates) == 0 {
+			return m, nil
+		}
+		m.removeCursor++
+		if m.removeCursor >= len(candidates) {
+			m.removeCursor = len(candidates) - 1
+		}
+		return m, nil
+	case "k", "up":
+		if len(candidates) == 0 {
+			return m, nil
+		}
+		m.removeCursor--
+		if m.removeCursor < 0 {
+			m.removeCursor = 0
+		}
+		return m, nil
+	case "enter", " ":
+		if len(candidates) == 0 {
+			return m, nil
+		}
+		if m.removeCursor < 0 || m.removeCursor >= len(candidates) {
+			m.removeCursor = 0
+		}
+		target := candidates[m.removeCursor]
+		m.removeTarget = &target
+		m.removeStage = "confirm"
+		m.pushLog(fmt.Sprintf("Remove 目标选中: [%s] %s (vault: %s)", target.Type, target.Name, target.Vault))
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) handleRemoveConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		if m.removeTarget == nil {
+			m.removeStage = ""
+			return m, nil
+		}
+		m.removeStage = "running"
+		return m, m.startRemoveRun()
+	case "n", "esc":
+		m.removeStage = "select"
+		m.removeTarget = nil
+		m.pushLog("Remove 取消，返回选择器")
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) handleRemoveFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.removeFilterInput = false
+		m.pushLog("Remove 筛选输入关闭")
+		return m, nil
+	case tea.KeyEnter:
+		m.removeFilterInput = false
+		m.removeCursor = 0
+		m.pushLog("Remove 筛选应用: " + m.currentRemoveFilterLabel())
+		return m, nil
+	case tea.KeyBackspace, tea.KeyCtrlH:
+		m.removeFilter = trimLastRune(m.removeFilter)
+		return m, nil
+	}
+
+	if len(msg.Runes) > 0 && !msg.Alt {
+		m.removeFilter += string(msg.Runes)
+	}
+	return m, nil
+}
+
+func (m *model) startRemoveRun() tea.Cmd {
+	if m.removeTarget == nil {
+		return nil
+	}
+	stream := make(chan tea.Msg, 64)
+	m.runningRemove = true
+	m.runMode = "remove"
+	m.runProgress = nil
+	m.runEvents = nil
+	m.runResult = nil
+	m.runErr = nil
+	m.removeResult = nil
+	m.removeErr = nil
+	m.runStream = stream
+	input := app.RemoveAssetInput{
+		ProjectRoot: m.projectRoot,
+		Type:        m.removeTarget.Type,
+		Name:        m.removeTarget.Name,
+		Vault:       m.removeTarget.Vault,
+		Confirmed:   true,
+	}
+	m.pushLog(fmt.Sprintf("Run page started remove: [%s] %s", input.Type, input.Name))
+	return tea.Batch(startRemoveRunCmd(input, stream), waitRunMsg(stream))
+}
+
+func startRemoveRunCmd(input app.RemoveAssetInput, stream chan<- tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		go func() {
+			result, err := runRemoveOperation(input, app.ReporterFunc(func(event app.OperationEvent) {
+				stream <- removeEventMsg{event: event}
+			}))
+			stream <- removeCompletedMsg{result: result, err: err}
+			close(stream)
+		}()
+		return nil
+	}
+}
+
+func (m model) currentRemoveFilterLabel() string {
+	filter := strings.TrimSpace(m.removeFilter)
+	if filter == "" {
+		return "<none>"
+	}
+	return filter
 }
 
 func (m *model) recordRunEvent(event app.OperationEvent) {
@@ -680,7 +923,7 @@ func (m model) renderProjectPage(width int) string {
 func (m model) renderRunPage(width int) string {
 	lines := []string{
 		fmt.Sprintf("状态: %s", m.runStatusLabel()),
-		shellMutedStyle.Render("快捷键：p 执行 pull · s 也可触发当前页主动作 · r 刷新概览"),
+		shellMutedStyle.Render("快捷键：p 执行 pull · x 删除资产 · s 触发当前页主动作 · r 刷新概览"),
 	}
 	if m.runProgress != nil {
 		lines = append(lines, fmt.Sprintf("阶段: %s (%d/%d)", fallbackValue(m.runProgress.Phase, "working"), m.runProgress.Current, m.runProgress.Total))
@@ -694,21 +937,86 @@ func (m model) renderRunPage(width int) string {
 			lines = append(lines, fmt.Sprintf("Commit: %s", m.runResult.VersionCommit))
 		}
 	}
+	if m.removeResult != nil {
+		lines = append(lines, fmt.Sprintf("Remove 结果: [%s] %s (vault: %s)", m.removeResult.Type, m.removeResult.Name, m.removeResult.Vault))
+		if strings.TrimSpace(m.removeResult.VersionCommit) != "" {
+			lines = append(lines, fmt.Sprintf("Remove Commit: %s", m.removeResult.VersionCommit))
+		}
+	}
 	if m.runErr != nil {
 		lines = append(lines, shellWarnStyle.Render("错误: "+m.runErr.Error()))
 	}
-	if len(m.runEvents) == 0 {
-		lines = append(lines, shellMutedStyle.Render("执行日志会显示在这里。当前阶段先接入 pull，后续再覆盖 push / remove / update。"))
+	if m.removeErr != nil {
+		lines = append(lines, shellWarnStyle.Render("Remove 错误: "+m.removeErr.Error()))
+	}
+
+	switch m.removeStage {
+	case "select":
+		lines = append(lines, "")
+		lines = append(lines, m.renderRemoveSelect()...)
+	case "confirm":
+		lines = append(lines, "")
+		lines = append(lines, m.renderRemoveConfirm()...)
+	}
+
+	if len(m.runEvents) == 0 && m.removeStage == "" {
+		lines = append(lines, shellMutedStyle.Render("执行日志会显示在这里。当前接入 pull / remove，后续再覆盖 push / update。"))
 		return wrapLines(width, lines)
 	}
 
 	formatted := make([]string, 0, len(lines)+len(m.runEvents)+2)
 	formatted = append(formatted, lines...)
-	formatted = append(formatted, shellTitleStyle.Render("Execution Log"))
-	for _, line := range m.runEvents {
-		formatted = append(formatted, "- "+line)
+	if len(m.runEvents) > 0 {
+		formatted = append(formatted, shellTitleStyle.Render("Execution Log"))
+		for _, line := range m.runEvents {
+			formatted = append(formatted, "- "+line)
+		}
 	}
 	return wrapLines(width, formatted)
+}
+
+func (m model) renderRemoveSelect() []string {
+	candidates := m.enabledRemoveCandidates()
+	lines := []string{shellTitleStyle.Render("Remove 选择器")}
+	lines = append(lines, fmt.Sprintf("筛选: %s", m.currentRemoveFilterLabel()))
+	if m.removeFilterInput {
+		lines = append(lines, shellMutedStyle.Render("筛选输入中：输入关键字后按 Enter 应用，Esc 退出。"))
+	} else {
+		lines = append(lines, shellMutedStyle.Render("快捷键：j/k 移动 · enter/space 选中 · / 筛选 · c 清空 · esc 取消"))
+	}
+	if len(candidates) == 0 {
+		lines = append(lines, "没有匹配的已启用资产。")
+		return lines
+	}
+	for idx, item := range candidates {
+		marker := " "
+		if idx == m.removeCursor {
+			marker = ">"
+		}
+		line := fmt.Sprintf("%s [%s] %s / %s", marker, item.Type, item.Vault, item.Name)
+		if idx == m.removeCursor {
+			lines = append(lines, shellSelectedRow.Render(line))
+		} else {
+			lines = append(lines, shellLogStyle.Render(line))
+		}
+	}
+	return lines
+}
+
+func (m model) renderRemoveConfirm() []string {
+	lines := []string{shellTitleStyle.Render("Remove 确认")}
+	if m.removeTarget == nil {
+		lines = append(lines, shellWarnStyle.Render("未选择目标资产，按 esc 返回。"))
+		return lines
+	}
+	lines = append(lines,
+		fmt.Sprintf("Type: %s", m.removeTarget.Type),
+		fmt.Sprintf("Vault: %s", m.removeTarget.Vault),
+		fmt.Sprintf("Name: %s", m.removeTarget.Name),
+		shellWarnStyle.Render("⚠️  删除操作不可逆，将从远端仓库、IDE、本地缓存一并清理。"),
+		shellMutedStyle.Render("按 y 确认执行 · n/esc 取消返回选择器"),
+	)
+	return lines
 }
 
 func (m model) renderSettingsPage(width int) string {
@@ -1190,6 +1498,9 @@ func (m model) renderStatusBar(width int) string {
 		if m.runProgress != nil {
 			right += fmt.Sprintf(" | %s %d/%d", fallbackValue(m.runProgress.Phase, "working"), m.runProgress.Current, m.runProgress.Total)
 		}
+		if m.removeStage != "" {
+			right += " | remove-" + m.removeStage
+		}
 	} else if m.overview != nil {
 		right = fmt.Sprintf("%s | enabled %d", right, m.overview.EnabledCount)
 	}
@@ -1238,11 +1549,26 @@ func (m model) currentSummary() string {
 		if m.runningPull {
 			return "Pull running"
 		}
+		if m.runningRemove {
+			return "Remove running"
+		}
+		if m.removeStage == "select" {
+			return "Selecting asset to remove"
+		}
+		if m.removeStage == "confirm" {
+			return "Confirming remove"
+		}
 		if m.runErr != nil {
 			return "Last pull failed"
 		}
+		if m.removeErr != nil {
+			return "Last remove failed"
+		}
 		if m.runResult != nil {
 			return fmt.Sprintf("Last pull: %d ok / %d failed", m.runResult.PulledCount, m.runResult.FailedCount)
+		}
+		if m.removeResult != nil {
+			return fmt.Sprintf("Last remove: [%s] %s", m.removeResult.Type, m.removeResult.Name)
 		}
 		return "Run page ready"
 	}
@@ -1278,10 +1604,20 @@ func (m model) runStatusLabel() string {
 	switch {
 	case m.runningPull:
 		return shellGoodStyle.Render("执行中")
+	case m.runningRemove:
+		return shellGoodStyle.Render("删除中")
 	case m.runErr != nil:
 		return shellWarnStyle.Render("失败")
+	case m.removeErr != nil:
+		return shellWarnStyle.Render("Remove 失败")
+	case m.removeStage == "select":
+		return shellMutedStyle.Render("Remove 选择中")
+	case m.removeStage == "confirm":
+		return shellWarnStyle.Render("Remove 确认中")
 	case m.runResult != nil:
 		return shellGoodStyle.Render("已完成")
+	case m.removeResult != nil:
+		return shellGoodStyle.Render("Remove 已完成")
 	default:
 		return shellMutedStyle.Render("空闲")
 	}

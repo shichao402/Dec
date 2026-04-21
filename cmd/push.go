@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/shichao402/Dec/pkg/app"
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/repo"
 	"github.com/spf13/cobra"
@@ -126,53 +127,26 @@ func runPushRemove(itemType, assetName string) error {
 		return nil
 	}
 
-	removedVault := ""
-
-	if err := withWriteRepo(func(tx *repo.Transaction) error {
-		repoDir := tx.WorkDir()
-
-		foundVault, fullPath, err := findAssetInRepo(repoDir, itemType, assetName)
-		if err != nil {
-			return fmt.Errorf("远程资产未找到: %w", err)
+	reporter := app.ReporterFunc(func(event app.OperationEvent) {
+		switch event.Level {
+		case app.EventWarn, app.EventError:
+			fmt.Printf("  %s\n", event.Message)
+		default:
+			fmt.Printf("  %s\n", event.Message)
 		}
-		removedVault = foundVault
+	})
 
-		if err := os.RemoveAll(fullPath); err != nil {
-			return fmt.Errorf("删除远程资产失败: %w", err)
-		}
-
-		commitMsg := fmt.Sprintf("remove: %s/%s", foundVault, assetName)
-		if err := tx.CommitAndPush(commitMsg); err != nil {
-			return fmt.Errorf("提交失败: %w", err)
-		}
-
-		fmt.Printf("  已从远程删除 (vault: %s)\n", foundVault)
-		return nil
-	}); err != nil {
+	result, err := app.RemoveAsset(app.RemoveAssetInput{
+		ProjectRoot: cwd,
+		Type:        itemType,
+		Name:        assetName,
+		Confirmed:   true,
+	}, reporter)
+	if err != nil {
 		return err
 	}
 
-	// 清理本地缓存和配置
-	mgr := config.NewProjectConfigManager(cwd)
-	projectConfig, err := mgr.LoadProjectConfig()
-	if err == nil {
-		changed := false
-		ref := projectConfig.Enabled.FindAsset(itemType, assetName, removedVault)
-		if ref != nil {
-			removeCachedAsset(itemType, assetName, cwd, ref.Vault)
-		}
-		if projectConfig.Enabled.RemoveAsset(itemType, assetName, removedVault) {
-			changed = true
-		}
-		if projectConfig.Available != nil && projectConfig.Available.RemoveAsset(itemType, assetName, removedVault) {
-			changed = true
-		}
-		if changed {
-			_ = mgr.SaveProjectConfig(projectConfig)
-		}
-	}
-
-	fmt.Printf("✅ %s '%s' 已从远程删除\n", itemType, assetName)
+	fmt.Printf("✅ %s '%s' 已从远程删除 (vault: %s)\n", itemType, assetName, result.Vault)
 	return nil
 }
 

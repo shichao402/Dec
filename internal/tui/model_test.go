@@ -437,3 +437,188 @@ func TestSuggestNextAction(t *testing.T) {
 		t.Fatalf("项目就绪时建议动作错误: %q", got)
 	}
 }
+
+func TestModelRunPageEnterRemoveFlowWithoutEnabledAssetsStaysIdle(t *testing.T) {
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 3
+	m.assets = &app.AssetSelectionState{
+		Items: []app.AssetSelectionItem{
+			{Name: "project-workflow", Type: "skill", Vault: "default", Enabled: false},
+		},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(model)
+	if m.removeStage != "" {
+		t.Fatalf("没有已启用资产时 x 不应进入 remove 流程, stage = %q", m.removeStage)
+	}
+}
+
+func TestModelRunPageRemoveFlowSelectConfirmAndCancel(t *testing.T) {
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 3
+	m.assets = &app.AssetSelectionState{
+		Items: []app.AssetSelectionItem{
+			{Name: "project-workflow", Type: "skill", Vault: "default", Enabled: true},
+			{Name: "cli-release-rules", Type: "rule", Vault: "cli", Enabled: true},
+			{Name: "off-asset", Type: "mcp", Vault: "default", Enabled: false},
+		},
+	}
+
+	// 进入 select 阶段
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(model)
+	if m.removeStage != "select" {
+		t.Fatalf("x 后 stage = %q, 期望 select", m.removeStage)
+	}
+	if len(m.enabledRemoveCandidates()) != 2 {
+		t.Fatalf("候选资产数 = %d, 期望 2", len(m.enabledRemoveCandidates()))
+	}
+
+	// j 向下
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = updated.(model)
+	if m.removeCursor != 1 {
+		t.Fatalf("j 后 cursor = %d, 期望 1", m.removeCursor)
+	}
+
+	// enter 进入 confirm
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.removeStage != "confirm" {
+		t.Fatalf("enter 后 stage = %q, 期望 confirm", m.removeStage)
+	}
+	if m.removeTarget == nil || m.removeTarget.Name != "cli-release-rules" {
+		t.Fatalf("removeTarget = %#v, 期望 cli-release-rules", m.removeTarget)
+	}
+
+	// n 取消回到 select
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = updated.(model)
+	if m.removeStage != "select" {
+		t.Fatalf("n 后 stage = %q, 期望 select", m.removeStage)
+	}
+	if m.removeTarget != nil {
+		t.Fatalf("取消后 removeTarget 应为 nil, 实际 %#v", m.removeTarget)
+	}
+
+	// esc 完全退出
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	if m.removeStage != "" {
+		t.Fatalf("esc 后 stage = %q, 期望空", m.removeStage)
+	}
+}
+
+func TestModelRunPageRemoveConfirmTriggersRunRemoveOperation(t *testing.T) {
+	oldRemove := runRemoveOperation
+	defer func() { runRemoveOperation = oldRemove }()
+
+	called := false
+	runRemoveOperation = func(input app.RemoveAssetInput, reporter app.Reporter) (*app.RemoveAssetResult, error) {
+		called = true
+		if input.Name != "project-workflow" {
+			t.Fatalf("Name = %q, 期望 project-workflow", input.Name)
+		}
+		if !input.Confirmed {
+			t.Fatal("Confirmed 应为 true")
+		}
+		return &app.RemoveAssetResult{Type: input.Type, Name: input.Name, Vault: input.Vault, VersionCommit: "abc123"}, nil
+	}
+
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 3
+	m.assets = &app.AssetSelectionState{
+		Items: []app.AssetSelectionItem{
+			{Name: "project-workflow", Type: "skill", Vault: "default", Enabled: true},
+		},
+	}
+
+	// x → select
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(model)
+	// enter → confirm
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	// y → 启动 remove 执行
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = updated.(model)
+	if !m.runningRemove {
+		t.Fatal("y 后应进入 runningRemove")
+	}
+	if m.removeStage != "running" {
+		t.Fatalf("y 后 stage = %q, 期望 running", m.removeStage)
+	}
+	if cmd == nil {
+		t.Fatal("y 后应返回命令")
+	}
+	// 执行 batch：第一个子命令是 startRemoveRunCmd 的 goroutine 启动器；第二个是 waitRunMsg
+	batchMsg, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("cmd() 类型 = %T, 期望 tea.BatchMsg", cmd())
+	}
+	// 解析 batch 中每个子 cmd，等待 remove 完成消息
+	var completed removeCompletedMsg
+	gotCompleted := false
+	for _, sub := range batchMsg {
+		if sub == nil {
+			continue
+		}
+		msg := sub()
+		if msg == nil {
+			continue
+		}
+		if c, ok := msg.(removeCompletedMsg); ok {
+			completed = c
+			gotCompleted = true
+		}
+	}
+	if !gotCompleted {
+		t.Fatal("应在 batch 执行中拿到 removeCompletedMsg")
+	}
+	if !called {
+		t.Fatal("应调用 runRemoveOperation")
+	}
+
+	updated, refreshCmd := m.Update(completed)
+	m = updated.(model)
+	if m.runningRemove {
+		t.Fatal("completed 后应退出 runningRemove")
+	}
+	if m.removeResult == nil || m.removeResult.VersionCommit != "abc123" {
+		t.Fatalf("removeResult = %#v, 期望 VersionCommit=abc123", m.removeResult)
+	}
+	if refreshCmd == nil {
+		t.Fatal("完成后应触发 refresh")
+	}
+}
+
+func TestModelRunPageRemoveFilter(t *testing.T) {
+	m := newModel("/tmp/dec-project")
+	m.pageIndex = 3
+	m.assets = &app.AssetSelectionState{
+		Items: []app.AssetSelectionItem{
+			{Name: "project-workflow", Type: "skill", Vault: "default", Enabled: true},
+			{Name: "cli-release-rules", Type: "rule", Vault: "cli", Enabled: true},
+		},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(model)
+	if !m.removeFilterInput {
+		t.Fatal("/ 应进入 remove 筛选输入状态")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c', 'l', 'i'}})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	candidates := m.enabledRemoveCandidates()
+	if len(candidates) != 1 || candidates[0].Name != "cli-release-rules" {
+		t.Fatalf("筛选候选 = %#v, 期望单独的 cli-release-rules", candidates)
+	}
+}
