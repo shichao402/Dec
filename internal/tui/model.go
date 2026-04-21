@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/pkg/update"
 )
 
 var (
@@ -66,6 +67,16 @@ type removeCompletedMsg struct {
 	err    error
 }
 
+type updateCheckedMsg struct {
+	result *update.CheckResult
+	err    error
+}
+
+type updateDoneMsg struct {
+	targetVersion string
+	err           error
+}
+
 var runPullOperation = func(projectRoot string, reporter app.Reporter) (*app.PullProjectAssetsResult, error) {
 	return app.PullProjectAssets(projectRoot, "", reporter)
 }
@@ -82,8 +93,21 @@ var saveGlobalSettingsOperation = func(input app.SaveGlobalSettingsInput, report
 	return app.SaveGlobalSettings(input, reporter)
 }
 
+var updateCheckOperation = func(currentVersion string) (*update.CheckResult, error) {
+	return update.Check(currentVersion)
+}
+
+var updateDoUpdateOperation = func(currentVersion string) error {
+	return update.DoUpdate(currentVersion)
+}
+
+var updateManualInstallCommand = func() string {
+	return update.ManualInstallCommand()
+}
+
 type model struct {
 	projectRoot          string
+	currentVersion       string
 	pages                []string
 	pageIndex            int
 	width                int
@@ -112,7 +136,7 @@ type model struct {
 	runResult            *app.PullProjectAssetsResult
 	runErr               error
 	runStream            <-chan tea.Msg
-	runMode              string // "pull" | "remove"
+	runMode              string // "pull" | "remove" | "update"
 	removeStage          string // "", "select", "confirm", "running"
 	removeCursor         int
 	removeFilter         string
@@ -121,12 +145,18 @@ type model struct {
 	runningRemove        bool
 	removeResult         *app.RemoveAssetResult
 	removeErr            error
+	updateStage          string // "", "checking", "result", "confirm", "running", "done"
+	updateResult         *update.CheckResult
+	updateErr            error
+	updateDoneVersion    string
+	updatingBinary       bool
 }
 
-func newModel(projectRoot string) model {
+func newModel(projectRoot, currentVersion string) model {
 	return model{
-		projectRoot: projectRoot,
-		pages:       []string{"Home", "Assets", "Project", "Run", "Settings"},
+		projectRoot:    projectRoot,
+		currentVersion: currentVersion,
+		pages:          []string{"Home", "Assets", "Project", "Run", "Settings"},
 		logs: []string{
 			"TUI shell ready",
 			"Loading project overview...",
@@ -250,6 +280,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Run remove finished: [%s] %s (vault: %s)", msg.result.Type, msg.result.Name, msg.result.Vault))
 		}
 		return m, m.refreshCmd()
+	case updateCheckedMsg:
+		m.updateResult = msg.result
+		m.updateErr = msg.err
+		if msg.err != nil {
+			m.updateStage = "done"
+			m.pushLog("Update check failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.result == nil {
+			m.updateStage = "done"
+			m.pushLog("Update check returned empty result")
+			return m, nil
+		}
+		if !msg.result.NeedUpdate {
+			m.updateStage = "done"
+			m.pushLog(fmt.Sprintf("Already up to date: %s", msg.result.CurrentVersion))
+			return m, nil
+		}
+		m.updateStage = "confirm"
+		m.pushLog(fmt.Sprintf("New version available: %s -> %s", msg.result.CurrentVersion, msg.result.LatestVersion))
+		return m, nil
+	case updateDoneMsg:
+		m.updatingBinary = false
+		m.updateErr = msg.err
+		m.updateDoneVersion = msg.targetVersion
+		m.updateStage = "done"
+		if msg.err != nil {
+			m.pushLog("Update failed: " + msg.err.Error())
+			return m, nil
+		}
+		m.pushLog(fmt.Sprintf("Update succeeded: %s", msg.targetVersion))
+		return m, nil
 	case tea.KeyMsg:
 		if m.assetFilterInput && m.isAssetsPage() {
 			return m.handleAssetFilterInput(msg)
@@ -262,6 +324,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.isRunPage() && m.removeStage != "" && !m.runningRemove {
 			return m.handleRemoveStageKey(msg)
+		}
+		if m.isRunPage() && m.updateStage != "" && !m.updatingBinary {
+			return m.handleUpdateStageKey(msg)
 		}
 
 		switch msg.String() {
@@ -355,18 +420,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pushLog("Saving global settings")
 				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), cloneStrings(m.settingsSelectedIDEs))
 			}
-			if m.isRunPage() && !m.runningPull && !m.runningRemove {
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && m.updateStage == "" {
 				return m, m.startPullRun()
 			}
 			return m, nil
 		case "p":
-			if m.isRunPage() && !m.runningPull && !m.runningRemove {
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && m.updateStage == "" {
 				return m, m.startPullRun()
 			}
 			return m, nil
 		case "x":
-			if m.isRunPage() && !m.runningPull && !m.runningRemove {
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && m.updateStage == "" {
 				m.beginRemoveSelection()
+			}
+			return m, nil
+		case "u":
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && m.removeStage == "" {
+				return m, m.startUpdateCheck()
 			}
 			return m, nil
 		}
@@ -732,6 +802,66 @@ func startRemoveRunCmd(input app.RemoveAssetInput, stream chan<- tea.Msg) tea.Cm
 	}
 }
 
+func (m *model) startUpdateCheck() tea.Cmd {
+	m.runMode = "update"
+	m.updateStage = "checking"
+	m.updateResult = nil
+	m.updateErr = nil
+	m.updateDoneVersion = ""
+	m.pushLog("Run page started update check")
+	currentVersion := m.currentVersion
+	return func() tea.Msg {
+		result, err := updateCheckOperation(currentVersion)
+		return updateCheckedMsg{result: result, err: err}
+	}
+}
+
+func (m *model) startUpdateApply() tea.Cmd {
+	m.updateStage = "running"
+	m.updatingBinary = true
+	m.pushLog("Run page started update apply")
+	currentVersion := m.currentVersion
+	target := ""
+	if m.updateResult != nil {
+		target = m.updateResult.LatestVersion
+	}
+	return func() tea.Msg {
+		err := updateDoUpdateOperation(currentVersion)
+		return updateDoneMsg{targetVersion: target, err: err}
+	}
+}
+
+func (m model) handleUpdateStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.updateStage {
+	case "confirm":
+		switch msg.String() {
+		case "y":
+			return m, m.startUpdateApply()
+		case "n", "esc":
+			m.updateStage = ""
+			m.updateResult = nil
+			m.updateErr = nil
+			m.updateDoneVersion = ""
+			m.pushLog("Update 取消")
+			return m, nil
+		}
+	case "done":
+		switch msg.String() {
+		case "esc", "enter", " ", "q":
+			m.updateStage = ""
+			m.updateResult = nil
+			m.updateErr = nil
+			m.updateDoneVersion = ""
+			m.pushLog("Update 面板关闭")
+			return m, nil
+		}
+	case "checking", "running":
+		// 忙碌状态忽略所有输入，避免并发操作
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m model) currentRemoveFilterLabel() string {
 	filter := strings.TrimSpace(m.removeFilter)
 	if filter == "" {
@@ -923,7 +1053,7 @@ func (m model) renderProjectPage(width int) string {
 func (m model) renderRunPage(width int) string {
 	lines := []string{
 		fmt.Sprintf("状态: %s", m.runStatusLabel()),
-		shellMutedStyle.Render("快捷键：p 执行 pull · x 删除资产 · s 触发当前页主动作 · r 刷新概览"),
+		shellMutedStyle.Render("快捷键：p 执行 pull · x 删除资产 · u 自更新 · s 触发当前页主动作 · r 刷新概览"),
 	}
 	if m.runProgress != nil {
 		lines = append(lines, fmt.Sprintf("阶段: %s (%d/%d)", fallbackValue(m.runProgress.Phase, "working"), m.runProgress.Current, m.runProgress.Total))
@@ -959,8 +1089,13 @@ func (m model) renderRunPage(width int) string {
 		lines = append(lines, m.renderRemoveConfirm()...)
 	}
 
-	if len(m.runEvents) == 0 && m.removeStage == "" {
-		lines = append(lines, shellMutedStyle.Render("执行日志会显示在这里。当前接入 pull / remove，后续再覆盖 push / update。"))
+	if m.updateStage != "" {
+		lines = append(lines, "")
+		lines = append(lines, m.renderUpdatePanel()...)
+	}
+
+	if len(m.runEvents) == 0 && m.removeStage == "" && m.updateStage == "" {
+		lines = append(lines, shellMutedStyle.Render("执行日志会显示在这里。当前接入 pull / remove / update。"))
 		return wrapLines(width, lines)
 	}
 
@@ -973,6 +1108,57 @@ func (m model) renderRunPage(width int) string {
 		}
 	}
 	return wrapLines(width, formatted)
+}
+
+func (m model) renderUpdatePanel() []string {
+	lines := []string{shellTitleStyle.Render("Update")}
+	switch m.updateStage {
+	case "checking":
+		lines = append(lines, shellMutedStyle.Render(fmt.Sprintf("检查更新中... 当前版本: %s", fallbackValue(m.currentVersion, "未知"))))
+	case "confirm":
+		if m.updateResult == nil {
+			lines = append(lines, shellWarnStyle.Render("检查结果缺失，按 n/esc 返回"))
+			return lines
+		}
+		lines = append(lines,
+			fmt.Sprintf("当前版本: %s", m.updateResult.CurrentVersion),
+			fmt.Sprintf("远端版本: %s", m.updateResult.LatestVersion),
+			shellWarnStyle.Render("⚠️  自更新会替换当前 dec 二进制，属不可逆操作。"),
+			shellMutedStyle.Render("按 y 确认下载并覆盖 · n/esc 取消"),
+		)
+	case "running":
+		target := ""
+		if m.updateResult != nil {
+			target = m.updateResult.LatestVersion
+		}
+		lines = append(lines, shellMutedStyle.Render(fmt.Sprintf("正在下载并替换二进制到 %s ...", fallbackValue(target, "最新版本"))))
+	case "done":
+		if m.updateErr != nil {
+			lines = append(lines,
+				shellWarnStyle.Render("更新失败: "+m.updateErr.Error()),
+				shellMutedStyle.Render("可改用手动覆盖安装："),
+				"  "+updateManualInstallCommand(),
+				shellMutedStyle.Render("按 esc/enter 关闭面板"),
+			)
+			return lines
+		}
+		if m.updateResult != nil && !m.updateResult.NeedUpdate {
+			lines = append(lines,
+				shellGoodStyle.Render(fmt.Sprintf("已是最新版本: %s", m.updateResult.CurrentVersion)),
+				shellMutedStyle.Render("按 esc/enter 关闭面板"),
+			)
+			return lines
+		}
+		target := m.updateDoneVersion
+		if target == "" && m.updateResult != nil {
+			target = m.updateResult.LatestVersion
+		}
+		lines = append(lines,
+			shellGoodStyle.Render(fmt.Sprintf("更新成功！已更新到 %s", fallbackValue(target, "最新版本"))),
+			shellMutedStyle.Render("按 esc/enter 关闭面板。新版本将在下次启动 dec 时生效。"),
+		)
+	}
+	return lines
 }
 
 func (m model) renderRemoveSelect() []string {
@@ -1501,6 +1687,9 @@ func (m model) renderStatusBar(width int) string {
 		if m.removeStage != "" {
 			right += " | remove-" + m.removeStage
 		}
+		if m.updateStage != "" {
+			right += " | update-" + m.updateStage
+		}
 	} else if m.overview != nil {
 		right = fmt.Sprintf("%s | enabled %d", right, m.overview.EnabledCount)
 	}
@@ -1552,11 +1741,29 @@ func (m model) currentSummary() string {
 		if m.runningRemove {
 			return "Remove running"
 		}
+		if m.updatingBinary {
+			return "Update running"
+		}
 		if m.removeStage == "select" {
 			return "Selecting asset to remove"
 		}
 		if m.removeStage == "confirm" {
 			return "Confirming remove"
+		}
+		if m.updateStage == "checking" {
+			return "Checking for updates"
+		}
+		if m.updateStage == "confirm" {
+			return "Confirming update"
+		}
+		if m.updateStage == "done" {
+			if m.updateErr != nil {
+				return "Last update failed"
+			}
+			if m.updateResult != nil && !m.updateResult.NeedUpdate {
+				return "Already up to date"
+			}
+			return "Last update succeeded"
 		}
 		if m.runErr != nil {
 			return "Last pull failed"
@@ -1606,14 +1813,27 @@ func (m model) runStatusLabel() string {
 		return shellGoodStyle.Render("执行中")
 	case m.runningRemove:
 		return shellGoodStyle.Render("删除中")
+	case m.updatingBinary:
+		return shellGoodStyle.Render("更新中")
 	case m.runErr != nil:
 		return shellWarnStyle.Render("失败")
 	case m.removeErr != nil:
 		return shellWarnStyle.Render("Remove 失败")
+	case m.updateErr != nil:
+		return shellWarnStyle.Render("Update 失败")
 	case m.removeStage == "select":
 		return shellMutedStyle.Render("Remove 选择中")
 	case m.removeStage == "confirm":
 		return shellWarnStyle.Render("Remove 确认中")
+	case m.updateStage == "checking":
+		return shellMutedStyle.Render("Update 检查中")
+	case m.updateStage == "confirm":
+		return shellWarnStyle.Render("Update 确认中")
+	case m.updateStage == "done":
+		if m.updateErr != nil {
+			return shellWarnStyle.Render("Update 失败")
+		}
+		return shellGoodStyle.Render("Update 已完成")
 	case m.runResult != nil:
 		return shellGoodStyle.Render("已完成")
 	case m.removeResult != nil:

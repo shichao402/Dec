@@ -184,7 +184,7 @@ func executeCLI(args []string, stdout, stderr io.Writer) error {
 }
 
 func executeTUI(projectRoot string, input io.Reader, output io.Writer) error {
-	return tui.Run(projectRoot, input, output)
+	return tui.Run(projectRoot, GetVersion(), input, output)
 }
 
 func isTerminalFile(file *os.File) bool {

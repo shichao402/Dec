@@ -1,15 +1,17 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/pkg/update"
 )
 
 func TestModelViewRendersHomeOverview(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.width = 120
 	m.height = 36
 
@@ -48,7 +50,7 @@ func TestModelViewRendersHomeOverview(t *testing.T) {
 }
 
 func TestModelAssetsPageRendersSelectionState(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.width = 110
 	m.height = 32
@@ -79,7 +81,7 @@ func TestModelAssetsPageRendersSelectionState(t *testing.T) {
 }
 
 func TestModelRunPageRendersExecutionState(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
 	m.width = 120
 	m.height = 32
@@ -112,7 +114,7 @@ func TestModelRunPageRendersExecutionState(t *testing.T) {
 }
 
 func TestModelToggleCurrentAssetMarksDirty(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
@@ -130,7 +132,7 @@ func TestModelToggleCurrentAssetMarksDirty(t *testing.T) {
 }
 
 func TestModelFilterInputNarrowsAssets(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{
@@ -161,7 +163,7 @@ func TestModelFilterInputNarrowsAssets(t *testing.T) {
 }
 
 func TestModelAssetsPageDoesNotLeavePageWithoutVisibleAssets(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
@@ -193,7 +195,7 @@ func TestModelRunPageHotkeysStartPull(t *testing.T) {
 
 	for _, tc := range keys {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newModel("/tmp/dec-project")
+			m := newModel("/tmp/dec-project", "v1.0.0")
 			m.pageIndex = 3
 
 			updated, cmd := m.Update(tc.msg)
@@ -215,7 +217,7 @@ func TestModelRunPageHotkeysStartPull(t *testing.T) {
 }
 
 func TestModelRunPageProcessesStreamedEventsAndSchedulesRefresh(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
 	m.runningPull = true
 	stream := make(chan tea.Msg, 1)
@@ -266,7 +268,7 @@ func TestModelRunPageProcessesStreamedEventsAndSchedulesRefresh(t *testing.T) {
 }
 
 func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 4
 	m.width = 120
 	m.height = 32
@@ -301,7 +303,7 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 }
 
 func TestModelSettingsHotkeysToggleIDEAndStartEdit(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 4
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:       "git@github.com:demo/dec.git",
@@ -345,7 +347,7 @@ func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
 		return &app.SaveGlobalSettingsResult{IDEs: []string{"cursor"}}, nil
 	}
 
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 4
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:       "git@github.com:demo/dec.git",
@@ -392,7 +394,7 @@ func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 		return &app.SaveGlobalSettingsResult{}, nil
 	}
 
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 4
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:       "git@github.com:demo/dec.git",
@@ -439,7 +441,7 @@ func TestSuggestNextAction(t *testing.T) {
 }
 
 func TestModelRunPageEnterRemoveFlowWithoutEnabledAssetsStaysIdle(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{
@@ -455,7 +457,7 @@ func TestModelRunPageEnterRemoveFlowWithoutEnabledAssetsStaysIdle(t *testing.T) 
 }
 
 func TestModelRunPageRemoveFlowSelectConfirmAndCancel(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{
@@ -526,7 +528,7 @@ func TestModelRunPageRemoveConfirmTriggersRunRemoveOperation(t *testing.T) {
 		return &app.RemoveAssetResult{Type: input.Type, Name: input.Name, Vault: input.Vault, VersionCommit: "abc123"}, nil
 	}
 
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{
@@ -594,7 +596,7 @@ func TestModelRunPageRemoveConfirmTriggersRunRemoveOperation(t *testing.T) {
 }
 
 func TestModelRunPageRemoveFilter(t *testing.T) {
-	m := newModel("/tmp/dec-project")
+	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{
@@ -620,5 +622,244 @@ func TestModelRunPageRemoveFilter(t *testing.T) {
 	candidates := m.enabledRemoveCandidates()
 	if len(candidates) != 1 || candidates[0].Name != "cli-release-rules" {
 		t.Fatalf("筛选候选 = %#v, 期望单独的 cli-release-rules", candidates)
+	}
+}
+
+func TestModelRunPageUpdateEntersCheckingAndConfirmOnNewVersion(t *testing.T) {
+	oldCheck := updateCheckOperation
+	defer func() { updateCheckOperation = oldCheck }()
+	called := false
+	updateCheckOperation = func(currentVersion string) (*update.CheckResult, error) {
+		called = true
+		if currentVersion != "v1.0.0" {
+			t.Fatalf("currentVersion = %q, 期望 %q", currentVersion, "v1.0.0")
+		}
+		return &update.CheckResult{CurrentVersion: "v1.0.0", LatestVersion: "v1.2.0", NeedUpdate: true}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 3
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	m = updated.(model)
+	if m.updateStage != "checking" {
+		t.Fatalf("u 后 stage = %q, 期望 checking", m.updateStage)
+	}
+	if cmd == nil {
+		t.Fatal("u 后应返回命令")
+	}
+	msg := cmd()
+	checkedMsg, ok := msg.(updateCheckedMsg)
+	if !ok {
+		t.Fatalf("updateCheck 返回 = %T, 期望 updateCheckedMsg", msg)
+	}
+	if !called {
+		t.Fatal("应调用 updateCheckOperation")
+	}
+
+	updated, _ = m.Update(checkedMsg)
+	m = updated.(model)
+	if m.updateStage != "confirm" {
+		t.Fatalf("checked 后 stage = %q, 期望 confirm", m.updateStage)
+	}
+	if m.updateResult == nil || m.updateResult.LatestVersion != "v1.2.0" {
+		t.Fatalf("updateResult = %#v, 期望 LatestVersion=v1.2.0", m.updateResult)
+	}
+}
+
+func TestModelRunPageUpdateAlreadyLatestSkipsConfirm(t *testing.T) {
+	oldCheck := updateCheckOperation
+	defer func() { updateCheckOperation = oldCheck }()
+	updateCheckOperation = func(currentVersion string) (*update.CheckResult, error) {
+		return &update.CheckResult{CurrentVersion: "v1.2.0", LatestVersion: "v1.2.0", NeedUpdate: false}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.2.0")
+	m.pageIndex = 3
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	m = updated.(model)
+	msg := cmd()
+	checked, ok := msg.(updateCheckedMsg)
+	if !ok {
+		t.Fatalf("checked 消息类型 = %T", msg)
+	}
+
+	updated, _ = m.Update(checked)
+	m = updated.(model)
+	if m.updateStage != "done" {
+		t.Fatalf("已最新版本时 stage = %q, 期望 done", m.updateStage)
+	}
+	if m.updateErr != nil {
+		t.Fatalf("updateErr = %v, 期望 nil", m.updateErr)
+	}
+	if m.updateResult == nil || m.updateResult.NeedUpdate {
+		t.Fatalf("updateResult = %#v, 期望 NeedUpdate=false", m.updateResult)
+	}
+}
+
+func TestModelRunPageUpdateCheckFailureEntersDone(t *testing.T) {
+	oldCheck := updateCheckOperation
+	defer func() { updateCheckOperation = oldCheck }()
+	updateCheckOperation = func(currentVersion string) (*update.CheckResult, error) {
+		return nil, errors.New("network down")
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 3
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	m = updated.(model)
+	msg := cmd()
+	checked, ok := msg.(updateCheckedMsg)
+	if !ok {
+		t.Fatalf("checked 消息类型 = %T", msg)
+	}
+	updated, _ = m.Update(checked)
+	m = updated.(model)
+	if m.updateStage != "done" {
+		t.Fatalf("检查失败时 stage = %q, 期望 done", m.updateStage)
+	}
+	if m.updateErr == nil {
+		t.Fatal("检查失败时 updateErr 应非 nil")
+	}
+}
+
+func TestModelRunPageUpdateConfirmYTriggersDoUpdate(t *testing.T) {
+	oldDo := updateDoUpdateOperation
+	defer func() { updateDoUpdateOperation = oldDo }()
+	called := false
+	updateDoUpdateOperation = func(currentVersion string) error {
+		called = true
+		if currentVersion != "v1.0.0" {
+			t.Fatalf("currentVersion = %q, 期望 %q", currentVersion, "v1.0.0")
+		}
+		return nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 3
+	m.updateStage = "confirm"
+	m.updateResult = &update.CheckResult{CurrentVersion: "v1.0.0", LatestVersion: "v1.2.0", NeedUpdate: true}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = updated.(model)
+	if m.updateStage != "running" {
+		t.Fatalf("y 后 stage = %q, 期望 running", m.updateStage)
+	}
+	if !m.updatingBinary {
+		t.Fatal("y 后应 updatingBinary=true")
+	}
+	if cmd == nil {
+		t.Fatal("y 后应返回命令")
+	}
+	msg := cmd()
+	done, ok := msg.(updateDoneMsg)
+	if !ok {
+		t.Fatalf("DoUpdate 返回 = %T, 期望 updateDoneMsg", msg)
+	}
+	if !called {
+		t.Fatal("应调用 updateDoUpdateOperation")
+	}
+
+	updated, _ = m.Update(done)
+	m = updated.(model)
+	if m.updatingBinary {
+		t.Fatal("done 后应退出 updatingBinary")
+	}
+	if m.updateStage != "done" {
+		t.Fatalf("done 后 stage = %q, 期望 done", m.updateStage)
+	}
+	if m.updateErr != nil {
+		t.Fatalf("成功后 updateErr = %v, 期望 nil", m.updateErr)
+	}
+	if m.updateDoneVersion != "v1.2.0" {
+		t.Fatalf("updateDoneVersion = %q, 期望 v1.2.0", m.updateDoneVersion)
+	}
+}
+
+func TestModelRunPageUpdateConfirmNCancelsFlow(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 3
+	m.updateStage = "confirm"
+	m.updateResult = &update.CheckResult{CurrentVersion: "v1.0.0", LatestVersion: "v1.2.0", NeedUpdate: true}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = updated.(model)
+	if m.updateStage != "" {
+		t.Fatalf("n 后 stage = %q, 期望空", m.updateStage)
+	}
+	if m.updateResult != nil {
+		t.Fatalf("取消后 updateResult 应为 nil, 实际 %#v", m.updateResult)
+	}
+}
+
+func TestModelRunPageUpdateFailurePath(t *testing.T) {
+	oldDo := updateDoUpdateOperation
+	defer func() { updateDoUpdateOperation = oldDo }()
+	updateDoUpdateOperation = func(currentVersion string) error {
+		return errors.New("download failed")
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 3
+	m.updateStage = "confirm"
+	m.updateResult = &update.CheckResult{CurrentVersion: "v1.0.0", LatestVersion: "v1.2.0", NeedUpdate: true}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = updated.(model)
+	done, ok := cmd().(updateDoneMsg)
+	if !ok {
+		t.Fatalf("DoUpdate 返回类型 = %T", cmd())
+	}
+	updated, _ = m.Update(done)
+	m = updated.(model)
+	if m.updateStage != "done" {
+		t.Fatalf("失败后 stage = %q, 期望 done", m.updateStage)
+	}
+	if m.updateErr == nil {
+		t.Fatal("失败后 updateErr 应非 nil")
+	}
+}
+
+func TestModelRunPageUpdateRenderingShowsConfirmPanel(t *testing.T) {
+	oldCmd := updateManualInstallCommand
+	defer func() { updateManualInstallCommand = oldCmd }()
+	updateManualInstallCommand = func() string { return "curl -fsSL example.com | bash" }
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 3
+	m.width = 120
+	m.height = 32
+	m.updateStage = "confirm"
+	m.updateResult = &update.CheckResult{CurrentVersion: "v1.0.0", LatestVersion: "v1.2.0", NeedUpdate: true}
+
+	view := m.View()
+	checks := []string{"Update", "当前版本: v1.0.0", "远端版本: v1.2.0", "按 y 确认"}
+	for _, check := range checks {
+		if !strings.Contains(view, check) {
+			t.Fatalf("Update confirm View() 缺少 %q:\n%s", check, view)
+		}
+	}
+}
+
+func TestModelRunPageUpdateDoneRenderingShowsFallbackOnFailure(t *testing.T) {
+	oldCmd := updateManualInstallCommand
+	defer func() { updateManualInstallCommand = oldCmd }()
+	updateManualInstallCommand = func() string { return "curl -fsSL example.com | bash" }
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 3
+	m.width = 120
+	m.height = 32
+	m.updateStage = "done"
+	m.updateErr = errors.New("download failed")
+
+	view := m.View()
+	if !strings.Contains(view, "更新失败") {
+		t.Fatalf("失败视图缺少 更新失败:\n%s", view)
+	}
+	if !strings.Contains(view, "curl -fsSL example.com | bash") {
+		t.Fatalf("失败视图缺少 fallback 命令:\n%s", view)
 	}
 }

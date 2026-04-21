@@ -7,9 +7,9 @@ import (
 )
 
 // Run 启动默认 TUI Shell。
-func Run(projectRoot string, input io.Reader, output io.Writer) error {
+func Run(projectRoot, currentVersion string, input io.Reader, output io.Writer) error {
 	program := tea.NewProgram(
-		newModel(projectRoot),
+		newModel(projectRoot, currentVersion),
 		tea.WithAltScreen(),
 		tea.WithInput(input),
 		tea.WithOutput(output),

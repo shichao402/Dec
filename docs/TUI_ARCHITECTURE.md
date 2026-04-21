@@ -170,6 +170,8 @@ TUI 应直接替代 `config init` 中“打开 YAML 自己复制”的流程。
 
 不要在 TUI 中直接复用现有 stdout 文本；应改为结构化事件流。
 
+注意：`update` 在本项目里专指 `dec` 二进制自更新（`pkg/update` 的 `Check` / `DoUpdate`），不是资产版本升级。**资产版本升级由 `dec pull --version` 承担**，与 `update` 是两条路径，不要复用。
+
 ### 4.4 搜索和命令面板
 
 为了保留命令行的效率，建议加一个 command palette：
@@ -400,12 +402,13 @@ else:
 
 - 阶段 4A（pull）与 4B（push）已落地，Run 页具备结构化执行骨架（Reporter / OperationEvent）
 - 阶段 4C（remove）已落地：`pkg/app/remove.go` 提供独立用例层，输出 `remove.prepare / repo / ide / cache / config / finish` 事件；`cmd/push.go --remove` 已改为复用该用例层；TUI Run 页新增 `x` 触发的选择器 → 二次确认 → 执行闭环，遵循用例层 `Confirmed=true` 约束
-- 阶段 4D（update）留待后续
+- 阶段 4D（update，自更新）已落地：TUI Run 页新增 `u` 快捷键，触发 check → 版本对比 → 确认 → 替换二进制 的 `update` runMode，直接复用 `pkg/update` 的 `Check` / `DoUpdate` / `ManualInstallCommand`；不新增 `pkg/app/operations.go` 用例层，CLI `dec update` 与 TUI 共用同一套 `pkg/update` 代码
 
 验收标准：
 
 - 不再需要在交互流程中手写 `stdin` confirm
 - remove 通过 `app.RemoveAsset` 一条路径驱动 CLI 与 TUI，不出现逻辑分叉
+- update 通过 `pkg/update` 一条路径驱动 CLI 与 TUI，且在 TUI 中把下载失败路径指向 `ManualInstallCommand()` 作为 fallback
 
 ### 阶段 5：打磨与测试
 
