@@ -346,3 +346,30 @@ func TestExecuteRoutesToCLIWhenHelpRequested(t *testing.T) {
 		t.Fatalf("CLI args = %#v, 期望 %#v", gotArgs, []string{"--help"})
 	}
 }
+
+// TestExecuteRoutesToCLIWhenTermIsDumb 覆盖 decideEntryMode 在 TERM=dumb
+// 时的 fallback 分支：即使 stdio 是 TTY 且未设置 DEC_NO_TUI，也应走 CLI。
+// 这对应 docs/TUI_ARCHITECTURE.md §2.1 / §8 中的损坏终端逃生口。
+func TestExecuteRoutesToCLIWhenTermIsDumb(t *testing.T) {
+	stubEntryExecutionForRootTest(t)
+	setEnvForRootTest(t, "TERM", "dumb")
+	setEnvForRootTest(t, "DEC_NO_TUI", "")
+	detectTTY = func(*os.File) bool { return true }
+
+	cliCalled := false
+	runCLIMode = func(args []string, stdout, stderr io.Writer) error {
+		cliCalled = true
+		return nil
+	}
+	runTUIMode = func(projectRoot string, input io.Reader, output io.Writer) error {
+		t.Fatal("TERM=dumb 时不应进入 TUI")
+		return nil
+	}
+
+	if err := Execute(nil, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		t.Fatalf("Execute() 返回错误: %v", err)
+	}
+	if !cliCalled {
+		t.Fatal("TERM=dumb 时应回退到 CLI")
+	}
+}

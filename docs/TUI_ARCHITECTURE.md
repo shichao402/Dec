@@ -418,17 +418,68 @@ else:
 
 ## 9. 测试策略
 
-建议增加三类测试：
+这一节是已落地的测试清单，随阶段 5C 一并稳定。新增 TUI 逻辑时对照本表决定要加哪种测试，不要让 snapshot 成为默认兜底。
 
-- 用例层单测：验证 `pkg/app` 的状态编排和错误处理
-- TUI model 测试：验证 `Update` 状态迁移和关键快捷键
-- PTY 集成测试：验证 `dec` 在真实伪终端中能启动、导航、退出
+### 9.1 用例层单测
 
-推荐做法：
+验证 `pkg/app/*` 中的状态编排与错误处理。
 
-- 保留当前命令测试，确保 CLI 兼容
-- 为 TUI 页面补 snapshot 测试，固定常见宽度如 100 / 140 columns
-- 对默认入口写分流测试：TTY、非 TTY、`--help`、`DEC_NO_TUI=1`
+- 位置：`pkg/app/*_test.go`
+- 原则：测结构化结果和事件序列，不测文本格式
+
+### 9.2 TUI model 状态迁移测试
+
+验证 `internal/tui/model.Update` 的状态迁移、关键快捷键、Reporter 接入。
+
+- 位置：`internal/tui/model_test.go`
+- 覆盖：Home 概览渲染、Assets 选择 / 筛选 / 切换 / dirty、Run 页 pull/push/remove/update 快捷键与消息流、Settings 编辑 / 保存（含显式空 IDE 选择）、suggestNextAction
+- 原则：对业务操作使用包级可替换变量（`saveGlobalSettingsOperation` / `runRemoveOperation` / `updateCheckOperation` / `updateDoUpdateOperation` / `updateManualInstallCommand`）打桩，不发起真实 IO
+
+### 9.3 响应式宽度回归
+
+验证在基线宽度下渲染不溢出终端宽度，对应架构风险 3（中文宽字符与终端宽度）。
+
+- 位置：`internal/tui/width_test.go`
+- 基线宽度：60 / 80 / 100 / 140
+- 断言：每行 `lipgloss.Width(line) <= 宽度`，状态栏在窄宽度下优先保留右侧页面状态
+
+### 9.4 Snapshot 测试
+
+固定基线宽度下的完整渲染内容，抓取布局级回归（不只是行宽）。
+
+- 位置：`internal/tui/snapshot_test.go`
+- Golden 文件：`internal/tui/testdata/snapshots/<page>_width_<n>.txt`
+- 覆盖：Home / Assets / Run / Settings × 80 / 100 / 140 列
+- 规范：`lipgloss.SetColorProfile(termenv.Ascii)` 固定色彩输出，`sanitizeView` 剥除行尾空白与尾空行
+- 更新 golden：`go test ./internal/tui/ -run TestSnapshot -update`
+- 60 列不入 snapshot：窄宽度下文案裁剪较激进，留给 `width_test.go` 的溢出守护而不是内容快照
+
+### 9.5 默认入口与回退策略测试
+
+验证 `Execute` / `decideEntryMode` 分流决策。
+
+- 位置：`cmd/root_test.go`
+- 已覆盖的分支：
+  - 无参 + TTY + `TERM=xterm-256color` → TUI
+  - 显式子命令 → CLI
+  - `DEC_NO_TUI=1` → CLI
+  - stdout 非 TTY → CLI
+  - `--help` → CLI
+  - `TERM=dumb` → CLI
+- 原则：通过 `detectTTY` / `runCLIMode` / `runTUIMode` 包级变量打桩，不启动真实 Bubble Tea
+
+### 9.6 PTY 集成测试
+
+用伪终端验证 `dec` 无参能进入 TUI、完成一次最小导航、优雅退出，对应架构第 3.1 节中 `github.com/creack/pty` 的可选补充。
+
+- 当前状态：未落地，拆为独立子任务继续推进
+- 依赖：`github.com/creack/pty`
+- 期望覆盖：启动 → 切换页面 → Ctrl+C / q 退出 → 终端状态恢复
+
+### 9.7 CI 执行
+
+- 用例层、TUI model、width、snapshot、路由测试均通过 `go test ./...` 覆盖，纳入主 CI 流水线
+- snapshot 与 PTY 相关的 golden / pty 设备依赖在非 Linux runner 上可能不可用，新增时需要在测试头部注明平台要求（`t.Skip` / build tag）
 
 ## 10. 风险与应对
 

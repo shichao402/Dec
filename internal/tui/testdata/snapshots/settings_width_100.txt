@@ -1,0 +1,44 @@
+╭──────────────────╮╭──────────────────────────────────────────────────────────────────────────────╮
+│                  ││                                                                              │
+│  Dec Shell       ││  Settings                                                                    │
+│  tab switch / j  ││  /tmp/dec-project                                                            │
+│  k move          ││  Settings ready, 1 IDEs                                                      │
+│   Home           ││                                                                              │
+│   Assets         │╰──────────────────────────────────────────────────────────────────────────────╯
+│   Project        │╭──────────────────────────────────────────────────────────────────────────────╮
+│   Run            ││                                                                              │
+│   Settings       ││  Repo URL: git@github.com:demo/dec.git                                       │
+│                  ││  当前远端: git@github.com:demo/dec.git                                       │
+│                  ││  已选 IDE: cursor                                                            │
+│                  ││  生效 IDE: cursor                                                            │
+│                  ││  全局配置: /tmp/.dec/config.yaml                                             │
+│                  ││  本机 Vars: /tmp/.dec/local/vars.yaml                                        │
+│                  ││  IDE 警告: 无                                                                │
+│                  ││  当前全局设置与磁盘一致。                                                    │
+│                  ││  快捷键：j/k 移动 · e 编辑 repo · space 切换 IDE · s 保存                    │
+│                  ││  首次保存会创建 ~/.dec/local/vars.yaml 模板。                                │
+│                  ││                                                                              │
+│                  ││  Global Settings                                                             │
+│                  ││  > Repo URL: git@github.com:demo/dec.git                                     │
+│                  ││    [ ] codex                                                                 │
+│                  ││    [x] cursor                                                                │
+│                  ││                                                                              │
+│                  ││  Details                                                                     │
+│                  ││  当前远端: git@github.com:demo/dec.git                                       │
+│                  ││  Bare Repo: 未连接                                                           │
+│                  ││  配置文件: /tmp/.dec/config.yaml                                             │
+│                  ││  本机 Vars: /tmp/.dec/local/vars.yaml                                        │
+│                  ││  保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。                         │
+│                  ││                                                                              │
+│                  ││                                                                              │
+│                  │╰──────────────────────────────────────────────────────────────────────────────╯
+│                  │╭──────────────────────────────────────────────────────────────────────────────╮
+│                  ││                                                                              │
+│                  ││  Logs                                                                        │
+│                  ││  - TUI shell ready                                                           │
+│                  ││  - Loading project overview...                                               │
+│                  ││  - Loading asset selection...                                                │
+╰──────────────────╯│  - Loading global settings...                                                │
+                    │                                                                              │
+                    ╰──────────────────────────────────────────────────────────────────────────────╯
+ q quit | tab switch | r refresh                                             page Settings | 1 IDEs
