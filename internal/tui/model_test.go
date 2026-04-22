@@ -263,8 +263,8 @@ func TestModelRunPageProcessesStreamedEventsAndSchedulesRefresh(t *testing.T) {
 	if !ok {
 		t.Fatalf("refreshCmd() = %T, 期望 tea.BatchMsg", refreshCmd())
 	}
-	if len(batchMsg) != 4 {
-		t.Fatalf("BatchMsg 长度 = %d, 期望 4", len(batchMsg))
+	if len(batchMsg) != 5 {
+		t.Fatalf("BatchMsg 长度 = %d, 期望 5", len(batchMsg))
 	}
 }
 
@@ -1320,5 +1320,142 @@ func TestModelProjectPageInitEmptyRepoRendersHint(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "仓库暂无资产") {
 		t.Fatalf("View 未显示仓库暂无资产文案:\n%s", view)
+	}
+}
+
+func TestModelProjectVarsBlockRendersUsedPlaceholders(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.width = 120
+	m.height = 32
+	m.overview = &app.ProjectOverview{RepoConnected: true}
+	m.projectSettings = &app.ProjectSettingsState{
+		ProjectRoot:        "/tmp/dec-project",
+		ConfigPath:         "/tmp/dec-project/.dec/config.yaml",
+		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
+		AvailableIDEs:      []string{"cursor"},
+		ProjectConfigReady: true,
+	}
+	m.projectVars = &app.ProjectVarsView{
+		VarsPath:         "/tmp/dec-project/.dec/vars.yaml",
+		VarsFileReady:    true,
+		CacheExists:      true,
+		EditorCommand:    "vim",
+		UsedPlaceholders: []string{"FOO", "MISSING"},
+		ResolvedVars: map[string]app.PlaceholderStatus{
+			"FOO":     {Name: "FOO", Value: "foo-val", Source: app.PlaceholderSourceProject},
+			"MISSING": {Name: "MISSING", Source: app.PlaceholderSourceMissing},
+		},
+	}
+
+	view := m.View()
+	for _, check := range []string{"Project Variables", "FOO", "MISSING", "e 打开外部编辑器", "vim"} {
+		if !strings.Contains(view, check) {
+			t.Fatalf("Project 页未包含 %q:\n%s", check, view)
+		}
+	}
+}
+
+func TestModelProjectVarsBlockNoCacheHint(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.width = 120
+	m.height = 32
+	m.overview = &app.ProjectOverview{RepoConnected: true}
+	m.projectSettings = &app.ProjectSettingsState{
+		ProjectRoot:        "/tmp/dec-project",
+		ConfigPath:         "/tmp/dec-project/.dec/config.yaml",
+		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
+		AvailableIDEs:      []string{"cursor"},
+		ProjectConfigReady: true,
+	}
+	m.projectVars = &app.ProjectVarsView{
+		VarsPath:      "/tmp/dec-project/.dec/vars.yaml",
+		VarsFileReady: false,
+		CacheExists:   false,
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "未生成") {
+		t.Fatalf("期望未生成 vars 文件的提示:\n%s", view)
+	}
+	if !strings.Contains(view, ".dec/cache 尚不存在") {
+		t.Fatalf("期望 cache 不存在的提示:\n%s", view)
+	}
+}
+
+func TestModelProjectEditKeyInvokesCmd(t *testing.T) {
+	oldEnsure := ensureProjectVarsFileOperation
+	defer func() { ensureProjectVarsFileOperation = oldEnsure }()
+
+	called := false
+	ensureProjectVarsFileOperation = func(projectRoot string) (*app.EnsureProjectVarsFileResult, error) {
+		called = true
+		return &app.EnsureProjectVarsFileResult{Path: "/tmp/dec-project/.dec/vars.yaml", Created: true}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.overview = &app.ProjectOverview{RepoConnected: true}
+	m.projectSettings = &app.ProjectSettingsState{AvailableIDEs: []string{"cursor"}, ProjectConfigReady: true}
+	m.projectVars = &app.ProjectVarsView{VarsPath: "/tmp/dec-project/.dec/vars.yaml", EditorCommand: "vim"}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	if cmd == nil {
+		t.Fatal("按 e 应返回 tea.Cmd")
+	}
+	if !called {
+		t.Fatal("按 e 应触发 ensureProjectVarsFileOperation")
+	}
+}
+
+func TestModelProjectVarsEditedMsgRefreshesView(t *testing.T) {
+	oldLoad := loadProjectVarsViewOperation
+	defer func() { loadProjectVarsViewOperation = oldLoad }()
+
+	loaded := false
+	loadProjectVarsViewOperation = func(projectRoot string) (*app.ProjectVarsView, error) {
+		loaded = true
+		return &app.ProjectVarsView{VarsPath: "/tmp/dec-project/.dec/vars.yaml", VarsFileReady: true}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+
+	updated, cmd := m.Update(projectVarsEditedMsg{err: nil})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("projectVarsEditedMsg 后应返回 reload tea.Cmd")
+	}
+	// 执行 cmd，看它是否真的调用了 loader
+	msg := cmd()
+	if _, ok := msg.(projectVarsLoadedMsg); !ok {
+		t.Fatalf("cmd 返回 = %T, 期望 projectVarsLoadedMsg", msg)
+	}
+	if !loaded {
+		t.Fatal("编辑完成后应重新加载 project vars view")
+	}
+}
+
+func TestModelProjectVarsEditedMsgSurfacesError(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.width = 120
+	m.height = 32
+	m.overview = &app.ProjectOverview{RepoConnected: true}
+	m.projectSettings = &app.ProjectSettingsState{
+		AvailableIDEs:      []string{"cursor"},
+		ProjectConfigReady: true,
+	}
+	m.projectVars = &app.ProjectVarsView{VarsPath: "/tmp/dec-project/.dec/vars.yaml"}
+
+	updated, _ := m.Update(projectVarsEditedMsg{err: errors.New("编辑器未退出正常")})
+	m = updated.(model)
+	if m.lastEditErr == nil {
+		t.Fatal("期望 lastEditErr 被记录")
+	}
+	view := m.View()
+	if !strings.Contains(view, "编辑器返回错误") {
+		t.Fatalf("期望 UI 显示编辑器错误:\n%s", view)
 	}
 }

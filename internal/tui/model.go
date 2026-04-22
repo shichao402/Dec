@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/pkg/editor"
 	"github.com/shichao402/Dec/pkg/update"
 )
 
@@ -62,6 +63,15 @@ type projectSettingsSavedMsg struct {
 type projectConfigInitializedMsg struct {
 	result *app.ConfigInitPreparation
 	err    error
+}
+
+type projectVarsLoadedMsg struct {
+	view *app.ProjectVarsView
+	err  error
+}
+
+type projectVarsEditedMsg struct {
+	err error
 }
 
 type runEventMsg struct {
@@ -120,6 +130,14 @@ var prepareProjectConfigInitOperation = func(projectRoot string, reporter app.Re
 	return app.PrepareProjectConfigInit(projectRoot, reporter)
 }
 
+var loadProjectVarsViewOperation = func(projectRoot string) (*app.ProjectVarsView, error) {
+	return app.LoadProjectVarsView(projectRoot)
+}
+
+var ensureProjectVarsFileOperation = func(projectRoot string) (*app.EnsureProjectVarsFileResult, error) {
+	return app.EnsureProjectVarsFile(projectRoot)
+}
+
 var updateCheckOperation = func(currentVersion string) (*update.CheckResult, error) {
 	return update.Check(currentVersion)
 }
@@ -167,6 +185,9 @@ type model struct {
 	initializingProjectConfig   bool
 	lastInitResult              *app.ConfigInitPreparation
 	lastInitErr                 error
+	projectVars                 *app.ProjectVarsView
+	projectVarsErr              error
+	lastEditErr                 error
 	runningPull          bool
 	runProgress          *app.Progress
 	runEvents            []string
@@ -333,6 +354,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.refreshCmd()
+	case projectVarsLoadedMsg:
+		m.projectVars = msg.view
+		m.projectVarsErr = msg.err
+		if msg.err != nil {
+			m.pushLog("Project vars load failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.view != nil {
+			missing := msg.view.MissingPlaceholders()
+			m.pushLog(fmt.Sprintf("Project vars loaded: %d used / %d missing", len(msg.view.UsedPlaceholders), len(missing)))
+		}
+		return m, nil
+	case projectVarsEditedMsg:
+		m.lastEditErr = msg.err
+		if msg.err != nil {
+			m.pushLog("Editor exited with error: " + msg.err.Error())
+		} else {
+			m.pushLog("Editor session finished; reloading project vars")
+		}
+		return m, loadProjectVarsCmd(m.projectRoot)
 	case runEventMsg:
 		m.recordRunEvent(msg.event)
 		if m.runStream != nil {
@@ -525,6 +566,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			if m.isSettingsPage() && !m.savingSettings {
 				m.beginSettingsRepoEdit()
+				return m, nil
+			}
+			if m.isProjectPage() && !m.savingProjectSettings && !m.initializingProjectConfig {
+				editorCmd := ""
+				if m.projectVars != nil {
+					editorCmd = m.projectVars.EditorCommand
+				} else if m.overview != nil {
+					editorCmd = m.overview.Editor
+				}
+				m.pushLog("Opening external editor for .dec/vars.yaml")
+				return m, openProjectVarsEditorCmd(m.projectRoot, editorCmd)
 			}
 			return m, nil
 		case "s":
@@ -663,7 +715,7 @@ func (m model) View() string {
 }
 
 func (m model) refreshCmd() tea.Cmd {
-	return tea.Batch(loadOverviewCmd(m.projectRoot), loadAssetsCmd(m.projectRoot), loadSettingsCmd(), loadProjectSettingsCmd(m.projectRoot))
+	return tea.Batch(loadOverviewCmd(m.projectRoot), loadAssetsCmd(m.projectRoot), loadSettingsCmd(), loadProjectSettingsCmd(m.projectRoot), loadProjectVarsCmd(m.projectRoot))
 }
 
 func loadOverviewCmd(projectRoot string) tea.Cmd {
@@ -724,6 +776,33 @@ func initProjectConfigCmd(projectRoot string) tea.Cmd {
 		result, err := prepareProjectConfigInitOperation(projectRoot, nil)
 		return projectConfigInitializedMsg{result: result, err: err}
 	}
+}
+
+func loadProjectVarsCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		view, err := loadProjectVarsViewOperation(projectRoot)
+		return projectVarsLoadedMsg{view: view, err: err}
+	}
+}
+
+// openProjectVarsEditorCmd 挂起 TUI 用 tea.ExecProcess 拉起外部编辑器编辑 .dec/vars.yaml。
+// 文件不存在时先落模板（不覆盖已有内容）。编辑器退出后推送 projectVarsEditedMsg 触发刷新。
+func openProjectVarsEditorCmd(projectRoot, editorCmd string) tea.Cmd {
+	ensured, err := ensureProjectVarsFileOperation(projectRoot)
+	if err != nil {
+		return func() tea.Msg {
+			return projectVarsEditedMsg{err: err}
+		}
+	}
+	cmd, err := editor.BuildCommand(ensured.Path, editorCmd)
+	if err != nil {
+		return func() tea.Msg {
+			return projectVarsEditedMsg{err: err}
+		}
+	}
+	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
+		return projectVarsEditedMsg{err: runErr}
+	})
 }
 
 func startPullRunCmd(projectRoot string, stream chan<- tea.Msg) tea.Cmd {
@@ -1278,7 +1357,7 @@ func (m model) renderProjectPage(width int) string {
 	} else {
 		initKeyHint = "i 初始化项目配置"
 	}
-	summary = append(summary, shellMutedStyle.Render(fmt.Sprintf("快捷键：j/k 移动 · space 切换模式/IDE · s 保存 · c 清除覆盖 · %s", initKeyHint)))
+	summary = append(summary, shellMutedStyle.Render(fmt.Sprintf("快捷键：j/k 移动 · space 切换模式/IDE · s 保存 · c 清除覆盖 · e 编辑变量 · %s", initKeyHint)))
 	if !repoConnected {
 		summary = append(summary, shellWarnStyle.Render("未连接仓库，请先在 Settings 页配置 Repo URL，然后再来初始化 / 刷新 available。"))
 	}
@@ -1304,18 +1383,31 @@ func (m model) renderProjectPage(width int) string {
 	if m.savingProjectSettings {
 		summary = append(summary, shellWarnStyle.Render("正在保存项目设置..."))
 	}
+	if m.lastEditErr != nil {
+		summary = append(summary, shellWarnStyle.Render("编辑器返回错误: "+m.lastEditErr.Error()))
+	}
 
 	list := m.renderProjectSettingsList()
 	detail := m.renderProjectSettingsDetails()
+	varsBlock := m.renderProjectVarsBlock()
 	if width < 88 {
-		return strings.Join(append(summary, "", list, "", detail), "\n")
+		parts := append(summary, "", list, "", detail)
+		if varsBlock != "" {
+			parts = append(parts, "", varsBlock)
+		}
+		return strings.Join(parts, "\n")
 	}
 
 	leftWidth := width / 2
 	rightWidth := width - leftWidth - 2
 	left := lipgloss.NewStyle().Width(leftWidth).Render(list)
 	right := lipgloss.NewStyle().Width(rightWidth).Render(detail)
-	return strings.Join(summary, "\n") + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	result := strings.Join(summary, "\n") + "\n\n" + body
+	if varsBlock != "" {
+		result += "\n\n" + varsBlock
+	}
+	return result
 }
 
 func (m model) renderProjectSettingsList() string {
@@ -1401,6 +1493,75 @@ func projectEffectivePreview(state *app.ProjectSettingsState, override bool, sel
 		return normalizedStringList(state.GlobalIDEs)
 	}
 	return normalizedStringList(state.EffectiveIDEs)
+}
+
+// renderProjectVarsBlock 渲染 Project 页下方的 "项目变量" 区块。
+// 纯只读；写入通过 `e` 键挂起 TUI 用外部编辑器完成。
+func (m model) renderProjectVarsBlock() string {
+	lines := []string{shellTitleStyle.Render("Project Variables")}
+
+	if m.projectVarsErr != nil {
+		lines = append(lines, shellWarnStyle.Render("加载变量失败: "+m.projectVarsErr.Error()))
+		return strings.Join(lines, "\n")
+	}
+
+	if m.projectVars == nil {
+		lines = append(lines, shellMutedStyle.Render("Loading project vars..."))
+		return strings.Join(lines, "\n")
+	}
+
+	view := m.projectVars
+	fileLine := fmt.Sprintf("变量文件: %s", view.VarsPath)
+	if view.VarsFileReady {
+		fileLine += shellMutedStyle.Render(" (已存在)")
+	} else {
+		fileLine += shellWarnStyle.Render(" (未生成，按 e 会自动创建模板并打开编辑器)")
+	}
+	lines = append(lines, fileLine)
+	lines = append(lines, fmt.Sprintf("编辑器: %s", fallbackValue(view.EditorCommand, "<未配置，将回退到 vim/vi/notepad>")))
+	lines = append(lines, shellMutedStyle.Render("快捷键：e 打开外部编辑器编辑 .dec/vars.yaml"))
+
+	for _, w := range view.Warnings {
+		lines = append(lines, shellWarnStyle.Render(w))
+	}
+
+	if !view.CacheExists {
+		lines = append(lines, shellMutedStyle.Render(".dec/cache 尚不存在：先运行 dec pull 再来查看项目真正用中的占位符。"))
+	}
+	if len(view.UsedPlaceholders) == 0 {
+		if view.CacheExists {
+			lines = append(lines, shellMutedStyle.Render("当前资产中未检测到 {{VAR_NAME}} 占位符。"))
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	lines = append(lines, fmt.Sprintf("占位符总数: %d | 缺失: %d", len(view.UsedPlaceholders), len(view.MissingPlaceholders())))
+	for _, name := range view.UsedPlaceholders {
+		status := view.ResolvedVars[name]
+		var row string
+		switch status.Source {
+		case app.PlaceholderSourceProject:
+			row = fmt.Sprintf("  %s = %s  (project)", name, truncateVarValue(status.Value))
+			row = shellEnabledRow.Render(row)
+		case app.PlaceholderSourceGlobal:
+			row = fmt.Sprintf("  %s = %s  (global)", name, truncateVarValue(status.Value))
+			row = shellMutedStyle.Render(row)
+		default:
+			row = shellWarnStyle.Render(fmt.Sprintf("  %s = <缺失>  (missing)", name))
+		}
+		lines = append(lines, row)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// truncateVarValue 把过长的变量值截断显示，避免一行撑破区块。
+func truncateVarValue(v string) string {
+	const max = 60
+	if len(v) <= max {
+		return v
+	}
+	return v[:max] + "…"
 }
 
 func (m model) renderRunPage(width int) string {
