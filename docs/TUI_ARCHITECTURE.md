@@ -472,9 +472,13 @@ else:
 
 用伪终端验证 `dec` 无参能进入 TUI、完成一次最小导航、优雅退出，对应架构第 3.1 节中 `github.com/creack/pty` 的可选补充。
 
-- 当前状态：未落地，拆为独立子任务继续推进
+- 当前状态：已落地
+- 位置：`internal/tui/pty_integration_test.go`
 - 依赖：`github.com/creack/pty`
-- 期望覆盖：启动 → 切换页面 → Ctrl+C / q 退出 → 终端状态恢复
+- 覆盖：构建 `dec` 可执行文件 → pty 启动 → 等待首屏（以状态栏 `q quit | tab switch` 为锚点，剥离 ANSI 后匹配）→ 发送 `q` → 断言退出码 0
+- 平台限制：通过 `//go:build integration && !windows` 约束，默认不参与 `go test ./...`
+- 本地运行：`go test -tags=integration ./internal/tui/...`
+- CI：需要在 POSIX runner 上显式加 `-tags=integration`，Windows / 无 pty 环境通过 build tag 自动跳过
 
 ### 9.7 CI 执行
 
