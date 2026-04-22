@@ -47,6 +47,9 @@ jobs:
       - name: Run tests
         run: go test ./... -v
 
+      - name: Run integration tests (PTY)
+        run: go test -tags=integration ./internal/tui/... -v
+
   build:
     name: Build Smoke Artifact
     needs: [prepare, test]

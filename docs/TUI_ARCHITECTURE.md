@@ -483,6 +483,7 @@ else:
 ### 9.7 CI 执行
 
 - 用例层、TUI model、width、snapshot、路由测试均通过 `go test ./...` 覆盖，纳入主 CI 流水线
+- PTY 集成测试（§9.6，build tag `integration && !windows`）已在 `.github/workflows/build.yml` 与 `.github/workflows/release-smoke.yml` 的 test job 中启用：在 `ubuntu-latest` runner 上追加一步 `go test -tags=integration ./internal/tui/... -v`，与默认测试一起跑
 - snapshot 与 PTY 相关的 golden / pty 设备依赖在非 Linux runner 上可能不可用，新增时需要在测试头部注明平台要求（`t.Skip` / build tag）
 
 ### 9.8 macOS 行为校验基线（阶段 5B）

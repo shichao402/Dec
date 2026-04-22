@@ -62,6 +62,9 @@ jobs:
       - name: Run tests
         run: go test ./... -v
 
+      - name: Run integration tests (PTY)
+        run: go test -tags=integration ./internal/tui/... -v
+
   build:
     name: Build (${{ matrix.goos }}-${{ matrix.goarch }})
     needs: [test, validate]
