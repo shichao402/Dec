@@ -412,9 +412,9 @@ else:
 
 ### 阶段 5：打磨与测试
 
-- 响应式 terminal width 适配
-- Windows / macOS / Linux 行为校验
-- 集成测试、快照测试、回退策略测试
+- 响应式 terminal width 适配（5A，已落地）
+- Windows / macOS / Linux 行为校验（5B）：macOS 已落地（见 §9.8），Linux / Windows 拆成独立跟踪卡后续推进
+- 集成测试、快照测试、回退策略测试（5C，已落地，含 §9.6 PTY 集成测试）
 
 ## 9. 测试策略
 
@@ -484,6 +484,32 @@ else:
 
 - 用例层、TUI model、width、snapshot、路由测试均通过 `go test ./...` 覆盖，纳入主 CI 流水线
 - snapshot 与 PTY 相关的 golden / pty 设备依赖在非 Linux runner 上可能不可用，新增时需要在测试头部注明平台要求（`t.Skip` / build tag）
+
+### 9.8 macOS 行为校验基线（阶段 5B）
+
+macOS 下的 TUI 行为已在 2026-04-22 本地通过 pty 自动化脚本校验，作为阶段 5B 的 macOS 部分交付。Linux 与 Windows 部分拆出独立跟踪卡推进（见第 8 节阶段 5 表格）。
+
+- 验证对象：`/tmp/dec`（`go build -o /tmp/dec .`，基于 `v1.11.15` 代码）
+- 验证方式：用 `github.com/creack/pty` 启动子进程，驱动输入序列，抓取输出并剥离 ANSI 后断言锚点
+- 验证矩阵：
+
+| 场景 | TERM | 窗口大小 | 语言环境 | 结果 |
+|------|------|----------|----------|------|
+| Terminal.app 典型 | xterm-256color | 120×40 | zh_CN.UTF-8 | ✓ 首屏 + 5 页 tab 循环 + `q` 退出码 0 |
+| iTerm2 典型 | xterm-256color | 180×50 | zh_CN.UTF-8 | ✓ 同上 |
+| 窄宽度基线 | xterm-256color | 80×30  | zh_CN.UTF-8 | ✓ 同上，布局未溢出 |
+
+- 入口分流（在 macOS `ttys00x` 真终端下复核）：
+  - `dec`（无参 + TTY + `TERM=xterm-256color`）→ TUI
+  - `echo '' \| dec`（非 TTY stdin）→ CLI 帮助
+  - `DEC_NO_TUI=1 dec` → CLI 帮助
+  - `dec --help` → CLI 帮助
+  - `TERM=dumb dec` → CLI 帮助
+  - `dec version` / `dec pull --help` → CLI 子命令保留，无 TUI 干扰
+- TTY 状态：CLI 路径执行后 `stty -a` 首行未变化，未检测到残留设置
+- PTY 集成测试：`go test -tags=integration ./internal/tui/...` 全部通过（含 §9.6 中的 `TestPTYStartupAndQuit`）
+
+本轮未发现需登记的新 bug；如后续在其他 macOS 版本、其他终端模拟器（Alacritty / WezTerm / Ghostty）或 SSH 嵌套场景下出现差异，应在 Dec 项目中建 `type:bug` 单独跟踪，而不是扩充此节。
 
 ## 10. 风险与应对
 
