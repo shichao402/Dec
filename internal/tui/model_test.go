@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/pkg/types"
 	"github.com/shichao402/Dec/pkg/update"
 )
 
@@ -1129,5 +1130,195 @@ func TestModelProjectPageSaveRejectsEmptyOverride(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Fatal("空覆盖下不应返回保存 tea.Cmd")
+	}
+}
+
+// ------- Project page init / refresh (#14) tests -------
+
+func TestModelProjectPageInitKeyTriggersCmd(t *testing.T) {
+	oldInit := prepareProjectConfigInitOperation
+	defer func() { prepareProjectConfigInitOperation = oldInit }()
+
+	called := false
+	prepareProjectConfigInitOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
+		called = true
+		if projectRoot != "/tmp/dec-project" {
+			t.Fatalf("ProjectRoot = %q", projectRoot)
+		}
+		return &app.ConfigInitPreparation{
+			ProjectRoot:    projectRoot,
+			ExistingConfig: false,
+			AssetCount:     5,
+			VarsCreated:    true,
+			ProjectConfig:  &types.ProjectConfig{},
+		}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.overview = &app.ProjectOverview{RepoConnected: true}
+	m.projectSettings = &app.ProjectSettingsState{
+		AvailableIDEs:      []string{"cursor"},
+		ProjectConfigReady: false,
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = updated.(model)
+	if !m.initializingProjectConfig {
+		t.Fatal("按 i 后应进入 initializing 状态")
+	}
+	if cmd == nil {
+		t.Fatal("按 i 后应返回 tea.Cmd")
+	}
+	msg := cmd()
+	if _, ok := msg.(projectConfigInitializedMsg); !ok {
+		t.Fatalf("cmd 返回 = %T, 期望 projectConfigInitializedMsg", msg)
+	}
+	if !called {
+		t.Fatal("应调用 prepareProjectConfigInitOperation")
+	}
+}
+
+func TestModelProjectPageRefreshKeyTriggersCmd(t *testing.T) {
+	oldInit := prepareProjectConfigInitOperation
+	defer func() { prepareProjectConfigInitOperation = oldInit }()
+
+	called := false
+	prepareProjectConfigInitOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
+		called = true
+		return &app.ConfigInitPreparation{
+			ProjectRoot:    projectRoot,
+			ExistingConfig: true,
+			AssetCount:     8,
+			ProjectConfig:  &types.ProjectConfig{},
+		}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.overview = &app.ProjectOverview{RepoConnected: true}
+	m.projectSettings = &app.ProjectSettingsState{
+		AvailableIDEs:      []string{"cursor"},
+		ProjectConfigReady: true,
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	m = updated.(model)
+	if !m.initializingProjectConfig {
+		t.Fatal("按 R 后应进入 initializing 状态")
+	}
+	if cmd == nil {
+		t.Fatal("按 R 后应返回 tea.Cmd")
+	}
+	if _, ok := cmd().(projectConfigInitializedMsg); !ok {
+		t.Fatal("期望返回 projectConfigInitializedMsg")
+	}
+	if !called {
+		t.Fatal("应调用 prepareProjectConfigInitOperation")
+	}
+}
+
+func TestModelProjectPageInitDisabledWhenRepoNotConnected(t *testing.T) {
+	oldInit := prepareProjectConfigInitOperation
+	defer func() { prepareProjectConfigInitOperation = oldInit }()
+	prepareProjectConfigInitOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
+		t.Fatal("未连仓库下不应调用 PrepareProjectConfigInit")
+		return nil, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.width = 120
+	m.height = 32
+	m.overview = &app.ProjectOverview{RepoConnected: false}
+	m.projectSettings = &app.ProjectSettingsState{
+		ProjectRoot:        "/tmp/dec-project",
+		ConfigPath:         "/tmp/dec-project/.dec/config.yaml",
+		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
+		AvailableIDEs:      []string{"cursor"},
+		ProjectConfigReady: false,
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = updated.(model)
+	if m.initializingProjectConfig {
+		t.Fatal("未连仓库下按 i 不应进入 initializing 状态")
+	}
+	if cmd != nil {
+		t.Fatal("未连仓库下按 i 不应返回 tea.Cmd")
+	}
+	view := m.View()
+	if !strings.Contains(view, "未连接仓库") {
+		t.Fatalf("View 未提示未连接仓库:\n%s", view)
+	}
+}
+
+func TestModelProjectPageInitSuccessRendersSummary(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.width = 120
+	m.height = 32
+	m.overview = &app.ProjectOverview{RepoConnected: true}
+	m.projectSettings = &app.ProjectSettingsState{
+		ProjectRoot:        "/tmp/dec-project",
+		ConfigPath:         "/tmp/dec-project/.dec/config.yaml",
+		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
+		AvailableIDEs:      []string{"cursor"},
+		ProjectConfigReady: false,
+	}
+	// 模拟消息回来
+	updated, _ := m.Update(projectConfigInitializedMsg{
+		result: &app.ConfigInitPreparation{
+			ExistingConfig: false,
+			AssetCount:     7,
+			VarsCreated:    true,
+			ProjectConfig:  &types.ProjectConfig{},
+		},
+		err: nil,
+	})
+	m = updated.(model)
+	if m.initializingProjectConfig {
+		t.Fatal("收到消息后应退出 initializing 状态")
+	}
+	if m.lastInitResult == nil || m.lastInitResult.AssetCount != 7 {
+		t.Fatalf("lastInitResult = %#v", m.lastInitResult)
+	}
+	view := m.View()
+	if !strings.Contains(view, "初始化完成，发现 7 个可用资产") {
+		t.Fatalf("View 未显示初始化完成文案:\n%s", view)
+	}
+	if !strings.Contains(view, "已生成 .dec/vars.yaml 模板") {
+		t.Fatalf("View 未显示 vars 模板生成文案:\n%s", view)
+	}
+}
+
+func TestModelProjectPageInitEmptyRepoRendersHint(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.width = 120
+	m.height = 32
+	m.overview = &app.ProjectOverview{RepoConnected: true}
+	m.projectSettings = &app.ProjectSettingsState{
+		ProjectRoot:        "/tmp/dec-project",
+		ConfigPath:         "/tmp/dec-project/.dec/config.yaml",
+		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
+		AvailableIDEs:      []string{"cursor"},
+		ProjectConfigReady: false,
+	}
+	updated, _ := m.Update(projectConfigInitializedMsg{
+		result: &app.ConfigInitPreparation{
+			ExistingConfig: false,
+			AssetCount:     0,
+			ProjectConfig:  nil,
+		},
+		err: nil,
+	})
+	m = updated.(model)
+	if m.lastInitErr != nil {
+		t.Fatalf("空仓库不应视为错误: %v", m.lastInitErr)
+	}
+	view := m.View()
+	if !strings.Contains(view, "仓库暂无资产") {
+		t.Fatalf("View 未显示仓库暂无资产文案:\n%s", view)
 	}
 }

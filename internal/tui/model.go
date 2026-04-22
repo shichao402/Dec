@@ -59,6 +59,11 @@ type projectSettingsSavedMsg struct {
 	err    error
 }
 
+type projectConfigInitializedMsg struct {
+	result *app.ConfigInitPreparation
+	err    error
+}
+
 type runEventMsg struct {
 	event app.OperationEvent
 }
@@ -111,6 +116,10 @@ var saveProjectSettingsOperation = func(input app.SaveProjectSettingsInput, repo
 	return app.SaveProjectSettings(input, reporter)
 }
 
+var prepareProjectConfigInitOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
+	return app.PrepareProjectConfigInit(projectRoot, reporter)
+}
+
 var updateCheckOperation = func(currentVersion string) (*update.CheckResult, error) {
 	return update.Check(currentVersion)
 }
@@ -155,6 +164,9 @@ type model struct {
 	savingProjectSettings       bool
 	projectSettingsOverride     bool
 	projectSettingsSelectedIDEs []string
+	initializingProjectConfig   bool
+	lastInitResult              *app.ConfigInitPreparation
+	lastInitErr                 error
 	runningPull          bool
 	runProgress          *app.Progress
 	runEvents            []string
@@ -297,6 +309,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pushLog(fmt.Sprintf("Project settings saved: %d IDE overrides", len(msg.result.SelectedIDEs)))
 			} else {
 				m.pushLog("Project settings saved: cleared override, inheriting global")
+			}
+		}
+		return m, m.refreshCmd()
+	case projectConfigInitializedMsg:
+		m.initializingProjectConfig = false
+		m.lastInitResult = msg.result
+		m.lastInitErr = msg.err
+		if msg.err != nil {
+			m.pushLog("Project config init failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.result != nil {
+			if msg.result.ProjectConfig == nil {
+				m.pushLog(fmt.Sprintf("Project config init: 仓库暂无资产 (AssetCount=%d)", msg.result.AssetCount))
+			} else if msg.result.ExistingConfig {
+				m.pushLog(fmt.Sprintf("Project config refreshed: %d assets available", msg.result.AssetCount))
+			} else {
+				m.pushLog(fmt.Sprintf("Project config initialized: %d assets available", msg.result.AssetCount))
+			}
+			if msg.result.VarsCreated {
+				m.pushLog("Project vars template created: .dec/vars.yaml")
 			}
 		}
 		return m, m.refreshCmd()
@@ -523,6 +556,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.startPullRun()
 			}
 			return m, nil
+		case "i":
+			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil && !m.projectSettings.ProjectConfigReady {
+				if m.initializingProjectConfig || m.savingProjectSettings {
+					return m, nil
+				}
+				if m.overview == nil || !m.overview.RepoConnected {
+					m.pushLog("初始化项目配置需要先连接仓库，请切到 Settings 页配置 Repo URL")
+					return m, nil
+				}
+				m.initializingProjectConfig = true
+				m.lastInitResult = nil
+				m.lastInitErr = nil
+				m.pushLog("Initializing project config (扫描仓库资产)...")
+				return m, initProjectConfigCmd(m.projectRoot)
+			}
+			return m, nil
+		case "R":
+			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil && m.projectSettings.ProjectConfigReady {
+				if m.initializingProjectConfig || m.savingProjectSettings {
+					return m, nil
+				}
+				if m.overview == nil || !m.overview.RepoConnected {
+					m.pushLog("刷新 available 需要先连接仓库，请切到 Settings 页配置 Repo URL")
+					return m, nil
+				}
+				m.initializingProjectConfig = true
+				m.lastInitResult = nil
+				m.lastInitErr = nil
+				m.pushLog("Refreshing project available assets (扫描仓库)...")
+				return m, initProjectConfigCmd(m.projectRoot)
+			}
+			return m, nil
 		case "p":
 			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && m.updateStage == "" {
 				return m, m.startPullRun()
@@ -651,6 +716,13 @@ func saveProjectSettingsCmd(projectRoot string, clearOverride bool, ides []strin
 			ClearOverride: clearOverride,
 		}, nil)
 		return projectSettingsSavedMsg{result: result, err: err}
+	}
+}
+
+func initProjectConfigCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := prepareProjectConfigInitOperation(projectRoot, nil)
+		return projectConfigInitializedMsg{result: result, err: err}
 	}
 }
 
@@ -1197,7 +1269,38 @@ func (m model) renderProjectPage(width int) string {
 	} else {
 		summary = append(summary, shellMutedStyle.Render("当前项目设置与磁盘一致。"))
 	}
-	summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · space 切换模式/IDE · s 保存 · c 清除覆盖"))
+
+	// 初始化 / 刷新 available 入口状态
+	repoConnected := m.overview != nil && m.overview.RepoConnected
+	initKeyHint := ""
+	if m.projectSettings.ProjectConfigReady {
+		initKeyHint = "R 刷新 available"
+	} else {
+		initKeyHint = "i 初始化项目配置"
+	}
+	summary = append(summary, shellMutedStyle.Render(fmt.Sprintf("快捷键：j/k 移动 · space 切换模式/IDE · s 保存 · c 清除覆盖 · %s", initKeyHint)))
+	if !repoConnected {
+		summary = append(summary, shellWarnStyle.Render("未连接仓库，请先在 Settings 页配置 Repo URL，然后再来初始化 / 刷新 available。"))
+	}
+	if m.initializingProjectConfig {
+		summary = append(summary, shellWarnStyle.Render("正在扫描仓库资产..."))
+	}
+	if m.lastInitErr != nil {
+		summary = append(summary, shellWarnStyle.Render("初始化失败: "+m.lastInitErr.Error()))
+	}
+	if m.lastInitResult != nil && m.lastInitErr == nil {
+		switch {
+		case m.lastInitResult.ProjectConfig == nil:
+			summary = append(summary, shellWarnStyle.Render(fmt.Sprintf("仓库暂无资产：扫描到 %d 个可用资产。", m.lastInitResult.AssetCount)))
+		case m.lastInitResult.ExistingConfig:
+			summary = append(summary, shellGoodStyle.Render(fmt.Sprintf("刷新完成，共 %d 个可用资产。tab 到 Assets 页选择启用项。", m.lastInitResult.AssetCount)))
+		default:
+			summary = append(summary, shellGoodStyle.Render(fmt.Sprintf("初始化完成，发现 %d 个可用资产。tab 到 Assets 页选择启用项。", m.lastInitResult.AssetCount)))
+		}
+		if m.lastInitResult.VarsCreated {
+			summary = append(summary, shellMutedStyle.Render("已生成 .dec/vars.yaml 模板。"))
+		}
+	}
 	if m.savingProjectSettings {
 		summary = append(summary, shellWarnStyle.Render("正在保存项目设置..."))
 	}
