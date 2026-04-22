@@ -262,8 +262,8 @@ func TestModelRunPageProcessesStreamedEventsAndSchedulesRefresh(t *testing.T) {
 	if !ok {
 		t.Fatalf("refreshCmd() = %T, 期望 tea.BatchMsg", refreshCmd())
 	}
-	if len(batchMsg) != 3 {
-		t.Fatalf("BatchMsg 长度 = %d, 期望 3", len(batchMsg))
+	if len(batchMsg) != 4 {
+		t.Fatalf("BatchMsg 长度 = %d, 期望 4", len(batchMsg))
 	}
 }
 
@@ -861,5 +861,273 @@ func TestModelRunPageUpdateDoneRenderingShowsFallbackOnFailure(t *testing.T) {
 	}
 	if !strings.Contains(view, "curl -fsSL example.com | bash") {
 		t.Fatalf("失败视图缺少 fallback 命令:\n%s", view)
+	}
+}
+
+// ------- Project page (#13) tests -------
+
+func TestModelProjectPageRendersInheritMode(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2 // Project
+	m.width = 120
+	m.height = 32
+	m.projectSettings = &app.ProjectSettingsState{
+		ProjectRoot:   "/tmp/dec-project",
+		ConfigPath:    "/tmp/dec-project/.dec/config.yaml",
+		VarsPath:      "/tmp/dec-project/.dec/vars.yaml",
+		AvailableIDEs: []string{"codex", "cursor"},
+		GlobalIDEs:    []string{"cursor"},
+		EffectiveIDEs: []string{"cursor"},
+	}
+	m.projectSettingsOverride = false
+	m.normalizeProjectSettingsCursor()
+
+	view := m.View()
+	checks := []string{
+		"Project Settings",
+		"当前模式: 继承全局",
+		"覆盖全局 IDE",
+		"全局默认: cursor",
+		"快捷键：j/k 移动",
+	}
+	for _, check := range checks {
+		if !strings.Contains(view, check) {
+			t.Fatalf("Project View(inherit) 缺少 %q:\n%s", check, view)
+		}
+	}
+}
+
+func TestModelProjectPageRendersOverrideMode(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.width = 120
+	m.height = 32
+	m.projectSettings = &app.ProjectSettingsState{
+		ProjectRoot:    "/tmp/dec-project",
+		ConfigPath:     "/tmp/dec-project/.dec/config.yaml",
+		VarsPath:       "/tmp/dec-project/.dec/vars.yaml",
+		AvailableIDEs:  []string{"codex", "cursor"},
+		SelectedIDEs:   []string{"codex"},
+		OverrideActive: true,
+		GlobalIDEs:     []string{"cursor"},
+		EffectiveIDEs:  []string{"codex"},
+	}
+	m.projectSettingsOverride = true
+	m.projectSettingsSelectedIDEs = []string{"codex"}
+	m.normalizeProjectSettingsCursor()
+
+	view := m.View()
+	checks := []string{
+		"当前模式: 项目显式覆盖",
+		"[x] codex",
+		"[ ] cursor",
+	}
+	for _, check := range checks {
+		if !strings.Contains(view, check) {
+			t.Fatalf("Project View(override) 缺少 %q:\n%s", check, view)
+		}
+	}
+}
+
+func TestModelProjectPageToggleOverrideSwitchesMode(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.projectSettings = &app.ProjectSettingsState{
+		AvailableIDEs: []string{"cursor"},
+		EffectiveIDEs: []string{"cursor"},
+	}
+	m.projectSettingsOverride = false
+	m.projectSettingsCursor = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = updated.(model)
+	if !m.projectSettingsOverride {
+		t.Fatal("space 在第 0 行应开启覆盖模式")
+	}
+	if !m.projectSettingsDirty {
+		t.Fatal("从继承切到覆盖后应标记 dirty")
+	}
+	// 开启覆盖时应用 EffectiveIDEs 预填
+	if !settingsContainsIDE(m.projectSettingsSelectedIDEs, "cursor") {
+		t.Fatalf("开启覆盖后应预填 EffectiveIDEs, 实际: %#v", m.projectSettingsSelectedIDEs)
+	}
+}
+
+func TestModelProjectPageToggleIDEInOverrideMode(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.projectSettings = &app.ProjectSettingsState{
+		AvailableIDEs:  []string{"cursor", "codex"},
+		SelectedIDEs:   []string{"cursor"},
+		OverrideActive: true,
+	}
+	m.projectSettingsOverride = true
+	m.projectSettingsSelectedIDEs = []string{"cursor"}
+	m.projectSettingsCursor = 2 // 第二个 IDE
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = updated.(model)
+	if !settingsContainsIDE(m.projectSettingsSelectedIDEs, "codex") {
+		t.Fatal("space 应在覆盖模式下把 codex 切换为选中")
+	}
+	if !m.projectSettingsDirty {
+		t.Fatal("切换 IDE 后应标记 dirty")
+	}
+}
+
+func TestModelProjectPageToggleIDEInInheritModeIsNoop(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.projectSettings = &app.ProjectSettingsState{
+		AvailableIDEs: []string{"cursor", "codex"},
+	}
+	m.projectSettingsOverride = false
+	m.projectSettingsCursor = 2
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = updated.(model)
+	if len(m.projectSettingsSelectedIDEs) != 0 {
+		t.Fatalf("继承模式下 IDE 行 space 不应改变 selected, 实际: %#v", m.projectSettingsSelectedIDEs)
+	}
+	if m.projectSettingsOverride {
+		t.Fatal("继承模式下 IDE 行 space 不应切换模式")
+	}
+}
+
+func TestModelProjectPageClearOverrideWithC(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.projectSettings = &app.ProjectSettingsState{
+		AvailableIDEs:  []string{"cursor", "codex"},
+		SelectedIDEs:   []string{"codex"},
+		OverrideActive: true,
+	}
+	m.projectSettingsOverride = true
+	m.projectSettingsSelectedIDEs = []string{"codex"}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = updated.(model)
+	if m.projectSettingsOverride {
+		t.Fatal("c 应一键清除覆盖")
+	}
+	if len(m.projectSettingsSelectedIDEs) != 0 {
+		t.Fatalf("清除后 selected 应为空, 实际: %#v", m.projectSettingsSelectedIDEs)
+	}
+	if !m.projectSettingsDirty {
+		t.Fatal("清除覆盖后应标记 dirty")
+	}
+}
+
+func TestModelProjectPageSaveCallsOperation_Override(t *testing.T) {
+	oldSave := saveProjectSettingsOperation
+	defer func() { saveProjectSettingsOperation = oldSave }()
+
+	called := false
+	saveProjectSettingsOperation = func(input app.SaveProjectSettingsInput, reporter app.Reporter) (*app.SaveProjectSettingsResult, error) {
+		called = true
+		if input.ProjectRoot != "/tmp/dec-project" {
+			t.Fatalf("ProjectRoot = %q", input.ProjectRoot)
+		}
+		if input.ClearOverride {
+			t.Fatal("期望 ClearOverride=false")
+		}
+		if len(input.IDEs) != 1 || input.IDEs[0] != "cursor" {
+			t.Fatalf("IDEs = %#v, 期望 [cursor]", input.IDEs)
+		}
+		return &app.SaveProjectSettingsResult{SelectedIDEs: []string{"cursor"}, OverrideActive: true}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.projectSettings = &app.ProjectSettingsState{
+		AvailableIDEs: []string{"cursor"},
+	}
+	m.projectSettingsOverride = true
+	m.projectSettingsSelectedIDEs = []string{"cursor"}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(model)
+	if !m.savingProjectSettings {
+		t.Fatal("s 后应进入 saving 状态")
+	}
+	if cmd == nil {
+		t.Fatal("s 后应返回 tea.Cmd")
+	}
+	msg := cmd()
+	resultMsg, ok := msg.(projectSettingsSavedMsg)
+	if !ok {
+		t.Fatalf("cmd 返回 = %T, 期望 projectSettingsSavedMsg", msg)
+	}
+	if resultMsg.err != nil {
+		t.Fatalf("saved err = %v", resultMsg.err)
+	}
+	if !called {
+		t.Fatal("应调用 saveProjectSettingsOperation")
+	}
+}
+
+func TestModelProjectPageSaveCallsOperation_ClearOverride(t *testing.T) {
+	oldSave := saveProjectSettingsOperation
+	defer func() { saveProjectSettingsOperation = oldSave }()
+
+	called := false
+	saveProjectSettingsOperation = func(input app.SaveProjectSettingsInput, reporter app.Reporter) (*app.SaveProjectSettingsResult, error) {
+		called = true
+		if !input.ClearOverride {
+			t.Fatal("期望 ClearOverride=true")
+		}
+		return &app.SaveProjectSettingsResult{}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.projectSettings = &app.ProjectSettingsState{
+		AvailableIDEs:  []string{"cursor"},
+		SelectedIDEs:   []string{"cursor"},
+		OverrideActive: true,
+	}
+	// 已加载处于覆盖态，本地编辑切到继承
+	m.projectSettingsOverride = false
+	m.projectSettingsSelectedIDEs = nil
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(model)
+	if !m.savingProjectSettings {
+		t.Fatal("s 后应进入 saving 状态")
+	}
+	if cmd == nil {
+		t.Fatal("s 后应返回 tea.Cmd")
+	}
+	if _, ok := cmd().(projectSettingsSavedMsg); !ok {
+		t.Fatal("期望返回 projectSettingsSavedMsg")
+	}
+	if !called {
+		t.Fatal("应调用 saveProjectSettingsOperation (ClearOverride)")
+	}
+}
+
+func TestModelProjectPageSaveRejectsEmptyOverride(t *testing.T) {
+	oldSave := saveProjectSettingsOperation
+	defer func() { saveProjectSettingsOperation = oldSave }()
+	saveProjectSettingsOperation = func(input app.SaveProjectSettingsInput, reporter app.Reporter) (*app.SaveProjectSettingsResult, error) {
+		t.Fatal("不应在空覆盖下调用保存")
+		return nil, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 2
+	m.projectSettings = &app.ProjectSettingsState{
+		AvailableIDEs: []string{"cursor"},
+	}
+	m.projectSettingsOverride = true
+	m.projectSettingsSelectedIDEs = nil
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(model)
+	if m.savingProjectSettings {
+		t.Fatal("空覆盖下不应进入 saving 状态")
+	}
+	if cmd != nil {
+		t.Fatal("空覆盖下不应返回保存 tea.Cmd")
 	}
 }

@@ -49,6 +49,16 @@ type settingsSavedMsg struct {
 	err    error
 }
 
+type projectSettingsLoadedMsg struct {
+	state *app.ProjectSettingsState
+	err   error
+}
+
+type projectSettingsSavedMsg struct {
+	result *app.SaveProjectSettingsResult
+	err    error
+}
+
 type runEventMsg struct {
 	event app.OperationEvent
 }
@@ -93,6 +103,14 @@ var saveGlobalSettingsOperation = func(input app.SaveGlobalSettingsInput, report
 	return app.SaveGlobalSettings(input, reporter)
 }
 
+var loadProjectSettingsOperation = func(projectRoot string, reporter app.Reporter) (*app.ProjectSettingsState, error) {
+	return app.LoadProjectSettings(projectRoot, reporter)
+}
+
+var saveProjectSettingsOperation = func(input app.SaveProjectSettingsInput, reporter app.Reporter) (*app.SaveProjectSettingsResult, error) {
+	return app.SaveProjectSettings(input, reporter)
+}
+
 var updateCheckOperation = func(currentVersion string) (*update.CheckResult, error) {
 	return update.Check(currentVersion)
 }
@@ -130,6 +148,13 @@ type model struct {
 	settingsRepoInput    string
 	settingsRepoEditing  bool
 	settingsSelectedIDEs []string
+	projectSettings             *app.ProjectSettingsState
+	projectSettingsErr          error
+	projectSettingsCursor       int
+	projectSettingsDirty        bool
+	savingProjectSettings       bool
+	projectSettingsOverride     bool
+	projectSettingsSelectedIDEs []string
 	runningPull          bool
 	runProgress          *app.Progress
 	runEvents            []string
@@ -237,6 +262,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Global settings saved: %d IDEs", len(msg.result.IDEs)))
 			for _, warning := range msg.result.InstallWarnings {
 				m.pushLog("Install warning: " + warning)
+			}
+		}
+		return m, m.refreshCmd()
+	case projectSettingsLoadedMsg:
+		m.projectSettings = msg.state
+		m.projectSettingsErr = msg.err
+		m.savingProjectSettings = false
+		m.projectSettingsDirty = false
+		if msg.err != nil {
+			m.pushLog("Project settings load failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.state != nil {
+			m.projectSettingsOverride = msg.state.OverrideActive
+			m.projectSettingsSelectedIDEs = cloneStrings(msg.state.SelectedIDEs)
+			m.normalizeProjectSettingsCursor()
+			m.syncProjectSettingsDirty()
+			if msg.state.OverrideActive {
+				m.pushLog(fmt.Sprintf("Project settings loaded: %d IDE overrides", len(m.projectSettingsSelectedIDEs)))
+			} else {
+				m.pushLog("Project settings loaded: inheriting global IDEs")
+			}
+		}
+		return m, nil
+	case projectSettingsSavedMsg:
+		m.savingProjectSettings = false
+		if msg.err != nil {
+			m.pushLog("Project settings save failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.result != nil {
+			if msg.result.OverrideActive {
+				m.pushLog(fmt.Sprintf("Project settings saved: %d IDE overrides", len(msg.result.SelectedIDEs)))
+			} else {
+				m.pushLog("Project settings saved: cleared override, inheriting global")
 			}
 		}
 		return m, m.refreshCmd()
@@ -354,6 +414,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if m.isProjectPage() {
+				if m.canNavigateProjectSettings() {
+					m.moveProjectSettingsCursor(1)
+				}
+				return m, nil
+			}
 			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
 			return m, nil
@@ -367,6 +433,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.isSettingsPage() {
 				if m.canNavigateSettings() {
 					m.moveSettingsCursor(-1)
+				}
+				return m, nil
+			}
+			if m.isProjectPage() {
+				if m.canNavigateProjectSettings() {
+					m.moveProjectSettingsCursor(-1)
 				}
 				return m, nil
 			}
@@ -387,6 +459,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.assetFilter = ""
 				m.normalizeAssetCursor()
 				m.pushLog("Asset filter cleared")
+				return m, nil
+			}
+			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
+				m.clearProjectOverride()
+				return m, nil
 			}
 			return m, nil
 		case " ", "enter":
@@ -401,6 +478,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				} else {
 					m.toggleCurrentSettingsIDE()
+				}
+				return m, nil
+			}
+			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
+				if m.projectSettingsCursor == 0 {
+					m.toggleProjectOverride()
+				} else {
+					m.toggleCurrentProjectIDE()
 				}
 			}
 			return m, nil
@@ -419,6 +504,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.savingSettings = true
 				m.pushLog("Saving global settings")
 				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), cloneStrings(m.settingsSelectedIDEs))
+			}
+			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
+				if m.projectSettingsOverride && len(normalizedStringList(m.projectSettingsSelectedIDEs)) == 0 {
+					m.pushLog("覆盖模式下至少选择一个 IDE，或按 c 切回继承模式")
+					return m, nil
+				}
+				m.savingProjectSettings = true
+				clearOverride := !m.projectSettingsOverride
+				if clearOverride {
+					m.pushLog("Saving project settings: clear override")
+				} else {
+					m.pushLog("Saving project settings: override")
+				}
+				return m, saveProjectSettingsCmd(m.projectRoot, clearOverride, cloneStrings(m.projectSettingsSelectedIDEs))
 			}
 			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && m.updateStage == "" {
 				return m, m.startPullRun()
@@ -499,7 +598,7 @@ func (m model) View() string {
 }
 
 func (m model) refreshCmd() tea.Cmd {
-	return tea.Batch(loadOverviewCmd(m.projectRoot), loadAssetsCmd(m.projectRoot), loadSettingsCmd())
+	return tea.Batch(loadOverviewCmd(m.projectRoot), loadAssetsCmd(m.projectRoot), loadSettingsCmd(), loadProjectSettingsCmd(m.projectRoot))
 }
 
 func loadOverviewCmd(projectRoot string) tea.Cmd {
@@ -534,6 +633,24 @@ func saveSettingsCmd(repoURL string, ides []string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := saveGlobalSettingsOperation(app.SaveGlobalSettingsInput{RepoURL: repoURL, IDEs: cloneStrings(ides)}, nil)
 		return settingsSavedMsg{result: result, err: err}
+	}
+}
+
+func loadProjectSettingsCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		state, err := loadProjectSettingsOperation(projectRoot, nil)
+		return projectSettingsLoadedMsg{state: state, err: err}
+	}
+}
+
+func saveProjectSettingsCmd(projectRoot string, clearOverride bool, ides []string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := saveProjectSettingsOperation(app.SaveProjectSettingsInput{
+			ProjectRoot:   projectRoot,
+			IDEs:          cloneStrings(ides),
+			ClearOverride: clearOverride,
+		}, nil)
+		return projectSettingsSavedMsg{result: result, err: err}
 	}
 }
 
@@ -1048,17 +1165,139 @@ func (m model) renderAssetsPage(width int) string {
 }
 
 func (m model) renderProjectPage(width int) string {
-	if m.overviewErr != nil {
-		return shellWarnStyle.Render("Failed to load project details") + "\n\n" + m.overviewErr.Error()
+	if m.projectSettingsErr != nil {
+		return shellWarnStyle.Render("Failed to load project settings") + "\n\n" + m.projectSettingsErr.Error()
 	}
-	if m.overview == nil {
-		return shellMutedStyle.Render("Loading project overview...")
+	if m.projectSettings == nil {
+		if m.overviewErr != nil {
+			return shellWarnStyle.Render("Failed to load project details") + "\n\n" + m.overviewErr.Error()
+		}
+		return shellMutedStyle.Render("Loading project settings...")
 	}
-	return wrapLines(width, []string{
-		fmt.Sprintf("项目配置路径: %s", m.overview.ProjectConfigPath),
-		fmt.Sprintf("变量文件路径: %s", m.overview.VarsPath),
-		"后续阶段会把项目初始化、变量编辑和 IDE 选择迁到此页。",
-	})
+
+	modeLabel := "继承全局"
+	if m.projectSettingsOverride {
+		modeLabel = "项目显式覆盖"
+	}
+
+	summary := []string{
+		fmt.Sprintf("项目配置: %s", m.projectSettings.ConfigPath),
+		fmt.Sprintf("变量文件: %s", m.projectSettings.VarsPath),
+		fmt.Sprintf("当前模式: %s", modeLabel),
+		fmt.Sprintf("项目 IDE: %s", fallbackValue(strings.Join(normalizedStringList(m.projectSettingsSelectedIDEs), ", "), "<none>")),
+		fmt.Sprintf("全局默认: %s", fallbackValue(strings.Join(normalizedStringList(m.projectSettings.GlobalIDEs), ", "), "<未配置>")),
+		fmt.Sprintf("生效 IDE: %s", fallbackValue(strings.Join(projectEffectivePreview(m.projectSettings, m.projectSettingsOverride, m.projectSettingsSelectedIDEs), ", "), "<none>")),
+		formatWarnings(m.projectSettings.IDEWarnings),
+	}
+	if !m.projectSettings.ProjectConfigReady {
+		summary = append(summary, shellMutedStyle.Render("尚未初始化项目配置。首次保存项目级覆盖会创建 .dec/config.yaml。"))
+	}
+	if m.projectSettingsDirty {
+		summary = append(summary, shellWarnStyle.Render("当前有未保存修改，按 s 保存。"))
+	} else {
+		summary = append(summary, shellMutedStyle.Render("当前项目设置与磁盘一致。"))
+	}
+	summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · space 切换模式/IDE · s 保存 · c 清除覆盖"))
+	if m.savingProjectSettings {
+		summary = append(summary, shellWarnStyle.Render("正在保存项目设置..."))
+	}
+
+	list := m.renderProjectSettingsList()
+	detail := m.renderProjectSettingsDetails()
+	if width < 88 {
+		return strings.Join(append(summary, "", list, "", detail), "\n")
+	}
+
+	leftWidth := width / 2
+	rightWidth := width - leftWidth - 2
+	left := lipgloss.NewStyle().Width(leftWidth).Render(list)
+	right := lipgloss.NewStyle().Width(rightWidth).Render(detail)
+	return strings.Join(summary, "\n") + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+}
+
+func (m model) renderProjectSettingsList() string {
+	lines := []string{shellTitleStyle.Render("Project Settings")}
+	override := m.projectSettingsOverride
+	checked := " "
+	if override {
+		checked = "x"
+	}
+	overrideLine := fmt.Sprintf("%s [%s] 覆盖全局 IDE", settingsCursorMarker(m.projectSettingsCursor == 0), checked)
+	switch {
+	case m.projectSettingsCursor == 0:
+		lines = append(lines, shellSelectedRow.Render(overrideLine))
+	case override:
+		lines = append(lines, shellEnabledRow.Render(overrideLine))
+	default:
+		lines = append(lines, shellLogStyle.Render(overrideLine))
+	}
+	if m.projectSettings == nil {
+		return strings.Join(lines, "\n")
+	}
+	for idx, ideName := range m.projectSettings.AvailableIDEs {
+		selected := override && settingsContainsIDE(m.projectSettingsSelectedIDEs, ideName)
+		mark := " "
+		if selected {
+			mark = "x"
+		}
+		line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.projectSettingsCursor == idx+1), mark, ideName)
+		switch {
+		case m.projectSettingsCursor == idx+1:
+			lines = append(lines, shellSelectedRow.Render(line))
+		case selected:
+			lines = append(lines, shellEnabledRow.Render(line))
+		default:
+			lines = append(lines, shellLogStyle.Render(line))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) renderProjectSettingsDetails() string {
+	lines := []string{shellTitleStyle.Render("Details")}
+	if m.projectSettings == nil {
+		return strings.Join(lines, "\n")
+	}
+	if m.projectSettingsCursor == 0 {
+		lines = append(lines,
+			"模式切换：决定是否用项目级 IDE 覆盖全局默认。",
+			fmt.Sprintf("覆盖开关: %s", formatReady(m.projectSettingsOverride, "已开启", "未开启（继承全局）")),
+			fmt.Sprintf("全局默认: %s", fallbackValue(strings.Join(normalizedStringList(m.projectSettings.GlobalIDEs), ", "), "<未配置>")),
+			fmt.Sprintf("当前生效: %s", fallbackValue(strings.Join(projectEffectivePreview(m.projectSettings, m.projectSettingsOverride, m.projectSettingsSelectedIDEs), ", "), "<none>")),
+			shellMutedStyle.Render("按 space 切换；c 可一键清除覆盖回落全局。"),
+		)
+	} else {
+		ideName := m.currentProjectSettingsIDEName()
+		state := "未选中"
+		if m.projectSettingsOverride && settingsContainsIDE(m.projectSettingsSelectedIDEs, ideName) {
+			state = "已选中"
+		}
+		lines = append(lines,
+			fmt.Sprintf("IDE: %s", ideName),
+			fmt.Sprintf("当前状态: %s", state),
+		)
+		if !m.projectSettingsOverride {
+			lines = append(lines, shellMutedStyle.Render("当前处于继承模式。按 space 切到第一行开启覆盖后再选择 IDE。"))
+		} else {
+			lines = append(lines, shellMutedStyle.Render("按 space 在此 IDE 上切换。保存后将写入 .dec/config.yaml。"))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// projectEffectivePreview 返回本地编辑态下应当生效的 IDE 列表。
+// 覆盖模式下使用本地选择；继承模式下展示 state.EffectiveIDEs（已由 ResolveEffectiveIDEs 解析过）。
+func projectEffectivePreview(state *app.ProjectSettingsState, override bool, selected []string) []string {
+	if override {
+		return normalizedStringList(selected)
+	}
+	if state == nil {
+		return nil
+	}
+	if len(state.GlobalIDEs) > 0 {
+		return normalizedStringList(state.GlobalIDEs)
+	}
+	return normalizedStringList(state.EffectiveIDEs)
 }
 
 func (m model) renderRunPage(width int) string {
@@ -1603,6 +1842,119 @@ func settingsCursorMarker(active bool) string {
 	return " "
 }
 
+// ------- Project Settings helpers -------
+
+func (m model) canNavigateProjectSettings() bool {
+	return m.projectSettings != nil && m.projectSettingsRowCount() > 0
+}
+
+func (m model) projectSettingsRowCount() int {
+	if m.projectSettings == nil {
+		return 0
+	}
+	return 1 + len(m.projectSettings.AvailableIDEs)
+}
+
+func (m *model) normalizeProjectSettingsCursor() {
+	if m.projectSettingsRowCount() == 0 {
+		m.projectSettingsCursor = 0
+		return
+	}
+	if m.projectSettingsCursor < 0 || m.projectSettingsCursor >= m.projectSettingsRowCount() {
+		m.projectSettingsCursor = 0
+	}
+}
+
+func (m *model) moveProjectSettingsCursor(delta int) {
+	if !m.canNavigateProjectSettings() {
+		return
+	}
+	m.normalizeProjectSettingsCursor()
+	m.projectSettingsCursor += delta
+	if m.projectSettingsCursor < 0 {
+		m.projectSettingsCursor = 0
+	}
+	if m.projectSettingsCursor >= m.projectSettingsRowCount() {
+		m.projectSettingsCursor = m.projectSettingsRowCount() - 1
+	}
+}
+
+func (m model) currentProjectSettingsIDEName() string {
+	if m.projectSettings == nil || m.projectSettingsCursor <= 0 {
+		return ""
+	}
+	idx := m.projectSettingsCursor - 1
+	if idx < 0 || idx >= len(m.projectSettings.AvailableIDEs) {
+		return ""
+	}
+	return m.projectSettings.AvailableIDEs[idx]
+}
+
+// toggleProjectOverride 切换 "覆盖/继承" 模式。首次开启覆盖时，预填当前生效 IDE。
+func (m *model) toggleProjectOverride() {
+	if m.projectSettings == nil {
+		return
+	}
+	m.projectSettingsOverride = !m.projectSettingsOverride
+	if m.projectSettingsOverride {
+		if len(m.projectSettingsSelectedIDEs) == 0 {
+			m.projectSettingsSelectedIDEs = cloneStrings(m.projectSettings.EffectiveIDEs)
+		}
+		m.pushLog("Project override enabled")
+	} else {
+		m.pushLog("Project override disabled (will inherit global on save)")
+	}
+	m.syncProjectSettingsDirty()
+}
+
+// toggleCurrentProjectIDE 在覆盖模式下切换光标所在的 IDE。继承模式下仅记录日志。
+func (m *model) toggleCurrentProjectIDE() {
+	ideName := m.currentProjectSettingsIDEName()
+	if strings.TrimSpace(ideName) == "" {
+		return
+	}
+	if !m.projectSettingsOverride {
+		m.pushLog("当前处于继承模式，按 space 在第一行切换到覆盖模式后再选择 IDE")
+		return
+	}
+	if settingsContainsIDE(m.projectSettingsSelectedIDEs, ideName) {
+		m.projectSettingsSelectedIDEs = settingsRemoveIDE(m.projectSettingsSelectedIDEs, ideName)
+		m.pushLog("Project IDE disabled: " + ideName)
+	} else {
+		m.projectSettingsSelectedIDEs = append(m.projectSettingsSelectedIDEs, ideName)
+		m.pushLog("Project IDE enabled: " + ideName)
+	}
+	m.syncProjectSettingsDirty()
+}
+
+// clearProjectOverride 立即切回继承态，并清空本地选择。
+func (m *model) clearProjectOverride() {
+	if m.projectSettings == nil {
+		return
+	}
+	m.projectSettingsOverride = false
+	m.projectSettingsSelectedIDEs = nil
+	m.pushLog("Project override cleared (will inherit global on save)")
+	m.syncProjectSettingsDirty()
+}
+
+func (m *model) syncProjectSettingsDirty() {
+	if m.projectSettings == nil {
+		m.projectSettingsDirty = false
+		return
+	}
+	if m.projectSettingsOverride != m.projectSettings.OverrideActive {
+		m.projectSettingsDirty = true
+		return
+	}
+	if !m.projectSettingsOverride {
+		// 同属继承态；本地选择无意义。
+		m.projectSettingsDirty = false
+		return
+	}
+	m.projectSettingsDirty = !equalNormalizedStrings(m.projectSettingsSelectedIDEs, m.projectSettings.SelectedIDEs)
+}
+
 func (m *model) toggleCurrentAsset() {
 	if m.assets == nil {
 		return
@@ -1650,6 +2002,10 @@ func (m model) isSettingsPage() bool {
 	return m.pages[m.pageIndex] == "Settings"
 }
 
+func (m model) isProjectPage() bool {
+	return m.pages[m.pageIndex] == "Project"
+}
+
 func (m model) isRunPage() bool {
 	return m.pages[m.pageIndex] == "Run"
 }
@@ -1688,6 +2044,21 @@ func (m model) renderStatusBar(width int) string {
 			right += " | repo-input"
 		}
 		if m.savingSettings {
+			right += " | saving"
+		}
+	} else if m.isProjectPage() && m.projectSettings != nil {
+		modeTag := "inherit"
+		if m.projectSettingsOverride {
+			modeTag = "override"
+		}
+		right = fmt.Sprintf("%s | %s", right, modeTag)
+		if m.projectSettingsOverride {
+			right = fmt.Sprintf("%s | %d IDEs", right, len(normalizedStringList(m.projectSettingsSelectedIDEs)))
+		}
+		if m.projectSettingsDirty {
+			right += " | modified"
+		}
+		if m.savingProjectSettings {
 			right += " | saving"
 		}
 	} else if m.isRunPage() {
