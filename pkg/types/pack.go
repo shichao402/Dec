@@ -46,11 +46,41 @@ const ProjectConfigVersionV2 = "v2"
 
 // ProjectConfig 项目配置 (<project>/.dec/config.yaml)
 type ProjectConfig struct {
-	Version   string     `yaml:"version,omitempty"`
-	IDEs      []string   `yaml:"ides,omitempty"`
-	Editor    string     `yaml:"editor,omitempty"`
-	Available *AssetList `yaml:"available,omitempty"`
-	Enabled   *AssetList `yaml:"enabled,omitempty"`
+	Version        string     `yaml:"version,omitempty"`
+	IDEs           []string   `yaml:"ides,omitempty"`
+	Editor         string     `yaml:"editor,omitempty"`
+	Available      *AssetList `yaml:"available,omitempty"`
+	Enabled        *AssetList `yaml:"enabled,omitempty"`
+	EnabledBundles []string   `yaml:"enabled_bundles,omitempty"`
+}
+
+// Bundle 描述 vault 内声明的一组资产启用单位。
+//
+// Bundle 的 YAML 声明位于 vault 根目录的 bundles/<name>.yaml：
+//
+//	name: vikunja
+//	description: Vikunja 任务管理完整工作流
+//	members:
+//	  - mcp/vikunja-mcp
+//	  - rules/vikunja-integration
+//	  - skills/vikunja-workflow
+//
+// Bundle 不跨 vault，成员只能是 skill/rule/mcp（不能是 bundle）。
+type Bundle struct {
+	// Name 为 bundle 短名，在 vault 内唯一，用于 config.yaml 引用。
+	Name string `yaml:"name"`
+	// Description 是 TUI 渲染用的一句话描述。
+	Description string `yaml:"description,omitempty"`
+	// Members 列出 bundle 的成员资产，格式为 <type>/<asset-name>。
+	Members []string `yaml:"members"`
+}
+
+// BundleMember 是解析后的 bundle 成员引用。
+type BundleMember struct {
+	// Type 取值 skill / rule / mcp，对应 AssetList 的三种资产类型。
+	Type string
+	// Name 是资产的短名（不含类型前缀）。
+	Name string
 }
 
 // AssetList 资产列表（available 和 enabled 共用）
