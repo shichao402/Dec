@@ -20,9 +20,15 @@ type ProjectOverview struct {
 	VarsFileReady      bool
 	AvailableCount     int
 	EnabledCount       int
-	IDEs               []string
-	IDEWarnings        []string
-	Editor             string
+	// EnabledBundleCount 记录 project config 中 enabled_bundles 声明的数量。
+	// 不代表解析后展开的成员数量，只是 config 层面的引用数。
+	EnabledBundleCount int
+	// Bundles 在仓库已连接时填充：扫描所有 vault 内的 bundle 声明，标注是否启用。
+	// 未连接仓库或仓库读取失败时保持为 nil，调用方应容忍空列表。
+	Bundles []BundleOverview
+	IDEs        []string
+	IDEWarnings []string
+	Editor      string
 }
 
 func LoadProjectOverview(projectRoot string) (*ProjectOverview, error) {
@@ -55,6 +61,20 @@ func LoadProjectOverview(projectRoot string) (*ProjectOverview, error) {
 		projectConfig = loaded
 		overview.AvailableCount = loaded.Available.Count()
 		overview.EnabledCount = loaded.Enabled.Count()
+		overview.EnabledBundleCount = len(loaded.EnabledBundles)
+	}
+
+	// 仓库已连接时扫描 vault 内的 bundle 声明，并根据 EnabledBundles 标记启用状态。
+	// 失败时不阻塞 overview（bundle 是增量能力，项目级配置仍应可读）。
+	if connected {
+		tx, txErr := repo.NewReadTransaction()
+		if txErr == nil {
+			resolved, resolveErr := resolveDesiredAssets(projectConfig, tx.WorkDir(), nil)
+			if resolveErr == nil {
+				overview.Bundles = resolved.Bundles
+			}
+			tx.Close()
+		}
 	}
 
 	selection, err := config.ResolveEffectiveIDEs(projectConfig)

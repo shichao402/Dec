@@ -40,6 +40,11 @@ type PullProjectAssetsResult struct {
 	GitignoreUpdated    bool
 	MiseTrustSucceeded  bool
 	NonFatalWarnings    []string
+	// BundleOverviews 记录本轮解析时发现的所有 bundle（含未启用的），供 CLI / TUI 呈现。
+	BundleOverviews []BundleOverview
+	// AssetSources 以 "type:vault:name" 为 key，值是每个目标资产的来源列表
+	// （例如 ["bundle/vikunja", "standalone"]）。供多来源追溯使用。
+	AssetSources map[string][]string
 }
 
 func PullProjectAssets(projectRoot, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
@@ -50,27 +55,68 @@ func PullProjectAssets(projectRoot, version string, reporter Reporter) (*PullPro
 		return nil, err
 	}
 
-	result := &PullProjectAssetsResult{ProjectRoot: projectRoot}
-	if projectConfig.Enabled.IsEmpty() {
-		result.SkippedReason = "config.yaml 中没有已启用的资产"
+	result := &PullProjectAssetsResult{
+		ProjectRoot:  projectRoot,
+		AssetSources: make(map[string][]string),
+	}
+	if projectConfig.Enabled.IsEmpty() && len(projectConfig.EnabledBundles) == 0 {
+		result.SkippedReason = "config.yaml 中没有已启用的资产或 bundle"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
 		emit(reporter, EventInfo, "pull.prepare", "运行 dec config init 选择需要的资产", nil)
 		return result, nil
 	}
 
-	validAssets := projectConfig.Enabled.All()
+	createTx := func() (*repo.Transaction, error) {
+		if strings.TrimSpace(version) != "" {
+			return repo.NewReadTransactionAt(version)
+		}
+		return repo.NewReadTransaction()
+	}
+
+	tx, err := createTx()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Close()
+
+	repoDir := tx.WorkDir()
+
+	resolved, err := resolveDesiredAssets(projectConfig, repoDir, reporter)
+	if err != nil {
+		return nil, err
+	}
+	result.BundleOverviews = resolved.Bundles
+
+	validAssets := resolved.Assets
 	if projectConfig.Available != nil && !projectConfig.Available.IsEmpty() {
-		validAssets = make([]types.TypedAssetRef, 0, len(projectConfig.Enabled.All()))
-		for _, asset := range projectConfig.Enabled.All() {
+		filtered := make([]types.TypedAssetRef, 0, len(resolved.Assets))
+		for _, asset := range resolved.Assets {
 			if projectConfig.Available.FindAsset(asset.Type, asset.Name, asset.Vault) == nil {
+				// 通过 bundle 带入的资产可能并不在 Available 里（因为 Available 是 scan 仓库得到的快照）。
+				// 如果该资产的来源全部是 bundle，就信任 bundle 解析结果（资产存在性已由解析器校验）。
+				sources := resolved.Sources[assetKey(asset)]
+				onlyFromBundle := len(sources) > 0 && allBundleSourced(sources)
+				if onlyFromBundle {
+					filtered = append(filtered, asset)
+					continue
+				}
 				warning := fmt.Sprintf("[%-5s] %s (vault: %s) — 不在 available 中（可能拼写错误或已被删除）", asset.Type, asset.Name, asset.Vault)
 				result.ValidationWarnings = append(result.ValidationWarnings, warning)
 				emit(reporter, EventWarn, "pull.validate", warning, nil)
 				continue
 			}
-			validAssets = append(validAssets, asset)
+			filtered = append(filtered, asset)
 		}
+		validAssets = filtered
 	}
+
+	// 对照最终目标集缩减 AssetSources，避免把被过滤掉的资产的来源带出。
+	finalSources := make(map[string][]string, len(validAssets))
+	for _, asset := range validAssets {
+		key := assetKey(asset)
+		finalSources[key] = append([]string(nil), resolved.Sources[key]...)
+	}
+	result.AssetSources = finalSources
 
 	if len(validAssets) == 0 {
 		result.SkippedReason = "没有有效的已启用资产可拉取"
@@ -100,7 +146,7 @@ func PullProjectAssets(projectRoot, version string, reporter Reporter) (*PullPro
 		emit(reporter, EventInfo, "pull.migrate", note, nil)
 	}
 
-	result.CleanedAssets = cleanupRemovedAssets(projectRoot, projectConfig.Enabled.All(), projectIDEs)
+	result.CleanedAssets = cleanupRemovedAssets(projectRoot, validAssets, projectIDEs)
 	if len(result.CleanedAssets) > 0 {
 		emit(reporter, EventInfo, "pull.cleanup", fmt.Sprintf("🧹 清理 %d 个不再启用的资产", len(result.CleanedAssets)), nil)
 		for _, asset := range result.CleanedAssets {
@@ -108,20 +154,6 @@ func PullProjectAssets(projectRoot, version string, reporter Reporter) (*PullPro
 		}
 	}
 
-	createTx := func() (*repo.Transaction, error) {
-		if strings.TrimSpace(version) != "" {
-			return repo.NewReadTransactionAt(version)
-		}
-		return repo.NewReadTransaction()
-	}
-
-	tx, err := createTx()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Close()
-
-	repoDir := tx.WorkDir()
 	emit(reporter, EventInfo, "pull.start", fmt.Sprintf("📥 拉取 %d 个已启用资产", len(validAssets)), &Progress{Phase: "pull", Current: 0, Total: len(validAssets)})
 
 	for idx, asset := range validAssets {

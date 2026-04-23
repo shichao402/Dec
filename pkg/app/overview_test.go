@@ -67,6 +67,44 @@ func TestLoadProjectOverviewWithExistingProjectConfig(t *testing.T) {
 	}
 }
 
+func TestLoadProjectOverviewSurfacesBundles(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"default/bundles/combo.yaml": `name: combo
+description: combo bundle
+members:
+  - skill/foo
+`,
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		IDEs:           []string{"cursor"},
+		EnabledBundles: []string{"combo"},
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig() 失败: %v", err)
+	}
+
+	overview, err := LoadProjectOverview(projectRoot)
+	if err != nil {
+		t.Fatalf("LoadProjectOverview() 失败: %v", err)
+	}
+	if overview.EnabledBundleCount != 1 {
+		t.Fatalf("EnabledBundleCount = %d, 期望 1", overview.EnabledBundleCount)
+	}
+	if len(overview.Bundles) != 1 {
+		t.Fatalf("Bundles = %#v, 期望 1 个", overview.Bundles)
+	}
+	if overview.Bundles[0].Name != "combo" || !overview.Bundles[0].Enabled {
+		t.Fatalf("Bundle[0] = %#v, 期望 combo 且启用", overview.Bundles[0])
+	}
+}
+
 func TestLoadProjectOverviewFallsBackToDefaultsWithoutProjectConfig(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 

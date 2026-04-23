@@ -19,13 +19,23 @@ func TestPullProjectAssetsSkipsWithoutEnabledAssets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	if result.SkippedReason != "config.yaml 中没有已启用的资产" {
-		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, "config.yaml 中没有已启用的资产")
+	if result.SkippedReason != "config.yaml 中没有已启用的资产或 bundle" {
+		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, "config.yaml 中没有已启用的资产或 bundle")
 	}
 }
 
 func TestPullProjectAssetsSkipsWhenEnabledAssetsDoNotExistInAvailable(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"default/skills/another-workflow/SKILL.md": `---
+name: another-workflow
+---
+`,
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
@@ -175,6 +185,78 @@ name: project-workflow
 	}
 	if len(result.NonFatalWarnings) != 1 || !strings.Contains(result.NonFatalWarnings[0], "mock trust failed") {
 		t.Fatalf("NonFatalWarnings = %#v, 期望包含 mock trust failed", result.NonFatalWarnings)
+	}
+}
+
+func TestPullProjectAssetsInstallsBundleMembers(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"default/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
+		"default/rules/bundle-rule.mdc":        "---\ndescription: rule\n---\n",
+		"default/bundles/combo.yaml": `name: combo
+description: bundle-integration test
+members:
+  - skill/bundle-skill
+  - rule/bundle-rule
+`,
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	// 注意：EnabledBundles 填 combo，Enabled 为空。Available 里也没有这两个成员——
+	// 验证 bundle-sourced 资产走豁免分支能装上。
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		IDEs: []string{"cursor"},
+		Available: &types.AssetList{
+			Skills: []types.AssetRef{{Name: "some-other-skill", Vault: "default"}},
+		},
+		EnabledBundles: []string{"combo"},
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig() 失败: %v", err)
+	}
+
+	oldExec := operationsExecCommand
+	operationsExecCommand = fakeMiseTrustCommandProjectAppTest(t, projectRoot, false, "")
+	defer func() { operationsExecCommand = oldExec }()
+
+	result, err := PullProjectAssets(projectRoot, "", nil)
+	if err != nil {
+		t.Fatalf("PullProjectAssets() 失败: %v", err)
+	}
+	if result.RequestedCount != 2 || result.PulledCount != 2 {
+		t.Fatalf("结果计数异常: %+v", result)
+	}
+
+	// 两个成员都应以 bundle/combo 作为来源
+	if len(result.AssetSources) != 2 {
+		t.Fatalf("AssetSources 长度 = %d, 期望 2; 内容 %#v", len(result.AssetSources), result.AssetSources)
+	}
+	for key, sources := range result.AssetSources {
+		if len(sources) != 1 || sources[0] != "bundle/combo" {
+			t.Fatalf("AssetSources[%s] = %#v, 期望 [bundle/combo]", key, sources)
+		}
+	}
+
+	// BundleOverviews 里 combo 被标记启用
+	var sawEnabledCombo bool
+	for _, b := range result.BundleOverviews {
+		if b.Name == "combo" && b.Enabled {
+			sawEnabledCombo = true
+		}
+	}
+	if !sawEnabledCombo {
+		t.Fatalf("BundleOverviews = %#v, 期望包含 enabled=true 的 combo", result.BundleOverviews)
+	}
+
+	// 两个成员实际安装到 .cursor/ 下
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-bundle-skill", "SKILL.md")); err != nil {
+		t.Fatalf("bundle skill 未安装: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "rules", "dec-bundle-rule.mdc")); err != nil {
+		t.Fatalf("bundle rule 未安装: %v", err)
 	}
 }
 
