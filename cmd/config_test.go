@@ -235,3 +235,209 @@ func setupRemoteBareRepoConfigInitTest(t *testing.T, files map[string]string) st
 
 	return remoteBareDir
 }
+
+// ========================================
+// dec config project CLI
+// ========================================
+
+// resetConfigProjectFlags 重置项目级命令用到的 package-level flag 状态，防止测试间互相污染。
+func resetConfigProjectFlags(t *testing.T) {
+	t.Helper()
+	prevIDEs := configProjectIDEs
+	prevClear := configProjectClear
+	configProjectIDEs = nil
+	configProjectClear = false
+	t.Cleanup(func() {
+		configProjectIDEs = prevIDEs
+		configProjectClear = prevClear
+	})
+}
+
+func captureStdoutForConfigTest(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("创建 stdout pipe 失败: %v", err)
+	}
+	os.Stdout = w
+
+	runErr := fn()
+	if err := w.Close(); err != nil {
+		os.Stdout = oldStdout
+		t.Fatalf("关闭写端失败: %v", err)
+	}
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("读取输出失败: %v", err)
+	}
+	_ = r.Close()
+	return buf.String(), runErr
+}
+
+func TestRunConfigProject_ReadOnlyShowsInheritState(t *testing.T) {
+	resetConfigProjectFlags(t)
+
+	decHome := t.TempDir()
+	setEnvForRootTest(t, "DEC_HOME", decHome)
+	setHomeForConfigTest(t, decHome)
+
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{IDEs: []string{"cursor", "codex"}}); err != nil {
+		t.Fatalf("SaveGlobalConfig() 失败: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	chdirForTest(t, projectRoot)
+
+	out, err := captureStdoutForConfigTest(t, func() error {
+		return runConfigProject(configProjectCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runConfigProject() 失败: %v", err)
+	}
+
+	for _, want := range []string{
+		"项目级 IDE 配置",
+		"未覆盖",
+		"全局 IDE: cursor, codex",
+		"生效 IDE: cursor, codex",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("输出缺少 %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunConfigProject_WritesOverride(t *testing.T) {
+	resetConfigProjectFlags(t)
+
+	decHome := t.TempDir()
+	setEnvForRootTest(t, "DEC_HOME", decHome)
+	setHomeForConfigTest(t, decHome)
+
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{IDEs: []string{"cursor"}}); err != nil {
+		t.Fatalf("SaveGlobalConfig() 失败: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	chdirForTest(t, projectRoot)
+
+	configProjectIDEs = []string{"codex", "codebuddy"}
+
+	out, err := captureStdoutForConfigTest(t, func() error {
+		return runConfigProject(configProjectCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runConfigProject() 失败: %v", err)
+	}
+
+	if !strings.Contains(out, "已保存项目级 IDE 覆盖: codex, codebuddy") {
+		t.Fatalf("输出缺少写入成功提示:\n%s", out)
+	}
+
+	mgr := config.NewProjectConfigManager(projectRoot)
+	loaded, err := mgr.LoadProjectConfig()
+	if err != nil {
+		t.Fatalf("LoadProjectConfig() 失败: %v", err)
+	}
+	if len(loaded.IDEs) != 2 || loaded.IDEs[0] != "codex" || loaded.IDEs[1] != "codebuddy" {
+		t.Fatalf("loaded.IDEs = %#v, 期望 [codex codebuddy]", loaded.IDEs)
+	}
+}
+
+func TestRunConfigProject_ClearRemovesOverride(t *testing.T) {
+	resetConfigProjectFlags(t)
+
+	decHome := t.TempDir()
+	setEnvForRootTest(t, "DEC_HOME", decHome)
+	setHomeForConfigTest(t, decHome)
+
+	projectRoot := t.TempDir()
+	chdirForTest(t, projectRoot)
+
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		IDEs:   []string{"cursor", "codex"},
+		Editor: "vim",
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig() 失败: %v", err)
+	}
+
+	configProjectClear = true
+
+	out, err := captureStdoutForConfigTest(t, func() error {
+		return runConfigProject(configProjectCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runConfigProject(--clear) 失败: %v", err)
+	}
+	if !strings.Contains(out, "已清除项目级 IDE 覆盖") {
+		t.Fatalf("输出缺少清除成功提示:\n%s", out)
+	}
+
+	reloaded, err := mgr.LoadProjectConfig()
+	if err != nil {
+		t.Fatalf("LoadProjectConfig() 失败: %v", err)
+	}
+	if len(reloaded.IDEs) != 0 {
+		t.Fatalf("reloaded.IDEs = %#v, 期望已清除", reloaded.IDEs)
+	}
+	if reloaded.Editor != "vim" {
+		t.Fatalf("Editor 字段应保留, 得到 %q", reloaded.Editor)
+	}
+
+	// YAML 文本级验证：不再包含 ides: 字段
+	raw, err := os.ReadFile(filepath.Join(mgr.GetDecDir(), "config.yaml"))
+	if err != nil {
+		t.Fatalf("读取 config.yaml 失败: %v", err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "ides:") && !strings.HasPrefix(trimmed, "#") {
+			t.Fatalf("config.yaml 不应包含 ides: 字段, 命中行: %q\n完整内容:\n%s", line, string(raw))
+		}
+	}
+}
+
+func TestRunConfigProject_ClearIdempotentWithoutOverride(t *testing.T) {
+	resetConfigProjectFlags(t)
+
+	decHome := t.TempDir()
+	setEnvForRootTest(t, "DEC_HOME", decHome)
+	setHomeForConfigTest(t, decHome)
+
+	projectRoot := t.TempDir()
+	chdirForTest(t, projectRoot)
+
+	configProjectClear = true
+
+	out, err := captureStdoutForConfigTest(t, func() error {
+		return runConfigProject(configProjectCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runConfigProject(--clear) 在无覆盖时应幂等成功, 但报错: %v", err)
+	}
+	if !strings.Contains(out, "未设置 IDE 覆盖") {
+		t.Fatalf("输出缺少幂等提示:\n%s", out)
+	}
+}
+
+func TestRunConfigProject_RejectsIDEAndClearTogether(t *testing.T) {
+	resetConfigProjectFlags(t)
+
+	projectRoot := t.TempDir()
+	chdirForTest(t, projectRoot)
+
+	configProjectIDEs = []string{"cursor"}
+	configProjectClear = true
+
+	err := runConfigProject(configProjectCmd, nil)
+	if err == nil {
+		t.Fatal("--ide 与 --clear 同时使用时应返回错误")
+	}
+	if !strings.Contains(err.Error(), "不能同时使用") {
+		t.Fatalf("错误信息应提示不能同时使用, 实际: %v", err)
+	}
+}

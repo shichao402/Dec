@@ -13,7 +13,9 @@ import (
 )
 
 var (
-	configIDEs []string
+	configIDEs         []string
+	configProjectIDEs  []string
+	configProjectClear bool
 )
 
 var configCmd = &cobra.Command{
@@ -26,6 +28,9 @@ var configCmd = &cobra.Command{
   dec config show                    # 显示当前配置
   dec config global                  # 配置全局 IDE（所有支持的 IDE）
   dec config global --ide cursor     # 只配置 Cursor
+  dec config project                 # 查看项目级 IDE 覆盖
+  dec config project --ide cursor    # 设置项目级 IDE 覆盖
+  dec config project --clear         # 清除项目级 IDE 覆盖
   dec config init                    # 初始化项目配置`,
 }
 
@@ -401,6 +406,113 @@ func runConfigGlobal(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// ========================================
+// config project
+// ========================================
+
+var configProjectCmd = &cobra.Command{
+	Use:   "project",
+	Short: "配置项目级 IDE 覆盖",
+	Long: `管理当前项目的 IDE 覆盖配置（.dec/config.yaml 中的 ides 字段）。
+
+无标志时打印当前项目级 IDE 状态（是否覆盖、生效集、警告等）。
+使用 --ide 指定项目级覆盖；使用 --clear 清除覆盖回落到全局。
+--ide 与 --clear 不能同时使用。
+
+示例:
+  dec config project                                # 查看当前状态
+  dec config project --ide cursor                   # 覆盖为仅 cursor
+  dec config project --ide cursor --ide codebuddy   # 覆盖多个 IDE
+  dec config project --clear                        # 清除项目级覆盖`,
+	RunE: runConfigProject,
+}
+
+func runConfigProject(cmd *cobra.Command, args []string) error {
+	if configProjectClear && len(configProjectIDEs) > 0 {
+		return fmt.Errorf("--ide 与 --clear 不能同时使用")
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("获取当前目录失败: %w", err)
+	}
+
+	// 无标志：只读模式，打印当前状态。
+	if !configProjectClear && len(configProjectIDEs) == 0 {
+		state, err := app.LoadProjectSettings(cwd, nil)
+		if err != nil {
+			return err
+		}
+		printProjectSettingsState(state)
+		return nil
+	}
+
+	// --clear 幂等：先加载判断是否已无覆盖。
+	if configProjectClear {
+		state, err := app.LoadProjectSettings(cwd, nil)
+		if err != nil {
+			return err
+		}
+		if !state.OverrideActive {
+			fmt.Println("ℹ️  本项目未设置 IDE 覆盖，无需清除")
+			return nil
+		}
+	}
+
+	result, err := app.SaveProjectSettings(app.SaveProjectSettingsInput{
+		ProjectRoot:   cwd,
+		IDEs:          configProjectIDEs,
+		ClearOverride: configProjectClear,
+	}, nil)
+	if err != nil {
+		return err
+	}
+
+	if configProjectClear {
+		fmt.Println("✅ 已清除项目级 IDE 覆盖，现回落到全局默认")
+	} else {
+		fmt.Printf("✅ 已保存项目级 IDE 覆盖: %s\n", strings.Join(result.SelectedIDEs, ", "))
+	}
+	fmt.Printf("📁 配置文件: %s\n", result.ConfigPath)
+	if len(result.EffectiveIDEs) > 0 {
+		fmt.Printf("🎯 生效 IDE: %s\n", strings.Join(result.EffectiveIDEs, ", "))
+	}
+	for _, warning := range result.Warnings {
+		fmt.Printf("  ⚠️  %s\n", warning)
+	}
+	return nil
+}
+
+func printProjectSettingsState(state *app.ProjectSettingsState) {
+	fmt.Println("📦 项目级 IDE 配置")
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Printf("  配置文件: %s\n", state.ConfigPath)
+	if state.ProjectConfigReady {
+		fmt.Println("  配置状态: ✅ 已初始化")
+	} else {
+		fmt.Println("  配置状态: ⚠️  未初始化 (.dec/config.yaml 不存在)")
+	}
+
+	if state.OverrideActive {
+		fmt.Printf("  覆盖状态: ✅ 已覆盖 (%s)\n", strings.Join(state.SelectedIDEs, ", "))
+	} else {
+		fmt.Println("  覆盖状态: (未覆盖，继承全局)")
+	}
+
+	if len(state.GlobalIDEs) > 0 {
+		fmt.Printf("  全局 IDE: %s\n", strings.Join(state.GlobalIDEs, ", "))
+	} else {
+		fmt.Println("  全局 IDE: (未配置，使用默认 cursor)")
+	}
+
+	if len(state.EffectiveIDEs) > 0 {
+		fmt.Printf("  生效 IDE: %s\n", strings.Join(state.EffectiveIDEs, ", "))
+	}
+	for _, warning := range state.IDEWarnings {
+		fmt.Printf("  ⚠️  %s\n", warning)
+	}
+}
+
 func installBuiltinAssetsForIDE(ideName string) error {
 	return app.InstallBuiltinAssetsForIDE(ideName)
 }
@@ -417,9 +529,14 @@ func init() {
 	// config global 标志
 	configGlobalCmd.Flags().StringSliceVar(&configIDEs, "ide", nil, "指定要配置的 IDE（可多次指定，默认配置所有支持的 IDE）")
 
+	// config project 标志
+	configProjectCmd.Flags().StringSliceVar(&configProjectIDEs, "ide", nil, "指定项目级 IDE 覆盖（可多次指定）")
+	configProjectCmd.Flags().BoolVar(&configProjectClear, "clear", false, "清除项目级 IDE 覆盖，回落到全局默认")
+
 	// 注册子命令
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configGlobalCmd)
+	configCmd.AddCommand(configProjectCmd)
 	configCmd.AddCommand(configRepoCmd)
 	configCmd.AddCommand(configInitCmd)
 
