@@ -150,6 +150,22 @@ func LoadBundles(vaultPath string, memberExists func(m types.BundleMember) bool)
 	return bundles, warnings, nil
 }
 
+// Validate 解析并校验单个 bundle YAML 文件内容，返回解析后的 Bundle。
+//
+// source 用于报错时指明来源（通常是文件路径）。
+//
+// 致命条件：
+//   - YAML 无法解析
+//   - name 为空或命名非法
+//   - members 为空
+//   - 某个 member 引用格式非法
+//
+// 仅做单文件语法 / 命名 / 成员格式校验，不做跨文件重名、成员存在性、vault 级别检查，
+// 这些由 LoadBundles 在聚合阶段处理。
+func Validate(data []byte, source string) (types.Bundle, error) {
+	return parseBundleYAML(data, source)
+}
+
 // parseBundleYAML 解析单个 bundle 文件内容并做致命校验。
 //
 // 致命条件：

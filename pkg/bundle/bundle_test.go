@@ -49,6 +49,55 @@ func TestParseMember(t *testing.T) {
 	}
 }
 
+// TestValidate 覆盖 Validate 函数（parseBundleYAML 的对外导出）：
+//   - 合法 YAML 应返回解析后的 Bundle
+//   - 缺 name / 空 members / 非法成员 / 非法 YAML 应返回错误
+func TestValidate(t *testing.T) {
+	t.Run("合法", func(t *testing.T) {
+		data := []byte("name: vikunja\ndescription: desc\nmembers:\n  - skill/foo\n  - mcp/bar\n")
+		b, err := Validate(data, "test.yaml")
+		if err != nil {
+			t.Fatalf("意外错误: %v", err)
+		}
+		if b.Name != "vikunja" {
+			t.Fatalf("name 应为 vikunja, 得到 %q", b.Name)
+		}
+		if len(b.Members) != 2 {
+			t.Fatalf("members 应为 2, 得到 %d", len(b.Members))
+		}
+	})
+
+	t.Run("缺 name", func(t *testing.T) {
+		if _, err := Validate([]byte("members:\n  - skill/foo\n"), "x.yaml"); err == nil {
+			t.Fatal("期望错误")
+		}
+	})
+
+	t.Run("name 非法", func(t *testing.T) {
+		if _, err := Validate([]byte("name: -bad\nmembers:\n  - skill/foo\n"), "x.yaml"); err == nil {
+			t.Fatal("期望错误")
+		}
+	})
+
+	t.Run("members 为空", func(t *testing.T) {
+		if _, err := Validate([]byte("name: good\n"), "x.yaml"); err == nil {
+			t.Fatal("期望错误")
+		}
+	})
+
+	t.Run("非法 member 引用", func(t *testing.T) {
+		if _, err := Validate([]byte("name: good\nmembers:\n  - bundle/nested\n"), "x.yaml"); err == nil {
+			t.Fatal("期望错误")
+		}
+	})
+
+	t.Run("YAML 解析失败", func(t *testing.T) {
+		if _, err := Validate([]byte("name: good\nmembers: [not-a-list"), "x.yaml"); err == nil {
+			t.Fatal("期望错误")
+		}
+	})
+}
+
 func TestLoadBundles_Empty(t *testing.T) {
 	vault := t.TempDir()
 	// 目录里完全没有 bundles/

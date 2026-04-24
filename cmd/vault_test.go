@@ -36,12 +36,12 @@ func (f *failingMCPIDE) LoadMCPConfig(string) (*types.MCPConfig, error) {
 // ========================================
 
 func TestIsValidAssetType(t *testing.T) {
-	for _, v := range []string{"skill", "rule", "mcp"} {
+	for _, v := range []string{"skill", "rule", "mcp", "bundle"} {
 		if !isValidAssetType(v) {
 			t.Fatalf("期望 %q 合法", v)
 		}
 	}
-	for _, v := range []string{"", "skills", "unknown"} {
+	for _, v := range []string{"", "skills", "bundles", "unknown"} {
 		if isValidAssetType(v) {
 			t.Fatalf("期望 %q 不合法", v)
 		}
@@ -76,6 +76,7 @@ func TestResolveAssetFile(t *testing.T) {
 		{"skill", "my-skill", filepath.Join(repoDir, "cli/skills", "my-skill")},
 		{"rule", "my-rule", filepath.Join(repoDir, "cli/rules", "my-rule.mdc")},
 		{"mcp", "my-mcp", filepath.Join(repoDir, "cli/mcp", "my-mcp.json")},
+		{"bundle", "my-bundle", filepath.Join(repoDir, "cli/bundles", "my-bundle.yaml")},
 		{"unknown", "x", ""},
 	}
 	for _, tt := range tests {
@@ -178,6 +179,7 @@ func TestGetCachePath(t *testing.T) {
 		{"skill", "my-skill", filepath.Join(root, ".dec", "cache", "cli/skills", "my-skill")},
 		{"rule", "my-rule", filepath.Join(root, ".dec", "cache", "cli/rules", "my-rule.mdc")},
 		{"mcp", "my-mcp", filepath.Join(root, ".dec", "cache", "cli/mcp", "my-mcp.json")},
+		{"bundle", "my-bundle", filepath.Join(root, ".dec", "cache", "cli/bundles", "my-bundle.yaml")},
 		{"unknown", "x", ""},
 	}
 	for _, tt := range tests {

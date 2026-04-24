@@ -52,7 +52,7 @@ func readFolderEntries(repoDir string) ([]folderEntry, error) {
 
 // isValidAssetType 检查资产类型是否有效
 func isValidAssetType(t string) bool {
-	return t == "skill" || t == "rule" || t == "mcp"
+	return t == "skill" || t == "rule" || t == "mcp" || t == "bundle"
 }
 
 // typeSubDir 资产类型对应的子目录名
@@ -64,6 +64,8 @@ func typeSubDir(itemType string) string {
 		return "rules"
 	case "mcp":
 		return "mcp"
+	case "bundle":
+		return "bundles"
 	}
 	return ""
 }
@@ -78,6 +80,8 @@ func resolveAssetFile(repoDir, vault, itemType, assetName string) string {
 		return filepath.Join(base, assetName+".mdc")
 	case "mcp":
 		return filepath.Join(base, assetName+".json")
+	case "bundle":
+		return filepath.Join(base, assetName+".yaml")
 	}
 	return ""
 }
@@ -202,6 +206,8 @@ func getCachePath(projectRoot, vault, itemType, assetName string) string {
 		return filepath.Join(base, assetName+".mdc")
 	case "mcp":
 		return filepath.Join(base, assetName+".json")
+	case "bundle":
+		return filepath.Join(base, assetName+".yaml")
 	}
 	return ""
 }
