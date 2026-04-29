@@ -56,12 +56,17 @@ Use labels for item type, not process stage.
 
 Recommended minimal set:
 
+- `type:epic`
 - `type:bug`
 - `type:feature`
 - `type:improvement`
 - `type:research`
 - `type:decision`
 - `type:follow-up`
+
+`type:epic` marks a long-running goal or persistent theme that spans many regular cards.
+Normal cards are attached to an Epic through the Vikunja `subtask` relation, not through a separate bucket or view.
+An Epic is a regular task with the `type:epic` label; it is mutually exclusive with the other `type:*` labels on the same card.
 
 Optional additions such as `type:chore` are acceptable when the team already uses them consistently.
 
@@ -75,7 +80,7 @@ Source classification is often unstable and should usually stay in the descripti
 3. Reuse or rename obviously compatible existing structures before creating duplicates.
 4. Create the minimum view set.
 5. Normalize buckets to the canonical process model.
-6. Create missing canonical type labels.
+6. Create missing canonical type labels, including `type:epic`.
 7. Report the resulting structure and any intentional deviations.
 
 ## Migration Safety
@@ -112,3 +117,4 @@ When finishing, state:
 - do not introduce source labels by default when the team cannot classify them consistently
 - do not assume bulk task updates are a safe replacement for real kanban bucket moves
 - do not keep plain `bug` / `feature` / `improvement` labels or extra completion semantics as the long-term target structure
+- do not implement Epic as its own bucket, column, or view; Epic is only a `type:epic` label plus `subtask` relations, and introducing an "Epic bucket" will break the canonical process-stage meaning of buckets
