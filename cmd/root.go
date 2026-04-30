@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/shichao402/Dec/internal/tui"
+	"github.com/shichao402/Dec/pkg/freshness"
 	"github.com/shichao402/Dec/pkg/update"
 	"github.com/shichao402/Dec/pkg/version"
 	"github.com/spf13/cobra"
@@ -47,6 +50,21 @@ var (
 			fmt.Fprintf(w, "\n💡 %s\n\n", update.FormatUpdateHint(result))
 		}
 	}
+	// freshnessCheckTimeout 限制整个陈旧度检查（含 git fetch）的最长阻塞时间。
+	// 主命令最多等待这段时间后退出；超时则跳过提示，不影响 CLI 响应感。
+	freshnessCheckTimeout = 200 * time.Millisecond
+	// freshnessSkipCommands 列出不应触发陈旧度检查的命令全路径。
+	// - 同步类命令（pull/push）自己就是刷新入口，再触发会循环/冗余。
+	// - config init 本身可能还没有 .dec/.version，也会触发首轮 fetch，打扰首次体验。
+	// - update/version/help 属于元命令，不涉及资产。
+	freshnessSkipCommands = []string{
+		"dec pull",
+		"dec push",
+		"dec config init",
+		"dec update",
+		"dec version",
+		"dec help",
+	}
 )
 
 var RootCmd = &cobra.Command{
@@ -73,6 +91,10 @@ var RootCmd = &cobra.Command{
 			return
 		}
 		emitUpdateHint(cmd.ErrOrStderr())
+	},
+	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+		emitFreshnessHint(cmd)
+		return nil
 	},
 }
 
@@ -196,4 +218,31 @@ func isTerminalFile(file *os.File) bool {
 
 func init() {
 	RootCmd.AddCommand(versionCmd)
+}
+
+// emitFreshnessHint 在命令正常收尾后做被动的陈旧度检查。
+//
+// 只有命令被正常执行到 PostRun 阶段才会触发；命令执行出错、或属于 freshnessSkipCommands
+// 清单里的同步/元命令时直接返回。整个检查带超时，不会拖慢 CLI 响应。
+func emitFreshnessHint(cmd *cobra.Command) {
+	if cmd == nil {
+		return
+	}
+	path := cmd.CommandPath()
+	for _, skip := range freshnessSkipCommands {
+		if path == skip || strings.HasPrefix(path, skip+" ") {
+			return
+		}
+	}
+
+	projectRoot, err := getWorkingDir()
+	if err != nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), freshnessCheckTimeout)
+	defer cancel()
+
+	result := freshness.Check(ctx, projectRoot)
+	freshness.WriteHint(cmd.ErrOrStderr(), result)
 }
