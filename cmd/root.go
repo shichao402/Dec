@@ -52,7 +52,9 @@ var (
 	}
 	// freshnessCheckTimeout 限制整个陈旧度检查（含 git fetch）的最长阻塞时间。
 	// 主命令最多等待这段时间后退出；超时则跳过提示，不影响 CLI 响应感。
-	freshnessCheckTimeout = 200 * time.Millisecond
+	// 注意：真实网络下 `git fetch` 首次往返通常 1~3 秒，200ms 会直接超时；
+	// 5 秒能让多数网络环境顺利完成。节流窗口默认 24h，单日最多触发一次阻塞。
+	freshnessCheckTimeout = 5 * time.Second
 	// freshnessSkipCommands 列出不应触发陈旧度检查的命令全路径。
 	// - 同步类命令（pull/push）自己就是刷新入口，再触发会循环/冗余。
 	// - config init 本身可能还没有 .dec/.version，也会触发首轮 fetch，打扰首次体验。
