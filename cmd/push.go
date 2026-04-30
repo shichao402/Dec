@@ -18,12 +18,26 @@ var pushRemove bool
 
 var pushCmd = &cobra.Command{
 	Use:   "push [<type> <name>]",
-	Short: "推送本地修改到仓库",
+	Short: "将 .dec/cache/ 中的资产修改回流到远端仓库",
 	Long: `推送项目中修改的资产到远程仓库。
 
-此命令检测 .dec/cache/ 中已启用资产的修改，
-并推送到仓库。Bundle 声明文件（.dec/cache/<vault>/bundles/*.yaml）
+此命令从 .dec/cache/<vault>/ 中读取已启用资产的当前内容，
+并推送到远端仓库。Bundle 声明文件（.dec/cache/<vault>/bundles/*.yaml）
 会在启用资产推送完成后被扫描并一并推送。
+
+源 / 副本方向：
+
+  .codebuddy/rules/ 等 IDE 副本  ◀──(dec pull 渲染)── .dec/cache/<vault>/ ──(dec push)──▶ 远端仓库
+                                                            ▲
+                                                            │ 编辑这里
+                                                            │
+  直接改 IDE 副本会在下次 dec pull 时被覆盖 ──────────┘
+
+编辑共享资产的正确流程：
+
+  1. 编辑 .dec/cache/<vault>/<type>/<name>  （这是本地源）
+  2. dec push                                # 把本地源回流到远端
+  3. dec pull                                # 重新渲染副本，确认生效
 
 删除远程资产需明确指定 --remove 加 <type> <name>：
   dec push --remove skill my-skill

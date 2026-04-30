@@ -33,8 +33,20 @@ pull 会：
 1. 校验 enabled 中的资产是否在 available 中存在
 2. 清理不再启用的旧资产
 3. 从远程仓库拉取资产
-4. 缓存到 .dec/cache/
-5. 替换环境变量后安装到 IDE 目录
+4. 缓存到 .dec/cache/<vault>/（这是资产的本地源副本）
+5. 替换环境变量后渲染到各 IDE 目录（.codebuddy/rules/、.cursor/rules/、.claude/skills/ 等）
+
+源 / 副本方向：
+
+  远端仓库 ──(dec pull)──▶ .dec/cache/<vault>/ ──(渲染)──▶ .codebuddy/rules/ 等 IDE 副本
+                               ▲
+                               │ 这里是唯一可编辑的本地源
+                               │
+  本地修改 ──(编辑)──────────┘──(dec push)──▶ 回流远端
+
+IDE 目录下的 .mdc / SKILL.md 是生成产物，顶部会带「请勿直接编辑」Markdown 注释；
+直接改它们会在下次 dec pull 时被覆盖。想修改内容，请改 .dec/cache/<vault>/ 里的源文件，
+再 dec push 回流远端，最后 dec pull 验证。
 
 版本回退：
   dec pull --version <commit|tag>   # 拉取指定版本的资产
