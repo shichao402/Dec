@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/pkg/freshness"
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/types"
 	"github.com/spf13/cobra"
@@ -65,6 +66,11 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	printer := newPullCLIPrinter(cmd.OutOrStdout(), cmd.ErrOrStderr())
 	_, err = app.PullProjectAssets(cwd, pullVersion, app.ReporterFunc(printer.Emit))
+	if err == nil {
+		// pull 成功后把 freshness cache 删掉：cache 里 LocalCommit 是 pull 前的，
+		// 留着会让下一条命令的 PreRun 误报 stale。忽略错误，这只是清扫动作。
+		_ = freshness.InvalidateCache(cwd)
+	}
 	return err
 }
 

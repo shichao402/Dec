@@ -58,6 +58,10 @@ func Interval() time.Duration {
 // 调用方应根据 result.Stale 决定是否打印提示。
 //
 // ctx 用来给整次 fetch 加超时；超时到就立刻返回 Skipped=true。
+//
+// Deprecated: 同步实现会阻塞主命令 ~1-3s（真实 git fetch 耗时）。
+// 新代码应使用 StartBackgroundCheck + EmitCachedHint 异步路径。
+// 本函数保留给老调用方和测试，不再由 cmd 层调用。
 func Check(ctx context.Context, projectRoot string) CheckResult {
 	if IsDisabled() {
 		return CheckResult{Skipped: true}

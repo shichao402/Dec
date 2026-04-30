@@ -1,12 +1,10 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/shichao402/Dec/internal/tui"
 	"github.com/shichao402/Dec/pkg/freshness"
@@ -50,15 +48,12 @@ var (
 			fmt.Fprintf(w, "\n💡 %s\n\n", update.FormatUpdateHint(result))
 		}
 	}
-	// freshnessCheckTimeout 限制整个陈旧度检查（含 git fetch）的最长阻塞时间。
-	// 主命令最多等待这段时间后退出；超时则跳过提示，不影响 CLI 响应感。
-	// 注意：真实网络下 `git fetch` 首次往返通常 1~3 秒，200ms 会直接超时；
-	// 5 秒能让多数网络环境顺利完成。节流窗口默认 24h，单日最多触发一次阻塞。
-	freshnessCheckTimeout = 5 * time.Second
-	// freshnessSkipCommands 列出不应触发陈旧度检查的命令全路径。
+	// freshnessSkipCommands 列出不应参与 freshness 流程的命令全路径。
+	// 这些命令既不会在 PostRun fork 后台 worker，也不会在 PreRun 读 cache 打印提示。
 	// - 同步类命令（pull/push）自己就是刷新入口，再触发会循环/冗余。
 	// - config init 本身可能还没有 .dec/.version，也会触发首轮 fetch，打扰首次体验。
 	// - update/version/help 属于元命令，不涉及资产。
+	// - __freshness-check 是后台 worker 本身，不能递归 fork。
 	freshnessSkipCommands = []string{
 		"dec pull",
 		"dec push",
@@ -66,6 +61,7 @@ var (
 		"dec update",
 		"dec version",
 		"dec help",
+		"dec __freshness-check",
 	}
 )
 
@@ -93,6 +89,7 @@ var RootCmd = &cobra.Command{
 			return
 		}
 		emitUpdateHint(cmd.ErrOrStderr())
+		emitCachedFreshnessHint(cmd)
 	},
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		emitFreshnessHint(cmd)
@@ -222,29 +219,51 @@ func init() {
 	RootCmd.AddCommand(versionCmd)
 }
 
-// emitFreshnessHint 在命令正常收尾后做被动的陈旧度检查。
+// emitFreshnessHint 在命令正常收尾后发起一次后台 staleness 检查。
 //
-// 只有命令被正常执行到 PostRun 阶段才会触发；命令执行出错、或属于 freshnessSkipCommands
-// 清单里的同步/元命令时直接返回。整个检查带超时，不会拖慢 CLI 响应。
+// 不阻塞主命令：fork 一个分离的 `dec __freshness-check` 子进程，
+// 它独立完成 git fetch 并写 cache；主命令立即返回。
+// 提示会延后到下一条非 skip 命令的 PreRun 显示（见 emitCachedFreshnessHint）。
 func emitFreshnessHint(cmd *cobra.Command) {
 	if cmd == nil {
 		return
 	}
-	path := cmd.CommandPath()
-	for _, skip := range freshnessSkipCommands {
-		if path == skip || strings.HasPrefix(path, skip+" ") {
-			return
-		}
+	if skipFreshness(cmd) {
+		return
 	}
-
 	projectRoot, err := getWorkingDir()
 	if err != nil {
 		return
 	}
+	freshness.StartBackgroundCheck(projectRoot)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), freshnessCheckTimeout)
-	defer cancel()
+// emitCachedFreshnessHint 在命令开始前读上一次后台检查的结果。
+//
+// 如果 cache 显示资产已落后远端，就把提示打到 stderr。
+// 所有错误沉默；skip 命令直接跳过，避免 help / version / __freshness-check 显示提示。
+func emitCachedFreshnessHint(cmd *cobra.Command) {
+	if cmd == nil {
+		return
+	}
+	if skipFreshness(cmd) {
+		return
+	}
+	projectRoot, err := getWorkingDir()
+	if err != nil {
+		return
+	}
+	freshness.EmitCachedHint(cmd.ErrOrStderr(), projectRoot)
+}
 
-	result := freshness.Check(ctx, projectRoot)
-	freshness.WriteHint(cmd.ErrOrStderr(), result)
+// skipFreshness 判断当前命令是否在 freshness 流程之外。
+// 匹配 freshnessSkipCommands：完全相等或以 "skip + 空格" 开头（覆盖子命令）。
+func skipFreshness(cmd *cobra.Command) bool {
+	path := cmd.CommandPath()
+	for _, skip := range freshnessSkipCommands {
+		if path == skip || strings.HasPrefix(path, skip+" ") {
+			return true
+		}
+	}
+	return false
 }

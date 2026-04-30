@@ -107,18 +107,29 @@ func FetchRemoteHead() (string, error) {
 //
 // 形如 ~/.dec/local/last-freshness-check.<sha1-of-abs-path>
 func StateFilePath(projectRoot string) (string, error) {
-	abs, err := filepath.Abs(projectRoot)
+	localDir, hash, err := hashProjectRoot(projectRoot)
 	if err != nil {
 		return "", err
+	}
+	return filepath.Join(localDir, fmt.Sprintf("last-freshness-check.%s", hash)), nil
+}
+
+// hashProjectRoot 把项目根目录映射到 (~/.dec/local, sha1-of-abs-path)。
+//
+// 同一项目在多个 per-project 文件（throttle state、cache）间共享同一 hash，
+// 保证 local/ 目录下的文件按项目聚合，且跨版本稳定。
+func hashProjectRoot(projectRoot string) (localDir string, hash string, err error) {
+	abs, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return "", "", err
 	}
 	rootDir, err := repo.GetRootDir()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	localDir := filepath.Join(rootDir, "local")
+	localDir = filepath.Join(rootDir, "local")
 	sum := sha1.Sum([]byte(abs))
-	name := fmt.Sprintf("last-freshness-check.%s", hex.EncodeToString(sum[:]))
-	return filepath.Join(localDir, name), nil
+	return localDir, hex.EncodeToString(sum[:]), nil
 }
 
 // ShouldCheck 判断是否已超过节流窗口，允许再次 fetch 远端。
