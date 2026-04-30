@@ -67,6 +67,14 @@ func configureGitUserProjectTest(t *testing.T, dir string) {
 func setupRemoteBareRepoProjectTest(t *testing.T, files map[string]string) string {
 	t.Helper()
 
+	// 事务提交会在 bare repo 下 clone 出 worktree 并调 git commit。
+	// CI runner 默认没配全局 user.name/email，导致 commit 失败。
+	// 通过环境变量兜底身份信息，覆盖整条测试链路（包括未来从 bare 克隆的 worktree）。
+	setEnvForProjectTest(t, "GIT_AUTHOR_NAME", "Dec App Test")
+	setEnvForProjectTest(t, "GIT_AUTHOR_EMAIL", "dec-app-test@example.com")
+	setEnvForProjectTest(t, "GIT_COMMITTER_NAME", "Dec App Test")
+	setEnvForProjectTest(t, "GIT_COMMITTER_EMAIL", "dec-app-test@example.com")
+
 	root := t.TempDir()
 	remoteBareDir := filepath.Join(root, "remote.git")
 	seedDir := filepath.Join(root, "seed")
