@@ -1,3 +1,6 @@
+<!-- 本文件由 `dec pull` 从 .dec/cache/vikunja/ 渲染生成，请勿直接编辑。
+     修改流程：编辑 .dec/cache/vikunja/... → dec push → dec pull 验证 -->
+
 ---
 name: vikunja-issue
 description: >

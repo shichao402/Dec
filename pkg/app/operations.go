@@ -181,7 +181,7 @@ func PullProjectAssets(projectRoot, version string, reporter Reporter) (*PullPro
 			}
 		}
 
-		if err := installAssetToIDEs(asset.Type, asset.Name, fullPath, projectRoot, projectIDEs); err != nil {
+		if err := installAssetToIDEs(asset.Type, asset.Name, asset.Vault, fullPath, projectRoot, projectIDEs); err != nil {
 			result.FailedCount++
 			emit(reporter, EventWarn, "pull.asset", fmt.Sprintf("⚠️  [%-5s] %s (%v)", asset.Type, asset.Name, err), progress)
 			continue
@@ -404,11 +404,11 @@ func managedName(name string) string {
 	return "dec-" + name
 }
 
-func installAssetToIDEs(itemType, assetName, srcPath, projectRoot string, projectIDEs []ide.IDE) error {
+func installAssetToIDEs(itemType, assetName, vaultName, srcPath, projectRoot string, projectIDEs []ide.IDE) error {
 	installed := make([]ide.IDE, 0, len(projectIDEs))
 
 	for _, ideImpl := range projectIDEs {
-		if err := installAssetToIDE(itemType, assetName, srcPath, projectRoot, ideImpl); err != nil {
+		if err := installAssetToIDE(itemType, assetName, vaultName, srcPath, projectRoot, ideImpl); err != nil {
 			rollbackErrors := rollbackInstalledAsset(itemType, assetName, projectRoot, installed)
 			if len(rollbackErrors) > 0 {
 				return fmt.Errorf("安装到 %s 失败: %v；回滚失败: %s", ideImpl.Name(), err, strings.Join(rollbackErrors, "; "))
@@ -435,18 +435,26 @@ func rollbackInstalledAsset(itemType, assetName, projectRoot string, installed [
 	return rollbackErrors
 }
 
-func installAssetToIDE(itemType, assetName, srcPath, projectRoot string, ideImpl ide.IDE) error {
+func installAssetToIDE(itemType, assetName, vaultName, srcPath, projectRoot string, ideImpl ide.IDE) error {
 	managed := managedName(assetName)
 
 	switch itemType {
 	case "skill":
-		return copyDir(srcPath, filepath.Join(ideImpl.SkillsDir(projectRoot), managed))
+		destDir := filepath.Join(ideImpl.SkillsDir(projectRoot), managed)
+		if err := copyDir(srcPath, destDir); err != nil {
+			return err
+		}
+		return injectRenderedHeaderDir(destDir, vaultName)
 	case "rule":
 		destDir := ideImpl.RulesDir(projectRoot)
 		if err := os.MkdirAll(destDir, 0755); err != nil {
 			return err
 		}
-		return copyFile(srcPath, filepath.Join(destDir, managed+".mdc"))
+		destPath := filepath.Join(destDir, managed+".mdc")
+		if err := copyFile(srcPath, destPath); err != nil {
+			return err
+		}
+		return injectRenderedHeaderFile(destPath, vaultName)
 	case "mcp":
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
@@ -718,6 +726,68 @@ func copyDir(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+// renderedHeaderMarker 是用来识别本文件顶部是否已注入过「勿编辑」注释的幂等标记。
+// 只要顶部 Markdown 注释中包含这个子串，就视为已注入，不再重复。
+const renderedHeaderMarker = "本文件由 `dec pull` 从"
+
+// renderedHeader 生成写入 rule/skill 副本顶部的「勿编辑」Markdown 注释。
+// vaultName 为空时退化为通用占位，避免误导读者。
+func renderedHeader(vaultName string) string {
+	vault := strings.TrimSpace(vaultName)
+	if vault == "" {
+		vault = "<vault>"
+	}
+	return fmt.Sprintf("<!-- 本文件由 `dec pull` 从 .dec/cache/%s/ 渲染生成，请勿直接编辑。\n"+
+		"     修改流程：编辑 .dec/cache/%s/... → dec push → dec pull 验证 -->\n\n",
+		vault, vault)
+}
+
+// shouldInjectHeader 只对 Markdown 类文本资产注入注释，避免破坏 JSON/TOML/其它格式。
+func shouldInjectHeader(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".mdc":
+		return true
+	default:
+		return false
+	}
+}
+
+// injectRenderedHeaderFile 在单个 Markdown 副本顶部注入「勿编辑」注释。
+// 如果目标文件已经包含注释标记，则保持幂等不重复注入。
+func injectRenderedHeaderFile(path, vaultName string) error {
+	if !shouldInjectHeader(path) {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	// 幂等：只检查文件前 512 字节，足够覆盖任何正常 header。
+	head := data
+	if len(head) > 512 {
+		head = head[:512]
+	}
+	if strings.Contains(string(head), renderedHeaderMarker) {
+		return nil
+	}
+	header := renderedHeader(vaultName)
+	combined := append([]byte(header), data...)
+	return os.WriteFile(path, combined, 0644)
+}
+
+// injectRenderedHeaderDir 递归为一个 skill 目录内所有 Markdown 副本注入注释。
+func injectRenderedHeaderDir(dir, vaultName string) error {
+	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		return injectRenderedHeaderFile(path, vaultName)
+	})
 }
 
 func saveVersionMeta(projectRoot, commitHash string) {

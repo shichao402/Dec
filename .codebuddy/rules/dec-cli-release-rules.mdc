@@ -1,3 +1,6 @@
+<!-- 本文件由 `dec pull` 从 .dec/cache/cli/ 渲染生成，请勿直接编辑。
+     修改流程：编辑 .dec/cache/cli/... → dec push → dec pull 验证 -->
+
 ---
 description: CLI 项目版本号管理与版本到构建契约规则（通用，无语言绑定，无 CI/CD 平台耦合）
 globs: version.json, package.json, pyproject.toml, Cargo.toml, Makefile, scripts/build.sh, scripts/build*.sh, **/version/**, **/build/**

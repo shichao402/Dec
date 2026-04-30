@@ -1,3 +1,6 @@
+<!-- 本文件由 `dec pull` 从 .dec/cache/default/ 渲染生成，请勿直接编辑。
+     修改流程：编辑 .dec/cache/default/... → dec push → dec pull 验证 -->
+
 ---
 name: project-workflow
 description: Summarize and execute a Vikunja-backed project advancement method. Use when an AI coding agent needs to continue work in a project tracked in Vikunja, choose the next task from the correct Vikunja project, create a task plan, implement against the documented lifecycle, or explain how work should move from selection to closure without cross-project mistakes.

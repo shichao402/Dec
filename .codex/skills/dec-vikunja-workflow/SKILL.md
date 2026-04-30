@@ -1,3 +1,6 @@
+<!-- 本文件由 `dec pull` 从 .dec/cache/vikunja/ 渲染生成，请勿直接编辑。
+     修改流程：编辑 .dec/cache/vikunja/... → dec push → dec pull 验证 -->
+
 ---
 name: vikunja-workflow
 description: >
@@ -115,6 +118,27 @@ Every round locks exactly one target Epic before any card selection. This scopin
 - do not compare or rank cards across Epics in the same round
 - if the user wants to switch Epics mid-round, treat it as a new round: re-run the locking procedure from step 1
 
+### Locked Epic Recovery Flow
+
+When the locked Epic has no locally actionable candidate after filtering, do not treat the whole project as empty and do not silently execute a card outside the locked Epic.
+
+This state can happen when every remaining subtask is blocked, parked, waiting for a specific external environment, or otherwise not runnable in the current agent context.
+
+In that case:
+
+- report the locked Epic and the exact reason no subtask is locally actionable
+- keep all write operations paused; do not modify, close, comment on, or relate any candidate during discovery
+- run an advisory project-scoped scan for active, non-done, non-`type:epic` tasks that appear ready but are not attached to any active Epic through a `parenttask`/`subtask` relation
+- list those orphan ready candidates separately from the locked Epic's subtasks, including task ID, title, type labels, priority, and why they look actionable
+- ask the user to choose a structural next step before implementation:
+  1. attach a candidate to an existing active Epic
+  2. promote an existing task to Epic after explicit approval
+  3. draft a new Epic and create it through `$vikunja-issue` after explicit approval
+  4. mark or move the blocking subtask according to the project's blocking policy
+- after the user confirms the structure change, perform only that approved relation/label/bucket action, write the required audit comment, then restart the round from Epic lock
+
+Orphan ready candidates are evidence that backlog structure needs cleanup. They are not execution candidates until they belong to the locked Epic of a fresh round.
+
 ### No-Epic Blocking Flow
 
 When the confirmed project has zero active Epics:
@@ -186,20 +210,21 @@ This skill operates under a tier-3 autonomy contract: the agent may take certain
 4. Lock the round Epic per `Round Epic Lock`: 0 active → enter no-Epic blocking flow and exit the round; 1 active → auto-lock and tell the user; multiple active → ask the user to pick one.
 5. Query actionable items inside the locked Epic's subtasks, sorted by priority.
 6. Exclude blocked items, intake items, and repository-local parked items unless the user directs otherwise.
-7. Check cross-Epic `blocked` relations on the locked Epic; if it is blocked by another active Epic, surface the dependency and ask the user before continuing.
-8. Analyze the top candidates, but lock only one item for execution.
-9. Classify the locked item as a small card or a large card against the `Continuation Window` criteria.
-10. Create or update the working plan in Vikunja first. Add a local task doc only when repository rules require it or the round clearly benefits from durable repo-local notes.
-11. Mark the task as actively in progress in Vikunja if the workflow expects that.
-12. Implement or analyze only the chosen increment.
-13. Verify against the stop condition.
-14. Review for regressions, missing coverage, and required doc updates.
-15. Inspect `git status --short` and make sure only intended files are in scope.
-16. Commit and push using the repository's traceability rules.
-17. Write the commit hash, verification summary, and closeout note back to Vikunja.
-18. Write a tier-3 audit comment on the task summarizing autonomous actions taken this round, per `Autonomy Audit Comment`.
-19. Mark the task done only after write-back and audit comment attempts are complete.
-20. Continuation decision: if the user asked to continue and the current item was a small card and fewer than two cards have been advanced this round, loop back to step 5 within the same locked Epic; otherwise stop and summarize.
+7. If no subtask remains locally actionable, enter `Locked Epic Recovery Flow` and stop before implementation.
+8. Check cross-Epic `blocked` relations on the locked Epic; if it is blocked by another active Epic, surface the dependency and ask the user before continuing.
+9. Analyze the top candidates, but lock only one item for execution.
+10. Classify the locked item as a small card or a large card against the `Continuation Window` criteria.
+11. Create or update the working plan in Vikunja first. Add a local task doc only when repository rules require it or the round clearly benefits from durable repo-local notes.
+12. Mark the task as actively in progress in Vikunja if the workflow expects that.
+13. Implement or analyze only the chosen increment.
+14. Verify against the stop condition.
+15. Review for regressions, missing coverage, and required doc updates.
+16. Inspect `git status --short` and make sure only intended files are in scope.
+17. Commit and push using the repository's traceability rules.
+18. Write the commit hash, verification summary, and closeout note back to Vikunja.
+19. Write a tier-3 audit comment on the task summarizing autonomous actions taken this round, per `Autonomy Audit Comment`.
+20. Mark the task done only after write-back and audit comment attempts are complete.
+21. Continuation decision: if the user asked to continue and the current item was a small card and fewer than two cards have been advanced this round, loop back to step 5 within the same locked Epic; otherwise stop and summarize.
 
 ## Query And Selection Rules
 
@@ -209,7 +234,7 @@ This skill operates under a tier-3 autonomy contract: the agent may take certain
 - use project-scoped endpoints or explicit `project_id` filters whenever possible, and further filter by the locked Epic's subtasks
 - if project lookup is ambiguous, stop and ask the user
 - if an exact-name lookup misses, check nearby names or visibility differences before declaring the project missing
-- if the locked Epic has no actionable subtasks that match the selection rules, stop and report back rather than reaching across Epics
+- if the locked Epic has no actionable subtasks that match the selection rules, use `Locked Epic Recovery Flow` rather than reaching across Epics
 - analyze multiple items if needed, but execute only one item by default
 
 Before the exact project ID and the round Epic are both confirmed, do not perform write operations.
@@ -365,6 +390,7 @@ When the user asks to continue or summarize project work:
 - mention the commit hash or explicitly say that commit or push did not happen
 - mention whether architecture docs or tracker state were updated
 - report how many cards were advanced this round and why the round stopped (budget exhausted, large card, failure, no more actionable subtasks)
+- if `Locked Epic Recovery Flow` ran, list the blocked subtasks and any orphan ready candidates discovered, and state that no candidate was executed until structure is confirmed
 - list any audit comment writes that failed so the user can manually post the missing comment
 
 ## Anti-Patterns
@@ -377,6 +403,7 @@ When the user asks to continue or summarize project work:
 - do not batch unrelated workstreams into one round without an explicit reason
 - do not close a tracker item before commit, write-back, and final state update are all complete
 - do not select cards outside the locked Epic once the round is locked
+- do not let one blocked locked-Epic subtask make the whole project look empty; use `Locked Epic Recovery Flow` to surface orphan ready work without executing it
 - do not auto-pick an Epic when the project has more than one active Epic; ask the user
 - do not create an Epic inside this skill; Epic creation is always handled by `$vikunja-issue` with explicit user approval
 - do not advance more than two cards in a single round, even if every card looks small

@@ -1,3 +1,6 @@
+<!-- 本文件由 `dec pull` 从 .dec/cache/default/ 渲染生成，请勿直接编辑。
+     修改流程：编辑 .dec/cache/default/... → dec push → dec pull 验证 -->
+
 ---
 name: helloworld
 description: Create minimal hello world examples for quick demos, smoke tests, and starter snippets. Use when the user asks for a simple runnable example in a specific language, framework, runtime, or file format and the goal is to show the smallest working program.
