@@ -74,6 +74,11 @@ type projectVarsEditedMsg struct {
 	err error
 }
 
+type externalToolFinishedMsg struct {
+	tool string
+	err  error
+}
+
 type runEventMsg struct {
 	event app.OperationEvent
 }
@@ -216,6 +221,8 @@ type model struct {
 	updateErr            error
 	updateDoneVersion    string
 	updatingBinary       bool
+	launchingExternal    bool
+	externalErr          error
 }
 
 func newModel(projectRoot, currentVersion string) model {
@@ -396,6 +403,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog("Editor session finished; reloading project vars")
 		}
 		return m, loadProjectVarsCmd(m.projectRoot)
+	case externalToolFinishedMsg:
+		m.launchingExternal = false
+		m.externalErr = msg.err
+		if msg.err != nil {
+			m.pushLog(fmt.Sprintf("External tool %q exited with error: %s", msg.tool, msg.err.Error()))
+		} else {
+			m.pushLog(fmt.Sprintf("External tool %q finished", msg.tool))
+		}
+		return m, nil
 	case runEventMsg:
 		m.recordRunEvent(msg.event)
 		if m.runStream != nil {
@@ -610,6 +626,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.pushLog("Opening external editor for .dec/vars.yaml")
 				return m, openProjectVarsEditorCmd(m.projectRoot, editorCmd)
+			}
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && !m.launchingExternal && m.removeStage == "" && m.updateStage == "" {
+				m.launchingExternal = true
+				m.externalErr = nil
+				m.pushLog("Launching pkv (external tool)...")
+				return m, launchPKVCmd()
 			}
 			return m, nil
 		case "s":
@@ -847,6 +869,21 @@ func openProjectVarsEditorCmd(projectRoot, editorCmd string) tea.Cmd {
 	}
 	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
 		return projectVarsEditedMsg{err: runErr}
+	})
+}
+
+// launchPKVCmd 挂起 TUI，用 tea.ExecProcess 呼起 pkv 交互模式。
+// pkv 进程接管 tty；退出后推送 externalToolFinishedMsg 触发 Run 页重绘。
+// 未找到 pkv 时直接推送带错误的消息，由 Run 页展示中文错误行，不走 ExecProcess。
+func launchPKVCmd() tea.Cmd {
+	cmd, err := app.LocatePKV()
+	if err != nil {
+		return func() tea.Msg {
+			return externalToolFinishedMsg{tool: "pkv", err: err}
+		}
+	}
+	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
+		return externalToolFinishedMsg{tool: "pkv", err: runErr}
 	})
 }
 
@@ -1607,7 +1644,7 @@ func truncateVarValue(v string) string {
 func (m model) renderRunPage(width int) string {
 	lines := []string{
 		fmt.Sprintf("状态: %s", m.runStatusLabel()),
-		shellMutedStyle.Render("快捷键：p 执行 pull · x 删除资产 · u 自更新 · s 触发当前页主动作 · r 刷新概览"),
+		shellMutedStyle.Render("快捷键：p 执行 pull · x 删除资产 · u 自更新 · s 触发当前页主动作 · r 刷新概览 · e 呼起 pkv"),
 	}
 	if m.runProgress != nil {
 		lines = append(lines, fmt.Sprintf("阶段: %s (%d/%d)", fallbackValue(m.runProgress.Phase, "working"), m.runProgress.Current, m.runProgress.Total))
@@ -1632,6 +1669,9 @@ func (m model) renderRunPage(width int) string {
 	}
 	if m.removeErr != nil {
 		lines = append(lines, shellWarnStyle.Render("Remove 错误: "+m.removeErr.Error()))
+	}
+	if m.externalErr != nil {
+		lines = append(lines, shellWarnStyle.Render("外部工具错误: "+m.externalErr.Error()))
 	}
 
 	switch m.removeStage {
@@ -2828,6 +2868,8 @@ func (m model) runStatusLabel() string {
 		return shellGoodStyle.Render("删除中")
 	case m.updatingBinary:
 		return shellGoodStyle.Render("更新中")
+	case m.launchingExternal:
+		return shellGoodStyle.Render("呼起 pkv 中")
 	case m.runErr != nil:
 		return shellWarnStyle.Render("失败")
 	case m.removeErr != nil:
