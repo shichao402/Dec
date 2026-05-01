@@ -241,7 +241,24 @@ MCP 采用非覆盖式合并：
 - 用户手工维护的非 `dec-*` 条目保持不变
 - 已不再托管的 `dec-*` 条目会被清理
 
-### 6. 变量替换
+### 6. freshness 被动检查
+
+Dec 在每次 CLI 命令结束后，会被动检查远端 Vault 是否有新提交，并在下一条命令开始前打印一次 `dec pull` 提示。核心目标是零阻塞主命令，代价是提示会延后到"下一条命令"。
+
+实现位于 `pkg/freshness/` 与 `cmd/freshness_check.go`：
+
+- **分离子进程执行 fetch**：PostRun 阶段 `cmd.Start()` 启动 hidden cobra 子命令 `__freshness-check --project-root`，立即返回不 `Wait()`
+  - Unix：`syscall.SysProcAttr{Setsid: true}`（`pkg/freshness/async_unix.go`）
+  - Windows：`CreationFlags |= DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`（`pkg/freshness/async_windows.go`）
+- **两阶段协作**：当前命令 PostRun fork 子进程写 cache → 下一条命令 PreRun 读 cache 打印提示
+- **cache**：`~/.dec/local/freshness-result.<sha1>.json`，24h TTL（沿用 `Interval()`），atomic `.tmp` + rename 写入
+- **lock**：`~/.dec/local/freshness.lock`，`O_CREATE|O_EXCL` 独占。busy 时静默 skip，避免与 `dec pull/push` 撞车；mtime 超过 10 分钟视为僵尸自动回收
+- **dec pull 成功后清 cache**：`cmd/pull.go` 调 `freshness.InvalidateCache(cwd)`，防止旧 local commit 让下一次提示误报
+- **throttle 与 cache 共用 SHA1**：`pkg/freshness/freshness.go:hashProjectRoot()` 让 `last-freshness-check.<hash>` 与 `freshness-result.<hash>.json` 指向同一项目
+
+所有静默路径（disabled / 未 pull / lock busy / throttled / cache 中 `Err` 非空）都不会打扰用户。
+
+### 7. 变量替换
 
 变量替换发生在 pull 后、安装到 IDE 目录之后。
 
@@ -341,6 +358,10 @@ IDE 抽象层，负责不同 IDE 的目录与 MCP 配置差异。
 ### `pkg/update/`
 
 检查 GitHub Release、下载新版本并执行自更新。
+
+### `pkg/freshness/`
+
+被动式远端 freshness 检查。负责 fork 分离子进程执行 `git fetch`、结果 cache、lock 互斥、以及跨平台 detach 行为（`async_unix.go` / `async_windows.go`）。调用入口在 `cmd/root.go` 的 PreRun / PostRun 以及 hidden 子命令 `cmd/freshness_check.go`。
 
 ## 关键设计点
 
