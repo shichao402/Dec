@@ -4,7 +4,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"time"
 )
 
@@ -26,11 +25,6 @@ var fetchRemoteHead = FetchRemoteHead
 // 任何错误都被吞掉：这是辅助特性，失败不应影响主命令体感。
 func StartBackgroundCheck(projectRoot string) {
 	if IsDisabled() {
-		return
-	}
-	if runtime.GOOS == "windows" {
-		// Windows 需要 CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS 和 x/sys/windows，
-		// 本轮不上；用户仍享受原有的 throttle 语义，只是没有后台提示。
 		return
 	}
 	exe, err := os.Executable()
