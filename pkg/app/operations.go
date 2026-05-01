@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,28 +17,19 @@ import (
 	"github.com/shichao402/Dec/pkg/vars"
 )
 
-var operationsExecCommand = exec.Command
-
-const defaultMiseLocalTomlContent = `[env]
-DEC_PLACEHOLDER = "replace-me"
-`
-
 type PullProjectAssetsResult struct {
-	ProjectRoot         string
-	RequestedCount      int
-	PulledCount         int
-	FailedCount         int
-	SkippedReason       string
-	EffectiveIDEs       []string
-	IDEWarnings         []string
-	ValidationWarnings  []string
-	MigrationNotes      []string
-	CleanedAssets       []string
-	VersionCommit       string
-	MiseLocalCreated    bool
-	GitignoreUpdated    bool
-	MiseTrustSucceeded  bool
-	NonFatalWarnings    []string
+	ProjectRoot        string
+	RequestedCount     int
+	PulledCount        int
+	FailedCount        int
+	SkippedReason      string
+	EffectiveIDEs      []string
+	IDEWarnings        []string
+	ValidationWarnings []string
+	MigrationNotes     []string
+	CleanedAssets      []string
+	VersionCommit      string
+	NonFatalWarnings   []string
 	// BundleOverviews 记录本轮解析时发现的所有 bundle（含未启用的），供 CLI / TUI 呈现。
 	BundleOverviews []BundleOverview
 	// AssetSources 以 "type:vault:name" 为 key，值是每个目标资产的来源列表
@@ -197,34 +187,6 @@ func PullProjectAssets(projectRoot, version string, reporter Reporter) (*PullPro
 	if commitHash != "" {
 		result.VersionCommit = commitHash
 		saveVersionMeta(projectRoot, commitHash)
-	}
-
-	if result.PulledCount > 0 {
-		createdMise, err := ensureMiseLocalTomlFile(projectRoot)
-		if createdMise {
-			result.MiseLocalCreated = true
-			emit(reporter, EventInfo, "pull.finalize", "📝 已创建 mise.local.toml", nil)
-		}
-		if err != nil {
-			result.NonFatalWarnings = append(result.NonFatalWarnings, err.Error())
-			emit(reporter, EventWarn, "pull.finalize", err.Error(), nil)
-		} else {
-			updatedGitignore, err := ensureMiseLocalTomlGitignore(projectRoot)
-			if updatedGitignore {
-				result.GitignoreUpdated = true
-				emit(reporter, EventInfo, "pull.finalize", "🙈 已将 mise.local.toml 加入 .gitignore", nil)
-			}
-			if err != nil {
-				result.NonFatalWarnings = append(result.NonFatalWarnings, err.Error())
-				emit(reporter, EventWarn, "pull.finalize", err.Error(), nil)
-			} else if err := trustMiseLocalToml(projectRoot); err != nil {
-				result.NonFatalWarnings = append(result.NonFatalWarnings, err.Error())
-				emit(reporter, EventWarn, "pull.finalize", err.Error(), nil)
-			} else {
-				result.MiseTrustSucceeded = true
-				emit(reporter, EventInfo, "pull.finalize", "🔐 已执行 mise trust mise.local.toml", nil)
-			}
-		}
 	}
 
 	summary := fmt.Sprintf("✅ 完成：%d 个资产已拉取", result.PulledCount)
@@ -795,82 +757,4 @@ func saveVersionMeta(projectRoot, commitHash string) {
 	content := fmt.Sprintf("commit: %s\npulled_at: %q\n", commitHash, time.Now().Format(time.RFC3339))
 	_ = os.MkdirAll(filepath.Dir(versionPath), 0755)
 	_ = os.WriteFile(versionPath, []byte(content), 0644)
-}
-
-func ensureMiseLocalTomlFile(projectRoot string) (bool, error) {
-	trustFile := filepath.Join(projectRoot, "mise.local.toml")
-	if _, err := os.Stat(trustFile); err == nil {
-		return false, nil
-	} else if !os.IsNotExist(err) {
-		return false, fmt.Errorf("检查 mise.local.toml 失败: %w", err)
-	}
-
-	if err := os.WriteFile(trustFile, []byte(defaultMiseLocalTomlContent), 0644); err != nil {
-		return false, fmt.Errorf("创建 mise.local.toml 失败: %w", err)
-	}
-
-	return true, nil
-}
-
-func ensureMiseLocalTomlGitignore(projectRoot string) (bool, error) {
-	gitignorePath := filepath.Join(projectRoot, ".gitignore")
-	data, err := os.ReadFile(gitignorePath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return false, fmt.Errorf("读取 .gitignore 失败: %w", err)
-		}
-		if err := os.WriteFile(gitignorePath, []byte("mise.local.toml\n"), 0644); err != nil {
-			return false, fmt.Errorf("写入 .gitignore 失败: %w", err)
-		}
-		return true, nil
-	}
-
-	content := string(data)
-	if gitignoreHasMiseLocalTomlEntry(content) {
-		return false, nil
-	}
-
-	if content != "" && !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	content += "mise.local.toml\n"
-
-	if err := os.WriteFile(gitignorePath, []byte(content), 0644); err != nil {
-		return false, fmt.Errorf("更新 .gitignore 失败: %w", err)
-	}
-
-	return true, nil
-}
-
-func gitignoreHasMiseLocalTomlEntry(content string) bool {
-	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "mise.local.toml" || trimmed == "/mise.local.toml" {
-			return true
-		}
-	}
-	return false
-}
-
-func trustMiseLocalToml(projectRoot string) error {
-	trustFile := filepath.Join(projectRoot, "mise.local.toml")
-	if _, err := os.Stat(trustFile); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("未找到 mise.local.toml")
-		}
-		return fmt.Errorf("检查 mise.local.toml 失败: %w", err)
-	}
-
-	cmd := operationsExecCommand("mise", "trust", "mise.local.toml")
-	cmd.Dir = projectRoot
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if message != "" {
-			return fmt.Errorf("执行 mise trust mise.local.toml 失败: %w: %s", err, message)
-		}
-		return fmt.Errorf("执行 mise trust mise.local.toml 失败: %w", err)
-	}
-
-	return nil
 }
