@@ -201,3 +201,45 @@ members:
 		t.Fatalf("bundle rule 未安装: %v", err)
 	}
 }
+
+// substituteAssetVars 之前会用 `_` 吞掉 LoadVarsConfig 的 error，
+// 导致 YAML 语法错误下变量被静默丢弃。本用例覆盖修复后的感知路径：
+// 解析失败必须通过 reporter 发一个 EventWarn 事件，且消息里带 vars.yaml 路径。
+func TestSubstituteAssetVarsReportsProjectVarsParseError(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+
+	projectRoot := t.TempDir()
+	decDir := filepath.Join(projectRoot, ".dec")
+	if err := os.MkdirAll(decDir, 0755); err != nil {
+		t.Fatalf("创建 .dec 失败: %v", err)
+	}
+	// 写入语法错误的 vars.yaml
+	varsPath := filepath.Join(decDir, "vars.yaml")
+	if err := os.WriteFile(varsPath, []byte("vars:\n  FOO: [unclosed\n"), 0644); err != nil {
+		t.Fatalf("写入损坏的 vars.yaml 失败: %v", err)
+	}
+
+	mgr := config.NewProjectConfigManager(projectRoot)
+
+	var events []OperationEvent
+	reporter := ReporterFunc(func(event OperationEvent) {
+		events = append(events, event)
+	})
+
+	// projectIDEs 留空即可：LoadVarsConfig 的 error 在进入 IDE 循环之前就应该被报告。
+	substituteAssetVars("skill", "any-asset", projectRoot, nil, mgr, reporter)
+
+	var sawWarn bool
+	for _, event := range events {
+		if event.Level != EventWarn || event.Scope != "pull.vars" {
+			continue
+		}
+		if strings.Contains(event.Message, varsPath) && strings.Contains(event.Message, "解析") {
+			sawWarn = true
+			break
+		}
+	}
+	if !sawWarn {
+		t.Fatalf("期望收到包含 vars.yaml 路径的 pull.vars warn 事件, 实际事件: %#v", events)
+	}
+}

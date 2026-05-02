@@ -476,8 +476,16 @@ func removeAssetFromIDE(itemType, assetName, projectRoot string, ideImpl ide.IDE
 }
 
 func substituteAssetVars(itemType, assetName, projectRoot string, projectIDEs []ide.IDE, mgr *config.ProjectConfigManager, reporter Reporter) {
-	globalVars, _ := config.LoadGlobalVars()
-	projectVars, _ := mgr.LoadVarsConfig()
+	globalVars, err := config.LoadGlobalVars()
+	if err != nil {
+		emit(reporter, EventWarn, "pull.vars", fmt.Sprintf("读取全局变量失败: %v", err), nil)
+		globalVars = nil
+	}
+	projectVars, err := mgr.LoadVarsConfig()
+	if err != nil {
+		emit(reporter, EventWarn, "pull.vars", fmt.Sprintf("解析 %s 失败: %v", mgr.GetVarsPath(), err), nil)
+		projectVars = nil
+	}
 	projectVarsPath := mgr.GetVarsPath()
 	globalVarsPath, _ := config.GetGlobalVarsPath()
 

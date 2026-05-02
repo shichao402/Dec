@@ -11,8 +11,6 @@ import (
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
-	"github.com/shichao402/Dec/pkg/types"
-	"github.com/shichao402/Dec/pkg/vars"
 )
 
 // ========================================
@@ -224,144 +222,9 @@ func removeCachedAsset(itemType, assetName, projectRoot, vault string) {
 // 占位符替换
 // ========================================
 
-// substituteAssetVars 对已安装到 IDE 目录的资产执行变量替换
-func substituteAssetVars(itemType, assetName, projectRoot string, projectIDEs []ide.IDE, mgr *config.ProjectConfigManager) {
-	globalVars, _ := config.LoadGlobalVars()
-	projectVars, _ := mgr.LoadVarsConfig()
-	projectVarsPath := mgr.GetVarsPath()
-	globalVarsPath, _ := config.GetGlobalVarsPath()
-
-	if (globalVars == nil || len(globalVars.Vars) == 0) && (projectVars == nil || len(projectVars.Vars) == 0) {
-		if globalVars != nil && globalVars.Assets != nil {
-			// 可能有资产级变量，继续
-		} else if projectVars != nil && projectVars.Assets != nil {
-			// 可能有资产级变量，继续
-		} else {
-			return
-		}
-	}
-
-	for _, ideImpl := range projectIDEs {
-		ideName := ideImpl.Name()
-
-		switch itemType {
-		case "skill":
-			localPath := filepath.Join(ideImpl.SkillsDir(projectRoot), managedName(assetName))
-			placeholders := vars.ExtractPlaceholdersFromDir(localPath)
-			locations := vars.ExtractPlaceholderLocationsFromDir(localPath)
-			if len(placeholders) == 0 {
-				continue
-			}
-			resolved := vars.ResolveVars(globalVars, projectVars, itemType, assetName, placeholders)
-			_, missing, err := vars.SubstituteDir(localPath, resolved)
-			if err != nil {
-				fmt.Printf("  ⚠️  变量替换失败 (%s): %v\n", ideName, err)
-				continue
-			}
-			printMissingVars(itemType, assetName, missing, locations, projectVarsPath, globalVarsPath)
-
-		case "rule":
-			localPath := filepath.Join(ideImpl.RulesDir(projectRoot), managedName(assetName)+".mdc")
-			placeholders := vars.ExtractPlaceholdersFromFile(localPath)
-			locations := vars.ExtractPlaceholderLocationsFromFile(localPath)
-			if len(placeholders) == 0 {
-				continue
-			}
-			resolved := vars.ResolveVars(globalVars, projectVars, itemType, assetName, placeholders)
-			_, missing, err := vars.SubstituteFile(localPath, resolved)
-			if err != nil {
-				fmt.Printf("  ⚠️  变量替换失败 (%s): %v\n", ideName, err)
-				continue
-			}
-			printMissingVars(itemType, assetName, missing, locations, projectVarsPath, globalVarsPath)
-
-		case "mcp":
-			used, missing, locations := substituteMCPVars(assetName, projectRoot, ideImpl, globalVars, projectVars)
-			_ = used
-			printMissingVars(itemType, assetName, missing, locations, projectVarsPath, globalVarsPath)
-		}
-	}
-}
-
-// substituteMCPVars 对 MCP 配置中的指定条目执行变量替换
-func substituteMCPVars(assetName, projectRoot string, ideImpl ide.IDE, globalVars, projectVars *types.VarsConfig) (map[string]string, []string, map[string][]string) {
-	managed := managedName(assetName)
-	configPath := ideImpl.MCPConfigPath(projectRoot)
-
-	existingConfig, err := ideImpl.LoadMCPConfig(projectRoot)
-	if err != nil {
-		return nil, nil, nil
-	}
-
-	server, ok := existingConfig.MCPServers[managed]
-	if !ok {
-		return nil, nil, nil
-	}
-
-	var allContent string
-	if server.Env != nil {
-		for _, v := range server.Env {
-			allContent += v + "\n"
-		}
-	}
-	for _, arg := range server.Args {
-		allContent += arg + "\n"
-	}
-	allContent += server.Command
-
-	placeholders := vars.ExtractPlaceholders(allContent)
-	if len(placeholders) == 0 {
-		return nil, nil, nil
-	}
-
-	locations := make(map[string][]string, len(placeholders))
-	for _, placeholder := range placeholders {
-		locations[placeholder] = []string{configPath}
-	}
-
-	resolved := vars.ResolveVars(globalVars, projectVars, "mcp", assetName, placeholders)
-
-	used := make(map[string]string)
-	var missing []string
-
-	if server.Env != nil {
-		newEnv := make(map[string]string)
-		for k, v := range server.Env {
-			newVal, u, m := vars.Substitute(v, resolved)
-			newEnv[k] = newVal
-			for uk, uv := range u {
-				used[uk] = uv
-			}
-			missing = append(missing, m...)
-		}
-		server.Env = newEnv
-	}
-
-	for i, arg := range server.Args {
-		newArg, u, m := vars.Substitute(arg, resolved)
-		server.Args[i] = newArg
-		for uk, uv := range u {
-			used[uk] = uv
-		}
-		missing = append(missing, m...)
-	}
-
-	newCmd, u, m := vars.Substitute(server.Command, resolved)
-	server.Command = newCmd
-	for uk, uv := range u {
-		used[uk] = uv
-	}
-	missing = append(missing, m...)
-
-	if len(used) > 0 {
-		existingConfig.MCPServers[managed] = server
-		if err := ideImpl.WriteMCPConfig(projectRoot, existingConfig); err != nil {
-			fmt.Printf("  ⚠️  写入 MCP 配置失败: %v\n", err)
-		}
-	}
-
-	return used, missing, locations
-}
+// 占位符替换的真实实现在 pkg/app/operations.go 的 substituteAssetVars /
+// substituteMCPVars。这里只保留 printMissingVars 供仍在使用它的调用方（和
+// vault_test.go）使用，避免维护两份容易漂移的实现。
 
 // printMissingVars 打印缺失变量的警告（去重）
 func printMissingVars(itemType, assetName string, missing []string, locations map[string][]string, projectVarsPath, globalVarsPath string) {
