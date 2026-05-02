@@ -141,7 +141,8 @@ dec pull
 
 1. `.dec/vars.yaml` 中的 `assets.<type>.<name>.vars`
 2. `.dec/vars.yaml` 中的 `vars`
-3. `~/.dec/local/vars.yaml` 中的机器级变量
+3. `.dec/vars.d/*.yaml` 中的 `vars`（可选；按文件名字典序合并，主文件 `vars.yaml` 覆盖同名键）
+4. `~/.dec/local/vars.yaml` 中的机器级变量
 
 未定义的占位符会保留原样，并在 pull 时提示补充变量配置。
 
@@ -301,7 +302,8 @@ MCP 必须是单个 server 片段 JSON，`command` 必填：
 ├── config.yaml      # 项目配置（available + enabled）
 ├── cache/           # 资产缓存（pull 时写入，push 时读取）
 ├── .version         # 当前 pull 的版本记录
-└── vars.yaml        # 项目变量定义（config init 自动创建）
+├── vars.yaml        # 项目变量定义（config init 自动创建）
+└── vars.d/          # 可选：拆分的变量片段 *.yaml / *.yml，按文件名字典序合并
 ```
 
 机器级变量文件位于 `~/.dec/local/vars.yaml`，由 `dec config global` 自动创建。
