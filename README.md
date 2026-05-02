@@ -270,6 +270,25 @@ dec config init
 | `dec update` | 更新 Dec 到最新版本 |
 | `dec version` | 显示版本号 |
 
+## 交互模式与后台检查
+
+### 默认 TUI 入口
+
+在交互式终端里直接运行 `dec`（不带任何子命令），会进入内置 TUI Shell，可以在同一界面里浏览仓库资产、切换启用状态、触发 `pull`、编辑全局设置。下列任一情况会退回到传统 CLI：
+
+- 传了任何子命令或参数（例如 `dec list`）
+- 环境变量 `DEC_NO_TUI=1`
+- `TERM=dumb`
+- stdin / stdout / stderr 任一不是 TTY（重定向、管道、CI 场景）
+
+所有 CLI 子命令的行为和 TUI 模式等价，脚本与自动化继续按命令用即可。
+
+### 远端资产新鲜度提示
+
+每次 CLI 命令结束后，Dec 会在后台静默 `git fetch` 远端仓库；如果发现远端有新提交，会在**下一次**普通命令开始前打印一行 `dec pull` 提示。主命令永远不会被阻塞，代价是提示会延后一次命令。
+
+以下命令不参与该检查，避免冗余或打扰：`dec pull` / `dec push` / `dec config init` / `dec update` / `dec version` / `dec help`。
+
 ## 资产格式要求
 
 资产模板支持 `{{VAR_NAME}}` 占位符，变量名必须以大写字母开头，只能包含大写字母、数字和下划线。
