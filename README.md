@@ -248,6 +248,7 @@ dec config init
 |------|------|
 | `dec config repo <url>` | 连接个人仓库 |
 | `dec config global [--ide]` | 配置全局 IDE |
+| `dec config project [--ide ... \| --clear]` | 查看或覆盖项目级 IDE（无参打印当前状态） |
 | `dec config init` | 初始化项目配置（扫描仓库，打开编辑器选择资产） |
 | `dec config show` | 显示当前配置 |
 
