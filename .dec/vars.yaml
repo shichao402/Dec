@@ -1,6 +1,9 @@
 # Dec 项目变量定义
 # 资产模板中的 {{VAR_NAME}} 会在 dec pull 时替换
-# 优先级：assets.<type>.<name>.vars > vars > 机器级变量 (~/.dec/local/vars.yaml)
+# 优先级（由高到低）：assets.<type>.<name>.vars > vars.yaml > vars.d/*.yaml > 机器级变量 (~/.dec/local/vars.yaml)
+#
+# vars.d/ 目录：可选，放拆分的变量片段 *.yaml / *.yml，按文件名字典序合并，
+#   主文件 vars.yaml 会覆盖 vars.d/ 中的同名键。fragment 里的 assets: 字段会被忽略。
 
 vars:
   TASK_DOCS_DIR: "docs/tasks"

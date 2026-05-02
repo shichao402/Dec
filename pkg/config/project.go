@@ -21,7 +21,10 @@ type ProjectConfigManager struct {
 
 const projectVarsTemplate = `# Dec 项目变量定义
 # 资产模板中的 {{VAR_NAME}} 会在 dec pull 时替换
-# 优先级：assets.<type>.<name>.vars > vars > 机器级变量 (~/.dec/local/vars.yaml)
+# 优先级（由高到低）：assets.<type>.<name>.vars > vars.yaml > vars.d/*.yaml > 机器级变量 (~/.dec/local/vars.yaml)
+#
+# vars.d/ 目录：可选，放拆分的变量片段 *.yaml / *.yml，按文件名字典序合并，
+#   主文件 vars.yaml 会覆盖 vars.d/ 中的同名键。fragment 里的 assets: 字段会被忽略。
 
 vars:
   # TASK_DOCS_DIR: "docs/tasks"
@@ -58,6 +61,11 @@ func (m *ProjectConfigManager) GetDecDir() string {
 // GetVarsPath 获取项目变量定义文件路径
 func (m *ProjectConfigManager) GetVarsPath() string {
 	return filepath.Join(m.GetDecDir(), "vars.yaml")
+}
+
+// GetVarsDir 获取项目变量片段目录路径 (.dec/vars.d)
+func (m *ProjectConfigManager) GetVarsDir() string {
+	return filepath.Join(m.GetDecDir(), "vars.d")
 }
 
 // Exists 检查项目配置是否已存在
@@ -177,23 +185,117 @@ func (m *ProjectConfigManager) EnsureVarsConfigTemplate() (bool, error) {
 // ========================================
 
 // LoadVarsConfig 加载项目变量定义
+//
+// 加载顺序（后者覆盖前者）：
+//  1. .dec/vars.d/*.yaml 与 *.yml，按文件名字典序依次合并
+//  2. .dec/vars.yaml 主文件（权威最高，覆盖 vars.d/ 的值）
+//
+// 只合并顶层 `vars:` 字段；fragment 里的 `assets:` 会被忽略。
+// 最终返回的 VarsConfig.Assets 仅来自主文件。
+//
+// 任一 fragment 或主文件解析失败都会整体返回 error。
+// 主文件不存在但 vars.d 存在时仍会返回 fragment 合并结果。
+// 两者都不存在时返回空 VarsConfig。
 func (m *ProjectConfigManager) LoadVarsConfig() (*types.VarsConfig, error) {
-	varsPath := m.GetVarsPath()
+	// 1. 加载 vars.d/ 片段，得到合并基线
+	merged, err := m.loadVarsDirFragments()
+	if err != nil {
+		return nil, err
+	}
 
+	// 2. 加载主文件 vars.yaml
+	varsPath := m.GetVarsPath()
 	data, err := os.ReadFile(varsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &types.VarsConfig{}, nil
+			// 主文件缺失：直接返回 fragment 合并结果
+			if merged == nil {
+				return &types.VarsConfig{}, nil
+			}
+			return &types.VarsConfig{Vars: merged}, nil
 		}
 		return nil, fmt.Errorf("读取变量定义失败: %w", err)
 	}
 
-	var cfg types.VarsConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	var main types.VarsConfig
+	if err := yaml.Unmarshal(data, &main); err != nil {
 		return nil, fmt.Errorf("解析变量定义失败: %w", err)
 	}
 
-	return &cfg, nil
+	// 3. 主文件覆盖 fragment
+	if merged == nil {
+		merged = make(map[string]string, len(main.Vars))
+	}
+	for k, v := range main.Vars {
+		merged[k] = v
+	}
+
+	result := &types.VarsConfig{
+		Assets: main.Assets,
+	}
+	if len(merged) > 0 {
+		result.Vars = merged
+	}
+	return result, nil
+}
+
+// loadVarsDirFragments 读取 .dec/vars.d/*.yaml{,yml}，按文件名字典序合并顶层 vars:
+//
+// 返回合并后的 map[string]string（无片段或目录不存在时返回 nil, nil）。
+// 任一片段解析失败整体返回 error。
+// fragment 里的 assets 字段会被忽略（只取 Vars）。
+//
+// 文件过滤规则：
+//   - 仅 *.yaml / *.yml 扩展名
+//   - 跳过目录
+//   - 跳过以 `.` 开头的隐藏文件
+func (m *ProjectConfigManager) loadVarsDirFragments() (map[string]string, error) {
+	dir := m.GetVarsDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("读取变量片段目录失败: %w", err)
+	}
+
+	var merged map[string]string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+
+		fragmentPath := filepath.Join(dir, name)
+		data, err := os.ReadFile(fragmentPath)
+		if err != nil {
+			return nil, fmt.Errorf("读取变量片段 %s 失败: %w", fragmentPath, err)
+		}
+
+		var fragment types.VarsConfig
+		if err := yaml.Unmarshal(data, &fragment); err != nil {
+			return nil, fmt.Errorf("解析变量片段 %s 失败: %w", fragmentPath, err)
+		}
+
+		if len(fragment.Vars) == 0 {
+			continue
+		}
+		if merged == nil {
+			merged = make(map[string]string, len(fragment.Vars))
+		}
+		for k, v := range fragment.Vars {
+			merged[k] = v
+		}
+	}
+
+	return merged, nil
 }
 
 func detectProjectConfigVersion(data []byte) (string, error) {
