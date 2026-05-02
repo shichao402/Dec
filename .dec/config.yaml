@@ -14,6 +14,7 @@
 #       rules: true
 
 version: v2
+project_name: Dec
 available:
     cli:
         cli-release-rules:

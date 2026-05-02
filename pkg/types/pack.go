@@ -46,7 +46,11 @@ const ProjectConfigVersionV2 = "v2"
 
 // ProjectConfig 项目配置 (<project>/.dec/config.yaml)
 type ProjectConfig struct {
-	Version        string     `yaml:"version,omitempty"`
+	Version string `yaml:"version,omitempty"`
+	// ProjectName 是项目对外使用的短名，TUI / 外部工具（如 pkv get all <name>）都以此为准。
+	// 未显式设置时，调用方应 fallback 到 filepath.Base(projectRoot)，但不会自动写回 yaml。
+	// `dec config init` 创建新配置时默认写入 basename。
+	ProjectName    string     `yaml:"project_name,omitempty"`
 	IDEs           []string   `yaml:"ides,omitempty"`
 	Editor         string     `yaml:"editor,omitempty"`
 	Available      *AssetList `yaml:"available,omitempty"`

@@ -69,19 +69,29 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 	enabled := &types.AssetList{}
 	projectEditor := ""
 	var projectIDEs []string
+	projectName := ""
 	if existingConfig != nil {
 		if !existingConfig.Enabled.IsEmpty() {
 			enabled = existingConfig.Enabled
 		}
 		projectEditor = existingConfig.Editor
 		projectIDEs = existingConfig.IDEs
+		projectName = existingConfig.ProjectName
+	}
+	// 新项目默认写入 cwd basename 作为 project_name，避免用户后续需要手写。
+	// 已有配置时保留原值（即使为空）——不自动填充 basename，防止悄悄篡改用户意图。
+	if !prepared.ExistingConfig && strings.TrimSpace(projectName) == "" {
+		if base := strings.TrimSpace(filepath.Base(projectRoot)); base != "" && base != "." && base != "/" {
+			projectName = base
+		}
 	}
 
 	prepared.ProjectConfig = &types.ProjectConfig{
-		IDEs:      projectIDEs,
-		Editor:    projectEditor,
-		Available: buildAssetList(allAssets),
-		Enabled:   enabled,
+		ProjectName: projectName,
+		IDEs:        projectIDEs,
+		Editor:      projectEditor,
+		Available:   buildAssetList(allAssets),
+		Enabled:     enabled,
 	}
 
 	emit(reporter, EventInfo, "project.init", "写入项目配置", &Progress{Phase: "write", Current: 1, Total: 2})

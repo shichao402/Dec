@@ -1,31 +1,31 @@
 ╭──────────────────╮╭──────────────────────────────────────────────────────────────────────────────╮
 │                  ││                                                                              │
-│  Dec Shell       ││  Assets                                                                      │
+│  Dec Shell       ││  外部应用                                                                    │
 │  tab switch / j  ││  /tmp/dec-project                                                            │
-│  k move          ││  Assets ready, 1 enabled                                                     │
+│  k move          ││  External tools ready (project: dec-project)                                 │
 │   Home           ││                                                                              │
 │   Assets         │╰──────────────────────────────────────────────────────────────────────────────╯
 │   Project        │╭──────────────────────────────────────────────────────────────────────────────╮
 │   Run            ││                                                                              │
-│   外部应用       ││  筛选: <none> | 类型: all                                                    │
-│   Settings       ││  资产总数: 2 | 已启用: 1 | Bundle: 0/0                                       │
-│                  ││  当前资产选择与磁盘一致。                                                    │
-│                  ││  快捷键：j/k 移动 · space 切换 · enter 展开/切换 · t 类型 · s 保存 · / 筛选  │
-│                  ││  · c 清空筛选                                                                │
+│   外部应用       ││  项目短名: dec-project                                                       │
+│   Settings       ││  来自 .dec/config.yaml                                                       │
+│                  ││  pkv 已就绪，选中后按 enter 执行；执行期间 Dec TUI 会挂起。                  │
+│                  ││  快捷键：j/k 移动 · enter 执行 · tab 切换页                                  │
+│                  ││  可用命令                                                                    │
+│                  ││  > pkv                                                                       │
+│                  ││  pkv get all dec-project                                                     │
+│                  ││  预览                                                                        │
+│                  ││  $ pkv                                                                       │
+│                  ││  交互模式进入 pkv（直接把终端交给 pkv，退出后回到 Dec）。                    │
 │                  ││                                                                              │
-│                  ││  Asset List                                                                  │
-│                  ││  > [x] default / skill / project-workflow                                    │
-│                  ││    [ ] cli / rule / cli-release-rules                                        │
 │                  ││                                                                              │
-│                  ││  Details                                                                     │
-│                  ││  Vault: default                                                              │
-│                  ││  Type: skill                                                                 │
-│                  ││  Name: project-workflow                                                      │
-│                  ││  Enabled: yes                                                                │
 │                  ││                                                                              │
-│                  ││  Config: /tmp/dec-project/.dec/config.yaml                                   │
-│                  ││  Vars: /tmp/dec-project/.dec/vars.yaml                                       │
-│                  ││  Vars 模板会在首次保存时创建。                                               │
+│                  ││                                                                              │
+│                  ││                                                                              │
+│                  ││                                                                              │
+│                  ││                                                                              │
+│                  ││                                                                              │
+│                  ││                                                                              │
 │                  ││                                                                              │
 │                  ││                                                                              │
 │                  ││                                                                              │
@@ -41,4 +41,4 @@
 ╰──────────────────╯│  - Loading global settings...                                                │
                     │                                                                              │
                     ╰──────────────────────────────────────────────────────────────────────────────╯
- q quit | tab switch | r refresh                                          page Assets | 1/2 enabled
+ q quit | tab switch | r refresh                                        page 外部应用 | dec-project

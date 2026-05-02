@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -77,6 +78,20 @@ type projectVarsEditedMsg struct {
 type externalToolFinishedMsg struct {
 	tool string
 	err  error
+}
+
+// externalToolsEntry 描述外部应用页的一行可选命令。
+type externalToolsEntry struct {
+	// Label 显示在菜单上的短名。
+	Label string
+	// Command 用于预览的完整命令（含参数）。
+	Command string
+	// Description 在详情区展示的一句话说明。
+	Description string
+	// Build 构造真正的 tea.Cmd；若工具不可用返回 nil。
+	Build func(m *model) tea.Cmd
+	// Unavailable 为 true 时不执行，仅展示。
+	Unavailable bool
 }
 
 type runEventMsg struct {
@@ -155,6 +170,10 @@ var updateManualInstallCommand = func() string {
 	return update.ManualInstallCommand()
 }
 
+// locatePKVOperation 是包级可替换变量，方便测试打桩（例如 snapshot 测试固定 pkv 可用性）。
+// 默认直接代理到 app.LocatePKV。
+var locatePKVOperation = app.LocatePKV
+
 type model struct {
 	projectRoot          string
 	currentVersion       string
@@ -223,13 +242,15 @@ type model struct {
 	updatingBinary       bool
 	launchingExternal    bool
 	externalErr          error
+	// externalToolsCursor 是"外部应用"页当前高亮的命令行索引。
+	externalToolsCursor  int
 }
 
 func newModel(projectRoot, currentVersion string) model {
 	return model{
 		projectRoot:     projectRoot,
 		currentVersion:  currentVersion,
-		pages:           []string{"Home", "Assets", "Project", "Run", "Settings"},
+		pages:           []string{"Home", "Assets", "Project", "Run", "外部应用", "Settings"},
 		expandedBundles: make(map[string]bool),
 		assetTypeFilter: "all",
 		logs: []string{
@@ -532,6 +553,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if m.isExternalToolsPage() {
+				m.moveExternalToolsCursor(1)
+				return m, nil
+			}
 			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
 			return m, nil
@@ -552,6 +577,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.canNavigateProjectSettings() {
 					m.moveProjectSettingsCursor(-1)
 				}
+				return m, nil
+			}
+			if m.isExternalToolsPage() {
+				m.moveExternalToolsCursor(-1)
 				return m, nil
 			}
 			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
@@ -611,6 +640,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.toggleCurrentProjectIDE()
 				}
 			}
+			if m.isExternalToolsPage() && !m.launchingExternal {
+				return m, m.triggerExternalToolsSelection()
+			}
 			return m, nil
 		case "e":
 			if m.isSettingsPage() && !m.savingSettings {
@@ -626,12 +658,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.pushLog("Opening external editor for .dec/vars.yaml")
 				return m, openProjectVarsEditorCmd(m.projectRoot, editorCmd)
-			}
-			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && !m.launchingExternal && m.removeStage == "" && m.updateStage == "" {
-				m.launchingExternal = true
-				m.externalErr = nil
-				m.pushLog("Launching pkv (external tool)...")
-				return m, launchPKVCmd()
 			}
 			return m, nil
 		case "s":
@@ -876,7 +902,7 @@ func openProjectVarsEditorCmd(projectRoot, editorCmd string) tea.Cmd {
 // pkv 进程接管 tty；退出后推送 externalToolFinishedMsg 触发 Run 页重绘。
 // 未找到 pkv 时直接推送带错误的消息，由 Run 页展示中文错误行，不走 ExecProcess。
 func launchPKVCmd() tea.Cmd {
-	cmd, err := app.LocatePKV()
+	cmd, err := locatePKVOperation()
 	if err != nil {
 		return func() tea.Msg {
 			return externalToolFinishedMsg{tool: "pkv", err: err}
@@ -884,6 +910,20 @@ func launchPKVCmd() tea.Cmd {
 	}
 	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
 		return externalToolFinishedMsg{tool: "pkv", err: runErr}
+	})
+}
+
+// launchPKVGetAllCmd 挂起 TUI 运行 `pkv get all <projectName>`。
+// 行为与 launchPKVCmd 对齐，区别只在参数。projectName 为空时交由 pkv 自行报错。
+func launchPKVGetAllCmd(projectName string) tea.Cmd {
+	cmd, err := locatePKVOperation("get", "all", projectName)
+	if err != nil {
+		return func() tea.Msg {
+			return externalToolFinishedMsg{tool: "pkv get all", err: err}
+		}
+	}
+	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
+		return externalToolFinishedMsg{tool: "pkv get all", err: runErr}
 	})
 }
 
@@ -1318,6 +1358,8 @@ func (m model) renderPageBody(width int) string {
 		return m.renderProjectPage(width)
 	case "Run":
 		return m.renderRunPage(width)
+	case "外部应用":
+		return m.renderExternalToolsPage(width)
 	default:
 		return m.renderSettingsPage(width)
 	}
@@ -1644,7 +1686,7 @@ func truncateVarValue(v string) string {
 func (m model) renderRunPage(width int) string {
 	lines := []string{
 		fmt.Sprintf("状态: %s", m.runStatusLabel()),
-		shellMutedStyle.Render("快捷键：p 执行 pull · x 删除资产 · u 自更新 · s 触发当前页主动作 · r 刷新概览 · e 呼起 pkv"),
+		shellMutedStyle.Render("快捷键：p 执行 pull · x 删除资产 · u 自更新 · s 触发当前页主动作 · r 刷新概览"),
 	}
 	if m.runProgress != nil {
 		lines = append(lines, fmt.Sprintf("阶段: %s (%d/%d)", fallbackValue(m.runProgress.Phase, "working"), m.runProgress.Current, m.runProgress.Total))
@@ -1797,6 +1839,121 @@ func (m model) renderRemoveConfirm() []string {
 		shellMutedStyle.Render("按 y 确认执行 · n/esc 取消返回选择器"),
 	)
 	return lines
+}
+
+// externalToolsEntries 按当前 model 状态构造"外部应用"页可执行命令列表。
+// 第二个返回值是 pkv 不可用时的中文错误（为空表示可用）。
+// 列表顺序即菜单顺序；命令长度依赖 pkvAvailable / projectName，渲染层按 Build==nil 标记禁用。
+func (m model) externalToolsEntries() ([]externalToolsEntry, string) {
+	// 探测 pkv 是否存在：只查 $PATH，不执行。
+	_, probeErr := locatePKVOperation()
+	pkvUnavailable := probeErr != nil
+
+	projectName, _ := m.resolveProjectNameForExternal()
+
+	entries := []externalToolsEntry{
+		{
+			Label:       "pkv",
+			Command:     "pkv",
+			Description: "交互模式进入 pkv（直接把终端交给 pkv，退出后回到 Dec）。",
+			Build: func(mm *model) tea.Cmd {
+				return launchPKVCmd()
+			},
+			Unavailable: pkvUnavailable,
+		},
+		{
+			Label:       fmt.Sprintf("pkv get all %s", projectName),
+			Command:     fmt.Sprintf("pkv get all %s", projectName),
+			Description: fmt.Sprintf("对当前项目 %q 运行 pkv get all。", projectName),
+			Build: func(mm *model) tea.Cmd {
+				return launchPKVGetAllCmd(projectName)
+			},
+			Unavailable: pkvUnavailable,
+		},
+	}
+
+	errMsg := ""
+	if pkvUnavailable && probeErr != nil {
+		errMsg = probeErr.Error()
+	}
+	return entries, errMsg
+}
+
+// resolveProjectNameForExternal 返回外部工具使用的 project_name，以及是否来自 .dec/config.yaml。
+// 优先用 overview 的 ProjectName，回退到 filepath.Base(projectRoot)；两者都不可用时返回 "unknown"。
+func (m model) resolveProjectNameForExternal() (string, bool) {
+	if m.overview != nil && strings.TrimSpace(m.overview.ProjectName) != "" {
+		return m.overview.ProjectName, m.overview.ProjectNameFromConfig
+	}
+	base := strings.TrimSpace(filepath.Base(m.projectRoot))
+	if base == "" || base == "." || base == "/" {
+		return "unknown", false
+	}
+	return base, false
+}
+
+func (m model) renderExternalToolsPage(width int) string {
+	entries, errMsg := m.externalToolsEntries()
+	name, fromConfig := m.resolveProjectNameForExternal()
+
+	nameSource := "来自 .dec/config.yaml"
+	if !fromConfig {
+		nameSource = "回退自当前目录名（未显式配置 project_name）"
+	}
+
+	lines := []string{
+		fmt.Sprintf("项目短名: %s", name),
+		shellMutedStyle.Render(nameSource),
+	}
+	if errMsg != "" {
+		lines = append(lines, shellWarnStyle.Render("pkv 不可用: "+errMsg))
+	} else {
+		lines = append(lines, shellMutedStyle.Render("pkv 已就绪，选中后按 enter 执行；执行期间 Dec TUI 会挂起。"))
+	}
+	if m.launchingExternal {
+		lines = append(lines, shellWarnStyle.Render("正在呼起外部工具..."))
+	}
+	if m.externalErr != nil {
+		lines = append(lines, shellWarnStyle.Render("上次外部工具错误: "+m.externalErr.Error()))
+	}
+	lines = append(lines, shellMutedStyle.Render("快捷键：j/k 移动 · enter 执行 · tab 切换页"))
+	lines = append(lines, "")
+
+	// 列表渲染
+	lines = append(lines, shellTitleStyle.Render("可用命令"))
+	for idx, entry := range entries {
+		marker := " "
+		if idx == m.externalToolsCursor {
+			marker = ">"
+		}
+		label := entry.Label
+		if entry.Unavailable {
+			label += "  (pkv 未安装)"
+		}
+		line := fmt.Sprintf("%s %s", marker, label)
+		switch {
+		case idx == m.externalToolsCursor && entry.Unavailable:
+			lines = append(lines, shellWarnStyle.Render(line))
+		case idx == m.externalToolsCursor:
+			lines = append(lines, shellSelectedRow.Render(line))
+		case entry.Unavailable:
+			lines = append(lines, shellMutedStyle.Render(line))
+		default:
+			lines = append(lines, shellLogStyle.Render(line))
+		}
+	}
+
+	// 详情区：当前选中命令的预览
+	if len(entries) > 0 && m.externalToolsCursor >= 0 && m.externalToolsCursor < len(entries) {
+		selected := entries[m.externalToolsCursor]
+		lines = append(lines, "", shellTitleStyle.Render("预览"))
+		lines = append(lines, "$ "+selected.Command)
+		if strings.TrimSpace(selected.Description) != "" {
+			lines = append(lines, shellMutedStyle.Render(selected.Description))
+		}
+	}
+
+	return wrapLines(width, lines)
 }
 
 func (m model) renderSettingsPage(width int) string {
@@ -2667,6 +2824,43 @@ func (m model) isRunPage() bool {
 	return m.pages[m.pageIndex] == "Run"
 }
 
+func (m model) isExternalToolsPage() bool {
+	return m.pages[m.pageIndex] == "外部应用"
+}
+
+// moveExternalToolsCursor 将外部应用页光标按 delta 移动，循环到首尾。
+// 空列表（理论上不该发生）下静默返回。
+func (m *model) moveExternalToolsCursor(delta int) {
+	entries, _ := m.externalToolsEntries()
+	if len(entries) == 0 {
+		m.externalToolsCursor = 0
+		return
+	}
+	n := len(entries)
+	m.externalToolsCursor = ((m.externalToolsCursor+delta)%n + n) % n
+}
+
+// triggerExternalToolsSelection 执行当前光标所在命令。
+// 对 Unavailable 行记录日志、保持 externalErr 不变；成功触发时置 launchingExternal=true 并清空上一次错误。
+func (m *model) triggerExternalToolsSelection() tea.Cmd {
+	entries, _ := m.externalToolsEntries()
+	if len(entries) == 0 {
+		return nil
+	}
+	if m.externalToolsCursor < 0 || m.externalToolsCursor >= len(entries) {
+		return nil
+	}
+	entry := entries[m.externalToolsCursor]
+	if entry.Unavailable || entry.Build == nil {
+		m.pushLog(fmt.Sprintf("External tool %q 不可用，已忽略 enter", entry.Label))
+		return nil
+	}
+	m.launchingExternal = true
+	m.externalErr = nil
+	m.pushLog(fmt.Sprintf("Launching external tool: %s", entry.Command))
+	return entry.Build(m)
+}
+
 func (m model) renderLogs(width, height int) string {
 	start := 0
 	if len(m.logs) > height-2 {
@@ -2728,6 +2922,15 @@ func (m model) renderStatusBar(width int) string {
 		}
 		if m.updateStage != "" {
 			right += " | update-" + m.updateStage
+		}
+	} else if m.isExternalToolsPage() {
+		name, _ := m.resolveProjectNameForExternal()
+		right = fmt.Sprintf("%s | %s", right, name)
+		if m.launchingExternal {
+			right += " | launching"
+		}
+		if m.externalErr != nil {
+			right += " | last-error"
 		}
 	} else if m.overview != nil {
 		right = fmt.Sprintf("%s | enabled %d", right, m.overview.EnabledCount)
@@ -2831,6 +3034,16 @@ func (m model) currentSummary() string {
 			return fmt.Sprintf("Last remove: [%s] %s", m.removeResult.Type, m.removeResult.Name)
 		}
 		return "Run page ready"
+	}
+	if m.isExternalToolsPage() {
+		if m.launchingExternal {
+			return "Launching external tool"
+		}
+		if m.externalErr != nil {
+			return "Last external tool failed"
+		}
+		name, _ := m.resolveProjectNameForExternal()
+		return fmt.Sprintf("External tools ready (project: %s)", name)
 	}
 	if m.overview == nil {
 		return "Loading project state"

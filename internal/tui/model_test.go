@@ -270,7 +270,7 @@ func TestModelRunPageProcessesStreamedEventsAndSchedulesRefresh(t *testing.T) {
 
 func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.pageIndex = 5
 	m.width = 120
 	m.height = 32
 	m.settings = &app.GlobalSettingsState{
@@ -305,7 +305,7 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 
 func TestModelSettingsHotkeysToggleIDEAndStartEdit(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.pageIndex = 5
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:       "git@github.com:demo/dec.git",
 		AvailableIDEs: []string{"cursor", "codex"},
@@ -349,7 +349,7 @@ func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.pageIndex = 5
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:       "git@github.com:demo/dec.git",
 		AvailableIDEs: []string{"cursor"},
@@ -396,7 +396,7 @@ func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.pageIndex = 5
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:       "git@github.com:demo/dec.git",
 		AvailableIDEs: []string{"cursor"},

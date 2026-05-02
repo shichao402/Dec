@@ -3,6 +3,7 @@ package tui
 import (
 	"flag"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -128,7 +129,7 @@ func snapshotRunModel(width int) model {
 
 func snapshotSettingsModel(width int) model {
 	m := snapshotHomeModel(width)
-	m.pageIndex = 4
+	m.pageIndex = 5
 	m.settings = &app.GlobalSettingsState{
 		ConfigPath:       "/tmp/.dec/config.yaml",
 		VarsPath:         "/tmp/.dec/local/vars.yaml",
@@ -143,6 +144,33 @@ func snapshotSettingsModel(width int) model {
 	m.settingsSelectedIDEs = []string{"cursor"}
 	m.normalizeSettingsCursor()
 	return m
+}
+
+// snapshotExternalToolsModel 构造"外部应用"页的稳定基线：
+// - pageIndex 指向新菜单项（Run 与 Settings 之间，即 index 4）
+// - overview.ProjectName 固定为 "dec-project" 且 fromConfig=true
+// - 调用方应在 t.Cleanup 里通过 stubLocatePKV(t) 把 pkv 可用性锁定为"已安装"，
+//   避免跨机器 $PATH 差异导致 snapshot 抖动。
+func snapshotExternalToolsModel(width int) model {
+	m := snapshotHomeModel(width)
+	m.pageIndex = 4
+	m.overview.ProjectName = "dec-project"
+	m.overview.ProjectNameFromConfig = true
+	return m
+}
+
+// stubLocatePKV 在测试期间把 locatePKVOperation 固定成"pkv 存在"的桩，返回一个
+// 安全的 *exec.Cmd（真正被执行时只会 noop 地跑 /bin/true，snapshot 测试不会触发执行）。
+// 测试结束时自动还原。
+func stubLocatePKV(t *testing.T) {
+	t.Helper()
+	original := locatePKVOperation
+	locatePKVOperation = func(args ...string) (*exec.Cmd, error) {
+		return exec.Command("/bin/true"), nil
+	}
+	t.Cleanup(func() {
+		locatePKVOperation = original
+	})
 }
 
 // TestSnapshotHome 固定 Home 页在基线宽度下的完整渲染。
@@ -185,6 +213,19 @@ func TestSnapshotSettings(t *testing.T) {
 		t.Run(widthLabel(w), func(t *testing.T) {
 			m := snapshotSettingsModel(w)
 			assertSnapshot(t, "settings_"+widthLabel(w), m.View())
+		})
+	}
+}
+
+// TestSnapshotExternalTools 固定"外部应用"页在基线宽度下的完整渲染。
+// 使用 stubLocatePKV 锁定 pkv 可用性，避免跨机器 $PATH 差异。
+func TestSnapshotExternalTools(t *testing.T) {
+	for _, w := range snapshotWidths {
+		w := w
+		t.Run(widthLabel(w), func(t *testing.T) {
+			stubLocatePKV(t)
+			m := snapshotExternalToolsModel(w)
+			assertSnapshot(t, "external_tools_"+widthLabel(w), m.View())
 		})
 	}
 }

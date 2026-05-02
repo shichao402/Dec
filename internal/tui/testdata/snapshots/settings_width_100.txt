@@ -7,8 +7,8 @@
 │   Assets         │╰──────────────────────────────────────────────────────────────────────────────╯
 │   Project        │╭──────────────────────────────────────────────────────────────────────────────╮
 │   Run            ││                                                                              │
-│   Settings       ││  Repo URL: git@github.com:demo/dec.git                                       │
-│                  ││  当前远端: git@github.com:demo/dec.git                                       │
+│   外部应用       ││  Repo URL: git@github.com:demo/dec.git                                       │
+│   Settings       ││  当前远端: git@github.com:demo/dec.git                                       │
 │                  ││  已选 IDE: cursor                                                            │
 │                  ││  生效 IDE: cursor                                                            │
 │                  ││  全局配置: /tmp/.dec/config.yaml                                             │
