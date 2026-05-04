@@ -1,6 +1,6 @@
 # Dec TUI 架构设计
 
-状态：Draft
+状态：Stable（设计已实现，最新进度见 Vikunja Epic #57 与 git log）
 
 ## 1. 背景与目标
 
@@ -405,12 +405,6 @@ else:
 - 将 pull / push / remove / update 全部接入执行页
 - 提供统一确认框、错误重试、日志查看
 
-当前进度：
-
-- 阶段 4A（pull）与 4B（push）已落地，Run 页具备结构化执行骨架（Reporter / OperationEvent）
-- 阶段 4C（remove）已落地：`pkg/app/remove.go` 提供独立用例层，输出 `remove.prepare / repo / ide / cache / config / finish` 事件；`cmd/push.go --remove` 已改为复用该用例层；TUI Run 页新增 `x` 触发的选择器 → 二次确认 → 执行闭环，遵循用例层 `Confirmed=true` 约束
-- 阶段 4D（update，自更新）已落地：TUI Run 页新增 `u` 快捷键，触发 check → 版本对比 → 确认 → 替换二进制 的 `update` runMode，直接复用 `pkg/update` 的 `Check` / `DoUpdate` / `ManualInstallCommand`；不新增 `pkg/app/operations.go` 用例层，CLI `dec update` 与 TUI 共用同一套 `pkg/update` 代码
-
 验收标准：
 
 - 不再需要在交互流程中手写 `stdin` confirm
@@ -419,13 +413,13 @@ else:
 
 ### 阶段 5：打磨与测试
 
-- 响应式 terminal width 适配（5A，已落地）
-- Windows / macOS / Linux 行为校验（5B）：macOS 已落地（见 §9.8），Linux / Windows 拆成独立跟踪卡后续推进
-- 集成测试、快照测试、回退策略测试（5C，已落地，含 §9.6 PTY 集成测试）
+- 响应式 terminal width 适配
+- Windows / macOS / Linux 行为校验
+- 集成测试、快照测试、回退策略测试
 
 ## 9. 测试策略
 
-这一节是已落地的测试清单，随阶段 5C 一并稳定。新增 TUI 逻辑时对照本表决定要加哪种测试，不要让 snapshot 成为默认兜底。
+新增 TUI 逻辑时对照本表决定要加哪种测试，不要让 snapshot 成为默认兜底。
 
 ### 9.1 用例层单测
 
@@ -479,7 +473,6 @@ else:
 
 用伪终端验证 `dec` 无参能进入 TUI、完成一次最小导航、优雅退出，对应架构第 3.1 节中 `github.com/creack/pty` 的可选补充。
 
-- 当前状态：已落地
 - 位置：`internal/tui/pty_integration_test.go`
 - 依赖：`github.com/creack/pty`
 - 覆盖：构建 `dec` 可执行文件 → pty 启动 → 等待首屏（以状态栏 `q quit | tab switch` 为锚点，剥离 ANSI 后匹配）→ `tab` 循环 Home / Assets / Project / Run / 外部应用 / Settings → `shift+tab` 回退 → 发送 `q` → 断言退出码 0
@@ -493,58 +486,7 @@ else:
 - PTY 集成测试（§9.6，build tag `integration && !windows`）已在 `.github/workflows/build.yml` 与 `.github/workflows/release-smoke.yml` 的 test job 中启用：在 `ubuntu-latest` runner 上追加一步 `go test -tags=integration ./internal/tui/... -v`，与默认测试一起跑
 - snapshot 与 PTY 相关的 golden / pty 设备依赖在非 Linux runner 上可能不可用，新增时需要在测试头部注明平台要求（`t.Skip` / build tag）
 
-### 9.8 macOS 行为校验基线（阶段 5B）
-
-macOS 下的 TUI 行为已在 2026-04-22 本地通过 pty 自动化脚本校验，作为阶段 5B 的 macOS 部分交付。Linux 与 Windows 部分拆出独立跟踪卡推进（见第 8 节阶段 5 表格）。
-
-- 验证对象：`/tmp/dec`（`go build -o /tmp/dec .`，基于 `v1.11.15` 代码）
-- 验证方式：用 `github.com/creack/pty` 启动子进程，驱动输入序列，抓取输出并剥离 ANSI 后断言锚点
-- 验证矩阵：
-
-| 场景 | TERM | 窗口大小 | 语言环境 | 结果 |
-|------|------|----------|----------|------|
-| Terminal.app 典型 | xterm-256color | 120×40 | zh_CN.UTF-8 | ✓ 首屏 + 6 页 tab 循环 + `q` 退出码 0 |
-| iTerm2 典型 | xterm-256color | 180×50 | zh_CN.UTF-8 | ✓ 同上 |
-| 窄宽度基线 | xterm-256color | 80×30  | zh_CN.UTF-8 | ✓ 同上，布局未溢出 |
-
-- 入口分流（在 macOS `ttys00x` 真终端下复核）：
-  - `dec`（无参 + TTY + `TERM=xterm-256color`）→ TUI
-  - `echo '' \| dec`（非 TTY stdin）→ CLI 帮助
-  - `DEC_NO_TUI=1 dec` → CLI 帮助
-  - `dec --help` → CLI 帮助
-  - `TERM=dumb dec` → CLI 帮助
-  - `dec version` / `dec pull --help` → CLI 子命令保留，无 TUI 干扰
-- TTY 状态：CLI 路径执行后 `stty -a` 首行未变化，未检测到残留设置
-- PTY 集成测试：`go test -tags=integration ./internal/tui/...` 全部通过（含 §9.6 中的 `TestPTYStartupAndQuit`，现覆盖 tab 循环和 shift+tab 回退）
-
-本轮未发现需登记的新 bug；如后续在其他 macOS 版本、其他终端模拟器（Alacritty / WezTerm / Ghostty）或 SSH 嵌套场景下出现差异，应在 Dec 项目中建 `type:bug` 单独跟踪，而不是扩充此节。
-
-### 9.9 Linux 行为校验基线（阶段 5B-Linux）
-
-Linux 下的 TUI 行为已在 2026-04-29 通过 Docker Linux 环境中的 pty 自动化校验，作为阶段 5B 的 Linux 部分交付。本基线覆盖容器 / CI runner 风格的 Linux PTY，不替代后续真实桌面终端或 SSH 环境中发现差异时的独立 bug 跟踪。
-
-- 验证对象：测试内临时构建的 `dec` 可执行文件（`go build -o <temp>/dec .`）
-- 验证方式：在 Linux 容器内运行 `go test -tags=integration ./internal/tui/... -run TestPTYStartupAndQuit -v`，由 `github.com/creack/pty` 启动子进程、驱动输入序列、抓取输出并剥离 ANSI 后断言锚点
-- Docker 基线命令：
-
-```bash
-docker run --rm -v "$PWD":/src -w /src golang:1.21-bookworm \
-  bash -lc '/usr/local/go/bin/go test -tags=integration ./internal/tui/... -run TestPTYStartupAndQuit -v'
-```
-
-- 验证矩阵：
-
-| 场景 | TERM | 窗口大小 | 语言环境 | 结果 |
-|------|------|----------|----------|------|
-| Linux CI / 容器宽屏 | xterm-256color | 120×40 | C.UTF-8 | ✓ 首屏 + 6 页 tab 循环 + shift+tab 回退 + `q` 退出码 0 |
-| Linux console 窄宽度 | linux | 80×30 | C.UTF-8 | ✓ 同上，布局未溢出 |
-
-- 本地 macOS 复核：`go test -tags=integration ./internal/tui/... -run TestPTYStartupAndQuit -v` 同样通过上述两个 TERM 场景
-- 本轮未发现需登记的新 Linux bug。若后续在 GNOME Terminal / Konsole / xterm / SSH 嵌套等真实环境里出现颜色、边框、输入法或 Alt 序列差异，应在 Dec 项目中新建 `type:bug` 或 `type:improvement`，不要把真实环境差异混进本基线。
-
-### 9.10 Project 页变量编辑（外部 editor 挂起）
-
-阶段：EPIC TUI 化子卡 VK-15（task #80）。
+### 9.8 Project 页变量编辑（外部 editor 挂起）
 
 - Project 页下方新增 "Project Variables" 只读区块，显示 `.dec/vars.yaml` 路径、有效 editor 命令、以及通过 `pkg/vars.ExtractPlaceholdersFromDir` 从 `.dec/cache/` 扫出的已用占位符及其解析来源（project / global / missing）
 - 按 `e` 键触发 `openProjectVarsEditorCmd`：调用 `pkg/app.EnsureProjectVarsFile` 确保模板存在，再用 `pkg/editor.BuildCommand` 构造 `*exec.Cmd`，交给 `tea.ExecProcess` 挂起 TUI 执行外部编辑器，编辑器退出后通过 `projectVarsEditedMsg` 触发 `loadProjectVarsCmd` 重新拉一次视图
