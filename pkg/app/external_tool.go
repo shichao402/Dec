@@ -65,7 +65,16 @@ func BuildPKVUnlockCmd() (*exec.Cmd, *bytes.Buffer, error) {
 }
 
 // ParsePKVUnlockOutput 把 BuildPKVUnlockCmd 的 buffer 内容 trim 换行/空白后返回 BW_SESSION。
-// 空字符串视为 error（pkv unlock 成功时 stdout 必然至少有一行 session）。
+//
+// pkv unlock 成功时 stdout 是一行 bare session 字符串（不包含空白、换行），
+// 所有诊断/交互文本都走 stderr。这里做三层校验，任一不满足都当成解锁失败：
+//
+//  1. buffer 非 nil；
+//  2. trim 后非空；
+//  3. trim 后不含空白字符（空格/换行）——避免误把 stderr 串进 stdout 的异常输出
+//     或者带行尾诊断的输出当成 session 缓存下去。
+//
+// 即便 exit code == 0 但 stdout 形态不对，也拒绝写入 session。
 func ParsePKVUnlockOutput(buf *bytes.Buffer) (string, error) {
 	if buf == nil {
 		return "", fmt.Errorf("pkv unlock 未捕获任何输出")
@@ -73,6 +82,9 @@ func ParsePKVUnlockOutput(buf *bytes.Buffer) (string, error) {
 	session := strings.TrimSpace(buf.String())
 	if session == "" {
 		return "", fmt.Errorf("pkv unlock 未输出 session，可能未成功解锁")
+	}
+	if strings.ContainsAny(session, " \t\r\n") {
+		return "", fmt.Errorf("pkv unlock 输出格式异常（包含空白字符），不是有效的 BW_SESSION")
 	}
 	return session, nil
 }

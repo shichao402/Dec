@@ -963,7 +963,8 @@ func launchPKVCmd(bwSession string) tea.Cmd {
 	})
 }
 
-// launchPKVGetAllCmd 挂起 TUI 运行 `pkv get all <projectName>`。
+// launchPKVGetAllCmd 挂起 TUI 运行 `pkv get <projectName> all`。
+// pkv CLI 约定是 `pkv get <folder> <ssh|env|note|all>`，folder 必须在 resource type 之前。
 // bwSession 语义同 launchPKVCmd。projectName 为空时交由 pkv 自行报错。
 func launchPKVGetAllCmd(projectName, bwSession string) tea.Cmd {
 	var (
@@ -971,9 +972,9 @@ func launchPKVGetAllCmd(projectName, bwSession string) tea.Cmd {
 		err error
 	)
 	if bwSession != "" {
-		cmd, err = locatePKVWithEnvOperation([]string{"BW_SESSION=" + bwSession}, "get", "all", projectName)
+		cmd, err = locatePKVWithEnvOperation([]string{"BW_SESSION=" + bwSession}, "get", projectName, "all")
 	} else {
-		cmd, err = locatePKVOperation("get", "all", projectName)
+		cmd, err = locatePKVOperation("get", projectName, "all")
 	}
 	if err != nil {
 		return func() tea.Msg {

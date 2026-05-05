@@ -191,7 +191,8 @@ func TestParsePKVUnlockOutput(t *testing.T) {
 	}{
 		{name: "带末尾换行", input: "session-xyz\n", want: "session-xyz"},
 		{name: "两侧空白", input: "  session-xyz  \n", want: "session-xyz"},
-		{name: "多行（取整体 trim）", input: "session-xyz\n\n", want: "session-xyz"},
+		{name: "中间含空白视为非法", input: "session-xyz something\n", wantErr: true},
+		{name: "多行视为非法", input: "session-xyz\nmore\n", wantErr: true},
 		{name: "空串", input: "", wantErr: true},
 		{name: "仅空白", input: "   \n\t\n", wantErr: true},
 	}
