@@ -10,15 +10,15 @@
 │   外部应用           ││  项目短名: dec-project                                                                                           │
 │   Settings           ││  来自 .dec/config.yaml                                                                                           │
 │                      ││  pkv 已就绪，选中后按 enter 执行；执行期间 Dec TUI 会挂起。                                                      │
+│                      ││  pkv 会话: 已解锁（BW_SESSION 缓存于 TUI 进程内，退出即清）                                                      │
 │                      ││  快捷键：j/k 移动 · enter 执行 · tab 切换页                                                                      │
 │                      ││  可用命令                                                                                                        │
-│                      ││  > pkv                                                                                                           │
+│                      ││  > pkv unlock                                                                                                    │
+│                      ││  pkv                                                                                                             │
 │                      ││  pkv get all dec-project                                                                                         │
 │                      ││  预览                                                                                                            │
-│                      ││  $ pkv                                                                                                           │
-│                      ││  交互模式进入 pkv（直接把终端交给 pkv，退出后回到 Dec）。                                                        │
-│                      ││                                                                                                                  │
-│                      ││                                                                                                                  │
+│                      ││  $ pkv unlock                                                                                                    │
+│                      ││  重新解锁 / 刷新 session（已存在缓存的会话；pkv 仍有效时会直接回显当前 session，不再问密码）。                   │
 │                      ││                                                                                                                  │
 │                      ││                                                                                                                  │
 │                      ││                                                                                                                  │

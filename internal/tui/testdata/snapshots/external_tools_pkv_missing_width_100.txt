@@ -9,17 +9,17 @@
 │   Run            ││                                                                              │
 │   外部应用       ││  项目短名: dec-project                                                       │
 │   Settings       ││  来自 .dec/config.yaml                                                       │
-│                  ││  pkv 已就绪，选中后按 enter 执行；执行期间 Dec TUI 会挂起。                  │
+│                  ││  pkv 不可用: 未找到 pkv 可执行文件，请确认 pkv 已安装并在 $PATH 中           │
+│                  ││  pkv 会话: 未解锁（选 pkv unlock 解锁以便后续命令复用 session）              │
 │                  ││  快捷键：j/k 移动 · enter 执行 · tab 切换页                                  │
 │                  ││  可用命令                                                                    │
-│                  ││  > pkv                                                                       │
-│                  ││  pkv get all dec-project                                                     │
+│                  ││  > pkv unlock  (pkv 未安装)                                                  │
+│                  ││  pkv  (pkv 未安装)                                                           │
+│                  ││  pkv get all dec-project  (pkv 未安装)                                       │
 │                  ││  预览                                                                        │
-│                  ││  $ pkv                                                                       │
-│                  ││  交互模式进入 pkv（直接把终端交给 pkv，退出后回到 Dec）。                    │
-│                  ││                                                                              │
-│                  ││                                                                              │
-│                  ││                                                                              │
+│                  ││  $ pkv unlock                                                                │
+│                  ││  解锁 Bitwarden vault 并把 BW_SESSION 缓存在 Dec 进程内（仅本次 TUI          │
+│                  ││  生命周期）。                                                                │
 │                  ││                                                                              │
 │                  ││                                                                              │
 │                  ││                                                                              │

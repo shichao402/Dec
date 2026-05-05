@@ -2,6 +2,7 @@ package tui
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -173,6 +174,18 @@ func stubLocatePKV(t *testing.T) {
 	})
 }
 
+// stubLocatePKVMissing 把 locatePKVOperation 固定为"未找到 pkv"，用于覆盖 pkv 不可用分支。
+func stubLocatePKVMissing(t *testing.T) {
+	t.Helper()
+	original := locatePKVOperation
+	locatePKVOperation = func(args ...string) (*exec.Cmd, error) {
+		return nil, fmt.Errorf("未找到 pkv 可执行文件，请确认 pkv 已安装并在 $PATH 中")
+	}
+	t.Cleanup(func() {
+		locatePKVOperation = original
+	})
+}
+
 // TestSnapshotHome 固定 Home 页在基线宽度下的完整渲染。
 func TestSnapshotHome(t *testing.T) {
 	for _, w := range snapshotWidths {
@@ -217,15 +230,34 @@ func TestSnapshotSettings(t *testing.T) {
 	}
 }
 
-// TestSnapshotExternalTools 固定"外部应用"页在基线宽度下的完整渲染。
-// 使用 stubLocatePKV 锁定 pkv 可用性，避免跨机器 $PATH 差异。
+// TestSnapshotExternalTools 固定"外部应用"页在三种 pkv 会话状态下的完整渲染。
+// 使用 stubLocatePKV / 自定义桩锁定 pkv 可用性，避免跨机器 $PATH 差异。
+//
+// 三种状态：
+//   - unlocked：pkv 可用、bwSession 为空（尚未解锁）
+//   - locked  ：pkv 可用、bwSession 已缓存（菜单 description 切换、顶部状态行绿色）
+//   - pkv_missing：pkv 不在 PATH（所有 entry 都 Unavailable）
 func TestSnapshotExternalTools(t *testing.T) {
 	for _, w := range snapshotWidths {
 		w := w
-		t.Run(widthLabel(w), func(t *testing.T) {
+		t.Run("unlocked_"+widthLabel(w), func(t *testing.T) {
 			stubLocatePKV(t)
 			m := snapshotExternalToolsModel(w)
-			assertSnapshot(t, "external_tools_"+widthLabel(w), m.View())
+			// bwSession 显式留空，保险起见
+			m.bwSession = ""
+			assertSnapshot(t, "external_tools_unlocked_"+widthLabel(w), m.View())
+		})
+		t.Run("locked_"+widthLabel(w), func(t *testing.T) {
+			stubLocatePKV(t)
+			m := snapshotExternalToolsModel(w)
+			m.bwSession = "fake-session"
+			assertSnapshot(t, "external_tools_locked_"+widthLabel(w), m.View())
+		})
+		t.Run("pkv_missing_"+widthLabel(w), func(t *testing.T) {
+			stubLocatePKVMissing(t)
+			m := snapshotExternalToolsModel(w)
+			m.bwSession = ""
+			assertSnapshot(t, "external_tools_pkv_missing_"+widthLabel(w), m.View())
 		})
 	}
 }
