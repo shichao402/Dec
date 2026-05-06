@@ -2,6 +2,7 @@
 package repo
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -298,7 +299,7 @@ func (g *GitOps) ensureNoSyncInProgress() error {
 
 	for _, marker := range markers {
 		if _, err := os.Stat(marker.path); err == nil {
-			return fmt.Errorf(marker.message)
+			return errors.New(marker.message)
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("检查仓库同步状态失败: %w", err)
 		}
