@@ -137,11 +137,11 @@ func TestBuildPKVUnlockCmd_CapturesStdout(t *testing.T) {
 	}
 	t.Setenv("PATH", tmpDir)
 
-	// 强制走 /dev/tty 不可用的 fallback 路径，stdin/stderr 应保持 os.Stdin/os.Stderr，
+	// 强制走 console 不可用的 fallback 路径，stdin/stderr 应保持 os.Stdin/os.Stderr，
 	// 这样 cmd.Run() 才能直接拿到测试进程的句柄，stdout buffer 才能稳定捕获。
 	prev := openTTYFunc
 	t.Cleanup(func() { openTTYFunc = prev })
-	openTTYFunc = func() (*os.File, error) { return nil, errors.New("tty unavailable in test") }
+	openTTYFunc = func() (*os.File, *os.File, error) { return nil, nil, errors.New("tty unavailable in test") }
 
 	cmd, buf, cleanup, err := BuildPKVUnlockCmd()
 	if err != nil {
@@ -250,13 +250,14 @@ func TestLocatePKVInteractive_TTYAttached(t *testing.T) {
 	t.Setenv("PATH", tmpDir)
 
 	// 临时 file 作为 tty 替身。test cleanup 会确认它被 attachTTYIfAvailable 关闭。
+	// 这里 in == out（模拟 Unix 一个 fd 双向用），cleanup 应只关一次而不是 double-close。
 	stub, err := os.CreateTemp(tmpDir, "fake-tty-*")
 	if err != nil {
 		t.Fatalf("创建 stub tty 失败: %v", err)
 	}
 	prev := openTTYFunc
 	t.Cleanup(func() { openTTYFunc = prev })
-	openTTYFunc = func() (*os.File, error) { return stub, nil }
+	openTTYFunc = func() (*os.File, *os.File, error) { return stub, stub, nil }
 
 	cmd, cleanup, err := LocatePKVInteractive("unlock")
 	if err != nil {
@@ -297,7 +298,7 @@ func TestLocatePKVInteractive_TTYUnavailable(t *testing.T) {
 
 	prev := openTTYFunc
 	t.Cleanup(func() { openTTYFunc = prev })
-	openTTYFunc = func() (*os.File, error) { return nil, errors.New("no tty") }
+	openTTYFunc = func() (*os.File, *os.File, error) { return nil, nil, errors.New("no tty") }
 
 	cmd, cleanup, err := LocatePKVInteractive("unlock")
 	if err != nil {

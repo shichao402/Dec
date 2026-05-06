@@ -39,17 +39,22 @@ func LocatePKVWithEnv(extraEnv []string, args ...string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// openTTYFunc 是 /dev/tty 打开钩子，方便测试 mock。
-// 默认实现：在 Unix 上打开 /dev/tty；Windows 或不可用时返回 (nil, err)。
-var openTTYFunc = func() (*os.File, error) {
-	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
-}
-
-// LocatePKVInteractive 与 LocatePKV 同，但额外把 stdin/stderr 切到 /dev/tty
-// （绕开 bubbletea 持有的 fd 0/2，避免 raw 模式残留导致 bw 读到错乱密码字节）。
+// openTTYFunc 是 console/tty 打开钩子，方便测试 mock。
 //
-// 返回的 cleanup 在调用方拿到 cmd.Run() 结果之后调用，用于关闭 /dev/tty 文件句柄。
-// 即便 cmd 失败也要 cleanup。如果 /dev/tty 不可用（Windows 或无 controlling tty），
+// 返回 (in, out, err) 两个 *os.File：
+//   - Unix：打开 /dev/tty，in == out（一个 fd 双向使用）
+//   - Windows：打开 CONIN$ 和 CONOUT$，in != out（console 输入/输出是不同句柄）
+//   - 任意平台失败：返回 (nil, nil, err)，调用方回退到 os.Stdin/os.Stderr
+//
+// 平台默认实现见 external_tool_tty_unix.go / external_tool_tty_windows.go。
+var openTTYFunc = defaultOpenTTY
+
+// LocatePKVInteractive 与 LocatePKV 同，但额外把 stdin/stderr 切到当前 console/tty
+// （Unix: /dev/tty；Windows: CONIN$/CONOUT$），绕开 bubbletea 持有的 fd 0/2，避免
+// raw 模式残留导致 bw 读到错乱密码字节。
+//
+// 返回的 cleanup 在调用方拿到 cmd.Run() 结果之后调用，用于关闭 console 文件句柄。
+// 即便 cmd 失败也要 cleanup。如果 console 不可用（daemon / 无 controlling tty），
 // 会回退到 os.Stdin / os.Stderr，cleanup 是 no-op。
 //
 // stdout 仍为 os.Stdout（由调用方按需覆盖，比如 unlock 流程要换成 bytes.Buffer）。
@@ -74,38 +79,51 @@ func LocatePKVInteractiveWithEnv(extraEnv []string, args ...string) (*exec.Cmd, 
 	return cmd, cleanup, nil
 }
 
-// attachTTYIfAvailable 尝试打开 /dev/tty，把 cmd.Stdin / cmd.Stderr 切过去。
+// attachTTYIfAvailable 尝试打开当前 console/tty，把 cmd.Stdin / cmd.Stderr 切过去。
 // 不影响 cmd.Stdout（调用方可能挂了 buffer）。返回的 cleanup 关闭打开的 tty 文件。
-// 打不开 /dev/tty（Windows、daemon、无 controlling tty）时维持原 Stdin/Stderr，cleanup no-op。
+//
+// Unix 下 in == out 都指向同一个 /dev/tty fd，cleanup 只 Close 一次。
+// Windows 下 in (CONIN$) 和 out (CONOUT$) 是不同句柄，cleanup 各 Close 一次。
+//
+// 打不开 console（daemon、无 controlling tty、CONIN$/CONOUT$ 不可用）时维持原 Stdin/Stderr，
+// cleanup no-op。
 func attachTTYIfAvailable(cmd *exec.Cmd) func() {
-	tty, err := openTTYFunc()
-	if err != nil || tty == nil {
+	in, out, err := openTTYFunc()
+	if err != nil || in == nil || out == nil {
 		return func() {}
 	}
-	cmd.Stdin = tty
-	cmd.Stderr = tty
-	return func() { _ = tty.Close() }
+	cmd.Stdin = in
+	cmd.Stderr = out
+	return func() {
+		_ = in.Close()
+		// in == out 时（Unix /dev/tty 双向 fd）只 Close 一次，避免 double-close。
+		if out != in {
+			_ = out.Close()
+		}
+	}
 }
 
 // BuildPKVUnlockCmd 构造一个用于 `pkv unlock` 的 cmd：
 //
 //	stdout = 新建的 *bytes.Buffer（捕获 session 字符串）
-//	stderr = /dev/tty（让 bw 的密码提示对用户可见，绕开 bubbletea 占用的 fd 2）
-//	stdin  = /dev/tty（让用户能输 master password，绕开 bubbletea 持有的 fd 0）
+//	stderr = console（让 bw 的密码提示对用户可见，绕开 bubbletea 占用的 fd 2）
+//	stdin  = console（让用户能输 master password，绕开 bubbletea 持有的 fd 0）
+//
+// 这里的 "console" Unix 上是 /dev/tty，Windows 上是 CONIN$/CONOUT$。
 //
 // 为什么不直接 os.Stdin / os.Stderr：bubbletea 启动时把 stdin 切到 raw 模式，
 // 即便 ReleaseTerminal 调了 term.Restore，readLoop / cancelreader 仍可能与 bw
 // 抢占 fd 0 字节流，导致 bw 读到的密码与用户实际输入对不上 → decryption failed。
-// 直接打开 /dev/tty 拿一个干净的 fd 给 pkv/bw，可以彻底绕开这个抢占。
+// 直接打开独立的 console 句柄给 pkv/bw，可以彻底绕开这个抢占。
 //
-// /dev/tty 不可用时（Windows / 无 controlling tty / 重定向）回退到 os.Stdin/os.Stderr，
+// console 不可用时（daemon / 无 controlling tty / 重定向）回退到 os.Stdin/os.Stderr，
 // 行为与历史版本一致；调用 cleanup 是 no-op。
 //
 // 调用方（TUI）负责：
 //
 //  1. 把 cmd 交给 tea.ExecProcess 挂起运行；
 //  2. 在 callback 里调用 ParsePKVUnlockOutput(buf) 取 session；
-//  3. 不论成功失败都调用 cleanup 关闭打开的 /dev/tty fd。
+//  3. 不论成功失败都调用 cleanup 关闭打开的 console fd。
 func BuildPKVUnlockCmd() (*exec.Cmd, *bytes.Buffer, func(), error) {
 	path, err := exec.LookPath("pkv")
 	if err != nil {
