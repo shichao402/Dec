@@ -1003,45 +1003,25 @@ func launchPKVGetAllCmd(projectName, bwSession string) tea.Cmd {
 // 避开 bubbletea 占用的 fd 0/2（避免 bw 读到残留 raw mode 下的密码字节）。
 // /dev/tty 不可用时会回退到 os.Stdin/os.Stderr，行为与发现问题之前一致。
 // callback 调用 cleanup 关闭 /dev/tty 句柄避免 fd 泄漏。
-//
-// DEC_DEBUG_UNLOCK=1 时会把关键节点写到 <home>/.dec/pkv-unlock-debug.log，
-// 用于定位 Windows 上的 stdin race / session 解析异常。
 func launchPKVUnlockCmd() tea.Cmd {
-	pkvDebug.log("launchPKVUnlockCmd: enter, building cmd")
 	cmd, buf, cleanup, err := buildPKVUnlockCmdOperation()
 	if err != nil {
-		pkvDebug.log("launchPKVUnlockCmd: build cmd failed: %v", err)
 		cleanup()
 		return func() tea.Msg {
 			return pkvUnlockedMsg{err: err}
 		}
 	}
-	pkvDebug.log("launchPKVUnlockCmd: cmd built path=%s args=%v stdin_type=%T stderr_type=%T",
-		cmd.Path, cmd.Args, cmd.Stdin, cmd.Stderr)
 	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
-		pkvDebug.log("launchPKVUnlockCmd: ExecProcess returned, runErr=%v exitCode=%d", runErr, exitCodeOf(cmd))
-		pkvDebug.dumpBuffer("stdout_buffer", buf.Bytes(), 256)
 		cleanup()
-		pkvDebug.log("launchPKVUnlockCmd: cleanup done")
 		if runErr != nil {
 			return pkvUnlockedMsg{err: runErr}
 		}
 		session, parseErr := parsePKVUnlockOutputOperation(buf)
 		if parseErr != nil {
-			pkvDebug.log("launchPKVUnlockCmd: parse session failed: %v", parseErr)
 			return pkvUnlockedMsg{err: parseErr}
 		}
-		pkvDebug.log("launchPKVUnlockCmd: session captured len=%d", len(session))
 		return pkvUnlockedMsg{session: session}
 	})
-}
-
-// exitCodeOf 安全提取 cmd 的退出码；ProcessState 不存在或异常时返回 -1。
-func exitCodeOf(cmd *exec.Cmd) int {
-	if cmd == nil || cmd.ProcessState == nil {
-		return -1
-	}
-	return cmd.ProcessState.ExitCode()
 }
 
 func startPullRunCmd(projectRoot string, stream chan<- tea.Msg) tea.Cmd {
