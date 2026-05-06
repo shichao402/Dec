@@ -183,9 +183,13 @@ var updateManualInstallCommand = func() string {
 // 默认直接代理到 app.LocatePKV。
 var locatePKVOperation = app.LocatePKV
 
-// locatePKVWithEnvOperation / buildPKVUnlockCmdOperation / parsePKVUnlockOutputOperation
-// 同样是测试打桩用的替换点，生产路径直接代理到 app 包。
+// locatePKVWithEnvOperation / locatePKV*InteractiveOperation /
+// buildPKVUnlockCmdOperation / parsePKVUnlockOutputOperation 都是测试打桩用的替换点，
+// 生产路径直接代理到 app 包。Interactive 变体专门给"需要让 bw 弹密码"的子命令用，
+// 它们会把 stdin/stderr 切到 /dev/tty 绕开 bubbletea 占用的 fd（参见 app.attachTTYIfAvailable）。
 var locatePKVWithEnvOperation = app.LocatePKVWithEnv
+var locatePKVInteractiveOperation = app.LocatePKVInteractive
+var locatePKVInteractiveWithEnvOperation = app.LocatePKVInteractiveWithEnv
 var buildPKVUnlockCmdOperation = app.BuildPKVUnlockCmd
 var parsePKVUnlockOutputOperation = app.ParsePKVUnlockOutput
 
@@ -940,64 +944,75 @@ func openProjectVarsEditorCmd(projectRoot, editorCmd string) tea.Cmd {
 }
 
 // launchPKVCmd 挂起 TUI，用 tea.ExecProcess 呼起 pkv 交互模式。
-// bwSession 非空时会通过 LocatePKVWithEnv 把 BW_SESSION 注入子进程环境，
-// pkv 内部 `bw` 会识别并复用，不再问 master password。
-// 未找到 pkv 时直接推送带错误的消息，不走 ExecProcess。
+// bwSession 非空时走 LocatePKVWithEnv（不交互，不需要 /dev/tty），把 BW_SESSION
+// 注入子进程环境，pkv 内部 `bw` 会识别并复用、不再问 master password。
+// bwSession 为空时走 LocatePKVInteractive，stdin/stderr 接 /dev/tty，避免
+// bubbletea 占用的 fd 导致 bw 读乱密码字节。未找到 pkv 时直接推送带错误的消息。
 func launchPKVCmd(bwSession string) tea.Cmd {
 	var (
-		cmd *exec.Cmd
-		err error
+		cmd     *exec.Cmd
+		cleanup = func() {}
+		err     error
 	)
 	if bwSession != "" {
 		cmd, err = locatePKVWithEnvOperation([]string{"BW_SESSION=" + bwSession})
 	} else {
-		cmd, err = locatePKVOperation()
+		cmd, cleanup, err = locatePKVInteractiveOperation()
 	}
 	if err != nil {
+		cleanup()
 		return func() tea.Msg {
 			return externalToolFinishedMsg{tool: "pkv", err: err}
 		}
 	}
 	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
+		cleanup()
 		return externalToolFinishedMsg{tool: "pkv", err: runErr}
 	})
 }
 
 // launchPKVGetAllCmd 挂起 TUI 运行 `pkv get <projectName> all`。
 // pkv CLI 约定是 `pkv get <folder> <ssh|env|note|all>`，folder 必须在 resource type 之前。
-// bwSession 语义同 launchPKVCmd。projectName 为空时交由 pkv 自行报错。
+// bwSession 语义同 launchPKVCmd：非空走环境注入、空走 /dev/tty 交互变体。
+// projectName 为空时交由 pkv 自行报错。
 func launchPKVGetAllCmd(projectName, bwSession string) tea.Cmd {
 	var (
-		cmd *exec.Cmd
-		err error
+		cmd     *exec.Cmd
+		cleanup = func() {}
+		err     error
 	)
 	if bwSession != "" {
 		cmd, err = locatePKVWithEnvOperation([]string{"BW_SESSION=" + bwSession}, "get", projectName, "all")
 	} else {
-		cmd, err = locatePKVOperation("get", projectName, "all")
+		cmd, cleanup, err = locatePKVInteractiveOperation("get", projectName, "all")
 	}
 	if err != nil {
+		cleanup()
 		return func() tea.Msg {
 			return externalToolFinishedMsg{tool: "pkv get all", err: err}
 		}
 	}
 	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
+		cleanup()
 		return externalToolFinishedMsg{tool: "pkv get all", err: runErr}
 	})
 }
 
 // launchPKVUnlockCmd 挂起 TUI 运行 `pkv unlock`。
-// cmd.Stdout 预挂 *bytes.Buffer 捕获 session；Stdin/Stderr 接当前 tty 让 bw 问密码。
-// tea.ExecProcess 对已赋值的 Std* 字段不再覆盖（bubbletea@v1 exec.go:SetStdin/out/err），
-// 因此 bw 依然能从 tty 读 master password，pkv 的 session 输出进我们的 buffer。
+// cmd.Stdout 预挂 *bytes.Buffer 捕获 session；Stdin/Stderr 优先接 /dev/tty
+// 避开 bubbletea 占用的 fd 0/2（避免 bw 读到残留 raw mode 下的密码字节）。
+// /dev/tty 不可用时会回退到 os.Stdin/os.Stderr，行为与发现问题之前一致。
+// callback 调用 cleanup 关闭 /dev/tty 句柄避免 fd 泄漏。
 func launchPKVUnlockCmd() tea.Cmd {
-	cmd, buf, err := buildPKVUnlockCmdOperation()
+	cmd, buf, cleanup, err := buildPKVUnlockCmdOperation()
 	if err != nil {
+		cleanup()
 		return func() tea.Msg {
 			return pkvUnlockedMsg{err: err}
 		}
 	}
 	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
+		cleanup()
 		if runErr != nil {
 			return pkvUnlockedMsg{err: runErr}
 		}

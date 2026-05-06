@@ -39,29 +39,86 @@ func LocatePKVWithEnv(extraEnv []string, args ...string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
+// openTTYFunc 是 /dev/tty 打开钩子，方便测试 mock。
+// 默认实现：在 Unix 上打开 /dev/tty；Windows 或不可用时返回 (nil, err)。
+var openTTYFunc = func() (*os.File, error) {
+	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
+}
+
+// LocatePKVInteractive 与 LocatePKV 同，但额外把 stdin/stderr 切到 /dev/tty
+// （绕开 bubbletea 持有的 fd 0/2，避免 raw 模式残留导致 bw 读到错乱密码字节）。
+//
+// 返回的 cleanup 在调用方拿到 cmd.Run() 结果之后调用，用于关闭 /dev/tty 文件句柄。
+// 即便 cmd 失败也要 cleanup。如果 /dev/tty 不可用（Windows 或无 controlling tty），
+// 会回退到 os.Stdin / os.Stderr，cleanup 是 no-op。
+//
+// stdout 仍为 os.Stdout（由调用方按需覆盖，比如 unlock 流程要换成 bytes.Buffer）。
+func LocatePKVInteractive(args ...string) (*exec.Cmd, func(), error) {
+	cmd, err := LocatePKV(args...)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	cleanup := attachTTYIfAvailable(cmd)
+	return cmd, cleanup, nil
+}
+
+// LocatePKVInteractiveWithEnv 是 LocatePKVInteractive 的 env 注入版本。
+// 语义同 LocatePKVWithEnv + LocatePKVInteractive 的并集。
+func LocatePKVInteractiveWithEnv(extraEnv []string, args ...string) (*exec.Cmd, func(), error) {
+	cmd, cleanup, err := LocatePKVInteractive(args...)
+	if err != nil {
+		return nil, cleanup, err
+	}
+	env := append(os.Environ(), extraEnv...)
+	cmd.Env = env
+	return cmd, cleanup, nil
+}
+
+// attachTTYIfAvailable 尝试打开 /dev/tty，把 cmd.Stdin / cmd.Stderr 切过去。
+// 不影响 cmd.Stdout（调用方可能挂了 buffer）。返回的 cleanup 关闭打开的 tty 文件。
+// 打不开 /dev/tty（Windows、daemon、无 controlling tty）时维持原 Stdin/Stderr，cleanup no-op。
+func attachTTYIfAvailable(cmd *exec.Cmd) func() {
+	tty, err := openTTYFunc()
+	if err != nil || tty == nil {
+		return func() {}
+	}
+	cmd.Stdin = tty
+	cmd.Stderr = tty
+	return func() { _ = tty.Close() }
+}
+
 // BuildPKVUnlockCmd 构造一个用于 `pkv unlock` 的 cmd：
 //
 //	stdout = 新建的 *bytes.Buffer（捕获 session 字符串）
-//	stderr = os.Stderr（让 bw 的密码提示对用户可见）
-//	stdin  = os.Stdin（让用户能输 master password）
+//	stderr = /dev/tty（让 bw 的密码提示对用户可见，绕开 bubbletea 占用的 fd 2）
+//	stdin  = /dev/tty（让用户能输 master password，绕开 bubbletea 持有的 fd 0）
 //
-// 调用方负责把 cmd 交给 tea.ExecProcess，在 callback 里调 ParsePKVUnlockOutput(buf)。
-// 未找到 pkv 时返回 (nil, nil, error)。
+// 为什么不直接 os.Stdin / os.Stderr：bubbletea 启动时把 stdin 切到 raw 模式，
+// 即便 ReleaseTerminal 调了 term.Restore，readLoop / cancelreader 仍可能与 bw
+// 抢占 fd 0 字节流，导致 bw 读到的密码与用户实际输入对不上 → decryption failed。
+// 直接打开 /dev/tty 拿一个干净的 fd 给 pkv/bw，可以彻底绕开这个抢占。
 //
-// tea.ExecProcess 只在 cmd 的 Std* 为 nil 时才覆盖为 tty，所以这里预先挂好的 Stdout
-// (bytes.Buffer) 会被保留，Stderr/Stdin (os.Stderr/os.Stdin) 会被 bubbletea 识别为
-// 已赋值也不再覆盖。bw 从 tty (stderr/stdin) 问密码，pkv 从 stdout 输出 session。
-func BuildPKVUnlockCmd() (*exec.Cmd, *bytes.Buffer, error) {
+// /dev/tty 不可用时（Windows / 无 controlling tty / 重定向）回退到 os.Stdin/os.Stderr，
+// 行为与历史版本一致；调用 cleanup 是 no-op。
+//
+// 调用方（TUI）负责：
+//
+//  1. 把 cmd 交给 tea.ExecProcess 挂起运行；
+//  2. 在 callback 里调用 ParsePKVUnlockOutput(buf) 取 session；
+//  3. 不论成功失败都调用 cleanup 关闭打开的 /dev/tty fd。
+func BuildPKVUnlockCmd() (*exec.Cmd, *bytes.Buffer, func(), error) {
 	path, err := exec.LookPath("pkv")
 	if err != nil {
-		return nil, nil, fmt.Errorf("未找到 pkv 可执行文件，请确认 pkv 已安装并在 $PATH 中")
+		return nil, nil, func() {}, fmt.Errorf("未找到 pkv 可执行文件，请确认 pkv 已安装并在 $PATH 中")
 	}
 	buf := &bytes.Buffer{}
 	cmd := exec.Command(path, "unlock")
+	// 默认先挂上 stdin/stderr 兜底，再尝试切到 /dev/tty。
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = buf
 	cmd.Stderr = os.Stderr
-	return cmd, buf, nil
+	cmd.Stdout = buf
+	cleanup := attachTTYIfAvailable(cmd)
+	return cmd, buf, cleanup, nil
 }
 
 // ParsePKVUnlockOutput 把 BuildPKVUnlockCmd 的 buffer 内容 trim 换行/空白后返回 BW_SESSION。

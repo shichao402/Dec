@@ -216,11 +216,11 @@ func TestLaunchPKVUnlockCmd_ParseBuffer(t *testing.T) {
 	}
 
 	// 用一个实际存在的 noop 命令，同时喂一个预填好的 buffer
-	buildPKVUnlockCmdOperation = func() (*exec.Cmd, *bytes.Buffer, error) {
+	buildPKVUnlockCmdOperation = func() (*exec.Cmd, *bytes.Buffer, func(), error) {
 		buf := bytes.NewBufferString("session-xyz\n")
 		// 用 true 命令（/usr/bin/true 或 /bin/true）作为 noop；跑 tea.Cmd 返回的闭包时
 		// tea.ExecProcess 会试图执行它，为避免真执行，我们只构造闭包但不运行。
-		return exec.Command("/bin/true"), buf, nil
+		return exec.Command("/bin/true"), buf, func() {}, nil
 	}
 
 	cmd := launchPKVUnlockCmd()

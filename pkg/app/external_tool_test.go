@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -136,10 +137,17 @@ func TestBuildPKVUnlockCmd_CapturesStdout(t *testing.T) {
 	}
 	t.Setenv("PATH", tmpDir)
 
-	cmd, buf, err := BuildPKVUnlockCmd()
+	// 强制走 /dev/tty 不可用的 fallback 路径，stdin/stderr 应保持 os.Stdin/os.Stderr，
+	// 这样 cmd.Run() 才能直接拿到测试进程的句柄，stdout buffer 才能稳定捕获。
+	prev := openTTYFunc
+	t.Cleanup(func() { openTTYFunc = prev })
+	openTTYFunc = func() (*os.File, error) { return nil, errors.New("tty unavailable in test") }
+
+	cmd, buf, cleanup, err := BuildPKVUnlockCmd()
 	if err != nil {
 		t.Fatalf("BuildPKVUnlockCmd 返回错误: %v", err)
 	}
+	t.Cleanup(cleanup)
 	if cmd == nil || buf == nil {
 		t.Fatal("cmd / buf 不应为 nil")
 	}
@@ -148,7 +156,7 @@ func TestBuildPKVUnlockCmd_CapturesStdout(t *testing.T) {
 	if len(cmd.Args) < 2 || cmd.Args[1] != "unlock" {
 		t.Errorf("cmd.Args 应为 [path, \"unlock\"]，实际 %v", cmd.Args)
 	}
-	// 绑定关系
+	// fallback 下 Stdin/Stderr 维持 os.Stdin/os.Stderr
 	if cmd.Stdin != os.Stdin {
 		t.Error("cmd.Stdin 未绑定到 os.Stdin")
 	}
@@ -173,7 +181,10 @@ func TestBuildPKVUnlockCmd_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("PATH", tmpDir)
 
-	cmd, buf, err := BuildPKVUnlockCmd()
+	cmd, buf, cleanup, err := BuildPKVUnlockCmd()
+	if cleanup != nil {
+		cleanup()
+	}
 	if err == nil {
 		t.Fatal("预期返回错误，实际为 nil")
 	}
@@ -220,5 +231,83 @@ func TestParsePKVUnlockOutput_NilBuffer(t *testing.T) {
 	got, err := ParsePKVUnlockOutput(nil)
 	if err == nil {
 		t.Fatalf("nil buffer 应返回错误，got=%q", got)
+	}
+}
+
+// TestLocatePKVInteractive_TTYAttached 验证：openTTYFunc 返回有效 *os.File 时，
+// LocatePKVInteractive 会把 cmd.Stdin / cmd.Stderr 切到该 tty 文件，stdout 保持 os.Stdout。
+// 拿一个临时 regular file 当 tty 替身（attachTTYIfAvailable 不关心是不是真 tty，只关心非 nil）。
+func TestLocatePKVInteractive_TTYAttached(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skip on windows: PATH/exec 语义与 POSIX 不同")
+	}
+
+	tmpDir := t.TempDir()
+	fakePKV := filepath.Join(tmpDir, "pkv")
+	if err := os.WriteFile(fakePKV, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("写入伪 pkv 失败: %v", err)
+	}
+	t.Setenv("PATH", tmpDir)
+
+	// 临时 file 作为 tty 替身。test cleanup 会确认它被 attachTTYIfAvailable 关闭。
+	stub, err := os.CreateTemp(tmpDir, "fake-tty-*")
+	if err != nil {
+		t.Fatalf("创建 stub tty 失败: %v", err)
+	}
+	prev := openTTYFunc
+	t.Cleanup(func() { openTTYFunc = prev })
+	openTTYFunc = func() (*os.File, error) { return stub, nil }
+
+	cmd, cleanup, err := LocatePKVInteractive("unlock")
+	if err != nil {
+		t.Fatalf("LocatePKVInteractive 返回错误: %v", err)
+	}
+	if cmd == nil {
+		t.Fatal("cmd 不应为 nil")
+	}
+	if cmd.Stdin != stub {
+		t.Errorf("cmd.Stdin 应为 stub tty, 实际 %v", cmd.Stdin)
+	}
+	if cmd.Stderr != stub {
+		t.Errorf("cmd.Stderr 应为 stub tty, 实际 %v", cmd.Stderr)
+	}
+	if cmd.Stdout != os.Stdout {
+		t.Errorf("cmd.Stdout 应保持 os.Stdout, 实际 %v", cmd.Stdout)
+	}
+	cleanup()
+	// cleanup 后 stub 被关闭：再写入应失败
+	if _, err := stub.Write([]byte("x")); err == nil {
+		t.Error("cleanup 后 stub 仍可写，说明未关闭 tty 文件句柄")
+	}
+}
+
+// TestLocatePKVInteractive_TTYUnavailable 验证：openTTYFunc 失败时回退到 os.Stdin/os.Stderr，
+// cleanup 是 no-op，且不返回 error（这是日常 daemon / Windows 场景的兜底）。
+func TestLocatePKVInteractive_TTYUnavailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skip on windows: PATH/exec 语义与 POSIX 不同")
+	}
+
+	tmpDir := t.TempDir()
+	fakePKV := filepath.Join(tmpDir, "pkv")
+	if err := os.WriteFile(fakePKV, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("写入伪 pkv 失败: %v", err)
+	}
+	t.Setenv("PATH", tmpDir)
+
+	prev := openTTYFunc
+	t.Cleanup(func() { openTTYFunc = prev })
+	openTTYFunc = func() (*os.File, error) { return nil, errors.New("no tty") }
+
+	cmd, cleanup, err := LocatePKVInteractive("unlock")
+	if err != nil {
+		t.Fatalf("LocatePKVInteractive 不应返回错误（应回退）: %v", err)
+	}
+	t.Cleanup(cleanup)
+	if cmd.Stdin != os.Stdin {
+		t.Errorf("回退路径 cmd.Stdin 应为 os.Stdin, 实际 %v", cmd.Stdin)
+	}
+	if cmd.Stderr != os.Stderr {
+		t.Errorf("回退路径 cmd.Stderr 应为 os.Stderr, 实际 %v", cmd.Stderr)
 	}
 }
