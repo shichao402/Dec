@@ -100,10 +100,12 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
         run: |
           EXT=""
           if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
           OUTPUT="dec-${GOOS}-${GOARCH}${EXT}"
+          # CGO_ENABLED=0 确保产物为纯静态二进制，不依赖构建机 glibc（避免在老 Linux 上报 GLIBC_2.3x not found）
           go build -ldflags "-X main.Version=${{ steps.version.outputs.version }} -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')" -o "$OUTPUT" .
           echo "artifact=${OUTPUT}" >> "$GITHUB_ENV"
 

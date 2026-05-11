@@ -187,7 +187,9 @@ build_platform() {
     print_info "  输出: ${output_path}"
     
     # 构建命令
-    GOOS="${os}" GOARCH="${arch}" go build \
+    # CGO_ENABLED=0 确保产物为纯静态二进制，不依赖构建机 glibc
+    # （否则在 Ubuntu 24.04/glibc 2.39 上构建的 Linux 产物会要求目标机 glibc ≥ 2.34）
+    GOOS="${os}" GOARCH="${arch}" CGO_ENABLED=0 go build \
         -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
         -o "${output_path}" \
         . 2>&1 | tee -a "${LOG_FILE}"
@@ -224,7 +226,7 @@ build_current() {
         
         print_info "输出: ${output_path}"
         
-        GOOS="${target_os}" GOARCH="${target_arch}" go build \
+        GOOS="${target_os}" GOARCH="${target_arch}" CGO_ENABLED=0 go build \
             -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
             -o "${output_path}" \
             . 2>&1 | tee -a "${LOG_FILE}"
@@ -252,7 +254,7 @@ build_current() {
         print_info "构建当前平台: ${current_os}-${current_arch}"
         print_info "输出: ${output_path}"
         
-        go build \
+        CGO_ENABLED=0 go build \
             -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
             -o "${output_path}" \
             . 2>&1 | tee -a "${LOG_FILE}"
