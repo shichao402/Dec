@@ -28,6 +28,7 @@ func uniqueProjectIDEs(projectRoot string, ideNames []string) []ide.IDE {
 func projectIDEKey(projectRoot string, ideImpl ide.IDE) string {
 	parts := []string{
 		filepath.Clean(ideImpl.SkillsDir(projectRoot)),
+		filepath.Clean(ideImpl.CommandsDir(projectRoot)),
 		filepath.Clean(ideImpl.RulesDir(projectRoot)),
 		filepath.Clean(ideImpl.MCPConfigPath(projectRoot)),
 	}

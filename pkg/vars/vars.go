@@ -84,6 +84,8 @@ func getAssetSpecificVar(cfg *types.VarsConfig, assetType, assetName, key string
 		entries = cfg.Assets.Rules
 	case "skill":
 		entries = cfg.Assets.Skills
+	case "command":
+		entries = cfg.Assets.Commands
 	}
 	if entries == nil {
 		return "", false

@@ -16,6 +16,8 @@ func TestParseMember(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "skill 单数", in: "skill/vikunja-workflow", want: types.BundleMember{Type: "skill", Name: "vikunja-workflow"}},
+		{name: "command 单数", in: "command/hello-cmd", want: types.BundleMember{Type: "command", Name: "hello-cmd"}},
+		{name: "commands 复数", in: "commands/hello-cmd", want: types.BundleMember{Type: "command", Name: "hello-cmd"}},
 		{name: "skills 复数", in: "skills/vikunja-workflow", want: types.BundleMember{Type: "skill", Name: "vikunja-workflow"}},
 		{name: "rule 单数", in: "rule/vikunja-integration", want: types.BundleMember{Type: "rule", Name: "vikunja-integration"}},
 		{name: "rules 复数", in: "rules/vikunja-integration", want: types.BundleMember{Type: "rule", Name: "vikunja-integration"}},

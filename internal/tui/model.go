@@ -217,7 +217,7 @@ type model struct {
 	bundleSelection []string
 	// expandedBundles 记录哪些 bundle 节点当前展开显示成员。key 是 bundle 名称。
 	expandedBundles map[string]bool
-	// assetTypeFilter 取值 "all" / "skill" / "rule" / "mcp" / "bundle"，按 t 键轮转。
+	// assetTypeFilter 取值 "all" / "skill" / "command" / "rule" / "mcp" / "bundle"，按 t 键轮转。
 	// "bundle" 表示只显示 bundle 节点（以及它们展开的成员）；其他值只影响单资产行的过滤。
 	assetTypeFilter      string
 	settingsCursor       int
@@ -2912,10 +2912,10 @@ func (m *model) toggleCurrentBundleExpansion() {
 	}
 }
 
-// cycleAssetTypeFilter 按 t 键在 all/skill/rule/mcp/bundle 间轮转。
+// cycleAssetTypeFilter 按 t 键在 all/skill/command/rule/mcp/bundle 间轮转。
 // 切换后若 cursor 越界，normalizeAssetCursor 会把它拉回第 0 行。
 func (m *model) cycleAssetTypeFilter() {
-	order := []string{"all", "skill", "rule", "mcp", "bundle"}
+	order := []string{"all", "skill", "command", "rule", "mcp", "bundle"}
 	cur := m.assetTypeFilter
 	if cur == "" {
 		cur = "all"

@@ -21,11 +21,13 @@ func (f *failingMCPIDE) Name() string                   { return f.name }
 func (f *failingMCPIDE) UserRootDir(home string) string { return filepath.Join(home, "."+f.name) }
 func (f *failingMCPIDE) RulesDir(pr string) string      { return filepath.Join(pr, "."+f.name, "rules") }
 func (f *failingMCPIDE) SkillsDir(pr string) string     { return filepath.Join(pr, "."+f.name, "skills") }
+func (f *failingMCPIDE) CommandsDir(pr string) string   { return filepath.Join(pr, "."+f.name, "commands") }
 func (f *failingMCPIDE) MCPConfigPath(pr string) string {
 	return filepath.Join(pr, "."+f.name, "mcp.json")
 }
 func (f *failingMCPIDE) WriteRules(string, []ide.RuleFile) error          { return nil }
 func (f *failingMCPIDE) WriteSkill(string, string, []ide.SkillFile) error { return nil }
+func (f *failingMCPIDE) WriteCommand(string, string, []ide.SkillFile) error { return nil }
 func (f *failingMCPIDE) WriteMCPConfig(string, *types.MCPConfig) error    { return nil }
 func (f *failingMCPIDE) LoadMCPConfig(string) (*types.MCPConfig, error) {
 	return nil, fmt.Errorf("mock MCP load failure")
@@ -36,7 +38,7 @@ func (f *failingMCPIDE) LoadMCPConfig(string) (*types.MCPConfig, error) {
 // ========================================
 
 func TestIsValidAssetType(t *testing.T) {
-	for _, v := range []string{"skill", "rule", "mcp", "bundle"} {
+	for _, v := range []string{"skill", "command", "rule", "mcp", "bundle"} {
 		if !isValidAssetType(v) {
 			t.Fatalf("期望 %q 合法", v)
 		}
@@ -74,6 +76,7 @@ func TestResolveAssetFile(t *testing.T) {
 		itemType, assetName, want string
 	}{
 		{"skill", "my-skill", filepath.Join(repoDir, "cli/skills", "my-skill")},
+		{"command", "my-command", filepath.Join(repoDir, "cli/commands", "my-command")},
 		{"rule", "my-rule", filepath.Join(repoDir, "cli/rules", "my-rule.mdc")},
 		{"mcp", "my-mcp", filepath.Join(repoDir, "cli/mcp", "my-mcp.json")},
 		{"bundle", "my-bundle", filepath.Join(repoDir, "cli/bundles", "my-bundle.yaml")},
@@ -125,12 +128,27 @@ func TestListFolderAssets(t *testing.T) {
 
 func TestListFolderAssets_Empty(t *testing.T) {
 	dir := t.TempDir()
-	for _, sub := range []string{"skills", "rules", "mcp"} {
+	for _, sub := range []string{"skills", "commands", "rules", "mcp"} {
 		os.MkdirAll(filepath.Join(dir, sub), 0755)
 		os.WriteFile(filepath.Join(dir, sub, ".gitkeep"), []byte(""), 0644)
 	}
 	if len(listFolderAssets(dir, "empty")) != 0 {
 		t.Fatal("空目录应返回 0")
+	}
+}
+
+func TestListFolderAssets_Commands(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "commands", "hello-cmd"), 0755)
+	os.WriteFile(filepath.Join(dir, "commands", "hello-cmd", "SKILL.md"), []byte("test"), 0644)
+
+	assets := listFolderAssets(dir, "cli")
+	found := map[string]string{}
+	for _, a := range assets {
+		found[a.Name] = a.Type
+	}
+	if found["hello-cmd"] != "command" {
+		t.Fatalf("hello-cmd 应为 command, 得到 %q", found["hello-cmd"])
 	}
 }
 
@@ -177,6 +195,7 @@ func TestGetCachePath(t *testing.T) {
 		itemType, assetName, want string
 	}{
 		{"skill", "my-skill", filepath.Join(root, ".dec", "cache", "cli/skills", "my-skill")},
+		{"command", "my-command", filepath.Join(root, ".dec", "cache", "cli/commands", "my-command")},
 		{"rule", "my-rule", filepath.Join(root, ".dec", "cache", "cli/rules", "my-rule.mdc")},
 		{"mcp", "my-mcp", filepath.Join(root, ".dec", "cache", "cli/mcp", "my-mcp.json")},
 		{"bundle", "my-bundle", filepath.Join(root, ".dec", "cache", "cli/bundles", "my-bundle.yaml")},

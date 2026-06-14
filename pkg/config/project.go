@@ -90,9 +90,10 @@ type legacyProjectConfig struct {
 }
 
 type legacyAssetList struct {
-	Skills []types.AssetRef `yaml:"skills,omitempty"`
-	Rules  []types.AssetRef `yaml:"rules,omitempty"`
-	MCPs   []types.AssetRef `yaml:"mcps,omitempty"`
+	Skills   []types.AssetRef `yaml:"skills,omitempty"`
+	Commands []types.AssetRef `yaml:"commands,omitempty"`
+	Rules    []types.AssetRef `yaml:"rules,omitempty"`
+	MCPs     []types.AssetRef `yaml:"mcps,omitempty"`
 }
 
 // LoadProjectConfig 加载项目配置，自动去重
@@ -346,9 +347,10 @@ func (l *legacyAssetList) toAssetList() *types.AssetList {
 		return nil
 	}
 	converted := &types.AssetList{
-		Skills: append([]types.AssetRef(nil), l.Skills...),
-		Rules:  append([]types.AssetRef(nil), l.Rules...),
-		MCPs:   append([]types.AssetRef(nil), l.MCPs...),
+		Skills:   append([]types.AssetRef(nil), l.Skills...),
+		Commands: append([]types.AssetRef(nil), l.Commands...),
+		Rules:    append([]types.AssetRef(nil), l.Rules...),
+		MCPs:     append([]types.AssetRef(nil), l.MCPs...),
 	}
 	converted.Dedup()
 	return converted

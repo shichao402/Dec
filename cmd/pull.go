@@ -195,7 +195,7 @@ func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRe
 			continue
 		}
 		vaultName := vaultDir.Name()
-		for _, sub := range []string{"skills", "rules", "mcp"} {
+		for _, sub := range []string{"skills", "commands", "rules", "mcp"} {
 			subDir := filepath.Join(cacheDir, vaultName, sub)
 			entries, err := os.ReadDir(subDir)
 			if err != nil {
@@ -208,7 +208,10 @@ func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRe
 					assetType = "rule"
 					name = strings.TrimSuffix(name, ".mdc")
 				} else if sub == "mcp" {
+					assetType = "mcp"
 					name = strings.TrimSuffix(name, ".json")
+				} else if sub == "commands" {
+					assetType = "command"
 				} else {
 					assetType = "skill"
 				}
@@ -316,6 +319,8 @@ func installAssetToIDE(itemType, assetName, srcPath, projectRoot string, ideImpl
 	switch itemType {
 	case "skill":
 		return copyDir(srcPath, filepath.Join(ideImpl.SkillsDir(projectRoot), managed))
+	case "command":
+		return copyDir(srcPath, filepath.Join(ideImpl.CommandsDir(projectRoot), managed))
 	case "rule":
 		destDir := ideImpl.RulesDir(projectRoot)
 		if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -350,6 +355,14 @@ func removeAssetFromIDE(itemType, assetName, projectRoot string, ideImpl ide.IDE
 	switch itemType {
 	case "skill":
 		destDir := filepath.Join(ideImpl.SkillsDir(projectRoot), managed)
+		if _, err := os.Stat(destDir); os.IsNotExist(err) {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
+		return true, os.RemoveAll(destDir)
+	case "command":
+		destDir := filepath.Join(ideImpl.CommandsDir(projectRoot), managed)
 		if _, err := os.Stat(destDir); os.IsNotExist(err) {
 			return false, nil
 		} else if err != nil {

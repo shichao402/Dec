@@ -50,7 +50,7 @@ func readFolderEntries(repoDir string) ([]folderEntry, error) {
 
 // isValidAssetType 检查资产类型是否有效
 func isValidAssetType(t string) bool {
-	return t == "skill" || t == "rule" || t == "mcp" || t == "bundle"
+	return t == "skill" || t == "command" || t == "rule" || t == "mcp" || t == "bundle"
 }
 
 // typeSubDir 资产类型对应的子目录名
@@ -58,6 +58,8 @@ func typeSubDir(itemType string) string {
 	switch itemType {
 	case "skill":
 		return "skills"
+	case "command":
+		return "commands"
 	case "rule":
 		return "rules"
 	case "mcp":
@@ -72,7 +74,7 @@ func typeSubDir(itemType string) string {
 func resolveAssetFile(repoDir, vault, itemType, assetName string) string {
 	base := filepath.Join(repoDir, vault, typeSubDir(itemType))
 	switch itemType {
-	case "skill":
+	case "skill", "command":
 		return filepath.Join(base, assetName)
 	case "rule":
 		return filepath.Join(base, assetName+".mdc")
@@ -102,7 +104,7 @@ func findAssetInRepo(repoDir, itemType, assetName string) (string, string, error
 // listFolderAssets 列出一个顶层目录中的所有资产
 func listFolderAssets(folderDir, folderName string) []repoAssetInfo {
 	var assets []repoAssetInfo
-	for _, subDir := range []string{"skills", "rules", "mcp"} {
+	for _, subDir := range []string{"skills", "commands", "rules", "mcp"} {
 		dir := filepath.Join(folderDir, subDir)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -118,7 +120,10 @@ func listFolderAssets(folderDir, folderName string) []repoAssetInfo {
 				assetType = "rule"
 				name = strings.TrimSuffix(name, ".mdc")
 			} else if subDir == "mcp" {
+				assetType = "mcp"
 				name = strings.TrimSuffix(name, ".json")
+			} else if subDir == "commands" {
+				assetType = "command"
 			} else {
 				assetType = "skill"
 			}
@@ -146,6 +151,8 @@ func getLocalAssetPath(itemType, assetName, projectRoot string, ideImpl ide.IDE)
 	switch itemType {
 	case "skill":
 		return filepath.Join(ideImpl.SkillsDir(projectRoot), managed)
+	case "command":
+		return filepath.Join(ideImpl.CommandsDir(projectRoot), managed)
 	case "rule":
 		return filepath.Join(ideImpl.RulesDir(projectRoot), managed+".mdc")
 	case "mcp":
@@ -198,7 +205,7 @@ func withWriteRepo(fn func(*repo.Transaction) error) error {
 func getCachePath(projectRoot, vault, itemType, assetName string) string {
 	base := filepath.Join(projectRoot, ".dec", "cache", vault, typeSubDir(itemType))
 	switch itemType {
-	case "skill":
+	case "skill", "command":
 		return filepath.Join(base, assetName)
 	case "rule":
 		return filepath.Join(base, assetName+".mdc")

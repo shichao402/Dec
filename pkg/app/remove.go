@@ -57,7 +57,7 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 		return nil, fmt.Errorf("资产名称不能为空")
 	}
 	if !isRemovableAssetType(itemType) {
-		return nil, fmt.Errorf("不支持的资产类型: %s (支持: skill, rule, mcp)", itemType)
+		return nil, fmt.Errorf("不支持的资产类型: %s (支持: skill, command, rule, mcp)", itemType)
 	}
 	if !input.Confirmed {
 		return nil, ErrRemoveNotConfirmed
@@ -153,7 +153,7 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 }
 
 func isRemovableAssetType(t string) bool {
-	return t == "skill" || t == "rule" || t == "mcp"
+	return t == "skill" || t == "command" || t == "rule" || t == "mcp"
 }
 
 // locateAssetInRepo 在 repo 中定位资产文件。vaultHint 非空时优先走该 vault；为空时遍历顶层目录查找唯一匹配。

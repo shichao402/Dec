@@ -55,4 +55,6 @@ scripts/temp/*
 Documents/temp/*
 !Documents/temp/.gitkeep
 
+# 本地用户配置
+.config/
 mise.local.toml

@@ -1610,13 +1610,13 @@ func TestModelAssetsTypeFilterCycleAndBundleOnlyView(t *testing.T) {
 			t.Fatal("skill 过滤下不应包含 rule 行")
 		}
 	}
-	// 继续到 rule/mcp/bundle
-	for i := 0; i < 3; i++ {
+	// 继续到 command/rule/mcp/bundle
+	for i := 0; i < 4; i++ {
 		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
 		m = updated.(model)
 	}
 	if m.assetTypeFilter != "bundle" {
-		t.Fatalf("第四次 t = %q, 期望 bundle", m.assetTypeFilter)
+		t.Fatalf("第五次 t = %q, 期望 bundle", m.assetTypeFilter)
 	}
 	// bundle 视图只含 bundle 节点行（+ 展开的成员），不含单资产行
 	for _, r := range m.visibleAssetRows() {

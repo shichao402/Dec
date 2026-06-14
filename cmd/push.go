@@ -90,7 +90,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 
 			destPath := resolveAssetFile(repoDir, asset.Vault, asset.Type, asset.Name)
 			switch asset.Type {
-			case "skill":
+			case "skill", "command":
 				if err := copyDir(cachePath, destPath); err != nil {
 					fmt.Printf("⚠️  推送 %s/%s 失败: %v\n", asset.Type, asset.Name, err)
 					continue
@@ -203,7 +203,7 @@ func pushBundles(projectRoot, repoDir string) (int, error) {
 
 func runPushRemove(itemType, assetName string) error {
 	if !isValidAssetType(itemType) {
-		return fmt.Errorf("不支持的资产类型: %s (支持: skill, rule, mcp, bundle)", itemType)
+		return fmt.Errorf("不支持的资产类型: %s (支持: skill, command, rule, mcp, bundle)", itemType)
 	}
 
 	cwd, err := os.Getwd()

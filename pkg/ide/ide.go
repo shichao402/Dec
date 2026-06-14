@@ -33,6 +33,12 @@ type IDE interface {
 	// WriteSkill 写入单个 Skill 目录到 IDE Skills 目录
 	WriteSkill(projectRoot string, skillName string, files []SkillFile) error
 
+	// CommandsDir 返回 Commands 输出目录
+	CommandsDir(projectRoot string) string
+
+	// WriteCommand 写入单个 Command 目录到 IDE Commands 目录
+	WriteCommand(projectRoot string, commandName string, files []SkillFile) error
+
 	// WriteMCPConfig 写入 MCP 配置到 IDE 目录
 	WriteMCPConfig(projectRoot string, config *types.MCPConfig) error
 
@@ -76,6 +82,10 @@ func (b *baseIDE) SkillsDir(projectRoot string) string {
 	return filepath.Join(projectRoot, b.dirKey, "skills")
 }
 
+func (b *baseIDE) CommandsDir(projectRoot string) string {
+	return filepath.Join(projectRoot, b.dirKey, "commands")
+}
+
 func (b *baseIDE) MCPConfigPath(projectRoot string) string {
 	if b.mcpConfigPath != "" {
 		return filepath.Join(projectRoot, b.mcpConfigPath)
@@ -110,7 +120,15 @@ func (b *baseIDE) WriteRules(projectRoot string, rules []RuleFile) error {
 }
 
 func (b *baseIDE) WriteSkill(projectRoot string, skillName string, files []SkillFile) error {
-	skillDir := filepath.Join(b.SkillsDir(projectRoot), skillName)
+	return b.writeSkillDir(b.SkillsDir(projectRoot), skillName, files)
+}
+
+func (b *baseIDE) WriteCommand(projectRoot string, commandName string, files []SkillFile) error {
+	return b.writeSkillDir(b.CommandsDir(projectRoot), commandName, files)
+}
+
+func (b *baseIDE) writeSkillDir(baseDir, name string, files []SkillFile) error {
+	skillDir := filepath.Join(baseDir, name)
 
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		return err

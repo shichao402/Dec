@@ -169,7 +169,7 @@ func readFolderEntries(repoDir string) ([]folderEntry, error) {
 
 func listFolderAssets(folderDir, folderName string) []AssetInfo {
 	var assets []AssetInfo
-	for _, subDir := range []string{"skills", "rules", "mcp"} {
+	for _, subDir := range []string{"skills", "commands", "rules", "mcp"} {
 		dir := filepath.Join(folderDir, subDir)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -187,6 +187,8 @@ func listFolderAssets(folderDir, folderName string) []AssetInfo {
 				name = strings.TrimSuffix(name, ".mdc")
 			} else if subDir == "mcp" {
 				name = strings.TrimSuffix(name, ".json")
+			} else if subDir == "commands" {
+				assetType = "command"
 			} else {
 				assetType = "skill"
 			}

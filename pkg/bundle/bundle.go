@@ -1,6 +1,6 @@
 // Package bundle 实现 vault 内 bundle 声明的解析与校验。
 //
-// Bundle 是把一组天然成套使用的资产（skill / rule / mcp）作为一个启用单位的机制。
+// Bundle 是把一组天然成套使用的资产（skill / command / rule / mcp）作为一个启用单位的机制。
 // 本包只负责「读」与「校验」：加载 vault 根目录下的 bundles/*.yaml 并产出结构化数据。
 // 不负责接入 pull reconcile、TUI 渲染或 CLI 命令——这些由其它子卡承担。
 package bundle
@@ -22,11 +22,12 @@ const BundlesDirName = "bundles"
 
 // ValidMemberTypes 列出成员引用允许的类型前缀。
 //
-// 与 AssetList 的三种资产类型对齐：
-//   - skills / skill -> skill
-//   - rules  / rule  -> rule
-//   - mcp    / mcps  -> mcp
-var ValidMemberTypes = []string{"skill", "rule", "mcp"}
+// 与 AssetList 的四种资产类型对齐：
+//   - skills   / skill   -> skill
+//   - commands / command -> command
+//   - rules    / rule    -> rule
+//   - mcp      / mcps    -> mcp
+var ValidMemberTypes = []string{"skill", "command", "rule", "mcp"}
 
 // bundleNameRegexp 约束 bundle name 为字母数字加 - _。
 var bundleNameRegexp = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
@@ -47,7 +48,7 @@ type Warning struct {
 // ParseMember 把 "<type>/<name>" 形式的成员引用解析为 BundleMember。
 //
 // 合法前缀同时接受单复数（skill/skills、rule/rules、mcp/mcps），
-// 归一到 skill / rule / mcp。
+// 归一到 skill / command / rule / mcp。
 func ParseMember(ref string) (types.BundleMember, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -67,7 +68,7 @@ func ParseMember(ref string) (types.BundleMember, error) {
 
 	normalized, ok := normalizeMemberType(rawType)
 	if !ok {
-		return types.BundleMember{}, fmt.Errorf("成员引用 %q 使用了不支持的类型 %q，仅允许 skill / rule / mcp", ref, rawType)
+		return types.BundleMember{}, fmt.Errorf("成员引用 %q 使用了不支持的类型 %q，仅允许 skill / command / rule / mcp", ref, rawType)
 	}
 	return types.BundleMember{Type: normalized, Name: name}, nil
 }
@@ -206,6 +207,8 @@ func normalizeMemberType(raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "skill", "skills":
 		return "skill", true
+	case "command", "commands":
+		return "command", true
 	case "rule", "rules":
 		return "rule", true
 	case "mcp", "mcps":

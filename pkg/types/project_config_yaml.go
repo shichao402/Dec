@@ -9,15 +9,17 @@ import (
 )
 
 const (
-	projectConfigKeySkills = "skills"
-	projectConfigKeyRules  = "rules"
-	projectConfigKeyMCP    = "mcp"
+	projectConfigKeySkills   = "skills"
+	projectConfigKeyCommands = "commands"
+	projectConfigKeyRules    = "rules"
+	projectConfigKeyMCP      = "mcp"
 )
 
 type assetTypeSet struct {
-	Skill bool
-	Rule  bool
-	MCP   bool
+	Skill   bool
+	Command bool
+	Rule    bool
+	MCP     bool
 }
 
 // MarshalYAML 将资产列表编码为 v2 的 vault -> item -> type 结构。
@@ -42,6 +44,8 @@ func (l *AssetList) MarshalYAML() (interface{}, error) {
 		switch asset.Type {
 		case "skill":
 			set.Skill = true
+		case "command":
+			set.Command = true
 		case "rule":
 			set.Rule = true
 		case "mcp":
@@ -62,6 +66,9 @@ func (l *AssetList) MarshalYAML() (interface{}, error) {
 			set := items[itemName]
 			if set.Skill {
 				typesNode.Content = append(typesNode.Content, scalarNode(projectConfigKeySkills), boolNode(true))
+			}
+			if set.Command {
+				typesNode.Content = append(typesNode.Content, scalarNode(projectConfigKeyCommands), boolNode(true))
 			}
 			if set.Rule {
 				typesNode.Content = append(typesNode.Content, scalarNode(projectConfigKeyRules), boolNode(true))
@@ -137,6 +144,8 @@ func (l *AssetList) addAsset(assetType string, ref AssetRef) {
 	switch assetType {
 	case "skill":
 		l.Skills = append(l.Skills, ref)
+	case "command":
+		l.Commands = append(l.Commands, ref)
 	case "rule":
 		l.Rules = append(l.Rules, ref)
 	case "mcp":
@@ -148,6 +157,8 @@ func normalizeProjectAssetTypeKey(raw string) (string, bool) {
 	switch strings.TrimSpace(raw) {
 	case "skill", projectConfigKeySkills:
 		return "skill", true
+	case "command", projectConfigKeyCommands:
+		return "command", true
 	case "rule", projectConfigKeyRules:
 		return "rule", true
 	case "mcp", "mcps":

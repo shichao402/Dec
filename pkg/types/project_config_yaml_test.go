@@ -7,6 +7,37 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestAssetListMarshalYAML_IncludesCommands(t *testing.T) {
+	list := &AssetList{
+		Commands: []AssetRef{{Name: "hello-cmd", Vault: "cli"}},
+	}
+
+	data, err := yaml.Marshal(list)
+	if err != nil {
+		t.Fatalf("Marshal 失败: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "commands: true") {
+		t.Fatalf("序列化结果应包含 commands: true:\n%s", content)
+	}
+}
+
+func TestAssetListUnmarshalYAML_ParsesCommands(t *testing.T) {
+	raw := `
+cli:
+  hello-cmd:
+    commands: true
+`
+
+	var list AssetList
+	if err := yaml.Unmarshal([]byte(raw), &list); err != nil {
+		t.Fatalf("Unmarshal 失败: %v", err)
+	}
+	if list.FindAsset("command", "hello-cmd", "cli") == nil {
+		t.Fatal("应解析出 command cli/hello-cmd")
+	}
+}
+
 func TestAssetListMarshalYAML_V2VaultFirstShape(t *testing.T) {
 	list := &AssetList{
 		Skills: []AssetRef{{Name: "api-test", Vault: "team"}},

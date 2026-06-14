@@ -33,11 +33,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		for _, f := range folders {
 			assets := listFolderAssets(f.path, f.name)
 
-			skillCount, ruleCount, mcpCount := 0, 0, 0
+			skillCount, commandCount, ruleCount, mcpCount := 0, 0, 0, 0
 			for _, a := range assets {
 				switch a.Type {
 				case "skill":
 					skillCount++
+				case "command":
+					commandCount++
 				case "rule":
 					ruleCount++
 				case "mcp":
@@ -47,6 +49,9 @@ func runList(cmd *cobra.Command, args []string) error {
 			var parts []string
 			if skillCount > 0 {
 				parts = append(parts, fmt.Sprintf("%d skills", skillCount))
+			}
+			if commandCount > 0 {
+				parts = append(parts, fmt.Sprintf("%d commands", commandCount))
 			}
 			if ruleCount > 0 {
 				parts = append(parts, fmt.Sprintf("%d rules", ruleCount))

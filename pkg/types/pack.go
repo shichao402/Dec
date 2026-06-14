@@ -69,7 +69,7 @@ type ProjectConfig struct {
 //	  - rules/vikunja-integration
 //	  - skills/vikunja-workflow
 //
-// Bundle 不跨 vault，成员只能是 skill/rule/mcp（不能是 bundle）。
+// Bundle 不跨 vault，成员只能是 skill/command/rule/mcp（不能是 bundle）。
 type Bundle struct {
 	// Name 为 bundle 短名，在 vault 内唯一，用于 config.yaml 引用。
 	Name string `yaml:"name"`
@@ -81,7 +81,7 @@ type Bundle struct {
 
 // BundleMember 是解析后的 bundle 成员引用。
 type BundleMember struct {
-	// Type 取值 skill / rule / mcp，对应 AssetList 的三种资产类型。
+	// Type 取值 skill / command / rule / mcp，对应 AssetList 的四种资产类型。
 	Type string
 	// Name 是资产的短名（不含类型前缀）。
 	Name string
@@ -89,9 +89,10 @@ type BundleMember struct {
 
 // AssetList 资产列表（available 和 enabled 共用）
 type AssetList struct {
-	Skills []AssetRef `yaml:"skills,omitempty"`
-	Rules  []AssetRef `yaml:"rules,omitempty"`
-	MCPs   []AssetRef `yaml:"mcps,omitempty"`
+	Skills   []AssetRef `yaml:"skills,omitempty"`
+	Commands []AssetRef `yaml:"commands,omitempty"`
+	Rules    []AssetRef `yaml:"rules,omitempty"`
+	MCPs     []AssetRef `yaml:"mcps,omitempty"`
 }
 
 // AssetRef 资产引用
@@ -106,6 +107,7 @@ func (l *AssetList) Dedup() {
 		return
 	}
 	l.Skills = dedupRefs(l.Skills)
+	l.Commands = dedupRefs(l.Commands)
 	l.Rules = dedupRefs(l.Rules)
 	l.MCPs = dedupRefs(l.MCPs)
 }
@@ -115,7 +117,7 @@ func (l *AssetList) IsEmpty() bool {
 	if l == nil {
 		return true
 	}
-	return len(l.Skills) == 0 && len(l.Rules) == 0 && len(l.MCPs) == 0
+	return len(l.Skills) == 0 && len(l.Commands) == 0 && len(l.Rules) == 0 && len(l.MCPs) == 0
 }
 
 // Count 资产总数
@@ -123,7 +125,7 @@ func (l *AssetList) Count() int {
 	if l == nil {
 		return 0
 	}
-	return len(l.Skills) + len(l.Rules) + len(l.MCPs)
+	return len(l.Skills) + len(l.Commands) + len(l.Rules) + len(l.MCPs)
 }
 
 // All 返回所有资产（带类型标记）
@@ -134,6 +136,9 @@ func (l *AssetList) All() []TypedAssetRef {
 	var all []TypedAssetRef
 	for _, s := range l.Skills {
 		all = append(all, TypedAssetRef{Type: "skill", AssetRef: s})
+	}
+	for _, c := range l.Commands {
+		all = append(all, TypedAssetRef{Type: "command", AssetRef: c})
 	}
 	for _, r := range l.Rules {
 		all = append(all, TypedAssetRef{Type: "rule", AssetRef: r})
@@ -152,6 +157,8 @@ func (l *AssetList) Add(assetType string, ref AssetRef) {
 	switch assetType {
 	case "skill":
 		l.Skills = append(l.Skills, ref)
+	case "command":
+		l.Commands = append(l.Commands, ref)
 	case "rule":
 		l.Rules = append(l.Rules, ref)
 	case "mcp":
@@ -172,6 +179,8 @@ func (l *AssetList) FindAsset(assetType, name string, vault ...string) *AssetRef
 	switch assetType {
 	case "skill":
 		list = l.Skills
+	case "command":
+		list = l.Commands
 	case "rule":
 		list = l.Rules
 	case "mcp":
@@ -199,6 +208,13 @@ func (l *AssetList) RemoveAsset(assetType, name string, vault ...string) bool {
 		for i, s := range l.Skills {
 			if s.Name == name && (targetVault == "" || s.Vault == targetVault) {
 				l.Skills = append(l.Skills[:i], l.Skills[i+1:]...)
+				return true
+			}
+		}
+	case "command":
+		for i, c := range l.Commands {
+			if c.Name == name && (targetVault == "" || c.Vault == targetVault) {
+				l.Commands = append(l.Commands[:i], l.Commands[i+1:]...)
 				return true
 			}
 		}
@@ -251,7 +267,8 @@ type VarsConfig struct {
 type AssetVars struct {
 	MCPs   map[string]AssetVarEntry `yaml:"mcp,omitempty"`
 	Rules  map[string]AssetVarEntry `yaml:"rule,omitempty"`
-	Skills map[string]AssetVarEntry `yaml:"skill,omitempty"`
+	Skills   map[string]AssetVarEntry `yaml:"skill,omitempty"`
+	Commands map[string]AssetVarEntry `yaml:"command,omitempty"`
 }
 
 // AssetVarEntry 单个资产的变量覆盖

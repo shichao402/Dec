@@ -157,7 +157,7 @@ func PullProjectAssets(projectRoot, version string, reporter Reporter) (*PullPro
 
 		cachePath := getCachePath(projectRoot, asset.Vault, asset.Type, asset.Name)
 		switch asset.Type {
-		case "skill":
+		case "skill", "command":
 			if err := copyDir(fullPath, cachePath); err != nil {
 				result.FailedCount++
 				emit(reporter, EventWarn, "pull.asset", fmt.Sprintf("⚠️  [%-5s] %s 缓存失败: %v", asset.Type, asset.Name, err), progress)
@@ -209,6 +209,7 @@ func uniqueProjectIDEs(projectRoot string, ideNames []string) []ide.IDE {
 		ideImpl := ide.Get(ideName)
 		key := strings.Join([]string{
 			filepath.Clean(ideImpl.SkillsDir(projectRoot)),
+			filepath.Clean(ideImpl.CommandsDir(projectRoot)),
 			filepath.Clean(ideImpl.RulesDir(projectRoot)),
 			filepath.Clean(ideImpl.MCPConfigPath(projectRoot)),
 		}, "|")
@@ -282,7 +283,7 @@ func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRe
 			continue
 		}
 		vaultName := vaultDir.Name()
-		for _, sub := range []string{"skills", "rules", "mcp"} {
+		for _, sub := range []string{"skills", "commands", "rules", "mcp"} {
 			subDir := filepath.Join(cacheDir, vaultName, sub)
 			entries, err := os.ReadDir(subDir)
 			if err != nil {
@@ -295,7 +296,10 @@ func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRe
 					assetType = "rule"
 					name = strings.TrimSuffix(name, ".mdc")
 				} else if sub == "mcp" {
+					assetType = "mcp"
 					name = strings.TrimSuffix(name, ".json")
+				} else if sub == "commands" {
+					assetType = "command"
 				} else {
 					assetType = "skill"
 				}
@@ -322,6 +326,8 @@ func typeSubDir(itemType string) string {
 	switch itemType {
 	case "skill":
 		return "skills"
+	case "command":
+		return "commands"
 	case "rule":
 		return "rules"
 	case "mcp":
@@ -334,7 +340,7 @@ func typeSubDir(itemType string) string {
 func resolveAssetFile(repoDir, vault, itemType, assetName string) string {
 	base := filepath.Join(repoDir, vault, typeSubDir(itemType))
 	switch itemType {
-	case "skill":
+	case "skill", "command":
 		return filepath.Join(base, assetName)
 	case "rule":
 		return filepath.Join(base, assetName+".mdc")
@@ -348,7 +354,7 @@ func resolveAssetFile(repoDir, vault, itemType, assetName string) string {
 func getCachePath(projectRoot, vault, itemType, assetName string) string {
 	base := filepath.Join(projectRoot, ".dec", "cache", vault, typeSubDir(itemType))
 	switch itemType {
-	case "skill":
+	case "skill", "command":
 		return filepath.Join(base, assetName)
 	case "rule":
 		return filepath.Join(base, assetName+".mdc")
@@ -407,6 +413,12 @@ func installAssetToIDE(itemType, assetName, vaultName, srcPath, projectRoot stri
 			return err
 		}
 		return injectRenderedHeaderDir(destDir, vaultName)
+	case "command":
+		destDir := filepath.Join(ideImpl.CommandsDir(projectRoot), managed)
+		if err := copyDir(srcPath, destDir); err != nil {
+			return err
+		}
+		return injectRenderedHeaderDir(destDir, vaultName)
 	case "rule":
 		destDir := ideImpl.RulesDir(projectRoot)
 		if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -446,6 +458,14 @@ func removeAssetFromIDE(itemType, assetName, projectRoot string, ideImpl ide.IDE
 	switch itemType {
 	case "skill":
 		destDir := filepath.Join(ideImpl.SkillsDir(projectRoot), managed)
+		if _, err := os.Stat(destDir); os.IsNotExist(err) {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
+		return true, os.RemoveAll(destDir)
+	case "command":
+		destDir := filepath.Join(ideImpl.CommandsDir(projectRoot), managed)
 		if _, err := os.Stat(destDir); os.IsNotExist(err) {
 			return false, nil
 		} else if err != nil {
@@ -505,6 +525,20 @@ func substituteAssetVars(itemType, assetName, projectRoot string, projectIDEs []
 		switch itemType {
 		case "skill":
 			localPath := filepath.Join(ideImpl.SkillsDir(projectRoot), managedName(assetName))
+			placeholders := vars.ExtractPlaceholdersFromDir(localPath)
+			locations := vars.ExtractPlaceholderLocationsFromDir(localPath)
+			if len(placeholders) == 0 {
+				continue
+			}
+			resolved := vars.ResolveVars(globalVars, projectVars, itemType, assetName, placeholders)
+			_, missing, err := vars.SubstituteDir(localPath, resolved)
+			if err != nil {
+				emit(reporter, EventWarn, "pull.vars", fmt.Sprintf("变量替换失败 (%s): %v", ideName, err), nil)
+				continue
+			}
+			emitMissingVars(reporter, itemType, assetName, missing, locations, projectVarsPath, globalVarsPath)
+		case "command":
+			localPath := filepath.Join(ideImpl.CommandsDir(projectRoot), managedName(assetName))
 			placeholders := vars.ExtractPlaceholdersFromDir(localPath)
 			locations := vars.ExtractPlaceholderLocationsFromDir(localPath)
 			if len(placeholders) == 0 {
