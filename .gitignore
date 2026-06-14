@@ -9,6 +9,8 @@
 # Test binary
 *.test
 
+.config
+
 # Output of the go coverage tool
 *.out
 
