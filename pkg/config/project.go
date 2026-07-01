@@ -151,7 +151,7 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 		return fmt.Errorf("序列化项目配置失败: %w", err)
 	}
 
-	header := "# Dec 项目配置\n# version: 配置结构版本；当前固定为 v2\n# ides: 项目级 IDE 覆盖（可选），例如：\n#   ides:\n#     - cursor\n#     - codex\n# editor: 项目级交互式编辑器，覆盖全局配置（可选），例如：\n#   editor: code --wait\n#   editor: vim\n# available / enabled: 按 vault -> item -> type 组织，type 使用 skills / rules / mcp\n#   my-vault:\n#     my-asset:\n#       skills: true\n#       rules: true\n\n"
+	header := "# Dec 项目配置\n# version: 配置结构版本；当前固定为 v2\n# ides: 项目级 IDE 覆盖（可选），例如：\n#   ides:\n#     - cursor\n#     - codex\n# editor: 项目级交互式编辑器，覆盖全局配置（可选），例如：\n#   editor: code --wait\n#   editor: vim\n# enabled_bundles: 按 package 启用资产（推荐）；package 名通常与 vault 同名\n#   enabled_bundles:\n#     - vikunja\n#     - cli\n# available / enabled: 单资产粒度（高级用法）；多数场景请优先使用 enabled_bundles\n#   my-vault:\n#     my-asset:\n#       skills: true\n#       rules: true\n\n"
 	configPath := filepath.Join(decDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入项目配置失败: %w", err)

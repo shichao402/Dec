@@ -182,6 +182,39 @@ func TestPrepareProjectConfigInitPreservesExistingConfigAndWritesFiles(t *testin
 	}
 }
 
+func TestPrepareProjectConfigInitPreservesEnabledBundlesAndDiscoversPackages(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		EnabledBundles: []string{"vikunja"},
+		Enabled: &types.AssetList{
+			Skills: []types.AssetRef{{Name: "vikunja-workflow", Vault: "vikunja"}},
+		},
+	}); err != nil {
+		t.Fatalf("写入现有项目配置失败: %v", err)
+	}
+
+	prepared, err := PrepareProjectConfigInit(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("PrepareProjectConfigInit() 失败: %v", err)
+	}
+	if len(prepared.ProjectConfig.EnabledBundles) != 1 || prepared.ProjectConfig.EnabledBundles[0] != "vikunja" {
+		t.Fatalf("EnabledBundles 应保留, got %v", prepared.ProjectConfig.EnabledBundles)
+	}
+	if prepared.PackageCount < 2 {
+		t.Fatalf("PackageCount = %d, 期望至少 2", prepared.PackageCount)
+	}
+}
+
 func TestPrepareProjectConfigInitSkipsWriteWhenRepoHasNoAssets(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, nil)

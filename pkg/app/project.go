@@ -26,6 +26,10 @@ type ConfigInitPreparation struct {
 	ExistingConfig bool
 	VarsCreated    bool
 	AssetCount     int
+	// PackageCount 是扫描到的 package（bundle）数量，含 vault 级隐式 package。
+	PackageCount int
+	// PackageNames 列出可用 package 名称，供 init 提示使用。
+	PackageNames []string
 }
 
 func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigInitPreparation, error) {
@@ -70,6 +74,7 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 	projectEditor := ""
 	var projectIDEs []string
 	projectName := ""
+	var enabledBundles []string
 	if existingConfig != nil {
 		if !existingConfig.Enabled.IsEmpty() {
 			enabled = existingConfig.Enabled
@@ -77,6 +82,9 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 		projectEditor = existingConfig.Editor
 		projectIDEs = existingConfig.IDEs
 		projectName = existingConfig.ProjectName
+		if len(existingConfig.EnabledBundles) > 0 {
+			enabledBundles = append([]string(nil), existingConfig.EnabledBundles...)
+		}
 	}
 	// 新项目默认写入 cwd basename 作为 project_name，避免用户后续需要手写。
 	// 已有配置时保留原值（即使为空）——不自动填充 basename，防止悄悄篡改用户意图。
@@ -87,11 +95,30 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 	}
 
 	prepared.ProjectConfig = &types.ProjectConfig{
-		ProjectName: projectName,
-		IDEs:        projectIDEs,
-		Editor:      projectEditor,
-		Available:   buildAssetList(allAssets),
-		Enabled:     enabled,
+		ProjectName:    projectName,
+		IDEs:           projectIDEs,
+		Editor:         projectEditor,
+		Available:      buildAssetList(allAssets),
+		Enabled:        enabled,
+		EnabledBundles: enabledBundles,
+	}
+
+	// 扫描 package（含 vault 级隐式 bundle），供 init 提示与 TUI 使用。
+	if err := withReadRepoDir(func(repoDir string) error {
+		_, bundleOverviews, scanErr := scanVaultBundles(repoDir, reporter)
+		if scanErr != nil {
+			return scanErr
+		}
+		prepared.PackageCount = len(bundleOverviews)
+		names := make([]string, 0, len(bundleOverviews))
+		for _, bo := range bundleOverviews {
+			names = append(names, bo.Name)
+		}
+		sort.Strings(names)
+		prepared.PackageNames = names
+		return nil
+	}); err != nil {
+		emit(reporter, EventWarn, "project.init", fmt.Sprintf("扫描 package 失败，init 仍会继续：%v", err), nil)
 	}
 
 	emit(reporter, EventInfo, "project.init", "写入项目配置", &Progress{Phase: "write", Current: 1, Total: 2})

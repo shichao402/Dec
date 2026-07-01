@@ -315,9 +315,17 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("📝 变量模板已保留: %s\n", prepared.VarsPath)
 	}
-	fmt.Println("   将 available 中的资产复制到 enabled 即为启用。")
+	if prepared.PackageCount > 0 {
+		fmt.Printf("📦 检测到 %d 个 package，可在 enabled_bundles 中按包启用（推荐）\n", prepared.PackageCount)
+		if len(prepared.PackageNames) > 0 {
+			fmt.Printf("   可用 package: %s\n", strings.Join(prepared.PackageNames, ", "))
+		}
+		fmt.Println("   示例: enabled_bundles: [vikunja, cli]")
+	} else {
+		fmt.Println("   将 available 中的资产复制到 enabled 即为启用。")
+	}
 	fmt.Println("   如资产模板包含 {{VAR_NAME}}，在 vars.yaml 中填写对应变量。")
-	fmt.Println()
+	fmt.Println("   也可运行 dec 进入 TUI，在 Assets 页按 package 勾选。")
 
 	interactiveEditor, err := config.GetEffectiveEditor(prepared.ProjectConfig)
 	if err != nil {

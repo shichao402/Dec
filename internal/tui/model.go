@@ -277,7 +277,7 @@ func newModel(projectRoot, currentVersion string) model {
 		currentVersion:  currentVersion,
 		pages:           []string{"Home", "Assets", "Project", "Run", "外部应用", "Settings"},
 		expandedBundles: make(map[string]bool),
-		assetTypeFilter: "all",
+		assetTypeFilter: "bundle",
 		logs: []string{
 			"TUI shell ready",
 			"Loading project overview...",
@@ -322,6 +322,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if bo.Enabled {
 					m.bundleSelection = append(m.bundleSelection, bo.Name)
 				}
+			}
+			// 仓库尚无 package 声明时，bundle 视图会空列表；回落到单资产视图。
+			if len(msg.state.Bundles) == 0 && m.assetTypeFilter == "bundle" {
+				m.assetTypeFilter = "all"
 			}
 		}
 		if m.expandedBundles == nil {

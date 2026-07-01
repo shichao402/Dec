@@ -60,8 +60,11 @@ func TestResolveDesiredAssets_StandaloneOnly(t *testing.T) {
 	if sources := got.Sources[key]; len(sources) != 1 || sources[0] != "standalone" {
 		t.Fatalf("Sources[%s] = %#v, 期望 [standalone]", key, sources)
 	}
-	if len(got.Bundles) != 0 {
-		t.Fatalf("Bundles = %#v, 期望为空", got.Bundles)
+	if len(got.Bundles) != 1 || got.Bundles[0].Name != "default" {
+		t.Fatalf("Bundles = %#v, 期望 1 个隐式 default package", got.Bundles)
+	}
+	if got.Bundles[0].Enabled {
+		t.Fatal("未在 enabled_bundles 中引用时不应标记 package 为 Enabled")
 	}
 }
 
@@ -97,9 +100,18 @@ members:
 		}
 	}
 
-	// bundle 本身被标记为 Enabled
-	if len(got.Bundles) != 1 || !got.Bundles[0].Enabled {
-		t.Fatalf("Bundles = %#v, 期望 1 个启用的 bundle", got.Bundles)
+	// combo 启用 + default 隐式 package 未启用
+	if len(got.Bundles) != 2 {
+		t.Fatalf("Bundles len = %d, 期望 2（combo + default 隐式 package）", len(got.Bundles))
+	}
+	enabledCount := 0
+	for _, b := range got.Bundles {
+		if b.Enabled {
+			enabledCount++
+		}
+	}
+	if enabledCount != 1 {
+		t.Fatalf("Bundles = %#v, 期望仅 1 个启用的 bundle", got.Bundles)
 	}
 }
 

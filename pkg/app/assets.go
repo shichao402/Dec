@@ -226,6 +226,11 @@ func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) 
 			opt.Enabled = true
 		}
 		opt.Members = buildBundleMemberItems(bo, tx.WorkDir())
+		if !opt.Enabled && projectConfig != nil && len(opt.Members) > 0 {
+			if inferBundleEnabledFromStandalone(opt.Members, projectConfig.Enabled) {
+				opt.Enabled = true
+			}
+		}
 		options = append(options, opt)
 	}
 	sort.SliceStable(options, func(i, j int) bool {

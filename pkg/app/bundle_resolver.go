@@ -209,6 +209,7 @@ func scanVaultBundles(repoDir string, reporter Reporter) (map[string][]vaultBund
 		}
 	}
 
+	overviews = synthesizeVaultPackages(repoDir, byName, overviews)
 	return byName, overviews, nil
 }
 

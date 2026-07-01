@@ -108,7 +108,23 @@ func snapshotAssetsModel(width int) model {
 			{Name: "project-workflow", Type: "skill", Vault: "default", Enabled: true},
 			{Name: "cli-release-rules", Type: "rule", Vault: "cli", Enabled: false},
 		},
+		Bundles: []app.AssetBundleOption{
+			{
+				Name:        "default",
+				Vault:       "default",
+				Description: "default 资产包",
+				Enabled:     true,
+				Members:     []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
+			},
+			{
+				Name:        "cli",
+				Vault:       "cli",
+				Description: "cli 资产包",
+				Members:     []app.AssetSelectionItem{{Name: "cli-release-rules", Type: "rule", Vault: "cli"}},
+			},
+		},
 	}
+	m.bundleSelection = []string{"default"}
 	m.normalizeAssetCursor()
 	return m
 }

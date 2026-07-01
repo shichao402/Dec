@@ -55,6 +55,7 @@ func TestModelAssetsPageRendersSelectionState(t *testing.T) {
 	m.pageIndex = 1
 	m.width = 110
 	m.height = 32
+	m.assetTypeFilter = "all"
 	m.assets = &app.AssetSelectionState{
 		ExistingConfig: true,
 		ConfigPath:     "/tmp/dec-project/.dec/config.yaml",
@@ -117,6 +118,7 @@ func TestModelRunPageRendersExecutionState(t *testing.T) {
 func TestModelToggleCurrentAssetMarksDirty(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.assetTypeFilter = "all"
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
 	}
@@ -135,6 +137,7 @@ func TestModelToggleCurrentAssetMarksDirty(t *testing.T) {
 func TestModelFilterInputNarrowsAssets(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.assetTypeFilter = "all"
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{
 			{Name: "project-workflow", Type: "skill", Vault: "default"},
@@ -1528,6 +1531,8 @@ func TestModelAssetsBundleToggleMarksMembersReadonly(t *testing.T) {
 		}
 	}
 	// 找到独立资产行尝试 toggle：独立 rule 应仍可切换
+	m.assetTypeFilter = "all"
+	m.normalizeAssetCursor()
 	seekCursorToKind(t, &m, assetRowAsset)
 	rows := m.visibleAssetRows()
 	var cursorItem app.AssetSelectionItem
@@ -1595,14 +1600,26 @@ func TestModelAssetsTypeFilterCycleAndBundleOnlyView(t *testing.T) {
 	m.assets = assetsStateWithBundle()
 	m.normalizeAssetCursor()
 
-	if m.assetTypeFilter != "all" {
-		t.Fatalf("初始 type filter = %q, 期望 all", m.assetTypeFilter)
+	if m.assetTypeFilter != "bundle" {
+		t.Fatalf("初始 type filter = %q, 期望 bundle", m.assetTypeFilter)
 	}
-	// 按 t 轮转一次到 skill
+	// 默认 bundle 视图只含 bundle 节点行
+	for _, r := range m.visibleAssetRows() {
+		if r.kind == assetRowAsset {
+			t.Fatal("默认 bundle 视图下不应包含单资产行")
+		}
+	}
+	// 按 t 轮转一次到 all
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
 	m = updated.(model)
+	if m.assetTypeFilter != "all" {
+		t.Fatalf("第一次 t = %q, 期望 all", m.assetTypeFilter)
+	}
+	// 再按 t 到 skill
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = updated.(model)
 	if m.assetTypeFilter != "skill" {
-		t.Fatalf("第一次 t = %q, 期望 skill", m.assetTypeFilter)
+		t.Fatalf("第二次 t = %q, 期望 skill", m.assetTypeFilter)
 	}
 	// skill 过滤下不应显示 rule 资产
 	for _, r := range m.visibleAssetRows() {
@@ -1655,6 +1672,7 @@ func TestModelAssetsNoBundleLegacyBehaviorUnchanged(t *testing.T) {
 	// 回归：存量项目（assets.Bundles 为空）时，Assets 页 toggle / filter 行为应与旧版一致。
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.assetTypeFilter = "all"
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{{Name: "solo", Type: "skill", Vault: "default"}},
 	}

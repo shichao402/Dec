@@ -97,11 +97,18 @@ members:
 	if overview.EnabledBundleCount != 1 {
 		t.Fatalf("EnabledBundleCount = %d, 期望 1", overview.EnabledBundleCount)
 	}
-	if len(overview.Bundles) != 1 {
-		t.Fatalf("Bundles = %#v, 期望 1 个", overview.Bundles)
+	if len(overview.Bundles) != 2 {
+		t.Fatalf("Bundles = %#v, 期望 2 个（combo + default 隐式 package）", overview.Bundles)
 	}
-	if overview.Bundles[0].Name != "combo" || !overview.Bundles[0].Enabled {
-		t.Fatalf("Bundle[0] = %#v, 期望 combo 且启用", overview.Bundles[0])
+	var combo *BundleOverview
+	for i := range overview.Bundles {
+		if overview.Bundles[i].Name == "combo" {
+			combo = &overview.Bundles[i]
+			break
+		}
+	}
+	if combo == nil || !combo.Enabled {
+		t.Fatalf("combo bundle 应存在且启用, Bundles = %#v", overview.Bundles)
 	}
 }
 
