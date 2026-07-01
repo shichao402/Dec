@@ -1,0 +1,5 @@
+name: cli
+description: Dec CLI 发布与工作流
+members:
+  - skills/cli-release-workflow
+  - rules/cli-release-rules

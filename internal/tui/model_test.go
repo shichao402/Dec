@@ -1699,3 +1699,34 @@ func TestModelAssetsSaveCmdSignatureCarriesBundles(t *testing.T) {
 	_ = saveAssetsCmd("/nonexistent", nil, []string{"x"})
 }
 
+func TestModelConfigInitModeQuitsAfterSave(t *testing.T) {
+	m := newModelWithOptions("/tmp/dec-project", "v1.0.0", RunOptions{ConfigInitMode: true})
+	if !m.configInitMode {
+		t.Fatal("configInitMode 应为 true")
+	}
+	if m.pageIndex != 1 {
+		t.Fatalf("pageIndex = %d, 期望 1 (Assets)", m.pageIndex)
+	}
+
+	updated, cmd := m.Update(assetsSavedMsg{
+		result: &app.SaveAssetSelectionResult{EnabledBundleCount: 1},
+	})
+	if cmd == nil {
+		t.Fatal("config init 保存后应触发 tea.Quit")
+	}
+	if _, ok := updated.(model); !ok {
+		t.Fatalf("Update 返回 = %T, 期望 model", updated)
+	}
+}
+
+func TestNewModelWithOptionsDefaultsMatchLegacy(t *testing.T) {
+	legacy := newModel("/tmp/dec-project", "v1.0.0")
+	opts := newModelWithOptions("/tmp/dec-project", "v1.0.0", RunOptions{})
+	if legacy.pageIndex != opts.pageIndex {
+		t.Fatalf("pageIndex 不一致: legacy=%d opts=%d", legacy.pageIndex, opts.pageIndex)
+	}
+	if opts.configInitMode {
+		t.Fatal("默认 RunOptions 不应开启 configInitMode")
+	}
+}
+

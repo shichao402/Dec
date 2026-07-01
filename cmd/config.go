@@ -5,17 +5,20 @@ import (
 	"os"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/tui"
 	"github.com/shichao402/Dec/pkg/app"
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/editor"
 	"github.com/shichao402/Dec/pkg/repo"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
-	configIDEs         []string
-	configProjectIDEs  []string
-	configProjectClear bool
+	configIDEs            []string
+	configProjectIDEs     []string
+	configProjectClear    bool
+	configInitUseEditor   bool
 )
 
 var configCmd = &cobra.Command{
@@ -277,13 +280,15 @@ var configInitCmd = &cobra.Command{
 	Long: `初始化当前项目的 Dec 配置。
 
 从远程仓库获取所有可用资产，生成项目配置和变量模板文件，
-并打开编辑器让你选择需要的资产。
+并在 TUI 中按 package 选择要启用的资产（推荐）。
 
-保存并关闭编辑器后，配置即生效。
-之后运行 dec pull 即可拉取选中的资产。
+保存后配置即生效；之后运行 dec pull 即可拉取选中的资产。
+
+非交互终端或需要手动编辑 YAML 时，使用 --editor 打开外部编辑器。
 
 示例:
-  dec config init`,
+  dec config init
+  dec config init --editor`,
 	RunE: runConfigInit,
 }
 
@@ -325,6 +330,19 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 		fmt.Println("   将 available 中的资产复制到 enabled 即为启用。")
 	}
 	fmt.Println("   如资产模板包含 {{VAR_NAME}}，在 vars.yaml 中填写对应变量。")
+
+	if !configInitUseEditor && isInteractiveTerminal() {
+		fmt.Println("\n🖥️  打开 TUI 选择 package（space 切换 · s 保存退出）...")
+		if err := tui.RunConfigInit(cwd, GetVersion(), os.Stdin, os.Stdout); err != nil {
+			return fmt.Errorf("初始化 TUI 失败: %w", err)
+		}
+		return printConfigInitSummary(mgr)
+	}
+
+	if !configInitUseEditor && !isInteractiveTerminal() {
+		fmt.Println("   当前非交互终端，将尝试打开外部编辑器；也可稍后运行 dec 进入 TUI。")
+	}
+
 	fmt.Println("   也可运行 dec 进入 TUI，在 Assets 页按 package 勾选。")
 
 	interactiveEditor, err := config.GetEffectiveEditor(prepared.ProjectConfig)
@@ -349,14 +367,40 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("\n✅ 项目配置已完成")
 	if enabledCount > 0 {
 		fmt.Printf("   已启用 %d 个资产\n", enabledCount)
+	} else if len(projectConfig.EnabledBundles) > 0 {
+		fmt.Printf("   已启用 %d 个 package: %s\n", len(projectConfig.EnabledBundles), strings.Join(projectConfig.EnabledBundles, ", "))
 	} else {
-		fmt.Println("   未启用任何资产（可稍后编辑 .dec/config.yaml）")
+		fmt.Println("   未启用任何资产（可稍后编辑 .dec/config.yaml 或运行 dec）")
 	}
 	fmt.Println("\n后续步骤:")
 	fmt.Println("  编辑 .dec/vars.yaml          # 如资产使用了 {{VAR_NAME}} 占位符")
 	fmt.Println("  dec pull                     # 拉取所有已启用的资产")
 
 	return nil
+}
+
+func printConfigInitSummary(mgr *config.ProjectConfigManager) error {
+	projectConfig, err := mgr.LoadProjectConfig()
+	if err != nil {
+		return fmt.Errorf("解析配置失败: %w", err)
+	}
+
+	fmt.Println("\n✅ 项目配置已完成")
+	if len(projectConfig.EnabledBundles) > 0 {
+		fmt.Printf("   已启用 %d 个 package: %s\n", len(projectConfig.EnabledBundles), strings.Join(projectConfig.EnabledBundles, ", "))
+	} else if projectConfig.Enabled != nil && !projectConfig.Enabled.IsEmpty() {
+		fmt.Printf("   已启用 %d 个资产\n", projectConfig.Enabled.Count())
+	} else {
+		fmt.Println("   未启用任何 package（可稍后运行 dec 在 Assets 页勾选）")
+	}
+	fmt.Println("\n后续步骤:")
+	fmt.Println("  编辑 .dec/vars.yaml          # 如资产使用了 {{VAR_NAME}} 占位符")
+	fmt.Println("  dec pull                     # 拉取所有已启用的资产")
+	return nil
+}
+
+func isInteractiveTerminal() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 // ========================================
@@ -547,6 +591,7 @@ func init() {
 	configCmd.AddCommand(configProjectCmd)
 	configCmd.AddCommand(configRepoCmd)
 	configCmd.AddCommand(configInitCmd)
+	configInitCmd.Flags().BoolVar(&configInitUseEditor, "editor", false, "使用外部编辑器编辑 config.yaml（默认走 TUI package 选择）")
 
 	RootCmd.AddCommand(configCmd)
 }

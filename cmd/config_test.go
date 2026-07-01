@@ -109,6 +109,9 @@ func TestRunConfigInitWritesConfigBeforeManualEditFallback(t *testing.T) {
 	projectRoot := t.TempDir()
 	chdirForTest(t, projectRoot)
 
+	configInitUseEditor = true
+	t.Cleanup(func() { configInitUseEditor = false })
+
 	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {

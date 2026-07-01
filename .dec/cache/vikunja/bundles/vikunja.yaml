@@ -1,0 +1,8 @@
+name: vikunja
+description: Vikunja 项目管理与 issue 工作流（skills + rules + mcp）
+members:
+  - skills/vikunja-issue
+  - skills/vikunja-project-bootstrap
+  - skills/vikunja-workflow
+  - rules/vikunja-integration
+  - mcp/vikunja-mcp

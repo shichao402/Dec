@@ -269,22 +269,41 @@ type model struct {
 	// sessionInvalidMsg 是 pkv 子命令报错时给用户的提示行（中文一句话）。
 	// 不会自动清 bwSession；下次 unlock 成功或清空逻辑显式写入空串时复位。
 	sessionInvalidMsg string
+	// configInitMode 为 true 时表示由 dec config init 拉起：聚焦 Assets/package 视图，保存后退出。
+	configInitMode bool
 }
 
 func newModel(projectRoot, currentVersion string) model {
-	return model{
+	return newModelWithOptions(projectRoot, currentVersion, RunOptions{})
+}
+
+func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) model {
+	logs := []string{
+		"TUI shell ready",
+		"Loading project overview...",
+		"Loading asset selection...",
+		"Loading global settings...",
+	}
+	if opts.ConfigInitMode {
+		logs = []string{
+			"项目配置初始化",
+			"选择 package 后按 s 保存并退出",
+			"Loading asset selection...",
+		}
+	}
+	m := model{
 		projectRoot:     projectRoot,
 		currentVersion:  currentVersion,
 		pages:           []string{"Home", "Assets", "Project", "Run", "外部应用", "Settings"},
 		expandedBundles: make(map[string]bool),
 		assetTypeFilter: "bundle",
-		logs: []string{
-			"TUI shell ready",
-			"Loading project overview...",
-			"Loading asset selection...",
-			"Loading global settings...",
-		},
+		configInitMode:  opts.ConfigInitMode,
+		logs:            logs,
 	}
+	if opts.ConfigInitMode {
+		m.pageIndex = 1 // Assets
+	}
+	return m
 }
 
 func (m model) Init() tea.Cmd {
@@ -344,6 +363,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.result != nil {
 			m.pushLog(fmt.Sprintf("Asset selection saved: %d enabled / %d available / %d bundles", msg.result.EnabledCount, msg.result.AvailableCount, msg.result.EnabledBundleCount))
+		}
+		if m.configInitMode {
+			m.pushLog("项目配置已保存，退出初始化")
+			return m, tea.Quit
 		}
 		return m, m.refreshCmd()
 	case settingsLoadedMsg:
@@ -1496,10 +1519,15 @@ func (m model) renderAssetsPage(width int) string {
 		return shellMutedStyle.Render("Loading asset selection...")
 	}
 
-	summary := []string{
+	summary := []string{}
+	if m.configInitMode {
+		summary = append(summary, shellTitleStyle.Render("项目配置初始化 — 按 package 启用资产"))
+		summary = append(summary, shellMutedStyle.Render("推荐勾选 vault 级 package（如 vikunja、cli）；保存后写入 enabled_bundles。"))
+	}
+	summary = append(summary,
 		fmt.Sprintf("筛选: %s | 类型: %s", m.currentAssetFilterLabel(), m.assetTypeFilter),
 		fmt.Sprintf("资产总数: %d | 已启用: %d | Bundle: %d/%d", len(m.assets.Items), m.countEnabledAssets(), len(m.bundleSelection), len(m.assets.Bundles)),
-	}
+	)
 	if m.assetsDirty {
 		summary = append(summary, shellWarnStyle.Render("当前有未保存修改，按 s 保存。"))
 	} else {
