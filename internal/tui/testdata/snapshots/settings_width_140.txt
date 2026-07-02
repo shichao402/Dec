@@ -1,14 +1,14 @@
 ╭──────────────────────╮╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                      ││                                                                                                                  │
 │  Dec Shell           ││  Settings                                                                                                        │
-│  tab switch / j k    ││  /tmp/dec-project                                                                                                │
-│  move                ││  Settings ready, 1 IDEs                                                                                          │
+│  j/k 切换页 · l      ││  /tmp/dec-project                                                                                                │
+│  进入 · h 返回       ││  Settings ready, 1 IDEs                                                                                          │
 │   Home               ││                                                                                                                  │
 │   Assets             │╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 │   Project            │╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │   Run                ││                                                                                                                  │
 │   外部应用           ││  Repo URL: git@github.com:demo/dec.git                                                                           │
-│   Settings           ││  当前远端: git@github.com:demo/dec.git                                                                           │
+│  Settings            ││  当前远端: git@github.com:demo/dec.git                                                                           │
 │                      ││  已选 IDE: cursor                                                                                                │
 │                      ││  生效 IDE: cursor                                                                                                │
 │                      ││  全局配置: /tmp/.dec/config.yaml                                                                                 │
@@ -19,7 +19,7 @@
 │                      ││  首次保存会创建 ~/.dec/local/vars.yaml 模板。                                                                    │
 │                      ││                                                                                                                  │
 │                      ││  Global Settings                                       Details                                                   │
-│                      ││  > Repo URL: git@github.com:demo/dec.git               当前远端: git@github.com:demo/dec.git                     │
+│                      ││    Repo URL: git@github.com:demo/dec.git               当前远端: git@github.com:demo/dec.git                     │
 │                      ││    [ ] codex                                           Bare Repo: 未连接                                         │
 │                      ││    [x] cursor                                          配置文件: /tmp/.dec/config.yaml                           │
 │                      ││                                                        本机 Vars: /tmp/.dec/local/vars.yaml                      │
@@ -41,4 +41,4 @@
 ╰──────────────────────╯│  - Loading global settings...                                                                                    │
                         │                                                                                                                  │
                         ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- q quit | tab switch | r refresh                                                                                     page Settings | 1 IDEs
+ q quit | j/k nav | l/h in-out | r refresh                                                                           page Settings | 1 IDEs

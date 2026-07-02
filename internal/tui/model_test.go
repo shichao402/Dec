@@ -53,6 +53,7 @@ func TestModelViewRendersHomeOverview(t *testing.T) {
 func TestModelAssetsPageRendersSelectionState(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.focus = focusContent
 	m.width = 110
 	m.height = 32
 	m.assetTypeFilter = "all"
@@ -73,7 +74,7 @@ func TestModelAssetsPageRendersSelectionState(t *testing.T) {
 		"Details",
 		"[x] default / skill / project-workflow",
 		"[ ] cli / rule / cli-release-rules",
-		"快捷键：j/k 移动",
+		"快捷键：j/k 移动 · h 返回导航",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
@@ -118,6 +119,7 @@ func TestModelRunPageRendersExecutionState(t *testing.T) {
 func TestModelToggleCurrentAssetMarksDirty(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.focus = focusContent
 	m.assetTypeFilter = "all"
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
@@ -137,6 +139,7 @@ func TestModelToggleCurrentAssetMarksDirty(t *testing.T) {
 func TestModelFilterInputNarrowsAssets(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.focus = focusContent
 	m.assetTypeFilter = "all"
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{
@@ -169,6 +172,7 @@ func TestModelFilterInputNarrowsAssets(t *testing.T) {
 func TestModelAssetsPageDoesNotLeavePageWithoutVisibleAssets(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.focus = focusContent
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
 	}
@@ -178,13 +182,21 @@ func TestModelAssetsPageDoesNotLeavePageWithoutVisibleAssets(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = updated.(model)
 	if m.pageIndex != 1 {
-		t.Fatalf("无可见资产时按 down 不应切出 Assets 页, pageIndex = %d", m.pageIndex)
+		t.Fatalf("内容区无可见资产时按 down 不应切出 Assets 页, pageIndex = %d", m.pageIndex)
 	}
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m = updated.(model)
 	if m.pageIndex != 1 {
-		t.Fatalf("无可见资产时按 up 不应切出 Assets 页, pageIndex = %d", m.pageIndex)
+		t.Fatalf("内容区无可见资产时按 up 不应切出 Assets 页, pageIndex = %d", m.pageIndex)
+	}
+
+	// 侧栏焦点下 j/k 应切换页
+	m.focus = focusSidebar
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	if m.pageIndex == 1 {
+		t.Fatal("侧栏焦点下按 down 应切换页")
 	}
 }
 
@@ -274,6 +286,7 @@ func TestModelRunPageProcessesStreamedEventsAndSchedulesRefresh(t *testing.T) {
 func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 5
+	m.focus = focusContent
 	m.width = 120
 	m.height = 32
 	m.settings = &app.GlobalSettingsState{
@@ -309,6 +322,7 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 func TestModelSettingsHotkeysToggleIDEAndStartEdit(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 5
+	m.focus = focusContent
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:       "git@github.com:demo/dec.git",
 		AvailableIDEs: []string{"cursor", "codex"},
@@ -873,6 +887,7 @@ func TestModelRunPageUpdateDoneRenderingShowsFallbackOnFailure(t *testing.T) {
 func TestModelProjectPageRendersInheritMode(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 2 // Project
+	m.focus = focusContent
 	m.width = 120
 	m.height = 32
 	m.projectSettings = &app.ProjectSettingsState{
@@ -936,6 +951,7 @@ func TestModelProjectPageRendersOverrideMode(t *testing.T) {
 func TestModelProjectPageToggleOverrideSwitchesMode(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 2
+	m.focus = focusContent
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs: []string{"cursor"},
 		EffectiveIDEs: []string{"cursor"},
@@ -960,6 +976,7 @@ func TestModelProjectPageToggleOverrideSwitchesMode(t *testing.T) {
 func TestModelProjectPageToggleIDEInOverrideMode(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 2
+	m.focus = focusContent
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs:  []string{"cursor", "codex"},
 		SelectedIDEs:   []string{"cursor"},
@@ -982,6 +999,7 @@ func TestModelProjectPageToggleIDEInOverrideMode(t *testing.T) {
 func TestModelProjectPageToggleIDEInInheritModeIsNoop(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 2
+	m.focus = focusContent
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs: []string{"cursor", "codex"},
 	}
@@ -1507,6 +1525,7 @@ func seekCursorToKind(t *testing.T, m *model, want assetRowKind) {
 func TestModelAssetsBundleToggleMarksMembersReadonly(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.focus = focusContent
 	m.assets = assetsStateWithBundle()
 	m.normalizeAssetCursor()
 
@@ -1556,6 +1575,7 @@ func TestModelAssetsBundleToggleMarksMembersReadonly(t *testing.T) {
 func TestModelAssetsBundleUnselectReturnsMembersToStandalone(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.focus = focusContent
 	m.assets = assetsStateWithBundle()
 	// 预置：bundle 已选中；同时把 Items[1] 单独 enabled（模拟用户也显式 enabled 了成员）。
 	m.bundleSelection = []string{"vikunja"}
@@ -1597,6 +1617,7 @@ func TestModelAssetsSaveSendsBundlesAndFiltersImplicitMembers(t *testing.T) {
 func TestModelAssetsTypeFilterCycleAndBundleOnlyView(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.focus = focusContent
 	m.assets = assetsStateWithBundle()
 	m.normalizeAssetCursor()
 
@@ -1643,28 +1664,55 @@ func TestModelAssetsTypeFilterCycleAndBundleOnlyView(t *testing.T) {
 	}
 }
 
-func TestModelAssetsBundleEnterExpandsAndCollapses(t *testing.T) {
+func TestModelAssetsBundleRightExpandsAndLeftCollapses(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.focus = focusContent
 	m.assets = assetsStateWithBundle()
 	m.normalizeAssetCursor()
 	seekCursorToKind(t, &m, assetRowBundle)
 
 	before := len(m.visibleAssetRows())
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	m = updated.(model)
 	after := len(m.visibleAssetRows())
 	if after <= before {
-		t.Fatalf("展开后 rows %d 应大于折叠态 %d", after, before)
+		t.Fatalf("按 l 展开后 rows %d 应大于折叠态 %d", after, before)
 	}
 	if !m.expandedBundles["vikunja"] {
 		t.Fatal("bundle 应处于展开态")
 	}
-	// 再按一次 enter 折叠
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.focus != focusBundleExpanded {
+		t.Fatalf("展开后 focus = %q, 期望 bundleExpanded", m.focus)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
 	m = updated.(model)
 	if m.expandedBundles["vikunja"] {
-		t.Fatal("bundle 应处于折叠态")
+		t.Fatal("按 h 后 bundle 应处于折叠态")
+	}
+	if m.focus != focusContent {
+		t.Fatalf("折叠后 focus = %q, 期望 content", m.focus)
+	}
+}
+
+func TestModelSpatialNavigationSidebarEnterExit(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 1
+	if m.focus != focusSidebar {
+		t.Fatalf("默认 focus = %q, 期望 sidebar", m.focus)
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	m = updated.(model)
+	if m.focus != focusContent {
+		t.Fatalf("侧栏按 l 后 focus = %q, 期望 content", m.focus)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m = updated.(model)
+	if m.focus != focusSidebar {
+		t.Fatalf("内容区按 h 后 focus = %q, 期望 sidebar", m.focus)
 	}
 }
 
@@ -1672,6 +1720,7 @@ func TestModelAssetsNoBundleLegacyBehaviorUnchanged(t *testing.T) {
 	// 回归：存量项目（assets.Bundles 为空）时，Assets 页 toggle / filter 行为应与旧版一致。
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
+	m.focus = focusContent
 	m.assetTypeFilter = "all"
 	m.assets = &app.AssetSelectionState{
 		Items: []app.AssetSelectionItem{{Name: "solo", Type: "skill", Vault: "default"}},

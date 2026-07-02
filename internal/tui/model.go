@@ -90,6 +90,19 @@ type pkvUnlockedMsg struct {
 }
 
 // externalToolsEntry 描述外部应用页的一行可选命令。
+// focusContext 描述 TUI 的空间导航焦点层级。
+// 左右键（h/l）在该层级间进入/退出；上下键（j/k）在同级内移动。
+//   - focusSidebar：侧栏导航（Home/Assets/...），j/k 切换页，l 进入内容区
+//   - focusContent：当前页内容列表，j/k 移动光标，h 退回侧栏，l 进入更深（如展开 bundle）
+//   - focusBundleExpanded：bundle 已展开，j/k 在成员间移动，h 折叠并退回内容区
+type focusContext string
+
+const (
+	focusSidebar         focusContext = "sidebar"
+	focusContent         focusContext = "content"
+	focusBundleExpanded  focusContext = "bundleExpanded"
+)
+
 type externalToolsEntry struct {
 	// Label 显示在菜单上的短名。
 	Label string
@@ -271,6 +284,8 @@ type model struct {
 	sessionInvalidMsg string
 	// configInitMode 为 true 时表示由 dec config init 拉起：聚焦 Assets/package 视图，保存后退出。
 	configInitMode bool
+	// focus 是当前键盘交互上下文（侧栏 / 内容 / bundle 成员）。
+	focus focusContext
 }
 
 func newModel(projectRoot, currentVersion string) model {
@@ -298,10 +313,12 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 		expandedBundles: make(map[string]bool),
 		assetTypeFilter: "bundle",
 		configInitMode:  opts.ConfigInitMode,
+		focus:           focusSidebar,
 		logs:            logs,
 	}
 	if opts.ConfigInitMode {
 		m.pageIndex = 1 // Assets
+		m.focus = focusContent
 	}
 	return m
 }
@@ -598,83 +615,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			m.pushLog("Exit requested")
 			return m, tea.Quit
-		case "tab", "l", "right":
+		case "tab":
 			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
+			m.focus = focusSidebar
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
 			return m, nil
-		case "shift+tab", "h", "left":
+		case "shift+tab":
 			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
+			m.focus = focusSidebar
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
 			return m, nil
+		case "l", "right":
+			return m.handleHorizontalNav(1)
+		case "h", "left":
+			return m.handleHorizontalNav(-1)
 		case "j", "down":
-			if m.isAssetsPage() {
-				if m.canNavigateAssets() {
-					m.moveAssetCursor(1)
-				}
-				return m, nil
-			}
-			if m.isSettingsPage() {
-				if m.canNavigateSettings() {
-					m.moveSettingsCursor(1)
-				}
-				return m, nil
-			}
-			if m.isProjectPage() {
-				if m.canNavigateProjectSettings() {
-					m.moveProjectSettingsCursor(1)
-				}
-				return m, nil
-			}
-			if m.isExternalToolsPage() {
-				m.moveExternalToolsCursor(1)
-				return m, nil
-			}
-			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
-			m.pushLog("Switched to " + m.pages[m.pageIndex])
-			return m, nil
+			return m.handleVerticalNav(1)
 		case "k", "up":
-			if m.isAssetsPage() {
-				if m.canNavigateAssets() {
-					m.moveAssetCursor(-1)
-				}
-				return m, nil
-			}
-			if m.isSettingsPage() {
-				if m.canNavigateSettings() {
-					m.moveSettingsCursor(-1)
-				}
-				return m, nil
-			}
-			if m.isProjectPage() {
-				if m.canNavigateProjectSettings() {
-					m.moveProjectSettingsCursor(-1)
-				}
-				return m, nil
-			}
-			if m.isExternalToolsPage() {
-				m.moveExternalToolsCursor(-1)
-				return m, nil
-			}
-			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
-			m.pushLog("Switched to " + m.pages[m.pageIndex])
-			return m, nil
+			return m.handleVerticalNav(-1)
 		case "r":
 			m.pushLog("Refreshing project overview, assets, and global settings")
 			return m, m.refreshCmd()
 		case "/":
-			if m.isAssetsPage() {
+			if m.isAssetsPage() && m.focus != focusSidebar {
 				m.assetFilterInput = true
 				m.pushLog("Asset filter input opened")
 			}
 			return m, nil
 		case "t":
-			if m.isAssetsPage() && !m.savingAssets {
+			if m.isAssetsPage() && !m.savingAssets && m.focus != focusSidebar {
 				m.cycleAssetTypeFilter()
 				return m, nil
 			}
 			return m, nil
 		case "c":
-			if m.isAssetsPage() && strings.TrimSpace(m.assetFilter) != "" {
+			if m.isAssetsPage() && m.focus != focusSidebar && strings.TrimSpace(m.assetFilter) != "" {
 				m.assetFilter = ""
 				m.normalizeAssetCursor()
 				m.pushLog("Asset filter cleared")
@@ -686,16 +661,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case " ", "enter":
-			if m.isAssetsPage() && !m.savingAssets {
-				// enter 在 bundle 节点行上用于展开/折叠；space 则始终触发 toggle。
-				if msg.String() == "enter" && m.assetsCursorOnBundle() {
-					m.toggleCurrentBundleExpansion()
+			if m.isAssetsPage() && !m.savingAssets && m.focus != focusSidebar {
+				// enter 在 bundle 节点行上用于展开/折叠（内容区）；space 则始终触发 toggle。
+				if msg.String() == "enter" && m.assetsCursorOnBundle() && m.focus == focusContent {
+					m.expandCurrentBundle()
+					return m, nil
+				}
+				if msg.String() == "enter" && m.assetsCursorOnBundle() && m.focus == focusBundleExpanded {
+					m.collapseCurrentBundle()
+					m.focus = focusContent
 					return m, nil
 				}
 				m.toggleCurrentAsset()
 				return m, nil
 			}
-			if m.isSettingsPage() && !m.savingSettings {
+			if m.isSettingsPage() && !m.savingSettings && m.focus != focusSidebar {
 				if m.settingsCursor == 0 {
 					if msg.String() == "enter" {
 						m.beginSettingsRepoEdit()
@@ -705,14 +685,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
+			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil && m.focus != focusSidebar {
 				if m.projectSettingsCursor == 0 {
 					m.toggleProjectOverride()
 				} else {
 					m.toggleCurrentProjectIDE()
 				}
 			}
-			if m.isExternalToolsPage() && !m.launchingExternal {
+			if m.isExternalToolsPage() && !m.launchingExternal && m.focus != focusSidebar {
 				return m, m.triggerExternalToolsSelection()
 			}
 			return m, nil
@@ -814,6 +794,81 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	return m, nil
+}
+
+// handleHorizontalNav 实现左右键（h/l）的空间进入/退出模型。
+func (m model) handleHorizontalNav(direction int) (tea.Model, tea.Cmd) {
+	switch m.focus {
+	case focusSidebar:
+		if direction > 0 {
+			m.focus = focusContent
+			m.pushLog("进入内容区")
+		}
+		return m, nil
+	case focusContent:
+		if direction < 0 {
+			m.focus = focusSidebar
+			m.pushLog("返回导航")
+			return m, nil
+		}
+		if m.isAssetsPage() && m.assetsCursorOnBundle() {
+			m.expandCurrentBundle()
+			m.focus = focusBundleExpanded
+			m.moveCursorToFirstBundleMember()
+		}
+		return m, nil
+	case focusBundleExpanded:
+		if direction < 0 {
+			m.collapseCurrentBundle()
+			m.focus = focusContent
+			m.pushLog("折叠 bundle")
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleVerticalNav 实现上下键（j/k）在侧栏或内容区的移动。
+func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
+	switch m.focus {
+	case focusSidebar:
+		if delta > 0 {
+			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
+		} else {
+			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
+		}
+		m.pushLog("Switched to " + m.pages[m.pageIndex])
+		return m, nil
+	case focusContent:
+		if m.isAssetsPage() {
+			if m.canNavigateAssets() {
+				m.moveAssetCursor(delta)
+			}
+			return m, nil
+		}
+		if m.isSettingsPage() {
+			if m.canNavigateSettings() {
+				m.moveSettingsCursor(delta)
+			}
+			return m, nil
+		}
+		if m.isProjectPage() {
+			if m.canNavigateProjectSettings() {
+				m.moveProjectSettingsCursor(delta)
+			}
+			return m, nil
+		}
+		if m.isExternalToolsPage() {
+			m.moveExternalToolsCursor(delta)
+		}
+		return m, nil
+	case focusBundleExpanded:
+		if m.isAssetsPage() && m.canNavigateAssets() {
+			m.moveBundleMemberCursor(delta)
+		}
+		return m, nil
+	}
 	return m, nil
 }
 
@@ -1444,11 +1499,14 @@ func (m *model) pushLog(line string) {
 func (m model) renderSidebar(width, height int) string {
 	items := make([]string, 0, len(m.pages)+2)
 	items = append(items, shellTitleStyle.Render("Dec Shell"))
-	items = append(items, shellMutedStyle.Render("tab switch / j k move"))
+	items = append(items, shellMutedStyle.Render("j/k 切换页 · l 进入 · h 返回"))
 	for idx, page := range m.pages {
 		style := shellNavStyle
 		if idx == m.pageIndex {
 			style = shellActiveNav
+			if m.focus == focusSidebar {
+				style = shellSelectedRow
+			}
 		}
 		items = append(items, style.Render(page))
 	}
@@ -1536,7 +1594,14 @@ func (m model) renderAssetsPage(width int) string {
 	if m.assetFilterInput {
 		summary = append(summary, shellMutedStyle.Render("筛选输入中：输入关键字后按 Enter 应用，Esc 退出。"))
 	} else {
-		summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · space 切换 · enter 展开/切换 · t 类型 · s 保存 · / 筛选 · c 清空筛选"))
+		switch m.focus {
+		case focusSidebar:
+			summary = append(summary, shellMutedStyle.Render("按 l 进入内容区 · j/k 在侧栏切换页"))
+		case focusBundleExpanded:
+			summary = append(summary, shellMutedStyle.Render("快捷键：j/k 成员 · h 折叠返回 · space 切换 bundle · s 保存"))
+		default:
+			summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · h 返回导航 · l 展开 bundle · space 切换 · t 类型 · s 保存 · / 筛选"))
+		}
 	}
 	if !m.assets.ExistingConfig {
 		summary = append(summary, shellMutedStyle.Render("首次保存会创建 .dec/config.yaml 与 .dec/vars.yaml。"))
@@ -1665,9 +1730,9 @@ func (m model) renderProjectSettingsList() string {
 	if override {
 		checked = "x"
 	}
-	overrideLine := fmt.Sprintf("%s [%s] 覆盖全局 IDE", settingsCursorMarker(m.projectSettingsCursor == 0), checked)
+	overrideLine := fmt.Sprintf("%s [%s] 覆盖全局 IDE", settingsCursorMarker(m.projectSettingsCursor == 0 && m.focus != focusSidebar), checked)
 	switch {
-	case m.projectSettingsCursor == 0:
+		case m.projectSettingsCursor == 0 && m.focus != focusSidebar:
 		lines = append(lines, shellSelectedRow.Render(overrideLine))
 	case override:
 		lines = append(lines, shellEnabledRow.Render(overrideLine))
@@ -1683,9 +1748,9 @@ func (m model) renderProjectSettingsList() string {
 		if selected {
 			mark = "x"
 		}
-		line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.projectSettingsCursor == idx+1), mark, ideName)
+		line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.projectSettingsCursor == idx+1 && m.focus != focusSidebar), mark, ideName)
 		switch {
-		case m.projectSettingsCursor == idx+1:
+		case m.projectSettingsCursor == idx+1 && m.focus != focusSidebar:
 			lines = append(lines, shellSelectedRow.Render(line))
 		case selected:
 			lines = append(lines, shellEnabledRow.Render(line))
@@ -2088,7 +2153,7 @@ func (m model) renderExternalToolsPage(width int) string {
 	lines = append(lines, shellTitleStyle.Render("可用命令"))
 	for idx, entry := range entries {
 		marker := " "
-		if idx == m.externalToolsCursor {
+		if idx == m.externalToolsCursor && m.focus != focusSidebar {
 			marker = ">"
 		}
 		label := entry.Label
@@ -2097,9 +2162,9 @@ func (m model) renderExternalToolsPage(width int) string {
 		}
 		line := fmt.Sprintf("%s %s", marker, label)
 		switch {
-		case idx == m.externalToolsCursor && entry.Unavailable:
+		case idx == m.externalToolsCursor && m.focus != focusSidebar && entry.Unavailable:
 			lines = append(lines, shellWarnStyle.Render(line))
-		case idx == m.externalToolsCursor:
+		case idx == m.externalToolsCursor && m.focus != focusSidebar:
 			lines = append(lines, shellSelectedRow.Render(line))
 		case entry.Unavailable:
 			lines = append(lines, shellMutedStyle.Render(line))
@@ -2170,8 +2235,8 @@ func (m model) renderSettingsPage(width int) string {
 
 func (m model) renderSettingsList() string {
 	lines := []string{shellTitleStyle.Render("Global Settings")}
-	repoLine := fmt.Sprintf("%s Repo URL: %s", settingsCursorMarker(m.settingsCursor == 0), fallbackValue(strings.TrimSpace(m.settingsRepoInput), "<none>"))
-	if m.settingsCursor == 0 {
+	repoLine := fmt.Sprintf("%s Repo URL: %s", settingsCursorMarker(m.settingsCursor == 0 && m.focus != focusSidebar), fallbackValue(strings.TrimSpace(m.settingsRepoInput), "<none>"))
+	if m.settingsCursor == 0 && m.focus != focusSidebar {
 		lines = append(lines, shellSelectedRow.Render(repoLine))
 	} else {
 		lines = append(lines, shellLogStyle.Render(repoLine))
@@ -2182,9 +2247,9 @@ func (m model) renderSettingsList() string {
 		if selected {
 			checked = "x"
 		}
-		line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.settingsCursor == idx+1), checked, ideName)
+		line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.settingsCursor == idx+1 && m.focus != focusSidebar), checked, ideName)
 		switch {
-		case m.settingsCursor == idx+1:
+		case m.settingsCursor == idx+1 && m.focus != focusSidebar:
 			lines = append(lines, shellSelectedRow.Render(line))
 		case selected:
 			lines = append(lines, shellEnabledRow.Render(line))
@@ -2228,12 +2293,12 @@ func (m model) renderAssetList(visible []int) string {
 	cursorRow := m.cursorRowIndex(rows)
 	for rowIdx, row := range rows {
 		marker := " "
-		if rowIdx == cursorRow {
+		if m.focus != focusSidebar && rowIdx == cursorRow {
 			marker = ">"
 		}
 		line := m.renderAssetRowLine(row, marker)
 		switch {
-		case rowIdx == cursorRow:
+		case m.focus != focusSidebar && rowIdx == cursorRow:
 			lines = append(lines, shellSelectedRow.Render(line))
 		case row.kind == assetRowBundle && row.bundleEnabled:
 			lines = append(lines, shellEnabledRow.Render(line))
@@ -2246,10 +2311,8 @@ func (m model) renderAssetList(visible []int) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderAssetRowLine 生成单行文本。为兼容旧测试/快照：
-//   - 单资产行保留原格式 "[x] vault / type / name"
-//   - bundle 节点行格式 "[x] bundle <name> (vault) • N 个成员"
-//   - bundle 成员行前缀 "    ↳ [bundle] vault / type / name"，bracket 里显示 "bundle" 以示只读
+// renderAssetRowLine 生成单行文本。
+// bundle 视图（type=bundle）省略冗余 "bundle" 前缀，只显示名称与成员数。
 func (m model) renderAssetRowLine(row assetRow, marker string) string {
 	switch row.kind {
 	case assetRowBundle:
@@ -2262,11 +2325,18 @@ func (m model) renderAssetRowLine(row assetRow, marker string) string {
 		if m.expandedBundles[bo.Name] {
 			arrow = "▾"
 		}
+		label := bo.Name
+		if bo.Name != bo.Vault {
+			label = fmt.Sprintf("%s (%s)", bo.Name, bo.Vault)
+		}
+		if m.assetTypeFilter == "bundle" {
+			return fmt.Sprintf("%s [%s] %s %s · %d 个成员", marker, checked, arrow, label, len(bo.Members))
+		}
 		return fmt.Sprintf("%s [%s] %s bundle %s (%s) · %d 个成员", marker, checked, arrow, bo.Name, bo.Vault, len(bo.Members))
 	case assetRowBundleMember:
 		bo := m.assets.Bundles[row.bundleIndex]
 		mb := bo.Members[row.memberIndex]
-		return fmt.Sprintf("%s   ↳ [bundle] %s / %s / %s", marker, mb.Vault, mb.Type, mb.Name)
+		return fmt.Sprintf("%s   ↳ %s / %s / %s", marker, mb.Type, mb.Vault, mb.Name)
 	default:
 		item := m.assets.Items[row.assetIndex]
 		checked := " "
@@ -2296,14 +2366,34 @@ func (m model) renderAssetDetails() string {
 					status = "已选中（勾选后其成员会随 pull 一起下发）"
 				}
 				lines = append(lines,
-					fmt.Sprintf("Bundle: %s", bo.Name),
+					fmt.Sprintf("Package: %s", bo.Name),
 					fmt.Sprintf("Vault: %s", bo.Vault),
 					fmt.Sprintf("状态: %s", status),
-					fmt.Sprintf("成员: %d 个（按 enter 展开）", len(bo.Members)),
+					fmt.Sprintf("成员: %d 个", len(bo.Members)),
 				)
+				if m.expandedBundles[bo.Name] {
+					lines = append(lines, "", shellTitleStyle.Render("成员列表"))
+					for _, mb := range bo.Members {
+						lines = append(lines, fmt.Sprintf("  · %s / %s / %s", mb.Type, mb.Vault, mb.Name))
+					}
+				} else if m.focus == focusContent {
+					lines = append(lines, shellMutedStyle.Render("按 l 或 Enter 展开查看成员"))
+				}
 				if bo.Description != "" {
 					lines = append(lines, "", bo.Description)
 				}
+				return strings.Join(lines, "\n")
+			}
+			if row.kind == assetRowBundleMember {
+				bo := m.assets.Bundles[row.bundleIndex]
+				mb := bo.Members[row.memberIndex]
+				lines = append(lines,
+					fmt.Sprintf("Package: %s", bo.Name),
+					fmt.Sprintf("Type: %s", mb.Type),
+					fmt.Sprintf("Vault: %s", mb.Vault),
+					fmt.Sprintf("Name: %s", mb.Name),
+					shellMutedStyle.Render("成员由 package 带入，只读。"),
+				)
 				return strings.Join(lines, "\n")
 			}
 		}
@@ -2917,9 +3007,8 @@ func (m model) assetsCursorOnBundle() bool {
 	return rows[m.cursorRowIndex(rows)].kind == assetRowBundle
 }
 
-// toggleCurrentBundleExpansion 翻转当前 bundle 节点的展开/折叠状态。
-// 仅在光标在 bundle 节点行时生效；展开后当前位置的 rows 长度会变化，cursor 仍保持在同一 row 位置（即 bundle 节点）。
-func (m *model) toggleCurrentBundleExpansion() {
+// expandCurrentBundle 展开当前光标所在的 bundle 节点。
+func (m *model) expandCurrentBundle() {
 	if m.assets == nil {
 		return
 	}
@@ -2935,13 +3024,91 @@ func (m *model) toggleCurrentBundleExpansion() {
 	if m.expandedBundles == nil {
 		m.expandedBundles = make(map[string]bool)
 	}
-	if m.expandedBundles[bo.Name] {
-		delete(m.expandedBundles, bo.Name)
-		m.pushLog("Bundle 折叠: " + bo.Name)
-	} else {
+	if !m.expandedBundles[bo.Name] {
 		m.expandedBundles[bo.Name] = true
 		m.pushLog("Bundle 展开: " + bo.Name)
 	}
+}
+
+// collapseCurrentBundle 折叠当前光标所在（或已展开）的 bundle 节点，并将光标回到 bundle 行。
+func (m *model) collapseCurrentBundle() {
+	if m.assets == nil {
+		return
+	}
+	rows := m.visibleAssetRows()
+	if len(rows) == 0 {
+		return
+	}
+	row := rows[m.cursorRowIndex(rows)]
+	bundleIndex := row.bundleIndex
+	if row.kind == assetRowBundleMember {
+		bundleIndex = row.bundleIndex
+	}
+	if row.kind != assetRowBundle && row.kind != assetRowBundleMember {
+		return
+	}
+	bo := m.assets.Bundles[bundleIndex]
+	if m.expandedBundles != nil && m.expandedBundles[bo.Name] {
+		delete(m.expandedBundles, bo.Name)
+		m.pushLog("Bundle 折叠: " + bo.Name)
+	}
+	// 光标回到 bundle 节点行
+	for i, r := range m.visibleAssetRows() {
+		if r.kind == assetRowBundle && r.bundleIndex == bundleIndex {
+			m.assetCursor = i
+			break
+		}
+	}
+}
+
+// moveCursorToFirstBundleMember 将光标移到当前 bundle 的第一个成员行。
+func (m *model) moveCursorToFirstBundleMember() {
+	rows := m.visibleAssetRows()
+	if len(rows) == 0 {
+		return
+	}
+	cur := m.cursorRowIndex(rows)
+	bundleIndex := rows[cur].bundleIndex
+	for i, r := range rows {
+		if r.kind == assetRowBundleMember && r.bundleIndex == bundleIndex {
+			m.assetCursor = i
+			return
+		}
+	}
+}
+
+// moveBundleMemberCursor 在 bundleExpanded 上下文中仅在成员行间移动。
+func (m *model) moveBundleMemberCursor(delta int) {
+	rows := m.visibleAssetRows()
+	if len(rows) == 0 {
+		return
+	}
+	cur := m.cursorRowIndex(rows)
+	bundleIndex := rows[cur].bundleIndex
+	memberIndices := make([]int, 0)
+	for i, r := range rows {
+		if r.kind == assetRowBundleMember && r.bundleIndex == bundleIndex {
+			memberIndices = append(memberIndices, i)
+		}
+	}
+	if len(memberIndices) == 0 {
+		return
+	}
+	pos := 0
+	for i, idx := range memberIndices {
+		if idx == cur {
+			pos = i
+			break
+		}
+	}
+	pos += delta
+	if pos < 0 {
+		pos = 0
+	}
+	if pos >= len(memberIndices) {
+		pos = len(memberIndices) - 1
+	}
+	m.assetCursor = memberIndices[pos]
 }
 
 // cycleAssetTypeFilter 按 t 键在 all/skill/command/rule/mcp/bundle 间轮转。
@@ -3041,7 +3208,7 @@ func (m model) renderLogs(width, height int) string {
 }
 
 func (m model) renderStatusBar(width int) string {
-	left := "q quit | tab switch | r refresh"
+	left := "q quit | j/k nav | l/h in-out | r refresh"
 	right := fmt.Sprintf("page %s", m.pages[m.pageIndex])
 	if m.isAssetsPage() && m.assets != nil {
 		right = fmt.Sprintf("%s | %d/%d enabled", right, m.countEnabledAssets(), len(m.assets.Items))

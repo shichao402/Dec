@@ -1,8 +1,8 @@
 ╭──────────────────╮╭──────────────────────────────────────────────────────────────────────────────╮
 │                  ││                                                                              │
 │  Dec Shell       ││  Assets                                                                      │
-│  tab switch / j  ││  /tmp/dec-project                                                            │
-│  k move          ││  Assets ready, 1 enabled                                                     │
+│  j/k 切换页 · l  ││  /tmp/dec-project                                                            │
+│  进入 · h 返回   ││  Assets ready, 1 enabled                                                     │
 │   Home           ││                                                                              │
 │   Assets         │╰──────────────────────────────────────────────────────────────────────────────╯
 │   Project        │╭──────────────────────────────────────────────────────────────────────────────╮
@@ -10,21 +10,21 @@
 │   外部应用       ││  筛选: <none> | 类型: bundle                                                 │
 │   Settings       ││  资产总数: 2 | 已启用: 1 | Bundle: 1/2                                       │
 │                  ││  当前资产选择与磁盘一致。                                                    │
-│                  ││  快捷键：j/k 移动 · space 切换 · enter 展开/切换 · t 类型 · s 保存 · / 筛选  │
-│                  ││  · c 清空筛选                                                                │
+│                  ││  快捷键：j/k 移动 · h 返回导航 · l 展开 bundle · space 切换 · t 类型 · s     │
+│                  ││  保存 · / 筛选                                                               │
 │                  ││                                                                              │
 │                  ││  Asset List                                                                  │
-│                  ││  > [x] ▸ bundle default (default) · 1 个成员                                 │
-│                  ││    [ ] ▸ bundle cli (cli) · 1 个成员                                         │
+│                  ││  > [x] ▸ default · 1 个成员                                                  │
+│                  ││    [ ] ▸ cli · 1 个成员                                                      │
 │                  ││                                                                              │
 │                  ││  Details                                                                     │
-│                  ││  Bundle: default                                                             │
+│                  ││  Package: default                                                            │
 │                  ││  Vault: default                                                              │
 │                  ││  状态: 已选中（勾选后其成员会随 pull 一起下发）                              │
-│                  ││  成员: 1 个（按 enter 展开）                                                 │
+│                  ││  成员: 1 个                                                                  │
+│                  ││  按 l 或 Enter 展开查看成员                                                  │
 │                  ││                                                                              │
 │                  ││  default 资产包                                                              │
-│                  ││                                                                              │
 │                  ││                                                                              │
 │                  ││                                                                              │
 │                  ││                                                                              │
@@ -41,4 +41,4 @@
 ╰──────────────────╯│  - Loading global settings...                                                │
                     │                                                                              │
                     ╰──────────────────────────────────────────────────────────────────────────────╯
- q quit | tab switch | r refresh                                          page Assets | 1/2 enabled
+ q quit | j/k nav | l/h in-out | r refresh                                page Assets | 1/2 enabled

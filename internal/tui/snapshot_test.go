@@ -100,6 +100,7 @@ func snapshotHomeModel(width int) model {
 func snapshotAssetsModel(width int) model {
 	m := snapshotHomeModel(width)
 	m.pageIndex = 1
+	m.focus = focusContent
 	m.assets = &app.AssetSelectionState{
 		ExistingConfig: true,
 		ConfigPath:     "/tmp/dec-project/.dec/config.yaml",

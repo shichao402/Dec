@@ -1,19 +1,19 @@
 ╭──────────────────────╮╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                      ││                                                                                                                  │
 │  Dec Shell           ││  外部应用                                                                                                        │
-│  tab switch / j k    ││  /tmp/dec-project                                                                                                │
-│  move                ││  External tools ready (project: dec-project)                                                                     │
+│  j/k 切换页 · l      ││  /tmp/dec-project                                                                                                │
+│  进入 · h 返回       ││  External tools ready (project: dec-project)                                                                     │
 │   Home               ││                                                                                                                  │
 │   Assets             │╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 │   Project            │╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │   Run                ││                                                                                                                  │
-│   外部应用           ││  项目短名: dec-project                                                                                           │
+│  外部应用            ││  项目短名: dec-project                                                                                           │
 │   Settings           ││  来自 .dec/config.yaml                                                                                           │
 │                      ││  pkv 不可用: 未找到 pkv 可执行文件，请确认 pkv 已安装并在 $PATH 中                                               │
 │                      ││  pkv 会话: 未解锁（选 pkv unlock 解锁以便后续命令复用 session）                                                  │
 │                      ││  快捷键：j/k 移动 · enter 执行 · tab 切换页                                                                      │
 │                      ││  可用命令                                                                                                        │
-│                      ││  > pkv unlock  (pkv 未安装)                                                                                      │
+│                      ││  pkv unlock  (pkv 未安装)                                                                                        │
 │                      ││  pkv  (pkv 未安装)                                                                                               │
 │                      ││  pkv get all dec-project  (pkv 未安装)                                                                           │
 │                      ││  预览                                                                                                            │
@@ -41,4 +41,4 @@
 ╰──────────────────────╯│  - Loading global settings...                                                                                    │
                         │                                                                                                                  │
                         ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- q quit | tab switch | r refresh                                                                                page 外部应用 | dec-project
+ q quit | j/k nav | l/h in-out | r refresh                                                                      page 外部应用 | dec-project

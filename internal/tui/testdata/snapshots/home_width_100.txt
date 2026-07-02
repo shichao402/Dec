@@ -1,9 +1,9 @@
 ╭──────────────────╮╭──────────────────────────────────────────────────────────────────────────────╮
 │                  ││                                                                              │
 │  Dec Shell       ││  Home                                                                        │
-│  tab switch / j  ││  /tmp/dec-project                                                            │
-│  k move          ││  Repo ready, 2 assets enabled                                                │
-│   Home           ││                                                                              │
+│  j/k 切换页 · l  ││  /tmp/dec-project                                                            │
+│  进入 · h 返回   ││  Repo ready, 2 assets enabled                                                │
+│  Home            ││                                                                              │
 │   Assets         │╰──────────────────────────────────────────────────────────────────────────────╯
 │   Project        │╭──────────────────────────────────────────────────────────────────────────────╮
 │   Run            ││                                                                              │
@@ -41,4 +41,4 @@
 ╰──────────────────╯│  - Loading global settings...                                                │
                     │                                                                              │
                     ╰──────────────────────────────────────────────────────────────────────────────╯
- q quit | tab switch | r refresh                                              page Home | enabled 2
+ q quit | j/k nav | l/h in-out | r refresh                                    page Home | enabled 2

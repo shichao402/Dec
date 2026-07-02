@@ -134,9 +134,9 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 	}()
 
 	// 等待首屏锚点出现。Lip Gloss 会在单元之间插入 ANSI 样式码，
-	// 为此搜索时先剥掉 ANSI 序列。状态栏里稳定的 "q quit | tab switch"
+	// 为此搜索时先剥掉 ANSI 序列。状态栏里稳定的 "q quit | j/k nav"
 	// 比侧边栏标题更容易命中（后者可能被 lipgloss 拆成多段）。
-	anchor := "q quit | tab switch"
+	anchor := "q quit | j/k nav"
 	if err := waitForContains(&mu, &buf, anchor, ptyStartupTimeout); err != nil {
 		snapshot := snapshotOutput(&mu, &buf)
 		// 尽量不阻塞，让后台 goroutine 能继续消费后续输出。
