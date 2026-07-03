@@ -66,16 +66,18 @@ func resolveDesiredAssets(projectConfig *types.ProjectConfig, repoDir string, re
 	result := &ResolvedAssets{
 		Sources: make(map[string][]string),
 	}
-	if projectConfig == nil {
-		return result, nil
-	}
 
-	// 1. 扫描 vault 目录并加载所有 bundles。
+	// 1. 扫描 vault 目录并加载所有 bundles（含隐式 vault package）。
+	// 即使尚无项目配置也要扫描，供 Assets TUI / config init 展示 package 列表。
 	vaultBundles, bundleOverviews, err := scanVaultBundles(repoDir, reporter)
 	if err != nil {
 		return nil, err
 	}
 	result.Bundles = bundleOverviews
+
+	if projectConfig == nil {
+		return result, nil
+	}
 
 	// 2. 先把单资产（standalone）放入目标集。
 	seen := make(map[string]int) // key -> index in result.Assets

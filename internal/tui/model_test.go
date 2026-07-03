@@ -1748,6 +1748,30 @@ func TestModelAssetsSaveCmdSignatureCarriesBundles(t *testing.T) {
 	_ = saveAssetsCmd("/nonexistent", nil, []string{"x"})
 }
 
+func TestModelAssetsLoadedKeepsBundleViewWhenPackagesExist(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 1
+	m.focus = focusContent
+
+	updated, _ := m.Update(assetsLoadedMsg{
+		state: &app.AssetSelectionState{
+			ExistingConfig: false,
+			Items: []app.AssetSelectionItem{
+				{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja"},
+				{Name: "cli-release-rules", Type: "rule", Vault: "cli"},
+			},
+			Bundles: []app.AssetBundleOption{
+				{Name: "vikunja", Vault: "vikunja", Members: []app.AssetSelectionItem{{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja"}}},
+				{Name: "cli", Vault: "cli", Members: []app.AssetSelectionItem{{Name: "cli-release-rules", Type: "rule", Vault: "cli"}}},
+			},
+		},
+	})
+	m = updated.(model)
+	if m.assetTypeFilter != "bundle" {
+		t.Fatalf("有 package 时不应回落到 all, got %q", m.assetTypeFilter)
+	}
+}
+
 func TestModelConfigInitModeQuitsAfterSave(t *testing.T) {
 	m := newModelWithOptions("/tmp/dec-project", "v1.0.0", RunOptions{ConfigInitMode: true})
 	if !m.configInitMode {

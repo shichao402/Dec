@@ -55,6 +55,31 @@ func TestLoadAssetSelectionReturnsEnabledState(t *testing.T) {
 	}
 }
 
+func TestLoadAssetSelectionDiscoversBundlesWithoutProjectConfig(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	state, err := LoadAssetSelection(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("LoadAssetSelection() 失败: %v", err)
+	}
+	if state.ExistingConfig {
+		t.Fatal("无 .dec/config.yaml 时不应标记 ExistingConfig")
+	}
+	if len(state.Items) != 2 {
+		t.Fatalf("Items = %d, 期望 2", len(state.Items))
+	}
+	if len(state.Bundles) < 2 {
+		t.Fatalf("无项目配置时仍应发现 package, Bundles = %d", len(state.Bundles))
+	}
+}
+
 func TestSaveAssetSelectionPersistsEnabledAssetsAndPreservesEditor(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	projectRoot := t.TempDir()

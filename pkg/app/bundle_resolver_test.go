@@ -39,6 +39,24 @@ func captureEvents(events *[]OperationEvent) Reporter {
 	})
 }
 
+func TestResolveDesiredAssets_NilConfigScansBundles(t *testing.T) {
+	repoDir := setupRepoWithVault(t, map[string]string{
+		"vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+	})
+
+	got, err := resolveDesiredAssets(nil, repoDir, nil)
+	if err != nil {
+		t.Fatalf("resolveDesiredAssets(nil) 失败: %v", err)
+	}
+	if len(got.Assets) != 0 {
+		t.Fatalf("nil config 时不应解析 Assets, got %#v", got.Assets)
+	}
+	if len(got.Bundles) < 2 {
+		t.Fatalf("nil config 时仍应扫描 Bundles, got %d", len(got.Bundles))
+	}
+}
+
 func TestResolveDesiredAssets_StandaloneOnly(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
