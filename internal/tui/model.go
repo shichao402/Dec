@@ -2,8 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -76,20 +74,6 @@ type projectVarsEditedMsg struct {
 	err error
 }
 
-type externalToolFinishedMsg struct {
-	tool string
-	err  error
-}
-
-// pkvUnlockedMsg 是 launchPKVUnlockCmd 完成后回填给 Update 的消息。
-// session 非空时表示成功拿到 BW_SESSION；err 非空时表示失败（未找到 pkv /
-// stdout 未输出 / bw 退出非零等）。两个字段不会同时有值。
-type pkvUnlockedMsg struct {
-	session string
-	err     error
-}
-
-// externalToolsEntry 描述外部应用页的一行可选命令。
 // focusContext 描述 TUI 的空间导航焦点层级。
 // 左右键（h/l）在该层级间进入/退出；上下键（j/k）在同级内移动。
 //   - focusSidebar：侧栏导航（Home/Assets/...），j/k 切换页，l 进入内容区
@@ -102,19 +86,6 @@ const (
 	focusContent         focusContext = "content"
 	focusBundleExpanded  focusContext = "bundleExpanded"
 )
-
-type externalToolsEntry struct {
-	// Label 显示在菜单上的短名。
-	Label string
-	// Command 用于预览的完整命令（含参数）。
-	Command string
-	// Description 在详情区展示的一句话说明。
-	Description string
-	// Build 构造真正的 tea.Cmd；若工具不可用返回 nil。
-	Build func(m *model) tea.Cmd
-	// Unavailable 为 true 时不执行，仅展示。
-	Unavailable bool
-}
 
 type runEventMsg struct {
 	event app.OperationEvent
@@ -192,20 +163,6 @@ var updateManualInstallCommand = func() string {
 	return update.ManualInstallCommand()
 }
 
-// locatePKVOperation 是包级可替换变量，方便测试打桩（例如 snapshot 测试固定 pkv 可用性）。
-// 默认直接代理到 app.LocatePKV。
-var locatePKVOperation = app.LocatePKV
-
-// locatePKVWithEnvOperation / locatePKV*InteractiveOperation /
-// buildPKVUnlockCmdOperation / parsePKVUnlockOutputOperation 都是测试打桩用的替换点，
-// 生产路径直接代理到 app 包。Interactive 变体专门给"需要让 bw 弹密码"的子命令用，
-// 它们会把 stdin/stderr 切到 /dev/tty 绕开 bubbletea 占用的 fd（参见 app.attachTTYIfAvailable）。
-var locatePKVWithEnvOperation = app.LocatePKVWithEnv
-var locatePKVInteractiveOperation = app.LocatePKVInteractive
-var locatePKVInteractiveWithEnvOperation = app.LocatePKVInteractiveWithEnv
-var buildPKVUnlockCmdOperation = app.BuildPKVUnlockCmd
-var parsePKVUnlockOutputOperation = app.ParsePKVUnlockOutput
-
 type model struct {
 	projectRoot          string
 	currentVersion       string
@@ -272,16 +229,6 @@ type model struct {
 	updateErr            error
 	updateDoneVersion    string
 	updatingBinary       bool
-	launchingExternal    bool
-	externalErr          error
-	// externalToolsCursor 是"外部应用"页当前高亮的命令行索引。
-	externalToolsCursor  int
-	// bwSession 是 pkv unlock 后缓存的 BW_SESSION 字符串，空表示未解锁。
-	// 仅存活在当前 TUI 进程内存，TUI 退出立即丢；不落盘、不传给独立 dec 子进程。
-	bwSession string
-	// sessionInvalidMsg 是 pkv 子命令报错时给用户的提示行（中文一句话）。
-	// 不会自动清 bwSession；下次 unlock 成功或清空逻辑显式写入空串时复位。
-	sessionInvalidMsg string
 	// configInitMode 为 true 时表示由 dec config init 拉起：聚焦 Assets/package 视图，保存后退出。
 	configInitMode bool
 	// focus 是当前键盘交互上下文（侧栏 / 内容 / bundle 成员）。
@@ -309,7 +256,7 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 	m := model{
 		projectRoot:     projectRoot,
 		currentVersion:  currentVersion,
-		pages:           []string{"Home", "Assets", "Project", "Run", "外部应用", "Settings"},
+		pages:           []string{"Home", "Assets", "Project", "Run", "Settings"},
 		expandedBundles: make(map[string]bool),
 		assetTypeFilter: "bundle",
 		configInitMode:  opts.ConfigInitMode,
@@ -493,35 +440,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog("Editor session finished; reloading project vars")
 		}
 		return m, loadProjectVarsCmd(m.projectRoot)
-	case externalToolFinishedMsg:
-		m.launchingExternal = false
-		m.externalErr = msg.err
-		if msg.err != nil {
-			m.pushLog(fmt.Sprintf("External tool %q exited with error: %s", msg.tool, msg.err.Error()))
-			// 当缓存 session 存在且本次 pkv 调用失败时，在 UI 上提示用户可能需要重新 unlock。
-			// 不直接清掉 bwSession：错误原因可能并非会话失效（folder 不存在、网络问题等），
-			// 留给用户自己判断。pkv unlock 本身在 session 仍有效时会秒返回当前 session。
-			if m.bwSession != "" {
-				m.sessionInvalidMsg = "pkv 调用失败，如果是会话失效请重新点 pkv unlock"
-			}
-		} else {
-			m.pushLog(fmt.Sprintf("External tool %q finished", msg.tool))
-			// 成功一次意味着 session 至少此刻有效，清掉可能残留的失效提示。
-			m.sessionInvalidMsg = ""
-		}
-		return m, nil
-	case pkvUnlockedMsg:
-		m.launchingExternal = false
-		if msg.err != nil {
-			m.externalErr = msg.err
-			m.pushLog(fmt.Sprintf("pkv unlock 失败: %s", msg.err.Error()))
-		} else {
-			m.bwSession = msg.session
-			m.externalErr = nil
-			m.sessionInvalidMsg = ""
-			m.pushLog("pkv 会话已解锁并缓存（仅本次 TUI 进程内）")
-		}
-		return m, nil
 	case runEventMsg:
 		m.recordRunEvent(msg.event)
 		if m.runStream != nil {
@@ -692,9 +610,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.toggleCurrentProjectIDE()
 				}
 			}
-			if m.isExternalToolsPage() && !m.launchingExternal && m.focus != focusSidebar {
-				return m, m.triggerExternalToolsSelection()
-			}
 			return m, nil
 		case "e":
 			if m.isSettingsPage() && !m.savingSettings {
@@ -859,9 +774,6 @@ func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.isExternalToolsPage() {
-			m.moveExternalToolsCursor(delta)
-		}
 		return m, nil
 	case focusBundleExpanded:
 		if m.isAssetsPage() && m.canNavigateAssets() {
@@ -1022,87 +934,6 @@ func openProjectVarsEditorCmd(projectRoot, editorCmd string) tea.Cmd {
 	}
 	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
 		return projectVarsEditedMsg{err: runErr}
-	})
-}
-
-// launchPKVCmd 挂起 TUI，用 tea.ExecProcess 呼起 pkv 交互模式。
-// bwSession 非空时走 LocatePKVWithEnv（不交互，不需要 /dev/tty），把 BW_SESSION
-// 注入子进程环境，pkv 内部 `bw` 会识别并复用、不再问 master password。
-// bwSession 为空时走 LocatePKVInteractive，stdin/stderr 接 /dev/tty，避免
-// bubbletea 占用的 fd 导致 bw 读乱密码字节。未找到 pkv 时直接推送带错误的消息。
-func launchPKVCmd(bwSession string) tea.Cmd {
-	var (
-		cmd     *exec.Cmd
-		cleanup = func() {}
-		err     error
-	)
-	if bwSession != "" {
-		cmd, err = locatePKVWithEnvOperation([]string{"BW_SESSION=" + bwSession})
-	} else {
-		cmd, cleanup, err = locatePKVInteractiveOperation()
-	}
-	if err != nil {
-		cleanup()
-		return func() tea.Msg {
-			return externalToolFinishedMsg{tool: "pkv", err: err}
-		}
-	}
-	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
-		cleanup()
-		return externalToolFinishedMsg{tool: "pkv", err: runErr}
-	})
-}
-
-// launchPKVGetAllCmd 挂起 TUI 运行 `pkv get <projectName> all`。
-// pkv CLI 约定是 `pkv get <folder> <ssh|env|note|all>`，folder 必须在 resource type 之前。
-// bwSession 语义同 launchPKVCmd：非空走环境注入、空走 /dev/tty 交互变体。
-// projectName 为空时交由 pkv 自行报错。
-func launchPKVGetAllCmd(projectName, bwSession string) tea.Cmd {
-	var (
-		cmd     *exec.Cmd
-		cleanup = func() {}
-		err     error
-	)
-	if bwSession != "" {
-		cmd, err = locatePKVWithEnvOperation([]string{"BW_SESSION=" + bwSession}, "get", projectName, "all")
-	} else {
-		cmd, cleanup, err = locatePKVInteractiveOperation("get", projectName, "all")
-	}
-	if err != nil {
-		cleanup()
-		return func() tea.Msg {
-			return externalToolFinishedMsg{tool: "pkv get all", err: err}
-		}
-	}
-	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
-		cleanup()
-		return externalToolFinishedMsg{tool: "pkv get all", err: runErr}
-	})
-}
-
-// launchPKVUnlockCmd 挂起 TUI 运行 `pkv unlock`。
-// cmd.Stdout 预挂 *bytes.Buffer 捕获 session；Stdin/Stderr 优先接 /dev/tty
-// 避开 bubbletea 占用的 fd 0/2（避免 bw 读到残留 raw mode 下的密码字节）。
-// /dev/tty 不可用时会回退到 os.Stdin/os.Stderr，行为与发现问题之前一致。
-// callback 调用 cleanup 关闭 /dev/tty 句柄避免 fd 泄漏。
-func launchPKVUnlockCmd() tea.Cmd {
-	cmd, buf, cleanup, err := buildPKVUnlockCmdOperation()
-	if err != nil {
-		cleanup()
-		return func() tea.Msg {
-			return pkvUnlockedMsg{err: err}
-		}
-	}
-	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
-		cleanup()
-		if runErr != nil {
-			return pkvUnlockedMsg{err: runErr}
-		}
-		session, parseErr := parsePKVUnlockOutputOperation(buf)
-		if parseErr != nil {
-			return pkvUnlockedMsg{err: parseErr}
-		}
-		return pkvUnlockedMsg{session: session}
 	})
 }
 
@@ -1540,8 +1371,6 @@ func (m model) renderPageBody(width int) string {
 		return m.renderProjectPage(width)
 	case "Run":
 		return m.renderRunPage(width)
-	case "外部应用":
-		return m.renderExternalToolsPage(width)
 	default:
 		return m.renderSettingsPage(width)
 	}
@@ -1906,9 +1735,6 @@ func (m model) renderRunPage(width int) string {
 	if m.removeErr != nil {
 		lines = append(lines, shellWarnStyle.Render("Remove 错误: "+m.removeErr.Error()))
 	}
-	if m.externalErr != nil {
-		lines = append(lines, shellWarnStyle.Render("外部工具错误: "+m.externalErr.Error()))
-	}
 
 	switch m.removeStage {
 	case "select":
@@ -2033,157 +1859,6 @@ func (m model) renderRemoveConfirm() []string {
 		shellMutedStyle.Render("按 y 确认执行 · n/esc 取消返回选择器"),
 	)
 	return lines
-}
-
-// externalToolsEntries 按当前 model 状态构造"外部应用"页可执行命令列表。
-// 第二个返回值是 pkv 不可用时的中文错误（为空表示可用）。
-// 列表顺序即菜单顺序；命令长度依赖 pkvAvailable / projectName，渲染层按 Build==nil 标记禁用。
-// unlock 行放在最上面，符合"先解锁再用"的直觉。
-func (m model) externalToolsEntries() ([]externalToolsEntry, string) {
-	// 探测 pkv 是否存在：只查 $PATH，不执行。
-	_, probeErr := locatePKVOperation()
-	pkvUnavailable := probeErr != nil
-
-	projectName, _ := m.resolveProjectNameForExternal()
-	locked := m.bwSession != ""
-
-	// unlock 描述：未解锁 vs 已解锁文案不同，让用户知道点下去会发生什么。
-	unlockDesc := "解锁 Bitwarden vault 并把 BW_SESSION 缓存在 Dec 进程内（仅本次 TUI 生命周期）。"
-	if locked {
-		unlockDesc = "重新解锁 / 刷新 session（已存在缓存的会话；pkv 仍有效时会直接回显当前 session，不再问密码）。"
-	}
-	// 交互 pkv 描述：已解锁时说明会注入 BW_SESSION。
-	pkvDesc := "交互模式进入 pkv（直接把终端交给 pkv，退出后回到 Dec）。"
-	if locked {
-		pkvDesc = "交互模式进入 pkv；会注入已缓存的 BW_SESSION，不再问密码。"
-	}
-	// get all 描述：区分是否复用 session。
-	getAllDesc := fmt.Sprintf("对当前项目 %q 运行 pkv get all。未解锁，pkv 会要求 master password。", projectName)
-	if locked {
-		getAllDesc = fmt.Sprintf("对当前项目 %q 运行 pkv get all。会复用已缓存的 BW_SESSION，无需再次输密码。", projectName)
-	}
-
-	entries := []externalToolsEntry{
-		{
-			Label:       "pkv unlock",
-			Command:     "pkv unlock",
-			Description: unlockDesc,
-			Build: func(mm *model) tea.Cmd {
-				return launchPKVUnlockCmd()
-			},
-			Unavailable: pkvUnavailable,
-		},
-		{
-			Label:       "pkv",
-			Command:     "pkv",
-			Description: pkvDesc,
-			Build: func(mm *model) tea.Cmd {
-				return launchPKVCmd(mm.bwSession)
-			},
-			Unavailable: pkvUnavailable,
-		},
-		{
-			Label:       fmt.Sprintf("pkv get all %s", projectName),
-			Command:     fmt.Sprintf("pkv get all %s", projectName),
-			Description: getAllDesc,
-			Build: func(mm *model) tea.Cmd {
-				return launchPKVGetAllCmd(projectName, mm.bwSession)
-			},
-			Unavailable: pkvUnavailable,
-		},
-	}
-
-	errMsg := ""
-	if pkvUnavailable && probeErr != nil {
-		errMsg = probeErr.Error()
-	}
-	return entries, errMsg
-}
-
-// resolveProjectNameForExternal 返回外部工具使用的 project_name，以及是否来自 .dec/config.yaml。
-// 优先用 overview 的 ProjectName，回退到 filepath.Base(projectRoot)；两者都不可用时返回 "unknown"。
-func (m model) resolveProjectNameForExternal() (string, bool) {
-	if m.overview != nil && strings.TrimSpace(m.overview.ProjectName) != "" {
-		return m.overview.ProjectName, m.overview.ProjectNameFromConfig
-	}
-	base := strings.TrimSpace(filepath.Base(m.projectRoot))
-	if base == "" || base == "." || base == "/" {
-		return "unknown", false
-	}
-	return base, false
-}
-
-func (m model) renderExternalToolsPage(width int) string {
-	entries, errMsg := m.externalToolsEntries()
-	name, fromConfig := m.resolveProjectNameForExternal()
-
-	nameSource := "来自 .dec/config.yaml"
-	if !fromConfig {
-		nameSource = "回退自当前目录名（未显式配置 project_name）"
-	}
-
-	lines := []string{
-		fmt.Sprintf("项目短名: %s", name),
-		shellMutedStyle.Render(nameSource),
-	}
-	if errMsg != "" {
-		lines = append(lines, shellWarnStyle.Render("pkv 不可用: "+errMsg))
-	} else {
-		lines = append(lines, shellMutedStyle.Render("pkv 已就绪，选中后按 enter 执行；执行期间 Dec TUI 会挂起。"))
-	}
-	// pkv 会话状态：已解锁用绿色突出，未解锁走灰色；TUI 进程内缓存，退出即丢。
-	if m.bwSession != "" {
-		lines = append(lines, shellGoodStyle.Render("pkv 会话: 已解锁（BW_SESSION 缓存于 TUI 进程内，退出即清）"))
-	} else {
-		lines = append(lines, shellMutedStyle.Render("pkv 会话: 未解锁（选 pkv unlock 解锁以便后续命令复用 session）"))
-	}
-	if m.sessionInvalidMsg != "" {
-		lines = append(lines, shellWarnStyle.Render(m.sessionInvalidMsg))
-	}
-	if m.launchingExternal {
-		lines = append(lines, shellWarnStyle.Render("正在呼起外部工具..."))
-	}
-	if m.externalErr != nil {
-		lines = append(lines, shellWarnStyle.Render("上次外部工具错误: "+m.externalErr.Error()))
-	}
-	lines = append(lines, shellMutedStyle.Render("快捷键：j/k 移动 · enter 执行 · tab 切换页"))
-	lines = append(lines, "")
-
-	// 列表渲染
-	lines = append(lines, shellTitleStyle.Render("可用命令"))
-	for idx, entry := range entries {
-		marker := " "
-		if idx == m.externalToolsCursor && m.focus != focusSidebar {
-			marker = ">"
-		}
-		label := entry.Label
-		if entry.Unavailable {
-			label += "  (pkv 未安装)"
-		}
-		line := fmt.Sprintf("%s %s", marker, label)
-		switch {
-		case idx == m.externalToolsCursor && m.focus != focusSidebar && entry.Unavailable:
-			lines = append(lines, shellWarnStyle.Render(line))
-		case idx == m.externalToolsCursor && m.focus != focusSidebar:
-			lines = append(lines, shellSelectedRow.Render(line))
-		case entry.Unavailable:
-			lines = append(lines, shellMutedStyle.Render(line))
-		default:
-			lines = append(lines, shellLogStyle.Render(line))
-		}
-	}
-
-	// 详情区：当前选中命令的预览
-	if len(entries) > 0 && m.externalToolsCursor >= 0 && m.externalToolsCursor < len(entries) {
-		selected := entries[m.externalToolsCursor]
-		lines = append(lines, "", shellTitleStyle.Render("预览"))
-		lines = append(lines, "$ "+selected.Command)
-		if strings.TrimSpace(selected.Description) != "" {
-			lines = append(lines, shellMutedStyle.Render(selected.Description))
-		}
-	}
-
-	return wrapLines(width, lines)
 }
 
 func (m model) renderSettingsPage(width int) string {
@@ -3156,43 +2831,6 @@ func (m model) isRunPage() bool {
 	return m.pages[m.pageIndex] == "Run"
 }
 
-func (m model) isExternalToolsPage() bool {
-	return m.pages[m.pageIndex] == "外部应用"
-}
-
-// moveExternalToolsCursor 将外部应用页光标按 delta 移动，循环到首尾。
-// 空列表（理论上不该发生）下静默返回。
-func (m *model) moveExternalToolsCursor(delta int) {
-	entries, _ := m.externalToolsEntries()
-	if len(entries) == 0 {
-		m.externalToolsCursor = 0
-		return
-	}
-	n := len(entries)
-	m.externalToolsCursor = ((m.externalToolsCursor+delta)%n + n) % n
-}
-
-// triggerExternalToolsSelection 执行当前光标所在命令。
-// 对 Unavailable 行记录日志、保持 externalErr 不变；成功触发时置 launchingExternal=true 并清空上一次错误。
-func (m *model) triggerExternalToolsSelection() tea.Cmd {
-	entries, _ := m.externalToolsEntries()
-	if len(entries) == 0 {
-		return nil
-	}
-	if m.externalToolsCursor < 0 || m.externalToolsCursor >= len(entries) {
-		return nil
-	}
-	entry := entries[m.externalToolsCursor]
-	if entry.Unavailable || entry.Build == nil {
-		m.pushLog(fmt.Sprintf("External tool %q 不可用，已忽略 enter", entry.Label))
-		return nil
-	}
-	m.launchingExternal = true
-	m.externalErr = nil
-	m.pushLog(fmt.Sprintf("Launching external tool: %s", entry.Command))
-	return entry.Build(m)
-}
-
 func (m model) renderLogs(width, height int) string {
 	start := 0
 	if len(m.logs) > height-2 {
@@ -3254,15 +2892,6 @@ func (m model) renderStatusBar(width int) string {
 		}
 		if m.updateStage != "" {
 			right += " | update-" + m.updateStage
-		}
-	} else if m.isExternalToolsPage() {
-		name, _ := m.resolveProjectNameForExternal()
-		right = fmt.Sprintf("%s | %s", right, name)
-		if m.launchingExternal {
-			right += " | launching"
-		}
-		if m.externalErr != nil {
-			right += " | last-error"
 		}
 	} else if m.overview != nil {
 		right = fmt.Sprintf("%s | enabled %d", right, m.overview.EnabledCount)
@@ -3367,16 +2996,6 @@ func (m model) currentSummary() string {
 		}
 		return "Run page ready"
 	}
-	if m.isExternalToolsPage() {
-		if m.launchingExternal {
-			return "Launching external tool"
-		}
-		if m.externalErr != nil {
-			return "Last external tool failed"
-		}
-		name, _ := m.resolveProjectNameForExternal()
-		return fmt.Sprintf("External tools ready (project: %s)", name)
-	}
 	if m.overview == nil {
 		return "Loading project state"
 	}
@@ -3413,8 +3032,6 @@ func (m model) runStatusLabel() string {
 		return shellGoodStyle.Render("删除中")
 	case m.updatingBinary:
 		return shellGoodStyle.Render("更新中")
-	case m.launchingExternal:
-		return shellGoodStyle.Render("呼起 pkv 中")
 	case m.runErr != nil:
 		return shellWarnStyle.Render("失败")
 	case m.removeErr != nil:

@@ -142,14 +142,7 @@ Bubble Tea 适合 Dec 的原因，不在于“它最流行”，而在于它和 
 - `Assets`
 - `Project`
 - `Run`
-- `外部应用`
 - `Settings`
-
-"外部应用"页是 Dec 的外部工具发射台：集中列出通过 `tea.ExecProcess` 挂起 TUI 运行的命令，默认提供 `pkv` 的两种用法：
-
-- `pkv`：交互模式，把终端直接交给 pkv
-- `pkv get all <project_name>`：针对当前项目批量操作；`<project_name>` 取自 `.dec/config.yaml` 的 `project_name` 字段，未配置时回退到当前目录 basename，不会自动写回 yaml
-- pkv 不在 `$PATH` 时菜单项会被标记为不可用，但页面仍然可见，避免隐藏能力
 
 ### 4.2 资产浏览与启用
 
@@ -475,7 +468,7 @@ else:
 
 - 位置：`internal/tui/pty_integration_test.go`
 - 依赖：`github.com/creack/pty`
-- 覆盖：构建 `dec` 可执行文件 → pty 启动 → 等待首屏（以状态栏 `q quit | tab switch` 为锚点，剥离 ANSI 后匹配）→ `tab` 循环 Home / Assets / Project / Run / 外部应用 / Settings → `shift+tab` 回退 → 发送 `q` → 断言退出码 0
+- 覆盖：构建 `dec` 可执行文件 → pty 启动 → 等待首屏（以状态栏 `q quit | tab switch` 为锚点，剥离 ANSI 后匹配）→ `tab` 循环 Home / Assets / Project / Run / Settings → `shift+tab` 回退 → 发送 `q` → 断言退出码 0
 - 平台限制：通过 `//go:build integration && !windows` 约束，默认不参与 `go test ./...`
 - 本地运行：`go test -tags=integration ./internal/tui/...`
 - CI：需要在 POSIX runner 上显式加 `-tags=integration`，Windows / 无 pty 环境通过 build tag 自动跳过
