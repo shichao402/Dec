@@ -198,6 +198,75 @@ func TestSaveAssetSelectionWritesEnabledBundles(t *testing.T) {
 
 // TestSaveAssetSelectionEmptyBundlesPersistNil 保证传入空列表时 EnabledBundles 清空为 nil，
 // 便于 yaml omitempty 移除该键。
+func TestListEffectiveEnabledAssetsIncludesBundleMembers(t *testing.T) {
+	state := &AssetSelectionState{
+		Items: []AssetSelectionItem{
+			{Name: "project-workflow", Type: "skill", Vault: "default", Enabled: true},
+			{Name: "cli-release-rules", Type: "rule", Vault: "cli", Enabled: false},
+			{Name: "off-asset", Type: "mcp", Vault: "default", Enabled: false},
+		},
+		Bundles: []AssetBundleOption{
+			{
+				Name:    "vikunja",
+				Enabled: true,
+				Members: []AssetSelectionItem{
+					{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja", Enabled: false},
+					{Name: "vikunja-rules", Type: "rule", Vault: "vikunja", Enabled: false},
+				},
+			},
+			{
+				Name:    "cli",
+				Enabled: false,
+				Members: []AssetSelectionItem{
+					{Name: "cli-release-rules", Type: "rule", Vault: "cli", Enabled: false},
+				},
+			},
+		},
+	}
+
+	got := ListEffectiveEnabledAssets(state)
+	if len(got) != 3 {
+		t.Fatalf("有效启用资产数 = %d, 期望 3 (1 standalone + 2 bundle members)", len(got))
+	}
+
+	groups := ListEffectiveEnabledGroups(state)
+	if len(groups) != 2 {
+		t.Fatalf("分组数 = %d, 期望 2 (bundle/vikunja + 独立启用)", len(groups))
+	}
+	if groups[0].Label != "bundle/vikunja" || len(groups[0].Items) != 2 {
+		t.Fatalf("第一组 = %#v, 期望 bundle/vikunja 含 2 项", groups[0])
+	}
+	if groups[1].Label != "独立启用" || len(groups[1].Items) != 1 || groups[1].Items[0].Name != "project-workflow" {
+		t.Fatalf("第二组 = %#v, 期望独立启用 project-workflow", groups[1])
+	}
+}
+
+func TestListEffectiveEnabledAssetsDeduplicatesStandaloneAndBundle(t *testing.T) {
+	state := &AssetSelectionState{
+		Items: []AssetSelectionItem{
+			{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja", Enabled: true},
+		},
+		Bundles: []AssetBundleOption{
+			{
+				Name:    "vikunja",
+				Enabled: true,
+				Members: []AssetSelectionItem{
+					{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja", Enabled: false},
+				},
+			},
+		},
+	}
+
+	got := ListEffectiveEnabledAssets(state)
+	if len(got) != 1 {
+		t.Fatalf("去重后有效启用资产数 = %d, 期望 1", len(got))
+	}
+	groups := ListEffectiveEnabledGroups(state)
+	if len(groups) != 1 || groups[0].Label != "bundle/vikunja" {
+		t.Fatalf("重复资产应只出现在 bundle 组: %#v", groups)
+	}
+}
+
 func TestSaveAssetSelectionEmptyBundlesPersistNil(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	projectRoot := t.TempDir()

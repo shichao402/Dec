@@ -1,8 +1,5 @@
----
-description: Vikunja MCP 集成规则 — TUI-first、mise env、目标项目确认
-globs: **/*
-alwaysApply: false
----
+<!-- 本文件由 `dec pull` 从 .dec/cache/vikunja/ 渲染生成，请勿直接编辑。
+     修改流程：编辑 .dec/cache/vikunja/... → dec push → dec pull 验证 -->
 
 # Vikunja MCP 集成规则
 
@@ -10,22 +7,17 @@ alwaysApply: false
 
 ## ⚠️ 重要约束
 
-**所有 Dec 资产的安装、更新、推送都必须通过 Dec TUI 完成，禁止直接操作底层 Git 仓库。**
+**所有 Dec 资产的安装、更新、推送都必须通过 `dec` CLI 完成，禁止直接操作底层 git 仓库。**
 
-常用入口（运行 `dec` 启动 TUI）：
+常用命令：
 
-| 操作 | TUI 页面 |
-|------|----------|
-| 拉取 project 内 bundle | **Run** → pull |
-| 推送 `.dec/cache/` 变更 | **Run** → push |
-| 浏览 / 搜索远程资产 | **Assets** |
-| 调整 bundle / 资产启用 | **Assets** → 保存 |
-| 编辑项目变量 | **Project** → 按 `e` 编辑 `.dec/vars.yaml` |
+- 拉取当前项目已启用资产：`dec pull`
+- 推送 `.dec/cache/` 中的资产变更：`dec push`
+- 搜索远程资产：`dec search "<query>"`
+- 查看当前项目资产：`dec list`
 
-如需新增通用资产：在 **Assets** 页启用 bundle / 资产，编辑 `.dec/cache/<bundle>/` 下文件，再在 **Run** 页 push。
-若 TUI 操作失败，应把错误反馈给用户，由用户决定是否继续，而不是绕过 Dec 直接操作 Git。
-
-Agent / CI 应调用 `pkg/app/` API，而非假设存在 `dec pull` 等 CLI 子命令。
+如果需要新增通用资产，先修改 `.dec/cache/` 与 `.dec/config.yaml`，再执行 `dec push`。
+如果 `dec` 命令执行失败，应把错误反馈给用户，由用户决定是否继续，而不是绕过 `dec` 直接操作 git。
 
 ## 🧩 变量化原则
 
@@ -33,11 +25,11 @@ Dec 中保存的共享 Vikunja 资产应只把真正会按项目变化的值做�
 
 - 可复用资产里保留少量必要变量，例如默认项目名、任务文档目录
 - 项目本地的具体取值写入 `.dec/vars.yaml`
-- TUI **Run** 页 pull 后再把这些变量替换进当前项目安装到 IDE 的实际配置
+- `dec pull` 时再把这些变量替换进当前项目安装到 IDE 的实际配置
 - 不要把稳定的流程 bucket 名、type label 名、默认视图名也全部变量化
 - 当用户确认了项目本地默认值后，应该优先整理进 vars，而不是把项目特有事实回写进通用资产
 
-这条规则的目的，是让 Dec 远端永远保存可抽象、可复用的版本，而不是保存某个项目的一次性定制文案。
+这条规则的目的，是让 Dec 远端永远保存可抽象、可迁移的版本，而不是保存某个项目的一次性定制文案。
 
 ## 🔒 目标项目确认（强制）
 
@@ -158,53 +150,105 @@ agent 推进不依赖 saved filter。只有在用户明确希望保留人类可�
 
 ## 📌 环境配置
 
-### 私密 env（mise + Bitwarden）
+### 必需的环境变量
 
-`VIKUNJA_URL`、`VIKUNJA_API_TOKEN` 等 **不进** Dec 占位符或 MCP JSON 的 `env` 块。由 Bitwarden Secure Note 落地到项目根 mise 配置，mise 在 MCP 启动时注入：
+当前 Dec 资产为了兼容既有项目，继续透传 `VIKUNJA_URL`。
+`@shichao402/vikunja-mcp` 同时支持 `VIKUNJA_BASE_URL` 和 `VIKUNJA_URL`，推荐使用实例根地址，而不是手动拼接 `/api/v1`。
 
-**Bitwarden Secure Note 名**（= 项目根相对路径）：`.config/mise/conf.d/vikunja.toml`
+在项目的 `.env` 文件或 `config.yaml` 中至少配置以下变量：
 
-```toml
-[env]
-VIKUNJA_URL = "https://vikunja.example.com"
-VIKUNJA_API_TOKEN = "your-api-token-here"
+#### 方式 1: .env 文件（推荐本地开发）
+
+```bash
+VIKUNJA_URL=https://vikunja.example.com
+VIKUNJA_API_TOKEN=your-api-token-here
 ```
 
-TUI **Run** 页 pull 时从 Bitwarden 写入上述路径；**不进** `.dec/cache/`。详见 [Documents/BUNDLE-SECRETS-MODEL.md](../../Documents/BUNDLE-SECRETS-MODEL.md)。
+#### 方式 2: config.yaml（推荐生产/容器化）
 
-`@shichao402/vikunja-mcp` 同时支持 `VIKUNJA_BASE_URL` 和 `VIKUNJA_URL`；推荐使用实例根地址，而不是手动拼接 `/api/v1`。
+```yaml
+secrets:
+  VIKUNJA_URL: "https://vikunja.example.com"
+  VIKUNJA_API_TOKEN: "your-token-here"
+```
+
+如需和上游包文档保持一致，也可以改用 `VIKUNJA_BASE_URL`；当前包会把 `VIKUNJA_URL` 作为等价别名处理。
 
 ### URL 格式规范
 
 - ✅ 推荐: `https://vikunja.example.com`
-- ✅ 也支持: `https://vikunja.example.com/api/v1`（包会自动规范化）
+- ✅ 兼容: `https://vikunja.example.com/api/v1`（包会自动规范化）
 - ❌ 错误: `vikunja.example.com`（缺少协议）
 - ❌ 错误: `/api/v1`（不是完整 URL）
 
 ## 🔧 配置集成
 
-Dec pull 后 MCP 片段写入 IDE 配置（如 `.cursor/mcp.json` 的 `dec-vikunja-mcp` 条目）。**通过 mise 启动**，不在 JSON 中嵌入 token：
+### 集成方式选择
+
+#### 选项 A: .mcp.json（单项目 / 单 Agent）
+
+适用场景：项目中只需要一个 MCP 服务器配置
+
+在项目根目录创建或编辑 `.mcp.json`：
 
 ```json
 {
-  "command": "mise",
-  "args": ["exec", "node@20", "--", "npx", "-y", "@shichao402/vikunja-mcp"]
+  "mcpServers": {
+    "vikunja": {
+      "command": "mise",
+      "args": ["exec", "node@20", "--", "npx", "-y", "@shichao402/vikunja-mcp"],
+      "env": {
+        "VIKUNJA_URL": "${VIKUNJA_URL}",
+        "VIKUNJA_API_TOKEN": "${VIKUNJA_API_TOKEN}"
+      }
+    }
+  }
 }
 ```
 
-私密 env 由 mise 从 `.config/mise/conf.d/vikunja.toml` 读取；**不要**在 MCP JSON 中使用 `"env": { "VIKUNJA_API_TOKEN": "${...}" }` 或 `{{TOKEN}}` 占位符作为 secrets 注入主路径。
+然后在 IDE 配置中加载此文件（CodeBuddy Code 会自动识别）。
+
+#### 选项 B: agents.yaml（多 Agent 场景）
+
+适用场景：项目中多个 Agent 需要使用 Vikunja，或需要灵活配置不同 Agent 的权限
+
+在 `agents.yaml` 中为需要的 Agent 添加 Vikunja 插件：
+
+```yaml
+agents:
+  planning-agent:
+    plugins:
+      vikunja:
+        command: mise
+        args: ["exec", "node@20", "--", "npx", "-y", "@shichao402/vikunja-mcp"]
+        env:
+          VIKUNJA_URL: ${VIKUNJA_URL}
+          VIKUNJA_API_TOKEN: ${VIKUNJA_API_TOKEN}
+
+  execution-agent:
+    plugins:
+      vikunja:
+        command: mise
+        args: ["exec", "node@20", "--", "npx", "-y", "@shichao402/vikunja-mcp"]
+        env:
+          VIKUNJA_URL: ${VIKUNJA_URL}
+          VIKUNJA_API_TOKEN: ${VIKUNJA_API_TOKEN}
+```
 
 ## ✅ 启动检查清单
 
 加载 Vikunja MCP 后，按以下步骤验证：
 
-### 1. mise env 验证
+### 1. 环境变量验证
 
 ```bash
-mise env | grep VIKUNJA
+echo "VIKUNJA_URL=${VIKUNJA_URL:-$VIKUNJA_BASE_URL}"
+echo "VIKUNJA_API_TOKEN=${VIKUNJA_API_TOKEN:0:10}***"  # 只输出前 10 个字符用于验证
 ```
 
-**预期结果**：显示 `VIKUNJA_URL` 与 `VIKUNJA_API_TOKEN`（token 仅显示前缀即可）
+**预期结果**:
+- URL 环境变量显示完整实例地址
+- VIKUNJA_API_TOKEN 显示 token 的前 10 个字符
 
 ### 2. 网络连通性测试
 
@@ -295,7 +339,7 @@ mise exec node@20 -- npx -y @shichao402/vikunja-mcp --help
 已验证的行为：
 
 - `PUT /filters` 创建 saved filter 可以正常使用
-- `POST /tasks/bulk` 虽然可以更新任务字段，但不应作为真实 kanban bucket 移动手段
+- `POST /tasks/bulk` 虽然可以更新任务字段，但不应作为真实 kanban bucket 迁移手段
 - 真正的看板卡片移动应使用专门的 bucket 任务移动接口：`POST /projects/{project}/views/{view}/buckets/{bucket}/tasks`
 
 如果当前 MCP 暴露了原始 REST 工具，优先调用对应的 task-bucket move endpoint，不要单纯写 `bucket_id` 后假设看板位置已经同步。
@@ -325,4 +369,4 @@ mise exec node@20 -- npx -y @shichao402/vikunja-mcp --help
 **解决方案**:
 1. 登录 Vikunja 界面 → 用户设置 → API Token
 2. 删除旧 Token，生成新 Token
-3. 更新 Bitwarden 中对应 Secure Note（`.config/mise/conf.d/vikunja.toml`），再 TUI **Run** 页 pull
+3. 更新 `.env` 或 `config.yaml` 中的 `VIKUNJA_API_TOKEN`

@@ -34,3 +34,57 @@ func TestMasterPasswordHash_MatchesBitwardenPBKDF2Vector(t *testing.T) {
 		t.Fatalf("server hash 不应再使用 account.key salt")
 	}
 }
+
+func TestDecryptUserKey_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	password := "master-password"
+	email := "user@example.com"
+	iterations := 1000
+	userKey := make([]byte, 64)
+	for i := range userKey {
+		userKey[i] = byte(i)
+	}
+	encKey, macKey := deriveStretchedKeys(password, email, iterations)
+	encrypted, err := encryptEncBytes(userKey, encKey, macKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decryptUserKey(encrypted, password, email, iterations)
+	if err != nil {
+		t.Fatalf("decryptUserKey() = %v", err)
+	}
+	if string(got) != string(userKey) {
+		t.Fatalf("user key mismatch")
+	}
+}
+
+func testEncryptedUserKey(password, email string, iterations int) (string, error) {
+	userKey := make([]byte, 64)
+	for i := range userKey {
+		userKey[i] = byte(i + 1)
+	}
+	encKey, macKey := deriveStretchedKeys(password, email, iterations)
+	return encryptEncBytes(userKey, encKey, macKey)
+}
+
+func TestEncryptVaultString_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	vaultKey := make([]byte, 64)
+	for i := range vaultKey {
+		vaultKey[i] = byte(i + 5)
+	}
+	plain := ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml"
+	encrypted, err := encryptVaultString(plain, vaultKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decryptVaultString(encrypted, vaultKey)
+	if err != nil {
+		t.Fatalf("decryptVaultString() = %v", err)
+	}
+	if got != plain {
+		t.Fatalf("round trip = %q, want %q", got, plain)
+	}
+}

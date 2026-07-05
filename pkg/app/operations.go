@@ -36,6 +36,8 @@ type PullProjectAssetsResult struct {
 	// AssetSources 以 "type:vault:name" 为 key，值是每个目标资产的来源列表
 	// （例如 ["bundle/vikunja", "standalone"]）。供多来源追溯使用。
 	AssetSources map[string][]string
+	SecretsSkippedReason string
+	SecretsNoteCount     int
 }
 
 func PullProjectAssets(ctx context.Context, projectRoot, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
@@ -182,6 +184,8 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	if err != nil {
 		return nil, err
 	}
+	result.SecretsSkippedReason = secretsSummary.SkippedReason
+	result.SecretsNoteCount = secretsSummary.NoteCount
 	if err := validateSecretsPathOverlap(projectRoot, secretsSummary.LandingPaths, reporter); err != nil {
 		return nil, err
 	}

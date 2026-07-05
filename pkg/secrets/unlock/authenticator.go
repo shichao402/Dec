@@ -3,13 +3,14 @@ package unlock
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 )
 
 // Authenticator 抽象 Bitwarden unlock API（真实实现可后续替换）。
 type Authenticator interface {
-	Unlock(ctx context.Context, password string) (session string, need2FA bool, err error)
-	Verify2FA(ctx context.Context, code string) (session string, err error)
+	Unlock(ctx context.Context, email, password string) (session string, need2FA bool, err error)
+	Verify2FA(ctx context.Context, code string, rememberDevice bool) (session string, err error)
 }
 
 // StubAuthenticator 测试/开发用 unlock 实现。
@@ -34,7 +35,10 @@ func NewStubAuthenticator(password, totp, token string) *StubAuthenticator {
 	}
 }
 
-func (a *StubAuthenticator) Unlock(_ context.Context, password string) (string, bool, error) {
+func (a *StubAuthenticator) Unlock(_ context.Context, email, password string) (string, bool, error) {
+	if strings.TrimSpace(email) == "" {
+		return "", false, fmt.Errorf("邮箱不能为空")
+	}
 	if password == "" {
 		return "", false, fmt.Errorf("主密码不能为空")
 	}
@@ -50,7 +54,7 @@ func (a *StubAuthenticator) Unlock(_ context.Context, password string) (string, 
 	return a.Token, false, nil
 }
 
-func (a *StubAuthenticator) Verify2FA(_ context.Context, code string) (string, error) {
+func (a *StubAuthenticator) Verify2FA(_ context.Context, code string, _ bool) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.state != "awaiting_2fa" {

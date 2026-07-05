@@ -43,7 +43,7 @@ Dec 是一个以 **TUI** 为第一交互入口的个人 AI 资产管理工具，
 ```text
 Git Vault（Dec 仓库）          Bitwarden                    本地工作区
 ─────────────────────          ─────────                    ──────────
-projects/my-app.yaml           folder: vikunja_workflow     my-app/
+projects/my-app.yaml           secrets_bundle: vikunja_workflow   my-app/
   bundles: [vikunja]             Secure Note → .config/       ├── .dec/
 bundles/vikunja/                 SSH Key → ~/.ssh/            │   ├── config.yaml  ← project_name
   skills/...                                                  │   └── cache/vikunja/

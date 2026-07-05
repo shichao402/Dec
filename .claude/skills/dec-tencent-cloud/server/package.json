@@ -1,0 +1,52 @@
+{
+  "name": "@shichao402/tencent-cloud-mcp",
+  "version": "0.2.0",
+  "description": "Single high-privilege Tencent Cloud MCP — CVM, COS, DNSPod, Lighthouse via SDK",
+  "type": "module",
+  "license": "MIT",
+  "author": "shichao402",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shichao402/tencent-cloud-mcp.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "dec",
+    "mise",
+    "tencent-cloud",
+    "tencentcloud"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "cos-nodejs-sdk-v5": "^2.14.6",
+    "mysql2": "^3.14.1",
+    "tencentcloud-sdk-nodejs": "^4.1.38",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.2"
+  },
+  "bin": {
+    "tencent-cloud-mcp": "dist/index.js"
+  }
+}

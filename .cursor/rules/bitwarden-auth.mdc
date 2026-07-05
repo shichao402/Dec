@@ -13,7 +13,20 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 - Bitwarden session **仅在当前进程内存**中保存；进程退出即失效。
 - **禁止**将 session 持久化到磁盘：`~/.dec/secrets/session`、`BW_SESSION` 文件、或任何 env/配置文件形式的 session 缓存均不允许。
 - `SyncStateFile`（`~/.dec/secrets/state.json`）**不得**包含 session 字段；只记录同步元数据。
-- 同一进程内已有有效 session → 直接复用；无 session → 阻塞等待 web unlock。
+- 同一进程内已有有效 session → 直接复用；无 session → 先尝试程序化解锁（见下），失败再阻塞等待 web unlock。
+
+## 开发 / Agent 程序化解锁
+
+- 新进程需要 Bitwarden API 时，可设置环境变量 **`DEC_BW_PASSWORD`**（主密码，**仅当前进程**，禁止写入代码、配置或磁盘）。
+- 配合 `~/.dec/secrets/device.json` 中的 `two_factor_remember` 令牌，可在无浏览器、无 2FA 的情况下建立 session。
+- **未设置** `DEC_BW_PASSWORD` 或 remember token 失效 / 仍需 2FA 时，**回退 web unlock**（这是预期行为，不是 bug）。
+- Agent / CI 在启动 `dec` 或调用 `pkg/app` 前，须 `export DEC_BW_PASSWORD=…`；TUI 与主进程同进程，**不会**从其他 shell 继承未 export 的变量。
+
+## 设备信任（允许落盘）
+
+- `~/.dec/secrets/device.json` 可持久化 **deviceIdentifier**（UUID）与 **two_factor_remember** 令牌（按 email 索引）。
+- 上述内容用于「记住此设备」跳过 2FA，**不是** access token / session；重启 Dec 仍需 web unlock 输入主密码。
+- 禁止在 device.json 或任何配置中存储主密码、access_token、refresh_token。
 
 ## Web Unlock（唯一认证入口）
 

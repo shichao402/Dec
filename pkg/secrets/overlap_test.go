@@ -30,6 +30,14 @@ func TestValidateNoOverlap_RejectsIntersection(t *testing.T) {
 	}
 }
 
+func TestValidateNoOverlap_RejectsEmbeddedDecSegment(t *testing.T) {
+	projectRoot := t.TempDir()
+	err := ValidateNoOverlap(projectRoot, []string{".secrets/combo/.dec/cache/default/skills/foo/SKILL.md"})
+	if err == nil {
+		t.Fatal("期望路径中含 /.dec/ 时被拒绝")
+	}
+}
+
 func TestValidateNoOverlap_AllowsSeparateRoots(t *testing.T) {
 	projectRoot := t.TempDir()
 	skillPath := filepath.Join(projectRoot, ".dec", "cache", "default", "skills", "foo", "SKILL.md")
@@ -40,7 +48,7 @@ func TestValidateNoOverlap_AllowsSeparateRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := ValidateNoOverlap(projectRoot, []string{".config/mise/conf.d/vikunja.toml"})
+	err := ValidateNoOverlap(projectRoot, []string{".secrets/vikunja_workflow/mise/conf.d/vikunja.toml"})
 	if err != nil {
 		t.Fatalf("期望独立根路径通过校验: %v", err)
 	}
@@ -59,7 +67,7 @@ func TestPullBundle_WritesNotes(t *testing.T) {
 	paths, err := PullBundle(t.Context(), client, PullBundleRequest{
 		ProjectRoot:   projectRoot,
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{DecBundleName: "vikunja", BitwardenFolder: "vikunja"},
+		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja"},
 	})
 	if err != nil {
 		t.Fatalf("PullBundle() 失败: %v", err)
@@ -67,8 +75,11 @@ func TestPullBundle_WritesNotes(t *testing.T) {
 	if len(paths) != 1 {
 		t.Fatalf("paths = %#v, 期望 1 条", paths)
 	}
-	dest := filepath.Join(projectRoot, ".config", "mise", "conf.d", "vikunja.toml")
+	dest := filepath.Join(projectRoot, ".secrets", "vikunja", "mise", "conf.d", "vikunja.toml")
 	if _, err := os.Stat(dest); err != nil {
 		t.Fatalf("落地文件应存在: %v", err)
+	}
+	if paths[0] != ".secrets/vikunja/mise/conf.d/vikunja.toml" {
+		t.Fatalf("paths[0] = %q, want canonical landing path", paths[0])
 	}
 }

@@ -80,11 +80,11 @@ func TestViewAtBaselineWidths_AssetsNoOverflow(t *testing.T) {
 		width := width
 		t.Run(widthLabel(width), func(t *testing.T) {
 			m := homeModelAtWidth(width)
-			m.pageIndex = 1 // Assets
+			m.pageIndex = 1 // Bundles
 			m.assets = assets
 			m.normalizeAssetCursor()
 			view := m.View()
-			assertNoLineOverflowsWidth(t, "Assets", view, width)
+			assertNoLineOverflowsWidth(t, "Bundles", view, width)
 		})
 	}
 }
@@ -115,7 +115,7 @@ func TestViewAtBaselineWidths_SettingsNoOverflow(t *testing.T) {
 		width := width
 		t.Run(widthLabel(width), func(t *testing.T) {
 			m := homeModelAtWidth(width)
-			m.pageIndex = 4 // Settings
+			m.pageIndex = 5 // Settings
 			m.settings = &app.GlobalSettingsState{
 				ConfigPath:       "/tmp/.dec/config.yaml",
 				VarsPath:         "/tmp/.dec/local/vars.yaml",
@@ -140,11 +140,12 @@ func TestViewAtBaselineWidths_SettingsNoOverflow(t *testing.T) {
 func TestStatusBarDropsLeftHintOnOverflow(t *testing.T) {
 	m := homeModelAtWidth(60)
 	m.pageIndex = 3 // Run：右侧会携带 pull 阶段状态
+	m.runningPull = true
 	m.runProgress = &app.Progress{Phase: "pull", Current: 1, Total: 2}
 
 	bar := m.renderStatusBar(60)
-	// 右侧带 "pull 1/2" 的状态信息必须保留
-	if !strings.Contains(bar, "pull 1/2") {
+	// 右侧带 "Dec cache 1/2" 的状态信息必须保留
+	if !strings.Contains(bar, "Dec cache 1/2") {
 		t.Fatalf("窄终端下状态栏应保留右侧页面状态，实际：%q", bar)
 	}
 	// 宽度不能超过 60

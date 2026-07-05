@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestPullProjectAssets_SkipsSecretsWhenNotConfigured(t *testing.T) {
+func TestPullProjectAssets_UsesDefaultServerWithoutConfigFile(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
@@ -38,6 +39,16 @@ func TestPullProjectAssets_SkipsSecretsWhenNotConfigured(t *testing.T) {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{}}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
 	var events []OperationEvent
 	result, err := PullProjectAssets(context.Background(), projectRoot, "", ReporterFunc(func(event OperationEvent) {
 		events = append(events, event)
@@ -48,8 +59,8 @@ func TestPullProjectAssets_SkipsSecretsWhenNotConfigured(t *testing.T) {
 	if result.PulledCount != 1 {
 		t.Fatalf("PulledCount = %d, 期望 1", result.PulledCount)
 	}
-	if !containsScopeMessage(events, "pull.secrets", "Bitwarden 未配置") {
-		t.Fatalf("应发出 secrets 跳过事件: %#v", events)
+	if containsScopeMessage(events, "pull.secrets", "Bitwarden 未配置") {
+		t.Fatalf("默认 server_url 时不应跳过 secrets: %#v", events)
 	}
 }
 
@@ -69,6 +80,7 @@ func TestPullProjectAssets_RejectsSecretsOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
 	t.Cleanup(secrets.ClearSession)
 
 	origFactory := secretsClientFactory

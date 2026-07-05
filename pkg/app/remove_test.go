@@ -11,13 +11,12 @@ import (
 	"github.com/shichao402/Dec/pkg/types"
 )
 
-func TestRemoveAssetRejectsWhenUnconfirmed(t *testing.T) {
+func TestRemoveBundleRejectsWhenUnconfirmed(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 
-	_, err := RemoveAsset(RemoveAssetInput{
+	_, err := RemoveBundle(RemoveBundleInput{
 		ProjectRoot: t.TempDir(),
-		Type:        "skill",
-		Name:        "project-workflow",
+		BundleName:  "vikunja",
 		Confirmed:   false,
 	}, nil)
 	if !errors.Is(err, ErrRemoveNotConfirmed) {
@@ -25,24 +24,24 @@ func TestRemoveAssetRejectsWhenUnconfirmed(t *testing.T) {
 	}
 }
 
-func TestRemoveAssetRejectsInvalidType(t *testing.T) {
+func TestRemoveBundleRejectsEmptyName(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 
-	_, err := RemoveAsset(RemoveAssetInput{
+	_, err := RemoveBundle(RemoveBundleInput{
 		ProjectRoot: t.TempDir(),
-		Type:        "invalid",
-		Name:        "anything",
+		BundleName:  "",
 		Confirmed:   true,
 	}, nil)
 	if err == nil {
-		t.Fatal("非法资产类型应返回错误")
+		t.Fatal("空 bundle 名应返回错误")
 	}
 }
 
-func TestRemoveAssetRemovesRemoteAndCleansLocal(t *testing.T) {
+func TestRemoveBundleRemovesRemoteAndCleansLocal(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"bundles/vikunja/rules/vikunja-rules.mdc":          "---\ndescription: test\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -51,26 +50,29 @@ func TestRemoveAssetRemovesRemoteAndCleansLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs: []string{"cursor"},
+		IDEs:           []string{"cursor"},
+		EnabledBundles: []string{"vikunja"},
 		Available: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "project-workflow", Vault: "default"}},
+			Skills: []types.AssetRef{{Name: "vikunja-workflow", Vault: "vikunja"}},
+			Rules:  []types.AssetRef{{Name: "vikunja-rules", Vault: "vikunja"}},
 		},
 		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "project-workflow", Vault: "default"}},
+			Skills: []types.AssetRef{{Name: "vikunja-workflow", Vault: "vikunja"}},
+			Rules:  []types.AssetRef{{Name: "vikunja-rules", Vault: "vikunja"}},
 		},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	// 预置 cache 和 IDE 目录，验证清理路径。
-	cacheSkill := filepath.Join(projectRoot, ".dec", "cache", "default", "skills", "project-workflow")
+	cacheBundle := filepath.Join(projectRoot, ".dec", "cache", "vikunja")
+	cacheSkill := filepath.Join(cacheBundle, "skills", "vikunja-workflow")
 	if err := os.MkdirAll(cacheSkill, 0755); err != nil {
 		t.Fatalf("创建 cache 目录失败: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cacheSkill, "SKILL.md"), []byte("cache"), 0644); err != nil {
 		t.Fatalf("写 cache 失败: %v", err)
 	}
-	ideSkill := filepath.Join(projectRoot, ".cursor", "skills", "dec-project-workflow")
+	ideSkill := filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow")
 	if err := os.MkdirAll(ideSkill, 0755); err != nil {
 		t.Fatalf("创建 IDE skill 目录失败: %v", err)
 	}
@@ -79,26 +81,32 @@ func TestRemoveAssetRemovesRemoteAndCleansLocal(t *testing.T) {
 	}
 
 	var events []OperationEvent
-	result, err := RemoveAsset(RemoveAssetInput{
+	result, err := RemoveBundle(RemoveBundleInput{
 		ProjectRoot: projectRoot,
-		Type:        "skill",
-		Name:        "project-workflow",
-		Confirmed:   true,
+		BundleName:  "vikunja",
+		Members: []AssetSelectionItem{
+			{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja"},
+			{Name: "vikunja-rules", Type: "rule", Vault: "vikunja"},
+		},
+		Confirmed: true,
 	}, ReporterFunc(func(event OperationEvent) {
 		events = append(events, event)
 	}))
 	if err != nil {
-		t.Fatalf("RemoveAsset() 失败: %v", err)
+		t.Fatalf("RemoveBundle() 失败: %v", err)
 	}
 
-	if result.Vault != "default" {
-		t.Fatalf("Vault = %q, 期望 %q", result.Vault, "default")
+	if result.BundleName != "vikunja" {
+		t.Fatalf("BundleName = %q, 期望 %q", result.BundleName, "vikunja")
+	}
+	if result.MemberCount != 2 {
+		t.Fatalf("MemberCount = %d, 期望 2", result.MemberCount)
 	}
 	if result.VersionCommit == "" {
 		t.Fatal("VersionCommit 不应为空")
 	}
 	if !result.RemovedFromCache {
-		t.Fatal("应清理缓存")
+		t.Fatal("应清理 bundle 缓存")
 	}
 	if !result.ConfigUpdated {
 		t.Fatal("应更新项目配置")
@@ -110,16 +118,19 @@ func TestRemoveAssetRemovesRemoteAndCleansLocal(t *testing.T) {
 	if _, err := os.Stat(ideSkill); !os.IsNotExist(err) {
 		t.Fatalf("IDE skill 目录应已删除, err=%v", err)
 	}
-	if _, err := os.Stat(cacheSkill); !os.IsNotExist(err) {
-		t.Fatalf("cache 目录应已删除, err=%v", err)
+	if _, err := os.Stat(cacheBundle); !os.IsNotExist(err) {
+		t.Fatalf("bundle cache 目录应已删除, err=%v", err)
 	}
 
 	updatedConfig, err := mgr.LoadProjectConfig()
 	if err != nil {
 		t.Fatalf("LoadProjectConfig() 失败: %v", err)
 	}
-	if updatedConfig.Enabled != nil && updatedConfig.Enabled.FindAsset("skill", "project-workflow", "default") != nil {
-		t.Fatal("Enabled 中不应再包含该资产")
+	if len(updatedConfig.EnabledBundles) != 0 {
+		t.Fatalf("EnabledBundles 应已清空, got %v", updatedConfig.EnabledBundles)
+	}
+	if updatedConfig.Enabled != nil && updatedConfig.Enabled.FindAsset("skill", "vikunja-workflow", "vikunja") != nil {
+		t.Fatal("Enabled 中不应再包含 bundle 成员")
 	}
 
 	var sawFinish bool
@@ -134,7 +145,7 @@ func TestRemoveAssetRemovesRemoteAndCleansLocal(t *testing.T) {
 	}
 }
 
-func TestRemoveAssetReturnsNotFound(t *testing.T) {
+func TestRemoveBundleReturnsNotFound(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/default/skills/other-workflow/SKILL.md": "---\nname: other-workflow\n---\n",
@@ -151,13 +162,12 @@ func TestRemoveAssetReturnsNotFound(t *testing.T) {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	_, err := RemoveAsset(RemoveAssetInput{
+	_, err := RemoveBundle(RemoveBundleInput{
 		ProjectRoot: projectRoot,
-		Type:        "skill",
-		Name:        "missing-asset",
+		BundleName:  "missing-bundle",
 		Confirmed:   true,
 	}, nil)
 	if err == nil {
-		t.Fatal("找不到远端资产时应返回错误")
+		t.Fatal("找不到远端 bundle 时应返回错误")
 	}
 }

@@ -5,8 +5,37 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/secrets"
 )
+
+type secretsSyncPlan struct {
+	EnabledBundles     []string
+	ProjectSecretsName string
+	Total              int
+}
+
+func planSecretsSync(projectRoot string, enabledBundles []string, cfg *secrets.Config) (*secretsSyncPlan, error) {
+	plan := &secretsSyncPlan{
+		EnabledBundles: append([]string(nil), enabledBundles...),
+	}
+	mgr := config.NewProjectConfigManager(projectRoot)
+	projectConfig, err := mgr.LoadProjectConfig()
+	if err != nil {
+		return nil, err
+	}
+	projectName, _ := ResolveProjectName(projectRoot, projectConfig)
+	if cfg != nil {
+		if name, enabled := cfg.ResolveProjectSecrets(projectName); enabled {
+			plan.ProjectSecretsName = name
+		}
+	}
+	plan.Total = len(plan.EnabledBundles)
+	if plan.ProjectSecretsName != "" {
+		plan.Total++
+	}
+	return plan, nil
+}
 
 // secretsClientFactory 供测试注入 stub Client。
 var secretsClientFactory = secrets.DefaultClient
@@ -31,29 +60,8 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 	}
 	if !configured {
 		summary.SkippedReason = "Bitwarden 未配置"
-		emit(reporter, EventInfo, "pull.secrets", "Bitwarden 未配置，跳过 secrets bundle 同步", nil)
+		emit(reporter, EventInfo, "pull.secrets", "Bitwarden 未配置，跳过 secrets 同步", nil)
 		return summary, nil
-	}
-	if len(enabledBundles) == 0 {
-		summary.SkippedReason = "无已启用 bundle"
-		emit(reporter, EventInfo, "pull.secrets", "无已启用 bundle，跳过 secrets bundle 同步", nil)
-		return summary, nil
-	}
-
-	if !secrets.HasSession() {
-		emit(reporter, EventInfo, "pull.secrets", "Bitwarden 未解锁，启动 web unlock…", nil)
-		if err := secrets.EnsureSession(ctx, &secrets.EnsureSessionOpts{
-			OnUnlockURL: func(url string) {
-				emit(reporter, EventInfo, "pull.secrets", fmt.Sprintf("Bitwarden 解锁页: %s", url), nil)
-				emit(reporter, EventInfo, "pull.secrets", "若浏览器未自动打开，请复制上方链接到浏览器访问", nil)
-			},
-			OnBrowserError: func(err error) {
-				emit(reporter, EventWarn, "pull.secrets", fmt.Sprintf("无法自动打开浏览器: %v", err), nil)
-			},
-		}); err != nil {
-			return nil, fmt.Errorf("Bitwarden 解锁失败: %w", err)
-		}
-		emit(reporter, EventInfo, "pull.secrets", "Bitwarden 已解锁", nil)
 	}
 
 	cfg, err := secrets.LoadConfig()
@@ -61,18 +69,44 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 		return nil, err
 	}
 
-	client := secretsClientFactory()
-	total := len(enabledBundles)
-	emit(reporter, EventInfo, "pull.secrets", fmt.Sprintf("同步 %d 个 secrets bundle", total), &Progress{Phase: "secrets", Current: 0, Total: total})
+	plan, err := planSecretsSync(projectRoot, enabledBundles, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if plan.Total == 0 {
+		summary.SkippedReason = "无已启用 bundle 或 project secrets"
+		emit(reporter, EventInfo, "pull.secrets", "无已启用 bundle 或 project secrets，跳过 secrets 同步", nil)
+		return summary, nil
+	}
 
-	for idx, bundleName := range enabledBundles {
+	if !secrets.HasSession() {
+		emit(reporter, EventInfo, "pull.secrets", "[auth] pull: Bitwarden session required", nil)
+		if err := ensureBitwardenSession(ctx, reporter, "pull.secrets"); err != nil {
+			return nil, err
+		}
+	}
+	if !secrets.HasUserKey() {
+		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
+	}
+
+	client := secretsClientFactory()
+	total := plan.Total
+	emit(reporter, EventInfo, "pull.secrets", fmt.Sprintf("同步 %d 个 secrets 目标（bundle + project）", total), &Progress{Phase: "secrets", Current: 0, Total: total})
+
+	if err := migrateSecretsTargets(ctx, projectRoot, plan, reporter); err != nil {
+		return nil, err
+	}
+
+	idx := 0
+	for _, bundleName := range plan.EnabledBundles {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		progress := &Progress{Phase: "secrets", Current: idx + 1, Total: total}
+		idx++
+		progress := &Progress{Phase: "secrets", Current: idx, Total: total}
 		binding := cfg.ResolveBinding(bundleName)
 		emit(reporter, EventInfo, "pull.secrets",
-			fmt.Sprintf("拉取 secrets bundle %q (folder: %s)", bundleName, binding.BitwardenFolder), progress)
+			fmt.Sprintf("拉取 secrets bundle %q (Bitwarden folder: %s)", bundleName, binding.SecretsBundleName), progress)
 
 		paths, pullErr := secrets.PullBundle(ctx, client, secrets.PullBundleRequest{
 			ProjectRoot:   projectRoot,
@@ -84,17 +118,51 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 		}
 		summary.NoteCount += len(paths)
 		summary.LandingPaths = append(summary.LandingPaths, paths...)
-		if len(paths) > 0 {
+		switch {
+		case len(paths) > 0:
 			emit(reporter, EventInfo, "pull.secrets",
 				fmt.Sprintf("  落地 %d 个 Secure Note: %s", len(paths), strings.Join(paths, ", ")), progress)
+		case binding.SecretsBundleName != "":
+			emit(reporter, EventInfo, "pull.secrets",
+				fmt.Sprintf("  Bitwarden folder %q 无 Secure Note 或 folder 不存在，跳过", binding.SecretsBundleName), progress)
+		}
+	}
+
+	if plan.ProjectSecretsName != "" {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		idx++
+		progress := &Progress{Phase: "secrets", Current: idx, Total: total}
+		binding := secrets.ProjectSecretsBinding(plan.ProjectSecretsName)
+		emit(reporter, EventInfo, "pull.secrets",
+			fmt.Sprintf("拉取 project secrets %q (Bitwarden folder: %s)", plan.ProjectSecretsName, binding.SecretsBundleName), progress)
+
+		paths, pullErr := secrets.PullBundle(ctx, client, secrets.PullBundleRequest{
+			ProjectRoot:   projectRoot,
+			DecBundleName: secrets.ProjectSecretsDecBundleName,
+			Binding:       binding,
+		})
+		if pullErr != nil {
+			return nil, fmt.Errorf("拉取 project secrets %q 失败: %w", plan.ProjectSecretsName, pullErr)
+		}
+		summary.NoteCount += len(paths)
+		summary.LandingPaths = append(summary.LandingPaths, paths...)
+		switch {
+		case len(paths) > 0:
+			emit(reporter, EventInfo, "pull.secrets",
+				fmt.Sprintf("  落地 %d 个 Secure Note: %s", len(paths), strings.Join(paths, ", ")), progress)
+		default:
+			emit(reporter, EventInfo, "pull.secrets",
+				fmt.Sprintf("  Bitwarden folder %q 无 Secure Note 或 folder 不存在，跳过", binding.SecretsBundleName), progress)
 		}
 	}
 
 	if summary.NoteCount == 0 {
-		emit(reporter, EventInfo, "pull.secrets", "secrets bundle 同步完成（无变更）", &Progress{Phase: "secrets", Current: total, Total: total})
+		emit(reporter, EventInfo, "pull.secrets", "secrets 同步完成（无变更）", &Progress{Phase: "secrets", Current: total, Total: total})
 	} else {
 		emit(reporter, EventInfo, "pull.secrets",
-			fmt.Sprintf("secrets bundle 同步完成：%d 个文件", summary.NoteCount),
+			fmt.Sprintf("secrets 同步完成：%d 个文件", summary.NoteCount),
 			&Progress{Phase: "secrets", Current: total, Total: total})
 	}
 	return summary, nil

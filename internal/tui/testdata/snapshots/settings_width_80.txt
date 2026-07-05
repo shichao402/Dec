@@ -4,11 +4,11 @@
 │  j/k 切换页 · l  ││  /tmp/dec-project                                        │
 │  进入 · h 返回   ││  Settings ready, 1 IDEs                                  │
 │   Home           ││                                                          │
-│   Assets         │╰──────────────────────────────────────────────────────────╯
+│   Bundles        │╰──────────────────────────────────────────────────────────╯
 │   Project        │╭──────────────────────────────────────────────────────────╮
 │   Run            ││                                                          │
-│  Settings        ││  Repo URL: git@github.com:demo/dec.git                   │
-│                  ││  当前远端: git@github.com:demo/dec.git                   │
+│   Delete         ││  Repo URL: git@github.com:demo/dec.git                   │
+│  Settings        ││  当前远端: git@github.com:demo/dec.git                   │
 │                  ││  已选 IDE: cursor                                        │
 │                  ││  生效 IDE: cursor                                        │
 │                  ││  全局配置: /tmp/.dec/config.yaml                         │

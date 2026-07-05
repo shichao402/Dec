@@ -8,7 +8,7 @@ import (
 
 // RunOptions 控制 TUI 启动行为。
 type RunOptions struct {
-	// ConfigInitMode 为 true 时直接进入 Assets 页做 bundle 选择，保存后退出。
+	// ConfigInitMode 为 true 时直接进入 Bundles 页做 bundle 选择，保存后退出。
 	ConfigInitMode bool
 }
 

@@ -6,8 +6,8 @@
 #   主文件 vars.yaml 会覆盖 vars.d/ 中的同名键。fragment 里的 assets: 字段会被忽略。
 
 vars:
-  TASK_DOCS_DIR: "Documents/tasks"
-  VIKUNJA_PROJECT: "Dec"
+  # TASK_DOCS_DIR: "Documents/tasks"
+  # VIKUNJA_PROJECT: "MyProject"
   # 稳定的流程 bucket / type label 由共享资产固化，不需要写进 vars
   # API_BASE_URL: "https://api.example.com"
   # API_TOKEN: "<TOKEN>"

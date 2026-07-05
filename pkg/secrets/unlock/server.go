@@ -6,14 +6,19 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 type server struct {
-	auth     Authenticator
-	onUnlock func(session string)
-	done     chan error
+	auth         Authenticator
+	onUnlock     func(session string)
+	onEmailSaved func(email string) error
+	initialEmail string
+	pendingEmail string
+	done         chan error
 
 	mu          sync.Mutex
 	awaiting2FA bool
@@ -21,11 +26,13 @@ type server struct {
 	httpServer  *http.Server
 }
 
-func newServer(auth Authenticator, onUnlock func(session string)) *server {
+func newServer(auth Authenticator, initialEmail string, onUnlock func(session string), onEmailSaved func(email string) error) *server {
 	return &server{
-		auth:     auth,
-		onUnlock: onUnlock,
-		done:     make(chan error, 1),
+		auth:         auth,
+		initialEmail: strings.TrimSpace(initialEmail),
+		onUnlock:     onUnlock,
+		onEmailSaved: onEmailSaved,
+		done:         make(chan error, 1),
 	}
 }
 
@@ -47,29 +54,46 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/unlock/2fa", http.StatusSeeOther)
 		return
 	}
-	s.render(w, "unlock", pageData{})
+	s.render(w, "unlock", pageData{Email: s.initialEmail})
 }
 
 func (s *server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.render(w, "unlock", pageData{Error: "请求无效"})
+		s.render(w, "unlock", pageData{Error: "请求无效", Email: s.initialEmail})
 		return
 	}
+	email := strings.TrimSpace(r.FormValue("email"))
 	password := r.FormValue("password")
-	session, need2FA, err := s.auth.Unlock(r.Context(), password)
+	if email == "" {
+		s.render(w, "unlock", pageData{Error: "邮箱不能为空"})
+		return
+	}
+	session, need2FA, err := s.auth.Unlock(r.Context(), email, password)
 	if err != nil {
-		s.render(w, "unlock", pageData{Error: err.Error()})
+		s.render(w, "unlock", pageData{Error: err.Error(), Email: email})
 		return
 	}
 	if need2FA {
 		s.mu.Lock()
 		s.awaiting2FA = true
+		s.pendingEmail = email
 		s.mu.Unlock()
 		http.Redirect(w, r, "/unlock/2fa", http.StatusSeeOther)
 		return
 	}
+	if err := s.persistEmail(email); err != nil {
+		s.render(w, "unlock", pageData{Error: err.Error(), Email: email})
+		return
+	}
 	s.complete(session)
 	s.render(w, "success", pageData{})
+}
+
+func (s *server) persistEmail(email string) error {
+	if s.onEmailSaved == nil {
+		return nil
+	}
+	return s.onEmailSaved(email)
 }
 
 func (s *server) handle2FA(w http.ResponseWriter, r *http.Request) {
@@ -95,8 +119,13 @@ func (s *server) handle2FASubmit(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "2fa", pageData{Error: "请求无效"})
 		return
 	}
-	session, err := s.auth.Verify2FA(r.Context(), r.FormValue("code"))
+	rememberDevice := r.FormValue("remember") == "1" || r.FormValue("remember") == "on"
+	session, err := s.auth.Verify2FA(r.Context(), r.FormValue("code"), rememberDevice)
 	if err != nil {
+		s.render(w, "2fa", pageData{Error: err.Error()})
+		return
+	}
+	if err := s.persistEmail(s.pendingEmail); err != nil {
 		s.render(w, "2fa", pageData{Error: err.Error()})
 		return
 	}
@@ -182,11 +211,43 @@ func (s *server) waitReady(ctx context.Context, baseURL string) error {
 	}
 }
 
-func (s *server) listenAndServe(ctx context.Context, listenAddr string) (baseURL string, err error) {
-	if listenAddr == "" {
-		listenAddr = "127.0.0.1:0"
+func isAddrInUse(err error) bool {
+	var opErr *net.OpError
+	if !errors.As(err, &opErr) {
+		return false
 	}
-	ln, err := net.Listen("tcp", listenAddr)
+	var errno syscall.Errno
+	return errors.As(opErr.Err, &errno) && errno == syscall.EADDRINUSE
+}
+
+func resolveListenAddrs(listenAddr string) []string {
+	if listenAddr != "" {
+		return []string{listenAddr}
+	}
+	return []string{
+		fmt.Sprintf("127.0.0.1:%d", DefaultUnlockPort),
+		"127.0.0.1:0",
+	}
+}
+
+func listenTCP(addrs ...string) (net.Listener, error) {
+	var lastErr error
+	for _, addr := range addrs {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			return ln, nil
+		}
+		lastErr = err
+		if len(addrs) > 1 && isAddrInUse(err) {
+			continue
+		}
+		return nil, err
+	}
+	return nil, lastErr
+}
+
+func (s *server) listenAndServe(ctx context.Context, listenAddr string) (baseURL string, err error) {
+	ln, err := listenTCP(resolveListenAddrs(listenAddr)...)
 	if err != nil {
 		return "", fmt.Errorf("启动本地 HTTP 服务失败: %w", err)
 	}

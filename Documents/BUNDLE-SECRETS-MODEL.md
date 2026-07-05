@@ -28,8 +28,8 @@ projects/my-app.yaml              my-app/
                                       │   ├── config.yaml  project_name: my-app
 bundles/vikunja/                      │   └── cache/vikunja/
   skills/...                          ├── .cursor/
-                                      └── .config/mise/conf.d/  ← folder vikunja_workflow
-                                          └── vikunja.toml
+                                      └── .secrets/vikunja_workflow/
+                                          └── mise/conf.d/vikunja.toml
 ```
 
 ## Project 与 Bundle 的关系
@@ -50,6 +50,38 @@ Pull 顺序：
 - **Project** 只声明 bundle 短名；bundle 内资产结构在 `bundles/<name>/` 目录
 - 本地 `enabled_bundles` 从 vault project 同步；Assets 页可微调后保存
 - secrets bundle **仍与 Dec bundle 一一绑定**，不由 project 单独声明
+- **project 级 secrets**（见下节）与 bundle 级并列，存放项目专属敏感文件
+
+## Project 级 secrets
+
+除 bundle 绑定的 secrets 外，每个 project 可有 **project 级** 敏感文件，与 Dec bundle 无关（如项目级 token、部署密钥）。
+
+```text
+.secrets/
+  vikunja_workflow/     # bundle 级（随 enabled_bundles 同步）
+    mise/conf.d/...
+  Dec/                  # project 级（project_name 或 project_secrets）
+    tokens/...
+```
+
+| 维度 | bundle 级 | project 级 |
+|------|-----------|------------|
+| 触发条件 | `enabled_bundles` 中的 Dec bundle | 有 `project_name`（或目录 basename） |
+| Bitwarden folder | `secrets_bundle`（默认同 Dec bundle 名） | `project_secrets`（默认同 `project_name`） |
+| 本地目录 | `.secrets/<secrets_bundle>/` | `.secrets/<project_secrets>/` |
+| Secure Note 名 | `.secrets/<secrets_bundle>/<相对路径>` | `.secrets/<project_secrets>/<相对路径>` |
+| 配置 | `bundles[].dec_bundle` / `secrets_bundle` | `~/.dec/secrets/config.yaml` 的 `project_secrets`（可选） |
+
+`~/.dec/secrets/config.yaml` 示例：
+
+```yaml
+project_secrets: Dec   # 可选；未设时回退 .dec/config.yaml 的 project_name
+bundles:
+  - dec_bundle: vikunja
+    secrets_bundle: vikunja_workflow
+```
+
+Pull/Push/Migrate 的 secrets 阶段在遍历 bundle 之后，若解析到 project secrets 目标，会额外同步 `.secrets/<project_secrets>/`；零重叠校验同样覆盖这些路径。
 
 ## 组织形式
 
@@ -75,11 +107,16 @@ Bitwarden folder: vikunja_workflow（或绑定名 vikunja）
 
 ### Bitwarden Secure Note 命名
 
-- **Note 名称** = 敏感文件在项目根的 **目标相对路径**（如 `.config/mise/conf.d/vikunja.toml`）。
-- **Note 内容** = 该路径文件的完整正文（如 mise env TOML）。
-- Pull 后文件落到 `<project>/.config/mise/conf.d/vikunja.toml`，**不经过 `.dec/cache/`**。
+本地 secrets 统一落在 **`.secrets/<secrets_bundle>/`** 下；Bitwarden folder 名 = `secrets_bundle`（`BundleBinding` 可显式绑定，如 `vikunja` ↔ `vikunja_workflow`）。
 
-Bitwarden folder 名可与 Dec bundle 名对应或通过 `BundleBinding` 显式绑定（如 `vikunja` ↔ `vikunja_workflow`）。
+- **Note 名称** = 项目根相对路径 **`.secrets/<secrets_bundle>/<bundle 内相对路径>`**（如 `.secrets/vikunja_workflow/mise/conf.d/vikunja.toml`）。
+- **Note 内容** = 该路径文件的完整正文（如 mise env TOML）。
+- Pull 后文件落到 `<project>/.secrets/<secrets_bundle>/...`，**不经过 `.dec/cache/`**。
+- Push（TUI Run 页 `O`）扫描 `.secrets/<secrets_bundle>/` 下文件，按 Note 名 create/update Bitwarden Secure Note。
+
+**旧 Note 名迁移**：若 Bitwarden 中仍为旧格式（如 `.config/mise/conf.d/vikunja.toml`），Pull/Push 的 secrets 阶段会 **自动迁移**（见下文「自动迁移」）；无需手工改 Bitwarden 或移动本地文件。
+
+Bitwarden secrets bundle（`secrets_bundle`）名可与 Dec bundle 名对应或通过 `BundleBinding` 显式绑定（如 `vikunja` ↔ `vikunja_workflow`）。
 
 ## MCP 与 mise
 
@@ -193,6 +230,10 @@ sequenceDiagram
     BW->>Proj: Secure Note → 项目根相对路径
     BW->>Proj: SSH Key → ~/.ssh/ + config 区块
   end
+  opt 有 project_name / project_secrets
+    TUI->>BW: 2b. 拉取 project 级 secrets
+    BW->>Proj: → .secrets/<project_secrets>/...
+  end
   TUI->>TUI: 3. 零重叠校验（.dec/ vs 项目根敏感路径）
   alt 有重叠路径
     TUI-->>TUI: 报错，不安装
@@ -205,6 +246,7 @@ sequenceDiagram
 0. **Project 解析**：读取 `project_name` → vault `projects/<name>.yaml`，得到 `bundles`（或使用本地 `enabled_bundles`）
 1. **Dec bundle**：对每个 bundle 从 Git Vault 拉取，写入 `.dec/cache/<bundle>/`
 2. **Secrets bundle**：每个 Dec bundle 成功后 **自动** 从 Bitwarden 拉取同名（或 `BundleBinding` 配置的）secrets bundle；Secure Note 按 **Note 名** 写到 **项目根相对路径**；SSH Key Item 写到 **`~/.ssh/`** 并更新 Dec 管理 config 区块
+2b. **Project secrets**：若有 `project_name`（及可选 `project_secrets` 配置），额外拉取 Bitwarden folder 同名目录到 `.secrets/<project_secrets>/`
 3. **独立落地**：敏感文件 **不合并** 进 `.dec/cache/`；项目根与机器级 `~/.ssh/` 各自写入
 4. **零重叠校验**：`.dec/` 内路径 vs 敏感落地路径；有交集则失败
 5. **渲染安装**：从 `.dec/cache/` 安装到 IDE 目录；对非敏感模板执行 `vars.yaml` 占位符替换（若有）
@@ -295,11 +337,31 @@ sequenceDiagram
 
 详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)。
 
+## 自动迁移
+
+存量项目无需手工改 Bitwarden Note 名或移动 `.config/` 下的旧文件。TUI **Run** 页 Pull / Push 在 secrets 阶段 **第一步** 自动执行迁移（`migrate.secrets` 事件），幂等、可重复执行。
+
+| 存量场景 | 自动处理 |
+|----------|----------|
+| Bitwarden Note 旧名（如 `.config/mise/conf.d/vikunja.toml`） | 原地 **rename** 为 `.secrets/<secrets_bundle>/mise/conf.d/vikunja.toml`（保留 cipher key） |
+| 本地旧落地（项目根 `.config/...` 或 `.secrets/<bundle>/.config/...`） | **move** 到 `.secrets/<secrets_bundle>/mise/...`（目标不存在时） |
+| 损坏 cipher（key 丢失等无法解密） | **跳过** 并 `migrate.secrets` warn（`id=...`） |
+| `~/.dec/secrets/config.yaml` 废弃 `folder:` 字段 | 一次性迁移为 `secrets_bundle` 并回写配置 |
+| 已迁移路径 | 不重复处理 |
+
+日志在 Run 页事件流与底部 log 区可见，例如：
+
+- `migrate.secrets: 重命名 Bitwarden note .config/... → .secrets/vikunja_workflow/...`
+- `migrate.secrets: 移动本地 .config/... → .secrets/...`
+- `migrate.secrets: 跳过无法解密的 cipher (id=...)`
+
+实现：`pkg/secrets/migrate.go`；编排：`pkg/app/migrate_secrets.go`（Pull/Push secrets 阶段调用）。
+
 ## 配置与绑定
 
 - **Project 声明**：vault `projects/<name>.yaml` 的 `bundles`；本地 `.dec/config.yaml` 的 `project_name` 引用
 - **Dec bundle 启用**：本地 `enabled_bundles`（从 vault project 同步或 Assets 页保存）；secrets bundle 默认与 Dec bundle **同名**
-- 显式绑定：`schema/secrets/v1/config.proto` 的 `BundleBinding`（`dec_bundle` ↔ `secrets_bundle` / `bitwarden_folder`）
+- 显式绑定：`schema/secrets/v1/config.proto` 的 `BundleBinding`（`dec_bundle` ↔ `secrets_bundle`，后者即 Bitwarden folder 名）
 - mise env 等私密配置：Bitwarden Secure Note，**Note 名 = 项目根相对路径**（如 `.config/mise/conf.d/vikunja.toml`）
 - SSH Key：Bitwarden SSH Key Item，**Name = 逻辑名**，**Notes = hosts**；Pull 落地 `~/.ssh/dec_<bundle>_<name>` + Dec 管理 `~/.ssh/config` 区块
 

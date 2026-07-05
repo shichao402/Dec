@@ -36,5 +36,27 @@ func PullBundle(ctx context.Context, client Client, req PullBundleRequest) ([]st
 	if err != nil {
 		return nil, err
 	}
-	return WriteSecureNotes(req.ProjectRoot, result.Notes)
+
+	secretsBundleName := req.Binding.SecretsBundleName
+	if secretsBundleName == "" {
+		secretsBundleName = req.DecBundleName
+	}
+
+	mapped := make([]SecureNote, 0, len(result.Notes))
+	seenLanding := make(map[string]struct{}, len(result.Notes))
+	for _, note := range result.Notes {
+		landing, mapErr := LandingPathForNote(secretsBundleName, note.RelativePath)
+		if mapErr != nil {
+			return nil, mapErr
+		}
+		if _, dup := seenLanding[landing]; dup {
+			continue
+		}
+		seenLanding[landing] = struct{}{}
+		mapped = append(mapped, SecureNote{
+			RelativePath: landing,
+			Content:      note.Content,
+		})
+	}
+	return WriteSecureNotes(req.ProjectRoot, mapped)
 }

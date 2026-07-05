@@ -1,0 +1,637 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/shichao402/Dec/pkg/config"
+	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/secrets"
+	"github.com/shichao402/Dec/pkg/types"
+)
+
+type DeleteItemKind string
+
+const (
+	DeleteKindDecAsset DeleteItemKind = "dec"
+	DeleteKindSecret   DeleteItemKind = "secret"
+	DeleteKindBundle   DeleteItemKind = "bundle"
+)
+
+// DeleteCandidate 描述 Delete 页可选项。
+type DeleteCandidate struct {
+	Kind            DeleteItemKind
+	Label           string
+	Type            string
+	Name            string
+	Vault           string
+	SecretPath      string
+	SecretsBundle   string
+	RelWithinBundle string
+	BundleName      string
+	Members         []AssetSelectionItem
+	Orphan          bool
+	GroupBundle     string
+	GroupOrder      int
+	GroupTitle      string
+}
+
+// DeleteSelectionItem 为一次删除操作选中的候选项。
+type DeleteSelectionItem struct {
+	Kind            DeleteItemKind
+	Type            string
+	Name            string
+	Vault           string
+	SecretPath      string
+	SecretsBundle   string
+	RelWithinBundle string
+	BundleName      string
+	Members         []AssetSelectionItem
+}
+
+// DeleteProjectInput 描述 Delete 页批量删除输入。
+type DeleteProjectInput struct {
+	ProjectRoot string
+	Items       []DeleteSelectionItem
+	Confirmed   bool
+}
+
+// DeleteProjectResult 汇总 Delete 页批量删除结果。
+type DeleteProjectResult struct {
+	DecDeleted      int
+	SecretsDeleted  int
+	BundlesDeleted  int
+	VersionCommit   string
+	LastCommit      string
+	SkippedReason   string
+}
+
+// ErrDeleteNotConfirmed 调用方没有完成二次确认。
+var ErrDeleteNotConfirmed = fmt.Errorf("delete 未确认")
+
+// ListDeleteCandidates 列出当前项目可删除的 Dec 资产、secrets 文件与 bundle。
+// 若 Bitwarden 已配置，会按需触发 web unlock 并补充远端 Secure Note 候选项。
+func ListDeleteCandidates(ctx context.Context, projectRoot string, reporter Reporter) ([]DeleteCandidate, error) {
+	reporter = defaultReporter(reporter)
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return nil, fmt.Errorf("项目根目录不能为空")
+	}
+
+	mgr := config.NewProjectConfigManager(projectRoot)
+	projectConfig, err := mgr.LoadProjectConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	var candidates []DeleteCandidate
+	seenDec := make(map[string]struct{})
+	groupCtx := newDeleteGroupContext(projectRoot, projectConfig)
+
+	addDec := func(kind DeleteItemKind, itemType, name, vault string, orphan bool) {
+		key := resolverKey(itemType, vault, name)
+		if _, dup := seenDec[key]; dup {
+			return
+		}
+		seenDec[key] = struct{}{}
+		tag := ""
+		if orphan {
+			tag = " · 仅远端"
+		}
+		groupBundle, groupOrder := groupCtx.forDecVault(vault)
+		candidates = append(candidates, DeleteCandidate{
+			Kind:        kind,
+			Type:        itemType,
+			Name:        name,
+			Vault:       vault,
+			Label:       fmt.Sprintf("[dec/%s] %s / %s%s", itemType, name, vault, tag),
+			Orphan:      orphan,
+			GroupBundle: groupBundle,
+			GroupOrder:  groupOrder,
+			GroupTitle:  groupCtx.groupTitle(groupBundle),
+		})
+	}
+
+	walkCacheDec := func(vault, itemType, name string) {
+		cachePath := getCachePath(projectRoot, vault, itemType, name)
+		if cachePath == "" {
+			return
+		}
+		if _, err := os.Stat(cachePath); err != nil {
+			return
+		}
+		addDec(DeleteKindDecAsset, itemType, name, vault, false)
+	}
+
+	for _, spec := range []struct {
+		dir  string
+		typ  string
+		trim func(string) string
+		isDir bool
+	}{
+		{"skills", "skill", func(s string) string { return s }, true},
+		{"commands", "command", func(s string) string { return s }, true},
+		{"rules", "rule", func(s string) string { return strings.TrimSuffix(s, ".mdc") }, false},
+		{"mcp", "mcp", func(s string) string { return strings.TrimSuffix(s, ".json") }, false},
+	} {
+		for _, bundleName := range projectConfig.EnabledBundles {
+			dir := filepath.Join(projectRoot, ".dec", "cache", bundleName, spec.dir)
+			entries, readErr := os.ReadDir(dir)
+			if readErr != nil {
+				continue
+			}
+			for _, entry := range entries {
+				if entry.Name() == ".gitkeep" {
+					continue
+				}
+				if spec.isDir {
+					if !entry.IsDir() {
+						continue
+					}
+					walkCacheDec(bundleName, spec.typ, entry.Name())
+					continue
+				}
+				if entry.IsDir() {
+					continue
+				}
+				walkCacheDec(bundleName, spec.typ, spec.trim(entry.Name()))
+			}
+		}
+	}
+
+	if projectConfig.Enabled != nil {
+		for _, asset := range projectConfig.Enabled.All() {
+			vault := strings.TrimSpace(asset.Vault)
+			if vault == "" {
+				continue
+			}
+			walkCacheDec(vault, asset.Type, asset.Name)
+		}
+	}
+
+	_ = withAppReadRepo(func(tx *repo.Transaction) error {
+		repoDir := tx.WorkDir()
+		resolved, resolveErr := resolveDesiredAssets(projectConfig, repoDir, reporter)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		bundles := collectEnabledBundleNames(projectConfig, resolved.Assets)
+		for bundleName := range bundles {
+			for _, member := range listBundleAssetMembers(repoDir, bundleName) {
+				parts := strings.SplitN(member, "/", 2)
+				if len(parts) != 2 {
+					continue
+				}
+				itemType := memberPrefixToAssetType(parts[0])
+				if itemType == "" {
+					continue
+				}
+				name := parts[1]
+				cachePath := getCachePath(projectRoot, bundleName, itemType, name)
+				if _, err := os.Stat(cachePath); os.IsNotExist(err) {
+					vaultPath := resolveAssetFile(repoDir, bundleName, itemType, name)
+					if vaultPath == "" {
+						continue
+					}
+					if _, err := os.Stat(vaultPath); err == nil {
+						addDec(DeleteKindDecAsset, itemType, name, bundleName, true)
+					}
+				}
+			}
+		}
+		return nil
+	})
+
+	seenSecret := make(map[string]struct{})
+	addSecret := func(secretsBundle, relWithinBundle string, orphan bool) {
+		notePath, pathErr := secrets.NotePathForBundleFile(secretsBundle, relWithinBundle)
+		if pathErr != nil {
+			return
+		}
+		if _, dup := seenSecret[notePath]; dup {
+			return
+		}
+		seenSecret[notePath] = struct{}{}
+		tag := ""
+		if orphan {
+			tag = " · 仅远端"
+		}
+		groupBundle, groupOrder := groupCtx.forSecretsBundle(secretsBundle)
+		candidates = append(candidates, DeleteCandidate{
+			Kind:            DeleteKindSecret,
+			SecretPath:      notePath,
+			SecretsBundle:   secretsBundle,
+			RelWithinBundle: relWithinBundle,
+			Label:           fmt.Sprintf("[secret] %s%s", notePath, tag),
+			Orphan:          orphan,
+			GroupBundle:     groupBundle,
+			GroupOrder:      groupOrder,
+			GroupTitle:      groupCtx.groupTitle(groupBundle),
+		})
+	}
+
+	scanSecretsDir := func(secretsBundleName string) {
+		dir := secrets.SecretsBundleDir(projectRoot, secretsBundleName)
+		_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			rel, relErr := filepath.Rel(dir, path)
+			if relErr != nil {
+				return nil
+			}
+			addSecret(secretsBundleName, rel, false)
+			return nil
+		})
+	}
+
+	// 扫描 `.secrets/` 下所有已存在的 secrets bundle 目录，避免绑定名与落地目录不一致时漏列。
+	secretsBundleNames, listErr := secrets.ListSecretsBundleDirNames(projectRoot)
+	if listErr != nil {
+		return nil, listErr
+	}
+	for _, secretsBundleName := range secretsBundleNames {
+		scanSecretsDir(secretsBundleName)
+	}
+
+	if err := appendRemoteSecretCandidates(ctx, projectRoot, projectConfig, seenSecret, addSecret, reporter); err != nil {
+		return nil, err
+	}
+
+	if state, loadErr := LoadAssetSelection(projectRoot, reporter); loadErr == nil {
+		for _, bo := range ListEnabledBundles(state) {
+			groupBundle, groupOrder := groupCtx.forDecBundle(bo.Name)
+			candidates = append(candidates, DeleteCandidate{
+				Kind:        DeleteKindBundle,
+				BundleName:  bo.Name,
+				Vault:       bo.Vault,
+				Members:     append([]AssetSelectionItem(nil), bo.Members...),
+				Label:       fmt.Sprintf("[bundle] %s / %s · %d 成员", bo.Name, fallbackVaultName(bo), len(bo.Members)),
+				GroupBundle: groupBundle,
+				GroupOrder:  groupOrder,
+				GroupTitle:  groupCtx.groupTitle(groupBundle),
+			})
+		}
+	}
+
+	sortDeleteCandidates(candidates)
+	return candidates, nil
+}
+
+type deleteGroupContext struct {
+	bundleOrder    map[string]int
+	secretsToDec   map[string]string
+	projectSecrets string
+	projectName    string
+}
+
+func newDeleteGroupContext(projectRoot string, projectConfig *types.ProjectConfig) *deleteGroupContext {
+	ctx := &deleteGroupContext{
+		bundleOrder:  make(map[string]int),
+		secretsToDec: make(map[string]string),
+	}
+	for i, name := range projectConfig.EnabledBundles {
+		ctx.bundleOrder[name] = i
+	}
+	if configured, err := secrets.IsConfigured(); err == nil && configured {
+		if cfg, loadErr := secrets.LoadConfig(); loadErr == nil && cfg != nil {
+			for _, decBundle := range projectConfig.EnabledBundles {
+				binding := cfg.ResolveBinding(decBundle)
+				secretsName := strings.TrimSpace(binding.SecretsBundleName)
+				if secretsName == "" {
+					secretsName = decBundle
+				}
+				ctx.secretsToDec[secretsName] = decBundle
+			}
+			for _, binding := range cfg.Bundles {
+				decBundle := strings.TrimSpace(binding.DecBundleName)
+				secretsName := strings.TrimSpace(binding.SecretsBundleName)
+				if decBundle == "" || secretsName == "" {
+					continue
+				}
+				ctx.secretsToDec[secretsName] = decBundle
+				if _, ok := ctx.bundleOrder[decBundle]; !ok {
+					ctx.bundleOrder[decBundle] = len(ctx.bundleOrder) + 100
+				}
+			}
+			projectName, _ := ResolveProjectName(projectRoot, projectConfig)
+			ctx.projectName = projectName
+			if name, enabled := cfg.ResolveProjectSecrets(projectName); enabled {
+				ctx.projectSecrets = name
+				ctx.secretsToDec[name] = secrets.ProjectSecretsDecBundleName
+			}
+		}
+	}
+	if ctx.projectName == "" {
+		ctx.projectName, _ = ResolveProjectName(projectRoot, projectConfig)
+	}
+	return ctx
+}
+
+func (g *deleteGroupContext) orderFor(bundleName string) int {
+	if bundleName == secrets.ProjectSecretsDecBundleName {
+		return -1
+	}
+	if order, ok := g.bundleOrder[bundleName]; ok {
+		return order
+	}
+	return 1000
+}
+
+func (g *deleteGroupContext) forDecVault(vault string) (string, int) {
+	vault = strings.TrimSpace(vault)
+	if vault == "" {
+		vault = "dec"
+	}
+	return vault, g.orderFor(vault)
+}
+
+func (g *deleteGroupContext) forDecBundle(bundleName string) (string, int) {
+	bundleName = strings.TrimSpace(bundleName)
+	if bundleName == "" {
+		bundleName = "dec"
+	}
+	return bundleName, g.orderFor(bundleName)
+}
+
+func (g *deleteGroupContext) forSecretsBundle(secretsBundle string) (string, int) {
+	secretsBundle = strings.TrimSpace(secretsBundle)
+	if decBundle, ok := g.secretsToDec[secretsBundle]; ok {
+		return decBundle, g.orderFor(decBundle)
+	}
+	if secretsBundle == g.projectSecrets {
+		return secrets.ProjectSecretsDecBundleName, g.orderFor(secrets.ProjectSecretsDecBundleName)
+	}
+	return secretsBundle, g.orderFor(secretsBundle)
+}
+
+func (g *deleteGroupContext) groupTitle(groupBundle string) string {
+	if groupBundle == secrets.ProjectSecretsDecBundleName {
+		name := strings.TrimSpace(g.projectName)
+		if name == "" {
+			name = "?"
+		}
+		return fmt.Sprintf("%s (project)", name)
+	}
+	return fmt.Sprintf("%s (bundle)", groupBundle)
+}
+
+func deleteKindOrder(kind DeleteItemKind) int {
+	switch kind {
+	case DeleteKindDecAsset:
+		return 0
+	case DeleteKindSecret:
+		return 1
+	case DeleteKindBundle:
+		return 2
+	default:
+		return 9
+	}
+}
+
+func sortDeleteCandidates(candidates []DeleteCandidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].GroupOrder != candidates[j].GroupOrder {
+			return candidates[i].GroupOrder < candidates[j].GroupOrder
+		}
+		if candidates[i].GroupBundle != candidates[j].GroupBundle {
+			return candidates[i].GroupBundle < candidates[j].GroupBundle
+		}
+		if deleteKindOrder(candidates[i].Kind) != deleteKindOrder(candidates[j].Kind) {
+			return deleteKindOrder(candidates[i].Kind) < deleteKindOrder(candidates[j].Kind)
+		}
+		return candidates[i].Label < candidates[j].Label
+	})
+}
+
+func appendRemoteSecretCandidates(
+	ctx context.Context,
+	projectRoot string,
+	projectConfig *types.ProjectConfig,
+	seenSecret map[string]struct{},
+	addSecret func(secretsBundle, relWithinBundle string, orphan bool),
+	reporter Reporter,
+) error {
+	reporter = defaultReporter(reporter)
+	configured, err := secrets.IsConfigured()
+	if err != nil {
+		return fmt.Errorf("读取 Bitwarden 配置失败: %w", err)
+	}
+	if !configured {
+		return nil
+	}
+	cfg, err := secrets.LoadConfig()
+	if err != nil {
+		return err
+	}
+	if !secrets.HasSession() {
+		emit(reporter, EventInfo, "delete.secrets", "[auth] delete scan: Bitwarden session required", nil)
+		if err := ensureBitwardenSession(ctx, reporter, "delete.secrets"); err != nil {
+			return err
+		}
+	}
+	if !secrets.HasUserKey() {
+		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
+	}
+
+	client := secretsClientFactory()
+	plan, err := planSecretsSync(projectRoot, projectConfig.EnabledBundles, cfg)
+	if err != nil {
+		return err
+	}
+
+	scanRemote := func(decBundleName string, binding secrets.BundleBinding) error {
+		result, pullErr := client.PullBundle(ctx, secrets.PullBundleRequest{
+			DecBundleName: decBundleName,
+			Binding:       binding,
+		})
+		if pullErr != nil {
+			return pullErr
+		}
+		secretsBundleName := binding.SecretsBundleName
+		if secretsBundleName == "" {
+			secretsBundleName = decBundleName
+		}
+		for _, note := range result.Notes {
+			landing, mapErr := secrets.LandingPathForNote(secretsBundleName, note.RelativePath)
+			if mapErr != nil {
+				continue
+			}
+			if _, dup := seenSecret[landing]; dup {
+				continue
+			}
+			relWithinBundle, relErr := relWithinSecretsBundle(secretsBundleName, landing)
+			if relErr != nil {
+				continue
+			}
+			localPath := filepath.Join(secrets.SecretsBundleDir(projectRoot, secretsBundleName), relWithinBundle)
+			if _, statErr := os.Stat(localPath); statErr == nil {
+				continue
+			}
+			addSecret(secretsBundleName, relWithinBundle, true)
+		}
+		return nil
+	}
+
+	for _, bundleName := range plan.EnabledBundles {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := scanRemote(bundleName, cfg.ResolveBinding(bundleName)); err != nil {
+			return fmt.Errorf("列出远端 secrets bundle %q 失败: %w", bundleName, err)
+		}
+	}
+	if plan.ProjectSecretsName != "" {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		binding := secrets.ProjectSecretsBinding(plan.ProjectSecretsName)
+		if err := scanRemote(secrets.ProjectSecretsDecBundleName, binding); err != nil {
+			return fmt.Errorf("列出远端 project secrets %q 失败: %w", plan.ProjectSecretsName, err)
+		}
+	}
+	return nil
+}
+
+func relWithinSecretsBundle(secretsBundleName, landingPath string) (string, error) {
+	prefix := ".secrets/" + strings.TrimSpace(secretsBundleName) + "/"
+	trimmed := strings.TrimSpace(landingPath)
+	if !strings.HasPrefix(trimmed, prefix) {
+		return "", fmt.Errorf("非法 secrets 落地路径: %q", landingPath)
+	}
+	return filepath.ToSlash(filepath.Clean(strings.TrimPrefix(trimmed, prefix))), nil
+}
+
+func fallbackVaultName(bo AssetBundleOption) string {
+	if strings.TrimSpace(bo.Vault) != "" {
+		return bo.Vault
+	}
+	return bo.Name
+}
+
+// DeleteProjectItems 执行 Delete 页选中的删除（Dec vault + cache + IDE；secrets 本地 + Bitwarden）。
+func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter Reporter) (*DeleteProjectResult, error) {
+	reporter = defaultReporter(reporter)
+	if strings.TrimSpace(input.ProjectRoot) == "" {
+		return nil, fmt.Errorf("项目根目录不能为空")
+	}
+	if len(input.Items) == 0 {
+		return nil, fmt.Errorf("未选择任何删除项")
+	}
+	if !input.Confirmed {
+		return nil, ErrDeleteNotConfirmed
+	}
+
+	result := &DeleteProjectResult{}
+	var lastCommit string
+
+	for _, item := range input.Items {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		switch item.Kind {
+		case DeleteKindBundle:
+			bundleName := strings.TrimSpace(item.BundleName)
+			if bundleName == "" {
+				continue
+			}
+			emit(reporter, EventInfo, "delete.bundle", fmt.Sprintf("删除 bundle %s", bundleName), nil)
+			bundleResult, err := RemoveBundle(RemoveBundleInput{
+				ProjectRoot: input.ProjectRoot,
+				BundleName:  bundleName,
+				Members:     append([]AssetSelectionItem(nil), item.Members...),
+				Confirmed:   true,
+			}, reporter)
+			if err != nil {
+				return nil, err
+			}
+			result.BundlesDeleted++
+			if bundleResult.VersionCommit != "" {
+				lastCommit = bundleResult.VersionCommit
+			}
+		case DeleteKindDecAsset:
+			emit(reporter, EventInfo, "delete.dec", fmt.Sprintf("删除 [%s] %s", item.Type, item.Name), nil)
+			assetResult, err := RemoveAsset(RemoveAssetInput{
+				ProjectRoot: input.ProjectRoot,
+				Type:        item.Type,
+				Name:        item.Name,
+				Vault:       item.Vault,
+				Confirmed:   true,
+			}, reporter)
+			if err != nil {
+				return nil, err
+			}
+			result.DecDeleted++
+			if assetResult.VersionCommit != "" {
+				lastCommit = assetResult.VersionCommit
+			}
+		case DeleteKindSecret:
+			emit(reporter, EventInfo, "delete.secrets", fmt.Sprintf("删除 secret %s", item.SecretPath), nil)
+			if err := deleteSecretItem(ctx, input.ProjectRoot, item.SecretsBundle, item.RelWithinBundle, reporter); err != nil {
+				return nil, err
+			}
+			result.SecretsDeleted++
+		default:
+			return nil, fmt.Errorf("不支持的删除类型: %s", item.Kind)
+		}
+	}
+
+	result.VersionCommit = lastCommit
+	result.LastCommit = lastCommit
+	summary := fmt.Sprintf("✅ 删除完成：Dec %d · secrets %d · bundle %d",
+		result.DecDeleted, result.SecretsDeleted, result.BundlesDeleted)
+	emit(reporter, EventInfo, "delete.finish", summary, nil)
+	return result, nil
+}
+
+func deleteSecretItem(ctx context.Context, projectRoot, secretsBundleName, relWithinBundle string, reporter Reporter) error {
+	localPath := filepath.Join(secrets.SecretsBundleDir(projectRoot, secretsBundleName), relWithinBundle)
+	if _, err := os.Stat(localPath); err == nil {
+		if rmErr := os.Remove(localPath); rmErr != nil {
+			return fmt.Errorf("删除本地文件 %s 失败: %w", localPath, rmErr)
+		}
+		emit(reporter, EventInfo, "delete.secrets", fmt.Sprintf("  已删本地 %s", localPath), nil)
+	}
+
+	configured, err := secrets.IsConfigured()
+	if err != nil {
+		return fmt.Errorf("读取 Bitwarden 配置失败: %w", err)
+	}
+	if !configured {
+		emit(reporter, EventInfo, "delete.secrets", "Bitwarden 未配置，跳过远端 Secure Note 删除", nil)
+		return nil
+	}
+	if !secrets.HasSession() {
+		emit(reporter, EventInfo, "delete.secrets", "[auth] delete: Bitwarden session required", nil)
+		if err := ensureBitwardenSession(ctx, reporter, "delete.secrets"); err != nil {
+			return err
+		}
+	}
+
+	notePath, err := secrets.NotePathForBundleFile(secretsBundleName, relWithinBundle)
+	if err != nil {
+		return err
+	}
+	client := secretsClientFactory()
+	if err := client.DeleteSecureNote(ctx, secrets.DeleteSecureNoteRequest{
+		Binding:  secrets.BundleBinding{SecretsBundleName: secretsBundleName},
+		NotePath: notePath,
+	}); err != nil {
+		return fmt.Errorf("删除 Bitwarden Secure Note %q 失败: %w", notePath, err)
+	}
+	emit(reporter, EventInfo, "delete.secrets", fmt.Sprintf("  已删 Bitwarden Note %s", notePath), nil)
+	return nil
+}
+
+func withAppReadRepo(fn func(*repo.Transaction) error) error {
+	tx, err := repo.NewReadTransaction()
+	if err != nil {
+		return err
+	}
+	defer tx.Close()
+	return fn(tx)
+}

@@ -356,3 +356,114 @@ func trimSpaceASCII(s string) string {
 func assetSelectionKey(assetType string, ref types.AssetRef) string {
 	return assetType + "\x00" + ref.Vault + "\x00" + ref.Name
 }
+
+// EffectiveEnabledGroup 表示一组与 pull 目标集对齐的有效启用资产，按来源分组。
+type EffectiveEnabledGroup struct {
+	// Label 为 "bundle/<name>" 或 "独立启用"。
+	Label string
+	Items []AssetSelectionItem
+}
+
+// ListEffectiveEnabledAssets 返回与 pull 目标集对齐的有效启用资产：
+// ProjectConfig.Enabled 中的单资产 + EnabledBundles 展开的成员，按 (type, vault, name) 去重。
+func ListEffectiveEnabledAssets(state *AssetSelectionState) []AssetSelectionItem {
+	groups := ListEffectiveEnabledGroups(state)
+	total := 0
+	for _, group := range groups {
+		total += len(group.Items)
+	}
+	out := make([]AssetSelectionItem, 0, total)
+	for _, group := range groups {
+		out = append(out, group.Items...)
+	}
+	return out
+}
+
+// ListEffectiveEnabledGroups 按来源分组列出有效启用资产。
+// 顺序：先 enabled bundle（按 bundle 名排序），再 standalone-only 资产。
+func ListEffectiveEnabledGroups(state *AssetSelectionState) []EffectiveEnabledGroup {
+	if state == nil {
+		return nil
+	}
+
+	bundleMemberKeys := make(map[string]struct{})
+	for _, bo := range state.Bundles {
+		if !bo.Enabled {
+			continue
+		}
+		for _, member := range bo.Members {
+			bundleMemberKeys[effectiveAssetKey(member)] = struct{}{}
+		}
+	}
+
+	var groups []EffectiveEnabledGroup
+	bundleNames := make([]string, 0, len(state.Bundles))
+	bundleByName := make(map[string]AssetBundleOption, len(state.Bundles))
+	for _, bo := range state.Bundles {
+		if !bo.Enabled {
+			continue
+		}
+		if _, seen := bundleByName[bo.Name]; seen {
+			continue
+		}
+		bundleByName[bo.Name] = bo
+		bundleNames = append(bundleNames, bo.Name)
+	}
+	sort.Strings(bundleNames)
+
+	for _, name := range bundleNames {
+		bo := bundleByName[name]
+		if len(bo.Members) == 0 {
+			continue
+		}
+		groups = append(groups, EffectiveEnabledGroup{
+			Label: "bundle/" + bo.Name,
+			Items: append([]AssetSelectionItem(nil), bo.Members...),
+		})
+	}
+
+	standalone := make([]AssetSelectionItem, 0)
+	for _, item := range state.Items {
+		if !item.Enabled {
+			continue
+		}
+		if _, fromBundle := bundleMemberKeys[effectiveAssetKey(item)]; fromBundle {
+			continue
+		}
+		standalone = append(standalone, item)
+	}
+	if len(standalone) > 0 {
+		groups = append(groups, EffectiveEnabledGroup{
+			Label: "独立启用",
+			Items: standalone,
+		})
+	}
+	return groups
+}
+
+func effectiveAssetKey(item AssetSelectionItem) string {
+	return resolverKey(item.Type, item.Vault, item.Name)
+}
+
+// ListEnabledBundles 返回当前 ProjectConfig.EnabledBundles 引用的 bundle 选项，供 TUI Remove 等场景展示。
+func ListEnabledBundles(state *AssetSelectionState) []AssetBundleOption {
+	if state == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]AssetBundleOption, 0)
+	for _, bo := range state.Bundles {
+		if !bo.Enabled {
+			continue
+		}
+		if _, dup := seen[bo.Name]; dup {
+			continue
+		}
+		seen[bo.Name] = struct{}{}
+		out = append(out, bo)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out
+}

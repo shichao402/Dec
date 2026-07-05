@@ -35,8 +35,8 @@ Before acting, identify or confirm:
 
 - the exact target Vikunja project name or ID for this round
 - the exact Vikunja project ID once resolved
-- any repository-local default project such as `Dec`, if the current repository defines one
-- the task plan directory and naming convention, preferably from repository docs or an optional default such as `Documents/tasks/VK-<id>.md`
+- any repository-local default project such as `{{VIKUNJA_PROJECT}}`, if the current repository defines one
+- the task plan directory and naming convention, preferably from repository docs or an optional default such as `{{TASK_DOCS_DIR}}/VK-<id>.md`
 - the repository documents that define lifecycle, architecture, and completion rules
 
 If any of these are unclear, resolve them before implementation.
@@ -48,7 +48,7 @@ A valid token may be able to read or mutate multiple projects.
 
 Because of that:
 
-- treat any configured project such as `Dec` as an optional repository default, not as universal truth
+- treat any configured project such as `{{VIKUNJA_PROJECT}}` as an optional repository default, not as universal truth
 - if the user explicitly names another project for this round, that explicit target overrides the repository default
 - never infer the target project from the repository directory name alone
 - resolve the exact project by name or ID, then use its project ID for follow-up operations when possible

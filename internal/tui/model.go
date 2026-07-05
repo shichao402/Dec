@@ -27,8 +27,14 @@ var (
 )
 
 type overviewLoadedMsg struct {
-	overview *app.ProjectOverview
-	err      error
+	overview       *app.ProjectOverview
+	err            error
+	vaultInference *app.VaultProjectInference
+}
+
+type vaultProjectAppliedMsg struct {
+	result *app.VaultProjectAutoApplyResult
+	err    error
 }
 
 type assetsLoadedMsg struct {
@@ -93,8 +99,9 @@ type runEventMsg struct {
 }
 
 type runCompletedMsg struct {
-	result *app.PullProjectAssetsResult
-	err    error
+	result     *app.PullProjectAssetsResult
+	pushResult *app.PushProjectAssetsResult
+	err        error
 }
 
 type removeEventMsg struct {
@@ -102,7 +109,7 @@ type removeEventMsg struct {
 }
 
 type removeCompletedMsg struct {
-	result *app.RemoveAssetResult
+	result *app.RemoveBundleResult
 	err    error
 }
 
@@ -120,8 +127,16 @@ var runPullOperation = func(ctx context.Context, projectRoot string, reporter ap
 	return app.PullProjectAssets(ctx, projectRoot, "", reporter)
 }
 
-var runRemoveOperation = func(input app.RemoveAssetInput, reporter app.Reporter) (*app.RemoveAssetResult, error) {
-	return app.RemoveAsset(input, reporter)
+var runPushOperation = func(ctx context.Context, projectRoot string, reporter app.Reporter) (*app.PushProjectAssetsResult, error) {
+	return app.PushProjectAssets(ctx, projectRoot, reporter)
+}
+
+var runRemoveOperation = func(input app.RemoveBundleInput, reporter app.Reporter) (*app.RemoveBundleResult, error) {
+	return app.RemoveBundle(input, reporter)
+}
+
+var previewPushOperation = func(projectRoot string) (*app.PushProjectAssetsPreview, error) {
+	return app.PreviewPushProjectAssets(projectRoot)
 }
 
 var loadGlobalSettingsOperation = func(reporter app.Reporter) (*app.GlobalSettingsState, error) {
@@ -142,6 +157,14 @@ var saveProjectSettingsOperation = func(input app.SaveProjectSettingsInput, repo
 
 var prepareProjectConfigInitOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
 	return app.PrepareProjectConfigInit(projectRoot, reporter)
+}
+
+var inferVaultProjectOperation = func(projectRoot string, reporter app.Reporter) (*app.VaultProjectInference, error) {
+	return app.InferVaultProject(projectRoot, reporter)
+}
+
+var applyVaultProjectOperation = func(projectRoot string, reporter app.Reporter) (*app.VaultProjectAutoApplyResult, error) {
+	return app.ApplyVaultProject(projectRoot, reporter)
 }
 
 var loadProjectVarsViewOperation = func(projectRoot string) (*app.ProjectVarsView, error) {
@@ -213,27 +236,52 @@ type model struct {
 	runningPull          bool
 	runProgress          *app.Progress
 	runEvents            []string
+	runPinLine           string
+	runShowHelp          bool
 	runResult            *app.PullProjectAssetsResult
+	pushResult           *app.PushProjectAssetsResult
 	runErr               error
 	runStream            <-chan tea.Msg
 	runCtx               context.Context
 	runCancel            context.CancelFunc
-	runMode              string // "pull" | "remove" | "update"
+	runMode              string // "pull" | "push" | "remove" | "update"
 	removeStage          string // "", "select", "confirm", "running"
 	removeCursor         int
 	removeFilter         string
 	removeFilterInput    bool
-	removeTarget         *app.AssetSelectionItem
+	removeTarget         *app.AssetBundleOption
 	runningRemove        bool
-	removeResult         *app.RemoveAssetResult
+	removeResult         *app.RemoveBundleResult
 	removeErr            error
+	pushStage            string // "", "summary", "confirm", "running"
+	pushPreview          *app.PushProjectAssetsPreview
+	pushPreviewErr       error
 	updateStage          string // "", "checking", "result", "confirm", "running", "done"
 	updateResult         *update.CheckResult
 	updateErr            error
 	updateDoneVersion    string
 	updatingBinary       bool
+	deleteCandidates         []app.DeleteCandidate
+	deleteSelected           []bool
+	deleteCursor             int
+	deleteFilter             string
+	deleteFilterInput        bool
+	deleteStage              string // "", "list", "summary", "confirm", "running"
+	deleteCandidatesLoaded   bool
+	loadingDeleteCandidates  bool
+	deleteLoadErr            error
+	runningDelete            bool
+	deleteResult             *app.DeleteProjectResult
+	deleteErr                error
 	// configInitMode 为 true 时表示由 dec config init 拉起：聚焦 Assets/bundle 视图，保存后退出。
 	configInitMode bool
+	// vaultInference Home 页待确认的 vault project 推断（来自目录名匹配）。
+	vaultInference *app.VaultProjectInference
+	// vaultInferenceDismissed 用户本次会话内已拒绝推断，刷新前不再提示。
+	vaultInferenceDismissed bool
+	applyingVaultProject    bool
+	// vaultAutoApplyNotice Home 页展示 vault 应用成功提示（仅本次会话内最近一次）。
+	vaultAutoApplyNotice string
 	// focus 是当前键盘交互上下文（侧栏 / 内容 / bundle 成员）。
 	focus focusContext
 }
@@ -259,7 +307,7 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 	m := model{
 		projectRoot:     projectRoot,
 		currentVersion:  currentVersion,
-		pages:           []string{"Home", "Assets", "Project", "Run", "Settings"},
+		pages:           []string{"Home", "Bundles", "Project", "Run", "Delete", "Settings"},
 		expandedBundles: make(map[string]bool),
 		assetTypeFilter: "bundle",
 		configInitMode:  opts.ConfigInitMode,
@@ -267,7 +315,7 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 		logs:            logs,
 	}
 	if opts.ConfigInitMode {
-		m.pageIndex = 1 // Assets
+		m.pageIndex = 1 // Bundles
 		m.focus = focusContent
 	}
 	return m
@@ -283,15 +331,82 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+	case deleteLoadedMsg:
+		m.loadingDeleteCandidates = false
+		m.deleteCandidatesLoaded = true
+		m.deleteCandidates = msg.candidates
+		m.deleteLoadErr = msg.err
+		m.deleteSelected = nil
+		m.deleteCursor = 0
+		for _, line := range msg.logs {
+			m.pushLog(line)
+		}
+		if msg.err != nil {
+			m.pushLog("Delete 列表加载失败: " + msg.err.Error())
+		} else {
+			m.pushLog(fmt.Sprintf("Delete 列表已加载：%d 项", len(msg.candidates)))
+		}
+		return m, nil
+	case deleteEventMsg:
+		m.recordRunEvent(msg.event)
+		if m.runStream != nil {
+			return m, waitRunMsg(m.runStream)
+		}
+		return m, nil
+	case deleteCompletedMsg:
+		m.runningDelete = false
+		m.runStream = nil
+		if m.runCancel != nil {
+			m.runCancel()
+			m.runCancel = nil
+		}
+		m.runCtx = nil
+		m.deleteStage = ""
+		m.deleteResult = msg.result
+		m.deleteErr = msg.err
+		m.deleteCandidatesLoaded = false
+		if msg.err != nil {
+			m.pushLog("Delete failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.result != nil {
+			m.pushLog(fmt.Sprintf("Delete finished: dec %d · secrets %d · bundle %d",
+				msg.result.DecDeleted, msg.result.SecretsDeleted, msg.result.BundlesDeleted))
+		}
+		return m, tea.Batch(m.refreshCmd(), loadDeleteCandidatesCmd(m.projectRoot))
 	case overviewLoadedMsg:
 		m.overview = msg.overview
 		m.overviewErr = msg.err
+		m.vaultInference = msg.vaultInference
+		if msg.vaultInference != nil {
+			m.vaultInferenceDismissed = false
+		}
 		if msg.err != nil {
 			m.pushLog("Overview load failed: " + msg.err.Error())
 			return m, nil
 		}
+		if msg.vaultInference != nil {
+			m.pushLog(fmt.Sprintf("Vault project inferred from directory: %s (%d bundles)", msg.vaultInference.ProjectName, len(msg.vaultInference.EnabledBundles)))
+		}
 		m.pushLog(fmt.Sprintf("Overview loaded: %d enabled / %d available assets", msg.overview.EnabledCount, msg.overview.AvailableCount))
 		return m, nil
+	case vaultProjectAppliedMsg:
+		m.applyingVaultProject = false
+		if msg.err != nil {
+			m.pushLog("Vault project apply failed: " + msg.err.Error())
+			return m, nil
+		}
+		m.vaultInference = nil
+		m.vaultInferenceDismissed = false
+		if msg.result != nil && msg.result.Applied {
+			name := msg.result.ProjectName
+			m.vaultAutoApplyNotice = fmt.Sprintf("已从 vault 应用 project %s", name)
+			m.pushLog(m.vaultAutoApplyNotice)
+			if msg.result.VarsCreated {
+				m.pushLog("Project vars template created: .dec/vars.yaml")
+			}
+		}
+		return m, m.refreshCmd()
 	case assetsLoadedMsg:
 		m.assets = msg.state
 		m.assetsErr = msg.err
@@ -457,14 +572,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.runCancel = nil
 		}
 		m.runCtx = nil
-		m.runResult = msg.result
+		if m.runMode == "push" {
+			m.pushResult = msg.pushResult
+			m.runResult = nil
+			m.pushStage = ""
+		} else {
+			m.runResult = msg.result
+			m.pushResult = nil
+		}
 		m.runErr = msg.err
 		if msg.err != nil {
-			m.pushLog("Run pull failed: " + msg.err.Error())
+			if m.runMode == "push" {
+				m.pushLog("Run push failed: " + msg.err.Error())
+			} else {
+				m.pushLog("Run pull failed: " + msg.err.Error())
+			}
 			return m, nil
 		}
-		if msg.result != nil {
-			m.pushLog(fmt.Sprintf("Run pull finished: %d pulled / %d failed", msg.result.PulledCount, msg.result.FailedCount))
+		if m.runMode == "push" && msg.pushResult != nil {
+			m.pushLog(fmt.Sprintf("Run push finished: dec %d · secrets created %d / updated %d",
+				msg.pushResult.DecPushedCount, msg.pushResult.SecretsCreatedCount, msg.pushResult.SecretsUpdatedCount))
+		} else if msg.result != nil {
+			secretsMsg := fmt.Sprintf("secrets %d landed", msg.result.SecretsNoteCount)
+			if msg.result.SecretsSkippedReason != "" && msg.result.SecretsNoteCount == 0 {
+				secretsMsg = "secrets skipped: " + msg.result.SecretsSkippedReason
+			}
+			m.pushLog(fmt.Sprintf("Run pull finished: %d pulled / %d failed · %s",
+				msg.result.PulledCount, msg.result.FailedCount, secretsMsg))
 		}
 		return m, m.refreshCmd()
 	case removeEventMsg:
@@ -485,7 +619,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.result != nil {
-			m.pushLog(fmt.Sprintf("Run remove finished: [%s] %s (vault: %s)", msg.result.Type, msg.result.Name, msg.result.Vault))
+			m.pushLog(fmt.Sprintf("Run remove finished: bundle %s (%d members)", msg.result.BundleName, msg.result.MemberCount))
 		}
 		return m, m.refreshCmd()
 	case updateCheckedMsg:
@@ -521,7 +655,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pushLog(fmt.Sprintf("Update succeeded: %s", msg.targetVersion))
 		return m, nil
 	case tea.KeyMsg:
-		if m.assetFilterInput && m.isAssetsPage() {
+		if routedModel, routedCmd, routed := m.routeDeletePageKey(msg); routed {
+			return routedModel, routedCmd
+		}
+		if m.assetFilterInput && m.isBundlesPage() {
 			return m.handleAssetFilterInput(msg)
 		}
 		if m.settingsRepoEditing && m.isSettingsPage() {
@@ -530,11 +667,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.removeFilterInput && m.isRunPage() {
 			return m.handleRemoveFilterInput(msg)
 		}
+		if m.isRunPage() && m.pushStage != "" && !m.runningPull {
+			return m.handlePushStageKey(msg)
+		}
 		if m.isRunPage() && m.removeStage != "" && !m.runningRemove {
 			return m.handleRemoveStageKey(msg)
 		}
 		if m.isRunPage() && m.updateStage != "" && !m.updatingBinary {
 			return m.handleUpdateStageKey(msg)
+		}
+		if m.isHomePage() && m.hasVaultInferencePrompt() {
+			return m.handleVaultInferenceKey(msg)
+		}
+		if m.isHomePage() && m.applyingVaultProject {
+			return m, nil
 		}
 		if m.isRunPage() && m.runningPull && msg.String() == "esc" {
 			if m.runCancel != nil {
@@ -552,12 +698,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
 			m.focus = focusSidebar
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
-			return m, nil
+			if m.isDeletePage() {
+				m.deleteCandidatesLoaded = false
+				m.loadingDeleteCandidates = true
+			}
+			return m, m.cmdOnPageSwitch()
 		case "shift+tab":
 			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
 			m.focus = focusSidebar
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
-			return m, nil
+			if m.isDeletePage() {
+				m.deleteCandidatesLoaded = false
+				m.loadingDeleteCandidates = true
+			}
+			return m, m.cmdOnPageSwitch()
 		case "l", "right":
 			return m.handleHorizontalNav(1)
 		case "h", "left":
@@ -570,19 +724,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog("Refreshing project overview, assets, and global settings")
 			return m, m.refreshCmd()
 		case "/":
-			if m.isAssetsPage() && m.focus != focusSidebar {
+			if m.isBundlesPage() && m.focus != focusSidebar {
 				m.assetFilterInput = true
 				m.pushLog("Asset filter input opened")
 			}
 			return m, nil
 		case "t":
-			if m.isAssetsPage() && !m.savingAssets && m.focus != focusSidebar {
+			if m.isBundlesPage() && !m.savingAssets && m.focus != focusSidebar {
 				m.cycleAssetTypeFilter()
 				return m, nil
 			}
 			return m, nil
 		case "c":
-			if m.isAssetsPage() && m.focus != focusSidebar && strings.TrimSpace(m.assetFilter) != "" {
+			if m.isBundlesPage() && m.focus != focusSidebar && strings.TrimSpace(m.assetFilter) != "" {
 				m.assetFilter = ""
 				m.normalizeAssetCursor()
 				m.pushLog("Asset filter cleared")
@@ -594,7 +748,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case " ", "enter":
-			if m.isAssetsPage() && !m.savingAssets && m.focus != focusSidebar {
+			if m.isBundlesPage() && !m.savingAssets && m.focus != focusSidebar {
 				// enter 在 bundle 节点行上用于展开/折叠（内容区）；space 则始终触发 toggle。
 				if msg.String() == "enter" && m.assetsCursorOnBundle() && m.focus == focusContent {
 					m.expandCurrentBundle()
@@ -643,7 +797,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "s":
-			if m.isAssetsPage() && !m.savingAssets && m.assets != nil && m.assetsErr == nil {
+			if m.isBundlesPage() && !m.savingAssets && m.assets != nil && m.assetsErr == nil {
 				m.savingAssets = true
 				m.pushLog("Saving asset selection")
 				// Items 里 Enabled=true 的成员若完全由 bundle 带入，不应写进 enabled_assets；
@@ -707,18 +861,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "p":
-			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && m.updateStage == "" {
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && m.pushStage == "" && !m.updatingBinary && m.updateStage == "" {
 				return m, m.startPullRun()
 			}
 			return m, nil
-		case "x":
-			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && m.updateStage == "" {
-				m.beginRemoveSelection()
+		case "P":
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && m.pushStage == "" && !m.updatingBinary && m.updateStage == "" {
+				m.beginPushConfirmation()
 			}
 			return m, nil
 		case "u":
-			if m.isRunPage() && !m.runningPull && !m.runningRemove && !m.updatingBinary && m.removeStage == "" {
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && m.pushStage == "" && !m.updatingBinary && m.removeStage == "" {
 				return m, m.startUpdateCheck()
+			}
+			return m, nil
+		case "?":
+			if m.isRunPage() && m.removeStage == "" && m.pushStage == "" && !m.removeFilterInput {
+				m.runShowHelp = !m.runShowHelp
 			}
 			return m, nil
 		}
@@ -742,7 +901,7 @@ func (m model) handleHorizontalNav(direction int) (tea.Model, tea.Cmd) {
 			m.pushLog("返回导航")
 			return m, nil
 		}
-		if m.isAssetsPage() && m.assetsCursorOnBundle() {
+		if m.isBundlesPage() && m.assetsCursorOnBundle() {
 			m.expandCurrentBundle()
 			m.focus = focusBundleExpanded
 			m.moveCursorToFirstBundleMember()
@@ -769,9 +928,14 @@ func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
 			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
 		}
 		m.pushLog("Switched to " + m.pages[m.pageIndex])
+		if m.isDeletePage() {
+			m.deleteCandidatesLoaded = false
+			m.loadingDeleteCandidates = true
+			return m, loadDeleteCandidatesCmd(m.projectRoot)
+		}
 		return m, nil
 	case focusContent:
-		if m.isAssetsPage() {
+		if m.isBundlesPage() {
 			if m.canNavigateAssets() {
 				m.moveAssetCursor(delta)
 			}
@@ -791,7 +955,7 @@ func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case focusBundleExpanded:
-		if m.isAssetsPage() && m.canNavigateAssets() {
+		if m.isBundlesPage() && m.canNavigateAssets() {
 			m.moveBundleMemberCursor(delta)
 		}
 		return m, nil
@@ -858,8 +1022,19 @@ func (m model) refreshCmd() tea.Cmd {
 
 func loadOverviewCmd(projectRoot string) tea.Cmd {
 	return func() tea.Msg {
+		inference, inferErr := inferVaultProjectOperation(projectRoot, nil)
+		if inferErr != nil {
+			return overviewLoadedMsg{err: inferErr, vaultInference: inference}
+		}
 		overview, err := app.LoadProjectOverview(projectRoot)
-		return overviewLoadedMsg{overview: overview, err: err}
+		return overviewLoadedMsg{overview: overview, err: err, vaultInference: inference}
+	}
+}
+
+func applyVaultProjectCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := applyVaultProjectOperation(projectRoot, nil)
+		return vaultProjectAppliedMsg{result: result, err: err}
 	}
 }
 
@@ -965,6 +1140,19 @@ func startPullRunCmd(ctx context.Context, projectRoot string, stream chan<- tea.
 	}
 }
 
+func startPushRunCmd(ctx context.Context, projectRoot string, stream chan<- tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		go func() {
+			result, err := runPushOperation(ctx, projectRoot, app.ReporterFunc(func(event app.OperationEvent) {
+				stream <- runEventMsg{event: event}
+			}))
+			stream <- runCompletedMsg{pushResult: result, err: err}
+			close(stream)
+		}()
+		return nil
+	}
+}
+
 func waitRunMsg(stream <-chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		msg, ok := <-stream
@@ -1038,7 +1226,9 @@ func (m *model) startPullRun() tea.Cmd {
 	m.runMode = "pull"
 	m.runProgress = nil
 	m.runEvents = nil
+	m.runPinLine = ""
 	m.runResult = nil
+	m.pushResult = nil
 	m.runErr = nil
 	m.runStream = stream
 	m.runCtx = ctx
@@ -1047,9 +1237,88 @@ func (m *model) startPullRun() tea.Cmd {
 	return tea.Batch(startPullRunCmd(ctx, m.projectRoot, stream), waitRunMsg(stream))
 }
 
+func (m *model) beginPushConfirmation() {
+	preview, err := previewPushOperation(m.projectRoot)
+	if err != nil {
+		m.pushPreviewErr = err
+		m.pushPreview = nil
+		m.pushStage = "summary"
+		m.pushLog("Push 预览失败: " + err.Error())
+		return
+	}
+	m.pushPreview = preview
+	m.pushPreviewErr = nil
+	m.pushStage = "summary"
+	m.pushResult = nil
+	m.runErr = nil
+	m.pushLog(fmt.Sprintf("Push 确认页已打开：%d 个 enabled bundle", preview.EnabledBundleCount))
+}
+
+func (m model) handlePushStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.pushStage {
+	case "summary":
+		return m.handlePushSummaryKey(msg)
+	case "confirm":
+		return m.handlePushConfirmKey(msg)
+	}
+	return m, nil
+}
+
+func (m model) handlePushSummaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "enter":
+		if m.pushPreviewErr != nil {
+			return m, nil
+		}
+		m.pushStage = "confirm"
+		m.pushLog("Push 进入最终确认")
+		return m, nil
+	case "n", "esc":
+		m.pushStage = ""
+		m.pushPreview = nil
+		m.pushPreviewErr = nil
+		m.pushLog("Push 已取消")
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) handlePushConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		m.pushStage = "running"
+		m.pushPreview = nil
+		m.pushPreviewErr = nil
+		return m, m.startPushRun()
+	case "n", "esc":
+		m.pushStage = "summary"
+		m.pushLog("Push 最终确认已取消，返回摘要")
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *model) startPushRun() tea.Cmd {
+	stream := make(chan tea.Msg, 64)
+	ctx, cancel := context.WithCancel(context.Background())
+	m.runningPull = true
+	m.runMode = "push"
+	m.runProgress = nil
+	m.runEvents = nil
+	m.runPinLine = ""
+	m.runResult = nil
+	m.pushResult = nil
+	m.runErr = nil
+	m.runStream = stream
+	m.runCtx = ctx
+	m.runCancel = cancel
+	m.pushLog("Run page started push")
+	return tea.Batch(startPushRunCmd(ctx, m.projectRoot, stream), waitRunMsg(stream))
+}
+
 func (m *model) beginRemoveSelection() {
-	if m.assets == nil || len(m.enabledRemoveCandidates()) == 0 {
-		m.pushLog("没有可删除的已启用资产")
+	if m.assets == nil || len(app.ListEnabledBundles(m.assets)) == 0 {
+		m.pushLog("没有可删除的已启用 bundle（enabled_bundles 为空）")
 		return
 	}
 	m.removeStage = "select"
@@ -1062,25 +1331,23 @@ func (m *model) beginRemoveSelection() {
 	m.pushLog("Remove 选择器已打开")
 }
 
-func (m model) enabledRemoveCandidates() []app.AssetSelectionItem {
+func (m model) enabledRemoveBundles() []app.AssetBundleOption {
 	if m.assets == nil {
 		return nil
 	}
-	items := make([]app.AssetSelectionItem, 0, len(m.assets.Items))
+	bundles := app.ListEnabledBundles(m.assets)
 	filter := strings.ToLower(strings.TrimSpace(m.removeFilter))
-	for _, item := range m.assets.Items {
-		if !item.Enabled {
-			continue
-		}
-		if filter != "" {
-			haystack := strings.ToLower(strings.Join([]string{item.Vault, item.Type, item.Name}, " "))
-			if !strings.Contains(haystack, filter) {
-				continue
-			}
-		}
-		items = append(items, item)
+	if filter == "" {
+		return bundles
 	}
-	return items
+	filtered := make([]app.AssetBundleOption, 0, len(bundles))
+	for _, bo := range bundles {
+		haystack := strings.ToLower(strings.Join([]string{bo.Name, bo.Vault, bo.Description}, " "))
+		if strings.Contains(haystack, filter) {
+			filtered = append(filtered, bo)
+		}
+	}
+	return filtered
 }
 
 func (m model) handleRemoveStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1094,7 +1361,7 @@ func (m model) handleRemoveStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleRemoveSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	candidates := m.enabledRemoveCandidates()
+	bundles := m.enabledRemoveBundles()
 	switch msg.String() {
 	case "esc":
 		m.removeStage = ""
@@ -1109,23 +1376,23 @@ func (m model) handleRemoveSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		if strings.TrimSpace(m.removeFilter) != "" {
 			m.removeFilter = ""
-			if m.removeCursor >= len(m.enabledRemoveCandidates()) {
+			if m.removeCursor >= len(m.enabledRemoveBundles()) {
 				m.removeCursor = 0
 			}
 			m.pushLog("Remove 筛选已清空")
 		}
 		return m, nil
 	case "j", "down":
-		if len(candidates) == 0 {
+		if len(bundles) == 0 {
 			return m, nil
 		}
 		m.removeCursor++
-		if m.removeCursor >= len(candidates) {
-			m.removeCursor = len(candidates) - 1
+		if m.removeCursor >= len(bundles) {
+			m.removeCursor = len(bundles) - 1
 		}
 		return m, nil
 	case "k", "up":
-		if len(candidates) == 0 {
+		if len(bundles) == 0 {
 			return m, nil
 		}
 		m.removeCursor--
@@ -1134,16 +1401,16 @@ func (m model) handleRemoveSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter", " ":
-		if len(candidates) == 0 {
+		if len(bundles) == 0 {
 			return m, nil
 		}
-		if m.removeCursor < 0 || m.removeCursor >= len(candidates) {
+		if m.removeCursor < 0 || m.removeCursor >= len(bundles) {
 			m.removeCursor = 0
 		}
-		target := candidates[m.removeCursor]
+		target := bundles[m.removeCursor]
 		m.removeTarget = &target
 		m.removeStage = "confirm"
-		m.pushLog(fmt.Sprintf("Remove 目标选中: [%s] %s (vault: %s)", target.Type, target.Name, target.Vault))
+		m.pushLog(fmt.Sprintf("Remove 目标选中: bundle %s (%d 成员)", target.Name, len(target.Members)))
 		return m, nil
 	}
 	return m, nil
@@ -1198,23 +1465,23 @@ func (m *model) startRemoveRun() tea.Cmd {
 	m.runMode = "remove"
 	m.runProgress = nil
 	m.runEvents = nil
+	m.runPinLine = ""
 	m.runResult = nil
 	m.runErr = nil
 	m.removeResult = nil
 	m.removeErr = nil
 	m.runStream = stream
-	input := app.RemoveAssetInput{
+	input := app.RemoveBundleInput{
 		ProjectRoot: m.projectRoot,
-		Type:        m.removeTarget.Type,
-		Name:        m.removeTarget.Name,
-		Vault:       m.removeTarget.Vault,
+		BundleName:  m.removeTarget.Name,
+		Members:     append([]app.AssetSelectionItem(nil), m.removeTarget.Members...),
 		Confirmed:   true,
 	}
-	m.pushLog(fmt.Sprintf("Run page started remove: [%s] %s", input.Type, input.Name))
+	m.pushLog(fmt.Sprintf("Run page started remove: bundle %s", input.BundleName))
 	return tea.Batch(startRemoveRunCmd(input, stream), waitRunMsg(stream))
 }
 
-func startRemoveRunCmd(input app.RemoveAssetInput, stream chan<- tea.Msg) tea.Cmd {
+func startRemoveRunCmd(input app.RemoveBundleInput, stream chan<- tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
 			result, err := runRemoveOperation(input, app.ReporterFunc(func(event app.OperationEvent) {
@@ -1254,6 +1521,23 @@ func (m *model) startUpdateApply() tea.Cmd {
 		err := updateDoUpdateOperation(currentVersion)
 		return updateDoneMsg{targetVersion: target, err: err}
 	}
+}
+
+func (m model) handleVaultInferenceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "enter":
+		if m.vaultInference == nil {
+			return m, nil
+		}
+		m.applyingVaultProject = true
+		m.pushLog(fmt.Sprintf("Applying inferred vault project %s...", m.vaultInference.ProjectName))
+		return m, applyVaultProjectCmd(m.projectRoot)
+	case "n", "esc":
+		m.vaultInferenceDismissed = true
+		m.pushLog("已跳过 vault project 推断，可切到 Bundles 页手动选择")
+		return m, nil
+	}
+	return m, nil
 }
 
 func (m model) handleUpdateStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1300,6 +1584,7 @@ func (m *model) recordRunEvent(event app.OperationEvent) {
 		progress := *event.Progress
 		m.runProgress = &progress
 	}
+	m.updateRunPinLine(event)
 	for _, line := range splitRunMessage(event.Message) {
 		m.runEvents = append(m.runEvents, line)
 		if len(m.runEvents) > 12 {
@@ -1383,12 +1668,14 @@ func (m model) renderPageBody(width int) string {
 	switch m.pages[m.pageIndex] {
 	case "Home":
 		return m.renderHomePage(width)
-	case "Assets":
-		return m.renderAssetsPage(width)
+	case "Bundles":
+		return m.renderBundlesPage(width)
 	case "Project":
 		return m.renderProjectPage(width)
 	case "Run":
 		return m.renderRunPage(width)
+	case "Delete":
+		return m.renderDeletePage(width)
 	default:
 		return m.renderSettingsPage(width)
 	}
@@ -1402,41 +1689,64 @@ func (m model) renderHomePage(width int) string {
 		return shellMutedStyle.Render("Loading project overview...")
 	}
 
-	return wrapLines(width, []string{
+	lines := []string{}
+	if notice := strings.TrimSpace(m.vaultAutoApplyNotice); notice != "" {
+		lines = append(lines, shellGoodStyle.Render(notice))
+	}
+	if m.applyingVaultProject {
+		lines = append(lines, shellMutedStyle.Render("正在从 vault 应用 project..."))
+	} else if m.hasVaultInferencePrompt() {
+		inf := m.vaultInference
+		lines = append(lines,
+			shellWarnStyle.Render("根据目录名推断 vault project，请确认是否应用"),
+			fmt.Sprintf("推断 project: %s", inf.ProjectName),
+			fmt.Sprintf("Vault 路径: %s", inf.VaultPath),
+			fmt.Sprintf("Bundles (%d): %s", len(inf.EnabledBundles), formatInferenceBundleNames(inf.EnabledBundles)),
+			shellMutedStyle.Render("y / Enter 应用 · n 跳过并手动选择"),
+		)
+	}
+	if len(lines) > 0 {
+		lines = append(lines, "")
+	}
+	lines = append(lines,
+		fmt.Sprintf("项目名: %s", formatProjectNameDisplay(m.overview)),
+		fmt.Sprintf("Vault project: projects/%s.yaml", m.overview.ProjectName),
 		fmt.Sprintf("仓库: %s", formatReady(m.overview.RepoConnected, "已连接", "未连接")),
 		fmt.Sprintf("远端仓库: %s", fallbackValue(m.overview.RepoRemoteURL, "未连接")),
 		fmt.Sprintf("项目配置: %s", formatReady(m.overview.ProjectConfigReady, "已初始化", "未初始化")),
 		fmt.Sprintf("变量文件: %s", formatReady(m.overview.VarsFileReady, "已存在", "未生成")),
-		fmt.Sprintf("可用资产: %d", m.overview.AvailableCount),
-		fmt.Sprintf("已启用资产: %d", m.overview.EnabledCount),
+		fmt.Sprintf("Vault bundle: %d 个 | 已启用: %d 个", len(m.overview.Bundles), countOverviewEnabledBundles(m.overview)),
+		fmt.Sprintf("展开资产: %d 可用 / %d 已启用", m.overview.AvailableCount, m.overview.EnabledCount),
 		fmt.Sprintf("默认 IDE: %s", strings.Join(m.overview.IDEs, ", ")),
 		fmt.Sprintf("编辑器: %s", fallbackValue(m.overview.Editor, "未配置")),
-		fmt.Sprintf("建议下一步: %s", suggestNextAction(m.overview)),
+		fmt.Sprintf("建议下一步: %s", suggestNextAction(m.overview, m.hasVaultInferencePrompt(), m.vaultInferenceDismissed)),
 		formatWarnings(m.overview.IDEWarnings),
-	})
+	)
+	return wrapLines(width, lines)
 }
 
-func (m model) renderAssetsPage(width int) string {
+func (m model) renderBundlesPage(width int) string {
 	if m.assetsErr != nil {
-		return shellWarnStyle.Render("无法加载资产选择") + "\n\n" + m.assetsErr.Error()
+		return shellWarnStyle.Render("无法加载 bundle 选择") + "\n\n" + m.assetsErr.Error()
 	}
 	if m.assets == nil {
-		return shellMutedStyle.Render("Loading asset selection...")
+		return shellMutedStyle.Render("Loading bundle selection...")
 	}
 
 	summary := []string{}
 	if m.configInitMode {
-		summary = append(summary, shellTitleStyle.Render("项目配置初始化 — 按 bundle 启用资产"))
-		summary = append(summary, shellMutedStyle.Render("推荐勾选 vault 级 bundle（如 vikunja、cli）；保存后写入 enabled_bundles。"))
+		summary = append(summary, shellTitleStyle.Render("项目配置初始化 — 勾选要启用的 bundle"))
+		summary = append(summary, shellMutedStyle.Render("勾选 vault bundles/ 下的 bundle；保存后写入 enabled_bundles。"))
 	}
 	summary = append(summary,
+		shellMutedStyle.Render("扫描 vault bundles/，勾选 bundle 写入 enabled_bundles；成员资产随 bundle 一并启用。"),
 		fmt.Sprintf("筛选: %s | 类型: %s", m.currentAssetFilterLabel(), m.assetTypeFilter),
-		fmt.Sprintf("资产总数: %d | 已启用: %d | Bundle: %d/%d", len(m.assets.Items), m.countEnabledAssets(), len(m.bundleSelection), len(m.assets.Bundles)),
+		fmt.Sprintf("Bundle: %d/%d 已启用 | 独立资产: %d/%d 已启用", len(m.bundleSelection), len(m.assets.Bundles), m.countEnabledAssets(), len(m.assets.Items)),
 	)
 	if m.assetsDirty {
 		summary = append(summary, shellWarnStyle.Render("当前有未保存修改，按 s 保存。"))
 	} else {
-		summary = append(summary, shellMutedStyle.Render("当前资产选择与磁盘一致。"))
+		summary = append(summary, shellMutedStyle.Render("当前 bundle 选择与磁盘一致。"))
 	}
 	if m.assetFilterInput {
 		summary = append(summary, shellMutedStyle.Render("筛选输入中：输入关键字后按 Enter 应用，Esc 退出。"))
@@ -1456,7 +1766,7 @@ func (m model) renderAssetsPage(width int) string {
 
 	rows := m.visibleAssetRows()
 	if len(m.assets.Items) == 0 && len(m.assets.Bundles) == 0 {
-		return strings.Join(append(summary, "", "仓库中还没有可选资产。"), "\n")
+		return strings.Join(append(summary, "", "仓库 bundles/ 下还没有可选 bundle。"), "\n")
 	}
 	if len(rows) == 0 {
 		return strings.Join(append(summary, "", "当前筛选没有结果。"), "\n")
@@ -1492,16 +1802,26 @@ func (m model) renderProjectPage(width int) string {
 	}
 
 	summary := []string{
-		fmt.Sprintf("项目配置: %s", m.projectSettings.ConfigPath),
+		shellMutedStyle.Render("项目配置与变量：IDE 覆盖、.dec/vars.yaml；bundle 启用在 Bundles 页。"),
+	}
+	if m.overview != nil {
+		summary = append(summary,
+			fmt.Sprintf("项目名: %s", formatProjectNameDisplay(m.overview)),
+			fmt.Sprintf("Vault project: projects/%s.yaml", m.overview.ProjectName),
+			fmt.Sprintf("已启用 bundle (%d): %s", countOverviewEnabledBundles(m.overview), formatOverviewEnabledBundleNames(m.overview)),
+		)
+	}
+	summary = append(summary,
+		fmt.Sprintf("配置文件: %s", m.projectSettings.ConfigPath),
 		fmt.Sprintf("变量文件: %s", m.projectSettings.VarsPath),
-		fmt.Sprintf("当前模式: %s", modeLabel),
+		fmt.Sprintf("IDE 模式: %s", modeLabel),
 		fmt.Sprintf("项目 IDE: %s", fallbackValue(strings.Join(normalizedStringList(m.projectSettingsSelectedIDEs), ", "), "<none>")),
 		fmt.Sprintf("全局默认: %s", fallbackValue(strings.Join(normalizedStringList(m.projectSettings.GlobalIDEs), ", "), "<未配置>")),
 		fmt.Sprintf("生效 IDE: %s", fallbackValue(strings.Join(projectEffectivePreview(m.projectSettings, m.projectSettingsOverride, m.projectSettingsSelectedIDEs), ", "), "<none>")),
 		formatWarnings(m.projectSettings.IDEWarnings),
-	}
+	)
 	if !m.projectSettings.ProjectConfigReady {
-		summary = append(summary, shellMutedStyle.Render("尚未初始化项目配置。首次保存项目级覆盖会创建 .dec/config.yaml。"))
+		summary = append(summary, shellMutedStyle.Render("尚未初始化 .dec/config.yaml，请先在 Home 页初始化 project。"))
 	}
 	if m.projectSettingsDirty {
 		summary = append(summary, shellWarnStyle.Render("当前有未保存修改，按 s 保存。"))
@@ -1509,37 +1829,7 @@ func (m model) renderProjectPage(width int) string {
 		summary = append(summary, shellMutedStyle.Render("当前项目设置与磁盘一致。"))
 	}
 
-	// 初始化 / 刷新 available 入口状态
-	repoConnected := m.overview != nil && m.overview.RepoConnected
-	initKeyHint := ""
-	if m.projectSettings.ProjectConfigReady {
-		initKeyHint = "R 刷新 available"
-	} else {
-		initKeyHint = "i 初始化项目配置"
-	}
-	summary = append(summary, shellMutedStyle.Render(fmt.Sprintf("快捷键：j/k 移动 · space 切换模式/IDE · s 保存 · c 清除覆盖 · e 编辑变量 · %s", initKeyHint)))
-	if !repoConnected {
-		summary = append(summary, shellWarnStyle.Render("未连接仓库，请先在 Settings 页配置 Repo URL，然后再来初始化 / 刷新 available。"))
-	}
-	if m.initializingProjectConfig {
-		summary = append(summary, shellWarnStyle.Render("正在扫描仓库资产..."))
-	}
-	if m.lastInitErr != nil {
-		summary = append(summary, shellWarnStyle.Render("初始化失败: "+m.lastInitErr.Error()))
-	}
-	if m.lastInitResult != nil && m.lastInitErr == nil {
-		switch {
-		case m.lastInitResult.ProjectConfig == nil:
-			summary = append(summary, shellWarnStyle.Render(fmt.Sprintf("仓库暂无资产：扫描到 %d 个可用资产。", m.lastInitResult.AssetCount)))
-		case m.lastInitResult.ExistingConfig:
-			summary = append(summary, shellGoodStyle.Render(fmt.Sprintf("刷新完成，共 %d 个可用资产。tab 到 Assets 页选择启用项。", m.lastInitResult.AssetCount)))
-		default:
-			summary = append(summary, shellGoodStyle.Render(fmt.Sprintf("初始化完成，发现 %d 个可用资产。tab 到 Assets 页选择启用项。", m.lastInitResult.AssetCount)))
-		}
-		if m.lastInitResult.VarsCreated {
-			summary = append(summary, shellMutedStyle.Render("已生成 .dec/vars.yaml 模板。"))
-		}
-	}
+	summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · space 切换模式/IDE · s 保存 · c 清除覆盖 · e 编辑变量"))
 	if m.savingProjectSettings {
 		summary = append(summary, shellWarnStyle.Render("正在保存项目设置..."))
 	}
@@ -1571,7 +1861,7 @@ func (m model) renderProjectPage(width int) string {
 }
 
 func (m model) renderProjectSettingsList() string {
-	lines := []string{shellTitleStyle.Render("Project Settings")}
+	lines := []string{shellTitleStyle.Render("项目 IDE")}
 	override := m.projectSettingsOverride
 	checked := " "
 	if override {
@@ -1658,7 +1948,7 @@ func projectEffectivePreview(state *app.ProjectSettingsState, override bool, sel
 // renderProjectVarsBlock 渲染 Project 页下方的 "项目变量" 区块。
 // 纯只读；写入通过 `e` 键挂起 TUI 用外部编辑器完成。
 func (m model) renderProjectVarsBlock() string {
-	lines := []string{shellTitleStyle.Render("Project Variables")}
+	lines := []string{shellTitleStyle.Render("项目变量")}
 
 	if m.projectVarsErr != nil {
 		lines = append(lines, shellWarnStyle.Render("加载变量失败: "+m.projectVarsErr.Error()))
@@ -1686,7 +1976,7 @@ func (m model) renderProjectVarsBlock() string {
 	}
 
 	if !view.CacheExists {
-		lines = append(lines, shellMutedStyle.Render(".dec/cache 尚不存在：先运行 dec pull 再来查看项目真正用中的占位符。"))
+		lines = append(lines, shellMutedStyle.Render(".dec/cache 尚不存在：请先到 Run 页执行 pull，再查看占位符。"))
 	}
 	if len(view.UsedPlaceholders) == 0 {
 		if view.CacheExists {
@@ -1725,35 +2015,256 @@ func truncateVarValue(v string) string {
 }
 
 func (m model) renderRunPage(width int) string {
-	lines := []string{
-		fmt.Sprintf("状态: %s", m.runStatusLabel()),
-		shellMutedStyle.Render("快捷键：p 执行 pull · x 删除资产 · u 自更新 · s 触发当前页主动作 · r 刷新概览 · Esc 取消 pull"),
+	if m.pushStage == "summary" || m.pushStage == "confirm" {
+		return m.renderRunPushPage(width)
 	}
+	if m.removeStage == "select" || m.removeStage == "confirm" {
+		return m.renderRunRemovePage(width)
+	}
+
+	sections := []string{
+		m.renderRunHeader(),
+		m.renderRunActionBar(),
+	}
+	sections = append(sections, m.renderRunStateBlock(width)...)
+
+	if m.runShowHelp {
+		sections = append(sections, m.renderRunHelpPanel()...)
+	}
+
+	if m.updateStage != "" {
+		sections = append(sections, "")
+		sections = append(sections, m.renderUpdatePanel()...)
+	}
+
+	if len(m.runEvents) > 0 {
+		sections = append(sections, "", shellTitleStyle.Render("事件日志"))
+		for _, line := range m.runEvents {
+			sections = append(sections, formatRunLogLine(line))
+		}
+	} else if !m.runningPull && !m.runningRemove && m.updateStage == "" {
+		sections = append(sections, "", shellMutedStyle.Render("执行后事件将显示于此。"))
+	}
+
+	return wrapLines(width, sections)
+}
+
+func (m model) renderRunHeader() string {
+	mode := "就绪"
+	switch {
+	case m.runningPull && m.runMode == "push":
+		mode = "Push 执行中"
+	case m.runningPull:
+		mode = "Pull 执行中"
+	case m.runningRemove:
+		mode = "Remove 执行中"
+	case m.updatingBinary:
+		mode = "Update 执行中"
+	case m.runErr != nil && m.runMode == "push":
+		mode = "Push 失败"
+	case m.runErr != nil:
+		mode = "Pull 失败"
+	case m.pushResult != nil:
+		mode = "Push 完成"
+	case m.runResult != nil:
+		mode = "Pull 完成"
+	case m.removeErr != nil:
+		mode = "Remove 失败"
+	case m.removeResult != nil:
+		mode = "Remove 完成"
+	}
+	return shellTitleStyle.Render("Run · "+mode) + "\n" + fmt.Sprintf("状态 %s", m.runStatusLabel())
+}
+
+func (m model) renderRunActionBar() string {
+	switch {
+	case m.runningPull && m.runMode == "push":
+		return shellMutedStyle.Render("操作  Esc 取消 push  ·  ? 帮助")
+	case m.runningPull:
+		return shellMutedStyle.Render("操作  Esc 取消 pull  ·  ? 帮助")
+	case m.runningRemove, m.updatingBinary:
+		return shellMutedStyle.Render("操作  ? 帮助")
+	default:
+		return shellMutedStyle.Render("操作  p Pull  ·  P Push  ·  u Update  ·  ? 帮助 · 删除请切到 Delete 页")
+	}
+}
+
+func (m model) renderRunStateBlock(width int) []string {
+	if m.runningPull || m.runningRemove {
+		return m.renderRunActiveBlock(width)
+	}
+	if m.runResult == nil && m.pushResult == nil && m.runErr == nil && m.removeResult == nil && m.removeErr == nil {
+		return m.renderRunIdleGuide()
+	}
+	return m.renderRunLastResult()
+}
+
+func (m model) renderRunActiveBlock(width int) []string {
+	lines := make([]string, 0, 3)
 	if m.runProgress != nil {
-		lines = append(lines, fmt.Sprintf("阶段: %s (%d/%d)", fallbackValue(m.runProgress.Phase, "working"), m.runProgress.Current, m.runProgress.Total))
+		phase := runPhaseLabel(m.runProgress.Phase)
+		bar := renderRunProgressBar(m.runProgress.Current, m.runProgress.Total, progressBarWidth(width))
+		lines = append(lines, fmt.Sprintf("阶段  %s  %s  %d/%d", phase, bar, m.runProgress.Current, m.runProgress.Total))
+	} else {
+		lines = append(lines, shellMutedStyle.Render("阶段  准备中…"))
 	}
+	if pin := strings.TrimSpace(m.runPinLine); pin != "" {
+		lines = append(lines, shellWarnStyle.Render("提示  "+pin))
+	}
+	return lines
+}
+
+func (m model) renderRunIdleGuide() []string {
+	lines := []string{
+		shellTitleStyle.Render("建议"),
+		shellMutedStyle.Render("· p 拉取 Dec bundle + secrets + IDE 安装"),
+		shellMutedStyle.Render("· P 推送到远端（Dec cache + .secrets/ → Bitwarden，需两次确认）"),
+		shellMutedStyle.Render("· x 删除已启用 bundle（整包，不可逆）"),
+	}
+	if m.overview != nil && countOverviewEnabledBundles(m.overview) == 0 && m.overview.EnabledCount == 0 {
+		lines = append(lines, shellWarnStyle.Render("⚠ 当前无启用 bundle，请先到 Bundles 页勾选"))
+	}
+	lines = append(lines, shellMutedStyle.Render("上次  尚无操作记录"))
+	return lines
+}
+
+func (m model) renderRunLastResult() []string {
+	lines := []string{shellTitleStyle.Render("上次结果")}
 	if m.runResult != nil {
-		lines = append(lines,
-			fmt.Sprintf("结果: 请求 %d | 成功 %d | 失败 %d", m.runResult.RequestedCount, m.runResult.PulledCount, m.runResult.FailedCount),
-			fmt.Sprintf("IDE: %s", fallbackValue(strings.Join(m.runResult.EffectiveIDEs, ", "), "<none>")),
-		)
+		lines = append(lines, fmt.Sprintf("Pull  请求 %d · 成功 %d · 失败 %d",
+			m.runResult.RequestedCount, m.runResult.PulledCount, m.runResult.FailedCount))
+		secretsLine := fmt.Sprintf("Secrets  落地 %d 个文件", m.runResult.SecretsNoteCount)
+		if m.runResult.SecretsSkippedReason != "" && m.runResult.SecretsNoteCount == 0 {
+			secretsLine = "Secrets  " + m.runResult.SecretsSkippedReason
+		}
+		lines = append(lines, secretsLine)
+		lines = append(lines, fmt.Sprintf("IDE   %s", fallbackValue(strings.Join(m.runResult.EffectiveIDEs, ", "), "<none>")))
 		if strings.TrimSpace(m.runResult.VersionCommit) != "" {
-			lines = append(lines, fmt.Sprintf("Commit: %s", m.runResult.VersionCommit))
+			lines = append(lines, fmt.Sprintf("Commit %s", m.runResult.VersionCommit))
 		}
 	}
-	if m.removeResult != nil {
-		lines = append(lines, fmt.Sprintf("Remove 结果: [%s] %s (vault: %s)", m.removeResult.Type, m.removeResult.Name, m.removeResult.Vault))
-		if strings.TrimSpace(m.removeResult.VersionCommit) != "" {
-			lines = append(lines, fmt.Sprintf("Remove Commit: %s", m.removeResult.VersionCommit))
+	if m.pushResult != nil {
+		if m.pushResult.DecPushedCount > 0 || m.pushResult.DecSkippedReason != "" {
+			decLine := fmt.Sprintf("Dec   推送 %d 项", m.pushResult.DecPushedCount)
+			if m.pushResult.DecSkippedReason != "" && m.pushResult.DecPushedCount == 0 {
+				decLine = "Dec   " + m.pushResult.DecSkippedReason
+			}
+			lines = append(lines, decLine)
+		}
+		secretsLine := fmt.Sprintf("Secrets  新建 %d · 更新 %d", m.pushResult.SecretsCreatedCount, m.pushResult.SecretsUpdatedCount)
+		if m.pushResult.SecretsSkippedReason != "" && m.pushResult.SecretsCreatedCount+m.pushResult.SecretsUpdatedCount == 0 {
+			secretsLine = "Secrets  " + m.pushResult.SecretsSkippedReason
+		}
+		lines = append(lines, secretsLine)
+		if strings.TrimSpace(m.pushResult.VersionCommit) != "" {
+			lines = append(lines, fmt.Sprintf("Commit %s", m.pushResult.VersionCommit))
 		}
 	}
 	if m.runErr != nil {
-		lines = append(lines, shellWarnStyle.Render("错误: "+m.runErr.Error()))
+		label := "Pull 错误"
+		if m.runMode == "push" {
+			label = "Push 错误"
+		}
+		lines = append(lines, shellWarnStyle.Render(label+": "+m.runErr.Error()))
+	}
+	if m.removeResult != nil {
+		lines = append(lines, fmt.Sprintf("Remove  bundle %s · %d 成员", m.removeResult.BundleName, m.removeResult.MemberCount))
+		if strings.TrimSpace(m.removeResult.VersionCommit) != "" {
+			lines = append(lines, fmt.Sprintf("Remove Commit %s", m.removeResult.VersionCommit))
+		}
 	}
 	if m.removeErr != nil {
 		lines = append(lines, shellWarnStyle.Render("Remove 错误: "+m.removeErr.Error()))
 	}
+	return lines
+}
 
+func (m model) renderRunHelpPanel() []string {
+	return []string{
+		"",
+		shellTitleStyle.Render("快捷键"),
+		shellMutedStyle.Render("p / s  执行 pull"),
+		shellMutedStyle.Render("P      推送到远端（两次确认）"),
+		shellMutedStyle.Render("删除请切到 Delete 页（侧栏 Run 之后）"),
+		shellMutedStyle.Render("u      检查并自更新 dec"),
+		shellMutedStyle.Render("r      刷新项目概览"),
+		shellMutedStyle.Render("Esc    取消进行中的 pull / push"),
+		shellMutedStyle.Render("?      开关此帮助"),
+	}
+}
+
+func (m model) renderRunPushPage(width int) string {
+	lines := []string{
+		shellTitleStyle.Render("Run · Push"),
+		fmt.Sprintf("状态 %s", m.runStatusLabel()),
+	}
+	switch m.pushStage {
+	case "summary":
+		lines = append(lines, shellMutedStyle.Render("操作  y/Enter 继续 · n/Esc 取消"))
+		lines = append(lines, "")
+		lines = append(lines, m.renderPushSummary()...)
+	case "confirm":
+		lines = append(lines, shellMutedStyle.Render("操作  y 确认推送 · n/Esc 返回摘要"))
+		lines = append(lines, "")
+		lines = append(lines, m.renderPushConfirm()...)
+	}
+	return wrapLines(width, lines)
+}
+
+func (m model) renderPushSummary() []string {
+	lines := []string{shellTitleStyle.Render("Push 摘要")}
+	if m.pushPreviewErr != nil {
+		lines = append(lines, shellWarnStyle.Render("预览失败: "+m.pushPreviewErr.Error()))
+		lines = append(lines, shellMutedStyle.Render("按 n/esc 取消"))
+		return lines
+	}
+	if m.pushPreview == nil {
+		lines = append(lines, shellWarnStyle.Render("无预览数据，按 esc 取消。"))
+		return lines
+	}
+	p := m.pushPreview
+	lines = append(lines, fmt.Sprintf("Enabled bundles: %d", p.EnabledBundleCount))
+	if len(p.EnabledBundleNames) > 0 {
+		lines = append(lines, fmt.Sprintf("  %s", strings.Join(p.EnabledBundleNames, ", ")))
+	}
+	if p.ProjectSecretsName != "" {
+		lines = append(lines, fmt.Sprintf("Project secrets: %s", p.ProjectSecretsName))
+	}
+	secretsLine := fmt.Sprintf("Secrets  目标 %d · 本地文件 %d", p.SecretsTargetCount, p.SecretsFileCount)
+	if !p.BitwardenConfigured {
+		secretsLine += "（Bitwarden 未配置，将跳过）"
+	}
+	lines = append(lines, secretsLine)
+	if p.DecHasChanges {
+		lines = append(lines, fmt.Sprintf("Dec cache  有变更（约 %d 项待推送）", p.DecCandidateCount))
+	} else if p.DecSkippedReason != "" {
+		lines = append(lines, fmt.Sprintf("Dec cache  %s", p.DecSkippedReason))
+	} else {
+		lines = append(lines, "Dec cache  无本地变更")
+	}
+	lines = append(lines, shellMutedStyle.Render("按 y/Enter 进入最终确认 · n/esc 取消"))
+	return lines
+}
+
+func (m model) renderPushConfirm() []string {
+	lines := []string{shellTitleStyle.Render("Push 最终确认")}
+	lines = append(lines,
+		shellWarnStyle.Render("⚠️  将推送到远端 Dec Git vault 与 Bitwarden，操作不可逆。"),
+		shellMutedStyle.Render("Dec cache 变更将 commit 并 push 到 vault 仓库。"),
+		shellMutedStyle.Render(".secrets/ 下文件将 create/update Bitwarden Secure Note。"),
+		shellMutedStyle.Render("执行中若 Bitwarden 未解锁，将自动尝试解锁（可设 DEC_BW_PASSWORD 免浏览器）。"),
+		shellMutedStyle.Render("按 y 确认执行 · n/esc 返回摘要"),
+	)
+	return lines
+}
+
+func (m model) renderRunRemovePage(width int) string {
+	lines := []string{
+		shellTitleStyle.Render("Run · Remove"),
+		fmt.Sprintf("状态 %s", m.runStatusLabel()),
+		shellMutedStyle.Render("操作  j/k 移动 · Enter 选中 · / 筛选 · Esc 返回"),
+		shellWarnStyle.Render("⚠ 删除整包不可逆；Bitwarden secrets 需自行处理"),
+	}
 	switch m.removeStage {
 	case "select":
 		lines = append(lines, "")
@@ -1762,26 +2273,99 @@ func (m model) renderRunPage(width int) string {
 		lines = append(lines, "")
 		lines = append(lines, m.renderRemoveConfirm()...)
 	}
+	return wrapLines(width, lines)
+}
 
-	if m.updateStage != "" {
-		lines = append(lines, "")
-		lines = append(lines, m.renderUpdatePanel()...)
+func (m *model) updateRunPinLine(event app.OperationEvent) {
+	msg := strings.TrimSpace(event.Message)
+	if msg == "" {
+		return
 	}
-
-	if len(m.runEvents) == 0 && m.removeStage == "" && m.updateStage == "" {
-		lines = append(lines, shellMutedStyle.Render("执行日志会显示在这里。当前接入 pull / remove / update。"))
-		return wrapLines(width, lines)
+	switch {
+	case strings.Contains(msg, "解锁页:"):
+		m.runPinLine = msg
+	case strings.Contains(msg, "Bitwarden 未解锁"):
+		m.runPinLine = msg
+	case strings.Contains(msg, "Bitwarden 已解锁"):
+		m.runPinLine = msg
+	case event.Scope == "push.secrets" && strings.Contains(msg, "解锁页:"):
+		m.runPinLine = msg
+	case event.Level == app.EventWarn || event.Level == app.EventError:
+		m.runPinLine = msg
+	case event.Progress != nil && event.Progress.Phase == "done":
+		m.runPinLine = msg
 	}
+}
 
-	formatted := make([]string, 0, len(lines)+len(m.runEvents)+2)
-	formatted = append(formatted, lines...)
-	if len(m.runEvents) > 0 {
-		formatted = append(formatted, shellTitleStyle.Render("Execution Log"))
-		for _, line := range m.runEvents {
-			formatted = append(formatted, "- "+line)
+func runPhaseLabel(phase string) string {
+	switch phase {
+	case "pull":
+		return "Dec cache"
+	case "dec":
+		return "Dec 推送"
+	case "secrets":
+		return "Secrets"
+	case "install":
+		return "IDE 安装"
+	case "done":
+		return "完成"
+	case "validate":
+		return "路径校验"
+	default:
+		if phase == "" {
+			return "进行中"
 		}
+		return phase
 	}
-	return wrapLines(width, formatted)
+}
+
+func progressBarWidth(pageWidth int) int {
+	w := pageWidth / 3
+	if w < 10 {
+		w = 10
+	}
+	if w > 24 {
+		w = 24
+	}
+	return w
+}
+
+func renderRunProgressBar(current, total, width int) string {
+	if total <= 0 {
+		return "[----]"
+	}
+	if width < 8 {
+		width = 8
+	}
+	innerWidth := width - 2
+	filled := current * innerWidth / total
+	if filled > innerWidth {
+		filled = innerWidth
+	}
+	if current > 0 && filled == 0 {
+		filled = 1
+	}
+	inner := strings.Repeat("=", filled) + strings.Repeat("-", innerWidth-filled)
+	return "[" + inner + "]"
+}
+
+func formatRunLogLine(line string) string {
+	if isRunImportantLine(line) {
+		return shellWarnStyle.Render("▸ " + line)
+	}
+	return shellLogStyle.Render("· " + line)
+}
+
+func isRunImportantLine(line string) bool {
+	return strings.Contains(line, "[auth]") ||
+		strings.Contains(line, "解锁页:") ||
+		strings.Contains(line, "Bitwarden 未解锁") ||
+		strings.Contains(line, "Bitwarden 已解锁") ||
+		strings.Contains(line, "Bitwarden 未配置") ||
+		strings.Contains(line, "跳过 secrets") ||
+		strings.Contains(line, "无法自动打开") ||
+		strings.Contains(line, "失败") ||
+		strings.Contains(line, "⚠")
 }
 
 func (m model) renderUpdatePanel() []string {
@@ -1836,25 +2420,36 @@ func (m model) renderUpdatePanel() []string {
 }
 
 func (m model) renderRemoveSelect() []string {
-	candidates := m.enabledRemoveCandidates()
+	bundles := m.enabledRemoveBundles()
 	lines := []string{shellTitleStyle.Render("Remove 选择器")}
-	lines = append(lines, fmt.Sprintf("筛选: %s", m.currentRemoveFilterLabel()))
+	lines = append(lines, fmt.Sprintf("筛选: %s · 共 %d 个 bundle", m.currentRemoveFilterLabel(), len(bundles)))
 	if m.removeFilterInput {
 		lines = append(lines, shellMutedStyle.Render("筛选输入中：输入关键字后按 Enter 应用，Esc 退出。"))
 	} else {
 		lines = append(lines, shellMutedStyle.Render("快捷键：j/k 移动 · enter/space 选中 · / 筛选 · c 清空 · esc 取消"))
 	}
-	if len(candidates) == 0 {
-		lines = append(lines, "没有匹配的已启用资产。")
+	if len(bundles) == 0 {
+		if m.assets != nil && len(app.ListEnabledBundles(m.assets)) == 0 {
+			lines = append(lines, shellWarnStyle.Render("当前没有已启用的 bundle。"))
+			lines = append(lines, shellMutedStyle.Render("请先在 Bundles 页勾选 bundle 并保存，再执行 pull。"))
+		} else {
+			lines = append(lines, shellWarnStyle.Render("没有匹配筛选条件的 bundle。"))
+			lines = append(lines, shellMutedStyle.Render("按 c 清空筛选，或 esc 退出。"))
+		}
 		return lines
 	}
-	for idx, item := range candidates {
+
+	for i, bo := range bundles {
 		marker := " "
-		if idx == m.removeCursor {
+		if i == m.removeCursor {
 			marker = ">"
 		}
-		line := fmt.Sprintf("%s [%s] %s / %s", marker, item.Type, item.Vault, item.Name)
-		if idx == m.removeCursor {
+		vault := bo.Vault
+		if vault == "" {
+			vault = bo.Name
+		}
+		line := fmt.Sprintf("  %s %s / %s · %d 成员", marker, bo.Name, vault, len(bo.Members))
+		if i == m.removeCursor {
 			lines = append(lines, shellSelectedRow.Render(line))
 		} else {
 			lines = append(lines, shellLogStyle.Render(line))
@@ -1866,14 +2461,19 @@ func (m model) renderRemoveSelect() []string {
 func (m model) renderRemoveConfirm() []string {
 	lines := []string{shellTitleStyle.Render("Remove 确认")}
 	if m.removeTarget == nil {
-		lines = append(lines, shellWarnStyle.Render("未选择目标资产，按 esc 返回。"))
+		lines = append(lines, shellWarnStyle.Render("未选择 bundle，按 esc 返回。"))
 		return lines
 	}
+	vault := m.removeTarget.Vault
+	if vault == "" {
+		vault = m.removeTarget.Name
+	}
 	lines = append(lines,
-		fmt.Sprintf("Type: %s", m.removeTarget.Type),
-		fmt.Sprintf("Vault: %s", m.removeTarget.Vault),
-		fmt.Sprintf("Name: %s", m.removeTarget.Name),
-		shellWarnStyle.Render("⚠️  删除操作不可逆，将从远端仓库、IDE、本地缓存一并清理。"),
+		fmt.Sprintf("Bundle: %s", m.removeTarget.Name),
+		fmt.Sprintf("Vault: %s", vault),
+		fmt.Sprintf("成员数: %d", len(m.removeTarget.Members)),
+		shellWarnStyle.Render("⚠️  删除操作不可逆：将从远端仓库删除整包、清理 IDE 与本地 cache，并从 enabled_bundles 移除。"),
+		shellMutedStyle.Render("Bitwarden secrets bundle 不会自动删除，敏感文件需自行处理。"),
 		shellMutedStyle.Render("按 y 确认执行 · n/esc 取消返回选择器"),
 	)
 	return lines
@@ -1978,7 +2578,7 @@ func (m model) renderSettingsDetails() string {
 }
 
 func (m model) renderAssetList(visible []int) string {
-	lines := []string{shellTitleStyle.Render("Asset List")}
+	lines := []string{shellTitleStyle.Render("Bundle 列表")}
 	rows := m.visibleAssetRows()
 	if len(rows) == 0 {
 		return strings.Join(lines, "\n")
@@ -2059,7 +2659,7 @@ func (m model) renderAssetDetails() string {
 					status = "已选中（勾选后其成员会随 pull 一起下发）"
 				}
 				lines = append(lines,
-					fmt.Sprintf("Package: %s", bo.Name),
+					fmt.Sprintf("Bundle: %s", bo.Name),
 					fmt.Sprintf("Vault: %s", bo.Vault),
 					fmt.Sprintf("状态: %s", status),
 					fmt.Sprintf("成员: %d 个", len(bo.Members)),
@@ -2081,7 +2681,7 @@ func (m model) renderAssetDetails() string {
 				bo := m.assets.Bundles[row.bundleIndex]
 				mb := bo.Members[row.memberIndex]
 				lines = append(lines,
-					fmt.Sprintf("Package: %s", bo.Name),
+					fmt.Sprintf("Bundle: %s", bo.Name),
 					fmt.Sprintf("Type: %s", mb.Type),
 					fmt.Sprintf("Vault: %s", mb.Vault),
 					fmt.Sprintf("Name: %s", mb.Name),
@@ -2117,7 +2717,7 @@ func (m model) renderAssetDetails() string {
 		}
 	}
 	if m.savingAssets {
-		lines = append(lines, "", shellWarnStyle.Render("正在保存资产选择..."))
+		lines = append(lines, "", shellWarnStyle.Render("正在保存 bundle 选择..."))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -2833,8 +3433,16 @@ func (m model) currentAssetFilterLabel() string {
 	return filter
 }
 
-func (m model) isAssetsPage() bool {
-	return m.pages[m.pageIndex] == "Assets"
+func (m model) isHomePage() bool {
+	return m.pages[m.pageIndex] == "Home"
+}
+
+func (m model) hasVaultInferencePrompt() bool {
+	return m.vaultInference != nil && !m.vaultInferenceDismissed && !m.applyingVaultProject
+}
+
+func (m model) isBundlesPage() bool {
+	return m.pages[m.pageIndex] == "Bundles"
 }
 
 func (m model) isSettingsPage() bool {
@@ -2865,9 +3473,14 @@ func (m model) renderLogs(width, height int) string {
 
 func (m model) renderStatusBar(width int) string {
 	left := "q quit | j/k nav | l/h in-out | r refresh"
+	if m.isHomePage() && m.hasVaultInferencePrompt() {
+		left = "y/Enter 应用 · n 跳过 | q quit | r refresh"
+	} else if m.isHomePage() && m.applyingVaultProject {
+		left = "正在应用 vault project..."
+	}
 	right := fmt.Sprintf("page %s", m.pages[m.pageIndex])
-	if m.isAssetsPage() && m.assets != nil {
-		right = fmt.Sprintf("%s | %d/%d enabled", right, m.countEnabledAssets(), len(m.assets.Items))
+	if m.isBundlesPage() && m.assets != nil {
+		right = fmt.Sprintf("%s | %d/%d bundles", right, len(m.bundleSelection), len(m.assets.Bundles))
 		if m.assetsDirty {
 			right += " | modified"
 		}
@@ -2902,8 +3515,8 @@ func (m model) renderStatusBar(width int) string {
 		}
 	} else if m.isRunPage() {
 		right = fmt.Sprintf("%s | %s", right, m.runStatusLabel())
-		if m.runProgress != nil {
-			right += fmt.Sprintf(" | %s %d/%d", fallbackValue(m.runProgress.Phase, "working"), m.runProgress.Current, m.runProgress.Total)
+		if m.runProgress != nil && (m.runningPull || m.runningRemove) {
+			right += fmt.Sprintf(" | %s %d/%d", runPhaseLabel(m.runProgress.Phase), m.runProgress.Current, m.runProgress.Total)
 		}
 		if m.removeStage != "" {
 			right += " | remove-" + m.removeStage
@@ -2912,7 +3525,7 @@ func (m model) renderStatusBar(width int) string {
 			right += " | update-" + m.updateStage
 		}
 	} else if m.overview != nil {
-		right = fmt.Sprintf("%s | enabled %d", right, m.overview.EnabledCount)
+		right = fmt.Sprintf("%s | %d bundles", right, countOverviewEnabledBundles(m.overview))
 	}
 	// shellStatusBar 的 Padding(0, 1) 会在左右各占 1 列，实际可写内容宽度 = width - 2。
 	// 必须按内容区预算，否则在窄终端下会被 lipgloss 的 Width() 悄悄换行，右侧页面状态被截断。
@@ -2939,17 +3552,17 @@ func (m model) currentSummary() string {
 	if m.overviewErr != nil {
 		return "Overview unavailable"
 	}
-	if m.isAssetsPage() {
+	if m.isBundlesPage() {
 		if m.assetsErr != nil {
-			return "Asset selection unavailable"
+			return "Bundle selection unavailable"
 		}
 		if m.assets == nil {
-			return "Loading asset selection"
+			return "Loading bundle selection"
 		}
 		if m.assetsDirty {
-			return fmt.Sprintf("Unsaved selection: %d enabled", m.countEnabledAssets())
+			return fmt.Sprintf("Unsaved bundles: %d/%d enabled", len(m.bundleSelection), len(m.assets.Bundles))
 		}
-		return fmt.Sprintf("Assets ready, %d enabled", m.countEnabledAssets())
+		return fmt.Sprintf("Bundles ready, %d/%d enabled", len(m.bundleSelection), len(m.assets.Bundles))
 	}
 	if m.isSettingsPage() {
 		if m.settingsErr != nil {
@@ -2971,6 +3584,9 @@ func (m model) currentSummary() string {
 	}
 	if m.isRunPage() {
 		if m.runningPull {
+			if m.runMode == "push" {
+				return "Push running"
+			}
 			return "Pull running"
 		}
 		if m.runningRemove {
@@ -2980,10 +3596,16 @@ func (m model) currentSummary() string {
 			return "Update running"
 		}
 		if m.removeStage == "select" {
-			return "Selecting asset to remove"
+			return "Selecting bundle to remove"
 		}
 		if m.removeStage == "confirm" {
 			return "Confirming remove"
+		}
+		if m.pushStage == "summary" {
+			return "Confirming push (summary)"
+		}
+		if m.pushStage == "confirm" {
+			return "Confirming push (final)"
 		}
 		if m.updateStage == "checking" {
 			return "Checking for updates"
@@ -3001,6 +3623,9 @@ func (m model) currentSummary() string {
 			return "Last update succeeded"
 		}
 		if m.runErr != nil {
+			if m.runMode == "push" {
+				return "Last push failed"
+			}
 			return "Last pull failed"
 		}
 		if m.removeErr != nil {
@@ -3009,13 +3634,42 @@ func (m model) currentSummary() string {
 		if m.runResult != nil {
 			return fmt.Sprintf("Last pull: %d ok / %d failed", m.runResult.PulledCount, m.runResult.FailedCount)
 		}
+		if m.pushResult != nil {
+			return fmt.Sprintf("Last push: dec %d · secrets +%d/~%d",
+				m.pushResult.DecPushedCount, m.pushResult.SecretsCreatedCount, m.pushResult.SecretsUpdatedCount)
+		}
 		if m.removeResult != nil {
-			return fmt.Sprintf("Last remove: [%s] %s", m.removeResult.Type, m.removeResult.Name)
+			return fmt.Sprintf("Last remove: bundle %s", m.removeResult.BundleName)
 		}
 		return "Run page ready"
 	}
+	if m.isProjectPage() {
+		if m.projectSettingsErr != nil {
+			return "Project settings unavailable"
+		}
+		if m.projectSettings == nil {
+			return "Loading project settings"
+		}
+		if m.savingProjectSettings {
+			return "Saving project settings"
+		}
+		if m.projectSettingsDirty {
+			return "Unsaved project IDE settings"
+		}
+		mode := "inherit"
+		if m.projectSettingsOverride {
+			mode = "override"
+		}
+		return fmt.Sprintf("Project ready, IDE %s", mode)
+	}
 	if m.overview == nil {
 		return "Loading project state"
+	}
+	if m.applyingVaultProject {
+		return "Applying inferred vault project"
+	}
+	if m.hasVaultInferencePrompt() {
+		return fmt.Sprintf("Vault project %s inferred, awaiting confirmation", m.vaultInference.ProjectName)
 	}
 	if !m.overview.RepoConnected {
 		return "Repository not connected yet"
@@ -3023,23 +3677,82 @@ func (m model) currentSummary() string {
 	if !m.overview.ProjectConfigReady {
 		return "Project config missing"
 	}
-	return fmt.Sprintf("Repo ready, %d assets enabled", m.overview.EnabledCount)
+	return fmt.Sprintf("Repo ready, %d bundles enabled", countOverviewEnabledBundles(m.overview))
 }
 
-func suggestNextAction(overview *app.ProjectOverview) string {
+func formatProjectNameDisplay(overview *app.ProjectOverview) string {
+	if overview == nil {
+		return "<unknown>"
+	}
+	name := overview.ProjectName
+	if !overview.ProjectNameFromConfig {
+		return fmt.Sprintf("%s (目录推断，未写入 config)", name)
+	}
+	return name
+}
+
+func countOverviewEnabledBundles(overview *app.ProjectOverview) int {
+	if overview == nil {
+		return 0
+	}
+	if len(overview.Bundles) > 0 {
+		n := 0
+		for _, b := range overview.Bundles {
+			if b.Enabled {
+				n++
+			}
+		}
+		return n
+	}
+	return overview.EnabledBundleCount
+}
+
+func formatOverviewEnabledBundleNames(overview *app.ProjectOverview) string {
+	if overview == nil {
+		return "<无>"
+	}
+	var names []string
+	for _, b := range overview.Bundles {
+		if b.Enabled {
+			names = append(names, b.Name)
+		}
+	}
+	if len(names) == 0 {
+		if overview.EnabledBundleCount > 0 {
+			return fmt.Sprintf("<%d 个，详情见 Bundles 页>", overview.EnabledBundleCount)
+		}
+		return "<无>"
+	}
+	return strings.Join(names, ", ")
+}
+
+func suggestNextAction(overview *app.ProjectOverview, vaultInferencePending, vaultInferenceDismissed bool) string {
 	if overview == nil {
 		return "等待项目概览加载完成"
 	}
 	if !overview.RepoConnected {
 		return "先切到 Settings 页连接资产仓库"
 	}
+	if vaultInferencePending {
+		return "在 Home 页确认推断的 vault project（y 应用 / n 跳过），或切到 Bundles 页手动选择"
+	}
 	if !overview.ProjectConfigReady {
-		return "先切到 Assets 页选择资产并保存"
+		if vaultInferenceDismissed {
+			return "切到 Bundles 页选择 bundle 并保存"
+		}
+		return "先在 Home 页初始化 project，或切到 Bundles 页选择 bundle 并保存"
 	}
-	if overview.EnabledCount == 0 {
-		return "当前还没有启用资产，先切到 Assets 页选择并保存"
+	if countOverviewEnabledBundles(overview) == 0 && overview.EnabledCount == 0 {
+		return "当前还没有启用 bundle，请切到 Bundles 页勾选并保存"
 	}
-	return "可以切到 Run 页拉取资产到项目"
+	return "可以切到 Run 页执行 pull"
+}
+
+func formatInferenceBundleNames(bundles []string) string {
+	if len(bundles) == 0 {
+		return "<无>"
+	}
+	return strings.Join(bundles, ", ")
 }
 
 func (m model) runStatusLabel() string {
@@ -3057,9 +3770,13 @@ func (m model) runStatusLabel() string {
 	case m.updateErr != nil:
 		return shellWarnStyle.Render("Update 失败")
 	case m.removeStage == "select":
-		return shellMutedStyle.Render("Remove 选择中")
+		return shellWarnStyle.Render("Remove · 选择 bundle")
 	case m.removeStage == "confirm":
-		return shellWarnStyle.Render("Remove 确认中")
+		return shellWarnStyle.Render("Remove · 确认删除")
+	case m.pushStage == "summary":
+		return shellWarnStyle.Render("Push · 摘要确认")
+	case m.pushStage == "confirm":
+		return shellWarnStyle.Render("Push · 最终确认")
 	case m.updateStage == "checking":
 		return shellMutedStyle.Render("Update 检查中")
 	case m.updateStage == "confirm":
@@ -3069,6 +3786,8 @@ func (m model) runStatusLabel() string {
 			return shellWarnStyle.Render("Update 失败")
 		}
 		return shellGoodStyle.Render("Update 已完成")
+	case m.pushResult != nil:
+		return shellGoodStyle.Render("Push 已完成")
 	case m.runResult != nil:
 		return shellGoodStyle.Render("已完成")
 	case m.removeResult != nil:

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
@@ -25,6 +27,18 @@ func setEnvForProjectTest(t *testing.T, key, value string) {
 			_ = os.Unsetenv(key)
 		}
 	})
+}
+
+func useStubSecretsSession(t *testing.T) {
+	t.Helper()
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+	orig := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{}}
+	}
+	t.Cleanup(func() { secretsClientFactory = orig })
 }
 
 func runGitProjectTest(t *testing.T, dir string, args ...string) string {
@@ -242,5 +256,200 @@ func TestPrepareProjectConfigInitSkipsWriteWhenRepoHasNoAssets(t *testing.T) {
 	}
 	if _, err := os.Stat(prepared.VarsPath); !os.IsNotExist(err) {
 		t.Fatalf("无资产时不应写入 vars 文件: %v", err)
+	}
+}
+
+func TestInferVaultProjectDoesNotWriteConfig(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"projects/dec-app.yaml": `name: dec-app
+bundles:
+  - vikunja
+  - cli
+`,
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := filepath.Join(t.TempDir(), "dec-app")
+	if err := os.MkdirAll(projectRoot, 0755); err != nil {
+		t.Fatalf("创建项目目录失败: %v", err)
+	}
+
+	inference, err := InferVaultProject(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("InferVaultProject() 失败: %v", err)
+	}
+	if inference == nil {
+		t.Fatal("应推断出 vault project")
+	}
+	if inference.ProjectName != "dec-app" {
+		t.Fatalf("ProjectName = %q, 期望 dec-app", inference.ProjectName)
+	}
+	if len(inference.EnabledBundles) != 2 {
+		t.Fatalf("EnabledBundles = %#v, 期望 2 个", inference.EnabledBundles)
+	}
+
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if mgr.Exists() {
+		t.Fatal("推断阶段不应写入 .dec/config.yaml")
+	}
+}
+
+func TestTryAutoApplyVaultProjectAppliesWhenNoConfig(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"projects/dec-app.yaml": `name: dec-app
+bundles:
+  - vikunja
+  - cli
+ides:
+  - cursor
+editor: code --wait
+`,
+		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+		"bundles/vikunja/bundle.yaml": `name: vikunja
+members:
+  - skill/vikunja-workflow
+`,
+		"bundles/cli/bundle.yaml": `name: cli
+members:
+  - rule/cli-release-rules
+`,
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := filepath.Join(t.TempDir(), "dec-app")
+	if err := os.MkdirAll(projectRoot, 0755); err != nil {
+		t.Fatalf("创建项目目录失败: %v", err)
+	}
+
+	result, err := TryAutoApplyVaultProject(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("TryAutoApplyVaultProject() 失败: %v", err)
+	}
+	if !result.Applied {
+		t.Fatal("应自动应用 vault project")
+	}
+	if result.ProjectName != "dec-app" {
+		t.Fatalf("ProjectName = %q, 期望 dec-app", result.ProjectName)
+	}
+	if len(result.EnabledBundles) != 2 {
+		t.Fatalf("EnabledBundles = %#v, 期望 2 个", result.EnabledBundles)
+	}
+
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if !mgr.Exists() {
+		t.Fatal("应写入 .dec/config.yaml")
+	}
+	loaded, err := mgr.LoadProjectConfig()
+	if err != nil {
+		t.Fatalf("LoadProjectConfig() 失败: %v", err)
+	}
+	if loaded.ProjectName != "dec-app" {
+		t.Fatalf("ProjectName = %q, 期望 dec-app", loaded.ProjectName)
+	}
+	if len(loaded.EnabledBundles) != 2 {
+		t.Fatalf("EnabledBundles = %#v, 期望 2 个", loaded.EnabledBundles)
+	}
+	if loaded.Available == nil || loaded.Available.Count() < 2 {
+		t.Fatalf("Available.Count() = %d, 期望至少 2", loaded.Available.Count())
+	}
+	if _, err := os.Stat(result.VarsPath); err != nil {
+		t.Fatalf("应创建 vars 模板: %v", err)
+	}
+}
+
+func TestTryAutoApplyVaultProjectSkipsWhenProjectNameSet(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"projects/dec-app.yaml": `name: dec-app
+bundles:
+  - vikunja
+`,
+		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := filepath.Join(t.TempDir(), "dec-app")
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "dec-app",
+		EnabledBundles: []string{"custom"},
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig() 失败: %v", err)
+	}
+
+	result, err := TryAutoApplyVaultProject(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("TryAutoApplyVaultProject() 失败: %v", err)
+	}
+	if result.Applied {
+		t.Fatal("project_name 已设置时不应再次自动应用")
+	}
+
+	loaded, err := mgr.LoadProjectConfig()
+	if err != nil {
+		t.Fatalf("LoadProjectConfig() 失败: %v", err)
+	}
+	if len(loaded.EnabledBundles) != 1 || loaded.EnabledBundles[0] != "custom" {
+		t.Fatalf("EnabledBundles 不应被覆盖, got %#v", loaded.EnabledBundles)
+	}
+}
+
+func TestTryAutoApplyVaultProjectSkipsWhenVaultProjectMissing(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := filepath.Join(t.TempDir(), "missing-project")
+	if err := os.MkdirAll(projectRoot, 0755); err != nil {
+		t.Fatalf("创建项目目录失败: %v", err)
+	}
+
+	result, err := TryAutoApplyVaultProject(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("TryAutoApplyVaultProject() 失败: %v", err)
+	}
+	if result.Applied {
+		t.Fatal("vault 无同名 project 时不应写入配置")
+	}
+
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if mgr.Exists() {
+		t.Fatal("不应创建 .dec/config.yaml")
+	}
+}
+
+func TestNeedsVaultProjectAutoApply(t *testing.T) {
+	projectRoot := t.TempDir()
+	needs, err := NeedsVaultProjectAutoApply(projectRoot)
+	if err != nil {
+		t.Fatalf("NeedsVaultProjectAutoApply() 失败: %v", err)
+	}
+	if !needs {
+		t.Fatal("无 config 时应需要自动匹配")
+	}
+
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "my-app"}); err != nil {
+		t.Fatalf("SaveProjectConfig() 失败: %v", err)
+	}
+	needs, err = NeedsVaultProjectAutoApply(projectRoot)
+	if err != nil {
+		t.Fatalf("NeedsVaultProjectAutoApply() 失败: %v", err)
+	}
+	if needs {
+		t.Fatal("project_name 已设置时不应需要自动匹配")
 	}
 }

@@ -36,6 +36,10 @@ func ValidateNoOverlap(projectRoot string, secretRelativePaths []string) error {
 			conflicts = append(conflicts, rel)
 			continue
 		}
+		if strings.Contains(rel, "/.dec/") {
+			conflicts = append(conflicts, rel)
+			continue
+		}
 		if _, ok := decSet[rel]; ok {
 			conflicts = append(conflicts, rel)
 		}

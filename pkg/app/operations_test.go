@@ -63,6 +63,7 @@ name: another-workflow
 
 func TestPullProjectAssetsInstallsAssetsAndReportsProgress(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/default/skills/project-workflow/SKILL.md": `---
 name: project-workflow
@@ -137,6 +138,7 @@ name: project-workflow
 
 func TestPullProjectAssetsInstallsBundleMembers(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/combo/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
 		"bundles/combo/rules/bundle-rule.mdc":        "---\ndescription: rule\n---\n",

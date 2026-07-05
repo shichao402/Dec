@@ -145,7 +145,7 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 			ptyStartupTimeout, anchor, err, snapshot)
 	}
 
-	tabTargets := []string{"Assets", "Project", "Run", "Settings", "Home"}
+	tabTargets := []string{"Bundles", "Project", "Run", "Settings", "Home"}
 	for _, target := range tabTargets {
 		if _, err := ptmx.Write([]byte("\t")); err != nil {
 			_ = cmd.Process.Kill()

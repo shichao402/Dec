@@ -80,22 +80,25 @@ func snapshotHomeModel(width int) model {
 	m.width = width
 	m.height = snapshotHeight
 	m.overview = &app.ProjectOverview{
-		ProjectRoot:        "/tmp/dec-project",
-		RepoConnected:      true,
+		ProjectRoot:           "/tmp/dec-project",
+		ProjectName:           "dec-project",
+		ProjectNameFromConfig: true,
+		RepoConnected:         true,
 		RepoRemoteURL:      "git@github.com:demo/dec.git",
 		ProjectConfigPath:  "/tmp/dec-project/.dec/config.yaml",
 		ProjectConfigReady: true,
 		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
 		VarsFileReady:      true,
 		AvailableCount:     5,
-		EnabledCount:       2,
+		EnabledCount:          2,
+		EnabledBundleCount:    2,
 		IDEs:               []string{"codex", "cursor"},
 		Editor:             "code --wait",
 	}
 	return m
 }
 
-func snapshotAssetsModel(width int) model {
+func snapshotBundlesModel(width int) model {
 	m := snapshotHomeModel(width)
 	m.pageIndex = 1
 	m.focus = focusContent
@@ -145,7 +148,7 @@ func snapshotRunModel(width int) model {
 
 func snapshotSettingsModel(width int) model {
 	m := snapshotHomeModel(width)
-	m.pageIndex = 4
+	m.pageIndex = 5
 	m.settings = &app.GlobalSettingsState{
 		ConfigPath:       "/tmp/.dec/config.yaml",
 		VarsPath:         "/tmp/.dec/local/vars.yaml",
@@ -173,13 +176,13 @@ func TestSnapshotHome(t *testing.T) {
 	}
 }
 
-// TestSnapshotAssets 固定 Assets 页在基线宽度下的完整渲染。
-func TestSnapshotAssets(t *testing.T) {
+// TestSnapshotBundles 固定 Bundles 页在基线宽度下的完整渲染。
+func TestSnapshotBundles(t *testing.T) {
 	for _, w := range snapshotWidths {
 		w := w
 		t.Run(widthLabel(w), func(t *testing.T) {
-			m := snapshotAssetsModel(w)
-			assertSnapshot(t, "assets_"+widthLabel(w), m.View())
+			m := snapshotBundlesModel(w)
+			assertSnapshot(t, "bundles_"+widthLabel(w), m.View())
 		})
 	}
 }
@@ -202,6 +205,59 @@ func TestSnapshotSettings(t *testing.T) {
 		t.Run(widthLabel(w), func(t *testing.T) {
 			m := snapshotSettingsModel(w)
 			assertSnapshot(t, "settings_"+widthLabel(w), m.View())
+		})
+	}
+}
+
+func snapshotDeleteModel(width int) model {
+	m := snapshotHomeModel(width)
+	m.pageIndex = 4
+	m.focus = focusContent
+	m.deleteCandidatesLoaded = true
+	m.deleteCandidates = []app.DeleteCandidate{
+		{
+			Kind: app.DeleteKindSecret, Label: "[secret] .secrets/Dec/pkv.include",
+			SecretPath: ".secrets/Dec/pkv.include", SecretsBundle: "Dec",
+			GroupBundle: "_project", GroupOrder: -1, GroupTitle: "Dec (project)",
+		},
+		{
+			Kind: app.DeleteKindDecAsset, Label: "[dec/skill] demo / default", Type: "skill", Name: "demo", Vault: "default",
+			GroupBundle: "default", GroupOrder: 0, GroupTitle: "default (bundle)",
+		},
+		{
+			Kind: app.DeleteKindDecAsset, Label: "[dec/rule] demo-rule / default", Type: "rule", Name: "demo-rule", Vault: "default",
+			GroupBundle: "default", GroupOrder: 0, GroupTitle: "default (bundle)",
+		},
+		{
+			Kind: app.DeleteKindSecret, Label: "[secret] .secrets/vikunja_workflow/mise/conf.d/vikunja.toml",
+			SecretPath: ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
+			GroupBundle: "vikunja", GroupOrder: 1, GroupTitle: "vikunja (bundle)",
+		},
+		{
+			Kind: app.DeleteKindBundle, Label: "[bundle] vikunja / vikunja · 2 成员", BundleName: "vikunja", Vault: "vikunja",
+			GroupBundle: "vikunja", GroupOrder: 1, GroupTitle: "vikunja (bundle)",
+		},
+	}
+	return m
+}
+
+func TestSnapshotDelete(t *testing.T) {
+	for _, w := range snapshotWidths {
+		w := w
+		t.Run(widthLabel(w), func(t *testing.T) {
+			m := snapshotDeleteModel(w)
+			assertSnapshot(t, "delete_"+widthLabel(w), m.View())
+		})
+	}
+}
+
+func TestViewAtBaselineWidths_DeleteNoOverflow(t *testing.T) {
+	for _, width := range widthBaselines {
+		width := width
+		t.Run(widthLabel(width), func(t *testing.T) {
+			m := snapshotDeleteModel(width)
+			view := m.View()
+			assertNoLineOverflowsWidth(t, "Delete", view, width)
 		})
 	}
 }

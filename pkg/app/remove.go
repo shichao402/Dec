@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/pkg/config"
@@ -35,6 +36,201 @@ type RemoveAssetResult struct {
 
 // ErrRemoveNotConfirmed 调用方没有完成二次确认。
 var ErrRemoveNotConfirmed = fmt.Errorf("remove 未确认")
+
+// RemoveBundleInput 描述一次 bundle 级 remove 操作的输入。
+type RemoveBundleInput struct {
+	ProjectRoot string
+	BundleName  string
+	// Members 为 bundle 成员（用于 IDE/cache 清理）；为空时在远端删除前从 repo 扫描。
+	Members   []AssetSelectionItem
+	Confirmed bool
+}
+
+// RemoveBundleResult 汇总一次 bundle 级 remove 操作的结果。
+type RemoveBundleResult struct {
+	ProjectRoot      string
+	BundleName       string
+	MemberCount      int
+	RemovedFromIDEs  []string
+	RemovedFromCache bool
+	ConfigUpdated    bool
+	VersionCommit    string
+}
+
+// RemoveBundle 执行 bundle 级删除：远端删除 bundles/<name>/、清理 IDE / cache / 项目配置。
+//
+// 不会自动删除 Bitwarden secrets bundle；敏感文件需用户自行处理。
+func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, error) {
+	reporter = defaultReporter(reporter)
+
+	projectRoot := strings.TrimSpace(input.ProjectRoot)
+	bundleName := strings.TrimSpace(input.BundleName)
+
+	emit(reporter, EventInfo, "remove.prepare", fmt.Sprintf("🗑  准备删除 bundle %s", bundleName), nil)
+
+	if projectRoot == "" {
+		return nil, fmt.Errorf("项目根目录不能为空")
+	}
+	if bundleName == "" {
+		return nil, fmt.Errorf("bundle 名称不能为空")
+	}
+	if !input.Confirmed {
+		return nil, ErrRemoveNotConfirmed
+	}
+
+	result := &RemoveBundleResult{
+		ProjectRoot: projectRoot,
+		BundleName:  bundleName,
+	}
+
+	members := append([]AssetSelectionItem(nil), input.Members...)
+
+	// Stage 1: 远端删除整包（最关键，失败直接返回错误）。
+	emit(reporter, EventInfo, "remove.repo", "连接资产仓库...", nil)
+	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
+		repoDir := tx.WorkDir()
+		bundlePath := filepath.Join(repoDir, types.VaultBundlesDir, bundleName)
+		if _, err := os.Stat(bundlePath); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("未找到 bundle %q", bundleName)
+			}
+			return fmt.Errorf("检查 bundle 目录失败: %w", err)
+		}
+		if len(members) == 0 {
+			members = bundleSelectionItemsFromRepo(repoDir, bundleName)
+		}
+		if err := os.RemoveAll(bundlePath); err != nil {
+			return fmt.Errorf("删除远端 bundle 失败: %w", err)
+		}
+		commitMsg := fmt.Sprintf("remove bundle: %s", bundleName)
+		if err := tx.CommitAndPush(commitMsg); err != nil {
+			return fmt.Errorf("提交失败: %w", err)
+		}
+		result.VersionCommit = tx.CommitHash()
+		emit(reporter, EventInfo, "remove.repo", fmt.Sprintf("✅ 已从远端删除 bundle %s", bundleName), nil)
+		return nil
+	}); err != nil {
+		emit(reporter, EventError, "remove.repo", err.Error(), nil)
+		return nil, err
+	}
+
+	result.MemberCount = len(members)
+
+	// Stage 2: IDE 清理（尽力而为）。
+	projectIDEs := resolveProjectIDEs(projectRoot, reporter)
+	removedIDEs := make(map[string]struct{})
+	for _, member := range members {
+		for _, ideImpl := range projectIDEs {
+			removed, err := removeAssetFromIDE(member.Type, member.Name, projectRoot, ideImpl)
+			if err != nil {
+				emit(reporter, EventWarn, "remove.ide", fmt.Sprintf("IDE %s 清理 %s 失败: %v", ideImpl.Name(), member.Name, err), nil)
+				continue
+			}
+			if removed {
+				removedIDEs[ideImpl.Name()] = struct{}{}
+			}
+		}
+	}
+	if len(removedIDEs) > 0 {
+		ideNames := make([]string, 0, len(removedIDEs))
+		for name := range removedIDEs {
+			ideNames = append(ideNames, name)
+		}
+		sort.Strings(ideNames)
+		result.RemovedFromIDEs = ideNames
+		emit(reporter, EventInfo, "remove.ide", fmt.Sprintf("🧹 已清理 IDE: %s", strings.Join(ideNames, ", ")), nil)
+	}
+
+	// Stage 3: 本地 bundle cache 清理。
+	cacheBundleDir := filepath.Join(projectRoot, ".dec", "cache", bundleName)
+	if _, err := os.Stat(cacheBundleDir); err == nil {
+		if err := os.RemoveAll(cacheBundleDir); err != nil {
+			emit(reporter, EventWarn, "remove.cache", fmt.Sprintf("缓存清理失败: %v", err), nil)
+		} else {
+			result.RemovedFromCache = true
+			emit(reporter, EventInfo, "remove.cache", "🧹 已清理本地 bundle 缓存", nil)
+		}
+	}
+
+	// Stage 4: 项目配置更新。
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if projectConfig, err := mgr.LoadProjectConfig(); err == nil {
+		changed := false
+		if updated, ok := removeEnabledBundle(projectConfig.EnabledBundles, bundleName); ok {
+			projectConfig.EnabledBundles = updated
+			changed = true
+		}
+		for _, member := range members {
+			if projectConfig.Enabled != nil && projectConfig.Enabled.RemoveAsset(member.Type, member.Name, member.Vault) {
+				changed = true
+			}
+			if projectConfig.Available != nil && projectConfig.Available.RemoveAsset(member.Type, member.Name, member.Vault) {
+				changed = true
+			}
+		}
+		if changed {
+			if err := mgr.SaveProjectConfig(projectConfig); err != nil {
+				emit(reporter, EventWarn, "remove.config", fmt.Sprintf("项目配置更新失败: %v", err), nil)
+			} else {
+				result.ConfigUpdated = true
+				emit(reporter, EventInfo, "remove.config", "📝 已更新项目配置", nil)
+			}
+		}
+	}
+
+	summary := fmt.Sprintf("✅ 已删除 bundle %s（%d 个成员）", bundleName, result.MemberCount)
+	emit(reporter, EventInfo, "remove.finish", summary, nil)
+	return result, nil
+}
+
+func removeEnabledBundle(bundles []string, name string) ([]string, bool) {
+	changed := false
+	out := make([]string, 0, len(bundles))
+	for _, b := range bundles {
+		if b == name {
+			changed = true
+			continue
+		}
+		out = append(out, b)
+	}
+	return out, changed
+}
+
+func bundleSelectionItemsFromRepo(repoDir, bundleName string) []AssetSelectionItem {
+	refs := listBundleAssetMembers(repoDir, bundleName)
+	items := make([]AssetSelectionItem, 0, len(refs))
+	for _, ref := range refs {
+		parts := strings.SplitN(ref, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		itemType := memberPrefixToAssetType(parts[0])
+		if itemType == "" {
+			continue
+		}
+		items = append(items, AssetSelectionItem{
+			Type:  itemType,
+			Name:  parts[1],
+			Vault: bundleName,
+		})
+	}
+	return items
+}
+
+func memberPrefixToAssetType(prefix string) string {
+	switch prefix {
+	case "skills":
+		return "skill"
+	case "commands":
+		return "command"
+	case "rules":
+		return "rule"
+	case "mcp":
+		return "mcp"
+	default:
+		return ""
+	}
+}
 
 // RemoveAsset 执行一次资产删除：远端 commit、清理 IDE / cache / 项目配置。
 //

@@ -1,5 +1,24 @@
 {
   "mcpServers": {
+    "dec-pkv-mcp": {
+      "command": "pkv",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "PKV_WORKSPACE_ROOT": "${workspaceFolder}"
+      }
+    },
+    "dec-tencent-cloud": {
+      "command": "mise",
+      "args": [
+        "exec",
+        "node@20",
+        "--",
+        "node",
+        "${workspaceFolder}/.dec/cache/tencent-cloud/skills/tencent-cloud/server/dist/index.js"
+      ]
+    },
     "dec-vikunja-mcp": {
       "command": "mise",
       "args": [
