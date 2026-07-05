@@ -1,6 +1,3 @@
-<!-- 本文件由 `dec pull` 从 .dec/cache/cli/ 渲染生成，请勿直接编辑。
-     修改流程：编辑 .dec/cache/cli/... → dec push → dec pull 验证 -->
-
 ---
 description: CLI 项目版本号管理与版本到构建契约规则（通用，无语言绑定，无 CI/CD 平台耦合）
 globs: version.json, package.json, pyproject.toml, Cargo.toml, Makefile, scripts/build.sh, scripts/build*.sh, **/version/**, **/build/**
@@ -42,8 +39,8 @@ alwaysApply: false
 
 格式：`vMAJOR.MINOR.PATCH[-PRERELEASE]`
 
-- **PATCH**：向后兼容的修复
-- **MINOR**：向后兼容的新功能
+- **PATCH**：不影响现有用法的修复
+- **MINOR**：不影响现有用法的新功能
 - **MAJOR**：破坏性变更
 
 示例：`v1.0.0`、`v2.1.0-beta.1`、`v1.2.3-rc.2`

@@ -110,8 +110,8 @@ func TestPrepareProjectConfigInitRequiresConnectedRepo(t *testing.T) {
 func TestPrepareProjectConfigInitPreservesExistingConfigAndWritesFiles(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
-		"cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -182,11 +182,11 @@ func TestPrepareProjectConfigInitPreservesExistingConfigAndWritesFiles(t *testin
 	}
 }
 
-func TestPrepareProjectConfigInitPreservesEnabledBundlesAndDiscoversPackages(t *testing.T) {
+func TestPrepareProjectConfigInitPreservesEnabledBundlesAndDiscoversBundles(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -210,8 +210,8 @@ func TestPrepareProjectConfigInitPreservesEnabledBundlesAndDiscoversPackages(t *
 	if len(prepared.ProjectConfig.EnabledBundles) != 1 || prepared.ProjectConfig.EnabledBundles[0] != "vikunja" {
 		t.Fatalf("EnabledBundles 应保留, got %v", prepared.ProjectConfig.EnabledBundles)
 	}
-	if prepared.PackageCount < 2 {
-		t.Fatalf("PackageCount = %d, 期望至少 2", prepared.PackageCount)
+	if prepared.BundleCount < 2 {
+		t.Fatalf("BundleCount = %d, 期望至少 2", prepared.BundleCount)
 	}
 }
 

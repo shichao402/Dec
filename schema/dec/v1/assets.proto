@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package dec.v1;
+
+option go_package = "github.com/shichao402/Dec/schema/dec/v1;decv1";
+
+// AssetInventory 对应 ProjectConfig 中 available / enabled 的 v2 嵌套结构：
+// vault -> item -> enabled asset types。
+message AssetInventory {
+  map<string, VaultAssets> vaults = 1;
+}
+
+message VaultAssets {
+  map<string, AssetTypeFlags> items = 1;
+}
+
+message AssetTypeFlags {
+  bool skill = 1;
+  bool command = 2;
+  bool rule = 3;
+  bool mcp = 4;
+}
+
+enum AssetType {
+  ASSET_TYPE_UNSPECIFIED = 0;
+  ASSET_TYPE_SKILL = 1;
+  ASSET_TYPE_COMMAND = 2;
+  ASSET_TYPE_RULE = 3;
+  ASSET_TYPE_MCP = 4;
+}
+
+message AssetRef {
+  string name = 1;
+  string vault = 2;
+  AssetType type = 3;
+}
+
+// Bundle 描述 vault 内声明的一组资产启用单位。
+// Wire format：Git Vault 中 bundles/<name>/bundle.yaml（YAML）。
+// Project.bundles 引用的是 bundle 短名，与 bundles/<name>/ 目录名一致。
+message Bundle {
+  string name = 1;
+  string description = 2;
+  repeated string members = 3; // 格式 "<type>/<name>"，如 skills/foo、mcp/bar
+}
+
+// BundleMember 是解析后的 bundle 成员引用（内存视图，通常不单独落盘）。
+message BundleMember {
+  AssetType type = 1;
+  string name = 2;
+}
+
+message VarsConfig {
+  map<string, string> vars = 1;
+  AssetVars assets = 2;
+}
+
+message AssetVars {
+  map<string, AssetVarEntry> skills = 1;
+  map<string, AssetVarEntry> commands = 2;
+  map<string, AssetVarEntry> rules = 3;
+  map<string, AssetVarEntry> mcps = 4;
+}
+
+message AssetVarEntry {
+  map<string, string> vars = 1;
+}
+
+// MCPConfig 表示 IDE 的 MCP 配置片段（JSON 或 TOML 段）。
+message MCPConfig {
+  map<string, MCPServer> mcp_servers = 1 [json_name = "mcpServers"];
+}
+
+message MCPServer {
+  string command = 1;
+  repeated string args = 2;
+  map<string, string> env = 3;
+  repeated string env_vars = 4 [json_name = "env_vars"];
+  string cwd = 5;
+  string url = 6;
+  string bearer_token_env_var = 7 [json_name = "bearer_token_env_var"];
+  map<string, string> http_headers = 8 [json_name = "http_headers"];
+  map<string, string> env_http_headers = 9 [json_name = "env_http_headers"];
+  optional int32 startup_timeout_sec = 10 [json_name = "startup_timeout_sec"];
+  optional int32 tool_timeout_sec = 11 [json_name = "tool_timeout_sec"];
+  optional bool enabled = 12;
+  optional bool required = 13;
+  repeated string enabled_tools = 14 [json_name = "enabled_tools"];
+  repeated string disabled_tools = 15 [json_name = "disabled_tools"];
+  repeated string scopes = 16;
+}

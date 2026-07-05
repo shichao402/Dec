@@ -21,8 +21,8 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// setupRepoWithVault 创建临时 repo 目录，并在给定 vault 下写入若干文件。
-// files 的 key 相对于 repoDir，例如 "default/skills/foo/SKILL.md"。
+// setupRepoWithVault 创建临时 repo 目录，并在 bundles/ 下写入若干文件。
+// files 的 key 相对于 repoDir，例如 "bundles/default/skills/foo/SKILL.md"。
 func setupRepoWithVault(t *testing.T, files map[string]string) string {
 	t.Helper()
 	repoDir := t.TempDir()
@@ -41,8 +41,8 @@ func captureEvents(events *[]OperationEvent) Reporter {
 
 func TestResolveDesiredAssets_NilConfigScansBundles(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
 	})
 
 	got, err := resolveDesiredAssets(nil, repoDir, nil)
@@ -59,7 +59,7 @@ func TestResolveDesiredAssets_NilConfigScansBundles(t *testing.T) {
 
 func TestResolveDesiredAssets_StandaloneOnly(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"bundles/default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
 	})
 	cfg := &types.ProjectConfig{
 		Enabled: &types.AssetList{
@@ -79,18 +79,18 @@ func TestResolveDesiredAssets_StandaloneOnly(t *testing.T) {
 		t.Fatalf("Sources[%s] = %#v, 期望 [standalone]", key, sources)
 	}
 	if len(got.Bundles) != 1 || got.Bundles[0].Name != "default" {
-		t.Fatalf("Bundles = %#v, 期望 1 个隐式 default package", got.Bundles)
+		t.Fatalf("Bundles = %#v, 期望 1 个隐式 default bundle", got.Bundles)
 	}
 	if got.Bundles[0].Enabled {
-		t.Fatal("未在 enabled_bundles 中引用时不应标记 package 为 Enabled")
+		t.Fatal("未在 enabled_bundles 中引用时不应标记 bundle 为 Enabled")
 	}
 }
 
 func TestResolveDesiredAssets_BundleExpandsMembers(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"default/rules/bar.mdc":       "rule bar\n",
-		"default/bundles/combo.yaml": `name: combo
+		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"bundles/combo/rules/bar.mdc":       "rule bar\n",
+		"bundles/combo/bundle.yaml": `name: combo
 description: combo bundle
 members:
   - skill/foo
@@ -118,9 +118,9 @@ members:
 		}
 	}
 
-	// combo 启用 + default 隐式 package 未启用
-	if len(got.Bundles) != 2 {
-		t.Fatalf("Bundles len = %d, 期望 2（combo + default 隐式 package）", len(got.Bundles))
+	// combo 启用；default 无资产故不合成
+	if len(got.Bundles) != 1 {
+		t.Fatalf("Bundles len = %d, 期望 1（combo）", len(got.Bundles))
 	}
 	enabledCount := 0
 	for _, b := range got.Bundles {
@@ -135,8 +135,8 @@ members:
 
 func TestResolveDesiredAssets_BundleMissingMemberWarns(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"default/bundles/combo.yaml": `name: combo
+		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"bundles/combo/bundle.yaml": `name: combo
 members:
   - skill/foo
   - rule/ghost
@@ -172,15 +172,15 @@ members:
 
 func TestResolveDesiredAssets_BundleAndStandaloneOverlap(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"default/bundles/combo.yaml": `name: combo
+		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"bundles/combo/bundle.yaml": `name: combo
 members:
   - skill/foo
 `,
 	})
 	cfg := &types.ProjectConfig{
 		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "foo", Vault: "default"}},
+			Skills: []types.AssetRef{{Name: "foo", Vault: "combo"}},
 		},
 		EnabledBundles: []string{"combo"},
 	}
@@ -205,7 +205,7 @@ members:
 
 func TestResolveDesiredAssets_UnknownBundleWarns(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"bundles/default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
 	})
 	cfg := &types.ProjectConfig{
 		EnabledBundles: []string{"does-not-exist"},
@@ -233,14 +233,15 @@ func TestResolveDesiredAssets_UnknownBundleWarns(t *testing.T) {
 
 func TestResolveDesiredAssets_MultipleBundlesDedup(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"default/skills/shared/SKILL.md": "---\nname: shared\n---\n",
-		"default/skills/onlyA/SKILL.md":  "---\nname: onlyA\n---\n",
-		"default/bundles/a.yaml": `name: a
+		"bundles/a/skills/shared/SKILL.md": "---\nname: shared\n---\n",
+		"bundles/a/skills/onlyA/SKILL.md":  "---\nname: onlyA\n---\n",
+		"bundles/a/bundle.yaml": `name: a
 members:
   - skill/shared
   - skill/onlyA
 `,
-		"default/bundles/b.yaml": `name: b
+		"bundles/b/skills/shared/SKILL.md": "---\nname: shared\n---\n",
+		"bundles/b/bundle.yaml": `name: b
 members:
   - skill/shared
 `,
@@ -253,24 +254,33 @@ members:
 	if err != nil {
 		t.Fatalf("resolveDesiredAssets() 失败: %v", err)
 	}
-	if len(got.Assets) != 2 {
-		t.Fatalf("Assets len = %d, 期望 2（shared + onlyA）", len(got.Assets))
+	if len(got.Assets) != 3 {
+		t.Fatalf("Assets len = %d, 期望 3（shared@a + onlyA@a + shared@b）", len(got.Assets))
 	}
 
-	// shared 同时来自 bundle/a 和 bundle/b
-	var foundShared bool
+	// shared@a 来自 bundle/a，shared@b 来自 bundle/b（不同 bundle 目录下为独立资产）
+	var sharedA, sharedB bool
 	for _, a := range got.Assets {
-		if a.Name == "shared" {
-			foundShared = true
-			sources := append([]string(nil), got.Sources[assetKey(a)]...)
-			sort.Strings(sources)
-			if len(sources) != 2 || sources[0] != "bundle/a" || sources[1] != "bundle/b" {
-				t.Fatalf("shared sources = %#v, 期望 [bundle/a bundle/b]", sources)
+		if a.Name != "shared" {
+			continue
+		}
+		sources := append([]string(nil), got.Sources[assetKey(a)]...)
+		sort.Strings(sources)
+		switch a.Vault {
+		case "a":
+			sharedA = true
+			if len(sources) != 1 || sources[0] != "bundle/a" {
+				t.Fatalf("shared@a sources = %#v, 期望 [bundle/a]", sources)
+			}
+		case "b":
+			sharedB = true
+			if len(sources) != 1 || sources[0] != "bundle/b" {
+				t.Fatalf("shared@b sources = %#v, 期望 [bundle/b]", sources)
 			}
 		}
 	}
-	if !foundShared {
-		t.Fatalf("未在目标集中找到 shared，Assets: %#v", got.Assets)
+	if !sharedA || !sharedB {
+		t.Fatalf("未在目标集中找到 shared@a 与 shared@b，Assets: %#v", got.Assets)
 	}
 }
 
@@ -300,8 +310,8 @@ func TestResolveDesiredAssets_SkipsDotDirs(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		".git/config":                    "",
 		".dec/whatever":                  "",
-		"default/skills/foo/SKILL.md":    "---\nname: foo\n---\n",
-		"default/bundles/combo.yaml":     "name: combo\nmembers:\n  - skill/foo\n",
+		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"bundles/combo/bundle.yaml":     "name: combo\nmembers:\n  - skill/foo\n",
 	})
 	cfg := &types.ProjectConfig{EnabledBundles: []string{"combo"}}
 
@@ -309,10 +319,10 @@ func TestResolveDesiredAssets_SkipsDotDirs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveDesiredAssets() 失败: %v", err)
 	}
-	// 只应发现 default vault 的 bundle。
+	// 只应发现 combo bundle。
 	for _, b := range got.Bundles {
 		if b.VaultName == ".git" || b.VaultName == ".dec" {
-			t.Fatalf("隐藏目录被误当作 vault: %+v", b)
+			t.Fatalf("隐藏目录被误当作 bundle: %+v", b)
 		}
 	}
 }

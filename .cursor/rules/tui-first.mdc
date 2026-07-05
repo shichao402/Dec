@@ -1,0 +1,46 @@
+---
+description: Dec 以 TUI 为第一交互入口；避免新增独立 CLI 子命令
+alwaysApply: true
+---
+
+# TUI 优先
+
+Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运行 `dec` 在交互式终端中启动 TUI Shell。
+
+## 设计原则
+
+- 新功能先设计 TUI 页面/快捷键/消息流，再实现 `pkg/app/` 业务逻辑。
+- **不要新增**独立 Cobra 子命令（pull、config、push 等用户面能力均在 TUI）。
+- 保留最小 CLI 面：`dec --version`、内部 hidden 命令（如 `__freshness-check`）、非 TTY 时的简短提示。
+- Secrets / Bitwarden / SSH / env 部署等操作通过 TUI 触达（Settings、Run、Assets 等页）。
+- **Run** 页 pull：解析 project bundle 列表 → 拉 Dec Git bundle（→ `.dec/cache/`）+ 自动拉 Bitwarden **secrets bundle**（→ 项目根相对路径，零路径重叠）；见 `Documents/BUNDLE-SECRETS-MODEL.md`。
+
+## TUI 页与能力映射
+
+| 用户操作 | TUI 入口 |
+|----------|----------|
+| 连接仓库 / 全局 IDE 配置 | Settings 页 |
+| project 初始化 / 选择 | Home 页（首次进入引导） |
+| 扫描资产 / bundle 选择 | Assets 页 |
+| pull / push / remove | Run 页 |
+| 浏览 / 筛选资产 | Assets 页 |
+| 项目概览 / project 初始化 | Home 页 |
+| 项目变量编辑 | Project 页 |
+| 全局 / Bitwarden 配置 | Settings 页 |
+
+若 TUI 尚未覆盖某能力，在代码中留 `TODO(tui)` 并在 Home 建议下一步中指向对应页面，而不是恢复 CLI 子命令。
+
+## 非交互环境
+
+- `DEC_NO_TUI=1` 或 stdout 非 TTY：不启动 TUI，输出简短说明后退出。
+- Agent / CI 应调用 `pkg/app/` API，而非假设存在 CLI 子命令。
+
+## 反例
+
+```go
+// ❌ 新增用户-facing 子命令
+RootCmd.AddCommand(&cobra.Command{Use: "sync", ...})
+
+// ✅ 在 TUI Run 页绑定快捷键，调用 pkg/app
+result, err := app.PullProjectAssets(projectRoot, opts, reporter)
+```

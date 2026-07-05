@@ -36,7 +36,7 @@ Before acting, identify or confirm:
 - the exact target Vikunja project name or ID for this round
 - the exact Vikunja project ID once resolved
 - any repository-local default project such as `Dec`, if the current repository defines one
-- the task plan directory and naming convention, preferably from repository docs or an optional default such as `docs/tasks/VK-<id>.md`
+- the task plan directory and naming convention, preferably from repository docs or an optional default such as `Documents/tasks/VK-<id>.md`
 - the repository documents that define lifecycle, architecture, and completion rules
 
 If any of these are unclear, resolve them before implementation.

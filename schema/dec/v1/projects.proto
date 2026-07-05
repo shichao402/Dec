@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package dec.v1;
+
+option go_package = "github.com/shichao402/Dec/schema/dec/v1;decv1";
+
+// Project 描述一个可复用的项目配置单元，保存在 Git Vault 的 projects/<name>.yaml。
+// 项目只需声明启用哪些 bundle；bundle 详情在 bundles/<name>/ 目录内。
+//
+// Wire format 示例（projects/my-app.yaml）：
+//
+//   name: my-app
+//   description: 我的应用项目
+//   bundles:
+//     - vikunja
+//     - helloworld
+//   ides:
+//     - cursor
+//   editor: code --wait
+message Project {
+  // 项目短名，与文件名 projects/<name>.yaml 一致，在 vault 内唯一。
+  string name = 1;
+  // TUI 展示用的一句话描述。
+  string description = 2;
+  // 启用的 Dec bundle 短名列表（对应 bundles/<name>/）。
+  // Pull 时按此列表拉 Dec Git bundle 及同名/绑定的 Bitwarden secrets bundle。
+  repeated string bundles = 3;
+  // 该项目默认 IDE 列表；本地 .dec/config.yaml 可覆盖。
+  repeated string ides = 4;
+  // 该项目默认交互式编辑器；本地可覆盖。
+  string editor = 5;
+}

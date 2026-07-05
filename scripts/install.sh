@@ -118,7 +118,8 @@ main() {
             xattr -cr "${binary_path}" 2>/dev/null || true
         fi
         local current_version
-        current_version=$("${binary_path}" --version 2>&1 | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1 || true)
+        # 限时读取版本，避免 stuck exec（UE 态）导致安装脚本本身挂起。
+        current_version=$(perl -e 'alarm 3; exec @ARGV' "${binary_path}" --version 2>&1 | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1 || true)
         if [ -n "${current_version}" ]; then
             print_info "当前已安装版本: ${current_version}"
             local compare_result
@@ -167,6 +168,8 @@ main() {
     local download_url="https://github.com/shichao402/Dec/releases/download/${download_tag}/${binary_name}"
 
     print_info "下载预编译版本..."
+    # 先删除旧二进制再下载，避免 macOS 上 stuck exec 占用同一 inode 导致新进程卡在 dyld。
+    rm -f "${binary_path}"
     if ! curl -fsSL -o "${binary_path}" "${download_url}"; then
         print_error "下载失败: ${download_url}"
         exit 1

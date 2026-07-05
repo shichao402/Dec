@@ -5,7 +5,7 @@ package tui_test
 // PTY integration test for the `dec` TUI entry path.
 //
 // 验证 `dec` 无参能在真实 pty 下进入 TUI 首页，完成页面导航，
-// 并通过 `q` 优雅退出，对应 docs/TUI_ARCHITECTURE.md §9.6。
+// 并通过 `q` 优雅退出，对应 Documents/TUI_ARCHITECTURE.md §9.6。
 //
 // 本测试由 build tag `integration` 控制，默认不参与 `go test ./...`；
 // 因为依赖 `/dev/ptmx`，同时通过 `!windows` 避免在 Windows runner 上尝试。

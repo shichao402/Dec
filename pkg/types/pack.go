@@ -44,12 +44,62 @@ type GlobalConfig struct {
 
 const ProjectConfigVersionV2 = "v2"
 
+// VaultProjectsDir 是 Git Vault 中 project 声明目录。
+const VaultProjectsDir = "projects"
+
+// VaultBundlesDir 是 Git Vault 中 bundle 根目录。
+const VaultBundlesDir = "bundles"
+
+// BundleManifestFileName 是每个 bundle 目录内的声明文件名。
+const BundleManifestFileName = "bundle.yaml"
+
+// VaultProjectFileExt 是 project 声明文件扩展名。
+const VaultProjectFileExt = ".yaml"
+
+// Project 描述 vault 中 projects/<name>.yaml 的项目声明。
+//
+// Wire format 示例（projects/my-app.yaml）：
+//
+//	name: my-app
+//	description: 我的应用项目
+//	bundles:
+//	  - vikunja
+//	  - helloworld
+//	ides:
+//	  - cursor
+type Project struct {
+	// Name 为 project 短名，与文件名 projects/<name>.yaml 一致。
+	Name string `yaml:"name"`
+	// Description 是 TUI 展示用的一句话描述。
+	Description string `yaml:"description,omitempty"`
+	// Bundles 列出该项目启用的 Dec bundle 短名（对应 bundles/<name>/）。
+	Bundles []string `yaml:"bundles"`
+	// IDEs 为该项目默认 IDE 列表；本地 .dec/config.yaml 可覆盖。
+	IDEs []string `yaml:"ides,omitempty"`
+	// Editor 为该项目默认交互式编辑器；本地可覆盖。
+	Editor string `yaml:"editor,omitempty"`
+}
+
+// VaultProjectPath 返回 vault 内 project 声明的相对路径。
+func VaultProjectPath(name string) string {
+	return VaultProjectsDir + "/" + name + VaultProjectFileExt
+}
+
+// VaultBundleDir 返回 vault 内 bundle 目录的相对路径。
+func VaultBundleDir(name string) string {
+	return VaultBundlesDir + "/" + name
+}
+
+// VaultBundleManifestPath 返回 bundle 声明文件的相对路径。
+func VaultBundleManifestPath(name string) string {
+	return VaultBundleDir(name) + "/" + BundleManifestFileName
+}
+
 // ProjectConfig 项目配置 (<project>/.dec/config.yaml)
 type ProjectConfig struct {
 	Version string `yaml:"version,omitempty"`
-	// ProjectName 是项目对外使用的短名。
+	// ProjectName 引用 vault projects/<project_name>.yaml。
 	// 未显式设置时，调用方应 fallback 到 filepath.Base(projectRoot)，但不会自动写回 yaml。
-	// `dec config init` 创建新配置时默认写入 basename。
 	ProjectName    string     `yaml:"project_name,omitempty"`
 	IDEs           []string   `yaml:"ides,omitempty"`
 	Editor         string     `yaml:"editor,omitempty"`
@@ -60,7 +110,7 @@ type ProjectConfig struct {
 
 // Bundle 描述 vault 内声明的一组资产启用单位。
 //
-// Bundle 的 YAML 声明位于 vault 根目录的 bundles/<name>.yaml：
+// Bundle 的 YAML 声明位于 bundles/<name>/bundle.yaml：
 //
 //	name: vikunja
 //	description: Vikunja 任务管理完整工作流
@@ -69,7 +119,7 @@ type ProjectConfig struct {
 //	  - rules/vikunja-integration
 //	  - skills/vikunja-workflow
 //
-// Bundle 不跨 vault，成员只能是 skill/command/rule/mcp（不能是 bundle）。
+// 成员资产须位于同一 bundles/<name>/ 目录内；成员只能是 skill/command/rule/mcp（不能是 bundle）。
 type Bundle struct {
 	// Name 为 bundle 短名，在 vault 内唯一，用于 config.yaml 引用。
 	Name string `yaml:"name"`

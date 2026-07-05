@@ -26,10 +26,10 @@ type ConfigInitPreparation struct {
 	ExistingConfig bool
 	VarsCreated    bool
 	AssetCount     int
-	// PackageCount 是扫描到的 package（bundle）数量，含 vault 级隐式 package。
-	PackageCount int
-	// PackageNames 列出可用 package 名称，供 init 提示使用。
-	PackageNames []string
+	// BundleCount 是扫描到的 bundle 数量，含 vault 级隐式 bundle。
+	BundleCount int
+	// BundleNames 列出可用 bundle 名称，供 init 提示使用。
+	BundleNames []string
 }
 
 func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigInitPreparation, error) {
@@ -103,22 +103,22 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 		EnabledBundles: enabledBundles,
 	}
 
-	// 扫描 package（含 vault 级隐式 bundle），供 init 提示与 TUI 使用。
+	// 扫描 bundle（含 vault 级隐式 bundle），供 init 提示与 TUI 使用。
 	if err := withReadRepoDir(func(repoDir string) error {
 		_, bundleOverviews, scanErr := scanVaultBundles(repoDir, reporter)
 		if scanErr != nil {
 			return scanErr
 		}
-		prepared.PackageCount = len(bundleOverviews)
+		prepared.BundleCount = len(bundleOverviews)
 		names := make([]string, 0, len(bundleOverviews))
 		for _, bo := range bundleOverviews {
 			names = append(names, bo.Name)
 		}
 		sort.Strings(names)
-		prepared.PackageNames = names
+		prepared.BundleNames = names
 		return nil
 	}); err != nil {
-		emit(reporter, EventWarn, "project.init", fmt.Sprintf("扫描 package 失败，init 仍会继续：%v", err), nil)
+		emit(reporter, EventWarn, "project.init", fmt.Sprintf("扫描 bundle 失败，init 仍会继续：%v", err), nil)
 	}
 
 	emit(reporter, EventInfo, "project.init", "写入项目配置", &Progress{Phase: "write", Current: 1, Total: 2})
@@ -142,7 +142,7 @@ func ScanAvailableAssets(reporter Reporter) ([]AssetInfo, error) {
 
 	var allAssets []AssetInfo
 	if err := withReadRepoDir(func(repoDir string) error {
-		folders, err := readFolderEntries(repoDir)
+		folders, err := readBundleEntries(repoDir)
 		if err != nil {
 			return fmt.Errorf("读取仓库失败: %w", err)
 		}
@@ -173,9 +173,13 @@ type folderEntry struct {
 	path string
 }
 
-func readFolderEntries(repoDir string) ([]folderEntry, error) {
-	entries, err := os.ReadDir(repoDir)
+func readBundleEntries(repoDir string) ([]folderEntry, error) {
+	bundlesDir := filepath.Join(repoDir, types.VaultBundlesDir)
+	entries, err := os.ReadDir(bundlesDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
@@ -184,7 +188,7 @@ func readFolderEntries(repoDir string) ([]folderEntry, error) {
 		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
 			folders = append(folders, folderEntry{
 				name: entry.Name(),
-				path: filepath.Join(repoDir, entry.Name()),
+				path: filepath.Join(bundlesDir, entry.Name()),
 			})
 		}
 	}

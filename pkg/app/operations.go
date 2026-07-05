@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,7 +38,7 @@ type PullProjectAssetsResult struct {
 	AssetSources map[string][]string
 }
 
-func PullProjectAssets(projectRoot, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
+func PullProjectAssets(ctx context.Context, projectRoot, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
 	reporter = defaultReporter(reporter)
 	mgr := config.NewProjectConfigManager(projectRoot)
 	projectConfig, err := mgr.LoadProjectConfig()
@@ -146,6 +147,7 @@ func PullProjectAssets(projectRoot, version string, reporter Reporter) (*PullPro
 
 	emit(reporter, EventInfo, "pull.start", fmt.Sprintf("📥 拉取 %d 个已启用资产", len(validAssets)), &Progress{Phase: "pull", Current: 0, Total: len(validAssets)})
 
+	// 阶段 1：Dec Git 资产写入 .dec/cache/
 	for idx, asset := range validAssets {
 		progress := &Progress{Phase: "pull", Current: idx + 1, Total: len(validAssets)}
 		fullPath := resolveAssetFile(repoDir, asset.Vault, asset.Type, asset.Name)
@@ -169,6 +171,34 @@ func PullProjectAssets(projectRoot, version string, reporter Reporter) (*PullPro
 				emit(reporter, EventWarn, "pull.asset", fmt.Sprintf("⚠️  [%-5s] %s 缓存失败: %v", asset.Type, asset.Name, err), progress)
 				continue
 			}
+		}
+	}
+
+	enabledBundleNames := enabledBundleNamesFromConfig(projectConfig, resolved.Bundles)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	secretsSummary, err := pullEnabledSecretsBundles(ctx, projectRoot, enabledBundleNames, reporter)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateSecretsPathOverlap(projectRoot, secretsSummary.LandingPaths, reporter); err != nil {
+		return nil, err
+	}
+
+	// 阶段 3：从 cache 渲染安装到 IDE，并执行非敏感 vars 替换
+	for idx, asset := range validAssets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		progress := &Progress{Phase: "install", Current: idx + 1, Total: len(validAssets)}
+		fullPath := resolveAssetFile(repoDir, asset.Vault, asset.Type, asset.Name)
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			continue
+		}
+		cachePath := getCachePath(projectRoot, asset.Vault, asset.Type, asset.Name)
+		if _, err := os.Stat(cachePath); err != nil {
+			continue
 		}
 
 		if err := installAssetToIDEs(asset.Type, asset.Name, asset.Vault, fullPath, projectRoot, projectIDEs); err != nil {
@@ -338,7 +368,7 @@ func typeSubDir(itemType string) string {
 }
 
 func resolveAssetFile(repoDir, vault, itemType, assetName string) string {
-	base := filepath.Join(repoDir, vault, typeSubDir(itemType))
+	base := filepath.Join(repoDir, types.VaultBundlesDir, vault, typeSubDir(itemType))
 	switch itemType {
 	case "skill", "command":
 		return filepath.Join(base, assetName)
@@ -792,6 +822,20 @@ func injectRenderedHeaderDir(dir, vaultName string) error {
 		}
 		return injectRenderedHeaderFile(path, vaultName)
 	})
+}
+
+func enabledBundleNamesFromConfig(projectConfig *types.ProjectConfig, overviews []BundleOverview) []string {
+	if projectConfig != nil && len(projectConfig.EnabledBundles) > 0 {
+		return append([]string(nil), projectConfig.EnabledBundles...)
+	}
+	names := make([]string, 0, len(overviews))
+	for _, overview := range overviews {
+		if overview.Enabled {
+			names = append(names, overview.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func saveVersionMeta(projectRoot, commitHash string) {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ import (
 func TestPullProjectAssetsSkipsWithoutEnabledAssets(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 
-	result, err := PullProjectAssets(t.TempDir(), "", nil)
+	result, err := PullProjectAssets(context.Background(), t.TempDir(), "", nil)
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
@@ -26,7 +27,7 @@ func TestPullProjectAssetsSkipsWithoutEnabledAssets(t *testing.T) {
 func TestPullProjectAssetsSkipsWhenEnabledAssetsDoNotExistInAvailable(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"default/skills/another-workflow/SKILL.md": `---
+		"bundles/default/skills/another-workflow/SKILL.md": `---
 name: another-workflow
 ---
 `,
@@ -48,7 +49,7 @@ name: another-workflow
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	result, err := PullProjectAssets(projectRoot, "", nil)
+	result, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
@@ -63,7 +64,7 @@ name: another-workflow
 func TestPullProjectAssetsInstallsAssetsAndReportsProgress(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"default/skills/project-workflow/SKILL.md": `---
+		"bundles/default/skills/project-workflow/SKILL.md": `---
 name: project-workflow
 ---
 `,
@@ -87,7 +88,7 @@ name: project-workflow
 	}
 
 	var events []OperationEvent
-	result, err := PullProjectAssets(projectRoot, "", ReporterFunc(func(event OperationEvent) {
+	result, err := PullProjectAssets(context.Background(), projectRoot, "", ReporterFunc(func(event OperationEvent) {
 		events = append(events, event)
 	}))
 	if err != nil {
@@ -137,9 +138,9 @@ name: project-workflow
 func TestPullProjectAssetsInstallsBundleMembers(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"default/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
-		"default/rules/bundle-rule.mdc":        "---\ndescription: rule\n---\n",
-		"default/bundles/combo.yaml": `name: combo
+		"bundles/combo/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
+		"bundles/combo/rules/bundle-rule.mdc":        "---\ndescription: rule\n---\n",
+		"bundles/combo/bundle.yaml": `name: combo
 description: bundle-integration test
 members:
   - skill/bundle-skill
@@ -164,7 +165,7 @@ members:
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	result, err := PullProjectAssets(projectRoot, "", nil)
+	result, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}

@@ -9,13 +9,13 @@ import (
 
 func TestPrintCommandErrorSeparatesHelpSection(t *testing.T) {
 	var buf bytes.Buffer
-	PrintCommandError(&buf, []string{"config", "repo"}, errors.New("仓库未连接\n\n运行 dec config repo <url> 连接仓库"))
+	PrintCommandError(&buf, []string{"pull"}, errors.New("未知命令\n\n在 TTY 中运行 dec 启动 TUI"))
 
 	out := buf.String()
-	if !strings.Contains(out, "错误: 仓库未连接\n") {
+	if !strings.Contains(out, "错误: 未知命令\n") {
 		t.Fatalf("输出应包含错误段, 实际:\n%s", out)
 	}
-	if !strings.Contains(out, "\n\n帮助: 运行 dec config repo <url> 连接仓库\n") {
+	if !strings.Contains(out, "\n\n帮助: 在 TTY 中运行 dec 启动 TUI\n") {
 		t.Fatalf("输出应包含帮助段, 实际:\n%s", out)
 	}
 	if strings.Contains(out, "查看完整用法") {
@@ -25,13 +25,13 @@ func TestPrintCommandErrorSeparatesHelpSection(t *testing.T) {
 
 func TestPrintCommandErrorAddsCommandHelpHintWhenMissing(t *testing.T) {
 	var buf bytes.Buffer
-	PrintCommandError(&buf, []string{"config", "repo"}, errors.New("accepts 1 arg(s), received 0"))
+	PrintCommandError(&buf, []string{"pull"}, errors.New("unknown command \"pull\" for \"dec\""))
 
 	out := buf.String()
-	if !strings.Contains(out, "错误: accepts 1 arg(s), received 0\n") {
+	if !strings.Contains(out, "错误: unknown command \"pull\" for \"dec\"\n") {
 		t.Fatalf("输出应包含错误段, 实际:\n%s", out)
 	}
-	if !strings.Contains(out, "\n\n帮助: 运行 dec config repo --help 查看完整用法\n") {
+	if !strings.Contains(out, "\n\n帮助: 运行 dec --help 查看完整用法\n") {
 		t.Fatalf("输出应包含命令级帮助提示, 实际:\n%s", out)
 	}
 }

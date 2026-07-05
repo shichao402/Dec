@@ -13,8 +13,7 @@ import (
 	"sort"
 
 	"github.com/shichao402/Dec/pkg/bundle"
-	"github.com/shichao402/Dec/pkg/types"
-)
+	"github.com/shichao402/Dec/pkg/types")
 
 // BundleOverview 描述一次解析中涉及的 bundle 状态，供 TUI / CLI 呈现。
 type BundleOverview struct {
@@ -52,7 +51,7 @@ type ResolvedAssets struct {
 //   - error：致命错误（bundle YAML 非法、命名冲突等）。成员不存在等非致命问题只打 warning，不报错。
 //
 // 算法：
-//  1. 扫描 repoDir 下所有顶层目录作为候选 vault，对每个目录加载 bundles/*.yaml。
+//  1. 扫描 repoDir/bundles/ 下各 bundle 目录，加载 bundles/<name>/bundle.yaml。
 //  2. 把 Enabled 中每个 asset 放入目标集，来源记 "standalone"。
 //  3. 对 EnabledBundles 中的每个 bundle 名，在所有 vault 中搜索匹配项：
 //     - 找不到：reporter warning + Bundles 不新增条目（因为我们没找到其声明）。
@@ -67,8 +66,8 @@ func resolveDesiredAssets(projectConfig *types.ProjectConfig, repoDir string, re
 		Sources: make(map[string][]string),
 	}
 
-	// 1. 扫描 vault 目录并加载所有 bundles（含隐式 vault package）。
-	// 即使尚无项目配置也要扫描，供 Assets TUI / config init 展示 package 列表。
+	// 1. 扫描 vault 目录并加载所有 bundles（含隐式 vault bundle）。
+	// 即使尚无项目配置也要扫描，供 Assets TUI / config init 展示 bundle 列表。
 	vaultBundles, bundleOverviews, err := scanVaultBundles(repoDir, reporter)
 	if err != nil {
 		return nil, err
@@ -151,67 +150,65 @@ type vaultBundle struct {
 	bundle    types.Bundle
 }
 
-// scanVaultBundles 扫描 repoDir 下所有顶层目录（不以 . 开头）作为 vault，加载每个 vault 的 bundles。
-// 非致命告警（成员不存在、非 yaml 文件）通过 reporter 发出。
+// scanVaultBundles 扫描 repoDir/bundles/ 下各 bundle 目录，加载 bundle.yaml。
+// 非致命告警（成员不存在等）通过 reporter 发出。
 func scanVaultBundles(repoDir string, reporter Reporter) (map[string][]vaultBundle, []BundleOverview, error) {
 	if repoDir == "" {
 		return nil, nil, nil
 	}
-	entries, err := os.ReadDir(repoDir)
+	bundlesDir := filepath.Join(repoDir, types.VaultBundlesDir)
+	entries, err := os.ReadDir(bundlesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil, nil
 		}
-		return nil, nil, fmt.Errorf("读取仓库目录失败: %w", err)
+		return nil, nil, fmt.Errorf("读取仓库 bundle 目录失败: %w", err)
 	}
 
 	byName := make(map[string][]vaultBundle)
 	var overviews []BundleOverview
 
-	// 为了 TUI 稳定排序，按 vault 名升序扫描。
-	vaultNames := make([]string, 0, len(entries))
+	bundleNames := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || entry.Name() == "" || entry.Name()[0] == '.' {
 			continue
 		}
-		if len(entry.Name()) > 0 && entry.Name()[0] == '.' {
-			continue
-		}
-		vaultNames = append(vaultNames, entry.Name())
+		bundleNames = append(bundleNames, entry.Name())
 	}
-	sort.Strings(vaultNames)
+	sort.Strings(bundleNames)
 
-	for _, vaultName := range vaultNames {
-		vaultPath := filepath.Join(repoDir, vaultName)
+	for _, bundleName := range bundleNames {
+		bundlePath := filepath.Join(bundlesDir, bundleName)
 		memberExists := func(m types.BundleMember) bool {
-			return assetFileExists(repoDir, vaultName, m.Type, m.Name)
+			return assetFileExists(repoDir, bundleName, m.Type, m.Name)
 		}
-		bundles, warnings, loadErr := bundle.LoadBundles(vaultPath, memberExists)
+		b, warnings, loadErr := bundle.LoadBundle(bundlePath, memberExists)
 		if loadErr != nil {
-			return nil, nil, fmt.Errorf("加载 vault %q 的 bundle 失败: %w", vaultName, loadErr)
+			return nil, nil, fmt.Errorf("加载 bundle %q 失败: %w", bundleName, loadErr)
 		}
 		for _, w := range warnings {
 			msg := w.Message
 			if w.BundleName != "" {
-				msg = fmt.Sprintf("[vault %s] %s", vaultName, msg)
+				msg = fmt.Sprintf("[bundle %s] %s", bundleName, msg)
 			} else {
-				msg = fmt.Sprintf("[vault %s] %s", vaultName, msg)
+				msg = fmt.Sprintf("[bundle %s] %s", bundleName, msg)
 			}
 			emit(reporter, EventWarn, "pull.bundle", msg, nil)
 		}
-		for _, b := range bundles {
-			byName[b.Name] = append(byName[b.Name], vaultBundle{vaultName: vaultName, bundle: b})
-			overviews = append(overviews, BundleOverview{
-				Name:        b.Name,
-				Description: b.Description,
-				VaultName:   vaultName,
-				Members:     append([]string(nil), b.Members...),
-				Enabled:     false,
-			})
+		if b.Name == "" {
+			continue
 		}
+		byName[b.Name] = append(byName[b.Name], vaultBundle{vaultName: bundleName, bundle: b})
+		overviews = append(overviews, BundleOverview{
+			Name:        b.Name,
+			Description: b.Description,
+			VaultName:   bundleName,
+			Members:     append([]string(nil), b.Members...),
+			Enabled:     false,
+		})
 	}
 
-	overviews = synthesizeVaultPackages(repoDir, byName, overviews)
+	overviews = synthesizeVaultBundles(repoDir, byName, overviews)
 	return byName, overviews, nil
 }
 

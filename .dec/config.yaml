@@ -60,3 +60,4 @@ enabled:
 enabled_bundles:
     - cli
     - default
+    - vikunja

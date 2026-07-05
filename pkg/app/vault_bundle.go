@@ -10,56 +10,57 @@ import (
 	"github.com/shichao402/Dec/pkg/types"
 )
 
-// synthesizeVaultPackages 为缺少同名 bundle 声明的 vault 合成隐式 package。
+// synthesizeVaultBundles 为缺少 bundle.yaml 的 bundle 目录合成隐式 bundle。
 //
-// 用户视角的 package（vikunja、cli、default 等）通常与 vault 同名。
-// 若 vault/bundles/<vault>.yaml 已存在则尊重显式声明，不再合成。
-func synthesizeVaultPackages(repoDir string, byName map[string][]vaultBundle, overviews []BundleOverview) []BundleOverview {
+// 用户视角的 bundle（vikunja、cli、default 等）对应 bundles/<name>/ 目录。
+// 若 bundles/<name>/bundle.yaml 已存在则尊重显式声明，不再合成。
+func synthesizeVaultBundles(repoDir string, byName map[string][]vaultBundle, overviews []BundleOverview) []BundleOverview {
 	if repoDir == "" {
 		return overviews
 	}
-	entries, err := os.ReadDir(repoDir)
+	bundlesDir := filepath.Join(repoDir, types.VaultBundlesDir)
+	entries, err := os.ReadDir(bundlesDir)
 	if err != nil {
 		return overviews
 	}
 
-	explicitVaultPackage := make(map[string]struct{})
+	explicitBundle := make(map[string]struct{})
 	for name, matches := range byName {
 		for _, m := range matches {
 			if m.vaultName == name {
-				explicitVaultPackage[name] = struct{}{}
+				explicitBundle[name] = struct{}{}
 				break
 			}
 		}
 	}
 
-	vaultNames := make([]string, 0, len(entries))
+	bundleNames := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == "" || entry.Name()[0] == '.' {
 			continue
 		}
-		vaultNames = append(vaultNames, entry.Name())
+		bundleNames = append(bundleNames, entry.Name())
 	}
-	sort.Strings(vaultNames)
+	sort.Strings(bundleNames)
 
-	for _, vaultName := range vaultNames {
-		if _, ok := explicitVaultPackage[vaultName]; ok {
+	for _, bundleName := range bundleNames {
+		if _, ok := explicitBundle[bundleName]; ok {
 			continue
 		}
-		members := listVaultAssetMembers(repoDir, vaultName)
+		members := listBundleAssetMembers(repoDir, bundleName)
 		if len(members) == 0 {
 			continue
 		}
 		b := types.Bundle{
-			Name:        vaultName,
-			Description: fmt.Sprintf("%s 资产包（vault 内全部资产）", vaultName),
+			Name:        bundleName,
+			Description: fmt.Sprintf("%s 资产包（bundle 内全部资产）", bundleName),
 			Members:     members,
 		}
-		byName[vaultName] = append(byName[vaultName], vaultBundle{vaultName: vaultName, bundle: b})
+		byName[bundleName] = append(byName[bundleName], vaultBundle{vaultName: bundleName, bundle: b})
 		overviews = append(overviews, BundleOverview{
 			Name:        b.Name,
 			Description: b.Description,
-			VaultName:   vaultName,
+			VaultName:   bundleName,
 			Members:     append([]string(nil), b.Members...),
 			Enabled:     false,
 		})
@@ -67,9 +68,9 @@ func synthesizeVaultPackages(repoDir string, byName map[string][]vaultBundle, ov
 	return overviews
 }
 
-// listVaultAssetMembers 列出 vault 内全部资产，返回 bundle members 引用（skills/rules/mcp 前缀）。
-func listVaultAssetMembers(repoDir, vaultName string) []string {
-	vaultPath := filepath.Join(repoDir, vaultName)
+// listBundleAssetMembers 列出 bundles/<name>/ 内全部资产，返回 bundle members 引用。
+func listBundleAssetMembers(repoDir, bundleName string) []string {
+	bundlePath := filepath.Join(repoDir, types.VaultBundlesDir, bundleName)
 	type memberRef struct {
 		prefix string
 		name   string
@@ -85,7 +86,7 @@ func listVaultAssetMembers(repoDir, vaultName string) []string {
 		{"rules", "rules", func(s string) string { return strings.TrimSuffix(s, ".mdc") }},
 		{"mcp", "mcp", func(s string) string { return strings.TrimSuffix(s, ".json") }},
 	} {
-		dir := filepath.Join(vaultPath, spec.dir)
+		dir := filepath.Join(bundlePath, spec.dir)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
@@ -122,7 +123,7 @@ func listVaultAssetMembers(repoDir, vaultName string) []string {
 }
 
 // inferBundleEnabledFromStandalone 当 bundle 成员在 enabled 中全部以 standalone 启用时，
-// 视为该 package 已启用（便于从旧配置迁移到包级呈现）。
+// 视为该 bundle 已启用（便于从 standalone 资产推断 bundle 级呈现）。
 func inferBundleEnabledFromStandalone(members []AssetSelectionItem, enabled *types.AssetList) bool {
 	if enabled == nil || enabled.IsEmpty() || len(members) == 0 {
 		return false

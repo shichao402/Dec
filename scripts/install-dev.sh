@@ -59,6 +59,8 @@ fi
 
 print_step "安装到本地目录..."
 mkdir -p "${BIN_DIR}"
+# 先删除旧二进制再写入，避免 macOS 上 stuck exec（UE 态）占用同一 inode 导致新进程卡在 dyld。
+rm -f "${BINARY_PATH}"
 cp dist/dec "${BINARY_PATH}"
 chmod +x "${BINARY_PATH}"
 # macOS: 清除可能的扩展属性以避免系统阻止执行

@@ -1,17 +1,9 @@
 package cmd
 
 import (
-	"bytes"
 	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/shichao402/Dec/pkg/config"
-	"github.com/shichao402/Dec/pkg/repo"
-	"github.com/shichao402/Dec/pkg/types"
 )
 
 func setEnvForRootTest(t *testing.T, key, value string) {
@@ -29,74 +21,27 @@ func setEnvForRootTest(t *testing.T, key, value string) {
 	})
 }
 
-func runGitRootTest(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s 失败: %v\n%s", strings.Join(args, " "), err, string(output))
-	}
-	return strings.TrimSpace(string(output))
-}
-
-func runGitNoDirRootTest(t *testing.T, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s 失败: %v\n%s", strings.Join(args, " "), err, string(output))
-	}
-	return strings.TrimSpace(string(output))
-}
-
-func writeFileRootTest(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		t.Fatalf("创建目录失败: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatalf("写入文件失败: %v", err)
-	}
-}
-
-func configureGitUserRootTest(t *testing.T, dir string) {
-	t.Helper()
-	runGitRootTest(t, dir, "config", "user.name", "Dec Cmd Test")
-	runGitRootTest(t, dir, "config", "user.email", "dec-cmd-test@example.com")
-}
-
-func setupRemoteBareRepoRootTest(t *testing.T) string {
+func stubEntryExecutionForRootTest(t *testing.T) {
 	t.Helper()
 
-	root := t.TempDir()
-	remoteBareDir := filepath.Join(root, "remote.git")
-	seedDir := filepath.Join(root, "seed")
+	oldDetectTTY := detectTTY
+	oldGetWorkingDir := getWorkingDir
+	oldRunCLIMode := runCLIMode
+	oldRunTUIMode := runTUIMode
+	oldEmitUpdateHint := emitUpdateHint
 
-	runGitNoDirRootTest(t, "init", "--bare", remoteBareDir)
-	runGitNoDirRootTest(t, "clone", remoteBareDir, seedDir)
-	configureGitUserRootTest(t, seedDir)
-	writeFileRootTest(t, filepath.Join(seedDir, "README.md"), "init\n")
-	runGitRootTest(t, seedDir, "add", ".")
-	runGitRootTest(t, seedDir, "commit", "-m", "initial commit")
-	runGitRootTest(t, seedDir, "branch", "-M", "main")
-	runGitRootTest(t, seedDir, "push", "-u", "origin", "main")
-	runGitNoDirRootTest(t, "--git-dir", remoteBareDir, "symbolic-ref", "HEAD", "refs/heads/main")
+	t.Cleanup(func() {
+		detectTTY = oldDetectTTY
+		getWorkingDir = oldGetWorkingDir
+		runCLIMode = oldRunCLIMode
+		runTUIMode = oldRunTUIMode
+		emitUpdateHint = oldEmitUpdateHint
+	})
 
-	return remoteBareDir
+	emitUpdateHint = func(io.Writer) {}
 }
 
-func TestVersionCommandRegistered(t *testing.T) {
-	cmd, _, err := RootCmd.Find([]string{"version"})
-	if err != nil {
-		t.Fatalf("查找 version 命令失败: %v", err)
-	}
-	if cmd == nil || cmd.Name() != "version" {
-		t.Fatalf("期望找到 version 命令")
-	}
-}
-
-func TestRunVersionPrintsCurrentVersion(t *testing.T) {
+func TestRootVersionString(t *testing.T) {
 	oldVersion := appVersion
 	oldBuildTime := appBuildTime
 	defer func() {
@@ -106,23 +51,17 @@ func TestRunVersionPrintsCurrentVersion(t *testing.T) {
 	}()
 
 	SetVersion("v1.10.40", "2026-04-03_00:00:00")
-
-	var buf bytes.Buffer
-	versionCmd.SetOut(&buf)
-	versionCmd.SetErr(&buf)
-
-	if err := runVersion(versionCmd, nil); err != nil {
-		t.Fatalf("runVersion 返回错误: %v", err)
+	if got := GetVersion(); got != "v1.10.40" {
+		t.Fatalf("GetVersion() = %q, 期望 %q", got, "v1.10.40")
 	}
-
-	if got := buf.String(); got != "v1.10.40\n" {
-		t.Fatalf("runVersion 输出 = %q, 期望 %q", got, "v1.10.40\n")
+	if RootCmd.Version == "" {
+		t.Fatal("RootCmd.Version 不应为空")
 	}
 }
 
 func TestGetVersionFallsBackToVersionFileWhenAppVersionIsDev(t *testing.T) {
 	tempDir := t.TempDir()
-	versionFile := filepath.Join(tempDir, "version.json")
+	versionFile := tempDir + "/version.json"
 	if err := os.WriteFile(versionFile, []byte("{\n  \"version\": \"v9.9.9\"\n}\n"), 0644); err != nil {
 		t.Fatalf("写入 version.json 失败: %v", err)
 	}
@@ -145,78 +84,18 @@ func TestGetVersionFallsBackToVersionFileWhenAppVersionIsDev(t *testing.T) {
 	}
 }
 
-func TestRunConfigShowRepairsRepoConnectionAndPrintsCurrentRemote(t *testing.T) {
-	decHome := t.TempDir()
-	setEnvForRootTest(t, "DEC_HOME", decHome)
-	remoteA := setupRemoteBareRepoRootTest(t)
-	remoteB := setupRemoteBareRepoRootTest(t)
-
-	if err := repo.Connect(remoteA); err != nil {
-		t.Fatalf("repo.Connect(remoteA) 失败: %v", err)
-	}
-	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remoteB}); err != nil {
-		t.Fatalf("SaveGlobalConfig() 失败: %v", err)
-	}
-
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("创建 stdout pipe 失败: %v", err)
-	}
-	os.Stdout = w
-	defer func() {
-		os.Stdout = oldStdout
-		_ = r.Close()
-	}()
-
-	if err := runConfigShow(configShowCmd, nil); err != nil {
-		t.Fatalf("runConfigShow() 失败: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("关闭写端失败: %v", err)
-	}
-
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatalf("读取输出失败: %v", err)
-	}
-	_ = r.Close()
-
-	out := buf.String()
-	if !strings.Contains(out, "当前远端: "+remoteB) {
-		t.Fatalf("config show 应展示修复后的当前远端, 实际输出:\n%s", out)
-	}
-	if !strings.Contains(out, "连接校验: ✅ 与全局配置一致") {
-		t.Fatalf("config show 应展示连接校验通过, 实际输出:\n%s", out)
-	}
-
-	bareRemote, err := repo.GetBareRemoteURL()
-	if err != nil {
-		t.Fatalf("GetBareRemoteURL() 失败: %v", err)
-	}
-	if bareRemote != remoteB {
-		t.Fatalf("runConfigShow 后 bare origin 应被修复为 %q, got %q", remoteB, bareRemote)
-	}
-}
-
-func stubEntryExecutionForRootTest(t *testing.T) {
+func chdirForTest(t *testing.T, dir string) {
 	t.Helper()
-
-	oldDetectTTY := detectTTY
-	oldGetWorkingDir := getWorkingDir
-	oldRunCLIMode := runCLIMode
-	oldRunTUIMode := runTUIMode
-	oldEmitUpdateHint := emitUpdateHint
-
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd 失败: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir 失败: %v", err)
+	}
 	t.Cleanup(func() {
-		detectTTY = oldDetectTTY
-		getWorkingDir = oldGetWorkingDir
-		runCLIMode = oldRunCLIMode
-		runTUIMode = oldRunTUIMode
-		emitUpdateHint = oldEmitUpdateHint
+		_ = os.Chdir(oldDir)
 	})
-
-	emitUpdateHint = func(io.Writer) {}
 }
 
 func TestExecuteRoutesInteractiveNoArgsToTUI(t *testing.T) {
@@ -262,7 +141,7 @@ func TestExecuteRoutesToCLIWhenSubcommandRequested(t *testing.T) {
 		return nil
 	}
 	runTUIMode = func(projectRoot string, input io.Reader, output io.Writer) error {
-		t.Fatal("显式子命令应走 CLI")
+		t.Fatal("显式参数应走 CLI")
 		return nil
 	}
 
@@ -271,6 +150,29 @@ func TestExecuteRoutesToCLIWhenSubcommandRequested(t *testing.T) {
 	}
 	if len(gotArgs) != 1 || gotArgs[0] != "pull" {
 		t.Fatalf("CLI args = %#v, 期望 %#v", gotArgs, []string{"pull"})
+	}
+}
+
+func TestExecuteRoutesInternalFreshnessCheckToCLI(t *testing.T) {
+	stubEntryExecutionForRootTest(t)
+	setEnvForRootTest(t, "TERM", "xterm-256color")
+	detectTTY = func(*os.File) bool { return true }
+
+	var gotArgs []string
+	runCLIMode = func(args []string, stdout, stderr io.Writer) error {
+		gotArgs = append([]string(nil), args...)
+		return nil
+	}
+	runTUIMode = func(projectRoot string, input io.Reader, output io.Writer) error {
+		t.Fatal("内部 freshness 命令应走 CLI")
+		return nil
+	}
+
+	if err := Execute([]string{"__freshness-check", "--project-root", "/tmp/proj"}, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		t.Fatalf("Execute() 返回错误: %v", err)
+	}
+	if len(gotArgs) < 1 || gotArgs[0] != "__freshness-check" {
+		t.Fatalf("CLI args = %#v, 期望 freshness 内部命令", gotArgs)
 	}
 }
 
@@ -347,9 +249,6 @@ func TestExecuteRoutesToCLIWhenHelpRequested(t *testing.T) {
 	}
 }
 
-// TestExecuteRoutesToCLIWhenTermIsDumb 覆盖 decideEntryMode 在 TERM=dumb
-// 时的 fallback 分支：即使 stdio 是 TTY 且未设置 DEC_NO_TUI，也应走 CLI。
-// 这对应 docs/TUI_ARCHITECTURE.md §2.1 / §8 中的损坏终端逃生口。
 func TestExecuteRoutesToCLIWhenTermIsDumb(t *testing.T) {
 	stubEntryExecutionForRootTest(t)
 	setEnvForRootTest(t, "TERM", "dumb")
@@ -371,5 +270,21 @@ func TestExecuteRoutesToCLIWhenTermIsDumb(t *testing.T) {
 	}
 	if !cliCalled {
 		t.Fatal("TERM=dumb 时应回退到 CLI")
+	}
+}
+
+func TestIsInternalCLIArgs(t *testing.T) {
+	if !isInternalCLIArgs([]string{"__freshness-check", "--project-root", "/x"}) {
+		t.Fatal("freshness 内部命令应识别为 CLI 参数")
+	}
+	if isInternalCLIArgs([]string{"pull"}) {
+		t.Fatal("已移除的用户子命令不应走内部 CLI 短路")
+	}
+}
+
+func TestRemovedSubcommandReturnsError(t *testing.T) {
+	cmd, _, err := RootCmd.Find([]string{"pull"})
+	if err == nil && cmd != nil && cmd.Name() == "pull" {
+		t.Fatal("pull 子命令应已移除")
 	}
 }

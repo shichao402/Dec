@@ -51,9 +51,6 @@ func TestParseMember(t *testing.T) {
 	}
 }
 
-// TestValidate 覆盖 Validate 函数（parseBundleYAML 的对外导出）：
-//   - 合法 YAML 应返回解析后的 Bundle
-//   - 缺 name / 空 members / 非法成员 / 非法 YAML 应返回错误
 func TestValidate(t *testing.T) {
 	t.Run("合法", func(t *testing.T) {
 		data := []byte("name: vikunja\ndescription: desc\nmembers:\n  - skill/foo\n  - mcp/bar\n")
@@ -100,41 +97,54 @@ func TestValidate(t *testing.T) {
 	})
 }
 
-func TestLoadBundles_Empty(t *testing.T) {
-	vault := t.TempDir()
-	// 目录里完全没有 bundles/
-	bundles, warnings, err := LoadBundles(vault, nil)
+func TestLoadBundle_MissingManifest(t *testing.T) {
+	bundleDir := t.TempDir()
+	b, warnings, err := LoadBundle(bundleDir, nil)
+	if err != nil {
+		t.Fatalf("意外错误: %v", err)
+	}
+	if b.Name != "" {
+		t.Fatalf("无 bundle.yaml 时应返回零值, got %#v", b)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("不应产生 warning, got %d", len(warnings))
+	}
+}
+
+func TestLoadRepoBundles_Empty(t *testing.T) {
+	repoDir := t.TempDir()
+	bundles, warnings, err := LoadRepoBundles(repoDir, nil)
 	if err != nil {
 		t.Fatalf("意外错误: %v", err)
 	}
 	if len(bundles) != 0 {
-		t.Fatalf("无 bundles 目录时应返回空列表, got %d", len(bundles))
+		t.Fatalf("无 bundles/ 目录时应返回空列表, got %d", len(bundles))
 	}
 	if len(warnings) != 0 {
-		t.Fatalf("无 bundles 目录时不应产生 warning, got %d", len(warnings))
+		t.Fatalf("无 bundles/ 目录时不应产生 warning, got %d", len(warnings))
 	}
 }
 
-func TestLoadBundles_BundlesDirExistsButEmpty(t *testing.T) {
-	vault := t.TempDir()
-	if err := os.Mkdir(filepath.Join(vault, BundlesDirName), 0755); err != nil {
+func TestLoadRepoBundles_BundlesDirExistsButEmpty(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repoDir, types.VaultBundlesDir), 0755); err != nil {
 		t.Fatal(err)
 	}
-	bundles, warnings, err := LoadBundles(vault, nil)
+	bundles, warnings, err := LoadRepoBundles(repoDir, nil)
 	if err != nil {
 		t.Fatalf("意外错误: %v", err)
 	}
 	if len(bundles) != 0 {
-		t.Fatalf("空 bundles 目录应返回空列表, got %d", len(bundles))
+		t.Fatalf("空 bundles/ 目录应返回空列表, got %d", len(bundles))
 	}
 	if len(warnings) != 0 {
-		t.Fatalf("空 bundles 目录不应产生 warning, got %d", len(warnings))
+		t.Fatalf("空 bundles/ 目录不应产生 warning, got %d", len(warnings))
 	}
 }
 
-func TestLoadBundles_HappyPath(t *testing.T) {
-	vault := t.TempDir()
-	writeBundle(t, vault, "vikunja.yaml", `
+func TestLoadRepoBundles_HappyPath(t *testing.T) {
+	repoDir := t.TempDir()
+	writeBundleManifest(t, repoDir, "vikunja", `
 name: vikunja
 description: Vikunja 工作流
 members:
@@ -142,13 +152,13 @@ members:
   - rules/vikunja-integration
   - skills/vikunja-workflow
 `)
-	writeBundle(t, vault, "helloworld.yaml", `
+	writeBundleManifest(t, repoDir, "helloworld", `
 name: helloworld
 members:
   - skill/helloworld
 `)
 
-	bundles, warnings, err := LoadBundles(vault, nil)
+	bundles, warnings, err := LoadRepoBundles(repoDir, nil)
 	if err != nil {
 		t.Fatalf("意外错误: %v", err)
 	}
@@ -158,118 +168,81 @@ members:
 	if len(bundles) != 2 {
 		t.Fatalf("期望 2 个 bundle，得到 %d", len(bundles))
 	}
-	// 按 name 升序
 	if bundles[0].Name != "helloworld" || bundles[1].Name != "vikunja" {
 		t.Fatalf("bundle 排序不正确: %v", bundles)
 	}
 	if bundles[1].Description != "Vikunja 工作流" {
 		t.Fatalf("description 解析错误: %q", bundles[1].Description)
 	}
-	if len(bundles[1].Members) != 3 {
-		t.Fatalf("members 长度错误: %d", len(bundles[1].Members))
-	}
 }
 
-func TestLoadBundles_DuplicateNameIsFatal(t *testing.T) {
-	vault := t.TempDir()
-	writeBundle(t, vault, "a.yaml", `
+func TestLoadRepoBundles_DuplicateNameIsFatal(t *testing.T) {
+	repoDir := t.TempDir()
+	writeBundleManifest(t, repoDir, "a", `
 name: dup
 members:
   - skill/foo
 `)
-	writeBundle(t, vault, "b.yaml", `
+	writeBundleManifest(t, repoDir, "b", `
 name: dup
 members:
   - skill/bar
 `)
-	_, _, err := LoadBundles(vault, nil)
+	_, _, err := LoadRepoBundles(repoDir, nil)
 	if err == nil {
 		t.Fatalf("重名 bundle 应该致命报错")
 	}
 }
 
-func TestLoadBundles_InvalidMemberReferenceIsFatal(t *testing.T) {
-	vault := t.TempDir()
-	writeBundle(t, vault, "x.yaml", `
+func TestLoadBundle_InvalidMemberReferenceIsFatal(t *testing.T) {
+	repoDir := t.TempDir()
+	writeBundleManifest(t, repoDir, "x", `
 name: x
 members:
   - bundle/nope
 `)
-	_, _, err := LoadBundles(vault, nil)
+	_, _, err := LoadBundle(filepath.Join(repoDir, types.VaultBundlesDir, "x"), nil)
 	if err == nil {
 		t.Fatalf("非法成员引用应致命报错")
 	}
 }
 
-func TestLoadBundles_MissingNameIsFatal(t *testing.T) {
-	vault := t.TempDir()
-	writeBundle(t, vault, "x.yaml", `
+func TestLoadBundle_MissingNameIsFatal(t *testing.T) {
+	repoDir := t.TempDir()
+	writeBundleManifest(t, repoDir, "x", `
 members:
   - skill/foo
 `)
-	_, _, err := LoadBundles(vault, nil)
+	_, _, err := LoadBundle(filepath.Join(repoDir, types.VaultBundlesDir, "x"), nil)
 	if err == nil {
 		t.Fatalf("缺 name 应致命报错")
 	}
 }
 
-func TestLoadBundles_EmptyMembersIsFatal(t *testing.T) {
-	vault := t.TempDir()
-	writeBundle(t, vault, "x.yaml", `
+func TestLoadBundle_EmptyMembersIsFatal(t *testing.T) {
+	repoDir := t.TempDir()
+	writeBundleManifest(t, repoDir, "x", `
 name: x
 members: []
 `)
-	_, _, err := LoadBundles(vault, nil)
+	_, _, err := LoadBundle(filepath.Join(repoDir, types.VaultBundlesDir, "x"), nil)
 	if err == nil {
 		t.Fatalf("空 members 应致命报错")
 	}
 }
 
-func TestLoadBundles_IllegalNameIsFatal(t *testing.T) {
-	vault := t.TempDir()
-	writeBundle(t, vault, "x.yaml", `
-name: "-illegal"
-members:
-  - skill/foo
-`)
-	_, _, err := LoadBundles(vault, nil)
-	if err == nil {
-		t.Fatalf("首字符为 - 的 name 应致命报错")
-	}
-}
-
-func TestLoadBundles_NonYAMLFileProducesWarning(t *testing.T) {
-	vault := t.TempDir()
-	writeBundle(t, vault, "README.md", "not yaml")
-	writeBundle(t, vault, "ok.yaml", `
-name: ok
-members:
-  - skill/foo
-`)
-	bundles, warnings, err := LoadBundles(vault, nil)
-	if err != nil {
-		t.Fatalf("非 yaml 文件应只产生 warning: %v", err)
-	}
-	if len(bundles) != 1 {
-		t.Fatalf("应解析出 1 个 bundle, got %d", len(bundles))
-	}
-	if len(warnings) != 1 {
-		t.Fatalf("应产生 1 条 warning, got %d", len(warnings))
-	}
-}
-
-func TestLoadBundles_MemberExistsWarning(t *testing.T) {
-	vault := t.TempDir()
-	writeBundle(t, vault, "x.yaml", `
+func TestLoadBundle_MemberExistsWarning(t *testing.T) {
+	repoDir := t.TempDir()
+	writeBundleManifest(t, repoDir, "x", `
 name: x
 members:
   - skill/present
   - skill/missing
 `)
-	exists := func(m types.BundleMember) bool {
+	exists := func(bundleName string, m types.BundleMember) bool {
 		return m.Name == "present"
 	}
-	bundles, warnings, err := LoadBundles(vault, exists)
+	bundles, warnings, err := LoadRepoBundles(repoDir, exists)
 	if err != nil {
 		t.Fatalf("成员存在性检查失败不应致命: %v", err)
 	}
@@ -284,24 +257,22 @@ members:
 	}
 }
 
-func TestLoadBundles_InvalidYAMLIsFatal(t *testing.T) {
-	vault := t.TempDir()
-	writeBundle(t, vault, "bad.yaml", "::: not-yaml :::")
-	_, _, err := LoadBundles(vault, nil)
+func TestLoadBundle_InvalidYAMLIsFatal(t *testing.T) {
+	repoDir := t.TempDir()
+	writeBundleManifest(t, repoDir, "bad", "::: not-yaml :::")
+	_, _, err := LoadBundle(filepath.Join(repoDir, types.VaultBundlesDir, "bad"), nil)
 	if err == nil {
 		t.Fatalf("非法 YAML 应致命报错")
 	}
 }
 
-// writeBundle 是测试辅助：把内容写入 <vault>/bundles/<name>。
-// 自动创建 bundles 目录。
-func writeBundle(t *testing.T, vault, name, content string) {
+func writeBundleManifest(t *testing.T, repoDir, bundleName, content string) {
 	t.Helper()
-	dir := filepath.Join(vault, BundlesDirName)
+	dir := filepath.Join(repoDir, types.VaultBundlesDir, bundleName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, types.BundleManifestFileName), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 }

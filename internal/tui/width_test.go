@@ -19,7 +19,7 @@ var widthBaselines = []int{60, 80, 100, 140}
 func assertNoLineOverflowsWidth(t *testing.T, label string, view string, expected int) {
 	t.Helper()
 	for i, line := range strings.Split(view, "\n") {
-		// 使用 lipgloss.Width 一致地度量，保持「统一走 lipgloss」的约束（docs 风险 3）。
+		// 使用 lipgloss.Width 一致地度量，保持「统一走 lipgloss」的约束（TUI_ARCHITECTURE 风险 3）。
 		got := lipgloss.Width(line)
 		if got > expected {
 			t.Fatalf(

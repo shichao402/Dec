@@ -3,11 +3,13 @@ package app
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/types"
 )
 
 // RemoveAssetInput 描述一次 remove 操作的输入。
@@ -156,7 +158,7 @@ func isRemovableAssetType(t string) bool {
 	return t == "skill" || t == "command" || t == "rule" || t == "mcp"
 }
 
-// locateAssetInRepo 在 repo 中定位资产文件。vaultHint 非空时优先走该 vault；为空时遍历顶层目录查找唯一匹配。
+// locateAssetInRepo 在 repo 中定位资产文件。vaultHint 非空时优先走该 bundle；为空时遍历 bundles/ 子目录查找唯一匹配。
 func locateAssetInRepo(repoDir, itemType, assetName, vaultHint string) (string, string, error) {
 	if vaultHint != "" {
 		fullPath := resolveAssetFile(repoDir, vaultHint, itemType, assetName)
@@ -164,14 +166,18 @@ func locateAssetInRepo(repoDir, itemType, assetName, vaultHint string) (string, 
 			return "", "", fmt.Errorf("不支持的资产类型: %s", itemType)
 		}
 		if _, err := os.Stat(fullPath); err != nil {
-			return "", "", fmt.Errorf("未找到 %s '%s' (vault: %s)", itemType, assetName, vaultHint)
+			return "", "", fmt.Errorf("未找到 %s '%s' (bundle: %s)", itemType, assetName, vaultHint)
 		}
 		return vaultHint, fullPath, nil
 	}
 
-	entries, err := os.ReadDir(repoDir)
+	bundlesDir := filepath.Join(repoDir, types.VaultBundlesDir)
+	entries, err := os.ReadDir(bundlesDir)
 	if err != nil {
-		return "", "", fmt.Errorf("读取仓库目录失败: %w", err)
+		if os.IsNotExist(err) {
+			return "", "", fmt.Errorf("未找到 %s '%s'", itemType, assetName)
+		}
+		return "", "", fmt.Errorf("读取仓库 bundle 目录失败: %w", err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {

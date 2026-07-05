@@ -1,32 +1,162 @@
 # Dec 架构设计
 
-本文档描述当前代码库的实现结构与运行机制。
+本文档描述 Dec 的实现结构与运行机制。
 
-用户侧命令说明与使用建议以以下文档为准：
+用户侧说明以以下文档为准：
 
-- `README.md`：项目概览与快速开始
+- [README.md](../README.md)：项目概览与快速开始
+- [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md)：Project / bundle 与 secrets bundle 同构模型
+- [TUI_ARCHITECTURE.md](./TUI_ARCHITECTURE.md)：TUI 页面、测试策略与入口路由
+- [schema/dec/v1/README.md](../schema/dec/v1/README.md)：Dec 配置 Protobuf schema
+- [schema/secrets/v1/README.md](../schema/secrets/v1/README.md)：Secrets bundle Protobuf schema
 - `pkg/assets/dec/SKILL.md`：Dec Skill 的完整使用说明
-- `pkg/assets/dec-extract-asset/SKILL.md`：Dec 资产沉淀 Skill 的完整使用说明
 
 ## 概览
 
-Dec 是一个以 Cobra CLI 为自动化接口、并在交互式无参启动时默认进入 TUI Shell 的个人 AI 资产管理工具，用于把 Skills、Rules、MCP 配置保存在个人 Vault 中，并在不同项目、不同 IDE 间复用。
+Dec 是一个以 **TUI** 为第一交互入口的个人 AI 资产管理工具，用于把 Skills、Rules、MCP 配置保存在个人 Vault 中，并在不同项目、不同 IDE 间复用。
 
-当前命令体系围绕四类动作展开：
+配置与资产按 **Project > Bundle** 两层组织：
 
-- 仓库连接：`dec config repo`
-- 项目配置：`dec config init` / `dec config show`
-- 资产管理：`dec list` / `dec search` / `dec pull` / `dec push`
-- 版本更新：`dec update`
+| 层级 | 存储位置 | 职责 |
+|------|----------|------|
+| **Project** | Git Vault `projects/<name>.yaml` | 声明项目启用哪些 bundle、默认 IDE 等；跨机器共享 |
+| **Bundle** | Git Vault `bundles/<name>/` + Bitwarden secrets bundle | 公开资产与私密文件的同构组织单位 |
+
+公开资产以 **bundle** 组织在 Git Vault，落地在 **`.dec/`**；私密文件以 **同名 secrets bundle** 同构存放在 Bitwarden——Secure Note / mise env 落地 **项目根相对路径**，SSH Key 落地 **机器级 `~/.ssh/`**。TUI **Run** 页一次 pull 先解析 project 的 bundle 列表，再逐 bundle 拉 Dec Git bundle、自动拉 secrets bundle，两边 **独立落地**（敏感文件不进 `.dec/cache/`），且 **`.dec/` 树与项目根敏感路径不得相交**。
+
+用户操作通过 TUI Shell（`internal/tui/`）完成，业务逻辑在 `pkg/app/`：
+
+- 仓库连接：TUI **Settings** 页
+- 项目初始化 / project 选择：TUI **Home** 或首次进入引导
+- bundle 与资产调整：TUI **Assets** 页
+- 资产管理：TUI **Assets** 浏览 + **Run** 页 pull/push/remove
+- 版本信息：`dec --version`
 
 ## 文档边界
 
-为了减少重复：
-
 - `README.md` 负责概览、安装、快速上手
-- `pkg/assets/dec/SKILL.md` 负责完整的用户操作语义和 Skill 资产说明
-- `pkg/assets/dec-extract-asset/SKILL.md` 负责把当前项目能力沉淀进 Dec 的操作语义
-- 本文档只保留架构、目录结构、模块边界和关键运行机制
+- `pkg/assets/dec/SKILL.md` 负责完整的用户操作语义
+- 本文档保留架构、目录结构、模块边界和关键运行机制
+
+## 三层目录总览
+
+```text
+Git Vault（Dec 仓库）          Bitwarden                    本地工作区
+─────────────────────          ─────────                    ──────────
+projects/my-app.yaml           folder: vikunja_workflow     my-app/
+  bundles: [vikunja]             Secure Note → .config/       ├── .dec/
+bundles/vikunja/                 SSH Key → ~/.ssh/            │   ├── config.yaml  ← project_name
+  skills/...                                                  │   └── cache/vikunja/
+bundles/default/                                              ├── .cursor/...
+                                                              └── .config/mise/...
+```
+
+## Project 层
+
+**Project** 是 Dec 的配置入口：用户只需在 project 里声明需要哪些 bundle，不必在每个工作区手工维护完整 bundle 列表。
+
+### Vault 中的 Project 声明
+
+```text
+<repo>/
+├── projects/
+│   ├── my-app.yaml          # project 声明
+│   └── dec-cli.yaml
+└── bundles/
+    ├── vikunja/
+    │   ├── bundle.yaml      # bundle 成员声明（可选）
+    │   ├── skills/
+    │   ├── rules/
+    │   ├── mcp/
+    │   └── commands/
+    └── default/
+        ├── bundle.yaml
+        └── skills/helloworld/...
+```
+
+`projects/<name>.yaml` 示例：
+
+```yaml
+name: my-app
+description: 我的应用项目
+
+bundles:
+  - vikunja
+  - helloworld
+
+ides:
+  - cursor
+
+editor: code --wait
+```
+
+- `bundles`：启用的 Dec bundle 短名（对应 `bundles/<name>/`）
+- `ides` / `editor`：该项目默认值；本地 `.dec/config.yaml` 可覆盖
+
+### 本地 Project 引用
+
+工作区 `.dec/config.yaml` 以 **`project_name`** 引用 vault 中的 project；bundle 列表从 vault project 同步到本地 `enabled_bundles`：
+
+```yaml
+version: v2
+
+project_name: my-app
+
+ides:               # 可选：机器级 IDE 覆盖
+  - cursor
+
+enabled_bundles:    # 从 projects/my-app.yaml 同步；Assets 页可调整
+  - vikunja
+  - helloworld
+
+available:          # Assets 页扫描生成（本地缓存）
+  vikunja:
+    vikunja-workflow:
+      skills: true
+
+enabled:            # 单资产粒度（高级用法）
+  vikunja:
+    vikunja-workflow:
+      skills: true
+```
+
+**职责划分**：
+
+| 字段 | 存储 | 说明 |
+|------|------|------|
+| `project_name` | 本地 + vault 文件名 | 关联 `projects/<name>.yaml` |
+| `bundles` | vault project | bundle 列表真相源 |
+| `enabled_bundles` | 本地 | 从 vault 同步或 Assets 页保存；pull 解析用 |
+| `ides` / `editor` | vault project + 本地覆盖 | 本地优先 |
+| `available` / `enabled` | 本地 | 扫描缓存与单资产粒度控制 |
+
+### Project 初始化（TUI-first）
+
+首次进入工作区或 Home 页 **初始化 project** 时，TUI 引导完成以下之一：
+
+```mermaid
+flowchart TD
+  A[进入工作区 / dec] --> B{本地 .dec/config.yaml 存在?}
+  B -->|否| C[推断 project 名]
+  C --> D{vault 存在 projects/同名.yaml?}
+  D -->|是| E[自动匹配并应用]
+  D -->|否| F[TUI：选择已有 project 或新建]
+  B -->|是| G[加载 project_name]
+  E --> H[写入 .dec/config.yaml]
+  F -->|选择已有| I[从 vault 拉 project → 同步 enabled_bundles]
+  F -->|新建| J[填名 + 选 bundles → push projects/名.yaml]
+  I --> H
+  J --> H
+  G --> K[正常使用 Assets / Run]
+  H --> K
+```
+
+1. **推断 project 名**：工作区目录 basename（如 `my-app`），或用户在 TUI 中指定
+2. **自动匹配（新机器）**：vault 存在 `projects/<basename>.yaml` → 自动应用，写入本地 `project_name` 与 `enabled_bundles`
+3. **选择已有 project**：从 vault 列出 `projects/*.yaml`，用户选择 → 同步 bundle 列表到本地
+4. **新建 project**：填 project 名、勾选 bundles → **push 到 vault** `projects/<name>.yaml` → 写入本地引用
+
+不在 TUI 外暴露 `dec init` 等 CLI 子命令；与 [TUI 优先](../.cursor/rules/tui-first.mdc) 一致。
 
 ## 目录结构
 
@@ -37,77 +167,155 @@ Dec 是一个以 Cobra CLI 为自动化接口、并在交互式无参启动时�
 ├── config.yaml              # 全局配置（repo_url、默认 IDE、默认 editor）
 ├── local/
 │   └── vars.yaml            # 本机级变量定义
-└── repo.git/                # 本地 bare repo 缓存
+├── repo.git/                # 本地 bare repo 缓存
+└── secrets/
+    └── state.json           # Bitwarden secrets bundle 同步状态
 ```
 
-如果设置了 `DEC_HOME`，上述目录都会迁移到 `DEC_HOME` 下。
+若设置了 `DEC_HOME`，上述目录位于 `DEC_HOME` 下。
 
 ### 项目目录
 
 ```text
-.dec/
-├── config.yaml              # 项目配置（v2: available/enabled + vault/item/type 结构）
-├── cache/                   # 资产缓存（pull 时写入，push 时读取）
-├── .version                 # 最近一次 pull 的 commit 记录
-├── vars.yaml                # 项目变量定义（主文件，覆盖 vars.d/）
-└── vars.d/                  # 可选：拆分的变量片段 *.yaml / *.yml，按文件名字典序合并
+<workspace>/
+├── .dec/
+│   ├── config.yaml          # project_name + 本地 override + enabled_bundles
+│   ├── cache/               # 资产缓存（pull 写入，push 读取）
+│   ├── .version             # 最近一次 pull 的 commit 记录
+│   ├── vars.yaml            # 项目变量定义（主文件，覆盖 vars.d/）
+│   └── vars.d/              # 可选：拆分的变量片段 *.yaml / *.yml
+├── .cursor/                 # IDE 渲染产物
+└── .config/mise/conf.d/     # Bitwarden secrets 落地（不进 .dec/）
 ```
 
-在当前项目语义下，`.dec/` 适合作为共享配置的一部分纳入版本控制：
+`.dec/` 适合纳入版本控制：
 
-- `config.yaml`：记录项目级 IDE / editor 覆盖，以及 available / enabled 资产清单
-- `cache/`：保存 pull 下来的原始资产文件，也是 push 的读取源
-- `.version`：记录当前项目最近一次 pull 对应的远端 commit
-- `vars.yaml`：记录项目级变量与资产级变量覆盖
-
-### 项目配置格式
-
-项目配置当前版本为 `v2`，采用 `vault -> item -> type` 结构：
-
-```yaml
-version: v2
-
-ides:
-  - cursor
-
-editor: code --wait
-
-available:
-  team:
-    api-style:
-      rules: true
-    postgres:
-      mcp: true
-
-enabled:
-  team:
-    api-style:
-      rules: true
-```
-
-兼容策略：
-
-- 读取到没有 `version` 的旧配置时，按 `v1` 处理
-- `v1` 结构会在加载时自动迁移为 `v2` 并回写到 `.dec/config.yaml`
-- 迁移完成后，流程继续按 `v2` 配置执行
+- `config.yaml`：`project_name`、机器级 IDE / editor 覆盖、`enabled_bundles` / available / enabled
+- `cache/`：pull 下来的 **公开** 资产缓存，也是 push 的读取源（私密文件不进 cache）
+- `.version`：当前项目最近一次 pull 对应的远端 commit
+- `vars.yaml`：项目级变量与资产级变量覆盖
 
 ### 仓库中的 Vault 结构
 
-远端仓库仍按 Vault 目录组织真实资产文件：
+远端仓库顶层仅含 **projects/** 与 **bundles/**：
 
 ```text
 <repo>/
-└── <vault>/
-    ├── skills/
-    │   └── <name>/
-    │       └── SKILL.md
-    ├── rules/
-    │   └── <name>.mdc
-    └── mcp/
-        └── <name>.json
+├── projects/
+│   └── <project-name>.yaml   # Project 声明（bundles、ides、描述）
+└── bundles/
+    └── <bundle-name>/        # bundle 目录，名与 project.bundles 引用一致
+        ├── bundle.yaml       # bundle 成员声明（可选；缺省时合成隐式 bundle）
+        ├── skills/
+        │   └── <name>/
+        │       └── SKILL.md
+        ├── rules/
+        │   └── <name>.mdc
+        ├── mcp/
+        │   └── <name>.json
+        └── commands/
+            └── <name>/
+                └── ...
 ```
 
-Dec 通过扫描这些目录发现资产，不依赖额外索引文件。
+Dec 通过扫描 `projects/` 与 `bundles/` 发现 project 与资产，不依赖额外索引文件。
+
+### Bitwarden secrets bundle 结构
+
+与 Dec bundle **同构绑定**；project 启用的每个 bundle 在 pull 时成对拉取 Dec + secrets。Secure Note **名称** = 敏感文件在项目根的 **目标相对路径**：
+
+```text
+Bitwarden folder: vikunja_workflow（绑定 Dec bundle: vikunja）
+
+Secure Note: .config/mise/conf.d/vikunja.toml
+  [env]
+  VIKUNJA_URL="..."
+  VIKUNJA_API_TOKEN="..."
+
+Pull 后落地:
+  <workspace>/.config/mise/conf.d/vikunja.toml   # 项目根，不进 .dec/
+```
+
+### SSH Key（机器级落地）
+
+OpenSSH / Git 默认只认 **机器级** `~/.ssh/`，SSH 私钥 **不进项目根**（无 `keys/`、无项目级 `.ssh/config`）。
+
+```text
+Bitwarden folder: vikunja_workflow
+  [SSH Key] deploy
+    Name: deploy
+    Notes: vikunja.example.com   # 一行一个 host
+
+Pull 后落地:
+  ~/.ssh/dec_vikunja_deploy
+  ~/.ssh/dec_vikunja_deploy.pub
+  ~/.ssh/config                  # Dec 管理区块（Host + IdentityFile）
+```
+
+- `authorized_keys`：Dec 不管理（服务器侧自行维护）。
+- `known_hosts`：Dec 不主动写入；首次连接由 OpenSSH 提示或由用户维护。
+- 同步元数据：`~/.dec/secrets/state.json` 的 `SSHKeyRef` 记录机器级路径。
+
+**`.dec/` 树** 与 **项目根** 敏感落地路径 **不得相交**；冲突时 pull 报错。SSH 落在 `~/.ssh/`，不参与项目根零重叠校验。详见 [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md)。
+
+### 端到端示例：vikunja project
+
+以下展示 vault 声明、Dec bundle 与 pull 后本地三处目录的关系。
+
+**Vault — project 声明**（`projects/my-app.yaml`）：
+
+```yaml
+name: my-app
+description: 使用 Vikunja 集成的应用
+bundles:
+  - vikunja
+ides:
+  - cursor
+```
+
+**Vault — Dec bundle**（`bundles/vikunja/`）：
+
+```text
+bundles/vikunja/
+├── bundle.yaml
+├── skills/vikunja-workflow/SKILL.md
+├── rules/vikunja-integration.mdc
+└── mcp/vikunja-mcp.json          # command: mise，无 token 占位
+```
+
+**Bitwarden — secrets bundle**（folder `vikunja_workflow`，绑定 Dec bundle `vikunja`）：
+
+```text
+Secure Note: .config/mise/conf.d/vikunja.toml
+  [env]
+  VIKUNJA_URL="https://vikunja.example.com"
+  VIKUNJA_API_TOKEN="..."
+
+[SSH Key] deploy  Notes: vikunja.example.com
+```
+
+**Pull 后本地三处目录**（存储根分离，零路径重叠）：
+
+```text
+my-app/
+├── .dec/
+│   ├── config.yaml               # project_name: my-app
+│   └── cache/vikunja/            # Dec 公开资产（push 读取源）
+│       ├── skills/...
+│       ├── rules/...
+│       └── mcp/vikunja-mcp.json
+├── .cursor/                      # IDE 渲染产物（dec-* 前缀）
+│   ├── skills/dec-vikunja-workflow/
+│   ├── rules/dec-vikunja-integration.mdc
+│   └── mcp.json                  # dec-vikunja-mcp 条目
+└── .config/mise/conf.d/
+    └── vikunja.toml              # Bitwarden Secure Note 落地，不进 .dec/
+
+机器级（不进项目根）：
+  ~/.ssh/dec_vikunja_deploy
+  ~/.ssh/dec_vikunja_deploy.pub
+  ~/.ssh/config                   # Dec 管理区块
+```
 
 ### IDE 托管输出
 
@@ -120,215 +328,134 @@ Dec 通过扫描这些目录发现资产，不依赖额外索引文件。
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 | Codex Internal | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 
-Dec 托管产物统一使用 `dec-` 前缀，以便和用户手工维护的内容区分。
-
-其中 `claude-internal` 在项目级复用 `.claude/`，`codex-internal` 在项目级复用 `.codex/`；只有用户级目录仍然分别是 `~/.claude-internal/` 和 `~/.codex-internal/`。
+Dec 托管产物统一使用 `dec-` 前缀。`claude-internal` / `codex-internal` 在项目级复用 `.claude/` / `.codex/`；用户级目录分别为 `~/.claude-internal/` 与 `~/.codex-internal/`。
 
 ## 关键运行机制
 
 ### 1. 仓库连接与事务
 
-- `dec config repo <url>` 会把远端仓库连接到本地 `repo.git` bare repo 缓存
+TUI **Settings** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
+
 - 读操作基于 bare repo 的最新远端引用
 - 写操作通过短生命周期临时 worktree 完成，结束后自动清理
-- Dec 依赖系统 `git`，认证由用户自己的 Git 环境负责
+- Dec 依赖系统 `git`，认证由用户 Git 环境负责
 
 ### 2. 有效 IDE 与编辑器解析
 
-资产部署目标由以下优先级决定：
+资产部署目标优先级：
 
-1. 项目级 `.dec/config.yaml`
-2. 全局 `~/.dec/config.yaml`
-3. 默认值 `cursor`
+1. 项目级 `.dec/config.yaml`（机器级 override）
+2. vault `projects/<project_name>.yaml` 的 `ides` / `editor`
+3. 全局 `~/.dec/config.yaml`
+4. 默认值 `cursor`
 
-交互式编辑器由以下优先级决定：
+交互式编辑器优先级相同。TUI **Settings** 页安装 Dec 内置资产并写入全局 IDE 列表。
 
-1. 项目级 `.dec/config.yaml`
-2. 全局 `~/.dec/config.yaml`
-3. 自动探测到的系统编辑器
+### 3. 内置资产与 Vault 资产的边界
 
-`dec config global` 的作用是安装 Dec 跟随分发的内置资产，并把默认 IDE 列表写入 `~/.dec/config.yaml`。
+三套内容平面：
 
-### 3. 用户级内置资产安装
+- **Dec 产品源码**：`pkg/assets/`、`cmd/`、`pkg/`、`Documents/` 等，通过构建进入二进制
+- **项目级落地产物**：`.dec/`、`.cursor/`、`.claude/` 等，由 TUI pull 写入
+- **Vault 资产源**：远端 `projects/`、`projects/<name>.yaml` 与各 `bundles/<name>/` 目录与项目 `.dec/cache/`
 
-`dec config global` 不是把某个单独说明文档写进 IDE，而是安装一组跟随 Dec 二进制分发的内置资产。
-
-当前内置资产 bundle 为：
-
-- `dec`：通用 Dec 操作 Skill
-- `dec-extract-asset`：把当前项目中的本地能力沉淀为 Dec 资产的 Skill
-
-安装机制约束：
-
-- 内置资产内容由 `pkg/assets/` 通过 embed 打包进二进制
-- `cmd/config.go` 负责把 bundle 安装到各 IDE 的用户级目录
-- 安装器按资产类型分发，目前实际写入的是 Skills
-- Rule / MCP 已有独立安装函数入口，但当前 bundle 仍为空，后续可在不改命令语义的前提下继续扩展
-
-用户级路径与项目级路径不是同一套映射：
-
-- `claude-internal` 项目级继续复用 `.claude/`，但用户级安装目标是 `~/.claude-internal/`
-- `codex-internal` 项目级继续复用 `.codex/`，但用户级安装目标是 `~/.codex-internal/`
-- 这类差异由 `pkg/ide/` 中的 IDE 抽象负责解析
-
-### 3.1 内置资产源码、项目缓存与 Vault 资产的边界
-
-这里有三套很容易混淆的内容平面，必须严格区分：
-
-- **Dec 产品源码**：当前仓库中的 `pkg/assets/`、`cmd/`、`pkg/`、`Documents/`、`README.md`、`version.json` 等。这些内容通过构建进入 Dec 二进制，属于 Dec 自身发布物的一部分。
-- **项目级落地产物**：业务仓库中的 `.dec/`、`.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 等。这些是 `dec config init` / `dec pull` 作用到某个项目后的结果。
-- **Vault 资产源**：远端 Vault 仓库中的 `<vault>/skills/`、`<vault>/rules/`、`<vault>/mcp/`，以及当前项目里作为其 push 输入源的 `.dec/cache/`。
-
-因此有两个不能再混淆的规则：
-
-- 修改 `pkg/assets/dec/SKILL.md`、`pkg/assets/dec-extract-asset/SKILL.md` 或其他内置资产源码时，**不要**使用 `dec push` 试图“发布”它们。`dec push` 不读取 `pkg/assets/`，也不会更新 Dec 安装包或 GitHub Release。
-- `dec push` 只负责把当前项目 `.dec/cache/` 中的已启用资产写回个人 Vault 仓库；它适用于用户资产同步，不适用于 Dec 自身内置资产发布。
-
-内置资产的正确发布路径是：
-
-- 在 Dec 源码仓库中修改对应文件，例如 `pkg/assets/dec/SKILL.md`
-- 提交到当前仓库，并在需要发版时更新 `version.json`
-- push 到 `main`，由 GitHub Actions 基于版本变更创建 `vX.Y.Z` tag、GitHub Release（自动标 Latest），并 force-sync `ReleaseLatest` 分支用于 install 脚本分发
-
-换句话说：
-
-- **内置 Skill 变更** 是 Dec 产品改动，走正常代码提交与版本发布流程
-- **`.dec/cache/` 变更** 才是用户资产改动，走 `dec push`
+修改 `pkg/assets/` 走源码 commit + release；`.dec/cache/` 变更走 TUI **Run** 页 push；project 声明变更走 vault `projects/` push。
 
 ### 4. 资产生命周期
 
-#### `config init`
+#### project init（Home / 首次进入）
 
-- 扫描远端仓库中的所有 Vault 和资产
-- 生成或更新项目级 `.dec/config.yaml`
-- 保留已有 `enabled` / `ides` / `editor`
+- 推断或让用户指定 project 名
+- 自动匹配 vault `projects/<name>.yaml`，或列出已有 project 供选择，或新建并 push
+- 写入本地 `.dec/config.yaml`（`project_name`、`enabled_bundles`）
 - 生成 `.dec/vars.yaml` 模板
-- 打开编辑器让用户调整 `enabled`
 
-#### `pull`
+#### config init（Assets 页）
 
-- 读取 `.dec/config.yaml` 中 `enabled` 的资产
-- 校验它们是否仍在 `available` 中
-- 清理 `.dec/cache/` 和 IDE 中已经不再启用的资产
-- 从远端仓库读取资产内容
-- 把原始内容写入 `.dec/cache/`
-- 安装到有效 IDE 对应目录
-- 对安装后的文件执行变量替换
-- 把拉取来源 commit 记录到 `.dec/.version`
+- 扫描远端 vault 与 bundle
+- 更新 `.dec/config.yaml` 的 `available`
+- 保留已有 `project_name` / enabled / enabled_bundles / ides / editor
 
-#### `push`
+#### pull（Run 页）
 
-- 读取 `.dec/config.yaml` 中 `enabled` 的资产
-- 从 `.dec/cache/` 查找对应缓存文件
-- 将缓存文件回写到远端 Vault 目录
-- 提交并推送到远端仓库
+1. 解析 `project_name` → vault `projects/<name>.yaml`（或使用本地 `enabled_bundles`）
+2. 对每个 enabled bundle：拉 Dec Git bundle → `.dec/cache/<bundle>/`
+3. 自动拉 Bitwarden secrets bundle（同名或 `BundleBinding`）→ Secure Note **项目根相对路径**；SSH Key Item → **`~/.ssh/`** + Dec 管理 config 区块
+4. 零重叠校验（`.dec/` vs 项目根敏感落地路径）
+5. 从 cache 渲染安装到 IDE 目录 + 非敏感 vars 占位符替换
+6. 记录 commit 到 `.dec/.version`
 
-额外约束：
+#### push（Run 页）
 
-- `push` 的读取源只有项目 `.dec/cache/`，不会读取 Dec 源码仓库中的 `pkg/assets/`
-- 因此修改内置 Skill / Rule / MCP 时，验证可以依赖测试与自举验收，但发布必须走源码仓库的 commit + version + release 流程，不能用 `dec push` 代替
+- 从 `.dec/cache/` 读取已启用资产，写回 Git Vault
+- project 声明变更：更新 vault `projects/<name>.yaml`
+- secrets bundle 走 Bitwarden API，不进 Git
 
-#### `push --remove`
+#### remove（Run 页）
 
-- 在远端仓库中查找匹配资产
-- 删除远端文件或目录
-- 同步清理本地 `.dec/config.yaml` 和 `.dec/cache/` 中对应条目
+- 删除远端匹配资产，同步清理 `.dec/config.yaml` 与 `.dec/cache/`
 
 ### 5. MCP 合并策略
 
 MCP 采用非覆盖式合并：
 
-- Vault 中的条目以 `dec-{name}` 写入 IDE 的 MCP 配置
-- 用户手工维护的非 `dec-*` 条目保持不变
-- 已不再托管的 `dec-*` 条目会被清理
+- Vault 条目以 `dec-{name}` 写入 IDE MCP 配置
+- 用户非 `dec-*` 条目保持不变
+- 不再托管的 `dec-*` 条目会被清理
 
 ### 6. freshness 被动检查
 
-Dec 在每次 CLI 命令结束后，会被动检查远端 Vault 是否有新提交，并在下一条命令开始前打印一次 `dec pull` 提示。核心目标是零阻塞主命令，代价是提示会延后到"下一条命令"。
+`pkg/freshness/` 在后台检查远端 Vault 是否有新提交。实现位于 `pkg/freshness/` 与 hidden 子命令 `__freshness-check`：
 
-实现位于 `pkg/freshness/` 与 `cmd/freshness_check.go`：
-
-- **分离子进程执行 fetch**：PostRun 阶段 `cmd.Start()` 启动 hidden cobra 子命令 `__freshness-check --project-root`，立即返回不 `Wait()`
-  - Unix：`syscall.SysProcAttr{Setsid: true}`（`pkg/freshness/async_unix.go`）
-  - Windows：`CreationFlags |= DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`（`pkg/freshness/async_windows.go`）
-- **两阶段协作**：当前命令 PostRun fork 子进程写 cache → 下一条命令 PreRun 读 cache 打印提示
-- **cache**：`~/.dec/local/freshness-result.<sha1>.json`，24h TTL（沿用 `Interval()`），atomic `.tmp` + rename 写入
-- **lock**：`~/.dec/local/freshness.lock`，`O_CREATE|O_EXCL` 独占。busy 时静默 skip，避免与 `dec pull/push` 撞车；mtime 超过 10 分钟视为僵尸自动回收
-- **dec pull 成功后清 cache**：`cmd/pull.go` 调 `freshness.InvalidateCache(cwd)`，防止旧 local commit 让下一次提示误报
-- **throttle 与 cache 共用 SHA1**：`pkg/freshness/freshness.go:hashProjectRoot()` 让 `last-freshness-check.<hash>` 与 `freshness-result.<hash>.json` 指向同一项目
-
-所有静默路径（disabled / 未 pull / lock busy / throttled / cache 中 `Err` 非空）都不会打扰用户。
+- 分离子进程执行 fetch，不阻塞 TUI 主流程
+- cache：`~/.dec/local/freshness-result.<sha1>.json`，24h TTL
+- lock：`~/.dec/local/freshness.lock`，busy 时静默 skip
+- pull 成功后清 cache，避免误报
 
 ### 7. 变量替换
 
-变量替换发生在 pull 后、安装到 IDE 目录之后。
-
-优先级（由高到低）：
+pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感** 模板。优先级（由高到低）：
 
 1. `.dec/vars.yaml` 中的 `assets.<type>.<name>.vars`
 2. `.dec/vars.yaml` 中的 `vars`
-3. `.dec/vars.d/*.yaml`（可选，按文件名字典序合并；主文件 `vars.yaml` 会覆盖同名键；fragment 的 `assets:` 字段被忽略）
+3. `.dec/vars.d/*.yaml`（按文件名字典序合并；主文件覆盖同名键）
 4. `~/.dec/local/vars.yaml` 中的 `vars`
 
-未定义的占位符会保留原样，并在 pull 输出中提示。
-
-变量文件解析失败（例如 `vars.yaml` / `vars.d/*.yaml` 语法错误）不会终止 pull，但会通过 `Reporter` 以 `pull.vars` scope 的 warn 事件上报，便于 CLI 与 TUI 统一提示、避免静默吞错。
+私密 env（如 `VIKUNJA_API_TOKEN`）由 mise 从 `.config/mise/conf.d/*.toml` 读取，**不通过**占位符替换注入。未定义占位符保留原样并通过 Reporter 提示。
 
 ## 模块划分
 
 ### `cmd/`
 
-命令行入口层，负责参数解析、命令编排和用户输出。
-同时，根入口还负责在默认 TUI 和传统 CLI 之间做分流。
+命令行入口层：
 
-- `root.go`：根命令、版本信息，以及 `dec` 无参启动时的入口分流
-- `repo.go`：仓库连接命令
-- `config.go`：配置初始化、展示与全局 IDE 配置
-- `pull.go`：项目拉取与安装
-- `push.go`：缓存推送与远端删除
-- `list.go` / `search.go`：仓库资产浏览
-- `vault.go`：共享的 Vault 扫描、缓存路径、安装辅助函数
-- `update.go`：版本检查与自更新
-
-`cmd/*` 当前仍是 CLI 适配层，但 `config init`、`config repo`、`config global` 与 `pull` 的非交互编排已经开始下沉到 `pkg/app/`，后续 `push` / 默认 TUI 会继续沿这条边界演进。
+- `root.go`：根命令、TUI/CLI 分流、`dec --version`
+- `freshness_check.go`：hidden 子命令，供 freshness 后台 worker 使用
+- `output.go`：输出辅助
 
 ### `pkg/app/`
 
-用例层，负责把底层 repo/config/ide 能力编排成可复用的结构化操作结果，而不是直接向终端打印文本。
+用例层，编排 repo/config/ide 为可复用操作：
 
-当前已落地的边界：
-
-- `project.go`：`config init` 的仓库扫描、项目配置写入、vars 模板准备
-- `overview.go`：TUI 首页所需的项目概览聚合，包括仓库连接、项目配置、启用资产数、有效 IDE 和编辑器
-- `assets.go`：TUI Assets 页所需的资产选择状态加载与保存，包括 enabled 切换持久化、保留 IDE/editor、确保 vars 模板
-- `operations.go`：`pull` 的复用编排层，负责配置校验、旧布局迁移、清理失效资产、缓存写入、IDE 安装、变量替换与结构化结果汇总
-- `settings.go`：全局设置与仓库连接用例，负责 repo connect、默认 IDE 保存、用户级内置资产安装与全局 vars 模板准备
-- `events.go`：`Reporter` / `OperationEvent` 事件模型，供 CLI 与 TUI 共享执行过程
-
-当前 CLI 仍保留交互式编辑器打开、最终输出和用户提示；`pkg/app` 负责承接可复用的非交互业务步骤，供 CLI 与 TUI 共享，其中 `config init`、`config repo`、`config global` 与 `pull` 已经走到这条边界上。
+- `project.go`：project init、项目配置写入
+- `overview.go`：TUI 首页概览
+- `assets.go`：Assets 页资产选择与持久化
+- `operations.go`：pull/push/remove 编排
+- `settings.go`：Settings 页仓库连接与全局配置
+- `vault_bundle.go`：bundle 解析与合成
+- `events.go`：`Reporter` / `OperationEvent` 事件模型
 
 ### `internal/tui/`
 
-交互式展示层，当前承接默认入口下的最小可用 TUI Shell。
+Bubble Tea 交互层：
 
-- `app.go`：Bubble Tea 程序启动与 IO 绑定
-- `model.go`：全局 Shell model，负责首页、导航、Assets / Run / Settings 页交互、状态栏、日志区与刷新逻辑
-
-当前阶段已经接入：
-
-- `dec` 在交互式无参数场景下进入 TUI
-- 首页展示仓库/项目概览、导航、状态栏和最近日志
-- `Assets` 页可加载仓库资产、按关键字筛选、切换启用状态，并保存到 `.dec/config.yaml`
-- `Run` 页可触发一次 `pull`，展示阶段进度、执行日志和最近一次结果
-- `Settings` 页可编辑 repo URL、勾选默认 IDE，并通过同一用例层完成仓库连接、内置资产安装与全局 vars 模板准备
-- `pull` 或 `Settings` 保存完成后会刷新首页概览、资产状态与全局设置；`Project` 页仍保留占位页
+- `app.go`：程序启动与 IO 绑定
+- `model.go`：Shell model，Home / Assets / Project / Run / Settings 页
 
 ### `pkg/config/`
 
-配置读写与优先级解析。
-
-- `global.go`：全局配置、旧本机配置兼容迁移、有效 IDE / editor 解析
-- `project.go`：项目级 `.dec/config.yaml` 与 `.dec/vars.yaml`，以及 v1 -> v2 自动迁移
+- `global.go`：全局配置、有效 IDE / editor 解析
+- `project.go`：项目级 `.dec/config.yaml` 与 `.dec/vars.yaml`
 
 ### `pkg/repo/`
 
@@ -336,80 +463,70 @@ Git 仓库连接、bare repo 管理、事务 worktree。
 
 ### `pkg/ide/`
 
-IDE 抽象层，负责不同 IDE 的目录与 MCP 配置差异。
-
-- `registry.go`：注册 cursor、codebuddy、claude、claude-internal、codex、codex-internal
-- 同时区分项目级输出目录与用户级内置资产安装目录
+IDE 抽象层，区分项目级输出目录与用户级内置资产安装目录。
 
 ### `pkg/assets/`
 
-内置资产内容与装载逻辑。目前包含 `dec` 与 `dec-extract-asset` 两个内置 skill，并为未来内置 rule / mcp 预留统一 bundle 结构。
-
-这里的文件不是 Vault 里的用户资产副本，而是 Dec 产品源码的一部分。任何对 `pkg/assets/*` 的修改，都必须通过重新构建和发布 Dec 才会进入用户安装结果。
+内置 skill 内容（`dec`、`dec-extract-asset`），通过 embed 打包进二进制。
 
 ### `pkg/types/`
 
-声明全局配置、项目配置、资产列表、MCP 配置等结构体，并包含项目配置 v2 的 YAML 编解码逻辑。
+全局配置、Project、ProjectConfig、资产列表、Bundle、MCP 配置等结构体。
 
 ### `pkg/vars/`
 
-变量文件加载、占位符提取、变量解析与替换。
+变量文件加载、占位符提取与替换。
 
-### `pkg/version/`
+### `pkg/version/`、`pkg/update/`、`pkg/freshness/`
 
-版本信息加载、比较与编译期注入支持。
-
-### `pkg/update/`
-
-检查 GitHub Release、下载新版本并执行自更新。
-
-### `pkg/freshness/`
-
-被动式远端 freshness 检查。负责 fork 分离子进程执行 `git fetch`、结果 cache、lock 互斥、以及跨平台 detach 行为（`async_unix.go` / `async_windows.go`）。调用入口在 `cmd/root.go` 的 PreRun / PostRun 以及 hidden 子命令 `cmd/freshness_check.go`。
+版本信息、自更新、远端新鲜度检查。
 
 ## 关键设计点
 
-### 命令驱动而非声明式同步
+### TUI 驱动
 
-Dec 不依赖 `dec sync` 之类的全量同步入口，而是通过 `config init` / `pull` / `push` / `push --remove` 让用户显式控制状态变化。
+日常交互通过 TUI 页面完成；Agent / CI 调用 `pkg/app/` API。
 
-### 多 Vault 支持
+### Project > Bundle
 
-一个仓库可以包含多个 Vault；项目配置中的 `available` 和 `enabled` 也显式记录每个资产所属的 Vault。
+- **Project**（vault `projects/`）：声明启用哪些 bundle，跨机器共享
+- **Bundle**（`bundles/<name>/` + Bitwarden secrets bundle）：公开与私密资产的组织单位
+- 本地 `.dec/config.yaml` 引用 project，同步 `enabled_bundles` 供 pull 解析
+
+### 多 Bundle 支持
+
+一个仓库可含多个 bundle；project 的 `bundles` 列表引用 bundle 短名。
 
 ### 托管范围有限
 
-Dec 只管理自己生成的 `dec-*` 产物，不主动修改用户手工维护的非托管内容。
+Dec 只管理 `dec-*` 产物，不修改用户手工维护的非托管内容。
 
 ### 基于文件系统的真实状态
 
-Vault 中的资产以目录和文件直接组织，代码通过扫描真实目录结构发现状态，而不是依赖单独的索引数据库。
+Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真实目录发现状态。
 
-## 当前边界
+### Secrets Bundle 同构
 
-以下能力不在当前实现中：
+- 存储根分离：Dec → `.dec/`；Secure Note / mise env → 项目根；SSH Key → `~/.ssh/`
+- Pull：按 project bundle 列表 → Dec Git bundle → Bitwarden secrets bundle → 零重叠校验（项目根）→ 独立落地 + IDE 渲染
+- MCP 通过 mise 启动；env 由 `.config/mise/conf.d/*.toml` 提供
+- Schema：`Project`（`schema/dec/v1/projects.proto`）、`BundleBinding`、`SecretsConfig`（`schema/secrets/v1/`）
+- TUI：Run 页一次 pull；Settings 页配置 Bitwarden；Home 页 project 初始化
 
-- `dec sync`
-- 独立的 `pkg/vault/` 编排层
-- `dec serve` / `dec publish-notify`
-- `technology.yaml` / `packs.yaml` 配置体系
+## 已知限制
 
-## 已知问题与限制
+### CodeBuddy MCP 路径
 
-### CodeBuddy MCP 配置路径特殊
+CodeBuddy MCP 位于项目根 `.mcp.json`。Codex 位于 `.codex/config.toml`。
 
-CodeBuddy 的 MCP 配置位于项目根目录 `.mcp.json`，不是 `.codebuddy/mcp.json`。该差异已经在 IDE 抽象层中单独处理。
+### 文件权限
 
-Codex / Codex Internal 的项目级 MCP 配置位于 `.codex/config.toml`，不是 `mcp.json`。其中 `codex-internal` 在项目级同样复用 `.codex/`；只有用户级目录仍然是 `~/.codex-internal/`。Dec 会把托管的 MCP server 写入 `config.toml` 的 `[mcp_servers.<name>]` 段，同时保留现有的其他 Codex 配置。
+复制时使用固定权限位，不保留源文件权限。
 
-### 文件权限不保留原始值
+### remove 按名称查找
 
-复制文件和目录时使用固定权限位，不保留源文件权限。
+多个 Vault 下存在同名同类型资产时，按仓库扫描顺序命中第一个。
 
-### `push --remove` 按名称查找远端资产
+### 测试覆盖
 
-删除远端资产时，CLI 入口目前仍是 `dec push --remove <type> <name>`，不直接传 vault；若多个 Vault 下存在同名同类型资产，会按仓库扫描顺序命中第一个结果。
-
-### 测试覆盖仍不完整
-
-当前测试已经覆盖配置迁移、repo/ide 抽象和变量处理，但文档示例与部分命令组合场景仍有继续补充空间。
+repo/ide 抽象与变量处理已有测试；部分 TUI 组合场景待补充。

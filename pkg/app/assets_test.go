@@ -12,8 +12,8 @@ import (
 func TestLoadAssetSelectionReturnsEnabledState(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
-		"cli/rules/cli-release-rules.mdc":          "description: test\n",
+		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"bundles/cli/rules/cli-release-rules.mdc":          "description: test\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -58,8 +58,8 @@ func TestLoadAssetSelectionReturnsEnabledState(t *testing.T) {
 func TestLoadAssetSelectionDiscoversBundlesWithoutProjectConfig(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -76,7 +76,7 @@ func TestLoadAssetSelectionDiscoversBundlesWithoutProjectConfig(t *testing.T) {
 		t.Fatalf("Items = %d, 期望 2", len(state.Items))
 	}
 	if len(state.Bundles) < 2 {
-		t.Fatalf("无项目配置时仍应发现 package, Bundles = %d", len(state.Bundles))
+		t.Fatalf("无项目配置时仍应发现 bundle, Bundles = %d", len(state.Bundles))
 	}
 }
 

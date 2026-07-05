@@ -8,72 +8,103 @@ Dec 是一个个人 AI 知识仓库工具。
 
 很多团队和个人都会遇到这些问题：
 
-- 常用 Skill 只能留在某一个项目里，迁移困难
+- 常用 Skill 只能留在某一个项目里，难以跨项目复用
 - Rule 散落在不同仓库中，风格难以统一
 - MCP 配置复制粘贴多次，容易漂移
 - 项目里既想复用资产，又不想直接提交 IDE 生成副本
 
 Dec 的解决方案：
 
-- 个人维度：通过 `dec config repo` 关联你的仓库
-- 项目维度：使用 `dec config init` + `dec pull` 选择并拉取资产
+- 个人维度：在 TUI **Settings** 页连接你的资产仓库
+- 项目维度：TUI **Home** 初始化 project；**Assets** 页调整 bundle；**Run** 页拉取到项目
 - IDE 维度：Dec 自动将资产部署到配置的 IDE 目录
+- 私密维度：Bitwarden **secrets bundle** 与 Dec bundle **同构绑定**；mise env 等落地项目根（如 `.config/mise/conf.d/`），SSH Key 落地机器级 `~/.ssh/`，均不进 `.dec/`
+
+> **交互入口**：在交互式终端运行 `dec` 启动 TUI。CLI 仅保留 `dec --version` 与内部 hidden 命令。
 
 ## 核心概念
 
-### 1. 资产仓库
+### 1. Project、Bundle 与资产仓库
 
-使用 `dec config repo <url>` 关联你的资产仓库，底层是一个 Git 仓库。
+在 TUI **Settings** 页连接你的资产仓库，底层是一个 Git 仓库。
 
-仓库中支持三类资产：
+配置按 **Project > Bundle** 两层组织：
 
-- `skill`：技能脚本（目录，包含 SKILL.md）
-- `rule`：规则文件（.mdc 文件）
-- `mcp`：MCP 服务配置（JSON 片段）
+| 层级 | 位置 | 说明 |
+|------|------|------|
+| **Project** | vault `projects/<name>.yaml` | 声明启用哪些 bundle；跨机器共享 |
+| **Bundle** | Git Vault `bundles/<name>/` + Bitwarden secrets bundle | Skills、Rules、MCP 及对应私密文件 |
+
+```text
+<repo>/
+├── projects/my-app.yaml    # bundles: [vikunja, helloworld]
+└── bundles/
+    ├── vikunja/
+    │   ├── bundle.yaml
+    │   ├── skills/
+    │   ├── rules/
+    │   ├── mcp/
+    │   └── commands/
+    └── default/
+        └── skills/helloworld/...
+```
+
+同名 **secrets bundle** 在 Bitwarden 中同构组织；Secure Note 名 = 项目根相对路径（如 `.config/mise/conf.d/vikunja.toml`），SSH Key pull 到 `~/.ssh/dec_<bundle>_<name>` 与 Dec 管理 `~/.ssh/config` 区块；均不进 `.dec/cache/`。详见 [Documents/BUNDLE-SECRETS-MODEL.md](Documents/BUNDLE-SECRETS-MODEL.md)。
 
 ### 2. 项目配置
 
-项目配置位于 `.dec/config.yaml`，采用 **available/enabled** 双区结构。当前版本为 `v2`，按 `vault -> item -> type` 组织：
+**Vault project**（真相源）示例：
+
+```yaml
+name: my-app
+description: 我的应用项目
+bundles:
+  - vikunja
+  - helloworld
+ides:
+  - cursor
+```
+
+**本地** `.dec/config.yaml` 引用 vault project：
 
 ```yaml
 version: v2
 
-ides:               # 可选；当前项目覆盖全局 IDE 列表
+project_name: my-app       # 引用 projects/my-app.yaml
+
+ides:                      # 可选：机器级 IDE 覆盖
   - cursor
-  - codex
 
-editor: code --wait # 可选；也可写成 vim / vi
+enabled_bundles:           # 从 vault project 同步；Assets 页可调整
+  - vikunja
+  - helloworld
 
-available:          # 仓库中所有可用资产（dec config init 自动生成）
-  my-vault:
-    my-rule:
-      rules: true
-    postgres-tool:
-      mcp: true
+available:                 # TUI Assets 页扫描生成
+  vikunja:
+    vikunja-workflow:
+      skills: true
 
-enabled:            # 已启用资产（从 available 复制到这里即为启用）
-  my-vault:
-    my-rule:
-      rules: true
+enabled:                   # 单资产粒度（高级用法）
+  vikunja:
+    vikunja-workflow:
+      skills: true
 ```
 
-- `dec config init` 扫描仓库填充 available，重复执行时保留已有 enabled / editor / ides
-- 启动时读到没有 `version` 的旧配置会按 `v1` 处理，自动迁移成 `v2` 后再继续读取
-- `ides` 可选，填写当前项目要部署到的 IDE 列表；不写则继承 `~/.dec/config.yaml`。支持值见 `dec config global --ide ...`，例如 `cursor`、`codebuddy`、`claude`、`codex`
-- `editor` 可选，支持在项目级指定交互式编辑器，例如 `vim`、`vi`、`code --wait`
-- 用户从 available 复制想要的资产到 enabled
-- `dec pull` 只拉取 enabled 中的资产
-- pull 时自动校验 enabled vs available，清理不再启用的旧资产
+- TUI **Home** 页初始化 project（自动匹配、选择或新建）
+- TUI **Assets** 页扫描仓库、调整 bundle / 资产
+- **Run** 页按 project 的 bundle 列表拉取 Dec + secrets bundle
 
 ### 3. 资产部署
 
-`dec pull` 将资产部署到当前项目的配置 IDE。
+TUI **Run** 页将资产部署到当前项目的配置 IDE。
 
 Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 
 - `.cursor/skills/dec-create-api-test/`
 - `.cursor/rules/dec-my-rule.mdc`
 - `.cursor/mcp.json` 中的 `dec-postgres-tool`
+
+一次 **pull bundle** 会先拉 Dec Git bundle 到 `.dec/cache/`，再自动拉 Bitwarden secrets bundle（Secure Note → 项目根，SSH Key → `~/.ssh/`）；项目根零路径重叠校验后渲染 IDE。
 
 ### 4. 支持的 IDE
 
@@ -86,9 +117,9 @@ Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 | Codex Internal | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 
-更详细的使用语义见 `pkg/assets/dec/SKILL.md`，实现与存储结构见 `Documents/ARCHITECTURE.md`。
+更详细的使用语义见 `pkg/assets/dec/SKILL.md`，实现与存储结构见 [Documents/ARCHITECTURE.md](Documents/ARCHITECTURE.md)。
 
-说明：`claude-internal` 的项目级部署复用 `.claude/`，只有用户级目录仍然是 `~/.claude-internal/`。`codex-internal` 的项目级部署复用 `.codex/`，只有用户级目录仍然是 `~/.codex-internal/`。对于 Codex，MCP 不是写入 `mcp.json`，而是写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
+说明：`claude-internal` 的项目级部署复用 `.claude/`，用户级目录为 `~/.claude-internal/`。`codex-internal` 的项目级部署复用 `.codex/`，用户级目录为 `~/.codex-internal/`。Codex MCP 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
 
 ## 快速开始
 
@@ -106,188 +137,107 @@ curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/script
 iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex
 ```
 
-### 2. 连接个人仓库
+### 2. 启动 TUI
+
+在项目目录或任意目录打开终端，运行：
 
 ```bash
-dec config repo https://github.com/<user>/<your-repo>
+dec
 ```
 
-### 3. 配置全局 IDE
+TUI 侧栏页面：
 
-```bash
-dec config global                    # 配置所有支持的 IDE
-dec config global --ide cursor       # 只配置 Cursor
-```
+| 页面 | 用途 |
+|------|------|
+| Home | 项目概览、建议下一步、project 初始化 |
+| Assets | 浏览/搜索资产、选择 bundle、保存 enabled |
+| Project | 项目 IDE / editor 覆盖、编辑 `.dec/vars.yaml` |
+| Run | 拉取、推送、移除资产 |
+| Settings | 连接仓库、Bitwarden、全局 IDE 与 editor |
 
-这一步会把 Dec 跟随分发的内置 Skills 安装到用户级 IDE 目录。当前包括 `dec` 和 `dec-extract-asset`。同时还会创建 `~/.dec/local/vars.yaml` 模板，用于填写机器级占位符变量，例如本机 API Token、数据库地址等。
+### 3. 首次使用流程
 
-### 4. 初始化项目
+1. **Settings** → 连接个人 Git 仓库 URL
+2. **Settings** → 配置本机 IDE（安装 Dec 内置 Skills）
+3. **Home** → 初始化 project（**自动匹配** vault 中同名 `projects/<目录名>.yaml`，或选择/新建）
+4. **Run** → 拉取 project 内 bundle 到当前项目 IDE 目录
 
-```bash
-dec config init
-```
+### 4. 变量与占位符
 
-这会扫描仓库中所有可用资产，生成 `.dec/config.yaml` 和 `.dec/vars.yaml`，并打开交互式编辑器让你选择。编辑器优先读取 `.dec/config.yaml` 的 `editor`，再读取 `~/.dec/config.yaml` 的 `editor`，默认优先 `vim` / `vi`。将 available 中想要的资产复制到 enabled 后保存即可。
-
-### 5. 拉取资产
-
-```bash
-dec pull
-```
-
-根据 `.dec/config.yaml` 中 enabled 的资产，自动拉取并安装到 IDE。
-
-如果资产模板里包含 `{{VAR_NAME}}` 形式的占位符，`dec pull` 会按以下优先级替换：
+拉取时若资产模板包含 `{{VAR_NAME}}` 占位符，Dec 按以下优先级替换：
 
 1. `.dec/vars.yaml` 中的 `assets.<type>.<name>.vars`
 2. `.dec/vars.yaml` 中的 `vars`
-3. `.dec/vars.d/*.yaml` 中的 `vars`（可选；按文件名字典序合并，主文件 `vars.yaml` 覆盖同名键）
+3. `.dec/vars.d/*.yaml` 中的 `vars`（按文件名字典序合并，主文件覆盖同名键）
 4. `~/.dec/local/vars.yaml` 中的机器级变量
 
-未定义的占位符会保留原样，并在 pull 时提示补充变量配置。
+私密 env 由 mise 从 `.config/mise/conf.d/*.toml` 读取，不通过占位符注入。未定义的占位符会保留原样，并在拉取时提示。可在 TUI **Project** 页按 `e` 编辑 `.dec/vars.yaml`。
 
-变量只应用在确实会按项目变化、但又需要保留的值，例如默认项目名、任务文档目录、实例地址。
-像稳定的流程 bucket 名、type label 名、默认视图名这类共享约定，不要默认变量化。
+### 5. 推送与新增资产
 
+在 TUI **Run** 页推送 `.dec/cache/` 中的修改到远程仓库。secrets bundle 走 Bitwarden API，不进 Git。
 
-### 6. 推送修改
+新增资产流程：
 
-```bash
-dec push                              # 推送缓存中的修改到远程
-dec push --remove skill my-skill      # 删除远程资产（需确认）
-```
+1. 在 TUI **Assets** 页或 `.dec/config.yaml` 中启用 bundle / 资产
+2. 在 `.dec/cache/<bundle>/` 下创建对应文件（skills / rules / mcp）
+3. 在 **Run** 页执行推送
 
-如果要新增资产，直接在已初始化项目的 `.dec/` 目录中组织并编写即可：
-
-1. 在 `.dec/config.yaml` 的 `enabled` 中加入新资产。
-   例如：
-
-   ```yaml
-   enabled:
-     my-vault:
-       my-skill:
-         skills: true
-       my-rule:
-         rules: true
-       my-mcp:
-         mcp: true
-   ```
-2. 在 `.dec/cache/<vault>/` 下创建对应文件：
-
-```text
-.dec/cache/<vault>/skills/<name>/SKILL.md
-.dec/cache/<vault>/rules/<name>.mdc
-.dec/cache/<vault>/mcp/<name>.json
-```
-
-3. 执行 `dec push` 推送到远程仓库。
-
-`dec push` 的读取源是 `.dec/cache/`，不是 `.cursor/`、`.codex/` 等 IDE 目录。
-
-如果用户已经在当前项目里做出了一个很好用的本地 Skill，希望把它抽象成可复用资产后放进 Dec，可以直接让 agent 使用内置的 `dec-extract-asset` skill。它的目标是把项目特有内容提炼成通用版本，只把确实会跨项目变化的值改成 `{{VAR_NAME}}`，写入 `.dec/cache/<vault>/skills/<name>/`，更新 `.dec/config.yaml`，然后执行 `dec push`。
+推送读取源是 `.dec/cache/`，不是 `.cursor/`、`.codex/` 等 IDE 目录。
 
 ## 推荐工作流
 
 ### 工作流 A：第一次设置
 
-```bash
-# 1. 连接仓库
-dec config repo https://github.com/<user>/<your-repo>
-
-# 2. 配置 IDE
-dec config global
-
-# 3. 在项目中初始化
-dec config init
-
-# 4. 拉取选中的资产
-dec pull
-```
+1. 运行 `dec` 进入 TUI
+2. **Settings** → 连接仓库、配置 IDE
+3. **Assets** → 选择 bundle / 资产并保存
+4. **Run** → 拉取到项目
 
 ### 工作流 B：在新项目中复用
 
-```bash
-cd my-new-project
-dec config init       # 扫描仓库，选择资产
-dec pull              # 拉取到项目
-```
+1. 在新项目目录运行 `dec`
+2. **Home** → 自动匹配或选择 vault 中同名 project
+3. **Run** → 拉取
 
 ### 工作流 C：更新已有资产
 
-```bash
-# 1. 修改 .dec/cache/ 中的缓存文件
-# 2. 推送到远程
-dec push
-
-# 3. 在其他项目中拉取最新版本
-cd ../another-project
-dec pull
-```
+1. 修改 `.dec/cache/` 中的缓存文件
+2. **Run** 页推送
+3. 在其他项目的 **Run** 页拉取最新版本
 
 ### 工作流 D：新增资产
 
-```bash
-# 1. 确保项目已执行过初始化
-dec config init
-
-# 2. 编辑 .dec/config.yaml，把新资产加入 enabled
-#    例如：my-vault -> my-skill -> skills: true
-# 3. 在 .dec/cache/<vault>/ 下创建资产文件
-# 4. 推送到远程仓库
-dec push
-
-# 5. 如需刷新 available 列表
-dec config init
-```
+1. **Assets** 页刷新并启用新 bundle / 资产
+2. 编辑 `.dec/cache/<bundle>/` 下文件
+3. **Run** 页推送
 
 ## 命令参考
 
-### 配置命令
+Dec 以 TUI 为主入口。CLI 仅保留：
 
 | 命令 | 说明 |
 |------|------|
-| `dec config repo <url>` | 连接个人仓库 |
-| `dec config global [--ide]` | 配置全局 IDE |
-| `dec config project [--ide ... \| --clear]` | 查看或覆盖项目级 IDE（无参打印当前状态） |
-| `dec config init` | 初始化项目配置（扫描仓库，打开编辑器选择资产） |
-| `dec config show` | 显示当前配置 |
+| `dec` | 在 TTY 中启动 TUI Shell |
+| `dec --version` | 显示版本号 |
 
-### 资产命令
+非交互环境（`DEC_NO_TUI=1`、stdout 非 TTY）会输出简短说明，不启动 TUI。
 
-| 命令 | 说明 |
-|------|------|
-| `dec list` | 列出仓库中所有资产 |
-| `dec search <query>` | 搜索资产 |
-| `dec pull` | 拉取 enabled 中的资产到项目 |
-| `dec pull --version <ref>` | 拉取指定版本 |
-| `dec push` | 推送缓存中的修改到远程 |
-| `dec push --remove <type> <name>` | 删除远程资产（需交互确认） |
+## 交互模式
 
-### 其他命令
+### TUI 入口
 
-| 命令 | 说明 |
-|------|------|
-| `dec update` | 更新 Dec 到最新版本 |
-| `dec version` | 显示版本号 |
+在交互式终端里直接运行 `dec`（不带参数），会进入内置 TUI Shell。下列情况不会启动 TUI：
 
-## 交互模式与后台检查
-
-### 默认 TUI 入口
-
-在交互式终端里直接运行 `dec`（不带任何子命令），会进入内置 TUI Shell，可以在同一界面里浏览仓库资产、切换启用状态、触发 `pull`、编辑全局设置。下列任一情况会退回到传统 CLI：
-
-- 传了任何子命令或参数（例如 `dec list`）
+- 传了参数（`dec --version`、`dec --help`）
+- 内部命令 `dec __freshness-check`（hidden，供后台 worker 使用）
 - 环境变量 `DEC_NO_TUI=1`
 - `TERM=dumb`
-- stdin / stdout / stderr 任一不是 TTY（重定向、管道、CI 场景）
+- stdin / stdout / stderr 任一不是 TTY
 
-所有 CLI 子命令的行为和 TUI 模式等价，脚本与自动化继续按命令用即可。
+### 远端资产新鲜度
 
-### 远端资产新鲜度提示
-
-每次 CLI 命令结束后，Dec 会在后台静默 `git fetch` 远端仓库；如果发现远端有新提交，会在**下一次**普通命令开始前打印一行 `dec pull` 提示。主命令永远不会被阻塞，代价是提示会延后一次命令。
-
-以下命令不参与该检查，避免冗余或打扰：`dec pull` / `dec push` / `dec config init` / `dec update` / `dec version` / `dec help`。
+`pkg/freshness/` 提供后台远端检查能力，待 TUI 启动与 Run 页集成。
 
 ## 资产格式要求
 
@@ -319,14 +269,16 @@ MCP 必须是单个 server 片段 JSON，`command` 必填：
 
 ```
 .dec/
-├── config.yaml      # 项目配置（available + enabled）
-├── cache/           # 资产缓存（pull 时写入，push 时读取）
+├── config.yaml      # project_name + enabled_bundles + available/enabled
+├── cache/           # 资产缓存（pull 写入，push 读取）
 ├── .version         # 当前 pull 的版本记录
-├── vars.yaml        # 项目变量定义（config init 自动创建）
-└── vars.d/          # 可选：拆分的变量片段 *.yaml / *.yml，按文件名字典序合并
+├── vars.yaml        # 项目变量定义
+└── vars.d/          # 可选：拆分的变量片段
 ```
 
-机器级变量文件位于 `~/.dec/local/vars.yaml`，由 `dec config global` 自动创建。
+Vault project 声明位于 Git 仓库 `projects/<name>.yaml`。
+
+机器级变量文件位于 `~/.dec/local/vars.yaml`。
 
 全局配置位于 `~/.dec/config.yaml`，例如：
 
@@ -340,49 +292,23 @@ ides:
 editor: code --wait
 ```
 
-其中 `ides` 是默认部署目标，`editor` 是 `dec config init` 打开交互式编辑器时使用的命令。
-
-项目级变量文件示例：
-
-```yaml
-vars:
-  API_BASE_URL: "https://api.example.com"
-
-assets:
-  mcp:
-    my-mcp:
-      vars:
-        API_TOKEN: "<TOKEN>"
-```
-
-项目配置示例：
-
-```yaml
-version: v2
-
-enabled:
-  my-vault:
-    my-skill:
-      skills: true
-    my-rule:
-      rules: true
-    my-mcp:
-      mcp: true
-```
-
 ## 故障排查
 
 ### 仓库未连接
 
-执行 `dec config repo <url>` 连接仓库。
+在 TUI **Settings** 页连接仓库 URL。
 
 ### 配置校验警告
 
-pull 前会校验 enabled 中的资产是否在 available 中存在。如果看到警告，检查拼写或运行 `dec config init` 更新 available。
+拉取前会校验 enabled 中的资产是否在 available 中存在。若看到警告，检查拼写或在 **Assets** 页重新扫描。
 
 ### 推送/拉取失败
 
-如果出现远端冲突，重新执行命令即可。Dec 使用临时 worktree，不会留下中间状态。
+若出现远端冲突，在 **Run** 页重试即可。Dec 使用临时 worktree，不会留下中间状态。
+
+### secrets bundle 路径冲突
+
+`.dec/` 树与敏感落地路径禁止相交。若 pull 报错，检查 Bitwarden Note 名是否误落在 `.dec/` 下，或 Dec cache 是否占用了敏感目标路径。
 
 ## 安装、构建与测试
 
@@ -408,9 +334,13 @@ go test ./...
 
 ## 项目文档
 
-- `pkg/assets/dec/SKILL.md`：Dec Skill 的完整使用说明
-- `pkg/assets/dec-extract-asset/SKILL.md`：把当前项目能力沉淀为 Dec 资产的内置 Skill
-- `Documents/ARCHITECTURE.md`：架构设计与模块说明
+- [Documents/ARCHITECTURE.md](Documents/ARCHITECTURE.md) — 架构设计、vault 结构与模块说明
+- [Documents/BUNDLE-SECRETS-MODEL.md](Documents/BUNDLE-SECRETS-MODEL.md) — Dec bundle 与 Bitwarden secrets bundle 同构模型
+- [Documents/TUI_ARCHITECTURE.md](Documents/TUI_ARCHITECTURE.md) — TUI 页面、入口路由与测试策略
+- [schema/dec/v1/README.md](schema/dec/v1/README.md) — Dec 配置 Protobuf schema
+- [schema/secrets/v1/README.md](schema/secrets/v1/README.md) — Secrets bundle Protobuf schema
+- `pkg/assets/dec/SKILL.md` — Dec Skill 的完整使用说明
+- `pkg/assets/dec-extract-asset/SKILL.md` — 把当前项目能力沉淀为 Dec 资产的内置 Skill
 
 ## 许可证
 

@@ -1,0 +1,38 @@
+---
+description: Bitwarden 认证约束 — 进程内存 session、web unlock 唯一入口、禁止 session 落盘
+globs: schema/secrets/**, pkg/secrets/**, pkg/app/**/*.go, internal/tui/**/*.go, Documents/**
+alwaysApply: true
+---
+
+# Bitwarden 认证
+
+Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/BUNDLE-SECRETS-MODEL.md`「Bitwarden 认证」一节。
+
+## Session 存储（硬约束）
+
+- Bitwarden session **仅在当前进程内存**中保存；进程退出即失效。
+- **禁止**将 session 持久化到磁盘：`~/.dec/secrets/session`、`BW_SESSION` 文件、或任何 env/配置文件形式的 session 缓存均不允许。
+- `SyncStateFile`（`~/.dec/secrets/state.json`）**不得**包含 session 字段；只记录同步元数据。
+- 同一进程内已有有效 session → 直接复用；无 session → 阻塞等待 web unlock。
+
+## Web Unlock（唯一认证入口）
+
+需要 Bitwarden API 且进程内无 session 时：
+
+1. 启动 `127.0.0.1` 本地 HTTP 服务（随机端口）
+2. 打开系统浏览器到解锁页
+3. 网页收集主密码；若需 2FA/TOTP，同一页继续输入验证码
+4. 成功后 session 写入进程内存，关闭 HTTP 服务，继续 secrets bundle pull 等操作
+
+**不要**新增 `dec unlock`、`dec secrets login` 等 CLI 子命令；**不要**在 TUI 终端内提示输入主密码替代网页流程。
+
+## TUI-first
+
+- 认证由 TUI 进程（或等价 `pkg/app` 调用链）在 pull secrets bundle 等操作时 **自动触发**。
+- Settings 页配置 Bitwarden 连接信息；解锁仅在缺 session 时按需弹出。
+
+## 实现落点（规划）
+
+- `pkg/secrets/unlock/`：本地 HTTP 服务、浏览器打开、unlock 回调
+- `pkg/secrets/`：进程内 session 缓存与 Bitwarden API 客户端
+- `internal/tui/` Run 页：pull 流程在 secrets 步骤前检查/等待 session；Note 内容落地到 **项目根相对路径**（不进 `.dec/cache/`）

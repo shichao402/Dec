@@ -42,7 +42,7 @@ func TestRemoveAssetRejectsInvalidType(t *testing.T) {
 func TestRemoveAssetRemovesRemoteAndCleansLocal(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -137,7 +137,7 @@ func TestRemoveAssetRemovesRemoteAndCleansLocal(t *testing.T) {
 func TestRemoveAssetReturnsNotFound(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"default/skills/other-workflow/SKILL.md": "---\nname: other-workflow\n---\n",
+		"bundles/default/skills/other-workflow/SKILL.md": "---\nname: other-workflow\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)

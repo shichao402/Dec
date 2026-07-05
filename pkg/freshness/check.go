@@ -116,7 +116,7 @@ func FormatHint(result CheckResult) string {
 	if !result.Stale {
 		return ""
 	}
-	return fmt.Sprintf("💡 当前项目的 Dec 资产已落后远端（本地 %s，远端 %s）。执行 `dec pull` 可更新。",
+	return fmt.Sprintf("💡 当前项目的 Dec 资产已落后远端（本地 %s，远端 %s）。在 TUI Run 页拉取可更新。",
 		ShortHash(result.LocalCommit), ShortHash(result.RemoteCommit))
 }
 

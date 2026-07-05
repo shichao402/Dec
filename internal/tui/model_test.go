@@ -444,7 +444,7 @@ func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 }
 
 func TestSuggestNextAction(t *testing.T) {
-	if got := suggestNextAction(&app.ProjectOverview{}); !strings.Contains(got, "dec config repo") {
+	if got := suggestNextAction(&app.ProjectOverview{}); !strings.Contains(got, "Settings 页") {
 		t.Fatalf("未连接仓库时建议动作错误: %q", got)
 	}
 	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}); !strings.Contains(got, "Assets 页") {
@@ -1768,7 +1768,7 @@ func TestModelAssetsLoadedKeepsBundleViewWhenPackagesExist(t *testing.T) {
 	})
 	m = updated.(model)
 	if m.assetTypeFilter != "bundle" {
-		t.Fatalf("有 package 时不应回落到 all, got %q", m.assetTypeFilter)
+		t.Fatalf("有 bundle 时不应回落到 all, got %q", m.assetTypeFilter)
 	}
 }
 

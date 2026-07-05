@@ -12,7 +12,7 @@ import (
 func TestLoadProjectOverviewWithExistingProjectConfig(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -70,8 +70,8 @@ func TestLoadProjectOverviewWithExistingProjectConfig(t *testing.T) {
 func TestLoadProjectOverviewSurfacesBundles(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"default/bundles/combo.yaml": `name: combo
+		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"bundles/combo/bundle.yaml": `name: combo
 description: combo bundle
 members:
   - skill/foo
@@ -97,8 +97,8 @@ members:
 	if overview.EnabledBundleCount != 1 {
 		t.Fatalf("EnabledBundleCount = %d, 期望 1", overview.EnabledBundleCount)
 	}
-	if len(overview.Bundles) != 2 {
-		t.Fatalf("Bundles = %#v, 期望 2 个（combo + default 隐式 package）", overview.Bundles)
+	if len(overview.Bundles) != 1 {
+		t.Fatalf("Bundles = %#v, 期望 1 个（combo）", overview.Bundles)
 	}
 	var combo *BundleOverview
 	for i := range overview.Bundles {

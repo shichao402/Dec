@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -115,8 +116,8 @@ type updateDoneMsg struct {
 	err           error
 }
 
-var runPullOperation = func(projectRoot string, reporter app.Reporter) (*app.PullProjectAssetsResult, error) {
-	return app.PullProjectAssets(projectRoot, "", reporter)
+var runPullOperation = func(ctx context.Context, projectRoot string, reporter app.Reporter) (*app.PullProjectAssetsResult, error) {
+	return app.PullProjectAssets(ctx, projectRoot, "", reporter)
 }
 
 var runRemoveOperation = func(input app.RemoveAssetInput, reporter app.Reporter) (*app.RemoveAssetResult, error) {
@@ -215,6 +216,8 @@ type model struct {
 	runResult            *app.PullProjectAssetsResult
 	runErr               error
 	runStream            <-chan tea.Msg
+	runCtx               context.Context
+	runCancel            context.CancelFunc
 	runMode              string // "pull" | "remove" | "update"
 	removeStage          string // "", "select", "confirm", "running"
 	removeCursor         int
@@ -229,7 +232,7 @@ type model struct {
 	updateErr            error
 	updateDoneVersion    string
 	updatingBinary       bool
-	// configInitMode 为 true 时表示由 dec config init 拉起：聚焦 Assets/package 视图，保存后退出。
+	// configInitMode 为 true 时表示由 dec config init 拉起：聚焦 Assets/bundle 视图，保存后退出。
 	configInitMode bool
 	// focus 是当前键盘交互上下文（侧栏 / 内容 / bundle 成员）。
 	focus focusContext
@@ -249,7 +252,7 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 	if opts.ConfigInitMode {
 		logs = []string{
 			"项目配置初始化",
-			"选择 package 后按 s 保存并退出",
+			"选择 bundle 后按 s 保存并退出",
 			"Loading asset selection...",
 		}
 	}
@@ -306,7 +309,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.bundleSelection = append(m.bundleSelection, bo.Name)
 				}
 			}
-			// 仓库尚无 package 声明时，bundle 视图会空列表；回落到单资产视图。
+			// 仓库尚无 bundle 声明时，bundle 视图会空列表；回落到单资产视图。
 			if len(msg.state.Bundles) == 0 && m.assetTypeFilter == "bundle" {
 				m.assetTypeFilter = "all"
 			}
@@ -449,6 +452,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case runCompletedMsg:
 		m.runningPull = false
 		m.runStream = nil
+		if m.runCancel != nil {
+			m.runCancel()
+			m.runCancel = nil
+		}
+		m.runCtx = nil
 		m.runResult = msg.result
 		m.runErr = msg.err
 		if msg.err != nil {
@@ -527,6 +535,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.isRunPage() && m.updateStage != "" && !m.updatingBinary {
 			return m.handleUpdateStageKey(msg)
+		}
+		if m.isRunPage() && m.runningPull && msg.String() == "esc" {
+			if m.runCancel != nil {
+				m.runCancel()
+				m.pushLog("Run pull cancel requested")
+			}
+			return m, nil
 		}
 
 		switch msg.String() {
@@ -937,10 +952,10 @@ func openProjectVarsEditorCmd(projectRoot, editorCmd string) tea.Cmd {
 	})
 }
 
-func startPullRunCmd(projectRoot string, stream chan<- tea.Msg) tea.Cmd {
+func startPullRunCmd(ctx context.Context, projectRoot string, stream chan<- tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
-			result, err := runPullOperation(projectRoot, app.ReporterFunc(func(event app.OperationEvent) {
+			result, err := runPullOperation(ctx, projectRoot, app.ReporterFunc(func(event app.OperationEvent) {
 				stream <- runEventMsg{event: event}
 			}))
 			stream <- runCompletedMsg{result: result, err: err}
@@ -1018,6 +1033,7 @@ func (m model) handleSettingsRepoInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *model) startPullRun() tea.Cmd {
 	stream := make(chan tea.Msg, 64)
+	ctx, cancel := context.WithCancel(context.Background())
 	m.runningPull = true
 	m.runMode = "pull"
 	m.runProgress = nil
@@ -1025,8 +1041,10 @@ func (m *model) startPullRun() tea.Cmd {
 	m.runResult = nil
 	m.runErr = nil
 	m.runStream = stream
+	m.runCtx = ctx
+	m.runCancel = cancel
 	m.pushLog("Run page started pull")
-	return tea.Batch(startPullRunCmd(m.projectRoot, stream), waitRunMsg(stream))
+	return tea.Batch(startPullRunCmd(ctx, m.projectRoot, stream), waitRunMsg(stream))
 }
 
 func (m *model) beginRemoveSelection() {
@@ -1408,8 +1426,8 @@ func (m model) renderAssetsPage(width int) string {
 
 	summary := []string{}
 	if m.configInitMode {
-		summary = append(summary, shellTitleStyle.Render("项目配置初始化 — 按 package 启用资产"))
-		summary = append(summary, shellMutedStyle.Render("推荐勾选 vault 级 package（如 vikunja、cli）；保存后写入 enabled_bundles。"))
+		summary = append(summary, shellTitleStyle.Render("项目配置初始化 — 按 bundle 启用资产"))
+		summary = append(summary, shellMutedStyle.Render("推荐勾选 vault 级 bundle（如 vikunja、cli）；保存后写入 enabled_bundles。"))
 	}
 	summary = append(summary,
 		fmt.Sprintf("筛选: %s | 类型: %s", m.currentAssetFilterLabel(), m.assetTypeFilter),
@@ -1709,7 +1727,7 @@ func truncateVarValue(v string) string {
 func (m model) renderRunPage(width int) string {
 	lines := []string{
 		fmt.Sprintf("状态: %s", m.runStatusLabel()),
-		shellMutedStyle.Render("快捷键：p 执行 pull · x 删除资产 · u 自更新 · s 触发当前页主动作 · r 刷新概览"),
+		shellMutedStyle.Render("快捷键：p 执行 pull · x 删除资产 · u 自更新 · s 触发当前页主动作 · r 刷新概览 · Esc 取消 pull"),
 	}
 	if m.runProgress != nil {
 		lines = append(lines, fmt.Sprintf("阶段: %s (%d/%d)", fallbackValue(m.runProgress.Phase, "working"), m.runProgress.Current, m.runProgress.Total))
@@ -2067,7 +2085,7 @@ func (m model) renderAssetDetails() string {
 					fmt.Sprintf("Type: %s", mb.Type),
 					fmt.Sprintf("Vault: %s", mb.Vault),
 					fmt.Sprintf("Name: %s", mb.Name),
-					shellMutedStyle.Render("成员由 package 带入，只读。"),
+					shellMutedStyle.Render("成员由 bundle 带入，只读。"),
 				)
 				return strings.Join(lines, "\n")
 			}
@@ -3013,15 +3031,15 @@ func suggestNextAction(overview *app.ProjectOverview) string {
 		return "等待项目概览加载完成"
 	}
 	if !overview.RepoConnected {
-		return "先切到 Settings 页连接资产仓库，或运行 dec config repo <url>"
+		return "先切到 Settings 页连接资产仓库"
 	}
 	if !overview.ProjectConfigReady {
-		return "先切到 Assets 页选择资产并保存，或运行 dec config init"
+		return "先切到 Assets 页选择资产并保存"
 	}
 	if overview.EnabledCount == 0 {
 		return "当前还没有启用资产，先切到 Assets 页选择并保存"
 	}
-	return "可以切到 Run 页执行 pull，或继续使用 dec pull"
+	return "可以切到 Run 页拉取资产到项目"
 }
 
 func (m model) runStatusLabel() string {

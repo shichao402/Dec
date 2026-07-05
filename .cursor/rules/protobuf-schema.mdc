@@ -1,0 +1,54 @@
+---
+description: schema/ 下 Protobuf 为 Dec 配置与资产声明的 schema 真相源
+globs: schema/**/*.proto, pkg/types/**/*.go, pkg/config/**/*.go, pkg/app/**/*.go
+alwaysApply: false
+---
+
+# Protobuf Schema 真相源
+
+`schema/` 目录（`dec/v1`、`secrets/v1`）是 Dec **配置与资产声明层**的 schema 真相源；运行时 wire format 仍是 YAML / JSON，不引入 `.pb` 二进制配置文件。
+
+## 适用 proto 的字段
+
+- `Project`、`ProjectConfig`、`GlobalConfig`、`Bundle`、`VarsConfig`
+- 资产引用（`AssetRef`、bundle `members`）
+- vault `Project.bundles`、本地 `ProjectConfig.project_name` / `enabled_bundles`、`Bundle`（`bundles/<name>/bundle.yaml`，含 `skills/`、`rules/`、`mcp/`、`commands/`）
+- `BundleBinding`（Dec bundle ↔ Bitwarden secrets bundle 同构绑定）
+
+## 不适用 proto（保持原格式）
+
+- `SKILL.md`、`.mdc` 规则正文
+- MCP JSON / TOML 片段正文
+- Bitwarden Secure Note / SSH 私钥明文
+- 资产目录布局（由代码扫描实现，不进 proto）
+
+## 实现约定
+
+- 修改 schema 时先改 `schema/**/*.proto`，再同步 `pkg/types/` 手写 struct 与 adapter（生成物见 `schema/gen/go/`）。
+- 统一使用 **bundle** 命名；资产正文不进 proto，只声明引用与元数据。
+- Pull 时 Dec bundle（→ `.dec/`）与 **同名** secrets bundle（→ 项目根）成对拉取；`.dec/` 与敏感路径冲突必须报错（见 `Documents/BUNDLE-SECRETS-MODEL.md`）。
+- secrets bundle 名默认与 Dec bundle 名一致；显式绑定见 `BundleBinding`。
+
+## 示例
+
+```yaml
+# .dec/config.yaml — wire format 仍是 YAML
+version: v2
+project_name: my-app
+enabled_bundles:
+  - helloworld
+```
+
+```yaml
+# projects/my-app.yaml — vault project 声明
+name: my-app
+bundles:
+  - helloworld
+```
+
+```protobuf
+// schema/dec/v1/projects.proto — vault project 真相源
+message Project {
+  repeated string bundles = 3;
+}
+```
