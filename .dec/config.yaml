@@ -7,7 +7,11 @@
 # editor: 项目级交互式编辑器，覆盖全局配置（可选），例如：
 #   editor: code --wait
 #   editor: vim
-# available / enabled: 按 vault -> item -> type 组织，type 使用 skills / rules / mcp
+# enabled_bundles: 按 package 启用资产（推荐）；package 名通常与 vault 同名
+#   enabled_bundles:
+#     - vikunja
+#     - cli
+# available / enabled: 单资产粒度（高级用法）；多数场景请优先使用 enabled_bundles
 #   my-vault:
 #     my-asset:
 #       skills: true
@@ -26,6 +30,10 @@ available:
             skills: true
         project-workflow:
             skills: true
+    tencent-cloud:
+        tencent-cloud:
+            skills: true
+            mcp: true
     vikunja:
         vikunja-integration:
             rules: true
@@ -38,16 +46,6 @@ available:
         vikunja-workflow:
             skills: true
 enabled:
-    cli:
-        cli-release-rules:
-            rules: true
-        cli-release-workflow:
-            skills: true
-    default:
-        helloworld:
-            skills: true
-        project-workflow:
-            skills: true
     vikunja:
         vikunja-integration:
             rules: true
@@ -59,3 +57,6 @@ enabled:
             skills: true
         vikunja-workflow:
             skills: true
+enabled_bundles:
+    - cli
+    - default
