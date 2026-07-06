@@ -61,7 +61,8 @@ var RootCmd = &cobra.Command{
 
 示例:
   dec                # 启动 TUI（默认）
-  dec --version      # 显示版本号`,
+  dec --version      # 显示版本号
+  dec update         # 检查并更新到最新版本`,
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	Version:       getVersionString(),

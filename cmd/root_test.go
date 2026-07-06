@@ -288,3 +288,13 @@ func TestRemovedSubcommandReturnsError(t *testing.T) {
 		t.Fatal("pull 子命令应已移除")
 	}
 }
+
+func TestUpdateSubcommandRegistered(t *testing.T) {
+	cmd, _, err := RootCmd.Find([]string{"update"})
+	if err != nil {
+		t.Fatalf("查找 update 子命令失败: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "update" {
+		t.Fatal("update 子命令应已注册")
+	}
+}
