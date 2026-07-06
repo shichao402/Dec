@@ -42,7 +42,7 @@ const (
 // 等待首屏渲染，完成 5 页 tab 循环和一次 shift+tab 回退，
 // 然后按 `q` 退出，断言：
 //   - 首屏输出包含 TUI 首页锚点字符串（"Dec Shell"）
-//   - 页面导航日志覆盖 Home / Assets / Project / Run / Settings
+//   - 页面导航日志覆盖 Home / Bundles / Project / Run / Delete / Settings
 //   - 子进程以退出码 0 结束
 //   - pty 在子进程退出后进入 EOF
 func TestPTYStartupAndQuit(t *testing.T) {
@@ -145,7 +145,7 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 			ptyStartupTimeout, anchor, err, snapshot)
 	}
 
-	tabTargets := []string{"Bundles", "Project", "Run", "Settings", "Home"}
+	tabTargets := []string{"Bundles", "Project", "Run", "Delete", "Settings", "Home"}
 	for _, target := range tabTargets {
 		if _, err := ptmx.Write([]byte("\t")); err != nil {
 			_ = cmd.Process.Kill()
