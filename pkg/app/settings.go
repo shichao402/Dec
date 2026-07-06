@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -195,16 +196,7 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 		RepoURL: targetRepoURL,
 		IDEs:    append([]string(nil), targetIDEs...),
 	}
-	for _, ideName := range targetIDEs {
-		if err := InstallBuiltinAssetsForIDE(ideName); err != nil {
-			warning := fmt.Sprintf("%s: %s", ideName, err)
-			result.InstallWarnings = append(result.InstallWarnings, warning)
-			emit(reporter, EventWarn, "settings.install", warning, nil)
-			continue
-		}
-		message := fmt.Sprintf("已为 %s 安装内置资产", ideName)
-		emit(reporter, EventInfo, "settings.install", message, nil)
-	}
+	result.InstallWarnings = append(result.InstallWarnings, EnsureBuiltinIDEAssets(targetIDEs, reporter)...)
 
 	globalConfig.RepoURL = targetRepoURL
 	globalConfig.IDEs = append([]string(nil), targetIDEs...)
@@ -293,6 +285,27 @@ func ValidateIDEName(ideName string) error {
 	return fmt.Errorf("不支持的 IDE: %s (支持: %s)", ideName, strings.Join(validIDEs, ", "))
 }
 
+// EnsureBuiltinIDEAssets 为已选 IDE 同步内置 skills / rules / dec MCP（幂等）。
+// TUI 启动与 Settings 保存时调用，避免「IDE 已勾选但未按 s 保存」导致 MCP 缺失。
+func EnsureBuiltinIDEAssets(ideNames []string, reporter Reporter) []string {
+	reporter = defaultReporter(reporter)
+	var warnings []string
+	for _, ideName := range ideNames {
+		name := strings.TrimSpace(ideName)
+		if name == "" {
+			continue
+		}
+		if err := InstallBuiltinAssetsForIDE(name); err != nil {
+			warning := fmt.Sprintf("%s: %s", name, err)
+			warnings = append(warnings, warning)
+			emit(reporter, EventWarn, "settings.install", warning, nil)
+			continue
+		}
+		emit(reporter, EventInfo, "settings.install", fmt.Sprintf("已为 %s 同步内置资产", name), nil)
+	}
+	return warnings
+}
+
 // InstallBuiltinAssetsForIDE 为指定 IDE 安装 Dec 跟随分发的内置资产。
 func InstallBuiltinAssetsForIDE(ideName string) error {
 	homeDir, err := os.UserHomeDir()
@@ -310,7 +323,7 @@ func InstallBuiltinAssetsForIDE(ideName string) error {
 	if err := installBuiltinRules(filepath.Join(userRoot, "rules"), bundle.Rules); err != nil {
 		return fmt.Errorf("安装内置 rules 失败: %w", err)
 	}
-	if err := installBuiltinMCPs(ideName, userRoot, bundle.MCPs); err != nil {
+	if err := installBuiltinMCPs(ideName, homeDir, bundle.MCPs); err != nil {
 		return err
 	}
 
@@ -358,12 +371,104 @@ func installBuiltinRules(rulesDir string, rules []assets.RuleAsset) error {
 	return nil
 }
 
-func installBuiltinMCPs(ideName, userRoot string, mcps []assets.MCPAsset) error {
+// builtinDecMCPServerName 是 Dec 自身 MCP server 在 IDE 配置中的条目名。
+const builtinDecMCPServerName = "dec"
+
+func installBuiltinMCPs(ideName, homeDir string, mcps []assets.MCPAsset) error {
 	if len(mcps) == 0 {
 		return nil
 	}
 
-	return fmt.Errorf("IDE %s 暂未实现内置 MCP 分发（用户级根目录: %s）", ideName, userRoot)
+	configRoot := builtinMCPConfigRoot(ideName, homeDir)
+	configPath := ide.Get(ideName).MCPConfigPath(configRoot)
+
+	for _, asset := range mcps {
+		var server types.MCPServer
+		if err := json.Unmarshal(asset.Content, &server); err != nil {
+			return fmt.Errorf("解析内置 MCP %s 失败: %w", asset.Name, err)
+		}
+		serverName := builtinDecMCPServerName
+		if asset.Name != "dec" {
+			serverName = managedName(asset.Name)
+		}
+		if isCodexIDE(ideName) {
+			if err := mergeCodexBuiltinMCPEntry(ideName, configRoot, serverName, server); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := mergeJSONBuiltinMCPEntry(configPath, serverName, server); err != nil {
+			return fmt.Errorf("写入 MCP 配置失败: %w", err)
+		}
+	}
+	return nil
+}
+
+func isCodexIDE(ideName string) bool {
+	return ideName == "codex" || ideName == "codex-internal"
+}
+
+func mergeCodexBuiltinMCPEntry(ideName, configRoot, serverName string, server types.MCPServer) error {
+	ideImpl := ide.Get(ideName)
+	existing, err := ideImpl.LoadMCPConfig(configRoot)
+	if err != nil {
+		return fmt.Errorf("加载 MCP 配置失败: %w", err)
+	}
+	if existing.MCPServers == nil {
+		existing.MCPServers = make(map[string]types.MCPServer)
+	}
+	existing.MCPServers[serverName] = server
+	return ideImpl.WriteMCPConfig(configRoot, existing)
+}
+
+// mergeJSONBuiltinMCPEntry 仅合并 dec MCP 条目，保留其它 server 的未知字段（如 transportType）。
+func mergeJSONBuiltinMCPEntry(configPath, serverName string, server types.MCPServer) error {
+	serverData, err := json.Marshal(server)
+	if err != nil {
+		return err
+	}
+
+	var root map[string]json.RawMessage
+	if existing, err := os.ReadFile(configPath); err == nil {
+		if err := json.Unmarshal(existing, &root); err != nil {
+			return fmt.Errorf("解析 MCP 配置失败: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if root == nil {
+		root = make(map[string]json.RawMessage)
+	}
+
+	var servers map[string]json.RawMessage
+	if raw, ok := root["mcpServers"]; ok && len(raw) > 0 {
+		_ = json.Unmarshal(raw, &servers)
+	}
+	if servers == nil {
+		servers = make(map[string]json.RawMessage)
+	}
+	servers[serverName] = json.RawMessage(serverData)
+
+	serversRaw, err := json.Marshal(servers)
+	if err != nil {
+		return err
+	}
+	root["mcpServers"] = serversRaw
+
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, append(out, '\n'), 0644)
+}
+
+// builtinMCPConfigRoot 返回传给 IDE.MCPConfigPath 的根路径。
+// MCPConfigPath 以 workspace / 用户主目录为根，再拼 .cursor/mcp.json 等路径。
+func builtinMCPConfigRoot(_ string, homeDir string) string {
+	return homeDir
 }
 
 func writeBuiltinFiles(rootDir string, files []assets.FileAsset) error {

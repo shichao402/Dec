@@ -35,13 +35,16 @@ type Bundle struct {
 	MCPs   []MCPAsset
 }
 
-//go:embed dec dec-extract-asset
+//go:embed dec dec-extract-asset mcp
 var builtinFS embed.FS
 
 var globalAssets = Bundle{
 	Skills: []SkillAsset{
 		mustLoadSkillAsset("dec"),
 		mustLoadSkillAsset("dec-extract-asset"),
+	},
+	MCPs: []MCPAsset{
+		mustLoadMCPAsset("dec"),
 	},
 }
 
@@ -89,6 +92,14 @@ func mustLoadSkillAsset(dir string) SkillAsset {
 	})
 
 	return SkillAsset{Name: path.Base(dir), Files: files}
+}
+
+func mustLoadMCPAsset(name string) MCPAsset {
+	content, err := builtinFS.ReadFile(path.Join("mcp", name+".json"))
+	if err != nil {
+		panic(fmt.Sprintf("加载内置 MCP %s 失败: %v", name, err))
+	}
+	return MCPAsset{Name: name, Content: content}
 }
 
 func cloneSkillAssets(in []SkillAsset) []SkillAsset {

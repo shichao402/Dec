@@ -1,0 +1,8 @@
+{
+  "command": "dec",
+  "args": [
+    "mcp",
+    "--project-root",
+    "${workspaceFolder}"
+  ]
+}

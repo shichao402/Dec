@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shichao402/Dec/pkg/secrets/unlock"
 )
@@ -254,6 +255,40 @@ func TestEnsureSession_ProgrammaticFails_NoWebUnlock(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "2FA") {
 		t.Fatalf("EnsureSession() = %v, 期望 2FA 相关错误", err)
+	}
+}
+
+func TestEnsureSession_UnlockTimeoutOpt(t *testing.T) {
+	ClearSession()
+	t.Cleanup(ClearSession)
+
+	decHome := t.TempDir()
+	t.Setenv("DEC_HOME", decHome)
+	t.Setenv("DEC_BW_UNLOCK_TIMEOUT", "5m")
+	secretsDir := filepath.Join(decHome, "secrets")
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), []byte("server_url: https://vault.example.com\nemail: user@example.com\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotTimeout time.Duration
+	origRun := unlockRun
+	unlockRun = func(ctx context.Context, opts unlock.Options) error {
+		if deadline, ok := ctx.Deadline(); ok {
+			gotTimeout = time.Until(deadline)
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	t.Cleanup(func() { unlockRun = origRun })
+
+	_ = EnsureSession(context.Background(), &EnsureSessionOpts{
+		UnlockTimeout: 200 * time.Millisecond,
+	})
+	if gotTimeout <= 0 || gotTimeout > 500*time.Millisecond {
+		t.Fatalf("unlock ctx timeout = %v, want ~200ms", gotTimeout)
 	}
 }
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,6 +105,26 @@ func TestSaveGlobalSettingsConfiguresAllSupportedIDEsByDefault(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(homeDir, ".cursor", "skills", "dec", "SKILL.md")); err != nil {
 		t.Fatalf("应为 cursor 安装内置 skill: %v", err)
 	}
+	mcpData, err := os.ReadFile(filepath.Join(homeDir, ".cursor", "mcp.json"))
+	if err != nil {
+		t.Fatalf("应为 cursor 安装内置 MCP 配置: %v", err)
+	}
+	var mcpCfg struct {
+		MCPServers map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(mcpData, &mcpCfg); err != nil {
+		t.Fatalf("解析 cursor mcp.json 失败: %v", err)
+	}
+	decMCP, ok := mcpCfg.MCPServers["dec"]
+	if !ok {
+		t.Fatalf("cursor mcp.json 应包含 dec 条目: %#v", mcpCfg.MCPServers)
+	}
+	if decMCP.Command != "dec" || len(decMCP.Args) < 1 || decMCP.Args[0] != "mcp" {
+		t.Fatalf("dec MCP 配置 = %#v", decMCP)
+	}
 	if !result.VarsCreated {
 		t.Fatal("首次保存应创建本机 vars 模板")
 	}
@@ -146,5 +167,64 @@ func TestSaveGlobalSettingsRejectsUnknownIDE(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "不支持的 IDE") {
 		t.Fatalf("错误信息应提示 IDE 不支持, 实际: %v", err)
+	}
+}
+
+func TestMergeJSONBuiltinMCPEntryPreservesExistingFields(t *testing.T) {
+	homeDir := t.TempDir()
+	configPath := filepath.Join(homeDir, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{
+  "mcpServers": {
+    "custom": {
+      "transportType": "streamable-http",
+      "url": "https://example.com/mcp"
+    }
+  }
+}`
+	if err := os.WriteFile(configPath, []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mergeJSONBuiltinMCPEntry(configPath, "dec", types.MCPServer{
+		Command: "dec",
+		Args:    []string{"mcp", "--project-root", "${workspaceFolder}"},
+	}); err != nil {
+		t.Fatalf("mergeJSONBuiltinMCPEntry() = %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	servers, _ := parsed["mcpServers"].(map[string]any)
+	custom, _ := servers["custom"].(map[string]any)
+	if custom["transportType"] != "streamable-http" {
+		t.Fatalf("custom server lost transportType: %#v", custom)
+	}
+	if _, ok := servers["dec"]; !ok {
+		t.Fatalf("dec server missing: %#v", servers)
+	}
+}
+
+func TestEnsureBuiltinIDEAssetsInstallsDecMCP(t *testing.T) {
+	homeDir := t.TempDir()
+	setEnvForProjectTest(t, "HOME", homeDir)
+	warnings := EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	data, err := os.ReadFile(filepath.Join(homeDir, ".cursor", "mcp.json"))
+	if err != nil {
+		t.Fatalf("read mcp.json: %v", err)
+	}
+	if !strings.Contains(string(data), `"dec"`) {
+		t.Fatalf("mcp.json = %s", string(data))
 	}
 }

@@ -57,6 +57,10 @@ type settingsSavedMsg struct {
 	err    error
 }
 
+type builtinAssetsEnsuredMsg struct {
+	warnings []string
+}
+
 type projectSettingsLoadedMsg struct {
 	state *app.ProjectSettingsState
 	err   error
@@ -145,6 +149,10 @@ var loadGlobalSettingsOperation = func(reporter app.Reporter) (*app.GlobalSettin
 
 var saveGlobalSettingsOperation = func(input app.SaveGlobalSettingsInput, reporter app.Reporter) (*app.SaveGlobalSettingsResult, error) {
 	return app.SaveGlobalSettings(input, reporter)
+}
+
+var ensureBuiltinIDEAssetsOperation = func(ideNames []string, reporter app.Reporter) []string {
+	return app.EnsureBuiltinIDEAssets(ideNames, reporter)
 }
 
 var loadProjectSettingsOperation = func(projectRoot string, reporter app.Reporter) (*app.ProjectSettingsState, error) {
@@ -460,6 +468,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.normalizeSettingsCursor()
 			m.syncSettingsDirty()
 			m.pushLog(fmt.Sprintf("Global settings loaded: %d IDEs selected", len(m.settingsSelectedIDEs)))
+			if msg.state.RepoConnected && len(m.settingsSelectedIDEs) > 0 {
+				return m, ensureBuiltinIDEAssetsCmd(cloneStrings(m.settingsSelectedIDEs))
+			}
+		}
+		return m, nil
+	case builtinAssetsEnsuredMsg:
+		for _, warning := range msg.warnings {
+			m.pushLog("Install warning: " + warning)
+		}
+		if len(msg.warnings) == 0 {
+			m.pushLog("Builtin IDE assets synced (skills + dec MCP)")
 		}
 		return m, nil
 	case settingsSavedMsg:
@@ -1070,6 +1089,12 @@ func saveSettingsCmd(repoURL string, ides []string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := saveGlobalSettingsOperation(app.SaveGlobalSettingsInput{RepoURL: repoURL, IDEs: cloneStrings(ides)}, nil)
 		return settingsSavedMsg{result: result, err: err}
+	}
+}
+
+func ensureBuiltinIDEAssetsCmd(ideNames []string) tea.Cmd {
+	return func() tea.Msg {
+		return builtinAssetsEnsuredMsg{warnings: ensureBuiltinIDEAssetsOperation(cloneStrings(ideNames), nil)}
 	}
 }
 
@@ -2563,7 +2588,8 @@ func (m model) renderSettingsDetails() string {
 		ideName := m.currentSettingsIDEName()
 		lines = append(lines,
 			fmt.Sprintf("IDE: %s", ideName),
-			"保存时会在用户级目录安装内置 dec / dec-extract-asset。",
+			"启动 dec 或保存 Settings 时，会在用户级目录同步内置 dec skill 与 dec MCP。",
+			"dec MCP 写入 ~/.cursor/mcp.json 等；Cursor 打开各项目时用 ${workspaceFolder} 作为项目根。",
 			fmt.Sprintf("当前状态: %s", formatReady(settingsContainsIDE(m.settingsSelectedIDEs, ideName), "已选中", "未选中")),
 		)
 	}

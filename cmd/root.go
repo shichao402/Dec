@@ -145,7 +145,15 @@ func Execute(args []string, stdin, stdout, stderr *os.File) error {
 }
 
 func isInternalCLIArgs(args []string) bool {
-	return len(args) > 0 && args[0] == "__freshness-check"
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "__freshness-check", "mcp":
+		return true
+	default:
+		return false
+	}
 }
 
 func decideEntryMode(ctx entryContext) entryMode {

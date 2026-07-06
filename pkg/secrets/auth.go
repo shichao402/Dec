@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/shichao402/Dec/pkg/secrets/unlock"
 )
@@ -44,6 +45,8 @@ type EnsureSessionOpts struct {
 	OnUnlockURL func(url string)
 	// OnBrowserError 在自动打开浏览器失败时回调。
 	OnBrowserError func(err error)
+	// UnlockTimeout 覆盖 web unlock 等待时长；零值时使用 unlock.WebUnlockTimeout()。
+	UnlockTimeout time.Duration
 }
 
 // EnsureSession 若进程内无 session 则尝试程序化解锁，必要时触发 web unlock。
@@ -81,6 +84,9 @@ func EnsureSession(ctx context.Context, opts *EnsureSessionOpts) error {
 	}
 
 	timeout := unlock.WebUnlockTimeout()
+	if opts != nil && opts.UnlockTimeout > 0 {
+		timeout = opts.UnlockTimeout
+	}
 	authStatus(onStatus, "web unlock: starting (timeout=%s)", timeout)
 
 	unlockCtx, cancel := context.WithTimeout(ctx, timeout)

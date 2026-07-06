@@ -46,5 +46,4 @@ available:
         vikunja-workflow:
             skills: true
 enabled: {}
-enabled_bundles:
-    - vikunja
+enabled_bundles: []

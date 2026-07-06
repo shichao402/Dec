@@ -14,7 +14,7 @@ func ensureBitwardenSession(ctx context.Context, reporter Reporter, phase string
 		return nil
 	}
 	emit(reporter, EventInfo, phase, "[auth] Bitwarden session required, starting unlock", nil)
-	if err := secrets.EnsureSession(ctx, &secrets.EnsureSessionOpts{
+	sessionOpts := &secrets.EnsureSessionOpts{
 		OnStatus: func(message string) {
 			level := EventInfo
 			if strings.Contains(message, "failed:") ||
@@ -31,7 +31,11 @@ func ensureBitwardenSession(ctx context.Context, reporter Reporter, phase string
 		OnBrowserError: func(err error) {
 			emit(reporter, EventWarn, phase, fmt.Sprintf("[auth] web unlock: cannot open browser: %v", err), nil)
 		},
-	}); err != nil {
+	}
+	if unlockCfg := unlockConfigFromContext(ctx); unlockCfg.Timeout > 0 {
+		sessionOpts.UnlockTimeout = unlockCfg.Timeout
+	}
+	if err := secrets.EnsureSession(ctx, sessionOpts); err != nil {
 		emit(reporter, EventWarn, phase, fmt.Sprintf("[auth] unlock failed: %v", err), nil)
 		return fmt.Errorf("Bitwarden 解锁失败: %w", err)
 	}

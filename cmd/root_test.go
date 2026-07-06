@@ -277,8 +277,21 @@ func TestIsInternalCLIArgs(t *testing.T) {
 	if !isInternalCLIArgs([]string{"__freshness-check", "--project-root", "/x"}) {
 		t.Fatal("freshness 内部命令应识别为 CLI 参数")
 	}
+	if !isInternalCLIArgs([]string{"mcp", "--project-root", "/x"}) {
+		t.Fatal("mcp 子命令应识别为 CLI 参数")
+	}
 	if isInternalCLIArgs([]string{"pull"}) {
 		t.Fatal("已移除的用户子命令不应走内部 CLI 短路")
+	}
+}
+
+func TestMCPSubcommandRegistered(t *testing.T) {
+	cmd, _, err := RootCmd.Find([]string{"mcp"})
+	if err != nil {
+		t.Fatalf("查找 mcp 子命令失败: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "mcp" {
+		t.Fatal("mcp 子命令应已注册")
 	}
 }
 
