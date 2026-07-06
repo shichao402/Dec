@@ -33,17 +33,15 @@ func programmaticUnlock(t *testing.T, cfg *Config, password string) (token strin
 
 // 运行: DEC_BW_PASSWORD='...' go test -tags live ./pkg/secrets -run TestLive_ProgrammaticUnlock -v
 func TestLive_ProgrammaticUnlock(t *testing.T) {
+	requireLivePassword(t)
 	password := os.Getenv("DEC_BW_PASSWORD")
-	if password == "" {
-		t.Skip("设置 DEC_BW_PASSWORD 以运行 live 登录测试")
-	}
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
 	token, need2FA, err := programmaticUnlock(t, cfg, password)
 	if need2FA {
-		t.Fatal("程序化登录仍需 2FA：检查 device.json 中 remember token 与 identifier 是否匹配")
+		t.Fatal("程序化登录仍需 2FA：专用测试账户应关闭 2FA")
 	}
 	if token == "" {
 		t.Fatal("未返回 access token")
@@ -64,18 +62,15 @@ func TestLive_ProgrammaticUnlock(t *testing.T) {
 
 // 运行: DEC_BW_PASSWORD='...' go test -tags live ./pkg/secrets -run TestLive_PushBundle -v
 func TestLive_PushBundle(t *testing.T) {
+	requireLivePassword(t)
 	password := os.Getenv("DEC_BW_PASSWORD")
-	if password == "" {
-		t.Skip("设置 DEC_BW_PASSWORD 以运行 live push 测试")
-	}
-
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
 	token, need2FA, err := programmaticUnlock(t, cfg, password)
 	if need2FA {
-		t.Fatal("remember token 应跳过 2FA；若失败请检查 device.json identifier 是否与 Bitwarden 记住的设备一致")
+		t.Fatal("专用测试账户应关闭 2FA")
 	}
 
 	client, err := NewAPIClient(cfg, token, nil)
@@ -85,7 +80,10 @@ func TestLive_PushBundle(t *testing.T) {
 
 	projectRoot := os.Getenv("DEC_PROJECT_ROOT")
 	if projectRoot == "" {
-		projectRoot = "/Users/firo/workspace/Dec"
+		projectRoot = FindProjectRootWithIntegrationAuth()
+	}
+	if projectRoot == "" {
+		t.Skip("设置 DEC_PROJECT_ROOT 或在含 .secrets/dec/integration/bitwarden.yaml 的项目根运行")
 	}
 	result, err := PushBundle(context.Background(), client, PushBundleRequest{
 		ProjectRoot:   projectRoot,
@@ -100,18 +98,15 @@ func TestLive_PushBundle(t *testing.T) {
 
 // 运行: DEC_BW_PASSWORD='...' go test -tags live ./pkg/secrets -run TestLive_PushThenPull -v
 func TestLive_PushThenPull(t *testing.T) {
+	requireLivePassword(t)
 	password := os.Getenv("DEC_BW_PASSWORD")
-	if password == "" {
-		t.Skip("设置 DEC_BW_PASSWORD 以运行 live push/pull 往返测试")
-	}
-
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
 	token, need2FA, err := programmaticUnlock(t, cfg, password)
 	if need2FA {
-		t.Fatal("remember token 应跳过 2FA；若失败请检查 device.json identifier 是否与 Bitwarden 记住的设备一致")
+		t.Fatal("专用测试账户应关闭 2FA")
 	}
 
 	client, err := NewAPIClient(cfg, token, nil)
@@ -121,7 +116,10 @@ func TestLive_PushThenPull(t *testing.T) {
 
 	projectRoot := os.Getenv("DEC_PROJECT_ROOT")
 	if projectRoot == "" {
-		projectRoot = "/Users/firo/workspace/Dec"
+		projectRoot = FindProjectRootWithIntegrationAuth()
+	}
+	if projectRoot == "" {
+		t.Skip("设置 DEC_PROJECT_ROOT 或在含 .secrets/dec/integration/bitwarden.yaml 的项目根运行")
 	}
 	req := PushBundleRequest{
 		ProjectRoot:   projectRoot,

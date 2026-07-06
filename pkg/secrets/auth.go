@@ -130,14 +130,27 @@ func authStatus(onStatus func(string), format string, args ...any) {
 }
 
 // tryProgrammaticUnlock 尝试 DEC_BW_PASSWORD 程序化解锁。
-// passwordSet=true 表示 env 已设置；此情况下失败时不应回退 web unlock。
+// 若未设置 DEC_BW_PASSWORD，会尝试从项目 `.secrets/dec/integration/bitwarden.yaml` 读取（集成 / live 测试）。
+// passwordSet=true 表示 env 或集成凭据已提供；此情况下失败时不应回退 web unlock。
 func tryProgrammaticUnlock(ctx context.Context, onStatus func(string)) (unlocked bool, passwordSet bool, err error) {
 	password := strings.TrimSpace(os.Getenv("DEC_BW_PASSWORD"))
+	if password == "" {
+		password = integrationAuthPassword()
+		if password != "" {
+			_ = os.Setenv("DEC_BW_PASSWORD", password)
+			authStatus(onStatus, "programmatic unlock: loaded credentials from %s", IntegrationAuthRel)
+		}
+	}
 	if password == "" {
 		authStatus(onStatus, "programmatic unlock: skipped (DEC_BW_PASSWORD not set)")
 		return false, false, nil
 	}
 	passwordSet = true
+
+	if err := ensureIntegrationEmailConfigured(); err != nil {
+		authStatus(onStatus, "programmatic unlock: failed: sync email: %v", err)
+		return false, true, fmt.Errorf("同步 Bitwarden 邮箱失败: %w", err)
+	}
 
 	email := KnownEmail()
 	if email == "" {

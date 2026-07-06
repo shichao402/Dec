@@ -33,6 +33,9 @@ func ScanSecretsBundleFiles(projectRoot, secretsBundleName string) ([]SecureNote
 		if err != nil {
 			return err
 		}
+		if IsIntegrationAuthRelWithinBundle(relWithinBundle) {
+			return nil
+		}
 		notePath, err := NotePathForBundleFile(secretsBundleName, relWithinBundle)
 		if err != nil {
 			return err

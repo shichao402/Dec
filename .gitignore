@@ -45,6 +45,9 @@ logs/
 # 本地环境变量
 .env
 
+# 项目敏感文件与集成测试 Bitwarden 凭据（勿提交）
+.secrets/
+
 # 临时文件
 resources/temp/*
 !resources/temp/.gitkeep

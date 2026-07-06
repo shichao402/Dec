@@ -5,17 +5,32 @@ package secrets
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/pkg/secrets/unlock"
 )
 
-// 运行: DEC_BW_PASSWORD='...' go test -tags live ./pkg/secrets -run TestLive_EnsureSession -v
-func TestLive_EnsureSession(t *testing.T) {
-	password := os.Getenv("DEC_BW_PASSWORD")
-	if password == "" {
-		t.Skip("设置 DEC_BW_PASSWORD 以运行 live EnsureSession 测试")
+func TestMain(m *testing.M) {
+	root := FindProjectRootWithIntegrationAuth()
+	if root != "" {
+		if _, err := ApplyIntegrationAuth(root); err != nil {
+			panic("ApplyIntegrationAuth: " + err.Error())
+		}
 	}
+	os.Exit(m.Run())
+}
+
+func requireLivePassword(t *testing.T) {
+	t.Helper()
+	if strings.TrimSpace(os.Getenv("DEC_BW_PASSWORD")) == "" {
+		t.Skip("未找到 DEC_BW_PASSWORD 或 .secrets/dec/integration/bitwarden.yaml")
+	}
+}
+
+// 运行: go test -tags live ./pkg/secrets -run TestLive_EnsureSession -v
+func TestLive_EnsureSession(t *testing.T) {
+	requireLivePassword(t)
 	ClearSession()
 	t.Cleanup(ClearSession)
 
@@ -48,7 +63,7 @@ func TestLive_EnsureSession(t *testing.T) {
 	}
 	found := false
 	for _, s := range statuses {
-		if s == "Bitwarden 已通过程序化登录解锁" {
+		if strings.Contains(s, "programmatic unlock: success") || strings.Contains(s, "session ready") {
 			found = true
 			break
 		}

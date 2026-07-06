@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/shichao402/Dec/pkg/secrets"
 )
 
 const (
@@ -37,6 +38,15 @@ const (
 	ptyShutdownTimeout = 5 * time.Second
 	ptyReadChunk       = 4096
 )
+
+func TestMain(m *testing.M) {
+	if root := repoRootFromCWD(); root != "" {
+		if _, err := secrets.ApplyIntegrationAuth(root); err != nil {
+			panic("ApplyIntegrationAuth: " + err.Error())
+		}
+	}
+	os.Exit(m.Run())
+}
 
 // TestPTYStartupAndQuit 构建 dec 可执行文件，在伪终端中启动 TUI，
 // 等待首屏渲染，完成 5 页 tab 循环和一次 shift+tab 回退，
@@ -94,6 +104,9 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 		"LC_ALL="+lang,
 		"DEC_NO_TUI=",
 	)
+	if pw := strings.TrimSpace(os.Getenv("DEC_BW_PASSWORD")); pw != "" {
+		cmd.Env = append(cmd.Env, "DEC_BW_PASSWORD="+pw)
+	}
 	// 使用临时空目录作为 CWD，避免仓库内的 .dec/ 状态污染首屏。
 	cmd.Dir = t.TempDir()
 
@@ -222,12 +235,11 @@ func buildDecBinary(t *testing.T) string {
 	return outBin
 }
 
-// findRepoRoot 从当前测试文件目录向上查找包含 go.mod 的仓库根。
-func findRepoRoot(t *testing.T) string {
-	t.Helper()
+// repoRootFromCWD 从当前目录向上查找包含 go.mod 的仓库根。
+func repoRootFromCWD() string {
 	dir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("os.Getwd 失败: %v", err)
+		return ""
 	}
 	for i := 0; i < 8; i++ {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
@@ -238,6 +250,15 @@ func findRepoRoot(t *testing.T) string {
 			break
 		}
 		dir = parent
+	}
+	return ""
+}
+
+// findRepoRoot 从当前测试文件目录向上查找包含 go.mod 的仓库根。
+func findRepoRoot(t *testing.T) string {
+	t.Helper()
+	if root := repoRootFromCWD(); root != "" {
+		return root
 	}
 	t.Fatalf("找不到仓库根（向上查找 go.mod 失败）")
 	return ""
