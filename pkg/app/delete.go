@@ -35,7 +35,9 @@ type DeleteCandidate struct {
 	BundleName      string
 	Members         []AssetSelectionItem
 	Orphan          bool
-	GroupBundle     string
+	TreeRoot        string // ".dec" 或 ".secrets"
+	TreeBranch      string // 根下目录名（dec cache bundle 或 secrets bundle 目录）
+	GroupBundle     string // 已废弃，同 TreeBranch；保留便于测试断言
 	GroupOrder      int
 	GroupTitle      string
 }
@@ -110,6 +112,8 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, reporter Repo
 			Vault:       vault,
 			Label:       fmt.Sprintf("[dec/%s] %s / %s%s", itemType, name, vault, tag),
 			Orphan:      orphan,
+			TreeRoot:    ".dec",
+			TreeBranch:  groupBundle,
 			GroupBundle: groupBundle,
 			GroupOrder:  groupOrder,
 			GroupTitle:  groupCtx.groupTitle(groupBundle),
@@ -226,11 +230,13 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, reporter Repo
 			SecretPath:      notePath,
 			SecretsBundle:   secretsBundle,
 			RelWithinBundle: relWithinBundle,
-			Label:           fmt.Sprintf("[secret] %s%s", notePath, tag),
+			Label:           fmt.Sprintf("[secret] %s%s", relWithinBundle, tag),
 			Orphan:          orphan,
+			TreeRoot:        ".secrets",
+			TreeBranch:      groupBundle,
 			GroupBundle:     groupBundle,
 			GroupOrder:      groupOrder,
-			GroupTitle:      groupCtx.groupTitle(groupBundle),
+			GroupTitle:      groupCtx.secretsGroupTitle(groupBundle),
 		})
 	}
 
@@ -271,6 +277,8 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, reporter Repo
 				Vault:       bo.Vault,
 				Members:     append([]AssetSelectionItem(nil), bo.Members...),
 				Label:       fmt.Sprintf("[bundle] %s / %s · %d 成员", bo.Name, fallbackVaultName(bo), len(bo.Members)),
+				TreeRoot:    ".dec",
+				TreeBranch:  groupBundle,
 				GroupBundle: groupBundle,
 				GroupOrder:  groupOrder,
 				GroupTitle:  groupCtx.groupTitle(groupBundle),
@@ -360,13 +368,24 @@ func (g *deleteGroupContext) forDecBundle(bundleName string) (string, int) {
 
 func (g *deleteGroupContext) forSecretsBundle(secretsBundle string) (string, int) {
 	secretsBundle = strings.TrimSpace(secretsBundle)
-	if decBundle, ok := g.secretsToDec[secretsBundle]; ok {
-		return decBundle, g.orderFor(decBundle)
-	}
 	if secretsBundle == g.projectSecrets {
-		return secrets.ProjectSecretsDecBundleName, g.orderFor(secrets.ProjectSecretsDecBundleName)
+		return secretsBundle, g.orderFor(secrets.ProjectSecretsDecBundleName)
+	}
+	if decBundle, ok := g.secretsToDec[secretsBundle]; ok {
+		return secretsBundle, g.orderFor(decBundle)
 	}
 	return secretsBundle, g.orderFor(secretsBundle)
+}
+
+func (g *deleteGroupContext) secretsGroupTitle(secretsBundle string) string {
+	if secretsBundle == g.projectSecrets {
+		name := strings.TrimSpace(g.projectName)
+		if name == "" {
+			name = "?"
+		}
+		return fmt.Sprintf("%s (project)", name)
+	}
+	return secretsBundle
 }
 
 func (g *deleteGroupContext) groupTitle(groupBundle string) string {
@@ -395,11 +414,14 @@ func deleteKindOrder(kind DeleteItemKind) int {
 
 func sortDeleteCandidates(candidates []DeleteCandidate) {
 	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].TreeRoot != candidates[j].TreeRoot {
+			return candidates[i].TreeRoot < candidates[j].TreeRoot
+		}
 		if candidates[i].GroupOrder != candidates[j].GroupOrder {
 			return candidates[i].GroupOrder < candidates[j].GroupOrder
 		}
-		if candidates[i].GroupBundle != candidates[j].GroupBundle {
-			return candidates[i].GroupBundle < candidates[j].GroupBundle
+		if candidates[i].TreeBranch != candidates[j].TreeBranch {
+			return candidates[i].TreeBranch < candidates[j].TreeBranch
 		}
 		if deleteKindOrder(candidates[i].Kind) != deleteKindOrder(candidates[j].Kind) {
 			return deleteKindOrder(candidates[i].Kind) < deleteKindOrder(candidates[j].Kind)

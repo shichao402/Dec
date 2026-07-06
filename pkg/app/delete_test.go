@@ -158,9 +158,9 @@ func TestListDeleteCandidates_IncludesSecretsWhenBindingDiffersFromDir(t *testin
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
 	for _, c := range candidates {
-		if c.Kind == DeleteKindSecret && c.SecretPath == ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml" {
-			if c.GroupBundle != "vikunja" {
-				t.Fatalf("secret GroupBundle = %q, want vikunja", c.GroupBundle)
+		if c.Kind == DeleteKindSecret && strings.Contains(c.SecretPath, "vikunja.toml") {
+			if c.TreeBranch != "vikunja_workflow" {
+				t.Fatalf("secret TreeBranch = %q, want vikunja_workflow", c.TreeBranch)
 			}
 			return
 		}
@@ -193,7 +193,7 @@ func TestListDeleteCandidates_IncludesRemoteOnlySecrets(t *testing.T) {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
 				"vikunja_workflow": {{
-					RelativePath: ".secrets/vikunja_workflow/mise/conf.d/remote-only.toml",
+					RelativePath: "mise/conf.d/remote-only.toml",
 					Content:      "[env]\nTOKEN=1\n",
 				}},
 			},
@@ -218,8 +218,8 @@ func TestListDeleteCandidates_IncludesRemoteOnlySecrets(t *testing.T) {
 			if !c.Orphan {
 				t.Fatalf("远端-only secret 应标记 Orphan: %#v", c)
 			}
-			if c.GroupBundle != "vikunja" {
-				t.Fatalf("GroupBundle = %q, want vikunja", c.GroupBundle)
+			if c.TreeBranch != "vikunja_workflow" {
+				t.Fatalf("TreeBranch = %q, want vikunja_workflow", c.TreeBranch)
 			}
 			if !strings.Contains(c.Label, "仅远端") {
 				t.Fatalf("Label 应含仅远端: %q", c.Label)
@@ -255,8 +255,8 @@ func TestListDeleteCandidates_GroupsDecAssetsUnderBundle(t *testing.T) {
 	}
 	for _, c := range candidates {
 		if c.Kind == DeleteKindDecAsset && c.Name == "demo" {
-			if c.GroupBundle != "vikunja" {
-				t.Fatalf("Dec 资产 GroupBundle = %q, want vikunja", c.GroupBundle)
+			if c.TreeRoot != ".dec" || c.TreeBranch != "vikunja" {
+				t.Fatalf("Dec 资产 tree = %q/%q, want .dec/vikunja", c.TreeRoot, c.TreeBranch)
 			}
 			return
 		}

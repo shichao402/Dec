@@ -223,15 +223,20 @@ func cipherDecryptedName(cipher bwCipher, userKey []byte) string {
 }
 
 func noteStillPresent(localNames map[string]struct{}, remoteName, folderName string) bool {
-	if _, ok := localNames[remoteName]; ok {
-		return true
-	}
-	canonical, err := CanonicalNotePath(folderName, remoteName)
+	remoteCanon, err := CanonicalNoteName(folderName, remoteName)
 	if err != nil {
 		return false
 	}
-	_, ok := localNames[canonical]
-	return ok
+	for localName := range localNames {
+		localCanon, err := CanonicalNoteName(folderName, localName)
+		if err != nil {
+			continue
+		}
+		if localCanon == remoteCanon {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error {
@@ -306,98 +311,20 @@ func (c *APIClient) deleteCipher(ctx context.Context, cipherID string) error {
 	return nil
 }
 
-func (c *APIClient) MigrateBundle(ctx context.Context, req MigrateBundleRequest) (*MigrateBundleResult, error) {
-	userKey := UserKey()
-	if len(userKey) == 0 {
-		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
-	}
-
-	folderName := req.Binding.SecretsBundleName
-	if folderName == "" {
-		folderName = req.DecBundleName
-	}
-
-	folderID, err := c.findFolderID(ctx, folderName, userKey)
-	if err != nil {
-		return nil, err
-	}
-	if folderID == "" {
-		return &MigrateBundleResult{}, nil
-	}
-
-	ciphers, err := c.listCiphers(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	existing := make(map[string]bwCipher)
-	for _, cipher := range ciphers {
-		if cipher.Type != cipherTypeSecureNote || cipher.FolderID != folderID {
-			continue
-		}
-		itemKey, err := itemDecryptionKey(cipher.Key, userKey)
-		if err != nil {
-			continue
-		}
-		name, err := decryptVaultString(strings.TrimSpace(cipher.Name), itemKey)
-		if err != nil {
-			continue
-		}
-		if name == "" {
-			continue
-		}
-		existing[name] = cipher
-	}
-
-	result := &MigrateBundleResult{}
-	for _, cipher := range ciphers {
-		if cipher.Type != cipherTypeSecureNote || cipher.FolderID != folderID {
-			continue
-		}
-		itemKey, keyErr := itemDecryptionKey(cipher.Key, userKey)
-		if keyErr != nil {
-			result.SkippedCiphers = append(result.SkippedCiphers, cipher.ID)
-			continue
-		}
-		name, nameErr := decryptVaultString(strings.TrimSpace(cipher.Name), itemKey)
-		if nameErr != nil {
-			result.SkippedCiphers = append(result.SkippedCiphers, cipher.ID)
-			continue
-		}
-		if name == "" || !NeedsNoteRename(folderName, name) {
-			continue
-		}
-		canonical, canonErr := CanonicalNotePath(folderName, name)
-		if canonErr != nil {
-			return nil, canonErr
-		}
-		if canonical == name {
-			continue
-		}
-		if _, dup := existing[canonical]; dup {
-			continue
-		}
-		content, notesErr := decryptVaultString(cipher.Notes, itemKey)
-		if notesErr != nil {
-			result.SkippedCiphers = append(result.SkippedCiphers, cipher.ID)
-			continue
-		}
-		if err := c.updateSecureNote(ctx, cipher, userKey, canonical, content); err != nil {
-			return nil, fmt.Errorf("重命名 Secure Note %q 失败: %w", name, err)
-		}
-		result.RenamedNotes = append(result.RenamedNotes, name+" → "+canonical)
-		existing[canonical] = cipher
-		delete(existing, name)
-	}
-	return result, nil
-}
-
 func findExistingCipher(existing map[string]bwCipher, noteName, secretsBundleName string) (bwCipher, bool) {
-	if cipher, ok := existing[noteName]; ok {
-		return cipher, true
+	target, err := CanonicalNoteName(secretsBundleName, noteName)
+	if err != nil {
+		if cipher, ok := existing[noteName]; ok {
+			return cipher, true
+		}
+		return bwCipher{}, false
 	}
-	if legacy := LegacyNoteName(secretsBundleName, noteName); legacy != "" {
-		if cipher, ok := existing[legacy]; ok {
+	for name, cipher := range existing {
+		canon, err := CanonicalNoteName(secretsBundleName, name)
+		if err != nil {
+			continue
+		}
+		if canon == target {
 			return cipher, true
 		}
 	}

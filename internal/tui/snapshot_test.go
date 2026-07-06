@@ -216,28 +216,29 @@ func snapshotDeleteModel(width int) model {
 	m.deleteCandidatesLoaded = true
 	m.deleteCandidates = []app.DeleteCandidate{
 		{
-			Kind: app.DeleteKindSecret, Label: "[secret] .secrets/Dec/pkv.include",
-			SecretPath: ".secrets/Dec/pkv.include", SecretsBundle: "Dec",
-			GroupBundle: "_project", GroupOrder: -1, GroupTitle: "Dec (project)",
+			Kind: app.DeleteKindSecret, Label: "[secret] pkv.include",
+			SecretPath: "pkv.include", SecretsBundle: "Dec",
+			TreeRoot: ".secrets", TreeBranch: "Dec", GroupOrder: -1, GroupTitle: "Dec (project)",
 		},
 		{
 			Kind: app.DeleteKindDecAsset, Label: "[dec/skill] demo / default", Type: "skill", Name: "demo", Vault: "default",
-			GroupBundle: "default", GroupOrder: 0, GroupTitle: "default (bundle)",
+			TreeRoot: ".dec", TreeBranch: "default", GroupOrder: 0, GroupTitle: "default",
 		},
 		{
 			Kind: app.DeleteKindDecAsset, Label: "[dec/rule] demo-rule / default", Type: "rule", Name: "demo-rule", Vault: "default",
-			GroupBundle: "default", GroupOrder: 0, GroupTitle: "default (bundle)",
+			TreeRoot: ".dec", TreeBranch: "default", GroupOrder: 0, GroupTitle: "default",
 		},
 		{
-			Kind: app.DeleteKindSecret, Label: "[secret] .secrets/vikunja_workflow/mise/conf.d/vikunja.toml",
-			SecretPath: ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
-			GroupBundle: "vikunja", GroupOrder: 1, GroupTitle: "vikunja (bundle)",
+			Kind: app.DeleteKindSecret, Label: "[secret] mise/conf.d/vikunja.toml",
+			SecretPath: "mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
+			TreeRoot: ".secrets", TreeBranch: "vikunja_workflow", GroupOrder: 1, GroupTitle: "vikunja_workflow",
 		},
 		{
 			Kind: app.DeleteKindBundle, Label: "[bundle] vikunja / vikunja · 2 成员", BundleName: "vikunja", Vault: "vikunja",
-			GroupBundle: "vikunja", GroupOrder: 1, GroupTitle: "vikunja (bundle)",
+			TreeRoot: ".dec", TreeBranch: "vikunja", GroupOrder: 1, GroupTitle: "vikunja",
 		},
 	}
+	m.rebuildDeleteTree()
 	return m
 }
 

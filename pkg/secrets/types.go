@@ -9,20 +9,6 @@ type BundleBinding struct {
 	TargetDir         string `yaml:"target_dir" json:"target_dir"`
 }
 
-// MigrateBundleRequest 自动迁移单个 secrets bundle 的输入。
-type MigrateBundleRequest struct {
-	ProjectRoot   string
-	DecBundleName string
-	Binding       BundleBinding
-}
-
-// MigrateBundleResult 自动迁移结果（幂等；无变更时各计数为 0）。
-type MigrateBundleResult struct {
-	RenamedNotes   []string
-	MovedLocal     []string
-	SkippedCiphers []string
-}
-
 // SecureNote 表示一条待落地到项目根的 Secure Note。
 type SecureNote struct {
 	RelativePath string

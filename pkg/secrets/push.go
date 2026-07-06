@@ -77,7 +77,11 @@ func PushBundle(ctx context.Context, client Client, req PushBundleRequest) (*Pus
 
 	paths := make([]string, 0, len(notes))
 	for _, note := range notes {
-		paths = append(paths, note.RelativePath)
+		landing, err := SecretsLocalPath(secretsBundleName, note.RelativePath)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, landing)
 	}
 	if err := ValidateNoOverlap(req.ProjectRoot, paths); err != nil {
 		return nil, err

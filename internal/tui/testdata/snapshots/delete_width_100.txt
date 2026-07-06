@@ -10,24 +10,24 @@
 │   Delete         ││  Delete                                                                      │
 │   Settings       ││  Dec 资产 · secrets 文件 · bundle · 两次确认后执行                           │
 │                  ││  共 5 项 · 已选 0 · 筛选 "<none>"                                            │
-│                  ││  j/k 移动 · space 选择 · d 删除 · a 全选 · / 筛选 · r 刷新 · h/Esc           │
-│                  ││  返回导航                                                                    │
-│                  ││  ▾ Dec (project)                                                             │
-│                  ││  > [ ]    ↳ [secret] .secrets/Dec/pkv.include                                │
-│                  ││  ▾ default (bundle)                                                          │
-│                  ││  [ ]    ↳ [dec/skill] demo / default                                         │
-│                  ││  [ ]    ↳ [dec/rule] demo-rule / default                                     │
-│                  ││  ▾ vikunja (bundle)                                                          │
-│                  ││  [ ]    ↳ [secret] .secrets/vikunja_workflow/mise/conf.d/vikunja.toml        │
-│                  ││  [ ]    ↳ [bundle] vikunja / vikunja · 2 成员                                │
-│                  ││                                                                              │
-│                  ││                                                                              │
-│                  ││                                                                              │
-│                  ││                                                                              │
-│                  ││                                                                              │
-│                  ││                                                                              │
-│                  ││                                                                              │
-│                  ││                                                                              │
+│                  ││  j/k 移动 · l/h 展开折叠 · space 选择 · d 删除 · a 全选 · / 筛选 · r 刷新    │
+│                  ││  · Esc 返回导航                                                              │
+│                  ││  ▾ .dec                                                                      │
+│                  ││  ▾ cache                                                                     │
+│                  ││  ▾ vikunja                                                                   │
+│                  ││  > [ ]       ↳ [bundle] vikunja / vikunja · 2 成员                           │
+│                  ││  ▾ default                                                                   │
+│                  ││  ▾ skills                                                                    │
+│                  ││  [ ]         ↳ demo                                                          │
+│                  ││  ▾ rules                                                                     │
+│                  ││  [ ]         ↳ demo-rule.mdc                                                 │
+│                  ││  ▾ .secrets                                                                  │
+│                  ││  ▾ vikunja_workflow                                                          │
+│                  ││  ▾ mise                                                                      │
+│                  ││  ▾ conf.d                                                                    │
+│                  ││  [ ]         ↳ vikunja.toml                                                  │
+│                  ││  ▾ Dec                                                                       │
+│                  ││  [ ]     ↳ pkv.include                                                       │
 │                  ││                                                                              │
 │                  ││                                                                              │
 │                  ││                                                                              │

@@ -39,66 +39,67 @@ func ListSecretsBundleDirNames(projectRoot string) ([]string, error) {
 	return names, nil
 }
 
-// NotePathForBundleFile 构造 Bitwarden Secure Note 名（项目根相对路径）。
+// NotePathForBundleFile 构造 Bitwarden Secure Note 名（folder 内相对路径，不含 `.secrets/<bundle>/` 前缀）。
 func NotePathForBundleFile(secretsBundleName, relWithinBundle string) (string, error) {
-	rel, err := normalizeBundleRelativePath(relWithinBundle)
-	if err != nil {
-		return "", err
-	}
-	return secretsBundlePrefix(secretsBundleName) + rel, nil
+	_ = secretsBundleName
+	return normalizeBundleRelativePath(relWithinBundle)
 }
 
 // SecretsLocalPath 返回 bundle 内文件在项目根的落地相对路径。
 func SecretsLocalPath(secretsBundleName, relWithinBundle string) (string, error) {
-	notePath, err := NotePathForBundleFile(secretsBundleName, relWithinBundle)
+	rel, err := normalizeBundleRelativePath(relWithinBundle)
 	if err != nil {
 		return "", err
 	}
-	return normalizeProjectRelativePath(notePath)
+	return normalizeProjectRelativePath(secretsBundlePrefix(secretsBundleName) + rel)
 }
 
-// IsLegacyNoteName 判断 Bitwarden Secure Note 名是否为旧格式（不以 `.secrets/` 开头）。
+// IsLegacyNoteName 判断 Bitwarden Secure Note 名是否为需迁移的旧格式。
 func IsLegacyNoteName(noteName string) bool {
-	trimmed := strings.TrimSpace(noteName)
-	return trimmed != "" && !strings.HasPrefix(trimmed, SecretsRootDir+"/")
-}
-
-// NeedsNoteRename 判断 note 名是否需迁移到规范 `.secrets/<bundle>/...` 路径。
-func NeedsNoteRename(secretsBundleName, noteName string) bool {
 	trimmed := strings.TrimSpace(noteName)
 	if trimmed == "" {
 		return false
 	}
-	prefix := secretsBundlePrefix(secretsBundleName)
-	if !strings.HasPrefix(trimmed, prefix) {
-		return IsLegacyNoteName(trimmed)
-	}
-	rel := strings.TrimPrefix(trimmed, prefix)
-	return strings.HasPrefix(rel, ".config/") || strings.Contains(rel, "/.config/")
+	return !isCanonicalNoteName(trimmed)
 }
 
-// CanonicalNotePath 将 legacy 或中间态 note 名规范为新格式。
-func CanonicalNotePath(secretsBundleName, noteName string) (string, error) {
+func isCanonicalNoteName(noteName string) bool {
+	trimmed := strings.TrimSpace(noteName)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasPrefix(trimmed, SecretsRootDir+"/") {
+		return false
+	}
+	if strings.HasPrefix(trimmed, ".config/") {
+		return false
+	}
+	return true
+}
+
+// CanonicalNoteName 将 legacy 或中间态 note 名规范为 folder 内相对路径。
+func CanonicalNoteName(secretsBundleName, noteName string) (string, error) {
 	trimmed := strings.TrimSpace(noteName)
 	if trimmed == "" {
 		return "", fmt.Errorf("Secure Note 名称不能为空")
 	}
 	prefix := secretsBundlePrefix(secretsBundleName)
 	if strings.HasPrefix(trimmed, prefix) {
-		rel, err := normalizeBundleRelativePath(canonicalWithinBundlePath(strings.TrimPrefix(trimmed, prefix)))
-		if err != nil {
-			return "", err
-		}
-		return NotePathForBundleFile(secretsBundleName, rel)
+		rel := strings.TrimPrefix(trimmed, prefix)
+		return normalizeBundleRelativePath(canonicalWithinBundlePath(rel))
 	}
-	if IsLegacyNoteName(trimmed) {
-		rel, err := normalizeBundleRelativePath(canonicalWithinBundlePath(trimmed))
-		if err != nil {
-			return "", err
-		}
-		return NotePathForBundleFile(secretsBundleName, rel)
+	if strings.HasPrefix(trimmed, ".config/") {
+		return normalizeBundleRelativePath(canonicalWithinBundlePath(trimmed))
 	}
-	return normalizeProjectRelativePath(trimmed)
+	if isCanonicalNoteName(trimmed) {
+		return normalizeBundleRelativePath(canonicalWithinBundlePath(trimmed))
+	}
+	return "", fmt.Errorf("无法解析 Secure Note 名称: %q", noteName)
+}
+
+// CanonicalNotePath 将 note 名映射为本地落地相对路径（`.secrets/<bundle>/...`）。
+func CanonicalNotePath(secretsBundleName, noteName string) (string, error) {
+	return LandingPathForNote(secretsBundleName, noteName)
 }
 
 func canonicalWithinBundlePath(rel string) string {
@@ -109,23 +110,30 @@ func canonicalWithinBundlePath(rel string) string {
 	return clean
 }
 
-// LegacyNoteName 若 noteName 为新格式（`.secrets/<bundle>/...`），返回 Bitwarden 旧格式名。
+// LegacyNoteName 若 noteName 为长前缀旧格式，返回其 folder 内相对路径别名（供匹配存量 cipher）。
 func LegacyNoteName(secretsBundleName, noteName string) string {
+	canon, err := CanonicalNoteName(secretsBundleName, noteName)
+	if err != nil || canon == "" {
+		return ""
+	}
 	prefix := secretsBundlePrefix(secretsBundleName)
-	trimmed := strings.TrimSpace(noteName)
-	if !strings.HasPrefix(trimmed, prefix) {
-		return ""
+	longForm := prefix + canon
+	if noteName == longForm {
+		return canon
 	}
-	remainder := strings.TrimPrefix(trimmed, prefix)
-	if remainder == "" {
-		return ""
+	if noteName == canon {
+		return longForm
 	}
-	return filepath.ToSlash(filepath.Clean(remainder))
+	return ""
 }
 
-// LandingPathForNote 将 Bitwarden Note 名映射为本地落地相对路径（规范 `.secrets/<bundle>/...`）。
+// LandingPathForNote 将 Bitwarden Note 名映射为本地落地相对路径（`.secrets/<bundle>/...`）。
 func LandingPathForNote(secretsBundleName, noteName string) (string, error) {
-	return CanonicalNotePath(secretsBundleName, noteName)
+	rel, err := CanonicalNoteName(secretsBundleName, noteName)
+	if err != nil {
+		return "", err
+	}
+	return SecretsLocalPath(secretsBundleName, rel)
 }
 
 func normalizeBundleRelativePath(raw string) (string, error) {

@@ -6,7 +6,18 @@ import (
 	"testing"
 )
 
-func TestLandingPathForNote_NewFormat(t *testing.T) {
+func TestLandingPathForNote_CanonicalNoteName(t *testing.T) {
+	got, err := LandingPathForNote("vikunja_workflow", "mise/conf.d/vikunja.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml"
+	if got != want {
+		t.Fatalf("LandingPathForNote() = %q, want %q", got, want)
+	}
+}
+
+func TestLandingPathForNote_LongPrefixLegacy(t *testing.T) {
 	got, err := LandingPathForNote("vikunja_workflow", ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml")
 	if err != nil {
 		t.Fatal(err)
@@ -17,7 +28,7 @@ func TestLandingPathForNote_NewFormat(t *testing.T) {
 	}
 }
 
-func TestLandingPathForNote_LegacyFormat(t *testing.T) {
+func TestLandingPathForNote_LegacyConfigFormat(t *testing.T) {
 	got, err := LandingPathForNote("vikunja_workflow", ".config/mise/conf.d/vikunja.toml")
 	if err != nil {
 		t.Fatal(err)
@@ -44,21 +55,21 @@ func TestNotePathForBundleFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml"
+	want := "mise/conf.d/vikunja.toml"
 	if got != want {
 		t.Fatalf("NotePathForBundleFile() = %q, want %q", got, want)
 	}
 }
 
 func TestLegacyNoteName(t *testing.T) {
-	newName := ".secrets/vikunja_workflow/.config/mise/conf.d/vikunja.toml"
-	got := LegacyNoteName("vikunja_workflow", newName)
-	want := ".config/mise/conf.d/vikunja.toml"
+	longName := ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml"
+	got := LegacyNoteName("vikunja_workflow", longName)
+	want := "mise/conf.d/vikunja.toml"
 	if got != want {
 		t.Fatalf("LegacyNoteName() = %q, want %q", got, want)
 	}
-	if legacy := LegacyNoteName("vikunja_workflow", ".config/mise/conf.d/vikunja.toml"); legacy != "" {
-		t.Fatalf("旧格式不应再映射: %q", legacy)
+	if legacy := LegacyNoteName("vikunja_workflow", "mise/conf.d/vikunja.toml"); legacy != longName {
+		t.Fatalf("canonical 应映射长前缀: %q", legacy)
 	}
 }
 

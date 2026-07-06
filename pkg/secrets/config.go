@@ -201,3 +201,63 @@ func normalizeBinding(decBundleName string, b BundleBinding) BundleBinding {
 	}
 	return b
 }
+
+// MigrateConfigIfNeeded 将废弃的 folder 字段迁移为 secrets_bundle 并回写配置（幂等）。
+// 不在 Pull/Push 流程中自动调用；需显式触发或用于一次性升级。
+func MigrateConfigIfNeeded() (bool, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	for i := range cfg.Bundles {
+		b := &cfg.Bundles[i]
+		if strings.TrimSpace(b.Folder) == "" {
+			continue
+		}
+		if b.SecretsBundleName == "" {
+			b.SecretsBundleName = strings.TrimSpace(b.Folder)
+		}
+		b.Folder = ""
+		changed = true
+	}
+	if applyDefaultBindings(cfg) {
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+	if err := SaveConfig(cfg); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func applyDefaultBindings(cfg *Config) bool {
+	if cfg == nil {
+		return false
+	}
+	changed := false
+	for _, decBundle := range []string{"vikunja"} {
+		secretsBundle := defaultSecretsBundleName(decBundle)
+		if secretsBundle == decBundle {
+			continue
+		}
+		found := false
+		for _, b := range cfg.Bundles {
+			if b.DecBundleName == decBundle {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		cfg.Bundles = append(cfg.Bundles, BundleBinding{
+			DecBundleName:     decBundle,
+			SecretsBundleName: secretsBundle,
+		})
+		changed = true
+	}
+	return changed
+}

@@ -89,7 +89,7 @@ func TestScanSecretsBundleFiles_SkipsIntegrationAuth(t *testing.T) {
 	if len(notes) != 1 {
 		t.Fatalf("notes len = %d, want 1", len(notes))
 	}
-	if notes[0].RelativePath != ".secrets/dec/tokens/api.key" {
+	if notes[0].RelativePath != "tokens/api.key" {
 		t.Fatalf("note path = %q", notes[0].RelativePath)
 	}
 }

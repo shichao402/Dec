@@ -66,10 +66,6 @@ func PushSecretsBundles(ctx context.Context, projectRoot string, reporter Report
 	total := plan.Total
 	emit(reporter, EventInfo, "push.secrets", fmt.Sprintf("推送 %d 个 secrets 目标（bundle + project）", total), &Progress{Phase: "secrets", Current: 0, Total: total})
 
-	if err := migrateSecretsTargets(ctx, projectRoot, plan, reporter); err != nil {
-		return nil, err
-	}
-
 	idx := 0
 	for _, bundleName := range plan.EnabledBundles {
 		if err := ctx.Err(); err != nil {

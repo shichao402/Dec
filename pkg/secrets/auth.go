@@ -135,13 +135,6 @@ func authStatus(onStatus func(string), format string, args ...any) {
 func tryProgrammaticUnlock(ctx context.Context, onStatus func(string)) (unlocked bool, passwordSet bool, err error) {
 	password := strings.TrimSpace(os.Getenv("DEC_BW_PASSWORD"))
 	if password == "" {
-		password = integrationAuthPassword()
-		if password != "" {
-			_ = os.Setenv("DEC_BW_PASSWORD", password)
-			authStatus(onStatus, "programmatic unlock: loaded credentials from %s", IntegrationAuthRel)
-		}
-	}
-	if password == "" {
 		authStatus(onStatus, "programmatic unlock: skipped (DEC_BW_PASSWORD not set)")
 		return false, false, nil
 	}

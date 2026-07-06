@@ -1,0 +1,225 @@
+package tui
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/shichao402/Dec/pkg/app"
+)
+
+type assetTreePayload struct {
+	kind          assetRowKind
+	bundleIndex   int
+	memberIndex   int
+	assetIndex    int
+	bundleEnabled bool
+	assetEnabled  bool
+}
+
+func assetBundleNodeID(name string) string {
+	return "bundle:" + name
+}
+
+func (m *model) refreshAssetTree() {
+	if m.assets == nil {
+		m.assetTree.Roots = nil
+		return
+	}
+	m.assetTree.ensureExpanded()
+	m.assetTree.Roots = m.buildAssetTreeRoots()
+	m.assetTree.Filter = m.assetFilter
+	m.assetTree.normalizeCursor()
+}
+
+func (m model) buildAssetTreeRoots() []*TreeNode {
+	if m.assets == nil {
+		return nil
+	}
+	typeFilter := m.assetTypeFilter
+	filter := strings.ToLower(strings.TrimSpace(m.assetFilter))
+	roots := make([]*TreeNode, 0, len(m.assets.Bundles)+len(m.assets.Items))
+
+	if typeFilter == "all" || typeFilter == "bundle" {
+		for i, bo := range m.assets.Bundles {
+			if filter != "" {
+				haystack := strings.ToLower(strings.Join([]string{bo.Name, bo.Vault, bo.Description}, " "))
+				if !strings.Contains(haystack, filter) {
+					continue
+				}
+			}
+			enabled := m.bundleSelected(bo.Name)
+			nodeID := assetBundleNodeID(bo.Name)
+			node := &TreeNode{
+				ID:         nodeID,
+				Label:      formatAssetBundleLabel(bo, enabled, m.assetTypeFilter),
+				SelectMode: TreeSelectBranch,
+				Payload: assetTreePayload{
+					kind:          assetRowBundle,
+					bundleIndex:   i,
+					bundleEnabled: enabled,
+				},
+			}
+			typeGroups := make(map[string][]int)
+			for mi, mb := range bo.Members {
+				sub := assetTypeSubDir(mb.Type)
+				typeGroups[sub] = append(typeGroups[sub], mi)
+			}
+			subs := make([]string, 0, len(typeGroups))
+			for sub := range typeGroups {
+				subs = append(subs, sub)
+			}
+			sort.Strings(subs)
+			for _, sub := range subs {
+				indices := typeGroups[sub]
+				typeID := nodeID + "/" + sub
+				typeNode := &TreeNode{
+					ID:         typeID,
+					Label:      sub,
+					SelectMode: TreeSelectNone,
+				}
+				for _, mi := range indices {
+					mb := bo.Members[mi]
+					typeNode.Children = append(typeNode.Children, &TreeNode{
+						ID:         fmt.Sprintf("%s:member:%d", typeID, mi),
+						Label:      memberLeafLabel(mb.Type, mb.Name),
+						SelectMode: TreeSelectReadOnly,
+						Payload: assetTreePayload{
+							kind:        assetRowBundleMember,
+							bundleIndex: i,
+							memberIndex: mi,
+						},
+					})
+				}
+				sortPathTreeChildren(typeNode.Children)
+				node.Children = append(node.Children, typeNode)
+			}
+			sortPathTreeChildren(node.Children)
+			roots = append(roots, node)
+		}
+	}
+
+	if typeFilter != "bundle" {
+		for _, idx := range m.filteredAssetIndices() {
+			item := m.assets.Items[idx]
+			roots = append(roots, &TreeNode{
+				ID:         fmt.Sprintf("asset:%s:%s:%s", item.Vault, item.Type, item.Name),
+				Label:      formatAssetItemLabel(item, m.assetManagedByActiveBundle(item)),
+				SelectMode: TreeSelectLeaf,
+				Payload: assetTreePayload{
+					kind:         assetRowAsset,
+					assetIndex:   idx,
+					assetEnabled: item.Enabled,
+				},
+			})
+		}
+	}
+	return roots
+}
+
+func memberLeafLabel(itemType, name string) string {
+	segs := memberPathSegments(itemType, name)
+	if len(segs) == 0 {
+		return name
+	}
+	return segs[len(segs)-1]
+}
+
+func formatAssetBundleLabel(bo app.AssetBundleOption, enabled bool, typeFilter string) string {
+	label := bo.Name
+	if bo.Name != bo.Vault {
+		label = fmt.Sprintf("%s (%s)", bo.Name, bo.Vault)
+	}
+	if typeFilter == "bundle" {
+		return fmt.Sprintf("%s · %d 个成员", label, len(bo.Members))
+	}
+	return fmt.Sprintf("bundle %s (%s) · %d 个成员", bo.Name, bo.Vault, len(bo.Members))
+}
+
+func formatAssetItemLabel(item app.AssetSelectionItem, managed bool) string {
+	tag := ""
+	if managed {
+		tag = " (by bundle)"
+	}
+	return fmt.Sprintf("%s / %s / %s%s", item.Vault, item.Type, item.Name, tag)
+}
+
+func (m model) visibleAssetRows() []assetRow {
+	mm := m
+	mm.refreshAssetTree()
+	rows := mm.assetTree.VisibleRows()
+	out := make([]assetRow, 0, len(rows))
+	for _, tr := range rows {
+		p, ok := tr.Node.Payload.(assetTreePayload)
+		if !ok {
+			continue
+		}
+		out = append(out, assetRow{
+			kind:          p.kind,
+			assetIndex:    p.assetIndex,
+			assetEnabled:  p.assetEnabled,
+			bundleIndex:   p.bundleIndex,
+			memberIndex:   p.memberIndex,
+			bundleEnabled: p.bundleEnabled,
+		})
+	}
+	return out
+}
+
+func (m model) assetTreeRowAtCursor() (TreeRow, bool) {
+	mm := m
+	mm.refreshAssetTree()
+	return mm.assetTree.currentRow()
+}
+
+func (m model) assetPayloadAtCursor() (assetTreePayload, bool) {
+	row, ok := m.assetTreeRowAtCursor()
+	if !ok {
+		return assetTreePayload{}, false
+	}
+	p, ok := row.Node.Payload.(assetTreePayload)
+	return p, ok
+}
+
+func (m model) assetTreeVisibleCount() int {
+	mm := m
+	mm.refreshAssetTree()
+	return len(mm.assetTree.VisibleRows())
+}
+
+func renderAssetTreeLine(row TreeRow, tree *TreeList, marker string, bundleEnabled, assetEnabled bool) string {
+	indent := strings.Repeat("  ", row.Depth)
+	if p, ok := row.Node.Payload.(assetTreePayload); ok {
+		switch p.kind {
+		case assetRowBundle:
+			checked := " "
+			if bundleEnabled {
+				checked = "x"
+			}
+			arrow := "▸"
+			if tree.Expanded[row.Node.ID] {
+				arrow = "▾"
+			}
+			return fmt.Sprintf("%s [%s] %s %s%s", marker, checked, arrow, indent, row.Node.Label)
+		case assetRowBundleMember:
+			return fmt.Sprintf("%s %s↳ %s", marker, indent, row.Node.Label)
+		case assetRowAsset:
+			checked := " "
+			if assetEnabled {
+				checked = "x"
+			}
+			return fmt.Sprintf("%s [%s] %s%s", marker, checked, indent, row.Node.Label)
+		}
+	}
+	prefix := indent
+	if treeNodeExpandable(row.Node) {
+		if tree.Expanded[row.Node.ID] {
+			prefix += "▾ "
+		} else {
+			prefix += "▸ "
+		}
+	} else if row.Depth > 0 {
+		prefix += "↳ "
+	}
+	return fmt.Sprintf("%s %s%s", marker, prefix, row.Node.Label)
+}

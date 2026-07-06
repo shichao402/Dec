@@ -337,32 +337,18 @@ sequenceDiagram
 
 详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)。
 
-## 自动迁移
+## Legacy 路径兼容
 
-存量项目无需手工改 Bitwarden Note 名或移动 `.config/` 下的旧文件。TUI **Run** 页 Pull / Push 在 secrets 阶段 **第一步** 自动执行迁移（`migrate.secrets` 事件），幂等、可重复执行。
+Pull / Push **不会**自动重命名 Bitwarden Note 或移动本地旧文件。读写时通过 `CanonicalNoteName` / `LandingPathForNote` 将存量 Note 名（如 `.config/mise/conf.d/vikunja.toml`、长前缀 `.secrets/<bundle>/...`）映射到当前本地路径 `.secrets/<secrets_bundle>/mise/...`；Push 时 `findExistingCipher` 按规范化短名匹配已有 cipher，**不重命名**。
 
-| 存量场景 | 自动处理 |
-|----------|----------|
-| Bitwarden Note 旧名（如 `.config/mise/conf.d/vikunja.toml`） | 原地 **rename** 为 `.secrets/<secrets_bundle>/mise/conf.d/vikunja.toml`（保留 cipher key） |
-| 本地旧落地（项目根 `.config/...` 或 `.secrets/<bundle>/.config/...`） | **move** 到 `.secrets/<secrets_bundle>/mise/...`（目标不存在时） |
-| 损坏 cipher（key 丢失等无法解密） | **跳过** 并 `migrate.secrets` warn（`id=...`） |
-| `~/.dec/secrets/config.yaml` 废弃 `folder:` 字段 | 一次性迁移为 `secrets_bundle` 并回写配置 |
-| 已迁移路径 | 不重复处理 |
-
-日志在 Run 页事件流与底部 log 区可见，例如：
-
-- `migrate.secrets: 重命名 Bitwarden note .config/... → .secrets/vikunja_workflow/...`
-- `migrate.secrets: 移动本地 .config/... → .secrets/...`
-- `migrate.secrets: 跳过无法解密的 cipher (id=...)`
-
-实现：`pkg/secrets/migrate.go`；编排：`pkg/app/migrate_secrets.go`（Pull/Push secrets 阶段调用）。
+存量数据需用户在 Bitwarden 或本地自行整理；`~/.dec/secrets/config.yaml` 废弃 `folder:` 字段可在加载时由 `normalizeBinding` 内存兼容，一次性持久化迁移可调用 `secrets.MigrateConfigIfNeeded()`。
 
 ## 配置与绑定
 
 - **Project 声明**：vault `projects/<name>.yaml` 的 `bundles`；本地 `.dec/config.yaml` 的 `project_name` 引用
 - **Dec bundle 启用**：本地 `enabled_bundles`（从 vault project 同步或 Assets 页保存）；secrets bundle 默认与 Dec bundle **同名**
 - 显式绑定：`schema/secrets/v1/config.proto` 的 `BundleBinding`（`dec_bundle` ↔ `secrets_bundle`，后者即 Bitwarden folder 名）
-- mise env 等私密配置：Bitwarden Secure Note，**Note 名 = 项目根相对路径**（如 `.config/mise/conf.d/vikunja.toml`）
+- mise env 等私密配置：Bitwarden Secure Note，**Note 名 = folder 内相对路径**（如 `mise/conf.d/vikunja.toml`），本地落地 `.secrets/<secrets_bundle>/mise/conf.d/vikunja.toml`
 - SSH Key：Bitwarden SSH Key Item，**Name = 逻辑名**，**Notes = hosts**；Pull 落地 `~/.ssh/dec_<bundle>_<name>` + Dec 管理 `~/.ssh/config` 区块
 
 ## Schema

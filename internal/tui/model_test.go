@@ -776,29 +776,33 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 	m.deleteCandidates = []app.DeleteCandidate{
 		{
 			Kind: app.DeleteKindDecAsset, Label: "[dec/skill] demo / vikunja", Type: "skill", Name: "demo", Vault: "vikunja",
-			GroupBundle: "vikunja", GroupOrder: 0, GroupTitle: "vikunja (bundle)",
+			TreeRoot: ".dec", TreeBranch: "vikunja", GroupOrder: 0, GroupTitle: "vikunja",
 		},
 		{
-			Kind: app.DeleteKindSecret, Label: "[secret] .secrets/vikunja_workflow/mise/conf.d/vikunja.toml",
-			SecretPath: ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
-			GroupBundle: "vikunja", GroupOrder: 0, GroupTitle: "vikunja (bundle)",
+			Kind: app.DeleteKindSecret, Label: "[secret] mise/conf.d/vikunja.toml",
+			SecretPath: "mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
+			TreeRoot: ".secrets", TreeBranch: "vikunja_workflow", GroupOrder: 0, GroupTitle: "vikunja_workflow",
 		},
 		{
 			Kind: app.DeleteKindBundle, Label: "[bundle] vikunja / vikunja · 2 成员", BundleName: "vikunja",
-			GroupBundle: "vikunja", GroupOrder: 0, GroupTitle: "vikunja (bundle)",
+			TreeRoot: ".dec", TreeBranch: "vikunja", GroupOrder: 0, GroupTitle: "vikunja",
 		},
 	}
 	m.deleteCandidatesLoaded = true
+	m.rebuildDeleteTree()
 
 	view := m.View()
 	for _, want := range []string{
-		"▾ vikunja (bundle)",
-		"↳ [dec/skill] demo / vikunja",
-		"↳ [secret] .secrets/vikunja_workflow/mise/conf.d/vikunja.toml",
-		"↳ [bundle] vikunja / vikunja · 2 成员",
+		"▾ .dec",
+		"▾ cache",
+		"▾ vikunja",
+		"↳ demo",
+		"▾ .secrets",
+		"vikunja.toml",
+		"[bundle]",
 	} {
 		if !strings.Contains(view, want) {
-			t.Fatalf("Delete 页应展示分组视图，缺少 %q:\n%s", want, view)
+			t.Fatalf("Delete 页应展示目录树，缺少 %q:\n%s", want, view)
 		}
 	}
 }
@@ -818,6 +822,63 @@ func TestModelDeletePageShowsBundleCandidates(t *testing.T) {
 	}
 }
 
+func TestModelDeletePageHCollapsesBeforeSidebar(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 4
+	m.focus = focusContent
+	m.deleteCandidates = []app.DeleteCandidate{
+		{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli", TreeRoot: ".dec", TreeBranch: "cli"},
+	}
+	m.deleteCandidatesLoaded = true
+	m.rebuildDeleteTree()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m = updated.(model)
+	if m.focus != focusContent {
+		t.Fatalf("叶子行 h 应先折叠父目录, focus = %q", m.focus)
+	}
+	if len(m.deleteTree.VisibleRows()) >= 4 {
+		t.Fatalf("h 后应减少可见行, rows=%d", len(m.deleteTree.VisibleRows()))
+	}
+
+	// 折叠到根且无法再折叠时，h 才返回侧栏
+	for tries := 0; tries < 8; tries++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+		m = updated.(model)
+		if m.focus == focusSidebar {
+			break
+		}
+	}
+	if m.focus != focusSidebar {
+		t.Fatalf("全部折叠后 h 应返回 sidebar, focus = %q", m.focus)
+	}
+}
+
+func TestModelDeletePageEnterTogglesDirectory(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 4
+	m.focus = focusContent
+	m.deleteCandidates = []app.DeleteCandidate{
+		{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli", TreeRoot: ".dec", TreeBranch: "cli"},
+	}
+	m.deleteCandidatesLoaded = true
+	m.rebuildDeleteTree()
+	m.deleteTree.Cursor = 0 // .dec
+
+	before := len(m.deleteTree.VisibleRows())
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if len(m.deleteTree.VisibleRows()) >= before {
+		t.Fatalf("Enter 在 .dec 上应折叠, before=%d after=%d", before, len(m.deleteTree.VisibleRows()))
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if len(m.deleteTree.VisibleRows()) != before {
+		t.Fatalf("再次 Enter 应展开, rows=%d want %d", len(m.deleteTree.VisibleRows()), before)
+	}
+}
+
 func TestModelDeletePageEscReturnsToSidebar(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 4
@@ -834,10 +895,19 @@ func TestModelDeletePageEscReturnsToSidebar(t *testing.T) {
 	}
 
 	m.focus = focusContent
+	m.rebuildDeleteTree()
+	// 先折叠到只剩根节点，此时 h 才返回侧栏
+	for tries := 0; tries < 8; tries++ {
+		if len(m.deleteTree.VisibleRows()) <= 1 {
+			break
+		}
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+		m = updated.(model)
+	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
 	m = updated.(model)
 	if m.focus != focusSidebar {
-		t.Fatalf("h 后 focus = %q, 期望 sidebar", m.focus)
+		t.Fatalf("根节点折叠后 h 应返回 sidebar, focus = %q", m.focus)
 	}
 }
 
@@ -846,15 +916,21 @@ func TestModelDeletePageSelectConfirmAndCancel(t *testing.T) {
 	m.pageIndex = 4
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
-		{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli"},
-		{Kind: app.DeleteKindBundle, BundleName: "vikunja", Label: "[bundle] vikunja"},
+		{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli", TreeRoot: ".dec", TreeBranch: "cli"},
+		{Kind: app.DeleteKindBundle, BundleName: "vikunja", Label: "[bundle] vikunja", TreeRoot: ".dec", TreeBranch: "vikunja"},
 	}
 	m.deleteCandidatesLoaded = true
+	m.rebuildDeleteTree()
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = updated.(model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	m = updated.(model)
+	for tries := 0; tries < 4; tries++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		m = updated.(model)
+		if row, ok := m.deleteTree.currentRow(); ok && row.SelectIndex >= 0 && !m.deleteTree.IsSelected(row.SelectIndex) {
+			break
+		}
+	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = updated.(model)
 	if len(m.selectedDeleteItems()) != 2 {
@@ -906,9 +982,10 @@ func TestModelDeletePageConfirmTriggersDeleteOperation(t *testing.T) {
 	m.pageIndex = 4
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
-		{Kind: app.DeleteKindBundle, BundleName: "vikunja", Label: "[bundle] vikunja", Members: []app.AssetSelectionItem{{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja"}}},
+		{Kind: app.DeleteKindBundle, BundleName: "vikunja", Label: "[bundle] vikunja", TreeRoot: ".dec", TreeBranch: "vikunja", Members: []app.AssetSelectionItem{{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja"}}},
 	}
 	m.deleteCandidatesLoaded = true
+	m.rebuildDeleteTree()
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = updated.(model)
@@ -1857,10 +1934,11 @@ func assetsStateWithBundle() *app.AssetSelectionState {
 // 把光标定位到 visibleAssetRows 中首个 kind==want 的行。
 func seekCursorToKind(t *testing.T, m *model, want assetRowKind) {
 	t.Helper()
-	rows := m.visibleAssetRows()
-	for i, r := range rows {
-		if r.kind == want {
-			m.assetCursor = i
+	m.refreshAssetTree()
+	rows := m.assetTree.VisibleRows()
+	for i, tr := range rows {
+		if p, ok := tr.Node.Payload.(assetTreePayload); ok && p.kind == want {
+			m.assetTree.Cursor = i
 			return
 		}
 	}
@@ -2017,23 +2095,27 @@ func TestModelAssetsBundleRightExpandsAndLeftCollapses(t *testing.T) {
 	m.normalizeAssetCursor()
 	seekCursorToKind(t, &m, assetRowBundle)
 
-	before := len(m.visibleAssetRows())
+	before := func() int {
+		m.refreshAssetTree()
+		return len(m.assetTree.VisibleRows())
+	}()
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	m = updated.(model)
-	after := len(m.visibleAssetRows())
+	m.refreshAssetTree()
+	after := len(m.assetTree.VisibleRows())
 	if after <= before {
 		t.Fatalf("按 l 展开后 rows %d 应大于折叠态 %d", after, before)
 	}
-	if !m.expandedBundles["vikunja"] {
+	if !m.assetTree.Expanded[assetBundleNodeID("vikunja")] {
 		t.Fatal("bundle 应处于展开态")
 	}
-	if m.focus != focusBundleExpanded {
-		t.Fatalf("展开后 focus = %q, 期望 bundleExpanded", m.focus)
+	if m.focus != focusContent {
+		t.Fatalf("展开后 focus = %q, 期望 content", m.focus)
 	}
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
 	m = updated.(model)
-	if m.expandedBundles["vikunja"] {
+	if m.assetTree.Expanded[assetBundleNodeID("vikunja")] {
 		t.Fatal("按 h 后 bundle 应处于折叠态")
 	}
 	if m.focus != focusContent {

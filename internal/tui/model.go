@@ -201,16 +201,14 @@ type model struct {
 	settings             *app.GlobalSettingsState
 	settingsErr          error
 	logs                 []string
-	assetCursor          int
+	assetTree              TreeList
+	// bundleSelection 是 TUI 内对 ProjectConfig.EnabledBundles 的镜像。
+	// 进入 Assets 页后：从 assets.Bundles[i].Enabled==true 初始化；保存时随 Items 一起传给 SaveAssetSelection。
+	bundleSelection []string
 	assetFilter          string
 	assetFilterInput     bool
 	assetsDirty          bool
 	savingAssets         bool
-	// bundleSelection 是 TUI 内对 ProjectConfig.EnabledBundles 的镜像。
-	// 进入 Assets 页后：从 assets.Bundles[i].Enabled==true 初始化；保存时随 Items 一起传给 SaveAssetSelection。
-	bundleSelection []string
-	// expandedBundles 记录哪些 bundle 节点当前展开显示成员。key 是 bundle 名称。
-	expandedBundles map[string]bool
 	// assetTypeFilter 取值 "all" / "skill" / "command" / "rule" / "mcp" / "bundle"，按 t 键轮转。
 	// "bundle" 表示只显示 bundle 节点（以及它们展开的成员）；其他值只影响单资产行的过滤。
 	assetTypeFilter      string
@@ -262,8 +260,7 @@ type model struct {
 	updateDoneVersion    string
 	updatingBinary       bool
 	deleteCandidates         []app.DeleteCandidate
-	deleteSelected           []bool
-	deleteCursor             int
+	deleteTree               TreeList
 	deleteFilter             string
 	deleteFilterInput        bool
 	deleteStage              string // "", "list", "summary", "confirm", "running"
@@ -308,7 +305,6 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 		projectRoot:     projectRoot,
 		currentVersion:  currentVersion,
 		pages:           []string{"Home", "Bundles", "Project", "Run", "Delete", "Settings"},
-		expandedBundles: make(map[string]bool),
 		assetTypeFilter: "bundle",
 		configInitMode:  opts.ConfigInitMode,
 		focus:           focusSidebar,
@@ -336,8 +332,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.deleteCandidatesLoaded = true
 		m.deleteCandidates = msg.candidates
 		m.deleteLoadErr = msg.err
-		m.deleteSelected = nil
-		m.deleteCursor = 0
+		m.deleteTree = TreeList{}
+		m.rebuildDeleteTree()
 		for _, line := range msg.logs {
 			m.pushLog(line)
 		}
@@ -428,9 +424,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(msg.state.Bundles) == 0 && m.assetTypeFilter == "bundle" {
 				m.assetTypeFilter = "all"
 			}
-		}
-		if m.expandedBundles == nil {
-			m.expandedBundles = make(map[string]bool)
 		}
 		m.normalizeAssetCursor()
 		if msg.state != nil {
@@ -749,14 +742,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case " ", "enter":
 			if m.isBundlesPage() && !m.savingAssets && m.focus != focusSidebar {
-				// enter 在 bundle 节点行上用于展开/折叠（内容区）；space 则始终触发 toggle。
-				if msg.String() == "enter" && m.assetsCursorOnBundle() && m.focus == focusContent {
-					m.expandCurrentBundle()
-					return m, nil
-				}
-				if msg.String() == "enter" && m.assetsCursorOnBundle() && m.focus == focusBundleExpanded {
-					m.collapseCurrentBundle()
-					m.focus = focusContent
+				if msg.String() == "enter" && m.assetsCursorOnBundle() {
+					if m.assetTree.CursorExpanded() {
+						m.collapseCurrentBundle()
+					} else {
+						m.expandCurrentBundle()
+					}
 					return m, nil
 				}
 				m.toggleCurrentAsset()
@@ -897,21 +888,29 @@ func (m model) handleHorizontalNav(direction int) (tea.Model, tea.Cmd) {
 		return m, nil
 	case focusContent:
 		if direction < 0 {
+			if m.isBundlesPage() && m.assetsCursorOnBundle() && m.assetTree.CursorExpanded() {
+				m.collapseCurrentBundle()
+				return m, nil
+			}
+			if m.isDeletePage() && m.deleteTree.CollapseAtCursor() {
+				m.pushLog("Delete 折叠目录")
+				return m, nil
+			}
 			m.focus = focusSidebar
 			m.pushLog("返回导航")
 			return m, nil
 		}
-		if m.isBundlesPage() && m.assetsCursorOnBundle() {
-			m.expandCurrentBundle()
-			m.focus = focusBundleExpanded
-			m.moveCursorToFirstBundleMember()
+		if m.isDeletePage() && direction > 0 {
+			if m.deleteTree.CursorOnExpandable() && !m.deleteTree.CursorExpanded() {
+				m.deleteTree.ExpandAtCursor()
+				m.pushLog("Delete 展开目录")
+				return m, nil
+			}
+			return m, nil
 		}
-		return m, nil
-	case focusBundleExpanded:
-		if direction < 0 {
-			m.collapseCurrentBundle()
-			m.focus = focusContent
-			m.pushLog("折叠 bundle")
+		if m.isBundlesPage() && m.focus == focusContent && direction > 0 {
+			m.expandAssetAtCursor()
+			return m, nil
 		}
 		return m, nil
 	}
@@ -953,10 +952,9 @@ func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		return m, nil
-	case focusBundleExpanded:
-		if m.isBundlesPage() && m.canNavigateAssets() {
-			m.moveBundleMemberCursor(delta)
+		if m.isDeletePage() && m.focus == focusContent {
+			m.deleteTree.MoveCursor(delta)
+			return m, nil
 		}
 		return m, nil
 	}
@@ -1754,8 +1752,6 @@ func (m model) renderBundlesPage(width int) string {
 		switch m.focus {
 		case focusSidebar:
 			summary = append(summary, shellMutedStyle.Render("按 l 进入内容区 · j/k 在侧栏切换页"))
-		case focusBundleExpanded:
-			summary = append(summary, shellMutedStyle.Render("快捷键：j/k 成员 · h 折叠返回 · space 切换 bundle · s 保存"))
 		default:
 			summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · h 返回导航 · l 展开 bundle · space 切换 · t 类型 · s 保存 · / 筛选"))
 		}
@@ -1764,11 +1760,11 @@ func (m model) renderBundlesPage(width int) string {
 		summary = append(summary, shellMutedStyle.Render("首次保存会创建 .dec/config.yaml 与 .dec/vars.yaml。"))
 	}
 
-	rows := m.visibleAssetRows()
+	rows := m.assetTreeVisibleCount()
 	if len(m.assets.Items) == 0 && len(m.assets.Bundles) == 0 {
 		return strings.Join(append(summary, "", "仓库 bundles/ 下还没有可选 bundle。"), "\n")
 	}
-	if len(rows) == 0 {
+	if rows == 0 {
 		return strings.Join(append(summary, "", "当前筛选没有结果。"), "\n")
 	}
 
@@ -2579,27 +2575,39 @@ func (m model) renderSettingsDetails() string {
 
 func (m model) renderAssetList(visible []int) string {
 	lines := []string{shellTitleStyle.Render("Bundle 列表")}
-	rows := m.visibleAssetRows()
-	if len(rows) == 0 {
+	mm := m
+	mm.refreshAssetTree()
+	treeRows := mm.assetTree.VisibleRows()
+	if len(treeRows) == 0 {
 		return strings.Join(lines, "\n")
 	}
-	cursorRow := m.cursorRowIndex(rows)
-	for rowIdx, row := range rows {
+	for i, tr := range treeRows {
 		marker := " "
-		if m.focus != focusSidebar && rowIdx == cursorRow {
+		if m.focus != focusSidebar && i == mm.assetTree.Cursor {
 			marker = ">"
 		}
-		line := m.renderAssetRowLine(row, marker)
-		switch {
-		case m.focus != focusSidebar && rowIdx == cursorRow:
-			lines = append(lines, shellSelectedRow.Render(line))
-		case row.kind == assetRowBundle && row.bundleEnabled:
-			lines = append(lines, shellEnabledRow.Render(line))
-		case row.kind == assetRowAsset && row.assetEnabled:
-			lines = append(lines, shellEnabledRow.Render(line))
-		default:
-			lines = append(lines, shellLogStyle.Render(line))
+		bundleEnabled, assetEnabled := false, false
+		if p, ok := tr.Node.Payload.(assetTreePayload); ok {
+			bundleEnabled = p.bundleEnabled
+			assetEnabled = p.assetEnabled
 		}
+		line := renderAssetTreeLine(tr, &mm.assetTree, marker, bundleEnabled, assetEnabled)
+		if m.focus != focusSidebar && i == mm.assetTree.Cursor {
+			lines = append(lines, shellSelectedRow.Render(line))
+			continue
+		}
+		if p, ok := tr.Node.Payload.(assetTreePayload); ok {
+			switch {
+			case p.kind == assetRowBundle && p.bundleEnabled:
+				lines = append(lines, shellEnabledRow.Render(line))
+			case p.kind == assetRowAsset && p.assetEnabled:
+				lines = append(lines, shellEnabledRow.Render(line))
+			default:
+				lines = append(lines, shellLogStyle.Render(line))
+			}
+			continue
+		}
+		lines = append(lines, shellLogStyle.Render(line))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -2615,7 +2623,7 @@ func (m model) renderAssetRowLine(row assetRow, marker string) string {
 			checked = "x"
 		}
 		arrow := "▸"
-		if m.expandedBundles[bo.Name] {
+		if m.assetTree.Expanded[assetBundleNodeID(bo.Name)] {
 			arrow = "▾"
 		}
 		label := bo.Name
@@ -2647,13 +2655,11 @@ func (m model) renderAssetRowLine(row assetRow, marker string) string {
 
 func (m model) renderAssetDetails() string {
 	lines := []string{shellTitleStyle.Render("Details")}
-	// 优先处理 bundle 节点所在光标：currentAssetItem 对 bundle 行返回 false，但我们仍要给 bundle 渲染 detail。
 	if m.assets != nil {
-		rows := m.visibleAssetRows()
-		if len(rows) > 0 {
-			row := rows[m.cursorRowIndex(rows)]
-			if row.kind == assetRowBundle {
-				bo := m.assets.Bundles[row.bundleIndex]
+		if p, ok := m.assetPayloadAtCursor(); ok {
+			switch p.kind {
+			case assetRowBundle:
+				bo := m.assets.Bundles[p.bundleIndex]
 				status := "未选中"
 				if m.bundleSelected(bo.Name) {
 					status = "已选中（勾选后其成员会随 pull 一起下发）"
@@ -2664,7 +2670,7 @@ func (m model) renderAssetDetails() string {
 					fmt.Sprintf("状态: %s", status),
 					fmt.Sprintf("成员: %d 个", len(bo.Members)),
 				)
-				if m.expandedBundles[bo.Name] {
+				if m.assetTree.Expanded[assetBundleNodeID(bo.Name)] {
 					lines = append(lines, "", shellTitleStyle.Render("成员列表"))
 					for _, mb := range bo.Members {
 						lines = append(lines, fmt.Sprintf("  · %s / %s / %s", mb.Type, mb.Vault, mb.Name))
@@ -2676,10 +2682,9 @@ func (m model) renderAssetDetails() string {
 					lines = append(lines, "", bo.Description)
 				}
 				return strings.Join(lines, "\n")
-			}
-			if row.kind == assetRowBundleMember {
-				bo := m.assets.Bundles[row.bundleIndex]
-				mb := bo.Members[row.memberIndex]
+			case assetRowBundleMember:
+				bo := m.assets.Bundles[p.bundleIndex]
+				mb := bo.Members[p.memberIndex]
 				lines = append(lines,
 					fmt.Sprintf("Bundle: %s", bo.Name),
 					fmt.Sprintf("Type: %s", mb.Type),
@@ -2688,22 +2693,40 @@ func (m model) renderAssetDetails() string {
 					shellMutedStyle.Render("成员由 bundle 带入，只读。"),
 				)
 				return strings.Join(lines, "\n")
+			case assetRowAsset:
+				item := m.assets.Items[p.assetIndex]
+				lines = append(lines,
+					fmt.Sprintf("Vault: %s", item.Vault),
+					fmt.Sprintf("Type: %s", item.Type),
+					fmt.Sprintf("Name: %s", item.Name),
+					fmt.Sprintf("Enabled: %s", formatReady(item.Enabled, "yes", "no")),
+				)
+				if m.assetManagedByActiveBundle(item) {
+					lines = append(lines, shellMutedStyle.Render("当前由 bundle 带入，只读。"))
+				}
 			}
+		} else if row, ok := m.assetTreeRowAtCursor(); ok {
+			lines = append(lines,
+				fmt.Sprintf("目录: %s", row.Node.Label),
+				shellMutedStyle.Render("按 l 展开 · h 折叠"),
+			)
 		}
 	}
-	item, ok := m.currentAssetItem()
-	if ok {
-		lines = append(lines,
-			fmt.Sprintf("Vault: %s", item.Vault),
-			fmt.Sprintf("Type: %s", item.Type),
-			fmt.Sprintf("Name: %s", item.Name),
-			fmt.Sprintf("Enabled: %s", formatReady(item.Enabled, "yes", "no")),
-		)
-		if m.assetManagedByActiveBundle(item) {
-			lines = append(lines, shellMutedStyle.Render("当前由 bundle 带入，只读。"))
+	if len(lines) == 1 {
+		item, ok := m.currentAssetItem()
+		if ok {
+			lines = append(lines,
+				fmt.Sprintf("Vault: %s", item.Vault),
+				fmt.Sprintf("Type: %s", item.Type),
+				fmt.Sprintf("Name: %s", item.Name),
+				fmt.Sprintf("Enabled: %s", formatReady(item.Enabled, "yes", "no")),
+			)
+			if m.assetManagedByActiveBundle(item) {
+				lines = append(lines, shellMutedStyle.Render("当前由 bundle 带入，只读。"))
+			}
+		} else {
+			lines = append(lines, "当前没有匹配的资产。")
 		}
-	} else {
-		lines = append(lines, "当前没有匹配的资产。")
 	}
 
 	if m.assets != nil {
@@ -2737,23 +2760,22 @@ func (m model) currentAssetItem() (app.AssetSelectionItem, bool) {
 	if m.assets == nil {
 		return app.AssetSelectionItem{}, false
 	}
-	rows := m.visibleAssetRows()
-	if len(rows) == 0 {
+	p, ok := m.assetPayloadAtCursor()
+	if !ok {
 		return app.AssetSelectionItem{}, false
 	}
-	row := rows[m.cursorRowIndex(rows)]
-	switch row.kind {
+	switch p.kind {
 	case assetRowAsset:
-		return m.assets.Items[row.assetIndex], true
+		return m.assets.Items[p.assetIndex], true
 	case assetRowBundleMember:
-		bo := m.assets.Bundles[row.bundleIndex]
-		mb := bo.Members[row.memberIndex]
+		bo := m.assets.Bundles[p.bundleIndex]
+		mb := bo.Members[p.memberIndex]
 		// 返回成员资产的 AssetSelectionItem 视图（Enabled 以当前 bundle 是否 enabled 为准）。
 		return app.AssetSelectionItem{
 			Name:    mb.Name,
 			Type:    mb.Type,
 			Vault:   mb.Vault,
-			Enabled: row.bundleEnabled,
+			Enabled: p.bundleEnabled,
 		}, true
 	}
 	// bundle 节点本身没有对应的 AssetSelectionItem。返回 false 让 Detail 面板走 bundle 分支。
@@ -2796,8 +2818,7 @@ const (
 	assetRowBundleMember
 )
 
-// assetRow 描述 Assets 页一行可见条目，融合单资产、bundle 节点、bundle 成员三种。
-// cursor 索引的是 visibleAssetRows() 返回切片中的位置，不再直接映射到 Items 下标。
+// assetRow 描述 Assets 页一行可见条目；光标索引以 assetTree.VisibleRows() 为准。
 type assetRow struct {
 	kind          assetRowKind
 	assetIndex    int // kind == assetRowAsset 时有效
@@ -2805,58 +2826,6 @@ type assetRow struct {
 	bundleIndex   int // kind == assetRowBundle / assetRowBundleMember 时有效
 	memberIndex   int // kind == assetRowBundleMember 时有效
 	bundleEnabled bool
-}
-
-// visibleAssetRows 构造当前可见行。顺序：先 bundle 节点（含展开后的成员），再受 typeFilter/assetFilter 过滤后的单资产。
-// 若 assetTypeFilter == "bundle"，则只输出 bundle 节点部分；单资产行被隐藏。
-func (m model) visibleAssetRows() []assetRow {
-	if m.assets == nil {
-		return nil
-	}
-	rows := make([]assetRow, 0, len(m.assets.Items)+len(m.assets.Bundles))
-	filter := strings.ToLower(strings.TrimSpace(m.assetFilter))
-	typeFilter := m.assetTypeFilter
-
-	// Bundle 段：typeFilter 为 "all" / "bundle" 时显示 bundle 节点。
-	if typeFilter == "all" || typeFilter == "bundle" {
-		for i, bo := range m.assets.Bundles {
-			if filter != "" {
-				haystack := strings.ToLower(strings.Join([]string{bo.Name, bo.Vault, bo.Description}, " "))
-				if !strings.Contains(haystack, filter) {
-					continue
-				}
-			}
-			enabled := m.bundleSelected(bo.Name)
-			rows = append(rows, assetRow{
-				kind:          assetRowBundle,
-				bundleIndex:   i,
-				bundleEnabled: enabled,
-			})
-			if m.expandedBundles[bo.Name] {
-				for mi := range bo.Members {
-					rows = append(rows, assetRow{
-						kind:          assetRowBundleMember,
-						bundleIndex:   i,
-						memberIndex:   mi,
-						bundleEnabled: enabled,
-					})
-				}
-			}
-		}
-	}
-
-	// 单资产段：typeFilter == "bundle" 时整体跳过。
-	if typeFilter != "bundle" {
-		for _, idx := range m.filteredAssetIndices() {
-			item := m.assets.Items[idx]
-			rows = append(rows, assetRow{
-				kind:         assetRowAsset,
-				assetIndex:   idx,
-				assetEnabled: item.Enabled,
-			})
-		}
-	}
-	return rows
 }
 
 // bundleSelected 返回当前 TUI 侧 bundleSelection 是否包含该 bundle。
@@ -2886,21 +2855,6 @@ func (m model) assetManagedByActiveBundle(item app.AssetSelectionItem) bool {
 		}
 	}
 	return false
-}
-
-// cursorRowIndex 将 m.assetCursor 解析为 rows 切片中的位置。cursor 存的是 row 位置（自 #93 起）。
-// 若 cursor 越界，返回 0 并由调用方处理。
-func (m model) cursorRowIndex(rows []assetRow) int {
-	if len(rows) == 0 {
-		return 0
-	}
-	if m.assetCursor < 0 {
-		return 0
-	}
-	if m.assetCursor >= len(rows) {
-		return len(rows) - 1
-	}
-	return m.assetCursor
 }
 
 // filterItemsForSave 把"由 bundle 带入"的隐式启用从保存列表里挤掉，避免把隐式启用写回 enabled_assets。
@@ -2949,37 +2903,17 @@ func (m model) settingsRowCount() int {
 }
 
 func (m model) canNavigateAssets() bool {
-	return m.assets != nil && len(m.visibleAssetRows()) > 0
+	return m.assets != nil && m.assetTreeVisibleCount() > 0
 }
 
 func (m *model) normalizeAssetCursor() {
-	rows := m.visibleAssetRows()
-	if len(rows) == 0 {
-		m.assetCursor = 0
-		return
-	}
-	if m.assetCursor < 0 {
-		m.assetCursor = 0
-		return
-	}
-	if m.assetCursor >= len(rows) {
-		m.assetCursor = len(rows) - 1
-	}
+	m.refreshAssetTree()
+	m.assetTree.normalizeCursor()
 }
 
 func (m *model) moveAssetCursor(delta int) {
-	rows := m.visibleAssetRows()
-	if len(rows) == 0 {
-		m.assetCursor = 0
-		return
-	}
-	m.assetCursor += delta
-	if m.assetCursor < 0 {
-		m.assetCursor = 0
-	}
-	if m.assetCursor >= len(rows) {
-		m.assetCursor = len(rows) - 1
-	}
+	m.refreshAssetTree()
+	m.assetTree.MoveCursor(delta)
 }
 
 func (m *model) normalizeSettingsCursor() {
@@ -3230,29 +3164,28 @@ func (m *model) toggleCurrentAsset() {
 	if m.assets == nil {
 		return
 	}
-	rows := m.visibleAssetRows()
-	if len(rows) == 0 {
+	p, ok := m.assetPayloadAtCursor()
+	if !ok {
 		return
 	}
-	row := rows[m.cursorRowIndex(rows)]
-	switch row.kind {
+	switch p.kind {
 	case assetRowAsset:
-		item := m.assets.Items[row.assetIndex]
+		item := m.assets.Items[p.assetIndex]
 		// 由 bundle 带入的单资产为只读：直接拒绝翻转，打日志提示。
 		if m.assetManagedByActiveBundle(item) {
 			m.pushLog(fmt.Sprintf("Asset 由 bundle 带入，无法单独取消：%s / %s / %s", item.Vault, item.Type, item.Name))
 			return
 		}
-		m.assets.Items[row.assetIndex].Enabled = !m.assets.Items[row.assetIndex].Enabled
+		m.assets.Items[p.assetIndex].Enabled = !m.assets.Items[p.assetIndex].Enabled
 		m.assetsDirty = true
-		newItem := m.assets.Items[row.assetIndex]
+		newItem := m.assets.Items[p.assetIndex]
 		state := "disabled"
 		if newItem.Enabled {
 			state = "enabled"
 		}
 		m.pushLog(fmt.Sprintf("Asset %s: %s / %s / %s", state, newItem.Vault, newItem.Type, newItem.Name))
 	case assetRowBundle:
-		bo := m.assets.Bundles[row.bundleIndex]
+		bo := m.assets.Bundles[p.bundleIndex]
 		if m.bundleSelected(bo.Name) {
 			// 取消 bundle：从 bundleSelection 移除；成员回到独立态（enabled_assets 中的独立引用保留）。
 			next := make([]string, 0, len(m.bundleSelection))
@@ -3269,8 +3202,8 @@ func (m *model) toggleCurrentAsset() {
 		}
 		m.assetsDirty = true
 	case assetRowBundleMember:
-		bo := m.assets.Bundles[row.bundleIndex]
-		mb := bo.Members[row.memberIndex]
+		bo := m.assets.Bundles[p.bundleIndex]
+		mb := bo.Members[p.memberIndex]
 		m.pushLog(fmt.Sprintf("Member 由 bundle %q 带入，无法单独切换：%s / %s / %s", bo.Name, mb.Vault, mb.Type, mb.Name))
 	}
 }
@@ -3290,118 +3223,61 @@ func (m model) countEnabledAssets() int {
 
 // assetsCursorOnBundle 判断当前光标是否落在 bundle 节点行（不是成员行、不是单资产行）。
 func (m model) assetsCursorOnBundle() bool {
-	if m.assets == nil {
-		return false
-	}
-	rows := m.visibleAssetRows()
-	if len(rows) == 0 {
-		return false
-	}
-	return rows[m.cursorRowIndex(rows)].kind == assetRowBundle
+	p, ok := m.assetPayloadAtCursor()
+	return ok && p.kind == assetRowBundle
 }
 
-// expandCurrentBundle 展开当前光标所在的 bundle 节点。
-func (m *model) expandCurrentBundle() {
+func (m *model) expandAssetAtCursor() {
 	if m.assets == nil {
 		return
 	}
-	rows := m.visibleAssetRows()
-	if len(rows) == 0 {
+	m.refreshAssetTree()
+	row, ok := m.assetTree.currentRow()
+	if !ok || !treeNodeExpandable(row.Node) {
 		return
 	}
-	row := rows[m.cursorRowIndex(rows)]
-	if row.kind != assetRowBundle {
-		return
-	}
-	bo := m.assets.Bundles[row.bundleIndex]
-	if m.expandedBundles == nil {
-		m.expandedBundles = make(map[string]bool)
-	}
-	if !m.expandedBundles[bo.Name] {
-		m.expandedBundles[bo.Name] = true
+	m.assetTree.Expanded[row.Node.ID] = true
+	if p, ok := row.Node.Payload.(assetTreePayload); ok && p.kind == assetRowBundle {
+		bo := m.assets.Bundles[p.bundleIndex]
+		nodeID := assetBundleNodeID(bo.Name)
+		seen := make(map[string]struct{})
+		for _, mb := range bo.Members {
+			sub := assetTypeSubDir(mb.Type)
+			if _, dup := seen[sub]; dup {
+				continue
+			}
+			seen[sub] = struct{}{}
+			m.assetTree.Expanded[nodeID+"/"+sub] = true
+		}
 		m.pushLog("Bundle 展开: " + bo.Name)
+	} else {
+		m.pushLog("展开: " + row.Node.Label)
 	}
+	m.refreshAssetTree()
 }
 
-// collapseCurrentBundle 折叠当前光标所在（或已展开）的 bundle 节点，并将光标回到 bundle 行。
+// expandCurrentBundle 展开 bundle 及其类型子目录。
+func (m *model) expandCurrentBundle() {
+	if !m.assetsCursorOnBundle() {
+		return
+	}
+	m.expandAssetAtCursor()
+}
+
+// collapseCurrentBundle 折叠当前 bundle 节点（光标可在 bundle 或成员行）。
 func (m *model) collapseCurrentBundle() {
 	if m.assets == nil {
 		return
 	}
-	rows := m.visibleAssetRows()
-	if len(rows) == 0 {
-		return
-	}
-	row := rows[m.cursorRowIndex(rows)]
-	bundleIndex := row.bundleIndex
-	if row.kind == assetRowBundleMember {
-		bundleIndex = row.bundleIndex
-	}
-	if row.kind != assetRowBundle && row.kind != assetRowBundleMember {
-		return
-	}
-	bo := m.assets.Bundles[bundleIndex]
-	if m.expandedBundles != nil && m.expandedBundles[bo.Name] {
-		delete(m.expandedBundles, bo.Name)
-		m.pushLog("Bundle 折叠: " + bo.Name)
-	}
-	// 光标回到 bundle 节点行
-	for i, r := range m.visibleAssetRows() {
-		if r.kind == assetRowBundle && r.bundleIndex == bundleIndex {
-			m.assetCursor = i
-			break
+	m.refreshAssetTree()
+	if m.assetTree.CollapseAtCursor() {
+		name := ""
+		if p, ok := m.assetPayloadAtCursor(); ok && p.bundleIndex < len(m.assets.Bundles) {
+			name = m.assets.Bundles[p.bundleIndex].Name
 		}
+		m.pushLog("Bundle 折叠: " + name)
+		m.refreshAssetTree()
 	}
-}
-
-// moveCursorToFirstBundleMember 将光标移到当前 bundle 的第一个成员行。
-func (m *model) moveCursorToFirstBundleMember() {
-	rows := m.visibleAssetRows()
-	if len(rows) == 0 {
-		return
-	}
-	cur := m.cursorRowIndex(rows)
-	bundleIndex := rows[cur].bundleIndex
-	for i, r := range rows {
-		if r.kind == assetRowBundleMember && r.bundleIndex == bundleIndex {
-			m.assetCursor = i
-			return
-		}
-	}
-}
-
-// moveBundleMemberCursor 在 bundleExpanded 上下文中仅在成员行间移动。
-func (m *model) moveBundleMemberCursor(delta int) {
-	rows := m.visibleAssetRows()
-	if len(rows) == 0 {
-		return
-	}
-	cur := m.cursorRowIndex(rows)
-	bundleIndex := rows[cur].bundleIndex
-	memberIndices := make([]int, 0)
-	for i, r := range rows {
-		if r.kind == assetRowBundleMember && r.bundleIndex == bundleIndex {
-			memberIndices = append(memberIndices, i)
-		}
-	}
-	if len(memberIndices) == 0 {
-		return
-	}
-	pos := 0
-	for i, idx := range memberIndices {
-		if idx == cur {
-			pos = i
-			break
-		}
-	}
-	pos += delta
-	if pos < 0 {
-		pos = 0
-	}
-	if pos >= len(memberIndices) {
-		pos = len(memberIndices) - 1
-	}
-	m.assetCursor = memberIndices[pos]
 }
 
 // cycleAssetTypeFilter 按 t 键在 all/skill/command/rule/mcp/bundle 间轮转。
@@ -3421,7 +3297,7 @@ func (m *model) cycleAssetTypeFilter() {
 	}
 	next := order[(idx+1)%len(order)]
 	m.assetTypeFilter = next
-	m.assetCursor = 0
+	m.assetTree.Cursor = 0
 	m.pushLog("Asset type filter: " + next)
 }
 

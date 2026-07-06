@@ -8,7 +8,6 @@ import (
 type Client interface {
 	PullBundle(ctx context.Context, req PullBundleRequest) (*PullBundleResult, error)
 	PushBundle(ctx context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error)
-	MigrateBundle(ctx context.Context, req MigrateBundleRequest) (*MigrateBundleResult, error)
 	DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error
 }
 
@@ -83,45 +82,6 @@ func (c *StubClient) DeleteSecureNote(_ context.Context, req DeleteSecureNoteReq
 	return nil
 }
 
-func (c *StubClient) MigrateBundle(_ context.Context, req MigrateBundleRequest) (*MigrateBundleResult, error) {
-	folder := req.Binding.SecretsBundleName
-	if folder == "" {
-		folder = req.DecBundleName
-	}
-	notes := c.NotesByFolder[folder]
-	if len(notes) == 0 {
-		return &MigrateBundleResult{}, nil
-	}
-	result := &MigrateBundleResult{}
-	updated := make([]SecureNote, 0, len(notes))
-	for _, note := range notes {
-		if !NeedsNoteRename(folder, note.RelativePath) {
-			updated = append(updated, note)
-			continue
-		}
-		canonical, err := CanonicalNotePath(folder, note.RelativePath)
-		if err != nil {
-			return nil, err
-		}
-		if canonical == note.RelativePath {
-			updated = append(updated, note)
-			continue
-		}
-		result.RenamedNotes = append(result.RenamedNotes, note.RelativePath+" → "+canonical)
-		updated = append(updated, SecureNote{RelativePath: canonical, Content: note.Content})
-	}
-	c.NotesByFolder[folder] = updated
-	return result, nil
-}
-
-func notePaths(notes []SecureNote) []string {
-	paths := make([]string, 0, len(notes))
-	for _, note := range notes {
-		paths = append(paths, note.RelativePath)
-	}
-	return paths
-}
-
 // NoopClient 未配置 Bitwarden API 时的空实现。
 type NoopClient struct{}
 
@@ -131,10 +91,6 @@ func (NoopClient) PullBundle(_ context.Context, _ PullBundleRequest) (*PullBundl
 
 func (NoopClient) PushBundle(_ context.Context, _ PushBundleRequest, _ []SecureNote) (*PushBundleResult, error) {
 	return &PushBundleResult{}, nil
-}
-
-func (NoopClient) MigrateBundle(_ context.Context, _ MigrateBundleRequest) (*MigrateBundleResult, error) {
-	return &MigrateBundleResult{}, nil
 }
 
 func (NoopClient) DeleteSecureNote(_ context.Context, _ DeleteSecureNoteRequest) error {

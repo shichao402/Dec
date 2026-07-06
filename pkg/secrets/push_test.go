@@ -29,7 +29,7 @@ func TestPushBundle_ScansProjectSecretsDir(t *testing.T) {
 	if result.Created != 1 {
 		t.Fatalf("Created = %d, want 1", result.Created)
 	}
-	want := ".secrets/Dec/tokens/api.key"
+	want := "tokens/api.key"
 	if len(result.Paths) != 1 || result.Paths[0] != want {
 		t.Fatalf("Paths = %#v, want [%q]", result.Paths, want)
 	}
@@ -59,7 +59,7 @@ func TestPushBundle_ScansLocalFiles(t *testing.T) {
 	if result.Created != 1 {
 		t.Fatalf("Created = %d, want 1", result.Created)
 	}
-	if len(result.Paths) != 1 || result.Paths[0] != ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml" {
+	if len(result.Paths) != 1 || result.Paths[0] != "mise/conf.d/vikunja.toml" {
 		t.Fatalf("Paths = %#v", result.Paths)
 	}
 }

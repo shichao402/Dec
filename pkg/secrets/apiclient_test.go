@@ -55,7 +55,7 @@ func TestAPIClient_PushBundle_CreateSecureNotePayload(t *testing.T) {
 	SetUserKey(userKey)
 	t.Cleanup(ClearSession)
 
-	noteName := ".secrets/vikunja_workflow/.config/mise/conf.d/vikunja.toml"
+	noteName := "mise/conf.d/vikunja.toml"
 	content := "[env]\nTOKEN=abc\n"
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
@@ -182,7 +182,7 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 	SetUserKey(userKey)
 	t.Cleanup(ClearSession)
 
-	newName := ".secrets/vikunja_workflow/.config/mise/conf.d/vikunja.toml"
+	newName := "mise/conf.d/vikunja.toml"
 	newContent := "[env]\nNEW=1"
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
@@ -265,7 +265,7 @@ func TestAPIClient_PushBundle_UpdateLegacyCipher(t *testing.T) {
 	SetUserKey(bytes.Repeat([]byte{0x04}, 64))
 	t.Cleanup(ClearSession)
 
-	newName := ".secrets/vikunja_workflow/.config/mise/conf.d/vikunja.toml"
+	newName := "mise/conf.d/vikunja.toml"
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
 		Binding:       BundleBinding{SecretsBundleName: "vikunja_workflow"},
