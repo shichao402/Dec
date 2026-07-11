@@ -76,8 +76,8 @@ type DeleteProjectResult struct {
 var ErrDeleteNotConfirmed = fmt.Errorf("delete 未确认")
 
 // ListDeleteCandidates 列出当前项目可删除的 Dec 资产、secrets 文件与 bundle。
-// 若 Bitwarden 已配置，会按需触发 web unlock 并补充远端 Secure Note 候选项。
-func ListDeleteCandidates(ctx context.Context, projectRoot string, reporter Reporter) ([]DeleteCandidate, error) {
+// includeRemote 为 true 且 Bitwarden 已配置时，会按需触发 web unlock 并补充远端 Secure Note 候选项。
+func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote bool, reporter Reporter) ([]DeleteCandidate, error) {
 	reporter = defaultReporter(reporter)
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
@@ -264,8 +264,10 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, reporter Repo
 		scanSecretsDir(secretsBundleName)
 	}
 
-	if err := appendRemoteSecretCandidates(ctx, projectRoot, projectConfig, seenSecret, addSecret, reporter); err != nil {
-		return nil, err
+	if includeRemote {
+		if err := appendRemoteSecretCandidates(ctx, projectRoot, projectConfig, seenSecret, addSecret, reporter); err != nil {
+			return nil, err
+		}
 	}
 
 	if state, loadErr := LoadAssetSelection(projectRoot, reporter); loadErr == nil {

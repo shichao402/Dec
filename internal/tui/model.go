@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -275,6 +276,9 @@ type model struct {
 	deleteCandidatesLoaded   bool
 	loadingDeleteCandidates  bool
 	deleteLoadErr            error
+	deleteLoadCancel         context.CancelFunc
+	deleteLoadGen            uint64
+	deleteIncludeRemote      bool
 	runningDelete            bool
 	deleteResult             *app.DeleteProjectResult
 	deleteErr                error
@@ -336,8 +340,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case deleteLoadedMsg:
+		if msg.loadGen != m.deleteLoadGen {
+			return m, nil
+		}
+		m.deleteLoadCancel = nil
 		m.loadingDeleteCandidates = false
+		if errors.Is(msg.err, context.Canceled) {
+			return m, nil
+		}
 		m.deleteCandidatesLoaded = true
+		m.deleteIncludeRemote = msg.includeRemote
 		m.deleteCandidates = msg.candidates
 		m.deleteLoadErr = msg.err
 		m.deleteTree = TreeList{}
@@ -377,7 +389,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Delete finished: dec %d · secrets %d · bundle %d",
 				msg.result.DecDeleted, msg.result.SecretsDeleted, msg.result.BundlesDeleted))
 		}
-		return m, tea.Batch(m.refreshCmd(), loadDeleteCandidatesCmd(m.projectRoot))
+		return m, tea.Batch(m.refreshCmd(), m.startDeleteCandidatesLoad(m.deleteIncludeRemote, true))
 	case overviewLoadedMsg:
 		m.overview = msg.overview
 		m.overviewErr = msg.err
@@ -707,23 +719,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog("Exit requested")
 			return m, tea.Quit
 		case "tab":
+			fromPage := m.pages[m.pageIndex]
 			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
 			m.focus = focusSidebar
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
-			if m.isDeletePage() {
-				m.deleteCandidatesLoaded = false
-				m.loadingDeleteCandidates = true
-			}
-			return m, m.cmdOnPageSwitch()
+			return m, m.onPageChanged(fromPage)
 		case "shift+tab":
+			fromPage := m.pages[m.pageIndex]
 			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
 			m.focus = focusSidebar
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
-			if m.isDeletePage() {
-				m.deleteCandidatesLoaded = false
-				m.loadingDeleteCandidates = true
-			}
-			return m, m.cmdOnPageSwitch()
+			return m, m.onPageChanged(fromPage)
 		case "l", "right":
 			return m.handleHorizontalNav(1)
 		case "h", "left":
@@ -940,18 +946,14 @@ func (m model) handleHorizontalNav(direction int) (tea.Model, tea.Cmd) {
 func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
 	switch m.focus {
 	case focusSidebar:
+		fromPage := m.pages[m.pageIndex]
 		if delta > 0 {
 			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
 		} else {
 			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
 		}
 		m.pushLog("Switched to " + m.pages[m.pageIndex])
-		if m.isDeletePage() {
-			m.deleteCandidatesLoaded = false
-			m.loadingDeleteCandidates = true
-			return m, loadDeleteCandidatesCmd(m.projectRoot)
-		}
-		return m, nil
+		return m, m.onPageChanged(fromPage)
 	case focusContent:
 		if m.isBundlesPage() {
 			if m.canNavigateAssets() {

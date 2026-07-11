@@ -112,7 +112,7 @@ func TestListDeleteCandidates_IncludesCacheAndSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, nil)
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
 	if err != nil {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
@@ -153,7 +153,7 @@ func TestListDeleteCandidates_IncludesSecretsWhenBindingDiffersFromDir(t *testin
 		t.Fatal(err)
 	}
 
-	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, nil)
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
 	if err != nil {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
@@ -209,7 +209,7 @@ func TestListDeleteCandidates_IncludesRemoteOnlySecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, nil)
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, true, nil)
 	if err != nil {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
@@ -228,6 +228,42 @@ func TestListDeleteCandidates_IncludesRemoteOnlySecrets(t *testing.T) {
 		}
 	}
 	t.Fatalf("应列出远端-only secret: %#v", candidates)
+}
+
+func TestListDeleteCandidates_SkipsRemoteWhenDisabled(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForProjectTest(t, "DEC_HOME", decHome)
+	secretsDir := filepath.Join(decHome, "secrets")
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := secrets.Config{ServerURL: "https://vault.example.com"}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		t.Fatal("includeRemote=false 时不应访问 Bitwarden client")
+		return nil
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		EnabledBundles: []string{"vikunja"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil); err != nil {
+		t.Fatalf("ListDeleteCandidates() = %v", err)
+	}
 }
 
 func TestListDeleteCandidates_GroupsDecAssetsUnderBundle(t *testing.T) {
@@ -249,7 +285,7 @@ func TestListDeleteCandidates_GroupsDecAssetsUnderBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, nil)
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
 	if err != nil {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}

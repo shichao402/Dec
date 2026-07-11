@@ -10,9 +10,11 @@ import (
 )
 
 type deleteLoadedMsg struct {
-	candidates []app.DeleteCandidate
-	err        error
-	logs       []string
+	candidates    []app.DeleteCandidate
+	err           error
+	logs          []string
+	loadGen       uint64
+	includeRemote bool
 }
 
 type deleteEventMsg struct {
@@ -24,15 +26,15 @@ type deleteCompletedMsg struct {
 	err    error
 }
 
-var listDeleteCandidatesOperation = func(ctx context.Context, projectRoot string, reporter app.Reporter) ([]app.DeleteCandidate, error) {
-	return app.ListDeleteCandidates(ctx, projectRoot, reporter)
+var listDeleteCandidatesOperation = func(ctx context.Context, projectRoot string, includeRemote bool, reporter app.Reporter) ([]app.DeleteCandidate, error) {
+	return app.ListDeleteCandidates(ctx, projectRoot, includeRemote, reporter)
 }
 
 var runDeleteOperation = func(ctx context.Context, input app.DeleteProjectInput, reporter app.Reporter) (*app.DeleteProjectResult, error) {
 	return app.DeleteProjectItems(ctx, input, reporter)
 }
 
-func loadDeleteCandidatesCmd(projectRoot string) tea.Cmd {
+func loadDeleteCandidatesCmd(ctx context.Context, projectRoot string, includeRemote bool, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		var logs []string
 		reporter := app.ReporterFunc(func(event app.OperationEvent) {
@@ -40,13 +42,49 @@ func loadDeleteCandidatesCmd(projectRoot string) tea.Cmd {
 				logs = append(logs, msg)
 			}
 		})
-		candidates, err := listDeleteCandidatesOperation(context.Background(), projectRoot, reporter)
-		return deleteLoadedMsg{candidates: candidates, err: err, logs: logs}
+		candidates, err := listDeleteCandidatesOperation(ctx, projectRoot, includeRemote, reporter)
+		return deleteLoadedMsg{candidates: candidates, err: err, logs: logs, loadGen: loadGen, includeRemote: includeRemote}
 	}
 }
 
 func (m model) isDeletePage() bool {
 	return m.pages[m.pageIndex] == "Delete"
+}
+
+func (m *model) cancelDeleteCandidatesLoad() {
+	if m.deleteLoadCancel != nil {
+		m.deleteLoadCancel()
+		m.deleteLoadCancel = nil
+	}
+}
+
+func (m *model) startDeleteCandidatesLoad(includeRemote, force bool) tea.Cmd {
+	if !force {
+		if m.loadingDeleteCandidates {
+			return nil
+		}
+		if m.deleteCandidatesLoaded && (!includeRemote || m.deleteIncludeRemote) {
+			return nil
+		}
+	}
+	m.cancelDeleteCandidatesLoad()
+	m.deleteLoadGen++
+	gen := m.deleteLoadGen
+	ctx, cancel := context.WithCancel(context.Background())
+	m.deleteLoadCancel = cancel
+	m.loadingDeleteCandidates = true
+	return loadDeleteCandidatesCmd(ctx, m.projectRoot, includeRemote, gen)
+}
+
+func (m *model) onPageChanged(fromPage string) tea.Cmd {
+	if fromPage == "Delete" {
+		m.cancelDeleteCandidatesLoad()
+		m.loadingDeleteCandidates = false
+	}
+	if m.isDeletePage() {
+		return m.startDeleteCandidatesLoad(false, false)
+	}
+	return nil
 }
 
 func (m model) routeDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
@@ -75,22 +113,13 @@ func (m model) routeDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	if m.focus == focusSidebar && msg.String() == "r" {
-		m.deleteCandidatesLoaded = false
-		m.loadingDeleteCandidates = true
-		return m, loadDeleteCandidatesCmd(m.projectRoot), true
+		return m, m.startDeleteCandidatesLoad(true, true), true
 	}
 	if m.focus != focusSidebar {
 		model, cmd := m.handleDeletePageKey(msg)
 		return model, cmd, true
 	}
 	return m, nil, false
-}
-
-func (m model) cmdOnPageSwitch() tea.Cmd {
-	if m.isDeletePage() {
-		return loadDeleteCandidatesCmd(m.projectRoot)
-	}
-	return nil
 }
 
 func (m model) visibleDeleteCandidates() []app.DeleteCandidate {
@@ -197,9 +226,7 @@ func (m model) handleDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pushLog(fmt.Sprintf("Delete 摘要确认：%d 项", len(selected)))
 		return m, nil
 	case "r":
-		m.deleteCandidatesLoaded = false
-		m.loadingDeleteCandidates = true
-		return m, loadDeleteCandidatesCmd(m.projectRoot)
+		return m, m.startDeleteCandidatesLoad(true, true)
 	}
 	return m, nil
 }
@@ -314,6 +341,9 @@ func (m model) renderDeletePage(width int) string {
 		shellTitleStyle.Render("Delete"),
 		shellMutedStyle.Render("Dec 资产 · secrets 文件 · bundle · 两次确认后执行"),
 		fmt.Sprintf("共 %d 项 · 已选 %d · 筛选 %q", len(visible), selectedCount, mm.currentDeleteFilterLabel()),
+	}
+	if !mm.deleteIncludeRemote {
+		lines = append(lines, shellMutedStyle.Render("未扫描 Bitwarden 远端 orphan · 按 r 刷新（含远端）"))
 	}
 	if mm.deleteFilterInput {
 		lines = append(lines, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))

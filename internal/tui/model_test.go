@@ -822,6 +822,56 @@ func TestModelDeletePageShowsBundleCandidates(t *testing.T) {
 	}
 }
 
+func TestModelDeletePageTabSwitchDoesNotReloadCandidates(t *testing.T) {
+	oldList := listDeleteCandidatesOperation
+	defer func() { listDeleteCandidatesOperation = oldList }()
+
+	calls := 0
+	listDeleteCandidatesOperation = func(ctx context.Context, projectRoot string, includeRemote bool, reporter app.Reporter) ([]app.DeleteCandidate, error) {
+		calls++
+		return []app.DeleteCandidate{
+			{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli"},
+		}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 3 // Run
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("首次进入 Delete 应触发加载")
+	}
+	updated, _ = m.Update(cmd())
+	m = updated.(model)
+	if !m.deleteCandidatesLoaded || calls != 1 {
+		t.Fatalf("loaded=%v calls=%d", m.deleteCandidatesLoaded, calls)
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Delete -> Settings
+	m = updated.(model)
+	if cmd != nil {
+		t.Fatalf("离开 Delete 不应触发加载, cmd = %T", cmd)
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Settings -> Home
+	m = updated.(model)
+	if cmd != nil {
+		t.Fatalf("Home 不应触发 Delete 加载, cmd = %T", cmd)
+	}
+
+	// Home -> Bundles -> Project -> Run -> Delete
+	for i := 0; i < 4; i++ {
+		updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		m = updated.(model)
+	}
+	if cmd != nil {
+		t.Fatalf("再次进入 Delete 且已加载时不应重复加载, cmd = %T", cmd)
+	}
+	if calls != 1 {
+		t.Fatalf("ListDeleteCandidates 调用次数 = %d, 期望 1", calls)
+	}
+}
+
 func TestModelDeletePageHCollapsesBeforeSidebar(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 4

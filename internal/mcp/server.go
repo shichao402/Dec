@@ -265,7 +265,7 @@ type listDeleteCandidatesParams struct{}
 
 func (s *Server) handleListDeleteCandidates(ctx context.Context, _ *mcp.CallToolRequest, _ listDeleteCandidatesParams) (*mcp.CallToolResult, any, error) {
 	reporter, logs := newCollector()
-	candidates, err := app.ListDeleteCandidates(s.toolContext(ctx), s.projectRoot(), reporter)
+	candidates, err := app.ListDeleteCandidates(s.toolContext(ctx), s.projectRoot(), true, reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}
