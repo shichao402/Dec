@@ -136,3 +136,67 @@ func containsScopeMessage(events []OperationEvent, scope, fragment string) bool 
 	}
 	return false
 }
+
+func TestCleanupRemovedSecretsBundlesKeepsProjectSecretsCaseInsensitive(t *testing.T) {
+	projectRoot := t.TempDir()
+	vikunjaDir := filepath.Join(projectRoot, ".secrets", "vikunja_workflow", "mise")
+	if err := os.MkdirAll(vikunjaDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vikunjaDir, "x.toml"), []byte("a=1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := filepath.Join(projectRoot, ".secrets", "dec", "integration")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "keep.yaml"), []byte("ok: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cleaned := cleanupRemovedSecretsBundles(projectRoot, &secretsSyncPlan{
+		ProjectSecretsName: "Dec",
+	}, &secrets.Config{})
+	if len(cleaned) != 1 || cleaned[0] != "vikunja_workflow" {
+		t.Fatalf("cleaned = %#v, 期望 [vikunja_workflow]", cleaned)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "vikunja_workflow")); !os.IsNotExist(err) {
+		t.Fatalf("vikunja_workflow 应被删除, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "dec", "integration", "keep.yaml")); err != nil {
+		t.Fatalf("project secrets 目录应保留: %v", err)
+	}
+}
+
+func TestPruneLocalSecretsBundlesCleansStaleWithoutBitwarden(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "Demo"}); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(projectRoot, ".secrets", "vikunja_workflow", "mise")
+	if err := os.MkdirAll(stale, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "x.toml"), []byte("a=1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var events []OperationEvent
+	cleaned, err := pruneLocalSecretsBundles(projectRoot, nil, ReporterFunc(func(event OperationEvent) {
+		events = append(events, event)
+	}))
+	if err != nil {
+		t.Fatalf("pruneLocalSecretsBundles() 失败: %v", err)
+	}
+	if len(cleaned) != 1 || cleaned[0] != "vikunja_workflow" {
+		t.Fatalf("cleaned = %#v", cleaned)
+	}
+	if !containsScopeMessage(events, "pull.secrets.cleanup", "vikunja_workflow") {
+		t.Fatalf("应发出 secrets cleanup 事件: %#v", events)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "vikunja_workflow")); !os.IsNotExist(err) {
+		t.Fatalf("过期 secrets bundle 应删除, err=%v", err)
+	}
+}

@@ -29,13 +29,14 @@ type PullProjectAssetsResult struct {
 	ValidationWarnings []string
 	MigrationNotes     []string
 	CleanedAssets      []string
+	CleanedSecrets     []string
 	VersionCommit      string
 	NonFatalWarnings   []string
 	// BundleOverviews 记录本轮解析时发现的所有 bundle（含未启用的），供 CLI / TUI 呈现。
 	BundleOverviews []BundleOverview
 	// AssetSources 以 "type:vault:name" 为 key，值是每个目标资产的来源列表
 	// （例如 ["bundle/vikunja", "standalone"]）。供多来源追溯使用。
-	AssetSources map[string][]string
+	AssetSources         map[string][]string
 	SecretsSkippedReason string
 	SecretsNoteCount     int
 }
@@ -52,10 +53,39 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 		ProjectRoot:  projectRoot,
 		AssetSources: make(map[string][]string),
 	}
-	if projectConfig.Enabled.IsEmpty() && len(projectConfig.EnabledBundles) == 0 {
+
+	ideSelection, err := config.ResolveEffectiveIDEs(projectConfig)
+	if err != nil {
+		return nil, fmt.Errorf("解析有效 IDE 失败: %w", err)
+	}
+	result.IDEWarnings = append(result.IDEWarnings, ideSelection.Warnings...)
+	for _, warning := range ideSelection.Warnings {
+		emit(reporter, EventWarn, "pull.ide", warning, nil)
+	}
+	projectIDEs := uniqueProjectIDEs(projectRoot, ideSelection.IDEs)
+	result.EffectiveIDEs = projectIDENames(projectIDEs)
+
+	migrationNotes, err := migrateLegacyProjectLayouts(projectRoot, projectIDEs)
+	if err != nil {
+		return nil, fmt.Errorf("迁移旧版项目布局失败: %w", err)
+	}
+	result.MigrationNotes = append(result.MigrationNotes, migrationNotes...)
+	for _, note := range migrationNotes {
+		emit(reporter, EventInfo, "pull.migrate", note, nil)
+	}
+
+	nothingEnabled := projectConfig.Enabled.IsEmpty() && len(projectConfig.EnabledBundles) == 0
+	if nothingEnabled {
 		result.SkippedReason = "config.yaml 中没有已启用的资产或 bundle"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
 		emit(reporter, EventInfo, "pull.prepare", "运行 dec config init 选择需要的资产", nil)
+		applyAssetCleanup(result, projectRoot, nil, projectIDEs, reporter)
+		// 全取消时只做本地 secrets prune，不触发 Bitwarden unlock / project secrets pull。
+		cleanedSecrets, pruneErr := pruneLocalSecretsBundles(projectRoot, nil, reporter)
+		if pruneErr != nil {
+			return nil, pruneErr
+		}
+		result.CleanedSecrets = cleanedSecrets
 		return result, nil
 	}
 
@@ -111,41 +141,21 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	}
 	result.AssetSources = finalSources
 
+	applyAssetCleanup(result, projectRoot, validAssets, projectIDEs, reporter)
+
+	enabledBundleNames := enabledBundleNamesFromConfig(projectConfig, resolved.Bundles)
 	if len(validAssets) == 0 {
 		result.SkippedReason = "没有有效的已启用资产可拉取"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
+		// 无有效 Dec 资产时只做本地 secrets prune，避免仅为清理触发 Bitwarden unlock。
+		cleanedSecrets, pruneErr := pruneLocalSecretsBundles(projectRoot, enabledBundleNames, reporter)
+		if pruneErr != nil {
+			return nil, pruneErr
+		}
+		result.CleanedSecrets = cleanedSecrets
 		return result, nil
 	}
 	result.RequestedCount = len(validAssets)
-
-	ideSelection, err := config.ResolveEffectiveIDEs(projectConfig)
-	if err != nil {
-		return nil, fmt.Errorf("解析有效 IDE 失败: %w", err)
-	}
-	result.IDEWarnings = append(result.IDEWarnings, ideSelection.Warnings...)
-	for _, warning := range ideSelection.Warnings {
-		emit(reporter, EventWarn, "pull.ide", warning, nil)
-	}
-
-	projectIDEs := uniqueProjectIDEs(projectRoot, ideSelection.IDEs)
-	result.EffectiveIDEs = projectIDENames(projectIDEs)
-
-	migrationNotes, err := migrateLegacyProjectLayouts(projectRoot, projectIDEs)
-	if err != nil {
-		return nil, fmt.Errorf("迁移旧版项目布局失败: %w", err)
-	}
-	result.MigrationNotes = append(result.MigrationNotes, migrationNotes...)
-	for _, note := range migrationNotes {
-		emit(reporter, EventInfo, "pull.migrate", note, nil)
-	}
-
-	result.CleanedAssets = cleanupRemovedAssets(projectRoot, validAssets, projectIDEs)
-	if len(result.CleanedAssets) > 0 {
-		emit(reporter, EventInfo, "pull.cleanup", fmt.Sprintf("🧹 清理 %d 个不再启用的资产", len(result.CleanedAssets)), nil)
-		for _, asset := range result.CleanedAssets {
-			emit(reporter, EventInfo, "pull.cleanup", asset, nil)
-		}
-	}
 
 	emit(reporter, EventInfo, "pull.start", fmt.Sprintf("📥 拉取 %d 个已启用资产", len(validAssets)), &Progress{Phase: "pull", Current: 0, Total: len(validAssets)})
 
@@ -176,17 +186,10 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 		}
 	}
 
-	enabledBundleNames := enabledBundleNamesFromConfig(projectConfig, resolved.Bundles)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	secretsSummary, err := pullEnabledSecretsBundles(ctx, projectRoot, enabledBundleNames, reporter)
-	if err != nil {
-		return nil, err
-	}
-	result.SecretsSkippedReason = secretsSummary.SkippedReason
-	result.SecretsNoteCount = secretsSummary.NoteCount
-	if err := validateSecretsPathOverlap(projectRoot, secretsSummary.LandingPaths, reporter); err != nil {
+	if err := applySecretsPull(ctx, result, projectRoot, enabledBundleNames, reporter); err != nil {
 		return nil, err
 	}
 
@@ -233,6 +236,28 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	emit(reporter, EventInfo, "pull.finish", summary, &Progress{Phase: "done", Current: len(validAssets), Total: len(validAssets)})
 
 	return result, nil
+}
+
+func applyAssetCleanup(result *PullProjectAssetsResult, projectRoot string, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE, reporter Reporter) {
+	result.CleanedAssets = cleanupRemovedAssets(projectRoot, enabledAssets, projectIDEs)
+	if len(result.CleanedAssets) == 0 {
+		return
+	}
+	emit(reporter, EventInfo, "pull.cleanup", fmt.Sprintf("🧹 清理 %d 个不再启用的资产", len(result.CleanedAssets)), nil)
+	for _, asset := range result.CleanedAssets {
+		emit(reporter, EventInfo, "pull.cleanup", asset, nil)
+	}
+}
+
+func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, projectRoot string, enabledBundles []string, reporter Reporter) error {
+	secretsSummary, err := pullEnabledSecretsBundles(ctx, projectRoot, enabledBundles, reporter)
+	if err != nil {
+		return err
+	}
+	result.SecretsSkippedReason = secretsSummary.SkippedReason
+	result.SecretsNoteCount = secretsSummary.NoteCount
+	result.CleanedSecrets = secretsSummary.CleanedBundles
+	return validateSecretsPathOverlap(projectRoot, secretsSummary.LandingPaths, reporter)
 }
 
 func uniqueProjectIDEs(projectRoot string, ideNames []string) []ide.IDE {
@@ -349,11 +374,26 @@ func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRe
 				_ = os.RemoveAll(filepath.Join(subDir, entry.Name()))
 				removed = append(removed, fmt.Sprintf("[%-5s] %s (vault: %s)", assetType, name, vaultName))
 			}
+			// 清理空的类型子目录（skills/rules/...）
+			_ = removeDirIfEmpty(subDir)
 		}
+		// 清理空的 vault/bundle 缓存目录
+		_ = removeDirIfEmpty(filepath.Join(cacheDir, vaultName))
 	}
 
 	sort.Strings(removed)
 	return removed
+}
+
+func removeDirIfEmpty(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	if len(entries) > 0 {
+		return nil
+	}
+	return os.Remove(dir)
 }
 
 func typeSubDir(itemType string) string {

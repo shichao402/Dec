@@ -246,3 +246,143 @@ func TestSubstituteAssetVarsReportsProjectVarsParseError(t *testing.T) {
 		t.Fatalf("期望收到包含 vars.yaml 路径的 pull.vars warn 事件, 实际事件: %#v", events)
 	}
 }
+
+func TestPullProjectAssetsCleansDeselectedBundleAssets(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	useStubSecretsSession(t)
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"bundles/vikunja/bundle.yaml": `name: vikunja
+members:
+  - skill/vikunja-workflow
+`,
+		"bundles/combo/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
+		"bundles/combo/bundle.yaml": `name: combo
+members:
+  - skill/bundle-skill
+`,
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		IDEs:           []string{"cursor"},
+		EnabledBundles: []string{"vikunja"},
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig() 失败: %v", err)
+	}
+
+	if _, err := PullProjectAssets(context.Background(), projectRoot, "", nil); err != nil {
+		t.Fatalf("首次 pull vikunja 失败: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", "cache", "vikunja", "skills", "vikunja-workflow", "SKILL.md")); err != nil {
+		t.Fatalf("vikunja cache 应存在: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "SKILL.md")); err != nil {
+		t.Fatalf("vikunja IDE skill 应存在: %v", err)
+	}
+
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		IDEs:           []string{"cursor"},
+		EnabledBundles: []string{"combo"},
+	}); err != nil {
+		t.Fatalf("切换 enabled_bundles 失败: %v", err)
+	}
+
+	result, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
+	if err != nil {
+		t.Fatalf("切换 bundle 后再 pull 失败: %v", err)
+	}
+	if result.PulledCount != 1 {
+		t.Fatalf("PulledCount = %d, 期望 1", result.PulledCount)
+	}
+	if len(result.CleanedAssets) == 0 {
+		t.Fatalf("应清理 vikunja 残留资产, CleanedAssets=%#v", result.CleanedAssets)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", "cache", "vikunja", "skills", "vikunja-workflow", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("取消后 vikunja cache 应被删除, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("取消后 vikunja IDE skill 应被删除, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-bundle-skill", "SKILL.md")); err != nil {
+		t.Fatalf("新 bundle skill 应安装: %v", err)
+	}
+}
+
+func TestPullProjectAssetsCleansWhenAllBundlesDeselected(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	useStubSecretsSession(t)
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"bundles/vikunja/bundle.yaml": `name: vikunja
+members:
+  - skill/vikunja-workflow
+`,
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "Demo",
+		IDEs:           []string{"cursor"},
+		EnabledBundles: []string{"vikunja"},
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig() 失败: %v", err)
+	}
+	if _, err := PullProjectAssets(context.Background(), projectRoot, "", nil); err != nil {
+		t.Fatalf("首次 pull 失败: %v", err)
+	}
+
+	secretDir := filepath.Join(projectRoot, ".secrets", "vikunja_workflow", "mise", "conf.d")
+	if err := os.MkdirAll(secretDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretDir, "vikunja.toml"), []byte("X=1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	projectSecret := filepath.Join(projectRoot, ".secrets", "Demo", "tokens")
+	if err := os.MkdirAll(projectSecret, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectSecret, "keep.txt"), []byte("keep\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "Demo",
+		IDEs:           []string{"cursor"},
+		EnabledBundles: nil,
+	}); err != nil {
+		t.Fatalf("清空 enabled_bundles 失败: %v", err)
+	}
+
+	result, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
+	if err != nil {
+		t.Fatalf("全取消后再 pull 失败: %v", err)
+	}
+	if result.SkippedReason == "" {
+		t.Fatal("期望 SkippedReason 非空")
+	}
+	if len(result.CleanedAssets) == 0 {
+		t.Fatalf("应清理 Dec 资产残留, CleanedAssets=%#v", result.CleanedAssets)
+	}
+	if len(result.CleanedSecrets) != 1 || result.CleanedSecrets[0] != "vikunja_workflow" {
+		t.Fatalf("CleanedSecrets = %#v, 期望 [vikunja_workflow]", result.CleanedSecrets)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("全取消后 IDE skill 应删除, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "vikunja_workflow")); !os.IsNotExist(err) {
+		t.Fatalf("全取消后 secrets bundle 应删除, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "Demo", "tokens", "keep.txt")); err != nil {
+		t.Fatalf("project secrets 应保留: %v", err)
+	}
+}

@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/pkg/config"
@@ -41,9 +43,32 @@ func planSecretsSync(projectRoot string, enabledBundles []string, cfg *secrets.C
 var secretsClientFactory = secrets.DefaultClient
 
 type secretsPullSummary struct {
-	SkippedReason string
-	NoteCount     int
-	LandingPaths  []string
+	SkippedReason  string
+	NoteCount      int
+	LandingPaths   []string
+	CleanedBundles []string
+}
+
+// pruneLocalSecretsBundles 仅做本地 `.secrets/` 差集清理，不访问 Bitwarden。
+func pruneLocalSecretsBundles(projectRoot string, enabledBundles []string, reporter Reporter) ([]string, error) {
+	reporter = defaultReporter(reporter)
+	cfg, err := loadSecretsConfigForPull()
+	if err != nil {
+		return nil, err
+	}
+	plan, err := planSecretsSync(projectRoot, enabledBundles, cfg)
+	if err != nil {
+		return nil, err
+	}
+	cleaned := cleanupRemovedSecretsBundles(projectRoot, plan, cfg)
+	if len(cleaned) > 0 {
+		emit(reporter, EventInfo, "pull.secrets.cleanup",
+			fmt.Sprintf("🧹 清理 %d 个不再启用的 secrets bundle", len(cleaned)), nil)
+		for _, name := range cleaned {
+			emit(reporter, EventInfo, "pull.secrets.cleanup", name, nil)
+		}
+	}
+	return cleaned, nil
 }
 
 func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledBundles []string, reporter Reporter) (*secretsPullSummary, error) {
@@ -53,6 +78,12 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+
+	cleaned, err := pruneLocalSecretsBundles(projectRoot, enabledBundles, reporter)
+	if err != nil {
+		return nil, err
+	}
+	summary.CleanedBundles = cleaned
 
 	configured, err := secrets.IsConfigured()
 	if err != nil {
@@ -64,11 +95,10 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 		return summary, nil
 	}
 
-	cfg, err := secrets.LoadConfig()
+	cfg, err := loadSecretsConfigForPull()
 	if err != nil {
 		return nil, err
 	}
-
 	plan, err := planSecretsSync(projectRoot, enabledBundles, cfg)
 	if err != nil {
 		return nil, err
@@ -162,6 +192,67 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 			&Progress{Phase: "secrets", Current: total, Total: total})
 	}
 	return summary, nil
+}
+
+func loadSecretsConfigForPull() (*secrets.Config, error) {
+	configured, err := secrets.IsConfigured()
+	if err != nil {
+		return nil, fmt.Errorf("读取 Bitwarden 配置失败: %w", err)
+	}
+	if !configured {
+		return &secrets.Config{}, nil
+	}
+	cfg, err := secrets.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return &secrets.Config{}, nil
+	}
+	return cfg, nil
+}
+
+// cleanupRemovedSecretsBundles 删除 `.secrets/` 下不再属于当前启用集的 secrets bundle 目录。
+// keep set = 已启用 Dec bundle 的绑定名 + project secrets；本地清理不依赖 Bitwarden session。
+// 目录名比较大小写不敏感（macOS 默认大小写不敏感），避免误删 project secrets。
+func cleanupRemovedSecretsBundles(projectRoot string, plan *secretsSyncPlan, cfg *secrets.Config) []string {
+	if cfg == nil {
+		cfg = &secrets.Config{}
+	}
+	keepLower := make(map[string]struct{})
+	addKeep := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		keepLower[strings.ToLower(name)] = struct{}{}
+	}
+	if plan != nil {
+		for _, bundleName := range plan.EnabledBundles {
+			binding := cfg.ResolveBinding(bundleName)
+			addKeep(binding.SecretsBundleName)
+		}
+		addKeep(plan.ProjectSecretsName)
+	}
+
+	existing, err := secrets.ListSecretsBundleDirNames(projectRoot)
+	if err != nil || len(existing) == 0 {
+		return nil
+	}
+
+	var removed []string
+	for _, name := range existing {
+		if _, ok := keepLower[strings.ToLower(name)]; ok {
+			continue
+		}
+		dir := secrets.SecretsBundleDir(projectRoot, name)
+		if rmErr := os.RemoveAll(dir); rmErr != nil {
+			continue
+		}
+		removed = append(removed, name)
+	}
+	sort.Strings(removed)
+	return removed
 }
 
 func validateSecretsPathOverlap(projectRoot string, landingPaths []string, reporter Reporter) error {
