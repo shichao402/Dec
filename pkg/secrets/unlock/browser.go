@@ -13,6 +13,11 @@ type BrowserOpener func(url string) error
 var defaultBrowserOpener BrowserOpener = openSystemBrowser
 
 func openSystemBrowser(url string) error {
+	// 兜底：即便有调用方绕过 Run 的检查，也不允许测试进程弹出浏览器。
+	if !WebUnlockAllowed() {
+		return ErrWebUnlockBlocked
+	}
+
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

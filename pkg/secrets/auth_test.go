@@ -14,6 +14,13 @@ import (
 	"github.com/shichao402/Dec/pkg/secrets/unlock"
 )
 
+// requireNoAmbientPassword 清掉进程内的 DEC_BW_PASSWORD，使断言 web unlock 分支的单测
+// 不受外部环境影响。带 -tags live 时同包的 TestMain 会调 ApplyIntegrationAuth 设置该变量。
+func requireNoAmbientPassword(t *testing.T) {
+	t.Helper()
+	t.Setenv("DEC_BW_PASSWORD", "")
+}
+
 func TestEnsureSession_SkipsWhenPresent(t *testing.T) {
 	SetSession("existing")
 	t.Cleanup(ClearSession)
@@ -32,6 +39,7 @@ func TestEnsureSession_WebUnlockWithoutEmail(t *testing.T) {
 
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
+	requireNoAmbientPassword(t)
 	secretsDir := filepath.Join(decHome, "secrets")
 	if err := os.MkdirAll(secretsDir, 0755); err != nil {
 		t.Fatal(err)
@@ -77,6 +85,7 @@ func TestEnsureSession_WebUnlock_SavesEmail(t *testing.T) {
 
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
+	requireNoAmbientPassword(t)
 	secretsDir := filepath.Join(decHome, "secrets")
 	if err := os.MkdirAll(secretsDir, 0755); err != nil {
 		t.Fatal(err)
@@ -126,6 +135,7 @@ func TestEnsureSession_WebUnlock(t *testing.T) {
 
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
+	requireNoAmbientPassword(t)
 	secretsDir := filepath.Join(decHome, "secrets")
 	if err := os.MkdirAll(secretsDir, 0755); err != nil {
 		t.Fatal(err)
@@ -265,6 +275,7 @@ func TestEnsureSession_UnlockTimeoutOpt(t *testing.T) {
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
 	t.Setenv("DEC_BW_UNLOCK_TIMEOUT", "5m")
+	requireNoAmbientPassword(t)
 	secretsDir := filepath.Join(decHome, "secrets")
 	if err := os.MkdirAll(secretsDir, 0755); err != nil {
 		t.Fatal(err)
@@ -299,6 +310,7 @@ func TestEnsureSession_WebUnlockTimeout(t *testing.T) {
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
 	t.Setenv("DEC_BW_UNLOCK_TIMEOUT", "100ms")
+	requireNoAmbientPassword(t)
 	secretsDir := filepath.Join(decHome, "secrets")
 	if err := os.MkdirAll(secretsDir, 0755); err != nil {
 		t.Fatal(err)
@@ -343,6 +355,7 @@ func TestEnsureSession_Cancel(t *testing.T) {
 
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
+	requireNoAmbientPassword(t)
 	secretsDir := filepath.Join(decHome, "secrets")
 	if err := os.MkdirAll(secretsDir, 0755); err != nil {
 		t.Fatal(err)

@@ -103,7 +103,7 @@ func TestLive_EnsureSession_NoPassword(t *testing.T) {
 	}
 	found := false
 	for _, s := range statuses {
-		if s == "未设置 DEC_BW_PASSWORD，将使用 web unlock" {
+		if strings.Contains(s, "programmatic unlock: skipped (DEC_BW_PASSWORD not set)") {
 			found = true
 			break
 		}

@@ -605,6 +605,7 @@ func TestRun_CancelContext(t *testing.T) {
 	cancel()
 	err := Run(ctx, Options{
 		Authenticator: NewStubAuthenticator("pw", "", "sess-end"),
+		OpenBrowser:   func(string) error { return nil },
 	})
 	if err == nil {
 		t.Fatal("Run() 应返回取消错误")

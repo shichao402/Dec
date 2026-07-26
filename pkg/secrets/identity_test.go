@@ -97,6 +97,62 @@ func TestIdentityClient_LoginRequires2FA(t *testing.T) {
 	}
 }
 
+func TestDescribeLoginFailure(t *testing.T) {
+	t.Parallel()
+
+	newDevice := describeLoginFailure(http.StatusBadRequest, "New device verification required.")
+	for _, want := range []string{"New device verification required.", "两步登录", "Danger Zone"} {
+		if !strings.Contains(newDevice, want) {
+			t.Fatalf("新设备验证提示缺少 %q:\n%s", want, newDevice)
+		}
+	}
+
+	throttled := describeLoginFailure(http.StatusTooManyRequests, "Slow down!")
+	if !strings.Contains(throttled, "频率限制") {
+		t.Fatalf("限流提示 = %q", throttled)
+	}
+
+	// 未识别的错误保持原样，不要凭空编造建议。
+	if got := describeLoginFailure(http.StatusBadRequest, "Username or password is incorrect."); got != "Username or password is incorrect." {
+		t.Fatalf("未知错误不应被改写: %q", got)
+	}
+}
+
+func TestIdentityClient_LoginNewDeviceVerificationHint(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBitwardenHeaders(t, r)
+		switch r.URL.Path {
+		case "/accounts/prelogin":
+			_ = json.NewEncoder(w).Encode(preloginResponse{KdfIterations: 1000})
+		case "/connect/token":
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error":             "invalid_grant",
+				"error_description": "New device verification required.",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client := &IdentityClient{
+		IdentityURL: srv.URL,
+		Email:       "user@example.com",
+		DeviceID:    "device-1",
+		HTTP:        srv.Client(),
+	}
+	_, err := client.Login(context.Background(), "master-password", "", "", "", LoginOptions{})
+	if err == nil {
+		t.Fatal("Login() 应失败")
+	}
+	if !strings.Contains(err.Error(), "两步登录") {
+		t.Fatalf("错误缺少新设备验证处置建议:\n%v", err)
+	}
+}
+
 func TestIdentityClient_LoginRequires2FAWithoutChallengeToken(t *testing.T) {
 	t.Parallel()
 
@@ -116,8 +172,8 @@ func TestIdentityClient_LoginRequires2FAWithoutChallengeToken(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"error":             "invalid_grant",
-				"error_description": "Two factor required.",
+				"error":              "invalid_grant",
+				"error_description":  "Two factor required.",
 				"TwoFactorProviders": []string{"0"},
 				"TwoFactorProviders2": map[string]any{
 					"0": nil,

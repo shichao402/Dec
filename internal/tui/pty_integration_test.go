@@ -31,6 +31,7 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/shichao402/Dec/pkg/secrets"
+	"github.com/shichao402/Dec/pkg/secrets/unlock"
 )
 
 const (
@@ -98,11 +99,13 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 
 	cmd := exec.Command(bin)
 	// 使用独立、最小的环境，避免外部 DEC_NO_TUI / TERM=dumb 影响默认入口分流。
+	// 子进程不是 go test 二进制，需显式禁止 web unlock，否则测试会弹出浏览器等人工输入。
 	cmd.Env = append(os.Environ(),
 		"TERM="+term,
 		"LANG="+lang,
 		"LC_ALL="+lang,
 		"DEC_NO_TUI=",
+		unlock.EnvNoWebUnlock+"=1",
 	)
 	if pw := strings.TrimSpace(os.Getenv("DEC_BW_PASSWORD")); pw != "" {
 		cmd.Env = append(cmd.Env, "DEC_BW_PASSWORD="+pw)

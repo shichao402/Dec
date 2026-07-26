@@ -12,6 +12,10 @@ import (
 // IntegrationAuthRel 是项目内集成测试 Bitwarden 凭据的相对路径（勿提交 git）。
 const IntegrationAuthRel = ".secrets/dec/integration/bitwarden.yaml"
 
+// IntegrationDecHomeRel 是集成 / live 测试专用的隔离 DEC_HOME（勿提交 git）。
+// 复用同一目录可以保留 device.json 的 remember token，避免每次重跑都触发 2FA。
+const IntegrationDecHomeRel = ".secrets/dec/integration/dec-home"
+
 // IntegrationAuth 描述集成 / live 测试用的 Bitwarden 账号（专用测试账户，2FA 关闭）。
 type IntegrationAuth struct {
 	ServerURL string `yaml:"server_url"`
@@ -79,8 +83,13 @@ func FindProjectRootWithIntegrationAuth() string {
 	return ""
 }
 
-// ApplyIntegrationAuth 将项目内集成测试凭据同步到进程环境与本机 secrets 配置。
-// 写入 ~/.dec/secrets/config.yaml 的 email；设置 DEC_BW_PASSWORD（若尚未设置）。
+// ApplyIntegrationAuth 为集成 / live 测试准备 Bitwarden 认证：
+//   - 将 DEC_HOME 指向仓库内的隔离目录，避免读写开发者真实的 ~/.dec；
+//   - 在该隔离目录中写入集成账号的 server_url / email；
+//   - 设置 DEC_BW_PASSWORD（若尚未设置）。
+//
+// 隔离是必需的：真实 ~/.dec 里通常是开发者本人的账号邮箱，沿用会造成
+// 「真实邮箱 + 测试密码」的错配，登录成功时更会把测试数据写进真实 vault。
 func ApplyIntegrationAuth(projectRoot string) (*IntegrationAuth, error) {
 	auth, err := LoadIntegrationAuth(projectRoot)
 	if err != nil {
@@ -90,20 +99,21 @@ func ApplyIntegrationAuth(projectRoot string) (*IntegrationAuth, error) {
 		return nil, nil
 	}
 
+	decHome := filepath.Join(projectRoot, IntegrationDecHomeRel)
+	if err := os.MkdirAll(decHome, 0700); err != nil {
+		return nil, fmt.Errorf("创建集成测试 DEC_HOME 失败: %w", err)
+	}
+	if err := os.Setenv("DEC_HOME", decHome); err != nil {
+		return nil, fmt.Errorf("设置集成测试 DEC_HOME 失败: %w", err)
+	}
+
 	cfg, err := LoadConfig()
 	if err != nil {
 		return nil, err
 	}
-	changed := false
-	if auth.ServerURL != "" && cfg.ServerURL != auth.ServerURL {
+	if cfg.ServerURL != auth.ServerURL || cfg.Email != auth.Email {
 		cfg.ServerURL = auth.ServerURL
-		changed = true
-	}
-	if cfg.Email == "" || isPlaceholderEmail(cfg.Email) {
 		cfg.Email = auth.Email
-		changed = true
-	}
-	if changed {
 		if err := SaveConfig(cfg); err != nil {
 			return nil, err
 		}
@@ -114,21 +124,6 @@ func ApplyIntegrationAuth(projectRoot string) (*IntegrationAuth, error) {
 		}
 	}
 	return auth, nil
-}
-
-func integrationAuthPassword() string {
-	if password := strings.TrimSpace(os.Getenv("DEC_BW_PASSWORD")); password != "" {
-		return password
-	}
-	root := FindProjectRootWithIntegrationAuth()
-	if root == "" {
-		return ""
-	}
-	auth, err := LoadIntegrationAuth(root)
-	if err != nil || auth == nil {
-		return ""
-	}
-	return auth.Password
 }
 
 func ensureIntegrationEmailConfigured() error {

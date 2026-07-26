@@ -51,8 +51,13 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	status := unlockStatusFunc(opts.OnStatus)
 
+	// 未显式注入 opener 意味着会打开真实浏览器并等待人工输入，
+	// 测试环境下直接拒绝，避免弹窗打断无人值守的测试。
 	opener := opts.OpenBrowser
 	if opener == nil {
+		if !WebUnlockAllowed() {
+			return ErrWebUnlockBlocked
+		}
 		opener = defaultBrowserOpener
 	}
 

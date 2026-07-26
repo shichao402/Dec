@@ -17,11 +17,11 @@ const (
 )
 
 type preloginResponse struct {
-	Kdf             int    `json:"kdf"`
-	KdfIterations   int    `json:"kdfIterations"`
-	KdfMemory       *int   `json:"kdfMemory"`
-	KdfParallelism  *int   `json:"kdfParallelism"`
-	Salt            string `json:"salt"`
+	Kdf            int    `json:"kdf"`
+	KdfIterations  int    `json:"kdfIterations"`
+	KdfMemory      *int   `json:"kdfMemory"`
+	KdfParallelism *int   `json:"kdfParallelism"`
+	Salt           string `json:"salt"`
 }
 
 type tokenErrorResponse struct {
@@ -67,7 +67,7 @@ func (r tokenErrorResponse) preferredProvider() string {
 }
 
 type tokenSuccessResponse struct {
-	AccessToken   string `json:"access_token"`
+	AccessToken    string `json:"access_token"`
 	TwoFactorToken string `json:"TwoFactorToken"`
 }
 
@@ -137,11 +137,11 @@ func preloginSalt(pre *preloginResponse, email string) string {
 }
 
 type loginAttempt struct {
-	accessToken        string
-	need2FA            bool
-	twoFactorSession   string
-	twoFactorProvider  string
-	twoFactorRemember  string
+	accessToken       string
+	need2FA           bool
+	twoFactorSession  string
+	twoFactorProvider string
+	twoFactorRemember string
 }
 
 func (c *IdentityClient) Login(ctx context.Context, password string, twoFactorCode, twoFactorSession, twoFactorProvider string, opts LoginOptions) (*loginAttempt, error) {
@@ -236,7 +236,27 @@ func (c *IdentityClient) postToken(ctx context.Context, form url.Values) (*login
 	if msg == "" {
 		msg = trimBody(body)
 	}
-	return nil, fmt.Errorf("Bitwarden 登录失败: %s", msg)
+	return nil, fmt.Errorf("Bitwarden 登录失败: %s", describeLoginFailure(resp.StatusCode, msg))
+}
+
+// newDeviceVerificationHint 说明如何解除 Bitwarden 的新设备登录保护。
+// Dec 目前无法提交邮件里的一次性验证码（identity 接口的 newDeviceOtp 尚未接入），
+// 所以只给出两条能真正走通的路径。
+const newDeviceVerificationHint = `
+  本机对 Bitwarden 而言是新设备，被新设备登录保护拦下了。Dec 暂不支持提交邮件里的一次性验证码，请任选其一：
+  1. 为账号开启两步登录（验证器 App / 硬件密钥）——开启后自动豁免新设备验证，Dec 的解锁页支持输入 TOTP 并记住本设备
+  2. 网页版 Bitwarden → Settings → My account → Danger Zone → 关闭新设备登录保护（会降低账号安全性，仅建议用于专用测试账号）`
+
+// describeLoginFailure 为常见的 Bitwarden 登录失败补上处置建议。
+// Bitwarden 只回一句英文短语，直接透传会让用户不知道下一步该做什么。
+func describeLoginFailure(statusCode int, msg string) string {
+	if statusCode == http.StatusTooManyRequests {
+		return msg + "\n  触发 Bitwarden 登录频率限制，等待几分钟后重试"
+	}
+	if strings.Contains(strings.ToLower(msg), "new device verification") {
+		return msg + newDeviceVerificationHint
+	}
+	return msg
 }
 
 func trimBody(body []byte) string {

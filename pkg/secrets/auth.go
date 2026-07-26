@@ -135,9 +135,10 @@ func authStatus(onStatus func(string), format string, args ...any) {
 	onStatus(msg)
 }
 
-// tryProgrammaticUnlock 尝试 DEC_BW_PASSWORD 程序化解锁。
-// 若未设置 DEC_BW_PASSWORD，会尝试从项目 `.secrets/dec/integration/bitwarden.yaml` 读取（集成 / live 测试）。
-// passwordSet=true 表示 env 或集成凭据已提供；此情况下失败时不应回退 web unlock。
+// tryProgrammaticUnlock 尝试用 DEC_BW_PASSWORD 程序化解锁。
+// 集成 / live 测试通过 ApplyIntegrationAuth 从 `.secrets/dec/integration/bitwarden.yaml`
+// 把密码注入进程环境，这里只读环境变量，保持单测不依赖仓库内是否存在凭据文件。
+// passwordSet=true 表示已提供密码；此情况下失败时不应回退 web unlock。
 func tryProgrammaticUnlock(ctx context.Context, onStatus func(string)) (unlocked bool, passwordSet bool, err error) {
 	password := strings.TrimSpace(os.Getenv("DEC_BW_PASSWORD"))
 	if password == "" {

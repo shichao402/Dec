@@ -21,6 +21,14 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 - 配合 `~/.dec/secrets/device.json` 中的 `two_factor_remember` 令牌，可在无浏览器、无 2FA 的情况下建立 session。
 - **未设置** `DEC_BW_PASSWORD` 或 remember token 失效 / 仍需 2FA 时，**回退 web unlock**（这是预期行为，不是 bug）。
 - Agent / CI 在启动 `dec` 或调用 `pkg/app` 前，须 `export DEC_BW_PASSWORD=…`；TUI 与主进程同进程，**不会**从其他 shell 继承未 export 的变量。
+- 集成 / live 测试把凭据放在 `.secrets/dec/integration/bitwarden.yaml`（gitignored），由 `TestMain` 调 `secrets.ApplyIntegrationAuth` 注入进程环境。
+
+## 测试禁止弹窗（硬约束）
+
+- **测试绝不能弹出浏览器要求人工输入主密码**。`go test` 构建的二进制中 `unlock.WebUnlockAllowed()` 返回 false，`unlock.Run`（未注入 `OpenBrowser` 时）与 `openSystemBrowser` 直接返回 `ErrWebUnlockBlocked`。
+- 测试拉起 `dec` 子进程时必须传 `DEC_NO_WEB_UNLOCK=1`（子进程不是 test 二进制，检测不到测试环境）。
+- 单测若要覆盖 web unlock 流程，**必须**注入 `Options.OpenBrowser` 桩；漏注入会被 guard 拦下并报错，不要靠改 guard 绕过。
+- 只有真机手工验证才用 `DEC_ALLOW_WEB_UNLOCK=1` 显式放行。
 
 ## 设备信任（允许落盘）
 
