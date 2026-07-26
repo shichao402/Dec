@@ -57,7 +57,7 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handlePull)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_push",
-		Description: "推送 .dec/cache/ 与 .secrets/ 变更到远端（Dec Git + Bitwarden）",
+		Description: "推送 .dec/cache/ 与 secrets 变更到远端（Dec Git + Bitwarden）",
 	}, s.handlePush)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_preview_push",
@@ -273,14 +273,13 @@ func (s *Server) handleListDeleteCandidates(ctx context.Context, _ *mcp.CallTool
 }
 
 type deleteItemInput struct {
-	Kind            string `json:"kind" jsonschema:"dec | secret | bundle"`
-	Type            string `json:"type,omitempty"`
-	Name            string `json:"name,omitempty"`
-	Vault           string `json:"vault,omitempty"`
-	SecretPath      string `json:"secret_path,omitempty"`
-	SecretsBundle   string `json:"secrets_bundle,omitempty"`
-	RelWithinBundle string `json:"rel_within_bundle,omitempty"`
-	BundleName      string `json:"bundle_name,omitempty"`
+	Kind          string `json:"kind" jsonschema:"dec | secret | bundle"`
+	Type          string `json:"type,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Vault         string `json:"vault,omitempty"`
+	SecretPath    string `json:"secret_path,omitempty" jsonschema:"secret：项目根相对落地路径，同时就是 Bitwarden Note 名"`
+	SecretsBundle string `json:"secrets_bundle,omitempty" jsonschema:"secret：Bitwarden folder"`
+	BundleName    string `json:"bundle_name,omitempty"`
 }
 
 type deleteParams struct {
@@ -293,14 +292,13 @@ func (s *Server) handleDelete(ctx context.Context, _ *mcp.CallToolRequest, in de
 	items := make([]app.DeleteSelectionItem, 0, len(in.Items))
 	for _, item := range in.Items {
 		items = append(items, app.DeleteSelectionItem{
-			Kind:            app.DeleteItemKind(item.Kind),
-			Type:            item.Type,
-			Name:            item.Name,
-			Vault:           item.Vault,
-			SecretPath:      item.SecretPath,
-			SecretsBundle:   item.SecretsBundle,
-			RelWithinBundle: item.RelWithinBundle,
-			BundleName:      item.BundleName,
+			Kind:          app.DeleteItemKind(item.Kind),
+			Type:          item.Type,
+			Name:          item.Name,
+			Vault:         item.Vault,
+			SecretPath:    item.SecretPath,
+			SecretsBundle: item.SecretsBundle,
+			BundleName:    item.BundleName,
 		})
 	}
 	result, err := app.DeleteProjectItems(s.toolContext(ctx), app.DeleteProjectInput{

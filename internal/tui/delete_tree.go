@@ -9,7 +9,9 @@ import (
 
 func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 	decRoot := &TreeNode{ID: "delete-root:.dec", Label: ".dec", SelectMode: TreeSelectNone}
-	secRoot := &TreeNode{ID: "delete-root:.secrets", Label: ".secrets", SelectMode: TreeSelectNone}
+	// secrets 分支按 Bitwarden folder 分组，而不是按某个本地目录：
+	// 落地路径散在项目根，folder 才是唯一的归属维度。
+	secRoot := &TreeNode{ID: "delete-root:secrets", Label: "secrets (Bitwarden)", SelectMode: TreeSelectNone}
 	hasDec, hasSec := false, false
 
 	for i, c := range candidates {
@@ -19,33 +21,29 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 			SelectMode: TreeSelectLeaf,
 			Payload:    i,
 		}
-		root := strings.TrimSpace(c.TreeRoot)
-		switch root {
-		case ".secrets":
+		// 按 Kind 分派，不看 TreeRoot 字符串：字符串对不上就会把一条 secret
+		// 静默塞进 .dec 树，Kind 是唯一不会漂的归属依据。
+		switch c.Kind {
+		case app.DeleteKindSecret:
 			hasSec = true
-			rel := strings.TrimSpace(c.RelWithinBundle)
-			if rel == "" {
-				rel = strings.TrimSpace(c.SecretPath)
+			insertTreePath(secRoot, secretsParentSegments(c.SecretsBundle, c.SecretPath), leaf)
+		case app.DeleteKindBundle:
+			hasDec = true
+			bundle := strings.TrimSpace(c.BundleName)
+			if bundle == "" {
+				bundle = strings.TrimSpace(c.TreeBranch)
 			}
-			insertTreePath(secRoot, secretsParentSegments(c.SecretsBundle, rel), leaf)
+			insertTreePath(decRoot, []string{"cache", bundle}, leaf)
+		case app.DeleteKindDecAsset:
+			hasDec = true
+			insertTreePath(decRoot, decCacheParentSegments(c.Vault, c.Type, c.Name), leaf)
 		default:
 			hasDec = true
-			switch c.Kind {
-			case app.DeleteKindBundle:
-				bundle := strings.TrimSpace(c.BundleName)
-				if bundle == "" {
-					bundle = strings.TrimSpace(c.TreeBranch)
-				}
-				insertTreePath(decRoot, []string{"cache", bundle}, leaf)
-			case app.DeleteKindDecAsset:
-				insertTreePath(decRoot, decCacheParentSegments(c.Vault, c.Type, c.Name), leaf)
-			default:
-				branch := strings.TrimSpace(c.TreeBranch)
-				if branch == "" {
-					branch = "other"
-				}
-				insertTreePath(decRoot, []string{"cache", branch}, leaf)
+			branch := strings.TrimSpace(c.TreeBranch)
+			if branch == "" {
+				branch = "other"
 			}
+			insertTreePath(decRoot, []string{"cache", branch}, leaf)
 		}
 	}
 
@@ -67,11 +65,11 @@ func deleteLeafLabel(c app.DeleteCandidate) string {
 	case app.DeleteKindBundle:
 		return "[bundle] " + strings.TrimPrefix(c.Label, "[bundle] ")
 	case app.DeleteKindSecret:
-		rel := strings.TrimSpace(c.RelWithinBundle)
-		if rel == "" {
-			rel = strings.TrimSpace(c.SecretPath)
+		leaf := secretsLeafName(c.SecretPath)
+		if c.Orphan {
+			leaf += " · 仅远端"
 		}
-		return secretsLeafName(rel)
+		return leaf
 	case app.DeleteKindDecAsset:
 		return decCacheLeafName(c.Type, c.Name)
 	default:

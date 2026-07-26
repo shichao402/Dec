@@ -1,8 +1,8 @@
 # 0001 — Secrets 落地路径：消费者路径即落地路径
 
-- **状态**：已接受（文档先行，代码待改）
+- **状态**：已实施
 - **日期**：2026-07-27
-- **影响范围**：`pkg/secrets/paths.go`、`pkg/secrets/push.go`、`pkg/app/secrets_pull.go`、`pkg/app/delete.go`、`Documents/BUNDLE-SECRETS-MODEL.md`
+- **影响范围**：`pkg/secrets/`（`paths.go` 已删、新增 `landing.go` / `remote.go`）、`pkg/app/secrets_pull.go`、`pkg/app/secrets_push.go`、`pkg/app/delete.go`、`internal/tui/`、`Documents/BUNDLE-SECRETS-MODEL.md`、`schema/secrets/v1/`（`state.proto` 已删）
 
 ## 问题
 
@@ -96,24 +96,39 @@ SSH Key 维持既有例外：落地机器级 `~/.ssh/`（OpenSSH 不认项目内
 ## `.secrets/` 当初解决的问题及其去向
 
 `.secrets/` 解决的是「push 时怎么知道哪些文件是密文件」——一个目录扫下去最省事
-（`ScanSecretsBundleFiles`）。改为真实路径落地后，该问题由 `SyncStateFile`
-（`~/.dec/secrets/state.json`，`SecretRef` 记录 note 名与落地路径）承担，这本就是它的设计用途。
+（`ScanSecretsBundleFiles`）。
 
-## 迁移计划
+本决策起草时打算把这件事交给 `SyncStateFile`（`~/.dec/secrets/state.json`）。**实施时否决了该方案**：
+本地索引会与远端漂移，漂移后 push 依据的是一份过期清单，而这个清单的错误后果是删错密钥。
+改为**每次操作实时枚举远端 folder 的 note 列表**——权威索引只有一份，在 Bitwarden 侧，没有可漂移的副本。
+`state.proto` 随之删除。
 
-远端无需预先改动（匹配键与前缀无关）。步骤：
+代价是 push 不再自动发现本地新文件：新增 secret 需显式登记（TUI Project 页 `A`）。
+这个代价是可接受的——自动发现在「落地路径散在项目根」的模型下本就无法安全实现。
 
-1. `LandingPathForNote` / `SecretsLocalPath` 改为返回 note 名本身（项目根相对路径），去掉 `.secrets/<bundle>/` 拼接
-2. push 侧改为按 `SyncStateFile` 中的 `SecretRef` 枚举待推文件，替代扫描 `.secrets/<bundle>/`
-3. 零重叠校验（`.dec/` 树 vs 敏感落地路径）范围不变，此前已在文档中规定
-4. 一次性迁移：把存量 note 名统一改写为项目根相对路径；本地把 `.secrets/<bundle>/` 下的文件移到目标路径
-5. 迁移跑完后**删除** `CanonicalNoteName` 中的三路前缀剥离与 `LegacyNoteName`，只保留单一形态
-6. 改平 `BUNDLE-SECRETS-MODEL.md` 的自相矛盾段落，与本决策对齐
+## 实施结果
 
-第 5 步是本决策的重点：**保留兼容层是这套东西越来越乱的直接原因**，迁移完必须删干净。
+远端未做任何改动：旧代码的匹配键与前缀无关，且经核对存量 note 名本就是消费者路径。
+落地路径的变化因此完全在本地一侧。
+
+1. `paths.go`（`CanonicalNoteName` / `LandingPathForNote` / `SecretsRootDir` / `ScanSecretsBundleFiles`）**整个文件删除**
+2. pull 改两阶段：先取回全部 folder 的 note，汇总后一次校验，再写盘。跨 folder 撞车只有在汇总视图下才看得见
+3. 落地前校验集中在 `pkg/secrets/landing.go`：非法路径（绝对路径 / `~` / `..` / 盘符）、跨 folder 撞车、`.dec/` 重叠、符号链接逃逸、git 跟踪
+4. push 改为按远端 note 列表读本地文件；**删掉了删远端孤儿的逻辑**，本地缺文件只报告
+5. `updateSecureNote` 原样回传远端 name 密文，不再用本地推导的名字重新加密：
+   note 名就是落地路径，push 无权把一条 secret 改指到另一个文件上（修掉了盘点中发现的「update 会就地重命名」）
+6. `BUNDLE-SECRETS-MODEL.md` 已改平；`state.proto` 已删
+
+一次性迁移曾用 hidden 命令 `__migrate-secrets-paths` 实现（`--plan` 产出映射表供人工确认——
+Bitwarden 里已丢失原始目标路径信息，无法自动推断；apply 时先移本地文件再改远端 note 名）。
+经确认存量 note 名已经是消费者路径，无需改写，该命令连同 `RenameSecureNote` / `ListFolderNames`
+一并删除。**不要为「以后可能还需要」而重新引入**：迁移工具只在有存量要迁时才该存在。
+
+**保留兼容层是这套东西越来越乱的直接原因**：现在 note 名只有一种合法形态，
+`findExistingCipher` 精确匹配，没有任何归一化或别名层。
 
 ## 参考
 
-- `Documents/BUNDLE-SECRETS-MODEL.md` — 详细设计（待与本决策对齐）
+- `Documents/BUNDLE-SECRETS-MODEL.md` — 详细设计
 - `.cursor/rules/bundle-secrets-mirror.mdc` — 存储根分离与零重叠约束
-- `schema/secrets/v1/state.proto` — `SecretRef`、`SyncStateFile`
+- `pkg/secrets/landing.go` — 落地前校验

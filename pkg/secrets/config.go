@@ -151,7 +151,7 @@ func (c *Config) ResolveBinding(decBundleName string) BundleBinding {
 	return normalizeBinding(decBundleName, BundleBinding{DecBundleName: decBundleName})
 }
 
-// ProjectSecretsName 返回显式配置的 project secrets 名（Bitwarden folder / `.secrets/` 子目录）。
+// ProjectSecretsName 返回显式配置的 project secrets 名（即 Bitwarden folder 名）。
 func (c *Config) ProjectSecretsName() string {
 	if c == nil {
 		return ""

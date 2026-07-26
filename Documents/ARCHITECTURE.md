@@ -169,8 +169,12 @@ flowchart TD
 │   └── vars.yaml            # 本机级变量定义
 ├── repo.git/                # 本地 bare repo 缓存
 └── secrets/
-    └── state.json           # Bitwarden secrets bundle 同步状态
+    ├── config.yaml          # Bitwarden 连接与 bundle ↔ folder 绑定
+    └── device.json          # deviceIdentifier + 2FA remember 令牌（无密码、无 session）
 ```
+
+secrets 没有本地同步状态文件：待推文件由**远端 folder 的 note 列表**实时枚举，
+不留可与远端漂移的本地索引。
 
 若设置了 `DEC_HOME`，上述目录位于 `DEC_HOME` 下。
 
@@ -254,7 +258,7 @@ Pull 后落地:
 
 - `authorized_keys`：Dec 不管理（服务器侧自行维护）。
 - `known_hosts`：Dec 不主动写入；首次连接由 OpenSSH 提示或由用户维护。
-- 同步元数据：`~/.dec/secrets/state.json` 的 `SSHKeyRef` 记录机器级路径。
+- 落地路径由 Bitwarden Item Name 推导（`~/.ssh/dec_<bundle>_<name>`），不记本地索引。
 
 **`.dec/` 树** 与 **项目根** 敏感落地路径 **不得相交**；冲突时 pull 报错。SSH 落在 `~/.ssh/`，不参与项目根零重叠校验。详见 [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md)。
 

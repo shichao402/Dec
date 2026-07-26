@@ -3,20 +3,21 @@ package tui
 import "testing"
 
 func TestInsertTreePath_CreatesIntermediateDirs(t *testing.T) {
-	root := &TreeNode{ID: "root:.secrets", Label: ".secrets", SelectMode: TreeSelectNone}
-	insertTreePath(root, []string{"vikunja_workflow", "mise", "conf.d"}, &TreeNode{
+	root := &TreeNode{ID: "root:secrets", Label: "secrets (Bitwarden)", SelectMode: TreeSelectNone}
+	insertTreePath(root, secretsParentSegments("vikunja_workflow", ".config/mise/conf.d/vikunja.toml"), &TreeNode{
 		ID:         "leaf1",
-		Label:      "vikunja.toml",
+		Label:      secretsLeafName(".config/mise/conf.d/vikunja.toml"),
 		SelectMode: TreeSelectLeaf,
 	})
 	rows := (&TreeList{Roots: []*TreeNode{root}, Expanded: map[string]bool{
-		"root:.secrets":                      true,
-		"root:.secrets/vikunja_workflow":     true,
-		"root:.secrets/vikunja_workflow/mise": true,
-		"root:.secrets/vikunja_workflow/mise/conf.d": true,
+		"root:secrets":                                      true,
+		"root:secrets/vikunja_workflow":                     true,
+		"root:secrets/vikunja_workflow/.config":             true,
+		"root:secrets/vikunja_workflow/.config/mise":        true,
+		"root:secrets/vikunja_workflow/.config/mise/conf.d": true,
 	}}).VisibleRows()
-	if len(rows) != 5 {
-		t.Fatalf("rows = %d, want 5", len(rows))
+	if len(rows) != 6 {
+		t.Fatalf("rows = %d, want 6", len(rows))
 	}
 	last := rows[len(rows)-1]
 	if last.Node.Label != "vikunja.toml" || last.SelectIndex != 0 {

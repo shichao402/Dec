@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
-	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/pkg/config"
@@ -43,34 +41,37 @@ func planSecretsSync(projectRoot string, enabledBundles []string, cfg *secrets.C
 var secretsClientFactory = secrets.DefaultClient
 
 type secretsPullSummary struct {
-	SkippedReason  string
-	NoteCount      int
-	LandingPaths   []string
-	CleanedBundles []string
+	SkippedReason string
+	NoteCount     int
+	LandingPaths  []string
 }
 
-// pruneLocalSecretsBundles 仅做本地 `.secrets/` 差集清理，不访问 Bitwarden。
-func pruneLocalSecretsBundles(projectRoot string, enabledBundles []string, reporter Reporter) ([]string, error) {
-	reporter = defaultReporter(reporter)
-	cfg, err := loadSecretsConfigForPull()
-	if err != nil {
-		return nil, err
-	}
-	plan, err := planSecretsSync(projectRoot, enabledBundles, cfg)
-	if err != nil {
-		return nil, err
-	}
-	cleaned := cleanupRemovedSecretsBundles(projectRoot, plan, cfg)
-	if len(cleaned) > 0 {
-		emit(reporter, EventInfo, "pull.secrets.cleanup",
-			fmt.Sprintf("🧹 清理 %d 个不再启用的 secrets bundle", len(cleaned)), nil)
-		for _, name := range cleaned {
-			emit(reporter, EventInfo, "pull.secrets.cleanup", name, nil)
-		}
-	}
-	return cleaned, nil
+// secretsPullTarget 是一个待同步的 secrets 目标（bundle 或 project 级）。
+// 两者唯一的区别是 Bitwarden folder 来源，同步链路完全一致。
+type secretsPullTarget struct {
+	Label         string
+	DecBundleName string
+	Binding       secrets.BundleBinding
 }
 
+// warnUnignoredSecrets 提示落地的密文件尚未被 .gitignore 忽略。
+// dec 不代改 .gitignore，只给出建议行。
+func warnUnignoredSecrets(projectRoot string, landingPaths []string, reporter Reporter) {
+	unignored := secrets.UnignoredLandingPaths(projectRoot, landingPaths)
+	if len(unignored) == 0 {
+		return
+	}
+	emit(reporter, EventInfo, "pull.secrets",
+		fmt.Sprintf("⚠️  %d 个密文件未被 .gitignore 忽略，建议在 .gitignore 中加入：", len(unignored)), nil)
+	for _, rel := range unignored {
+		emit(reporter, EventInfo, "pull.secrets", "  /"+rel, nil)
+	}
+}
+
+// pullEnabledSecretsBundles 拉取全部已启用 bundle 与 project 级 secrets。
+//
+// 不做「停用即清理」：落地路径就是消费者路径，散在项目根，没有一个可以安全
+// os.RemoveAll 的目录。bundle 停用后的清理走 Delete 页显式单条确认。
 func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledBundles []string, reporter Reporter) (*secretsPullSummary, error) {
 	reporter = defaultReporter(reporter)
 	summary := &secretsPullSummary{}
@@ -78,12 +79,6 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
-	cleaned, err := pruneLocalSecretsBundles(projectRoot, enabledBundles, reporter)
-	if err != nil {
-		return nil, err
-	}
-	summary.CleanedBundles = cleaned
 
 	configured, err := secrets.IsConfigured()
 	if err != nil {
@@ -123,66 +118,80 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 	total := plan.Total
 	emit(reporter, EventInfo, "pull.secrets", fmt.Sprintf("同步 %d 个 secrets 目标（bundle + project）", total), &Progress{Phase: "secrets", Current: 0, Total: total})
 
-	idx := 0
+	targets := make([]secretsPullTarget, 0, total)
 	for _, bundleName := range plan.EnabledBundles {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		idx++
-		progress := &Progress{Phase: "secrets", Current: idx, Total: total}
-		binding := cfg.ResolveBinding(bundleName)
-		emit(reporter, EventInfo, "pull.secrets",
-			fmt.Sprintf("拉取 secrets bundle %q (Bitwarden folder: %s)", bundleName, binding.SecretsBundleName), progress)
-
-		paths, pullErr := secrets.PullBundle(ctx, client, secrets.PullBundleRequest{
-			ProjectRoot:   projectRoot,
+		targets = append(targets, secretsPullTarget{
+			Label:         fmt.Sprintf("secrets bundle %q", bundleName),
 			DecBundleName: bundleName,
-			Binding:       binding,
+			Binding:       cfg.ResolveBinding(bundleName),
 		})
-		if pullErr != nil {
-			return nil, fmt.Errorf("拉取 secrets bundle %q 失败: %w", bundleName, pullErr)
-		}
-		summary.NoteCount += len(paths)
-		summary.LandingPaths = append(summary.LandingPaths, paths...)
-		switch {
-		case len(paths) > 0:
-			emit(reporter, EventInfo, "pull.secrets",
-				fmt.Sprintf("  落地 %d 个 Secure Note: %s", len(paths), strings.Join(paths, ", ")), progress)
-		case binding.SecretsBundleName != "":
-			emit(reporter, EventInfo, "pull.secrets",
-				fmt.Sprintf("  Bitwarden folder %q 无 Secure Note 或 folder 不存在，跳过", binding.SecretsBundleName), progress)
-		}
+	}
+	if plan.ProjectSecretsName != "" {
+		targets = append(targets, secretsPullTarget{
+			Label:         fmt.Sprintf("project secrets %q", plan.ProjectSecretsName),
+			DecBundleName: secrets.ProjectSecretsDecBundleName,
+			Binding:       secrets.ProjectSecretsBinding(plan.ProjectSecretsName),
+		})
 	}
 
-	if plan.ProjectSecretsName != "" {
+	// 先全部取回并做一次全局校验，再统一落地：跨 folder 撞同一路径必须在写任何
+	// 文件之前发现，否则先写的那个已经落盘了。
+	fetched := make([][]secrets.SecureNote, len(targets))
+	var candidates []secrets.LandingCandidate
+	for i, target := range targets {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		idx++
-		progress := &Progress{Phase: "secrets", Current: idx, Total: total}
-		binding := secrets.ProjectSecretsBinding(plan.ProjectSecretsName)
+		progress := &Progress{Phase: "secrets", Current: i + 1, Total: total}
 		emit(reporter, EventInfo, "pull.secrets",
-			fmt.Sprintf("拉取 project secrets %q (Bitwarden folder: %s)", plan.ProjectSecretsName, binding.SecretsBundleName), progress)
+			fmt.Sprintf("拉取 %s (Bitwarden folder: %s)", target.Label, target.Binding.SecretsBundleName), progress)
 
-		paths, pullErr := secrets.PullBundle(ctx, client, secrets.PullBundleRequest{
+		notes, pullErr := secrets.ResolveBundleNotes(ctx, client, secrets.PullBundleRequest{
 			ProjectRoot:   projectRoot,
-			DecBundleName: secrets.ProjectSecretsDecBundleName,
-			Binding:       binding,
+			DecBundleName: target.DecBundleName,
+			Binding:       target.Binding,
 		})
 		if pullErr != nil {
-			return nil, fmt.Errorf("拉取 project secrets %q 失败: %w", plan.ProjectSecretsName, pullErr)
+			return nil, fmt.Errorf("拉取 %s 失败: %w", target.Label, pullErr)
+		}
+		fetched[i] = notes
+		for _, note := range notes {
+			candidates = append(candidates, secrets.LandingCandidate{
+				Folder:       target.Binding.SecretsBundleName,
+				RelativePath: note.RelativePath,
+			})
+		}
+	}
+
+	emit(reporter, EventInfo, "pull.secrets", "校验落地路径（.dec/ 零重叠、跨 folder 冲突、git 跟踪）", nil)
+	if err := secrets.ValidateLandingPaths(projectRoot, candidates); err != nil {
+		emit(reporter, EventError, "pull.secrets", err.Error(), nil)
+		return nil, err
+	}
+
+	for i, target := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		progress := &Progress{Phase: "secrets", Current: i + 1, Total: total}
+		paths, writeErr := secrets.WriteSecureNotes(projectRoot, fetched[i])
+		if writeErr != nil {
+			return nil, fmt.Errorf("落地 %s 失败: %w", target.Label, writeErr)
 		}
 		summary.NoteCount += len(paths)
 		summary.LandingPaths = append(summary.LandingPaths, paths...)
-		switch {
-		case len(paths) > 0:
+		if len(paths) > 0 {
 			emit(reporter, EventInfo, "pull.secrets",
 				fmt.Sprintf("  落地 %d 个 Secure Note: %s", len(paths), strings.Join(paths, ", ")), progress)
-		default:
+			continue
+		}
+		if target.Binding.SecretsBundleName != "" {
 			emit(reporter, EventInfo, "pull.secrets",
-				fmt.Sprintf("  Bitwarden folder %q 无 Secure Note 或 folder 不存在，跳过", binding.SecretsBundleName), progress)
+				fmt.Sprintf("  Bitwarden folder %q 无 Secure Note 或 folder 不存在，跳过", target.Binding.SecretsBundleName), progress)
 		}
 	}
+
+	warnUnignoredSecrets(projectRoot, summary.LandingPaths, reporter)
 
 	if summary.NoteCount == 0 {
 		emit(reporter, EventInfo, "pull.secrets", "secrets 同步完成（无变更）", &Progress{Phase: "secrets", Current: total, Total: total})
@@ -210,60 +219,4 @@ func loadSecretsConfigForPull() (*secrets.Config, error) {
 		return &secrets.Config{}, nil
 	}
 	return cfg, nil
-}
-
-// cleanupRemovedSecretsBundles 删除 `.secrets/` 下不再属于当前启用集的 secrets bundle 目录。
-// keep set = 已启用 Dec bundle 的绑定名 + project secrets；本地清理不依赖 Bitwarden session。
-// 目录名比较大小写不敏感（macOS 默认大小写不敏感），避免误删 project secrets。
-func cleanupRemovedSecretsBundles(projectRoot string, plan *secretsSyncPlan, cfg *secrets.Config) []string {
-	if cfg == nil {
-		cfg = &secrets.Config{}
-	}
-	keepLower := make(map[string]struct{})
-	addKeep := func(name string) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return
-		}
-		keepLower[strings.ToLower(name)] = struct{}{}
-	}
-	if plan != nil {
-		for _, bundleName := range plan.EnabledBundles {
-			binding := cfg.ResolveBinding(bundleName)
-			addKeep(binding.SecretsBundleName)
-		}
-		addKeep(plan.ProjectSecretsName)
-	}
-
-	existing, err := secrets.ListSecretsBundleDirNames(projectRoot)
-	if err != nil || len(existing) == 0 {
-		return nil
-	}
-
-	var removed []string
-	for _, name := range existing {
-		if _, ok := keepLower[strings.ToLower(name)]; ok {
-			continue
-		}
-		dir := secrets.SecretsBundleDir(projectRoot, name)
-		if rmErr := os.RemoveAll(dir); rmErr != nil {
-			continue
-		}
-		removed = append(removed, name)
-	}
-	sort.Strings(removed)
-	return removed
-}
-
-func validateSecretsPathOverlap(projectRoot string, landingPaths []string, reporter Reporter) error {
-	if len(landingPaths) == 0 {
-		return nil
-	}
-	emit(reporter, EventInfo, "pull.validate", "校验 .dec/ 与 secrets 落地路径零重叠", nil)
-	if err := secrets.ValidateNoOverlap(projectRoot, landingPaths); err != nil {
-		emit(reporter, EventError, "pull.validate", err.Error(), nil)
-		return err
-	}
-	emit(reporter, EventInfo, "pull.validate", "零重叠校验通过", nil)
-	return nil
 }

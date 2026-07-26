@@ -28,12 +28,6 @@ func IntegrationAuthPath(projectRoot string) string {
 	return filepath.Join(projectRoot, IntegrationAuthRel)
 }
 
-// IsIntegrationAuthRelWithinBundle 判断 bundle 内相对路径是否为本地测试凭据（不参与 push/pull）。
-func IsIntegrationAuthRelWithinBundle(relWithinBundle string) bool {
-	rel := filepath.ToSlash(strings.TrimSpace(relWithinBundle))
-	return rel == "integration/bitwarden.yaml" || strings.HasPrefix(rel, "integration/")
-}
-
 // LoadIntegrationAuth 读取项目 `.secrets/dec/integration/bitwarden.yaml`。
 func LoadIntegrationAuth(projectRoot string) (*IntegrationAuth, error) {
 	projectRoot = strings.TrimSpace(projectRoot)

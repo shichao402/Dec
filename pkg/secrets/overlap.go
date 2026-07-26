@@ -3,6 +3,7 @@ package secrets
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -81,17 +82,26 @@ func listProjectRelativePaths(projectRoot, dir string) ([]string, error) {
 	return paths, err
 }
 
+// normalizeProjectRelativePath 把 Secure Note 名规范为项目根相对路径。
+// Note 名来自远端，必须当作不可信输入：绝对路径、~ 展开、.. 逃逸一律拒绝，
+// 不能靠 filepath.Join 把 "/etc/passwd" 静默折成项目内路径。
 func normalizeProjectRelativePath(raw string) (string, error) {
-	trimmed := strings.TrimSpace(raw)
+	trimmed := strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
 	if trimmed == "" {
 		return "", fmt.Errorf("secrets 落地路径不能为空")
 	}
-	clean := filepath.ToSlash(filepath.Clean(trimmed))
-	if clean == "." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
-		return "", fmt.Errorf("非法 secrets 落地路径: %q", raw)
+	if strings.HasPrefix(trimmed, "/") || filepath.IsAbs(trimmed) {
+		return "", fmt.Errorf("secrets 落地路径不能是绝对路径: %q", raw)
 	}
-	if !strings.HasPrefix(clean, ".") {
-		clean = "./" + clean
+	if trimmed == "~" || strings.HasPrefix(trimmed, "~/") {
+		return "", fmt.Errorf("secrets 落地路径不能以 ~ 开头: %q", raw)
+	}
+	if strings.Contains(trimmed, ":") {
+		return "", fmt.Errorf("secrets 落地路径不能包含盘符: %q", raw)
+	}
+	clean := path.Clean(trimmed)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+		return "", fmt.Errorf("非法 secrets 落地路径: %q", raw)
 	}
 	return clean, nil
 }

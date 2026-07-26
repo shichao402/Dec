@@ -218,7 +218,7 @@ func snapshotDeleteModel(width int) model {
 		{
 			Kind: app.DeleteKindSecret, Label: "[secret] pkv.include",
 			SecretPath: "pkv.include", SecretsBundle: "Dec",
-			TreeRoot: ".secrets", TreeBranch: "Dec", GroupOrder: -1, GroupTitle: "Dec (project)",
+			TreeRoot: "secrets", TreeBranch: "Dec", GroupOrder: -1, GroupTitle: "Dec (project)",
 		},
 		{
 			Kind: app.DeleteKindDecAsset, Label: "[dec/skill] demo / default", Type: "skill", Name: "demo", Vault: "default",
@@ -229,9 +229,9 @@ func snapshotDeleteModel(width int) model {
 			TreeRoot: ".dec", TreeBranch: "default", GroupOrder: 0, GroupTitle: "default",
 		},
 		{
-			Kind: app.DeleteKindSecret, Label: "[secret] mise/conf.d/vikunja.toml",
-			SecretPath: "mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
-			TreeRoot: ".secrets", TreeBranch: "vikunja_workflow", GroupOrder: 1, GroupTitle: "vikunja_workflow",
+			Kind: app.DeleteKindSecret, Label: "[secret] .config/mise/conf.d/vikunja.toml",
+			SecretPath: ".config/mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
+			TreeRoot: "secrets", TreeBranch: "vikunja_workflow", GroupOrder: 1, GroupTitle: "vikunja_workflow",
 		},
 		{
 			Kind: app.DeleteKindBundle, Label: "[bundle] vikunja / vikunja · 2 成员", BundleName: "vikunja", Vault: "vikunja",

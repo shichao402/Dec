@@ -29,7 +29,6 @@ type PullProjectAssetsResult struct {
 	ValidationWarnings []string
 	MigrationNotes     []string
 	CleanedAssets      []string
-	CleanedSecrets     []string
 	VersionCommit      string
 	NonFatalWarnings   []string
 	// BundleOverviews 记录本轮解析时发现的所有 bundle（含未启用的），供 CLI / TUI 呈现。
@@ -80,12 +79,6 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
 		emit(reporter, EventInfo, "pull.prepare", "运行 dec config init 选择需要的资产", nil)
 		applyAssetCleanup(result, projectRoot, nil, projectIDEs, reporter)
-		// 全取消时只做本地 secrets prune，不触发 Bitwarden unlock / project secrets pull。
-		cleanedSecrets, pruneErr := pruneLocalSecretsBundles(projectRoot, nil, reporter)
-		if pruneErr != nil {
-			return nil, pruneErr
-		}
-		result.CleanedSecrets = cleanedSecrets
 		return result, nil
 	}
 
@@ -147,12 +140,6 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	if len(validAssets) == 0 {
 		result.SkippedReason = "没有有效的已启用资产可拉取"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
-		// 无有效 Dec 资产时只做本地 secrets prune，避免仅为清理触发 Bitwarden unlock。
-		cleanedSecrets, pruneErr := pruneLocalSecretsBundles(projectRoot, enabledBundleNames, reporter)
-		if pruneErr != nil {
-			return nil, pruneErr
-		}
-		result.CleanedSecrets = cleanedSecrets
 		return result, nil
 	}
 	result.RequestedCount = len(validAssets)
@@ -256,8 +243,7 @@ func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, proj
 	}
 	result.SecretsSkippedReason = secretsSummary.SkippedReason
 	result.SecretsNoteCount = secretsSummary.NoteCount
-	result.CleanedSecrets = secretsSummary.CleanedBundles
-	return validateSecretsPathOverlap(projectRoot, secretsSummary.LandingPaths, reporter)
+	return nil
 }
 
 func uniqueProjectIDEs(projectRoot string, ideNames []string) []ide.IDE {

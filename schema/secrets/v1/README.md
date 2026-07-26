@@ -1,6 +1,6 @@
 # secrets/v1 Schema
 
-Protobuf 是 Bitwarden **secrets bundle** 同步与绑定声明的 schema 真相源；运行时 wire format 为 JSON（如 `~/.dec/secrets/state.json`），secret 明文不进 Git。
+Protobuf 是 Bitwarden **secrets bundle** 绑定声明的 schema 真相源；运行时 wire format 为 YAML（`~/.dec/secrets/config.yaml`），secret 明文不进 Git。
 
 相关文档：[BUNDLE-SECRETS-MODEL.md](../../Documents/BUNDLE-SECRETS-MODEL.md) · [ARCHITECTURE.md](../../Documents/ARCHITECTURE.md) · [README.md](../../README.md)
 
@@ -39,19 +39,15 @@ Bitwarden folder: vikunja_workflow
 |------|------|
 | `BundleBinding` | Dec bundle ↔ Bitwarden secrets bundle 绑定 |
 | `SecretsConfig` | bundle 侧 secrets 配置入口 |
-| `SecretRef` | Bitwarden 资源轻量引用；`relative_path` 为项目根相对落地路径 |
-| `SyncStateFile` | 本机同步元数据（`~/.dec/secrets/state.json`）；**不含** Bitwarden session |
 
-## SecretKind
+## 没有本地同步状态文件
 
-| 值 | 含义 |
-|----|------|
-| `SECRET_KIND_SSH_KEY` | SSH 私钥，落地机器级 `~/.ssh/`（如 `~/.ssh/dec_vikunja_deploy`） |
-| `SECRET_KIND_ENV_FILE` | env 类文件（如 `.config/mise/conf.d/*.toml`） |
-| `SECRET_KIND_CONFIG_NOTE` | 映射到工作区的配置类 Secure Note |
-| `SECRET_KIND_INCLUDE_NOTE` | secrets bundle 间 include 元数据 |
+曾有 `state.proto`（`SyncStateFile` / `SecretRef` / `NoteRef` / `EnvEntry`）打算用
+`~/.dec/secrets/state.json` 记录「哪些本地文件由 Bitwarden 管」，作为 push 时的枚举依据。
+它从未被实现，且方向是错的：本地状态文件会与远端漂移，漂移后 push 依据的是一份过期索引。
 
-mise env 等私密配置以 Secure Note 存放，Note 名即项目根相对路径；`EnvEntry` / `NoteRef` 记录其同步元数据。
+现在**权威索引是远端 folder 的 note 列表**，每次操作实时枚举，没有可漂移的本地副本。
+需要知道某个文件是否被管，就查它所属 folder 的 note 列表。
 
 ## 生成 Go 类型
 

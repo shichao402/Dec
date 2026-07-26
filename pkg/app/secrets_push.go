@@ -14,6 +14,8 @@ type PushSecretsResult struct {
 	CreatedCount  int
 	UpdatedCount  int
 	PushedPaths   []string
+	// MissingLocal 是远端有 note、本地缺文件的落地路径。push 只报告，删除走 Delete 页。
+	MissingLocal []string
 }
 
 func PushSecretsBundles(ctx context.Context, projectRoot string, reporter Reporter) (*PushSecretsResult, error) {
@@ -66,24 +68,37 @@ func PushSecretsBundles(ctx context.Context, projectRoot string, reporter Report
 	total := plan.Total
 	emit(reporter, EventInfo, "push.secrets", fmt.Sprintf("推送 %d 个 secrets 目标（bundle + project）", total), &Progress{Phase: "secrets", Current: 0, Total: total})
 
-	idx := 0
+	targets := make([]secretsPullTarget, 0, total)
 	for _, bundleName := range plan.EnabledBundles {
+		targets = append(targets, secretsPullTarget{
+			Label:         fmt.Sprintf("secrets bundle %q", bundleName),
+			DecBundleName: bundleName,
+			Binding:       cfg.ResolveBinding(bundleName),
+		})
+	}
+	if plan.ProjectSecretsName != "" {
+		targets = append(targets, secretsPullTarget{
+			Label:         fmt.Sprintf("project secrets %q", plan.ProjectSecretsName),
+			DecBundleName: secrets.ProjectSecretsDecBundleName,
+			Binding:       secrets.ProjectSecretsBinding(plan.ProjectSecretsName),
+		})
+	}
+
+	for i, target := range targets {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		idx++
-		progress := &Progress{Phase: "secrets", Current: idx, Total: total}
-		binding := cfg.ResolveBinding(bundleName)
+		progress := &Progress{Phase: "secrets", Current: i + 1, Total: total}
 		emit(reporter, EventInfo, "push.secrets",
-			fmt.Sprintf("推送 secrets bundle %q (Bitwarden folder: %s)", bundleName, binding.SecretsBundleName), progress)
+			fmt.Sprintf("推送 %s (Bitwarden folder: %s)", target.Label, target.Binding.SecretsBundleName), progress)
 
 		pushResult, pushErr := secrets.PushBundle(ctx, client, secrets.PushBundleRequest{
 			ProjectRoot:   projectRoot,
-			DecBundleName: bundleName,
-			Binding:       binding,
+			DecBundleName: target.DecBundleName,
+			Binding:       target.Binding,
 		})
 		if pushErr != nil {
-			return nil, fmt.Errorf("推送 secrets bundle %q 失败: %w", bundleName, pushErr)
+			return nil, fmt.Errorf("推送 %s 失败: %w", target.Label, pushErr)
 		}
 		if pushResult == nil {
 			continue
@@ -91,46 +106,22 @@ func PushSecretsBundles(ctx context.Context, projectRoot string, reporter Report
 		result.CreatedCount += pushResult.Created
 		result.UpdatedCount += pushResult.Updated
 		result.PushedPaths = append(result.PushedPaths, pushResult.Paths...)
+		result.MissingLocal = append(result.MissingLocal, pushResult.MissingLocal...)
+
 		if len(pushResult.Paths) > 0 {
 			emit(reporter, EventInfo, "push.secrets",
 				fmt.Sprintf("  推送 %d 个 Secure Note（新建 %d · 更新 %d）: %s",
 					len(pushResult.Paths), pushResult.Created, pushResult.Updated, strings.Join(pushResult.Paths, ", ")), progress)
 		} else {
 			emit(reporter, EventInfo, "push.secrets",
-				fmt.Sprintf("  %s 本地无文件（%s）", bundleName, secrets.SecretsBundleDir(projectRoot, binding.SecretsBundleName)), progress)
+				fmt.Sprintf("  %s 无可推送内容（Bitwarden folder %q 无 Note，或 folder 不存在）",
+					target.Label, target.Binding.SecretsBundleName), progress)
 		}
-	}
-
-	if plan.ProjectSecretsName != "" {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		idx++
-		progress := &Progress{Phase: "secrets", Current: idx, Total: total}
-		binding := secrets.ProjectSecretsBinding(plan.ProjectSecretsName)
-		emit(reporter, EventInfo, "push.secrets",
-			fmt.Sprintf("推送 project secrets %q (Bitwarden folder: %s)", plan.ProjectSecretsName, binding.SecretsBundleName), progress)
-
-		pushResult, pushErr := secrets.PushBundle(ctx, client, secrets.PushBundleRequest{
-			ProjectRoot:   projectRoot,
-			DecBundleName: secrets.ProjectSecretsDecBundleName,
-			Binding:       binding,
-		})
-		if pushErr != nil {
-			return nil, fmt.Errorf("推送 project secrets %q 失败: %w", plan.ProjectSecretsName, pushErr)
-		}
-		if pushResult != nil {
-			result.CreatedCount += pushResult.Created
-			result.UpdatedCount += pushResult.Updated
-			result.PushedPaths = append(result.PushedPaths, pushResult.Paths...)
-			if len(pushResult.Paths) > 0 {
-				emit(reporter, EventInfo, "push.secrets",
-					fmt.Sprintf("  推送 %d 个 Secure Note（新建 %d · 更新 %d）: %s",
-						len(pushResult.Paths), pushResult.Created, pushResult.Updated, strings.Join(pushResult.Paths, ", ")), progress)
-			} else {
-				emit(reporter, EventInfo, "push.secrets",
-					fmt.Sprintf("  project secrets 本地无文件（%s）", secrets.SecretsBundleDir(projectRoot, binding.SecretsBundleName)), progress)
-			}
+		if len(pushResult.MissingLocal) > 0 {
+			emit(reporter, EventWarn, "push.secrets",
+				fmt.Sprintf("  ⚠️  %d 个 Note 在本地找不到对应文件，已跳过（不会删除远端）: %s",
+					len(pushResult.MissingLocal), strings.Join(pushResult.MissingLocal, ", ")), progress)
+			emit(reporter, EventInfo, "push.secrets", "  确实要删除请到 Delete 页逐条确认", progress)
 		}
 	}
 

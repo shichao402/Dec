@@ -74,12 +74,7 @@ func (c *APIClient) PullBundle(ctx context.Context, req PullBundleRequest) (*Pul
 		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
 
-	folderName := req.Binding.SecretsBundleName
-	if folderName == "" {
-		folderName = req.DecBundleName
-	}
-
-	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	folderID, err := c.findFolderID(ctx, FolderNameFor(req.Binding, req.DecBundleName), userKey)
 	if err != nil {
 		return nil, err
 	}
@@ -87,38 +82,22 @@ func (c *APIClient) PullBundle(ctx context.Context, req PullBundleRequest) (*Pul
 		return &PullBundleResult{}, nil
 	}
 
-	ciphers, err := c.listCiphers(ctx)
+	existing, err := c.folderCiphers(ctx, folderID, userKey)
 	if err != nil {
 		return nil, err
 	}
 
-	notes := make([]SecureNote, 0)
-	for _, cipher := range ciphers {
-		if cipher.Type != cipherTypeSecureNote {
-			continue
-		}
-		if cipher.FolderID != folderID {
-			continue
-		}
+	notes := make([]SecureNote, 0, len(existing))
+	for name, cipher := range existing {
 		itemKey, err := itemDecryptionKey(cipher.Key, userKey)
 		if err != nil {
-			continue
-		}
-		name, err := decryptVaultString(strings.TrimSpace(cipher.Name), itemKey)
-		if err != nil {
-			continue
-		}
-		if name == "" {
 			continue
 		}
 		content, err := decryptVaultString(cipher.Notes, itemKey)
 		if err != nil {
 			continue
 		}
-		notes = append(notes, SecureNote{
-			RelativePath: name,
-			Content:      content,
-		})
+		notes = append(notes, SecureNote{RelativePath: name, Content: content})
 	}
 	return &PullBundleResult{Notes: notes}, nil
 }
@@ -129,11 +108,7 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
 
-	folderName := req.Binding.SecretsBundleName
-	if folderName == "" {
-		folderName = req.DecBundleName
-	}
-
+	folderName := FolderNameFor(req.Binding, req.DecBundleName)
 	folderID, err := c.findFolderID(ctx, folderName, userKey)
 	if err != nil {
 		return nil, err
@@ -142,45 +117,25 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 		return nil, fmt.Errorf("Bitwarden folder %q 不存在", folderName)
 	}
 
-	ciphers, err := c.listCiphers(ctx)
+	existing, err := c.folderCiphers(ctx, folderID, userKey)
 	if err != nil {
 		return nil, err
 	}
 
-	existing := make(map[string]bwCipher)
-	for _, cipher := range ciphers {
-		if cipher.Type != cipherTypeSecureNote || cipher.FolderID != folderID {
-			continue
-		}
-		itemKey, err := itemDecryptionKey(cipher.Key, userKey)
-		if err != nil {
-			continue
-		}
-		name, err := decryptVaultString(strings.TrimSpace(cipher.Name), itemKey)
-		if err != nil {
-			continue
-		}
-		if name == "" {
-			continue
-		}
-		existing[name] = cipher
-	}
-
+	// push 只做 create/update。删除远端 note 必须走 Delete 页的显式单条确认：
+	// 落地路径散在项目根，不存在可枚举的权威本地集合，靠"本地没有就删远端"
+	// 会在枚举漏一个文件时静默删掉一条真密钥。
 	result := &PushBundleResult{}
-	localNames := make(map[string]struct{}, len(notes))
-	targetedIDs := make(map[string]struct{})
 	for _, note := range notes {
 		noteName := strings.TrimSpace(note.RelativePath)
 		if noteName == "" {
 			continue
 		}
-		localNames[noteName] = struct{}{}
-		cipher, ok := findExistingCipher(existing, noteName, folderName)
+		cipher, ok := findExistingCipher(existing, noteName)
 		if ok {
-			if err := c.updateSecureNote(ctx, cipher, userKey, noteName, note.Content); err != nil {
+			if err := c.updateSecureNote(ctx, cipher, userKey, note.Content); err != nil {
 				return nil, fmt.Errorf("更新 Secure Note %q 失败: %w", noteName, err)
 			}
-			targetedIDs[cipher.ID] = struct{}{}
 			result.Updated++
 		} else {
 			if err := c.createSecureNote(ctx, folderID, userKey, noteName, note.Content); err != nil {
@@ -190,53 +145,7 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 		}
 		result.Paths = append(result.Paths, noteName)
 	}
-
-	for _, cipher := range existing {
-		if _, targeted := targetedIDs[cipher.ID]; targeted {
-			continue
-		}
-		name := cipherDecryptedName(cipher, userKey)
-		if name == "" {
-			continue
-		}
-		if noteStillPresent(localNames, name, folderName) {
-			continue
-		}
-		if err := c.deleteCipher(ctx, cipher.ID); err != nil {
-			return nil, fmt.Errorf("删除 Secure Note %q 失败: %w", name, err)
-		}
-		result.Deleted++
-	}
 	return result, nil
-}
-
-func cipherDecryptedName(cipher bwCipher, userKey []byte) string {
-	itemKey, err := itemDecryptionKey(cipher.Key, userKey)
-	if err != nil {
-		return ""
-	}
-	name, err := decryptVaultString(strings.TrimSpace(cipher.Name), itemKey)
-	if err != nil {
-		return ""
-	}
-	return name
-}
-
-func noteStillPresent(localNames map[string]struct{}, remoteName, folderName string) bool {
-	remoteCanon, err := CanonicalNoteName(folderName, remoteName)
-	if err != nil {
-		return false
-	}
-	for localName := range localNames {
-		localCanon, err := CanonicalNoteName(folderName, localName)
-		if err != nil {
-			continue
-		}
-		if localCanon == remoteCanon {
-			return true
-		}
-	}
-	return false
 }
 
 func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error {
@@ -244,7 +153,7 @@ func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRe
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
-	folderName := req.Binding.SecretsBundleName
+	folderName := strings.TrimSpace(req.Binding.SecretsBundleName)
 	if folderName == "" {
 		return fmt.Errorf("secrets bundle 名称不能为空")
 	}
@@ -261,27 +170,12 @@ func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRe
 		return nil
 	}
 
-	ciphers, err := c.listCiphers(ctx)
+	existing, err := c.folderCiphers(ctx, folderID, userKey)
 	if err != nil {
 		return err
 	}
-	existing := make(map[string]bwCipher)
-	for _, cipher := range ciphers {
-		if cipher.Type != cipherTypeSecureNote || cipher.FolderID != folderID {
-			continue
-		}
-		itemKey, err := itemDecryptionKey(cipher.Key, userKey)
-		if err != nil {
-			continue
-		}
-		name, err := decryptVaultString(strings.TrimSpace(cipher.Name), itemKey)
-		if err != nil || name == "" {
-			continue
-		}
-		existing[name] = cipher
-	}
 
-	cipher, ok := findExistingCipher(existing, notePath, folderName)
+	cipher, ok := findExistingCipher(existing, notePath)
 	if !ok {
 		return nil
 	}
@@ -311,24 +205,11 @@ func (c *APIClient) deleteCipher(ctx context.Context, cipherID string) error {
 	return nil
 }
 
-func findExistingCipher(existing map[string]bwCipher, noteName, secretsBundleName string) (bwCipher, bool) {
-	target, err := CanonicalNoteName(secretsBundleName, noteName)
-	if err != nil {
-		if cipher, ok := existing[noteName]; ok {
-			return cipher, true
-		}
-		return bwCipher{}, false
-	}
-	for name, cipher := range existing {
-		canon, err := CanonicalNoteName(secretsBundleName, name)
-		if err != nil {
-			continue
-		}
-		if canon == target {
-			return cipher, true
-		}
-	}
-	return bwCipher{}, false
+// findExistingCipher 按 note 名精确匹配。
+// note 名就是落地路径，只有一种合法形态，不存在需要多形态互认的命名变体。
+func findExistingCipher(existing map[string]bwCipher, noteName string) (bwCipher, bool) {
+	cipher, ok := existing[strings.TrimSpace(noteName)]
+	return cipher, ok
 }
 
 func secureNotePayload() map[string]any {
@@ -375,12 +256,11 @@ func (c *APIClient) createSecureNote(ctx context.Context, folderID string, userK
 	return c.postJSON(ctx, c.APIURL+"/ciphers", body)
 }
 
-func (c *APIClient) updateSecureNote(ctx context.Context, cipher bwCipher, userKey []byte, name, content string) error {
+// updateSecureNote 只更新正文，**原样回传远端的 name 密文**。
+// push 是「按远端 note 列表同步正文」，无权改名：note 名就是落地路径，
+// 改名等于把这条 secret 指到另一个文件上，只能由用户在 Bitwarden 里显式改。
+func (c *APIClient) updateSecureNote(ctx context.Context, cipher bwCipher, userKey []byte, content string) error {
 	itemKey, err := itemDecryptionKey(cipher.Key, userKey)
-	if err != nil {
-		return err
-	}
-	encName, err := encryptVaultString(name, itemKey)
 	if err != nil {
 		return err
 	}
@@ -390,7 +270,7 @@ func (c *APIClient) updateSecureNote(ctx context.Context, cipher bwCipher, userK
 	}
 	body := map[string]any{
 		"type":       cipherTypeSecureNote,
-		"name":       encName,
+		"name":       cipher.Name,
 		"notes":      encNotes,
 		"folderId":   cipher.FolderID,
 		"favorite":   false,

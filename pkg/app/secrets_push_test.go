@@ -46,103 +46,105 @@ func TestPushSecretsBundles_UsesDefaultServerWithoutConfigFile(t *testing.T) {
 	}
 }
 
-func TestPushSecretsBundles_PushesProjectSecrets(t *testing.T) {
-	decHome := t.TempDir()
-	setEnvForProjectTest(t, "DEC_HOME", decHome)
-	secretsDir := filepath.Join(decHome, "secrets")
-	if err := os.MkdirAll(secretsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	cfg := secrets.Config{ServerURL: "https://vault.example.com"}
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), data, 0644); err != nil {
-		t.Fatal(err)
-	}
-	secrets.SetSession("test-session")
-	secrets.SetUserKey(make([]byte, 64))
-	t.Cleanup(secrets.ClearSession)
+// push 按远端 folder 的 note 列表去读本地对应路径。
+func TestPushSecretsBundles_UpdatesFromConsumerPaths(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
 
+	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+		"vikunja_workflow": {{RelativePath: ".config/mise/conf.d/vikunja.toml", Content: "[env]\nOLD=1\n"}},
+		"Dec":              {{RelativePath: "config/private.yaml", Content: "old"}},
+	}}
 	origFactory := secretsClientFactory
-	secretsClientFactory = func() secrets.Client {
-		return &secrets.StubClient{}
-	}
+	secretsClientFactory = func() secrets.Client { return stub }
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName: "Dec",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	tokenPath := filepath.Join(secrets.SecretsBundleDir(projectRoot, "Dec"), "tokens", "deploy.key")
-	if err := os.MkdirAll(filepath.Dir(tokenPath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(tokenPath, []byte("ssh-key"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := PushSecretsBundles(context.Background(), projectRoot, nil)
-	if err != nil {
-		t.Fatalf("PushSecretsBundles() = %v", err)
-	}
-	if result.CreatedCount != 1 {
-		t.Fatalf("CreatedCount = %d, want 1", result.CreatedCount)
-	}
-}
-
-func TestPushSecretsBundles_PushesLocalFiles(t *testing.T) {
-	decHome := t.TempDir()
-	setEnvForProjectTest(t, "DEC_HOME", decHome)
-	secretsDir := filepath.Join(decHome, "secrets")
-	if err := os.MkdirAll(secretsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	cfg := secrets.Config{ServerURL: "https://vault.example.com"}
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), data, 0644); err != nil {
-		t.Fatal(err)
-	}
-	secrets.SetSession("test-session")
-	secrets.SetUserKey(make([]byte, 64))
-	t.Cleanup(secrets.ClearSession)
-
-	origFactory := secretsClientFactory
-	secretsClientFactory = func() secrets.Client {
-		return &secrets.StubClient{}
-	}
-	t.Cleanup(func() { secretsClientFactory = origFactory })
-
-	projectRoot := t.TempDir()
-	mgr := config.NewProjectConfigManager(projectRoot)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "Dec",
 		EnabledBundles: []string{"vikunja"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(secrets.SecretsBundleDir(projectRoot, "vikunja_workflow"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	confPath := filepath.Join(secrets.SecretsBundleDir(projectRoot, "vikunja_workflow"), "mise", "conf.d", "vikunja.toml")
-	if err := os.MkdirAll(filepath.Dir(confPath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(confPath, []byte("[env]\nX=1\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	writeProjectFileForPushTest(t, projectRoot, ".config/mise/conf.d/vikunja.toml", "[env]\nX=1\n")
+	writeProjectFileForPushTest(t, projectRoot, "config/private.yaml", "token: abc\n")
 
 	result, err := PushSecretsBundles(context.Background(), projectRoot, nil)
 	if err != nil {
 		t.Fatalf("PushSecretsBundles() = %v", err)
 	}
-	if result.CreatedCount != 1 {
-		t.Fatalf("CreatedCount = %d, want 1", result.CreatedCount)
+	if result.CreatedCount != 0 || result.UpdatedCount != 2 {
+		t.Fatalf("result = %#v, 期望 2 条更新", result)
+	}
+	if got := stub.NotesByFolder["vikunja_workflow"][0].Content; got != "[env]\nX=1\n" {
+		t.Fatalf("bundle secret 未被本地覆盖: %q", got)
+	}
+	if got := stub.NotesByFolder["Dec"][0].Content; got != "token: abc\n" {
+		t.Fatalf("project secret 未被本地覆盖: %q", got)
+	}
+}
+
+func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+
+	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+		"Dec": {{RelativePath: "config/private.yaml", Content: "只在远端存在"}},
+	}}
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "Dec"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var events []OperationEvent
+	result, err := PushSecretsBundles(context.Background(), projectRoot, ReporterFunc(func(event OperationEvent) {
+		events = append(events, event)
+	}))
+	if err != nil {
+		t.Fatalf("PushSecretsBundles() = %v", err)
+	}
+	if len(result.MissingLocal) != 1 || result.MissingLocal[0] != "config/private.yaml" {
+		t.Fatalf("MissingLocal = %#v", result.MissingLocal)
+	}
+	if len(stub.NotesByFolder["Dec"]) != 1 {
+		t.Fatal("本地缺文件不应导致远端 note 被删")
+	}
+	if !containsScopeMessage(events, "push.secrets", "Delete 页") {
+		t.Fatalf("应提示删除要走 Delete 页: %#v", events)
+	}
+}
+
+func setupSecretsConfigForPushTest(t *testing.T) {
+	t.Helper()
+	decHome := t.TempDir()
+	setEnvForProjectTest(t, "DEC_HOME", decHome)
+	secretsDir := filepath.Join(decHome, "secrets")
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := yaml.Marshal(secrets.Config{ServerURL: "https://vault.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(make([]byte, 64))
+	t.Cleanup(secrets.ClearSession)
+}
+
+func writeProjectFileForPushTest(t *testing.T, projectRoot, rel, content string) {
+	t.Helper()
+	path := filepath.Join(projectRoot, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
 	}
 }

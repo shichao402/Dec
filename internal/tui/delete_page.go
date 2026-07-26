@@ -141,15 +141,14 @@ func (m model) visibleDeleteCandidates() []app.DeleteCandidate {
 
 func selectionFromCandidate(c app.DeleteCandidate) app.DeleteSelectionItem {
 	return app.DeleteSelectionItem{
-		Kind:            c.Kind,
-		Type:            c.Type,
-		Name:            c.Name,
-		Vault:           c.Vault,
-		SecretPath:      c.SecretPath,
-		SecretsBundle:   c.SecretsBundle,
-		RelWithinBundle: c.RelWithinBundle,
-		BundleName:      c.BundleName,
-		Members:         append([]app.AssetSelectionItem(nil), c.Members...),
+		Kind:          c.Kind,
+		Type:          c.Type,
+		Name:          c.Name,
+		Vault:         c.Vault,
+		SecretPath:    c.SecretPath,
+		SecretsBundle: c.SecretsBundle,
+		BundleName:    c.BundleName,
+		Members:       append([]app.AssetSelectionItem(nil), c.Members...),
 	}
 }
 

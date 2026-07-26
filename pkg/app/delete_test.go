@@ -104,38 +104,37 @@ func TestListDeleteCandidates_IncludesCacheAndSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	secretPath := filepath.Join(projectRoot, ".secrets", "vikunja_workflow", "mise", "conf.d", "vikunja.toml")
-	if err := os.MkdirAll(filepath.Dir(secretPath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(secretPath, []byte("[env]\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
+	// 不查远端时只有 Dec 资产：落地路径散在项目根，扫目录认不出哪些文件是 secret。
 	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
 	if err != nil {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
-	var hasDec, hasSecret bool
+	var hasDec bool
 	for _, c := range candidates {
 		if c.Kind == DeleteKindDecAsset && c.Name == "demo" {
 			hasDec = true
 		}
-		if c.Kind == DeleteKindSecret && strings.Contains(c.SecretPath, "vikunja.toml") {
-			hasSecret = true
+		if c.Kind == DeleteKindSecret {
+			t.Fatalf("未查远端时不应产出 secret 候选项: %#v", c)
 		}
 	}
 	if !hasDec {
 		t.Fatalf("应列出 cache 中的 Dec 资产: %#v", candidates)
 	}
-	if !hasSecret {
-		t.Fatalf("应列出 .secrets 文件: %#v", candidates)
-	}
 }
 
-func TestListDeleteCandidates_IncludesSecretsWhenBindingDiffersFromDir(t *testing.T) {
-	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
-	useStubSecretsSession(t)
+// 远端有 note、本地也有文件 → 正常候选项，不标 Orphan。
+func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+			"vikunja_workflow": {{RelativePath: ".config/mise/conf.d/vikunja.toml", Content: "[env]\n"}},
+		}}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
@@ -143,29 +142,28 @@ func TestListDeleteCandidates_IncludesSecretsWhenBindingDiffersFromDir(t *testin
 	}); err != nil {
 		t.Fatal(err)
 	}
+	writeProjectFileForPushTest(t, projectRoot, ".config/mise/conf.d/vikunja.toml", "[env]\n")
 
-	// 无 secrets 绑定时 ResolveBinding("vikunja") 为 "vikunja"，但文件落在 vikunja_workflow。
-	secretPath := filepath.Join(projectRoot, ".secrets", "vikunja_workflow", "mise", "conf.d", "vikunja.toml")
-	if err := os.MkdirAll(filepath.Dir(secretPath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(secretPath, []byte("[env]\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, true, nil)
 	if err != nil {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
 	for _, c := range candidates {
-		if c.Kind == DeleteKindSecret && strings.Contains(c.SecretPath, "vikunja.toml") {
-			if c.TreeBranch != "vikunja_workflow" {
-				t.Fatalf("secret TreeBranch = %q, want vikunja_workflow", c.TreeBranch)
-			}
-			return
+		if c.Kind != DeleteKindSecret {
+			continue
 		}
+		if c.SecretPath != ".config/mise/conf.d/vikunja.toml" {
+			t.Fatalf("SecretPath = %q, 期望即 note 名", c.SecretPath)
+		}
+		if c.Orphan {
+			t.Fatalf("本地存在的 secret 不应标 Orphan: %#v", c)
+		}
+		if c.TreeRoot != secretsTreeRoot || c.TreeBranch != "vikunja_workflow" {
+			t.Fatalf("分组 = %q/%q, 期望按 Bitwarden folder 分组", c.TreeRoot, c.TreeBranch)
+		}
+		return
 	}
-	t.Fatalf("绑定名与目录不一致时仍应列出 secret: %#v", candidates)
+	t.Fatalf("应列出 secret 候选项: %#v", candidates)
 }
 
 func TestListDeleteCandidates_IncludesRemoteOnlySecrets(t *testing.T) {
@@ -193,7 +191,7 @@ func TestListDeleteCandidates_IncludesRemoteOnlySecrets(t *testing.T) {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
 				"vikunja_workflow": {{
-					RelativePath: "mise/conf.d/remote-only.toml",
+					RelativePath: ".config/mise/conf.d/remote-only.toml",
 					Content:      "[env]\nTOKEN=1\n",
 				}},
 			},

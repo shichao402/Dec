@@ -35,11 +35,13 @@ type PushBundleRequest struct {
 }
 
 // PushBundleResult 推送结果。
+// 无 Deleted：push 不删远端 note，删除只走 Delete 页的显式单条确认。
 type PushBundleResult struct {
 	Created int
 	Updated int
-	Deleted int
 	Paths   []string
+	// MissingLocal 是远端有 note、本地缺文件的落地路径。只报告，不删远端。
+	MissingLocal []string
 }
 
 // DeleteSecureNoteRequest 删除单条 Secure Note 的输入。

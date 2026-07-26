@@ -21,7 +21,7 @@ type PushProjectAssetsResult struct {
 	SecretsSkippedReason string
 }
 
-// PushProjectAssets 将本地 .dec/cache/ 与 .secrets/ 推送到远端（Dec Git vault + Bitwarden）。
+// PushProjectAssets 将本地 .dec/cache/ 与 secrets 落地文件推送到远端（Dec Git vault + Bitwarden）。
 func PushProjectAssets(ctx context.Context, projectRoot string, reporter Reporter) (*PushProjectAssetsResult, error) {
 	reporter = defaultReporter(reporter)
 	result := &PushProjectAssetsResult{}

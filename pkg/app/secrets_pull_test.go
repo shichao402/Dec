@@ -137,66 +137,65 @@ func containsScopeMessage(events []OperationEvent, scope, fragment string) bool 
 	return false
 }
 
-func TestCleanupRemovedSecretsBundlesKeepsProjectSecretsCaseInsensitive(t *testing.T) {
-	projectRoot := t.TempDir()
-	vikunjaDir := filepath.Join(projectRoot, ".secrets", "vikunja_workflow", "mise")
-	if err := os.MkdirAll(vikunjaDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(vikunjaDir, "x.toml"), []byte("a=1\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	projectDir := filepath.Join(projectRoot, ".secrets", "dec", "integration")
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "keep.yaml"), []byte("ok: true\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+// pull 不再做「停用即清理」：落地路径就是消费者路径，没有可以安全 RemoveAll 的目录。
+// 已存在的项目内文件必须原样留着，等 Delete 页逐条确认。
+func TestPullEnabledSecretsBundles_NeverDeletesExistingProjectFiles(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return &secrets.StubClient{} }
+	t.Cleanup(func() { secretsClientFactory = origFactory })
 
-	cleaned := cleanupRemovedSecretsBundles(projectRoot, &secretsSyncPlan{
-		ProjectSecretsName: "Dec",
-	}, &secrets.Config{})
-	if len(cleaned) != 1 || cleaned[0] != "vikunja_workflow" {
-		t.Fatalf("cleaned = %#v, 期望 [vikunja_workflow]", cleaned)
-	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "vikunja_workflow")); !os.IsNotExist(err) {
-		t.Fatalf("vikunja_workflow 应被删除, err=%v", err)
-	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "dec", "integration", "keep.yaml")); err != nil {
-		t.Fatalf("project secrets 目录应保留: %v", err)
-	}
-}
-
-func TestPruneLocalSecretsBundlesCleansStaleWithoutBitwarden(t *testing.T) {
-	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "Demo"}); err != nil {
 		t.Fatal(err)
 	}
-	stale := filepath.Join(projectRoot, ".secrets", "vikunja_workflow", "mise")
-	if err := os.MkdirAll(stale, 0755); err != nil {
+	untouched := filepath.Join(projectRoot, "config", "server.yaml")
+	if err := os.MkdirAll(filepath.Dir(untouched), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(stale, "x.toml"), []byte("a=1\n"), 0600); err != nil {
+	if err := os.WriteFile(untouched, []byte("keep: true\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	var events []OperationEvent
-	cleaned, err := pruneLocalSecretsBundles(projectRoot, nil, ReporterFunc(func(event OperationEvent) {
-		events = append(events, event)
-	}))
-	if err != nil {
-		t.Fatalf("pruneLocalSecretsBundles() 失败: %v", err)
+	if _, err := pullEnabledSecretsBundles(context.Background(), projectRoot, nil, nil); err != nil {
+		t.Fatalf("pullEnabledSecretsBundles() 失败: %v", err)
 	}
-	if len(cleaned) != 1 || cleaned[0] != "vikunja_workflow" {
-		t.Fatalf("cleaned = %#v", cleaned)
+	if _, err := os.Stat(untouched); err != nil {
+		t.Fatalf("项目内既有文件不应被 pull 清理: %v", err)
 	}
-	if !containsScopeMessage(events, "pull.secrets.cleanup", "vikunja_workflow") {
-		t.Fatalf("应发出 secrets cleanup 事件: %#v", events)
+}
+
+func TestPullEnabledSecretsBundles_RejectsCrossFolderCollision(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+			"combo": {{RelativePath: ".env.local", Content: "from-combo"}},
+			"Demo":  {{RelativePath: ".env.local", Content: "from-project"}},
+		}}
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "vikunja_workflow")); !os.IsNotExist(err) {
-		t.Fatalf("过期 secrets bundle 应删除, err=%v", err)
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "Demo",
+		EnabledBundles: []string{"combo"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := pullEnabledSecretsBundles(context.Background(), projectRoot, []string{"combo"}, nil)
+	if err == nil {
+		t.Fatal("两个 folder 撞同一落地路径时应报错")
+	}
+	if !strings.Contains(err.Error(), "冲突") {
+		t.Fatalf("错误应描述冲突: %v", err)
+	}
+	// 校验必须先于写盘：冲突时一个字节都不该落地。
+	if _, statErr := os.Stat(filepath.Join(projectRoot, ".env.local")); !os.IsNotExist(statErr) {
+		t.Fatalf("冲突时不应写入任何文件, err=%v", statErr)
 	}
 }

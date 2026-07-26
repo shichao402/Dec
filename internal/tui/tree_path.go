@@ -112,8 +112,9 @@ func decCachePathSegments(vault, itemType, name string) []string {
 	return append(segs, decCacheLeafName(itemType, name))
 }
 
-func secretsParentSegments(secretsBundle, relWithinBundle string) []string {
-	rel := strings.TrimSpace(filepath.ToSlash(relWithinBundle))
+// secretsParentSegments 把一条 secret 放到 folder 分组下，再按落地路径的目录逐层展开。
+func secretsParentSegments(secretsBundle, landingPath string) []string {
+	rel := strings.TrimSpace(filepath.ToSlash(landingPath))
 	if rel == "" {
 		return []string{secretsBundle}
 	}
@@ -125,8 +126,8 @@ func secretsParentSegments(secretsBundle, relWithinBundle string) []string {
 	return out
 }
 
-func secretsLeafName(relWithinBundle string) string {
-	rel := strings.TrimSpace(filepath.ToSlash(relWithinBundle))
+func secretsLeafName(landingPath string) string {
+	rel := strings.TrimSpace(filepath.ToSlash(landingPath))
 	if rel == "" {
 		return rel
 	}

@@ -77,7 +77,7 @@ func TestTreeList_CollapseFromLeafFoldsParent(t *testing.T) {
 func TestTreeList_FilterPreservesSelection(t *testing.T) {
 	roots := []*TreeNode{
 		{
-			ID: "root", Label: ".secrets", SelectMode: TreeSelectNone,
+			ID: "root", Label: "secrets (Bitwarden)", SelectMode: TreeSelectNone,
 			Children: []*TreeNode{
 				{ID: "l1", Label: "alpha.toml", SelectMode: TreeSelectLeaf},
 				{ID: "l2", Label: "beta.toml", SelectMode: TreeSelectLeaf},

@@ -22,37 +22,39 @@ const (
 	DeleteKindBundle   DeleteItemKind = "bundle"
 )
 
+// secretsTreeRoot 是 Delete 树中 secrets 分支的根标识。
+// 不再是 ".secrets"：落地路径散在项目根，没有一个共同的目录前缀，
+// 这里表达的是「归 Bitwarden 管的密文件」这个逻辑分组。
+const secretsTreeRoot = "secrets"
+
 // DeleteCandidate 描述 Delete 页可选项。
 type DeleteCandidate struct {
-	Kind            DeleteItemKind
-	Label           string
-	Type            string
-	Name            string
-	Vault           string
-	SecretPath      string
-	SecretsBundle   string
-	RelWithinBundle string
-	BundleName      string
-	Members         []AssetSelectionItem
-	Orphan          bool
-	TreeRoot        string // ".dec" 或 ".secrets"
-	TreeBranch      string // 根下目录名（dec cache bundle 或 secrets bundle 目录）
-	GroupBundle     string // 已废弃，同 TreeBranch；保留便于测试断言
-	GroupOrder      int
-	GroupTitle      string
+	Kind          DeleteItemKind
+	Label         string
+	Type          string
+	Name          string
+	Vault         string
+	SecretPath    string // secrets：项目根相对落地路径，同时就是 Bitwarden Note 名
+	SecretsBundle string // secrets：Bitwarden folder
+	BundleName    string
+	Members       []AssetSelectionItem
+	Orphan        bool
+	TreeRoot      string // ".dec" 或 secretsTreeRoot
+	TreeBranch    string // 根下分组名（dec cache bundle 或 Bitwarden folder）
+	GroupOrder    int
+	GroupTitle    string
 }
 
 // DeleteSelectionItem 为一次删除操作选中的候选项。
 type DeleteSelectionItem struct {
-	Kind            DeleteItemKind
-	Type            string
-	Name            string
-	Vault           string
-	SecretPath      string
-	SecretsBundle   string
-	RelWithinBundle string
-	BundleName      string
-	Members         []AssetSelectionItem
+	Kind          DeleteItemKind
+	Type          string
+	Name          string
+	Vault         string
+	SecretPath    string
+	SecretsBundle string
+	BundleName    string
+	Members       []AssetSelectionItem
 }
 
 // DeleteProjectInput 描述 Delete 页批量删除输入。
@@ -64,12 +66,12 @@ type DeleteProjectInput struct {
 
 // DeleteProjectResult 汇总 Delete 页批量删除结果。
 type DeleteProjectResult struct {
-	DecDeleted      int
-	SecretsDeleted  int
-	BundlesDeleted  int
-	VersionCommit   string
-	LastCommit      string
-	SkippedReason   string
+	DecDeleted     int
+	SecretsDeleted int
+	BundlesDeleted int
+	VersionCommit  string
+	LastCommit     string
+	SkippedReason  string
 }
 
 // ErrDeleteNotConfirmed 调用方没有完成二次确认。
@@ -106,17 +108,16 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		}
 		groupBundle, groupOrder := groupCtx.forDecVault(vault)
 		candidates = append(candidates, DeleteCandidate{
-			Kind:        kind,
-			Type:        itemType,
-			Name:        name,
-			Vault:       vault,
-			Label:       fmt.Sprintf("[dec/%s] %s / %s%s", itemType, name, vault, tag),
-			Orphan:      orphan,
-			TreeRoot:    ".dec",
-			TreeBranch:  groupBundle,
-			GroupBundle: groupBundle,
-			GroupOrder:  groupOrder,
-			GroupTitle:  groupCtx.groupTitle(groupBundle),
+			Kind:       kind,
+			Type:       itemType,
+			Name:       name,
+			Vault:      vault,
+			Label:      fmt.Sprintf("[dec/%s] %s / %s%s", itemType, name, vault, tag),
+			Orphan:     orphan,
+			TreeRoot:   ".dec",
+			TreeBranch: groupBundle,
+			GroupOrder: groupOrder,
+			GroupTitle: groupCtx.groupTitle(groupBundle),
 		})
 	}
 
@@ -132,9 +133,9 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 	}
 
 	for _, spec := range []struct {
-		dir  string
-		typ  string
-		trim func(string) string
+		dir   string
+		typ   string
+		trim  func(string) string
 		isDir bool
 	}{
 		{"skills", "skill", func(s string) string { return s }, true},
@@ -210,62 +211,39 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		return nil
 	})
 
+	// secrets 候选项只能来自远端 folder 的 note 列表：落地路径就是消费者路径，
+	// 散在项目根，无法靠扫目录区分「这是 dec 管的密文件」和「这是项目自己的文件」。
 	seenSecret := make(map[string]struct{})
-	addSecret := func(secretsBundle, relWithinBundle string, orphan bool) {
-		notePath, pathErr := secrets.NotePathForBundleFile(secretsBundle, relWithinBundle)
-		if pathErr != nil {
+	addSecret := func(secretsBundle, notePath string, localExists bool) {
+		notePath = strings.TrimSpace(notePath)
+		if notePath == "" {
 			return
 		}
-		if _, dup := seenSecret[notePath]; dup {
+		key := secretsBundle + "\x00" + notePath
+		if _, dup := seenSecret[key]; dup {
 			return
 		}
-		seenSecret[notePath] = struct{}{}
+		seenSecret[key] = struct{}{}
 		tag := ""
-		if orphan {
+		if !localExists {
 			tag = " · 仅远端"
 		}
 		groupBundle, groupOrder := groupCtx.forSecretsBundle(secretsBundle)
 		candidates = append(candidates, DeleteCandidate{
-			Kind:            DeleteKindSecret,
-			SecretPath:      notePath,
-			SecretsBundle:   secretsBundle,
-			RelWithinBundle: relWithinBundle,
-			Label:           fmt.Sprintf("[secret] %s%s", relWithinBundle, tag),
-			Orphan:          orphan,
-			TreeRoot:        ".secrets",
-			TreeBranch:      groupBundle,
-			GroupBundle:     groupBundle,
-			GroupOrder:      groupOrder,
-			GroupTitle:      groupCtx.secretsGroupTitle(groupBundle),
+			Kind:          DeleteKindSecret,
+			SecretPath:    notePath,
+			SecretsBundle: secretsBundle,
+			Label:         fmt.Sprintf("[secret] %s%s", notePath, tag),
+			Orphan:        !localExists,
+			TreeRoot:      secretsTreeRoot,
+			TreeBranch:    groupBundle,
+			GroupOrder:    groupOrder,
+			GroupTitle:    groupCtx.secretsGroupTitle(groupBundle),
 		})
-	}
-
-	scanSecretsDir := func(secretsBundleName string) {
-		dir := secrets.SecretsBundleDir(projectRoot, secretsBundleName)
-		_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
-				return nil
-			}
-			rel, relErr := filepath.Rel(dir, path)
-			if relErr != nil {
-				return nil
-			}
-			addSecret(secretsBundleName, rel, false)
-			return nil
-		})
-	}
-
-	// 扫描 `.secrets/` 下所有已存在的 secrets bundle 目录，避免绑定名与落地目录不一致时漏列。
-	secretsBundleNames, listErr := secrets.ListSecretsBundleDirNames(projectRoot)
-	if listErr != nil {
-		return nil, listErr
-	}
-	for _, secretsBundleName := range secretsBundleNames {
-		scanSecretsDir(secretsBundleName)
 	}
 
 	if includeRemote {
-		if err := appendRemoteSecretCandidates(ctx, projectRoot, projectConfig, seenSecret, addSecret, reporter); err != nil {
+		if err := appendRemoteSecretCandidates(ctx, projectRoot, projectConfig, addSecret, reporter); err != nil {
 			return nil, err
 		}
 	}
@@ -274,16 +252,15 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		for _, bo := range ListEnabledBundles(state) {
 			groupBundle, groupOrder := groupCtx.forDecBundle(bo.Name)
 			candidates = append(candidates, DeleteCandidate{
-				Kind:        DeleteKindBundle,
-				BundleName:  bo.Name,
-				Vault:       bo.Vault,
-				Members:     append([]AssetSelectionItem(nil), bo.Members...),
-				Label:       fmt.Sprintf("[bundle] %s / %s · %d 成员", bo.Name, fallbackVaultName(bo), len(bo.Members)),
-				TreeRoot:    ".dec",
-				TreeBranch:  groupBundle,
-				GroupBundle: groupBundle,
-				GroupOrder:  groupOrder,
-				GroupTitle:  groupCtx.groupTitle(groupBundle),
+				Kind:       DeleteKindBundle,
+				BundleName: bo.Name,
+				Vault:      bo.Vault,
+				Members:    append([]AssetSelectionItem(nil), bo.Members...),
+				Label:      fmt.Sprintf("[bundle] %s / %s · %d 成员", bo.Name, fallbackVaultName(bo), len(bo.Members)),
+				TreeRoot:   ".dec",
+				TreeBranch: groupBundle,
+				GroupOrder: groupOrder,
+				GroupTitle: groupCtx.groupTitle(groupBundle),
 			})
 		}
 	}
@@ -436,8 +413,7 @@ func appendRemoteSecretCandidates(
 	ctx context.Context,
 	projectRoot string,
 	projectConfig *types.ProjectConfig,
-	seenSecret map[string]struct{},
-	addSecret func(secretsBundle, relWithinBundle string, orphan bool),
+	addSecret func(secretsBundle, notePath string, localExists bool),
 	reporter Reporter,
 ) error {
 	reporter = defaultReporter(reporter)
@@ -469,34 +445,17 @@ func appendRemoteSecretCandidates(
 	}
 
 	scanRemote := func(decBundleName string, binding secrets.BundleBinding) error {
-		result, pullErr := client.PullBundle(ctx, secrets.PullBundleRequest{
-			DecBundleName: decBundleName,
-			Binding:       binding,
-		})
-		if pullErr != nil {
-			return pullErr
+		folder := secrets.FolderNameFor(binding, decBundleName)
+		notes, listErr := client.ListFolderNotes(ctx, folder)
+		if listErr != nil {
+			return listErr
 		}
-		secretsBundleName := binding.SecretsBundleName
-		if secretsBundleName == "" {
-			secretsBundleName = decBundleName
-		}
-		for _, note := range result.Notes {
-			landing, mapErr := secrets.LandingPathForNote(secretsBundleName, note.RelativePath)
-			if mapErr != nil {
-				continue
+		for _, note := range notes {
+			localExists := false
+			if _, statErr := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(note.Name))); statErr == nil {
+				localExists = true
 			}
-			if _, dup := seenSecret[landing]; dup {
-				continue
-			}
-			relWithinBundle, relErr := relWithinSecretsBundle(secretsBundleName, landing)
-			if relErr != nil {
-				continue
-			}
-			localPath := filepath.Join(secrets.SecretsBundleDir(projectRoot, secretsBundleName), relWithinBundle)
-			if _, statErr := os.Stat(localPath); statErr == nil {
-				continue
-			}
-			addSecret(secretsBundleName, relWithinBundle, true)
+			addSecret(folder, note.Name, localExists)
 		}
 		return nil
 	}
@@ -519,15 +478,6 @@ func appendRemoteSecretCandidates(
 		}
 	}
 	return nil
-}
-
-func relWithinSecretsBundle(secretsBundleName, landingPath string) (string, error) {
-	prefix := ".secrets/" + strings.TrimSpace(secretsBundleName) + "/"
-	trimmed := strings.TrimSpace(landingPath)
-	if !strings.HasPrefix(trimmed, prefix) {
-		return "", fmt.Errorf("非法 secrets 落地路径: %q", landingPath)
-	}
-	return filepath.ToSlash(filepath.Clean(strings.TrimPrefix(trimmed, prefix))), nil
 }
 
 func fallbackVaultName(bo AssetBundleOption) string {
@@ -595,7 +545,7 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 			}
 		case DeleteKindSecret:
 			emit(reporter, EventInfo, "delete.secrets", fmt.Sprintf("删除 secret %s", item.SecretPath), nil)
-			if err := deleteSecretItem(ctx, input.ProjectRoot, item.SecretsBundle, item.RelWithinBundle, reporter); err != nil {
+			if err := deleteSecretItem(ctx, input.ProjectRoot, item.SecretsBundle, item.SecretPath, reporter); err != nil {
 				return nil, err
 			}
 			result.SecretsDeleted++
@@ -612,13 +562,17 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 	return result, nil
 }
 
-func deleteSecretItem(ctx context.Context, projectRoot, secretsBundleName, relWithinBundle string, reporter Reporter) error {
-	localPath := filepath.Join(secrets.SecretsBundleDir(projectRoot, secretsBundleName), relWithinBundle)
+func deleteSecretItem(ctx context.Context, projectRoot, secretsBundleName, notePath string, reporter Reporter) error {
+	notePath = strings.TrimSpace(notePath)
+	if notePath == "" {
+		return fmt.Errorf("Secure Note 路径不能为空")
+	}
+	localPath := filepath.Join(projectRoot, filepath.FromSlash(notePath))
 	if _, err := os.Stat(localPath); err == nil {
 		if rmErr := os.Remove(localPath); rmErr != nil {
 			return fmt.Errorf("删除本地文件 %s 失败: %w", localPath, rmErr)
 		}
-		emit(reporter, EventInfo, "delete.secrets", fmt.Sprintf("  已删本地 %s", localPath), nil)
+		emit(reporter, EventInfo, "delete.secrets", fmt.Sprintf("  已删本地 %s", notePath), nil)
 	}
 
 	configured, err := secrets.IsConfigured()
@@ -636,10 +590,6 @@ func deleteSecretItem(ctx context.Context, projectRoot, secretsBundleName, relWi
 		}
 	}
 
-	notePath, err := secrets.NotePathForBundleFile(secretsBundleName, relWithinBundle)
-	if err != nil {
-		return err
-	}
 	client := secretsClientFactory()
 	if err := client.DeleteSecureNote(ctx, secrets.DeleteSecureNoteRequest{
 		Binding:  secrets.BundleBinding{SecretsBundleName: secretsBundleName},

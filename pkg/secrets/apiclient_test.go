@@ -182,12 +182,11 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 	SetUserKey(userKey)
 	t.Cleanup(ClearSession)
 
-	newName := "mise/conf.d/vikunja.toml"
 	newContent := "[env]\nNEW=1"
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
 		Binding:       BundleBinding{SecretsBundleName: "vikunja_workflow"},
-	}, []SecureNote{{RelativePath: newName, Content: newContent}})
+	}, []SecureNote{{RelativePath: legacyName, Content: newContent}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
 	}
@@ -209,15 +208,20 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 	if len(pullResult.Notes) != 1 {
 		t.Fatalf("Notes = %#v", pullResult.Notes)
 	}
-	if pullResult.Notes[0].RelativePath != newName {
-		t.Fatalf("RelativePath = %q, want %q", pullResult.Notes[0].RelativePath, newName)
+	// push 只改正文，远端 note 名保持原样——否则迁移期间会把改好的消费者路径名改回去。
+	if pullResult.Notes[0].RelativePath != legacyName {
+		t.Fatalf("RelativePath = %q, want %q（push 不应改远端 note 名）", pullResult.Notes[0].RelativePath, legacyName)
+	}
+	if gotName, _ := updateBody["name"].(string); gotName != encName {
+		t.Fatalf("update 应原样回传远端 name 密文: got %q want %q", gotName, encName)
 	}
 	if pullResult.Notes[0].Content != newContent {
 		t.Fatalf("Content = %q, want %q", pullResult.Notes[0].Content, newContent)
 	}
 }
 
-func TestAPIClient_PushBundle_UpdateLegacyCipher(t *testing.T) {
+// note 名只有一种合法形态（项目根相对落地路径），匹配按精确名走。
+func TestAPIClient_PushBundle_UpdateMatchesNameExactly(t *testing.T) {
 	t.Parallel()
 
 	var updatedID string
@@ -265,11 +269,10 @@ func TestAPIClient_PushBundle_UpdateLegacyCipher(t *testing.T) {
 	SetUserKey(bytes.Repeat([]byte{0x04}, 64))
 	t.Cleanup(ClearSession)
 
-	newName := "mise/conf.d/vikunja.toml"
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
 		Binding:       BundleBinding{SecretsBundleName: "vikunja_workflow"},
-	}, []SecureNote{{RelativePath: newName, Content: "[env]\nNEW=1"}})
+	}, []SecureNote{{RelativePath: ".config/mise/conf.d/vikunja.toml", Content: "[env]\nNEW=1"}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
 	}

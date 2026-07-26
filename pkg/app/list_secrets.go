@@ -13,9 +13,9 @@ import (
 )
 
 // SecretFileMetadata 描述一条私密资产的元数据（不含内容）。
+// ProjectRelPath 既是本地落地路径，也是 Bitwarden Note 名。
 type SecretFileMetadata struct {
 	SecretsBundle     string `json:"secrets_bundle"`
-	RelWithinBundle   string `json:"rel_within_bundle"`
 	ProjectRelPath    string `json:"project_rel_path"`
 	LocalExists       bool   `json:"local_exists"`
 	LocalSizeBytes    int64  `json:"local_size_bytes,omitempty"`
@@ -54,35 +54,14 @@ func ListSecretsMetadata(ctx context.Context, projectRoot string, includeRemote 
 
 	byKey := make(map[string]*SecretFileMetadata)
 
-	addLocal := func(secretsBundle, relWithinBundle, projectRel string, info os.FileInfo) {
-		key := secretsBundle + "\x00" + relWithinBundle
-		meta, ok := byKey[key]
-		if !ok {
-			meta = &SecretFileMetadata{
-				SecretsBundle:   secretsBundle,
-				RelWithinBundle: relWithinBundle,
-				ProjectRelPath:  projectRel,
-			}
-			byKey[key] = meta
-		}
-		meta.LocalExists = true
-		if info != nil {
-			meta.LocalSizeBytes = info.Size()
-			meta.LocalModifiedUnix = info.ModTime().Unix()
-		}
+	// 权威索引在远端：落地路径就是消费者路径，散在项目根，无法靠扫目录判断
+	// 哪些文件归 Bitwarden 管。不查远端就只能给出空列表。
+	if !includeRemote {
+		result.SkippedReason = "未查询远端：secrets 清单以 Bitwarden folder 的 Note 列表为准，请设置 includeRemote"
+		return finalizeSecretsMetadata(result, byKey), nil
 	}
 
-	bundleNames, err := secrets.ListSecretsBundleDirNames(projectRoot)
-	if err != nil {
-		return nil, err
-	}
-	for _, secretsBundle := range bundleNames {
-		if err := walkLocalSecretFiles(projectRoot, secretsBundle, addLocal); err != nil {
-			return nil, err
-		}
-	}
-
-	if includeRemote && configured {
+	if configured {
 		if !secrets.HasSession() {
 			emit(reporter, EventInfo, "secrets.list", "[auth] secrets list: Bitwarden session required", nil)
 			if err := ensureBitwardenSession(ctx, reporter, "secrets.list"); err != nil {
@@ -118,33 +97,7 @@ func sortSecretMetadata(files []SecretFileMetadata) {
 		if files[i].SecretsBundle != files[j].SecretsBundle {
 			return files[i].SecretsBundle < files[j].SecretsBundle
 		}
-		return files[i].RelWithinBundle < files[j].RelWithinBundle
-	})
-}
-
-func walkLocalSecretFiles(projectRoot, secretsBundle string, addLocal func(string, string, string, os.FileInfo)) error {
-	dir := secrets.SecretsBundleDir(projectRoot, secretsBundle)
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		relWithinBundle, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-		relWithinBundle = filepath.ToSlash(relWithinBundle)
-		if secrets.IsIntegrationAuthRelWithinBundle(relWithinBundle) {
-			return nil
-		}
-		projectRel, err := secrets.SecretsLocalPath(secretsBundle, relWithinBundle)
-		if err != nil {
-			return nil
-		}
-		addLocal(secretsBundle, relWithinBundle, projectRel, info)
-		return nil
+		return files[i].ProjectRelPath < files[j].ProjectRelPath
 	})
 }
 
@@ -164,73 +117,41 @@ func mergeRemoteSecretMetadata(ctx context.Context, projectRoot string, byKey ma
 	}
 	client := secretsClientFactory()
 
-	markRemote := func(secretsBundle, relWithinBundle string) {
-		key := secretsBundle + "\x00" + relWithinBundle
-		meta, ok := byKey[key]
-		if !ok {
-			projectRel, mapErr := secrets.SecretsLocalPath(secretsBundle, relWithinBundle)
-			if mapErr != nil {
-				return
-			}
-			meta = &SecretFileMetadata{
-				SecretsBundle:   secretsBundle,
-				RelWithinBundle: relWithinBundle,
-				ProjectRelPath:  projectRel,
-			}
-			byKey[key] = meta
+	// ListFolderNotes 只回 note 名，不回正文——元数据接口绝不能碰到密钥内容。
+	scanFolder := func(label, folder string) {
+		notes, listErr := client.ListFolderNotes(ctx, folder)
+		if listErr != nil {
+			emit(reporter, EventWarn, "secrets.list", fmt.Sprintf("列出远端 %s 元数据失败: %v", label, listErr), nil)
+			return
 		}
-		exists := true
-		meta.RemoteExists = &exists
+		for _, note := range notes {
+			rel := strings.TrimSpace(note.Name)
+			if rel == "" {
+				continue
+			}
+			key := folder + "\x00" + rel
+			meta, ok := byKey[key]
+			if !ok {
+				meta = &SecretFileMetadata{SecretsBundle: folder, ProjectRelPath: rel}
+				byKey[key] = meta
+			}
+			exists := true
+			meta.RemoteExists = &exists
+			if info, statErr := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(rel))); statErr == nil {
+				meta.LocalExists = true
+				meta.LocalSizeBytes = info.Size()
+				meta.LocalModifiedUnix = info.ModTime().Unix()
+			}
+		}
 	}
 
 	for _, decBundle := range plan.EnabledBundles {
 		binding := cfg.ResolveBinding(decBundle)
-		secretsBundle := binding.SecretsBundleName
-		if secretsBundle == "" {
-			secretsBundle = decBundle
-		}
-		pullResult, pullErr := client.PullBundle(ctx, secrets.PullBundleRequest{
-			DecBundleName: decBundle,
-			Binding:       binding,
-		})
-		if pullErr != nil {
-			emit(reporter, EventWarn, "secrets.list", fmt.Sprintf("拉取远端元数据失败 bundle=%s: %v", decBundle, pullErr), nil)
-			continue
-		}
-		for _, note := range pullResult.Notes {
-			_ = note.Content // 明确丢弃，不暴露
-			rel := note.RelativePath
-			if rel == "" {
-				continue
-			}
-			canon, canonErr := secrets.CanonicalNoteName(secretsBundle, rel)
-			if canonErr != nil {
-				continue
-			}
-			markRemote(secretsBundle, canon)
-		}
+		scanFolder("bundle "+decBundle, secrets.FolderNameFor(binding, decBundle))
 	}
-
 	if plan.ProjectSecretsName != "" {
 		binding := secrets.ProjectSecretsBinding(plan.ProjectSecretsName)
-		secretsBundle := binding.SecretsBundleName
-		pullResult, pullErr := client.PullBundle(ctx, secrets.PullBundleRequest{
-			DecBundleName: plan.ProjectSecretsName,
-			Binding:       binding,
-		})
-		if pullErr != nil {
-			emit(reporter, EventWarn, "secrets.list", fmt.Sprintf("拉取 project secrets 元数据失败: %v", pullErr), nil)
-		} else {
-			for _, note := range pullResult.Notes {
-				_ = note.Content
-				canon, canonErr := secrets.CanonicalNoteName(secretsBundle, note.RelativePath)
-				if canonErr != nil {
-					continue
-				}
-				markRemote(secretsBundle, canon)
-			}
-		}
+		scanFolder("project secrets", secrets.FolderNameFor(binding, plan.ProjectSecretsName))
 	}
-
 	return nil
 }

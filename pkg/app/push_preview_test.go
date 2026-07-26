@@ -1,29 +1,22 @@
 package app
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
-func TestPreviewPushProjectAssets_CountsEnabledAndSecrets(t *testing.T) {
+// 预览不访问 Bitwarden，所以只能报会涉及几个 folder。
+// 待推文件数由远端 folder 的 note 列表决定，不联网就数不出来，也不该猜。
+func TestPreviewPushProjectAssets_CountsSecretsTargetsNotFiles(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "Demo",
 		EnabledBundles: []string{"combo"},
 	}); err != nil {
-		t.Fatal(err)
-	}
-
-	secretsFile := filepath.Join(projectRoot, ".secrets", "combo", "tokens", "api.key")
-	if err := os.MkdirAll(filepath.Dir(secretsFile), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(secretsFile, []byte("secret"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -34,7 +27,8 @@ func TestPreviewPushProjectAssets_CountsEnabledAndSecrets(t *testing.T) {
 	if preview.EnabledBundleCount != 1 {
 		t.Fatalf("EnabledBundleCount = %d, want 1", preview.EnabledBundleCount)
 	}
-	if preview.SecretsFileCount != 1 {
-		t.Fatalf("SecretsFileCount = %d, want 1", preview.SecretsFileCount)
+	// 1 个 bundle folder + 1 个 project folder。
+	if preview.SecretsTargetCount != 2 {
+		t.Fatalf("SecretsTargetCount = %d, want 2", preview.SecretsTargetCount)
 	}
 }

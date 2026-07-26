@@ -9,6 +9,9 @@ type Client interface {
 	PullBundle(ctx context.Context, req PullBundleRequest) (*PullBundleResult, error)
 	PushBundle(ctx context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error)
 	DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error
+	// ListFolderNotes 枚举 folder 下的 note 名。落地路径散在项目根，没有可靠的
+	// 本地枚举方式，远端 folder 的 note 列表才是权威索引。
+	ListFolderNotes(ctx context.Context, folderName string) ([]RemoteNote, error)
 }
 
 // StubClient 测试/开发用 stub；按 Bitwarden folder 返回预设 Note。
@@ -38,31 +41,26 @@ func (c *StubClient) PushBundle(_ context.Context, req PushBundleRequest, notes 
 	if c.NotesByFolder == nil {
 		c.NotesByFolder = make(map[string][]SecureNote)
 	}
-	localNames := make(map[string]struct{}, len(notes))
-	for _, note := range notes {
-		localNames[note.RelativePath] = struct{}{}
+	// 与 APIClient 一致：只 create/update，不删除本次未覆盖的远端 note。
+	merged := append([]SecureNote(nil), c.NotesByFolder[folder]...)
+	indexOf := make(map[string]int, len(merged))
+	for i, note := range merged {
+		indexOf[note.RelativePath] = i
 	}
-	existing := make(map[string]SecureNote)
-	for _, note := range c.NotesByFolder[folder] {
-		existing[note.RelativePath] = note
-	}
+
 	result := &PushBundleResult{}
-	kept := make([]SecureNote, 0, len(notes))
 	for _, note := range notes {
-		if _, ok := existing[note.RelativePath]; ok {
+		if i, ok := indexOf[note.RelativePath]; ok {
+			merged[i] = note
 			result.Updated++
 		} else {
+			indexOf[note.RelativePath] = len(merged)
+			merged = append(merged, note)
 			result.Created++
 		}
 		result.Paths = append(result.Paths, note.RelativePath)
-		kept = append(kept, note)
 	}
-	for path := range existing {
-		if _, ok := localNames[path]; !ok {
-			result.Deleted++
-		}
-	}
-	c.NotesByFolder[folder] = kept
+	c.NotesByFolder[folder] = merged
 	return result, nil
 }
 

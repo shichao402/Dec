@@ -10,11 +10,13 @@ import (
 )
 
 // PushProjectAssetsPreview 描述 Push 前的本地摘要（不访问 Bitwarden、不提交 Git）。
+//
+// 无 secrets 文件数：待推文件由远端 folder 的 note 列表决定，数不出来又不联网，
+// 这里只报会涉及几个 folder。
 type PushProjectAssetsPreview struct {
 	EnabledBundleCount  int
 	EnabledBundleNames  []string
 	ProjectSecretsName  string
-	SecretsFileCount    int
 	SecretsTargetCount  int
 	DecCandidateCount   int
 	DecHasChanges       bool
@@ -51,23 +53,6 @@ func PreviewPushProjectAssets(projectRoot string) (*PushProjectAssetsPreview, er
 	}
 	preview.SecretsTargetCount = plan.Total
 	preview.ProjectSecretsName = plan.ProjectSecretsName
-
-	for _, bundleName := range plan.EnabledBundles {
-		binding := cfg.ResolveBinding(bundleName)
-		notes, scanErr := secrets.ScanSecretsBundleFiles(projectRoot, binding.SecretsBundleName)
-		if scanErr != nil {
-			return nil, scanErr
-		}
-		preview.SecretsFileCount += len(notes)
-	}
-	if plan.ProjectSecretsName != "" {
-		binding := secrets.ProjectSecretsBinding(plan.ProjectSecretsName)
-		notes, scanErr := secrets.ScanSecretsBundleFiles(projectRoot, binding.SecretsBundleName)
-		if scanErr != nil {
-			return nil, scanErr
-		}
-		preview.SecretsFileCount += len(notes)
-	}
 
 	candidate, hasChanges, skipped, decErr := previewDecPushChanges(context.Background(), projectRoot, projectConfig, nil)
 	if decErr != nil {

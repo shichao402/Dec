@@ -12,7 +12,7 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 
 - Bitwarden session **仅在当前进程内存**中保存；进程退出即失效。
 - **禁止**将 session 持久化到磁盘：`~/.dec/secrets/session`、`BW_SESSION` 文件、或任何 env/配置文件形式的 session 缓存均不允许。
-- `SyncStateFile`（`~/.dec/secrets/state.json`）**不得**包含 session 字段；只记录同步元数据。
+- 不存在 `~/.dec/secrets/state.json` 之类的本地同步状态文件（已删除，见 `Documents/decisions/0001-secrets-landing-path.md`），不要为了缓存 session 而重新引入。
 - 同一进程内已有有效 session → 直接复用；无 session → 先尝试程序化解锁（见下），失败再阻塞等待 web unlock。
 
 ## 开发 / Agent 程序化解锁

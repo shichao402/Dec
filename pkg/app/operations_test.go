@@ -340,18 +340,11 @@ members:
 		t.Fatalf("首次 pull 失败: %v", err)
 	}
 
-	secretDir := filepath.Join(projectRoot, ".secrets", "vikunja_workflow", "mise", "conf.d")
-	if err := os.MkdirAll(secretDir, 0755); err != nil {
+	landedSecret := filepath.Join(projectRoot, ".config", "mise", "conf.d", "vikunja.toml")
+	if err := os.MkdirAll(filepath.Dir(landedSecret), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(secretDir, "vikunja.toml"), []byte("X=1\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	projectSecret := filepath.Join(projectRoot, ".secrets", "Demo", "tokens")
-	if err := os.MkdirAll(projectSecret, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectSecret, "keep.txt"), []byte("keep\n"), 0600); err != nil {
+	if err := os.WriteFile(landedSecret, []byte("X=1\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -373,16 +366,11 @@ members:
 	if len(result.CleanedAssets) == 0 {
 		t.Fatalf("应清理 Dec 资产残留, CleanedAssets=%#v", result.CleanedAssets)
 	}
-	if len(result.CleanedSecrets) != 1 || result.CleanedSecrets[0] != "vikunja_workflow" {
-		t.Fatalf("CleanedSecrets = %#v, 期望 [vikunja_workflow]", result.CleanedSecrets)
-	}
 	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("全取消后 IDE skill 应删除, err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "vikunja_workflow")); !os.IsNotExist(err) {
-		t.Fatalf("全取消后 secrets bundle 应删除, err=%v", err)
-	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "Demo", "tokens", "keep.txt")); err != nil {
-		t.Fatalf("project secrets 应保留: %v", err)
+	// 落地的密文件在消费者路径上，停用 bundle 不会也不该动它——删除走 Delete 页。
+	if _, err := os.Stat(landedSecret); err != nil {
+		t.Fatalf("停用 bundle 不应删除已落地的密文件: %v", err)
 	}
 }

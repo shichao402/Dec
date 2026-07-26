@@ -297,6 +297,14 @@ type model struct {
 	vaultAutoApplyNotice string
 	// focus 是当前键盘交互上下文（侧栏 / 内容 / bundle 成员）。
 	focus focusContext
+	// addSecretStage 是 Project 页「登记新 secret」的阶段；空串表示流程未开启。
+	addSecretStage       string
+	addSecretPathInput   string
+	addSecretFolderInput string
+	addSecretFolders     []string
+	addSecretFolderIdx   int
+	addSecretResult      *app.AddSecretResult
+	addSecretErr         error
 }
 
 func newModel(projectRoot, currentVersion string) model {
@@ -586,6 +594,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog("Editor session finished; reloading project vars")
 		}
 		return m, loadProjectVarsCmd(m.projectRoot)
+	case addSecretDoneMsg:
+		m.addSecretStage = ""
+		m.addSecretResult = msg.result
+		m.addSecretErr = msg.err
+		for _, line := range msg.logs {
+			m.pushLog(line)
+		}
+		if msg.err != nil {
+			m.pushLog("登记 secret 失败: " + msg.err.Error())
+		}
+		return m, nil
 	case runEventMsg:
 		m.recordRunEvent(msg.event)
 		if m.runStream != nil {
@@ -694,6 +713,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.removeFilterInput && m.isRunPage() {
 			return m.handleRemoveFilterInput(msg)
+		}
+		if m.addSecretStage != "" && m.isProjectPage() {
+			return m.handleAddSecretKey(msg)
 		}
 		if m.isRunPage() && m.pushStage != "" && !m.runningPull {
 			return m.handlePushStageKey(msg)
@@ -862,6 +884,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastInitErr = nil
 				m.pushLog("Initializing project config (扫描仓库资产)...")
 				return m, initProjectConfigCmd(m.projectRoot)
+			}
+			return m, nil
+		case "A":
+			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil {
+				if !m.projectSettings.ProjectConfigReady {
+					m.pushLog("登记 secret 需要先初始化 .dec/config.yaml，按 i 初始化")
+					return m, nil
+				}
+				m.beginAddSecret()
+				return m, nil
 			}
 			return m, nil
 		case "R":
@@ -1856,7 +1888,7 @@ func (m model) renderProjectPage(width int) string {
 		summary = append(summary, shellMutedStyle.Render("当前项目设置与磁盘一致。"))
 	}
 
-	summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · space 切换模式/IDE · s 保存 · c 清除覆盖 · e 编辑变量"))
+	summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · space 切换模式/IDE · s 保存 · c 清除覆盖 · e 编辑变量 · A 登记 secret"))
 	if m.savingProjectSettings {
 		summary = append(summary, shellWarnStyle.Render("正在保存项目设置..."))
 	}
@@ -1864,13 +1896,25 @@ func (m model) renderProjectPage(width int) string {
 		summary = append(summary, shellWarnStyle.Render("编辑器返回错误: "+m.lastEditErr.Error()))
 	}
 
+	if outcome := m.renderAddSecretOutcome(); outcome != "" {
+		summary = append(summary, outcome)
+	}
+
 	list := m.renderProjectSettingsList()
 	detail := m.renderProjectSettingsDetails()
 	varsBlock := m.renderProjectVarsBlock()
+	trailing := make([]string, 0, 2)
+	if m.addSecretStage != "" {
+		trailing = append(trailing, m.renderAddSecretBlock())
+	}
+	if varsBlock != "" {
+		trailing = append(trailing, varsBlock)
+	}
+
 	if width < 88 {
 		parts := append(summary, "", list, "", detail)
-		if varsBlock != "" {
-			parts = append(parts, "", varsBlock)
+		for _, block := range trailing {
+			parts = append(parts, "", block)
 		}
 		return strings.Join(parts, "\n")
 	}
@@ -1881,8 +1925,8 @@ func (m model) renderProjectPage(width int) string {
 	right := lipgloss.NewStyle().Width(rightWidth).Render(detail)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	result := strings.Join(summary, "\n") + "\n\n" + body
-	if varsBlock != "" {
-		result += "\n\n" + varsBlock
+	for _, block := range trailing {
+		result += "\n\n" + block
 	}
 	return result
 }
@@ -2145,7 +2189,7 @@ func (m model) renderRunIdleGuide() []string {
 	lines := []string{
 		shellTitleStyle.Render("建议"),
 		shellMutedStyle.Render("· p 拉取 Dec bundle + secrets + IDE 安装"),
-		shellMutedStyle.Render("· P 推送到远端（Dec cache + .secrets/ → Bitwarden，需两次确认）"),
+		shellMutedStyle.Render("· P 推送到远端（Dec cache → Git vault + secrets → Bitwarden，需两次确认）"),
 		shellMutedStyle.Render("· x 删除已启用 bundle（整包，不可逆）"),
 	}
 	if m.overview != nil && countOverviewEnabledBundles(m.overview) == 0 && m.overview.EnabledCount == 0 {
@@ -2257,7 +2301,7 @@ func (m model) renderPushSummary() []string {
 	if p.ProjectSecretsName != "" {
 		lines = append(lines, fmt.Sprintf("Project secrets: %s", p.ProjectSecretsName))
 	}
-	secretsLine := fmt.Sprintf("Secrets  目标 %d · 本地文件 %d", p.SecretsTargetCount, p.SecretsFileCount)
+	secretsLine := fmt.Sprintf("Secrets  %d 个 Bitwarden folder（待推文件按远端 Note 列表确定）", p.SecretsTargetCount)
 	if !p.BitwardenConfigured {
 		secretsLine += "（Bitwarden 未配置，将跳过）"
 	}
@@ -2278,7 +2322,7 @@ func (m model) renderPushConfirm() []string {
 	lines = append(lines,
 		shellWarnStyle.Render("⚠️  将推送到远端 Dec Git vault 与 Bitwarden，操作不可逆。"),
 		shellMutedStyle.Render("Dec cache 变更将 commit 并 push 到 vault 仓库。"),
-		shellMutedStyle.Render(".secrets/ 下文件将 create/update Bitwarden Secure Note。"),
+		shellMutedStyle.Render("各 Bitwarden folder 已有的 Secure Note 将按本地对应文件更新（不删远端）。"),
 		shellMutedStyle.Render("执行中若 Bitwarden 未解锁，将自动尝试解锁（可设 DEC_BW_PASSWORD 免浏览器）。"),
 		shellMutedStyle.Render("按 y 确认执行 · n/esc 返回摘要"),
 	)

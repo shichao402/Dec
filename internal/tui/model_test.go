@@ -366,7 +366,6 @@ func TestModelRunPageHotkeysStartPush(t *testing.T) {
 		return &app.PushProjectAssetsPreview{
 			EnabledBundleCount: 1,
 			EnabledBundleNames: []string{"vikunja"},
-			SecretsFileCount:   2,
 			SecretsTargetCount: 1,
 			DecHasChanges:      true,
 			DecCandidateCount:  3,
@@ -779,9 +778,9 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 			TreeRoot: ".dec", TreeBranch: "vikunja", GroupOrder: 0, GroupTitle: "vikunja",
 		},
 		{
-			Kind: app.DeleteKindSecret, Label: "[secret] mise/conf.d/vikunja.toml",
-			SecretPath: "mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
-			TreeRoot: ".secrets", TreeBranch: "vikunja_workflow", GroupOrder: 0, GroupTitle: "vikunja_workflow",
+			Kind: app.DeleteKindSecret, Label: "[secret] .config/mise/conf.d/vikunja.toml",
+			SecretPath: ".config/mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
+			TreeRoot: "secrets", TreeBranch: "vikunja_workflow", GroupOrder: 0, GroupTitle: "vikunja_workflow",
 		},
 		{
 			Kind: app.DeleteKindBundle, Label: "[bundle] vikunja / vikunja · 2 成员", BundleName: "vikunja",
@@ -797,7 +796,8 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 		"▾ cache",
 		"▾ vikunja",
 		"↳ demo",
-		"▾ .secrets",
+		"▾ secrets (Bitwarden)",
+		"▾ vikunja_workflow",
 		"vikunja.toml",
 		"[bundle]",
 	} {

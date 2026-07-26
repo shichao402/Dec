@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,14 +15,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestListSecretsMetadata_LocalOnlyNoContent(t *testing.T) {
+// 落地路径就是消费者路径，散在项目根，扫目录无法区分哪些文件归 Bitwarden 管。
+// 不查远端时只能给空列表 + 明确理由，不能靠猜。
+func TestListSecretsMetadata_WithoutRemoteReturnsNothingAndSaysWhy(t *testing.T) {
 	projectRoot := t.TempDir()
-	secretsDir := filepath.Join(projectRoot, ".secrets", "vikunja_workflow", "mise", "conf.d")
-	if err := os.MkdirAll(secretsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	secretFile := filepath.Join(secretsDir, "vikunja.toml")
-	if err := os.WriteFile(secretFile, []byte("TOP_SECRET_TOKEN=never-expose\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(projectRoot, ".env.local"), []byte("TOKEN=x\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -29,15 +27,11 @@ func TestListSecretsMetadata_LocalOnlyNoContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSecretsMetadata() = %v", err)
 	}
-	if len(result.Files) != 1 {
-		t.Fatalf("files = %#v", result.Files)
+	if len(result.Files) != 0 {
+		t.Fatalf("files = %#v, 期望空", result.Files)
 	}
-	file := result.Files[0]
-	if file.SecretsBundle != "vikunja_workflow" {
-		t.Fatalf("bundle = %q", file.SecretsBundle)
-	}
-	if !file.LocalExists || file.LocalSizeBytes == 0 {
-		t.Fatalf("local meta = %#v", file)
+	if !strings.Contains(result.SkippedReason, "includeRemote") {
+		t.Fatalf("SkippedReason = %q, 应说明需要查远端", result.SkippedReason)
 	}
 }
 
@@ -64,7 +58,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	orig := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"vikunja_workflow": {{RelativePath: "mise/conf.d/vikunja.toml", Content: "SECRET=1"}},
+			"vikunja_workflow": {{RelativePath: ".config/mise/conf.d/vikunja.toml", Content: "SECRET=1"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = orig })
@@ -76,6 +70,13 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	landed := filepath.Join(projectRoot, ".config", "mise", "conf.d", "vikunja.toml")
+	if err := os.MkdirAll(filepath.Dir(landed), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(landed, []byte("SECRET=1"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := ListSecretsMetadata(context.Background(), projectRoot, true, nil)
 	if err != nil {
@@ -84,14 +85,18 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	if !result.RemoteChecked {
 		t.Fatalf("expected remote checked, got %#v", result)
 	}
-	foundRemote := false
-	for _, f := range result.Files {
-		if f.RemoteExists != nil && *f.RemoteExists {
-			foundRemote = true
-		}
+	if len(result.Files) != 1 {
+		t.Fatalf("files = %#v, 期望 1 条", result.Files)
 	}
-	if !foundRemote {
-		t.Fatalf("expected remote file metadata: %#v", result.Files)
+	file := result.Files[0]
+	if file.SecretsBundle != "vikunja_workflow" || file.ProjectRelPath != ".config/mise/conf.d/vikunja.toml" {
+		t.Fatalf("元数据 = %#v", file)
+	}
+	if file.RemoteExists == nil || !*file.RemoteExists {
+		t.Fatalf("RemoteExists = %#v", file.RemoteExists)
+	}
+	if !file.LocalExists || file.LocalSizeBytes == 0 {
+		t.Fatalf("本地元数据 = %#v", file)
 	}
 }
 
