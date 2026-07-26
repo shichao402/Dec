@@ -1224,10 +1224,13 @@ func TestModelRunPageUpdateConfirmYTriggersDoUpdate(t *testing.T) {
 	oldDo := updateDoUpdateOperation
 	defer func() { updateDoUpdateOperation = oldDo }()
 	called := false
-	updateDoUpdateOperation = func(currentVersion string) error {
+	updateDoUpdateOperation = func(currentVersion, latestVersion string) error {
 		called = true
 		if currentVersion != "v1.0.0" {
 			t.Fatalf("currentVersion = %q, 期望 %q", currentVersion, "v1.0.0")
+		}
+		if latestVersion != "v1.2.0" {
+			t.Fatalf("latestVersion = %q, 期望 %q", latestVersion, "v1.2.0")
 		}
 		return nil
 	}
@@ -1292,7 +1295,7 @@ func TestModelRunPageUpdateConfirmNCancelsFlow(t *testing.T) {
 func TestModelRunPageUpdateFailurePath(t *testing.T) {
 	oldDo := updateDoUpdateOperation
 	defer func() { updateDoUpdateOperation = oldDo }()
-	updateDoUpdateOperation = func(currentVersion string) error {
+	updateDoUpdateOperation = func(currentVersion, latestVersion string) error {
 		return errors.New("download failed")
 	}
 
@@ -1340,8 +1343,13 @@ func TestModelRunPageUpdateRenderingShowsConfirmPanel(t *testing.T) {
 
 func TestModelRunPageUpdateDoneRenderingShowsFallbackOnFailure(t *testing.T) {
 	oldCmd := updateManualInstallCommand
-	defer func() { updateManualInstallCommand = oldCmd }()
+	oldMirror := updateMirrorInstallCommand
+	defer func() {
+		updateManualInstallCommand = oldCmd
+		updateMirrorInstallCommand = oldMirror
+	}()
 	updateManualInstallCommand = func() string { return "curl -fsSL example.com | bash" }
+	updateMirrorInstallCommand = func() string { return "curl -fsSL mirror.example.com | bash" }
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
@@ -1351,11 +1359,11 @@ func TestModelRunPageUpdateDoneRenderingShowsFallbackOnFailure(t *testing.T) {
 	m.updateErr = errors.New("download failed")
 
 	view := m.View()
-	if !strings.Contains(view, "更新失败") {
-		t.Fatalf("失败视图缺少 更新失败:\n%s", view)
-	}
-	if !strings.Contains(view, "curl -fsSL example.com | bash") {
-		t.Fatalf("失败视图缺少 fallback 命令:\n%s", view)
+	checks := []string{"更新失败", "curl -fsSL example.com | bash", "curl -fsSL mirror.example.com | bash"}
+	for _, check := range checks {
+		if !strings.Contains(view, check) {
+			t.Fatalf("失败视图缺少 %q:\n%s", check, view)
+		}
 	}
 }
 
@@ -2286,4 +2294,3 @@ func TestNewModelWithOptionsDefaultsMatchLegacy(t *testing.T) {
 		t.Fatal("默认 RunOptions 不应开启 configInitMode")
 	}
 }
-

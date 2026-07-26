@@ -63,16 +63,26 @@ function Install-Dec {
     Write-ColorOutput "安装目录: $installDir" -Type "Info"
     Write-ColorOutput "更新分支: $updateBranch" -Type "Info"
 
-    try {
-        $versionJson = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/shichao402/Dec/$updateBranch/version.json" -ErrorAction Stop
-        $latestVersion = $versionJson.version
-    } catch {
-        Write-ColorOutput "无法从 $updateBranch 获取版本信息" -Type "Error"
-        exit 1
+    # raw.githubusercontent.com 在部分网络下会间歇性超时，失败时回退到 CDN 镜像
+    $versionSources = @(
+        "https://raw.githubusercontent.com/shichao402/Dec/$updateBranch/version.json",
+        "https://cdn.jsdelivr.net/gh/shichao402/Dec@$updateBranch/version.json"
+    )
+    $latestVersion = $null
+    for ($i = 0; $i -lt $versionSources.Count; $i++) {
+        try {
+            $versionJson = Invoke-RestMethod -Uri $versionSources[$i] -TimeoutSec 20 -ErrorAction Stop
+            $latestVersion = $versionJson.version
+            if ($latestVersion) { break }
+        } catch {
+            if ($i -lt $versionSources.Count - 1) {
+                Write-ColorOutput "从 $($versionSources[$i]) 获取版本信息失败，尝试下一个来源" -Type "Warning"
+            }
+        }
     }
-
     if (-not $latestVersion) {
-        Write-ColorOutput "无法解析版本号" -Type "Error"
+        Write-ColorOutput "无法从 $updateBranch 获取版本信息" -Type "Error"
+        Write-ColorOutput "若使用代理客户端，请先设置 `$env:HTTPS_PROXY 后重试" -Type "Error"
         exit 1
     }
 

@@ -97,10 +97,23 @@ main() {
     print_info "安装目录: ${install_dir}"
     print_info "更新分支: ${update_branch}"
 
-    local version_json
-    version_json=$(curl -fsSL "https://raw.githubusercontent.com/shichao402/Dec/${update_branch}/version.json" 2>/dev/null || true)
+    # raw.githubusercontent.com 在部分网络下会间歇性超时，失败时回退到 CDN 镜像
+    local version_sources=(
+        "https://raw.githubusercontent.com/shichao402/Dec/${update_branch}/version.json"
+        "https://cdn.jsdelivr.net/gh/shichao402/Dec@${update_branch}/version.json"
+    )
+    local version_json=""
+    local i
+    for i in "${!version_sources[@]}"; do
+        version_json=$(curl -fsSL --connect-timeout 8 --max-time 20 "${version_sources[$i]}" 2>/dev/null || true)
+        [ -n "${version_json}" ] && break
+        if [ $((i + 1)) -lt ${#version_sources[@]} ]; then
+            print_warning "从 ${version_sources[$i]} 获取版本信息失败，尝试下一个来源"
+        fi
+    done
     if [ -z "${version_json}" ]; then
         print_error "无法从 ${update_branch} 分支获取版本信息"
+        print_error "若使用代理客户端，请先 export HTTPS_PROXY=http://127.0.0.1:<端口> 后重试"
         exit 1
     fi
 

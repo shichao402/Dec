@@ -94,9 +94,9 @@ type projectVarsEditedMsg struct {
 type focusContext string
 
 const (
-	focusSidebar         focusContext = "sidebar"
-	focusContent         focusContext = "content"
-	focusBundleExpanded  focusContext = "bundleExpanded"
+	focusSidebar        focusContext = "sidebar"
+	focusContent        focusContext = "content"
+	focusBundleExpanded focusContext = "bundleExpanded"
 )
 
 type runEventMsg struct {
@@ -188,45 +188,49 @@ var updateCheckOperation = func(currentVersion string) (*update.CheckResult, err
 	return update.Check(currentVersion)
 }
 
-var updateDoUpdateOperation = func(currentVersion string) error {
-	return update.DoUpdate(currentVersion)
+var updateDoUpdateOperation = func(currentVersion, latestVersion string) error {
+	return update.DoUpdate(currentVersion, latestVersion)
 }
 
 var updateManualInstallCommand = func() string {
 	return update.ManualInstallCommand()
 }
 
+var updateMirrorInstallCommand = func() string {
+	return update.MirrorInstallCommand()
+}
+
 type model struct {
-	projectRoot          string
-	currentVersion       string
-	pages                []string
-	pageIndex            int
-	width                int
-	height               int
-	overview             *app.ProjectOverview
-	overviewErr          error
-	assets               *app.AssetSelectionState
-	assetsErr            error
-	settings             *app.GlobalSettingsState
-	settingsErr          error
-	logs                 []string
-	assetTree              TreeList
+	projectRoot    string
+	currentVersion string
+	pages          []string
+	pageIndex      int
+	width          int
+	height         int
+	overview       *app.ProjectOverview
+	overviewErr    error
+	assets         *app.AssetSelectionState
+	assetsErr      error
+	settings       *app.GlobalSettingsState
+	settingsErr    error
+	logs           []string
+	assetTree      TreeList
 	// bundleSelection 是 TUI 内对 ProjectConfig.EnabledBundles 的镜像。
 	// 进入 Assets 页后：从 assets.Bundles[i].Enabled==true 初始化；保存时随 Items 一起传给 SaveAssetSelection。
-	bundleSelection []string
-	assetFilter          string
-	assetFilterInput     bool
-	assetsDirty          bool
-	savingAssets         bool
+	bundleSelection  []string
+	assetFilter      string
+	assetFilterInput bool
+	assetsDirty      bool
+	savingAssets     bool
 	// assetTypeFilter 取值 "all" / "skill" / "command" / "rule" / "mcp" / "bundle"，按 t 键轮转。
 	// "bundle" 表示只显示 bundle 节点（以及它们展开的成员）；其他值只影响单资产行的过滤。
-	assetTypeFilter      string
-	settingsCursor       int
-	settingsDirty        bool
-	savingSettings       bool
-	settingsRepoInput    string
-	settingsRepoEditing  bool
-	settingsSelectedIDEs []string
+	assetTypeFilter             string
+	settingsCursor              int
+	settingsDirty               bool
+	savingSettings              bool
+	settingsRepoInput           string
+	settingsRepoEditing         bool
+	settingsSelectedIDEs        []string
 	projectSettings             *app.ProjectSettingsState
 	projectSettingsErr          error
 	projectSettingsCursor       int
@@ -240,48 +244,48 @@ type model struct {
 	projectVars                 *app.ProjectVarsView
 	projectVarsErr              error
 	lastEditErr                 error
-	runningPull          bool
-	runProgress          *app.Progress
-	runEvents            []string
-	runPinLine           string
-	runShowHelp          bool
-	runResult            *app.PullProjectAssetsResult
-	pushResult           *app.PushProjectAssetsResult
-	runErr               error
-	runStream            <-chan tea.Msg
-	runCtx               context.Context
-	runCancel            context.CancelFunc
-	runMode              string // "pull" | "push" | "remove" | "update"
-	removeStage          string // "", "select", "confirm", "running"
-	removeCursor         int
-	removeFilter         string
-	removeFilterInput    bool
-	removeTarget         *app.AssetBundleOption
-	runningRemove        bool
-	removeResult         *app.RemoveBundleResult
-	removeErr            error
-	pushStage            string // "", "summary", "confirm", "running"
-	pushPreview          *app.PushProjectAssetsPreview
-	pushPreviewErr       error
-	updateStage          string // "", "checking", "result", "confirm", "running", "done"
-	updateResult         *update.CheckResult
-	updateErr            error
-	updateDoneVersion    string
-	updatingBinary       bool
-	deleteCandidates         []app.DeleteCandidate
-	deleteTree               TreeList
-	deleteFilter             string
-	deleteFilterInput        bool
-	deleteStage              string // "", "list", "summary", "confirm", "running"
-	deleteCandidatesLoaded   bool
-	loadingDeleteCandidates  bool
-	deleteLoadErr            error
-	deleteLoadCancel         context.CancelFunc
-	deleteLoadGen            uint64
-	deleteIncludeRemote      bool
-	runningDelete            bool
-	deleteResult             *app.DeleteProjectResult
-	deleteErr                error
+	runningPull                 bool
+	runProgress                 *app.Progress
+	runEvents                   []string
+	runPinLine                  string
+	runShowHelp                 bool
+	runResult                   *app.PullProjectAssetsResult
+	pushResult                  *app.PushProjectAssetsResult
+	runErr                      error
+	runStream                   <-chan tea.Msg
+	runCtx                      context.Context
+	runCancel                   context.CancelFunc
+	runMode                     string // "pull" | "push" | "remove" | "update"
+	removeStage                 string // "", "select", "confirm", "running"
+	removeCursor                int
+	removeFilter                string
+	removeFilterInput           bool
+	removeTarget                *app.AssetBundleOption
+	runningRemove               bool
+	removeResult                *app.RemoveBundleResult
+	removeErr                   error
+	pushStage                   string // "", "summary", "confirm", "running"
+	pushPreview                 *app.PushProjectAssetsPreview
+	pushPreviewErr              error
+	updateStage                 string // "", "checking", "result", "confirm", "running", "done"
+	updateResult                *update.CheckResult
+	updateErr                   error
+	updateDoneVersion           string
+	updatingBinary              bool
+	deleteCandidates            []app.DeleteCandidate
+	deleteTree                  TreeList
+	deleteFilter                string
+	deleteFilterInput           bool
+	deleteStage                 string // "", "list", "summary", "confirm", "running"
+	deleteCandidatesLoaded      bool
+	loadingDeleteCandidates     bool
+	deleteLoadErr               error
+	deleteLoadCancel            context.CancelFunc
+	deleteLoadGen               uint64
+	deleteIncludeRemote         bool
+	runningDelete               bool
+	deleteResult                *app.DeleteProjectResult
+	deleteErr                   error
 	// configInitMode 为 true 时表示由 dec config init 拉起：聚焦 Assets/bundle 视图，保存后退出。
 	configInitMode bool
 	// vaultInference Home 页待确认的 vault project 推断（来自目录名匹配）。
@@ -1543,7 +1547,7 @@ func (m *model) startUpdateApply() tea.Cmd {
 		target = m.updateResult.LatestVersion
 	}
 	return func() tea.Msg {
-		err := updateDoUpdateOperation(currentVersion)
+		err := updateDoUpdateOperation(currentVersion, target)
 		return updateDoneMsg{targetVersion: target, err: err}
 	}
 }
@@ -1892,7 +1896,7 @@ func (m model) renderProjectSettingsList() string {
 	}
 	overrideLine := fmt.Sprintf("%s [%s] 覆盖全局 IDE", settingsCursorMarker(m.projectSettingsCursor == 0 && m.focus != focusSidebar), checked)
 	switch {
-		case m.projectSettingsCursor == 0 && m.focus != focusSidebar:
+	case m.projectSettingsCursor == 0 && m.focus != focusSidebar:
 		lines = append(lines, shellSelectedRow.Render(overrideLine))
 	case override:
 		lines = append(lines, shellEnabledRow.Render(overrideLine))
@@ -2419,6 +2423,8 @@ func (m model) renderUpdatePanel() []string {
 				shellWarnStyle.Render("更新失败: "+m.updateErr.Error()),
 				shellMutedStyle.Render("可改用手动覆盖安装："),
 				"  "+updateManualInstallCommand(),
+				shellMutedStyle.Render("GitHub 直连不稳定时改走 CDN 镜像："),
+				"  "+updateMirrorInstallCommand(),
 				shellMutedStyle.Render("按 esc/enter 关闭面板"),
 			)
 			return lines

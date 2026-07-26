@@ -298,6 +298,12 @@ func removeLegacyLocalConfig() error {
 // 系统配置（用于版本更新）
 // ========================================
 
+const (
+	defaultRepoOwner    = "shichao402"
+	defaultRepoName     = "Dec"
+	defaultUpdateBranch = "ReleaseLatest"
+)
+
 // SystemConfig 系统配置
 type SystemConfig struct {
 	RepoOwner    string
@@ -309,10 +315,11 @@ type SystemConfig struct {
 // GetSystemConfig 获取系统配置（返回默认值）
 func GetSystemConfig() *SystemConfig {
 	return &SystemConfig{
-		RepoOwner:    "shichao402",
-		RepoName:     "Dec",
-		VersionURL:   "https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/version.json",
-		UpdateBranch: "ReleaseLatest",
+		RepoOwner: defaultRepoOwner,
+		RepoName:  defaultRepoName,
+		VersionURL: fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/version.json",
+			defaultRepoOwner, defaultRepoName, defaultUpdateBranch),
+		UpdateBranch: defaultUpdateBranch,
 	}
 }
 
@@ -379,5 +386,5 @@ func loadVarsFile(path string) (*types.VarsConfig, error) {
 
 // GetVersionURL 获取版本检查 URL
 func GetVersionURL() string {
-	return "https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/version.json"
+	return GetSystemConfig().VersionURL
 }
