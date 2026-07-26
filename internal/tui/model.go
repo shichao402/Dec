@@ -3215,7 +3215,9 @@ func (m *model) toggleCurrentAsset() {
 	case assetRowBundle:
 		bo := m.assets.Bundles[p.bundleIndex]
 		if m.bundleSelected(bo.Name) {
-			// 取消 bundle：从 bundleSelection 移除；成员回到独立态（enabled_assets 中的独立引用保留）。
+			// 取消 bundle：从 bundleSelection 移除，同时清掉成员在 Items 上的启用标记。
+			// 留着这些标记会让保存后的 enabled_assets 仍含全部成员，加载时又被反推成
+			// "bundle 已启用"（见 app.inferBundleEnabledFromStandalone），勾选自己弹回来。
 			next := make([]string, 0, len(m.bundleSelection))
 			for _, n := range m.bundleSelection {
 				if n != bo.Name {
@@ -3223,6 +3225,7 @@ func (m *model) toggleCurrentAsset() {
 				}
 			}
 			m.bundleSelection = next
+			m.disableBundleMemberItems(bo)
 			m.pushLog("Bundle disabled: " + bo.Name)
 		} else {
 			m.bundleSelection = append(m.bundleSelection, bo.Name)
@@ -3233,6 +3236,22 @@ func (m *model) toggleCurrentAsset() {
 		bo := m.assets.Bundles[p.bundleIndex]
 		mb := bo.Members[p.memberIndex]
 		m.pushLog(fmt.Sprintf("Member 由 bundle %q 带入，无法单独切换：%s / %s / %s", bo.Name, mb.Vault, mb.Type, mb.Name))
+	}
+}
+
+// disableBundleMemberItems 把某个 bundle 的成员在 Items 上的启用标记清掉。
+// 仍被其它已选 bundle 覆盖的成员照样清掉：它们的启用态由那个 bundle 承载，
+// 保存时本来也会被 filterItemsForSave 过滤。
+func (m *model) disableBundleMemberItems(bo app.AssetBundleOption) {
+	if m.assets == nil {
+		return
+	}
+	for _, mb := range bo.Members {
+		for i := range m.assets.Items {
+			if m.assets.Items[i].Type == mb.Type && m.assets.Items[i].Vault == mb.Vault && m.assets.Items[i].Name == mb.Name {
+				m.assets.Items[i].Enabled = false
+			}
+		}
 	}
 }
 

@@ -138,6 +138,13 @@ func SaveAssetSelection(projectRoot string, selection AssetSaveSelection, report
 		projectConfig = &types.ProjectConfig{}
 	}
 
+	// 本次被取消的 bundle 的成员不再写回 enabled_assets。
+	// 否则磁盘会留下「enabled_bundles 不含该 bundle，但 enabled_assets 含其全部成员」的不一致状态：
+	// LoadAssetSelection 会按 standalone 反推该 bundle 仍启用（inferBundleEnabledFromStandalone），
+	// 用户刚取消的勾选下次刷新又亮回来，pull 也不会清理这些资产。
+	// 语义与 RemoveBundle 对齐：取消 bundle = 同时去掉 bundle 引用与成员引用。
+	prunedMembers := deselectedBundleMemberKeys(projectConfig, selection.EnabledBundles, reporter)
+
 	projectConfig.Available = &types.AssetList{}
 	projectConfig.Enabled = &types.AssetList{}
 
@@ -145,10 +152,14 @@ func SaveAssetSelection(projectRoot string, selection AssetSaveSelection, report
 		ref := types.AssetRef{Name: item.Name, Vault: item.Vault}
 		projectConfig.Available.Add(item.Type, ref)
 		result.AvailableCount++
-		if item.Enabled {
-			projectConfig.Enabled.Add(item.Type, ref)
-			result.EnabledCount++
+		if !item.Enabled {
+			continue
 		}
+		if _, pruned := prunedMembers[assetSelectionKey(item.Type, ref)]; pruned {
+			continue
+		}
+		projectConfig.Enabled.Add(item.Type, ref)
+		result.EnabledCount++
 	}
 
 	// EnabledBundles 语义：
@@ -181,6 +192,60 @@ func SaveAssetSelection(projectRoot string, selection AssetSaveSelection, report
 
 	emit(reporter, EventInfo, "assets.save", "资产选择已保存", &Progress{Phase: "write", Current: 2, Total: 2})
 	return result, nil
+}
+
+// deselectedBundleMemberKeys 返回「上次已启用、本次被取消」的 bundle 成员 key 集合。
+//
+// previousConfig 是磁盘上的旧配置；newEnabledBundles 为调用方本次的 bundle 勾选：
+//   - nil 表示调用方不改动 bundle 选择，直接返回 nil（不剔除任何成员）。
+//   - 非 nil 时对比旧的「有效启用 bundle」（含仅由 standalone 反推出来的旧 bundle），
+//     差集即为本次被取消的 bundle。
+//
+// 仍被其它启用中 bundle 覆盖的成员会从结果里剔除——它们的启用态由那个 bundle 承载。
+// 仓库未连接或 bundle 解析失败时返回 nil：宁可少剔除，也不误删用户的 enabled_assets。
+func deselectedBundleMemberKeys(previousConfig *types.ProjectConfig, newEnabledBundles []string, reporter Reporter) map[string]struct{} {
+	if newEnabledBundles == nil || previousConfig == nil {
+		return nil
+	}
+	// 旧配置里既没有 bundle 引用也没有启用资产（例如首次 init 保存）时不可能有被取消的 bundle，
+	// 省掉一次仓库只读事务。
+	if len(previousConfig.EnabledBundles) == 0 && previousConfig.Enabled.IsEmpty() {
+		return nil
+	}
+	if connected, err := repo.IsConnected(); err != nil || !connected {
+		return nil
+	}
+	options, _ := loadBundleSelection(previousConfig, reporter)
+	if len(options) == 0 {
+		return nil
+	}
+
+	keep := make(map[string]struct{}, len(newEnabledBundles))
+	for _, name := range newEnabledBundles {
+		keep[trimSpaceASCII(name)] = struct{}{}
+	}
+
+	pruned := make(map[string]struct{})
+	for _, opt := range options {
+		if !opt.Enabled {
+			continue
+		}
+		if _, stillEnabled := keep[opt.Name]; stillEnabled {
+			continue
+		}
+		for _, mb := range opt.Members {
+			pruned[assetSelectionKey(mb.Type, types.AssetRef{Name: mb.Name, Vault: mb.Vault})] = struct{}{}
+		}
+	}
+	for _, opt := range options {
+		if _, stillEnabled := keep[opt.Name]; !stillEnabled {
+			continue
+		}
+		for _, mb := range opt.Members {
+			delete(pruned, assetSelectionKey(mb.Type, types.AssetRef{Name: mb.Name, Vault: mb.Vault}))
+		}
+	}
+	return pruned
 }
 
 // loadBundleSelection 扫描仓库内 bundle 声明并解析出资产来源映射。

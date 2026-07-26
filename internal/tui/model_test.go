@@ -2045,14 +2045,19 @@ func TestModelAssetsBundleToggleMarksMembersReadonly(t *testing.T) {
 	}
 }
 
-func TestModelAssetsBundleUnselectReturnsMembersToStandalone(t *testing.T) {
+// TestModelAssetsBundleUnselectClearsMemberItems 覆盖「取消 bundle 后勾选弹回来」的回归点：
+// 成员的启用标记必须一起清掉，否则保存下去的 enabled_assets 仍含全部成员，
+// 重新加载时 app 层会按 standalone 把 bundle 反推回启用态。
+func TestModelAssetsBundleUnselectClearsMemberItems(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.focus = focusContent
 	m.assets = assetsStateWithBundle()
-	// 预置：bundle 已选中；同时把 Items[1] 单独 enabled（模拟用户也显式 enabled 了成员）。
+	// 预置：bundle 已选中；成员 Items[0..1] 在 enabled_assets 里也有独立引用（早期项目的典型状态）。
 	m.bundleSelection = []string{"vikunja"}
+	m.assets.Items[0].Enabled = true
 	m.assets.Items[1].Enabled = true
+	m.assets.Items[2].Enabled = true
 	m.normalizeAssetCursor()
 
 	// 取消 bundle
@@ -2062,9 +2067,11 @@ func TestModelAssetsBundleUnselectReturnsMembersToStandalone(t *testing.T) {
 	if m.bundleSelected("vikunja") {
 		t.Fatal("bundle 应被取消")
 	}
-	// Items[1] (独立 enabled) 应保留独立启用状态
-	if !m.assets.Items[1].Enabled {
-		t.Fatal("取消 bundle 后，独立 enabled 的成员应保留 enabled")
+	if m.assets.Items[0].Enabled || m.assets.Items[1].Enabled {
+		t.Fatal("取消 bundle 后，其成员的启用标记应一并清掉")
+	}
+	if !m.assets.Items[2].Enabled {
+		t.Fatal("非成员的独立资产不应被牵连")
 	}
 }
 

@@ -267,6 +267,141 @@ func TestListEffectiveEnabledAssetsDeduplicatesStandaloneAndBundle(t *testing.T)
 	}
 }
 
+// TestSaveAssetSelectionDropsMembersOfDeselectedBundle 覆盖「取消 bundle 后勾选自己弹回来」的回归点：
+// 早期项目的 enabled_assets 里往往同时留着 bundle 成员的独立引用，若保存时把它们原样写回，
+// 下次 LoadAssetSelection 会按 standalone 反推该 bundle 仍启用。
+func TestSaveAssetSelectionDropsMembersOfDeselectedBundle(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"bundles/vikunja/rules/vikunja-integration.mdc":    "---\ndescription: test\n---\n",
+		// cli bundle 有两个成员但只有一个被独立启用：它不会被反推成启用态，
+		// 因此该独立引用必须在保存后原样保留。
+		"bundles/cli/rules/cli-release-rules.mdc": "---\ndescription: test\n---\n",
+		"bundles/cli/rules/cli-extra-rules.mdc":   "---\ndescription: test\n---\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name              string
+		diskEnabledBundle []string
+	}{
+		{name: "显式 enabled_bundles", diskEnabledBundle: []string{"vikunja"}},
+		{name: "仅由 standalone 反推", diskEnabledBundle: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectRoot := t.TempDir()
+			mgr := config.NewProjectConfigManager(projectRoot)
+			if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+				IDEs:           []string{"codex"},
+				EnabledBundles: tc.diskEnabledBundle,
+				Enabled: &types.AssetList{
+					Skills: []types.AssetRef{{Name: "vikunja-workflow", Vault: "vikunja"}},
+					Rules: []types.AssetRef{
+						{Name: "vikunja-integration", Vault: "vikunja"},
+						{Name: "cli-release-rules", Vault: "cli"},
+					},
+				},
+			}); err != nil {
+				t.Fatalf("SaveProjectConfig() 失败: %v", err)
+			}
+
+			state, err := LoadAssetSelection(projectRoot, nil)
+			if err != nil {
+				t.Fatalf("LoadAssetSelection() 失败: %v", err)
+			}
+			if !bundleEnabledInState(state, "vikunja") {
+				t.Fatal("前置条件不成立：vikunja 初始应为启用态")
+			}
+
+			// 模拟 TUI 取消 vikunja 后保存：Items 仍带着磁盘上的成员启用态。
+			if _, err := SaveAssetSelection(projectRoot, AssetSaveSelection{
+				Items:          state.Items,
+				EnabledBundles: []string{},
+			}, nil); err != nil {
+				t.Fatalf("SaveAssetSelection() 失败: %v", err)
+			}
+
+			reloaded, err := LoadAssetSelection(projectRoot, nil)
+			if err != nil {
+				t.Fatalf("重新 LoadAssetSelection() 失败: %v", err)
+			}
+			if bundleEnabledInState(reloaded, "vikunja") {
+				t.Fatal("取消并保存后重新加载，vikunja 不应再是启用态")
+			}
+
+			saved, err := mgr.LoadProjectConfig()
+			if err != nil {
+				t.Fatalf("LoadProjectConfig() 失败: %v", err)
+			}
+			if saved.Enabled.FindAsset("skill", "vikunja-workflow", "vikunja") != nil {
+				t.Fatal("被取消 bundle 的成员不应留在 enabled_assets")
+			}
+			if saved.Enabled.FindAsset("rule", "cli-release-rules", "cli") == nil {
+				t.Fatal("其它 bundle 的成员引用不应被牵连清理")
+			}
+		})
+	}
+}
+
+// TestSaveAssetSelectionKeepsMembersOfStillEnabledBundle 保证只取消其中一个 bundle 时，
+// 仍启用的 bundle 的成员引用不被误剔除。
+func TestSaveAssetSelectionKeepsMembersOfStillEnabledBundle(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		EnabledBundles: []string{"vikunja", "cli"},
+		Enabled: &types.AssetList{
+			Skills: []types.AssetRef{{Name: "vikunja-workflow", Vault: "vikunja"}},
+			Rules:  []types.AssetRef{{Name: "cli-release-rules", Vault: "cli"}},
+		},
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig() 失败: %v", err)
+	}
+
+	state, err := LoadAssetSelection(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("LoadAssetSelection() 失败: %v", err)
+	}
+	if _, err := SaveAssetSelection(projectRoot, AssetSaveSelection{
+		Items:          state.Items,
+		EnabledBundles: []string{"cli"},
+	}, nil); err != nil {
+		t.Fatalf("SaveAssetSelection() 失败: %v", err)
+	}
+
+	reloaded, err := LoadAssetSelection(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("重新 LoadAssetSelection() 失败: %v", err)
+	}
+	if bundleEnabledInState(reloaded, "vikunja") {
+		t.Fatal("被取消的 vikunja 不应再是启用态")
+	}
+	if !bundleEnabledInState(reloaded, "cli") {
+		t.Fatal("未被取消的 cli 应保持启用态")
+	}
+}
+
+func bundleEnabledInState(state *AssetSelectionState, name string) bool {
+	for _, bo := range state.Bundles {
+		if bo.Name == name && bo.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
 func TestSaveAssetSelectionEmptyBundlesPersistNil(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	projectRoot := t.TempDir()
