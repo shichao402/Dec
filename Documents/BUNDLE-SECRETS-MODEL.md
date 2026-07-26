@@ -1,5 +1,12 @@
 # Bundle 同构与 Secrets Bundle 模型
 
+> **本文关于 secrets 落地路径的描述目前自相矛盾，待改平。**
+> 「项目根直接落地」与「统一落在 `.secrets/<secrets_bundle>/`」两种说法并存，
+> 前者是 v1.13.13 之前的模型，后者是当前代码行为。
+> 落地路径以 [decisions/0001](decisions/0001-secrets-landing-path.md) 为准：
+> **Note 名 = 项目根相对目标路径，原样落地**。其余内容（bundle 同构、零重叠、
+> Bitwarden 认证、SSH Key）不受影响。
+
 本文档描述 Dec **Project / bundle** 与 Bitwarden **secrets bundle** 的同构组织方式、存储根路径分离、拉取落地流程，以及零路径重叠 invariant。实现细节见 `Documents/ARCHITECTURE.md`；schema 声明见 `schema/dec/v1/` 与 `schema/secrets/v1/`。
 
 ## 一句话
