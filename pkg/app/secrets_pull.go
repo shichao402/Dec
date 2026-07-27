@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/shichao402/Dec/pkg/config"
@@ -43,7 +44,9 @@ var secretsClientFactory = secrets.DefaultClient
 type secretsPullSummary struct {
 	SkippedReason string
 	NoteCount     int
+	SSHKeyCount   int
 	LandingPaths  []string
+	SSHKeyNames   []string
 }
 
 // secretsPullTarget 是一个待同步的 secrets 目标（bundle 或 project 级）。
@@ -72,6 +75,7 @@ func warnUnignoredSecrets(projectRoot string, landingPaths []string, reporter Re
 //
 // 不做「停用即清理」：落地路径就是消费者路径，散在项目根，没有一个可以安全
 // os.RemoveAll 的目录。bundle 停用后的清理走 Delete 页显式单条确认。
+// SSH Key 同理：Pull 不清理远端已移除的旧 key，清理由 Delete 页完成。
 func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledBundles []string, reporter Reporter) (*secretsPullSummary, error) {
 	reporter = defaultReporter(reporter)
 	summary := &secretsPullSummary{}
@@ -135,9 +139,12 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 	}
 
 	// 先全部取回并做一次全局校验，再统一落地：跨 folder 撞同一路径必须在写任何
-	// 文件之前发现，否则先写的那个已经落盘了。
-	fetched := make([][]secrets.SecureNote, len(targets))
+	// 文件之前发现，否则先写的那个已经落盘了。SSH Key 同批校验失败时 Note 也不写。
+	fetchedNotes := make([][]secrets.SecureNote, len(targets))
+	fetchedKeys := make([][]secrets.SSHKeyLanding, len(targets))
 	var candidates []secrets.LandingCandidate
+	seenSSHFiles := make(map[string]string) // filename base -> label
+	seenSSHHosts := make(map[string]string) // host -> label
 	for i, target := range targets {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -146,7 +153,7 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 		emit(reporter, EventInfo, "pull.secrets",
 			fmt.Sprintf("拉取 %s (Bitwarden folder: %s)", target.Label, target.Binding.SecretsBundleName), progress)
 
-		notes, pullErr := secrets.ResolveBundleNotes(ctx, client, secrets.PullBundleRequest{
+		notes, keys, pullErr := secrets.ResolveBundle(ctx, client, secrets.PullBundleRequest{
 			ProjectRoot:   projectRoot,
 			DecBundleName: target.DecBundleName,
 			Binding:       target.Binding,
@@ -154,13 +161,32 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 		if pullErr != nil {
 			return nil, fmt.Errorf("拉取 %s 失败: %w", target.Label, pullErr)
 		}
-		fetched[i] = notes
+		fetchedNotes[i] = notes
 		for _, note := range notes {
 			candidates = append(candidates, secrets.LandingCandidate{
 				Folder:       target.Binding.SecretsBundleName,
 				RelativePath: note.RelativePath,
 			})
 		}
+
+		landings, prepErr := secrets.PrepareSSHKeyLandings(target.DecBundleName, keys)
+		if prepErr != nil {
+			return nil, fmt.Errorf("校验 %s 的 SSH Key 失败: %w", target.Label, prepErr)
+		}
+		for _, landing := range landings {
+			base := filepath.Base(landing.PrivatePath)
+			if prev, ok := seenSSHFiles[base]; ok {
+				return nil, fmt.Errorf("SSH Key 文件名冲突: %s 同时由 %s 与 %s 产生", base, prev, target.Label)
+			}
+			seenSSHFiles[base] = target.Label
+			for _, host := range landing.Hosts {
+				if prev, ok := seenSSHHosts[host]; ok {
+					return nil, fmt.Errorf("SSH host %q 冲突: 同时由 %s 与 %s 声明", host, prev, target.Label)
+				}
+				seenSSHHosts[host] = target.Label
+			}
+		}
+		fetchedKeys[i] = landings
 	}
 
 	emit(reporter, EventInfo, "pull.secrets", "校验落地路径（.dec/ 零重叠、跨 folder 冲突、git 跟踪）", nil)
@@ -174,7 +200,7 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 			return nil, err
 		}
 		progress := &Progress{Phase: "secrets", Current: i + 1, Total: total}
-		paths, writeErr := secrets.WriteSecureNotes(projectRoot, fetched[i])
+		paths, writeErr := secrets.WriteSecureNotes(projectRoot, fetchedNotes[i])
 		if writeErr != nil {
 			return nil, fmt.Errorf("落地 %s 失败: %w", target.Label, writeErr)
 		}
@@ -183,21 +209,37 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 		if len(paths) > 0 {
 			emit(reporter, EventInfo, "pull.secrets",
 				fmt.Sprintf("  落地 %d 个 Secure Note: %s", len(paths), strings.Join(paths, ", ")), progress)
-			continue
 		}
-		if target.Binding.SecretsBundleName != "" {
+
+		if len(fetchedKeys[i]) > 0 {
+			if writeErr := secrets.WriteSSHKeyLandings(fetchedKeys[i]); writeErr != nil {
+				return nil, fmt.Errorf("落地 %s 的 SSH Key 失败: %w", target.Label, writeErr)
+			}
+			for _, landing := range fetchedKeys[i] {
+				summary.SSHKeyCount++
+				summary.SSHKeyNames = append(summary.SSHKeyNames, landing.Name)
+			}
+			names := make([]string, 0, len(fetchedKeys[i]))
+			for _, landing := range fetchedKeys[i] {
+				names = append(names, landing.Name)
+			}
 			emit(reporter, EventInfo, "pull.secrets",
-				fmt.Sprintf("  Bitwarden folder %q 无 Secure Note 或 folder 不存在，跳过", target.Binding.SecretsBundleName), progress)
+				fmt.Sprintf("  落地 %d 个 SSH Key: %s", len(names), strings.Join(names, ", ")), progress)
+		}
+
+		if len(paths) == 0 && len(fetchedKeys[i]) == 0 && target.Binding.SecretsBundleName != "" {
+			emit(reporter, EventInfo, "pull.secrets",
+				fmt.Sprintf("  Bitwarden folder %q 无 Secure Note / SSH Key 或 folder 不存在，跳过", target.Binding.SecretsBundleName), progress)
 		}
 	}
 
 	warnUnignoredSecrets(projectRoot, summary.LandingPaths, reporter)
 
-	if summary.NoteCount == 0 {
+	if summary.NoteCount == 0 && summary.SSHKeyCount == 0 {
 		emit(reporter, EventInfo, "pull.secrets", "secrets 同步完成（无变更）", &Progress{Phase: "secrets", Current: total, Total: total})
 	} else {
 		emit(reporter, EventInfo, "pull.secrets",
-			fmt.Sprintf("secrets 同步完成：%d 个文件", summary.NoteCount),
+			fmt.Sprintf("secrets 同步完成：%d 个文件 · %d 个 SSH Key", summary.NoteCount, summary.SSHKeyCount),
 			&Progress{Phase: "secrets", Current: total, Total: total})
 	}
 	return summary, nil

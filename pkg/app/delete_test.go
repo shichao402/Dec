@@ -319,3 +319,101 @@ func TestDeleteGroupContext_ProjectOrderFirst(t *testing.T) {
 		t.Fatalf("vikunja order = %d, want 0", order)
 	}
 }
+
+func TestListDeleteCandidates_IncludesSSHKeys(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	stub := &secrets.StubClient{
+		SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
+			"vikunja_workflow": {{Name: "deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n"}},
+		},
+	}
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	// 先落地本地 key，验证非 Orphan。
+	landings, err := secrets.PrepareSSHKeyLandings("vikunja", stub.SSHKeysByFolder["vikunja_workflow"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.WriteSSHKeyLandings(landings); err != nil {
+		t.Fatal(err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"vikunja"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, true, nil)
+	if err != nil {
+		t.Fatalf("ListDeleteCandidates() = %v", err)
+	}
+	for _, c := range candidates {
+		if c.Kind == DeleteKindSSHKey && c.SSHKeyName == "deploy" {
+			if c.Orphan {
+				t.Fatalf("本地存在的 SSH Key 不应标 Orphan: %#v", c)
+			}
+			if c.DecBundleName != "vikunja" || c.SecretsBundle != "vikunja_workflow" {
+				t.Fatalf("SSH candidate = %#v", c)
+			}
+			if !strings.Contains(c.Label, "[ssh] deploy") {
+				t.Fatalf("Label = %q", c.Label)
+			}
+			return
+		}
+	}
+	t.Fatalf("应列出 SSH Key 候选项: %#v", candidates)
+}
+
+func TestDeleteProjectItems_RemovesSSHKeyLocalAndRemote(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	stub := &secrets.StubClient{
+		SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
+			"vikunja_workflow": {{Name: "deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n", PublicKey: "pub\n"}},
+		},
+	}
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	landings, err := secrets.PrepareSSHKeyLandings("vikunja", stub.SSHKeysByFolder["vikunja_workflow"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.WriteSSHKeyLandings(landings); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
+		ProjectRoot: t.TempDir(),
+		Confirmed:   true,
+		Items: []DeleteSelectionItem{{
+			Kind:          DeleteKindSSHKey,
+			SSHKeyName:    "deploy",
+			DecBundleName: "vikunja",
+			SecretsBundle: "vikunja_workflow",
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("DeleteProjectItems() = %v", err)
+	}
+	if result.SSHKeysDeleted != 1 {
+		t.Fatalf("SSHKeysDeleted = %d", result.SSHKeysDeleted)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".ssh", "dec_vikunja_deploy")); !os.IsNotExist(err) {
+		t.Fatal("本地私钥应已删除")
+	}
+	if len(stub.SSHKeysByFolder["vikunja_workflow"]) != 0 {
+		t.Fatalf("远端 SSH Key 应已删除: %#v", stub.SSHKeysByFolder["vikunja_workflow"])
+	}
+}

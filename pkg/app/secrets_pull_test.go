@@ -199,3 +199,99 @@ func TestPullEnabledSecretsBundles_RejectsCrossFolderCollision(t *testing.T) {
 		t.Fatalf("冲突时不应写入任何文件, err=%v", statErr)
 	}
 }
+
+func useTempHomeForSSH(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
+}
+
+func TestPullEnabledSecretsBundles_MixedNotesAndSSHKeys(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+	home := useTempHomeForSSH(t)
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{
+			NotesByFolder: map[string][]secrets.SecureNote{
+				"vikunja_workflow": {{RelativePath: ".config/mise/conf.d/vikunja.toml", Content: "[env]\nX=1\n"}},
+			},
+			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
+				"vikunja_workflow": {{
+					Name: "deploy", Hosts: []string{"vikunja.example.com"},
+					PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV\n-----END OPENSSH PRIVATE KEY-----\n",
+					PublicKey:  "ssh-ed25519 AAAA deploy\n",
+				}},
+			},
+		}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"vikunja"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	summary, err := pullEnabledSecretsBundles(context.Background(), projectRoot, []string{"vikunja"}, nil)
+	if err != nil {
+		t.Fatalf("pullEnabledSecretsBundles() = %v", err)
+	}
+	if summary.NoteCount != 1 || summary.SSHKeyCount != 1 {
+		t.Fatalf("summary = %#v", summary)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".config", "mise", "conf.d", "vikunja.toml")); err != nil {
+		t.Fatalf("Secure Note 应落地: %v", err)
+	}
+	priv := filepath.Join(home, ".ssh", "dec_vikunja_deploy")
+	if _, err := os.Stat(priv); err != nil {
+		t.Fatalf("SSH 私钥应落地: %v", err)
+	}
+	cfgRaw, err := os.ReadFile(filepath.Join(home, ".ssh", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cfgRaw), "vikunja.example.com") {
+		t.Fatalf("SSH config 应含 host:\n%s", cfgRaw)
+	}
+}
+
+func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+	home := useTempHomeForSSH(t)
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{
+			NotesByFolder: map[string][]secrets.SecureNote{
+				"vikunja_workflow": {{RelativePath: ".env.local", Content: "TOKEN=1\n"}},
+			},
+			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
+				"vikunja_workflow": {{
+					Name: "../evil", Hosts: []string{"host.example.com"},
+					PrivateKey: "priv\n",
+				}},
+			},
+		}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"vikunja"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := pullEnabledSecretsBundles(context.Background(), projectRoot, []string{"vikunja"}, nil)
+	if err == nil {
+		t.Fatal("非法 SSH Key 名应导致 pull 失败")
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".env.local")); !os.IsNotExist(err) {
+		t.Fatal("SSH 校验失败时不应写入 Secure Note")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(home, ".ssh")); len(entries) != 0 {
+		t.Fatalf("SSH 校验失败时不应写入 ~/.ssh: %v", entries)
+	}
+}

@@ -38,6 +38,7 @@ type PullProjectAssetsResult struct {
 	AssetSources         map[string][]string
 	SecretsSkippedReason string
 	SecretsNoteCount     int
+	SecretsSSHKeyCount   int
 }
 
 func PullProjectAssets(ctx context.Context, projectRoot, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
@@ -243,6 +244,7 @@ func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, proj
 	}
 	result.SecretsSkippedReason = secretsSummary.SkippedReason
 	result.SecretsNoteCount = secretsSummary.NoteCount
+	result.SecretsSSHKeyCount = secretsSummary.SSHKeyCount
 	return nil
 }
 

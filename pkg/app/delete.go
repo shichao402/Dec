@@ -19,6 +19,7 @@ type DeleteItemKind string
 const (
 	DeleteKindDecAsset DeleteItemKind = "dec"
 	DeleteKindSecret   DeleteItemKind = "secret"
+	DeleteKindSSHKey   DeleteItemKind = "ssh"
 	DeleteKindBundle   DeleteItemKind = "bundle"
 )
 
@@ -35,7 +36,9 @@ type DeleteCandidate struct {
 	Name          string
 	Vault         string
 	SecretPath    string // secrets：项目根相对落地路径，同时就是 Bitwarden Note 名
-	SecretsBundle string // secrets：Bitwarden folder
+	SecretsBundle string // secrets / ssh：Bitwarden folder
+	SSHKeyName    string // ssh：逻辑名
+	DecBundleName string // ssh：用于本地 ~/.ssh/dec_<bundle>_<name>
 	BundleName    string
 	Members       []AssetSelectionItem
 	Orphan        bool
@@ -53,6 +56,8 @@ type DeleteSelectionItem struct {
 	Vault         string
 	SecretPath    string
 	SecretsBundle string
+	SSHKeyName    string
+	DecBundleName string
 	BundleName    string
 	Members       []AssetSelectionItem
 }
@@ -68,6 +73,7 @@ type DeleteProjectInput struct {
 type DeleteProjectResult struct {
 	DecDeleted     int
 	SecretsDeleted int
+	SSHKeysDeleted int
 	BundlesDeleted int
 	VersionCommit  string
 	LastCommit     string
@@ -213,6 +219,7 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 
 	// secrets 候选项只能来自远端 folder 的 note 列表：落地路径就是消费者路径，
 	// 散在项目根，无法靠扫目录区分「这是 dec 管的密文件」和「这是项目自己的文件」。
+	// SSH Key 同理：以远端 folder 枚举为准，本地仅用于 Orphan 标记。
 	seenSecret := make(map[string]struct{})
 	addSecret := func(secretsBundle, notePath string, localExists bool) {
 		notePath = strings.TrimSpace(notePath)
@@ -241,9 +248,38 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 			GroupTitle:    groupCtx.secretsGroupTitle(groupBundle),
 		})
 	}
+	seenSSH := make(map[string]struct{})
+	addSSHKey := func(secretsBundle, decBundleName, keyName string, localExists bool) {
+		keyName = strings.TrimSpace(keyName)
+		if keyName == "" {
+			return
+		}
+		key := secretsBundle + "\x00ssh\x00" + keyName
+		if _, dup := seenSSH[key]; dup {
+			return
+		}
+		seenSSH[key] = struct{}{}
+		tag := ""
+		if !localExists {
+			tag = " · 仅远端"
+		}
+		groupBundle, groupOrder := groupCtx.forSecretsBundle(secretsBundle)
+		candidates = append(candidates, DeleteCandidate{
+			Kind:          DeleteKindSSHKey,
+			SSHKeyName:    keyName,
+			DecBundleName: decBundleName,
+			SecretsBundle: secretsBundle,
+			Label:         fmt.Sprintf("[ssh] %s%s", keyName, tag),
+			Orphan:        !localExists,
+			TreeRoot:      secretsTreeRoot,
+			TreeBranch:    groupBundle,
+			GroupOrder:    groupOrder,
+			GroupTitle:    groupCtx.secretsGroupTitle(groupBundle),
+		})
+	}
 
 	if includeRemote {
-		if err := appendRemoteSecretCandidates(ctx, projectRoot, projectConfig, addSecret, reporter); err != nil {
+		if err := appendRemoteSecretCandidates(ctx, projectRoot, projectConfig, addSecret, addSSHKey, reporter); err != nil {
 			return nil, err
 		}
 	}
@@ -384,8 +420,10 @@ func deleteKindOrder(kind DeleteItemKind) int {
 		return 0
 	case DeleteKindSecret:
 		return 1
-	case DeleteKindBundle:
+	case DeleteKindSSHKey:
 		return 2
+	case DeleteKindBundle:
+		return 3
 	default:
 		return 9
 	}
@@ -414,6 +452,7 @@ func appendRemoteSecretCandidates(
 	projectRoot string,
 	projectConfig *types.ProjectConfig,
 	addSecret func(secretsBundle, notePath string, localExists bool),
+	addSSHKey func(secretsBundle, decBundleName, keyName string, localExists bool),
 	reporter Reporter,
 ) error {
 	reporter = defaultReporter(reporter)
@@ -456,6 +495,17 @@ func appendRemoteSecretCandidates(
 				localExists = true
 			}
 			addSecret(folder, note.Name, localExists)
+		}
+		keys, listKeysErr := client.ListFolderSSHKeys(ctx, folder)
+		if listKeysErr != nil {
+			return listKeysErr
+		}
+		for _, key := range keys {
+			localExists, existsErr := secrets.LocalSSHKeyExists(decBundleName, key.Name)
+			if existsErr != nil {
+				return existsErr
+			}
+			addSSHKey(folder, decBundleName, key.Name, localExists)
 		}
 		return nil
 	}
@@ -549,6 +599,12 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 				return nil, err
 			}
 			result.SecretsDeleted++
+		case DeleteKindSSHKey:
+			emit(reporter, EventInfo, "delete.ssh", fmt.Sprintf("删除 SSH Key %s", item.SSHKeyName), nil)
+			if err := deleteSSHKeyItem(ctx, item.DecBundleName, item.SecretsBundle, item.SSHKeyName, reporter); err != nil {
+				return nil, err
+			}
+			result.SSHKeysDeleted++
 		default:
 			return nil, fmt.Errorf("不支持的删除类型: %s", item.Kind)
 		}
@@ -556,8 +612,8 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 
 	result.VersionCommit = lastCommit
 	result.LastCommit = lastCommit
-	summary := fmt.Sprintf("✅ 删除完成：Dec %d · secrets %d · bundle %d",
-		result.DecDeleted, result.SecretsDeleted, result.BundlesDeleted)
+	summary := fmt.Sprintf("✅ 删除完成：Dec %d · secrets %d · ssh %d · bundle %d",
+		result.DecDeleted, result.SecretsDeleted, result.SSHKeysDeleted, result.BundlesDeleted)
 	emit(reporter, EventInfo, "delete.finish", summary, nil)
 	return result, nil
 }
@@ -598,6 +654,47 @@ func deleteSecretItem(ctx context.Context, projectRoot, secretsBundleName, noteP
 		return fmt.Errorf("删除 Bitwarden Secure Note %q 失败: %w", notePath, err)
 	}
 	emit(reporter, EventInfo, "delete.secrets", fmt.Sprintf("  已删 Bitwarden Note %s", notePath), nil)
+	return nil
+}
+
+func deleteSSHKeyItem(ctx context.Context, decBundleName, secretsBundleName, keyName string, reporter Reporter) error {
+	keyName = strings.TrimSpace(keyName)
+	if keyName == "" {
+		return fmt.Errorf("SSH Key 名称不能为空")
+	}
+	decBundleName = strings.TrimSpace(decBundleName)
+	if decBundleName == "" {
+		return fmt.Errorf("Dec bundle 名称不能为空")
+	}
+
+	if err := secrets.RemoveSSHKeyLanding(decBundleName, keyName); err != nil {
+		return err
+	}
+	emit(reporter, EventInfo, "delete.ssh", fmt.Sprintf("  已删本地 SSH Key %s", keyName), nil)
+
+	configured, err := secrets.IsConfigured()
+	if err != nil {
+		return fmt.Errorf("读取 Bitwarden 配置失败: %w", err)
+	}
+	if !configured {
+		emit(reporter, EventInfo, "delete.ssh", "Bitwarden 未配置，跳过远端 SSH Key 删除", nil)
+		return nil
+	}
+	if !secrets.HasSession() {
+		emit(reporter, EventInfo, "delete.ssh", "[auth] delete: Bitwarden session required", nil)
+		if err := ensureBitwardenSession(ctx, reporter, "delete.ssh"); err != nil {
+			return err
+		}
+	}
+
+	client := secretsClientFactory()
+	if err := client.DeleteSSHKey(ctx, secrets.DeleteSSHKeyRequest{
+		Binding: secrets.BundleBinding{SecretsBundleName: secretsBundleName},
+		KeyName: keyName,
+	}); err != nil {
+		return fmt.Errorf("删除 Bitwarden SSH Key %q 失败: %w", keyName, err)
+	}
+	emit(reporter, EventInfo, "delete.ssh", fmt.Sprintf("  已删 Bitwarden SSH Key %s", keyName), nil)
 	return nil
 }
 

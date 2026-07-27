@@ -9,14 +9,18 @@ type Client interface {
 	PullBundle(ctx context.Context, req PullBundleRequest) (*PullBundleResult, error)
 	PushBundle(ctx context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error)
 	DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error
+	DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) error
 	// ListFolderNotes 枚举 folder 下的 note 名。落地路径散在项目根，没有可靠的
 	// 本地枚举方式，远端 folder 的 note 列表才是权威索引。
 	ListFolderNotes(ctx context.Context, folderName string) ([]RemoteNote, error)
+	// ListFolderSSHKeys 枚举 folder 下的 SSH Key 逻辑名。
+	ListFolderSSHKeys(ctx context.Context, folderName string) ([]RemoteSSHKey, error)
 }
 
-// StubClient 测试/开发用 stub；按 Bitwarden folder 返回预设 Note。
+// StubClient 测试/开发用 stub；按 Bitwarden folder 返回预设 Note / SSH Key。
 type StubClient struct {
-	NotesByFolder map[string][]SecureNote
+	NotesByFolder   map[string][]SecureNote
+	SSHKeysByFolder map[string][]SSHKeyItem
 }
 
 func (c *StubClient) PullBundle(_ context.Context, req PullBundleRequest) (*PullBundleResult, error) {
@@ -25,12 +29,19 @@ func (c *StubClient) PullBundle(_ context.Context, req PullBundleRequest) (*Pull
 		folder = req.DecBundleName
 	}
 	notes := c.NotesByFolder[folder]
-	if notes == nil {
-		return &PullBundleResult{}, nil
+	keys := c.SSHKeysByFolder[folder]
+	result := &PullBundleResult{}
+	if notes != nil {
+		copied := make([]SecureNote, len(notes))
+		copy(copied, notes)
+		result.Notes = copied
 	}
-	copied := make([]SecureNote, len(notes))
-	copy(copied, notes)
-	return &PullBundleResult{Notes: copied}, nil
+	if keys != nil {
+		copied := make([]SSHKeyItem, len(keys))
+		copy(copied, keys)
+		result.SSHKeys = copied
+	}
+	return result, nil
 }
 
 func (c *StubClient) PushBundle(_ context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error) {
@@ -80,6 +91,22 @@ func (c *StubClient) DeleteSecureNote(_ context.Context, req DeleteSecureNoteReq
 	return nil
 }
 
+func (c *StubClient) DeleteSSHKey(_ context.Context, req DeleteSSHKeyRequest) error {
+	folder := req.Binding.SecretsBundleName
+	keys := c.SSHKeysByFolder[folder]
+	if len(keys) == 0 {
+		return nil
+	}
+	out := make([]SSHKeyItem, 0, len(keys))
+	for _, key := range keys {
+		if key.Name != req.KeyName {
+			out = append(out, key)
+		}
+	}
+	c.SSHKeysByFolder[folder] = out
+	return nil
+}
+
 // NoopClient 未配置 Bitwarden API 时的空实现。
 type NoopClient struct{}
 
@@ -92,6 +119,10 @@ func (NoopClient) PushBundle(_ context.Context, _ PushBundleRequest, _ []SecureN
 }
 
 func (NoopClient) DeleteSecureNote(_ context.Context, _ DeleteSecureNoteRequest) error {
+	return nil
+}
+
+func (NoopClient) DeleteSSHKey(_ context.Context, _ DeleteSSHKeyRequest) error {
 	return nil
 }
 

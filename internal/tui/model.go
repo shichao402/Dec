@@ -398,8 +398,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.result != nil {
-			m.pushLog(fmt.Sprintf("Delete finished: dec %d · secrets %d · bundle %d",
-				msg.result.DecDeleted, msg.result.SecretsDeleted, msg.result.BundlesDeleted))
+			m.pushLog(fmt.Sprintf("Delete finished: dec %d · secrets %d · ssh %d · bundle %d",
+				msg.result.DecDeleted, msg.result.SecretsDeleted, msg.result.SSHKeysDeleted, msg.result.BundlesDeleted))
 		}
 		return m, tea.Batch(m.refreshCmd(), m.startDeleteCandidatesLoad(m.deleteIncludeRemote, true))
 	case overviewLoadedMsg:
@@ -640,8 +640,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Run push finished: dec %d · secrets created %d / updated %d",
 				msg.pushResult.DecPushedCount, msg.pushResult.SecretsCreatedCount, msg.pushResult.SecretsUpdatedCount))
 		} else if msg.result != nil {
-			secretsMsg := fmt.Sprintf("secrets %d landed", msg.result.SecretsNoteCount)
-			if msg.result.SecretsSkippedReason != "" && msg.result.SecretsNoteCount == 0 {
+			secretsMsg := fmt.Sprintf("secrets %d files · %d ssh", msg.result.SecretsNoteCount, msg.result.SecretsSSHKeyCount)
+			if msg.result.SecretsSkippedReason != "" && msg.result.SecretsNoteCount == 0 && msg.result.SecretsSSHKeyCount == 0 {
 				secretsMsg = "secrets skipped: " + msg.result.SecretsSkippedReason
 			}
 			m.pushLog(fmt.Sprintf("Run pull finished: %d pulled / %d failed · %s",
@@ -2204,8 +2204,8 @@ func (m model) renderRunLastResult() []string {
 	if m.runResult != nil {
 		lines = append(lines, fmt.Sprintf("Pull  请求 %d · 成功 %d · 失败 %d",
 			m.runResult.RequestedCount, m.runResult.PulledCount, m.runResult.FailedCount))
-		secretsLine := fmt.Sprintf("Secrets  落地 %d 个文件", m.runResult.SecretsNoteCount)
-		if m.runResult.SecretsSkippedReason != "" && m.runResult.SecretsNoteCount == 0 {
+		secretsLine := fmt.Sprintf("Secrets  落地 %d 个文件 · %d 个 SSH Key", m.runResult.SecretsNoteCount, m.runResult.SecretsSSHKeyCount)
+		if m.runResult.SecretsSkippedReason != "" && m.runResult.SecretsNoteCount == 0 && m.runResult.SecretsSSHKeyCount == 0 {
 			secretsLine = "Secrets  " + m.runResult.SecretsSkippedReason
 		}
 		lines = append(lines, secretsLine)

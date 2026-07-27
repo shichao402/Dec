@@ -15,6 +15,17 @@ type SecureNote struct {
 	Content      string
 }
 
+// SSHKeyItem 表示一条 Bitwarden SSH Key Item。
+// Name 是逻辑名（非落地路径）；Hosts 来自 Notes（一行一个）。
+type SSHKeyItem struct {
+	ID             string
+	Name           string
+	Hosts          []string
+	PrivateKey     string
+	PublicKey      string
+	KeyFingerprint string
+}
+
 // PullBundleRequest 拉取单个 secrets bundle 的输入。
 type PullBundleRequest struct {
 	ProjectRoot   string
@@ -22,9 +33,10 @@ type PullBundleRequest struct {
 	Binding       BundleBinding
 }
 
-// PullBundleResult 拉取结果（不含 SSH Key，后续扩展）。
+// PullBundleResult 拉取结果：Secure Notes + SSH Keys。
 type PullBundleResult struct {
-	Notes []SecureNote
+	Notes   []SecureNote
+	SSHKeys []SSHKeyItem
 }
 
 // PushBundleRequest 推送单个 secrets bundle 的输入。
@@ -48,4 +60,10 @@ type PushBundleResult struct {
 type DeleteSecureNoteRequest struct {
 	Binding  BundleBinding
 	NotePath string
+}
+
+// DeleteSSHKeyRequest 删除单条远端 SSH Key 的输入（按逻辑名）。
+type DeleteSSHKeyRequest struct {
+	Binding BundleBinding
+	KeyName string
 }

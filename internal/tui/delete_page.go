@@ -130,7 +130,7 @@ func (m model) visibleDeleteCandidates() []app.DeleteCandidate {
 	out := make([]app.DeleteCandidate, 0, len(m.deleteCandidates))
 	for _, c := range m.deleteCandidates {
 		haystack := strings.ToLower(strings.Join([]string{
-			c.Label, c.TreeRoot, c.TreeBranch, c.GroupTitle, c.SecretPath, c.Vault, c.Name,
+			c.Label, c.TreeRoot, c.TreeBranch, c.GroupTitle, c.SecretPath, c.SSHKeyName, c.Vault, c.Name,
 		}, " "))
 		if strings.Contains(haystack, filter) {
 			out = append(out, c)
@@ -147,6 +147,8 @@ func selectionFromCandidate(c app.DeleteCandidate) app.DeleteSelectionItem {
 		Vault:         c.Vault,
 		SecretPath:    c.SecretPath,
 		SecretsBundle: c.SecretsBundle,
+		SSHKeyName:    c.SSHKeyName,
+		DecBundleName: c.DecBundleName,
 		BundleName:    c.BundleName,
 		Members:       append([]app.AssetSelectionItem(nil), c.Members...),
 	}
@@ -338,7 +340,7 @@ func (m model) renderDeletePage(width int) string {
 	selectedCount := tree.CountSelected()
 	lines := []string{
 		shellTitleStyle.Render("Delete"),
-		shellMutedStyle.Render("Dec 资产 · secrets 文件 · bundle · 两次确认后执行"),
+		shellMutedStyle.Render("Dec 资产 · secrets · SSH Key · bundle · 两次确认后执行"),
 		fmt.Sprintf("共 %d 项 · 已选 %d · 筛选 %q", len(visible), selectedCount, mm.currentDeleteFilterLabel()),
 	}
 	if !mm.deleteIncludeRemote {
@@ -368,8 +370,8 @@ func (m model) renderDeletePage(width int) string {
 		lines = append(lines, shellWarnStyle.Render("删除失败: "+m.deleteErr.Error()))
 	}
 	if m.deleteResult != nil {
-		lines = append(lines, shellGoodStyle.Render(fmt.Sprintf("上次删除：Dec %d · secrets %d · bundle %d",
-			m.deleteResult.DecDeleted, m.deleteResult.SecretsDeleted, m.deleteResult.BundlesDeleted)))
+		lines = append(lines, shellGoodStyle.Render(fmt.Sprintf("上次删除：Dec %d · secrets %d · ssh %d · bundle %d",
+			m.deleteResult.DecDeleted, m.deleteResult.SecretsDeleted, m.deleteResult.SSHKeysDeleted, m.deleteResult.BundlesDeleted)))
 	}
 	return wrapLines(width, lines)
 }
@@ -387,6 +389,8 @@ func (m model) renderDeleteConfirmPage(width int) string {
 				lines = append(lines, fmt.Sprintf("  bundle %s", item.BundleName))
 			case app.DeleteKindSecret:
 				lines = append(lines, fmt.Sprintf("  secret %s", item.SecretPath))
+			case app.DeleteKindSSHKey:
+				lines = append(lines, fmt.Sprintf("  ssh %s", item.SSHKeyName))
 			default:
 				lines = append(lines, fmt.Sprintf("  [%s] %s / %s", item.Type, item.Name, item.Vault))
 			}
@@ -395,7 +399,7 @@ func (m model) renderDeleteConfirmPage(width int) string {
 		lines = append(lines,
 			shellMutedStyle.Render("操作  y 确认删除 · n/Esc/h 返回摘要"),
 			"",
-			shellWarnStyle.Render("⚠️  删除不可逆：远端 vault、本地 cache/IDE、Bitwarden Secure Note 将被移除。"),
+			shellWarnStyle.Render("⚠️  删除不可逆：远端 vault、本地 cache/IDE、Bitwarden Note/SSH Key 将被移除。"),
 			fmt.Sprintf("共 %d 项待删除。", len(selected)),
 		)
 	}

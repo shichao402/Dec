@@ -27,6 +27,14 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 		case app.DeleteKindSecret:
 			hasSec = true
 			insertTreePath(secRoot, secretsParentSegments(c.SecretsBundle, c.SecretPath), leaf)
+		case app.DeleteKindSSHKey:
+			hasSec = true
+			// SSH Key 不套用 Secure Note 路径树，直接挂在 folder 下。
+			folder := strings.TrimSpace(c.SecretsBundle)
+			if folder == "" {
+				folder = "ssh"
+			}
+			insertTreePath(secRoot, []string{folder}, leaf)
 		case app.DeleteKindBundle:
 			hasDec = true
 			bundle := strings.TrimSpace(c.BundleName)
@@ -66,6 +74,12 @@ func deleteLeafLabel(c app.DeleteCandidate) string {
 		return "[bundle] " + strings.TrimPrefix(c.Label, "[bundle] ")
 	case app.DeleteKindSecret:
 		leaf := secretsLeafName(c.SecretPath)
+		if c.Orphan {
+			leaf += " · 仅远端"
+		}
+		return leaf
+	case app.DeleteKindSSHKey:
+		leaf := "[ssh] " + strings.TrimSpace(c.SSHKeyName)
 		if c.Orphan {
 			leaf += " · 仅远端"
 		}

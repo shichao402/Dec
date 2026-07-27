@@ -69,8 +69,9 @@ func assertSnapshot(t *testing.T, name, view string) {
 	if err != nil {
 		t.Fatalf("读取 snapshot %s 失败: %v\n提示：首次运行请用 `go test ./internal/tui/ -run TestSnapshot -update` 生成 golden 文件", path, err)
 	}
-	if string(want) != got {
-		t.Fatalf("snapshot %s 不匹配。\n要更新 golden 文件请运行：\n  go test ./internal/tui/ -run TestSnapshot -update\n\n--- got ---\n%s\n--- want ---\n%s", name, got, string(want))
+	wantSanitized := sanitizeView(string(want))
+	if wantSanitized != got {
+		t.Fatalf("snapshot %s 不匹配。\n要更新 golden 文件请运行：\n  go test ./internal/tui/ -run TestSnapshot -update\n\n--- got ---\n%s\n--- want ---\n%s", name, got, wantSanitized)
 	}
 }
 
@@ -231,6 +232,11 @@ func snapshotDeleteModel(width int) model {
 		{
 			Kind: app.DeleteKindSecret, Label: "[secret] .config/mise/conf.d/vikunja.toml",
 			SecretPath: ".config/mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
+			TreeRoot: "secrets", TreeBranch: "vikunja_workflow", GroupOrder: 1, GroupTitle: "vikunja_workflow",
+		},
+		{
+			Kind: app.DeleteKindSSHKey, Label: "[ssh] deploy",
+			SSHKeyName: "deploy", DecBundleName: "vikunja", SecretsBundle: "vikunja_workflow",
 			TreeRoot: "secrets", TreeBranch: "vikunja_workflow", GroupOrder: 1, GroupTitle: "vikunja_workflow",
 		},
 		{

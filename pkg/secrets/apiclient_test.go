@@ -296,3 +296,98 @@ func TestFormatAPIError(t *testing.T) {
 		t.Fatalf("formatAPIError() = %q", msg)
 	}
 }
+
+func TestAPIClient_PullBundle_DecryptsSSHKey(t *testing.T) {
+	userKey := bytes.Repeat([]byte{0x07}, 64)
+	itemKey, err := generateCipherKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encItemKey, err := encryptVaultBytes(itemKey, userKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustEncItem := func(plain string) string {
+		t.Helper()
+		out, encErr := encryptVaultString(plain, itemKey)
+		if encErr != nil {
+			t.Fatal(encErr)
+		}
+		return out
+	}
+	encFolder, err := encryptVaultString("vikunja_workflow", userKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBitwardenHeaders(t, r)
+		switch r.URL.Path {
+		case "/api/folders":
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{
+				Data: []bwFolder{{ID: "f1", Name: encFolder}},
+			})
+		case "/api/ciphers":
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{
+				Data: []bwCipher{
+					{
+						ID: "note-1", Type: cipherTypeSecureNote, FolderID: "f1", Key: encItemKey,
+						Name: mustEncItem(".config/mise/conf.d/vikunja.toml"), Notes: mustEncItem("[env]\nX=1\n"),
+					},
+					{
+						ID: "ssh-1", Type: cipherTypeSSHKey, FolderID: "f1", Key: encItemKey,
+						Name: mustEncItem("deploy"), Notes: mustEncItem("vikunja.example.com\n"),
+						SSHKey: &bwSSHKey{
+							PrivateKey:     mustEncItem("-----BEGIN OPENSSH PRIVATE KEY-----\nSECRET\n-----END OPENSSH PRIVATE KEY-----\n"),
+							PublicKey:      mustEncItem("ssh-ed25519 AAAA deploy\n"),
+							KeyFingerprint: mustEncItem("SHA256:abc"),
+						},
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &Config{ServerURL: srv.URL}
+	client, err := NewAPIClient(cfg, "sess-ssh", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetUserKey(userKey)
+	t.Cleanup(ClearSession)
+
+	result, err := client.PullBundle(context.Background(), PullBundleRequest{
+		DecBundleName: "vikunja",
+		Binding:       BundleBinding{SecretsBundleName: "vikunja_workflow"},
+	})
+	if err != nil {
+		t.Fatalf("PullBundle() = %v", err)
+	}
+	if len(result.Notes) != 1 {
+		t.Fatalf("Notes = %#v", result.Notes)
+	}
+	if len(result.SSHKeys) != 1 {
+		t.Fatalf("SSHKeys = %#v", result.SSHKeys)
+	}
+	key := result.SSHKeys[0]
+	if key.Name != "deploy" || len(key.Hosts) != 1 || key.Hosts[0] != "vikunja.example.com" {
+		t.Fatalf("SSHKey meta = %#v", key)
+	}
+	if !strings.Contains(key.PrivateKey, "SECRET") {
+		t.Fatal("私钥应解密成功")
+	}
+	if key.KeyFingerprint != "SHA256:abc" {
+		t.Fatalf("fingerprint = %q", key.KeyFingerprint)
+	}
+
+	listed, err := client.ListFolderSSHKeys(context.Background(), "vikunja_workflow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].Name != "deploy" {
+		t.Fatalf("ListFolderSSHKeys = %#v", listed)
+	}
+}

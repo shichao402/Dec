@@ -34,12 +34,18 @@ func WriteSecureNotes(projectRoot string, notes []SecureNote) ([]string, error) 
 // 不剥 `.config/`。拆出取回阶段是为了让调用方能在写任何文件之前做跨 folder 的
 // 全局校验。
 func ResolveBundleNotes(ctx context.Context, client Client, req PullBundleRequest) ([]SecureNote, error) {
+	notes, _, err := ResolveBundle(ctx, client, req)
+	return notes, err
+}
+
+// ResolveBundle 一次取回 Secure Notes 与 SSH Keys，不写盘。
+func ResolveBundle(ctx context.Context, client Client, req PullBundleRequest) ([]SecureNote, []SSHKeyItem, error) {
 	if client == nil {
 		client = DefaultClient()
 	}
 	result, err := client.PullBundle(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	mapped := make([]SecureNote, 0, len(result.Notes))
@@ -47,7 +53,7 @@ func ResolveBundleNotes(ctx context.Context, client Client, req PullBundleReques
 	for _, note := range result.Notes {
 		landing, normErr := normalizeProjectRelativePath(note.RelativePath)
 		if normErr != nil {
-			return nil, normErr
+			return nil, nil, normErr
 		}
 		if _, dup := seenLanding[landing]; dup {
 			continue
@@ -58,7 +64,9 @@ func ResolveBundleNotes(ctx context.Context, client Client, req PullBundleReques
 			Content:      note.Content,
 		})
 	}
-	return mapped, nil
+	keys := make([]SSHKeyItem, len(result.SSHKeys))
+	copy(keys, result.SSHKeys)
+	return mapped, keys, nil
 }
 
 // PullBundle 取回、校验并落地单个 secrets bundle。

@@ -783,6 +783,11 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 			TreeRoot: "secrets", TreeBranch: "vikunja_workflow", GroupOrder: 0, GroupTitle: "vikunja_workflow",
 		},
 		{
+			Kind: app.DeleteKindSSHKey, Label: "[ssh] deploy",
+			SSHKeyName: "deploy", DecBundleName: "vikunja", SecretsBundle: "vikunja_workflow",
+			TreeRoot: "secrets", TreeBranch: "vikunja_workflow", GroupOrder: 0, GroupTitle: "vikunja_workflow",
+		},
+		{
 			Kind: app.DeleteKindBundle, Label: "[bundle] vikunja / vikunja · 2 成员", BundleName: "vikunja",
 			TreeRoot: ".dec", TreeBranch: "vikunja", GroupOrder: 0, GroupTitle: "vikunja",
 		},
@@ -799,6 +804,7 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 		"▾ secrets (Bitwarden)",
 		"▾ vikunja_workflow",
 		"vikunja.toml",
+		"[ssh] deploy",
 		"[bundle]",
 	} {
 		if !strings.Contains(view, want) {

@@ -8,8 +8,8 @@
 │   Project        │╭──────────────────────────────────────────────────────────────────────────────╮
 │   Run            ││                                                                              │
 │   Delete         ││  Delete                                                                      │
-│   Settings       ││  Dec 资产 · secrets 文件 · bundle · 两次确认后执行                           │
-│                  ││  共 5 项 · 已选 0 · 筛选 "<none>"                                            │
+│   Settings       ││  Dec 资产 · secrets · SSH Key · bundle · 两次确认后执行                      │
+│                  ││  共 6 项 · 已选 0 · 筛选 "<none>"                                            │
 │                  ││  未扫描 Bitwarden 远端 orphan · 按 r 刷新（含远端）                          │
 │                  ││  j/k 移动 · l/h 展开折叠 · space 选择 · d 删除 · a 全选 · / 筛选 · r 刷新    │
 │                  ││  · Esc 返回导航                                                              │
@@ -24,6 +24,7 @@
 │                  ││  [ ]         ↳ demo-rule.mdc                                                 │
 │                  ││  ▾ secrets (Bitwarden)                                                       │
 │                  ││  ▾ vikunja_workflow                                                          │
+│                  ││  [ ]     ↳ [ssh] deploy                                                      │
 │                  ││  ▾ .config                                                                   │
 │                  ││  ▾ mise                                                                      │
 │                  ││  ▾ conf.d                                                                    │
@@ -37,8 +38,8 @@
 │                  ││  Logs                                                                        │
 │                  ││  - TUI shell ready                                                           │
 │                  ││  - Loading project overview...                                               │
-│                  ││  - Loading asset selection...                                                │
-╰──────────────────╯│  - Loading global settings...                                                │
+╰──────────────────╯│  - Loading asset selection...                                                │
+                    │  - Loading global settings...                                                │
                     │                                                                              │
                     ╰──────────────────────────────────────────────────────────────────────────────╯
  q quit | j/k nav | l/h in-out | r refresh                                  page Delete | 2 bundles

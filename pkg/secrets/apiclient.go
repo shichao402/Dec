@@ -10,7 +10,10 @@ import (
 	"strings"
 )
 
-const cipherTypeSecureNote = 2
+const (
+	cipherTypeSecureNote = 2
+	cipherTypeSSHKey     = 5
+)
 
 type bwFolder struct {
 	ID   string `json:"id"`
@@ -25,13 +28,20 @@ type bwErrorResponse struct {
 	ErrorDescription string              `json:"error_description"`
 }
 
+type bwSSHKey struct {
+	PrivateKey     string `json:"privateKey"`
+	PublicKey      string `json:"publicKey"`
+	KeyFingerprint string `json:"keyFingerprint"`
+}
+
 type bwCipher struct {
-	ID       string `json:"id"`
-	Type     int    `json:"type"`
-	Name     string `json:"name"`
-	Notes    string `json:"notes"`
-	FolderID string `json:"folderId"`
-	Key      string `json:"key"`
+	ID       string    `json:"id"`
+	Type     int       `json:"type"`
+	Name     string    `json:"name"`
+	Notes    string    `json:"notes"`
+	FolderID string    `json:"folderId"`
+	Key      string    `json:"key"`
+	SSHKey   *bwSSHKey `json:"sshKey"`
 }
 
 type bwListResponse[T any] struct {
@@ -99,7 +109,12 @@ func (c *APIClient) PullBundle(ctx context.Context, req PullBundleRequest) (*Pul
 		}
 		notes = append(notes, SecureNote{RelativePath: name, Content: content})
 	}
-	return &PullBundleResult{Notes: notes}, nil
+
+	sshKeys, err := c.folderSSHKeys(ctx, folderID, userKey)
+	if err != nil {
+		return nil, err
+	}
+	return &PullBundleResult{Notes: notes, SSHKeys: sshKeys}, nil
 }
 
 func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error) {
@@ -176,6 +191,39 @@ func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRe
 	}
 
 	cipher, ok := findExistingCipher(existing, notePath)
+	if !ok {
+		return nil
+	}
+	return c.deleteCipher(ctx, cipher.ID)
+}
+
+func (c *APIClient) DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) error {
+	userKey := UserKey()
+	if len(userKey) == 0 {
+		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
+	}
+	folderName := strings.TrimSpace(req.Binding.SecretsBundleName)
+	if folderName == "" {
+		return fmt.Errorf("secrets bundle 名称不能为空")
+	}
+	keyName := strings.TrimSpace(req.KeyName)
+	if keyName == "" {
+		return fmt.Errorf("SSH Key 名称不能为空")
+	}
+
+	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	if err != nil {
+		return err
+	}
+	if folderID == "" {
+		return nil
+	}
+
+	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey)
+	if err != nil {
+		return err
+	}
+	cipher, ok := existing[keyName]
 	if !ok {
 		return nil
 	}
