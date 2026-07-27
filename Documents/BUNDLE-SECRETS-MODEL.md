@@ -157,7 +157,7 @@ OpenSSH、Git、`ssh`/`scp` 等工具默认只读取 **机器级** `~/.ssh/`，�
 | 字段 | 含义 |
 |------|------|
 | **Name** | 逻辑名（如 `deploy`） |
-| **Notes** | 关联 host，**一行一个**（如 `vikunja.example.com`） |
+| **Notes** | 关联 host，**可选**；有内容时**一行一个**（如 `vikunja.example.com`）。为空则只落密钥文件，不写 SSH config Host 条目 |
 | 私钥 / 公钥 | Bitwarden SSH Key Item 自带字段 |
 
 Item 存放在与 Dec bundle 绑定的 Bitwarden folder（如 `vikunja_workflow`）。
@@ -170,7 +170,7 @@ Item 存放在与 Dec bundle 绑定的 Bitwarden folder（如 `vikunja_workflow`
 | 公钥 | `~/.ssh/dec_<bundle>_<name>.pub` |
 | SSH config | `~/.ssh/config` 内 **Dec 管理区块**（`# BEGIN DEC MANAGED` … `# END DEC MANAGED`） |
 
-Dec 管理区块按 Notes 中的 host 写入 `Host` + `IdentityFile`，指向上述私钥路径。`<bundle>` 为 Dec enabled bundle 名；`<name>` 为 Item Name。
+若 Notes 声明了 host，Dec 管理区块按这些 host 写入 `Host` + `IdentityFile`，指向上述私钥路径；Notes 为空则只写密钥文件，不新增 Host 条目（也不使用 `Host *`）。`<bundle>` 为 Dec enabled bundle 名；`<name>` 为 Item Name。
 
 私钥 / 公钥的机器级路径由 Bitwarden Item Name 与所属 bundle 推导（`~/.ssh/dec_<bundle>_<name>`），不记本地索引。
 
@@ -375,7 +375,7 @@ sequenceDiagram
 - **Dec bundle 启用**：本地 `enabled_bundles`（从 vault project 同步或 Assets 页保存）；secrets bundle 默认与 Dec bundle **同名**
 - 显式绑定：`schema/secrets/v1/config.proto` 的 `BundleBinding`（`dec_bundle` ↔ `secrets_bundle`，后者即 Bitwarden folder 名）
 - mise env 等私密配置：Bitwarden Secure Note，**Note 名 = 项目根相对落地路径**（如 `.config/mise/conf.d/vikunja.toml`），原样落地
-- SSH Key：Bitwarden SSH Key Item，**Name = 逻辑名**，**Notes = hosts**；Pull 落地 `~/.ssh/dec_<bundle>_<name>` + Dec 管理 `~/.ssh/config` 区块
+- SSH Key：Bitwarden SSH Key Item，**Name = 逻辑名**，**Notes = hosts（可选）**；Pull 落地 `~/.ssh/dec_<bundle>_<name>`；有 hosts 时再更新 Dec 管理 `~/.ssh/config` 区块
 
 ## Schema
 

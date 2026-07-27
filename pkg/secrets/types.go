@@ -16,7 +16,7 @@ type SecureNote struct {
 }
 
 // SSHKeyItem 表示一条 Bitwarden SSH Key Item。
-// Name 是逻辑名（非落地路径）；Hosts 来自 Notes（一行一个）。
+// Name 是逻辑名（非落地路径）；Hosts 来自 Notes（可选；有内容时一行一个）。
 type SSHKeyItem struct {
 	ID             string
 	Name           string

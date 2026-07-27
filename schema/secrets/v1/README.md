@@ -27,7 +27,7 @@ Bitwarden folder: vikunja_workflow
 - **Secure Note 名称** = 敏感文件在项目根的 **目标相对路径**（不是 bundle 内虚拟路径）。
 - **Note 内容** = 该路径文件的完整正文。
 - Pull 后落到 `<project>/.config/mise/conf.d/vikunja.toml`，**不进** `.dec/cache/`。
-- **SSH Key**：Name = 逻辑名，Notes = hosts（一行一个）；Pull 落地 `~/.ssh/dec_<bundle>_<name>` + Dec 管理 `~/.ssh/config` 区块；**无** 项目根 `keys/`。
+- **SSH Key**：Name = 逻辑名，Notes = hosts（可选；有内容时一行一个）；Pull 落地 `~/.ssh/dec_<bundle>_<name>`；有 hosts 时再更新 Dec 管理 `~/.ssh/config` 区块；**无** 项目根 `keys/`。
 
 **Invariant**：`.dec/` 树与敏感落地路径 **不得相交**；冲突时 pull **报错**，不覆盖。
 

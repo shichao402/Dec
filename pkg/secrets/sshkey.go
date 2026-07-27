@@ -83,7 +83,7 @@ func validateSSHHost(host string) (string, error) {
 	return host, nil
 }
 
-// parseSSHHostsNotes 解析 SSH Key Item 的 Notes 字段（一行一个 host）。
+// parseSSHHostsNotes 解析 SSH Key Item 的 Notes 字段（可选；有内容时一行一个 host）。
 func parseSSHHostsNotes(notes string) []string {
 	var hosts []string
 	seen := make(map[string]struct{})
@@ -138,6 +138,7 @@ func PrepareSSHKeyLandings(decBundleName string, keys []SSHKeyItem) ([]SSHKeyLan
 			return nil, fmt.Errorf("SSH Key %q 私钥格式无效", name)
 		}
 
+		// Hosts 可为空：仅落地密钥文件，不写 SSH config Host 条目。
 		hosts := make([]string, 0, len(key.Hosts))
 		for _, raw := range key.Hosts {
 			host, hostErr := validateSSHHost(raw)
@@ -149,9 +150,6 @@ func PrepareSSHKeyLandings(decBundleName string, keys []SSHKeyItem) ([]SSHKeyLan
 			}
 			seenHosts[host] = name
 			hosts = append(hosts, host)
-		}
-		if len(hosts) == 0 {
-			return nil, fmt.Errorf("SSH Key %q 未声明任何 host（Notes 应一行一个）", name)
 		}
 
 		privPath := filepath.Join(sshDir, fileBase)
@@ -195,6 +193,7 @@ func ResolveBundleSSHKeys(ctx context.Context, client Client, req PullBundleRequ
 }
 
 // WriteSSHKeyLandings 将已校验的 SSH Key 写入 ~/.ssh，并合并 Dec managed config 区块。
+// 仅对声明了 Hosts 的 key 写入 Host 条目；空 Hosts 只落密钥文件，并按 IdentityFile 清掉其旧条目。
 // 按 IdentityFile 更新本批 keys，保留其他项目先前管理的条目。不清理远端已移除的旧 key。
 func WriteSSHKeyLandings(landings []SSHKeyLanding) error {
 	if len(landings) == 0 {

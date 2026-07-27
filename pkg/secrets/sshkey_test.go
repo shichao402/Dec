@@ -189,4 +189,118 @@ func TestParseSSHHostsNotes(t *testing.T) {
 	if len(hosts) != 2 || hosts[0] != "a.example.com" || hosts[1] != "b.example.com" {
 		t.Fatalf("hosts = %#v", hosts)
 	}
+	if empty := parseSSHHostsNotes(""); len(empty) != 0 {
+		t.Fatalf("空 Notes 应得到空 hosts, got %#v", empty)
+	}
+	if blank := parseSSHHostsNotes("  \n# only comment\n\n"); len(blank) != 0 {
+		t.Fatalf("仅空白/注释应得到空 hosts, got %#v", blank)
+	}
+}
+
+func TestPrepareAndWriteSSHKeyLandings_EmptyHosts_WritesKeysOnly(t *testing.T) {
+	home := useTempSSHHome(t)
+	sshDir := filepath.Join(home, ".ssh")
+
+	// 先写入带 host 的 key，再以空 hosts 重 pull：应保留密钥文件、清掉本 IdentityFile 的 Host 条目。
+	withHost, err := PrepareSSHKeyLandings("vikunja", []SSHKeyItem{{
+		Name: "deploy", Hosts: []string{"vikunja.example.com"},
+		PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV\n-----END OPENSSH PRIVATE KEY-----\n",
+		PublicKey:  "ssh-ed25519 AAAA deploy@dec\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSSHKeyLandings(withHost); err != nil {
+		t.Fatal(err)
+	}
+
+	other, err := PrepareSSHKeyLandings("other", []SSHKeyItem{{
+		Name: "key", Hosts: []string{"other.example.com"},
+		PrivateKey: "o\n", PublicKey: "op\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSSHKeyLandings(other); err != nil {
+		t.Fatal(err)
+	}
+
+	emptyHosts, err := PrepareSSHKeyLandings("vikunja", []SSHKeyItem{{
+		Name:       "deploy",
+		Hosts:      nil,
+		PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV2\n-----END OPENSSH PRIVATE KEY-----\n",
+		PublicKey:  "ssh-ed25519 BBBB deploy@dec\n",
+	}})
+	if err != nil {
+		t.Fatalf("空 hosts 应允许 Prepare: %v", err)
+	}
+	if len(emptyHosts) != 1 || len(emptyHosts[0].Hosts) != 0 {
+		t.Fatalf("landing Hosts 应为空: %#v", emptyHosts)
+	}
+	if err := WriteSSHKeyLandings(emptyHosts); err != nil {
+		t.Fatalf("空 hosts WriteSSHKeyLandings 应成功: %v", err)
+	}
+
+	priv := filepath.Join(sshDir, "dec_vikunja_deploy")
+	pub := priv + ".pub"
+	if _, err := os.Stat(priv); err != nil {
+		t.Fatalf("私钥应落地: %v", err)
+	}
+	if _, err := os.Stat(pub); err != nil {
+		t.Fatalf("公钥应落地: %v", err)
+	}
+	rawPriv, err := os.ReadFile(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rawPriv), "PRIV2") {
+		t.Fatalf("私钥内容应已更新: %q", rawPriv)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(sshDir, "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if strings.Contains(content, "vikunja.example.com") || strings.Contains(content, "dec_vikunja_deploy") {
+		t.Fatalf("空 hosts 不应写入本 key 的 Host 条目:\n%s", content)
+	}
+	if strings.Contains(content, "Host *") {
+		t.Fatalf("空 hosts 不得使用 Host *:\n%s", content)
+	}
+	if !strings.Contains(content, "other.example.com") || !strings.Contains(content, "dec_other_key") {
+		t.Fatalf("其他项目 Host 条目应保留:\n%s", content)
+	}
+}
+
+func TestWriteSSHKeyLandings_EmptyHostsOnly_NoHostBlock(t *testing.T) {
+	home := useTempSSHHome(t)
+	sshDir := filepath.Join(home, ".ssh")
+
+	landings, err := PrepareSSHKeyLandings("vikunja", []SSHKeyItem{{
+		Name: "deploy", Hosts: nil,
+		PrivateKey: "priv\n", PublicKey: "pub\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSSHKeyLandings(landings); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(sshDir, "dec_vikunja_deploy")); err != nil {
+		t.Fatalf("私钥应落地: %v", err)
+	}
+	cfgPath := filepath.Join(sshDir, "config")
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		// 允许不存在或为空；若存在则不得含 DEC MANAGED Host。
+		if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		return
+	}
+	content := string(raw)
+	if strings.Contains(content, "Host ") || strings.Contains(content, sshManagedBegin) {
+		t.Fatalf("仅空 hosts 时不应写入 Host / managed 区块:\n%s", content)
+	}
 }
