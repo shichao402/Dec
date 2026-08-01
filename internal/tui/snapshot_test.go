@@ -161,6 +161,30 @@ func snapshotSettingsModel(width int) model {
 	return m
 }
 
+func snapshotProjectModel(width int) model {
+	m := snapshotHomeModel(width)
+	m.pageIndex = 2
+	m.focus = focusContent
+	m.projectSettings = &app.ProjectSettingsState{
+		ProjectRoot:        "/tmp/dec-project",
+		ConfigPath:         "/tmp/dec-project/.dec/config.yaml",
+		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
+		ProjectConfigReady: true,
+		AvailableIDEs:      []string{"codex", "cursor"},
+		GlobalIDEs:         []string{"cursor"},
+		EffectiveIDEs:      []string{"cursor"},
+	}
+	m.projectSettingsOverride = false
+	m.projectVars = &app.ProjectVarsView{
+		VarsPath:      "/tmp/dec-project/.dec/vars.yaml",
+		VarsFileReady: true,
+		EditorCommand: "code --wait",
+		CacheExists:   false,
+	}
+	m.normalizeProjectSettingsCursor()
+	return m
+}
+
 // TestSnapshotHome 固定 Home 页在基线宽度下的完整渲染。
 func TestSnapshotHome(t *testing.T) {
 	for _, w := range snapshotWidths {
@@ -179,6 +203,17 @@ func TestSnapshotBundles(t *testing.T) {
 		t.Run(widthLabel(w), func(t *testing.T) {
 			m := snapshotBundlesModel(w)
 			assertSnapshot(t, "bundles_"+widthLabel(w), m.View())
+		})
+	}
+}
+
+// TestSnapshotProject 固定 Project 页在基线宽度下的完整渲染。
+func TestSnapshotProject(t *testing.T) {
+	for _, w := range snapshotWidths {
+		w := w
+		t.Run(widthLabel(w), func(t *testing.T) {
+			m := snapshotProjectModel(w)
+			assertSnapshot(t, "project_"+widthLabel(w), m.View())
 		})
 	}
 }

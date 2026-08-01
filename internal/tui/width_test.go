@@ -150,6 +150,124 @@ func TestViewAtBaselineWidths_SettingsNoOverflow(t *testing.T) {
 	}
 }
 
+func TestViewAtBaselineWidths_ProjectNoOverflow(t *testing.T) {
+	for _, width := range widthBaselines {
+		width := width
+		t.Run(widthLabel(width), func(t *testing.T) {
+			m := homeModelAtWidth(width)
+			m.pageIndex = 2
+			m.focus = focusContent
+			m.projectSettings = &app.ProjectSettingsState{
+				ProjectRoot:        "/tmp/dec-project",
+				ConfigPath:         "/tmp/dec-project/.dec/config.yaml",
+				VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
+				ProjectConfigReady: true,
+				AvailableIDEs:      []string{"codex", "cursor", "claude"},
+				GlobalIDEs:         []string{"cursor"},
+				EffectiveIDEs:      []string{"cursor"},
+			}
+			m.projectVars = &app.ProjectVarsView{
+				VarsPath:      "/tmp/dec-project/.dec/vars.yaml",
+				VarsFileReady: true,
+				EditorCommand: "code --wait",
+				CacheExists:   true,
+				UsedPlaceholders: []string{
+					"API_TOKEN", "DB_HOST", "DB_PASSWORD", "SSH_KEY",
+					"LONG_PATH_VALUE_THAT_SHOULD_TRUNCATE_NICELY",
+				},
+				ResolvedVars: map[string]app.PlaceholderStatus{
+					"API_TOKEN":  {Source: app.PlaceholderSourceProject, Value: "secret"},
+					"DB_HOST":    {Source: app.PlaceholderSourceGlobal, Value: "localhost"},
+					"DB_PASSWORD": {},
+					"SSH_KEY":    {Source: app.PlaceholderSourceProject, Value: strings.Repeat("x", 80)},
+					"LONG_PATH_VALUE_THAT_SHOULD_TRUNCATE_NICELY": {Source: app.PlaceholderSourceProject, Value: "/very/long/path/" + strings.Repeat("seg/", 20)},
+				},
+			}
+			m.normalizeProjectSettingsCursor()
+			view := m.View()
+			assertNoLineOverflowsWidth(t, "Project", view, width)
+			assertNoViewExceedsHeight(t, "Project", view, m.height)
+		})
+	}
+}
+
+func TestViewAtBaselineHeights_NoVerticalOverflow(t *testing.T) {
+	pages := []struct {
+		name  string
+		build func(width int) model
+	}{
+		{"Home", homeModelAtWidth},
+		{"Bundles", func(width int) model {
+			m := homeModelAtWidth(width)
+			m.pageIndex = 1
+			m.assets = &app.AssetSelectionState{
+				ExistingConfig: true,
+				Bundles: []app.AssetBundleOption{
+					{Name: "default", Vault: "default", Enabled: true, Members: []app.AssetSelectionItem{{Name: "a", Type: "skill", Vault: "default"}}},
+					{Name: "cli", Vault: "cli", Members: []app.AssetSelectionItem{{Name: "b", Type: "rule", Vault: "cli"}}},
+				},
+			}
+			m.bundleSelection = []string{"default"}
+			m.normalizeAssetCursor()
+			return m
+		}},
+		{"Project", func(width int) model {
+			m := homeModelAtWidth(width)
+			m.pageIndex = 2
+			m.projectSettings = &app.ProjectSettingsState{
+				ProjectRoot: "/tmp/dec-project", ConfigPath: "/tmp/dec-project/.dec/config.yaml",
+				VarsPath: "/tmp/dec-project/.dec/vars.yaml", ProjectConfigReady: true,
+				AvailableIDEs: []string{"codex", "cursor"}, GlobalIDEs: []string{"cursor"}, EffectiveIDEs: []string{"cursor"},
+			}
+			m.projectVars = &app.ProjectVarsView{VarsPath: "/tmp/dec-project/.dec/vars.yaml", VarsFileReady: true}
+			m.normalizeProjectSettingsCursor()
+			return m
+		}},
+		{"Run", func(width int) model {
+			m := homeModelAtWidth(width)
+			m.pageIndex = 3
+			m.runResult = &app.PullProjectAssetsResult{RequestedCount: 2, PulledCount: 1, FailedCount: 1, EffectiveIDEs: []string{"cursor"}}
+			m.runEvents = []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+			return m
+		}},
+		{"Settings", func(width int) model {
+			m := homeModelAtWidth(width)
+			m.pageIndex = 5
+			m.settings = &app.GlobalSettingsState{
+				ConfigPath: "/tmp/.dec/config.yaml", VarsPath: "/tmp/.dec/local/vars.yaml",
+				RepoConnected: true, RepoURL: "git@github.com:demo/dec.git", ConnectedRepoURL: "git@github.com:demo/dec.git",
+				AvailableIDEs: []string{"codex", "cursor"}, SelectedIDEs: []string{"cursor"}, EffectiveIDEs: []string{"cursor"},
+			}
+			m.settingsRepoInput = m.settings.RepoURL
+			m.settingsSelectedIDEs = []string{"cursor"}
+			m.normalizeSettingsCursor()
+			return m
+		}},
+	}
+	for _, page := range pages {
+		page := page
+		t.Run(page.name, func(t *testing.T) {
+			for _, width := range []int{80, 100, 140} {
+				width := width
+				t.Run(widthLabel(width), func(t *testing.T) {
+					m := page.build(width)
+					view := m.View()
+					assertNoViewExceedsHeight(t, page.name, view, m.height)
+					assertNoLineOverflowsWidth(t, page.name, view, width)
+				})
+			}
+		})
+	}
+}
+
+func assertNoViewExceedsHeight(t *testing.T, label string, view string, expected int) {
+	t.Helper()
+	got := lipgloss.Height(view)
+	if got > expected {
+		t.Fatalf("%s: 视图高度 %d 超过期望 %d\n%s", label, got, expected, view)
+	}
+}
+
 // TestStatusBarDropsLeftHintOnOverflow 验证状态栏在 left+right 已超出宽度时，
 // 会丢掉左侧快捷键提示以保留右侧承载的页面状态，而不是静默截断。
 func TestStatusBarDropsLeftHintOnOverflow(t *testing.T) {

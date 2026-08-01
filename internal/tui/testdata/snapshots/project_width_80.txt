@@ -1,27 +1,27 @@
 ╭────────────────╮╭────────────────────────────────────────────────────────────╮
-│ Dec Shell      ││ Delete · Repo ready, 2 bundles enabled                     │
+│ Dec Shell      ││ Project · /tmp/dec-project · Project ready, IDE inherit    │
 │  Home          │╰────────────────────────────────────────────────────────────╯
 │  Bundles       │╭────────────────────────────────────────────────────────────╮
-│  Project       ││ 共 6 项 · 已选 0                                           │
-│  Run           ││ 按 r 刷新可含 Bitwarden 远端 orphan                        │
-│  Delete        ││       ▾ .dec                                               │
-│  Settings      ││         ▾ cache                                            │
-│                ││           ▾ vikunja                                        │
-│                ││ > [ ]       ↳ [bundle] vikunja / vikunja · 2 成员          │
-│                ││           ▾ default                                        │
-│                ││             ▾ skills                                       │
-│                ││   [ ]         ↳ demo                                       │
-│                ││             ▾ rules                                        │
-│                ││   [ ]         ↳ demo-rule.mdc                              │
-│                ││       ▾ secrets (Bitwarden)                                │
-│                ││         ▾ vikunja_workflow                                 │
-│                ││   [ ]     ↳ [ssh] deploy                                   │
-│                ││           ▾ .config                                        │
-│                ││             ▾ mise                                         │
-│                ││               ▾ conf.d                                     │
-│                ││   [ ]           ↳ vikunja.toml                             │
-│                ││         ▾ Dec                                              │
-│                ││   [ ]     ↳ pkv.include                                    │
+│  Project       ││ IDE 模式: 继承全局 · 生效: cursor                          │
+│  Run           ││ 已启用 bundle (2): <2 个，详情见 Bundles 页>               │
+│  Delete        ││                                                            │
+│  Settings      ││ 项目 IDE                                                   │
+│                ││ > [ ] 覆盖全局 IDE                                         │
+│                ││   [ ] codex                                                │
+│                ││   [ ] cursor                                               │
+│                ││                                                            │
+│                ││ Details                                                    │
+│                ││ 模式切换：决定是否用项目级 IDE 覆盖全局默认。              │
+│                ││ 覆盖开关: 未开启（继承全局）                               │
+│                ││ 全局默认: cursor                                           │
+│                ││ 当前生效: cursor                                           │
+│                ││ 按 space 切换；c 可一键清除覆盖回落全局。                  │
+│                ││                                                            │
+│                ││ 项目变量                                                   │
+│                ││ /tmp/dec-project/.dec/vars.yaml (已存在)                   │
+│                ││ 编辑器: code --wait · e 打开外部编辑器                     │
+│                ││ A 登记 secret                                              │
+│                ││ .dec/cache 尚不存在：请先到 Run 页执行 pull                │
 │                ││                                                            │
 │                ││                                                            │
 │                ││                                                            │
@@ -37,4 +37,4 @@
 │                ││                                                            │
 │                ││                                                            │
 ╰────────────────╯╰────────────────────────────────────────────────────────────╯
- q quit | j/k nav | l/h in-out | r refresh              page Delete | 2 bundles
+ q quit | j/k nav | l/h in-out | r refresh               page Project | inherit

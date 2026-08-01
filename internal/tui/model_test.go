@@ -44,9 +44,9 @@ func TestModelViewRendersHomeOverview(t *testing.T) {
 		"项目名:",
 		"git@github.com:demo/dec.git",
 		"Vault bundle: 2 个 | 已启用: 1 个",
-		"默认 IDE: codex, cursor",
+		"IDE: codex, cursor",
 		"编辑器: code --wait",
-		"Logs",
+		"下一步",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
@@ -213,7 +213,7 @@ func TestModelAssetsPageRendersSelectionState(t *testing.T) {
 		"Details",
 		"[x] ▸ default · 1 个成员",
 		"[ ] ▸ cli · 1 个成员",
-		"快捷键：j/k 移动 · h 返回导航",
+		"1/2 已启用",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
@@ -241,12 +241,11 @@ func TestModelRunPageRendersExecutionState(t *testing.T) {
 	checks := []string{
 		"Run",
 		"Run · Pull 完成",
-		"状态",
 		"上次结果",
 		"Pull  请求 2 · 成功 1 · 失败 1",
 		"IDE   cursor",
 		"Commit abc123",
-		"事件日志",
+		"事件",
 		"开始拉取",
 	}
 	for _, check := range checks {
@@ -601,7 +600,6 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 		"当前远端:",
 		"[x] cursor",
 		"[ ] codex",
-		"快捷键：j/k 移动",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
@@ -1434,7 +1432,6 @@ func TestModelProjectPageRendersInheritMode(t *testing.T) {
 		"IDE 模式: 继承全局",
 		"覆盖全局 IDE",
 		"全局默认: cursor",
-		"快捷键：j/k 移动",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {

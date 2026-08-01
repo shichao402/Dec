@@ -13,20 +13,6 @@ import (
 	"github.com/shichao402/Dec/pkg/update"
 )
 
-var (
-	shellTitleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230"))
-	shellMutedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("248"))
-	shellCardStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("67")).Padding(1, 2)
-	shellActiveNav   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230")).Background(lipgloss.Color("24")).Padding(0, 1)
-	shellNavStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Padding(0, 1)
-	shellStatusBar   = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("24")).Padding(0, 1)
-	shellLogStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	shellWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	shellGoodStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("78")).Bold(true)
-	shellSelectedRow = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("24")).Bold(true)
-	shellEnabledRow  = lipgloss.NewStyle().Foreground(lipgloss.Color("78"))
-)
-
 type overviewLoadedMsg struct {
 	overview       *app.ProjectOverview
 	err            error
@@ -1002,59 +988,6 @@ func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) View() string {
-	width := m.width
-	if width <= 0 {
-		width = 100
-	}
-	height := m.height
-	if height <= 0 {
-		height = 30
-	}
-
-	// 宽度自适应：优先保证 main 区不被 sidebar 挤到横溢出。
-	// - <80 列：sidebar 缩到 14，给主区最多可用空间
-	// - 80-109 列：常规 18
-	// - >=110 列：宽终端给 22，强化导航可读性
-	sidebarWidth := 18
-	switch {
-	case width < 80:
-		sidebarWidth = 14
-	case width >= 110:
-		sidebarWidth = 22
-	}
-	// 主区宽度扣除：侧边栏 + 两个卡片 border 各占 1 列（sidebar 右 + main 左）。
-	// lipgloss.RoundedBorder 在横向分别贡献 1 列的边角，共 4 列（2 个卡片 × 2 边 / 2）。
-	// 这里以保守常量 4 做扣除，保证 sidebar_card + main_card 水平合计 <= width。
-	mainWidth := width - sidebarWidth - 4
-	// 软下界：极窄终端下宁可窄，也不横溢出超过 width。
-	if mainWidth < 20 {
-		mainWidth = 20
-	}
-
-	statusBar := m.renderStatusBar(width)
-	logsHeight := 7
-	if height < 26 {
-		logsHeight = 5
-	}
-	contentHeight := height - lipgloss.Height(statusBar) - logsHeight
-	if contentHeight < 12 {
-		contentHeight = 12
-	}
-
-	content := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		m.renderSidebar(sidebarWidth, contentHeight+logsHeight),
-		lipgloss.JoinVertical(
-			lipgloss.Left,
-			m.renderMain(mainWidth, contentHeight),
-			m.renderLogs(mainWidth, logsHeight),
-		),
-	)
-
-	return lipgloss.JoinVertical(lipgloss.Left, content, statusBar)
-}
-
 func (m model) refreshCmd() tea.Cmd {
 	return tea.Batch(loadOverviewCmd(m.projectRoot), loadAssetsCmd(m.projectRoot), loadSettingsCmd(), loadProjectSettingsCmd(m.projectRoot), loadProjectVarsCmd(m.projectRoot))
 }
@@ -1666,57 +1599,6 @@ func (m *model) pushLog(line string) {
 	}
 }
 
-func (m model) renderSidebar(width, height int) string {
-	items := make([]string, 0, len(m.pages)+2)
-	items = append(items, shellTitleStyle.Render("Dec Shell"))
-	items = append(items, shellMutedStyle.Render("j/k 切换页 · l 进入 · h 返回"))
-	for idx, page := range m.pages {
-		style := shellNavStyle
-		if idx == m.pageIndex {
-			style = shellActiveNav
-			if m.focus == focusSidebar {
-				style = shellSelectedRow
-			}
-		}
-		items = append(items, style.Render(page))
-	}
-
-	content := strings.Join(items, "\n")
-	return shellCardStyle.Width(width).Height(height).Render(content)
-}
-
-func (m model) renderMain(width, height int) string {
-	heroLines := []string{
-		shellTitleStyle.Render(m.pages[m.pageIndex]),
-		shellMutedStyle.Render(m.projectRoot),
-		shellMutedStyle.Render(m.currentSummary()),
-	}
-	hero := shellCardStyle.Width(width).Render(strings.Join(heroLines, "\n"))
-	bodyHeight := height - lipgloss.Height(hero)
-	if bodyHeight < 8 {
-		bodyHeight = 8
-	}
-	body := shellCardStyle.Width(width).Height(bodyHeight).Render(m.renderPageBody(width - 6))
-	return lipgloss.JoinVertical(lipgloss.Left, hero, body)
-}
-
-func (m model) renderPageBody(width int) string {
-	switch m.pages[m.pageIndex] {
-	case "Home":
-		return m.renderHomePage(width)
-	case "Bundles":
-		return m.renderBundlesPage(width)
-	case "Project":
-		return m.renderProjectPage(width)
-	case "Run":
-		return m.renderRunPage(width)
-	case "Delete":
-		return m.renderDeletePage(width)
-	default:
-		return m.renderSettingsPage(width)
-	}
-}
-
 func (m model) renderHomePage(width int) string {
 	if m.overviewErr != nil {
 		return shellWarnStyle.Render("Failed to load overview") + "\n\n" + m.overviewErr.Error()
@@ -1739,24 +1621,25 @@ func (m model) renderHomePage(width int) string {
 			fmt.Sprintf("Vault 路径: %s", inf.VaultPath),
 			fmt.Sprintf("Bundles (%d): %s", len(inf.EnabledBundles), formatInferenceBundleNames(inf.EnabledBundles)),
 			shellMutedStyle.Render("y / Enter 应用 · n 跳过并手动选择"),
+			"",
 		)
 	}
-	if len(lines) > 0 {
-		lines = append(lines, "")
-	}
+
+	next := suggestNextAction(m.overview, m.hasVaultInferencePrompt(), m.vaultInferenceDismissed)
 	lines = append(lines,
+		shellAccentStyle.Render("下一步"),
+		next,
+		"",
+		shellTitleStyle.Render("项目状态"),
 		fmt.Sprintf("项目名: %s", formatProjectNameDisplay(m.overview)),
-		fmt.Sprintf("Vault project: projects/%s.yaml", m.overview.ProjectName),
-		fmt.Sprintf("仓库: %s", formatReady(m.overview.RepoConnected, "已连接", "未连接")),
-		fmt.Sprintf("远端仓库: %s", fallbackValue(m.overview.RepoRemoteURL, "未连接")),
-		fmt.Sprintf("项目配置: %s", formatReady(m.overview.ProjectConfigReady, "已初始化", "未初始化")),
-		fmt.Sprintf("变量文件: %s", formatReady(m.overview.VarsFileReady, "已存在", "未生成")),
+		fmt.Sprintf("仓库: %s · %s", formatReady(m.overview.RepoConnected, "已连接", "未连接"), fallbackValue(m.overview.RepoRemoteURL, "未连接")),
+		fmt.Sprintf("配置: %s · 变量: %s", formatReady(m.overview.ProjectConfigReady, "已初始化", "未初始化"), formatReady(m.overview.VarsFileReady, "已存在", "未生成")),
 		fmt.Sprintf("Vault bundle: %d 个 | 已启用: %d 个", countOverviewAvailableBundles(m.overview), countOverviewEnabledBundles(m.overview)),
-		fmt.Sprintf("默认 IDE: %s", strings.Join(m.overview.IDEs, ", ")),
-		fmt.Sprintf("编辑器: %s", fallbackValue(m.overview.Editor, "未配置")),
-		fmt.Sprintf("建议下一步: %s", suggestNextAction(m.overview, m.hasVaultInferencePrompt(), m.vaultInferenceDismissed)),
-		formatWarnings(m.overview.IDEWarnings),
+		fmt.Sprintf("IDE: %s · 编辑器: %s", fallbackValue(strings.Join(m.overview.IDEs, ", "), "<none>"), fallbackValue(m.overview.Editor, "未配置")),
 	)
+	if warn := formatWarnings(m.overview.IDEWarnings); !strings.HasSuffix(warn, "无") {
+		lines = append(lines, warn)
+	}
 	return wrapLines(width, lines)
 }
 
@@ -1771,51 +1654,33 @@ func (m model) renderBundlesPage(width int) string {
 	summary := []string{}
 	if m.configInitMode {
 		summary = append(summary, shellTitleStyle.Render("项目配置初始化 — 勾选要启用的 bundle"))
-		summary = append(summary, shellMutedStyle.Render("勾选 vault bundles/ 下的 bundle；保存后写入 enabled_bundles。"))
 	}
-	summary = append(summary,
-		shellMutedStyle.Render("扫描 vault bundles/，勾选 bundle 写入 enabled_bundles；成员资产随 bundle 一并启用。"),
-		fmt.Sprintf("筛选: %s", m.currentAssetFilterLabel()),
-		fmt.Sprintf("Bundle: %d/%d 已启用 | 成员资产: %d 个", len(m.bundleSelection), len(m.assets.Bundles), m.countSelectedBundleMembers()),
-	)
+	status := fmt.Sprintf("%d/%d 已启用", len(m.bundleSelection), len(m.assets.Bundles))
+	if filter := m.currentAssetFilterLabel(); filter != "<none>" {
+		status += " · 筛选: " + filter
+	}
+	summary = append(summary, status)
 	if m.assetsDirty {
-		summary = append(summary, shellWarnStyle.Render("当前有未保存修改，按 s 保存。"))
-	} else {
-		summary = append(summary, shellMutedStyle.Render("当前 bundle 选择与磁盘一致。"))
+		summary = append(summary, shellWarnStyle.Render("有未保存修改，按 s 保存"))
 	}
 	if m.assetFilterInput {
-		summary = append(summary, shellMutedStyle.Render("筛选输入中：输入关键字后按 Enter 应用，Esc 退出。"))
-	} else {
-		switch m.focus {
-		case focusSidebar:
-			summary = append(summary, shellMutedStyle.Render("按 l 进入内容区 · j/k 在侧栏切换页"))
-		default:
-			summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · h 返回导航 · l 展开 bundle · space 切换 · s 保存 · / 筛选"))
-		}
+		summary = append(summary, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))
 	}
 	if !m.assets.ExistingConfig {
-		summary = append(summary, shellMutedStyle.Render("首次保存会创建 .dec/config.yaml 与 .dec/vars.yaml。"))
+		summary = append(summary, shellMutedStyle.Render("首次保存会创建 .dec/config.yaml"))
 	}
 
 	rows := m.assetTreeVisibleCount()
 	if len(m.assets.Bundles) == 0 {
-		return strings.Join(append(summary, "", "仓库 bundles/ 下还没有可选 bundle。"), "\n")
+		return wrapLines(width, append(summary, "仓库 bundles/ 下还没有可选 bundle。"))
 	}
 	if rows == 0 {
-		return strings.Join(append(summary, "", "当前筛选没有结果。"), "\n")
+		return wrapLines(width, append(summary, "当前筛选没有结果。"))
 	}
 
 	list := m.renderAssetList()
 	detail := m.renderAssetDetails()
-	if width < 88 {
-		return strings.Join(append(summary, "", list, "", detail), "\n")
-	}
-
-	leftWidth := width / 2
-	rightWidth := width - leftWidth - 2
-	left := lipgloss.NewStyle().Width(leftWidth).Render(list)
-	right := lipgloss.NewStyle().Width(rightWidth).Render(detail)
-	return strings.Join(summary, "\n") + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	return joinSections(wrapLines(width, summary), renderSplitPane(width, list, detail))
 }
 
 func (m model) renderProjectPage(width int) string {
@@ -1835,74 +1700,40 @@ func (m model) renderProjectPage(width int) string {
 	}
 
 	summary := []string{
-		shellMutedStyle.Render("项目配置与变量：IDE 覆盖、.dec/vars.yaml；bundle 启用在 Bundles 页。"),
+		fmt.Sprintf("IDE 模式: %s · 生效: %s", modeLabel, fallbackValue(strings.Join(projectEffectivePreview(m.projectSettings, m.projectSettingsOverride, m.projectSettingsSelectedIDEs), ", "), "<none>")),
 	}
 	if m.overview != nil {
-		summary = append(summary,
-			fmt.Sprintf("项目名: %s", formatProjectNameDisplay(m.overview)),
-			fmt.Sprintf("Vault project: projects/%s.yaml", m.overview.ProjectName),
-			fmt.Sprintf("已启用 bundle (%d): %s", countOverviewEnabledBundles(m.overview), formatOverviewEnabledBundleNames(m.overview)),
-		)
+		summary = append(summary, fmt.Sprintf("已启用 bundle (%d): %s", countOverviewEnabledBundles(m.overview), formatOverviewEnabledBundleNames(m.overview)))
 	}
-	summary = append(summary,
-		fmt.Sprintf("配置文件: %s", m.projectSettings.ConfigPath),
-		fmt.Sprintf("变量文件: %s", m.projectSettings.VarsPath),
-		fmt.Sprintf("IDE 模式: %s", modeLabel),
-		fmt.Sprintf("项目 IDE: %s", fallbackValue(strings.Join(normalizedStringList(m.projectSettingsSelectedIDEs), ", "), "<none>")),
-		fmt.Sprintf("全局默认: %s", fallbackValue(strings.Join(normalizedStringList(m.projectSettings.GlobalIDEs), ", "), "<未配置>")),
-		fmt.Sprintf("生效 IDE: %s", fallbackValue(strings.Join(projectEffectivePreview(m.projectSettings, m.projectSettingsOverride, m.projectSettingsSelectedIDEs), ", "), "<none>")),
-		formatWarnings(m.projectSettings.IDEWarnings),
-	)
 	if !m.projectSettings.ProjectConfigReady {
 		summary = append(summary, shellMutedStyle.Render("尚未初始化 .dec/config.yaml，请先在 Home 页初始化 project。"))
 	}
 	if m.projectSettingsDirty {
-		summary = append(summary, shellWarnStyle.Render("当前有未保存修改，按 s 保存。"))
-	} else {
-		summary = append(summary, shellMutedStyle.Render("当前项目设置与磁盘一致。"))
+		summary = append(summary, shellWarnStyle.Render("有未保存修改，按 s 保存"))
 	}
-
-	summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · space 切换模式/IDE · s 保存 · c 清除覆盖 · e 编辑变量 · A 登记 secret"))
 	if m.savingProjectSettings {
 		summary = append(summary, shellWarnStyle.Render("正在保存项目设置..."))
 	}
 	if m.lastEditErr != nil {
 		summary = append(summary, shellWarnStyle.Render("编辑器返回错误: "+m.lastEditErr.Error()))
 	}
-
 	if outcome := m.renderAddSecretOutcome(); outcome != "" {
 		summary = append(summary, outcome)
+	}
+	if warn := formatWarnings(m.projectSettings.IDEWarnings); !strings.HasSuffix(warn, "无") {
+		summary = append(summary, warn)
 	}
 
 	list := m.renderProjectSettingsList()
 	detail := m.renderProjectSettingsDetails()
-	varsBlock := m.renderProjectVarsBlock()
-	trailing := make([]string, 0, 2)
+	parts := []string{wrapLines(width, summary), renderSplitPane(width, list, detail)}
 	if m.addSecretStage != "" {
-		trailing = append(trailing, m.renderAddSecretBlock())
+		parts = append(parts, m.renderAddSecretBlock())
 	}
-	if varsBlock != "" {
-		trailing = append(trailing, varsBlock)
+	if varsBlock := m.renderProjectVarsBlock(); varsBlock != "" {
+		parts = append(parts, varsBlock)
 	}
-
-	if width < 88 {
-		parts := append(summary, "", list, "", detail)
-		for _, block := range trailing {
-			parts = append(parts, "", block)
-		}
-		return strings.Join(parts, "\n")
-	}
-
-	leftWidth := width / 2
-	rightWidth := width - leftWidth - 2
-	left := lipgloss.NewStyle().Width(leftWidth).Render(list)
-	right := lipgloss.NewStyle().Width(rightWidth).Render(detail)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	result := strings.Join(summary, "\n") + "\n\n" + body
-	for _, block := range trailing {
-		result += "\n\n" + block
-	}
-	return result
+	return joinSections(parts...)
 }
 
 func (m model) renderProjectSettingsList() string {
@@ -2006,22 +1837,22 @@ func (m model) renderProjectVarsBlock() string {
 	}
 
 	view := m.projectVars
-	fileLine := fmt.Sprintf("变量文件: %s", view.VarsPath)
+	fileLine := fmt.Sprintf("%s", compactPath(view.VarsPath, 48))
 	if view.VarsFileReady {
 		fileLine += shellMutedStyle.Render(" (已存在)")
 	} else {
-		fileLine += shellWarnStyle.Render(" (未生成，按 e 会自动创建模板并打开编辑器)")
+		fileLine += shellWarnStyle.Render(" (未生成)")
 	}
 	lines = append(lines, fileLine)
-	lines = append(lines, fmt.Sprintf("编辑器: %s", fallbackValue(view.EditorCommand, "<未配置，将回退到 vim/vi/notepad>")))
-	lines = append(lines, shellMutedStyle.Render("快捷键：e 打开外部编辑器编辑 .dec/vars.yaml"))
+	lines = append(lines, shellMutedStyle.Render(fmt.Sprintf("编辑器: %s · e 打开外部编辑器", fallbackValue(view.EditorCommand, "vim"))))
+	lines = append(lines, shellMutedStyle.Render("A 登记 secret"))
 
 	for _, w := range view.Warnings {
 		lines = append(lines, shellWarnStyle.Render(w))
 	}
 
 	if !view.CacheExists {
-		lines = append(lines, shellMutedStyle.Render(".dec/cache 尚不存在：请先到 Run 页执行 pull，再查看占位符。"))
+		lines = append(lines, shellMutedStyle.Render(".dec/cache 尚不存在：请先到 Run 页执行 pull"))
 	}
 	if len(view.UsedPlaceholders) == 0 {
 		if view.CacheExists {
@@ -2030,8 +1861,13 @@ func (m model) renderProjectVarsBlock() string {
 		return strings.Join(lines, "\n")
 	}
 
-	lines = append(lines, fmt.Sprintf("占位符总数: %d | 缺失: %d", len(view.UsedPlaceholders), len(view.MissingPlaceholders())))
-	for _, name := range view.UsedPlaceholders {
+	lines = append(lines, fmt.Sprintf("占位符: %d · 缺失: %d", len(view.UsedPlaceholders), len(view.MissingPlaceholders())))
+	const maxPlaceholders = 8
+	shown := view.UsedPlaceholders
+	if len(shown) > maxPlaceholders {
+		shown = shown[:maxPlaceholders]
+	}
+	for _, name := range shown {
 		status := view.ResolvedVars[name]
 		var row string
 		switch status.Source {
@@ -2046,17 +1882,24 @@ func (m model) renderProjectVarsBlock() string {
 		}
 		lines = append(lines, row)
 	}
+	if len(view.UsedPlaceholders) > maxPlaceholders {
+		lines = append(lines, shellMutedStyle.Render(fmt.Sprintf("  … 另有 %d 个占位符", len(view.UsedPlaceholders)-maxPlaceholders)))
+	}
 
 	return strings.Join(lines, "\n")
 }
 
 // truncateVarValue 把过长的变量值截断显示，避免一行撑破区块。
 func truncateVarValue(v string) string {
-	const max = 60
-	if len(v) <= max {
+	const maxW = 40
+	if lipgloss.Width(v) <= maxW {
 		return v
 	}
-	return v[:max] + "…"
+	runes := []rune(v)
+	if len(runes) <= maxW-1 {
+		return v
+	}
+	return string(runes[:maxW-1]) + "…"
 }
 
 func (m model) renderRunPage(width int) string {
@@ -2083,12 +1926,15 @@ func (m model) renderRunPage(width int) string {
 	}
 
 	if len(m.runEvents) > 0 {
-		sections = append(sections, "", shellTitleStyle.Render("事件日志"))
-		for _, line := range m.runEvents {
+		sections = append(sections, "", shellTitleStyle.Render("事件"))
+		const maxEvents = 6
+		start := 0
+		if len(m.runEvents) > maxEvents {
+			start = len(m.runEvents) - maxEvents
+		}
+		for _, line := range m.runEvents[start:] {
 			sections = append(sections, formatRunLogLine(line))
 		}
-	} else if !m.runningPull && !m.runningRemove && m.updateStage == "" {
-		sections = append(sections, "", shellMutedStyle.Render("执行后事件将显示于此。"))
 	}
 
 	return wrapLines(width, sections)
@@ -2118,19 +1964,19 @@ func (m model) renderRunHeader() string {
 	case m.removeResult != nil:
 		mode = "Remove 完成"
 	}
-	return shellTitleStyle.Render("Run · "+mode) + "\n" + fmt.Sprintf("状态 %s", m.runStatusLabel())
+	return shellTitleStyle.Render("Run · " + mode)
 }
 
 func (m model) renderRunActionBar() string {
 	switch {
 	case m.runningPull && m.runMode == "push":
-		return shellMutedStyle.Render("操作  Esc 取消 push  ·  ? 帮助")
+		return shellMutedStyle.Render("Esc 取消 push  ·  ? 帮助")
 	case m.runningPull:
-		return shellMutedStyle.Render("操作  Esc 取消 pull  ·  ? 帮助")
+		return shellMutedStyle.Render("Esc 取消 pull  ·  ? 帮助")
 	case m.runningRemove, m.updatingBinary:
-		return shellMutedStyle.Render("操作  ? 帮助")
+		return shellMutedStyle.Render("? 帮助")
 	default:
-		return shellMutedStyle.Render("操作  p Pull  ·  P Push  ·  u Update  ·  ? 帮助 · 删除请切到 Delete 页")
+		return shellMutedStyle.Render("p Pull  ·  P Push  ·  u Update  ·  ? 帮助")
 	}
 }
 
@@ -2229,10 +2075,9 @@ func (m model) renderRunActiveBlock(width int) []string {
 
 func (m model) renderRunIdleGuide() []string {
 	lines := []string{
-		shellTitleStyle.Render("建议"),
-		shellMutedStyle.Render("· p 拉取 Dec bundle + secrets + IDE 安装"),
-		shellMutedStyle.Render("· P 推送到远端（Dec cache → Git vault + secrets → Bitwarden，需两次确认）"),
-		shellMutedStyle.Render("· x 删除已启用 bundle（整包，不可逆）"),
+		shellMutedStyle.Render("p 拉取 Dec bundle + secrets + IDE 安装"),
+		shellMutedStyle.Render("P 推送到远端（两次确认）"),
+		shellMutedStyle.Render("删除请切到 Delete 页"),
 	}
 	lines = append(lines, m.renderPullPlanLines()...)
 	lines = append(lines, shellMutedStyle.Render("上次  尚无操作记录"))
@@ -2600,43 +2445,29 @@ func (m model) renderSettingsPage(width int) string {
 		return shellMutedStyle.Render("Loading global settings...")
 	}
 
-	summary := []string{
-		fmt.Sprintf("Repo URL: %s", fallbackValue(strings.TrimSpace(m.settingsRepoInput), "<none>")),
-		fmt.Sprintf("当前远端: %s", fallbackValue(m.settings.ConnectedRepoURL, "未连接")),
-		fmt.Sprintf("已选 IDE: %s", fallbackValue(strings.Join(normalizedStringList(m.settingsSelectedIDEs), ", "), "<none>")),
-		fmt.Sprintf("生效 IDE: %s", fallbackValue(strings.Join(settingsEffectivePreview(m.settings, m.settingsSelectedIDEs), ", "), "<none>")),
-		fmt.Sprintf("全局配置: %s", m.settings.ConfigPath),
-		fmt.Sprintf("本机 Vars: %s", m.settings.VarsPath),
-		formatWarnings(m.settings.IDEWarnings),
-	}
+	summary := []string{}
 	if m.settingsDirty {
-		summary = append(summary, shellWarnStyle.Render("当前有未保存修改，按 s 保存。"))
-	} else {
-		summary = append(summary, shellMutedStyle.Render("当前全局设置与磁盘一致。"))
+		summary = append(summary, shellWarnStyle.Render("有未保存修改，按 s 保存"))
 	}
 	if m.settingsRepoEditing {
-		summary = append(summary, shellMutedStyle.Render("Repo URL 输入中：输入后按 Enter 应用，Esc 退出。"))
-	} else {
-		summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · e 编辑 repo · space 切换 IDE · s 保存"))
+		summary = append(summary, shellMutedStyle.Render("Repo URL 输入中：Enter 应用 · Esc 退出"))
 	}
 	if !m.settings.VarsFileReady {
-		summary = append(summary, shellMutedStyle.Render("首次保存会创建 ~/.dec/local/vars.yaml 模板。"))
+		summary = append(summary, shellMutedStyle.Render("首次保存会创建 ~/.dec/local/vars.yaml"))
 	}
 	if m.savingSettings {
 		summary = append(summary, shellWarnStyle.Render("正在保存全局设置..."))
 	}
+	if warn := formatWarnings(m.settings.IDEWarnings); !strings.HasSuffix(warn, "无") {
+		summary = append(summary, warn)
+	}
 
 	list := m.renderSettingsList()
 	detail := m.renderSettingsDetails()
-	if width < 88 {
-		return strings.Join(append(summary, "", list, "", detail), "\n")
+	if len(summary) == 0 {
+		return renderSplitPane(width, list, detail)
 	}
-
-	leftWidth := width / 2
-	rightWidth := width - leftWidth - 2
-	left := lipgloss.NewStyle().Width(leftWidth).Render(list)
-	right := lipgloss.NewStyle().Width(rightWidth).Render(detail)
-	return strings.Join(summary, "\n") + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	return joinSections(wrapLines(width, summary), renderSplitPane(width, list, detail))
 }
 
 func (m model) renderSettingsList() string {
@@ -3287,97 +3118,6 @@ func (m model) isRunPage() bool {
 	return m.pages[m.pageIndex] == "Run"
 }
 
-func (m model) renderLogs(width, height int) string {
-	start := 0
-	if len(m.logs) > height-2 {
-		start = len(m.logs) - (height - 2)
-	}
-	visible := m.logs[start:]
-	lines := make([]string, 0, len(visible)+1)
-	lines = append(lines, shellTitleStyle.Render("Logs"))
-	for _, line := range visible {
-		lines = append(lines, shellLogStyle.Render("- "+line))
-	}
-	return shellCardStyle.Width(width).Height(height).Render(strings.Join(lines, "\n"))
-}
-
-func (m model) renderStatusBar(width int) string {
-	left := "q quit | j/k nav | l/h in-out | r refresh"
-	if m.isHomePage() && m.hasVaultInferencePrompt() {
-		left = "y/Enter 应用 · n 跳过 | q quit | r refresh"
-	} else if m.isHomePage() && m.applyingVaultProject {
-		left = "正在应用 vault project..."
-	}
-	right := fmt.Sprintf("page %s", m.pages[m.pageIndex])
-	if m.isBundlesPage() && m.assets != nil {
-		right = fmt.Sprintf("%s | %d/%d bundles", right, len(m.bundleSelection), len(m.assets.Bundles))
-		if m.assetsDirty {
-			right += " | modified"
-		}
-		if m.assetFilterInput {
-			right += " | filter"
-		}
-	} else if m.isSettingsPage() && m.settings != nil {
-		right = fmt.Sprintf("%s | %d IDEs", right, len(normalizedStringList(m.settingsSelectedIDEs)))
-		if m.settingsDirty {
-			right += " | modified"
-		}
-		if m.settingsRepoEditing {
-			right += " | repo-input"
-		}
-		if m.savingSettings {
-			right += " | saving"
-		}
-	} else if m.isProjectPage() && m.projectSettings != nil {
-		modeTag := "inherit"
-		if m.projectSettingsOverride {
-			modeTag = "override"
-		}
-		right = fmt.Sprintf("%s | %s", right, modeTag)
-		if m.projectSettingsOverride {
-			right = fmt.Sprintf("%s | %d IDEs", right, len(normalizedStringList(m.projectSettingsSelectedIDEs)))
-		}
-		if m.projectSettingsDirty {
-			right += " | modified"
-		}
-		if m.savingProjectSettings {
-			right += " | saving"
-		}
-	} else if m.isRunPage() {
-		right = fmt.Sprintf("%s | %s", right, m.runStatusLabel())
-		if m.runProgress != nil && (m.runningPull || m.runningRemove) {
-			right += fmt.Sprintf(" | %s %d/%d", runPhaseLabel(m.runProgress.Phase), m.runProgress.Current, m.runProgress.Total)
-		}
-		if m.removeStage != "" {
-			right += " | remove-" + m.removeStage
-		}
-		if m.updateStage != "" {
-			right += " | update-" + m.updateStage
-		}
-	} else if m.overview != nil {
-		right = fmt.Sprintf("%s | %d bundles", right, countOverviewEnabledBundles(m.overview))
-	}
-	// shellStatusBar 的 Padding(0, 1) 会在左右各占 1 列，实际可写内容宽度 = width - 2。
-	// 必须按内容区预算，否则在窄终端下会被 lipgloss 的 Width() 悄悄换行，右侧页面状态被截断。
-	innerWidth := width - 2
-	if innerWidth < 1 {
-		innerWidth = 1
-	}
-	// 预算保护：右侧状态承载页面信息更关键。
-	// 当 left + right 已超内容区宽度（含中文宽字符），丢弃左侧快捷键提示，避免页面状态被截断。
-	rightWidth := lipgloss.Width(right)
-	leftWidth := lipgloss.Width(left)
-	if leftWidth+rightWidth+1 > innerWidth {
-		left = ""
-		leftWidth = 0
-	}
-	available := innerWidth - leftWidth - rightWidth
-	if available < 1 {
-		available = 1
-	}
-	return shellStatusBar.Width(width).Render(left + strings.Repeat(" ", available) + right)
-}
-
 func (m model) currentSummary() string {
 	if m.overviewErr != nil {
 		return "Overview unavailable"
@@ -3658,16 +3398,4 @@ func fallbackValue(value, fallback string) string {
 		return fallback
 	}
 	return value
-}
-
-func wrapLines(width int, lines []string) string {
-	filtered := make([]string, 0, len(lines))
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		filtered = append(filtered, lipgloss.NewStyle().Width(width).Render(trimmed))
-	}
-	return strings.Join(filtered, "\n")
 }

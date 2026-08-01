@@ -339,24 +339,24 @@ func (m model) renderDeletePage(width int) string {
 	rows := tree.VisibleRows()
 	selectedCount := tree.CountSelected()
 	lines := []string{
-		shellTitleStyle.Render("Delete"),
-		shellMutedStyle.Render("Dec 资产 · secrets · SSH Key · bundle · 两次确认后执行"),
-		fmt.Sprintf("共 %d 项 · 已选 %d · 筛选 %q", len(visible), selectedCount, mm.currentDeleteFilterLabel()),
+		fmt.Sprintf("共 %d 项 · 已选 %d", len(visible), selectedCount),
+	}
+	if filter := mm.currentDeleteFilterLabel(); filter != "<none>" {
+		lines[0] += " · 筛选 " + filter
 	}
 	if !mm.deleteIncludeRemote {
-		lines = append(lines, shellMutedStyle.Render("未扫描 Bitwarden 远端 orphan · 按 r 刷新（含远端）"))
+		lines = append(lines, shellMutedStyle.Render("按 r 刷新可含 Bitwarden 远端 orphan"))
 	}
 	if mm.deleteFilterInput {
 		lines = append(lines, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))
-	} else {
-		lines = append(lines, shellMutedStyle.Render("j/k 移动 · l/h 展开折叠 · space 选择 · d 删除 · a 全选 · / 筛选 · r 刷新 · Esc 返回导航"))
 	}
 	if len(visible) == 0 {
-		lines = append(lines, shellWarnStyle.Render("没有可删除项。"))
+		lines = append(lines, shellMutedStyle.Render("没有可删除项。"))
 		return wrapLines(width, lines)
 	}
 	for i, row := range rows {
 		line := renderDeleteTreeLine(row, i, &tree, mm.focus != focusSidebar && i == tree.Cursor)
+		line = fitLine(line, width)
 		if mm.focus != focusSidebar && i == tree.Cursor {
 			lines = append(lines, shellSelectedRow.Render(line))
 		} else {
@@ -364,7 +364,7 @@ func (m model) renderDeletePage(width int) string {
 		}
 	}
 	if m.runningDelete {
-		lines = append(lines, "", shellWarnStyle.Render("正在删除… Esc 取消"))
+		lines = append(lines, shellWarnStyle.Render("正在删除… Esc 取消"))
 	}
 	if m.deleteErr != nil {
 		lines = append(lines, shellWarnStyle.Render("删除失败: "+m.deleteErr.Error()))

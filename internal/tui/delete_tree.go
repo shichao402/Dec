@@ -145,15 +145,15 @@ func renderDeleteTreeLine(row TreeRow, cursor int, tree *TreeList, focused bool)
 	if focused {
 		marker = ">"
 	}
-	prefix := indent
+	expand := "  "
 	if treeNodeExpandable(row.Node) {
 		if tree.Expanded[row.Node.ID] {
-			prefix += "▾ "
+			expand = "▾ "
 		} else {
-			prefix += "▸ "
+			expand = "▸ "
 		}
 	} else if row.Depth > 0 {
-		prefix += "↳ "
+		expand = "↳ "
 	}
 	check := "   "
 	if row.SelectIndex >= 0 {
@@ -163,5 +163,5 @@ func renderDeleteTreeLine(row TreeRow, cursor int, tree *TreeList, focused bool)
 			check = "[ ]"
 		}
 	}
-	return fmt.Sprintf(" %s %s %s%s", marker, check, prefix, row.Node.Label)
+	return fmt.Sprintf("%s %s %s%s%s", marker, check, indent, expand, row.Node.Label)
 }
