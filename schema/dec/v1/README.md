@@ -16,7 +16,7 @@ Protobuf 是本目录的 **schema 真相源**；运行时 wire format 仍是 YAM
 
 - **Project**（`projects.proto`）：vault `projects/<name>.yaml`，声明 `bundles`、`ides` 等
 - **Bundle**（`assets.proto`）：Git Vault `bundles/<name>/` 目录内的资产组织单位（`skills/`、`rules/`、`mcp/`、`commands/`、`bundle.yaml`）
-- **ProjectConfig**（`config.proto`）：本地 `.dec/config.yaml`，以 `project_name` 引用 vault project，同步 `enabled_bundles`
+- **ProjectConfig**（`config.proto`）：本地 `.dec/config.yaml`，以 `project_name` 引用 vault project，同步 `enabled_bundles`；`enabled_bundles` 是唯一的资产启用入口，字段 5/6 上曾经的单资产清单已 reserved
 - 私密平面在 Bitwarden **secrets bundle** 中与 Dec bundle **同构绑定**；pull 时按 project bundle 列表成对拉取
 - 零路径重叠 invariant 与 pull 流程见 [Documents/BUNDLE-SECRETS-MODEL.md](../../Documents/BUNDLE-SECRETS-MODEL.md)
 

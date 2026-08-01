@@ -105,20 +105,13 @@ project_name: my-app
 ides:               # 可选：机器级 IDE 覆盖
   - cursor
 
-enabled_bundles:    # 从 projects/my-app.yaml 同步；Assets 页可调整
+enabled_bundles:    # 从 projects/my-app.yaml 同步；Bundles 页可调整
   - vikunja
   - helloworld
-
-available:          # Assets 页扫描生成（本地缓存）
-  vikunja:
-    vikunja-workflow:
-      skills: true
-
-enabled:            # 单资产粒度（高级用法）
-  vikunja:
-    vikunja-workflow:
-      skills: true
 ```
+
+`enabled_bundles` 是唯一的资产启用入口：成员资产随 bundle 一并解析下发，不能单独启用或排除。
+早期版本的 `available` / `enabled` 字段已移除，`LoadProjectConfig` 读到旧配置时会把 `enabled` 涉及的 vault 折叠成 bundle 引用并立即回写，`available` 作为扫描缓存直接丢弃。
 
 **职责划分**：
 
@@ -126,9 +119,8 @@ enabled:            # 单资产粒度（高级用法）
 |------|------|------|
 | `project_name` | 本地 + vault 文件名 | 关联 `projects/<name>.yaml` |
 | `bundles` | vault project | bundle 列表真相源 |
-| `enabled_bundles` | 本地 | 从 vault 同步或 Assets 页保存；pull 解析用 |
+| `enabled_bundles` | 本地 | 从 vault 同步或 Bundles 页保存；pull 解析用 |
 | `ides` / `editor` | vault project + 本地覆盖 | 本地优先 |
-| `available` / `enabled` | 本地 | 扫描缓存与单资产粒度控制 |
 
 ### Project 初始化（TUI-first）
 
@@ -194,7 +186,7 @@ secrets 没有本地同步状态文件：待推文件由**远端 folder 的 note
 
 `.dec/` 适合纳入版本控制：
 
-- `config.yaml`：`project_name`、机器级 IDE / editor 覆盖、`enabled_bundles` / available / enabled
+- `config.yaml`：`project_name`、机器级 IDE / editor 覆盖、`enabled_bundles`
 - `cache/`：pull 下来的 **公开** 资产缓存，也是 push 的读取源（私密文件不进 cache）
 - `.version`：当前项目最近一次 pull 对应的远端 commit
 - `vars.yaml`：项目级变量与资产级变量覆盖
@@ -375,11 +367,11 @@ TUI **Settings** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 - 写入本地 `.dec/config.yaml`（`project_name`、`enabled_bundles`）
 - 生成 `.dec/vars.yaml` 模板
 
-#### config init（Assets 页）
+#### bundle 选择（Bundles 页）
 
-- 扫描远端 vault 与 bundle
-- 更新 `.dec/config.yaml` 的 `available`
-- 保留已有 `project_name` / enabled / enabled_bundles / ides / editor
+- 扫描远端 vault 与 bundle，列出全部 bundle 及成员
+- 勾选保存后只写 `.dec/config.yaml` 的 `enabled_bundles`
+- 保留已有 `project_name` / `ides` / `editor`
 
 #### pull（Run 页）
 

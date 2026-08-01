@@ -25,10 +25,14 @@ func TestModelViewRendersHomeOverview(t *testing.T) {
 		ProjectConfigReady: true,
 		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
 		VarsFileReady:      true,
-		AvailableCount:     5,
-		EnabledCount:       2,
-		IDEs:               []string{"codex", "cursor"},
-		Editor:             "code --wait",
+		AvailableBundleCount: 2,
+		EnabledBundleCount:   1,
+		Bundles: []app.BundleOverview{
+			{Name: "default", VaultName: "default", Enabled: true},
+			{Name: "cli", VaultName: "cli"},
+		},
+		IDEs:   []string{"codex", "cursor"},
+		Editor: "code --wait",
 	}})
 	m = updated.(model)
 
@@ -39,7 +43,7 @@ func TestModelViewRendersHomeOverview(t *testing.T) {
 		"Bundles",
 		"项目名:",
 		"git@github.com:demo/dec.git",
-		"展开资产: 5 可用 / 2 已启用",
+		"Vault bundle: 2 个 | 已启用: 1 个",
 		"默认 IDE: codex, cursor",
 		"编辑器: code --wait",
 		"Logs",
@@ -182,24 +186,33 @@ func TestModelAssetsPageRendersSelectionState(t *testing.T) {
 	m.focus = focusContent
 	m.width = 110
 	m.height = 32
-	m.assetTypeFilter = "all"
 	m.assets = &app.AssetSelectionState{
 		ExistingConfig: true,
 		ConfigPath:     "/tmp/dec-project/.dec/config.yaml",
 		VarsPath:       "/tmp/dec-project/.dec/vars.yaml",
-		Items: []app.AssetSelectionItem{
-			{Name: "project-workflow", Type: "skill", Vault: "default", Enabled: true},
-			{Name: "cli-release-rules", Type: "rule", Vault: "cli", Enabled: false},
+		Bundles: []app.AssetBundleOption{
+			{
+				Name:    "default",
+				Vault:   "default",
+				Enabled: true,
+				Members: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
+			},
+			{
+				Name:    "cli",
+				Vault:   "cli",
+				Members: []app.AssetSelectionItem{{Name: "cli-release-rules", Type: "rule", Vault: "cli"}},
+			},
 		},
 	}
+	m.bundleSelection = []string{"default"}
 	m.normalizeAssetCursor()
 
 	view := m.View()
 	checks := []string{
 		"Bundle 列表",
 		"Details",
-		"[x] default / skill / project-workflow",
-		"[ ] cli / rule / cli-release-rules",
+		"[x] ▸ default · 1 个成员",
+		"[ ] ▸ cli · 1 个成员",
 		"快捷键：j/k 移动 · h 返回导航",
 	}
 	for _, check := range checks {
@@ -247,19 +260,24 @@ func TestModelToggleCurrentAssetMarksDirty(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.focus = focusContent
-	m.assetTypeFilter = "all"
 	m.assets = &app.AssetSelectionState{
-		Items: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
+		Bundles: []app.AssetBundleOption{
+			{
+				Name:    "default",
+				Vault:   "default",
+				Members: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
+			},
+		},
 	}
 	m.normalizeAssetCursor()
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m = updated.(model)
-	if !m.assets.Items[0].Enabled {
-		t.Fatal("space 应切换当前资产为 enabled")
+	if !m.bundleSelected("default") {
+		t.Fatal("space 应切换当前 bundle 为已勾选")
 	}
 	if !m.assetsDirty {
-		t.Fatal("切换资产后应标记为 dirty")
+		t.Fatal("切换 bundle 后应标记为 dirty")
 	}
 }
 
@@ -267,11 +285,10 @@ func TestModelFilterInputNarrowsAssets(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.focus = focusContent
-	m.assetTypeFilter = "all"
 	m.assets = &app.AssetSelectionState{
-		Items: []app.AssetSelectionItem{
-			{Name: "project-workflow", Type: "skill", Vault: "default"},
-			{Name: "cli-release-rules", Type: "rule", Vault: "cli"},
+		Bundles: []app.AssetBundleOption{
+			{Name: "default", Vault: "default"},
+			{Name: "cli", Vault: "cli"},
 		},
 	}
 	m.normalizeAssetCursor()
@@ -287,12 +304,12 @@ func TestModelFilterInputNarrowsAssets(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
 
-	visible := m.filteredAssetIndices()
-	if len(visible) != 1 {
-		t.Fatalf("筛选后可见资产数 = %d, 期望 1", len(visible))
+	rows := m.visibleAssetRows()
+	if len(rows) != 1 {
+		t.Fatalf("筛选后可见行数 = %d, 期望 1", len(rows))
 	}
-	if got := m.assets.Items[visible[0]].Name; got != "cli-release-rules" {
-		t.Fatalf("筛选命中资产 = %q, 期望 %q", got, "cli-release-rules")
+	if got := m.assets.Bundles[rows[0].bundleIndex].Name; got != "cli" {
+		t.Fatalf("筛选命中 bundle = %q, 期望 %q", got, "cli")
 	}
 }
 
@@ -301,7 +318,7 @@ func TestModelAssetsPageDoesNotLeavePageWithoutVisibleAssets(t *testing.T) {
 	m.pageIndex = 1
 	m.focus = focusContent
 	m.assets = &app.AssetSelectionState{
-		Items: []app.AssetSelectionItem{{Name: "project-workflow", Type: "skill", Vault: "default"}},
+		Bundles: []app.AssetBundleOption{{Name: "default", Vault: "default"}},
 	}
 	m.assetFilter = "missing"
 	m.normalizeAssetCursor()
@@ -730,41 +747,60 @@ func TestSuggestNextAction(t *testing.T) {
 	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, false, true); !strings.Contains(got, "Bundles 页") {
 		t.Fatalf("推断已跳过时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true, EnabledCount: 0}, false, false); !strings.Contains(got, "Bundles 页") {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true}, false, false); !strings.Contains(got, "Bundles 页") {
 		t.Fatalf("无已启用 bundle 时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true, EnabledCount: 0, EnabledBundleCount: 1}, false, false); !strings.Contains(got, "Run 页") {
-		t.Fatalf("仅 enabled_bundles 非空时应建议 Run 页: %q", got)
+	ready := &app.ProjectOverview{
+		RepoConnected:      true,
+		ProjectConfigReady: true,
+		EnabledBundleCount: 1,
+		Bundles:            []app.BundleOverview{{Name: "default", VaultName: "default", Enabled: true}},
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true, EnabledCount: 2}, false, false); !strings.Contains(got, "Run 页") {
-		t.Fatalf("项目就绪时建议动作错误: %q", got)
+	if got := suggestNextAction(ready, false, false); !strings.Contains(got, "Run 页") {
+		t.Fatalf("enabled_bundles 非空时应建议 Run 页: %q", got)
 	}
 }
 
-func TestRenderRunIdleGuideEnabledBundlesOnly(t *testing.T) {
+// Run 页 pull 计划：有启用 bundle 时列出将拉取的内容，没有时给出警告。
+func TestRenderPullPlanLines(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.overview = &app.ProjectOverview{
-		EnabledCount:       0,
-		EnabledBundleCount: 1,
+	m.assets = assetsStateWithBundle()
+	m.assets.Bundles[0].Enabled = true
+	m.bundleSelection = []string{"vikunja"}
+
+	lines := strings.Join(m.renderPullPlanLines(), "\n")
+	if !strings.Contains(lines, "本次 Pull 计划") {
+		t.Fatalf("缺少 pull 计划标题: %q", lines)
 	}
-	lines := m.renderRunIdleGuide()
-	for _, line := range lines {
-		if strings.Contains(line, "无启用 bundle") {
-			t.Fatalf("enabled_bundles 非空时不应显示无启用 bundle 警告: %q", strings.Join(lines, "\n"))
-		}
+	if !strings.Contains(lines, "vikunja") {
+		t.Fatalf("pull 计划应列出已启用 bundle: %q", lines)
+	}
+	if strings.Contains(lines, "无启用 bundle") {
+		t.Fatalf("有启用 bundle 时不应显示警告: %q", lines)
 	}
 
-	m.overview = &app.ProjectOverview{EnabledCount: 0, EnabledBundleCount: 0}
-	lines = m.renderRunIdleGuide()
-	found := false
-	for _, line := range lines {
-		if strings.Contains(line, "无启用 bundle") {
-			found = true
-			break
-		}
+	m.assets.Bundles[0].Enabled = false
+	m.bundleSelection = nil
+	lines = strings.Join(m.renderPullPlanLines(), "\n")
+	if !strings.Contains(lines, "无启用 bundle") {
+		t.Fatalf("无启用 bundle 时应显示警告: %q", lines)
 	}
-	if !found {
-		t.Fatalf("enabled_bundles 与 enabled 均为空时应显示警告: %q", strings.Join(lines, "\n"))
+}
+
+// Bundles 页勾选未保存时，Run 页应提示差异，避免用户以为 pull 会带上新勾选。
+func TestRenderPullPlanWarnsUnsavedSelection(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.assets = assetsStateWithBundle()
+	m.assets.Bundles[0].Enabled = true
+	m.bundleSelection = []string{"cli"}
+	m.assetsDirty = true
+
+	lines := strings.Join(m.renderPullPlanLines(), "\n")
+	if !strings.Contains(lines, "未保存的勾选") {
+		t.Fatalf("应提示未保存勾选: %q", lines)
+	}
+	if !strings.Contains(lines, "+cli") || !strings.Contains(lines, "-vikunja") {
+		t.Fatalf("未保存差异描述不完整: %q", lines)
 	}
 }
 
@@ -1969,17 +2005,12 @@ func TestModelProjectVarsEditedMsgSurfacesError(t *testing.T) {
 
 // -------- #93 Bundle-aware Assets 页 --------
 
-// 构造一个带 1 个 bundle（2 成员）+ 2 独立资产的 Assets 状态。
+// 构造一个带 2 个 bundle 的 Bundles 页状态：vikunja（2 成员）+ cli（1 成员）。
 func assetsStateWithBundle() *app.AssetSelectionState {
 	return &app.AssetSelectionState{
 		ExistingConfig: true,
 		ConfigPath:     "/tmp/dec-project/.dec/config.yaml",
 		VarsPath:       "/tmp/dec-project/.dec/vars.yaml",
-		Items: []app.AssetSelectionItem{
-			{Name: "vikunja-workflow", Type: "skill", Vault: "default"},
-			{Name: "vikunja-issue", Type: "skill", Vault: "default"},
-			{Name: "solo-rule", Type: "rule", Vault: "cli"},
-		},
 		Bundles: []app.AssetBundleOption{
 			{
 				Name:        "vikunja",
@@ -1989,6 +2020,14 @@ func assetsStateWithBundle() *app.AssetSelectionState {
 				Members: []app.AssetSelectionItem{
 					{Name: "vikunja-workflow", Type: "skill", Vault: "default"},
 					{Name: "vikunja-issue", Type: "skill", Vault: "default"},
+				},
+			},
+			{
+				Name:    "cli",
+				Vault:   "cli",
+				Enabled: false,
+				Members: []app.AssetSelectionItem{
+					{Name: "solo-rule", Type: "rule", Vault: "cli"},
 				},
 			},
 		},
@@ -2009,7 +2048,7 @@ func seekCursorToKind(t *testing.T, m *model, want assetRowKind) {
 	t.Fatalf("rows 中找不到 kind=%d 的行", want)
 }
 
-func TestModelAssetsBundleToggleMarksMembersReadonly(t *testing.T) {
+func TestModelAssetsBundleToggleMarksDirty(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.focus = focusContent
@@ -2027,134 +2066,48 @@ func TestModelAssetsBundleToggleMarksMembersReadonly(t *testing.T) {
 	if !m.assetsDirty {
 		t.Fatal("勾选 bundle 应标脏")
 	}
-	// 单独取消成员应被拒绝：Items[0] 仍保持 Enabled=false
-	// 找到成员对应的 Items 下标
-	for i, it := range m.assets.Items {
-		if it.Type == "skill" && it.Name == "vikunja-workflow" {
-			if it.Enabled {
-				t.Fatalf("成员不应被自动 Enabled=true：Items[%d]", i)
-			}
-		}
-	}
-	// 找到独立资产行尝试 toggle：独立 rule 应仍可切换
-	m.assetTypeFilter = "all"
-	m.normalizeAssetCursor()
-	seekCursorToKind(t, &m, assetRowAsset)
-	rows := m.visibleAssetRows()
-	var cursorItem app.AssetSelectionItem
-	for _, r := range rows {
-		if r.kind == assetRowAsset {
-			cursorItem = m.assets.Items[r.assetIndex]
-			break
-		}
-	}
-	// bundle 带入的资产排在 Items 前面；cursorItem 若是 vikunja-workflow 则应为只读。
-	if cursorItem.Name == "vikunja-workflow" {
-		prev := m.assets.Items[0].Enabled
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
-		m = updated.(model)
-		if m.assets.Items[0].Enabled != prev {
-			t.Fatal("bundle 带入的资产应只读，不应被 space 翻转")
-		}
+	if m.bundleSelected("cli") {
+		t.Fatal("不应牵连其他 bundle")
 	}
 }
 
-// TestModelAssetsBundleUnselectClearsMemberItems 覆盖「取消 bundle 后勾选弹回来」的回归点：
-// 成员的启用标记必须一起清掉，否则保存下去的 enabled_assets 仍含全部成员，
-// 重新加载时 app 层会按 standalone 把 bundle 反推回启用态。
-func TestModelAssetsBundleUnselectClearsMemberItems(t *testing.T) {
+func TestModelAssetsBundleUnselectRemovesOnlyThatBundle(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.focus = focusContent
 	m.assets = assetsStateWithBundle()
-	// 预置：bundle 已选中；成员 Items[0..1] 在 enabled_assets 里也有独立引用（早期项目的典型状态）。
-	m.bundleSelection = []string{"vikunja"}
-	m.assets.Items[0].Enabled = true
-	m.assets.Items[1].Enabled = true
-	m.assets.Items[2].Enabled = true
+	m.bundleSelection = []string{"vikunja", "cli"}
 	m.normalizeAssetCursor()
 
-	// 取消 bundle
 	seekCursorToKind(t, &m, assetRowBundle)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m = updated.(model)
+
 	if m.bundleSelected("vikunja") {
 		t.Fatal("bundle 应被取消")
 	}
-	if m.assets.Items[0].Enabled || m.assets.Items[1].Enabled {
-		t.Fatal("取消 bundle 后，其成员的启用标记应一并清掉")
-	}
-	if !m.assets.Items[2].Enabled {
-		t.Fatal("非成员的独立资产不应被牵连")
+	if !m.bundleSelected("cli") {
+		t.Fatal("其他 bundle 的勾选不应被牵连")
 	}
 }
 
-func TestModelAssetsSaveSendsBundlesAndFiltersImplicitMembers(t *testing.T) {
-	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 1
-	m.assets = assetsStateWithBundle()
-	m.bundleSelection = []string{"vikunja"}
-	// 模拟：成员 Items[0] 被 "伪装" 为 Enabled=true（测试 filterItemsForSave 会把它挤掉）；
-	// 独立 rule (Items[2]) Enabled=true 应保留。
-	m.assets.Items[0].Enabled = true
-	m.assets.Items[2].Enabled = true
-
-	got := filterItemsForSave(m.assets.Items, m.bundleSelection, m.assets.Bundles)
-	if got[0].Enabled {
-		t.Fatal("被 bundle 带入的成员 Enabled 应被过滤为 false")
-	}
-	if !got[2].Enabled {
-		t.Fatal("独立资产 Enabled 应保留")
-	}
-}
-
-func TestModelAssetsTypeFilterCycleAndBundleOnlyView(t *testing.T) {
+// 成员行只读：光标停在展开后的成员上按空格，不应改变任何 bundle 勾选。
+func TestModelAssetsMemberRowIsReadonly(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.focus = focusContent
 	m.assets = assetsStateWithBundle()
+	m.bundleSelection = []string{"vikunja"}
 	m.normalizeAssetCursor()
+	m.refreshAssetTree()
+	m.assetTree.DefaultExpandAll()
 
-	if m.assetTypeFilter != "bundle" {
-		t.Fatalf("初始 type filter = %q, 期望 bundle", m.assetTypeFilter)
-	}
-	// 默认 bundle 视图只含 bundle 节点行
-	for _, r := range m.visibleAssetRows() {
-		if r.kind == assetRowAsset {
-			t.Fatal("默认 bundle 视图下不应包含单资产行")
-		}
-	}
-	// 按 t 轮转一次到 all
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	seekCursorToKind(t, &m, assetRowBundleMember)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m = updated.(model)
-	if m.assetTypeFilter != "all" {
-		t.Fatalf("第一次 t = %q, 期望 all", m.assetTypeFilter)
-	}
-	// 再按 t 到 skill
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
-	m = updated.(model)
-	if m.assetTypeFilter != "skill" {
-		t.Fatalf("第二次 t = %q, 期望 skill", m.assetTypeFilter)
-	}
-	// skill 过滤下不应显示 rule 资产
-	for _, r := range m.visibleAssetRows() {
-		if r.kind == assetRowAsset && m.assets.Items[r.assetIndex].Type == "rule" {
-			t.Fatal("skill 过滤下不应包含 rule 行")
-		}
-	}
-	// 继续到 command/rule/mcp/bundle
-	for i := 0; i < 4; i++ {
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
-		m = updated.(model)
-	}
-	if m.assetTypeFilter != "bundle" {
-		t.Fatalf("第五次 t = %q, 期望 bundle", m.assetTypeFilter)
-	}
-	// bundle 视图只含 bundle 节点行（+ 展开的成员），不含单资产行
-	for _, r := range m.visibleAssetRows() {
-		if r.kind == assetRowAsset {
-			t.Fatal("bundle 视图下不应包含单资产行")
-		}
+
+	if !m.bundleSelected("vikunja") || len(m.bundleSelection) != 1 {
+		t.Fatalf("成员行按空格不应改动勾选，got %v", m.bundleSelection)
 	}
 }
 
@@ -2214,59 +2167,49 @@ func TestModelSpatialNavigationSidebarEnterExit(t *testing.T) {
 	}
 }
 
-func TestModelAssetsNoBundleLegacyBehaviorUnchanged(t *testing.T) {
-	// 回归：存量项目（assets.Bundles 为空）时，Assets 页 toggle / filter 行为应与旧版一致。
+func TestModelAssetsEmptyBundlesRendersHint(t *testing.T) {
+	// 回归：仓库里没有 bundle 时，Bundles 页不应崩，也不应有可勾选行。
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.focus = focusContent
-	m.assetTypeFilter = "all"
-	m.assets = &app.AssetSelectionState{
-		Items: []app.AssetSelectionItem{{Name: "solo", Type: "skill", Vault: "default"}},
-	}
+	m.assets = &app.AssetSelectionState{ExistingConfig: true}
 	m.normalizeAssetCursor()
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m = updated.(model)
-	if !m.assets.Items[0].Enabled {
-		t.Fatal("无 bundle 项目 space 应翻转单资产")
-	}
 	if len(m.bundleSelection) != 0 {
-		t.Fatal("无 bundle 项目不应修改 bundleSelection")
+		t.Fatalf("无 bundle 时不应修改 bundleSelection, got %v", m.bundleSelection)
 	}
-	if len(m.visibleAssetRows()) != 1 {
-		t.Fatalf("rows = %d, 期望 1（仅单资产）", len(m.visibleAssetRows()))
+	if got := len(m.visibleAssetRows()); got != 0 {
+		t.Fatalf("rows = %d, 期望 0", got)
 	}
 }
 
-func TestModelAssetsSaveCmdSignatureCarriesBundles(t *testing.T) {
-	// saveAssetsCmd 应以 AssetSaveSelection{Items, EnabledBundles} 调用用例层。
-	// 这里直接调用 saveAssetsCmd 闭包并检查 msg 语义，不落盘：通过注入临时 projectRoot 触发错误路径即可。
-	// 关键是验证 app.AssetSaveSelection 被构造并传入；构造本身由 saveAssetsCmd 完成。
-	// 简化：通过 filterItemsForSave + SaveAssetSelection 的类型存在性断言确保签名未被回退。
-	_ = saveAssetsCmd("/nonexistent", nil, []string{"x"})
+func TestModelAssetsSaveCmdCarriesBundlesOnly(t *testing.T) {
+	// saveAssetsCmd 只接受 bundle 短名列表：签名回退（重新引入单资产参数）会在此处编译失败。
+	_ = saveAssetsCmd("/nonexistent", []string{"x"})
 }
 
-func TestModelAssetsLoadedKeepsBundleViewWhenPackagesExist(t *testing.T) {
+func TestModelAssetsLoadedKeepsBundleSelection(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.focus = focusContent
 
 	updated, _ := m.Update(assetsLoadedMsg{
 		state: &app.AssetSelectionState{
-			ExistingConfig: false,
-			Items: []app.AssetSelectionItem{
-				{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja"},
-				{Name: "cli-release-rules", Type: "rule", Vault: "cli"},
-			},
+			ExistingConfig: true,
 			Bundles: []app.AssetBundleOption{
-				{Name: "vikunja", Vault: "vikunja", Members: []app.AssetSelectionItem{{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja"}}},
+				{Name: "vikunja", Vault: "vikunja", Enabled: true, Members: []app.AssetSelectionItem{{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja"}}},
 				{Name: "cli", Vault: "cli", Members: []app.AssetSelectionItem{{Name: "cli-release-rules", Type: "rule", Vault: "cli"}}},
 			},
 		},
 	})
 	m = updated.(model)
-	if m.assetTypeFilter != "bundle" {
-		t.Fatalf("有 bundle 时不应回落到 all, got %q", m.assetTypeFilter)
+	if !m.bundleSelected("vikunja") {
+		t.Fatal("已启用 bundle 应回填到 bundleSelection")
+	}
+	if m.bundleSelected("cli") {
+		t.Fatal("未启用 bundle 不应被勾选")
 	}
 }
 
@@ -2280,7 +2223,7 @@ func TestModelConfigInitModeQuitsAfterSave(t *testing.T) {
 	}
 
 	updated, cmd := m.Update(assetsSavedMsg{
-		result: &app.SaveAssetSelectionResult{EnabledBundleCount: 1},
+		result: &app.SaveBundleSelectionResult{EnabledBundleCount: 1},
 	})
 	if cmd == nil {
 		t.Fatal("config init 保存后应触发 tea.Quit")

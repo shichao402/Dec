@@ -91,10 +91,12 @@ Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skill
 
 ## 配置文件格式
 
-项目配置位于 `.dec/config.yaml`，采用 available/enabled 双区结构。当前版本为 `v2`，按 `vault -> item -> type` 组织：
+项目配置位于 `.dec/config.yaml`，当前版本为 `v2`，资产以 **bundle** 为单位启用：
 
 ```yaml
 version: v2
+
+project_name: my-app  # 引用 vault 中的 projects/my-app.yaml
 
 ides:               # 可选；当前项目覆盖全局 IDE 列表
   - cursor
@@ -102,26 +104,17 @@ ides:               # 可选；当前项目覆盖全局 IDE 列表
 
 editor: code --wait # 可选；也可写成 vim / vi
 
-available:          # 仓库中所有可用资产（dec config init 自动生成）
-  my-vault:
-    my-rule:
-      rules: true
-    my-mcp:
-      mcp: true
-
-enabled:            # 已启用资产（从 available 复制到这里即为启用）
-  my-vault:
-    my-rule:
-      rules: true
+enabled_bundles:    # 唯一的资产启用入口，短名与 vault 中的 bundles/<name>/ 对应
+  - my-vault
+  - vikunja
 ```
 
-- `dec config init` 自动填充 available，enabled 留空
+- `enabled_bundles` 是唯一的启用入口；bundle 成员随 bundle 一并拉取，不能单独启用或排除
+- 早期版本的 `available` / `enabled` 字段已移除；读到旧配置时 Dec 会把 `enabled` 涉及的 vault 折叠成 bundle 引用并回写，`available` 直接丢弃
 - 读取到没有 `version` 的旧配置时，Dec 会按 `v1` 自动迁移到 `v2` 后再继续执行
 - `ides` 可选，填写当前项目要部署到的 IDE 列表；不写则继承全局配置
 - `editor` 可选，项目级可覆盖全局交互式编辑器
-- 用户从 available 复制想要的资产到 enabled
-- `dec pull` 只拉取 enabled 中的资产
-- pull 时自动校验 enabled vs available，清理不再启用的旧资产
+- pull 会清理不再属于任何已启用 bundle 的旧资产
 - 对于 Claude / Claude Internal，项目级输出统一写入 `.claude/`；只有用户级目录仍然区分 `~/.claude/` 与 `~/.claude-internal/`。
 - 对于 Codex / Codex Internal，项目级输出统一写入 `.codex/`；其中 MCP 会写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。只有用户级目录仍然区分 `~/.codex/` 与 `~/.codex-internal/`。
 
@@ -166,22 +159,16 @@ assets:
 推荐流程：
 
 1. 先确保项目已经执行过 `dec config init`。
-2. 编辑 `.dec/config.yaml`，把新资产写入 `enabled`。
+2. 编辑 `.dec/config.yaml`，确认目标 bundle 在 `enabled_bundles` 中。
    例如：
 
    ```yaml
    version: v2
 
-   enabled:
-     my-vault:
-       my-skill:
-         skills: true
-       my-rule:
-         rules: true
-       my-mcp:
-         mcp: true
+   enabled_bundles:
+     - my-vault
    ```
-3. 如需避免当前项目后续 `dec pull` 出现 available 校验警告，也把同一项写入 `available`，或在 push 后再执行一次 `dec config init` 刷新 available。
+3. 在 `.dec/cache/<vault>/bundles/<name>/bundle.yaml` 中把新资产登记为 bundle 成员，否则 pull 不会下发。
 4. 在 `.dec/cache/` 下按类型创建资产文件：
 
 ```text
@@ -228,14 +215,12 @@ Dec 仓库中的 MCP 资产仍然保存为 JSON 片段；部署到 Cursor / Code
 
 1. 检查仓库连接：`dec config show`
 2. 验证资产存在：`dec search <name>`
-3. 检查 enabled 配置是否正确
+3. 检查 `enabled_bundles` 是否包含目标 bundle，且该资产确实是 bundle 成员
 4. 如输出提示 `变量 {{XXX}} 未定义`，在 `.dec/vars.yaml` 或 `~/.dec/local/vars.yaml` 中补充
 
-### "配置校验警告"
+### "没有启用任何 bundle"
 
-pull 前会校验 enabled 中的资产是否在 available 中存在。如果看到警告：
-- 检查资产名是否拼写正确
-- 运行 `dec config init` 更新 available 列表
+pull 会跳过并提示。到 TUI **Bundles** 页勾选 bundle 并按 `s` 保存，再重新执行。
 
 ## 修改资产的正确流程
 

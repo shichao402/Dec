@@ -21,15 +21,9 @@ func TestLoadProjectOverviewWithExistingProjectConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:   []string{"codex"},
-		Editor: "code --wait",
-		Available: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "project-workflow", Vault: "default"}},
-			Rules:  []types.AssetRef{{Name: "cli-release-rules", Vault: "cli"}},
-		},
-		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "project-workflow", Vault: "default"}},
-		},
+		IDEs:           []string{"codex"},
+		Editor:         "code --wait",
+		EnabledBundles: []string{"default"},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -53,11 +47,11 @@ func TestLoadProjectOverviewWithExistingProjectConfig(t *testing.T) {
 	if !overview.VarsFileReady {
 		t.Fatal("应识别 vars 模板已存在")
 	}
-	if overview.AvailableCount != 2 {
-		t.Fatalf("AvailableCount = %d, 期望 2", overview.AvailableCount)
+	if overview.AvailableBundleCount != 1 {
+		t.Fatalf("AvailableBundleCount = %d, 期望 1", overview.AvailableBundleCount)
 	}
-	if overview.EnabledCount != 1 {
-		t.Fatalf("EnabledCount = %d, 期望 1", overview.EnabledCount)
+	if overview.EnabledBundleCount != 1 {
+		t.Fatalf("EnabledBundleCount = %d, 期望 1", overview.EnabledBundleCount)
 	}
 	if !reflect.DeepEqual(overview.IDEs, []string{"codex"}) {
 		t.Fatalf("IDEs = %#v, 期望 %#v", overview.IDEs, []string{"codex"})
@@ -128,8 +122,8 @@ func TestLoadProjectOverviewFallsBackToDefaultsWithoutProjectConfig(t *testing.T
 	if overview.VarsFileReady {
 		t.Fatal("未初始化项目时不应标记 vars 文件已存在")
 	}
-	if overview.AvailableCount != 0 || overview.EnabledCount != 0 {
-		t.Fatalf("未初始化项目时资产计数应为 0, got available=%d enabled=%d", overview.AvailableCount, overview.EnabledCount)
+	if overview.AvailableBundleCount != 0 || overview.EnabledBundleCount != 0 {
+		t.Fatalf("未初始化项目时 bundle 计数应为 0, got available=%d enabled=%d", overview.AvailableBundleCount, overview.EnabledBundleCount)
 	}
 	if !reflect.DeepEqual(overview.IDEs, []string{"cursor"}) {
 		t.Fatalf("默认 IDE = %#v, 期望 %#v", overview.IDEs, []string{"cursor"})

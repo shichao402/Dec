@@ -25,8 +25,8 @@ type ProjectOverview struct {
 	ProjectConfigReady bool
 	VarsPath           string
 	VarsFileReady      bool
-	AvailableCount     int
-	EnabledCount       int
+	// AvailableBundleCount 是仓库里扫描到的 bundle 总数（含未启用）。
+	AvailableBundleCount int
 	// EnabledBundleCount 记录 project config 中 enabled_bundles 声明的数量。
 	// 不代表解析后展开的成员数量，只是 config 层面的引用数。
 	EnabledBundleCount int
@@ -66,8 +66,6 @@ func LoadProjectOverview(projectRoot string) (*ProjectOverview, error) {
 			return nil, err
 		}
 		projectConfig = loaded
-		overview.AvailableCount = loaded.Available.Count()
-		overview.EnabledCount = loaded.Enabled.Count()
 		overview.EnabledBundleCount = len(loaded.EnabledBundles)
 	}
 
@@ -81,6 +79,7 @@ func LoadProjectOverview(projectRoot string) (*ProjectOverview, error) {
 			resolved, resolveErr := resolveDesiredAssets(projectConfig, tx.WorkDir(), nil)
 			if resolveErr == nil {
 				overview.Bundles = resolved.Bundles
+				overview.AvailableBundleCount = len(resolved.Bundles)
 			}
 			tx.Close()
 		}

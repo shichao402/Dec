@@ -90,8 +90,7 @@ func snapshotHomeModel(width int) model {
 		ProjectConfigReady: true,
 		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
 		VarsFileReady:      true,
-		AvailableCount:     5,
-		EnabledCount:          2,
+		AvailableBundleCount:  5,
 		EnabledBundleCount:    2,
 		IDEs:               []string{"codex", "cursor"},
 		Editor:             "code --wait",
@@ -107,10 +106,6 @@ func snapshotBundlesModel(width int) model {
 		ExistingConfig: true,
 		ConfigPath:     "/tmp/dec-project/.dec/config.yaml",
 		VarsPath:       "/tmp/dec-project/.dec/vars.yaml",
-		Items: []app.AssetSelectionItem{
-			{Name: "project-workflow", Type: "skill", Vault: "default", Enabled: true},
-			{Name: "cli-release-rules", Type: "rule", Vault: "cli", Enabled: false},
-		},
 		Bundles: []app.AssetBundleOption{
 			{
 				Name:        "default",
@@ -133,7 +128,7 @@ func snapshotBundlesModel(width int) model {
 }
 
 func snapshotRunModel(width int) model {
-	m := snapshotHomeModel(width)
+	m := snapshotBundlesModel(width)
 	m.pageIndex = 3
 	m.runProgress = &app.Progress{Phase: "pull", Current: 1, Total: 2}
 	m.runResult = &app.PullProjectAssetsResult{

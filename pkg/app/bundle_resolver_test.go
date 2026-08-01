@@ -57,35 +57,6 @@ func TestResolveDesiredAssets_NilConfigScansBundles(t *testing.T) {
 	}
 }
 
-func TestResolveDesiredAssets_StandaloneOnly(t *testing.T) {
-	repoDir := setupRepoWithVault(t, map[string]string{
-		"bundles/default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-	})
-	cfg := &types.ProjectConfig{
-		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "foo", Vault: "default"}},
-		},
-	}
-
-	got, err := resolveDesiredAssets(cfg, repoDir, nil)
-	if err != nil {
-		t.Fatalf("resolveDesiredAssets() 失败: %v", err)
-	}
-	if len(got.Assets) != 1 || got.Assets[0].Name != "foo" {
-		t.Fatalf("Assets = %#v, 期望包含 foo", got.Assets)
-	}
-	key := assetKey(got.Assets[0])
-	if sources := got.Sources[key]; len(sources) != 1 || sources[0] != "standalone" {
-		t.Fatalf("Sources[%s] = %#v, 期望 [standalone]", key, sources)
-	}
-	if len(got.Bundles) != 1 || got.Bundles[0].Name != "default" {
-		t.Fatalf("Bundles = %#v, 期望 1 个隐式 default bundle", got.Bundles)
-	}
-	if got.Bundles[0].Enabled {
-		t.Fatal("未在 enabled_bundles 中引用时不应标记 bundle 为 Enabled")
-	}
-}
-
 func TestResolveDesiredAssets_BundleExpandsMembers(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
@@ -167,39 +138,6 @@ members:
 	}
 	if !sawGhostWarn {
 		t.Fatalf("期望 ghost 相关 warning，事件: %#v", events)
-	}
-}
-
-func TestResolveDesiredAssets_BundleAndStandaloneOverlap(t *testing.T) {
-	repoDir := setupRepoWithVault(t, map[string]string{
-		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"bundles/combo/bundle.yaml": `name: combo
-members:
-  - skill/foo
-`,
-	})
-	cfg := &types.ProjectConfig{
-		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "foo", Vault: "combo"}},
-		},
-		EnabledBundles: []string{"combo"},
-	}
-
-	got, err := resolveDesiredAssets(cfg, repoDir, nil)
-	if err != nil {
-		t.Fatalf("resolveDesiredAssets() 失败: %v", err)
-	}
-
-	if len(got.Assets) != 1 {
-		t.Fatalf("Assets len = %d, 期望去重后 1 个", len(got.Assets))
-	}
-
-	key := assetKey(got.Assets[0])
-	sources := got.Sources[key]
-	sort.Strings(sources)
-	want := []string{"bundle/combo", "standalone"}
-	if len(sources) != 2 || sources[0] != want[0] || sources[1] != want[1] {
-		t.Fatalf("Sources[%s] = %#v, 期望 %#v", key, sources, want)
 	}
 }
 
@@ -324,26 +262,6 @@ func TestResolveDesiredAssets_SkipsDotDirs(t *testing.T) {
 		if b.VaultName == ".git" || b.VaultName == ".dec" {
 			t.Fatalf("隐藏目录被误当作 bundle: %+v", b)
 		}
-	}
-}
-
-func TestAllBundleSourced(t *testing.T) {
-	cases := []struct {
-		name    string
-		sources []string
-		want    bool
-	}{
-		{"empty", nil, false},
-		{"only standalone", []string{"standalone"}, false},
-		{"mixed", []string{"standalone", "bundle/a"}, false},
-		{"only bundle", []string{"bundle/a", "bundle/b"}, true},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := allBundleSourced(c.sources); got != c.want {
-				t.Fatalf("allBundleSourced(%#v) = %v, 期望 %v", c.sources, got, c.want)
-			}
-		})
 	}
 }
 

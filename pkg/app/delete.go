@@ -103,7 +103,7 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 	groupCtx := newDeleteGroupContext(projectRoot, projectConfig)
 
 	addDec := func(kind DeleteItemKind, itemType, name, vault string, orphan bool) {
-		key := resolverKey(itemType, vault, name)
+		key := itemType + ":" + vault + ":" + name
 		if _, dup := seenDec[key]; dup {
 			return
 		}
@@ -171,16 +171,6 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 				}
 				walkCacheDec(bundleName, spec.typ, spec.trim(entry.Name()))
 			}
-		}
-	}
-
-	if projectConfig.Enabled != nil {
-		for _, asset := range projectConfig.Enabled.All() {
-			vault := strings.TrimSpace(asset.Vault)
-			if vault == "" {
-				continue
-			}
-			walkCacheDec(vault, asset.Type, asset.Name)
 		}
 	}
 

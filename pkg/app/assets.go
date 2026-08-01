@@ -12,20 +12,17 @@ import (
 	"github.com/shichao402/Dec/pkg/types"
 )
 
+// AssetSelectionItem 描述 bundle 内的一个成员资产，仅供展示定位使用。
 type AssetSelectionItem struct {
-	Name    string
-	Type    string
-	Vault   string
-	Enabled bool
-	// Sources 为该资产的当前来源列表（例如 ["bundle/vikunja"]、["standalone", "bundle/foo"]）。
-	// 只在 LoadAssetSelection 结果中填充，保存时会忽略（由 EnabledBundles + Enabled 两个字段决定）。
-	Sources []string
+	Name  string
+	Type  string
+	Vault string
 }
 
-// AssetBundleOption 描述 Assets 页可勾选的 bundle 节点。
+// AssetBundleOption 描述 Bundles 页可勾选的 bundle 节点。
 //
 // 字段含义与 app.BundleOverview 一致，额外把成员展开成 AssetSelectionItem 级别的定位信息
-// （Type + Vault + Name），便于 TUI 渲染成员亮起态。
+// （Type + Vault + Name），便于 TUI 渲染成员列表。
 type AssetBundleOption struct {
 	Name        string
 	Description string
@@ -37,35 +34,23 @@ type AssetBundleOption struct {
 	Enabled bool
 }
 
+// AssetSelectionState 是 Bundles 页的数据源：仓库里全部 bundle + 当前启用态。
 type AssetSelectionState struct {
 	ProjectRoot    string
 	ConfigPath     string
 	VarsPath       string
 	ExistingConfig bool
 	VarsFileReady  bool
-	Items          []AssetSelectionItem
 	// Bundles 是当前仓库扫描得到的全部 bundle 选项，含未启用的。
 	// 仓库未连接或扫描失败时为 nil（调用方应当作"没有 bundle"处理）。
 	Bundles []AssetBundleOption
 }
 
-// AssetSaveSelection 是保存资产勾选状态时的入参集合。
-//
-// Items 表示单资产勾选（对应 ProjectConfig.Enabled / Available）。
-// EnabledBundles 是 TUI 选中的 bundle 列表（对应 ProjectConfig.EnabledBundles）。
-// 两者正交共存：bundle 带入的成员资产不应出现在 Items 里（由调用方保证），
-// 避免把"由 bundle 带入"的隐式启用当成独立勾选写入 enabled_assets。
-type AssetSaveSelection struct {
-	Items          []AssetSelectionItem
-	EnabledBundles []string
-}
-
-type SaveAssetSelectionResult struct {
+// SaveBundleSelectionResult 汇报一次 bundle 勾选保存的结果。
+type SaveBundleSelectionResult struct {
 	ConfigPath         string
 	VarsPath           string
 	VarsCreated        bool
-	AvailableCount     int
-	EnabledCount       int
 	EnabledBundleCount int
 }
 
@@ -76,7 +61,7 @@ func LoadAssetSelection(projectRoot string, reporter Reporter) (*AssetSelectionS
 		return nil, fmt.Errorf("检查仓库连接失败: %w", err)
 	}
 	if !connected {
-		return nil, fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 先连接你的仓库")
+		return nil, fmt.Errorf("仓库未连接\n\n在 Settings 页填写 Dec 仓库地址后重试")
 	}
 
 	mgr := config.NewProjectConfigManager(projectRoot)
@@ -89,7 +74,7 @@ func LoadAssetSelection(projectRoot string, reporter Reporter) (*AssetSelectionS
 	var existingConfig *types.ProjectConfig
 	if mgr.Exists() {
 		state.ExistingConfig = true
-		emit(reporter, EventInfo, "assets.load", "检测到现有项目配置，准备加载资产选择状态", nil)
+		emit(reporter, EventInfo, "assets.load", "检测到现有项目配置，准备加载 bundle 选择状态", nil)
 		loadedConfig, err := mgr.LoadProjectConfig()
 		if err != nil {
 			return nil, err
@@ -97,17 +82,7 @@ func LoadAssetSelection(projectRoot string, reporter Reporter) (*AssetSelectionS
 		existingConfig = loadedConfig
 	}
 
-	allAssets, err := ScanAvailableAssets(reporter)
-	if err != nil {
-		return nil, err
-	}
-
-	// 扫描仓库内 bundle 声明并解析出当前 bundle 带入的资产来源。
-	// 失败不阻塞 Assets 页加载：用户仍能按单资产勾选。
-	bundles, assetSources := loadBundleSelection(existingConfig, reporter)
-	state.Bundles = bundles
-
-	state.Items = buildAssetSelectionItems(allAssets, existingConfig, assetSources)
+	state.Bundles = loadBundleSelection(existingConfig, reporter)
 
 	if _, err := os.Stat(state.VarsPath); err == nil {
 		state.VarsFileReady = true
@@ -115,21 +90,22 @@ func LoadAssetSelection(projectRoot string, reporter Reporter) (*AssetSelectionS
 		return nil, fmt.Errorf("检查项目变量文件失败: %w", err)
 	}
 
-	emit(reporter, EventInfo, "assets.load", fmt.Sprintf("资产选择状态已加载，共 %d 个资产，%d 个 bundle", len(state.Items), len(state.Bundles)), nil)
+	emit(reporter, EventInfo, "assets.load", fmt.Sprintf("bundle 选择状态已加载，共 %d 个 bundle", len(state.Bundles)), nil)
 	return state, nil
 }
 
-func SaveAssetSelection(projectRoot string, selection AssetSaveSelection, reporter Reporter) (*SaveAssetSelectionResult, error) {
+// SaveEnabledBundles 把 bundle 勾选写入 .dec/config.yaml。
+//
+// bundles 为 nil 或空表示「一个 bundle 都不启用」，会清空 enabled_bundles。
+// 除 enabled_bundles 外的字段（IDEs / Editor / Version / ProjectName）一律从磁盘原样带过。
+func SaveEnabledBundles(projectRoot string, bundles []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
 	reporter = defaultReporter(reporter)
 	mgr := config.NewProjectConfigManager(projectRoot)
-	result := &SaveAssetSelectionResult{
+	result := &SaveBundleSelectionResult{
 		ConfigPath: filepath.Join(mgr.GetDecDir(), "config.yaml"),
 		VarsPath:   mgr.GetVarsPath(),
 	}
 
-	// 先加载磁盘上的 ProjectConfig 作为起点，避免把未参与本次交互的字段（例如 Version / 其它元数据）
-	// 在保存时清零。TUI Assets 页只负责三组字段：Available / Enabled / EnabledBundles；
-	// 其余（IDEs / Editor / Version / 未来新字段）一律从原 config 原样带过。
 	projectConfig, err := mgr.LoadProjectConfig()
 	if err != nil {
 		return nil, err
@@ -138,45 +114,7 @@ func SaveAssetSelection(projectRoot string, selection AssetSaveSelection, report
 		projectConfig = &types.ProjectConfig{}
 	}
 
-	// 本次被取消的 bundle 的成员不再写回 enabled_assets。
-	// 否则磁盘会留下「enabled_bundles 不含该 bundle，但 enabled_assets 含其全部成员」的不一致状态：
-	// LoadAssetSelection 会按 standalone 反推该 bundle 仍启用（inferBundleEnabledFromStandalone），
-	// 用户刚取消的勾选下次刷新又亮回来，pull 也不会清理这些资产。
-	// 语义与 RemoveBundle 对齐：取消 bundle = 同时去掉 bundle 引用与成员引用。
-	prunedMembers := deselectedBundleMemberKeys(projectConfig, selection.EnabledBundles, reporter)
-
-	projectConfig.Available = &types.AssetList{}
-	projectConfig.Enabled = &types.AssetList{}
-
-	for _, item := range selection.Items {
-		ref := types.AssetRef{Name: item.Name, Vault: item.Vault}
-		projectConfig.Available.Add(item.Type, ref)
-		result.AvailableCount++
-		if !item.Enabled {
-			continue
-		}
-		if _, pruned := prunedMembers[assetSelectionKey(item.Type, ref)]; pruned {
-			continue
-		}
-		projectConfig.Enabled.Add(item.Type, ref)
-		result.EnabledCount++
-	}
-
-	// EnabledBundles 语义：
-	//   - selection.EnabledBundles == nil  →  不修改（保留磁盘上已有的 EnabledBundles）
-	//   - selection.EnabledBundles == []   →  清空（用户明确取消所有 bundle）
-	//   - selection.EnabledBundles != nil  →  原样替换
-	// 这是 Assets 页保存时不吞 EnabledBundles 的关键：旧接口直接 new 空配置会把 bundle 带入的
-	// 隐式启用从磁盘抹掉，导致 pull 后成员资产全部被 cleanup。TUI 层在未进入 Bundle 交互时
-	// 应传 nil，在用户动过 bundle 勾选时才传一个（可能为空的）完整列表。
-	if selection.EnabledBundles != nil {
-		normalizedBundles := normalizeEnabledBundles(selection.EnabledBundles)
-		if len(normalizedBundles) == 0 {
-			projectConfig.EnabledBundles = nil
-		} else {
-			projectConfig.EnabledBundles = normalizedBundles
-		}
-	}
+	projectConfig.EnabledBundles = normalizeEnabledBundles(bundles)
 	result.EnabledBundleCount = len(projectConfig.EnabledBundles)
 
 	emit(reporter, EventInfo, "assets.save", "写入项目配置", &Progress{Phase: "write", Current: 1, Total: 2})
@@ -190,86 +128,28 @@ func SaveAssetSelection(projectRoot string, selection AssetSaveSelection, report
 	}
 	result.VarsCreated = varsCreated
 
-	emit(reporter, EventInfo, "assets.save", "资产选择已保存", &Progress{Phase: "write", Current: 2, Total: 2})
+	emit(reporter, EventInfo, "assets.save", "bundle 选择已保存", &Progress{Phase: "write", Current: 2, Total: 2})
 	return result, nil
 }
 
-// deselectedBundleMemberKeys 返回「上次已启用、本次被取消」的 bundle 成员 key 集合。
+// loadBundleSelection 扫描仓库内 bundle 声明，返回全部 bundle 选项（含未启用的）。
 //
-// previousConfig 是磁盘上的旧配置；newEnabledBundles 为调用方本次的 bundle 勾选：
-//   - nil 表示调用方不改动 bundle 选择，直接返回 nil（不剔除任何成员）。
-//   - 非 nil 时对比旧的「有效启用 bundle」（含仅由 standalone 反推出来的旧 bundle），
-//     差集即为本次被取消的 bundle。
-//
-// 仍被其它启用中 bundle 覆盖的成员会从结果里剔除——它们的启用态由那个 bundle 承载。
-// 仓库未连接或 bundle 解析失败时返回 nil：宁可少剔除，也不误删用户的 enabled_assets。
-func deselectedBundleMemberKeys(previousConfig *types.ProjectConfig, newEnabledBundles []string, reporter Reporter) map[string]struct{} {
-	if newEnabledBundles == nil || previousConfig == nil {
-		return nil
-	}
-	// 旧配置里既没有 bundle 引用也没有启用资产（例如首次 init 保存）时不可能有被取消的 bundle，
-	// 省掉一次仓库只读事务。
-	if len(previousConfig.EnabledBundles) == 0 && previousConfig.Enabled.IsEmpty() {
-		return nil
-	}
-	if connected, err := repo.IsConnected(); err != nil || !connected {
-		return nil
-	}
-	options, _ := loadBundleSelection(previousConfig, reporter)
-	if len(options) == 0 {
-		return nil
-	}
-
-	keep := make(map[string]struct{}, len(newEnabledBundles))
-	for _, name := range newEnabledBundles {
-		keep[trimSpaceASCII(name)] = struct{}{}
-	}
-
-	pruned := make(map[string]struct{})
-	for _, opt := range options {
-		if !opt.Enabled {
-			continue
-		}
-		if _, stillEnabled := keep[opt.Name]; stillEnabled {
-			continue
-		}
-		for _, mb := range opt.Members {
-			pruned[assetSelectionKey(mb.Type, types.AssetRef{Name: mb.Name, Vault: mb.Vault})] = struct{}{}
-		}
-	}
-	for _, opt := range options {
-		if _, stillEnabled := keep[opt.Name]; !stillEnabled {
-			continue
-		}
-		for _, mb := range opt.Members {
-			delete(pruned, assetSelectionKey(mb.Type, types.AssetRef{Name: mb.Name, Vault: mb.Vault}))
-		}
-	}
-	return pruned
-}
-
-// loadBundleSelection 扫描仓库内 bundle 声明并解析出资产来源映射。
-//
-// 返回：
-//   - []AssetBundleOption：所有 bundle 选项（含未启用的）；失败时返回 nil。
-//   - map[string][]string：以 assetKey（type:vault:name）为 key 的来源列表，
-//     保留"bundle/<name>"格式（与 resolveDesiredAssets 的输出一致）。
-//
-// 本函数只为 Assets 页展示服务，任何错误都降级为 reporter warning，不向上传播。
-func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) ([]AssetBundleOption, map[string][]string) {
+// 本函数只为 Bundles 页展示服务，任何错误都降级为 reporter warning，不向上传播；
+// 失败时返回 nil，调用方按"没有 bundle"处理。
+func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) []AssetBundleOption {
 	tx, err := repo.NewReadTransaction()
 	if err != nil {
 		emit(reporter, EventWarn, "assets.bundle",
-			fmt.Sprintf("打开仓库只读事务失败，Assets 页将不展示 bundle: %v", err), nil)
-		return nil, nil
+			fmt.Sprintf("打开仓库只读事务失败，Bundles 页将不展示 bundle: %v", err), nil)
+		return nil
 	}
 	defer tx.Close()
 
 	resolved, err := resolveDesiredAssets(projectConfig, tx.WorkDir(), reporter)
 	if err != nil {
 		emit(reporter, EventWarn, "assets.bundle",
-			fmt.Sprintf("解析 bundle 声明失败，Assets 页将不展示 bundle: %v", err), nil)
-		return nil, nil
+			fmt.Sprintf("解析 bundle 声明失败，Bundles 页将不展示 bundle: %v", err), nil)
+		return nil
 	}
 
 	enabledSet := make(map[string]struct{})
@@ -291,11 +171,6 @@ func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) 
 			opt.Enabled = true
 		}
 		opt.Members = buildBundleMemberItems(bo, tx.WorkDir())
-		if !opt.Enabled && projectConfig != nil && len(opt.Members) > 0 {
-			if inferBundleEnabledFromStandalone(opt.Members, projectConfig.Enabled) {
-				opt.Enabled = true
-			}
-		}
 		options = append(options, opt)
 	}
 	sort.SliceStable(options, func(i, j int) bool {
@@ -305,46 +180,7 @@ func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) 
 		return options[i].Vault < options[j].Vault
 	})
 
-	// 剥离多来源映射：resolved.Sources 的 key 是 assetKey，值里可能含 "standalone"。
-	// 外层使用方只关心 bundle 来源，这里过滤掉 standalone 以便 TUI 判断"由 bundle 带入"。
-	sources := make(map[string][]string, len(resolved.Sources))
-	for key, srcs := range resolved.Sources {
-		filtered := make([]string, 0, len(srcs))
-		for _, s := range srcs {
-			if s == "standalone" {
-				continue
-			}
-			filtered = append(filtered, s)
-		}
-		if len(filtered) > 0 {
-			sources[key] = filtered
-		}
-	}
-
-	return options, sources
-}
-
-func buildAssetSelectionItems(allAssets []AssetInfo, existingConfig *types.ProjectConfig, assetSources map[string][]string) []AssetSelectionItem {
-	enabled := make(map[string]struct{})
-	if existingConfig != nil {
-		for _, asset := range existingConfig.Enabled.All() {
-			enabled[assetSelectionKey(asset.Type, asset.AssetRef)] = struct{}{}
-		}
-	}
-
-	items := make([]AssetSelectionItem, 0, len(allAssets))
-	for _, asset := range allAssets {
-		key := assetSelectionKey(asset.Type, types.AssetRef{Name: asset.Name, Vault: asset.Vault})
-		_, isEnabled := enabled[key]
-		items = append(items, AssetSelectionItem{
-			Name:    asset.Name,
-			Type:    asset.Type,
-			Vault:   asset.Vault,
-			Enabled: isEnabled,
-			Sources: cloneSourceList(assetSources[resolverKey(asset.Type, asset.Vault, asset.Name)]),
-		})
-	}
-	return items
+	return options
 }
 
 // buildBundleMemberItems 把 BundleOverview 里的成员引用解析成 AssetSelectionItem。
@@ -368,21 +204,6 @@ func buildBundleMemberItems(bo BundleOverview, repoDir string) []AssetSelectionI
 		})
 	}
 	return items
-}
-
-// resolverKey 与 bundle_resolver.go 内 assetKey 保持一致：type:vault:name。
-// 单独拎出是为了避免在 assets.go 里直接取 types.TypedAssetRef 再传入 assetKey。
-func resolverKey(assetType, vault, name string) string {
-	return assetType + ":" + vault + ":" + name
-}
-
-func cloneSourceList(src []string) []string {
-	if len(src) == 0 {
-		return nil
-	}
-	out := make([]string, len(src))
-	copy(out, src)
-	return out
 }
 
 // normalizeEnabledBundles 去重、去空白，保持调用方传入的原始顺序。
@@ -418,66 +239,41 @@ func trimSpaceASCII(s string) string {
 	return s[start:end]
 }
 
-func assetSelectionKey(assetType string, ref types.AssetRef) string {
-	return assetType + "\x00" + ref.Vault + "\x00" + ref.Name
-}
-
-// EffectiveEnabledGroup 表示一组与 pull 目标集对齐的有效启用资产，按来源分组。
+// EffectiveEnabledGroup 表示一组与 pull 目标集对齐的有效启用资产，按 bundle 分组。
 type EffectiveEnabledGroup struct {
-	// Label 为 "bundle/<name>" 或 "独立启用"。
+	// Label 为 "bundle/<name>"。
 	Label string
 	Items []AssetSelectionItem
 }
 
-// ListEffectiveEnabledAssets 返回与 pull 目标集对齐的有效启用资产：
-// ProjectConfig.Enabled 中的单资产 + EnabledBundles 展开的成员，按 (type, vault, name) 去重。
+// ListEffectiveEnabledAssets 返回与 pull 目标集对齐的有效启用资产，
+// 即所有已启用 bundle 展开的成员，按 (type, vault, name) 去重。
 func ListEffectiveEnabledAssets(state *AssetSelectionState) []AssetSelectionItem {
-	groups := ListEffectiveEnabledGroups(state)
-	total := 0
-	for _, group := range groups {
-		total += len(group.Items)
+	if state == nil {
+		return nil
 	}
-	out := make([]AssetSelectionItem, 0, total)
-	for _, group := range groups {
-		out = append(out, group.Items...)
+	seen := make(map[string]struct{})
+	out := make([]AssetSelectionItem, 0)
+	for _, group := range ListEffectiveEnabledGroups(state) {
+		for _, item := range group.Items {
+			key := effectiveAssetKey(item)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, item)
+		}
 	}
 	return out
 }
 
-// ListEffectiveEnabledGroups 按来源分组列出有效启用资产。
-// 顺序：先 enabled bundle（按 bundle 名排序），再 standalone-only 资产。
+// ListEffectiveEnabledGroups 按 bundle 名字典序列出已启用 bundle 及其成员。
 func ListEffectiveEnabledGroups(state *AssetSelectionState) []EffectiveEnabledGroup {
 	if state == nil {
 		return nil
 	}
-
-	bundleMemberKeys := make(map[string]struct{})
-	for _, bo := range state.Bundles {
-		if !bo.Enabled {
-			continue
-		}
-		for _, member := range bo.Members {
-			bundleMemberKeys[effectiveAssetKey(member)] = struct{}{}
-		}
-	}
-
 	var groups []EffectiveEnabledGroup
-	bundleNames := make([]string, 0, len(state.Bundles))
-	bundleByName := make(map[string]AssetBundleOption, len(state.Bundles))
-	for _, bo := range state.Bundles {
-		if !bo.Enabled {
-			continue
-		}
-		if _, seen := bundleByName[bo.Name]; seen {
-			continue
-		}
-		bundleByName[bo.Name] = bo
-		bundleNames = append(bundleNames, bo.Name)
-	}
-	sort.Strings(bundleNames)
-
-	for _, name := range bundleNames {
-		bo := bundleByName[name]
+	for _, bo := range ListEnabledBundles(state) {
 		if len(bo.Members) == 0 {
 			continue
 		}
@@ -486,28 +282,11 @@ func ListEffectiveEnabledGroups(state *AssetSelectionState) []EffectiveEnabledGr
 			Items: append([]AssetSelectionItem(nil), bo.Members...),
 		})
 	}
-
-	standalone := make([]AssetSelectionItem, 0)
-	for _, item := range state.Items {
-		if !item.Enabled {
-			continue
-		}
-		if _, fromBundle := bundleMemberKeys[effectiveAssetKey(item)]; fromBundle {
-			continue
-		}
-		standalone = append(standalone, item)
-	}
-	if len(standalone) > 0 {
-		groups = append(groups, EffectiveEnabledGroup{
-			Label: "独立启用",
-			Items: standalone,
-		})
-	}
 	return groups
 }
 
 func effectiveAssetKey(item AssetSelectionItem) string {
-	return resolverKey(item.Type, item.Vault, item.Name)
+	return item.Type + ":" + item.Vault + ":" + item.Name
 }
 
 // ListEnabledBundles 返回当前 ProjectConfig.EnabledBundles 引用的 bundle 选项，供 TUI Remove 等场景展示。

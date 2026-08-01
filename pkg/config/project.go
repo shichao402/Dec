@@ -83,17 +83,9 @@ type projectConfigVersionProbe struct {
 }
 
 type projectConfigV1 struct {
-	IDEs      []string       `yaml:"ides,omitempty"`
-	Editor    string         `yaml:"editor,omitempty"`
-	Available *assetListV1   `yaml:"available,omitempty"`
-	Enabled   *assetListV1   `yaml:"enabled,omitempty"`
-}
-
-type assetListV1 struct {
-	Skills   []types.AssetRef `yaml:"skills,omitempty"`
-	Commands []types.AssetRef `yaml:"commands,omitempty"`
-	Rules    []types.AssetRef `yaml:"rules,omitempty"`
-	MCPs     []types.AssetRef `yaml:"mcps,omitempty"`
+	IDEs    []string            `yaml:"ides,omitempty"`
+	Editor  string              `yaml:"editor,omitempty"`
+	Enabled *legacyAssetSection `yaml:"enabled,omitempty"`
 }
 
 // LoadProjectConfig 加载项目配置，自动去重
@@ -124,7 +116,14 @@ func (m *ProjectConfigManager) LoadProjectConfig() (*types.ProjectConfig, error)
 		}
 		return loadProjectConfigV2(data, configPath)
 	case types.ProjectConfigVersionV2:
-		return loadProjectConfigV2(data, configPath)
+		config, err := loadProjectConfigV2(data, configPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := m.dropLegacyAssetSections(config, data); err != nil {
+			return nil, err
+		}
+		return config, nil
 	default:
 		return nil, fmt.Errorf("不支持的项目配置版本 %q\n\n请升级 Dec 或修正 %s", version, configPath)
 	}
@@ -139,19 +138,13 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 
 	normalized := *config
 	normalized.Version = types.ProjectConfigVersionV2
-	if normalized.Available != nil {
-		normalized.Available.Dedup()
-	}
-	if normalized.Enabled != nil {
-		normalized.Enabled.Dedup()
-	}
 
 	data, err := yaml.Marshal(&normalized)
 	if err != nil {
 		return fmt.Errorf("序列化项目配置失败: %w", err)
 	}
 
-	header := "# Dec 项目配置\n# version: 配置结构版本；当前固定为 v2\n# ides: 项目级 IDE 覆盖（可选），例如：\n#   ides:\n#     - cursor\n#     - codex\n# editor: 项目级交互式编辑器，覆盖全局配置（可选），例如：\n#   editor: code --wait\n#   editor: vim\n# enabled_bundles: 按 bundle 启用资产（推荐）；bundle 名通常与 vault 同名\n#   enabled_bundles:\n#     - vikunja\n#     - cli\n# available / enabled: 单资产粒度（高级用法）；多数场景请优先使用 enabled_bundles\n#   my-vault:\n#     my-asset:\n#       skills: true\n#       rules: true\n\n"
+	header := "# Dec 项目配置\n# version: 配置结构版本；当前固定为 v2\n# ides: 项目级 IDE 覆盖（可选），例如：\n#   ides:\n#     - cursor\n#     - codex\n# editor: 项目级交互式编辑器，覆盖全局配置（可选），例如：\n#   editor: code --wait\n#   editor: vim\n# enabled_bundles: 启用的 bundle 列表（唯一的资产启用入口）；bundle 名与 vault 目录同名\n#   enabled_bundles:\n#     - vikunja\n#     - cli\n# 提示：请在 TUI Bundles 页勾选后按 s 保存，不要手工维护本文件。\n\n"
 	configPath := filepath.Join(decDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入项目配置失败: %w", err)
@@ -318,13 +311,32 @@ func loadProjectConfigV2(data []byte, configPath string) (*types.ProjectConfig, 
 	}
 	config := raw.ProjectConfig
 	config.Version = types.ProjectConfigVersionV2
-	if config.Available != nil {
-		config.Available.Dedup()
-	}
-	if config.Enabled != nil {
-		config.Enabled.Dedup()
-	}
 	return &config, nil
+}
+
+// dropLegacyAssetSections 清理 v2 配置里残留的 available / enabled 段。
+//
+// 这两段来自「按单资产勾选」的历史设计，现在资产启用只认 enabled_bundles。
+// 迁移策略：enabled 里出现过的 vault 折叠成同名 bundle 引用，available 直接丢弃，
+// 然后立即回写磁盘，让配置文件里不再出现废弃字段。
+//
+// 折叠是按 vault 名做的：vault 目录名与 bundle 名一一对应，
+// 若某个 vault 已从仓库删除，pull 时会以「bundle 找不到声明」的形式给出告警。
+func (m *ProjectConfigManager) dropLegacyAssetSections(config *types.ProjectConfig, data []byte) error {
+	var legacy legacyProjectAssets
+	if err := yaml.Unmarshal(data, &legacy); err != nil {
+		// 解析不出来说明这两个字段不是历史格式，交给正常加载路径处理即可。
+		return nil
+	}
+	if !legacy.present() {
+		return nil
+	}
+
+	config.EnabledBundles = foldLegacyBundles(config.EnabledBundles, legacy.Enabled)
+	if err := m.SaveProjectConfig(config); err != nil {
+		return fmt.Errorf("清理项目配置中的废弃字段失败: %w", err)
+	}
+	return nil
 }
 
 func (m *ProjectConfigManager) upgradeProjectConfigV1ToV2(data []byte) error {
@@ -334,29 +346,14 @@ func (m *ProjectConfigManager) upgradeProjectConfigV1ToV2(data []byte) error {
 	}
 
 	upgraded := &types.ProjectConfig{
-		Version:   types.ProjectConfigVersionV2,
-		IDEs:      v1.IDEs,
-		Editor:    v1.Editor,
-		Available: v1.Available.toAssetList(),
-		Enabled:   v1.Enabled.toAssetList(),
+		Version:        types.ProjectConfigVersionV2,
+		IDEs:           v1.IDEs,
+		Editor:         v1.Editor,
+		EnabledBundles: foldLegacyBundles(nil, v1.Enabled),
 	}
 
 	if err := m.SaveProjectConfig(upgraded); err != nil {
 		return fmt.Errorf("升级项目配置到 v2 失败: %w", err)
 	}
 	return nil
-}
-
-func (l *assetListV1) toAssetList() *types.AssetList {
-	if l == nil {
-		return nil
-	}
-	converted := &types.AssetList{
-		Skills:   append([]types.AssetRef(nil), l.Skills...),
-		Commands: append([]types.AssetRef(nil), l.Commands...),
-		Rules:    append([]types.AssetRef(nil), l.Rules...),
-		MCPs:     append([]types.AssetRef(nil), l.MCPs...),
-	}
-	converted.Dedup()
-	return converted
 }

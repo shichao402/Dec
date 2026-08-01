@@ -4,8 +4,6 @@ package dec.v1;
 
 option go_package = "github.com/shichao402/Dec/schema/dec/v1;decv1";
 
-import "dec/v1/assets.proto";
-
 // GlobalConfig 对应 ~/.dec/config.yaml。
 message GlobalConfig {
   string repo_url = 1 [json_name = "repo_url"];
@@ -15,7 +13,7 @@ message GlobalConfig {
 
 // ProjectConfig 对应 <workspace>/.dec/config.yaml（version v2）。
 // 本地配置以 project_name 引用 Git Vault 中的 projects/<name>.yaml；
-// enabled_bundles 为从 vault Project 同步或 Assets 页调整后的本地副本，供 pull 解析。
+// enabled_bundles 为从 vault Project 同步或 Bundles 页调整后的本地副本，供 pull 解析。
 message ProjectConfig {
   string version = 1;
   // 引用的 vault Project 名，对应 projects/<project_name>.yaml。
@@ -24,10 +22,10 @@ message ProjectConfig {
   repeated string ides = 3;
   // 机器级 editor 覆盖（可选）。
   string editor = 4;
-  // TUI Assets 页扫描远端 bundles/ 生成的可用资产清单（本地缓存）。
-  AssetInventory available = 5;
-  // 单资产粒度启用（高级）；多数场景由 project.bundles 推导。
-  AssetInventory enabled = 6;
-  // 从 vault Project.bundles 同步或 Assets 页保存的 bundle 列表；pull 时据此拉 Dec + secrets bundle。
+  // 5、6 曾是 available / enabled 单资产清单，已随「bundle 是唯一启用入口」移除，不要复用。
+  reserved 5, 6;
+  reserved "available", "enabled";
+  // 从 vault Project.bundles 同步或 Bundles 页保存的 bundle 列表；
+  // 这是唯一的资产启用入口，pull 时据此拉 Dec + secrets bundle。
   repeated string enabled_bundles = 7 [json_name = "enabled_bundles"];
 }

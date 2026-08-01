@@ -14,19 +14,9 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 	mgr := NewProjectConfigManager(projectRoot)
 
 	cfg := &types.ProjectConfig{
-		IDEs:   []string{"cursor"},
-		Editor: "vim",
-		Available: &types.AssetList{
-			Rules: []types.AssetRef{
-				{Name: "rule-a", Vault: "v1"},
-				{Name: "rule-b", Vault: "v2"},
-			},
-		},
-		Enabled: &types.AssetList{
-			Rules: []types.AssetRef{
-				{Name: "rule-a", Vault: "v1"},
-			},
-		},
+		IDEs:           []string{"cursor"},
+		Editor:         "vim",
+		EnabledBundles: []string{"vikunja", "cli"},
 	}
 
 	if err := mgr.SaveProjectConfig(cfg); err != nil {
@@ -44,20 +34,14 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 	if !strings.Contains(content, "version: v2") {
 		t.Fatalf("保存后的配置应写入 version: v2, 实际内容:\n%s", content)
 	}
-	if !strings.Contains(content, "v1:") || !strings.Contains(content, "rule-a:") || !strings.Contains(content, "rules: true") {
-		t.Fatalf("保存后的配置应使用 v2 的 vault/item/type 结构, 实际内容:\n%s", content)
-	}
 
 	loaded, err := mgr.LoadProjectConfig()
 	if err != nil {
 		t.Fatalf("加载失败: %v", err)
 	}
 
-	if loaded.Available.Count() != 2 {
-		t.Fatalf("available 应有 2 个, 得到 %d", loaded.Available.Count())
-	}
-	if loaded.Enabled.Count() != 1 {
-		t.Fatalf("enabled 应有 1 个, 得到 %d", loaded.Enabled.Count())
+	if len(loaded.EnabledBundles) != 2 || loaded.EnabledBundles[0] != "vikunja" {
+		t.Fatalf("enabled_bundles = %#v, 期望 [vikunja cli]", loaded.EnabledBundles)
 	}
 	if loaded.Editor != "vim" {
 		t.Fatalf("editor = %q, 期望 %q", loaded.Editor, "vim")
@@ -70,34 +54,66 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 	}
 }
 
-func TestLoadProjectConfig_Dedup(t *testing.T) {
+func TestLoadProjectConfig_FoldsLegacyEnabledIntoBundles(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := NewProjectConfigManager(projectRoot)
 
-	// 手写一个有重复的配置
 	decDir := filepath.Join(projectRoot, ".dec")
-	os.MkdirAll(decDir, 0755)
-	content := `
-version: v2
+	if err := os.MkdirAll(decDir, 0755); err != nil {
+		t.Fatalf("创建 .dec 目录失败: %v", err)
+	}
+	configPath := filepath.Join(decDir, "config.yaml")
+	legacy := `version: v2
+enabled_bundles:
+    - tencent-cloud
+available:
+    vikunja:
+        vikunja-workflow:
+            skills: true
+        vikunja-project-bootstrap:
+            skills: true
 enabled:
-  v1:
-    rule-a:
-      rules: true
-      rules: true
+    vikunja:
+        vikunja-workflow:
+            skills: true
+    default:
+        helloworld:
+            skills: true
 `
-	os.WriteFile(filepath.Join(decDir, "config.yaml"), []byte(content), 0644)
+	if err := os.WriteFile(configPath, []byte(legacy), 0644); err != nil {
+		t.Fatalf("写入 legacy 配置失败: %v", err)
+	}
 
 	loaded, err := mgr.LoadProjectConfig()
 	if err != nil {
 		t.Fatalf("加载失败: %v", err)
 	}
 
-	// v2 同一 vault/item/type 重复声明后应只保留 1 个
-	if loaded.Enabled.Count() != 1 {
-		t.Fatalf("去重后应有 1 个, 得到 %d", loaded.Enabled.Count())
+	// enabled 里的 vault 折叠成同名 bundle，已有的 enabled_bundles 保持在前。
+	want := []string{"tencent-cloud", "default", "vikunja"}
+	if len(loaded.EnabledBundles) != len(want) {
+		t.Fatalf("enabled_bundles = %#v, 期望 %#v", loaded.EnabledBundles, want)
 	}
-	if loaded.Enabled.Rules[0].Vault != "v1" {
-		t.Fatalf("vault = %s, 期望 v1", loaded.Enabled.Rules[0].Vault)
+	got := map[string]int{}
+	for i, name := range loaded.EnabledBundles {
+		got[name] = i
+	}
+	if got["tencent-cloud"] != 0 {
+		t.Fatalf("原有 bundle 应排在前面, 实际: %#v", loaded.EnabledBundles)
+	}
+	for _, name := range want {
+		if _, ok := got[name]; !ok {
+			t.Fatalf("enabled_bundles 应包含 %q, 实际: %#v", name, loaded.EnabledBundles)
+		}
+	}
+
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("读取回写后的配置失败: %v", err)
+	}
+	content := string(raw)
+	if strings.Contains(content, "available:") || strings.Contains(content, "enabled:\n") {
+		t.Fatalf("回写后不应保留 available / enabled 段, 实际内容:\n%s", content)
 	}
 }
 
@@ -145,14 +161,9 @@ enabled:
 	if len(loaded.IDEs) != 1 || loaded.IDEs[0] != "cursor" {
 		t.Fatalf("ides = %#v, 期望 [cursor]", loaded.IDEs)
 	}
-	if loaded.Available.FindAsset("rule", "shared-rule", "team") == nil {
-		t.Fatal("迁移后应保留 available 中的 rule")
-	}
-	if loaded.Available.FindAsset("mcp", "postgres", "infra") == nil {
-		t.Fatal("迁移后应保留 available 中的 mcp")
-	}
-	if loaded.Enabled.FindAsset("rule", "shared-rule", "team") == nil {
-		t.Fatal("迁移后应保留 enabled 中的 rule")
+	// v1 的 enabled 只声明了 team vault，available 里的 infra 不代表用户意图，应被丢弃。
+	if len(loaded.EnabledBundles) != 1 || loaded.EnabledBundles[0] != "team" {
+		t.Fatalf("enabled_bundles = %#v, 期望 [team]", loaded.EnabledBundles)
 	}
 
 	raw, err := os.ReadFile(configPath)
@@ -163,11 +174,8 @@ enabled:
 	if !strings.Contains(content, "version: v2") {
 		t.Fatalf("迁移后配置应写入 version: v2, 实际内容:\n%s", content)
 	}
-	if !strings.Contains(content, "team:") || !strings.Contains(content, "shared-rule:") || !strings.Contains(content, "rules: true") {
-		t.Fatalf("迁移后配置应使用 v2 结构, 实际内容:\n%s", content)
-	}
-	if strings.Contains(content, "- name:") {
-		t.Fatalf("迁移后不应保留 v1 列表结构, 实际内容:\n%s", content)
+	if strings.Contains(content, "- name:") || strings.Contains(content, "available:") {
+		t.Fatalf("迁移后不应保留 v1 资产结构, 实际内容:\n%s", content)
 	}
 }
 

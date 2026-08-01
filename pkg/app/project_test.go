@@ -134,11 +134,9 @@ func TestPrepareProjectConfigInitPreservesExistingConfigAndWritesFiles(t *testin
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:   []string{"codex"},
-		Editor: "code --wait",
-		Enabled: &types.AssetList{
-			Rules: []types.AssetRef{{Name: "cli-release-rules", Vault: "cli"}},
-		},
+		IDEs:           []string{"codex"},
+		Editor:         "code --wait",
+		EnabledBundles: []string{"cli"},
 	}); err != nil {
 		t.Fatalf("写入现有项目配置失败: %v", err)
 	}
@@ -176,17 +174,8 @@ func TestPrepareProjectConfigInitPreservesExistingConfigAndWritesFiles(t *testin
 	if len(loaded.IDEs) != 1 || loaded.IDEs[0] != "codex" {
 		t.Fatalf("IDEs = %#v, 期望保留原值", loaded.IDEs)
 	}
-	if loaded.Enabled.Count() != 1 {
-		t.Fatalf("Enabled.Count() = %d, 期望 1", loaded.Enabled.Count())
-	}
-	if loaded.Available == nil || loaded.Available.Count() != 2 {
-		t.Fatalf("Available.Count() = %d, 期望 2", loaded.Available.Count())
-	}
-	if loaded.Available.FindAsset("skill", "project-workflow", "default") == nil {
-		t.Fatal("available 中缺少 default/project-workflow")
-	}
-	if loaded.Available.FindAsset("rule", "cli-release-rules", "cli") == nil {
-		t.Fatal("available 中缺少 cli/cli-release-rules")
+	if len(loaded.EnabledBundles) != 1 || loaded.EnabledBundles[0] != "cli" {
+		t.Fatalf("EnabledBundles = %#v, 期望保留 [cli]", loaded.EnabledBundles)
 	}
 	if _, err := os.Stat(prepared.ConfigPath); err != nil {
 		t.Fatalf("配置文件应已写入: %v", err)
@@ -210,9 +199,6 @@ func TestPrepareProjectConfigInitPreservesEnabledBundlesAndDiscoversBundles(t *t
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		EnabledBundles: []string{"vikunja"},
-		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "vikunja-workflow", Vault: "vikunja"}},
-		},
 	}); err != nil {
 		t.Fatalf("写入现有项目配置失败: %v", err)
 	}
@@ -355,9 +341,6 @@ members:
 	}
 	if len(loaded.EnabledBundles) != 2 {
 		t.Fatalf("EnabledBundles = %#v, 期望 2 个", loaded.EnabledBundles)
-	}
-	if loaded.Available == nil || loaded.Available.Count() < 2 {
-		t.Fatalf("Available.Count() = %d, 期望至少 2", loaded.Available.Count())
 	}
 	if _, err := os.Stat(result.VarsPath); err != nil {
 		t.Fatalf("应创建 vars 模板: %v", err)

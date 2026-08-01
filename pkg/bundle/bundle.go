@@ -19,7 +19,7 @@ import (
 
 // ValidMemberTypes 列出成员引用允许的类型前缀。
 //
-// 与 AssetList 的四种资产类型对齐：
+// 与 vault 中的四种资产目录对齐：
 //   - skills   / skill   -> skill
 //   - commands / command -> command
 //   - rules    / rule    -> rule

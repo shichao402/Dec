@@ -6,7 +6,7 @@ VERSION=$(shell cat version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
-.PHONY: all build build-all test test-self-host clean install-dev install-dev-test fmt lint help
+.PHONY: all build build-all test clean install-dev install-dev-test fmt lint help
 
 all: build
 
@@ -23,10 +23,6 @@ build-all:
 test:
 	@echo "🧪 运行 Go 单元测试..."
 	go test ./... -v -cover
-
-test-self-host:
-	@echo "🧪 运行自托管流程测试..."
-	@./scripts/run-tests.sh
 
 clean:
 	@echo "🧹 清理构建产物..."
@@ -58,7 +54,6 @@ help:
 	@echo ""
 	@echo "测试目标："
 	@echo "  make test            - 运行 Go 单元测试"
-	@echo "  make test-self-host  - 运行自托管流程测试"
 	@echo ""
 	@echo "安装目标："
 	@echo "  make install-dev     - 安装当前源码到本地"

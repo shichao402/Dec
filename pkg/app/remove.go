@@ -160,14 +160,6 @@ func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResu
 			projectConfig.EnabledBundles = updated
 			changed = true
 		}
-		for _, member := range members {
-			if projectConfig.Enabled != nil && projectConfig.Enabled.RemoveAsset(member.Type, member.Name, member.Vault) {
-				changed = true
-			}
-			if projectConfig.Available != nil && projectConfig.Available.RemoveAsset(member.Type, member.Name, member.Vault) {
-				changed = true
-			}
-		}
 		if changed {
 			if err := mgr.SaveProjectConfig(projectConfig); err != nil {
 				emit(reporter, EventWarn, "remove.config", fmt.Sprintf("项目配置更新失败: %v", err), nil)
@@ -325,25 +317,8 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 		}
 	}
 
-	// Stage 4: 项目配置更新。
-	mgr := config.NewProjectConfigManager(projectRoot)
-	if projectConfig, err := mgr.LoadProjectConfig(); err == nil {
-		changed := false
-		if projectConfig.Enabled != nil && projectConfig.Enabled.RemoveAsset(itemType, assetName, result.Vault) {
-			changed = true
-		}
-		if projectConfig.Available != nil && projectConfig.Available.RemoveAsset(itemType, assetName, result.Vault) {
-			changed = true
-		}
-		if changed {
-			if err := mgr.SaveProjectConfig(projectConfig); err != nil {
-				emit(reporter, EventWarn, "remove.config", fmt.Sprintf("项目配置更新失败: %v", err), nil)
-			} else {
-				result.ConfigUpdated = true
-				emit(reporter, EventInfo, "remove.config", "📝 已更新项目配置", nil)
-			}
-		}
-	}
+	// 单资产删除不改项目配置：资产的启用态由所属 bundle 承载，
+	// 只删掉某个成员并不意味着用户要取消整个 bundle。
 
 	summary := fmt.Sprintf("✅ 已删除 [%s] %s (vault: %s)", itemType, assetName, result.Vault)
 	emit(reporter, EventInfo, "remove.finish", summary, nil)

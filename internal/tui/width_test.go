@@ -42,8 +42,8 @@ func homeModelAtWidth(width int) model {
 		ProjectConfigReady: true,
 		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
 		VarsFileReady:      true,
-		AvailableCount:     5,
-		EnabledCount:       2,
+		AvailableBundleCount: 5,
+		EnabledBundleCount:   2,
 		IDEs:               []string{"codex", "cursor"},
 		Editor:             "code --wait",
 	}
@@ -64,15 +64,30 @@ func TestViewAtBaselineWidths_HomeNoOverflow(t *testing.T) {
 }
 
 func TestViewAtBaselineWidths_AssetsNoOverflow(t *testing.T) {
-	// 含中文 vault / name 的资产条目，验证宽字符不会撑爆列宽。
+	// 含中文 vault / name 的成员条目，验证宽字符不会撑爆列宽。
 	assets := &app.AssetSelectionState{
 		ExistingConfig: true,
 		ConfigPath:     "/tmp/dec-project/.dec/config.yaml",
 		VarsPath:       "/tmp/dec-project/.dec/vars.yaml",
-		Items: []app.AssetSelectionItem{
-			{Name: "project-workflow", Type: "skill", Vault: "default", Enabled: true},
-			{Name: "cli-release-rules", Type: "rule", Vault: "cli", Enabled: false},
-			{Name: "中文名称资产", Type: "skill", Vault: "中文仓库", Enabled: true},
+		Bundles: []app.AssetBundleOption{
+			{
+				Name:        "default",
+				Vault:       "default",
+				Description: "default 资产包",
+				Enabled:     true,
+				Members: []app.AssetSelectionItem{
+					{Name: "project-workflow", Type: "skill", Vault: "default"},
+					{Name: "cli-release-rules", Type: "rule", Vault: "cli"},
+				},
+			},
+			{
+				Name:        "中文包",
+				Vault:       "中文仓库",
+				Description: "含宽字符的 bundle",
+				Members: []app.AssetSelectionItem{
+					{Name: "中文名称资产", Type: "skill", Vault: "中文仓库"},
+				},
+			},
 		},
 	}
 

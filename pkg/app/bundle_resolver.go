@@ -1,9 +1,9 @@
-// bundle_resolver.go 负责把 ProjectConfig 的 enabled_bundles 与 enabled assets
-// 解析为本轮 pull 的目标资产集合，并记录每个资产的来源（bundle/<name> 或 standalone）。
+// bundle_resolver.go 负责把 ProjectConfig.enabled_bundles 解析为本轮 pull 的目标资产集合，
+// 并记录每个资产的来源（bundle/<name>）。
 //
 // 本文件只做「想装哪些资产」的解析；真正的装卸仍由 operations.go 内的 installAssetToIDEs
-// 与 cleanupRemovedAssets 负责。多来源保留语义由天然并集 + 清理阶段使用完整目标集共同实现：
-// 只要任何来源仍引用某个资产，它就会出现在目标集里，不会被清理掉。
+// 与 cleanupRemovedAssets 负责。同一资产被多个 bundle 引用时来源会叠加，
+// 只要任何 bundle 仍引用它，它就会出现在目标集里，不会被清理掉。
 package app
 
 import (
@@ -33,13 +33,14 @@ type BundleOverview struct {
 type ResolvedAssets struct {
 	// Assets 是按 (type, vault, name) 去重后的目标资产清单。
 	Assets []types.TypedAssetRef
-	// Sources 以 "type:vault:name" 为 key，值是 ["bundle/<name>", "standalone"] 这类来源列表。
+	// Sources 以 "type:vault:name" 为 key，值是 ["bundle/<name>"] 这类来源列表；
+	// 同一资产被多个 bundle 引用时会出现多项。
 	Sources map[string][]string
 	// Bundles 是本轮扫描发现的 bundle 全集，包含启用与未启用的。
 	Bundles []BundleOverview
 }
 
-// resolveDesiredAssets 把 ProjectConfig 的 Enabled + EnabledBundles 合并成目标资产集。
+// resolveDesiredAssets 把 ProjectConfig.EnabledBundles 展开成目标资产集。
 //
 // 参数：
 //   - projectConfig：项目配置；nil 或空时退化为空结果（调用方负责外部的 skip 判断）。
@@ -52,14 +53,13 @@ type ResolvedAssets struct {
 //
 // 算法：
 //  1. 扫描 repoDir/bundles/ 下各 bundle 目录，加载 bundles/<name>/bundle.yaml。
-//  2. 把 Enabled 中每个 asset 放入目标集，来源记 "standalone"。
-//  3. 对 EnabledBundles 中的每个 bundle 名，在所有 vault 中搜索匹配项：
+//  2. 对 EnabledBundles 中的每个 bundle 名，在所有 vault 中搜索匹配项：
 //     - 找不到：reporter warning + Bundles 不新增条目（因为我们没找到其声明）。
 //     - 找到唯一匹配：展开 members，对每个成员检查资产文件是否存在；存在就并入目标集，
 //       来源记 "bundle/<name>"；不存在则 reporter warning 跳过该成员。
 //     - 命中多个 vault：目前视为 warning 并使用第一个（按 vault 字典序），因为跨 vault
 //       bundle 短名冲突是父卡里 #17 明确标为「未验证需求」的场景。
-//  4. Bundles 列表同时包含启用和未启用（用于 TUI 的 overview 渲染）。
+//  3. Bundles 列表同时包含启用和未启用（用于 TUI 的 overview 渲染）。
 func resolveDesiredAssets(projectConfig *types.ProjectConfig, repoDir string, reporter Reporter) (*ResolvedAssets, error) {
 	reporter = defaultReporter(reporter)
 	result := &ResolvedAssets{
@@ -78,7 +78,6 @@ func resolveDesiredAssets(projectConfig *types.ProjectConfig, repoDir string, re
 		return result, nil
 	}
 
-	// 2. 先把单资产（standalone）放入目标集。
 	seen := make(map[string]int) // key -> index in result.Assets
 	addAsset := func(asset types.TypedAssetRef, source string) {
 		key := assetKey(asset)
@@ -93,11 +92,7 @@ func resolveDesiredAssets(projectConfig *types.ProjectConfig, repoDir string, re
 		result.Sources[key] = []string{source}
 	}
 
-	for _, asset := range projectConfig.Enabled.All() {
-		addAsset(asset, "standalone")
-	}
-
-	// 3. 展开 bundle 成员。
+	// 2. 展开 bundle 成员。
 	for _, bundleName := range projectConfig.EnabledBundles {
 		matches := vaultBundles[bundleName]
 		if len(matches) == 0 {
@@ -233,20 +228,6 @@ func appendUniqueSource(sources []string, candidate string) []string {
 		}
 	}
 	return append(sources, candidate)
-}
-
-// allBundleSourced 判定来源列表是否全部由 bundle 带入（即没有 "standalone"）。
-// 用于 Available 校验的豁免：bundle 展开的资产允许不在 Available 快照中。
-func allBundleSourced(sources []string) bool {
-	if len(sources) == 0 {
-		return false
-	}
-	for _, s := range sources {
-		if s == "standalone" {
-			return false
-		}
-	}
-	return true
 }
 
 func containsVault(matches []vaultBundle, vault string) bool {

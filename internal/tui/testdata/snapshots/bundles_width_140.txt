@@ -8,10 +8,10 @@
 │   Project            │╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │   Run                ││                                                                                                                  │
 │   Delete             ││  扫描 vault bundles/，勾选 bundle 写入 enabled_bundles；成员资产随 bundle 一并启用。                             │
-│   Settings           ││  筛选: <none> | 类型: bundle                                                                                     │
-│                      ││  Bundle: 1/2 已启用 | 独立资产: 1/2 已启用                                                                       │
+│   Settings           ││  筛选: <none>                                                                                                    │
+│                      ││  Bundle: 1/2 已启用 | 成员资产: 1 个                                                                             │
 │                      ││  当前 bundle 选择与磁盘一致。                                                                                    │
-│                      ││  快捷键：j/k 移动 · h 返回导航 · l 展开 bundle · space 切换 · t 类型 · s 保存 · / 筛选                           │
+│                      ││  快捷键：j/k 移动 · h 返回导航 · l 展开 bundle · space 切换 · s 保存 · / 筛选                                    │
 │                      ││                                                                                                                  │
 │                      ││  Bundle 列表                                           Details                                                   │
 │                      ││  > [x] ▸ default · 1 个成员                            Bundle: default                                           │

@@ -87,12 +87,10 @@ func TestSaveProjectSettings_WritesIDEsAndPreservesOtherFields(t *testing.T) {
 	projectRoot := setupProjectSettingsEnv(t)
 
 	mgr := config.NewProjectConfigManager(projectRoot)
-	// 先写入带 editor / enabled 的配置，确保 save IDEs 不清掉这些字段。
+	// 先写入带 editor / enabled_bundles 的配置，确保 save IDEs 不清掉这些字段。
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		Editor: "vim",
-		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Vault: "v", Name: "n"}},
-		},
+		Editor:         "vim",
+		EnabledBundles: []string{"v"},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -121,8 +119,8 @@ func TestSaveProjectSettings_WritesIDEsAndPreservesOtherFields(t *testing.T) {
 	if reloaded.Editor != "vim" {
 		t.Fatalf("Editor 字段应保留, 得到 %q", reloaded.Editor)
 	}
-	if reloaded.Enabled == nil || len(reloaded.Enabled.Skills) != 1 {
-		t.Fatal("Enabled 资产应保留")
+	if len(reloaded.EnabledBundles) != 1 || reloaded.EnabledBundles[0] != "v" {
+		t.Fatalf("EnabledBundles 应保留, 得到 %#v", reloaded.EnabledBundles)
 	}
 }
 

@@ -4,23 +4,6 @@ package dec.v1;
 
 option go_package = "github.com/shichao402/Dec/schema/dec/v1;decv1";
 
-// AssetInventory 对应 ProjectConfig 中 available / enabled 的 v2 嵌套结构：
-// vault -> item -> enabled asset types。
-message AssetInventory {
-  map<string, VaultAssets> vaults = 1;
-}
-
-message VaultAssets {
-  map<string, AssetTypeFlags> items = 1;
-}
-
-message AssetTypeFlags {
-  bool skill = 1;
-  bool command = 2;
-  bool rule = 3;
-  bool mcp = 4;
-}
-
 enum AssetType {
   ASSET_TYPE_UNSPECIFIED = 0;
   ASSET_TYPE_SKILL = 1;

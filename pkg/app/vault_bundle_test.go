@@ -51,25 +51,6 @@ members:
 	}
 }
 
-func TestInferBundleEnabledFromStandalone(t *testing.T) {
-	members := []AssetSelectionItem{
-		{Type: "skill", Vault: "vikunja", Name: "vikunja-workflow"},
-		{Type: "rule", Vault: "vikunja", Name: "vikunja-integration"},
-	}
-	enabled := &types.AssetList{
-		Skills: []types.AssetRef{{Name: "vikunja-workflow", Vault: "vikunja"}},
-		Rules:  []types.AssetRef{{Name: "vikunja-integration", Vault: "vikunja"}},
-	}
-	if !inferBundleEnabledFromStandalone(members, enabled) {
-		t.Fatal("全部成员 standalone 启用时应推断 bundle 已启用")
-	}
-	if inferBundleEnabledFromStandalone(members, &types.AssetList{
-		Skills: []types.AssetRef{{Name: "vikunja-workflow", Vault: "vikunja"}},
-	}) {
-		t.Fatal("部分成员启用时不应推断 bundle 已启用")
-	}
-}
-
 func TestResolveDesiredAssets_VaultBundleViaEnabledBundles(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",

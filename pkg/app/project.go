@@ -52,12 +52,12 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 	var existingConfig *types.ProjectConfig
 	if mgr.Exists() {
 		prepared.ExistingConfig = true
-		emit(reporter, EventInfo, "project.init", "检测到现有项目配置，准备刷新 available 列表", nil)
+		emit(reporter, EventInfo, "project.init", "检测到现有项目配置，准备刷新 bundle 列表", nil)
 		loadedConfig, err := mgr.LoadProjectConfig()
 		if err == nil {
 			existingConfig = loadedConfig
 		} else {
-			emit(reporter, EventWarn, "project.init", fmt.Sprintf("读取现有项目配置失败，继续按空配置刷新 available：%v", err), nil)
+			emit(reporter, EventWarn, "project.init", fmt.Sprintf("读取现有项目配置失败，继续按空配置初始化：%v", err), nil)
 		}
 	}
 
@@ -70,15 +70,11 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 		return prepared, nil
 	}
 
-	enabled := &types.AssetList{}
 	projectEditor := ""
 	var projectIDEs []string
 	projectName := ""
 	var enabledBundles []string
 	if existingConfig != nil {
-		if !existingConfig.Enabled.IsEmpty() {
-			enabled = existingConfig.Enabled
-		}
 		projectEditor = existingConfig.Editor
 		projectIDEs = existingConfig.IDEs
 		projectName = existingConfig.ProjectName
@@ -98,8 +94,6 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 		ProjectName:    projectName,
 		IDEs:           projectIDEs,
 		Editor:         projectEditor,
-		Available:      buildAssetList(allAssets),
-		Enabled:        enabled,
 		EnabledBundles: enabledBundles,
 	}
 
@@ -232,14 +226,6 @@ func listFolderAssets(folderDir, folderName string) []AssetInfo {
 		}
 	}
 	return assets
-}
-
-func buildAssetList(allAssets []AssetInfo) *types.AssetList {
-	list := &types.AssetList{}
-	for _, asset := range allAssets {
-		list.Add(asset.Type, types.AssetRef{Name: asset.Name, Vault: asset.Vault})
-	}
-	return list
 }
 
 func withReadRepoDir(fn func(string) error) error {

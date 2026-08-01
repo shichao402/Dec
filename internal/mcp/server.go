@@ -45,11 +45,11 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handleInitProject)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_assets",
-		Description: "列出可用 bundle 与单资产及启用状态",
+		Description: "列出仓库内全部 bundle 及其成员与启用状态",
 	}, s.handleListAssets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_set_assets",
-		Description: "保存 bundle / 单资产启用选择到 .dec/config.yaml",
+		Description: "保存 bundle 启用选择到 .dec/config.yaml",
 	}, s.handleSetAssets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_pull",
@@ -166,46 +166,14 @@ func (s *Server) handleListAssets(ctx context.Context, _ *mcp.CallToolRequest, _
 	return toolOK(state, logs())
 }
 
-type assetItemInput struct {
-	Type    string `json:"type"`
-	Name    string `json:"name"`
-	Vault   string `json:"vault"`
-	Enabled bool   `json:"enabled"`
-}
-
 type setAssetsParams struct {
-	EnabledBundles []string         `json:"enabled_bundles,omitempty" jsonschema:"启用的 bundle 名称列表；省略表示不修改"`
-	Items          []assetItemInput `json:"items,omitempty" jsonschema:"单资产勾选；省略表示从当前配置加载后仅更新 bundle"`
+	EnabledBundles []string `json:"enabled_bundles" jsonschema:"启用的 bundle 名称列表；传空数组表示全部取消"`
 }
 
 func (s *Server) handleSetAssets(ctx context.Context, _ *mcp.CallToolRequest, in setAssetsParams) (*mcp.CallToolResult, any, error) {
 	reporter, logs := newCollector()
-	root := s.projectRoot()
 
-	items := make([]app.AssetSelectionItem, 0)
-	if in.Items != nil {
-		for _, item := range in.Items {
-			items = append(items, app.AssetSelectionItem{
-				Name:    item.Name,
-				Type:    item.Type,
-				Vault:   item.Vault,
-				Enabled: item.Enabled,
-			})
-		}
-	} else {
-		state, err := app.LoadAssetSelection(root, reporter)
-		if err != nil {
-			return toolFail(err, logs())
-		}
-		items = append(items, state.Items...)
-	}
-
-	selection := app.AssetSaveSelection{Items: items}
-	if in.EnabledBundles != nil {
-		selection.EnabledBundles = append([]string(nil), in.EnabledBundles...)
-	}
-
-	result, err := app.SaveAssetSelection(root, selection, reporter)
+	result, err := app.SaveEnabledBundles(s.projectRoot(), in.EnabledBundles, reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}

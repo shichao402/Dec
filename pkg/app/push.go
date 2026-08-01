@@ -61,9 +61,9 @@ func pushDecBundles(ctx context.Context, projectRoot string, reporter Reporter) 
 		return 0, "", "", err
 	}
 
-	if projectConfig.Enabled.IsEmpty() && len(projectConfig.EnabledBundles) == 0 {
-		skippedReason = "无已启用 bundle 或资产"
-		emit(reporter, EventInfo, "push.dec", "无已启用 bundle 或资产，跳过 Dec 推送", nil)
+	if len(projectConfig.EnabledBundles) == 0 {
+		skippedReason = "无已启用 bundle"
+		emit(reporter, EventInfo, "push.dec", "无已启用 bundle，跳过 Dec 推送", nil)
 		return 0, skippedReason, "", nil
 	}
 

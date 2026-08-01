@@ -211,14 +211,10 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 	}
 	result.AssetCount = len(allAssets)
 
-	enabled := &types.AssetList{}
 	projectEditor := inference.Editor
 	projectIDEs := append([]string(nil), inference.IDEs...)
 	enabledBundles := append([]string(nil), inference.EnabledBundles...)
 	if existingConfig != nil {
-		if !existingConfig.Enabled.IsEmpty() {
-			enabled = existingConfig.Enabled
-		}
 		if projectEditor == "" {
 			projectEditor = existingConfig.Editor
 		}
@@ -243,8 +239,6 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 		ProjectName:    projectName,
 		IDEs:           projectIDEs,
 		Editor:         projectEditor,
-		Available:      buildAssetList(allAssets),
-		Enabled:        enabled,
 		EnabledBundles: enabledBundles,
 	}
 

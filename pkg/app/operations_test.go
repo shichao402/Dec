@@ -19,12 +19,14 @@ func TestPullProjectAssetsSkipsWithoutEnabledAssets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	if result.SkippedReason != "config.yaml 中没有已启用的资产或 bundle" {
-		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, "config.yaml 中没有已启用的资产或 bundle")
+	if result.SkippedReason != "config.yaml 中没有已启用的 bundle" {
+		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, "config.yaml 中没有已启用的 bundle")
 	}
 }
 
-func TestPullProjectAssetsSkipsWhenEnabledAssetsDoNotExistInAvailable(t *testing.T) {
+// TestPullProjectAssetsWarnsOnMissingBundle 覆盖「配置里引用了仓库中已不存在的 bundle」：
+// 解析阶段给出告警，pull 整体跳过而不是报错。
+func TestPullProjectAssetsWarnsOnMissingBundle(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/default/skills/another-workflow/SKILL.md": `---
@@ -39,25 +41,29 @@ name: another-workflow
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		Available: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "another-workflow", Vault: "default"}},
-		},
-		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "project-workflow", Vault: "default"}},
-		},
+		EnabledBundles: []string{"deleted-vault"},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	result, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
+	var events []OperationEvent
+	result, err := PullProjectAssets(context.Background(), projectRoot, "", ReporterFunc(func(event OperationEvent) {
+		events = append(events, event)
+	}))
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
 	if result.SkippedReason != "没有有效的已启用资产可拉取" {
 		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, "没有有效的已启用资产可拉取")
 	}
-	if len(result.ValidationWarnings) != 1 || !strings.Contains(result.ValidationWarnings[0], "project-workflow") {
-		t.Fatalf("ValidationWarnings = %#v, 期望包含 project-workflow", result.ValidationWarnings)
+	var sawWarn bool
+	for _, event := range events {
+		if event.Level == EventWarn && strings.Contains(event.Message, "deleted-vault") {
+			sawWarn = true
+		}
+	}
+	if !sawWarn {
+		t.Fatalf("期望针对失效 bundle 的 warning，事件: %#v", events)
 	}
 }
 
@@ -77,13 +83,8 @@ name: project-workflow
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs: []string{"cursor"},
-		Available: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "project-workflow", Vault: "default"}},
-		},
-		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "project-workflow", Vault: "default"}},
-		},
+		IDEs:           []string{"cursor"},
+		EnabledBundles: []string{"default"},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -155,13 +156,8 @@ members:
 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
-	// 注意：EnabledBundles 填 combo，Enabled 为空。Available 里也没有这两个成员——
-	// 验证 bundle-sourced 资产走豁免分支能装上。
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs: []string{"cursor"},
-		Available: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "some-other-skill", Vault: "default"}},
-		},
+		IDEs:           []string{"cursor"},
 		EnabledBundles: []string{"combo"},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)

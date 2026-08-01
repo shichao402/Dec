@@ -33,8 +33,8 @@ type PullProjectAssetsResult struct {
 	NonFatalWarnings   []string
 	// BundleOverviews 记录本轮解析时发现的所有 bundle（含未启用的），供 CLI / TUI 呈现。
 	BundleOverviews []BundleOverview
-	// AssetSources 以 "type:vault:name" 为 key，值是每个目标资产的来源列表
-	// （例如 ["bundle/vikunja", "standalone"]）。供多来源追溯使用。
+	// AssetSources 以 "type:vault:name" 为 key，值是每个目标资产的来源 bundle 列表
+	// （例如 ["bundle/vikunja"]）。供多来源追溯使用。
 	AssetSources         map[string][]string
 	SecretsSkippedReason string
 	SecretsNoteCount     int
@@ -74,11 +74,10 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 		emit(reporter, EventInfo, "pull.migrate", note, nil)
 	}
 
-	nothingEnabled := projectConfig.Enabled.IsEmpty() && len(projectConfig.EnabledBundles) == 0
-	if nothingEnabled {
-		result.SkippedReason = "config.yaml 中没有已启用的资产或 bundle"
+	if len(projectConfig.EnabledBundles) == 0 {
+		result.SkippedReason = "config.yaml 中没有已启用的 bundle"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
-		emit(reporter, EventInfo, "pull.prepare", "运行 dec config init 选择需要的资产", nil)
+		emit(reporter, EventInfo, "pull.prepare", "在 TUI Bundles 页勾选需要的 bundle 后按 s 保存", nil)
 		applyAssetCleanup(result, projectRoot, nil, projectIDEs, reporter)
 		return result, nil
 	}
@@ -104,28 +103,8 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	}
 	result.BundleOverviews = resolved.Bundles
 
+	// bundle 解析阶段已校验过成员文件存在性，这里无需再做一次白名单过滤。
 	validAssets := resolved.Assets
-	if projectConfig.Available != nil && !projectConfig.Available.IsEmpty() {
-		filtered := make([]types.TypedAssetRef, 0, len(resolved.Assets))
-		for _, asset := range resolved.Assets {
-			if projectConfig.Available.FindAsset(asset.Type, asset.Name, asset.Vault) == nil {
-				// 通过 bundle 带入的资产可能并不在 Available 里（因为 Available 是 scan 仓库得到的快照）。
-				// 如果该资产的来源全部是 bundle，就信任 bundle 解析结果（资产存在性已由解析器校验）。
-				sources := resolved.Sources[assetKey(asset)]
-				onlyFromBundle := len(sources) > 0 && allBundleSourced(sources)
-				if onlyFromBundle {
-					filtered = append(filtered, asset)
-					continue
-				}
-				warning := fmt.Sprintf("[%-5s] %s (vault: %s) — 不在 available 中（可能拼写错误或已被删除）", asset.Type, asset.Name, asset.Vault)
-				result.ValidationWarnings = append(result.ValidationWarnings, warning)
-				emit(reporter, EventWarn, "pull.validate", warning, nil)
-				continue
-			}
-			filtered = append(filtered, asset)
-		}
-		validAssets = filtered
-	}
 
 	// 对照最终目标集缩减 AssetSources，避免把被过滤掉的资产的来源带出。
 	finalSources := make(map[string][]string, len(validAssets))

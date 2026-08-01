@@ -13,12 +13,12 @@
 │                  ││  远端仓库: git@github.com:demo/dec.git                                       │
 │                  ││  项目配置: 已初始化                                                          │
 │                  ││  变量文件: 已存在                                                            │
-│                  ││  Vault bundle: 0 个 | 已启用: 2 个                                           │
-│                  ││  展开资产: 5 可用 / 2 已启用                                                 │
+│                  ││  Vault bundle: 5 个 | 已启用: 2 个                                           │
 │                  ││  默认 IDE: codex, cursor                                                     │
 │                  ││  编辑器: code --wait                                                         │
 │                  ││  建议下一步: 可以切到 Run 页执行 pull                                        │
 │                  ││  IDE 警告: 无                                                                │
+│                  ││                                                                              │
 │                  ││                                                                              │
 │                  ││                                                                              │
 │                  ││                                                                              │

@@ -44,7 +44,7 @@ type assetsLoadedMsg struct {
 }
 
 type assetsSavedMsg struct {
-	result *app.SaveAssetSelectionResult
+	result *app.SaveBundleSelectionResult
 	err    error
 }
 
@@ -222,9 +222,7 @@ type model struct {
 	assetFilterInput bool
 	assetsDirty      bool
 	savingAssets     bool
-	// assetTypeFilter 取值 "all" / "skill" / "command" / "rule" / "mcp" / "bundle"，按 t 键轮转。
 	// "bundle" 表示只显示 bundle 节点（以及它们展开的成员）；其他值只影响单资产行的过滤。
-	assetTypeFilter             string
 	settingsCursor              int
 	settingsDirty               bool
 	savingSettings              bool
@@ -329,7 +327,6 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 		projectRoot:     projectRoot,
 		currentVersion:  currentVersion,
 		pages:           []string{"Home", "Bundles", "Project", "Run", "Delete", "Settings"},
-		assetTypeFilter: "bundle",
 		configInitMode:  opts.ConfigInitMode,
 		focus:           focusSidebar,
 		logs:            logs,
@@ -416,7 +413,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.vaultInference != nil {
 			m.pushLog(fmt.Sprintf("Vault project inferred from directory: %s (%d bundles)", msg.vaultInference.ProjectName, len(msg.vaultInference.EnabledBundles)))
 		}
-		m.pushLog(fmt.Sprintf("Overview loaded: %d enabled / %d available assets", msg.overview.EnabledCount, msg.overview.AvailableCount))
+		m.pushLog(fmt.Sprintf("Overview loaded: %d enabled / %d available bundles", msg.overview.EnabledBundleCount, msg.overview.AvailableBundleCount))
 		return m, nil
 	case vaultProjectAppliedMsg:
 		m.applyingVaultProject = false
@@ -452,24 +449,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.bundleSelection = append(m.bundleSelection, bo.Name)
 				}
 			}
-			// 仓库尚无 bundle 声明时，bundle 视图会空列表；回落到单资产视图。
-			if len(msg.state.Bundles) == 0 && m.assetTypeFilter == "bundle" {
-				m.assetTypeFilter = "all"
-			}
 		}
 		m.normalizeAssetCursor()
 		if msg.state != nil {
-			m.pushLog(fmt.Sprintf("Asset selection loaded: %d items, %d bundles", len(msg.state.Items), len(msg.state.Bundles)))
+			m.pushLog(fmt.Sprintf("Bundle selection loaded: %d bundles", len(msg.state.Bundles)))
 		}
 		return m, nil
 	case assetsSavedMsg:
 		m.savingAssets = false
 		if msg.err != nil {
-			m.pushLog("Asset selection save failed: " + msg.err.Error())
+			m.pushLog("Bundle selection save failed: " + msg.err.Error())
 			return m, nil
 		}
 		if msg.result != nil {
-			m.pushLog(fmt.Sprintf("Asset selection saved: %d enabled / %d available / %d bundles", msg.result.EnabledCount, msg.result.AvailableCount, msg.result.EnabledBundleCount))
+			m.pushLog(fmt.Sprintf("Bundle selection saved: %d bundles", msg.result.EnabledBundleCount))
 		}
 		if m.configInitMode {
 			m.pushLog("项目配置已保存，退出初始化")
@@ -773,12 +766,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pushLog("Asset filter input opened")
 			}
 			return m, nil
-		case "t":
-			if m.isBundlesPage() && !m.savingAssets && m.focus != focusSidebar {
-				m.cycleAssetTypeFilter()
-				return m, nil
-			}
-			return m, nil
 		case "c":
 			if m.isBundlesPage() && m.focus != focusSidebar && strings.TrimSpace(m.assetFilter) != "" {
 				m.assetFilter = ""
@@ -841,11 +828,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			if m.isBundlesPage() && !m.savingAssets && m.assets != nil && m.assetsErr == nil {
 				m.savingAssets = true
-				m.pushLog("Saving asset selection")
-				// Items 里 Enabled=true 的成员若完全由 bundle 带入，不应写进 enabled_assets；
-				// filterItemsForSave 过滤掉这类"隐式启用"，只保留用户显式勾选的单资产。
-				items := filterItemsForSave(m.assets.Items, m.bundleSelection, m.assets.Bundles)
-				return m, saveAssetsCmd(m.projectRoot, items, cloneStrings(m.bundleSelection))
+				m.pushLog("Saving bundle selection")
+				return m, saveAssetsCmd(m.projectRoot, cloneStrings(m.bundleSelection))
 			}
 			if m.isSettingsPage() && !m.savingSettings && m.settings != nil && m.settingsErr == nil {
 				m.savingSettings = true
@@ -1100,18 +1084,9 @@ func loadAssetsCmd(projectRoot string) tea.Cmd {
 	}
 }
 
-func saveAssetsCmd(projectRoot string, items []app.AssetSelectionItem, bundles []string) tea.Cmd {
+func saveAssetsCmd(projectRoot string, bundles []string) tea.Cmd {
 	return func() tea.Msg {
-		// 保存时总是显式带 EnabledBundles（即使为 nil/空）——TUI 是 Assets 页的唯一权威入口，
-		// 需要让用例层按用户的最新选择覆盖磁盘值。为区分 "nil=保留" 与 "空=清空"，传一个非 nil 的空 slice。
-		bundleList := bundles
-		if bundleList == nil {
-			bundleList = []string{}
-		}
-		result, err := app.SaveAssetSelection(projectRoot, app.AssetSaveSelection{
-			Items:          items,
-			EnabledBundles: bundleList,
-		}, nil)
+		result, err := app.SaveEnabledBundles(projectRoot, bundles, nil)
 		return assetsSavedMsg{result: result, err: err}
 	}
 }
@@ -1776,8 +1751,7 @@ func (m model) renderHomePage(width int) string {
 		fmt.Sprintf("远端仓库: %s", fallbackValue(m.overview.RepoRemoteURL, "未连接")),
 		fmt.Sprintf("项目配置: %s", formatReady(m.overview.ProjectConfigReady, "已初始化", "未初始化")),
 		fmt.Sprintf("变量文件: %s", formatReady(m.overview.VarsFileReady, "已存在", "未生成")),
-		fmt.Sprintf("Vault bundle: %d 个 | 已启用: %d 个", len(m.overview.Bundles), countOverviewEnabledBundles(m.overview)),
-		fmt.Sprintf("展开资产: %d 可用 / %d 已启用", m.overview.AvailableCount, m.overview.EnabledCount),
+		fmt.Sprintf("Vault bundle: %d 个 | 已启用: %d 个", countOverviewAvailableBundles(m.overview), countOverviewEnabledBundles(m.overview)),
 		fmt.Sprintf("默认 IDE: %s", strings.Join(m.overview.IDEs, ", ")),
 		fmt.Sprintf("编辑器: %s", fallbackValue(m.overview.Editor, "未配置")),
 		fmt.Sprintf("建议下一步: %s", suggestNextAction(m.overview, m.hasVaultInferencePrompt(), m.vaultInferenceDismissed)),
@@ -1801,8 +1775,8 @@ func (m model) renderBundlesPage(width int) string {
 	}
 	summary = append(summary,
 		shellMutedStyle.Render("扫描 vault bundles/，勾选 bundle 写入 enabled_bundles；成员资产随 bundle 一并启用。"),
-		fmt.Sprintf("筛选: %s | 类型: %s", m.currentAssetFilterLabel(), m.assetTypeFilter),
-		fmt.Sprintf("Bundle: %d/%d 已启用 | 独立资产: %d/%d 已启用", len(m.bundleSelection), len(m.assets.Bundles), m.countEnabledAssets(), len(m.assets.Items)),
+		fmt.Sprintf("筛选: %s", m.currentAssetFilterLabel()),
+		fmt.Sprintf("Bundle: %d/%d 已启用 | 成员资产: %d 个", len(m.bundleSelection), len(m.assets.Bundles), m.countSelectedBundleMembers()),
 	)
 	if m.assetsDirty {
 		summary = append(summary, shellWarnStyle.Render("当前有未保存修改，按 s 保存。"))
@@ -1816,7 +1790,7 @@ func (m model) renderBundlesPage(width int) string {
 		case focusSidebar:
 			summary = append(summary, shellMutedStyle.Render("按 l 进入内容区 · j/k 在侧栏切换页"))
 		default:
-			summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · h 返回导航 · l 展开 bundle · space 切换 · t 类型 · s 保存 · / 筛选"))
+			summary = append(summary, shellMutedStyle.Render("快捷键：j/k 移动 · h 返回导航 · l 展开 bundle · space 切换 · s 保存 · / 筛选"))
 		}
 	}
 	if !m.assets.ExistingConfig {
@@ -1824,14 +1798,14 @@ func (m model) renderBundlesPage(width int) string {
 	}
 
 	rows := m.assetTreeVisibleCount()
-	if len(m.assets.Items) == 0 && len(m.assets.Bundles) == 0 {
+	if len(m.assets.Bundles) == 0 {
 		return strings.Join(append(summary, "", "仓库 bundles/ 下还没有可选 bundle。"), "\n")
 	}
 	if rows == 0 {
 		return strings.Join(append(summary, "", "当前筛选没有结果。"), "\n")
 	}
 
-	list := m.renderAssetList(nil)
+	list := m.renderAssetList()
 	detail := m.renderAssetDetails()
 	if width < 88 {
 		return strings.Join(append(summary, "", list, "", detail), "\n")
@@ -2167,7 +2141,75 @@ func (m model) renderRunStateBlock(width int) []string {
 	if m.runResult == nil && m.pushResult == nil && m.runErr == nil && m.removeResult == nil && m.removeErr == nil {
 		return m.renderRunIdleGuide()
 	}
-	return m.renderRunLastResult()
+	lines := m.renderRunLastResult()
+	if plan := m.renderPullPlanLines(); len(plan) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, plan...)
+	}
+	return lines
+}
+
+// renderPullPlanLines 说明「按下 p 会拉取什么」。
+//
+// 计划一律按磁盘上的 enabled_bundles 计算（也就是 m.assets 里的 Enabled 标记），
+// 因为 pull 读的是磁盘配置；Bundles 页里刚勾还没保存的改动只作为警告提示，
+// 避免用户以为勾选立刻生效——这正是"勾了 bundle 却没拉到"的来源。
+func (m model) renderPullPlanLines() []string {
+	if m.assets == nil {
+		return nil
+	}
+	enabled := app.ListEnabledBundles(m.assets)
+	names := make([]string, 0, len(enabled))
+	for _, bo := range enabled {
+		names = append(names, bo.Name)
+	}
+
+	lines := []string{shellTitleStyle.Render("本次 Pull 计划")}
+	if len(names) == 0 {
+		lines = append(lines, shellWarnStyle.Render("⚠ 当前无启用 bundle，请先到 Bundles 页勾选并按 s 保存"))
+	} else {
+		lines = append(lines, fmt.Sprintf("将拉取 %d 个资产 · bundle: %s",
+			len(app.ListEffectiveEnabledAssets(m.assets)), strings.Join(names, ", ")))
+	}
+	if pending := m.pendingBundleChanges(); pending != "" {
+		lines = append(lines, shellWarnStyle.Render("⚠ Bundles 页有未保存的勾选（"+pending+"），按 s 保存后才会生效"))
+	}
+	return lines
+}
+
+// pendingBundleChanges 描述 TUI 内 bundleSelection 与磁盘 enabled_bundles 的差异。
+// 无差异时返回空串。
+func (m model) pendingBundleChanges() string {
+	if m.assets == nil || !m.assetsDirty {
+		return ""
+	}
+	onDisk := make(map[string]struct{})
+	for _, bo := range m.assets.Bundles {
+		if bo.Enabled {
+			onDisk[bo.Name] = struct{}{}
+		}
+	}
+	selected := make(map[string]struct{}, len(m.bundleSelection))
+	for _, name := range m.bundleSelection {
+		selected[name] = struct{}{}
+	}
+
+	var added, removed []string
+	for _, bo := range m.assets.Bundles {
+		_, wasEnabled := onDisk[bo.Name]
+		_, nowEnabled := selected[bo.Name]
+		switch {
+		case nowEnabled && !wasEnabled:
+			added = append(added, "+"+bo.Name)
+		case wasEnabled && !nowEnabled:
+			removed = append(removed, "-"+bo.Name)
+		}
+	}
+	changes := append(added, removed...)
+	if len(changes) == 0 {
+		return ""
+	}
+	return strings.Join(changes, " ")
 }
 
 func (m model) renderRunActiveBlock(width int) []string {
@@ -2192,9 +2234,7 @@ func (m model) renderRunIdleGuide() []string {
 		shellMutedStyle.Render("· P 推送到远端（Dec cache → Git vault + secrets → Bitwarden，需两次确认）"),
 		shellMutedStyle.Render("· x 删除已启用 bundle（整包，不可逆）"),
 	}
-	if m.overview != nil && countOverviewEnabledBundles(m.overview) == 0 && m.overview.EnabledCount == 0 {
-		lines = append(lines, shellWarnStyle.Render("⚠ 当前无启用 bundle，请先到 Bundles 页勾选"))
-	}
+	lines = append(lines, m.renderPullPlanLines()...)
 	lines = append(lines, shellMutedStyle.Render("上次  尚无操作记录"))
 	return lines
 }
@@ -2651,7 +2691,7 @@ func (m model) renderSettingsDetails() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) renderAssetList(visible []int) string {
+func (m model) renderAssetList() string {
 	lines := []string{shellTitleStyle.Render("Bundle 列表")}
 	mm := m
 	mm.refreshAssetTree()
@@ -2664,23 +2704,19 @@ func (m model) renderAssetList(visible []int) string {
 		if m.focus != focusSidebar && i == mm.assetTree.Cursor {
 			marker = ">"
 		}
-		bundleEnabled, assetEnabled := false, false
+		bundleEnabled := false
 		if p, ok := tr.Node.Payload.(assetTreePayload); ok {
 			bundleEnabled = p.bundleEnabled
-			assetEnabled = p.assetEnabled
 		}
-		line := renderAssetTreeLine(tr, &mm.assetTree, marker, bundleEnabled, assetEnabled)
+		line := renderAssetTreeLine(tr, &mm.assetTree, marker, bundleEnabled)
 		if m.focus != focusSidebar && i == mm.assetTree.Cursor {
 			lines = append(lines, shellSelectedRow.Render(line))
 			continue
 		}
 		if p, ok := tr.Node.Payload.(assetTreePayload); ok {
-			switch {
-			case p.kind == assetRowBundle && p.bundleEnabled:
+			if p.kind == assetRowBundle && p.bundleEnabled {
 				lines = append(lines, shellEnabledRow.Render(line))
-			case p.kind == assetRowAsset && p.assetEnabled:
-				lines = append(lines, shellEnabledRow.Render(line))
-			default:
+			} else {
 				lines = append(lines, shellLogStyle.Render(line))
 			}
 			continue
@@ -2691,44 +2727,25 @@ func (m model) renderAssetList(visible []int) string {
 }
 
 // renderAssetRowLine 生成单行文本。
-// bundle 视图（type=bundle）省略冗余 "bundle" 前缀，只显示名称与成员数。
 func (m model) renderAssetRowLine(row assetRow, marker string) string {
-	switch row.kind {
-	case assetRowBundle:
-		bo := m.assets.Bundles[row.bundleIndex]
-		checked := " "
-		if row.bundleEnabled {
-			checked = "x"
-		}
-		arrow := "▸"
-		if m.assetTree.Expanded[assetBundleNodeID(bo.Name)] {
-			arrow = "▾"
-		}
-		label := bo.Name
-		if bo.Name != bo.Vault {
-			label = fmt.Sprintf("%s (%s)", bo.Name, bo.Vault)
-		}
-		if m.assetTypeFilter == "bundle" {
-			return fmt.Sprintf("%s [%s] %s %s · %d 个成员", marker, checked, arrow, label, len(bo.Members))
-		}
-		return fmt.Sprintf("%s [%s] %s bundle %s (%s) · %d 个成员", marker, checked, arrow, bo.Name, bo.Vault, len(bo.Members))
-	case assetRowBundleMember:
-		bo := m.assets.Bundles[row.bundleIndex]
+	bo := m.assets.Bundles[row.bundleIndex]
+	if row.kind == assetRowBundleMember {
 		mb := bo.Members[row.memberIndex]
 		return fmt.Sprintf("%s   ↳ %s / %s / %s", marker, mb.Type, mb.Vault, mb.Name)
-	default:
-		item := m.assets.Items[row.assetIndex]
-		checked := " "
-		if row.assetEnabled {
-			checked = "x"
-		}
-		// 独立资产若被 bundle 带入（Sources 非空或当前 bundleSelection 覆盖），加 "·bundle" 后缀提示只读
-		tag := ""
-		if m.assetManagedByActiveBundle(item) {
-			tag = " (by bundle)"
-		}
-		return fmt.Sprintf("%s [%s] %s / %s / %s%s", marker, checked, item.Vault, item.Type, item.Name, tag)
 	}
+	checked := " "
+	if row.bundleEnabled {
+		checked = "x"
+	}
+	arrow := "▸"
+	if m.assetTree.Expanded[assetBundleNodeID(bo.Name)] {
+		arrow = "▾"
+	}
+	label := bo.Name
+	if bo.Name != bo.Vault {
+		label = fmt.Sprintf("%s (%s)", bo.Name, bo.Vault)
+	}
+	return fmt.Sprintf("%s [%s] %s %s · %d 个成员", marker, checked, arrow, label, len(bo.Members))
 }
 
 func (m model) renderAssetDetails() string {
@@ -2771,17 +2788,6 @@ func (m model) renderAssetDetails() string {
 					shellMutedStyle.Render("成员由 bundle 带入，只读。"),
 				)
 				return strings.Join(lines, "\n")
-			case assetRowAsset:
-				item := m.assets.Items[p.assetIndex]
-				lines = append(lines,
-					fmt.Sprintf("Vault: %s", item.Vault),
-					fmt.Sprintf("Type: %s", item.Type),
-					fmt.Sprintf("Name: %s", item.Name),
-					fmt.Sprintf("Enabled: %s", formatReady(item.Enabled, "yes", "no")),
-				)
-				if m.assetManagedByActiveBundle(item) {
-					lines = append(lines, shellMutedStyle.Render("当前由 bundle 带入，只读。"))
-				}
 			}
 		} else if row, ok := m.assetTreeRowAtCursor(); ok {
 			lines = append(lines,
@@ -2791,19 +2797,14 @@ func (m model) renderAssetDetails() string {
 		}
 	}
 	if len(lines) == 1 {
-		item, ok := m.currentAssetItem()
-		if ok {
+		if item, ok := m.currentAssetItem(); ok {
 			lines = append(lines,
 				fmt.Sprintf("Vault: %s", item.Vault),
 				fmt.Sprintf("Type: %s", item.Type),
 				fmt.Sprintf("Name: %s", item.Name),
-				fmt.Sprintf("Enabled: %s", formatReady(item.Enabled, "yes", "no")),
 			)
-			if m.assetManagedByActiveBundle(item) {
-				lines = append(lines, shellMutedStyle.Render("当前由 bundle 带入，只读。"))
-			}
 		} else {
-			lines = append(lines, "当前没有匹配的资产。")
+			lines = append(lines, "当前没有匹配的 bundle。")
 		}
 	}
 
@@ -2842,48 +2843,12 @@ func (m model) currentAssetItem() (app.AssetSelectionItem, bool) {
 	if !ok {
 		return app.AssetSelectionItem{}, false
 	}
-	switch p.kind {
-	case assetRowAsset:
-		return m.assets.Items[p.assetIndex], true
-	case assetRowBundleMember:
+	if p.kind == assetRowBundleMember {
 		bo := m.assets.Bundles[p.bundleIndex]
-		mb := bo.Members[p.memberIndex]
-		// 返回成员资产的 AssetSelectionItem 视图（Enabled 以当前 bundle 是否 enabled 为准）。
-		return app.AssetSelectionItem{
-			Name:    mb.Name,
-			Type:    mb.Type,
-			Vault:   mb.Vault,
-			Enabled: p.bundleEnabled,
-		}, true
+		return bo.Members[p.memberIndex], true
 	}
 	// bundle 节点本身没有对应的 AssetSelectionItem。返回 false 让 Detail 面板走 bundle 分支。
 	return app.AssetSelectionItem{}, false
-}
-
-func (m model) filteredAssetIndices() []int {
-	if m.assets == nil {
-		return nil
-	}
-	filter := strings.ToLower(strings.TrimSpace(m.assetFilter))
-	typeFilter := m.assetTypeFilter
-	visible := make([]int, 0, len(m.assets.Items))
-	for idx, item := range m.assets.Items {
-		// typeFilter = "bundle" 时单资产整体被隐藏（只显示 bundle 节点）
-		if typeFilter == "bundle" {
-			continue
-		}
-		if typeFilter != "" && typeFilter != "all" && item.Type != typeFilter {
-			continue
-		}
-		if filter != "" {
-			haystack := strings.ToLower(strings.Join([]string{item.Vault, item.Type, item.Name}, " "))
-			if !strings.Contains(haystack, filter) {
-				continue
-			}
-		}
-		visible = append(visible, idx)
-	}
-	return visible
 }
 
 // ------ Bundle-aware row model for Assets page ------
@@ -2891,16 +2856,13 @@ func (m model) filteredAssetIndices() []int {
 type assetRowKind int
 
 const (
-	assetRowAsset assetRowKind = iota
-	assetRowBundle
+	assetRowBundle assetRowKind = iota
 	assetRowBundleMember
 )
 
-// assetRow 描述 Assets 页一行可见条目；光标索引以 assetTree.VisibleRows() 为准。
+// assetRow 描述 Bundles 页一行可见条目；光标索引以 assetTree.VisibleRows() 为准。
 type assetRow struct {
 	kind          assetRowKind
-	assetIndex    int // kind == assetRowAsset 时有效
-	assetEnabled  bool
 	bundleIndex   int // kind == assetRowBundle / assetRowBundleMember 时有效
 	memberIndex   int // kind == assetRowBundleMember 时有效
 	bundleEnabled bool
@@ -2914,59 +2876,6 @@ func (m model) bundleSelected(name string) bool {
 		}
 	}
 	return false
-}
-
-// assetManagedByActiveBundle 当前 bundleSelection 里任一 bundle 的成员是否命中此单资产。
-// 命中的资产视为"由 bundle 带入"，TUI 上显示只读；独立 enabled 状态仍保留（保存时会被 filterItemsForSave 再甄别）。
-func (m model) assetManagedByActiveBundle(item app.AssetSelectionItem) bool {
-	if m.assets == nil {
-		return false
-	}
-	for _, bo := range m.assets.Bundles {
-		if !m.bundleSelected(bo.Name) {
-			continue
-		}
-		for _, mb := range bo.Members {
-			if mb.Type == item.Type && mb.Vault == item.Vault && mb.Name == item.Name {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// filterItemsForSave 把"由 bundle 带入"的隐式启用从保存列表里挤掉，避免把隐式启用写回 enabled_assets。
-// 规则：遍历原 Items；若某项 Enabled=true 且完全由 bundleSelection 覆盖，则保存态 Enabled 设为 false。
-// 注意：Available 不受影响（bundle 成员仍然是项目 available 资产的一部分）。
-func filterItemsForSave(items []app.AssetSelectionItem, bundleSelection []string, bundles []app.AssetBundleOption) []app.AssetSelectionItem {
-	activeBundles := make(map[string]struct{}, len(bundleSelection))
-	for _, name := range bundleSelection {
-		activeBundles[name] = struct{}{}
-	}
-	memberSet := make(map[string]struct{})
-	for _, bo := range bundles {
-		if _, ok := activeBundles[bo.Name]; !ok {
-			continue
-		}
-		for _, mb := range bo.Members {
-			memberSet[mb.Type+"\x00"+mb.Vault+"\x00"+mb.Name] = struct{}{}
-		}
-	}
-	out := make([]app.AssetSelectionItem, len(items))
-	copy(out, items)
-	if len(memberSet) == 0 {
-		return out
-	}
-	for i := range out {
-		if !out[i].Enabled {
-			continue
-		}
-		key := out[i].Type + "\x00" + out[i].Vault + "\x00" + out[i].Name
-		if _, covered := memberSet[key]; covered {
-			out[i].Enabled = false
-		}
-	}
-	return out
 }
 
 func (m model) canNavigateSettings() bool {
@@ -3247,27 +3156,9 @@ func (m *model) toggleCurrentAsset() {
 		return
 	}
 	switch p.kind {
-	case assetRowAsset:
-		item := m.assets.Items[p.assetIndex]
-		// 由 bundle 带入的单资产为只读：直接拒绝翻转，打日志提示。
-		if m.assetManagedByActiveBundle(item) {
-			m.pushLog(fmt.Sprintf("Asset 由 bundle 带入，无法单独取消：%s / %s / %s", item.Vault, item.Type, item.Name))
-			return
-		}
-		m.assets.Items[p.assetIndex].Enabled = !m.assets.Items[p.assetIndex].Enabled
-		m.assetsDirty = true
-		newItem := m.assets.Items[p.assetIndex]
-		state := "disabled"
-		if newItem.Enabled {
-			state = "enabled"
-		}
-		m.pushLog(fmt.Sprintf("Asset %s: %s / %s / %s", state, newItem.Vault, newItem.Type, newItem.Name))
 	case assetRowBundle:
 		bo := m.assets.Bundles[p.bundleIndex]
 		if m.bundleSelected(bo.Name) {
-			// 取消 bundle：从 bundleSelection 移除，同时清掉成员在 Items 上的启用标记。
-			// 留着这些标记会让保存后的 enabled_assets 仍含全部成员，加载时又被反推成
-			// "bundle 已启用"（见 app.inferBundleEnabledFromStandalone），勾选自己弹回来。
 			next := make([]string, 0, len(m.bundleSelection))
 			for _, n := range m.bundleSelection {
 				if n != bo.Name {
@@ -3275,7 +3166,6 @@ func (m *model) toggleCurrentAsset() {
 				}
 			}
 			m.bundleSelection = next
-			m.disableBundleMemberItems(bo)
 			m.pushLog("Bundle disabled: " + bo.Name)
 		} else {
 			m.bundleSelection = append(m.bundleSelection, bo.Name)
@@ -3289,36 +3179,24 @@ func (m *model) toggleCurrentAsset() {
 	}
 }
 
-// disableBundleMemberItems 把某个 bundle 的成员在 Items 上的启用标记清掉。
-// 仍被其它已选 bundle 覆盖的成员照样清掉：它们的启用态由那个 bundle 承载，
-// 保存时本来也会被 filterItemsForSave 过滤。
-func (m *model) disableBundleMemberItems(bo app.AssetBundleOption) {
-	if m.assets == nil {
-		return
-	}
-	for _, mb := range bo.Members {
-		for i := range m.assets.Items {
-			if m.assets.Items[i].Type == mb.Type && m.assets.Items[i].Vault == mb.Vault && m.assets.Items[i].Name == mb.Name {
-				m.assets.Items[i].Enabled = false
-			}
-		}
-	}
-}
-
-func (m model) countEnabledAssets() int {
+// countSelectedBundleMembers 统计当前勾选 bundle 展开后的成员数（跨 bundle 去重）。
+func (m model) countSelectedBundleMembers() int {
 	if m.assets == nil {
 		return 0
 	}
-	count := 0
-	for _, item := range m.assets.Items {
-		if item.Enabled {
-			count++
+	seen := make(map[string]struct{})
+	for _, bo := range m.assets.Bundles {
+		if !m.bundleSelected(bo.Name) {
+			continue
+		}
+		for _, mb := range bo.Members {
+			seen[mb.Type+"\x00"+mb.Vault+"\x00"+mb.Name] = struct{}{}
 		}
 	}
-	return count
+	return len(seen)
 }
 
-// assetsCursorOnBundle 判断当前光标是否落在 bundle 节点行（不是成员行、不是单资产行）。
+// assetsCursorOnBundle 判断当前光标是否落在 bundle 节点行（不是成员行）。
 func (m model) assetsCursorOnBundle() bool {
 	p, ok := m.assetPayloadAtCursor()
 	return ok && p.kind == assetRowBundle
@@ -3375,27 +3253,6 @@ func (m *model) collapseCurrentBundle() {
 		m.pushLog("Bundle 折叠: " + name)
 		m.refreshAssetTree()
 	}
-}
-
-// cycleAssetTypeFilter 按 t 键在 all/skill/command/rule/mcp/bundle 间轮转。
-// 切换后若 cursor 越界，normalizeAssetCursor 会把它拉回第 0 行。
-func (m *model) cycleAssetTypeFilter() {
-	order := []string{"all", "skill", "command", "rule", "mcp", "bundle"}
-	cur := m.assetTypeFilter
-	if cur == "" {
-		cur = "all"
-	}
-	idx := 0
-	for i, name := range order {
-		if name == cur {
-			idx = i
-			break
-		}
-	}
-	next := order[(idx+1)%len(order)]
-	m.assetTypeFilter = next
-	m.assetTree.Cursor = 0
-	m.pushLog("Asset type filter: " + next)
 }
 
 func (m model) currentAssetFilterLabel() string {
@@ -3664,6 +3521,18 @@ func formatProjectNameDisplay(overview *app.ProjectOverview) string {
 	return name
 }
 
+// countOverviewAvailableBundles 优先按扫描到的 bundle 列表计数；仓库未连接或扫描失败时
+// Bundles 为空，退回 config 层记录的计数。
+func countOverviewAvailableBundles(overview *app.ProjectOverview) int {
+	if overview == nil {
+		return 0
+	}
+	if len(overview.Bundles) > 0 {
+		return len(overview.Bundles)
+	}
+	return overview.AvailableBundleCount
+}
+
 func countOverviewEnabledBundles(overview *app.ProjectOverview) int {
 	if overview == nil {
 		return 0
@@ -3715,7 +3584,7 @@ func suggestNextAction(overview *app.ProjectOverview, vaultInferencePending, vau
 		}
 		return "先在 Home 页初始化 project，或切到 Bundles 页选择 bundle 并保存"
 	}
-	if countOverviewEnabledBundles(overview) == 0 && overview.EnabledCount == 0 {
+	if countOverviewEnabledBundles(overview) == 0 {
 		return "当前还没有启用 bundle，请切到 Bundles 页勾选并保存"
 	}
 	return "可以切到 Run 页执行 pull"

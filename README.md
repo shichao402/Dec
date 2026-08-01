@@ -75,23 +75,15 @@ project_name: my-app       # 引用 projects/my-app.yaml
 ides:                      # 可选：机器级 IDE 覆盖
   - cursor
 
-enabled_bundles:           # 从 vault project 同步；Assets 页可调整
+enabled_bundles:           # 唯一的资产启用入口；从 vault project 同步，Bundles 页可调整
   - vikunja
   - helloworld
-
-available:                 # TUI Assets 页扫描生成
-  vikunja:
-    vikunja-workflow:
-      skills: true
-
-enabled:                   # 单资产粒度（高级用法）
-  vikunja:
-    vikunja-workflow:
-      skills: true
 ```
 
+资产只能按 bundle 启用，成员随 bundle 一并下发；早期的单资产字段（`available` / `enabled`）已移除，加载旧配置时会折叠成 `enabled_bundles` 并回写。
+
 - TUI **Home** 页初始化 project（自动匹配、选择或新建）
-- TUI **Assets** 页扫描仓库、调整 bundle / 资产
+- TUI **Bundles** 页扫描仓库、勾选 bundle
 - **Run** 页按 project 的 bundle 列表拉取 Dec + secrets bundle
 
 ### 3. 资产部署

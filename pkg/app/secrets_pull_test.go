@@ -27,13 +27,7 @@ func TestPullProjectAssets_UsesDefaultServerWithoutConfigFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs: []string{"cursor"},
-		Available: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "project-workflow", Vault: "default"}},
-		},
-		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "project-workflow", Vault: "default"}},
-		},
+		IDEs:           []string{"cursor"},
 		EnabledBundles: []string{"default"},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)

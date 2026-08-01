@@ -52,14 +52,6 @@ func TestRemoveBundleRemovesRemoteAndCleansLocal(t *testing.T) {
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
 		EnabledBundles: []string{"vikunja"},
-		Available: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "vikunja-workflow", Vault: "vikunja"}},
-			Rules:  []types.AssetRef{{Name: "vikunja-rules", Vault: "vikunja"}},
-		},
-		Enabled: &types.AssetList{
-			Skills: []types.AssetRef{{Name: "vikunja-workflow", Vault: "vikunja"}},
-			Rules:  []types.AssetRef{{Name: "vikunja-rules", Vault: "vikunja"}},
-		},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -128,9 +120,6 @@ func TestRemoveBundleRemovesRemoteAndCleansLocal(t *testing.T) {
 	}
 	if len(updatedConfig.EnabledBundles) != 0 {
 		t.Fatalf("EnabledBundles 应已清空, got %v", updatedConfig.EnabledBundles)
-	}
-	if updatedConfig.Enabled != nil && updatedConfig.Enabled.FindAsset("skill", "vikunja-workflow", "vikunja") != nil {
-		t.Fatal("Enabled 中不应再包含 bundle 成员")
 	}
 
 	var sawFinish bool

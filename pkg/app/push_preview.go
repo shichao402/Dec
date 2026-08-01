@@ -68,8 +68,8 @@ func PreviewPushProjectAssets(projectRoot string) (*PushProjectAssetsPreview, er
 }
 
 func previewDecPushChanges(ctx context.Context, projectRoot string, projectConfig *types.ProjectConfig, reporter Reporter) (candidateCount int, hasChanges bool, skippedReason string, err error) {
-	if projectConfig.Enabled.IsEmpty() && len(projectConfig.EnabledBundles) == 0 {
-		return 0, false, "无已启用 bundle 或资产", nil
+	if len(projectConfig.EnabledBundles) == 0 {
+		return 0, false, "无已启用 bundle", nil
 	}
 
 	err = withAppWriteRepo(func(tx *repo.Transaction) error {

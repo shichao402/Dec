@@ -7,43 +7,12 @@
 # editor: 项目级交互式编辑器，覆盖全局配置（可选），例如：
 #   editor: code --wait
 #   editor: vim
-# enabled_bundles: 按 bundle 启用资产（推荐）；bundle 名通常与 vault 同名
+# enabled_bundles: 启用的 bundle 列表（唯一的资产启用入口）；bundle 名与 vault 目录同名
 #   enabled_bundles:
 #     - vikunja
 #     - cli
-# available / enabled: 单资产粒度（高级用法）；多数场景请优先使用 enabled_bundles
-#   my-vault:
-#     my-asset:
-#       skills: true
-#       rules: true
+# 提示：请在 TUI Bundles 页勾选后按 s 保存，不要手工维护本文件。
 
 version: v2
 project_name: Dec
-available:
-    default:
-        helloworld:
-            skills: true
-        project-workflow:
-            skills: true
-    pkv:
-        pkv:
-            commands: true
-        pkv-mcp:
-            mcp: true
-    tencent-cloud:
-        tencent-cloud:
-            skills: true
-            mcp: true
-    vikunja:
-        vikunja-integration:
-            rules: true
-        vikunja-issue:
-            skills: true
-        vikunja-mcp:
-            mcp: true
-        vikunja-project-bootstrap:
-            skills: true
-        vikunja-workflow:
-            skills: true
-enabled: {}
 enabled_bundles: []

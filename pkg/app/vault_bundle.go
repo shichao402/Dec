@@ -121,17 +121,3 @@ func listBundleAssetMembers(repoDir, bundleName string) []string {
 	}
 	return members
 }
-
-// inferBundleEnabledFromStandalone 当 bundle 成员在 enabled 中全部以 standalone 启用时，
-// 视为该 bundle 已启用（便于从 standalone 资产推断 bundle 级呈现）。
-func inferBundleEnabledFromStandalone(members []AssetSelectionItem, enabled *types.AssetList) bool {
-	if enabled == nil || enabled.IsEmpty() || len(members) == 0 {
-		return false
-	}
-	for _, mb := range members {
-		if enabled.FindAsset(mb.Type, mb.Name, mb.Vault) == nil {
-			return false
-		}
-	}
-	return true
-}
