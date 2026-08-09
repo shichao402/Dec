@@ -94,18 +94,24 @@ Bitwarden folder: my-app                  # project 级（project_name 或 proje
 
 | 维度 | bundle 级 | project 级 |
 |------|-----------|------------|
-| 触发条件 | `enabled_bundles` 中的 Dec bundle | 有 `project_name`（或目录 basename） |
-| Bitwarden folder | `secrets_bundle`（默认同 Dec bundle 名） | `project_secrets`（默认同 `project_name`） |
+| 触发条件 | **并集**：当前 project 的 `enabled_bundles` **或** 本机用户级启用列表（见 [0003](decisions/0003-user-enabled-secret-bundles.md)） | 有 `project_name`（或目录 basename） |
+| Bitwarden folder | `secrets_bundle`（默认 `bundle/<name>`） | `project_secrets`（默认同 `project_name`） |
 | 本地同步根 | `.secrets/bundles/<bundle>/` | `.secrets/project/` |
 | Secure Note 名 | 相对同步根的路径 | 相对同步根的路径 |
+| SSH Key | 一律 `~/.ssh/`（机器平面；可用户级单独启用纯 SSH bundle） | 不经 project folder 拉 SSH 时无此项 |
+
+用户级启用：**不**新增 `user/` folder 协议；TUI **Settings** 勾选要始终同步的 `bundle/<name>`，配置落在 `~/.dec/secrets/`，与各 project 的 `enabled_bundles` 独立。允许 secrets-only bundle（无 vault `bundles/<name>/`）。详情见 [0003](decisions/0003-user-enabled-secret-bundles.md)。
 
 `~/.dec/secrets/config.yaml` 示例：
 
 ```yaml
 project_secrets: my-app   # 可选；未设时回退 .dec/config.yaml 的 project_name
+# 规划字段（0003，待实现）：
+# user_enabled_bundles:
+#   - woa
 bundles:
   - dec_bundle: vikunja
-    secrets_bundle: custom_alias   # 可选；默认同名
+    secrets_bundle: custom_alias   # 可选；默认同名（folder 为 bundle/<name> 或显式值）
 ```
 
 **跨 folder 撞车**：两个 folder 的 note 汇总后映射到同一项目根相对路径时，pull 在写盘前报错并中止。
@@ -159,7 +165,8 @@ OpenSSH、Git、`ssh`/`scp` 等工具默认只读取 **机器级** `~/.ssh/`。S
 | **Notes** | 关联 host，**可选**；有内容时**一行一个** |
 | 私钥 / 公钥 | Bitwarden SSH Key Item 自带字段 |
 
-Item 存放在与 Dec bundle 绑定的 Bitwarden folder（默认同 bundle 名）。
+Item 存放在与 Dec bundle 绑定的 Bitwarden folder（默认 `bundle/<name>`）。  
+纯 SSH、跨项目复用的包（如 `bundle/woa`）应走 **用户级启用**，不必写入各 project 的 `enabled_bundles`（[0003](decisions/0003-user-enabled-secret-bundles.md)）。
 
 ### Pull 落地
 

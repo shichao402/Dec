@@ -33,6 +33,7 @@ SyncTarget{kind: project, name: Dec}
 
 - 环境变量只认 `env/*.env`（dotenv，单行标量）；由 hidden `dec exec` 按 bundle 作用域注入；**不再**用外部 env 启动器
 - SSH Key 仍落 `~/.ssh/`（机器平面例外）
+- **用户级启用**（[0003](0003-user-enabled-secret-bundles.md)）：可在本机 Settings 全局启用 `bundle/<name>`，不必经各 project `enabled_bundles`；不新增 `user/` folder 协议
 - push **递归扫描** LocalRoot（可 create/update）；pull/push **不隐式删除**
 - **folder 约定**：project = 实体名；bundle = `bundle/<name>`；可用 `secrets_bundle` 显式覆盖
 - `.secrets/` 整树必须被 gitignore；已被跟踪则硬失败
