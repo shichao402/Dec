@@ -11,9 +11,11 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 
 - 新功能先设计 TUI 页面/快捷键/消息流，再实现 `pkg/app/` 业务逻辑。
 - **不要新增**独立 Cobra 子命令（pull、config、push 等用户面能力均在 TUI）。
-- 保留最小 CLI 面：`dec --version`、内部 hidden 命令（如 `__freshness-check`）、非 TTY 时的简短提示。
-- Secrets / Bitwarden / SSH / env 部署等操作通过 TUI 触达（Settings、Run、Assets 等页）。
-- **Run** 页 pull：解析 project bundle 列表 → 拉 Dec Git bundle（→ `.dec/cache/`）+ 自动拉 Bitwarden **secrets bundle**（→ 项目根相对路径，零路径重叠）；见 `Documents/BUNDLE-SECRETS-MODEL.md`。
+- 保留最小 CLI 面：`dec --version`、内部 hidden 命令（如 `__freshness-check`、**`dec exec`**）、非 TTY 时的简短提示。
+- Secrets / Bitwarden / SSH / env 部署等操作通过 TUI 触达（Settings、Run、**Bundles** 等页）。
+- **Run** 页 pull：解析 project bundle 列表 → 拉 Dec Git bundle（→ `.dec/cache/`）+ 自动拉 Bitwarden **secrets bundle**（→ **`.secrets/`** 同步根，零路径重叠）；见 `Documents/BUNDLE-SECRETS-MODEL.md`。
+- **`dec exec`**（hidden）：按 bundle 作用域读取 `.secrets/**/env/*.env` 并启动子进程，供 MCP / Agent 运行时注入；不是用户面 secrets 管理入口。
+- **跨页异步 IO**：慢 IO（尤其远端）跟 Shell 生命周期走，不跟当前页；切页禁止打断在飞请求；独立 busy 信号 + 防重复 + gen 丢弃过期结果（`internal/tui/async_io.go`，见 `Documents/TUI_ARCHITECTURE.md` §5.5）。
 
 ## TUI 页与能力映射
 
@@ -21,9 +23,9 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 |----------|----------|
 | 连接仓库 / 全局 IDE 配置 | Settings 页 |
 | project 初始化 / 选择 | Home 页（首次进入引导） |
-| 扫描资产 / bundle 选择 | Assets 页 |
+| 扫描资产 / bundle 选择 | **Bundles** 页 |
 | pull / push / remove | Run 页 |
-| 浏览 / 筛选资产 | Assets 页 |
+| 浏览 / 筛选资产 | Bundles 页 |
 | 项目概览 / project 初始化 | Home 页 |
 | 项目变量编辑 | Project 页 |
 | 全局 / Bitwarden 配置 | Settings 页 |
@@ -33,7 +35,7 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 ## 非交互环境
 
 - `DEC_NO_TUI=1` 或 stdout 非 TTY：不启动 TUI，输出简短说明后退出。
-- Agent / CI 应调用 `pkg/app/` API，而非假设存在 CLI 子命令。
+- Agent / CI 应调用 `pkg/app/` API，或 hidden `dec exec` 注入 env；**不要**假设存在 `dec pull` 等用户面子命令。
 
 ## 反例
 

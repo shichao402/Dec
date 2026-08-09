@@ -51,36 +51,22 @@ func (m model) isDeletePage() bool {
 	return m.pages[m.pageIndex] == "Delete"
 }
 
-func (m *model) cancelDeleteCandidatesLoad() {
-	if m.deleteLoadCancel != nil {
-		m.deleteLoadCancel()
-		m.deleteLoadCancel = nil
-	}
-}
-
 func (m *model) startDeleteCandidatesLoad(includeRemote, force bool) tea.Cmd {
 	if !force {
-		if m.loadingDeleteCandidates {
+		if m.deleteLoad.busy() {
 			return nil
 		}
 		if m.deleteCandidatesLoaded && (!includeRemote || m.deleteIncludeRemote) {
 			return nil
 		}
 	}
-	m.cancelDeleteCandidatesLoad()
-	m.deleteLoadGen++
-	gen := m.deleteLoadGen
-	ctx, cancel := context.WithCancel(context.Background())
-	m.deleteLoadCancel = cancel
-	m.loadingDeleteCandidates = true
+	ctx, gen := m.deleteLoad.begin()
 	return loadDeleteCandidatesCmd(ctx, m.projectRoot, includeRemote, gen)
 }
 
+// onPageChanged 只负责「进入某页时是否需要确保有数据」，不取消已在飞的 IO。
 func (m *model) onPageChanged(fromPage string) tea.Cmd {
-	if fromPage == "Delete" {
-		m.cancelDeleteCandidatesLoad()
-		m.loadingDeleteCandidates = false
-	}
+	_ = fromPage
 	if m.isDeletePage() {
 		return m.startDeleteCandidatesLoad(false, false)
 	}
@@ -328,7 +314,7 @@ func (m model) renderDeletePage(width int) string {
 		mm.rebuildDeleteTree()
 	}
 	tree := mm.deleteTree
-	if m.loadingDeleteCandidates && len(m.deleteCandidates) == 0 {
+	if m.deleteLoad.busy() && len(m.deleteCandidates) == 0 {
 		return shellMutedStyle.Render("加载可删除项…")
 	}
 	if m.deleteLoadErr != nil {
@@ -337,15 +323,17 @@ func (m model) renderDeletePage(width int) string {
 
 	visible := mm.visibleDeleteCandidates()
 	rows := tree.VisibleRows()
-	selectedCount := tree.CountSelected()
+	selectedCount := len(mm.selectedDeleteItems())
 	lines := []string{
 		fmt.Sprintf("共 %d 项 · 已选 %d", len(visible), selectedCount),
 	}
 	if filter := mm.currentDeleteFilterLabel(); filter != "<none>" {
 		lines[0] += " · 筛选 " + filter
 	}
-	if !mm.deleteIncludeRemote {
-		lines = append(lines, shellMutedStyle.Render("按 r 刷新可含 Bitwarden 远端 orphan"))
+	if m.deleteLoad.busy() {
+		lines = append(lines, shellWarnStyle.Render("刷新中…（含远端 Bitwarden orphan 时可能较慢）"))
+	} else {
+		lines = append(lines, shellMutedStyle.Render("快捷键  space 选中(目录=全选子项) · a 全选 · d 删除 · / 筛选 · r 刷新(+远端 orphan)"))
 	}
 	if mm.deleteFilterInput {
 		lines = append(lines, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))

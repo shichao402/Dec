@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/pkg/secrets"
 )
 
 func projectPageModelForAddSecret(t *testing.T) model {
@@ -28,32 +29,19 @@ func TestAddSecret_TwoStagePromptRunsCommand(t *testing.T) {
 	m := projectPageModelForAddSecret(t)
 
 	opened, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
-	// beginAddSecret 会去读真实配置推断候选 folder，这里改成固定值以隔离环境。
-	withFolders := opened.(model)
-	withFolders.addSecretFolders = []string{"Demo", "vikunja_workflow"}
+	withTargets := opened.(model)
+	withTargets.addSecretTargets = []app.SecretTargetOption{
+		{Kind: secrets.SyncKindProject, Name: "demo", Folder: "demo", LocalRoot: ".secrets/project", Label: "project secrets \"demo\" → .secrets/project"},
+		{Kind: secrets.SyncKindBundle, Name: "vikunja", Folder: "vikunja", LocalRoot: ".secrets/bundles/vikunja", Label: "secrets bundle \"vikunja\" → .secrets/bundles/vikunja"},
+	}
 
-	updated := typeRunes(withFolders, ".config/mise/conf.d/tencent.toml")
+	updated, _ := withTargets.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	after := updated.(model)
 	if after.addSecretStage != addSecretStagePath {
-		t.Fatalf("stage = %q, 期望仍在输入路径", after.addSecretStage)
+		t.Fatalf("stage = %q, 期望进入输入路径", after.addSecretStage)
 	}
 
-	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	after = updated.(model)
-	if after.addSecretStage != addSecretStageFolder {
-		t.Fatalf("stage = %q, 期望进入选 folder", after.addSecretStage)
-	}
-	// 默认归属是第一个候选（project folder），无需手输。
-	if after.addSecretFolderInput != "Demo" {
-		t.Fatalf("folder 默认值 = %q, 期望 Demo", after.addSecretFolderInput)
-	}
-
-	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
-	after = updated.(model)
-	if after.addSecretFolderInput != "vikunja_workflow" {
-		t.Fatalf("tab 后 folder = %q", after.addSecretFolderInput)
-	}
-
+	updated = typeRunes(updated, "env/vikunja.env")
 	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	after = updated.(model)
 	if after.addSecretStage != addSecretStageRunning {
@@ -64,11 +52,27 @@ func TestAddSecret_TwoStagePromptRunsCommand(t *testing.T) {
 	}
 }
 
+func TestAddSecret_TabCyclesTargets(t *testing.T) {
+	m := projectPageModelForAddSecret(t)
+	opened, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	withTargets := opened.(model)
+	withTargets.addSecretTargets = []app.SecretTargetOption{
+		{Label: "project", LocalRoot: ".secrets/project"},
+		{Label: "vikunja", LocalRoot: ".secrets/bundles/vikunja"},
+	}
+
+	updated, _ := withTargets.Update(tea.KeyMsg{Type: tea.KeyTab})
+	after := updated.(model)
+	if after.addSecretTargetIdx != 1 {
+		t.Fatalf("tab 后 targetIdx = %d, 期望 1", after.addSecretTargetIdx)
+	}
+}
+
 func TestAddSecret_EscCancelsWithoutRunning(t *testing.T) {
 	m := projectPageModelForAddSecret(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
-	updated = typeRunes(updated, ".env.local")
+	updated = typeRunes(updated, "env/local.env")
 	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	after := updated.(model)
 	if after.addSecretStage != "" {
@@ -86,10 +90,14 @@ func TestAddSecret_EmptyPathDoesNotAdvance(t *testing.T) {
 	m := projectPageModelForAddSecret(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	withTargets := updated.(model)
+	withTargets.addSecretTargets = []app.SecretTargetOption{{Label: "project", LocalRoot: ".secrets/project"}}
+	updated, _ = withTargets.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
 	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	after := updated.(model)
 	if after.addSecretStage != addSecretStagePath {
-		t.Fatalf("stage = %q, 空路径不应进入下一步", after.addSecretStage)
+		t.Fatalf("stage = %q, 空路径不应开始执行", after.addSecretStage)
 	}
 	if cmd != nil {
 		t.Fatal("空路径不应触发命令")
@@ -114,19 +122,21 @@ func TestAddSecret_RendersPromptAndOutcome(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
 	view := updated.(model).View()
-	if !strings.Contains(view, "登记新 secret") || !strings.Contains(view, "落地路径") {
+	if !strings.Contains(view, "登记新 secret") || !strings.Contains(view, "归属") {
 		t.Fatalf("Project 页应展示登记输入区:\n%s", view)
 	}
 
 	done, _ := updated.Update(addSecretDoneMsg{result: &app.AddSecretResult{
-		Folder:      "Demo",
-		LandingPath: ".env.local",
+		Folder:        "demo",
+		NoteRelPath:   "env/vikunja.env",
+		ProjectRelPath: ".secrets/project/env/vikunja.env",
+		LandingPath:   ".secrets/project/env/vikunja.env",
 	}})
 	after := done.(model)
 	if after.addSecretStage != "" {
 		t.Fatalf("完成后应退出流程, stage = %q", after.addSecretStage)
 	}
-	if !strings.Contains(after.View(), "已登记 .env.local") {
+	if !strings.Contains(after.View(), "已登记 env/vikunja.env") {
 		t.Fatalf("应展示登记结果:\n%s", after.View())
 	}
 }

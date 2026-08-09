@@ -4,11 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
-func TestNormalizeProjectRelativePath_RejectsUntrustedNames(t *testing.T) {
+func TestNormalizeSyncRelPath_RejectsUntrustedNames(t *testing.T) {
 	t.Parallel()
 
 	for _, raw := range []string{
@@ -17,35 +18,33 @@ func TestNormalizeProjectRelativePath_RejectsUntrustedNames(t *testing.T) {
 		"/etc/passwd",
 		"~/.ssh/id_rsa",
 		"~",
-		"../outside.toml",
-		"a/../../outside.toml",
+		"../outside.env",
+		"a/../../outside.env",
 		"..",
-		`..\..\outside.toml`,
+		`..\..\outside.env`,
 		"C:/Windows/system32",
 	} {
-		if got, err := normalizeProjectRelativePath(raw); err == nil {
-			t.Fatalf("normalizeProjectRelativePath(%q) = %q, 期望报错", raw, got)
+		if got, err := normalizeSyncRelPath(raw); err == nil {
+			t.Fatalf("normalizeSyncRelPath(%q) = %q, 期望报错", raw, got)
 		}
 	}
 }
 
-func TestNormalizeProjectRelativePath_KeepsBarePathWithoutDotSlash(t *testing.T) {
+func TestNormalizeSyncRelPath_KeepsBarePathWithoutDotSlash(t *testing.T) {
 	t.Parallel()
 
-	// 落地路径要和 Bitwarden Note 名逐字一致，补 "./" 会让两边对不上。
 	for raw, want := range map[string]string{
-		"config/private.yaml":           "config/private.yaml",
-		".env.local":                    ".env.local",
-		"./config/private.yaml":         "config/private.yaml",
-		".config/mise/conf.d/x.toml":    ".config/mise/conf.d/x.toml",
-		"config//nested/./private.yaml": "config/nested/private.yaml",
+		"config/private.yaml":     "config/private.yaml",
+		"env/app.env":             "env/app.env",
+		"./config/private.yaml":   "config/private.yaml",
+		"env//nested/./app.env":   "env/nested/app.env",
 	} {
-		got, err := normalizeProjectRelativePath(raw)
+		got, err := normalizeSyncRelPath(raw)
 		if err != nil {
-			t.Fatalf("normalizeProjectRelativePath(%q) 报错: %v", raw, err)
+			t.Fatalf("normalizeSyncRelPath(%q) 报错: %v", raw, err)
 		}
 		if got != want {
-			t.Fatalf("normalizeProjectRelativePath(%q) = %q, 期望 %q", raw, got, want)
+			t.Fatalf("normalizeSyncRelPath(%q) = %q, 期望 %q", raw, got, want)
 		}
 	}
 }
@@ -54,13 +53,13 @@ func TestValidateLandingPaths_RejectsCrossFolderCollision(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateLandingPaths(t.TempDir(), []LandingCandidate{
-		{Folder: "tencent-cloud", RelativePath: ".env.local"},
-		{Folder: "my-project", RelativePath: ".env.local"},
+		{Folder: "tencent-cloud", LocalRoot: ".secrets/bundles/shared", RelativePath: "env/app.env"},
+		{Folder: "my-project", LocalRoot: ".secrets/bundles/shared", RelativePath: "env/app.env"},
 	})
 	if err == nil {
 		t.Fatal("两个 folder 撞同一落地路径时应报错")
 	}
-	for _, want := range []string{".env.local", "tencent-cloud", "my-project"} {
+	for _, want := range []string{"env/app.env", "tencent-cloud", "my-project"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("冲突错误应点明 %q:\n%v", want, err)
 		}
@@ -71,8 +70,8 @@ func TestValidateLandingPaths_AllowsSameFolderDuplicate(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateLandingPaths(t.TempDir(), []LandingCandidate{
-		{Folder: "vikunja_workflow", RelativePath: ".config/mise/conf.d/vikunja.toml"},
-		{Folder: "vikunja_workflow", RelativePath: ".config/mise/conf.d/vikunja.toml"},
+		{Folder: "vikunja", LocalRoot: ".secrets/bundles/vikunja", RelativePath: "env/vikunja.env"},
+		{Folder: "vikunja", LocalRoot: ".secrets/bundles/vikunja", RelativePath: "env/vikunja.env"},
 	})
 	if err != nil {
 		t.Fatalf("同 folder 内重复路径应视为去重而非冲突: %v", err)
@@ -83,7 +82,7 @@ func TestValidateLandingPaths_RejectsDecOverlap(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateLandingPaths(t.TempDir(), []LandingCandidate{
-		{Folder: "evil", RelativePath: ".dec/config.yaml"},
+		{Folder: "evil", LocalRoot: ".secrets/bundles/evil", RelativePath: ".dec/config.yaml"},
 	})
 	if err == nil {
 		t.Fatal("落地路径指向 .dec/ 时应报错")
@@ -95,12 +94,16 @@ func TestValidateLandingPaths_RejectsSymlinkEscape(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	outside := t.TempDir()
-	if err := os.Symlink(outside, filepath.Join(projectRoot, "escape")); err != nil {
+	secretsRoot := filepath.Join(projectRoot, ".secrets", "bundles", "evil")
+	if err := os.MkdirAll(secretsRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(secretsRoot, "escape")); err != nil {
 		t.Skipf("无法创建符号链接: %v", err)
 	}
 
 	err := ValidateLandingPaths(projectRoot, []LandingCandidate{
-		{Folder: "evil", RelativePath: "escape/stolen.toml"},
+		{Folder: "evil", LocalRoot: ".secrets/bundles/evil", RelativePath: "escape/stolen.env"},
 	})
 	if err == nil {
 		t.Fatal("落地路径经符号链接指向项目外时应报错")
@@ -116,17 +119,17 @@ func TestValidateLandingPaths_RejectsGitTrackedPath(t *testing.T) {
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
 
-	tracked := filepath.Join(projectRoot, "config", "private.yaml")
+	tracked := filepath.Join(projectRoot, ".secrets", "project", "config", "private.yaml")
 	if err := os.MkdirAll(filepath.Dir(tracked), 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(tracked, []byte("placeholder\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	runGitOrSkip(t, projectRoot, "add", "config/private.yaml")
+	runGitOrSkip(t, projectRoot, "add", ".secrets/project/config/private.yaml")
 
 	err := ValidateLandingPaths(projectRoot, []LandingCandidate{
-		{Folder: "my-project", RelativePath: "config/private.yaml"},
+		{Folder: "my-project", LocalRoot: ".secrets/project", RelativePath: "config/private.yaml"},
 	})
 	if err == nil {
 		t.Fatal("落地路径已被 git 跟踪时应硬失败")
@@ -143,7 +146,7 @@ func TestValidateLandingPaths_AllowsUntrackedPathInGitRepo(t *testing.T) {
 	initGitRepo(t, projectRoot)
 
 	if err := ValidateLandingPaths(projectRoot, []LandingCandidate{
-		{Folder: "my-project", RelativePath: "config/private.yaml"},
+		{Folder: "my-project", LocalRoot: ".secrets/project", RelativePath: "config/private.yaml"},
 	}); err != nil {
 		t.Fatalf("未被跟踪的路径应通过校验: %v", err)
 	}
@@ -154,13 +157,13 @@ func TestUnignoredLandingPaths(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	initGitRepo(t, projectRoot)
-	if err := os.WriteFile(filepath.Join(projectRoot, ".gitignore"), []byte("/.env.local\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectRoot, ".gitignore"), []byte("/.secrets/project/env/\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	got := UnignoredLandingPaths(projectRoot, []string{".env.local", "config/private.yaml"})
-	if len(got) != 1 || got[0] != "config/private.yaml" {
-		t.Fatalf("UnignoredLandingPaths() = %#v, 期望仅 config/private.yaml", got)
+	got := UnignoredLandingPaths(projectRoot, []string{".secrets/project/env/app.env", ".secrets/project/config/private.yaml"})
+	if len(got) != 1 || got[0] != ".secrets/project/config/private.yaml" {
+		t.Fatalf("UnignoredLandingPaths() = %#v, 期望仅 .secrets/project/config/private.yaml", got)
 	}
 }
 
@@ -177,5 +180,12 @@ func runGitOrSkip(t *testing.T, dir string, args ...string) {
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("git %v 失败（跳过依赖 git 的用例）: %v\n%s", args, err, out)
+	}
+}
+
+func skipUnlessUnixFileMode(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 上文件权限语义与 Unix 不同")
 	}
 }

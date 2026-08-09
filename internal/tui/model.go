@@ -17,16 +17,19 @@ type overviewLoadedMsg struct {
 	overview       *app.ProjectOverview
 	err            error
 	vaultInference *app.VaultProjectInference
+	loadGen        uint64
 }
 
 type vaultProjectAppliedMsg struct {
-	result *app.VaultProjectAutoApplyResult
-	err    error
+	result  *app.VaultProjectAutoApplyResult
+	err     error
+	loadGen uint64
 }
 
 type assetsLoadedMsg struct {
-	state *app.AssetSelectionState
-	err   error
+	state   *app.AssetSelectionState
+	err     error
+	loadGen uint64
 }
 
 type assetsSavedMsg struct {
@@ -35,8 +38,9 @@ type assetsSavedMsg struct {
 }
 
 type settingsLoadedMsg struct {
-	state *app.GlobalSettingsState
-	err   error
+	state   *app.GlobalSettingsState
+	err     error
+	loadGen uint64
 }
 
 type settingsSavedMsg struct {
@@ -46,11 +50,13 @@ type settingsSavedMsg struct {
 
 type builtinAssetsEnsuredMsg struct {
 	warnings []string
+	loadGen  uint64
 }
 
 type projectSettingsLoadedMsg struct {
-	state *app.ProjectSettingsState
-	err   error
+	state   *app.ProjectSettingsState
+	err     error
+	loadGen uint64
 }
 
 type projectSettingsSavedMsg struct {
@@ -59,17 +65,32 @@ type projectSettingsSavedMsg struct {
 }
 
 type projectConfigInitializedMsg struct {
-	result *app.ConfigInitPreparation
-	err    error
+	result  *app.ConfigInitPreparation
+	err     error
+	loadGen uint64
+}
+
+type localProjectEnsuredMsg struct {
+	result  *app.ConfigInitPreparation
+	err     error
+	loadGen uint64
 }
 
 type projectVarsLoadedMsg struct {
-	view *app.ProjectVarsView
-	err  error
+	view    *app.ProjectVarsView
+	err     error
+	loadGen uint64
+	solo    bool // true: 独立 vars 重载；false: shell refresh 分片
 }
 
 type projectVarsEditedMsg struct {
 	err error
+}
+
+type pushPreviewLoadedMsg struct {
+	preview *app.PushProjectAssetsPreview
+	err     error
+	loadGen uint64
 }
 
 // focusContext 描述 TUI 的空间导航焦点层级。
@@ -154,6 +175,10 @@ var prepareProjectConfigInitOperation = func(projectRoot string, reporter app.Re
 	return app.PrepareProjectConfigInit(projectRoot, reporter)
 }
 
+var ensureLocalProjectConfigOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
+	return app.EnsureLocalProjectConfig(projectRoot, reporter)
+}
+
 var inferVaultProjectOperation = func(projectRoot string, reporter app.Reporter) (*app.VaultProjectInference, error) {
 	return app.InferVaultProject(projectRoot, reporter)
 }
@@ -202,7 +227,7 @@ type model struct {
 	logs           []string
 	assetTree      TreeList
 	// bundleSelection 是 TUI 内对 ProjectConfig.EnabledBundles 的镜像。
-	// 进入 Assets 页后：从 assets.Bundles[i].Enabled==true 初始化；保存时随 Items 一起传给 SaveAssetSelection。
+	// 进入 Bundles 页后：从 assets.Bundles[i].Enabled==true 初始化；保存时传给 SaveEnabledBundles。
 	bundleSelection  []string
 	assetFilter      string
 	assetFilterInput bool
@@ -222,7 +247,6 @@ type model struct {
 	savingProjectSettings       bool
 	projectSettingsOverride     bool
 	projectSettingsSelectedIDEs []string
-	initializingProjectConfig   bool
 	lastInitResult              *app.ConfigInitPreparation
 	lastInitErr                 error
 	projectVars                 *app.ProjectVarsView
@@ -248,9 +272,10 @@ type model struct {
 	runningRemove               bool
 	removeResult                *app.RemoveBundleResult
 	removeErr                   error
-	pushStage                   string // "", "summary", "confirm", "running"
+	pushStage                   string // "", "loading", "summary", "confirm", "running"
 	pushPreview                 *app.PushProjectAssetsPreview
 	pushPreviewErr              error
+	pushPreviewLoad             asyncLoad
 	updateStage                 string // "", "checking", "result", "confirm", "running", "done"
 	updateResult                *update.CheckResult
 	updateErr                   error
@@ -262,21 +287,24 @@ type model struct {
 	deleteFilterInput           bool
 	deleteStage                 string // "", "list", "summary", "confirm", "running"
 	deleteCandidatesLoaded      bool
-	loadingDeleteCandidates     bool
+	deleteLoad                  asyncLoad // 跨页飞行的候选列表加载（切页不取消）
 	deleteLoadErr               error
-	deleteLoadCancel            context.CancelFunc
-	deleteLoadGen               uint64
 	deleteIncludeRemote         bool
 	runningDelete               bool
 	deleteResult                *app.DeleteProjectResult
 	deleteErr                   error
+	shellRefresh                asyncBatch // overview/assets/settings/projectSettings/projectVars
+	projectVarsLoad             asyncLoad  // 独立重载 .dec/vars.yaml
+	builtinAssetsLoad           asyncLoad  // 同步内置 IDE assets
+	localProjectLoad            asyncLoad  // 生成本地 project 配置
+	vaultApplyLoad              asyncLoad  // 应用推断的 vault project
+	projectInitLoad             asyncLoad  // Project 页扫描仓库
 	// configInitMode 为 true 时表示由 dec config init 拉起：聚焦 Assets/bundle 视图，保存后退出。
 	configInitMode bool
 	// vaultInference Home 页待确认的 vault project 推断（来自目录名匹配）。
 	vaultInference *app.VaultProjectInference
 	// vaultInferenceDismissed 用户本次会话内已拒绝推断，刷新前不再提示。
 	vaultInferenceDismissed bool
-	applyingVaultProject    bool
 	// vaultAutoApplyNotice Home 页展示 vault 应用成功提示（仅本次会话内最近一次）。
 	vaultAutoApplyNotice string
 	// focus 是当前键盘交互上下文（侧栏 / 内容 / bundle 成员）。
@@ -284,9 +312,8 @@ type model struct {
 	// addSecretStage 是 Project 页「登记新 secret」的阶段；空串表示流程未开启。
 	addSecretStage       string
 	addSecretPathInput   string
-	addSecretFolderInput string
-	addSecretFolders     []string
-	addSecretFolderIdx   int
+	addSecretTargets     []app.SecretTargetOption
+	addSecretTargetIdx   int
 	addSecretResult      *app.AddSecretResult
 	addSecretErr         error
 }
@@ -335,11 +362,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case deleteLoadedMsg:
-		if msg.loadGen != m.deleteLoadGen {
+		if !m.deleteLoad.finish(msg.loadGen) {
 			return m, nil
 		}
-		m.deleteLoadCancel = nil
-		m.loadingDeleteCandidates = false
 		if errors.Is(msg.err, context.Canceled) {
 			return m, nil
 		}
@@ -386,6 +411,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.refreshCmd(), m.startDeleteCandidatesLoad(m.deleteIncludeRemote, true))
 	case overviewLoadedMsg:
+		if !m.shellRefresh.acceptPart(msg.loadGen) {
+			return m, nil
+		}
 		m.overview = msg.overview
 		m.overviewErr = msg.err
 		m.vaultInference = msg.vaultInference
@@ -400,9 +428,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Vault project inferred from directory: %s (%d bundles)", msg.vaultInference.ProjectName, len(msg.vaultInference.EnabledBundles)))
 		}
 		m.pushLog(fmt.Sprintf("Overview loaded: %d enabled / %d available bundles", msg.overview.EnabledBundleCount, msg.overview.AvailableBundleCount))
+		if msg.vaultInference == nil && !msg.overview.ProjectConfigReady && !m.localProjectLoad.busy() {
+			gen := m.localProjectLoad.beginGen()
+			m.pushLog("无 vault project 匹配，生成本地 project 配置")
+			return m, ensureLocalProjectCmd(m.projectRoot, gen)
+		}
 		return m, nil
 	case vaultProjectAppliedMsg:
-		m.applyingVaultProject = false
+		if !m.vaultApplyLoad.finish(msg.loadGen) {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.pushLog("Vault project apply failed: " + msg.err.Error())
 			return m, nil
@@ -419,6 +454,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refreshCmd()
 	case assetsLoadedMsg:
+		if !m.shellRefresh.acceptPart(msg.loadGen) {
+			return m, nil
+		}
 		m.assets = msg.state
 		m.assetsErr = msg.err
 		m.savingAssets = false
@@ -456,6 +494,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refreshCmd()
 	case settingsLoadedMsg:
+		if !m.shellRefresh.acceptPart(msg.loadGen) {
+			return m, nil
+		}
 		m.settings = msg.state
 		m.settingsErr = msg.err
 		m.savingSettings = false
@@ -471,12 +512,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.normalizeSettingsCursor()
 			m.syncSettingsDirty()
 			m.pushLog(fmt.Sprintf("Global settings loaded: %d IDEs selected", len(m.settingsSelectedIDEs)))
-			if msg.state.RepoConnected && len(m.settingsSelectedIDEs) > 0 {
-				return m, ensureBuiltinIDEAssetsCmd(cloneStrings(m.settingsSelectedIDEs))
+			if msg.state.RepoConnected && len(m.settingsSelectedIDEs) > 0 && !m.builtinAssetsLoad.busy() {
+				gen := m.builtinAssetsLoad.beginGen()
+				return m, ensureBuiltinIDEAssetsCmd(cloneStrings(m.settingsSelectedIDEs), gen)
 			}
 		}
 		return m, nil
 	case builtinAssetsEnsuredMsg:
+		if !m.builtinAssetsLoad.finish(msg.loadGen) {
+			return m, nil
+		}
 		for _, warning := range msg.warnings {
 			m.pushLog("Install warning: " + warning)
 		}
@@ -498,6 +543,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refreshCmd()
 	case projectSettingsLoadedMsg:
+		if !m.shellRefresh.acceptPart(msg.loadGen) {
+			return m, nil
+		}
 		m.projectSettings = msg.state
 		m.projectSettingsErr = msg.err
 		m.savingProjectSettings = false
@@ -532,8 +580,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.refreshCmd()
+	case localProjectEnsuredMsg:
+		if !m.localProjectLoad.finish(msg.loadGen) {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.pushLog("本地 project 生成失败: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.result != nil {
+			if msg.result.ExistingConfig {
+				m.pushLog("本地 project 配置已存在")
+			} else {
+				m.pushLog("已生成本地 project 配置，下一步到 Bundles 页勾选 bundle")
+			}
+			if msg.result.VarsCreated {
+				m.pushLog("Project vars template created: .dec/vars.yaml")
+			}
+		}
+		return m, m.refreshCmd()
 	case projectConfigInitializedMsg:
-		m.initializingProjectConfig = false
+		if !m.projectInitLoad.finish(msg.loadGen) {
+			return m, nil
+		}
 		m.lastInitResult = msg.result
 		m.lastInitErr = msg.err
 		if msg.err != nil {
@@ -554,6 +623,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refreshCmd()
 	case projectVarsLoadedMsg:
+		if msg.solo {
+			if !m.projectVarsLoad.finish(msg.loadGen) {
+				return m, nil
+			}
+		} else if !m.shellRefresh.acceptPart(msg.loadGen) {
+			return m, nil
+		}
 		m.projectVars = msg.view
 		m.projectVarsErr = msg.err
 		if msg.err != nil {
@@ -572,7 +648,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.pushLog("Editor session finished; reloading project vars")
 		}
-		return m, loadProjectVarsCmd(m.projectRoot)
+		gen := m.projectVarsLoad.beginGen()
+		return m, loadProjectVarsCmd(m.projectRoot, gen, true)
+	case pushPreviewLoadedMsg:
+		if !m.pushPreviewLoad.finish(msg.loadGen) {
+			return m, nil
+		}
+		m.pushPreview = msg.preview
+		m.pushPreviewErr = msg.err
+		m.pushStage = "summary"
+		m.pushResult = nil
+		m.runErr = nil
+		if msg.err != nil {
+			m.pushLog("Push 预览失败: " + msg.err.Error())
+		} else if msg.preview != nil {
+			m.pushLog(fmt.Sprintf("Push 确认页已打开：%d 个 enabled bundle", msg.preview.EnabledBundleCount))
+		}
+		return m, nil
 	case addSecretDoneMsg:
 		m.addSecretStage = ""
 		m.addSecretResult = msg.result
@@ -708,7 +800,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.isHomePage() && m.hasVaultInferencePrompt() {
 			return m.handleVaultInferenceKey(msg)
 		}
-		if m.isHomePage() && m.applyingVaultProject {
+		if m.isHomePage() && m.vaultApplyLoad.busy() {
 			return m, nil
 		}
 		if m.isRunPage() && m.runningPull && msg.String() == "esc" {
@@ -800,7 +892,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.beginSettingsRepoEdit()
 				return m, nil
 			}
-			if m.isProjectPage() && !m.savingProjectSettings && !m.initializingProjectConfig {
+			if m.isProjectPage() && !m.savingProjectSettings && !m.projectInitLoad.busy() {
 				editorCmd := ""
 				if m.projectVars != nil {
 					editorCmd = m.projectVars.EditorCommand
@@ -842,24 +934,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "i":
 			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil && !m.projectSettings.ProjectConfigReady {
-				if m.initializingProjectConfig || m.savingProjectSettings {
+				if m.projectInitLoad.busy() || m.savingProjectSettings || m.localProjectLoad.busy() {
 					return m, nil
 				}
-				if m.overview == nil || !m.overview.RepoConnected {
-					m.pushLog("初始化项目配置需要先连接仓库，请切到 Settings 页配置 Repo URL")
-					return m, nil
-				}
-				m.initializingProjectConfig = true
-				m.lastInitResult = nil
-				m.lastInitErr = nil
-				m.pushLog("Initializing project config (扫描仓库资产)...")
-				return m, initProjectConfigCmd(m.projectRoot)
+				gen := m.localProjectLoad.beginGen()
+				m.pushLog("在本页生成本地 project 配置...")
+				return m, ensureLocalProjectCmd(m.projectRoot, gen)
 			}
 			return m, nil
 		case "A":
 			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil {
 				if !m.projectSettings.ProjectConfigReady {
-					m.pushLog("登记 secret 需要先初始化 .dec/config.yaml，按 i 初始化")
+					m.pushLog("登记 secret 需要先有 .dec/config.yaml，按 i 在本页生成本地 project")
 					return m, nil
 				}
 				m.beginAddSecret()
@@ -868,18 +954,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "R":
 			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil && m.projectSettings.ProjectConfigReady {
-				if m.initializingProjectConfig || m.savingProjectSettings {
+				if m.projectInitLoad.busy() || m.savingProjectSettings {
 					return m, nil
 				}
 				if m.overview == nil || !m.overview.RepoConnected {
 					m.pushLog("刷新 available 需要先连接仓库，请切到 Settings 页配置 Repo URL")
 					return m, nil
 				}
-				m.initializingProjectConfig = true
+				gen := m.projectInitLoad.beginGen()
 				m.lastInitResult = nil
 				m.lastInitErr = nil
 				m.pushLog("Refreshing project available assets (扫描仓库)...")
-				return m, initProjectConfigCmd(m.projectRoot)
+				return m, initProjectConfigCmd(m.projectRoot, gen)
 			}
 			return m, nil
 		case "p":
@@ -889,7 +975,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "P":
 			if m.isRunPage() && !m.runningPull && !m.runningRemove && m.pushStage == "" && !m.updatingBinary && m.updateStage == "" {
-				m.beginPushConfirmation()
+				return m, m.beginPushConfirmation()
 			}
 			return m, nil
 		case "u":
@@ -988,32 +1074,41 @@ func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) refreshCmd() tea.Cmd {
-	return tea.Batch(loadOverviewCmd(m.projectRoot), loadAssetsCmd(m.projectRoot), loadSettingsCmd(), loadProjectSettingsCmd(m.projectRoot), loadProjectVarsCmd(m.projectRoot))
+const refreshPartCount = 5
+
+func (m *model) refreshCmd() tea.Cmd {
+	gen := m.shellRefresh.beginParts(refreshPartCount)
+	return tea.Batch(
+		loadOverviewCmd(m.projectRoot, gen),
+		loadAssetsCmd(m.projectRoot, gen),
+		loadSettingsCmd(gen),
+		loadProjectSettingsCmd(m.projectRoot, gen),
+		loadProjectVarsCmd(m.projectRoot, gen, false),
+	)
 }
 
-func loadOverviewCmd(projectRoot string) tea.Cmd {
+func loadOverviewCmd(projectRoot string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		inference, inferErr := inferVaultProjectOperation(projectRoot, nil)
 		if inferErr != nil {
-			return overviewLoadedMsg{err: inferErr, vaultInference: inference}
+			return overviewLoadedMsg{err: inferErr, vaultInference: inference, loadGen: loadGen}
 		}
 		overview, err := app.LoadProjectOverview(projectRoot)
-		return overviewLoadedMsg{overview: overview, err: err, vaultInference: inference}
+		return overviewLoadedMsg{overview: overview, err: err, vaultInference: inference, loadGen: loadGen}
 	}
 }
 
-func applyVaultProjectCmd(projectRoot string) tea.Cmd {
+func applyVaultProjectCmd(projectRoot string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		result, err := applyVaultProjectOperation(projectRoot, nil)
-		return vaultProjectAppliedMsg{result: result, err: err}
+		return vaultProjectAppliedMsg{result: result, err: err, loadGen: loadGen}
 	}
 }
 
-func loadAssetsCmd(projectRoot string) tea.Cmd {
+func loadAssetsCmd(projectRoot string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		state, err := app.LoadAssetSelection(projectRoot, nil)
-		return assetsLoadedMsg{state: state, err: err}
+		return assetsLoadedMsg{state: state, err: err, loadGen: loadGen}
 	}
 }
 
@@ -1024,10 +1119,10 @@ func saveAssetsCmd(projectRoot string, bundles []string) tea.Cmd {
 	}
 }
 
-func loadSettingsCmd() tea.Cmd {
+func loadSettingsCmd(loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		state, err := loadGlobalSettingsOperation(nil)
-		return settingsLoadedMsg{state: state, err: err}
+		return settingsLoadedMsg{state: state, err: err, loadGen: loadGen}
 	}
 }
 
@@ -1038,16 +1133,16 @@ func saveSettingsCmd(repoURL string, ides []string) tea.Cmd {
 	}
 }
 
-func ensureBuiltinIDEAssetsCmd(ideNames []string) tea.Cmd {
+func ensureBuiltinIDEAssetsCmd(ideNames []string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
-		return builtinAssetsEnsuredMsg{warnings: ensureBuiltinIDEAssetsOperation(cloneStrings(ideNames), nil)}
+		return builtinAssetsEnsuredMsg{warnings: ensureBuiltinIDEAssetsOperation(cloneStrings(ideNames), nil), loadGen: loadGen}
 	}
 }
 
-func loadProjectSettingsCmd(projectRoot string) tea.Cmd {
+func loadProjectSettingsCmd(projectRoot string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		state, err := loadProjectSettingsOperation(projectRoot, nil)
-		return projectSettingsLoadedMsg{state: state, err: err}
+		return projectSettingsLoadedMsg{state: state, err: err, loadGen: loadGen}
 	}
 }
 
@@ -1062,17 +1157,24 @@ func saveProjectSettingsCmd(projectRoot string, clearOverride bool, ides []strin
 	}
 }
 
-func initProjectConfigCmd(projectRoot string) tea.Cmd {
+func initProjectConfigCmd(projectRoot string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		result, err := prepareProjectConfigInitOperation(projectRoot, nil)
-		return projectConfigInitializedMsg{result: result, err: err}
+		return projectConfigInitializedMsg{result: result, err: err, loadGen: loadGen}
 	}
 }
 
-func loadProjectVarsCmd(projectRoot string) tea.Cmd {
+func ensureLocalProjectCmd(projectRoot string, loadGen uint64) tea.Cmd {
+	return func() tea.Msg {
+		result, err := ensureLocalProjectConfigOperation(projectRoot, nil)
+		return localProjectEnsuredMsg{result: result, err: err, loadGen: loadGen}
+	}
+}
+
+func loadProjectVarsCmd(projectRoot string, loadGen uint64, solo bool) tea.Cmd {
 	return func() tea.Msg {
 		view, err := loadProjectVarsViewOperation(projectRoot)
-		return projectVarsLoadedMsg{view: view, err: err}
+		return projectVarsLoadedMsg{view: view, err: err, loadGen: loadGen, solo: solo}
 	}
 }
 
@@ -1206,25 +1308,38 @@ func (m *model) startPullRun() tea.Cmd {
 	return tea.Batch(startPullRunCmd(ctx, m.projectRoot, stream), waitRunMsg(stream))
 }
 
-func (m *model) beginPushConfirmation() {
-	preview, err := previewPushOperation(m.projectRoot)
-	if err != nil {
-		m.pushPreviewErr = err
-		m.pushPreview = nil
-		m.pushStage = "summary"
-		m.pushLog("Push 预览失败: " + err.Error())
-		return
+func (m *model) beginPushConfirmation() tea.Cmd {
+	if m.pushPreviewLoad.busy() {
+		return nil
 	}
-	m.pushPreview = preview
+	gen := m.pushPreviewLoad.beginGen()
+	m.pushStage = "loading"
+	m.pushPreview = nil
 	m.pushPreviewErr = nil
-	m.pushStage = "summary"
 	m.pushResult = nil
 	m.runErr = nil
-	m.pushLog(fmt.Sprintf("Push 确认页已打开：%d 个 enabled bundle", preview.EnabledBundleCount))
+	m.pushLog("Push 预览加载中…")
+	return loadPushPreviewCmd(m.projectRoot, gen)
+}
+
+func loadPushPreviewCmd(projectRoot string, loadGen uint64) tea.Cmd {
+	return func() tea.Msg {
+		preview, err := previewPushOperation(projectRoot)
+		return pushPreviewLoadedMsg{preview: preview, err: err, loadGen: loadGen}
+	}
 }
 
 func (m model) handlePushStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.pushStage {
+	case "loading":
+		switch msg.String() {
+		case "n", "esc":
+			m.pushPreviewLoad.clear()
+			m.pushStage = ""
+			m.pushLog("Push 预览已取消")
+			return m, nil
+		}
+		return m, nil
 	case "summary":
 		return m.handlePushSummaryKey(msg)
 	case "confirm":
@@ -1498,12 +1613,16 @@ func (m model) handleVaultInferenceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.vaultInference == nil {
 			return m, nil
 		}
-		m.applyingVaultProject = true
+		gen := m.vaultApplyLoad.beginGen()
 		m.pushLog(fmt.Sprintf("Applying inferred vault project %s...", m.vaultInference.ProjectName))
-		return m, applyVaultProjectCmd(m.projectRoot)
+		return m, applyVaultProjectCmd(m.projectRoot, gen)
 	case "n", "esc":
 		m.vaultInferenceDismissed = true
-		m.pushLog("已跳过 vault project 推断，可切到 Bundles 页手动选择")
+		m.pushLog("已跳过 vault project 推断，将生成本地 project")
+		if m.overview != nil && !m.overview.ProjectConfigReady && !m.localProjectLoad.busy() {
+			gen := m.localProjectLoad.beginGen()
+			return m, ensureLocalProjectCmd(m.projectRoot, gen)
+		}
 		return m, nil
 	}
 	return m, nil
@@ -1611,7 +1730,7 @@ func (m model) renderHomePage(width int) string {
 	if notice := strings.TrimSpace(m.vaultAutoApplyNotice); notice != "" {
 		lines = append(lines, shellGoodStyle.Render(notice))
 	}
-	if m.applyingVaultProject {
+	if m.vaultApplyLoad.busy() {
 		lines = append(lines, shellMutedStyle.Render("正在从 vault 应用 project..."))
 	} else if m.hasVaultInferencePrompt() {
 		inf := m.vaultInference
@@ -1706,7 +1825,10 @@ func (m model) renderProjectPage(width int) string {
 		summary = append(summary, fmt.Sprintf("已启用 bundle (%d): %s", countOverviewEnabledBundles(m.overview), formatOverviewEnabledBundleNames(m.overview)))
 	}
 	if !m.projectSettings.ProjectConfigReady {
-		summary = append(summary, shellMutedStyle.Render("尚未初始化 .dec/config.yaml，请先在 Home 页初始化 project。"))
+		summary = append(summary, shellMutedStyle.Render("尚未初始化 .dec/config.yaml，按 i 在本页生成本地 project。"))
+	} else if m.overview != nil {
+		summary = append(summary, fmt.Sprintf("project_name: %s", formatProjectNameDisplay(m.overview)))
+		summary = append(summary, shellMutedStyle.Render("可选：Run 页 Push 将 Dec cache 与 secrets 推送到远端"))
 	}
 	if m.projectSettingsDirty {
 		summary = append(summary, shellWarnStyle.Render("有未保存修改，按 s 保存"))
@@ -1845,7 +1967,7 @@ func (m model) renderProjectVarsBlock() string {
 	}
 	lines = append(lines, fileLine)
 	lines = append(lines, shellMutedStyle.Render(fmt.Sprintf("编辑器: %s · e 打开外部编辑器", fallbackValue(view.EditorCommand, "vim"))))
-	lines = append(lines, shellMutedStyle.Render("A 登记 secret"))
+	lines = append(lines, shellMutedStyle.Render("A 登记 secret（相对 .secrets 同步根）"))
 
 	for _, w := range view.Warnings {
 		lines = append(lines, shellWarnStyle.Render(w))
@@ -1903,7 +2025,7 @@ func truncateVarValue(v string) string {
 }
 
 func (m model) renderRunPage(width int) string {
-	if m.pushStage == "summary" || m.pushStage == "confirm" {
+	if m.pushStage == "loading" || m.pushStage == "summary" || m.pushStage == "confirm" {
 		return m.renderRunPushPage(width)
 	}
 	if m.removeStage == "select" || m.removeStage == "confirm" {
@@ -2014,11 +2136,29 @@ func (m model) renderPullPlanLines() []string {
 	if len(names) == 0 {
 		lines = append(lines, shellWarnStyle.Render("⚠ 当前无启用 bundle，请先到 Bundles 页勾选并按 s 保存"))
 	} else {
-		lines = append(lines, fmt.Sprintf("将拉取 %d 个资产 · bundle: %s",
-			len(app.ListEffectiveEnabledAssets(m.assets)), strings.Join(names, ", ")))
+		lines = append(lines, fmt.Sprintf("Dec  bundle: %s（→ .dec/cache/）",
+			strings.Join(names, ", ")))
+	}
+	if secretsPlan := m.renderSecretsSyncPlanLines(); len(secretsPlan) > 0 {
+		lines = append(lines, secretsPlan...)
 	}
 	if pending := m.pendingBundleChanges(); pending != "" {
 		lines = append(lines, shellWarnStyle.Render("⚠ Bundles 页有未保存的勾选（"+pending+"），按 s 保存后才会生效"))
+	}
+	return lines
+}
+
+func (m model) renderSecretsSyncPlanLines() []string {
+	if m.overview == nil || !m.overview.ProjectConfigReady {
+		return nil
+	}
+	targets, err := app.ListSecretSyncTargets(m.projectRoot)
+	if err != nil || len(targets) == 0 {
+		return []string{shellMutedStyle.Render("Secrets  无已解析 SyncTarget（需启用 bundle 或配置 project secrets）")}
+	}
+	lines := []string{shellMutedStyle.Render("Secrets  按 SyncTarget 拉取（未删除多余项）：")}
+	for _, t := range targets {
+		lines = append(lines, fmt.Sprintf("  · %s", t.Label))
 	}
 	return lines
 }
@@ -2075,8 +2215,8 @@ func (m model) renderRunActiveBlock(width int) []string {
 
 func (m model) renderRunIdleGuide() []string {
 	lines := []string{
-		shellMutedStyle.Render("p 拉取 Dec bundle + secrets + IDE 安装"),
-		shellMutedStyle.Render("P 推送到远端（两次确认）"),
+		shellMutedStyle.Render("p 拉取 Dec bundle + secrets（按 SyncTarget 分组）+ IDE 安装"),
+		shellMutedStyle.Render("P 推送到远端（两次确认；未删除多余项）"),
 		shellMutedStyle.Render("删除请切到 Delete 页"),
 	}
 	lines = append(lines, m.renderPullPlanLines()...)
@@ -2092,8 +2232,13 @@ func (m model) renderRunLastResult() []string {
 		secretsLine := fmt.Sprintf("Secrets  落地 %d 个文件 · %d 个 SSH Key", m.runResult.SecretsNoteCount, m.runResult.SecretsSSHKeyCount)
 		if m.runResult.SecretsSkippedReason != "" && m.runResult.SecretsNoteCount == 0 && m.runResult.SecretsSSHKeyCount == 0 {
 			secretsLine = "Secrets  " + m.runResult.SecretsSkippedReason
+		} else if m.runResult.SecretsNoteCount > 0 || m.runResult.SecretsSSHKeyCount > 0 {
+			secretsLine += "（同步根 .secrets/project · .secrets/bundles/<name>；未删除多余项）"
 		}
 		lines = append(lines, secretsLine)
+		if grouped := formatRunEventsBySyncTarget(m.runEvents); len(grouped) > 0 {
+			lines = append(lines, grouped...)
+		}
 		lines = append(lines, fmt.Sprintf("IDE   %s", fallbackValue(strings.Join(m.runResult.EffectiveIDEs, ", "), "<none>")))
 		if strings.TrimSpace(m.runResult.VersionCommit) != "" {
 			lines = append(lines, fmt.Sprintf("Commit %s", m.runResult.VersionCommit))
@@ -2110,8 +2255,13 @@ func (m model) renderRunLastResult() []string {
 		secretsLine := fmt.Sprintf("Secrets  新建 %d · 更新 %d", m.pushResult.SecretsCreatedCount, m.pushResult.SecretsUpdatedCount)
 		if m.pushResult.SecretsSkippedReason != "" && m.pushResult.SecretsCreatedCount+m.pushResult.SecretsUpdatedCount == 0 {
 			secretsLine = "Secrets  " + m.pushResult.SecretsSkippedReason
+		} else if m.pushResult.SecretsCreatedCount+m.pushResult.SecretsUpdatedCount > 0 {
+			secretsLine += "（按 SyncTarget 扫描 .secrets/；未删除多余项）"
 		}
 		lines = append(lines, secretsLine)
+		if grouped := formatRunEventsBySyncTarget(m.runEvents); len(grouped) > 0 {
+			lines = append(lines, grouped...)
+		}
 		if strings.TrimSpace(m.pushResult.VersionCommit) != "" {
 			lines = append(lines, fmt.Sprintf("Commit %s", m.pushResult.VersionCommit))
 		}
@@ -2155,6 +2305,8 @@ func (m model) renderRunPushPage(width int) string {
 		fmt.Sprintf("状态 %s", m.runStatusLabel()),
 	}
 	switch m.pushStage {
+	case "loading":
+		lines = append(lines, shellMutedStyle.Render("正在生成 Push 预览… Esc 取消"))
 	case "summary":
 		lines = append(lines, shellMutedStyle.Render("操作  y/Enter 继续 · n/Esc 取消"))
 		lines = append(lines, "")
@@ -2319,9 +2471,28 @@ func isRunImportantLine(line string) bool {
 		strings.Contains(line, "Bitwarden 已解锁") ||
 		strings.Contains(line, "Bitwarden 未配置") ||
 		strings.Contains(line, "跳过 secrets") ||
+		strings.Contains(line, "拉取 project secrets") ||
+		strings.Contains(line, "拉取 secrets bundle") ||
+		strings.Contains(line, "推送 project secrets") ||
+		strings.Contains(line, "推送 secrets bundle") ||
+		strings.Contains(line, "未删除多余项") ||
 		strings.Contains(line, "无法自动打开") ||
 		strings.Contains(line, "失败") ||
 		strings.Contains(line, "⚠")
+}
+
+func formatRunEventsBySyncTarget(events []string) []string {
+	var out []string
+	for _, line := range events {
+		if strings.Contains(line, "拉取 project secrets") ||
+			strings.Contains(line, "拉取 secrets bundle") ||
+			strings.Contains(line, "推送 project secrets") ||
+			strings.Contains(line, "推送 secrets bundle") ||
+			strings.Contains(line, "→ .secrets/") {
+			out = append(out, shellMutedStyle.Render("  "+line))
+		}
+	}
+	return out
 }
 
 func (m model) renderUpdatePanel() []string {
@@ -3099,7 +3270,7 @@ func (m model) isHomePage() bool {
 }
 
 func (m model) hasVaultInferencePrompt() bool {
-	return m.vaultInference != nil && !m.vaultInferenceDismissed && !m.applyingVaultProject
+	return m.vaultInference != nil && !m.vaultInferenceDismissed && !m.vaultApplyLoad.busy()
 }
 
 func (m model) isBundlesPage() bool {
@@ -3119,8 +3290,26 @@ func (m model) isRunPage() bool {
 }
 
 func (m model) currentSummary() string {
+	if busy := m.ioBusyLabel(); busy != "" {
+		return busy
+	}
 	if m.overviewErr != nil {
 		return "Overview unavailable"
+	}
+	if m.isDeletePage() {
+		if m.deleteLoadErr != nil {
+			return "Delete list unavailable"
+		}
+		if m.deleteStage == "summary" {
+			return "Confirming delete (summary)"
+		}
+		if m.deleteStage == "confirm" {
+			return "Confirming delete (final)"
+		}
+		if m.deleteCandidatesLoaded {
+			return fmt.Sprintf("Delete ready, %d items", len(m.deleteCandidates))
+		}
+		return "Delete page ready"
 	}
 	if m.isBundlesPage() {
 		if m.assetsErr != nil {
@@ -3170,6 +3359,9 @@ func (m model) currentSummary() string {
 		}
 		if m.removeStage == "confirm" {
 			return "Confirming remove"
+		}
+		if m.pushStage == "loading" {
+			return "Loading push preview"
 		}
 		if m.pushStage == "summary" {
 			return "Confirming push (summary)"
@@ -3235,7 +3427,7 @@ func (m model) currentSummary() string {
 	if m.overview == nil {
 		return "Loading project state"
 	}
-	if m.applyingVaultProject {
+	if m.vaultApplyLoad.busy() {
 		return "Applying inferred vault project"
 	}
 	if m.hasVaultInferencePrompt() {
@@ -3309,25 +3501,23 @@ func formatOverviewEnabledBundleNames(overview *app.ProjectOverview) string {
 }
 
 func suggestNextAction(overview *app.ProjectOverview, vaultInferencePending, vaultInferenceDismissed bool) string {
+	const flow = "Settings 连仓库 → Home 确认/生成本地 project → Bundles 勾选 → Run pull"
 	if overview == nil {
-		return "等待项目概览加载完成"
+		return flow + "（等待项目概览加载）"
 	}
 	if !overview.RepoConnected {
-		return "先切到 Settings 页连接资产仓库"
+		return flow + "（当前：Settings 页配置 Repo URL）"
 	}
 	if vaultInferencePending {
-		return "在 Home 页确认推断的 vault project（y 应用 / n 跳过），或切到 Bundles 页手动选择"
+		return flow + "（当前：Home 页确认 vault project，y 应用 / n 跳过）"
 	}
 	if !overview.ProjectConfigReady {
-		if vaultInferenceDismissed {
-			return "切到 Bundles 页选择 bundle 并保存"
-		}
-		return "先在 Home 页初始化 project，或切到 Bundles 页选择 bundle 并保存"
+		return flow + "（当前：Home 确认或生成本地 project）"
 	}
 	if countOverviewEnabledBundles(overview) == 0 {
-		return "当前还没有启用 bundle，请切到 Bundles 页勾选并保存"
+		return flow + "（当前：Bundles 页勾选并保存）"
 	}
-	return "可以切到 Run 页执行 pull"
+	return flow + "（当前：Run 页 pull）"
 }
 
 func formatInferenceBundleNames(bundles []string) string {

@@ -14,6 +14,7 @@ import (
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/types"
 	"github.com/shichao402/Dec/pkg/vars"
 )
@@ -217,6 +218,9 @@ func applyAssetCleanup(result *PullProjectAssetsResult, projectRoot string, enab
 }
 
 func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, projectRoot string, enabledBundles []string, reporter Reporter) error {
+	if err := secrets.EnsureSecretsGitignore(projectRoot); err != nil {
+		emit(reporter, EventWarn, "pull.secrets", fmt.Sprintf("写入 .gitignore 失败: %v", err), nil)
+	}
 	secretsSummary, err := pullEnabledSecretsBundles(ctx, projectRoot, enabledBundles, reporter)
 	if err != nil {
 		return err
@@ -479,6 +483,8 @@ func installAssetToIDE(itemType, assetName, vaultName, srcPath, projectRoot stri
 		if err := json.Unmarshal(data, &server); err != nil {
 			return fmt.Errorf("解析 MCP 配置失败: %w", err)
 		}
+		cmd, args := stripExternalEnvLauncher(server.Command, server.Args)
+		server.Command, server.Args, server.Env = WrapMCPServerWithExec(projectRoot, vaultName, "dec", cmd, args, server.Env)
 		existingConfig, err := ideImpl.LoadMCPConfig(projectRoot)
 		if err != nil {
 			return fmt.Errorf("加载 IDE MCP 配置失败: %w", err)
@@ -854,4 +860,25 @@ func saveVersionMeta(projectRoot, commitHash string) {
 	content := fmt.Sprintf("commit: %s\npulled_at: %q\n", commitHash, time.Now().Format(time.RFC3339))
 	_ = os.MkdirAll(filepath.Dir(versionPath), 0755)
 	_ = os.WriteFile(versionPath, []byte(content), 0644)
+}
+
+// stripExternalEnvLauncher 去掉历史外部启动器外壳（如 mise exec ... --），返回真实命令。
+func stripExternalEnvLauncher(command string, args []string) (string, []string) {
+	command = strings.TrimSpace(command)
+	if command == "dec" && len(args) > 0 && args[0] == "exec" {
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--" && i+1 < len(args) {
+				return args[i+1], append([]string(nil), args[i+2:]...)
+			}
+		}
+		return command, args
+	}
+	if command == "mise" && len(args) >= 2 && args[0] == "exec" {
+		for i, a := range args {
+			if a == "--" && i+1 < len(args) {
+				return args[i+1], append([]string(nil), args[i+2:]...)
+			}
+		}
+	}
+	return command, args
 }

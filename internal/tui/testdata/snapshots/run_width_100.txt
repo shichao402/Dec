@@ -10,12 +10,12 @@
 │                ││ IDE   cursor                                                                   │
 │                ││ Commit abc123                                                                  │
 │                ││ 本次 Pull 计划                                                                 │
-│                ││ 将拉取 1 个资产 · bundle: default                                              │
+│                ││ Dec  bundle: default（→ .dec/cache/）                                          │
+│                ││ Secrets  按 SyncTarget 拉取（未删除多余项）：                                  │
+│                ││   · project secrets "dec-project" → .secrets/project                           │
 │                ││ 事件                                                                           │
 │                ││ · 开始拉取                                                                     │
 │                ││ · 完成汇总                                                                     │
-│                ││                                                                                │
-│                ││                                                                                │
 │                ││                                                                                │
 │                ││                                                                                │
 │                ││                                                                                │

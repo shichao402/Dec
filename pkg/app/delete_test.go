@@ -130,7 +130,7 @@ func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T)
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"vikunja_workflow": {{RelativePath: ".config/mise/conf.d/vikunja.toml", Content: "[env]\n"}},
+			"vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -142,7 +142,7 @@ func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".config/mise/conf.d/vikunja.toml", "[env]\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
 
 	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, true, nil)
 	if err != nil {
@@ -152,13 +152,13 @@ func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T)
 		if c.Kind != DeleteKindSecret {
 			continue
 		}
-		if c.SecretPath != ".config/mise/conf.d/vikunja.toml" {
-			t.Fatalf("SecretPath = %q, 期望即 note 名", c.SecretPath)
+		if c.SecretPath != "env/vikunja.env" {
+			t.Fatalf("SecretPath = %q, 期望相对同步根的 note 名", c.SecretPath)
 		}
 		if c.Orphan {
 			t.Fatalf("本地存在的 secret 不应标 Orphan: %#v", c)
 		}
-		if c.TreeRoot != secretsTreeRoot || c.TreeBranch != "vikunja_workflow" {
+		if c.TreeRoot != secretsTreeRoot || c.TreeBranch != "vikunja" {
 			t.Fatalf("分组 = %q/%q, 期望按 Bitwarden folder 分组", c.TreeRoot, c.TreeBranch)
 		}
 		return
@@ -190,9 +190,9 @@ func TestListDeleteCandidates_IncludesRemoteOnlySecrets(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"vikunja_workflow": {{
-					RelativePath: ".config/mise/conf.d/remote-only.toml",
-					Content:      "[env]\nTOKEN=1\n",
+				"vikunja": {{
+					RelativePath: "env/remote-only.env",
+					Content:      "VIKUNJA_API_TOKEN=1\n",
 				}},
 			},
 		}
@@ -212,12 +212,12 @@ func TestListDeleteCandidates_IncludesRemoteOnlySecrets(t *testing.T) {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
 	for _, c := range candidates {
-		if c.Kind == DeleteKindSecret && strings.Contains(c.SecretPath, "remote-only.toml") {
+		if c.Kind == DeleteKindSecret && strings.Contains(c.SecretPath, "remote-only.env") {
 			if !c.Orphan {
 				t.Fatalf("远端-only secret 应标记 Orphan: %#v", c)
 			}
-			if c.TreeBranch != "vikunja_workflow" {
-				t.Fatalf("TreeBranch = %q, want vikunja_workflow", c.TreeBranch)
+			if c.TreeBranch != "vikunja" {
+				t.Fatalf("TreeBranch = %q, want vikunja", c.TreeBranch)
 			}
 			if !strings.Contains(c.Label, "仅远端") {
 				t.Fatalf("Label 应含仅远端: %q", c.Label)
@@ -328,7 +328,7 @@ func TestListDeleteCandidates_IncludesSSHKeys(t *testing.T) {
 
 	stub := &secrets.StubClient{
 		SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-			"vikunja_workflow": {{Name: "deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n"}},
+			"vikunja": {{Name: "deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n"}},
 		},
 	}
 	origFactory := secretsClientFactory
@@ -336,7 +336,7 @@ func TestListDeleteCandidates_IncludesSSHKeys(t *testing.T) {
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	// 先落地本地 key，验证非 Orphan。
-	landings, err := secrets.PrepareSSHKeyLandings("vikunja", stub.SSHKeysByFolder["vikunja_workflow"])
+	landings, err := secrets.PrepareSSHKeyLandings("vikunja", stub.SSHKeysByFolder["vikunja"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestListDeleteCandidates_IncludesSSHKeys(t *testing.T) {
 			if c.Orphan {
 				t.Fatalf("本地存在的 SSH Key 不应标 Orphan: %#v", c)
 			}
-			if c.DecBundleName != "vikunja" || c.SecretsBundle != "vikunja_workflow" {
+			if c.DecBundleName != "vikunja" || c.SecretsBundle != "vikunja" {
 				t.Fatalf("SSH candidate = %#v", c)
 			}
 			if !strings.Contains(c.Label, "[ssh] deploy") {
@@ -379,14 +379,14 @@ func TestDeleteProjectItems_RemovesSSHKeyLocalAndRemote(t *testing.T) {
 
 	stub := &secrets.StubClient{
 		SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-			"vikunja_workflow": {{Name: "deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n", PublicKey: "pub\n"}},
+			"vikunja": {{Name: "deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n", PublicKey: "pub\n"}},
 		},
 	}
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
-	landings, err := secrets.PrepareSSHKeyLandings("vikunja", stub.SSHKeysByFolder["vikunja_workflow"])
+	landings, err := secrets.PrepareSSHKeyLandings("vikunja", stub.SSHKeysByFolder["vikunja"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestDeleteProjectItems_RemovesSSHKeyLocalAndRemote(t *testing.T) {
 			Kind:          DeleteKindSSHKey,
 			SSHKeyName:    "deploy",
 			DecBundleName: "vikunja",
-			SecretsBundle: "vikunja_workflow",
+			SecretsBundle: "vikunja",
 		}},
 	}, nil)
 	if err != nil {
@@ -413,7 +413,50 @@ func TestDeleteProjectItems_RemovesSSHKeyLocalAndRemote(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".ssh", "dec_vikunja_deploy")); !os.IsNotExist(err) {
 		t.Fatal("本地私钥应已删除")
 	}
-	if len(stub.SSHKeysByFolder["vikunja_workflow"]) != 0 {
-		t.Fatalf("远端 SSH Key 应已删除: %#v", stub.SSHKeysByFolder["vikunja_workflow"])
+	if len(stub.SSHKeysByFolder["vikunja"]) != 0 {
+		t.Fatalf("远端 SSH Key 应已删除: %#v", stub.SSHKeysByFolder["vikunja"])
+	}
+}
+
+func TestDeleteProjectItems_LocalOnlyDecAssetAndPruneEmptyBundleDir(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/default/bundle.yaml": "name: default\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() = %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"default"}}); err != nil {
+		t.Fatal(err)
+	}
+	skillDir := filepath.Join(projectRoot, ".dec", "cache", "default", "skills", "helloworld")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
+		ProjectRoot: projectRoot,
+		Confirmed:   true,
+		Items: []DeleteSelectionItem{{
+			Kind:  DeleteKindDecAsset,
+			Type:  "skill",
+			Name:  "helloworld",
+			Vault: "default",
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("DeleteProjectItems() = %v", err)
+	}
+	if result.DecDeleted != 1 {
+		t.Fatalf("DecDeleted = %d, want 1", result.DecDeleted)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", "cache", "default")); !os.IsNotExist(err) {
+		t.Fatalf("空的 .dec/cache/default 应被删掉, err=%v", err)
 	}
 }

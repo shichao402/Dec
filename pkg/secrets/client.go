@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"strings"
 )
 
 // Client 拉取/推送 Bitwarden secrets bundle 的 API 抽象。
@@ -10,8 +11,7 @@ type Client interface {
 	PushBundle(ctx context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error)
 	DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error
 	DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) error
-	// ListFolderNotes 枚举 folder 下的 note 名。落地路径散在项目根，没有可靠的
-	// 本地枚举方式，远端 folder 的 note 列表才是权威索引。
+	// ListFolderNotes 枚举 folder 下的 note 名（相对 SyncTarget.LocalRoot）。
 	ListFolderNotes(ctx context.Context, folderName string) ([]RemoteNote, error)
 	// ListFolderSSHKeys 枚举 folder 下的 SSH Key 逻辑名。
 	ListFolderSSHKeys(ctx context.Context, folderName string) ([]RemoteSSHKey, error)
@@ -23,11 +23,18 @@ type StubClient struct {
 	SSHKeysByFolder map[string][]SSHKeyItem
 }
 
-func (c *StubClient) PullBundle(_ context.Context, req PullBundleRequest) (*PullBundleResult, error) {
-	folder := req.Binding.SecretsBundleName
-	if folder == "" {
-		folder = req.DecBundleName
+func stubFolder(reqFolder, bindingFolder, decBundleName string) string {
+	if name := strings.TrimSpace(reqFolder); name != "" {
+		return name
 	}
+	if name := strings.TrimSpace(bindingFolder); name != "" {
+		return name
+	}
+	return DefaultBundleFolder(decBundleName)
+}
+
+func (c *StubClient) PullBundle(_ context.Context, req PullBundleRequest) (*PullBundleResult, error) {
+	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, req.DecBundleName)
 	notes := c.NotesByFolder[folder]
 	keys := c.SSHKeysByFolder[folder]
 	result := &PullBundleResult{}
@@ -45,10 +52,7 @@ func (c *StubClient) PullBundle(_ context.Context, req PullBundleRequest) (*Pull
 }
 
 func (c *StubClient) PushBundle(_ context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error) {
-	folder := req.Binding.SecretsBundleName
-	if folder == "" {
-		folder = req.DecBundleName
-	}
+	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, req.DecBundleName)
 	if c.NotesByFolder == nil {
 		c.NotesByFolder = make(map[string][]SecureNote)
 	}
@@ -76,7 +80,7 @@ func (c *StubClient) PushBundle(_ context.Context, req PushBundleRequest, notes 
 }
 
 func (c *StubClient) DeleteSecureNote(_ context.Context, req DeleteSecureNoteRequest) error {
-	folder := req.Binding.SecretsBundleName
+	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, "")
 	notes := c.NotesByFolder[folder]
 	if len(notes) == 0 {
 		return nil
@@ -92,7 +96,7 @@ func (c *StubClient) DeleteSecureNote(_ context.Context, req DeleteSecureNoteReq
 }
 
 func (c *StubClient) DeleteSSHKey(_ context.Context, req DeleteSSHKeyRequest) error {
-	folder := req.Binding.SecretsBundleName
+	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, "")
 	keys := c.SSHKeysByFolder[folder]
 	if len(keys) == 0 {
 		return nil

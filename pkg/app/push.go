@@ -120,8 +120,14 @@ func pushDecBundles(ctx context.Context, projectRoot string, reporter Reporter) 
 		}
 
 		commitMsg := fmt.Sprintf("push: 更新 %d 项", synced)
-		if commitErr := tx.CommitAndPush(commitMsg); commitErr != nil {
+		committed, commitErr := tx.CommitAndPush(commitMsg)
+		if commitErr != nil {
 			return commitErr
+		}
+		if !committed {
+			skippedReason = "无本地变更"
+			emit(reporter, EventInfo, "push.dec", "无本地变更，跳过 Dec 推送", nil)
+			return nil
 		}
 		pushedCount = synced + pruned
 		versionCommit = tx.CommitHash()

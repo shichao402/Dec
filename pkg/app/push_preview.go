@@ -52,7 +52,12 @@ func PreviewPushProjectAssets(projectRoot string) (*PushProjectAssetsPreview, er
 		return nil, err
 	}
 	preview.SecretsTargetCount = plan.Total
-	preview.ProjectSecretsName = plan.ProjectSecretsName
+	for _, target := range plan.Targets {
+		if target.Kind == secrets.SyncKindProject {
+			preview.ProjectSecretsName = target.Folder
+			break
+		}
+	}
 
 	candidate, hasChanges, skipped, decErr := previewDecPushChanges(context.Background(), projectRoot, projectConfig, nil)
 	if decErr != nil {

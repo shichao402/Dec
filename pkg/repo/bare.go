@@ -95,7 +95,7 @@ func FetchBare() error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 连接仓库")
+		return fmt.Errorf("仓库未连接\n\n请先到 Settings 页配置 Repo URL")
 	}
 
 	cmd := exec.Command("git", "--git-dir", bareDir, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
@@ -120,7 +120,7 @@ func GetBareRemoteURL() (string, error) {
 		return "", err
 	}
 	if !ok {
-		return "", fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 连接仓库")
+		return "", fmt.Errorf("仓库未连接\n\n请先到 Settings 页配置 Repo URL")
 	}
 	return getBareRemoteURL(bareDir, "origin")
 }

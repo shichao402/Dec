@@ -21,4 +21,5 @@
 
 | 编号 | 标题 | 状态 |
 |------|------|------|
-| [0001](0001-secrets-landing-path.md) | Secrets 落地路径：消费者路径即落地路径 | 已接受（文档先行，代码待改） |
+| [0001](0001-secrets-landing-path.md) | Secrets 落地路径：消费者路径即落地路径 | 已被 0002 取代 |
+| [0002](0002-secrets-synctarget-root.md) | Secrets SyncTarget：`.secrets` 同步根镜像 | 已接受（实施中） |

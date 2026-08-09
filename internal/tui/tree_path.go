@@ -23,7 +23,7 @@ func insertTreePath(root *TreeNode, segments []string, leaf *TreeNode) {
 			branch = &TreeNode{
 				ID:         id,
 				Label:      seg,
-				SelectMode: TreeSelectNone,
+				SelectMode: TreeSelectBranch, // 目录可勾选：选中=全选子项
 			}
 			parent.Children = append(parent.Children, branch)
 		}
@@ -65,8 +65,9 @@ func treeChildLess(a, b *TreeNode) bool {
 	if b == nil {
 		return true
 	}
-	aBranch := !treeNodeSelectable(a) && len(a.Children) > 0
-	bBranch := !treeNodeSelectable(b) && len(b.Children) > 0
+	// 有子节点的目录排在叶子前，便于先勾选父目录再看细节。
+	aBranch := len(a.Children) > 0
+	bBranch := len(b.Children) > 0
 	if aBranch != bBranch {
 		return aBranch
 	}
@@ -112,18 +113,17 @@ func decCachePathSegments(vault, itemType, name string) []string {
 	return append(segs, decCacheLeafName(itemType, name))
 }
 
-// secretsParentSegments 把一条 secret 放到 folder 分组下，再按落地路径的目录逐层展开。
-func secretsParentSegments(secretsBundle, landingPath string) []string {
-	rel := strings.TrimSpace(filepath.ToSlash(landingPath))
+// secretsParentSegments 按 Note 相对同步根的路径逐层展开目录。
+func secretsParentSegments(noteRel string) []string {
+	rel := strings.TrimSpace(strings.ReplaceAll(noteRel, "\\", "/"))
 	if rel == "" {
-		return []string{secretsBundle}
+		return nil
 	}
 	parts := strings.Split(rel, "/")
-	out := []string{secretsBundle}
-	if len(parts) > 1 {
-		out = append(out, parts[:len(parts)-1]...)
+	if len(parts) <= 1 {
+		return nil
 	}
-	return out
+	return parts[:len(parts)-1]
 }
 
 func secretsLeafName(landingPath string) string {

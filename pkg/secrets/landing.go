@@ -4,56 +4,86 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 )
 
-// LandingCandidate 是一条待落地的 secrets 文件及其 Bitwarden folder 归属。
-// Folder 用于在冲突报错时指出是哪两个分组撞了同一路径。
+// LandingCandidate 是一条待落地的 secrets 文件及其 SyncTarget 归属。
 type LandingCandidate struct {
-	Folder       string
-	RelativePath string
+	Folder       string // Bitwarden folder
+	LocalRoot    string // SyncTarget.LocalRoot
+	RelativePath string // 相对 LocalRoot（= Note 名）
 }
 
 // ValidateLandingPaths 在写盘之前校验全部落地路径。
 //
-// 必须先于写盘调用：note 名来自远端，未校验就落盘等于允许远端覆盖项目内任意文件
-// （包括 .dec/config.yaml）。校验涵盖非法路径、跨 folder 撞车、.dec/ 重叠、
-// 符号链接逃逸与 git 跟踪。
+// 校验：非法 note 路径、跨 folder 撞同一项目路径、逃出 LocalRoot、
+// 落入 .dec/、符号链接逃逸、git 跟踪、`.secrets/` 未被忽略。
 func ValidateLandingPaths(projectRoot string, candidates []LandingCandidate) error {
+	if err := ValidateSecretsRootIgnored(projectRoot); err != nil {
+		return err
+	}
+
 	owners := make(map[string]string, len(candidates))
-	paths := make([]string, 0, len(candidates))
+	projectRels := make([]string, 0, len(candidates))
 
 	for _, candidate := range candidates {
-		rel, err := normalizeProjectRelativePath(candidate.RelativePath)
+		noteRel, err := normalizeSyncRelPath(candidate.RelativePath)
 		if err != nil {
 			return err
 		}
+		root := strings.Trim(filepath.ToSlash(candidate.LocalRoot), "/")
+		if root == "" {
+			return fmt.Errorf("LandingCandidate.LocalRoot 不能为空")
+		}
+		projectRel := path.Join(root, noteRel)
 		folder := strings.TrimSpace(candidate.Folder)
-		if prev, ok := owners[rel]; ok {
+		if prev, ok := owners[projectRel]; ok {
 			if prev != folder {
 				return fmt.Errorf(
 					"secrets 落地路径冲突: %s 同时由 Bitwarden folder %q 与 %q 管理，请在 Bitwarden 中改掉其中一个 Note 名",
-					rel, prev, folder)
+					projectRel, prev, folder)
 			}
 			continue
 		}
-		owners[rel] = folder
-		paths = append(paths, rel)
+		owners[projectRel] = folder
+		projectRels = append(projectRels, projectRel)
+
+		if !strings.HasPrefix(projectRel, SecretsRootDir+"/") && projectRel != SecretsRootDir {
+			return fmt.Errorf("secrets 落地路径必须位于 %s/ 下: %s", SecretsRootDir, projectRel)
+		}
 	}
 
-	if err := ValidateNoOverlap(projectRoot, paths); err != nil {
+	if err := ValidateNoOverlap(projectRoot, projectRels); err != nil {
 		return err
 	}
-	if err := validateNoSymlinkEscape(projectRoot, paths); err != nil {
+	if err := validateNoSymlinkEscape(projectRoot, projectRels); err != nil {
 		return err
 	}
-	return validateNotGitTracked(projectRoot, paths)
+	return validateNotGitTracked(projectRoot, projectRels)
 }
 
-// validateNoSymlinkEscape 确认落地路径已存在的祖先目录解析后仍在项目内。
-// 消费者路径（如 .config/）可能是用户自建的符号链接，dec 不能顺着它写到项目外。
+// ValidateSecretsRootIgnored 要求 `.secrets/` 整树被 gitignore（若在 git 工作区内）。
+// 非 git 仓库或尚未初始化 .secrets 时直接通过。
+func ValidateSecretsRootIgnored(projectRoot string) error {
+	if !isGitWorkTree(projectRoot) {
+		return nil
+	}
+	// 确保规则存在后再校验，避免「先 pull 才写 gitignore」的鸡生蛋。
+	_ = EnsureSecretsGitignore(projectRoot)
+
+	probe := filepath.ToSlash(path.Join(SecretsRootDir, ".dec-ignore-probe"))
+	unignored := UnignoredLandingPaths(projectRoot, []string{probe})
+	if len(unignored) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"%s/ 未被 .gitignore 忽略；请在 .gitignore 中加入 /%s/ 后再同步 secrets",
+		SecretsRootDir, SecretsRootDir)
+}
+
 func validateNoSymlinkEscape(projectRoot string, relPaths []string) error {
 	root, err := filepath.EvalSymlinks(projectRoot)
 	if err != nil {
@@ -109,11 +139,6 @@ func isWithin(root, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// validateNotGitTracked 拒绝把 secrets 落到已被 git 跟踪的路径。
-//
-// 落地路径就是消费者路径（config/server.yaml、.env.local 等），在被管项目里很可能
-// 已经提交过。写进去会让密钥出现在工作区改动里，极易被误 commit。dec 不代改
-// .gitignore（有测试锁这个 invariant），所以这里只能硬失败，由用户先处理。
 func validateNotGitTracked(projectRoot string, relPaths []string) error {
 	tracked, err := gitTrackedPaths(projectRoot, relPaths)
 	if err != nil || len(tracked) == 0 {
@@ -122,8 +147,8 @@ func validateNotGitTracked(projectRoot string, relPaths []string) error {
 	sort.Strings(tracked)
 	return fmt.Errorf(
 		"以下 secrets 落地路径已被 git 跟踪，写入会把密钥暴露在版本库中: %s\n"+
-			"  请先 git rm --cached 这些文件并加入 .gitignore，再重新 pull",
-		strings.Join(tracked, ", "))
+			"  请先 git rm --cached 这些文件并确保 /%s/ 在 .gitignore 中，再重新 pull",
+		strings.Join(tracked, ", "), SecretsRootDir)
 }
 
 func gitTrackedPaths(projectRoot string, relPaths []string) ([]string, error) {
@@ -138,8 +163,7 @@ func gitTrackedPaths(projectRoot string, relPaths []string) ([]string, error) {
 	return splitNulTerminated(out), nil
 }
 
-// UnignoredLandingPaths 返回未被 .gitignore 忽略的落地路径，供调用方发出警告。
-// 与 validateNotGitTracked 不同，这里只是提醒：文件尚未被跟踪，加 .gitignore 即可。
+// UnignoredLandingPaths 返回未被 .gitignore 忽略的落地路径。
 func UnignoredLandingPaths(projectRoot string, relPaths []string) []string {
 	if len(relPaths) == 0 || !isGitWorkTree(projectRoot) {
 		return nil
@@ -150,7 +174,6 @@ func UnignoredLandingPaths(projectRoot string, relPaths []string) []string {
 	cmd.Stdin = strings.NewReader(strings.Join(relPaths, "\x00"))
 	out, err := cmd.Output()
 	if err != nil {
-		// 退出码 1 表示没有任何路径被忽略，不是故障；其他错误按“无法判断”处理。
 		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
 			return nil
 		}
@@ -158,13 +181,14 @@ func UnignoredLandingPaths(projectRoot string, relPaths []string) []string {
 
 	ignored := make(map[string]struct{})
 	for _, p := range splitNulTerminated(out) {
-		ignored[p] = struct{}{}
+		ignored[filepath.ToSlash(p)] = struct{}{}
 	}
 
 	var unignored []string
 	for _, rel := range relPaths {
-		if _, ok := ignored[rel]; !ok {
-			unignored = append(unignored, rel)
+		key := filepath.ToSlash(rel)
+		if _, ok := ignored[key]; !ok {
+			unignored = append(unignored, key)
 		}
 	}
 	sort.Strings(unignored)
@@ -186,7 +210,7 @@ func splitNulTerminated(out []byte) []string {
 	var result []string
 	for _, part := range strings.Split(string(out), "\x00") {
 		if part = strings.TrimSpace(part); part != "" {
-			result = append(result, part)
+			result = append(result, filepath.ToSlash(part))
 		}
 	}
 	return result

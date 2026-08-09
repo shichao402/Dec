@@ -260,14 +260,15 @@ func snapshotDeleteModel(width int) model {
 			TreeRoot: ".dec", TreeBranch: "default", GroupOrder: 0, GroupTitle: "default",
 		},
 		{
-			Kind: app.DeleteKindSecret, Label: "[secret] .config/mise/conf.d/vikunja.toml",
-			SecretPath: ".config/mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
-			TreeRoot: "secrets", TreeBranch: "vikunja_workflow", GroupOrder: 1, GroupTitle: "vikunja_workflow",
+			Kind: app.DeleteKindSecret, Label: "[secret] env/vikunja.env",
+			SecretPath: "env/vikunja.env", LocalRoot: ".secrets/bundles/vikunja", SecretsBundle: "vikunja",
+			TreeRoot: "secrets", TreeBranch: "vikunja", GroupOrder: 1, GroupTitle: "vikunja (bundle)",
 		},
 		{
 			Kind: app.DeleteKindSSHKey, Label: "[ssh] deploy",
-			SSHKeyName: "deploy", DecBundleName: "vikunja", SecretsBundle: "vikunja_workflow",
-			TreeRoot: "secrets", TreeBranch: "vikunja_workflow", GroupOrder: 1, GroupTitle: "vikunja_workflow",
+			SSHKeyName: "deploy", DecBundleName: "vikunja", SecretsBundle: "vikunja",
+			LocalRoot: ".secrets/bundles/vikunja",
+			TreeRoot: "secrets", TreeBranch: "vikunja", GroupOrder: 1, GroupTitle: "vikunja (bundle)",
 		},
 		{
 			Kind: app.DeleteKindBundle, Label: "[bundle] vikunja / vikunja · 2 成员", BundleName: "vikunja", Vault: "vikunja",

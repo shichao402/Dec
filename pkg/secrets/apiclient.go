@@ -84,7 +84,7 @@ func (c *APIClient) PullBundle(ctx context.Context, req PullBundleRequest) (*Pul
 		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
 
-	folderID, err := c.findFolderID(ctx, FolderNameFor(req.Binding, req.DecBundleName), userKey)
+	folderID, err := c.findFolderID(ctx, folderNameForRequest(req.Target.Folder, req.Binding, req.DecBundleName), userKey)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
 
-	folderName := FolderNameFor(req.Binding, req.DecBundleName)
+	folderName := folderNameForRequest(req.Target.Folder, req.Binding, req.DecBundleName)
 	folderID, err := c.findFolderID(ctx, folderName, userKey)
 	if err != nil {
 		return nil, err

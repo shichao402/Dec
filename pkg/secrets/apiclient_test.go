@@ -20,7 +20,7 @@ func TestAPIClient_PushBundle_CreateSecureNotePayload(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/folders":
 			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{
-				Data: []bwFolder{{ID: "f1", Name: "vikunja_workflow"}},
+				Data: []bwFolder{{ID: "f1", Name: "vikunja"}},
 			})
 		case "/api/ciphers":
 			switch r.Method {
@@ -55,11 +55,11 @@ func TestAPIClient_PushBundle_CreateSecureNotePayload(t *testing.T) {
 	SetUserKey(userKey)
 	t.Cleanup(ClearSession)
 
-	noteName := "mise/conf.d/vikunja.toml"
-	content := "[env]\nTOKEN=abc\n"
+	noteName := "env/vikunja.env"
+	content := "VIKUNJA_API_TOKEN=abc\n"
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja_workflow"},
+		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
 	}, []SecureNote{{RelativePath: noteName, Content: content}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
@@ -118,12 +118,12 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacyName := ".config/mise/conf.d/vikunja.toml"
+	legacyName := "env/vikunja.env"
 	encName, err := encryptVaultString(legacyName, itemKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	encNotes, err := encryptVaultString("[env]\nOLD=1", itemKey)
+	encNotes, err := encryptVaultString("VIKUNJA_API_TOKEN=old\n", itemKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/folders":
 			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{
-				Data: []bwFolder{{ID: "f1", Name: "vikunja_workflow"}},
+				Data: []bwFolder{{ID: "f1", Name: "vikunja"}},
 			})
 		case r.URL.Path == "/api/ciphers" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{Data: ciphers})
@@ -182,10 +182,10 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 	SetUserKey(userKey)
 	t.Cleanup(ClearSession)
 
-	newContent := "[env]\nNEW=1"
+	newContent := "VIKUNJA_API_TOKEN=new\n"
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja_workflow"},
+		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
 	}, []SecureNote{{RelativePath: legacyName, Content: newContent}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
@@ -200,7 +200,7 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 
 	pullResult, err := client.PullBundle(context.Background(), PullBundleRequest{
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja_workflow"},
+		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
 	})
 	if err != nil {
 		t.Fatalf("PullBundle() after update = %v", err)
@@ -231,14 +231,14 @@ func TestAPIClient_PushBundle_UpdateMatchesNameExactly(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/folders":
 			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{
-				Data: []bwFolder{{ID: "f1", Name: "vikunja_workflow"}},
+				Data: []bwFolder{{ID: "f1", Name: "vikunja"}},
 			})
 		case r.URL.Path == "/api/ciphers" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{
 				Data: []bwCipher{{
 					ID:       "cipher-legacy",
 					Type:     cipherTypeSecureNote,
-					Name:     ".config/mise/conf.d/vikunja.toml",
+					Name:     "env/vikunja.env",
 					Notes:    "[env]\nOLD=1",
 					FolderID: "f1",
 				}},
@@ -271,8 +271,8 @@ func TestAPIClient_PushBundle_UpdateMatchesNameExactly(t *testing.T) {
 
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja_workflow"},
-	}, []SecureNote{{RelativePath: ".config/mise/conf.d/vikunja.toml", Content: "[env]\nNEW=1"}})
+		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
+	}, []SecureNote{{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=new\n"}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
 	}
@@ -315,7 +315,7 @@ func TestAPIClient_PullBundle_DecryptsSSHKey(t *testing.T) {
 		}
 		return out
 	}
-	encFolder, err := encryptVaultString("vikunja_workflow", userKey)
+	encFolder, err := encryptVaultString("vikunja", userKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestAPIClient_PullBundle_DecryptsSSHKey(t *testing.T) {
 				Data: []bwCipher{
 					{
 						ID: "note-1", Type: cipherTypeSecureNote, FolderID: "f1", Key: encItemKey,
-						Name: mustEncItem(".config/mise/conf.d/vikunja.toml"), Notes: mustEncItem("[env]\nX=1\n"),
+						Name: mustEncItem("env/vikunja.env"), Notes: mustEncItem("VIKUNJA_API_TOKEN=abc\n"),
 					},
 					{
 						ID: "ssh-1", Type: cipherTypeSSHKey, FolderID: "f1", Key: encItemKey,
@@ -361,7 +361,7 @@ func TestAPIClient_PullBundle_DecryptsSSHKey(t *testing.T) {
 
 	result, err := client.PullBundle(context.Background(), PullBundleRequest{
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja_workflow"},
+		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
 	})
 	if err != nil {
 		t.Fatalf("PullBundle() = %v", err)
@@ -383,7 +383,7 @@ func TestAPIClient_PullBundle_DecryptsSSHKey(t *testing.T) {
 		t.Fatalf("fingerprint = %q", key.KeyFingerprint)
 	}
 
-	listed, err := client.ListFolderSSHKeys(context.Background(), "vikunja_workflow")
+	listed, err := client.ListFolderSSHKeys(context.Background(), "vikunja")
 	if err != nil {
 		t.Fatal(err)
 	}

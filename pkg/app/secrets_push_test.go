@@ -46,13 +46,13 @@ func TestPushSecretsBundles_UsesDefaultServerWithoutConfigFile(t *testing.T) {
 	}
 }
 
-// push 按远端 folder 的 note 列表去读本地对应路径。
-func TestPushSecretsBundles_UpdatesFromConsumerPaths(t *testing.T) {
+// push 递归扫描 .secrets 同步根并推送到远端 folder。
+func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"vikunja_workflow": {{RelativePath: ".config/mise/conf.d/vikunja.toml", Content: "[env]\nOLD=1\n"}},
-		"Dec":              {{RelativePath: "config/private.yaml", Content: "old"}},
+		"vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=old\n"}},
+		"Dec":     {{RelativePath: "config/private.yaml", Content: "old"}},
 	}}
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
@@ -66,8 +66,8 @@ func TestPushSecretsBundles_UpdatesFromConsumerPaths(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".config/mise/conf.d/vikunja.toml", "[env]\nX=1\n")
-	writeProjectFileForPushTest(t, projectRoot, "config/private.yaml", "token: abc\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/project/config/private.yaml", "token: abc\n")
 
 	result, err := PushSecretsBundles(context.Background(), projectRoot, nil)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestPushSecretsBundles_UpdatesFromConsumerPaths(t *testing.T) {
 	if result.CreatedCount != 0 || result.UpdatedCount != 2 {
 		t.Fatalf("result = %#v, 期望 2 条更新", result)
 	}
-	if got := stub.NotesByFolder["vikunja_workflow"][0].Content; got != "[env]\nX=1\n" {
+	if got := stub.NotesByFolder["vikunja"][0].Content; got != "VIKUNJA_API_TOKEN=abc\n" {
 		t.Fatalf("bundle secret 未被本地覆盖: %q", got)
 	}
 	if got := stub.NotesByFolder["Dec"][0].Content; got != "token: abc\n" {

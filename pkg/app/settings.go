@@ -243,7 +243,7 @@ func resolveRepoURLForGlobalSettings(inputRepoURL string, globalConfig *types.Gl
 		return "", fmt.Errorf("检查仓库连接失败: %w", err)
 	}
 	if !connected {
-		return "", fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 先连接你的仓库")
+		return "", fmt.Errorf("仓库未连接\n\n请先到 Settings 页配置 Repo URL")
 	}
 
 	remoteURL, err := repo.GetBareRemoteURL()
@@ -251,7 +251,7 @@ func resolveRepoURLForGlobalSettings(inputRepoURL string, globalConfig *types.Gl
 		return "", fmt.Errorf("读取当前远端失败: %w", err)
 	}
 	if strings.TrimSpace(remoteURL) == "" {
-		return "", fmt.Errorf("当前仓库远端为空，请先运行 dec config repo <url>")
+		return "", fmt.Errorf("当前仓库远端为空，请先到 Settings 页配置 Repo URL")
 	}
 	return remoteURL, nil
 }

@@ -22,7 +22,7 @@ Dec 是一个以 **TUI** 为第一交互入口的个人 AI 资产管理工具，
 | **Project** | Git Vault `projects/<name>.yaml` | 声明项目启用哪些 bundle、默认 IDE 等；跨机器共享 |
 | **Bundle** | Git Vault `bundles/<name>/` + Bitwarden secrets bundle | 公开资产与私密文件的同构组织单位 |
 
-公开资产以 **bundle** 组织在 Git Vault，落地在 **`.dec/`**；私密文件以 **同名 secrets bundle** 同构存放在 Bitwarden——Secure Note / mise env 落地 **项目根相对路径**，SSH Key 落地 **机器级 `~/.ssh/`**。TUI **Run** 页一次 pull 先解析 project 的 bundle 列表，再逐 bundle 拉 Dec Git bundle、自动拉 secrets bundle，两边 **独立落地**（敏感文件不进 `.dec/cache/`），且 **`.dec/` 树与项目根敏感路径不得相交**。
+公开资产以 **bundle** 组织在 Git Vault，落地在 **`.dec/`**；私密文件以 **SyncTarget**（`.secrets/project/` 或 `.secrets/bundles/<name>/`）同构存放在 Bitwarden，SSH Key 落地 **机器级 `~/.ssh/`**。TUI **Run** 页一次 pull 先解析 project 的 bundle 列表，再逐 bundle 拉 Dec Git bundle、自动拉 secrets bundle，两边 **独立落地**（敏感文件不进 `.dec/cache/`），且 **`.dec/` 树与 `.secrets/` 树不得相交**。详见 [0002](decisions/0002-secrets-synctarget-root.md)。
 
 用户操作通过 TUI Shell（`internal/tui/`）完成，业务逻辑在 `pkg/app/`：
 
@@ -43,12 +43,14 @@ Dec 是一个以 **TUI** 为第一交互入口的个人 AI 资产管理工具，
 ```text
 Git Vault（Dec 仓库）          Bitwarden                    本地工作区
 ─────────────────────          ─────────                    ──────────
-projects/my-app.yaml           secrets_bundle: vikunja_workflow   my-app/
-  bundles: [vikunja]             Secure Note → .config/       ├── .dec/
+projects/my-app.yaml           folder: vikunja（默认同名）     my-app/
+  bundles: [vikunja]             Secure Note → .secrets/       ├── .dec/
 bundles/vikunja/                 SSH Key → ~/.ssh/            │   ├── config.yaml  ← project_name
   skills/...                                                  │   └── cache/vikunja/
-bundles/default/                                              ├── .cursor/...
-                                                              └── .config/mise/...
+bundles/default/                                              ├── .secrets/bundles/vikunja/
+                                                              │   └── env/vikunja.env
+                                                              └── .cursor/...
+                                                              └── .secrets/...
 ```
 
 ## Project 层
@@ -165,8 +167,7 @@ flowchart TD
     └── device.json          # deviceIdentifier + 2FA remember 令牌（无密码、无 session）
 ```
 
-secrets 没有本地同步状态文件：待推文件由**远端 folder 的 note 列表**实时枚举，
-不留可与远端漂移的本地索引。
+secrets 没有本地同步状态文件：push 时**递归扫描** `.secrets/` 同步根；远端 note 列表用于 `MissingLocal` 报告。
 
 若设置了 `DEC_HOME`，上述目录位于 `DEC_HOME` 下。
 
@@ -181,7 +182,10 @@ secrets 没有本地同步状态文件：待推文件由**远端 folder 的 note
 │   ├── vars.yaml            # 项目变量定义（主文件，覆盖 vars.d/）
 │   └── vars.d/              # 可选：拆分的变量片段 *.yaml / *.yml
 ├── .cursor/                 # IDE 渲染产物
-└── .config/mise/conf.d/     # Bitwarden secrets 落地（不进 .dec/）
+└── .secrets/                # Bitwarden secrets 落地（须 .gitignore；不进 .dec/）
+    ├── project/             # project 级 SyncTarget
+    └── bundles/
+        └── <name>/          # bundle 级 SyncTarget（如 env/*.env）
 ```
 
 `.dec/` 适合纳入版本控制：
@@ -218,26 +222,27 @@ Dec 通过扫描 `projects/` 与 `bundles/` 发现 project 与资产，不依赖
 
 ### Bitwarden secrets bundle 结构
 
-与 Dec bundle **同构绑定**；project 启用的每个 bundle 在 pull 时成对拉取 Dec + secrets。Secure Note **名称** = 敏感文件在项目根的 **目标相对路径**：
+与 Dec bundle **同构绑定**；project 启用的每个 bundle 在 pull 时成对拉取 Dec + secrets。Secure Note **名称** = 相对 **SyncTarget.LocalRoot** 的路径：
 
 ```text
-Bitwarden folder: vikunja_workflow（绑定 Dec bundle: vikunja）
+Bitwarden folder: vikunja（默认同 Dec bundle 名）
 
-Secure Note: .config/mise/conf.d/vikunja.toml
-  [env]
-  VIKUNJA_URL="..."
-  VIKUNJA_API_TOKEN="..."
+Secure Note: env/vikunja.env
+  VIKUNJA_URL=https://vikunja.example.com
+  VIKUNJA_API_TOKEN=...
 
 Pull 后落地:
-  <workspace>/.config/mise/conf.d/vikunja.toml   # 项目根，不进 .dec/
+  <workspace>/.secrets/bundles/vikunja/env/vikunja.env   # 不进 .dec/
 ```
+
+环境变量由 hidden `dec exec --bundle vikunja` 读取 `env/*.env` 注入子进程。
 
 ### SSH Key（机器级落地）
 
 OpenSSH / Git 默认只认 **机器级** `~/.ssh/`，SSH 私钥 **不进项目根**（无 `keys/`、无项目级 `.ssh/config`）。
 
 ```text
-Bitwarden folder: vikunja_workflow
+Bitwarden folder: vikunja
   [SSH Key] deploy
     Name: deploy
     Notes: vikunja.example.com   # 可选；有内容时一行一个 host
@@ -253,7 +258,7 @@ Pull 后落地:
 - `known_hosts`：Dec 不主动写入；首次连接由 OpenSSH 提示或由用户维护。
 - 落地路径由 Bitwarden Item Name 推导（`~/.ssh/dec_<bundle>_<name>`），不记本地索引。
 
-**`.dec/` 树** 与 **项目根** 敏感落地路径 **不得相交**；冲突时 pull 报错。SSH 落在 `~/.ssh/`，不参与项目根零重叠校验。详见 [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md)。
+**`.dec/` 树** 与 **`.secrets/` 树** **不得相交**；冲突时 pull 报错。SSH 落在 `~/.ssh/`，不参与项目内零重叠校验。详见 [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md) 与 [0002](decisions/0002-secrets-synctarget-root.md)。
 
 ### 端到端示例：vikunja project
 
@@ -277,21 +282,20 @@ bundles/vikunja/
 ├── bundle.yaml
 ├── skills/vikunja-workflow/SKILL.md
 ├── rules/vikunja-integration.mdc
-└── mcp/vikunja-mcp.json          # command: mise，无 token 占位
+└── mcp/vikunja-mcp.json          # command: dec exec，无 token 占位
 ```
 
-**Bitwarden — secrets bundle**（folder `vikunja_workflow`，绑定 Dec bundle `vikunja`）：
+**Bitwarden — secrets bundle**（folder `vikunja`，默认同 Dec bundle 名）：
 
 ```text
-Secure Note: .config/mise/conf.d/vikunja.toml
-  [env]
-  VIKUNJA_URL="https://vikunja.example.com"
-  VIKUNJA_API_TOKEN="..."
+Secure Note: env/vikunja.env
+  VIKUNJA_URL=https://vikunja.example.com
+  VIKUNJA_API_TOKEN=...
 
 [SSH Key] deploy  Notes: vikunja.example.com
 ```
 
-**Pull 后本地三处目录**（存储根分离，零路径重叠）：
+**Pull 后本地目录**（存储根分离，零路径重叠）：
 
 ```text
 my-app/
@@ -305,8 +309,9 @@ my-app/
 │   ├── skills/dec-vikunja-workflow/
 │   ├── rules/dec-vikunja-integration.mdc
 │   └── mcp.json                  # dec-vikunja-mcp 条目
-└── .config/mise/conf.d/
-    └── vikunja.toml              # Bitwarden Secure Note 落地，不进 .dec/
+└── .secrets/
+    └── bundles/vikunja/
+        └── env/vikunja.env       # Bitwarden Secure Note 落地
 
 机器级（不进项目根）：
   ~/.ssh/dec_vikunja_deploy
@@ -377,8 +382,8 @@ TUI **Settings** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 1. 解析 `project_name` → vault `projects/<name>.yaml`（或使用本地 `enabled_bundles`）
 2. 对每个 enabled bundle：拉 Dec Git bundle → `.dec/cache/<bundle>/`
-3. 自动拉 Bitwarden secrets bundle（同名或 `BundleBinding`）→ Secure Note **项目根相对路径**；SSH Key Item → **`~/.ssh/`** + Dec 管理 config 区块
-4. 零重叠校验（`.dec/` vs 项目根敏感落地路径）
+3. 自动拉 Bitwarden secrets（各 SyncTarget）→ Secure Note **`.secrets/` 同步根**；SSH Key Item → **`~/.ssh/`** + Dec 管理 config 区块
+4. 零重叠校验（`.dec/` vs `.secrets/`）
 5. 从 cache 渲染安装到 IDE 目录 + 非敏感 vars 占位符替换
 6. 记录 commit 到 `.dec/.version`
 
@@ -418,7 +423,7 @@ pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感
 3. `.dec/vars.d/*.yaml`（按文件名字典序合并；主文件覆盖同名键）
 4. `~/.dec/local/vars.yaml` 中的 `vars`
 
-私密 env（如 `VIKUNJA_API_TOKEN`）由 mise 从 `.config/mise/conf.d/*.toml` 读取，**不通过**占位符替换注入。未定义占位符保留原样并通过 Reporter 提示。
+私密 env（如 `VIKUNJA_API_TOKEN`）由 hidden `dec exec` 从 `.secrets/bundles/<name>/env/*.env` 注入子进程，**不通过**占位符替换注入。未定义占位符保留原样并通过 Reporter 提示。
 
 ## 模块划分
 
@@ -436,7 +441,7 @@ pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感
 
 - `project.go`：project init、项目配置写入
 - `overview.go`：TUI 首页概览
-- `assets.go`：Assets 页资产选择与持久化
+- `assets.go`：Bundles 页资产选择与持久化
 - `operations.go`：pull/push/remove 编排
 - `settings.go`：Settings 页仓库连接与全局配置
 - `vault_bundle.go`：bundle 解析与合成
@@ -504,11 +509,12 @@ Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真�
 
 ### Secrets Bundle 同构
 
-- 存储根分离：Dec → `.dec/`；Secure Note / mise env → 项目根；SSH Key → `~/.ssh/`
-- Pull：按 project bundle 列表 → Dec Git bundle → Bitwarden secrets bundle → 零重叠校验（项目根）→ 独立落地 + IDE 渲染
-- MCP 通过 mise 启动；env 由 `.config/mise/conf.d/*.toml` 提供
+- 存储根分离：Dec → `.dec/`；Secure Note → `.secrets/`；SSH Key → `~/.ssh/`
+- SyncTarget：Bitwarden folder ↔ `.secrets/project` 或 `.secrets/bundles/<name>/`；Note 名 = 相对同步根路径
+- Pull：按 project bundle 列表 → Dec Git bundle → Bitwarden → 零重叠校验 → 独立落地 + IDE 渲染
+- MCP 经 hidden `dec exec` 注入 `env/*.env`；不再依赖 mise 落地路径
 - Schema：`Project`（`schema/dec/v1/projects.proto`）、`BundleBinding`、`SecretsConfig`（`schema/secrets/v1/`）
-- TUI：Run 页一次 pull；Settings 页配置 Bitwarden；Home 页 project 初始化
+- TUI：Run 页一次 pull；Bundles 页选 bundle；Settings 页配置 Bitwarden
 
 ## 已知限制
 

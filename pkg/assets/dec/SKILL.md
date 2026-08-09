@@ -84,7 +84,7 @@ Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skill
 
 | 操作 | 命令 | 说明 |
 |------|------|------|
-| 连接仓库 | `dec config repo <url>` | 连接个人仓库（GitHub URL） |
+| 连接仓库 | TUI Settings 页 | 配置 Repo URL |
 | 配置全局 IDE | `dec config global` | 为本机 IDE 安装 Dec 内置 Skills，并创建 `~/.dec/local/vars.yaml` 模板 |
 | 初始化项目 | `dec config init` | 生成项目配置和 `.dec/vars.yaml` 模板，选择启用的资产 |
 | 查看配置 | `dec config show` | 显示全局和项目配置 |
@@ -204,7 +204,7 @@ Dec 仓库中的 MCP 资产仍然保存为 JSON 片段；部署到 Cursor / Code
 
 ### "仓库未连接"
 
-运行 `dec config repo <url>` 连接你的仓库。
+在 TUI **Settings** 页配置仓库 URL。
 
 ### "找不到资产"
 

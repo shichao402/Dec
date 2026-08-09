@@ -56,4 +56,4 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 
 - `pkg/secrets/unlock/`：本地 HTTP 服务、浏览器打开、unlock 回调
 - `pkg/secrets/`：进程内 session 缓存与 Bitwarden API 客户端
-- `internal/tui/` Run 页：pull 流程在 secrets 步骤前检查/等待 session；Note 内容落地到 **项目根相对路径**（不进 `.dec/cache/`）
+- `internal/tui/` Run 页：pull 流程在 secrets 步骤前检查/等待 session；Note 内容落地到 **`.secrets/` SyncTarget 根**（不进 `.dec/cache/`）

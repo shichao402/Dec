@@ -2,6 +2,76 @@ package tui
 
 import "testing"
 
+func TestTreeList_CollapsedSubtreeKeepsSelectIndexAlignment(t *testing.T) {
+	roots := []*TreeNode{
+		{
+			ID: "root", Label: ".dec", SelectMode: TreeSelectBranch,
+			Children: []*TreeNode{
+				{
+					ID: "tencent", Label: "tencent-cloud", SelectMode: TreeSelectBranch,
+					Children: []*TreeNode{
+						{ID: "t-leaf", Label: "skill/t", SelectMode: TreeSelectLeaf, Payload: 0},
+					},
+				},
+				{
+					ID: "default", Label: "default", SelectMode: TreeSelectBranch,
+					Children: []*TreeNode{
+						{ID: "d-leaf1", Label: "skill/a", SelectMode: TreeSelectLeaf, Payload: 1},
+						{ID: "d-leaf2", Label: "skill/b", SelectMode: TreeSelectLeaf, Payload: 2},
+					},
+				},
+			},
+		},
+	}
+	tree := &TreeList{Roots: roots}
+	tree.DefaultExpandAll()
+	// 折叠 tencent-cloud（模拟截图：旁系折叠时勾选 default）
+	tree.Expanded["tencent"] = false
+
+	rows := tree.VisibleRows()
+	var leaf1Row TreeRow
+	foundDefault, foundLeaf := false, false
+	for _, row := range rows {
+		if row.Node.ID == "default" {
+			foundDefault = true
+		}
+		if row.Node.ID == "d-leaf1" {
+			leaf1Row, foundLeaf = row, true
+		}
+	}
+	if !foundDefault || !foundLeaf {
+		t.Fatalf("应能看到 default 与其子叶子, rows=%d", len(rows))
+	}
+	// selectable 顺序：root, tencent, t-leaf, default, d-leaf1, d-leaf2
+	if leaf1Row.SelectIndex != 4 {
+		t.Fatalf("折叠旁系后 d-leaf1 SelectIndex = %d, want 4（避免与 t-leaf 抢 0）", leaf1Row.SelectIndex)
+	}
+
+	tree.Cursor = indexOfVisibleRow(rows, "d-leaf1")
+	tree.ToggleSelectAtCursor()
+	if !tree.IsSelected(4) {
+		t.Fatal("应勾选全局下标 4，而不是 0")
+	}
+	if tree.IsSelected(2) {
+		t.Fatal("不应误勾选折叠分支下的 t-leaf")
+	}
+
+	tree.Cursor = indexOfVisibleRow(rows, "default")
+	tree.ToggleSelectAtCursor()
+	if !tree.IsSelected(4) || !tree.IsSelected(5) {
+		t.Fatalf("勾选 default 应级联全选子叶子, selected=%v", tree.Selected)
+	}
+}
+
+func indexOfVisibleRow(rows []TreeRow, id string) int {
+	for i, row := range rows {
+		if row.Node.ID == id {
+			return i
+		}
+	}
+	return 0
+}
+
 func TestTreeList_ExpandCollapseAndSelect(t *testing.T) {
 	roots := []*TreeNode{
 		{

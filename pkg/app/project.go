@@ -39,7 +39,7 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 		return nil, fmt.Errorf("检查仓库连接失败: %w", err)
 	}
 	if !connected {
-		return nil, fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 先连接你的仓库")
+		return nil, fmt.Errorf("仓库未连接\n\n请先到 Settings 页配置 Repo URL")
 	}
 
 	mgr := config.NewProjectConfigManager(projectRoot)
@@ -127,6 +127,44 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 	prepared.VarsCreated = varsCreated
 
 	emit(reporter, EventInfo, "project.init", "项目配置准备完成", &Progress{Phase: "write", Current: 2, Total: 2})
+	return prepared, nil
+}
+
+// EnsureLocalProjectConfig 在无 vault 匹配时创建最小本地 .dec/config.yaml（basename 作 project_name）。
+// 已存在配置时幂等返回，不覆盖 project_name 或 enabled_bundles。
+func EnsureLocalProjectConfig(projectRoot string, reporter Reporter) (*ConfigInitPreparation, error) {
+	reporter = defaultReporter(reporter)
+	mgr := config.NewProjectConfigManager(projectRoot)
+	prepared := &ConfigInitPreparation{
+		ProjectRoot: projectRoot,
+		ConfigPath:  filepath.Join(mgr.GetDecDir(), "config.yaml"),
+		VarsPath:    mgr.GetVarsPath(),
+	}
+	if mgr.Exists() {
+		prepared.ExistingConfig = true
+		loaded, err := mgr.LoadProjectConfig()
+		if err != nil {
+			return nil, err
+		}
+		prepared.ProjectConfig = loaded
+		emit(reporter, EventInfo, "project.local", "本地 project 配置已存在", nil)
+		return prepared, nil
+	}
+	projectName := ""
+	if base := strings.TrimSpace(filepath.Base(projectRoot)); base != "" && base != "." && base != "/" {
+		projectName = base
+	}
+	prepared.ProjectConfig = &types.ProjectConfig{ProjectName: projectName}
+	emit(reporter, EventInfo, "project.local", fmt.Sprintf("生成本地 project %q", projectName), &Progress{Phase: "write", Current: 1, Total: 2})
+	if err := mgr.SaveProjectConfig(prepared.ProjectConfig); err != nil {
+		return nil, fmt.Errorf("写入配置失败: %w", err)
+	}
+	varsCreated, err := mgr.EnsureVarsConfigTemplate()
+	if err != nil {
+		return nil, fmt.Errorf("写入变量定义模板失败: %w", err)
+	}
+	prepared.VarsCreated = varsCreated
+	emit(reporter, EventInfo, "project.local", "本地 project 配置已创建", &Progress{Phase: "write", Current: 2, Total: 2})
 	return prepared, nil
 }
 

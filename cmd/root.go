@@ -149,7 +149,7 @@ func isInternalCLIArgs(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "__freshness-check", "mcp":
+	case "__freshness-check", "mcp", "exec":
 		return true
 	default:
 		return false

@@ -1,8 +1,10 @@
 # 0001 — Secrets 落地路径：消费者路径即落地路径
 
-- **状态**：已实施
+- **状态**：已被 [0002](0002-secrets-synctarget-root.md) 取代
 - **日期**：2026-07-27
 - **影响范围**：`pkg/secrets/`（`paths.go` 已删、新增 `landing.go` / `remote.go`）、`pkg/app/secrets_pull.go`、`pkg/app/secrets_push.go`、`pkg/app/delete.go`、`internal/tui/`、`Documents/BUNDLE-SECRETS-MODEL.md`、`schema/secrets/v1/`（`state.proto` 已删）
+
+> **取代说明（2026-08-09）**：本决策把 Note 名定为项目根消费者路径，使 push 无法安全枚举本地文件，且密文散落。0002 改为 `.secrets` SyncTarget 镜像 + `dec exec` 注入。下文保留作历史。
 
 ## 问题
 

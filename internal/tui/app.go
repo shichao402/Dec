@@ -9,17 +9,13 @@ import (
 // RunOptions 控制 TUI 启动行为。
 type RunOptions struct {
 	// ConfigInitMode 为 true 时直接进入 Bundles 页做 bundle 选择，保存后退出。
+	// 仅供内部测试；用户面入口已移除。
 	ConfigInitMode bool
 }
 
 // Run 启动默认 TUI Shell。
 func Run(projectRoot, currentVersion string, input io.Reader, output io.Writer) error {
 	return runWithOptions(projectRoot, currentVersion, RunOptions{}, input, output)
-}
-
-// RunConfigInit 启动项目配置初始化 TUI：聚焦 bundle 勾选，保存后退出。
-func RunConfigInit(projectRoot, currentVersion string, input io.Reader, output io.Writer) error {
-	return runWithOptions(projectRoot, currentVersion, RunOptions{ConfigInitMode: true}, input, output)
 }
 
 func runWithOptions(projectRoot, currentVersion string, opts RunOptions, input io.Reader, output io.Writer) error {

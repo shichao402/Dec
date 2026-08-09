@@ -3,14 +3,14 @@
 │ Home           │╰────────────────────────────────────────────────────────────────────────────────╯
 │  Bundles       │╭────────────────────────────────────────────────────────────────────────────────╮
 │  Project       ││ 下一步                                                                         │
-│  Run           ││ 可以切到 Run 页执行 pull                                                       │
-│  Delete        ││ 项目状态                                                                       │
-│  Settings      ││ 项目名: dec-project                                                            │
+│  Run           ││ Settings 连仓库 → Home 确认/生成本地 project → Bundles 勾选 → Run              │
+│  Delete        ││ pull（当前：Run 页 pull）                                                      │
+│  Settings      ││ 项目状态                                                                       │
+│                ││ 项目名: dec-project                                                            │
 │                ││ 仓库: 已连接 · git@github.com:demo/dec.git                                     │
 │                ││ 配置: 已初始化 · 变量: 已存在                                                  │
 │                ││ Vault bundle: 5 个 | 已启用: 2 个                                              │
 │                ││ IDE: codex, cursor · 编辑器: code --wait                                       │
-│                ││                                                                                │
 │                ││                                                                                │
 │                ││                                                                                │
 │                ││                                                                                │

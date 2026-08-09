@@ -10,9 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ProjectSecretsDecBundleName 是 project 级 secrets 在内部 API 中使用的占位 Dec bundle 名。
-const ProjectSecretsDecBundleName = "_project"
-
 // DefaultServerURL 为 Bitwarden 美国公有云 vault 地址。
 const DefaultServerURL = "https://vault.bitwarden.com"
 
@@ -22,6 +19,8 @@ const secretsConfigHeader = `# Bitwarden secrets 连接配置
 #   欧盟公有云:         https://vault.bitwarden.eu
 #   自托管示例:         https://vault.example.com
 # email: 登录邮箱（web unlock 成功后自动写入）
+# project_secrets: 可选；project 级 Bitwarden folder 名，默认 = project_name
+# bundles: 可选显式别名绑定；默认同名，一般不需要
 
 `
 
@@ -116,7 +115,6 @@ func (c *Config) CanAuthenticate() bool {
 }
 
 // SaveEmail 将 email 写回 ~/.dec/secrets/config.yaml，保留其他字段。
-// 占位邮箱（如 user@example.com）不会写入，避免测试或 web unlock 误覆盖真实配置。
 func SaveEmail(email string) error {
 	email = strings.TrimSpace(email)
 	if isPlaceholderEmail(email) {
@@ -130,18 +128,12 @@ func SaveEmail(email string) error {
 	return SaveConfig(cfg)
 }
 
-// defaultSecretsBundleName 返回未显式配置时的默认 Bitwarden folder 名。
-// 少数 Dec bundle 与 secrets bundle 并不同名（如 vikunja ↔ vikunja_workflow）。
+// defaultSecretsBundleName 返回未显式配置时的默认 Bitwarden folder 名（严格同名）。
 func defaultSecretsBundleName(decBundleName string) string {
-	switch strings.TrimSpace(decBundleName) {
-	case "vikunja":
-		return "vikunja_workflow"
-	default:
-		return decBundleName
-	}
+	return strings.TrimSpace(decBundleName)
 }
 
-// ResolveBinding 解析 Dec bundle 对应的 secrets 绑定；未显式配置时使用 defaultSecretsBundleName。
+// ResolveBinding 解析 Dec bundle 对应的 secrets 绑定；未显式配置时同名。
 func (c *Config) ResolveBinding(decBundleName string) BundleBinding {
 	for _, b := range c.Bundles {
 		if b.DecBundleName == decBundleName {
@@ -151,7 +143,7 @@ func (c *Config) ResolveBinding(decBundleName string) BundleBinding {
 	return normalizeBinding(decBundleName, BundleBinding{DecBundleName: decBundleName})
 }
 
-// ProjectSecretsName 返回显式配置的 project secrets 名（即 Bitwarden folder 名）。
+// ProjectSecretsName 返回显式配置的 project secrets folder 名。
 func (c *Config) ProjectSecretsName() string {
 	if c == nil {
 		return ""
@@ -159,7 +151,7 @@ func (c *Config) ProjectSecretsName() string {
 	return strings.TrimSpace(c.ProjectSecrets)
 }
 
-// ResolveProjectSecrets 解析 project 级 secrets 同步目标。
+// ResolveProjectSecrets 解析 project 级 secrets folder。
 // project_secrets 未设时回退为 projectName；两者皆空时 enabled=false。
 func (c *Config) ResolveProjectSecrets(projectName string) (name string, enabled bool) {
 	if explicit := c.ProjectSecretsName(); explicit != "" {
@@ -178,6 +170,54 @@ func ProjectSecretsBinding(secretsName string) BundleBinding {
 		DecBundleName:     ProjectSecretsDecBundleName,
 		SecretsBundleName: strings.TrimSpace(secretsName),
 	}
+}
+
+// ResolveSyncTargets 解析一次 pull/push 的全部 SyncTarget。
+// 同一同步集合内 Bitwarden folder 名冲突时直接失败。
+func (c *Config) ResolveSyncTargets(enabledBundles []string, projectName string) ([]SyncTarget, error) {
+	targets := make([]SyncTarget, 0, len(enabledBundles)+1)
+	seenFolder := make(map[string]string) // folder -> label
+
+	add := func(t SyncTarget, label string) error {
+		prev, ok := seenFolder[t.Folder]
+		if ok && prev != label {
+			return fmt.Errorf("Bitwarden folder %q 同时绑定 %s 与 %s", t.Folder, prev, label)
+		}
+		seenFolder[t.Folder] = label
+		targets = append(targets, t)
+		return nil
+	}
+
+	for _, bundleName := range enabledBundles {
+		bundleName = strings.TrimSpace(bundleName)
+		if bundleName == "" {
+			continue
+		}
+		binding := c.ResolveBinding(bundleName)
+		target, err := NewBundleSyncTarget(bundleName, binding.SecretsBundleName)
+		if err != nil {
+			return nil, err
+		}
+		if err := add(target, fmt.Sprintf("bundle %q", bundleName)); err != nil {
+			return nil, err
+		}
+	}
+
+	if folder, ok := c.ResolveProjectSecrets(projectName); ok {
+		target, err := NewProjectSyncTarget(projectName, folder)
+		if err != nil {
+			return nil, err
+		}
+		// project folder 显式覆盖名可能与 projectName 不同；用 ResolveProjectSecrets 的 folder。
+		if folder != target.Name {
+			target.Folder = folder
+		}
+		if err := add(target, fmt.Sprintf("project %q", target.Name)); err != nil {
+			return nil, err
+		}
+	}
+
+	return targets, nil
 }
 
 func applyConfigDefaults(cfg *Config) {
@@ -203,7 +243,6 @@ func normalizeBinding(decBundleName string, b BundleBinding) BundleBinding {
 }
 
 // MigrateConfigIfNeeded 将废弃的 folder 字段迁移为 secrets_bundle 并回写配置（幂等）。
-// 不在 Pull/Push 流程中自动调用；需显式触发或用于一次性升级。
 func MigrateConfigIfNeeded() (bool, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -221,9 +260,6 @@ func MigrateConfigIfNeeded() (bool, error) {
 		b.Folder = ""
 		changed = true
 	}
-	if applyDefaultBindings(cfg) {
-		changed = true
-	}
 	if !changed {
 		return false, nil
 	}
@@ -231,33 +267,4 @@ func MigrateConfigIfNeeded() (bool, error) {
 		return false, err
 	}
 	return true, nil
-}
-
-func applyDefaultBindings(cfg *Config) bool {
-	if cfg == nil {
-		return false
-	}
-	changed := false
-	for _, decBundle := range []string{"vikunja"} {
-		secretsBundle := defaultSecretsBundleName(decBundle)
-		if secretsBundle == decBundle {
-			continue
-		}
-		found := false
-		for _, b := range cfg.Bundles {
-			if b.DecBundleName == decBundle {
-				found = true
-				break
-			}
-		}
-		if found {
-			continue
-		}
-		cfg.Bundles = append(cfg.Bundles, BundleBinding{
-			DecBundleName:     decBundle,
-			SecretsBundleName: secretsBundle,
-		})
-		changed = true
-	}
-	return changed
 }

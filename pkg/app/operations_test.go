@@ -116,8 +116,10 @@ name: project-workflow
 		t.Fatalf(".dec/.version 应存在: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(projectRoot, ".gitignore")); !os.IsNotExist(err) {
-		t.Fatalf("dec 不应写入 .gitignore, stat err = %v", err)
+	giPath := filepath.Join(projectRoot, ".gitignore")
+	giData, giErr := os.ReadFile(giPath)
+	if giErr != nil || !strings.Contains(string(giData), "/.secrets/") {
+		t.Fatalf("pull 应确保 .gitignore 包含 /.secrets/: err=%v content=%q", giErr, giData)
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, "mise.local.toml")); !os.IsNotExist(err) {
 		t.Fatalf("dec 不应写入 mise.local.toml, stat err = %v", err)
@@ -336,7 +338,7 @@ members:
 		t.Fatalf("首次 pull 失败: %v", err)
 	}
 
-	landedSecret := filepath.Join(projectRoot, ".config", "mise", "conf.d", "vikunja.toml")
+	landedSecret := filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", "env", "vikunja.env")
 	if err := os.MkdirAll(filepath.Dir(landedSecret), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +367,7 @@ members:
 	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("全取消后 IDE skill 应删除, err=%v", err)
 	}
-	// 落地的密文件在消费者路径上，停用 bundle 不会也不该动它——删除走 Delete 页。
+	// 已落地的密文件在 .secrets/ 同步根，停用 bundle 不会也不该动它——删除走 Delete 页。
 	if _, err := os.Stat(landedSecret); err != nil {
 		t.Fatalf("停用 bundle 不应删除已落地的密文件: %v", err)
 	}

@@ -52,7 +52,7 @@ func TestLive_ProgrammaticUnlock(t *testing.T) {
 	}
 	_, err = client.PullBundle(context.Background(), PullBundleRequest{
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja_workflow"},
+		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja"},
 	})
 	if err != nil {
 		t.Fatalf("PullBundle() = %v", err)
@@ -88,7 +88,7 @@ func TestLive_PushBundle(t *testing.T) {
 	result, err := PushBundle(context.Background(), client, PushBundleRequest{
 		ProjectRoot:   projectRoot,
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja_workflow"},
+		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja"},
 	})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
@@ -124,7 +124,7 @@ func TestLive_PushThenPull(t *testing.T) {
 	req := PushBundleRequest{
 		ProjectRoot:   projectRoot,
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja_workflow"},
+		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja"},
 	}
 	pushResult, err := PushBundle(context.Background(), client, req)
 	if err != nil {
@@ -135,7 +135,7 @@ func TestLive_PushThenPull(t *testing.T) {
 	pullReq := PullBundleRequest{
 		ProjectRoot:   projectRoot,
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja_workflow"},
+		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja"},
 	}
 	paths, err := PullBundle(context.Background(), client, pullReq)
 	if err != nil {

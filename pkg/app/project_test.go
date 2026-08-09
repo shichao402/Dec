@@ -27,6 +27,10 @@ func setEnvForProjectTest(t *testing.T, key, value string) {
 			_ = os.Unsetenv(key)
 		}
 	})
+	// Windows 上 os.UserHomeDir 读 USERPROFILE；测试只设 HOME 时内置资产会写到真家里。
+	if key == "HOME" {
+		setEnvForProjectTest(t, "USERPROFILE", value)
+	}
 }
 
 func useStubSecretsSession(t *testing.T) {
@@ -434,5 +438,29 @@ func TestNeedsVaultProjectAutoApply(t *testing.T) {
 	}
 	if needs {
 		t.Fatal("project_name 已设置时不应需要自动匹配")
+	}
+}
+
+func TestEnsureLocalProjectConfig_CreatesMinimalConfig(t *testing.T) {
+	projectRoot := t.TempDir()
+	result, err := EnsureLocalProjectConfig(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("EnsureLocalProjectConfig() = %v", err)
+	}
+	if result == nil || result.ProjectConfig == nil {
+		t.Fatal("应返回 ProjectConfig")
+	}
+	if result.ProjectConfig.ProjectName == "" {
+		t.Fatal("应写入 basename 作为 project_name")
+	}
+	if !result.VarsCreated {
+		t.Fatal("首次应创建 vars 模板")
+	}
+	result2, err := EnsureLocalProjectConfig(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("第二次 EnsureLocalProjectConfig() = %v", err)
+	}
+	if !result2.ExistingConfig {
+		t.Fatal("第二次应识别为已存在")
 	}
 }

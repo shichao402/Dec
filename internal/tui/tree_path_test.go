@@ -1,27 +1,33 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestInsertTreePath_CreatesIntermediateDirs(t *testing.T) {
-	root := &TreeNode{ID: "root:secrets", Label: "secrets (Bitwarden)", SelectMode: TreeSelectNone}
-	insertTreePath(root, secretsParentSegments("vikunja_workflow", ".config/mise/conf.d/vikunja.toml"), &TreeNode{
+	root := &TreeNode{ID: "root:secrets", Label: "secrets (SyncTarget)", SelectMode: TreeSelectNone}
+	group := &TreeNode{ID: "group:vikunja", Label: "bundle vikunja → .secrets/bundles/vikunja", SelectMode: TreeSelectNone}
+	root.Children = append(root.Children, group)
+	insertTreePath(group, secretsParentSegments("env/vikunja.env"), &TreeNode{
 		ID:         "leaf1",
-		Label:      secretsLeafName(".config/mise/conf.d/vikunja.toml"),
+		Label:      secretsLeafName("env/vikunja.env"),
 		SelectMode: TreeSelectLeaf,
 	})
 	rows := (&TreeList{Roots: []*TreeNode{root}, Expanded: map[string]bool{
-		"root:secrets":                                      true,
-		"root:secrets/vikunja_workflow":                     true,
-		"root:secrets/vikunja_workflow/.config":             true,
-		"root:secrets/vikunja_workflow/.config/mise":        true,
-		"root:secrets/vikunja_workflow/.config/mise/conf.d": true,
+		"root:secrets":        true,
+		"group:vikunja":       true,
+		"group:vikunja/env":   true,
 	}}).VisibleRows()
-	if len(rows) != 6 {
-		t.Fatalf("rows = %d, want 6", len(rows))
+	if len(rows) != 4 {
+		t.Fatalf("rows = %d, want 4", len(rows))
 	}
 	last := rows[len(rows)-1]
-	if last.Node.Label != "vikunja.toml" || last.SelectIndex != 0 {
+	if last.Node.Label != "vikunja.env" || last.SelectIndex != 1 {
 		t.Fatalf("leaf row = %#v", last)
+	}
+	env := rows[2]
+	if env.Node.Label != "env" || env.SelectIndex != 0 {
+		t.Fatalf("中间目录应可勾选: %#v", env)
 	}
 }
 

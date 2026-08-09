@@ -8,11 +8,32 @@ import (
 )
 
 func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
-	decRoot := &TreeNode{ID: "delete-root:.dec", Label: ".dec", SelectMode: TreeSelectNone}
-	// secrets 分支按 Bitwarden folder 分组，而不是按某个本地目录：
-	// 落地路径散在项目根，folder 才是唯一的归属维度。
-	secRoot := &TreeNode{ID: "delete-root:secrets", Label: "secrets (Bitwarden)", SelectMode: TreeSelectNone}
+	decRoot := &TreeNode{ID: "delete-root:.dec", Label: ".dec", SelectMode: TreeSelectBranch}
+	secRoot := &TreeNode{ID: "delete-root:secrets", Label: "secrets (SyncTarget)", SelectMode: TreeSelectBranch}
 	hasDec, hasSec := false, false
+
+	targetGroups := make(map[string]*TreeNode)
+	getSecretsGroup := func(c app.DeleteCandidate) *TreeNode {
+		key := strings.TrimSpace(c.LocalRoot)
+		if key == "" {
+			key = strings.TrimSpace(c.GroupTitle)
+		}
+		if key == "" {
+			key = strings.TrimSpace(c.SecretsBundle)
+		}
+		if node, ok := targetGroups[key]; ok {
+			return node
+		}
+		label := deleteSyncTargetGroupLabel(c)
+		node := &TreeNode{
+			ID:         "delete-secrets-group:" + key,
+			Label:      label,
+			SelectMode: TreeSelectBranch,
+		}
+		targetGroups[key] = node
+		secRoot.Children = append(secRoot.Children, node)
+		return node
+	}
 
 	for i, c := range candidates {
 		leaf := &TreeNode{
@@ -21,20 +42,15 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 			SelectMode: TreeSelectLeaf,
 			Payload:    i,
 		}
-		// 按 Kind 分派，不看 TreeRoot 字符串：字符串对不上就会把一条 secret
-		// 静默塞进 .dec 树，Kind 是唯一不会漂的归属依据。
 		switch c.Kind {
 		case app.DeleteKindSecret:
 			hasSec = true
-			insertTreePath(secRoot, secretsParentSegments(c.SecretsBundle, c.SecretPath), leaf)
+			group := getSecretsGroup(c)
+			insertTreePath(group, secretsParentSegments(c.SecretPath), leaf)
 		case app.DeleteKindSSHKey:
 			hasSec = true
-			// SSH Key 不套用 Secure Note 路径树，直接挂在 folder 下。
-			folder := strings.TrimSpace(c.SecretsBundle)
-			if folder == "" {
-				folder = "ssh"
-			}
-			insertTreePath(secRoot, []string{folder}, leaf)
+			group := getSecretsGroup(c)
+			insertTreePath(group, []string{"SSH · machine"}, leaf)
 		case app.DeleteKindBundle:
 			hasDec = true
 			bundle := strings.TrimSpace(c.BundleName)
@@ -57,6 +73,9 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 
 	sortPathTreeChildren(decRoot.Children)
 	sortPathTreeChildren(secRoot.Children)
+	for _, group := range targetGroups {
+		sortPathTreeChildren(group.Children)
+	}
 
 	var roots []*TreeNode
 	if hasDec {
@@ -66,6 +85,21 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 		roots = append(roots, secRoot)
 	}
 	return roots
+}
+
+func deleteSyncTargetGroupLabel(c app.DeleteCandidate) string {
+	title := strings.TrimSpace(c.GroupTitle)
+	if title == "" {
+		title = strings.TrimSpace(c.SecretsBundle)
+	}
+	root := strings.TrimSpace(c.LocalRoot)
+	if root != "" {
+		if title != "" {
+			return fmt.Sprintf("%s → %s", title, root)
+		}
+		return root
+	}
+	return title
 }
 
 func deleteLeafLabel(c app.DeleteCandidate) string {
@@ -124,9 +158,10 @@ func (m model) selectedDeleteItems() []app.DeleteSelectionItem {
 				continue
 			}
 			if treeNodeSelectable(n) {
-				if m.deleteTree.IsSelected(selectIdx) {
-					idx, _ := n.Payload.(int)
-					if idx >= 0 && idx < len(visible) {
+				// 目录分支勾选只驱动级联，真正删除项只来自叶子 Payload。
+				if n.SelectMode == TreeSelectLeaf && m.deleteTree.IsSelected(selectIdx) {
+					idx, ok := n.Payload.(int)
+					if ok && idx >= 0 && idx < len(visible) {
 						items = append(items, selectionFromCandidate(visible[idx]))
 					}
 				}
@@ -157,7 +192,17 @@ func renderDeleteTreeLine(row TreeRow, cursor int, tree *TreeList, focused bool)
 	}
 	check := "   "
 	if row.SelectIndex >= 0 {
-		if tree.IsSelected(row.SelectIndex) {
+		if row.Node.SelectMode == TreeSelectBranch {
+			all, any := tree.BranchCheckState(row.Node)
+			switch {
+			case all:
+				check = "[x]"
+			case any:
+				check = "[-]"
+			default:
+				check = "[ ]"
+			}
+		} else if tree.IsSelected(row.SelectIndex) {
 			check = "[x]"
 		} else {
 			check = "[ ]"

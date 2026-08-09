@@ -111,11 +111,11 @@ func TestSaveConfig_WritesDefaultAndComments(t *testing.T) {
 	}
 }
 
-func TestResolveBinding_DefaultVikunjaWorkflow(t *testing.T) {
+func TestResolveBinding_DefaultSameName(t *testing.T) {
 	cfg := &Config{}
 	binding := cfg.ResolveBinding("vikunja")
-	if binding.SecretsBundleName != "vikunja_workflow" {
-		t.Fatalf("SecretsBundleName = %q, 期望 vikunja_workflow", binding.SecretsBundleName)
+	if binding.SecretsBundleName != "vikunja" {
+		t.Fatalf("SecretsBundleName = %q, 期望 vikunja", binding.SecretsBundleName)
 	}
 	if binding.DecBundleName != "vikunja" {
 		t.Fatalf("DecBundleName = %q", binding.DecBundleName)
@@ -135,14 +135,14 @@ func TestResolveBinding_ExplicitBindingWins(t *testing.T) {
 	}
 }
 
-func TestMigrateConfigIfNeeded_AddsDefaultVikunjaBinding(t *testing.T) {
+func TestMigrateConfigIfNeeded_MigratesLegacyFolderField(t *testing.T) {
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
 	secretsDir := filepath.Join(decHome, "secrets")
 	if err := os.MkdirAll(secretsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), []byte("server_url: https://vault.example.com\nemail: user@example.com\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), []byte("server_url: https://vault.example.com\nemail: user@example.com\nbundles:\n  - dec_bundle: vikunja\n    folder: custom_vault\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -151,14 +151,17 @@ func TestMigrateConfigIfNeeded_AddsDefaultVikunjaBinding(t *testing.T) {
 		t.Fatalf("MigrateConfigIfNeeded() = %v", err)
 	}
 	if !changed {
-		t.Fatal("应写入默认 vikunja 绑定")
+		t.Fatal("应迁移废弃的 folder 字段")
 	}
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Bundles) != 1 || cfg.Bundles[0].SecretsBundleName != "vikunja_workflow" {
+	if len(cfg.Bundles) != 1 || cfg.Bundles[0].SecretsBundleName != "custom_vault" {
 		t.Fatalf("cfg.Bundles = %#v", cfg.Bundles)
+	}
+	if cfg.Bundles[0].Folder != "" {
+		t.Fatalf("folder 字段应已清空: %#v", cfg.Bundles[0])
 	}
 }
 
@@ -200,6 +203,7 @@ func TestSaveEmail_PreservesOtherFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	skipUnlessUnixFileMode(t)
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("权限 = %o, 期望 0600", info.Mode().Perm())
 	}

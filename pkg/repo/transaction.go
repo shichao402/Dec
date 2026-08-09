@@ -62,7 +62,7 @@ func newTransaction(readOnly bool) (*Transaction, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("仓库未连接\n\n运行 dec config repo <url> 连接仓库")
+		return nil, fmt.Errorf("仓库未连接\n\n请先到 Settings 页配置 Repo URL")
 	}
 
 	if err := FetchBare(); err != nil {
@@ -158,6 +158,13 @@ func isNonFastForwardPushError(err error) bool {
 		strings.Contains(msg, "[rejected]")
 }
 
+func isNothingToCommitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "nothing to commit")
+}
+
 // WorkDir 返回事务工作目录
 func (t *Transaction) WorkDir() string {
 	return t.worktreeDir
@@ -206,52 +213,61 @@ func (t *Transaction) cleanup() error {
 	return cleanupErr
 }
 
-// CommitAndPush 提交、同步并推送事务中的变更。
-func (t *Transaction) CommitAndPush(message string) error {
+// CommitAndPush 提交并推送；若工作区或暂存区最终无实质变更则 committed=false。
+func (t *Transaction) CommitAndPush(message string) (committed bool, err error) {
 	if t.readOnly {
-		return fmt.Errorf("只读事务不支持提交")
+		return false, fmt.Errorf("只读事务不支持提交")
 	}
 	if t.cleaned {
-		return fmt.Errorf("事务已关闭")
+		return false, fmt.Errorf("事务已关闭")
 	}
 
 	git := NewGitOps(t.worktreeDir)
 	clean, err := git.IsClean()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if clean {
-		return nil
+		return false, nil
 	}
 
 	if err := git.Add("."); err != nil {
-		return fmt.Errorf("git add 失败: %w", err)
+		return false, fmt.Errorf("git add 失败: %w", err)
+	}
+	// status 可能因换行等判脏，add 后用 cached diff 判定是否真有可提交内容。
+	if has, derr := git.HasCachedDiff(); derr != nil {
+		return false, derr
+	} else if !has {
+		return false, nil
 	}
 	if err := git.Commit(message); err != nil {
-		return fmt.Errorf("git commit 失败: %w", err)
+		if isNothingToCommitError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("git commit 失败: %w", err)
 	}
 	if _, err := git.run("push", "origin", fmt.Sprintf("HEAD:%s", t.branch)); err == nil {
 		t.syncBareRef(git)
-		return nil
+		return true, nil
 	} else if !isNonFastForwardPushError(err) {
-		return fmt.Errorf("git push 失败: %w", err)
+		return false, fmt.Errorf("git push 失败: %w", err)
 	}
 
 	if err := git.ensureNoSyncInProgress(); err != nil {
-		return err
+		return false, err
 	}
 	if _, err := git.run("fetch", "origin", t.branch); err != nil {
-		return fmt.Errorf("拉取远端引用失败: %w", err)
+		return false, fmt.Errorf("拉取远端引用失败: %w", err)
 	}
 	if _, err := git.run("merge", "--no-edit", "FETCH_HEAD"); err != nil {
 		_ = git.abortMerge()
-		return fmt.Errorf("与远端存在冲突，请稍后重试: %w", err)
+		return false, fmt.Errorf("与远端存在冲突，请稍后重试: %w", err)
 	}
 	if _, err := git.run("push", "origin", fmt.Sprintf("HEAD:%s", t.branch)); err != nil {
-		return fmt.Errorf("git push 失败: %w", err)
+		return false, fmt.Errorf("git push 失败: %w", err)
 	}
 	t.syncBareRef(git)
-	return nil
+	return true, nil
 }
 
 // syncBareRef 将 worktree 的 HEAD 同步到 bare repo 的目标分支

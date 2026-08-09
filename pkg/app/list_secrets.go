@@ -13,7 +13,7 @@ import (
 )
 
 // SecretFileMetadata 描述一条私密资产的元数据（不含内容）。
-// ProjectRelPath 既是本地落地路径，也是 Bitwarden Note 名。
+// ProjectRelPath 是项目根相对落地路径；Bitwarden Note 名是相对 SyncTarget.LocalRoot 的路径。
 type SecretFileMetadata struct {
 	SecretsBundle     string `json:"secrets_bundle"`
 	ProjectRelPath    string `json:"project_rel_path"`
@@ -54,7 +54,7 @@ func ListSecretsMetadata(ctx context.Context, projectRoot string, includeRemote 
 
 	byKey := make(map[string]*SecretFileMetadata)
 
-	// 权威索引在远端：落地路径就是消费者路径，散在项目根，无法靠扫目录判断
+	// 权威索引在远端：密文落在 .secrets/<sync-root>/ 下，无法靠扫目录判断
 	// 哪些文件归 Bitwarden 管。不查远端就只能给出空列表。
 	if !includeRemote {
 		result.SkippedReason = "未查询远端：secrets 清单以 Bitwarden folder 的 Note 列表为准，请设置 includeRemote"
@@ -117,41 +117,38 @@ func mergeRemoteSecretMetadata(ctx context.Context, projectRoot string, byKey ma
 	}
 	client := secretsClientFactory()
 
-	// ListFolderNotes 只回 note 名，不回正文——元数据接口绝不能碰到密钥内容。
-	scanFolder := func(label, folder string) {
-		notes, listErr := client.ListFolderNotes(ctx, folder)
+	// ListFolderNotes 只回 note 名（相对同步根），不回正文——元数据接口绝不能碰到密钥内容。
+	for _, target := range plan.Targets {
+		label := formatSyncTargetLabel(target)
+		notes, listErr := client.ListFolderNotes(ctx, target.Folder)
 		if listErr != nil {
 			emit(reporter, EventWarn, "secrets.list", fmt.Sprintf("列出远端 %s 元数据失败: %v", label, listErr), nil)
-			return
+			continue
 		}
 		for _, note := range notes {
-			rel := strings.TrimSpace(note.Name)
-			if rel == "" {
+			noteRel := strings.TrimSpace(note.Name)
+			if noteRel == "" {
 				continue
 			}
-			key := folder + "\x00" + rel
+			projectRel, relErr := secrets.ProjectRelPath(target, noteRel)
+			if relErr != nil {
+				emit(reporter, EventWarn, "secrets.list", fmt.Sprintf("跳过非法 note 名 %q: %v", noteRel, relErr), nil)
+				continue
+			}
+			key := target.Folder + "\x00" + projectRel
 			meta, ok := byKey[key]
 			if !ok {
-				meta = &SecretFileMetadata{SecretsBundle: folder, ProjectRelPath: rel}
+				meta = &SecretFileMetadata{SecretsBundle: target.Folder, ProjectRelPath: projectRel}
 				byKey[key] = meta
 			}
 			exists := true
 			meta.RemoteExists = &exists
-			if info, statErr := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(rel))); statErr == nil {
+			if info, statErr := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(projectRel))); statErr == nil {
 				meta.LocalExists = true
 				meta.LocalSizeBytes = info.Size()
 				meta.LocalModifiedUnix = info.ModTime().Unix()
 			}
 		}
-	}
-
-	for _, decBundle := range plan.EnabledBundles {
-		binding := cfg.ResolveBinding(decBundle)
-		scanFolder("bundle "+decBundle, secrets.FolderNameFor(binding, decBundle))
-	}
-	if plan.ProjectSecretsName != "" {
-		binding := secrets.ProjectSecretsBinding(plan.ProjectSecretsName)
-		scanFolder("project secrets", secrets.FolderNameFor(binding, plan.ProjectSecretsName))
 	}
 	return nil
 }

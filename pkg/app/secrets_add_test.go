@@ -12,7 +12,7 @@ import (
 	"github.com/shichao402/Dec/pkg/types"
 )
 
-func TestAddProjectSecret_CreatesNoteNamedByLandingPath(t *testing.T) {
+func TestAddProjectSecret_CreatesNoteNamedBySyncRelPath(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	stub := &secrets.StubClient{}
 	origFactory := secretsClientFactory
@@ -20,20 +20,24 @@ func TestAddProjectSecret_CreatesNoteNamedByLandingPath(t *testing.T) {
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	projectRoot := t.TempDir()
-	writeProjectFileForPushTest(t, projectRoot, ".config/mise/conf.d/tencent.toml", "[env]\nSECRET_ID=abc\n")
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"tencent-cloud"}}); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/tencent-cloud/env/tencent.env", "SECRET_ID=abc\n")
 
-	result, err := AddProjectSecret(context.Background(), projectRoot, "tencent-cloud", ".config/mise/conf.d/tencent.toml", nil)
+	result, err := AddProjectSecret(context.Background(), projectRoot, "tencent-cloud", "env/tencent.env", nil)
 	if err != nil {
 		t.Fatalf("AddProjectSecret() = %v", err)
 	}
-	if result.Folder != "tencent-cloud" || result.LandingPath != ".config/mise/conf.d/tencent.toml" {
+	if result.Folder != "tencent-cloud" || result.LandingPath != ".secrets/bundles/tencent-cloud/env/tencent.env" {
 		t.Fatalf("result = %#v", result)
 	}
 	notes := stub.NotesByFolder["tencent-cloud"]
-	if len(notes) != 1 || notes[0].RelativePath != ".config/mise/conf.d/tencent.toml" {
-		t.Fatalf("notes = %#v, note 名应即落地路径", notes)
+	if len(notes) != 1 || notes[0].RelativePath != "env/tencent.env" {
+		t.Fatalf("notes = %#v, note 名应相对同步根", notes)
 	}
-	if notes[0].Content != "[env]\nSECRET_ID=abc\n" {
+	if notes[0].Content != "SECRET_ID=abc\n" {
 		t.Fatalf("正文 = %q", notes[0].Content)
 	}
 }
@@ -45,7 +49,13 @@ func TestAddProjectSecret_RejectsMissingFile(t *testing.T) {
 	secretsClientFactory = func() secrets.Client { return &secrets.StubClient{} }
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
-	_, err := AddProjectSecret(context.Background(), t.TempDir(), "tencent-cloud", ".config/absent.toml", nil)
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"tencent-cloud"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := AddProjectSecret(context.Background(), projectRoot, "tencent-cloud", "env/absent.env", nil)
 	if err == nil {
 		t.Fatal("文件不存在时应报错")
 	}
@@ -61,7 +71,11 @@ func TestAddProjectSecret_RejectsDirectory(t *testing.T) {
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	projectRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(projectRoot, "config"), 0755); err != nil {
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"tencent-cloud"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectRoot, ".secrets", "bundles", "tencent-cloud", "config"), 0755); err != nil {
 		t.Fatal(err)
 	}
 

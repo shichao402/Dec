@@ -326,6 +326,19 @@ func (g *GitOps) IsClean() (bool, error) {
 	return output == "", nil
 }
 
+// HasCachedDiff 检查暂存区是否相对 HEAD 有实质差异。
+func (g *GitOps) HasCachedDiff() (bool, error) {
+	cmd := exec.Command("git", "-C", g.workDir, "diff", "--cached", "--quiet")
+	err := cmd.Run()
+	if err == nil {
+		return false, nil
+	}
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, err
+}
+
 // ========================================
 // 本地 git 命令封装（用于 pkg/repo 内部）
 // ========================================

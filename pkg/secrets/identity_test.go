@@ -341,7 +341,7 @@ func TestAPIClient_PullBundleByFolder(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/folders":
 			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{
-				Data: []bwFolder{{ID: "f1", Name: "vikunja_workflow"}},
+				Data: []bwFolder{{ID: "f1", Name: "vikunja"}},
 			})
 		case "/api/ciphers":
 			if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer sess-") {
@@ -351,7 +351,7 @@ func TestAPIClient_PullBundleByFolder(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{
 				Data: []bwCipher{
 					{Type: 1, Name: "login", FolderID: "f1"},
-					{Type: cipherTypeSecureNote, Name: ".config/mise/conf.d/vikunja.toml", Notes: "[env]\nX=1", FolderID: "f1"},
+					{Type: cipherTypeSecureNote, Name: "env/vikunja.env", Notes: "VIKUNJA_API_TOKEN=abc\n", FolderID: "f1"},
 					{Type: cipherTypeSecureNote, Name: "other.toml", Notes: "skip", FolderID: "f2"},
 				},
 			})
@@ -370,7 +370,7 @@ func TestAPIClient_PullBundleByFolder(t *testing.T) {
 	t.Cleanup(ClearSession)
 	result, err := client.PullBundle(context.Background(), PullBundleRequest{
 		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja_workflow"},
+		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
 	})
 	if err != nil {
 		t.Fatalf("PullBundle() = %v", err)
@@ -378,7 +378,7 @@ func TestAPIClient_PullBundleByFolder(t *testing.T) {
 	if len(result.Notes) != 1 {
 		t.Fatalf("Notes = %#v", result.Notes)
 	}
-	if result.Notes[0].RelativePath != ".config/mise/conf.d/vikunja.toml" {
+	if result.Notes[0].RelativePath != "env/vikunja.env" {
 		t.Fatalf("RelativePath = %q", result.Notes[0].RelativePath)
 	}
 }

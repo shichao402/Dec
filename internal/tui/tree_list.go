@@ -131,6 +131,26 @@ func (t *TreeList) collectSelectableIDs(roots []*TreeNode) []string {
 	return ids
 }
 
+func countSelectableNodes(nodes []*TreeNode) int {
+	n := 0
+	var walk func([]*TreeNode)
+	walk = func(nodes []*TreeNode) {
+		for _, node := range nodes {
+			if node == nil {
+				continue
+			}
+			if treeNodeSelectable(node) {
+				n++
+			}
+			if len(node.Children) > 0 {
+				walk(node.Children)
+			}
+		}
+	}
+	walk(nodes)
+	return n
+}
+
 func (t *TreeList) VisibleRows() []TreeRow {
 	t.ensureExpanded()
 	filter := strings.ToLower(strings.TrimSpace(t.Filter))
@@ -143,6 +163,8 @@ func (t *TreeList) VisibleRows() []TreeRow {
 				continue
 			}
 			if filter != "" && !treeNodeMatchesFilter(n, filter) {
+				// 筛选掉的整支仍要推进 selectIdx，保持与 Selected / selectableIDs 对齐。
+				selectIdx += countSelectableNodes([]*TreeNode{n})
 				continue
 			}
 			idx := -1
@@ -155,6 +177,8 @@ func (t *TreeList) VisibleRows() []TreeRow {
 				continue
 			}
 			if !t.Expanded[n.ID] && filter == "" {
+				// 折叠子树：不渲染子行，但必须推进 selectIdx，避免勾选错位到其他分支。
+				selectIdx += countSelectableNodes(n.Children)
 				continue
 			}
 			walk(n.Children, depth+1, append(ancestors, n))
@@ -218,13 +242,100 @@ func (t *TreeList) currentRow() (TreeRow, bool) {
 	return rows[t.Cursor], true
 }
 
+func (t *TreeList) selectIndexByID() map[string]int {
+	ids := t.selectableIDs()
+	out := make(map[string]int, len(ids))
+	for i, id := range ids {
+		out[id] = i
+	}
+	return out
+}
+
+func collectSelectableIDsUnder(node *TreeNode, includeSelf bool) []string {
+	if node == nil {
+		return nil
+	}
+	var ids []string
+	var walk func(*TreeNode, bool)
+	walk = func(n *TreeNode, self bool) {
+		if n == nil {
+			return
+		}
+		if self && treeNodeSelectable(n) {
+			ids = append(ids, n.ID)
+		}
+		for _, child := range n.Children {
+			walk(child, true)
+		}
+	}
+	walk(node, includeSelf)
+	return ids
+}
+
 func (t *TreeList) ToggleSelectAtCursor() bool {
 	row, ok := t.currentRow()
 	if !ok || row.SelectIndex < 0 || row.SelectIndex >= len(t.Selected) {
 		return false
 	}
+	if row.Node.SelectMode == TreeSelectBranch {
+		idxMap := t.selectIndexByID()
+		ids := collectSelectableIDsUnder(row.Node, true)
+		indices := make([]int, 0, len(ids))
+		for _, id := range ids {
+			if i, ok := idxMap[id]; ok && i >= 0 && i < len(t.Selected) {
+				indices = append(indices, i)
+			}
+		}
+		if len(indices) == 0 {
+			return false
+		}
+		allOn := true
+		for _, i := range indices {
+			if !t.Selected[i] {
+				allOn = false
+				break
+			}
+		}
+		for _, i := range indices {
+			t.Selected[i] = !allOn
+		}
+		return true
+	}
 	t.Selected[row.SelectIndex] = !t.Selected[row.SelectIndex]
 	return true
+}
+
+// BranchCheckState 返回分支勾选展示：空 / 全选 / 部分。
+func (t *TreeList) BranchCheckState(node *TreeNode) (all, any bool) {
+	if node == nil {
+		return false, false
+	}
+	idxMap := t.selectIndexByID()
+	leafIDs := collectSelectableIDsUnder(node, false)
+	// 若分支下没有可选子项，退回自身勾选位。
+	if len(leafIDs) == 0 {
+		if i, ok := idxMap[node.ID]; ok {
+			on := t.IsSelected(i)
+			return on, on
+		}
+		return false, false
+	}
+	all = true
+	for _, id := range leafIDs {
+		i, ok := idxMap[id]
+		if !ok {
+			continue
+		}
+		if t.IsSelected(i) {
+			any = true
+		} else {
+			all = false
+		}
+	}
+	if !any {
+		all = false
+	}
+	return all, any
 }
 
 func (t *TreeList) SelectAllAtCursor() {

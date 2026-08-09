@@ -15,8 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// 落地路径就是消费者路径，散在项目根，扫目录无法区分哪些文件归 Bitwarden 管。
-// 不查远端时只能给空列表 + 明确理由，不能靠猜。
+// 密文落在 .secrets/ 同步根，不查远端时只能给空列表 + 明确理由。
 func TestListSecretsMetadata_WithoutRemoteReturnsNothingAndSaysWhy(t *testing.T) {
 	projectRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectRoot, ".env.local"), []byte("TOKEN=x\n"), 0600); err != nil {
@@ -58,7 +57,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	orig := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"vikunja_workflow": {{RelativePath: ".config/mise/conf.d/vikunja.toml", Content: "SECRET=1"}},
+			"vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = orig })
@@ -70,7 +69,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	landed := filepath.Join(projectRoot, ".config", "mise", "conf.d", "vikunja.toml")
+	landed := filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", "env", "vikunja.env")
 	if err := os.MkdirAll(filepath.Dir(landed), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +88,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 		t.Fatalf("files = %#v, 期望 1 条", result.Files)
 	}
 	file := result.Files[0]
-	if file.SecretsBundle != "vikunja_workflow" || file.ProjectRelPath != ".config/mise/conf.d/vikunja.toml" {
+	if file.SecretsBundle != "vikunja" || file.ProjectRelPath != ".secrets/bundles/vikunja/env/vikunja.env" {
 		t.Fatalf("元数据 = %#v", file)
 	}
 	if file.RemoteExists == nil || !*file.RemoteExists {

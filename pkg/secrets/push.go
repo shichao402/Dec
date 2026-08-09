@@ -3,66 +3,128 @@ package secrets
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 // FolderNameFor 解析一次操作对应的 Bitwarden folder 名。
-// 未显式绑定时退回 Dec bundle 名。
 func FolderNameFor(binding BundleBinding, decBundleName string) string {
 	if name := strings.TrimSpace(binding.SecretsBundleName); name != "" {
 		return name
 	}
-	return strings.TrimSpace(decBundleName)
+	return DefaultBundleFolder(decBundleName)
 }
 
-// PushBundle 按远端 folder 的 note 列表读取本地对应文件并推送。
+func folderNameForRequest(targetFolder string, binding BundleBinding, decBundleName string) string {
+	if name := strings.TrimSpace(targetFolder); name != "" {
+		return name
+	}
+	return FolderNameFor(binding, decBundleName)
+}
+
+// ScanSyncRoot 递归扫描 SyncTarget.LocalRoot，返回相对 LocalRoot 的 SecureNote 列表。
+func ScanSyncRoot(projectRoot string, target SyncTarget) ([]SecureNote, error) {
+	rootAbs := filepath.Join(projectRoot, filepath.FromSlash(target.LocalRoot))
+	info, err := os.Stat(rootAbs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s 不是目录", target.LocalRoot)
+	}
+
+	var notes []SecureNote
+	err = filepath.WalkDir(rootAbs, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(rootAbs, path)
+		if err != nil {
+			return err
+		}
+		noteRel, err := normalizeSyncRelPath(filepath.ToSlash(rel))
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("读取 %s 失败: %w", noteRel, err)
+		}
+		notes = append(notes, SecureNote{RelativePath: noteRel, Content: string(content)})
+		return nil
+	})
+	return notes, err
+}
+
+// PushBundle 扫描 LocalRoot 并推送到远端 folder（create/update，不删除）。
 //
-// 权威索引是远端 folder 的 note 列表，不是本地目录：落地路径散在项目根，
-// 没有可靠的本地枚举方式。本地缺文件只记进 MissingLocal 报告，绝不删远端
-// ——枚举漏一个就等于静默删掉一条真密钥。
-//
-// 新增 note 走 AddSecureNote，不由 push 隐式创建。
+// 本地新文件会创建远端 Note；远端有而本地缺的路径记入 MissingLocal，绝不删远端。
 func PushBundle(ctx context.Context, client Client, req PushBundleRequest) (*PushBundleResult, error) {
 	if client == nil {
 		client = DefaultClient()
 	}
-	folder := FolderNameFor(req.Binding, req.DecBundleName)
-
-	remote, err := client.ListFolderNotes(ctx, folder)
+	target, err := pushRequestTarget(req)
 	if err != nil {
-		return nil, fmt.Errorf("列出 Bitwarden folder %q 的 Secure Note 失败: %w", folder, err)
+		return nil, err
 	}
-	if len(remote) == 0 {
-		return &PushBundleResult{}, nil
+	req.Target = target
+	req.Binding = BundleBinding{
+		DecBundleName:     target.Name,
+		SecretsBundleName: target.Folder,
+	}
+	if target.Kind == SyncKindProject {
+		req.DecBundleName = ProjectSecretsDecBundleName
+		req.Binding.DecBundleName = ProjectSecretsDecBundleName
+	} else {
+		req.DecBundleName = target.Name
 	}
 
-	notes := make([]SecureNote, 0, len(remote))
+	localNotes, err := ScanSyncRoot(req.ProjectRoot, target)
+	if err != nil {
+		return nil, err
+	}
+	localSet := localSetFromNotes(localNotes)
+
+	remote, err := client.ListFolderNotes(ctx, target.Folder)
+	if err != nil {
+		return nil, fmt.Errorf("列出 Bitwarden folder %q 的 Secure Note 失败: %w", target.Folder, err)
+	}
 	var missing []string
 	for _, note := range remote {
-		rel, normErr := normalizeProjectRelativePath(note.Name)
+		rel, normErr := normalizeSyncRelPath(note.Name)
 		if normErr != nil {
-			return nil, fmt.Errorf("远端 Secure Note 名 %q 不是合法的项目根相对路径: %w", note.Name, normErr)
+			// 远端脏名只报告，不阻断本地扫描 push。
+			missing = append(missing, note.Name)
+			continue
 		}
-		content, readErr := os.ReadFile(filepath.Join(req.ProjectRoot, filepath.FromSlash(rel)))
-		if readErr != nil {
-			if os.IsNotExist(readErr) {
-				missing = append(missing, rel)
-				continue
-			}
-			return nil, fmt.Errorf("读取 %s 失败: %w", rel, readErr)
+		if _, ok := localSet[rel]; !ok {
+			missing = append(missing, rel)
 		}
-		notes = append(notes, SecureNote{RelativePath: rel, Content: string(content)})
 	}
 
+	notes := make([]SecureNote, 0, len(localNotes))
+	for _, note := range localNotes {
+		notes = append(notes, note)
+	}
 	if len(notes) == 0 {
 		return &PushBundleResult{MissingLocal: missing}, nil
 	}
 
 	candidates := make([]LandingCandidate, 0, len(notes))
 	for _, note := range notes {
-		candidates = append(candidates, LandingCandidate{Folder: folder, RelativePath: note.RelativePath})
+		candidates = append(candidates, LandingCandidate{
+			Folder:       target.Folder,
+			LocalRoot:    target.LocalRoot,
+			RelativePath: note.RelativePath,
+		})
 	}
 	if err := ValidateLandingPaths(req.ProjectRoot, candidates); err != nil {
 		return nil, err
@@ -78,33 +140,79 @@ func PushBundle(ctx context.Context, client Client, req PushBundleRequest) (*Pus
 	return result, nil
 }
 
-// AddSecureNote 把项目内一个已存在的文件登记为新的 Secure Note。
-//
-// 这是新增 secret 的唯一入口：note 名即该文件的项目根相对路径，
-// folder 决定归属分组。已存在同名 note 时按更新处理。
-func AddSecureNote(ctx context.Context, client Client, projectRoot, folder, relPath string) error {
+// AddSecureNote 在指定 SyncTarget 下登记/创建一条 Secure Note。
+// noteRel 是相对 LocalRoot 的路径；本地文件必须已存在。
+func AddSecureNote(ctx context.Context, client Client, projectRoot string, target SyncTarget, noteRel string) error {
 	if client == nil {
 		client = DefaultClient()
 	}
-	folder = strings.TrimSpace(folder)
-	if folder == "" {
-		return fmt.Errorf("必须指定 Bitwarden folder")
+	if target.Folder == "" || target.LocalRoot == "" {
+		return fmt.Errorf("SyncTarget 不完整")
 	}
-	rel, err := normalizeProjectRelativePath(relPath)
+	rel, err := normalizeSyncRelPath(noteRel)
 	if err != nil {
 		return err
 	}
-	if err := ValidateLandingPaths(projectRoot, []LandingCandidate{{Folder: folder, RelativePath: rel}}); err != nil {
+	if err := ValidateLandingPaths(projectRoot, []LandingCandidate{{
+		Folder:       target.Folder,
+		LocalRoot:    target.LocalRoot,
+		RelativePath: rel,
+	}}); err != nil {
 		return err
 	}
-	content, err := os.ReadFile(filepath.Join(projectRoot, filepath.FromSlash(rel)))
+	abs, err := AbsolutePath(projectRoot, target, rel)
+	if err != nil {
+		return err
+	}
+	content, err := os.ReadFile(abs)
 	if err != nil {
 		return fmt.Errorf("读取 %s 失败: %w", rel, err)
 	}
 
-	_, err = client.PushBundle(ctx, PushBundleRequest{
+	req := PushBundleRequest{
 		ProjectRoot: projectRoot,
-		Binding:     BundleBinding{SecretsBundleName: folder},
-	}, []SecureNote{{RelativePath: rel, Content: string(content)}})
+		Target:      target,
+		Binding: BundleBinding{
+			DecBundleName:     target.Name,
+			SecretsBundleName: target.Folder,
+		},
+	}
+	if target.Kind == SyncKindProject {
+		req.DecBundleName = ProjectSecretsDecBundleName
+		req.Binding.DecBundleName = ProjectSecretsDecBundleName
+	} else {
+		req.DecBundleName = target.Name
+	}
+	_, err = client.PushBundle(ctx, req, []SecureNote{{RelativePath: rel, Content: string(content)}})
 	return err
+}
+
+func localSetFromNotes(notes []SecureNote) map[string]SecureNote {
+	m := make(map[string]SecureNote, len(notes))
+	for _, note := range notes {
+		m[note.RelativePath] = note
+	}
+	return m
+}
+
+func pushRequestTarget(req PushBundleRequest) (SyncTarget, error) {
+	if req.Target.LocalRoot != "" && req.Target.Folder != "" {
+		return req.Target, nil
+	}
+	name := strings.TrimSpace(req.DecBundleName)
+	if name == "" {
+		name = strings.TrimSpace(req.Binding.DecBundleName)
+	}
+	if name == ProjectSecretsDecBundleName || req.Target.Kind == SyncKindProject {
+		folder := strings.TrimSpace(req.Binding.SecretsBundleName)
+		if folder == "" {
+			folder = strings.TrimSpace(req.Target.Folder)
+		}
+		projName := strings.TrimSpace(req.Target.Name)
+		if projName == "" {
+			projName = folder
+		}
+		return NewProjectSyncTarget(projName, folder)
+	}
+	return NewBundleSyncTarget(name, req.Binding.SecretsBundleName)
 }

@@ -97,6 +97,27 @@ TUI **不得**直接调用 `cmd/*` 或 `fmt.Printf` 式业务输出；所有动�
 - **禁止**在 TUI 内直接调用 `editor.Open`（会与 Bubble Tea 持有的 TTY 冲突）
 - `.dec/cache/` 不存在时显示提示，占位符扫描依赖 prior pull
 
+### 5.5 跨页异步 IO（强制约定）
+
+远端 Bitwarden / Git、以及其它较慢 IO，**不得**绑定到「当前页面是否仍可见」：
+
+1. **任务跟 Shell，不跟页面**：切页禁止 `cancel` 在飞请求（见 `internal/tui/async_io.go`）。
+2. **独立 busy 信号**：`asyncLoad.loading` + `ioBusyLabel` / 状态栏，避免用户以为卡住。
+3. **防重复**：已在飞且未升级范围则 no-op；缓存仍有效且未 force 则 no-op。
+4. **世代丢弃**：仅「新一代请求取代旧请求」时 abort；完成回调用 `gen` 丢弃过期结果。
+5. **状态栏全局可见**：即使人不在发起页，busy 文案仍应显示。
+
+参考实现（已迁）：
+
+- Delete 候选列表：`deleteLoad`
+- Shell 并联刷新：`shellRefresh`（overview / assets / settings / projectSettings / vars）
+- 独立 vars 重载：`projectVarsLoad`
+- Builtin IDE assets：`builtinAssetsLoad`
+- Vault project 应用 / 本地 project 生成 / 仓库扫描：`vaultApplyLoad` / `localProjectLoad` / `projectInitLoad`
+- Push 预览：`pushPreviewLoad`（`pushStage=loading`）
+
+用户主动的 pull/push/remove/delete **执行**仍可用 Esc 取消（与「切页不打断加载」不同）。
+
 ## 6. 测试策略
 
 | 层级 | 位置 | 覆盖 |

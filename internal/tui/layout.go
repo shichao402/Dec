@@ -185,14 +185,21 @@ func padLines(content string, height int) string {
 }
 
 func (m model) renderStatusBar(width int) string {
-	left := "q quit | j/k nav | l/h in-out | r refresh"
-	if m.isHomePage() && m.hasVaultInferencePrompt() {
-		left = "y/Enter 应用 · n 跳过 | q quit | r refresh"
-	} else if m.isHomePage() && m.applyingVaultProject {
-		left = "正在应用 vault project..."
-	}
+	left := m.statusBarLeftHints()
 	right := fmt.Sprintf("page %s", m.pages[m.pageIndex])
-	if m.isBundlesPage() && m.assets != nil {
+	if busy := m.ioBusyLabel(); busy != "" {
+		// IO 忙碌时右侧也标 busy，窄宽度丢掉 left 时仍能看到状态。
+		right = fmt.Sprintf("%s | %s", right, busy)
+		if m.isRunPage() && m.runProgress != nil && (m.runningPull || m.runningRemove) {
+			right += fmt.Sprintf(" | %s %d/%d", runPhaseLabel(m.runProgress.Phase), m.runProgress.Current, m.runProgress.Total)
+		}
+	} else if m.isDeletePage() {
+		selected := len(m.selectedDeleteItems())
+		right = fmt.Sprintf("%s | %d items · %d selected", right, len(m.deleteCandidates), selected)
+		if m.deleteIncludeRemote {
+			right += " | +remote"
+		}
+	} else if m.isBundlesPage() && m.assets != nil {
 		right = fmt.Sprintf("%s | %d/%d bundles", right, len(m.bundleSelection), len(m.assets.Bundles))
 		if m.assetsDirty {
 			right += " | modified"

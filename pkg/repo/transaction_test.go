@@ -95,7 +95,7 @@ func TestTransactionCommitAndPush_Succeeds(t *testing.T) {
 	defer tx.Close()
 
 	writeFile(t, filepath.Join(tx.WorkDir(), "feature.txt"), "from transaction\n")
-	if err := tx.CommitAndPush("add feature"); err != nil {
+	if _, err := tx.CommitAndPush("add feature"); err != nil {
 		t.Fatalf("CommitAndPush 失败: %v", err)
 	}
 
@@ -128,7 +128,7 @@ func TestTransactionCommitAndPush_MergesRemoteAdvance(t *testing.T) {
 	runGit(t, remoteWorkDir, "commit", "-m", "remote update")
 	runGit(t, remoteWorkDir, "push", "origin", "main")
 
-	if err := tx.CommitAndPush("local update"); err != nil {
+	if _, err := tx.CommitAndPush("local update"); err != nil {
 		t.Fatalf("CommitAndPush 自动合并失败: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestTransactionCommitAndPush_FailsOnConflict(t *testing.T) {
 	runGit(t, remoteWorkDir, "commit", "-m", "remote conflict")
 	runGit(t, remoteWorkDir, "push", "origin", "main")
 
-	err = tx.CommitAndPush("local conflict")
+	_, err = tx.CommitAndPush("local conflict")
 	if err == nil {
 		t.Fatalf("真实冲突时应返回错误")
 	}
@@ -181,7 +181,7 @@ func TestTransactionCommitAndPush_ReadOnlyFails(t *testing.T) {
 	}
 	defer tx.Close()
 
-	err = tx.CommitAndPush("should fail")
+	_, err = tx.CommitAndPush("should fail")
 	if err == nil {
 		t.Fatalf("只读事务提交应失败")
 	}

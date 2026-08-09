@@ -75,7 +75,7 @@ func TestEncryptVaultString_RoundTrip(t *testing.T) {
 	for i := range vaultKey {
 		vaultKey[i] = byte(i + 5)
 	}
-	plain := ".secrets/vikunja_workflow/mise/conf.d/vikunja.toml"
+	plain := ".secrets/bundles/vikunja/env/vikunja.env"
 	encrypted, err := encryptVaultString(plain, vaultKey)
 	if err != nil {
 		t.Fatal(err)

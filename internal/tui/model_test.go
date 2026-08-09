@@ -76,7 +76,8 @@ func TestModelHomeShowsVaultInferencePrompt(t *testing.T) {
 		RepoConnected: true,
 	}
 
-	msg := loadOverviewCmd("/Users/firo/workspace/Dec")()
+	gen := m.shellRefresh.beginParts(1)
+	msg := loadOverviewCmd("/Users/firo/workspace/Dec", gen)()
 	overviewMsg, ok := msg.(overviewLoadedMsg)
 	if !ok {
 		t.Fatalf("loadOverviewCmd 返回 = %T, 期望 overviewLoadedMsg", msg)
@@ -123,7 +124,7 @@ func TestModelHomeVaultInferenceConfirmApplies(t *testing.T) {
 
 	updated, cmd := m.handleVaultInferenceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m = updated.(model)
-	if !m.applyingVaultProject {
+	if !m.vaultApplyLoad.busy() {
 		t.Fatal("按 y 后应进入 applying 状态")
 	}
 	if cmd == nil {
@@ -161,8 +162,8 @@ func TestModelHomeVaultInferenceDismiss(t *testing.T) {
 
 	updated, cmd := m.handleVaultInferenceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = updated.(model)
-	if cmd != nil {
-		t.Fatal("按 n 不应触发命令")
+	if cmd == nil {
+		t.Fatal("按 n 且未初始化 config 时应触发本地 project 生成")
 	}
 	if !m.vaultInferenceDismissed {
 		t.Fatal("按 n 后应标记 dismissed")
@@ -175,7 +176,7 @@ func TestModelHomeVaultInferenceDismiss(t *testing.T) {
 		t.Fatalf("dismiss 后不应展示确认块:\n%s", view)
 	}
 	got := suggestNextAction(m.overview, false, true)
-	if !strings.Contains(got, "Bundles 页") {
+	if !strings.Contains(got, "Bundles") {
 		t.Fatalf("dismiss 后建议下一步应指向 Bundles 页: %q", got)
 	}
 }
@@ -368,8 +369,8 @@ func TestModelRunPageHotkeysStartPull(t *testing.T) {
 			if cmd == nil {
 				t.Fatal("Run 页触发 pull 后应返回执行命令")
 			}
-			if summary := m.currentSummary(); summary != "Pull running" {
-				t.Fatalf("currentSummary() = %q, 期望 %q", summary, "Pull running")
+			if summary := m.currentSummary(); summary != "Pull running… Esc cancel" {
+				t.Fatalf("currentSummary() = %q, 期望 %q", summary, "Pull running… Esc cancel")
 			}
 		})
 	}
@@ -393,17 +394,22 @@ func TestModelRunPageHotkeysStartPush(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
 	m = updated.(model)
+	if m.pushStage != "loading" {
+		t.Fatalf("pushStage = %q, 期望 loading", m.pushStage)
+	}
+	if cmd == nil {
+		t.Fatal("按 P 后应返回预览加载命令")
+	}
+	updated, _ = m.Update(cmd())
+	m = updated.(model)
 	if m.pushStage != "summary" {
-		t.Fatalf("pushStage = %q, 期望 summary", m.pushStage)
+		t.Fatalf("预览完成后 pushStage = %q, 期望 summary", m.pushStage)
 	}
 	if m.pushPreview == nil {
-		t.Fatal("按 P 后应有 pushPreview")
+		t.Fatal("预览完成后应有 pushPreview")
 	}
 	if m.runningPull {
 		t.Fatal("按 P 后不应直接进入 push 执行")
-	}
-	if cmd != nil {
-		t.Fatal("按 P 进入确认页时不应返回执行命令")
 	}
 	if summary := m.currentSummary(); summary != "Confirming push (summary)" {
 		t.Fatalf("currentSummary() = %q, 期望 Confirming push (summary)", summary)
@@ -420,10 +426,15 @@ func TestModelRunPagePushFlowDoubleConfirmAndCancel(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("P 后应返回预览 cmd")
+	}
+	updated, _ = m.Update(cmd())
 	m = updated.(model)
 	if m.pushStage != "summary" {
-		t.Fatalf("P 后 stage = %q, 期望 summary", m.pushStage)
+		t.Fatalf("P 预览完成后 stage = %q, 期望 summary", m.pushStage)
 	}
 
 	// y → confirm
@@ -468,11 +479,16 @@ func TestModelRunPagePushConfirmTriggersRunPushOperation(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("P 后应返回预览 cmd")
+	}
+	updated, _ = m.Update(cmd())
 	m = updated.(model)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m = updated.(model)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m = updated.(model)
 
 	if !m.runningPull || m.runMode != "push" {
@@ -733,19 +749,17 @@ func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 }
 
 func TestSuggestNextAction(t *testing.T) {
-	if got := suggestNextAction(&app.ProjectOverview{}, false, false); !strings.Contains(got, "Settings 页") {
+	const flow = "Settings 连仓库 → Home 确认/生成本地 project → Bundles 勾选 → Run pull"
+	if got := suggestNextAction(&app.ProjectOverview{}, false, false); !strings.Contains(got, flow) || !strings.Contains(got, "Settings") {
 		t.Fatalf("未连接仓库时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, false, false); !strings.Contains(got, "Home 页") {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, false, false); !strings.Contains(got, flow) || !strings.Contains(got, "Home") {
 		t.Fatalf("未初始化项目时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, true, false); !strings.Contains(got, "确认推断") {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, true, false); !strings.Contains(got, "确认 vault project") {
 		t.Fatalf("推断待确认时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, false, true); !strings.Contains(got, "Bundles 页") {
-		t.Fatalf("推断已跳过时建议动作错误: %q", got)
-	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true}, false, false); !strings.Contains(got, "Bundles 页") {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true}, false, false); !strings.Contains(got, "Bundles") {
 		t.Fatalf("无已启用 bundle 时建议动作错误: %q", got)
 	}
 	ready := &app.ProjectOverview{
@@ -754,7 +768,7 @@ func TestSuggestNextAction(t *testing.T) {
 		EnabledBundleCount: 1,
 		Bundles:            []app.BundleOverview{{Name: "default", VaultName: "default", Enabled: true}},
 	}
-	if got := suggestNextAction(ready, false, false); !strings.Contains(got, "Run 页") {
+	if got := suggestNextAction(ready, false, false); !strings.Contains(got, "Run") {
 		t.Fatalf("enabled_bundles 非空时应建议 Run 页: %q", got)
 	}
 }
@@ -812,14 +826,14 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 			TreeRoot: ".dec", TreeBranch: "vikunja", GroupOrder: 0, GroupTitle: "vikunja",
 		},
 		{
-			Kind: app.DeleteKindSecret, Label: "[secret] .config/mise/conf.d/vikunja.toml",
-			SecretPath: ".config/mise/conf.d/vikunja.toml", SecretsBundle: "vikunja_workflow",
-			TreeRoot: "secrets", TreeBranch: "vikunja_workflow", GroupOrder: 0, GroupTitle: "vikunja_workflow",
+			Kind: app.DeleteKindSecret, Label: "[secret] env/vikunja.env",
+			SecretPath: "env/vikunja.env", LocalRoot: ".secrets/bundles/vikunja", SecretsBundle: "vikunja",
+			TreeRoot: "secrets", TreeBranch: "vikunja", GroupOrder: 0, GroupTitle: "vikunja (bundle)",
 		},
 		{
 			Kind: app.DeleteKindSSHKey, Label: "[ssh] deploy",
-			SSHKeyName: "deploy", DecBundleName: "vikunja", SecretsBundle: "vikunja_workflow",
-			TreeRoot: "secrets", TreeBranch: "vikunja_workflow", GroupOrder: 0, GroupTitle: "vikunja_workflow",
+			SSHKeyName: "deploy", DecBundleName: "vikunja", SecretsBundle: "vikunja",
+			LocalRoot: ".secrets/bundles/vikunja", TreeRoot: "secrets", TreeBranch: "vikunja", GroupOrder: 0, GroupTitle: "vikunja (bundle)",
 		},
 		{
 			Kind: app.DeleteKindBundle, Label: "[bundle] vikunja / vikunja · 2 成员", BundleName: "vikunja",
@@ -835,9 +849,10 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 		"▾ cache",
 		"▾ vikunja",
 		"↳ demo",
-		"▾ secrets (Bitwarden)",
-		"▾ vikunja_workflow",
-		"vikunja.toml",
+		"▾ secrets (SyncTarget)",
+		".secrets/bundles/vikunja",
+		"vikunja.env",
+		"SSH · machine",
 		"[ssh] deploy",
 		"[bundle]",
 	} {
@@ -1012,22 +1027,29 @@ func TestModelDeletePageSelectConfirmAndCancel(t *testing.T) {
 	m.deleteCandidatesLoaded = true
 	m.rebuildDeleteTree()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = updated.(model)
-	for tries := 0; tries < 4; tries++ {
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-		m = updated.(model)
-		if row, ok := m.deleteTree.currentRow(); ok && row.SelectIndex >= 0 && !m.deleteTree.IsSelected(row.SelectIndex) {
-			break
+	// 勾选两个 bundle 叶子（勿用根目录 space，那会级联全选/全消）。
+	for _, wantLabel := range []string{"[bundle] cli", "[bundle] vikunja"} {
+		found := false
+		rows := m.deleteTree.VisibleRows()
+		for i, row := range rows {
+			if row.Node.SelectMode == TreeSelectLeaf && strings.Contains(row.Node.Label, wantLabel) {
+				m.deleteTree.Cursor = i
+				if !m.deleteTree.ToggleSelectAtCursor() {
+					t.Fatalf("未能勾选 %s", wantLabel)
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("树中找不到叶子 %s", wantLabel)
 		}
 	}
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = updated.(model)
 	if len(m.selectedDeleteItems()) != 2 {
 		t.Fatalf("应选中 2 项, 实际 %d", len(m.selectedDeleteItems()))
 	}
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	m = updated.(model)
 	if m.deleteStage != "summary" {
 		t.Fatalf("d 后 stage = %q, 期望 summary", m.deleteStage)
@@ -1681,11 +1703,11 @@ func TestModelProjectPageSaveRejectsEmptyOverride(t *testing.T) {
 // ------- Project page init / refresh (#14) tests -------
 
 func TestModelProjectPageInitKeyTriggersCmd(t *testing.T) {
-	oldInit := prepareProjectConfigInitOperation
-	defer func() { prepareProjectConfigInitOperation = oldInit }()
+	oldEnsure := ensureLocalProjectConfigOperation
+	defer func() { ensureLocalProjectConfigOperation = oldEnsure }()
 
 	called := false
-	prepareProjectConfigInitOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
+	ensureLocalProjectConfigOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
 		called = true
 		if projectRoot != "/tmp/dec-project" {
 			t.Fatalf("ProjectRoot = %q", projectRoot)
@@ -1693,9 +1715,8 @@ func TestModelProjectPageInitKeyTriggersCmd(t *testing.T) {
 		return &app.ConfigInitPreparation{
 			ProjectRoot:    projectRoot,
 			ExistingConfig: false,
-			AssetCount:     5,
 			VarsCreated:    true,
-			ProjectConfig:  &types.ProjectConfig{},
+			ProjectConfig:  &types.ProjectConfig{ProjectName: "dec-project"},
 		}, nil
 	}
 
@@ -1709,18 +1730,18 @@ func TestModelProjectPageInitKeyTriggersCmd(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = updated.(model)
-	if !m.initializingProjectConfig {
-		t.Fatal("按 i 后应进入 initializing 状态")
+	if !m.localProjectLoad.busy() {
+		t.Fatal("按 i 后应进入 localProjectLoad busy 状态")
 	}
 	if cmd == nil {
 		t.Fatal("按 i 后应返回 tea.Cmd")
 	}
 	msg := cmd()
-	if _, ok := msg.(projectConfigInitializedMsg); !ok {
-		t.Fatalf("cmd 返回 = %T, 期望 projectConfigInitializedMsg", msg)
+	if _, ok := msg.(localProjectEnsuredMsg); !ok {
+		t.Fatalf("cmd 返回 = %T, 期望 localProjectEnsuredMsg", msg)
 	}
 	if !called {
-		t.Fatal("应调用 prepareProjectConfigInitOperation")
+		t.Fatal("应调用 ensureLocalProjectConfigOperation")
 	}
 }
 
@@ -1749,8 +1770,8 @@ func TestModelProjectPageRefreshKeyTriggersCmd(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
 	m = updated.(model)
-	if !m.initializingProjectConfig {
-		t.Fatal("按 R 后应进入 initializing 状态")
+	if !m.projectInitLoad.busy() {
+		t.Fatal("按 R 后应进入 projectInitLoad busy 状态")
 	}
 	if cmd == nil {
 		t.Fatal("按 R 后应返回 tea.Cmd")
@@ -1763,12 +1784,11 @@ func TestModelProjectPageRefreshKeyTriggersCmd(t *testing.T) {
 	}
 }
 
-func TestModelProjectPageInitDisabledWhenRepoNotConnected(t *testing.T) {
-	oldInit := prepareProjectConfigInitOperation
-	defer func() { prepareProjectConfigInitOperation = oldInit }()
-	prepareProjectConfigInitOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
-		t.Fatal("未连仓库下不应调用 PrepareProjectConfigInit")
-		return nil, nil
+func TestModelProjectPageInitWorksWithoutRepoConnected(t *testing.T) {
+	oldEnsure := ensureLocalProjectConfigOperation
+	defer func() { ensureLocalProjectConfigOperation = oldEnsure }()
+	ensureLocalProjectConfigOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
+		return &app.ConfigInitPreparation{ProjectRoot: projectRoot, ProjectConfig: &types.ProjectConfig{}}, nil
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
@@ -1786,15 +1806,15 @@ func TestModelProjectPageInitDisabledWhenRepoNotConnected(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = updated.(model)
-	if m.initializingProjectConfig {
-		t.Fatal("未连仓库下按 i 不应进入 initializing 状态")
+	if !m.localProjectLoad.busy() {
+		t.Fatal("未连仓库下按 i 仍应生成本地 project")
 	}
-	if cmd != nil {
-		t.Fatal("未连仓库下按 i 不应返回 tea.Cmd")
+	if cmd == nil {
+		t.Fatal("按 i 应返回 ensureLocalProjectCmd")
 	}
 	view := m.View()
-	if !strings.Contains(view, "Home 页初始化") {
-		t.Fatalf("View 未提示到 Home 页初始化:\n%s", view)
+	if !strings.Contains(view, "按 i 在本页生成本地 project") {
+		t.Fatalf("View 应提示在本页初始化:\n%s", view)
 	}
 }
 
@@ -1812,6 +1832,7 @@ func TestModelProjectPageInitSuccessRendersSummary(t *testing.T) {
 		ProjectConfigReady: false,
 	}
 	// 模拟消息回来
+	gen := m.projectInitLoad.beginGen()
 	updated, _ := m.Update(projectConfigInitializedMsg{
 		result: &app.ConfigInitPreparation{
 			ExistingConfig: false,
@@ -1819,10 +1840,11 @@ func TestModelProjectPageInitSuccessRendersSummary(t *testing.T) {
 			VarsCreated:    true,
 			ProjectConfig:  &types.ProjectConfig{},
 		},
-		err: nil,
+		err:     nil,
+		loadGen: gen,
 	})
 	m = updated.(model)
-	if m.initializingProjectConfig {
+	if m.projectInitLoad.busy() {
 		t.Fatal("收到消息后应退出 initializing 状态")
 	}
 	if m.lastInitResult == nil || m.lastInitResult.AssetCount != 7 {

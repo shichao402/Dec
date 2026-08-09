@@ -103,7 +103,7 @@ func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResu
 			return fmt.Errorf("删除远端 bundle 失败: %w", err)
 		}
 		commitMsg := fmt.Sprintf("remove bundle: %s", bundleName)
-		if err := tx.CommitAndPush(commitMsg); err != nil {
+		if _, err := tx.CommitAndPush(commitMsg); err != nil {
 			return fmt.Errorf("提交失败: %w", err)
 		}
 		result.VersionCommit = tx.CommitHash()
@@ -276,7 +276,7 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 		}
 
 		commitMsg := fmt.Sprintf("remove: %s/%s", foundVault, assetName)
-		if err := tx.CommitAndPush(commitMsg); err != nil {
+		if _, err := tx.CommitAndPush(commitMsg); err != nil {
 			return fmt.Errorf("提交失败: %w", err)
 		}
 

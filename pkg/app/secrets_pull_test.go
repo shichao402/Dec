@@ -131,7 +131,7 @@ func containsScopeMessage(events []OperationEvent, scope, fragment string) bool 
 	return false
 }
 
-// pull 不再做「停用即清理」：落地路径就是消费者路径，没有可以安全 RemoveAll 的目录。
+// pull 不再做「停用即清理」：密文落在 .secrets/ 同步根，没有可以安全 RemoveAll 的目录。
 // 已存在的项目内文件必须原样留着，等 Delete 页逐条确认。
 func TestPullEnabledSecretsBundles_NeverDeletesExistingProjectFiles(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
@@ -144,7 +144,7 @@ func TestPullEnabledSecretsBundles_NeverDeletesExistingProjectFiles(t *testing.T
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "Demo"}); err != nil {
 		t.Fatal(err)
 	}
-	untouched := filepath.Join(projectRoot, "config", "server.yaml")
+	untouched := filepath.Join(projectRoot, ".secrets", "project", "config", "server.yaml")
 	if err := os.MkdirAll(filepath.Dir(untouched), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -160,14 +160,13 @@ func TestPullEnabledSecretsBundles_NeverDeletesExistingProjectFiles(t *testing.T
 	}
 }
 
-func TestPullEnabledSecretsBundles_RejectsCrossFolderCollision(t *testing.T) {
+func TestPullEnabledSecretsBundles_RejectsSecretsDecOverlap(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"combo": {{RelativePath: ".env.local", Content: "from-combo"}},
-			"Demo":  {{RelativePath: ".env.local", Content: "from-project"}},
+			"combo": {{RelativePath: ".dec/embedded/secret.env", Content: "secret"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -175,7 +174,6 @@ func TestPullEnabledSecretsBundles_RejectsCrossFolderCollision(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Demo",
 		EnabledBundles: []string{"combo"},
 	}); err != nil {
 		t.Fatal(err)
@@ -183,14 +181,10 @@ func TestPullEnabledSecretsBundles_RejectsCrossFolderCollision(t *testing.T) {
 
 	_, err := pullEnabledSecretsBundles(context.Background(), projectRoot, []string{"combo"}, nil)
 	if err == nil {
-		t.Fatal("两个 folder 撞同一落地路径时应报错")
+		t.Fatal("secrets 路径与 .dec/ 相交时应报错")
 	}
 	if !strings.Contains(err.Error(), "冲突") {
 		t.Fatalf("错误应描述冲突: %v", err)
-	}
-	// 校验必须先于写盘：冲突时一个字节都不该落地。
-	if _, statErr := os.Stat(filepath.Join(projectRoot, ".env.local")); !os.IsNotExist(statErr) {
-		t.Fatalf("冲突时不应写入任何文件, err=%v", statErr)
 	}
 }
 
@@ -210,10 +204,10 @@ func TestPullEnabledSecretsBundles_MixedNotesAndSSHKeys(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"vikunja_workflow": {{RelativePath: ".config/mise/conf.d/vikunja.toml", Content: "[env]\nX=1\n"}},
+				"vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
 			},
 			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-				"vikunja_workflow": {{
+				"vikunja": {{
 					Name: "deploy", Hosts: []string{"vikunja.example.com"},
 					PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV\n-----END OPENSSH PRIVATE KEY-----\n",
 					PublicKey:  "ssh-ed25519 AAAA deploy\n",
@@ -236,7 +230,7 @@ func TestPullEnabledSecretsBundles_MixedNotesAndSSHKeys(t *testing.T) {
 	if summary.NoteCount != 1 || summary.SSHKeyCount != 1 {
 		t.Fatalf("summary = %#v", summary)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".config", "mise", "conf.d", "vikunja.toml")); err != nil {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", "env", "vikunja.env")); err != nil {
 		t.Fatalf("Secure Note 应落地: %v", err)
 	}
 	priv := filepath.Join(home, ".ssh", "dec_vikunja_deploy")
@@ -260,10 +254,10 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"vikunja_workflow": {{RelativePath: ".env.local", Content: "TOKEN=1\n"}},
+				"vikunja": {{RelativePath: "env/vikunja.env", Content: "TOKEN=1\n"}},
 			},
 			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-				"vikunja_workflow": {{
+				"vikunja": {{
 					Name: "../evil", Hosts: []string{"host.example.com"},
 					PrivateKey: "priv\n",
 				}},
@@ -282,7 +276,7 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 	if err == nil {
 		t.Fatal("非法 SSH Key 名应导致 pull 失败")
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".env.local")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", "env", "vikunja.env")); !os.IsNotExist(err) {
 		t.Fatal("SSH 校验失败时不应写入 Secure Note")
 	}
 	if entries, _ := os.ReadDir(filepath.Join(home, ".ssh")); len(entries) != 0 {
