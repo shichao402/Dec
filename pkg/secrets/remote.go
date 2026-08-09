@@ -199,6 +199,41 @@ func decryptSSHKeyCipher(cipher bwCipher, userKey []byte) (SSHKeyItem, error) {
 	return item, nil
 }
 
+// ListSecretBundleNames 枚举 vault 中所有 bundle/<name> folder，返回逻辑名（已排序去重）。
+func (c *APIClient) ListSecretBundleNames(ctx context.Context) ([]string, error) {
+	userKey := UserKey()
+	if len(userKey) == 0 {
+		return nil, errVaultKeyNotReady
+	}
+	folders, err := c.listFolders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	names := make([]string, 0)
+	for _, folder := range folders {
+		rawName, err := decryptVaultString(folder.Name, userKey)
+		if err != nil {
+			return nil, fmt.Errorf("解密 folder 名失败: %w", err)
+		}
+		name := strings.TrimSpace(rawName)
+		if !strings.HasPrefix(name, BundleFolderPrefix) {
+			continue
+		}
+		logical := strings.TrimSpace(strings.TrimPrefix(name, BundleFolderPrefix))
+		if logical == "" {
+			continue
+		}
+		if _, ok := seen[logical]; ok {
+			continue
+		}
+		seen[logical] = struct{}{}
+		names = append(names, logical)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
 func (c *StubClient) ListFolderNotes(_ context.Context, folderName string) ([]RemoteNote, error) {
 	notes := make([]RemoteNote, 0, len(c.NotesByFolder[folderName]))
 	for _, note := range c.NotesByFolder[folderName] {
@@ -221,10 +256,50 @@ func (c *StubClient) ListFolderSSHKeys(_ context.Context, folderName string) ([]
 	return keys, nil
 }
 
+func (c *StubClient) ListSecretBundleNames(_ context.Context) ([]string, error) {
+	seen := make(map[string]struct{})
+	for folder := range c.NotesByFolder {
+		if name, ok := stubSecretBundleName(folder); ok {
+			seen[name] = struct{}{}
+		}
+	}
+	for folder := range c.SSHKeysByFolder {
+		if name, ok := stubSecretBundleName(folder); ok {
+			seen[name] = struct{}{}
+		}
+	}
+	for _, folder := range c.SecretBundleFolders {
+		name := strings.TrimSpace(folder)
+		if name == "" {
+			continue
+		}
+		seen[name] = struct{}{}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func stubSecretBundleName(folder string) (string, bool) {
+	folder = strings.TrimSpace(folder)
+	if !strings.HasPrefix(folder, BundleFolderPrefix) {
+		return "", false
+	}
+	name := strings.TrimSpace(strings.TrimPrefix(folder, BundleFolderPrefix))
+	return name, name != ""
+}
+
 func (NoopClient) ListFolderNotes(_ context.Context, _ string) ([]RemoteNote, error) {
 	return nil, nil
 }
 
 func (NoopClient) ListFolderSSHKeys(_ context.Context, _ string) ([]RemoteSSHKey, error) {
+	return nil, nil
+}
+
+func (NoopClient) ListSecretBundleNames(_ context.Context) ([]string, error) {
 	return nil, nil
 }

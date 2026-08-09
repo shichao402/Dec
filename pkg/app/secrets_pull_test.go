@@ -283,3 +283,30 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 		t.Fatalf("SSH 校验失败时不应写入 ~/.ssh: %v", entries)
 	}
 }
+
+func TestPlanSecretsSync_MergesUserEnabledBundles(t *testing.T) {
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "demo",
+		EnabledBundles: []string{"vikunja"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := planSecretsSync(projectRoot, []string{"vikunja"}, &secrets.Config{
+		UserEnabledBundles: []string{"woa", "vikunja"},
+	})
+	if err != nil {
+		t.Fatalf("planSecretsSync() = %v", err)
+	}
+	names := make([]string, 0, len(plan.Targets))
+	for _, target := range plan.Targets {
+		if target.Kind == secrets.SyncKindBundle {
+			names = append(names, target.Name)
+		}
+	}
+	if len(names) != 2 || names[0] != "vikunja" || names[1] != "woa" {
+		t.Fatalf("bundle targets = %#v, 期望 [vikunja woa]", names)
+	}
+}

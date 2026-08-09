@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/shichao402/Dec/pkg/app"
 	"github.com/shichao402/Dec/pkg/editor"
+	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/update"
 )
 
@@ -240,6 +242,7 @@ type model struct {
 	settingsRepoInput           string
 	settingsRepoEditing         bool
 	settingsSelectedIDEs        []string
+	settingsSelectedSecretBundles []string
 	projectSettings             *app.ProjectSettingsState
 	projectSettingsErr          error
 	projectSettingsCursor       int
@@ -509,9 +512,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.state != nil {
 			m.settingsRepoInput = msg.state.RepoURL
 			m.settingsSelectedIDEs = cloneStrings(msg.state.SelectedIDEs)
+			m.settingsSelectedSecretBundles = cloneStrings(msg.state.UserEnabledBundles)
 			m.normalizeSettingsCursor()
 			m.syncSettingsDirty()
-			m.pushLog(fmt.Sprintf("Global settings loaded: %d IDEs selected", len(m.settingsSelectedIDEs)))
+			m.pushLog(fmt.Sprintf("Global settings loaded: %d IDEs, %d user secret bundles",
+				len(m.settingsSelectedIDEs), len(m.settingsSelectedSecretBundles)))
 			if msg.state.RepoConnected && len(m.settingsSelectedIDEs) > 0 && !m.builtinAssetsLoad.busy() {
 				gen := m.builtinAssetsLoad.beginGen()
 				return m, ensureBuiltinIDEAssetsCmd(cloneStrings(m.settingsSelectedIDEs), gen)
@@ -536,7 +541,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.result != nil {
-			m.pushLog(fmt.Sprintf("Global settings saved: %d IDEs", len(msg.result.IDEs)))
+			m.pushLog(fmt.Sprintf("Global settings saved: %d IDEs, %d user secret bundles",
+				len(msg.result.IDEs), len(msg.result.UserEnabledBundles)))
 			for _, warning := range msg.result.InstallWarnings {
 				m.pushLog("Install warning: " + warning)
 			}
@@ -874,8 +880,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if msg.String() == "enter" {
 						m.beginSettingsRepoEdit()
 					}
-				} else {
+				} else if m.settingsCursorIDEIndex() >= 0 {
 					m.toggleCurrentSettingsIDE()
+				} else if m.settingsCursorSecretBundleIndex() >= 0 {
+					m.toggleCurrentSettingsSecretBundle()
 				}
 				return m, nil
 			}
@@ -912,7 +920,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.isSettingsPage() && !m.savingSettings && m.settings != nil && m.settingsErr == nil {
 				m.savingSettings = true
 				m.pushLog("Saving global settings")
-				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), cloneStrings(m.settingsSelectedIDEs))
+				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), cloneStrings(m.settingsSelectedIDEs), cloneStrings(m.settingsSelectedSecretBundles))
 			}
 			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
 				if m.projectSettingsOverride && len(normalizedStringList(m.projectSettingsSelectedIDEs)) == 0 {
@@ -1126,9 +1134,13 @@ func loadSettingsCmd(loadGen uint64) tea.Cmd {
 	}
 }
 
-func saveSettingsCmd(repoURL string, ides []string) tea.Cmd {
+func saveSettingsCmd(repoURL string, ides []string, userSecretBundles []string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := saveGlobalSettingsOperation(app.SaveGlobalSettingsInput{RepoURL: repoURL, IDEs: cloneStrings(ides)}, nil)
+		result, err := saveGlobalSettingsOperation(app.SaveGlobalSettingsInput{
+			RepoURL:            repoURL,
+			IDEs:               cloneStrings(ides),
+			UserEnabledBundles: append([]string{}, userSecretBundles...), // 非 nil，空表示清空用户级启用
+		}, nil)
 		return settingsSavedMsg{result: result, err: err}
 	}
 }
@@ -2655,9 +2667,10 @@ func (m model) renderSettingsList() string {
 		if selected {
 			checked = "x"
 		}
-		line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.settingsCursor == idx+1 && m.focus != focusSidebar), checked, ideName)
+		row := idx + 1
+		line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.settingsCursor == row && m.focus != focusSidebar), checked, ideName)
 		switch {
-		case m.settingsCursor == idx+1 && m.focus != focusSidebar:
+		case m.settingsCursor == row && m.focus != focusSidebar:
 			lines = append(lines, shellSelectedRow.Render(line))
 		case selected:
 			lines = append(lines, shellEnabledRow.Render(line))
@@ -2665,12 +2678,33 @@ func (m model) renderSettingsList() string {
 			lines = append(lines, shellLogStyle.Render(line))
 		}
 	}
+	if len(m.settings.AvailableSecretBundles) > 0 || len(m.settingsSelectedSecretBundles) > 0 {
+		lines = append(lines, "", shellMutedStyle.Render("User secret bundles"))
+		for idx, name := range m.settingsSecretBundleRows() {
+			selected := settingsContainsIDE(m.settingsSelectedSecretBundles, name)
+			checked := " "
+			if selected {
+				checked = "x"
+			}
+			row := m.settingsSecretBundleRowStart() + idx
+			line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.settingsCursor == row && m.focus != focusSidebar), checked, name)
+			switch {
+			case m.settingsCursor == row && m.focus != focusSidebar:
+				lines = append(lines, shellSelectedRow.Render(line))
+			case selected:
+				lines = append(lines, shellEnabledRow.Render(line))
+			default:
+				lines = append(lines, shellLogStyle.Render(line))
+			}
+		}
+	}
 	return strings.Join(lines, "\n")
 }
 
 func (m model) renderSettingsDetails() string {
 	lines := []string{shellTitleStyle.Render("Details")}
-	if m.settingsCursor == 0 {
+	switch {
+	case m.settingsCursor == 0:
 		lines = append(lines,
 			fmt.Sprintf("当前远端: %s", fallbackValue(m.settings.ConnectedRepoURL, "未连接")),
 			fmt.Sprintf("Bare Repo: %s", fallbackValue(m.settings.ConnectedBarePath, "未连接")),
@@ -2678,13 +2712,22 @@ func (m model) renderSettingsDetails() string {
 			fmt.Sprintf("本机 Vars: %s", m.settings.VarsPath),
 			"保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。",
 		)
-	} else {
+	case m.settingsCursorIDEIndex() >= 0:
 		ideName := m.currentSettingsIDEName()
 		lines = append(lines,
 			fmt.Sprintf("IDE: %s", ideName),
 			"启动 dec 或保存 Settings 时，会在用户级目录同步内置 dec skill 与 dec MCP。",
 			"dec MCP 写入 ~/.cursor/mcp.json 等；Cursor 打开各项目时用 ${workspaceFolder} 作为项目根。",
 			fmt.Sprintf("当前状态: %s", formatReady(settingsContainsIDE(m.settingsSelectedIDEs, ideName), "已选中", "未选中")),
+		)
+	default:
+		name := m.currentSettingsSecretBundleName()
+		lines = append(lines,
+			fmt.Sprintf("User secret bundle: %s", fallbackValue(name, "<none>")),
+			"本机始终同步的 secrets bundle（与各 project enabled_bundles 并集）。",
+			"允许 secrets-only（无 vault 公开资产）；SSH Key 落地 ~/.ssh/。",
+			fmt.Sprintf("配置文件: %s", fallbackValue(m.settings.SecretsConfigPath, "~/.dec/secrets/config.yaml")),
+			fmt.Sprintf("当前状态: %s", formatReady(settingsContainsIDE(m.settingsSelectedSecretBundles, name), "已启用", "未启用")),
 		)
 	}
 	if m.settingsRepoEditing {
@@ -2827,14 +2870,56 @@ func (m model) renderAssetDetails() string {
 }
 
 func (m model) currentSettingsIDEName() string {
-	if m.settings == nil || m.settingsCursor <= 0 {
-		return ""
-	}
-	idx := m.settingsCursor - 1
-	if idx < 0 || idx >= len(m.settings.AvailableIDEs) {
+	idx := m.settingsCursorIDEIndex()
+	if idx < 0 || m.settings == nil || idx >= len(m.settings.AvailableIDEs) {
 		return ""
 	}
 	return m.settings.AvailableIDEs[idx]
+}
+
+func (m model) currentSettingsSecretBundleName() string {
+	idx := m.settingsCursorSecretBundleIndex()
+	rows := m.settingsSecretBundleRows()
+	if idx < 0 || idx >= len(rows) {
+		return ""
+	}
+	return rows[idx]
+}
+
+func (m model) settingsSecretBundleRows() []string {
+	if m.settings == nil {
+		return nil
+	}
+	names := secrets.NormalizeBundleNames(append(append([]string{}, m.settings.AvailableSecretBundles...), m.settingsSelectedSecretBundles...))
+	sort.Strings(names)
+	return names
+}
+
+func (m model) settingsSecretBundleRowStart() int {
+	if m.settings == nil {
+		return 1
+	}
+	return 1 + len(m.settings.AvailableIDEs)
+}
+
+func (m model) settingsCursorIDEIndex() int {
+	if m.settings == nil || m.settingsCursor <= 0 {
+		return -1
+	}
+	idx := m.settingsCursor - 1
+	if idx < 0 || idx >= len(m.settings.AvailableIDEs) {
+		return -1
+	}
+	return idx
+}
+
+func (m model) settingsCursorSecretBundleIndex() int {
+	start := m.settingsSecretBundleRowStart()
+	idx := m.settingsCursor - start
+	if idx < 0 || idx >= len(m.settingsSecretBundleRows()) {
+		return -1
+	}
+	return idx
 }
 
 func (m model) currentAssetItem() (app.AssetSelectionItem, bool) {
@@ -2888,7 +2973,7 @@ func (m model) settingsRowCount() int {
 	if m.settings == nil {
 		return 0
 	}
-	return 1 + len(m.settings.AvailableIDEs)
+	return 1 + len(m.settings.AvailableIDEs) + len(m.settingsSecretBundleRows())
 }
 
 func (m model) canNavigateAssets() bool {
@@ -2953,6 +3038,21 @@ func (m *model) toggleCurrentSettingsIDE() {
 	m.syncSettingsDirty()
 }
 
+func (m *model) toggleCurrentSettingsSecretBundle() {
+	name := m.currentSettingsSecretBundleName()
+	if strings.TrimSpace(name) == "" {
+		return
+	}
+	if settingsContainsIDE(m.settingsSelectedSecretBundles, name) {
+		m.settingsSelectedSecretBundles = settingsRemoveIDE(m.settingsSelectedSecretBundles, name)
+		m.pushLog("User secret bundle disabled: " + name)
+	} else {
+		m.settingsSelectedSecretBundles = append(m.settingsSelectedSecretBundles, name)
+		m.pushLog("User secret bundle enabled: " + name)
+	}
+	m.syncSettingsDirty()
+}
+
 func (m *model) syncSettingsDirty() {
 	if m.settings == nil {
 		m.settingsDirty = false
@@ -2960,7 +3060,9 @@ func (m *model) syncSettingsDirty() {
 	}
 	currentRepo := strings.TrimSpace(m.settingsRepoInput)
 	loadedRepo := strings.TrimSpace(m.settings.RepoURL)
-	m.settingsDirty = currentRepo != loadedRepo || !equalNormalizedStrings(m.settingsSelectedIDEs, m.settings.SelectedIDEs)
+	m.settingsDirty = currentRepo != loadedRepo ||
+		!equalNormalizedStrings(m.settingsSelectedIDEs, m.settings.SelectedIDEs) ||
+		!equalNormalizedStrings(m.settingsSelectedSecretBundles, m.settings.UserEnabledBundles)
 }
 
 func settingsContainsIDE(values []string, target string) bool {
@@ -3337,9 +3439,13 @@ func (m model) currentSummary() string {
 			return "Editing repo URL"
 		}
 		if m.settingsDirty {
-			return fmt.Sprintf("Unsaved settings: %d IDEs", len(normalizedStringList(m.settingsSelectedIDEs)))
+			return fmt.Sprintf("Unsaved settings: %d IDEs, %d secrets",
+				len(normalizedStringList(m.settingsSelectedIDEs)),
+				len(normalizedStringList(m.settingsSelectedSecretBundles)))
 		}
-		return fmt.Sprintf("Settings ready, %d IDEs", len(normalizedStringList(m.settingsSelectedIDEs)))
+		return fmt.Sprintf("Settings ready, %d IDEs, %d secrets",
+			len(normalizedStringList(m.settingsSelectedIDEs)),
+			len(normalizedStringList(m.settingsSelectedSecretBundles)))
 	}
 	if m.isRunPage() {
 		if m.runningPull {

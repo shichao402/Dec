@@ -15,12 +15,15 @@ type Client interface {
 	ListFolderNotes(ctx context.Context, folderName string) ([]RemoteNote, error)
 	// ListFolderSSHKeys 枚举 folder 下的 SSH Key 逻辑名。
 	ListFolderSSHKeys(ctx context.Context, folderName string) ([]RemoteSSHKey, error)
+	// ListSecretBundleNames 枚举 Bitwarden 上带 bundle/ 前缀的 folder，返回逻辑名（去前缀）。
+	ListSecretBundleNames(ctx context.Context) ([]string, error)
 }
 
 // StubClient 测试/开发用 stub；按 Bitwarden folder 返回预设 Note / SSH Key。
 type StubClient struct {
-	NotesByFolder   map[string][]SecureNote
-	SSHKeysByFolder map[string][]SSHKeyItem
+	NotesByFolder       map[string][]SecureNote
+	SSHKeysByFolder     map[string][]SSHKeyItem
+	SecretBundleFolders []string // 逻辑名；用于 ListSecretBundleNames 单测
 }
 
 func stubFolder(reqFolder, bindingFolder, decBundleName string) string {

@@ -231,3 +231,39 @@ func TestSaveEmail_SkipsPlaceholder(t *testing.T) {
 		t.Fatalf("Email = %q, 占位邮箱不应覆盖已有配置", cfg.Email)
 	}
 }
+
+func TestNormalizeAndMergeEnabledBundles(t *testing.T) {
+	got := NormalizeBundleNames([]string{"  woa ", "bundle/vikunja", "woa", ""})
+	if len(got) != 2 || got[0] != "woa" || got[1] != "vikunja" {
+		t.Fatalf("NormalizeBundleNames = %#v", got)
+	}
+	merged := MergeEnabledBundles([]string{"vikunja", "cli"}, []string{"woa", "vikunja"})
+	if len(merged) != 3 || merged[0] != "vikunja" || merged[1] != "cli" || merged[2] != "woa" {
+		t.Fatalf("MergeEnabledBundles = %#v", merged)
+	}
+}
+
+func TestLoadSaveConfig_UserEnabledBundles(t *testing.T) {
+	decHome := t.TempDir()
+	t.Setenv("DEC_HOME", decHome)
+
+	if err := SaveConfig(&Config{UserEnabledBundles: []string{" woa ", "bundle/vikunja", "woa"}}); err != nil {
+		t.Fatalf("SaveConfig() = %v", err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() = %v", err)
+	}
+	names := cfg.UserEnabledBundleNames()
+	if len(names) != 2 || names[0] != "woa" || names[1] != "vikunja" {
+		t.Fatalf("UserEnabledBundleNames = %#v", names)
+	}
+	data, err := os.ReadFile(filepath.Join(decHome, "secrets", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "user_enabled_bundles") {
+		t.Fatalf("config 应含 user_enabled_bundles:\n%s", data)
+	}
+}
+

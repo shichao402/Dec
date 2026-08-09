@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,22 +13,26 @@ import (
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/ide"
 	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
 type GlobalSettingsState struct {
-	ConfigPath        string
-	VarsPath          string
-	VarsFileReady     bool
-	RepoConnected     bool
-	RepoURL           string
-	ConnectedRepoURL  string
-	AvailableIDEs     []string
-	SelectedIDEs      []string
-	EffectiveIDEs     []string
-	IDEWarnings       []string
-	ConfiguredEditor  string
-	ConnectedBarePath string
+	ConfigPath             string
+	VarsPath               string
+	VarsFileReady          bool
+	RepoConnected          bool
+	RepoURL                string
+	ConnectedRepoURL       string
+	AvailableIDEs          []string
+	SelectedIDEs           []string
+	EffectiveIDEs          []string
+	IDEWarnings            []string
+	ConfiguredEditor       string
+	ConnectedBarePath      string
+	AvailableSecretBundles []string // Settings 勾选候选：vault ∪ Bitwarden ∪ 已启用
+	UserEnabledBundles     []string // ~/.dec/secrets user_enabled_bundles
+	SecretsConfigPath      string
 }
 
 type ConnectRepoResult struct {
@@ -37,18 +42,21 @@ type ConnectRepoResult struct {
 }
 
 type SaveGlobalSettingsInput struct {
-	RepoURL string
-	IDEs    []string
+	RepoURL            string
+	IDEs               []string
+	UserEnabledBundles []string // nil = 不改 secrets 用户级启用；非 nil（含空切片）= 写回
 }
 
 type SaveGlobalSettingsResult struct {
-	RepoURL         string
-	IDEs            []string
-	ConfigPath      string
-	VarsPath        string
-	VarsCreated     bool
-	BareRepo        string
-	InstallWarnings []string
+	RepoURL            string
+	IDEs               []string
+	UserEnabledBundles []string
+	ConfigPath         string
+	VarsPath           string
+	VarsCreated        bool
+	BareRepo           string
+	InstallWarnings    []string
+	SecretsConfigPath  string
 }
 
 func LoadGlobalSettings(reporter Reporter) (*GlobalSettingsState, error) {
@@ -117,8 +125,80 @@ func LoadGlobalSettings(reporter Reporter) (*GlobalSettingsState, error) {
 		return nil, fmt.Errorf("检查本机变量模板失败: %w", err)
 	}
 
+	if err := attachUserSecretBundleSettings(state, reporter); err != nil {
+		return nil, err
+	}
+
 	emit(reporter, EventInfo, "settings.load", "全局设置已加载", nil)
 	return state, nil
+}
+
+func attachUserSecretBundleSettings(state *GlobalSettingsState, reporter Reporter) error {
+	secretsPath, err := secrets.ConfigPath()
+	if err != nil {
+		return fmt.Errorf("获取 secrets 配置路径失败: %w", err)
+	}
+	state.SecretsConfigPath = secretsPath
+
+	cfg, err := secrets.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("加载 secrets 配置失败: %w", err)
+	}
+	state.UserEnabledBundles = cfg.UserEnabledBundleNames()
+	state.AvailableSecretBundles = listUserSecretBundleCandidates(state.UserEnabledBundles, secretsClientFactory(), reporter)
+	return nil
+}
+
+// listUserSecretBundleCandidates 合并 vault 公开包名、已启用用户级、以及（有 session 时）Bitwarden bundle/ folder。
+func listUserSecretBundleCandidates(userEnabled []string, client secrets.Client, reporter Reporter) []string {
+	reporter = defaultReporter(reporter)
+	parts := make([][]string, 0, 3)
+	parts = append(parts, userEnabled)
+	if vaultNames := listConnectedVaultBundleNames(reporter); len(vaultNames) > 0 {
+		parts = append(parts, vaultNames)
+	}
+	if client != nil {
+		names, err := client.ListSecretBundleNames(context.Background())
+		if err != nil {
+			emit(reporter, EventWarn, "settings.secrets",
+				fmt.Sprintf("枚举 Bitwarden secret bundles 失败（仍展示本机与 vault 候选）: %v", err), nil)
+		} else if len(names) > 0 {
+			parts = append(parts, names)
+		}
+	}
+	merged := make([]string, 0)
+	for _, part := range parts {
+		merged = append(merged, part...)
+	}
+	names := secrets.NormalizeBundleNames(merged)
+	sort.Strings(names)
+	return names
+}
+
+func listConnectedVaultBundleNames(reporter Reporter) []string {
+	connected, err := repo.IsConnected()
+	if err != nil || !connected {
+		return nil
+	}
+	tx, err := repo.NewReadTransaction()
+	if err != nil {
+		emit(reporter, EventWarn, "settings.secrets",
+			fmt.Sprintf("打开仓库只读事务失败，Settings 将不展示 vault bundle: %v", err), nil)
+		return nil
+	}
+	defer tx.Close()
+
+	resolved, err := resolveDesiredAssets(nil, tx.WorkDir(), reporter)
+	if err != nil {
+		emit(reporter, EventWarn, "settings.secrets",
+			fmt.Sprintf("扫描 vault bundles 失败: %v", err), nil)
+		return nil
+	}
+	names := make([]string, 0, len(resolved.Bundles))
+	for _, bo := range resolved.Bundles {
+		names = append(names, bo.Name)
+	}
+	return names
 }
 
 func ConnectRepo(repoURL string, reporter Reporter) (*ConnectRepoResult, error) {
@@ -225,6 +305,21 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 	result.VarsPath = varsPath
 	result.VarsCreated = varsCreated
 	result.BareRepo = bareRepo
+
+	if input.UserEnabledBundles != nil {
+		secretsCfg, err := secrets.LoadConfig()
+		if err != nil {
+			return nil, fmt.Errorf("加载 secrets 配置失败: %w", err)
+		}
+		secretsCfg.UserEnabledBundles = secrets.NormalizeBundleNames(input.UserEnabledBundles)
+		if err := secrets.SaveConfig(secretsCfg); err != nil {
+			return nil, fmt.Errorf("保存用户级 secret bundles 失败: %w", err)
+		}
+		result.UserEnabledBundles = secretsCfg.UserEnabledBundleNames()
+		if secretsPath, err := secrets.ConfigPath(); err == nil {
+			result.SecretsConfigPath = secretsPath
+		}
+	}
 
 	emit(reporter, EventInfo, "settings.save", "已写入全局配置与本机变量模板", &Progress{Phase: "save", Current: 3, Total: 3})
 	return result, nil

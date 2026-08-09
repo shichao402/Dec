@@ -9,6 +9,7 @@ import (
 
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
@@ -228,3 +229,60 @@ func TestEnsureBuiltinIDEAssetsInstallsDecMCP(t *testing.T) {
 		t.Fatalf("mcp.json = %s", string(data))
 	}
 }
+
+func TestSaveGlobalSettings_PersistsUserEnabledBundles(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/cli/bundle.yaml": "name: cli\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	result, err := SaveGlobalSettings(SaveGlobalSettingsInput{
+		RepoURL:            remote,
+		IDEs:               []string{"cursor"},
+		UserEnabledBundles: []string{"woa", "cli"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("SaveGlobalSettings() = %v", err)
+	}
+	if len(result.UserEnabledBundles) != 2 {
+		t.Fatalf("UserEnabledBundles = %#v", result.UserEnabledBundles)
+	}
+
+	state, err := LoadGlobalSettings(nil)
+	if err != nil {
+		t.Fatalf("LoadGlobalSettings() = %v", err)
+	}
+	if len(state.UserEnabledBundles) != 2 || state.UserEnabledBundles[0] != "woa" || state.UserEnabledBundles[1] != "cli" {
+		t.Fatalf("state.UserEnabledBundles = %#v", state.UserEnabledBundles)
+	}
+	found := false
+	for _, name := range state.AvailableSecretBundles {
+		if name == "cli" || name == "woa" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("AvailableSecretBundles 应包含 vault/已启用项: %#v", state.AvailableSecretBundles)
+	}
+}
+
+func TestListUserSecretBundleCandidates_MergesSources(t *testing.T) {
+	client := &secrets.StubClient{
+		SecretBundleFolders: []string{"woa"},
+		NotesByFolder: map[string][]secrets.SecureNote{
+			"bundle/extra": {{RelativePath: "env/a.env", Content: "A=1\n"}},
+		},
+	}
+	got := listUserSecretBundleCandidates([]string{"woa", "local-only"}, client, nil)
+	want := map[string]bool{"woa": true, "local-only": true, "extra": true}
+	for _, name := range got {
+		delete(want, name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("缺少候选 %#v, got %#v", want, got)
+	}
+}
+

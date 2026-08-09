@@ -25,7 +25,8 @@ func planSecretsSync(projectRoot string, enabledBundles []string, cfg *secrets.C
 	if cfg == nil {
 		cfg = &secrets.Config{}
 	}
-	targets, err := cfg.ResolveSyncTargets(enabledBundles, projectName)
+	merged := secrets.MergeEnabledBundles(enabledBundles, cfg.UserEnabledBundleNames())
+	targets, err := cfg.ResolveSyncTargets(merged, projectName)
 	if err != nil {
 		return nil, err
 	}

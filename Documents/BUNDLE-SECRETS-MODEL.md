@@ -106,8 +106,9 @@ Bitwarden folder: my-app                  # project 级（project_name 或 proje
 
 ```yaml
 project_secrets: my-app   # 可选；未设时回退 .dec/config.yaml 的 project_name
-# 规划字段（0003，待实现）：
+# 用户级启用（ADR 0003）：
 # user_enabled_bundles:
+#   - woa
 #   - woa
 bundles:
   - dec_bundle: vikunja

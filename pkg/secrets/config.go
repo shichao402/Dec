@@ -20,16 +20,18 @@ const secretsConfigHeader = `# Bitwarden secrets 连接配置
 #   自托管示例:         https://vault.example.com
 # email: 登录邮箱（web unlock 成功后自动写入）
 # project_secrets: 可选；project 级 Bitwarden folder 名，默认 = project_name
+# user_enabled_bundles: 本机始终同步的 secrets bundle（与各 project enabled_bundles 并集）
 # bundles: 可选显式别名绑定；默认同名，一般不需要
 
 `
 
 // Config 对应 ~/.dec/secrets/config.yaml。
 type Config struct {
-	ServerURL      string          `yaml:"server_url"`
-	Email          string          `yaml:"email"`
-	ProjectSecrets string          `yaml:"project_secrets,omitempty"`
-	Bundles        []BundleBinding `yaml:"bundles,omitempty"`
+	ServerURL           string          `yaml:"server_url"`
+	Email               string          `yaml:"email"`
+	ProjectSecrets      string          `yaml:"project_secrets,omitempty"`
+	UserEnabledBundles  []string        `yaml:"user_enabled_bundles,omitempty"`
+	Bundles             []BundleBinding `yaml:"bundles,omitempty"`
 }
 
 func secretsDir() (string, error) {
@@ -70,6 +72,7 @@ func LoadConfig() (*Config, error) {
 	for i := range cfg.Bundles {
 		cfg.Bundles[i] = normalizeBinding(cfg.Bundles[i].DecBundleName, cfg.Bundles[i])
 	}
+	cfg.UserEnabledBundles = NormalizeBundleNames(cfg.UserEnabledBundles)
 	applyConfigDefaults(cfg)
 	return cfg, nil
 }
@@ -79,6 +82,7 @@ func SaveConfig(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("secrets 配置不能为空")
 	}
+	cfg.UserEnabledBundles = NormalizeBundleNames(cfg.UserEnabledBundles)
 	applyConfigDefaults(cfg)
 	path, err := ConfigPath()
 	if err != nil {
@@ -172,9 +176,46 @@ func ProjectSecretsBinding(secretsName string) BundleBinding {
 	}
 }
 
+// NormalizeBundleNames 去空白、去重，保序。
+func NormalizeBundleNames(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(names))
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		name = strings.TrimPrefix(name, BundleFolderPrefix)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+// MergeEnabledBundles 合并 project 与 user 级启用列表（并集、保序：project 在前）。
+func MergeEnabledBundles(projectEnabled, userEnabled []string) []string {
+	return NormalizeBundleNames(append(append([]string{}, projectEnabled...), userEnabled...))
+}
+
+// UserEnabledBundleNames 返回规范化后的用户级启用列表。
+func (c *Config) UserEnabledBundleNames() []string {
+	if c == nil {
+		return nil
+	}
+	return NormalizeBundleNames(c.UserEnabledBundles)
+}
+
 // ResolveSyncTargets 解析一次 pull/push 的全部 SyncTarget。
 // 同一同步集合内 Bitwarden folder 名冲突时直接失败。
+// enabledBundles 应为已合并的 project∪user 列表（见 MergeEnabledBundles）。
 func (c *Config) ResolveSyncTargets(enabledBundles []string, projectName string) ([]SyncTarget, error) {
+	enabledBundles = NormalizeBundleNames(enabledBundles)
 	targets := make([]SyncTarget, 0, len(enabledBundles)+1)
 	seenFolder := make(map[string]string) // folder -> label
 
@@ -189,10 +230,6 @@ func (c *Config) ResolveSyncTargets(enabledBundles []string, projectName string)
 	}
 
 	for _, bundleName := range enabledBundles {
-		bundleName = strings.TrimSpace(bundleName)
-		if bundleName == "" {
-			continue
-		}
 		binding := c.ResolveBinding(bundleName)
 		target, err := NewBundleSyncTarget(bundleName, binding.SecretsBundleName)
 		if err != nil {

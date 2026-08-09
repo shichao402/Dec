@@ -146,17 +146,21 @@ func snapshotSettingsModel(width int) model {
 	m := snapshotHomeModel(width)
 	m.pageIndex = 5
 	m.settings = &app.GlobalSettingsState{
-		ConfigPath:       "/tmp/.dec/config.yaml",
-		VarsPath:         "/tmp/.dec/local/vars.yaml",
-		RepoConnected:    true,
-		RepoURL:          "git@github.com:demo/dec.git",
-		ConnectedRepoURL: "git@github.com:demo/dec.git",
-		AvailableIDEs:    []string{"codex", "cursor"},
-		SelectedIDEs:     []string{"cursor"},
-		EffectiveIDEs:    []string{"cursor"},
+		ConfigPath:             "/tmp/.dec/config.yaml",
+		VarsPath:               "/tmp/.dec/local/vars.yaml",
+		RepoConnected:          true,
+		RepoURL:                "git@github.com:demo/dec.git",
+		ConnectedRepoURL:       "git@github.com:demo/dec.git",
+		AvailableIDEs:          []string{"codex", "cursor"},
+		SelectedIDEs:           []string{"cursor"},
+		EffectiveIDEs:          []string{"cursor"},
+		AvailableSecretBundles: []string{"vikunja", "woa"},
+		UserEnabledBundles:     []string{"woa"},
+		SecretsConfigPath:      "/tmp/.dec/secrets/config.yaml",
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
+	m.settingsSelectedSecretBundles = []string{"woa"}
 	m.normalizeSettingsCursor()
 	return m
 }

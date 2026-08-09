@@ -1,9 +1,9 @@
 # 0003 — Secrets bundle 的用户级启用（机器平面）
 
-- **状态**：已接受（待实现）
+- **状态**：已接受（已实现）
 - **日期**：2026-08-09
 - **关联**：[0002-secrets-synctarget-root.md](0002-secrets-synctarget-root.md)
-- **影响范围（规划）**：`~/.dec/secrets` 全局配置、`pkg/secrets` sync plan、`pkg/app` pull、TUI Settings；**不**改 Bitwarden folder 命名协议
+- **影响范围**：`~/.dec/secrets/config.yaml` 的 `user_enabled_bundles`、`pkg/secrets` sync plan、`pkg/app` pull / Settings、TUI Settings；**不**改 Bitwarden folder 命名协议
 
 ## 问题
 
@@ -42,7 +42,7 @@ Secure Note → .secrets/bundles/<name>/（若有；仅当本次 pull 落在某 
 3. **TUI 入口在 Settings（全局）**  
    不塞进某项目 Bundles 页；Bundles 页仍只管当前 project 的公开资产与 project 级 enable。
 4. **Pull**：每次项目 pull（或 Settings 显式「同步用户 secrets」）把 `User.enabled_secret_bundles` 并入 secrets plan；至少保证 SSH 写入 `~/.ssh/`。
-5. **配置落点（规划）**：全局 secrets 配置中增加列表字段（实现时命名，例如 `user_enabled_bundles` / `enabled_secret_bundles`），持久化在 `~/.dec/secrets/`，**不是** `.dec/config.yaml`。
+5. **配置落点**：`~/.dec/secrets/config.yaml` 字段 `user_enabled_bundles`（逻辑 bundle 名列表），**不是** `.dec/config.yaml`。
 
 ## 理由
 

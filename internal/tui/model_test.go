@@ -596,17 +596,21 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 	m.width = 120
 	m.height = 32
 	m.settings = &app.GlobalSettingsState{
-		ConfigPath:       "/tmp/.dec/config.yaml",
-		VarsPath:         "/tmp/.dec/local/vars.yaml",
-		RepoConnected:    true,
-		RepoURL:          "git@github.com:demo/dec.git",
-		ConnectedRepoURL: "git@github.com:demo/dec.git",
-		AvailableIDEs:    []string{"codex", "cursor"},
-		SelectedIDEs:     []string{"cursor"},
-		EffectiveIDEs:    []string{"cursor"},
+		ConfigPath:             "/tmp/.dec/config.yaml",
+		VarsPath:               "/tmp/.dec/local/vars.yaml",
+		RepoConnected:          true,
+		RepoURL:                "git@github.com:demo/dec.git",
+		ConnectedRepoURL:       "git@github.com:demo/dec.git",
+		AvailableIDEs:          []string{"codex", "cursor"},
+		SelectedIDEs:           []string{"cursor"},
+		EffectiveIDEs:          []string{"cursor"},
+		AvailableSecretBundles: []string{"woa"},
+		UserEnabledBundles:     []string{"woa"},
+		SecretsConfigPath:      "/tmp/.dec/secrets/config.yaml",
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
+	m.settingsSelectedSecretBundles = []string{"woa"}
 	m.normalizeSettingsCursor()
 
 	view := m.View()
@@ -616,6 +620,8 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 		"当前远端:",
 		"[x] cursor",
 		"[ ] codex",
+		"User secret bundles",
+		"[x] woa",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
@@ -654,6 +660,30 @@ func TestModelSettingsHotkeysToggleIDEAndStartEdit(t *testing.T) {
 	}
 }
 
+func TestModelSettingsHotkeysToggleUserSecretBundle(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 5
+	m.focus = focusContent
+	m.settings = &app.GlobalSettingsState{
+		RepoURL:                "git@github.com:demo/dec.git",
+		AvailableIDEs:          []string{"cursor"},
+		SelectedIDEs:           []string{"cursor"},
+		AvailableSecretBundles: []string{"woa"},
+	}
+	m.settingsRepoInput = m.settings.RepoURL
+	m.settingsSelectedIDEs = []string{"cursor"}
+	m.settingsCursor = 2 // repo(0) + IDE(1) + first secret bundle
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = updated.(model)
+	if !settingsContainsIDE(m.settingsSelectedSecretBundles, "woa") {
+		t.Fatalf("space 应启用 user secret bundle, 实际: %#v", m.settingsSelectedSecretBundles)
+	}
+	if !m.settingsDirty {
+		t.Fatal("切换 user secret bundle 后应 dirty")
+	}
+}
+
 func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
 	oldSave := saveGlobalSettingsOperation
 	defer func() { saveGlobalSettingsOperation = oldSave }()
@@ -667,18 +697,26 @@ func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
 		if len(input.IDEs) != 1 || input.IDEs[0] != "cursor" {
 			t.Fatalf("IDEs = %#v, 期望 %#v", input.IDEs, []string{"cursor"})
 		}
-		return &app.SaveGlobalSettingsResult{IDEs: []string{"cursor"}}, nil
+		if input.UserEnabledBundles == nil {
+			t.Fatal("UserEnabledBundles 不应为 nil")
+		}
+		if len(input.UserEnabledBundles) != 1 || input.UserEnabledBundles[0] != "woa" {
+			t.Fatalf("UserEnabledBundles = %#v, 期望 [woa]", input.UserEnabledBundles)
+		}
+		return &app.SaveGlobalSettingsResult{IDEs: []string{"cursor"}, UserEnabledBundles: []string{"woa"}}, nil
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 5
 	m.settings = &app.GlobalSettingsState{
-		RepoURL:       "git@github.com:demo/dec.git",
-		AvailableIDEs: []string{"cursor"},
-		SelectedIDEs:  []string{"cursor"},
+		RepoURL:            "git@github.com:demo/dec.git",
+		AvailableIDEs:      []string{"cursor"},
+		SelectedIDEs:       []string{"cursor"},
+		UserEnabledBundles: []string{"woa"},
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
+	m.settingsSelectedSecretBundles = []string{"woa"}
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	m = updated.(model)
@@ -713,6 +751,9 @@ func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 		}
 		if len(input.IDEs) != 0 {
 			t.Fatalf("IDEs = %#v, 期望显式空切片", input.IDEs)
+		}
+		if input.UserEnabledBundles == nil {
+			t.Fatal("UserEnabledBundles 不应为 nil")
 		}
 		return &app.SaveGlobalSettingsResult{}, nil
 	}
