@@ -75,10 +75,17 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 		emit(reporter, EventInfo, "pull.migrate", note, nil)
 	}
 
-	if len(projectConfig.EnabledBundles) == 0 {
-		result.SkippedReason = "config.yaml 中没有已启用的 bundle"
+	mergedEnabled, err := mergeProjectAndUserEnabledBundles(projectConfig.EnabledBundles)
+	if err != nil {
+		return nil, fmt.Errorf("合并用户级启用 bundle 失败: %w", err)
+	}
+	pullConfig := *projectConfig
+	pullConfig.EnabledBundles = mergedEnabled
+
+	if len(mergedEnabled) == 0 {
+		result.SkippedReason = "config.yaml 与本机用户级均无已启用的 bundle"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
-		emit(reporter, EventInfo, "pull.prepare", "在 TUI Bundles 页勾选需要的 bundle 后按 s 保存", nil)
+		emit(reporter, EventInfo, "pull.prepare", "在 TUI Bundles 页勾选项目 bundle，或在 Settings 启用本机 bundle 后按 s 保存", nil)
 		applyAssetCleanup(result, projectRoot, nil, projectIDEs, reporter)
 		return result, nil
 	}
@@ -98,7 +105,7 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 
 	repoDir := tx.WorkDir()
 
-	resolved, err := resolveDesiredAssets(projectConfig, repoDir, reporter)
+	resolved, err := resolveDesiredAssets(&pullConfig, repoDir, reporter)
 	if err != nil {
 		return nil, err
 	}
@@ -117,10 +124,13 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 
 	applyAssetCleanup(result, projectRoot, validAssets, projectIDEs, reporter)
 
-	enabledBundleNames := enabledBundleNamesFromConfig(projectConfig, resolved.Bundles)
+	enabledBundleNames := append([]string(nil), mergedEnabled...)
 	if len(validAssets) == 0 {
-		result.SkippedReason = "没有有效的已启用资产可拉取"
+		result.SkippedReason = "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
+		if err := applySecretsPull(ctx, result, projectRoot, enabledBundleNames, reporter); err != nil {
+			return nil, err
+		}
 		return result, nil
 	}
 	result.RequestedCount = len(validAssets)

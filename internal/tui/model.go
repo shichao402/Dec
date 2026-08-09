@@ -515,7 +515,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsSelectedSecretBundles = cloneStrings(msg.state.UserEnabledBundles)
 			m.normalizeSettingsCursor()
 			m.syncSettingsDirty()
-			m.pushLog(fmt.Sprintf("Global settings loaded: %d IDEs, %d user secret bundles",
+			m.pushLog(fmt.Sprintf("Global settings loaded: %d IDEs, %d user bundles",
 				len(m.settingsSelectedIDEs), len(m.settingsSelectedSecretBundles)))
 			if msg.state.RepoConnected && len(m.settingsSelectedIDEs) > 0 && !m.builtinAssetsLoad.busy() {
 				gen := m.builtinAssetsLoad.beginGen()
@@ -541,8 +541,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.result != nil {
-			m.pushLog(fmt.Sprintf("Global settings saved: %d IDEs, %d user secret bundles",
+			m.pushLog(fmt.Sprintf("Global settings saved: %d IDEs, %d user bundles",
 				len(msg.result.IDEs), len(msg.result.UserEnabledBundles)))
+			for _, name := range msg.result.CreatedVaultBundles {
+				m.pushLog("Created vault placeholder bundle: " + name)
+			}
 			for _, warning := range msg.result.InstallWarnings {
 				m.pushLog("Install warning: " + warning)
 			}
@@ -2678,12 +2681,12 @@ func (m model) renderSettingsList() string {
 			lines = append(lines, shellLogStyle.Render(line))
 		}
 	}
-	lines = append(lines, "", shellMutedStyle.Render("本机 secrets bundles"))
+	lines = append(lines, "", shellMutedStyle.Render("本机启用的 bundles"))
 	rows := m.settingsSecretBundleRows()
 	if len(rows) == 0 {
-		hint := "（暂无候选）pull 或解锁 Bitwarden 后按 r 刷新"
+		hint := "（暂无候选）pull 或解锁 Bitwarden 后按 r 刷新；勾选启用时会补 vault 占位"
 		if m.settings != nil && !m.settings.BitwardenSessionReady {
-			hint = "（暂无候选）进程内未解锁 Bitwarden；pull/解锁后按 r 刷新可发现"
+			hint = "（暂无候选）未解锁 Bitwarden；pull/解锁后按 r 刷新。启用 secrets-only 时会创建 vault 包"
 		}
 		lines = append(lines, shellMutedStyle.Render("  "+hint))
 	} else {
@@ -2730,10 +2733,10 @@ func (m model) renderSettingsDetails() string {
 	default:
 		name := m.currentSettingsSecretBundleName()
 		lines = append(lines,
-			fmt.Sprintf("本机 secrets bundle: %s", fallbackValue(name, "<none>")),
-			"本机始终同步的 secrets bundle（与各 project enabled_bundles 并集）。",
-			"允许 secrets-only（无 vault 公开资产）；SSH Key 落地 ~/.ssh/。",
-			"候选来自 vault / known_secret_bundles / Bitwarden 枚举；pull 发现后会记住名字。",
+			fmt.Sprintf("本机 bundle: %s", fallbackValue(name, "<none>")),
+			"本机始终启用的 Dec bundle（与各 project enabled_bundles 并集；含公开资产与 secrets）。",
+			"secrets-only：勾选保存时若 vault 无此包，会创建最小 bundle.yaml 并 push。",
+			"候选来自 vault / known_secret_bundles / Bitwarden；仅发现不会改 Git vault。",
 			fmt.Sprintf("配置文件: %s", fallbackValue(m.settings.SecretsConfigPath, "~/.dec/secrets/config.yaml")),
 			fmt.Sprintf("Bitwarden session: %s", formatReady(m.settings.BitwardenSessionReady, "就绪", "未解锁")),
 			fmt.Sprintf("当前状态: %s", formatReady(settingsContainsIDE(m.settingsSelectedSecretBundles, name), "已启用", "未启用")),
@@ -2988,7 +2991,7 @@ func (m model) settingsSecretBundleCount() int {
 
 // settingsCountsLabel 是 Settings 顶栏/底栏共用的计数文案（SSOT）。
 func (m model) settingsCountsLabel() string {
-	return fmt.Sprintf("%d IDEs, %d secrets", m.settingsIDECount(), m.settingsSecretBundleCount())
+	return fmt.Sprintf("%d IDEs, %d bundles", m.settingsIDECount(), m.settingsSecretBundleCount())
 }
 
 func (m model) settingsRowCount() int {
@@ -3067,10 +3070,10 @@ func (m *model) toggleCurrentSettingsSecretBundle() {
 	}
 	if settingsContainsIDE(m.settingsSelectedSecretBundles, name) {
 		m.settingsSelectedSecretBundles = settingsRemoveIDE(m.settingsSelectedSecretBundles, name)
-		m.pushLog("User secret bundle disabled: " + name)
+		m.pushLog("User bundle disabled: " + name)
 	} else {
 		m.settingsSelectedSecretBundles = append(m.settingsSelectedSecretBundles, name)
-		m.pushLog("User secret bundle enabled: " + name)
+		m.pushLog("User bundle enabled: " + name)
 	}
 	m.syncSettingsDirty()
 }

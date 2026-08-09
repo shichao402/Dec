@@ -620,7 +620,7 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 		"当前远端:",
 		"[x] cursor",
 		"[ ] codex",
-		"本机 secrets bundles",
+		"本机启用的 bundles",
 		"[x] woa",
 	}
 	for _, check := range checks {

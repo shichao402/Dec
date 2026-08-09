@@ -20,8 +20,8 @@ const secretsConfigHeader = `# Bitwarden secrets 连接配置
 #   自托管示例:         https://vault.example.com
 # email: 登录邮箱（web unlock 成功后自动写入）
 # project_secrets: 可选；project 级 Bitwarden folder 名，默认 = project_name
-# user_enabled_bundles: 本机始终同步的 secrets bundle（与各 project enabled_bundles 并集）
-# known_secret_bundles: 本机已知的 secrets bundle 名（枚举/pull 后写入，供 Settings 候选，非启用）
+# user_enabled_bundles: 本机始终启用的 Dec bundle 短名（公开资产 ∪ secrets；与各 project enabled_bundles 并集）
+# known_secret_bundles: 本机已知的 secrets-related bundle 名（枚举/pull 后写入，供 Settings 候选；启用缺失 vault 包时再创建）
 # bundles: 可选显式别名绑定；默认同名，一般不需要
 
 `

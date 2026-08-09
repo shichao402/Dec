@@ -30,10 +30,10 @@ type GlobalSettingsState struct {
 	IDEWarnings            []string
 	ConfiguredEditor       string
 	ConnectedBarePath      string
-	AvailableSecretBundles []string // Settings 勾选候选：vault ∪ BW ∪ known ∪ 已启用
-	UserEnabledBundles     []string // ~/.dec/secrets user_enabled_bundles
+	AvailableSecretBundles []string // Settings 候选：vault ∪ known ∪ BW ∪ 已启用（语义：本机 bundle）
+	UserEnabledBundles     []string // 本机启用的 Dec bundle 短名（user_enabled_bundles）
 	SecretsConfigPath      string
-	BitwardenSessionReady  bool // 进程内是否已有 session（影响候选与提示）
+	BitwardenSessionReady  bool
 }
 
 type ConnectRepoResult struct {
@@ -58,6 +58,7 @@ type SaveGlobalSettingsResult struct {
 	BareRepo           string
 	InstallWarnings    []string
 	SecretsConfigPath  string
+	CreatedVaultBundles []string // 本次为用户级启用新建的 vault 占位
 }
 
 func LoadGlobalSettings(reporter Reporter) (*GlobalSettingsState, error) {
@@ -342,6 +343,14 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 	result.VarsPath = varsPath
 	result.VarsCreated = varsCreated
 	result.BareRepo = bareRepo
+
+	if len(savedUserBundles) > 0 {
+		created, err := ensureVaultBundlesForUserEnable(savedUserBundles, reporter)
+		if err != nil {
+			return nil, err
+		}
+		result.CreatedVaultBundles = created
+	}
 
 	emit(reporter, EventInfo, "settings.save", "已写入全局配置与本机变量模板", &Progress{Phase: "save", Current: 3, Total: 3})
 	return result, nil

@@ -1,5 +1,5 @@
 ╭────────────────╮╭────────────────────────────────────────────────────────────────────────────────╮
-│ Dec Shell      ││ Settings · Settings ready, 1 IDEs, 1 secrets                                   │
+│ Dec Shell      ││ Settings · Settings ready, 1 IDEs, 1 bundles                                   │
 │  Home          │╰────────────────────────────────────────────────────────────────────────────────╯
 │  Bundles       │╭────────────────────────────────────────────────────────────────────────────────╮
 │  Project       ││ 首次保存会创建 ~/.dec/local/vars.yaml                                          │
@@ -9,7 +9,7 @@
 │                ││   [ ] codex                                                                    │
 │                ││   [x] cursor                                                                   │
 │                ││                                                                                │
-│                ││ 本机 secrets bundles                                                           │
+│                ││ 本机启用的 bundles                                                             │
 │                ││   [ ] vikunja                                                                  │
 │                ││   [x] woa                                                                      │
 │                ││                                                                                │
@@ -37,4 +37,4 @@
 │                ││                                                                                │
 │                ││                                                                                │
 ╰────────────────╯╰────────────────────────────────────────────────────────────────────────────────╯
- q quit | j/k nav | l/h in-out | r refresh                        page Settings | 1 IDEs, 1 secrets
+ q quit | j/k nav | l/h in-out | r refresh                        page Settings | 1 IDEs, 1 bundles

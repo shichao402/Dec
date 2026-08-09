@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
@@ -19,13 +21,14 @@ func TestPullProjectAssetsSkipsWithoutEnabledAssets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	if result.SkippedReason != "config.yaml 中没有已启用的 bundle" {
-		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, "config.yaml 中没有已启用的 bundle")
+	want := "config.yaml 与本机用户级均无已启用的 bundle"
+	if result.SkippedReason != want {
+		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, want)
 	}
 }
 
 // TestPullProjectAssetsWarnsOnMissingBundle 覆盖「配置里引用了仓库中已不存在的 bundle」：
-// 解析阶段给出告警，pull 整体跳过而不是报错。
+// 解析阶段给出告警；无 Git 资产时仍走 secrets（测试注入 stub），整单不报错。
 func TestPullProjectAssetsWarnsOnMissingBundle(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
@@ -46,6 +49,13 @@ name: another-workflow
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return &secrets.StubClient{} }
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
 	var events []OperationEvent
 	result, err := PullProjectAssets(context.Background(), projectRoot, "", ReporterFunc(func(event OperationEvent) {
 		events = append(events, event)
@@ -53,8 +63,9 @@ name: another-workflow
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	if result.SkippedReason != "没有有效的已启用资产可拉取" {
-		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, "没有有效的已启用资产可拉取")
+	wantSkip := "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
+	if result.SkippedReason != wantSkip {
+		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, wantSkip)
 	}
 	var sawWarn bool
 	for _, event := range events {
