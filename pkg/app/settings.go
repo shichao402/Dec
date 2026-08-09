@@ -161,35 +161,28 @@ func attachUserSecretBundleSettings(state *GlobalSettingsState, reporter Reporte
 			if err := secrets.RememberSecretBundles(names); err != nil {
 				emit(reporter, EventWarn, "settings.secrets",
 					fmt.Sprintf("写入 known_secret_bundles 失败: %v", err), nil)
-			} else if refreshed, loadErr := secrets.LoadConfig(); loadErr == nil {
-				cfg = refreshed
 			}
 		}
 	}
 
+	vaultNames := listConnectedVaultBundleNames(reporter)
+	if refreshed, loadErr := secrets.LoadConfig(); loadErr == nil {
+		cfg = refreshed
+	}
 	state.AvailableSecretBundles = listUserSecretBundleCandidates(
 		state.UserEnabledBundles,
 		cfg.KnownSecretBundleNames(),
 		remoteNames,
-		reporter,
+		vaultNames,
 	)
 	return nil
 }
 
-// listUserSecretBundleCandidates 合并 vault / known / 已启用 / 本次远端枚举。
-func listUserSecretBundleCandidates(userEnabled, known, remote []string, reporter Reporter) []string {
-	reporter = defaultReporter(reporter)
-	parts := [][]string{userEnabled, known, remote}
-	if vaultNames := listConnectedVaultBundleNames(reporter); len(vaultNames) > 0 {
-		parts = append(parts, vaultNames)
-	}
-	merged := make([]string, 0)
-	for _, part := range parts {
-		merged = append(merged, part...)
-	}
-	names := secrets.NormalizeBundleNames(merged)
-	sort.Strings(names)
-	return names
+// listUserSecretBundleCandidates 合并已启用 / known / 远端枚举 / vault 扫描结果。
+func listUserSecretBundleCandidates(userEnabled, known, remote, vault []string) []string {
+	merged := secrets.NormalizeBundleNames(append(append(append(append([]string{}, userEnabled...), known...), remote...), vault...))
+	sort.Strings(merged)
+	return merged
 }
 
 func listConnectedVaultBundleNames(reporter Reporter) []string {
@@ -197,7 +190,7 @@ func listConnectedVaultBundleNames(reporter Reporter) []string {
 	if err != nil || !connected {
 		return nil
 	}
-	tx, err := repo.NewReadTransaction()
+	tx, err := repo.NewLocalReadTransaction()
 	if err != nil {
 		emit(reporter, EventWarn, "settings.secrets",
 			fmt.Sprintf("打开仓库只读事务失败，Settings 将不展示 vault bundle: %v", err), nil)
@@ -214,6 +207,12 @@ func listConnectedVaultBundleNames(reporter Reporter) []string {
 	names := make([]string, 0, len(resolved.Bundles))
 	for _, bo := range resolved.Bundles {
 		names = append(names, bo.Name)
+	}
+	if len(names) > 0 {
+		if err := secrets.RememberSecretBundles(names); err != nil {
+			emit(reporter, EventWarn, "settings.secrets",
+				fmt.Sprintf("写入 known_secret_bundles 失败: %v", err), nil)
+		}
 	}
 	return names
 }
@@ -299,6 +298,7 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 			return nil, fmt.Errorf("保存用户级 secret bundles 失败: %w", err)
 		}
 		savedUserBundles = secretsCfg.UserEnabledBundleNames()
+		_ = secrets.RememberSecretBundles(savedUserBundles)
 		if path, err := secrets.ConfigPath(); err == nil {
 			secretsConfigPath = path
 		}

@@ -191,6 +191,7 @@ func snapshotProjectModel(width int) model {
 
 // TestSnapshotHome 固定 Home 页在基线宽度下的完整渲染。
 func TestSnapshotHome(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
 	for _, w := range snapshotWidths {
 		w := w
 		t.Run(widthLabel(w), func(t *testing.T) {
@@ -202,6 +203,7 @@ func TestSnapshotHome(t *testing.T) {
 
 // TestSnapshotBundles 固定 Bundles 页在基线宽度下的完整渲染。
 func TestSnapshotBundles(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
 	for _, w := range snapshotWidths {
 		w := w
 		t.Run(widthLabel(w), func(t *testing.T) {
@@ -213,6 +215,7 @@ func TestSnapshotBundles(t *testing.T) {
 
 // TestSnapshotProject 固定 Project 页在基线宽度下的完整渲染。
 func TestSnapshotProject(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
 	for _, w := range snapshotWidths {
 		w := w
 		t.Run(widthLabel(w), func(t *testing.T) {
@@ -224,6 +227,7 @@ func TestSnapshotProject(t *testing.T) {
 
 // TestSnapshotRun 固定 Run 页在基线宽度下的完整渲染。
 func TestSnapshotRun(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
 	for _, w := range snapshotWidths {
 		w := w
 		t.Run(widthLabel(w), func(t *testing.T) {
@@ -235,6 +239,7 @@ func TestSnapshotRun(t *testing.T) {
 
 // TestSnapshotSettings 固定 Settings 页在基线宽度下的完整渲染。
 func TestSnapshotSettings(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
 	for _, w := range snapshotWidths {
 		w := w
 		t.Run(widthLabel(w), func(t *testing.T) {

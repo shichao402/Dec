@@ -80,5 +80,14 @@ func ensureVaultBundlesForUserEnable(names []string, reporter Reporter) ([]strin
 	if _, err := tx.CommitAndPush(msg); err != nil {
 		return nil, fmt.Errorf("推送用户级 vault bundle 占位失败: %w", err)
 	}
+	_ = secrets.RememberSecretBundles(created)
 	return created, nil
+}
+
+func bundleOverviewNames(bundles []BundleOverview) []string {
+	names := make([]string, 0, len(bundles))
+	for _, bo := range bundles {
+		names = append(names, bo.Name)
+	}
+	return names
 }

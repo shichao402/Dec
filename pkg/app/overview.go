@@ -8,6 +8,7 @@ import (
 
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
@@ -74,12 +75,17 @@ func LoadProjectOverview(projectRoot string) (*ProjectOverview, error) {
 	// 仓库已连接时扫描 vault 内的 bundle 声明，并根据 EnabledBundles 标记启用状态。
 	// 失败时不阻塞 overview（bundle 是增量能力，项目级配置仍应可读）。
 	if connected {
-		tx, txErr := repo.NewReadTransaction()
+		tx, txErr := repo.NewLocalReadTransaction()
 		if txErr == nil {
 			resolved, resolveErr := resolveDesiredAssets(projectConfig, tx.WorkDir(), nil)
 			if resolveErr == nil {
 				overview.Bundles = resolved.Bundles
 				overview.AvailableBundleCount = len(resolved.Bundles)
+				names := make([]string, 0, len(resolved.Bundles))
+				for _, bo := range resolved.Bundles {
+					names = append(names, bo.Name)
+				}
+				_ = secrets.RememberSecretBundles(names)
 			}
 			tx.Close()
 		}

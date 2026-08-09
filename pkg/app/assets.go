@@ -9,6 +9,7 @@ import (
 	"github.com/shichao402/Dec/pkg/bundle"
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
@@ -137,7 +138,7 @@ func SaveEnabledBundles(projectRoot string, bundles []string, reporter Reporter)
 // 本函数只为 Bundles 页展示服务，任何错误都降级为 reporter warning，不向上传播；
 // 失败时返回 nil，调用方按"没有 bundle"处理。
 func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) []AssetBundleOption {
-	tx, err := repo.NewReadTransaction()
+	tx, err := repo.NewLocalReadTransaction()
 	if err != nil {
 		emit(reporter, EventWarn, "assets.bundle",
 			fmt.Sprintf("打开仓库只读事务失败，Bundles 页将不展示 bundle: %v", err), nil)
@@ -150,6 +151,10 @@ func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) 
 		emit(reporter, EventWarn, "assets.bundle",
 			fmt.Sprintf("解析 bundle 声明失败，Bundles 页将不展示 bundle: %v", err), nil)
 		return nil
+	}
+
+	if names := bundleOverviewNames(resolved.Bundles); len(names) > 0 {
+		_ = secrets.RememberSecretBundles(names)
 	}
 
 	enabledSet := make(map[string]struct{})

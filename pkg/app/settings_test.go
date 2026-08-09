@@ -273,9 +273,9 @@ func TestListUserSecretBundleCandidates_MergesSources(t *testing.T) {
 		[]string{"woa", "local-only"},
 		[]string{"known-a"},
 		[]string{"extra"},
-		nil,
+		[]string{"cli"},
 	)
-	want := map[string]bool{"woa": true, "local-only": true, "known-a": true, "extra": true}
+	want := map[string]bool{"woa": true, "local-only": true, "known-a": true, "extra": true, "cli": true}
 	for _, name := range got {
 		delete(want, name)
 	}

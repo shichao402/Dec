@@ -8,7 +8,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+// bareOpMu 串行化 bare 上的 fetch / worktree 增删，避免 TUI 并联 refresh 在 Windows 上互卡。
+var bareOpMu sync.Mutex
 
 // Transaction 封装基于 bare repo 的短生命周期工作区
 // readOnly=true 表示只读事务，仅用于读取本地工作区文件。
@@ -21,15 +25,20 @@ type Transaction struct {
 	cleaned     bool
 }
 
-// NewReadTransaction 创建只读事务。
+// NewReadTransaction 创建只读事务（会先 FetchBare）。
 func NewReadTransaction() (*Transaction, error) {
-	return newTransaction(true)
+	return newTransaction(true, true)
+}
+
+// NewLocalReadTransaction 创建只读事务但不 fetch，用于 TUI 概览/列表等可接受略旧 refs 的场景。
+func NewLocalReadTransaction() (*Transaction, error) {
+	return newTransaction(true, false)
 }
 
 // NewReadTransactionAt 创建指定版本的只读事务。
 // ref 可以是 commit hash、tag 或 branch 名称。
 func NewReadTransactionAt(ref string) (*Transaction, error) {
-	tx, err := newTransaction(true)
+	tx, err := newTransaction(true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -45,10 +54,13 @@ func NewReadTransactionAt(ref string) (*Transaction, error) {
 
 // NewWriteTransaction 创建可写事务。
 func NewWriteTransaction() (*Transaction, error) {
-	return newTransaction(false)
+	return newTransaction(false, true)
 }
 
-func newTransaction(readOnly bool) (*Transaction, error) {
+func newTransaction(readOnly, fetch bool) (*Transaction, error) {
+	bareOpMu.Lock()
+	defer bareOpMu.Unlock()
+
 	if err := MigrateToBare(); err != nil {
 		return nil, err
 	}
@@ -65,8 +77,10 @@ func newTransaction(readOnly bool) (*Transaction, error) {
 		return nil, fmt.Errorf("仓库未连接\n\n请先到 Settings 页配置 Repo URL")
 	}
 
-	if err := FetchBare(); err != nil {
-		return nil, err
+	if fetch {
+		if err := FetchBare(); err != nil {
+			return nil, err
+		}
 	}
 	branch, err := GetDefaultBranch()
 	if err != nil {
@@ -192,6 +206,11 @@ func (t *Transaction) Close() {
 
 func (t *Transaction) cleanup() error {
 	if t == nil || t.cleaned {
+		return nil
+	}
+	bareOpMu.Lock()
+	defer bareOpMu.Unlock()
+	if t.cleaned {
 		return nil
 	}
 	t.cleaned = true
