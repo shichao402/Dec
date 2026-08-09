@@ -21,6 +21,7 @@ const secretsConfigHeader = `# Bitwarden secrets 连接配置
 # email: 登录邮箱（web unlock 成功后自动写入）
 # project_secrets: 可选；project 级 Bitwarden folder 名，默认 = project_name
 # user_enabled_bundles: 本机始终同步的 secrets bundle（与各 project enabled_bundles 并集）
+# known_secret_bundles: 本机已知的 secrets bundle 名（枚举/pull 后写入，供 Settings 候选，非启用）
 # bundles: 可选显式别名绑定；默认同名，一般不需要
 
 `
@@ -31,6 +32,7 @@ type Config struct {
 	Email               string          `yaml:"email"`
 	ProjectSecrets      string          `yaml:"project_secrets,omitempty"`
 	UserEnabledBundles  []string        `yaml:"user_enabled_bundles,omitempty"`
+	KnownSecretBundles  []string        `yaml:"known_secret_bundles,omitempty"`
 	Bundles             []BundleBinding `yaml:"bundles,omitempty"`
 }
 
@@ -73,6 +75,7 @@ func LoadConfig() (*Config, error) {
 		cfg.Bundles[i] = normalizeBinding(cfg.Bundles[i].DecBundleName, cfg.Bundles[i])
 	}
 	cfg.UserEnabledBundles = NormalizeBundleNames(cfg.UserEnabledBundles)
+	cfg.KnownSecretBundles = NormalizeBundleNames(cfg.KnownSecretBundles)
 	applyConfigDefaults(cfg)
 	return cfg, nil
 }
@@ -83,6 +86,7 @@ func SaveConfig(cfg *Config) error {
 		return fmt.Errorf("secrets 配置不能为空")
 	}
 	cfg.UserEnabledBundles = NormalizeBundleNames(cfg.UserEnabledBundles)
+	cfg.KnownSecretBundles = NormalizeBundleNames(cfg.KnownSecretBundles)
 	applyConfigDefaults(cfg)
 	path, err := ConfigPath()
 	if err != nil {
@@ -209,6 +213,46 @@ func (c *Config) UserEnabledBundleNames() []string {
 		return nil
 	}
 	return NormalizeBundleNames(c.UserEnabledBundles)
+}
+
+// KnownSecretBundleNames 返回本机已知的 secrets bundle 逻辑名（非启用）。
+func (c *Config) KnownSecretBundleNames() []string {
+	if c == nil {
+		return nil
+	}
+	return NormalizeBundleNames(c.KnownSecretBundles)
+}
+
+// RememberSecretBundles 把发现的 secrets bundle 名合并写入 known_secret_bundles（幂等）。
+// 用于 Settings 候选与刷新可见性；不写入 Dec Git vault。
+func RememberSecretBundles(names []string) error {
+	names = NormalizeBundleNames(names)
+	if len(names) == 0 {
+		return nil
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	before := cfg.KnownSecretBundleNames()
+	merged := NormalizeBundleNames(append(append([]string{}, before...), names...))
+	if equalStringSlices(before, merged) {
+		return nil
+	}
+	cfg.KnownSecretBundles = merged
+	return SaveConfig(cfg)
+}
+
+func equalStringSlices(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // ResolveSyncTargets 解析一次 pull/push 的全部 SyncTarget。

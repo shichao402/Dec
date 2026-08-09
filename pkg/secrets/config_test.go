@@ -267,3 +267,22 @@ func TestLoadSaveConfig_UserEnabledBundles(t *testing.T) {
 	}
 }
 
+func TestRememberSecretBundles_MergesIdempotent(t *testing.T) {
+	decHome := t.TempDir()
+	t.Setenv("DEC_HOME", decHome)
+	if err := RememberSecretBundles([]string{"woa", "bundle/cli"}); err != nil {
+		t.Fatalf("RememberSecretBundles() = %v", err)
+	}
+	if err := RememberSecretBundles([]string{"woa", "vikunja"}); err != nil {
+		t.Fatalf("RememberSecretBundles() 二次 = %v", err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.KnownSecretBundleNames()
+	if len(got) != 3 || got[0] != "woa" || got[1] != "cli" || got[2] != "vikunja" {
+		t.Fatalf("KnownSecretBundleNames = %#v", got)
+	}
+}
+

@@ -30,9 +30,10 @@ type GlobalSettingsState struct {
 	IDEWarnings            []string
 	ConfiguredEditor       string
 	ConnectedBarePath      string
-	AvailableSecretBundles []string // Settings 勾选候选：vault ∪ Bitwarden ∪ 已启用
+	AvailableSecretBundles []string // Settings 勾选候选：vault ∪ BW ∪ known ∪ 已启用
 	UserEnabledBundles     []string // ~/.dec/secrets user_enabled_bundles
 	SecretsConfigPath      string
+	BitwardenSessionReady  bool // 进程内是否已有 session（影响候选与提示）
 }
 
 type ConnectRepoResult struct {
@@ -139,32 +140,47 @@ func attachUserSecretBundleSettings(state *GlobalSettingsState, reporter Reporte
 		return fmt.Errorf("获取 secrets 配置路径失败: %w", err)
 	}
 	state.SecretsConfigPath = secretsPath
+	state.BitwardenSessionReady = secrets.HasSession() && secrets.HasUserKey()
 
 	cfg, err := secrets.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("加载 secrets 配置失败: %w", err)
 	}
 	state.UserEnabledBundles = cfg.UserEnabledBundleNames()
-	state.AvailableSecretBundles = listUserSecretBundleCandidates(state.UserEnabledBundles, secretsClientFactory(), reporter)
+
+	client := secretsClientFactory()
+	var remoteNames []string
+	if state.BitwardenSessionReady && client != nil {
+		names, listErr := client.ListSecretBundleNames(context.Background())
+		if listErr != nil {
+			emit(reporter, EventWarn, "settings.secrets",
+				fmt.Sprintf("枚举 Bitwarden secret bundles 失败（仍展示本机与 vault 候选）: %v", listErr), nil)
+		} else {
+			remoteNames = names
+			if err := secrets.RememberSecretBundles(names); err != nil {
+				emit(reporter, EventWarn, "settings.secrets",
+					fmt.Sprintf("写入 known_secret_bundles 失败: %v", err), nil)
+			} else if refreshed, loadErr := secrets.LoadConfig(); loadErr == nil {
+				cfg = refreshed
+			}
+		}
+	}
+
+	state.AvailableSecretBundles = listUserSecretBundleCandidates(
+		state.UserEnabledBundles,
+		cfg.KnownSecretBundleNames(),
+		remoteNames,
+		reporter,
+	)
 	return nil
 }
 
-// listUserSecretBundleCandidates 合并 vault 公开包名、已启用用户级、以及（有 session 时）Bitwarden bundle/ folder。
-func listUserSecretBundleCandidates(userEnabled []string, client secrets.Client, reporter Reporter) []string {
+// listUserSecretBundleCandidates 合并 vault / known / 已启用 / 本次远端枚举。
+func listUserSecretBundleCandidates(userEnabled, known, remote []string, reporter Reporter) []string {
 	reporter = defaultReporter(reporter)
-	parts := make([][]string, 0, 3)
-	parts = append(parts, userEnabled)
+	parts := [][]string{userEnabled, known, remote}
 	if vaultNames := listConnectedVaultBundleNames(reporter); len(vaultNames) > 0 {
 		parts = append(parts, vaultNames)
-	}
-	if client != nil {
-		names, err := client.ListSecretBundleNames(context.Background())
-		if err != nil {
-			emit(reporter, EventWarn, "settings.secrets",
-				fmt.Sprintf("枚举 Bitwarden secret bundles 失败（仍展示本机与 vault 候选）: %v", err), nil)
-		} else if len(names) > 0 {
-			parts = append(parts, names)
-		}
 	}
 	merged := make([]string, 0)
 	for _, part := range parts {
@@ -268,13 +284,34 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 	}
 
 	emit(reporter, EventInfo, "settings.save", "开始保存全局设置", &Progress{Phase: "save", Current: 1, Total: 3})
+
+	var savedUserBundles []string
+	var secretsConfigPath string
+	// 先写用户级 secrets，避免后续 repo.Connect 失败导致勾选丢失。
+	if input.UserEnabledBundles != nil {
+		secretsCfg, err := secrets.LoadConfig()
+		if err != nil {
+			return nil, fmt.Errorf("加载 secrets 配置失败: %w", err)
+		}
+		secretsCfg.UserEnabledBundles = secrets.NormalizeBundleNames(input.UserEnabledBundles)
+		if err := secrets.SaveConfig(secretsCfg); err != nil {
+			return nil, fmt.Errorf("保存用户级 secret bundles 失败: %w", err)
+		}
+		savedUserBundles = secretsCfg.UserEnabledBundleNames()
+		if path, err := secrets.ConfigPath(); err == nil {
+			secretsConfigPath = path
+		}
+	}
+
 	if err := repo.Connect(targetRepoURL); err != nil {
 		return nil, err
 	}
 
 	result := &SaveGlobalSettingsResult{
-		RepoURL: targetRepoURL,
-		IDEs:    append([]string(nil), targetIDEs...),
+		RepoURL:            targetRepoURL,
+		IDEs:               append([]string(nil), targetIDEs...),
+		UserEnabledBundles: savedUserBundles,
+		SecretsConfigPath:  secretsConfigPath,
 	}
 	result.InstallWarnings = append(result.InstallWarnings, EnsureBuiltinIDEAssets(targetIDEs, reporter)...)
 
@@ -305,21 +342,6 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 	result.VarsPath = varsPath
 	result.VarsCreated = varsCreated
 	result.BareRepo = bareRepo
-
-	if input.UserEnabledBundles != nil {
-		secretsCfg, err := secrets.LoadConfig()
-		if err != nil {
-			return nil, fmt.Errorf("加载 secrets 配置失败: %w", err)
-		}
-		secretsCfg.UserEnabledBundles = secrets.NormalizeBundleNames(input.UserEnabledBundles)
-		if err := secrets.SaveConfig(secretsCfg); err != nil {
-			return nil, fmt.Errorf("保存用户级 secret bundles 失败: %w", err)
-		}
-		result.UserEnabledBundles = secretsCfg.UserEnabledBundleNames()
-		if secretsPath, err := secrets.ConfigPath(); err == nil {
-			result.SecretsConfigPath = secretsPath
-		}
-	}
 
 	emit(reporter, EventInfo, "settings.save", "已写入全局配置与本机变量模板", &Progress{Phase: "save", Current: 3, Total: 3})
 	return result, nil

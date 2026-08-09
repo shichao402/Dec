@@ -2678,9 +2678,16 @@ func (m model) renderSettingsList() string {
 			lines = append(lines, shellLogStyle.Render(line))
 		}
 	}
-	if len(m.settings.AvailableSecretBundles) > 0 || len(m.settingsSelectedSecretBundles) > 0 {
-		lines = append(lines, "", shellMutedStyle.Render("User secret bundles"))
-		for idx, name := range m.settingsSecretBundleRows() {
+	lines = append(lines, "", shellMutedStyle.Render("本机 secrets bundles"))
+	rows := m.settingsSecretBundleRows()
+	if len(rows) == 0 {
+		hint := "（暂无候选）pull 或解锁 Bitwarden 后按 r 刷新"
+		if m.settings != nil && !m.settings.BitwardenSessionReady {
+			hint = "（暂无候选）进程内未解锁 Bitwarden；pull/解锁后按 r 刷新可发现"
+		}
+		lines = append(lines, shellMutedStyle.Render("  "+hint))
+	} else {
+		for idx, name := range rows {
 			selected := settingsContainsIDE(m.settingsSelectedSecretBundles, name)
 			checked := " "
 			if selected {
@@ -2723,10 +2730,12 @@ func (m model) renderSettingsDetails() string {
 	default:
 		name := m.currentSettingsSecretBundleName()
 		lines = append(lines,
-			fmt.Sprintf("User secret bundle: %s", fallbackValue(name, "<none>")),
+			fmt.Sprintf("本机 secrets bundle: %s", fallbackValue(name, "<none>")),
 			"本机始终同步的 secrets bundle（与各 project enabled_bundles 并集）。",
 			"允许 secrets-only（无 vault 公开资产）；SSH Key 落地 ~/.ssh/。",
+			"候选来自 vault / known_secret_bundles / Bitwarden 枚举；pull 发现后会记住名字。",
 			fmt.Sprintf("配置文件: %s", fallbackValue(m.settings.SecretsConfigPath, "~/.dec/secrets/config.yaml")),
+			fmt.Sprintf("Bitwarden session: %s", formatReady(m.settings.BitwardenSessionReady, "就绪", "未解锁")),
 			fmt.Sprintf("当前状态: %s", formatReady(settingsContainsIDE(m.settingsSelectedSecretBundles, name), "已启用", "未启用")),
 		)
 	}
@@ -2967,6 +2976,19 @@ func (m model) bundleSelected(name string) bool {
 
 func (m model) canNavigateSettings() bool {
 	return m.settings != nil && m.settingsRowCount() > 0
+}
+
+func (m model) settingsIDECount() int {
+	return len(normalizedStringList(m.settingsSelectedIDEs))
+}
+
+func (m model) settingsSecretBundleCount() int {
+	return len(normalizedStringList(m.settingsSelectedSecretBundles))
+}
+
+// settingsCountsLabel 是 Settings 顶栏/底栏共用的计数文案（SSOT）。
+func (m model) settingsCountsLabel() string {
+	return fmt.Sprintf("%d IDEs, %d secrets", m.settingsIDECount(), m.settingsSecretBundleCount())
 }
 
 func (m model) settingsRowCount() int {
@@ -3439,13 +3461,9 @@ func (m model) currentSummary() string {
 			return "Editing repo URL"
 		}
 		if m.settingsDirty {
-			return fmt.Sprintf("Unsaved settings: %d IDEs, %d secrets",
-				len(normalizedStringList(m.settingsSelectedIDEs)),
-				len(normalizedStringList(m.settingsSelectedSecretBundles)))
+			return "Unsaved settings: " + m.settingsCountsLabel()
 		}
-		return fmt.Sprintf("Settings ready, %d IDEs, %d secrets",
-			len(normalizedStringList(m.settingsSelectedIDEs)),
-			len(normalizedStringList(m.settingsSelectedSecretBundles)))
+		return "Settings ready, " + m.settingsCountsLabel()
 	}
 	if m.isRunPage() {
 		if m.runningPull {

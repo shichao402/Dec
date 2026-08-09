@@ -9,7 +9,7 @@
 │                ││   [ ] codex                                                │
 │                ││   [x] cursor                                               │
 │                ││                                                            │
-│                ││ User secret bundles                                        │
+│                ││ 本机 secrets bundles                                       │
 │                ││   [ ] vikunja                                              │
 │                ││   [x] woa                                                  │
 │                ││                                                            │
@@ -37,4 +37,4 @@
 │                ││                                                            │
 │                ││                                                            │
 ╰────────────────╯╰────────────────────────────────────────────────────────────╯
- q quit | j/k nav | l/h in-out | r refresh               page Settings | 1 IDEs
+ q quit | j/k nav | l/h in-out | r refresh    page Settings | 1 IDEs, 1 secrets

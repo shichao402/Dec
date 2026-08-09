@@ -101,6 +101,13 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 	}
 
 	client := secretsClientFactory()
+	if names, listErr := client.ListSecretBundleNames(ctx); listErr != nil {
+		emit(reporter, EventWarn, "pull.secrets",
+			fmt.Sprintf("枚举 Bitwarden secret bundles 失败（不影响本次 pull）: %v", listErr), nil)
+	} else if err := secrets.RememberSecretBundles(names); err != nil {
+		emit(reporter, EventWarn, "pull.secrets",
+			fmt.Sprintf("写入 known_secret_bundles 失败: %v", err), nil)
+	}
 	total := plan.Total
 	emit(reporter, EventInfo, "pull.secrets", fmt.Sprintf("同步 %d 个 secrets 目标（bundle + project）", total), &Progress{Phase: "secrets", Current: 0, Total: total})
 
@@ -162,6 +169,14 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 			}
 		}
 		fetchedKeys[i] = landings
+
+		// 一旦该 SyncTarget 上有密钥内容，记住 bundle 逻辑名供 Settings 候选。
+		if target.Kind == secrets.SyncKindBundle && (len(notes) > 0 || len(keys) > 0) {
+			if err := secrets.RememberSecretBundles([]string{target.Name}); err != nil {
+				emit(reporter, EventWarn, "pull.secrets",
+					fmt.Sprintf("写入 known_secret_bundles 失败: %v", err), nil)
+			}
+		}
 	}
 
 	emit(reporter, EventInfo, "pull.secrets", "校验落地路径（.secrets 边界、跨 folder 冲突、git 跟踪）", nil)

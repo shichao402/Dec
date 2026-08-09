@@ -9,7 +9,6 @@ import (
 
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/repo"
-	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
@@ -270,14 +269,13 @@ func TestSaveGlobalSettings_PersistsUserEnabledBundles(t *testing.T) {
 }
 
 func TestListUserSecretBundleCandidates_MergesSources(t *testing.T) {
-	client := &secrets.StubClient{
-		SecretBundleFolders: []string{"woa"},
-		NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/extra": {{RelativePath: "env/a.env", Content: "A=1\n"}},
-		},
-	}
-	got := listUserSecretBundleCandidates([]string{"woa", "local-only"}, client, nil)
-	want := map[string]bool{"woa": true, "local-only": true, "extra": true}
+	got := listUserSecretBundleCandidates(
+		[]string{"woa", "local-only"},
+		[]string{"known-a"},
+		[]string{"extra"},
+		nil,
+	)
+	want := map[string]bool{"woa": true, "local-only": true, "known-a": true, "extra": true}
 	for _, name := range got {
 		delete(want, name)
 	}

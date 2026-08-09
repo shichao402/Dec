@@ -208,7 +208,7 @@ func (m model) renderStatusBar(width int) string {
 			right += " | filter"
 		}
 	} else if m.isSettingsPage() && m.settings != nil {
-		right = fmt.Sprintf("%s | %d IDEs", right, len(normalizedStringList(m.settingsSelectedIDEs)))
+		right = fmt.Sprintf("%s | %s", right, m.settingsCountsLabel())
 		if m.settingsDirty {
 			right += " | modified"
 		}

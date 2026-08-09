@@ -102,6 +102,8 @@ Bitwarden folder: my-app                  # project 级（project_name 或 proje
 
 用户级启用：**不**新增 `user/` folder 协议；TUI **Settings** 勾选要始终同步的 `bundle/<name>`，配置落在 `~/.dec/secrets/`，与各 project 的 `enabled_bundles` 独立。允许 secrets-only bundle（无 vault `bundles/<name>/`）。详情见 [0003](decisions/0003-user-enabled-secret-bundles.md)。
 
+`known_secret_bundles` 是本机发现缓存（Settings 加载枚举 / pull 发现有密钥内容后写入），用于下次打开 Settings 或按 `r` 刷新时仍能看到名字；**不等于**启用，也**不**写入 Dec Git vault。
+
 `~/.dec/secrets/config.yaml` 示例：
 
 ```yaml

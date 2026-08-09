@@ -9,7 +9,7 @@
 │                  ││   [ ] codex                                              Bare Repo: 未连接                                           │
 │                  ││   [x] cursor                                             配置文件: /tmp/.dec/config.yaml                             │
 │                  ││                                                          本机 Vars: /tmp/.dec/local/vars.yaml                        │
-│                  ││ User secret bundles                                      保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。         │
+│                  ││ 本机 secrets bundles                                     保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。         │
 │                  ││   [ ] vikunja                                                                                                        │
 │                  ││   [x] woa                                                                                                            │
 │                  ││                                                                                                                      │
@@ -37,4 +37,4 @@
 │                  ││                                                                                                                      │
 │                  ││                                                                                                                      │
 ╰──────────────────╯╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- q quit | j/k nav | l/h in-out | r refresh                                                                           page Settings | 1 IDEs
+ q quit | j/k nav | l/h in-out | r refresh                                                                page Settings | 1 IDEs, 1 secrets
