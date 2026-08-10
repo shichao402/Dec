@@ -177,7 +177,7 @@ Item 存放在与 Dec bundle 绑定的 Bitwarden folder（默认 `bundle/<name>`
 |------|------|
 | 私钥 | `~/.ssh/dec_<bundle>_<name>` |
 | 公钥 | `~/.ssh/dec_<bundle>_<name>.pub` |
-| SSH config | `~/.ssh/config` 内 **Dec 管理区块** |
+| SSH config | `~/.ssh/config.d/dec.conf`（主 `~/.ssh/config` 顶部 `Include`） |
 
 ### 目录示例
 
