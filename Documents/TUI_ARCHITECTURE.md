@@ -36,12 +36,13 @@ dec --version / dec --help / dec __freshness-check
 | 页面 | 职责 |
 |------|------|
 | **Home** | 项目概览、建议下一步、**project 初始化**（自动匹配 vault 同名 project、选择或新建） |
-| **Assets** | 扫描 vault bundle、浏览/搜索资产、调整 `enabled_bundles` / `enabled` 并保存 |
+| **Bundles** | 扫描 vault bundle、浏览/搜索资产、调整项目 `enabled_bundles` / `enabled` 并保存 |
 | **Project** | 项目级 IDE / editor 覆盖、**项目变量**（`.dec/vars.yaml` 只读预览，按 `e` 挂起外部编辑器） |
 | **Run** | pull / push / remove；一次 pull 解析 project bundle 列表 → Dec Git bundle + Bitwarden secrets bundle |
-| **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、本机 `~/.dec/local/vars.yaml` |
+| **Remote** | 浏览 / 删除 / 外部编辑远端对象（Dec Git vault + Bitwarden SyncTarget / SSH Hosts）；原 Delete 页退役并入此页（ADR 0004） |
+| **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、本机用户级 bundle 启用 |
 
-侧栏导航：`Home` → `Assets` → `Project` → `Run` → `Settings`（`tab` / `shift+tab` 切换）。
+侧栏导航：`Home` → `Bundles` → `Project` → `Run` → `Remote` → `Settings`（`tab` / `shift+tab` 切换）。
 
 ## 4. 模块分层
 
@@ -109,7 +110,7 @@ TUI **不得**直接调用 `cmd/*` 或 `fmt.Printf` 式业务输出；所有动�
 
 参考实现（已迁）：
 
-- Delete 候选列表：`deleteLoad`
+- Remote 候选列表：`deleteLoad`（内部标识沿用，页签为 Remote）
 - Shell 并联刷新：`shellRefresh`（overview / assets / settings / projectSettings / vars）
 - 独立 vars 重载：`projectVarsLoad`
 - Builtin IDE assets：`builtinAssetsLoad`

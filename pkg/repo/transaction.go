@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/shichao402/Dec/pkg/diag"
 )
 
 // bareOpMu 串行化 bare 上的 fetch / worktree 增删，避免 TUI 并联 refresh 在 Windows 上互卡。
@@ -58,8 +61,15 @@ func NewWriteTransaction() (*Transaction, error) {
 }
 
 func newTransaction(readOnly, fetch bool) (*Transaction, error) {
+	label := fmt.Sprintf("bareTX readOnly=%v fetch=%v", readOnly, fetch)
+	diag.StartupLog("bareOpMu waiting… (%s)", label)
+	waitStart := time.Now()
 	bareOpMu.Lock()
-	defer bareOpMu.Unlock()
+	diag.StartupLog("bareOpMu acquired after %dms (%s)", time.Since(waitStart).Milliseconds(), label)
+	defer func() {
+		bareOpMu.Unlock()
+		diag.StartupLog("bareOpMu released (%s)", label)
+	}()
 
 	if err := MigrateToBare(); err != nil {
 		return nil, err
@@ -78,9 +88,12 @@ func newTransaction(readOnly, fetch bool) (*Transaction, error) {
 	}
 
 	if fetch {
+		diag.StartupLog("FetchBare starting")
 		if err := FetchBare(); err != nil {
+			diag.StartupLog("FetchBare failed: %v", err)
 			return nil, err
 		}
+		diag.StartupLog("FetchBare done")
 	}
 	branch, err := GetDefaultBranch()
 	if err != nil {
@@ -93,9 +106,12 @@ func newTransaction(readOnly, fetch bool) (*Transaction, error) {
 	}
 
 	if readOnly {
+		diag.StartupLog("addDetachedWorktree starting branch=%s", branch)
 		if err := addDetachedWorktree(bareDir, worktreeDir, branch); err != nil {
+			diag.StartupLog("addDetachedWorktree failed: %v", err)
 			return nil, err
 		}
+		diag.StartupLog("addDetachedWorktree done")
 		return &Transaction{bareDir: bareDir, worktreeDir: worktreeDir, branch: branch, readOnly: true}, nil
 	}
 

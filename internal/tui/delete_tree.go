@@ -8,8 +8,8 @@ import (
 )
 
 func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
-	decRoot := &TreeNode{ID: "delete-root:.dec", Label: ".dec", SelectMode: TreeSelectBranch}
-	secRoot := &TreeNode{ID: "delete-root:secrets", Label: "secrets (SyncTarget)", SelectMode: TreeSelectBranch}
+	decRoot := &TreeNode{ID: "delete-root:.dec", Label: "Dec (Git vault)", SelectMode: TreeSelectBranch}
+	secRoot := &TreeNode{ID: "delete-root:secrets", Label: "Secrets (Bitwarden)", SelectMode: TreeSelectBranch}
 	hasDec, hasSec := false, false
 
 	targetGroups := make(map[string]*TreeNode)

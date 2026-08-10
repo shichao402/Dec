@@ -57,7 +57,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	orig := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
+			"bundle/vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = orig })
@@ -88,7 +88,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 		t.Fatalf("files = %#v, 期望 1 条", result.Files)
 	}
 	file := result.Files[0]
-	if file.SecretsBundle != "vikunja" || file.ProjectRelPath != ".secrets/bundles/vikunja/env/vikunja.env" {
+	if file.SecretsBundle != "bundle/vikunja" || file.ProjectRelPath != ".secrets/bundles/vikunja/env/vikunja.env" {
 		t.Fatalf("元数据 = %#v", file)
 	}
 	if file.RemoteExists == nil || !*file.RemoteExists {

@@ -33,6 +33,9 @@ type AssetBundleOption struct {
 	Members []AssetSelectionItem
 	// Enabled 表示当前 ProjectConfig.EnabledBundles 是否已引用该 bundle。
 	Enabled bool
+	// UserEnabled 表示本机 Settings 的 user_enabled_bundles 是否已包含该 bundle。
+	// 与 Enabled 独立；pull 取二者并集（见 ADR 0003）。
+	UserEnabled bool
 }
 
 // AssetSelectionState 是 Bundles 页的数据源：仓库里全部 bundle + 当前启用态。
@@ -163,6 +166,12 @@ func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) 
 			enabledSet[name] = struct{}{}
 		}
 	}
+	userEnabledSet := make(map[string]struct{})
+	if cfg, err := secrets.LoadConfig(); err == nil {
+		for _, name := range cfg.UserEnabledBundleNames() {
+			userEnabledSet[name] = struct{}{}
+		}
+	}
 
 	options := make([]AssetBundleOption, 0, len(resolved.Bundles))
 	for _, bo := range resolved.Bundles {
@@ -174,6 +183,9 @@ func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) 
 		}
 		if _, ok := enabledSet[bo.Name]; ok {
 			opt.Enabled = true
+		}
+		if _, ok := userEnabledSet[bo.Name]; ok {
+			opt.UserEnabled = true
 		}
 		opt.Members = buildBundleMemberItems(bo, tx.WorkDir())
 		options = append(options, opt)

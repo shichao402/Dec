@@ -1,10 +1,10 @@
 ╭──────────────────╮╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Dec Shell        ││ Delete · Delete ready, 6 items                                                                                       │
+│ Dec Shell        ││ Remote · Remote ready, 6 items                                                                                       │
 │  Home            │╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 │  Bundles         │╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  Project         ││ 共 6 项 · 已选 0                                                                                                     │
-│  Run             ││ 快捷键  space 选中(目录=全选子项) · a 全选 · d 删除 · / 筛选 · r 刷新(+远端 orphan)                                  │
-│  Delete          ││ > [ ] ▾ .dec                                                                                                         │
+│  Project         ││ Remote · 共 6 项 · 已选 0                                                                                            │
+│  Run             ││ space 选中 · a 全选 · e 编辑 · d 删除 · A 登记 · / 筛选 · r 刷新 · PgUp/PgDn 翻页                                    │
+│  Remote          ││ > [ ] ▾ Dec (Git vault)                                                                                              │
 │  Settings        ││   [ ]   ▾ cache                                                                                                      │
 │                  ││   [ ]     ▾ vikunja                                                                                                  │
 │                  ││   [ ]       ↳ [bundle] vikunja / vikunja · 2 成员                                                                    │
@@ -13,7 +13,7 @@
 │                  ││   [ ]         ↳ demo                                                                                                 │
 │                  ││   [ ]       ▾ rules                                                                                                  │
 │                  ││   [ ]         ↳ demo-rule.mdc                                                                                        │
-│                  ││   [ ] ▾ secrets (SyncTarget)                                                                                         │
+│                  ││   [ ] ▾ Secrets (Bitwarden)                                                                                          │
 │                  ││   [ ]   ▾ vikunja (bundle) → .secrets/bundles/vikunja                                                                │
 │                  ││   [ ]     ▾ env                                                                                                      │
 │                  ││   [ ]       ↳ vikunja.env                                                                                            │
@@ -37,4 +37,4 @@
 │                  ││                                                                                                                      │
 │                  ││                                                                                                                      │
 ╰──────────────────╯╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- q quit | j/k | space select | d delete | r refresh                                                      page Delete | 6 items · 0 selected
+ q quit | j/k | PgUp/Dn | space | e edit | d delete | r refresh                                          page Remote | 6 items · 0 selected

@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
 type sshManagedEntry struct {
 	Host         string
+	Port         int // 0 = 不写 Port（OpenSSH 默认 22）
 	IdentityFile string
 }
 
@@ -127,18 +129,21 @@ func parseManagedEntries(managed string) []sshManagedEntry {
 	var entries []sshManagedEntry
 	var currentHosts []string
 	var identity string
+	var port int
 
 	flush := func() {
 		if identity == "" || len(currentHosts) == 0 {
 			currentHosts = nil
 			identity = ""
+			port = 0
 			return
 		}
 		for _, host := range currentHosts {
-			entries = append(entries, sshManagedEntry{Host: host, IdentityFile: identity})
+			entries = append(entries, sshManagedEntry{Host: host, Port: port, IdentityFile: identity})
 		}
 		currentHosts = nil
 		identity = ""
+		port = 0
 	}
 
 	for _, line := range strings.Split(managed, "\n") {
@@ -161,6 +166,12 @@ func parseManagedEntries(managed string) []sshManagedEntry {
 			if len(fields) > 1 {
 				identity = strings.Join(fields[1:], " ")
 			}
+		case "port":
+			if len(fields) > 1 {
+				if p, err := strconv.Atoi(fields[1]); err == nil && p >= 1 && p <= 65535 {
+					port = p
+				}
+			}
 		}
 	}
 	flush()
@@ -171,18 +182,19 @@ func renderManagedBlock(entries []sshManagedEntry) string {
 	if len(entries) == 0 {
 		return ""
 	}
-	// 按 IdentityFile 分组，同一 key 的多个 Host 合并到一个 Host 行。
+	// 按 IdentityFile + Port 分组：同 key 且同端口的多个 Host 合并到一个 Host 行。
 	type group struct {
 		hosts []string
 		id    string
+		port  int
 	}
 	order := make([]string, 0)
 	grouped := make(map[string]*group)
 	for _, e := range entries {
-		key := normalizeIdentityPath(e.IdentityFile)
+		key := normalizeIdentityPath(e.IdentityFile) + "\x00" + strconv.Itoa(e.Port)
 		g, ok := grouped[key]
 		if !ok {
-			g = &group{id: e.IdentityFile}
+			g = &group{id: e.IdentityFile, port: e.Port}
 			grouped[key] = g
 			order = append(order, key)
 		}
@@ -197,6 +209,11 @@ func renderManagedBlock(entries []sshManagedEntry) string {
 		b.WriteString("Host ")
 		b.WriteString(strings.Join(g.hosts, " "))
 		b.WriteByte('\n')
+		if g.port != 0 {
+			b.WriteString("  Port ")
+			b.WriteString(strconv.Itoa(g.port))
+			b.WriteByte('\n')
+		}
 		b.WriteString("  IdentityFile ")
 		b.WriteString(g.id)
 		b.WriteByte('\n')

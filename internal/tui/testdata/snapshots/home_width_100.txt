@@ -4,7 +4,7 @@
 │  Bundles       │╭────────────────────────────────────────────────────────────────────────────────╮
 │  Project       ││ 下一步                                                                         │
 │  Run           ││ Settings 连仓库 → Home 确认/生成本地 project → Bundles 勾选 → Run              │
-│  Delete        ││ pull（当前：Run 页 pull）                                                      │
+│  Remote        ││ pull（当前：Run 页 pull）                                                      │
 │  Settings      ││ 项目状态                                                                       │
 │                ││ 项目名: dec-project                                                            │
 │                ││ 仓库: 已连接 · git@github.com:demo/dec.git                                     │

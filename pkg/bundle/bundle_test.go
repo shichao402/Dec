@@ -78,9 +78,13 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("members 为空", func(t *testing.T) {
-		if _, err := Validate([]byte("name: good\n"), "x.yaml"); err == nil {
-			t.Fatal("期望错误")
+	t.Run("members 为空允许", func(t *testing.T) {
+		b, err := Validate([]byte("name: good\nmembers: []\n"), "x.yaml")
+		if err != nil {
+			t.Fatalf("空 members 应合法: %v", err)
+		}
+		if len(b.Members) != 0 {
+			t.Fatalf("Members = %#v", b.Members)
 		}
 	})
 
@@ -219,15 +223,21 @@ members:
 	}
 }
 
-func TestLoadBundle_EmptyMembersIsFatal(t *testing.T) {
+func TestLoadBundle_EmptyMembersIsAllowed(t *testing.T) {
 	repoDir := t.TempDir()
 	writeBundleManifest(t, repoDir, "x", `
 name: x
 members: []
 `)
-	_, _, err := LoadBundle(filepath.Join(repoDir, types.VaultBundlesDir, "x"), nil)
-	if err == nil {
-		t.Fatalf("空 members 应致命报错")
+	b, warnings, err := LoadBundle(filepath.Join(repoDir, types.VaultBundlesDir, "x"), nil)
+	if err != nil {
+		t.Fatalf("空 members 占位应合法（ADR 0003）: %v", err)
+	}
+	if len(b.Members) != 0 {
+		t.Fatalf("Members = %#v", b.Members)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
 	}
 }
 

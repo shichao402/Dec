@@ -378,7 +378,7 @@ members:
 	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("全取消后 IDE skill 应删除, err=%v", err)
 	}
-	// 已落地的密文件在 .secrets/ 同步根，停用 bundle 不会也不该动它——删除走 Delete 页。
+	// 已落地的密文件在 .secrets/ 同步根，停用 bundle 不会也不该动它——删除走 Remote 页。
 	if _, err := os.Stat(landedSecret); err != nil {
 		t.Fatalf("停用 bundle 不应删除已落地的密文件: %v", err)
 	}

@@ -57,7 +57,7 @@ func TestDeleteLoad_SurvivesPageLeaveAndDedups(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4 // Delete
+	m.pageIndex = 4 // Remote
 	cmd := m.startDeleteCandidatesLoad(true, false)
 	if cmd == nil {
 		t.Fatal("首次加载应返回 cmd")
@@ -71,7 +71,7 @@ func TestDeleteLoad_SurvivesPageLeaveAndDedups(t *testing.T) {
 
 	// 切到 Home：不得取消在飞加载
 	m.pageIndex = 0
-	if leaveCmd := m.onPageChanged("Delete"); leaveCmd != nil {
+	if leaveCmd := m.onPageChanged("Remote"); leaveCmd != nil {
 		t.Fatal("离开 Delete 不应再触发新加载")
 	}
 	if !m.deleteLoad.busy() {

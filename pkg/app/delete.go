@@ -28,7 +28,7 @@ const (
 // 这里表达的是「归 Bitwarden 管的密文件」这个逻辑分组。
 const secretsTreeRoot = "secrets"
 
-// DeleteCandidate 描述 Delete 页可选项。
+// DeleteCandidate 描述 Remote 页可选项。
 type DeleteCandidate struct {
 	Kind          DeleteItemKind
 	Label         string
@@ -64,14 +64,14 @@ type DeleteSelectionItem struct {
 	Members       []AssetSelectionItem
 }
 
-// DeleteProjectInput 描述 Delete 页批量删除输入。
+// DeleteProjectInput 描述 Remote 页批量删除输入。
 type DeleteProjectInput struct {
 	ProjectRoot string
 	Items       []DeleteSelectionItem
 	Confirmed   bool
 }
 
-// DeleteProjectResult 汇总 Delete 页批量删除结果。
+// DeleteProjectResult 汇总 Remote 页批量删除结果。
 type DeleteProjectResult struct {
 	DecDeleted     int
 	SecretsDeleted int
@@ -140,6 +140,12 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		addDec(DeleteKindDecAsset, itemType, name, vault, false)
 	}
 
+	enabledBundles, mergeErr := mergeProjectAndUserEnabledBundles(projectConfig.EnabledBundles)
+	if mergeErr != nil {
+		emit(reporter, EventWarn, "delete.list", "合并用户级 bundles 失败，仅用 project："+mergeErr.Error(), nil)
+		enabledBundles = append([]string(nil), projectConfig.EnabledBundles...)
+	}
+
 	for _, spec := range []struct {
 		dir   string
 		typ   string
@@ -151,7 +157,7 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		{"rules", "rule", func(s string) string { return strings.TrimSuffix(s, ".mdc") }, false},
 		{"mcp", "mcp", func(s string) string { return strings.TrimSuffix(s, ".json") }, false},
 	} {
-		for _, bundleName := range projectConfig.EnabledBundles {
+		for _, bundleName := range enabledBundles {
 			dir := filepath.Join(projectRoot, ".dec", "cache", bundleName, spec.dir)
 			entries, readErr := os.ReadDir(dir)
 			if readErr != nil {
@@ -176,14 +182,29 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		}
 	}
 
+	// LocalRead 浏览 vault：启用包 ∪ vault 内全部 bundle（不 Fetch）。
 	_ = withAppReadRepo(func(tx *repo.Transaction) error {
 		repoDir := tx.WorkDir()
-		resolved, resolveErr := resolveDesiredAssets(projectConfig, repoDir, reporter)
-		if resolveErr != nil {
-			return resolveErr
+		vaultBundles, _, scanErr := scanVaultBundles(repoDir, reporter)
+		if scanErr != nil {
+			emit(reporter, EventWarn, "delete.list", "扫描 vault bundles 失败（仅展示本地 cache）："+scanErr.Error(), nil)
+			return nil
 		}
-		bundles := collectEnabledBundleNames(projectConfig, resolved.Assets)
-		for bundleName := range bundles {
+		bundleNames := make([]string, 0, len(vaultBundles)+len(enabledBundles))
+		seenBundle := make(map[string]struct{})
+		for name := range vaultBundles {
+			seenBundle[name] = struct{}{}
+			bundleNames = append(bundleNames, name)
+		}
+		for _, name := range enabledBundles {
+			if _, ok := seenBundle[name]; ok {
+				continue
+			}
+			seenBundle[name] = struct{}{}
+			bundleNames = append(bundleNames, name)
+		}
+		sort.Strings(bundleNames)
+		for _, bundleName := range bundleNames {
 			for _, member := range listBundleAssetMembers(repoDir, bundleName) {
 				parts := strings.SplitN(member, "/", 2)
 				if len(parts) != 2 {
@@ -195,21 +216,24 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 				}
 				name := parts[1]
 				cachePath := getCachePath(projectRoot, bundleName, itemType, name)
-				if _, err := os.Stat(cachePath); os.IsNotExist(err) {
+				_, cacheErr := os.Stat(cachePath)
+				localExists := cacheErr == nil
+				if !localExists {
 					vaultPath := resolveAssetFile(repoDir, bundleName, itemType, name)
 					if vaultPath == "" {
 						continue
 					}
-					if _, err := os.Stat(vaultPath); err == nil {
-						addDec(DeleteKindDecAsset, itemType, name, bundleName, true)
+					if _, err := os.Stat(vaultPath); err != nil {
+						continue
 					}
 				}
+				addDec(DeleteKindDecAsset, itemType, name, bundleName, !localExists)
 			}
 		}
 		return nil
 	})
 
-	// secrets 候选项来自远端 folder 的 note 列表；本地路径 = LocalRoot + note。
+	// secrets：本地 SyncTarget 扫描 ∪（可选）远端 orphan。
 	seenSecret := make(map[string]struct{})
 	addSecret := func(secretsBundle, localRoot, notePath string, localExists bool) {
 		notePath = strings.TrimSpace(notePath)
@@ -268,6 +292,8 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 			GroupTitle:    groupCtx.secretsGroupTitle(groupBundle),
 		})
 	}
+
+	appendLocalSecretCandidates(projectRoot, projectConfig, addSecret, reporter)
 
 	if includeRemote {
 		if err := appendRemoteSecretCandidates(ctx, projectRoot, projectConfig, addSecret, addSSHKey, reporter); err != nil {
@@ -438,6 +464,40 @@ func sortDeleteCandidates(candidates []DeleteCandidate) {
 	})
 }
 
+func appendLocalSecretCandidates(
+	projectRoot string,
+	projectConfig *types.ProjectConfig,
+	addSecret func(secretsBundle, localRoot, notePath string, localExists bool),
+	reporter Reporter,
+) {
+	reporter = defaultReporter(reporter)
+	cfg, err := secrets.LoadConfig()
+	if err != nil {
+		emit(reporter, EventWarn, "delete.secrets", "读取 secrets 配置失败，跳过本地 secrets 扫描: "+err.Error(), nil)
+		return
+	}
+	plan, err := planSecretsSync(projectRoot, projectConfig.EnabledBundles, cfg)
+	if err != nil {
+		emit(reporter, EventWarn, "delete.secrets", "规划 SyncTarget 失败，跳过本地 secrets 扫描: "+err.Error(), nil)
+		return
+	}
+	if len(plan.Targets) == 0 {
+		emit(reporter, EventInfo, "delete.secrets", "无 SyncTarget（project∪user 均未启用 secrets 归属）", nil)
+		return
+	}
+	for _, target := range plan.Targets {
+		notes, scanErr := secrets.ScanSyncRoot(projectRoot, target)
+		if scanErr != nil {
+			emit(reporter, EventWarn, "delete.secrets",
+				fmt.Sprintf("扫描本地 %s 失败: %v", target.LocalRoot, scanErr), nil)
+			continue
+		}
+		for _, note := range notes {
+			addSecret(target.Folder, target.LocalRoot, note.RelativePath, true)
+		}
+	}
+}
+
 func appendRemoteSecretCandidates(
 	ctx context.Context,
 	projectRoot string,
@@ -449,29 +509,35 @@ func appendRemoteSecretCandidates(
 	reporter = defaultReporter(reporter)
 	configured, err := secrets.IsConfigured()
 	if err != nil {
-		return fmt.Errorf("读取 Bitwarden 配置失败: %w", err)
+		emit(reporter, EventWarn, "delete.secrets", "读取 Bitwarden 配置失败: "+err.Error(), nil)
+		return nil
 	}
 	if !configured {
+		emit(reporter, EventInfo, "delete.secrets", "Bitwarden 未配置：仅展示本地 .secrets（到 Settings 填写连接信息）", nil)
 		return nil
 	}
 	cfg, err := secrets.LoadConfig()
 	if err != nil {
-		return err
+		emit(reporter, EventWarn, "delete.secrets", "加载 secrets 配置失败: "+err.Error(), nil)
+		return nil
 	}
 	if !secrets.HasSession() {
-		emit(reporter, EventInfo, "delete.secrets", "[auth] delete scan: Bitwarden session required", nil)
+		emit(reporter, EventInfo, "delete.secrets", "[auth] remote scan: Bitwarden session required", nil)
 		if err := ensureBitwardenSession(ctx, reporter, "delete.secrets"); err != nil {
-			return err
+			emit(reporter, EventWarn, "delete.secrets", "远端未检查（解锁失败，保留本地 secrets 列表）: "+err.Error(), nil)
+			return nil
 		}
 	}
 	if !secrets.HasUserKey() {
-		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
+		emit(reporter, EventWarn, "delete.secrets", "Bitwarden vault 密钥未就绪，跳过远端补全", nil)
+		return nil
 	}
 
 	client := secretsClientFactory()
 	plan, err := planSecretsSync(projectRoot, projectConfig.EnabledBundles, cfg)
 	if err != nil {
-		return err
+		emit(reporter, EventWarn, "delete.secrets", "规划 SyncTarget 失败: "+err.Error(), nil)
+		return nil
 	}
 
 	for _, target := range plan.Targets {
@@ -481,7 +547,9 @@ func appendRemoteSecretCandidates(
 		folder := target.Folder
 		notes, listErr := client.ListFolderNotes(ctx, folder)
 		if listErr != nil {
-			return fmt.Errorf("列出远端 %s 失败: %w", formatSyncTargetLabel(target), listErr)
+			emit(reporter, EventWarn, "delete.secrets",
+				fmt.Sprintf("列出远端 %s 失败: %v", formatSyncTargetLabel(target), listErr), nil)
+			continue
 		}
 		for _, note := range notes {
 			abs, absErr := secrets.AbsolutePath(projectRoot, target, note.Name)
@@ -499,12 +567,15 @@ func appendRemoteSecretCandidates(
 		}
 		keys, listKeysErr := client.ListFolderSSHKeys(ctx, folder)
 		if listKeysErr != nil {
-			return fmt.Errorf("列出远端 %s SSH Key 失败: %w", formatSyncTargetLabel(target), listKeysErr)
+			emit(reporter, EventWarn, "delete.secrets",
+				fmt.Sprintf("列出远端 %s SSH Key 失败: %v", formatSyncTargetLabel(target), listKeysErr), nil)
+			continue
 		}
 		for _, key := range keys {
 			localExists, existsErr := secrets.LocalSSHKeyExists(owner, key.Name)
 			if existsErr != nil {
-				return existsErr
+				emit(reporter, EventWarn, "delete.secrets", existsErr.Error(), nil)
+				continue
 			}
 			addSSHKey(folder, owner, key.Name, localExists)
 		}
@@ -519,7 +590,7 @@ func fallbackVaultName(bo AssetBundleOption) string {
 	return bo.Name
 }
 
-// DeleteProjectItems 执行 Delete 页选中的删除（Dec vault + cache + IDE；secrets 本地 + Bitwarden）。
+// DeleteProjectItems 执行 Remote 页选中的删除（Dec vault + cache + IDE；secrets 本地 + Bitwarden）。
 func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter Reporter) (*DeleteProjectResult, error) {
 	reporter = defaultReporter(reporter)
 	if strings.TrimSpace(input.ProjectRoot) == "" {
@@ -700,7 +771,7 @@ func deleteSSHKeyItem(ctx context.Context, decBundleName, secretsBundleName, key
 }
 
 func withAppReadRepo(fn func(*repo.Transaction) error) error {
-	tx, err := repo.NewReadTransaction()
+	tx, err := repo.NewLocalReadTransaction()
 	if err != nil {
 		return err
 	}

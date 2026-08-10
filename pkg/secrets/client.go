@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
 
@@ -11,6 +12,7 @@ type Client interface {
 	PushBundle(ctx context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error)
 	DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error
 	DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) error
+	UpdateSSHKeyHosts(ctx context.Context, req UpdateSSHKeyHostsRequest) error
 	// ListFolderNotes 枚举 folder 下的 note 名（相对 SyncTarget.LocalRoot）。
 	ListFolderNotes(ctx context.Context, folderName string) ([]RemoteNote, error)
 	// ListFolderSSHKeys 枚举 folder 下的 SSH Key 逻辑名。
@@ -114,6 +116,28 @@ func (c *StubClient) DeleteSSHKey(_ context.Context, req DeleteSSHKeyRequest) er
 	return nil
 }
 
+func (c *StubClient) UpdateSSHKeyHosts(_ context.Context, req UpdateSSHKeyHostsRequest) error {
+	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, "")
+	keys := c.SSHKeysByFolder[folder]
+	for i, key := range keys {
+		if key.Name != req.KeyName {
+			continue
+		}
+		hosts := make([]string, 0, len(req.Hosts))
+		for _, h := range req.Hosts {
+			h = strings.TrimSpace(h)
+			if h == "" {
+				continue
+			}
+			hosts = append(hosts, h)
+		}
+		keys[i].Hosts = hosts
+		c.SSHKeysByFolder[folder] = keys
+		return nil
+	}
+	return fmt.Errorf("SSH Key %q 不在 folder %q", req.KeyName, folder)
+}
+
 // NoopClient 未配置 Bitwarden API 时的空实现。
 type NoopClient struct{}
 
@@ -130,6 +154,10 @@ func (NoopClient) DeleteSecureNote(_ context.Context, _ DeleteSecureNoteRequest)
 }
 
 func (NoopClient) DeleteSSHKey(_ context.Context, _ DeleteSSHKeyRequest) error {
+	return nil
+}
+
+func (NoopClient) UpdateSSHKeyHosts(_ context.Context, _ UpdateSSHKeyHostsRequest) error {
 	return nil
 }
 

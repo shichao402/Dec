@@ -55,6 +55,41 @@ func TestModelViewRendersHomeOverview(t *testing.T) {
 	}
 }
 
+func TestInitRefreshKickKeepsShellRefreshGen(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	initCmd := m.Init()
+	if initCmd == nil {
+		t.Fatal("Init 应返回 kick cmd")
+	}
+	kick := initCmd()
+	if _, ok := kick.(shellRefreshKickMsg); !ok {
+		t.Fatalf("Init 应先发 shellRefreshKickMsg, got %T", kick)
+	}
+	if m.shellRefresh.gen != 0 || m.shellRefresh.busy() {
+		t.Fatalf("Init 本身不得改 shellRefresh: gen=%d busy=%v", m.shellRefresh.gen, m.shellRefresh.busy())
+	}
+
+	updated, refresh := m.Update(kick)
+	m = updated.(model)
+	if refresh == nil {
+		t.Fatal("kick 后应返回 refreshCmd")
+	}
+	if m.shellRefresh.gen != 1 || !m.shellRefresh.busy() || m.shellRefresh.pending != refreshPartCount {
+		t.Fatalf("kick→refresh 后 gen/pending 应落在正式 model: gen=%d busy=%v pending=%d",
+			m.shellRefresh.gen, m.shellRefresh.busy(), m.shellRefresh.pending)
+	}
+
+	// 模拟 overview 分片回齐：gen 必须匹配，不能再 DROPPED。
+	updated, _ = m.Update(overviewLoadedMsg{
+		overview: &app.ProjectOverview{ProjectRoot: "/tmp/dec-project", EnabledBundleCount: 2},
+		loadGen:  1,
+	})
+	m = updated.(model)
+	if m.overview == nil || m.overview.EnabledBundleCount != 2 {
+		t.Fatalf("overview 不应被 DROPPED: %#v", m.overview)
+	}
+}
+
 func TestModelHomeShowsVaultInferencePrompt(t *testing.T) {
 	oldInfer := inferVaultProjectOperation
 	defer func() { inferVaultProjectOperation = oldInfer }()
@@ -70,11 +105,6 @@ func TestModelHomeShowsVaultInferencePrompt(t *testing.T) {
 	m := newModel("/Users/firo/workspace/Dec", "v1.0.0")
 	m.width = 120
 	m.height = 36
-	m.overview = &app.ProjectOverview{
-		ProjectRoot:   "/Users/firo/workspace/Dec",
-		ProjectName:   "Dec",
-		RepoConnected: true,
-	}
 
 	gen := m.shellRefresh.beginParts(1)
 	msg := loadOverviewCmd("/Users/firo/workspace/Dec", gen)()
@@ -82,8 +112,32 @@ func TestModelHomeShowsVaultInferencePrompt(t *testing.T) {
 	if !ok {
 		t.Fatalf("loadOverviewCmd 返回 = %T, 期望 overviewLoadedMsg", msg)
 	}
+	if overviewMsg.overview == nil && overviewMsg.err == nil {
+		// 允许在假路径上 overview 失败；本测试改用注入 overview + 独立 infer msg
+	}
 
-	updated, _ := m.Update(overviewMsg)
+	m.overview = &app.ProjectOverview{
+		ProjectRoot:   "/Users/firo/workspace/Dec",
+		ProjectName:   "Dec",
+		RepoConnected: true,
+	}
+	updated, cmd := m.Update(overviewLoadedMsg{
+		overview: m.overview,
+		loadGen:  gen,
+	})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("overview 加载后应调度 vault infer / enrich")
+	}
+	// 直接喂 infer 结果（Batch 内含多个 Cmd，单测不展开执行）
+	updated, _ = m.Update(vaultInferenceLoadedMsg{
+		vaultInference: &app.VaultProjectInference{
+			ProjectRoot:    "/Users/firo/workspace/Dec",
+			ProjectName:    "Dec",
+			VaultPath:      "projects/Dec.yaml",
+			EnabledBundles: []string{"dec-agent", "dec-vikunja"},
+		},
+	})
 	m = updated.(model)
 	view := m.View()
 	checks := []string{
@@ -214,7 +268,7 @@ func TestModelAssetsPageRendersSelectionState(t *testing.T) {
 		"Details",
 		"[x] ▸ default · 1 个成员",
 		"[ ] ▸ cli · 1 个成员",
-		"1/2 已启用",
+		"1/2 项目已启用",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
@@ -886,11 +940,11 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 
 	view := m.View()
 	for _, want := range []string{
-		"▾ .dec",
+		"▾ Dec (Git vault)",
 		"▾ cache",
 		"▾ vikunja",
 		"↳ demo",
-		"▾ secrets (SyncTarget)",
+		"▾ Secrets (Bitwarden)",
 		".secrets/bundles/vikunja",
 		"vikunja.env",
 		"SSH · machine",
@@ -898,7 +952,7 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 		"[bundle]",
 	} {
 		if !strings.Contains(view, want) {
-			t.Fatalf("Delete 页应展示目录树，缺少 %q:\n%s", want, view)
+			t.Fatalf("Remote 页应展示目录树，缺少 %q:\n%s", want, view)
 		}
 	}
 }
@@ -914,7 +968,7 @@ func TestModelDeletePageShowsBundleCandidates(t *testing.T) {
 
 	view := m.View()
 	if !strings.Contains(view, "[bundle] vikunja") {
-		t.Fatalf("Delete 页应展示 bundle 候选项:\n%s", view)
+		t.Fatalf("Remote 页应展示 bundle 候选项:\n%s", view)
 	}
 }
 

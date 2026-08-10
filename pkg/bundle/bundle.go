@@ -175,9 +175,9 @@ func LoadRepoBundles(repoDir string, memberExists func(bundleName string, m type
 // 致命条件：
 //   - YAML 无法解析
 //   - name 为空或命名非法
-//   - members 为空
 //   - 某个 member 引用格式非法
 //
+// members 允许为空（ADR 0003 secrets-only / 本机启用占位）。
 // 仅做单文件语法 / 命名 / 成员格式校验，不做跨文件重名、成员存在性、vault 级别检查，
 // 这些由 LoadRepoBundles 在聚合阶段处理。
 func Validate(data []byte, source string) (types.Bundle, error) {
@@ -200,7 +200,8 @@ func parseBundleYAML(data []byte, source string) (types.Bundle, error) {
 	}
 
 	if len(bundle.Members) == 0 {
-		return types.Bundle{}, fmt.Errorf("bundle 文件 %s 的 members 不能为空", source)
+		// ADR 0003：secrets-only / 本机启用占位允许 members: []。
+		return bundle, nil
 	}
 	for i, raw := range bundle.Members {
 		trimmed := strings.TrimSpace(raw)

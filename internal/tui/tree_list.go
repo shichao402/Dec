@@ -31,10 +31,12 @@ type TreeRow struct {
 	SelectIndex int // 对应 TreeList.Selected 下标；-1 表示不可勾选
 }
 
-// TreeList 通用目录树状态：光标、展开、勾选、筛选。
+// TreeList 通用目录树状态：光标、展开、勾选、筛选、列表视口滚动。
 type TreeList struct {
 	Roots    []*TreeNode
 	Cursor   int
+	Offset   int // 可见窗口起始行（相对 VisibleRows）
+	Viewport int // 列表可视行数；0 = 不裁剪（测试/未初始化）
 	Expanded map[string]bool
 	Selected []bool
 	Filter   string
@@ -50,6 +52,7 @@ func (t *TreeList) ensureExpanded() {
 func (t *TreeList) Reset(roots []*TreeNode, keepExpanded bool) {
 	t.Roots = roots
 	t.Cursor = 0
+	t.Offset = 0
 	if !keepExpanded {
 		t.Expanded = nil
 	}
@@ -215,6 +218,7 @@ func (t *TreeList) normalizeCursor() {
 	rows := t.VisibleRows()
 	if len(rows) == 0 {
 		t.Cursor = 0
+		t.Offset = 0
 		return
 	}
 	if t.Cursor >= len(rows) {
@@ -223,6 +227,65 @@ func (t *TreeList) normalizeCursor() {
 	if t.Cursor < 0 {
 		t.Cursor = 0
 	}
+	t.EnsureCursorVisible()
+}
+
+func (t *TreeList) SetViewport(viewport int) {
+	if viewport < 0 {
+		viewport = 0
+	}
+	t.Viewport = viewport
+	t.EnsureCursorVisible()
+}
+
+// EnsureCursorVisible 调整 Offset，使 Cursor 落在 [Offset, Offset+Viewport) 内。
+func (t *TreeList) EnsureCursorVisible() {
+	rows := t.VisibleRows()
+	n := len(rows)
+	if n == 0 {
+		t.Offset = 0
+		return
+	}
+	if t.Viewport <= 0 {
+		t.Offset = 0
+		return
+	}
+	if t.Cursor < t.Offset {
+		t.Offset = t.Cursor
+	}
+	if t.Cursor >= t.Offset+t.Viewport {
+		t.Offset = t.Cursor - t.Viewport + 1
+	}
+	maxOff := n - t.Viewport
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if t.Offset > maxOff {
+		t.Offset = maxOff
+	}
+	if t.Offset < 0 {
+		t.Offset = 0
+	}
+}
+
+// WindowRows 返回当前视口内的可见行（绝对下标通过 Offset+i 还原）。
+func (t *TreeList) WindowRows() []TreeRow {
+	rows := t.VisibleRows()
+	t.EnsureCursorVisible()
+	if t.Viewport <= 0 || len(rows) <= t.Viewport {
+		return rows
+	}
+	end := t.Offset + t.Viewport
+	if end > len(rows) {
+		end = len(rows)
+	}
+	if t.Offset < 0 {
+		t.Offset = 0
+	}
+	if t.Offset >= len(rows) {
+		return nil
+	}
+	return rows[t.Offset:end]
 }
 
 func (t *TreeList) MoveCursor(delta int) {
@@ -232,6 +295,22 @@ func (t *TreeList) MoveCursor(delta int) {
 	}
 	t.Cursor += delta
 	t.normalizeCursor()
+}
+
+// PageCursor 按当前 Viewport（或回退 10 行）翻页。
+func (t *TreeList) PageCursor(dir int) {
+	if dir == 0 {
+		return
+	}
+	step := t.Viewport
+	if step <= 0 {
+		step = 10
+	}
+	if dir < 0 {
+		t.MoveCursor(-step)
+		return
+	}
+	t.MoveCursor(step)
 }
 
 func (t *TreeList) currentRow() (TreeRow, bool) {
@@ -423,7 +502,7 @@ func (t *TreeList) CursorExpanded() bool {
 	return t.Expanded[row.Node.ID]
 }
 
-// DefaultExpandAll 展开所有有子节点的分支（用于 Delete 页初次加载）。
+// DefaultExpandAll 展开所有有子节点的分支（用于 Remote 页初次加载）。
 func (t *TreeList) DefaultExpandAll() {
 	t.ensureExpanded()
 	var walk func(nodes []*TreeNode)

@@ -101,7 +101,7 @@ func InferVaultProject(projectRoot string, reporter Reporter) (*VaultProjectInfe
 	}
 
 	var vaultProject *types.Project
-	if err := withReadRepoDir(func(repoDir string) error {
+	if err := withLocalReadRepoDir(func(repoDir string) error {
 		loaded, found, loadErr := LoadVaultProject(repoDir, projectName)
 		if loadErr != nil {
 			return loadErr
@@ -188,7 +188,7 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 	}
 
 	var vaultProject *types.Project
-	if err := withReadRepoDir(func(repoDir string) error {
+	if err := withLocalReadRepoDir(func(repoDir string) error {
 		loaded, found, loadErr := LoadVaultProject(repoDir, projectName)
 		if loadErr != nil {
 			return loadErr
@@ -242,7 +242,7 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 		EnabledBundles: enabledBundles,
 	}
 
-	if err := withReadRepoDir(func(repoDir string) error {
+	if err := withLocalReadRepoDir(func(repoDir string) error {
 		_, bundleOverviews, scanErr := scanVaultBundles(repoDir, reporter)
 		if scanErr != nil {
 			return scanErr

@@ -304,7 +304,7 @@ func TestViewAtBaselineWidths_DeleteNoOverflow(t *testing.T) {
 		t.Run(widthLabel(width), func(t *testing.T) {
 			m := snapshotDeleteModel(width)
 			view := m.View()
-			assertNoLineOverflowsWidth(t, "Delete", view, width)
+			assertNoLineOverflowsWidth(t, "Remote", view, width)
 		})
 	}
 }

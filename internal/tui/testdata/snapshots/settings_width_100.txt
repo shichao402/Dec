@@ -4,7 +4,7 @@
 │  Bundles       │╭────────────────────────────────────────────────────────────────────────────────╮
 │  Project       ││ 首次保存会创建 ~/.dec/local/vars.yaml                                          │
 │  Run           ││                                                                                │
-│  Delete        ││ Global Settings                                                                │
+│  Remote        ││ Global Settings                                                                │
 │ Settings       ││   Repo URL: git@github.com:demo/dec.git                                        │
 │                ││   [ ] codex                                                                    │
 │                ││   [x] cursor                                                                   │

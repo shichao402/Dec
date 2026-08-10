@@ -133,7 +133,7 @@ func (m model) renderMain(width, height, innerWidth int) string {
 		innerBodyH = 1
 	}
 
-	pageBody := padLines(clipLines(m.renderPageBody(innerWidth), innerBodyH), innerBodyH)
+	pageBody := padLines(clipLines(m.renderPageBody(innerWidth, innerBodyH), innerBodyH), innerBodyH)
 	body := shellCardStyle.Width(width).Render(pageBody)
 	main := lipgloss.JoinVertical(lipgloss.Left, headerBlock, body)
 	return clipBlockHeight(main, height)
@@ -150,21 +150,106 @@ func (m model) renderPageHeader(innerWidth int) string {
 	return fitLine(shellTitleStyle.Render(line), innerWidth)
 }
 
-func (m model) renderPageBody(width int) string {
+func (m model) renderPageBody(width, height int) string {
 	switch m.pages[m.pageIndex] {
 	case "Home":
 		return m.renderHomePage(width)
 	case "Bundles":
-		return m.renderBundlesPage(width)
+		return m.renderBundlesPage(width, height)
 	case "Project":
 		return m.renderProjectPage(width)
 	case "Run":
 		return m.renderRunPage(width)
-	case "Delete":
-		return m.renderDeletePage(width)
+	case "Remote":
+		return m.renderDeletePage(width, height)
 	default:
 		return m.renderSettingsPage(width)
 	}
+}
+
+// mainInnerBodyHeight 估计主卡内正文可用行数（与 renderMain 预算一致）。
+func (m model) mainInnerBodyHeight() int {
+	width := m.width
+	if width <= 0 {
+		width = 100
+	}
+	height := m.height
+	if height <= 0 {
+		height = 30
+	}
+	statusH := 1
+	if bar := m.renderStatusBar(width); bar != "" {
+		statusH = lipgloss.Height(bar)
+	}
+	lm := computeLayoutMetrics(width, height, statusH)
+	header := fitLine(m.renderPageHeader(lm.innerWidth), lm.innerWidth)
+	headerH := lipgloss.Height(shellCardStyle.Width(lm.mainWidth).Render(header))
+	bodyHeight := lm.contentHeight - headerH
+	if bodyHeight < cardChromeVertical+1 {
+		bodyHeight = cardChromeVertical + 1
+	}
+	innerBodyH := bodyHeight - cardChromeVertical
+	if innerBodyH < 1 {
+		return 1
+	}
+	return innerBodyH
+}
+
+func (m *model) syncTreeViewports() {
+	bodyH := m.mainInnerBodyHeight()
+	m.deleteTree.SetViewport(max(1, bodyH-m.remoteListChromeLines()))
+	m.assetTree.SetViewport(max(1, bodyH-m.bundlesListChromeLines()))
+}
+
+func (m model) remoteListChromeLines() int {
+	// 标题 + 快捷键提示 (+ 可选刷新/筛选提示) + 可选页脚
+	n := 2
+	if m.deleteLoad.busy() {
+		// busy 行替换普通 hints 仍算 1，上面已含 hints 位；加载时仍是 2 行头
+	}
+	if m.deleteFilterInput {
+		n++
+	}
+	if filter := strings.TrimSpace(m.deleteFilter); filter != "" && !m.deleteFilterInput {
+		// 筛选项合进标题行，不额外占行
+	}
+	if m.runningDelete {
+		n++
+	}
+	if m.deleteErr != nil {
+		n++
+	}
+	if m.deleteResult != nil {
+		n++
+	}
+	// 可滚动提示一行
+	n++
+	return n
+}
+
+func (m model) bundlesListChromeLines() int {
+	n := 1 // 状态行
+	if m.configInitMode {
+		n++
+	}
+	if m.countUserEnabledBundles() > 0 {
+		n++
+	}
+	if m.assetsDirty {
+		n++
+	}
+	if m.assetFilterInput {
+		n++
+	}
+	if m.assets != nil && !m.assets.ExistingConfig {
+		n++
+	}
+	if filter := m.currentAssetFilterLabel(); filter != "<none>" {
+		// 筛选项合进状态行
+	}
+	// 「Bundle 列表」标题 + 与 Detail 并列时的滚动提示
+	n += 2
+	return n
 }
 
 func padLines(content string, height int) string {
@@ -193,7 +278,7 @@ func (m model) renderStatusBar(width int) string {
 		if m.isRunPage() && m.runProgress != nil && (m.runningPull || m.runningRemove) {
 			right += fmt.Sprintf(" | %s %d/%d", runPhaseLabel(m.runProgress.Phase), m.runProgress.Current, m.runProgress.Total)
 		}
-	} else if m.isDeletePage() {
+	} else if m.isRemotePage() {
 		selected := len(m.selectedDeleteItems())
 		right = fmt.Sprintf("%s | %d items · %d selected", right, len(m.deleteCandidates), selected)
 		if m.deleteIncludeRemote {

@@ -245,7 +245,7 @@ OpenSSH / Git 默认只认 **机器级** `~/.ssh/`，SSH 私钥 **不进项目�
 Bitwarden folder: vikunja
   [SSH Key] deploy
     Name: deploy
-    Notes: vikunja.example.com   # 可选；有内容时一行一个 host
+    Notes: vikunja.example.com   # 可选；有内容时一行一个 host 或 host:port
 
 Pull 后落地:
   ~/.ssh/dec_vikunja_deploy
@@ -254,6 +254,7 @@ Pull 后落地:
 ```
 
 - Notes 为空：只落私钥/公钥，不写 Host 配置、不报错。
+- Notes 可为 `host` 或 `host:port`（如 `21.214.34.79:36000`）；有端口时写入 `Port`。
 - `authorized_keys`：Dec 不管理（服务器侧自行维护）。
 - `known_hosts`：Dec 不主动写入；首次连接由 OpenSSH 提示或由用户维护。
 - 落地路径由 Bitwarden Item Name 推导（`~/.ssh/dec_<bundle>_<name>`），不记本地索引。

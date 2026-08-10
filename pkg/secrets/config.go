@@ -136,9 +136,10 @@ func SaveEmail(email string) error {
 	return SaveConfig(cfg)
 }
 
-// defaultSecretsBundleName 返回未显式配置时的默认 Bitwarden folder 名（严格同名）。
+// defaultSecretsBundleName 返回未显式配置时的默认 Bitwarden folder 名。
+// bundle 级协议为 bundle/<decBundleName>（与 project 裸名文件夹区分，见 SyncTarget / ADR 0002）。
 func defaultSecretsBundleName(decBundleName string) string {
-	return strings.TrimSpace(decBundleName)
+	return DefaultBundleFolder(decBundleName)
 }
 
 // ResolveBinding 解析 Dec bundle 对应的 secrets 绑定；未显式配置时同名。

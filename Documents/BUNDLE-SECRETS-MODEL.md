@@ -144,7 +144,7 @@ Bitwarden folder: vikunja
 - **Note 内容** = 该路径文件的完整正文。
 - Pull 写到 `<project>/<LocalRoot>/<note 名>`；**不经过 `.dec/cache/`**。
 - Push **递归扫描** `LocalRoot`（create/update）；**不隐式删除**远端 note。
-- 远端有、本地缺的路径记入 `MissingLocal` 报告；**删除只走 Delete 页**。
+- 远端有、本地缺的路径记入 `MissingLocal` 报告；**删除只走 Remote 页**。
 - 新增 secret 走 TUI Project 页 `A`（登记 `.secrets/` 下已存在的文件）。
 
 Note 名来自远端，按不可信输入处理：绝对路径、`~` 展开、`..` 逃逸、盘符一律拒绝；落进 `.dec/`、经符号链接逃出项目根、或已被 git 跟踪同样拒绝。校验在写任何文件**之前**完成。
@@ -165,7 +165,7 @@ OpenSSH、Git、`ssh`/`scp` 等工具默认只读取 **机器级** `~/.ssh/`。S
 | 字段 | 含义 |
 |------|------|
 | **Name** | 逻辑名（如 `deploy`） |
-| **Notes** | 关联 host，**可选**；有内容时**一行一个** |
+| **Notes** | 关联 host，**可选**；有内容时**一行一个** `host` 或 `host:port` |
 | 私钥 / 公钥 | Bitwarden SSH Key Item 自带字段 |
 
 Item 存放在与 Dec bundle 绑定的 Bitwarden folder（默认 `bundle/<name>`）。  
@@ -234,7 +234,7 @@ sequenceDiagram
   end
 ```
 
-Pull **不做清理**：停用 bundle 后已落地的 `.secrets/` 文件原样保留，删除走 Delete 页。
+Pull **不做清理**：停用 bundle 后已落地的 `.secrets/` 文件原样保留，删除走 Remote 页。
 
 Push：Dec 公开资产走 Git push（源为 `.dec/cache/`）；secrets 走 Bitwarden API（扫描 `.secrets/` 同步根），**不** 混入 Git Vault。
 
@@ -249,7 +249,7 @@ Push：Dec 公开资产走 Git push（源为 `.dec/cache/`）；secrets 走 Bitw
 | Bitwarden 未配置 | Run 页 pull | 仅拉 Dec bundle |
 | Secrets 管理 | Settings 页 | Bitwarden 连接、folder 绑定 |
 | 新增一条 secret | Project 页 `A` | 登记 `.secrets/` 下已有文件 |
-| 删除 secret | Delete 页 | 逐条确认后删本地 + 远端 |
+| 删除 / 编辑 secret | Remote 页 | 删除二次确认；`e` 外部编辑 Note / SSH Hosts |
 | MCP 运行时注入 | `dec exec`（hidden） | 按 bundle 合并 `env/*.env` 后启动子进程 |
 
 不在 TUI 外暴露 `dec secrets pull` 等独立子命令；与 [TUI 优先](../.cursor/rules/tui-first.mdc) 一致。

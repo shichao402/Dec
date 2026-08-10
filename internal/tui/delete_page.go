@@ -48,7 +48,11 @@ func loadDeleteCandidatesCmd(ctx context.Context, projectRoot string, includeRem
 }
 
 func (m model) isDeletePage() bool {
-	return m.pages[m.pageIndex] == "Delete"
+	return m.isRemotePage()
+}
+
+func (m model) isRemotePage() bool {
+	return m.pages[m.pageIndex] == "Remote"
 }
 
 func (m *model) startDeleteCandidatesLoad(includeRemote, force bool) tea.Cmd {
@@ -67,8 +71,8 @@ func (m *model) startDeleteCandidatesLoad(includeRemote, force bool) tea.Cmd {
 // onPageChanged 只负责「进入某页时是否需要确保有数据」，不取消已在飞的 IO。
 func (m *model) onPageChanged(fromPage string) tea.Cmd {
 	_ = fromPage
-	if m.isDeletePage() {
-		return m.startDeleteCandidatesLoad(false, false)
+	if m.isRemotePage() {
+		return m.startDeleteCandidatesLoad(true, false)
 	}
 	return nil
 }
@@ -132,6 +136,7 @@ func selectionFromCandidate(c app.DeleteCandidate) app.DeleteSelectionItem {
 		Name:          c.Name,
 		Vault:         c.Vault,
 		SecretPath:    c.SecretPath,
+		LocalRoot:     c.LocalRoot,
 		SecretsBundle: c.SecretsBundle,
 		SSHKeyName:    c.SSHKeyName,
 		DecBundleName: c.DecBundleName,
@@ -153,28 +158,31 @@ func (m model) handleDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "esc", "h", "left":
+		m.syncTreeViewports()
 		if m.deleteTree.CollapseAtCursor() {
-			m.pushLog("Delete 折叠目录")
+			m.pushLog("Remote 折叠目录")
 			return m, nil
 		}
 		m.focus = focusSidebar
 		m.pushLog("返回导航")
 		return m, nil
 	case "l", "right":
+		m.syncTreeViewports()
 		if m.deleteTree.CursorOnExpandable() && !m.deleteTree.CursorExpanded() {
 			m.deleteTree.ExpandAtCursor()
-			m.pushLog("Delete 展开目录")
+			m.pushLog("Remote 展开目录")
 			return m, nil
 		}
 		return m, nil
 	case "enter":
+		m.syncTreeViewports()
 		if m.deleteTree.CursorOnExpandable() {
 			if m.deleteTree.CursorExpanded() {
 				m.deleteTree.CollapseAtCursor()
-				m.pushLog("Delete 折叠目录")
+				m.pushLog("Remote 折叠目录")
 			} else {
 				m.deleteTree.ExpandAtCursor()
-				m.pushLog("Delete 展开目录")
+				m.pushLog("Remote 展开目录")
 			}
 			return m, nil
 		}
@@ -187,18 +195,31 @@ func (m model) handleDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(m.deleteFilter) != "" {
 			m.deleteFilter = ""
 			m.rebuildDeleteTree()
-			m.pushLog("Delete 筛选已清空")
+			m.pushLog("Remote 筛选已清空")
 		}
 		return m, nil
 	case "a":
 		m.deleteTree.SelectAllAtCursor()
-		m.pushLog(fmt.Sprintf("Delete 已全选 %d 项", m.deleteTree.CountSelectable()))
+		m.pushLog(fmt.Sprintf("Remote 已全选 %d 项", m.deleteTree.CountSelectable()))
 		return m, nil
+	case "e":
+		cmd := m.startRemoteEditAtCursor()
+		return m, cmd
 	case "j", "down":
+		m.syncTreeViewports()
 		m.deleteTree.MoveCursor(1)
 		return m, nil
 	case "k", "up":
+		m.syncTreeViewports()
 		m.deleteTree.MoveCursor(-1)
+		return m, nil
+	case "pgdown", "ctrl+d":
+		m.syncTreeViewports()
+		m.deleteTree.PageCursor(1)
+		return m, nil
+	case "pgup", "ctrl+u":
+		m.syncTreeViewports()
+		m.deleteTree.PageCursor(-1)
 		return m, nil
 	case " ":
 		m.deleteTree.ToggleSelectAtCursor()
@@ -206,11 +227,11 @@ func (m model) handleDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		selected := m.selectedDeleteItems()
 		if len(selected) == 0 {
-			m.pushLog("Delete 请先 space 选择要删除的项")
+			m.pushLog("Remote：请先 space 选择要删除的项")
 			return m, nil
 		}
 		m.deleteStage = "summary"
-		m.pushLog(fmt.Sprintf("Delete 摘要确认：%d 项", len(selected)))
+		m.pushLog(fmt.Sprintf("Remote 摘要确认：%d 项", len(selected)))
 		return m, nil
 	case "r":
 		return m, m.startDeleteCandidatesLoad(true, true)
@@ -224,11 +245,11 @@ func (m model) handleDeleteStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "y", "enter":
 			m.deleteStage = "confirm"
-			m.pushLog("Delete 进入最终确认")
+			m.pushLog("Remote 进入最终确认")
 			return m, nil
 		case "n", "esc", "h", "left":
 			m.deleteStage = ""
-			m.pushLog("Delete 已取消")
+			m.pushLog("Remote 已取消删除")
 			return m, nil
 		}
 	case "confirm":
@@ -238,7 +259,7 @@ func (m model) handleDeleteStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.startDeleteRun()
 		case "n", "esc", "h", "left":
 			m.deleteStage = "summary"
-			m.pushLog("Delete 返回摘要")
+			m.pushLog("Remote 返回摘要")
 			return m, nil
 		}
 	}
@@ -288,7 +309,7 @@ func (m *model) startDeleteRun() tea.Cmd {
 		Items:       selected,
 		Confirmed:   true,
 	}
-	m.pushLog(fmt.Sprintf("Delete page started: %d items", len(selected)))
+	m.pushLog(fmt.Sprintf("Remote delete started: %d items", len(selected)))
 	return tea.Batch(startDeleteRunCmd(ctx, input, stream), waitRunMsg(stream))
 }
 
@@ -305,7 +326,7 @@ func startDeleteRunCmd(ctx context.Context, input app.DeleteProjectInput, stream
 	}
 }
 
-func (m model) renderDeletePage(width int) string {
+func (m model) renderDeletePage(width, height int) string {
 	if m.deleteStage == "summary" || m.deleteStage == "confirm" {
 		return m.renderDeleteConfirmPage(width)
 	}
@@ -315,17 +336,17 @@ func (m model) renderDeletePage(width int) string {
 	}
 	tree := mm.deleteTree
 	if m.deleteLoad.busy() && len(m.deleteCandidates) == 0 {
-		return shellMutedStyle.Render("加载可删除项…")
+		return shellMutedStyle.Render("加载远端候选项…")
 	}
 	if m.deleteLoadErr != nil {
 		return shellWarnStyle.Render("加载失败: "+m.deleteLoadErr.Error()) + "\n" + shellMutedStyle.Render("按 r 重试")
 	}
 
 	visible := mm.visibleDeleteCandidates()
-	rows := tree.VisibleRows()
+	allRows := tree.VisibleRows()
 	selectedCount := len(mm.selectedDeleteItems())
 	lines := []string{
-		fmt.Sprintf("共 %d 项 · 已选 %d", len(visible), selectedCount),
+		fmt.Sprintf("Remote · 共 %d 项 · 已选 %d", len(visible), selectedCount),
 	}
 	if filter := mm.currentDeleteFilterLabel(); filter != "<none>" {
 		lines[0] += " · 筛选 " + filter
@@ -333,34 +354,55 @@ func (m model) renderDeletePage(width int) string {
 	if m.deleteLoad.busy() {
 		lines = append(lines, shellWarnStyle.Render("刷新中…（含远端 Bitwarden orphan 时可能较慢）"))
 	} else {
-		lines = append(lines, shellMutedStyle.Render("快捷键  space 选中(目录=全选子项) · a 全选 · d 删除 · / 筛选 · r 刷新(+远端 orphan)"))
+		lines = append(lines, shellMutedStyle.Render("space 选中 · a 全选 · e 编辑 · d 删除 · A 登记 · / 筛选 · r 刷新 · PgUp/PgDn 翻页"))
 	}
 	if mm.deleteFilterInput {
 		lines = append(lines, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))
 	}
 	if len(visible) == 0 {
-		lines = append(lines, shellMutedStyle.Render("没有可删除项。"))
+		lines = append(lines, shellMutedStyle.Render("没有远端候选项。可按 A 登记 secret，或先到 Run 页 pull。"))
 		return wrapLines(width, lines)
 	}
-	for i, row := range rows {
-		line := renderDeleteTreeLine(row, i, &tree, mm.focus != focusSidebar && i == tree.Cursor)
+
+	footer := make([]string, 0, 3)
+	if m.runningDelete {
+		footer = append(footer, shellWarnStyle.Render("正在删除… Esc 取消"))
+	}
+	if m.deleteErr != nil {
+		footer = append(footer, shellWarnStyle.Render("删除失败: "+m.deleteErr.Error()))
+	}
+	if m.deleteResult != nil {
+		footer = append(footer, shellGoodStyle.Render(fmt.Sprintf("上次删除：Dec %d · secrets %d · ssh %d · bundle %d",
+			m.deleteResult.DecDeleted, m.deleteResult.SecretsDeleted, m.deleteResult.SSHKeysDeleted, m.deleteResult.BundlesDeleted)))
+	}
+
+	listBudget := height - len(lines) - len(footer)
+	if listBudget < 1 {
+		listBudget = 1
+	}
+	// 视口含滚动提示行时留一行给提示
+	scrollHint := len(allRows) > listBudget
+	vp := listBudget
+	if scrollHint && vp > 1 {
+		vp--
+	}
+	tree.SetViewport(vp)
+	window := tree.WindowRows()
+	if scrollHint {
+		lines = append(lines, shellMutedStyle.Render(fmt.Sprintf("列表 %d–%d / %d  ·  j/k 移动 · PgUp/PgDn 翻页",
+			tree.Offset+1, tree.Offset+len(window), len(allRows))))
+	}
+	for i, row := range window {
+		abs := tree.Offset + i
+		line := renderDeleteTreeLine(row, abs, &tree, mm.focus != focusSidebar && abs == tree.Cursor)
 		line = fitLine(line, width)
-		if mm.focus != focusSidebar && i == tree.Cursor {
+		if mm.focus != focusSidebar && abs == tree.Cursor {
 			lines = append(lines, shellSelectedRow.Render(line))
 		} else {
 			lines = append(lines, shellLogStyle.Render(line))
 		}
 	}
-	if m.runningDelete {
-		lines = append(lines, shellWarnStyle.Render("正在删除… Esc 取消"))
-	}
-	if m.deleteErr != nil {
-		lines = append(lines, shellWarnStyle.Render("删除失败: "+m.deleteErr.Error()))
-	}
-	if m.deleteResult != nil {
-		lines = append(lines, shellGoodStyle.Render(fmt.Sprintf("上次删除：Dec %d · secrets %d · ssh %d · bundle %d",
-			m.deleteResult.DecDeleted, m.deleteResult.SecretsDeleted, m.deleteResult.SSHKeysDeleted, m.deleteResult.BundlesDeleted)))
-	}
+	lines = append(lines, footer...)
 	return wrapLines(width, lines)
 }
 

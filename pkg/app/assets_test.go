@@ -6,6 +6,7 @@ import (
 
 	"github.com/shichao402/Dec/pkg/config"
 	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/types"
 )
 
@@ -264,10 +265,47 @@ func TestListEffectiveEnabledAssetsDeduplicatesAcrossBundles(t *testing.T) {
 	}
 }
 
+func TestLoadAssetSelectionMarksUserEnabled(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"bundles/cli/rules/cli-release-rules.mdc":          "description: test\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+	if err := secrets.SaveConfig(&secrets.Config{UserEnabledBundles: []string{"cli"}}); err != nil {
+		t.Fatalf("SaveConfig() 失败: %v", err)
+	}
+
+	state, err := LoadAssetSelection(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("LoadAssetSelection() 失败: %v", err)
+	}
+	if !bundleUserEnabledInState(state, "cli") {
+		t.Fatal("cli 应标记 UserEnabled")
+	}
+	if bundleUserEnabledInState(state, "default") {
+		t.Fatal("default 未在用户级启用，不应标记 UserEnabled")
+	}
+	if bundleEnabledInState(state, "cli") {
+		t.Fatal("cli 仅用户级启用时，项目 Enabled 应为 false")
+	}
+}
+
 func bundleEnabledInState(state *AssetSelectionState, name string) bool {
 	for _, bo := range state.Bundles {
 		if bo.Name == name && bo.Enabled {
 			return true
+		}
+	}
+	return false
+}
+
+func bundleUserEnabledInState(state *AssetSelectionState, name string) bool {
+	for _, bo := range state.Bundles {
+		if bo.Name == name {
+			return bo.UserEnabled
 		}
 	}
 	return false

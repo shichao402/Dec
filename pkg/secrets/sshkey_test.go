@@ -16,6 +16,197 @@ func useTempSSHHome(t *testing.T) string {
 	return home
 }
 
+func TestParseSSHHostSpec(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		raw        string
+		wantHost   string
+		wantPort   int
+		wantCanon  string
+		wantErrSub string
+	}{
+		{"vikunja.example.com", "vikunja.example.com", 0, "vikunja.example.com", ""},
+		{"21.214.34.79:36000", "21.214.34.79", 36000, "21.214.34.79:36000", ""},
+		{"osgamecore.devcloud.woa.com:36000", "osgamecore.devcloud.woa.com", 36000, "osgamecore.devcloud.woa.com:36000", ""},
+		{"update.devcloud.woa.com:36000", "update.devcloud.woa.com", 36000, "update.devcloud.woa.com:36000", ""},
+		{"host:0", "", 0, "", "端口非法"},
+		{"host:65536", "", 0, "", "端口非法"},
+		{"host:", "", 0, "", "端口非法"},
+		{"a:1:2", "", 0, "", "非法"},
+		{"host.com ProxyCommand=evil", "", 0, "", "非法字符"},
+		{":36000", "", 0, "", "非法"},
+	}
+	for _, tc := range cases {
+		host, port, canon, err := parseSSHHostSpec(tc.raw)
+		if tc.wantErrSub != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErrSub) {
+				t.Fatalf("parseSSHHostSpec(%q) err = %v, want 含 %q", tc.raw, err, tc.wantErrSub)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("parseSSHHostSpec(%q) = %v", tc.raw, err)
+		}
+		if host != tc.wantHost || port != tc.wantPort || canon != tc.wantCanon {
+			t.Fatalf("parseSSHHostSpec(%q) = (%q,%d,%q), want (%q,%d,%q)",
+				tc.raw, host, port, canon, tc.wantHost, tc.wantPort, tc.wantCanon)
+		}
+	}
+}
+
+func TestPrepareAndWriteSSHKeyLandings_HostPort(t *testing.T) {
+	home := useTempSSHHome(t)
+	sshDir := filepath.Join(home, ".ssh")
+
+	landings, err := PrepareSSHKeyLandings("woa", []SSHKeyItem{{
+		Name: "devcloud",
+		Hosts: []string{
+			"21.214.34.79:36000",
+			"osgamecore.devcloud.woa.com:36000",
+			"update.devcloud.woa.com:36000",
+		},
+		PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV\n-----END OPENSSH PRIVATE KEY-----\n",
+		PublicKey:  "ssh-ed25519 AAAA devcloud@dec\n",
+	}})
+	if err != nil {
+		t.Fatalf("PrepareSSHKeyLandings() = %v", err)
+	}
+	if len(landings) != 1 || len(landings[0].Hosts) != 3 {
+		t.Fatalf("landing Hosts = %#v", landings)
+	}
+	for i, want := range []string{
+		"21.214.34.79:36000",
+		"osgamecore.devcloud.woa.com:36000",
+		"update.devcloud.woa.com:36000",
+	} {
+		if landings[0].Hosts[i] != want {
+			t.Fatalf("Hosts[%d] = %q, want %q", i, landings[0].Hosts[i], want)
+		}
+	}
+	if err := WriteSSHKeyLandings(landings); err != nil {
+		t.Fatalf("WriteSSHKeyLandings() = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(sshDir, "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if !strings.Contains(content, "21.214.34.79") ||
+		!strings.Contains(content, "osgamecore.devcloud.woa.com") ||
+		!strings.Contains(content, "update.devcloud.woa.com") {
+		t.Fatalf("应写入三个 Host 模式:\n%s", content)
+	}
+	if !strings.Contains(content, "Port 36000") {
+		t.Fatalf("应写入 Port 36000:\n%s", content)
+	}
+	if strings.Count(content, "Port 36000") != 1 {
+		t.Fatalf("同 IdentityFile+Port 应合并为一个 Port 行:\n%s", content)
+	}
+	if !strings.Contains(content, "dec_woa_devcloud") {
+		t.Fatalf("应写入 IdentityFile:\n%s", content)
+	}
+}
+
+func TestPrepareSSHKeyLandings_HostPortConflictSameHost(t *testing.T) {
+	useTempSSHHome(t)
+	_, err := PrepareSSHKeyLandings("woa", []SSHKeyItem{{
+		Name: "a", Hosts: []string{"same.example.com:36000"}, PrivateKey: "key-a\n",
+	}, {
+		Name: "b", Hosts: []string{"same.example.com:22022"}, PrivateKey: "key-b\n",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "冲突") {
+		t.Fatalf("同 Host 不同 Port 仍应冲突: %v", err)
+	}
+}
+
+func TestWriteSSHKeyLandings_DifferentPortsSplitBlocks(t *testing.T) {
+	home := useTempSSHHome(t)
+	sshDir := filepath.Join(home, ".ssh")
+
+	landings, err := PrepareSSHKeyLandings("woa", []SSHKeyItem{{
+		Name: "devcloud",
+		Hosts: []string{
+			"a.example.com:36000",
+			"b.example.com:22022",
+		},
+		PrivateKey: "priv\n", PublicKey: "pub\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSSHKeyLandings(landings); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(sshDir, "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if strings.Count(content, "Port 36000") != 1 || strings.Count(content, "Port 22022") != 1 {
+		t.Fatalf("不同端口应拆成多个 Host 块:\n%s", content)
+	}
+}
+
+func TestWriteSSHKeyLandings_PreservesOtherPortOnUpsert(t *testing.T) {
+	home := useTempSSHHome(t)
+	sshDir := filepath.Join(home, ".ssh")
+
+	other, err := PrepareSSHKeyLandings("other", []SSHKeyItem{{
+		Name: "key", Hosts: []string{"other.example.com:36000"},
+		PrivateKey: "o\n", PublicKey: "op\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSSHKeyLandings(other); err != nil {
+		t.Fatal(err)
+	}
+
+	mine, err := PrepareSSHKeyLandings("woa", []SSHKeyItem{{
+		Name: "devcloud", Hosts: []string{"woa.example.com"},
+		PrivateKey: "w\n", PublicKey: "wp\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSSHKeyLandings(mine); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(sshDir, "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if !strings.Contains(content, "other.example.com") || !strings.Contains(content, "Port 36000") {
+		t.Fatalf("upsert 后应保留其他 IdentityFile 的 Port:\n%s", content)
+	}
+	if !strings.Contains(content, "woa.example.com") {
+		t.Fatalf("应写入本次 host:\n%s", content)
+	}
+	// mine 无端口：其 Host 块不应误带 Port（Port 36000 只属于 other）
+	entries := parseManagedEntries(func() string {
+		_, managed, _, _ := splitManagedBlock(content)
+		return managed
+	}())
+	var woaPort, otherPort int
+	for _, e := range entries {
+		switch e.Host {
+		case "woa.example.com":
+			woaPort = e.Port
+		case "other.example.com":
+			otherPort = e.Port
+		}
+	}
+	if woaPort != 0 {
+		t.Fatalf("woa host Port = %d, want 0", woaPort)
+	}
+	if otherPort != 36000 {
+		t.Fatalf("other host Port = %d, want 36000", otherPort)
+	}
+}
+
 func TestSSHKeyFileName_RejectsTraversal(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -194,6 +385,16 @@ func TestParseSSHHostsNotes(t *testing.T) {
 	}
 	if blank := parseSSHHostsNotes("  \n# only comment\n\n"); len(blank) != 0 {
 		t.Fatalf("仅空白/注释应得到空 hosts, got %#v", blank)
+	}
+}
+
+func TestFormatSSHHostsNotes(t *testing.T) {
+	t.Parallel()
+	if got := formatSSHHostsNotes(nil); got != "" {
+		t.Fatalf("nil = %q", got)
+	}
+	if got := formatSSHHostsNotes([]string{" a.example.com ", "", "#x", "a.example.com", "b.example.com"}); got != "a.example.com\nb.example.com\n" {
+		t.Fatalf("got %q", got)
 	}
 }
 

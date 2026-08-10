@@ -9,7 +9,7 @@ import (
 
 func TestIOBusyLabelPriority(t *testing.T) {
 	m := model{
-		pages:     []string{"Home", "Bundles", "Project", "Run", "Delete", "Settings"},
+		pages:     []string{"Home", "Bundles", "Project", "Run", "Remote", "Settings"},
 		pageIndex: 0,
 		overview:  &app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true},
 	}
@@ -23,12 +23,12 @@ func TestIOBusyLabelPriority(t *testing.T) {
 	}
 
 	m.deleteLoad.loading = true
-	if got := m.ioBusyLabel(); got != "Loading delete list…" {
+	if got := m.ioBusyLabel(); got != "Loading remote list…" {
 		t.Fatalf("delete load ioBusyLabel = %q", got)
 	}
 
 	m.deleteCandidates = []app.DeleteCandidate{{Label: "x"}}
-	if got := m.ioBusyLabel(); got != "Refreshing delete list…" {
+	if got := m.ioBusyLabel(); got != "Refreshing remote list…" {
 		t.Fatalf("delete refresh ioBusyLabel = %q", got)
 	}
 
@@ -41,25 +41,25 @@ func TestIOBusyLabelPriority(t *testing.T) {
 
 func TestStatusBarShowsBusyAndDeleteHints(t *testing.T) {
 	m := model{
-		pages:     []string{"Home", "Bundles", "Project", "Run", "Delete", "Settings"},
-		pageIndex: 4, // Delete
+		pages:     []string{"Home", "Bundles", "Project", "Run", "Remote", "Settings"},
+		pageIndex: 4, // Remote
 		overview:  &app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true, EnabledBundleCount: 1},
 		width:     120,
 	}
 
 	idle := m.renderStatusBar(120)
 	if !strings.Contains(idle, "d delete") {
-		t.Fatalf("Delete 空闲状态栏应提示 d delete：%q", idle)
+		t.Fatalf("Remote 空闲状态栏应提示 d delete：%q", idle)
 	}
 
 	m.deleteLoad.loading = true
 	m.deleteCandidates = []app.DeleteCandidate{{Label: "x"}}
 	busy := m.renderStatusBar(120)
-	if !strings.Contains(busy, "Refreshing delete list") {
-		t.Fatalf("Delete 刷新时状态栏应显示 busy：%q", busy)
+	if !strings.Contains(busy, "Refreshing remote list") {
+		t.Fatalf("Remote 刷新时状态栏应显示 busy：%q", busy)
 	}
-	if summary := m.currentSummary(); summary != "Refreshing delete list…" {
-		t.Fatalf("currentSummary during delete refresh = %q", summary)
+	if summary := m.currentSummary(); summary != "Refreshing remote list…" {
+		t.Fatalf("currentSummary during remote refresh = %q", summary)
 	}
 }
 

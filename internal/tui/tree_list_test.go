@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestTreeList_CollapsedSubtreeKeepsSelectIndexAlignment(t *testing.T) {
 	roots := []*TreeNode{
@@ -164,5 +167,36 @@ func TestTreeList_FilterPreservesSelection(t *testing.T) {
 	}
 	if len(tree.VisibleRows()) < 2 {
 		t.Fatalf("筛选应展示匹配路径, rows=%d", len(tree.VisibleRows()))
+	}
+}
+
+func TestTreeList_ViewportFollowsCursorAndPage(t *testing.T) {
+	roots := make([]*TreeNode, 0, 30)
+	for i := 0; i < 30; i++ {
+		id := fmt.Sprintf("n%02d", i)
+		roots = append(roots, &TreeNode{ID: id, Label: id, SelectMode: TreeSelectLeaf})
+	}
+	tree := &TreeList{Roots: roots}
+	tree.SetViewport(5)
+	if len(tree.WindowRows()) != 5 {
+		t.Fatalf("WindowRows = %d, want 5", len(tree.WindowRows()))
+	}
+	tree.MoveCursor(7)
+	if tree.Cursor != 7 {
+		t.Fatalf("Cursor = %d, want 7", tree.Cursor)
+	}
+	if tree.Offset != 3 { // 7 落在 [3,8)
+		t.Fatalf("Offset = %d, want 3", tree.Offset)
+	}
+	win := tree.WindowRows()
+	if len(win) != 5 || win[0].Node.ID != "n03" {
+		t.Fatalf("window start = %s, want n03", win[0].Node.ID)
+	}
+	tree.PageCursor(1)
+	if tree.Cursor != 12 {
+		t.Fatalf("PageCursor Cursor = %d, want 12", tree.Cursor)
+	}
+	if tree.Cursor < tree.Offset || tree.Cursor >= tree.Offset+tree.Viewport {
+		t.Fatalf("翻页后光标应在视口内 cursor=%d offset=%d vp=%d", tree.Cursor, tree.Offset, tree.Viewport)
 	}
 }

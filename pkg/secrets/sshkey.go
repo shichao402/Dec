@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -20,6 +21,9 @@ var sshSafeNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // Host 模式：字母数字 / . _ - * ?，禁止空白与 SSH config 注入字符。
 var sshHostRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._*?-]*$`)
+
+// sshPortRe 限制端口为无前导零的十进制（1–65535 另在数值侧校验；"0" 会被数值拒绝）。
+var sshPortRe = regexp.MustCompile(`^[1-9][0-9]{0,4}$`)
 
 // SSHKeyLanding 描述一条已校验、待写入 ~/.ssh 的 SSH Key。
 type SSHKeyLanding struct {
@@ -69,18 +73,48 @@ func validateSSHSafeName(kind, value string) (string, error) {
 	return value, nil
 }
 
-func validateSSHHost(host string) (string, error) {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		return "", fmt.Errorf("SSH host 不能为空")
+// parseSSHHostSpec 解析一行 host 或 host:port（port 省略时为 0，表示不写 Port）。
+// 返回规范串（host 或 host:port）供 Notes 往返；冲突检测用 host 模式（不含 port）。
+func parseSSHHostSpec(raw string) (host string, port int, canonical string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", 0, "", fmt.Errorf("SSH host 不能为空")
 	}
-	if strings.ContainsAny(host, " \t\r\n\"'#=\\/") {
-		return "", fmt.Errorf("SSH host 含非法字符: %q", host)
+	if strings.ContainsAny(raw, " \t\r\n\"'#=\\/") {
+		return "", 0, "", fmt.Errorf("SSH host 含非法字符: %q", raw)
 	}
-	if !sshHostRe.MatchString(host) {
-		return "", fmt.Errorf("SSH host 非法: %q", host)
+
+	hostPart := raw
+	portPart := ""
+	if i := strings.LastIndex(raw, ":"); i >= 0 {
+		hostPart = raw[:i]
+		portPart = raw[i+1:]
 	}
-	return host, nil
+	if hostPart == "" {
+		return "", 0, "", fmt.Errorf("SSH host 非法: %q", raw)
+	}
+	if !sshHostRe.MatchString(hostPart) {
+		return "", 0, "", fmt.Errorf("SSH host 非法: %q", raw)
+	}
+	if portPart == "" {
+		if strings.Contains(raw, ":") {
+			return "", 0, "", fmt.Errorf("SSH host 端口非法: %q", raw)
+		}
+		return hostPart, 0, hostPart, nil
+	}
+	if !sshPortRe.MatchString(portPart) {
+		return "", 0, "", fmt.Errorf("SSH host 端口非法: %q", raw)
+	}
+	portVal, convErr := strconv.Atoi(portPart)
+	if convErr != nil || portVal < 1 || portVal > 65535 {
+		return "", 0, "", fmt.Errorf("SSH host 端口非法: %q", raw)
+	}
+	return hostPart, portVal, fmt.Sprintf("%s:%d", hostPart, portVal), nil
+}
+
+func validateSSHHost(raw string) (string, error) {
+	_, _, canonical, err := parseSSHHostSpec(raw)
+	return canonical, err
 }
 
 // parseSSHHostsNotes 解析 SSH Key Item 的 Notes 字段（可选；有内容时一行一个 host）。
@@ -99,6 +133,27 @@ func parseSSHHostsNotes(notes string) []string {
 		hosts = append(hosts, line)
 	}
 	return hosts
+}
+
+// formatSSHHostsNotes 把 hosts 写成 Notes 正文（一行一个；空则空串）。
+func formatSSHHostsNotes(hosts []string) string {
+	lines := make([]string, 0, len(hosts))
+	seen := make(map[string]struct{}, len(hosts))
+	for _, h := range hosts {
+		h = strings.TrimSpace(h)
+		if h == "" || strings.HasPrefix(h, "#") {
+			continue
+		}
+		if _, ok := seen[h]; ok {
+			continue
+		}
+		seen[h] = struct{}{}
+		lines = append(lines, h)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // PrepareSSHKeyLandings 校验一批 SSH Key 并解析落地路径；不写盘。
@@ -139,17 +194,18 @@ func PrepareSSHKeyLandings(decBundleName string, keys []SSHKeyItem) ([]SSHKeyLan
 		}
 
 		// Hosts 可为空：仅落地密钥文件，不写 SSH config Host 条目。
+		// 元素为规范串 host 或 host:port；冲突按 Host 模式（不含 port）检测。
 		hosts := make([]string, 0, len(key.Hosts))
 		for _, raw := range key.Hosts {
-			host, hostErr := validateSSHHost(raw)
+			hostPattern, _, canonical, hostErr := parseSSHHostSpec(raw)
 			if hostErr != nil {
 				return nil, fmt.Errorf("SSH Key %q: %w", name, hostErr)
 			}
-			if prev, ok := seenHosts[host]; ok {
-				return nil, fmt.Errorf("SSH host %q 冲突：同时由 Key %q 与 %q 声明", host, prev, name)
+			if prev, ok := seenHosts[hostPattern]; ok {
+				return nil, fmt.Errorf("SSH host %q 冲突：同时由 Key %q 与 %q 声明", hostPattern, prev, name)
 			}
-			seenHosts[host] = name
-			hosts = append(hosts, host)
+			seenHosts[hostPattern] = name
+			hosts = append(hosts, canonical)
 		}
 
 		privPath := filepath.Join(sshDir, fileBase)
@@ -222,9 +278,14 @@ func WriteSSHKeyLandings(landings []SSHKeyLanding) error {
 
 	entries := make([]sshManagedEntry, 0)
 	for _, landing := range landings {
-		for _, host := range landing.Hosts {
+		for _, raw := range landing.Hosts {
+			host, port, _, hostErr := parseSSHHostSpec(raw)
+			if hostErr != nil {
+				return fmt.Errorf("SSH Key %q: %w", landing.Name, hostErr)
+			}
 			entries = append(entries, sshManagedEntry{
 				Host:         host,
+				Port:         port,
 				IdentityFile: landing.IdentityFile,
 			})
 		}

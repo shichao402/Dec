@@ -4,7 +4,7 @@
 │  Bundles         │╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  Project         ││ IDE 模式: 继承全局 · 生效: cursor                                                                                    │
 │  Run             ││ 已启用 bundle (2): <2 个，详情见 Bundles 页>                                                                         │
-│  Delete          ││ project_name: dec-project                                                                                            │
+│  Remote          ││ project_name: dec-project                                                                                            │
 │  Settings        ││ 可选：Run 页 Push 将 Dec cache 与 secrets 推送到远端                                                                 │
 │                  ││                                                                                                                      │
 │                  ││ 项目 IDE                                                 Details                                                     │

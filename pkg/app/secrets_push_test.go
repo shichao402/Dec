@@ -51,7 +51,7 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=old\n"}},
+		"bundle/vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=old\n"}},
 		"Dec":     {{RelativePath: "config/private.yaml", Content: "old"}},
 	}}
 	origFactory := secretsClientFactory
@@ -76,7 +76,7 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	if result.CreatedCount != 0 || result.UpdatedCount != 2 {
 		t.Fatalf("result = %#v, 期望 2 条更新", result)
 	}
-	if got := stub.NotesByFolder["vikunja"][0].Content; got != "VIKUNJA_API_TOKEN=abc\n" {
+	if got := stub.NotesByFolder["bundle/vikunja"][0].Content; got != "VIKUNJA_API_TOKEN=abc\n" {
 		t.Fatalf("bundle secret 未被本地覆盖: %q", got)
 	}
 	if got := stub.NotesByFolder["Dec"][0].Content; got != "token: abc\n" {
@@ -113,8 +113,8 @@ func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
 	if len(stub.NotesByFolder["Dec"]) != 1 {
 		t.Fatal("本地缺文件不应导致远端 note 被删")
 	}
-	if !containsScopeMessage(events, "push.secrets", "Delete 页") {
-		t.Fatalf("应提示删除要走 Delete 页: %#v", events)
+	if !containsScopeMessage(events, "push.secrets", "Remote 页") {
+		t.Fatalf("应提示删除要走 Remote 页: %#v", events)
 	}
 }
 

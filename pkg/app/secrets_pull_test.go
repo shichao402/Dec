@@ -81,7 +81,7 @@ func TestPullProjectAssets_RejectsSecretsOverlap(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"combo": {{
+				"bundle/combo": {{
 					RelativePath: ".dec/cache/combo/skills/bundle-skill/SKILL.md",
 					Content:      "secret",
 				}},
@@ -132,7 +132,7 @@ func containsScopeMessage(events []OperationEvent, scope, fragment string) bool 
 }
 
 // pull 不再做「停用即清理」：密文落在 .secrets/ 同步根，没有可以安全 RemoveAll 的目录。
-// 已存在的项目内文件必须原样留着，等 Delete 页逐条确认。
+// 已存在的项目内文件必须原样留着，等 Remote 页逐条确认。
 func TestPullEnabledSecretsBundles_NeverDeletesExistingProjectFiles(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	origFactory := secretsClientFactory
@@ -166,7 +166,7 @@ func TestPullEnabledSecretsBundles_RejectsSecretsDecOverlap(t *testing.T) {
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"combo": {{RelativePath: ".dec/embedded/secret.env", Content: "secret"}},
+			"bundle/combo": {{RelativePath: ".dec/embedded/secret.env", Content: "secret"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -204,10 +204,10 @@ func TestPullEnabledSecretsBundles_MixedNotesAndSSHKeys(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
+				"bundle/vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
 			},
 			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-				"vikunja": {{
+				"bundle/vikunja": {{
 					Name: "deploy", Hosts: []string{"vikunja.example.com"},
 					PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV\n-----END OPENSSH PRIVATE KEY-----\n",
 					PublicKey:  "ssh-ed25519 AAAA deploy\n",
@@ -254,10 +254,10 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"vikunja": {{RelativePath: "env/vikunja.env", Content: "TOKEN=1\n"}},
+				"bundle/vikunja": {{RelativePath: "env/vikunja.env", Content: "TOKEN=1\n"}},
 			},
 			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-				"vikunja": {{
+				"bundle/vikunja": {{
 					Name: "../evil", Hosts: []string{"host.example.com"},
 					PrivateKey: "priv\n",
 				}},

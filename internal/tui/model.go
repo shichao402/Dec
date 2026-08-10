@@ -10,16 +10,30 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/pkg/diag"
 	"github.com/shichao402/Dec/pkg/editor"
 	"github.com/shichao402/Dec/pkg/secrets"
 	"github.com/shichao402/Dec/pkg/update"
 )
 
 type overviewLoadedMsg struct {
-	overview       *app.ProjectOverview
-	err            error
+	overview *app.ProjectOverview
+	err      error
+	loadGen  uint64
+}
+
+// shellRefreshKickMsg 把 refresh 从 Init 挪进 Update，确保 beginParts 写入进正式 model。
+type shellRefreshKickMsg struct{}
+
+type vaultInferenceLoadedMsg struct {
 	vaultInference *app.VaultProjectInference
-	loadGen        uint64
+	err            error
+}
+
+type overviewVaultEnrichedMsg struct {
+	bundles               []app.BundleOverview
+	availableBundleCount  int
+	err                   error
 }
 
 type vaultProjectAppliedMsg struct {
@@ -296,6 +310,8 @@ type model struct {
 	runningDelete               bool
 	deleteResult                *app.DeleteProjectResult
 	deleteErr                   error
+	remoteNoteEdit              *app.RemoteNoteEditSession
+	remoteSSHEdit               *app.RemoteSSHHostsEditSession
 	shellRefresh                asyncBatch // overview/assets/settings/projectSettings/projectVars
 	projectVarsLoad             asyncLoad  // 独立重载 .dec/vars.yaml
 	builtinAssetsLoad           asyncLoad  // 同步内置 IDE assets
@@ -342,7 +358,7 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 	m := model{
 		projectRoot:     projectRoot,
 		currentVersion:  currentVersion,
-		pages:           []string{"Home", "Bundles", "Project", "Run", "Delete", "Settings"},
+		pages:           []string{"Home", "Bundles", "Project", "Run", "Remote", "Settings"},
 		configInitMode:  opts.ConfigInitMode,
 		focus:           focusSidebar,
 		logs:            logs,
@@ -355,7 +371,10 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 }
 
 func (m model) Init() tea.Cmd {
-	return m.refreshCmd()
+	diag.StartupLog("TUI Init projectRoot=%q log=%s", m.projectRoot, diag.StartupLogPath())
+	// 不能在 Init 里直接 refreshCmd：Update 是值接收者，Init 无法带回
+	// beginParts 对 shellRefresh.gen 的写入；会导致 overview gen=1 撞上 model.gen=0 被 DROPPED。
+	return func() tea.Msg { return shellRefreshKickMsg{} }
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -363,6 +382,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.syncTreeViewports()
 		return m, nil
 	case deleteLoadedMsg:
 		if !m.deleteLoad.finish(msg.loadGen) {
@@ -413,29 +433,70 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				msg.result.DecDeleted, msg.result.SecretsDeleted, msg.result.SSHKeysDeleted, msg.result.BundlesDeleted))
 		}
 		return m, tea.Batch(m.refreshCmd(), m.startDeleteCandidatesLoad(m.deleteIncludeRemote, true))
+	case shellRefreshKickMsg:
+		diag.StartupLog("shellRefreshKickMsg → refreshCmd")
+		return m, m.refreshCmd()
 	case overviewLoadedMsg:
 		if !m.shellRefresh.acceptPart(msg.loadGen) {
+			diag.StartupLog("overviewLoadedMsg DROPPED msgGen=%d modelGen=%d pending=%d loading=%v",
+				msg.loadGen, m.shellRefresh.gen, m.shellRefresh.pending, m.shellRefresh.loading)
 			return m, nil
 		}
 		m.overview = msg.overview
 		m.overviewErr = msg.err
-		m.vaultInference = msg.vaultInference
-		if msg.vaultInference != nil {
-			m.vaultInferenceDismissed = false
-		}
 		if msg.err != nil {
+			diag.StartupLog("overviewLoadedMsg err=%v overviewNil=%v", msg.err, msg.overview == nil)
 			m.pushLog("Overview load failed: " + msg.err.Error())
 			return m, nil
 		}
-		if msg.vaultInference != nil {
-			m.pushLog(fmt.Sprintf("Vault project inferred from directory: %s (%d bundles)", msg.vaultInference.ProjectName, len(msg.vaultInference.EnabledBundles)))
+		diag.StartupLog("overviewLoadedMsg applied enabled=%d available=%d repoConnected=%v",
+			msg.overview.EnabledBundleCount, msg.overview.AvailableBundleCount, msg.overview.RepoConnected)
+		m.pushLog(fmt.Sprintf("Overview loaded: %d enabled bundles (vault scan deferred)", msg.overview.EnabledBundleCount))
+		cmds := []tea.Cmd{loadVaultInferenceCmd(m.projectRoot)}
+		if msg.overview.RepoConnected {
+			cmds = append(cmds, enrichOverviewVaultCmd(m.projectRoot))
 		}
-		m.pushLog(fmt.Sprintf("Overview loaded: %d enabled / %d available bundles", msg.overview.EnabledBundleCount, msg.overview.AvailableBundleCount))
-		if msg.vaultInference == nil && !msg.overview.ProjectConfigReady && !m.localProjectLoad.busy() {
+		return m, tea.Batch(cmds...)
+	case vaultInferenceLoadedMsg:
+		if msg.err != nil {
+			diag.StartupLog("vaultInferenceLoadedMsg err=%v", msg.err)
+			m.pushLog("Vault project infer failed: " + msg.err.Error())
+			// Infer 失败时仍允许本地 fallback
+			if m.overview != nil && !m.overview.ProjectConfigReady && !m.localProjectLoad.busy() {
+				gen := m.localProjectLoad.beginGen()
+				m.pushLog("无 vault 推断结果，生成本地 project 配置")
+				return m, ensureLocalProjectCmd(m.projectRoot, gen)
+			}
+			return m, nil
+		}
+		m.vaultInference = msg.vaultInference
+		if msg.vaultInference != nil {
+			diag.StartupLog("vaultInferenceLoadedMsg hit project=%s bundles=%d", msg.vaultInference.ProjectName, len(msg.vaultInference.EnabledBundles))
+			m.vaultInferenceDismissed = false
+			m.pushLog(fmt.Sprintf("Vault project inferred from directory: %s (%d bundles)", msg.vaultInference.ProjectName, len(msg.vaultInference.EnabledBundles)))
+			return m, nil
+		}
+		diag.StartupLog("vaultInferenceLoadedMsg nil (no match)")
+		if m.overview != nil && !m.overview.ProjectConfigReady && !m.localProjectLoad.busy() {
 			gen := m.localProjectLoad.beginGen()
 			m.pushLog("无 vault project 匹配，生成本地 project 配置")
 			return m, ensureLocalProjectCmd(m.projectRoot, gen)
 		}
+		return m, nil
+	case overviewVaultEnrichedMsg:
+		if msg.err != nil {
+			diag.StartupLog("overviewVaultEnrichedMsg err=%v", msg.err)
+			m.pushLog("Overview vault enrich failed: " + msg.err.Error())
+			return m, nil
+		}
+		if m.overview == nil {
+			diag.StartupLog("overviewVaultEnrichedMsg skipped (overview still nil)")
+			return m, nil
+		}
+		m.overview.Bundles = msg.bundles
+		m.overview.AvailableBundleCount = msg.availableBundleCount
+		diag.StartupLog("overviewVaultEnrichedMsg applied available=%d", msg.availableBundleCount)
+		m.pushLog(fmt.Sprintf("Overview vault bundles ready: %d available", msg.availableBundleCount))
 		return m, nil
 	case vaultProjectAppliedMsg:
 		if !m.vaultApplyLoad.finish(msg.loadGen) {
@@ -659,6 +720,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		gen := m.projectVarsLoad.beginGen()
 		return m, loadProjectVarsCmd(m.projectRoot, gen, true)
+	case remoteEditPreparedMsg:
+		return m, m.handleRemoteEditPrepared(msg)
+	case remoteEditEditorClosedMsg:
+		return m, m.handleRemoteEditEditorClosed(msg)
+	case remoteEditDoneMsg:
+		return m, m.handleRemoteEditDone(msg)
 	case pushPreviewLoadedMsg:
 		if !m.pushPreviewLoad.finish(msg.loadGen) {
 			return m, nil
@@ -794,7 +861,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.removeFilterInput && m.isRunPage() {
 			return m.handleRemoveFilterInput(msg)
 		}
-		if m.addSecretStage != "" && m.isProjectPage() {
+		if m.addSecretStage != "" && (m.isProjectPage() || m.isRemotePage()) {
 			return m.handleAddSecretKey(msg)
 		}
 		if m.isRunPage() && m.pushStage != "" && !m.runningPull {
@@ -844,6 +911,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleVerticalNav(1)
 		case "k", "up":
 			return m.handleVerticalNav(-1)
+		case "pgdown", "ctrl+d":
+			return m.handleTreePageNav(1)
+		case "pgup", "ctrl+u":
+			return m.handleTreePageNav(-1)
 		case "r":
 			m.pushLog("Refreshing project overview, assets, and global settings")
 			return m, m.refreshCmd()
@@ -954,9 +1025,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "A":
-			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil {
+			if (m.isProjectPage() || m.isRemotePage()) && m.projectSettings != nil && m.projectSettingsErr == nil {
 				if !m.projectSettings.ProjectConfigReady {
-					m.pushLog("登记 secret 需要先有 .dec/config.yaml，按 i 在本页生成本地 project")
+					m.pushLog("登记 secret 需要先有 .dec/config.yaml，按 i 在 Project 页生成本地 project")
 					return m, nil
 				}
 				m.beginAddSecret()
@@ -1020,18 +1091,18 @@ func (m model) handleHorizontalNav(direction int) (tea.Model, tea.Cmd) {
 				m.collapseCurrentBundle()
 				return m, nil
 			}
-			if m.isDeletePage() && m.deleteTree.CollapseAtCursor() {
-				m.pushLog("Delete 折叠目录")
+			if m.isRemotePage() && m.deleteTree.CollapseAtCursor() {
+				m.pushLog("Remote 折叠目录")
 				return m, nil
 			}
 			m.focus = focusSidebar
 			m.pushLog("返回导航")
 			return m, nil
 		}
-		if m.isDeletePage() && direction > 0 {
+		if m.isRemotePage() && direction > 0 {
 			if m.deleteTree.CursorOnExpandable() && !m.deleteTree.CursorExpanded() {
 				m.deleteTree.ExpandAtCursor()
-				m.pushLog("Delete 展开目录")
+				m.pushLog("Remote 展开目录")
 				return m, nil
 			}
 			return m, nil
@@ -1060,6 +1131,7 @@ func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
 	case focusContent:
 		if m.isBundlesPage() {
 			if m.canNavigateAssets() {
+				m.syncTreeViewports()
 				m.moveAssetCursor(delta)
 			}
 			return m, nil
@@ -1077,9 +1149,27 @@ func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.isDeletePage() && m.focus == focusContent {
+			m.syncTreeViewports()
 			m.deleteTree.MoveCursor(delta)
 			return m, nil
 		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleTreePageNav 为 Bundles / Remote 树列表翻页。
+func (m model) handleTreePageNav(dir int) (tea.Model, tea.Cmd) {
+	if m.focus != focusContent {
+		return m, nil
+	}
+	m.syncTreeViewports()
+	if m.isBundlesPage() && m.canNavigateAssets() {
+		m.assetTree.PageCursor(dir)
+		return m, nil
+	}
+	if m.isDeletePage() {
+		m.deleteTree.PageCursor(dir)
 		return m, nil
 	}
 	return m, nil
@@ -1089,6 +1179,7 @@ const refreshPartCount = 5
 
 func (m *model) refreshCmd() tea.Cmd {
 	gen := m.shellRefresh.beginParts(refreshPartCount)
+	diag.StartupLog("refreshCmd start gen=%d parts=%d", gen, refreshPartCount)
 	return tea.Batch(
 		loadOverviewCmd(m.projectRoot, gen),
 		loadAssetsCmd(m.projectRoot, gen),
@@ -1100,12 +1191,51 @@ func (m *model) refreshCmd() tea.Cmd {
 
 func loadOverviewCmd(projectRoot string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
-		inference, inferErr := inferVaultProjectOperation(projectRoot, nil)
-		if inferErr != nil {
-			return overviewLoadedMsg{err: inferErr, vaultInference: inference, loadGen: loadGen}
+		done := diag.StartupSpan(fmt.Sprintf("loadOverviewCmd gen=%d skipVault", loadGen))
+		overview, err := app.LoadProjectOverviewOpts(projectRoot, app.OverviewLoadOpts{IncludeVaultBundles: false})
+		if err != nil {
+			done(fmt.Sprintf("err=%v", err))
+		} else if overview == nil {
+			done("overview=nil")
+		} else {
+			done(fmt.Sprintf("ok enabled=%d connected=%v", overview.EnabledBundleCount, overview.RepoConnected))
 		}
-		overview, err := app.LoadProjectOverview(projectRoot)
-		return overviewLoadedMsg{overview: overview, err: err, vaultInference: inference, loadGen: loadGen}
+		return overviewLoadedMsg{overview: overview, err: err, loadGen: loadGen}
+	}
+}
+
+func loadVaultInferenceCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		done := diag.StartupSpan("loadVaultInferenceCmd")
+		inference, err := inferVaultProjectOperation(projectRoot, nil)
+		if err != nil {
+			done(fmt.Sprintf("err=%v", err))
+		} else if inference == nil {
+			done("nil")
+		} else {
+			done(fmt.Sprintf("project=%s bundles=%d", inference.ProjectName, len(inference.EnabledBundles)))
+		}
+		return vaultInferenceLoadedMsg{vaultInference: inference, err: err}
+	}
+}
+
+func enrichOverviewVaultCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		done := diag.StartupSpan("enrichOverviewVaultCmd")
+		overview, err := app.LoadProjectOverviewOpts(projectRoot, app.OverviewLoadOpts{IncludeVaultBundles: true})
+		if err != nil {
+			done(fmt.Sprintf("err=%v", err))
+			return overviewVaultEnrichedMsg{err: err}
+		}
+		if overview == nil {
+			done("overview=nil")
+			return overviewVaultEnrichedMsg{}
+		}
+		done(fmt.Sprintf("available=%d", overview.AvailableBundleCount))
+		return overviewVaultEnrichedMsg{
+			bundles:              overview.Bundles,
+			availableBundleCount: overview.AvailableBundleCount,
+		}
 	}
 }
 
@@ -1118,7 +1248,15 @@ func applyVaultProjectCmd(projectRoot string, loadGen uint64) tea.Cmd {
 
 func loadAssetsCmd(projectRoot string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
+		done := diag.StartupSpan(fmt.Sprintf("loadAssetsCmd gen=%d", loadGen))
 		state, err := app.LoadAssetSelection(projectRoot, nil)
+		if err != nil {
+			done(fmt.Sprintf("err=%v", err))
+		} else if state == nil {
+			done("state=nil")
+		} else {
+			done(fmt.Sprintf("ok bundles=%d", len(state.Bundles)))
+		}
 		return assetsLoadedMsg{state: state, err: err, loadGen: loadGen}
 	}
 }
@@ -1132,7 +1270,13 @@ func saveAssetsCmd(projectRoot string, bundles []string) tea.Cmd {
 
 func loadSettingsCmd(loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
+		done := diag.StartupSpan(fmt.Sprintf("loadSettingsCmd gen=%d", loadGen))
 		state, err := loadGlobalSettingsOperation(nil)
+		if err != nil {
+			done(fmt.Sprintf("err=%v", err))
+		} else {
+			done("ok")
+		}
 		return settingsLoadedMsg{state: state, err: err, loadGen: loadGen}
 	}
 }
@@ -1156,7 +1300,13 @@ func ensureBuiltinIDEAssetsCmd(ideNames []string, loadGen uint64) tea.Cmd {
 
 func loadProjectSettingsCmd(projectRoot string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
+		done := diag.StartupSpan(fmt.Sprintf("loadProjectSettingsCmd gen=%d", loadGen))
 		state, err := loadProjectSettingsOperation(projectRoot, nil)
+		if err != nil {
+			done(fmt.Sprintf("err=%v", err))
+		} else {
+			done("ok")
+		}
 		return projectSettingsLoadedMsg{state: state, err: err, loadGen: loadGen}
 	}
 }
@@ -1188,7 +1338,13 @@ func ensureLocalProjectCmd(projectRoot string, loadGen uint64) tea.Cmd {
 
 func loadProjectVarsCmd(projectRoot string, loadGen uint64, solo bool) tea.Cmd {
 	return func() tea.Msg {
+		done := diag.StartupSpan(fmt.Sprintf("loadProjectVarsCmd gen=%d solo=%v", loadGen, solo))
 		view, err := loadProjectVarsViewOperation(projectRoot)
+		if err != nil {
+			done(fmt.Sprintf("err=%v", err))
+		} else {
+			done("ok")
+		}
 		return projectVarsLoadedMsg{view: view, err: err, loadGen: loadGen, solo: solo}
 	}
 }
@@ -1777,7 +1933,7 @@ func (m model) renderHomePage(width int) string {
 	return wrapLines(width, lines)
 }
 
-func (m model) renderBundlesPage(width int) string {
+func (m model) renderBundlesPage(width, height int) string {
 	if m.assetsErr != nil {
 		return shellWarnStyle.Render("无法加载 bundle 选择") + "\n\n" + m.assetsErr.Error()
 	}
@@ -1789,11 +1945,17 @@ func (m model) renderBundlesPage(width int) string {
 	if m.configInitMode {
 		summary = append(summary, shellTitleStyle.Render("项目配置初始化 — 勾选要启用的 bundle"))
 	}
-	status := fmt.Sprintf("%d/%d 已启用", len(m.bundleSelection), len(m.assets.Bundles))
+	status := fmt.Sprintf("%d/%d 项目已启用", len(m.bundleSelection), len(m.assets.Bundles))
+	if n := m.countUserEnabledBundles(); n > 0 {
+		status += fmt.Sprintf(" · %d 个本机启用", n)
+	}
 	if filter := m.currentAssetFilterLabel(); filter != "<none>" {
 		status += " · 筛选: " + filter
 	}
 	summary = append(summary, status)
+	if m.countUserEnabledBundles() > 0 {
+		summary = append(summary, shellMutedStyle.Render("青色 ")+shellAccentStyle.Render("user")+shellMutedStyle.Render(" = Settings 本机已启用；pull 为并集，一般无需再勾项目"))
+	}
 	if m.assetsDirty {
 		summary = append(summary, shellWarnStyle.Render("有未保存修改，按 s 保存"))
 	}
@@ -1812,7 +1974,12 @@ func (m model) renderBundlesPage(width int) string {
 		return wrapLines(width, append(summary, "当前筛选没有结果。"))
 	}
 
-	list := m.renderAssetList()
+	listBudget := height - len(summary)
+	if listBudget < 3 {
+		listBudget = 3
+	}
+	// split 时列表占半屏高度约等于剩余行（标题+窗口）
+	list := m.renderAssetList(listBudget)
 	detail := m.renderAssetDetails()
 	return joinSections(wrapLines(width, summary), renderSplitPane(width, list, detail))
 }
@@ -2232,7 +2399,7 @@ func (m model) renderRunIdleGuide() []string {
 	lines := []string{
 		shellMutedStyle.Render("p 拉取 Dec bundle + secrets（按 SyncTarget 分组）+ IDE 安装"),
 		shellMutedStyle.Render("P 推送到远端（两次确认；未删除多余项）"),
-		shellMutedStyle.Render("删除请切到 Delete 页"),
+		shellMutedStyle.Render("删除 / 编辑远端请切到 Remote 页"),
 	}
 	lines = append(lines, m.renderPullPlanLines()...)
 	lines = append(lines, shellMutedStyle.Render("上次  尚无操作记录"))
@@ -2306,7 +2473,7 @@ func (m model) renderRunHelpPanel() []string {
 		shellTitleStyle.Render("快捷键"),
 		shellMutedStyle.Render("p / s  执行 pull"),
 		shellMutedStyle.Render("P      推送到远端（两次确认）"),
-		shellMutedStyle.Render("删除请切到 Delete 页（侧栏 Run 之后）"),
+		shellMutedStyle.Render("删除 / 编辑远端请切到 Remote 页（侧栏 Run 之后）"),
 		shellMutedStyle.Render("u      检查并自更新 dec"),
 		shellMutedStyle.Render("r      刷新项目概览"),
 		shellMutedStyle.Render("Esc    取消进行中的 pull / push"),
@@ -2748,37 +2915,53 @@ func (m model) renderSettingsDetails() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) renderAssetList() string {
+func (m model) renderAssetList(listBudget int) string {
 	lines := []string{shellTitleStyle.Render("Bundle 列表")}
 	mm := m
 	mm.refreshAssetTree()
-	treeRows := mm.assetTree.VisibleRows()
-	if len(treeRows) == 0 {
+	allRows := mm.assetTree.VisibleRows()
+	if len(allRows) == 0 {
 		return strings.Join(lines, "\n")
 	}
-	for i, tr := range treeRows {
+	vp := listBudget - 1 // 标题
+	if vp < 1 {
+		vp = 1
+	}
+	scrollHint := len(allRows) > vp
+	if scrollHint && vp > 1 {
+		vp--
+	}
+	mm.assetTree.SetViewport(vp)
+	window := mm.assetTree.WindowRows()
+	if scrollHint {
+		lines = append(lines, shellMutedStyle.Render(fmt.Sprintf("%d–%d / %d · PgUp/PgDn",
+			mm.assetTree.Offset+1, mm.assetTree.Offset+len(window), len(allRows))))
+	}
+	for i, tr := range window {
+		abs := mm.assetTree.Offset + i
 		marker := " "
-		if m.focus != focusSidebar && i == mm.assetTree.Cursor {
+		if m.focus != focusSidebar && abs == mm.assetTree.Cursor {
 			marker = ">"
 		}
 		bundleEnabled := false
+		userEnabled := false
 		if p, ok := tr.Node.Payload.(assetTreePayload); ok {
 			bundleEnabled = p.bundleEnabled
+			userEnabled = p.kind == assetRowBundle && p.userEnabled
 		}
 		line := renderAssetTreeLine(tr, &mm.assetTree, marker, bundleEnabled)
-		if m.focus != focusSidebar && i == mm.assetTree.Cursor {
-			lines = append(lines, shellSelectedRow.Render(line))
-			continue
+		var styled string
+		if m.focus != focusSidebar && abs == mm.assetTree.Cursor {
+			styled = shellSelectedRow.Render(line)
+		} else if p, ok := tr.Node.Payload.(assetTreePayload); ok && p.kind == assetRowBundle && p.bundleEnabled {
+			styled = shellEnabledRow.Render(line)
+		} else {
+			styled = shellLogStyle.Render(line)
 		}
-		if p, ok := tr.Node.Payload.(assetTreePayload); ok {
-			if p.kind == assetRowBundle && p.bundleEnabled {
-				lines = append(lines, shellEnabledRow.Render(line))
-			} else {
-				lines = append(lines, shellLogStyle.Render(line))
-			}
-			continue
+		if userEnabled {
+			styled += " " + shellAccentStyle.Render("user")
 		}
-		lines = append(lines, shellLogStyle.Render(line))
+		lines = append(lines, styled)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -2812,9 +2995,16 @@ func (m model) renderAssetDetails() string {
 			switch p.kind {
 			case assetRowBundle:
 				bo := m.assets.Bundles[p.bundleIndex]
+				projectOn := m.bundleSelected(bo.Name)
+				userOn := m.userBundleEnabled(bo.Name)
 				status := "未选中"
-				if m.bundleSelected(bo.Name) {
-					status = "已选中（勾选后其成员会随 pull 一起下发）"
+				switch {
+				case projectOn && userOn:
+					status = "项目已勾选 · 本机已启用（pull 并集，效果相同）"
+				case projectOn:
+					status = "项目已勾选（保存后随本项目 pull 下发）"
+				case userOn:
+					status = "本机已启用（Settings；一般无需再勾项目）"
 				}
 				lines = append(lines,
 					fmt.Sprintf("Bundle: %s", bo.Name),
@@ -2975,6 +3165,45 @@ func (m model) bundleSelected(name string) bool {
 		}
 	}
 	return false
+}
+
+// userBundleEnabled 表示本机 Settings 是否启用该 bundle。
+// settings 已加载时以 settingsSelectedSecretBundles 为准（含未保存勾选）；否则回退 AssetBundleOption.UserEnabled。
+func (m model) userBundleEnabled(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	if m.settings != nil {
+		for _, n := range m.settingsSelectedSecretBundles {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+	if m.assets == nil {
+		return false
+	}
+	for _, bo := range m.assets.Bundles {
+		if bo.Name == name {
+			return bo.UserEnabled
+		}
+	}
+	return false
+}
+
+func (m model) countUserEnabledBundles() int {
+	if m.assets == nil {
+		return 0
+	}
+	n := 0
+	for _, bo := range m.assets.Bundles {
+		if m.userBundleEnabled(bo.Name) {
+			n++
+		}
+	}
+	return n
 }
 
 func (m model) canNavigateSettings() bool {
@@ -3423,9 +3652,9 @@ func (m model) currentSummary() string {
 	if m.overviewErr != nil {
 		return "Overview unavailable"
 	}
-	if m.isDeletePage() {
+	if m.isRemotePage() {
 		if m.deleteLoadErr != nil {
-			return "Delete list unavailable"
+			return "Remote list unavailable"
 		}
 		if m.deleteStage == "summary" {
 			return "Confirming delete (summary)"
@@ -3434,9 +3663,9 @@ func (m model) currentSummary() string {
 			return "Confirming delete (final)"
 		}
 		if m.deleteCandidatesLoaded {
-			return fmt.Sprintf("Delete ready, %d items", len(m.deleteCandidates))
+			return fmt.Sprintf("Remote ready, %d items", len(m.deleteCandidates))
 		}
-		return "Delete page ready"
+		return "Remote page ready"
 	}
 	if m.isBundlesPage() {
 		if m.assetsErr != nil {

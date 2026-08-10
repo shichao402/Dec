@@ -114,8 +114,8 @@ func TestSaveConfig_WritesDefaultAndComments(t *testing.T) {
 func TestResolveBinding_DefaultSameName(t *testing.T) {
 	cfg := &Config{}
 	binding := cfg.ResolveBinding("vikunja")
-	if binding.SecretsBundleName != "vikunja" {
-		t.Fatalf("SecretsBundleName = %q, 期望 vikunja", binding.SecretsBundleName)
+	if binding.SecretsBundleName != "bundle/vikunja" {
+		t.Fatalf("SecretsBundleName = %q, 期望 bundle/vikunja", binding.SecretsBundleName)
 	}
 	if binding.DecBundleName != "vikunja" {
 		t.Fatalf("DecBundleName = %q", binding.DecBundleName)

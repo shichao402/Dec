@@ -179,7 +179,8 @@ func scanVaultBundles(repoDir string, reporter Reporter) (map[string][]vaultBund
 		}
 		b, warnings, loadErr := bundle.LoadBundle(bundlePath, memberExists)
 		if loadErr != nil {
-			return nil, nil, fmt.Errorf("加载 bundle %q 失败: %w", bundleName, loadErr)
+			emit(reporter, EventWarn, "pull.bundle", fmt.Sprintf("加载 bundle %q 失败，跳过: %v", bundleName, loadErr), nil)
+			continue
 		}
 		for _, w := range warnings {
 			msg := w.Message

@@ -80,7 +80,7 @@ type PushBundleRequest struct {
 }
 
 // PushBundleResult 推送结果。
-// 无 Deleted：push 不删远端 note，删除只走 Delete 页的显式单条确认。
+// 无 Deleted：push 不删远端 note，删除只走 Remote 页的显式单条确认。
 type PushBundleResult struct {
 	Created int
 	Updated int
@@ -101,4 +101,12 @@ type DeleteSSHKeyRequest struct {
 	Binding BundleBinding
 	KeyName string
 	Target  SyncTarget
+}
+
+// UpdateSSHKeyHostsRequest 更新远端 SSH Key Item Notes（一行一个 Host）。
+type UpdateSSHKeyHostsRequest struct {
+	Binding BundleBinding
+	KeyName string
+	Target  SyncTarget
+	Hosts   []string // 规范化后写入 Notes；空切片清空 Notes
 }

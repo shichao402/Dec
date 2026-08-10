@@ -108,7 +108,7 @@ func PushSecretsBundles(ctx context.Context, projectRoot string, reporter Report
 			emit(reporter, EventWarn, "push.secrets",
 				fmt.Sprintf("  ⚠️  %d 个 Note 在本地找不到对应文件，已跳过（不会删除远端）: %s",
 					len(pushResult.MissingLocal), strings.Join(pushResult.MissingLocal, ", ")), progress)
-			emit(reporter, EventInfo, "push.secrets", "  确实要删除请到 Delete 页逐条确认", progress)
+			emit(reporter, EventInfo, "push.secrets", "  确实要删除请到 Remote 页逐条确认", progress)
 		}
 	}
 

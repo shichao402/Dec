@@ -98,7 +98,7 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 	}
 
 	// 扫描 bundle（含 vault 级隐式 bundle），供 init 提示与 TUI 使用。
-	if err := withReadRepoDir(func(repoDir string) error {
+	if err := withLocalReadRepoDir(func(repoDir string) error {
 		_, bundleOverviews, scanErr := scanVaultBundles(repoDir, reporter)
 		if scanErr != nil {
 			return scanErr
@@ -173,7 +173,7 @@ func ScanAvailableAssets(reporter Reporter) ([]AssetInfo, error) {
 	emit(reporter, EventInfo, "repo.scan", "开始扫描仓库资产", nil)
 
 	var allAssets []AssetInfo
-	if err := withReadRepoDir(func(repoDir string) error {
+	if err := withLocalReadRepoDir(func(repoDir string) error {
 		folders, err := readBundleEntries(repoDir)
 		if err != nil {
 			return fmt.Errorf("读取仓库失败: %w", err)
@@ -275,6 +275,25 @@ func withReadRepoDir(fn func(string) error) error {
 	}
 
 	tx, err := repo.NewReadTransaction()
+	if err != nil {
+		return err
+	}
+	defer tx.Close()
+
+	return fn(tx.WorkDir())
+}
+
+// withLocalReadRepoDir 只读 vault worktree，不 FetchBare。
+// TUI 概览 / 推断 / Remote 列表等可接受略旧 refs 的路径应走这里，避免启动被网络卡住。
+func withLocalReadRepoDir(fn func(string) error) error {
+	globalConfig, err := config.LoadGlobalConfig()
+	if err == nil {
+		if err := repo.EnsureConnectedRepoMatches(globalConfig.RepoURL); err != nil {
+			return err
+		}
+	}
+
+	tx, err := repo.NewLocalReadTransaction()
 	if err != nil {
 		return err
 	}

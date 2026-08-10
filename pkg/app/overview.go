@@ -40,6 +40,17 @@ type ProjectOverview struct {
 }
 
 func LoadProjectOverview(projectRoot string) (*ProjectOverview, error) {
+	return LoadProjectOverviewOpts(projectRoot, OverviewLoadOpts{IncludeVaultBundles: true})
+}
+
+// OverviewLoadOpts 控制 overview 加载成本。
+type OverviewLoadOpts struct {
+	// IncludeVaultBundles 为 true 时会 LocalRead 扫描 vault bundles（可能与其它 bare 事务争用）。
+	// TUI 首屏应传 false，先画出本机配置，vault 列表异步补全。
+	IncludeVaultBundles bool
+}
+
+func LoadProjectOverviewOpts(projectRoot string, opts OverviewLoadOpts) (*ProjectOverview, error) {
 	overview := &ProjectOverview{ProjectRoot: projectRoot}
 
 	connected, err := repo.IsConnected()
@@ -74,7 +85,7 @@ func LoadProjectOverview(projectRoot string) (*ProjectOverview, error) {
 
 	// 仓库已连接时扫描 vault 内的 bundle 声明，并根据 EnabledBundles 标记启用状态。
 	// 失败时不阻塞 overview（bundle 是增量能力，项目级配置仍应可读）。
-	if connected {
+	if connected && opts.IncludeVaultBundles {
 		tx, txErr := repo.NewLocalReadTransaction()
 		if txErr == nil {
 			resolved, resolveErr := resolveDesiredAssets(projectConfig, tx.WorkDir(), nil)

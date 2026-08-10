@@ -137,7 +137,7 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 		return nil, err
 	}
 
-	// push 只做 create/update。删除远端 note 必须走 Delete 页的显式单条确认：
+	// push 只做 create/update。删除远端 note 必须走 Remote 页的显式单条确认：
 	// 落地路径散在项目根，不存在可枚举的权威本地集合，靠"本地没有就删远端"
 	// 会在枚举漏一个文件时静默删掉一条真密钥。
 	result := &PushBundleResult{}
@@ -228,6 +228,65 @@ func (c *APIClient) DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) e
 		return nil
 	}
 	return c.deleteCipher(ctx, cipher.ID)
+}
+
+func (c *APIClient) UpdateSSHKeyHosts(ctx context.Context, req UpdateSSHKeyHostsRequest) error {
+	userKey := UserKey()
+	if len(userKey) == 0 {
+		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
+	}
+	folderName := strings.TrimSpace(req.Binding.SecretsBundleName)
+	if folderName == "" {
+		folderName = strings.TrimSpace(req.Target.Folder)
+	}
+	if folderName == "" {
+		return fmt.Errorf("secrets bundle 名称不能为空")
+	}
+	keyName := strings.TrimSpace(req.KeyName)
+	if keyName == "" {
+		return fmt.Errorf("SSH Key 名称不能为空")
+	}
+
+	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	if err != nil {
+		return err
+	}
+	if folderID == "" {
+		return fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+	}
+
+	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey)
+	if err != nil {
+		return err
+	}
+	cipher, ok := existing[keyName]
+	if !ok {
+		return fmt.Errorf("SSH Key %q 不在 folder %q", keyName, folderName)
+	}
+	return c.updateSSHKeyNotes(ctx, cipher, userKey, formatSSHHostsNotes(req.Hosts))
+}
+
+func (c *APIClient) updateSSHKeyNotes(ctx context.Context, cipher bwCipher, userKey []byte, notesPlain string) error {
+	itemKey, err := itemDecryptionKey(cipher.Key, userKey)
+	if err != nil {
+		return err
+	}
+	encNotes, err := encryptNoteField(notesPlain, itemKey)
+	if err != nil {
+		return err
+	}
+	body := map[string]any{
+		"type":     cipherTypeSSHKey,
+		"name":     cipher.Name,
+		"notes":    encNotes,
+		"folderId": cipher.FolderID,
+		"favorite": false,
+		"sshKey":   cipher.SSHKey,
+	}
+	if strings.TrimSpace(cipher.Key) != "" {
+		body["key"] = cipher.Key
+	}
+	return c.putJSON(ctx, c.APIURL+"/ciphers/"+cipher.ID, body)
 }
 
 func (c *APIClient) deleteCipher(ctx context.Context, cipherID string) error {

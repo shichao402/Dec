@@ -57,7 +57,7 @@ func warnUnignoredSecrets(projectRoot string, landingPaths []string, reporter Re
 }
 
 // pullEnabledSecretsBundles 拉取全部 SyncTarget。
-// 不做「停用即清理」：删除走 Delete 页显式确认。
+// 不做「停用即清理」：删除走 Remote 页显式确认。
 func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledBundles []string, reporter Reporter) (*secretsPullSummary, error) {
 	reporter = defaultReporter(reporter)
 	summary := &secretsPullSummary{}

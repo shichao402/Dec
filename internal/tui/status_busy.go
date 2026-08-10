@@ -36,9 +36,9 @@ func (m model) ioBusyLabel() string {
 		return "Syncing builtin IDE assets…"
 	case m.deleteLoad.busy():
 		if len(m.deleteCandidates) > 0 {
-			return "Refreshing delete list…"
+			return "Refreshing remote list…"
 		}
-		return "Loading delete list…"
+		return "Loading remote list…"
 	case m.projectVarsLoad.busy():
 		return "Reloading project vars…"
 	case m.shellRefresh.busy():
@@ -55,7 +55,7 @@ func (m model) statusBarLeftHints() string {
 	if m.isHomePage() && m.hasVaultInferencePrompt() {
 		return "y/Enter apply · n skip | q quit | r refresh"
 	}
-	if m.isDeletePage() {
+	if m.isRemotePage() {
 		if m.deleteStage == "summary" {
 			return "y/Enter continue · n/Esc cancel"
 		}
@@ -65,7 +65,7 @@ func (m model) statusBarLeftHints() string {
 		if m.deleteFilterInput {
 			return "filter · Enter apply · Esc cancel"
 		}
-		return "q quit | j/k | space select | d delete | r refresh"
+		return "q quit | j/k | PgUp/Dn | space | e edit | d delete | r refresh"
 	}
 	return "q quit | j/k nav | l/h in-out | r refresh"
 }
