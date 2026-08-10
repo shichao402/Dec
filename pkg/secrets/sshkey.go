@@ -248,7 +248,8 @@ func ResolveBundleSSHKeys(ctx context.Context, client Client, req PullBundleRequ
 	return keys, err
 }
 
-// WriteSSHKeyLandings 将已校验的 SSH Key 写入 ~/.ssh，并合并 Dec managed config 区块。
+// WriteSSHKeyLandings 将已校验的 SSH Key 写入 ~/.ssh，并更新 Dec managed SSH config。
+// Host 条目写入 ~/.ssh/config.d/dec.conf，主 ~/.ssh/config 顶部 Ensure Include（优先于用户 Host）。
 // 仅对声明了 Hosts 的 key 写入 Host 条目；空 Hosts 只落密钥文件，并按 IdentityFile 清掉其旧条目。
 // 按 IdentityFile 更新本批 keys，保留其他项目先前管理的条目。不清理远端已移除的旧 key。
 func WriteSSHKeyLandings(landings []SSHKeyLanding) error {

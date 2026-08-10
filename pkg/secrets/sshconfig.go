@@ -8,30 +8,39 @@ import (
 	"strings"
 )
 
+// OpenSSH 自 7.3 起支持 Include。Dec 将 managed Host 写入独立文件，
+// 并在 ~/.ssh/config 最顶部 Ensure Include，使注入配置优先于用户后续 Host（先匹配先生效）。
+const (
+	sshManagedIncludeRel  = "config.d/dec.conf"
+	sshManagedIncludeLine = "Include " + sshManagedIncludeRel
+)
+
 type sshManagedEntry struct {
 	Host         string
 	Port         int // 0 = 不写 Port（OpenSSH 默认 22）
 	IdentityFile string
 }
 
-// upsertManagedSSHConfig 更新 ~/.ssh/config 的 DEC MANAGED 区块。
+func sshManagedConfigPath(sshDir string) string {
+	return filepath.Join(sshDir, "config.d", "dec.conf")
+}
+
+// upsertManagedSSHConfig 更新 Dec managed SSH Host 配置（分文件 + 主 config 顶部 Include）。
 // removeIdentityFiles：先移除这些 IdentityFile 的旧条目，再写入 entries。
-// 其他 IdentityFile（其他项目）的条目全部保留；区块外用户配置原样保留。
+// 会把旧版内嵌于 ~/.ssh/config 的 BEGIN/END DEC MANAGED 块迁移到 config.d/dec.conf。
 func upsertManagedSSHConfig(configPath string, removeIdentityFiles []string, entries []sshManagedEntry) error {
-	raw, err := readFileOrEmpty(configPath)
+	sshDir := filepath.Dir(configPath)
+	managedPath := sshManagedConfigPath(sshDir)
+
+	existing, userBody, err := loadSSHManagedState(configPath, managedPath)
 	if err != nil {
 		return err
 	}
-	prefix, managed, suffix, err := splitManagedBlock(raw)
-	if err != nil {
-		return err
-	}
-	existing := parseManagedEntries(managed)
 	removeSet := make(map[string]struct{}, len(removeIdentityFiles))
 	for _, id := range removeIdentityFiles {
 		removeSet[normalizeIdentityPath(id)] = struct{}{}
 	}
-	kept := make([]sshManagedEntry, 0, len(existing))
+	kept := make([]sshManagedEntry, 0, len(existing)+len(entries))
 	for _, e := range existing {
 		if _, drop := removeSet[normalizeIdentityPath(e.IdentityFile)]; drop {
 			continue
@@ -39,27 +48,21 @@ func upsertManagedSSHConfig(configPath string, removeIdentityFiles []string, ent
 		kept = append(kept, e)
 	}
 	kept = append(kept, entries...)
-	newManaged := renderManagedBlock(kept)
-	out := joinConfigParts(prefix, newManaged, suffix)
-	return writeSecureFile(configPath, []byte(out), 0600)
+	return writeSSHManagedState(configPath, managedPath, userBody, kept)
 }
 
 func removeManagedSSHConfigEntries(configPath string, identityFiles []string) error {
-	raw, err := readFileOrEmpty(configPath)
+	sshDir := filepath.Dir(configPath)
+	managedPath := sshManagedConfigPath(sshDir)
+
+	existing, userBody, err := loadSSHManagedState(configPath, managedPath)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(raw) == "" {
+	if len(existing) == 0 && !strings.Contains(userBody, sshManagedIncludeLine) &&
+		!fileExists(managedPath) {
 		return nil
 	}
-	prefix, managed, suffix, err := splitManagedBlock(raw)
-	if err != nil {
-		return err
-	}
-	if managed == "" && !strings.Contains(raw, sshManagedBegin) {
-		return nil
-	}
-	existing := parseManagedEntries(managed)
 	removeSet := make(map[string]struct{}, len(identityFiles))
 	for _, id := range identityFiles {
 		removeSet[normalizeIdentityPath(id)] = struct{}{}
@@ -71,16 +74,62 @@ func removeManagedSSHConfigEntries(configPath string, identityFiles []string) er
 		}
 		kept = append(kept, e)
 	}
-	newManaged := ""
-	if len(kept) > 0 {
-		newManaged = renderManagedBlock(kept)
+	return writeSSHManagedState(configPath, managedPath, userBody, kept)
+}
+
+func loadSSHManagedState(configPath, managedPath string) (entries []sshManagedEntry, userBody string, err error) {
+	raw, err := readFileOrEmpty(configPath)
+	if err != nil {
+		return nil, "", err
 	}
-	out := joinConfigParts(prefix, newManaged, suffix)
-	if strings.TrimSpace(out) == "" {
-		// 若文件只剩空白，保留空文件以免误删用户可能依赖的路径。
-		out = ""
+	prefix, legacyManaged, suffix, err := splitManagedBlock(raw)
+	if err != nil {
+		return nil, "", err
 	}
+	userBody = stripDecIncludeLines(prefix + suffix)
+
+	fileManaged, err := readFileOrEmpty(managedPath)
+	if err != nil {
+		return nil, "", err
+	}
+	// 分文件已有内容则以之为准；否则吃旧内嵌块（一次性迁移）。
+	managedRaw := fileManaged
+	if strings.TrimSpace(managedRaw) == "" {
+		managedRaw = legacyManaged
+	}
+	return parseManagedEntries(managedRaw), userBody, nil
+}
+
+func writeSSHManagedState(configPath, managedPath, userBody string, entries []sshManagedEntry) error {
+	if err := os.MkdirAll(filepath.Dir(managedPath), 0700); err != nil {
+		return fmt.Errorf("创建 SSH config.d 失败: %w", err)
+	}
+	if err := restrictDirPermissions(filepath.Dir(managedPath)); err != nil {
+		return err
+	}
+
+	newManaged := renderManagedBlock(entries)
+	if strings.TrimSpace(newManaged) == "" {
+		if err := os.Remove(managedPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("删除 Dec managed SSH config 失败: %w", err)
+		}
+		out := strings.TrimLeft(userBody, "\r\n")
+		if strings.TrimSpace(out) == "" {
+			out = ""
+		}
+		return writeSecureFile(configPath, []byte(out), 0600)
+	}
+
+	if err := writeSecureFile(managedPath, []byte(newManaged), 0600); err != nil {
+		return fmt.Errorf("写入 Dec managed SSH config 失败: %w", err)
+	}
+	out := ensureDecIncludeAtTop(userBody)
 	return writeSecureFile(configPath, []byte(out), 0600)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func readFileOrEmpty(path string) (string, error) {
@@ -123,6 +172,48 @@ func splitManagedBlock(raw string) (prefix, managed, suffix string, err error) {
 	}
 	suffix = raw[afterEnd:]
 	return prefix, managed, suffix, nil
+}
+
+func isDecIncludeLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return false
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) < 2 || !strings.EqualFold(fields[0], "Include") {
+		return false
+	}
+	target := strings.Trim(fields[1], `"'`)
+	target = strings.ReplaceAll(target, "\\", "/")
+	target = strings.TrimPrefix(target, "~/")
+	target = strings.TrimPrefix(target, strings.TrimSuffix(strings.ReplaceAll(os.Getenv("USERPROFILE"), "\\", "/"), "/")+"/")
+	if home, err := os.UserHomeDir(); err == nil {
+		homeSlash := strings.ReplaceAll(home, "\\", "/")
+		target = strings.TrimPrefix(target, homeSlash+"/")
+		target = strings.TrimPrefix(target, homeSlash+"/.ssh/")
+	}
+	target = strings.TrimPrefix(target, ".ssh/")
+	return target == sshManagedIncludeRel || strings.HasSuffix(target, "/"+sshManagedIncludeRel)
+}
+
+func stripDecIncludeLines(raw string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(raw, "\n") {
+		if isDecIncludeLine(line) {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+func ensureDecIncludeAtTop(userBody string) string {
+	body := strings.TrimLeft(stripDecIncludeLines(userBody), "\r\n")
+	if body == "" {
+		return sshManagedIncludeLine + "\n"
+	}
+	return sshManagedIncludeLine + "\n\n" + body
 }
 
 func parseManagedEntries(managed string) []sshManagedEntry {
@@ -223,27 +314,13 @@ func renderManagedBlock(entries []sshManagedEntry) string {
 	return b.String()
 }
 
-func joinConfigParts(prefix, managed, suffix string) string {
-	var b strings.Builder
-	b.WriteString(prefix)
-	if managed != "" {
-		// 若 prefix 非空且不以换行结尾，补一个换行再写 managed。
-		if len(prefix) > 0 && !strings.HasSuffix(prefix, "\n") {
-			b.WriteByte('\n')
-		}
-		b.WriteString(managed)
-	}
-	b.WriteString(suffix)
-	return b.String()
-}
-
 func normalizeIdentityPath(p string) string {
 	p = strings.TrimSpace(p)
 	if p == "" {
 		return ""
 	}
 	// 展开 ~/ 便于与绝对路径比较。
-	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~\\") {
 		if home, err := os.UserHomeDir(); err == nil {
 			p = filepath.Join(home, p[2:])
 		}

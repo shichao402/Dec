@@ -87,11 +87,7 @@ func TestPrepareAndWriteSSHKeyLandings_HostPort(t *testing.T) {
 		t.Fatalf("WriteSSHKeyLandings() = %v", err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(sshDir, "config"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(raw)
+	content := mustReadSSHFile(t, filepath.Join(sshDir, "config.d", "dec.conf"))
 	if !strings.Contains(content, "21.214.34.79") ||
 		!strings.Contains(content, "osgamecore.devcloud.woa.com") ||
 		!strings.Contains(content, "update.devcloud.woa.com") {
@@ -105,6 +101,10 @@ func TestPrepareAndWriteSSHKeyLandings_HostPort(t *testing.T) {
 	}
 	if !strings.Contains(content, "dec_woa_devcloud") {
 		t.Fatalf("应写入 IdentityFile:\n%s", content)
+	}
+	mainCfg := mustReadSSHFile(t, filepath.Join(sshDir, "config"))
+	if !strings.HasPrefix(strings.TrimLeft(mainCfg, "\r\n"), sshManagedIncludeLine) {
+		t.Fatalf("主 config 应以 Include 置顶:\n%s", mainCfg)
 	}
 }
 
@@ -138,11 +138,7 @@ func TestWriteSSHKeyLandings_DifferentPortsSplitBlocks(t *testing.T) {
 	if err := WriteSSHKeyLandings(landings); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(sshDir, "config"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(raw)
+	content := mustReadSSHFile(t, filepath.Join(sshDir, "config.d", "dec.conf"))
 	if strings.Count(content, "Port 36000") != 1 || strings.Count(content, "Port 22022") != 1 {
 		t.Fatalf("不同端口应拆成多个 Host 块:\n%s", content)
 	}
@@ -174,11 +170,7 @@ func TestWriteSSHKeyLandings_PreservesOtherPortOnUpsert(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(sshDir, "config"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(raw)
+	content := mustReadSSHFile(t, filepath.Join(sshDir, "config.d", "dec.conf"))
 	if !strings.Contains(content, "other.example.com") || !strings.Contains(content, "Port 36000") {
 		t.Fatalf("upsert 后应保留其他 IdentityFile 的 Port:\n%s", content)
 	}
@@ -186,10 +178,7 @@ func TestWriteSSHKeyLandings_PreservesOtherPortOnUpsert(t *testing.T) {
 		t.Fatalf("应写入本次 host:\n%s", content)
 	}
 	// mine 无端口：其 Host 块不应误带 Port（Port 36000 只属于 other）
-	entries := parseManagedEntries(func() string {
-		_, managed, _, _ := splitManagedBlock(content)
-		return managed
-	}())
+	entries := parseManagedEntries(content)
 	var woaPort, otherPort int
 	for _, e := range entries {
 		switch e.Host {
@@ -256,6 +245,7 @@ func TestWriteSSHKeyLandings_PreservesUserConfigAndOtherProjectEntries(t *testin
 		"Host other.example.com\n" +
 		"  IdentityFile " + filepath.Join(sshDir, "dec_other_key") + "\n" +
 		sshManagedEnd + "\n"
+	// 模拟旧版：managed 内嵌在主 config 尾部
 	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(userConfig+otherManaged), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -291,19 +281,23 @@ func TestWriteSSHKeyLandings_PreservesUserConfigAndOtherProjectEntries(t *testin
 		}
 	}
 
-	raw, err := os.ReadFile(filepath.Join(sshDir, "config"))
-	if err != nil {
-		t.Fatal(err)
+	mainCfg := mustReadSSHFile(t, filepath.Join(sshDir, "config"))
+	if !strings.HasPrefix(strings.TrimLeft(mainCfg, "\r\n"), sshManagedIncludeLine) {
+		t.Fatalf("主 config 应以 Include 置顶:\n%s", mainCfg)
 	}
-	content := string(raw)
-	if !strings.Contains(content, "Host personal") {
-		t.Fatalf("应保留区块外用户配置:\n%s", content)
+	if !strings.Contains(mainCfg, "Host personal") {
+		t.Fatalf("应保留主 config 用户配置:\n%s", mainCfg)
 	}
-	if !strings.Contains(content, "dec_other_key") {
-		t.Fatalf("应保留其他项目 managed 条目:\n%s", content)
+	if strings.Contains(mainCfg, sshManagedBegin) || strings.Contains(mainCfg, "vikunja.example.com") {
+		t.Fatalf("managed Host 不应再内嵌主 config:\n%s", mainCfg)
 	}
-	if !strings.Contains(content, "vikunja.example.com") || !strings.Contains(content, "dec_vikunja_deploy") {
-		t.Fatalf("应写入本次 SSH Key 条目:\n%s", content)
+
+	managed := mustReadSSHFile(t, filepath.Join(sshDir, "config.d", "dec.conf"))
+	if !strings.Contains(managed, "dec_other_key") {
+		t.Fatalf("应迁移并保留其他项目 managed 条目:\n%s", managed)
+	}
+	if !strings.Contains(managed, "vikunja.example.com") || !strings.Contains(managed, "dec_vikunja_deploy") {
+		t.Fatalf("应写入本次 SSH Key 条目到 config.d:\n%s", managed)
 	}
 
 	// 再次 pull 同 key 但换 host：应替换本 IdentityFile，仍保留 other。
@@ -319,14 +313,26 @@ func TestWriteSSHKeyLandings_PreservesUserConfigAndOtherProjectEntries(t *testin
 	if err := WriteSSHKeyLandings(landings2); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ = os.ReadFile(filepath.Join(sshDir, "config"))
-	content = string(raw)
-	if strings.Contains(content, "vikunja.example.com") {
-		t.Fatalf("旧 host 应被替换:\n%s", content)
+	managed = mustReadSSHFile(t, filepath.Join(sshDir, "config.d", "dec.conf"))
+	if strings.Contains(managed, "vikunja.example.com") {
+		t.Fatalf("旧 host 应被替换:\n%s", managed)
 	}
-	if !strings.Contains(content, "vikunja-new.example.com") || !strings.Contains(content, "dec_other_key") {
-		t.Fatalf("新 host + 其他项目条目应存在:\n%s", content)
+	if !strings.Contains(managed, "vikunja-new.example.com") || !strings.Contains(managed, "dec_other_key") {
+		t.Fatalf("新 host + 其他项目条目应存在:\n%s", managed)
 	}
+	mainCfg = mustReadSSHFile(t, filepath.Join(sshDir, "config"))
+	if !strings.HasPrefix(strings.TrimLeft(mainCfg, "\r\n"), sshManagedIncludeLine) {
+		t.Fatalf("换 host 后 Include 仍应置顶:\n%s", mainCfg)
+	}
+}
+
+func mustReadSSHFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读取 %s: %v", path, err)
+	}
+	return string(raw)
 }
 
 func TestRemoveSSHKeyLanding_RemovesFilesAndManagedEntries(t *testing.T) {
@@ -361,16 +367,16 @@ func TestRemoveSSHKeyLanding_RemovesFilesAndManagedEntries(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(sshDir, "dec_vikunja_deploy")); !os.IsNotExist(err) {
 		t.Fatal("私钥应已删除")
 	}
-	raw, err := os.ReadFile(filepath.Join(sshDir, "config"))
-	if err != nil {
-		t.Fatal(err)
+	managed := mustReadSSHFile(t, filepath.Join(sshDir, "config.d", "dec.conf"))
+	if strings.Contains(managed, "vikunja.example.com") || strings.Contains(managed, "dec_vikunja_deploy") {
+		t.Fatalf("managed 中不应再有已删 key:\n%s", managed)
 	}
-	content := string(raw)
-	if strings.Contains(content, "vikunja.example.com") || strings.Contains(content, "dec_vikunja_deploy") {
-		t.Fatalf("managed 中不应再有已删 key:\n%s", content)
+	if !strings.Contains(managed, "other.example.com") {
+		t.Fatalf("其他项目条目应保留:\n%s", managed)
 	}
-	if !strings.Contains(content, "other.example.com") {
-		t.Fatalf("其他项目条目应保留:\n%s", content)
+	mainCfg := mustReadSSHFile(t, filepath.Join(sshDir, "config"))
+	if !strings.HasPrefix(strings.TrimLeft(mainCfg, "\r\n"), sshManagedIncludeLine) {
+		t.Fatalf("仍有其他 managed 时 Include 应保留:\n%s", mainCfg)
 	}
 }
 
@@ -458,11 +464,7 @@ func TestPrepareAndWriteSSHKeyLandings_EmptyHosts_WritesKeysOnly(t *testing.T) {
 		t.Fatalf("私钥内容应已更新: %q", rawPriv)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(sshDir, "config"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(raw)
+	content := mustReadSSHFile(t, filepath.Join(sshDir, "config.d", "dec.conf"))
 	if strings.Contains(content, "vikunja.example.com") || strings.Contains(content, "dec_vikunja_deploy") {
 		t.Fatalf("空 hosts 不应写入本 key 的 Host 条目:\n%s", content)
 	}
@@ -494,14 +496,17 @@ func TestWriteSSHKeyLandings_EmptyHostsOnly_NoHostBlock(t *testing.T) {
 	cfgPath := filepath.Join(sshDir, "config")
 	raw, err := os.ReadFile(cfgPath)
 	if err != nil {
-		// 允许不存在或为空；若存在则不得含 DEC MANAGED Host。
+		// 允许不存在或为空；若存在则不得含 Include / DEC Host。
 		if !os.IsNotExist(err) {
 			t.Fatal(err)
 		}
-		return
+	} else {
+		content := string(raw)
+		if strings.Contains(content, "Host ") || strings.Contains(content, sshManagedIncludeLine) || strings.Contains(content, sshManagedBegin) {
+			t.Fatalf("仅空 hosts 时不应写入 Host / Include:\n%s", content)
+		}
 	}
-	content := string(raw)
-	if strings.Contains(content, "Host ") || strings.Contains(content, sshManagedBegin) {
-		t.Fatalf("仅空 hosts 时不应写入 Host / managed 区块:\n%s", content)
+	if _, err := os.Stat(filepath.Join(sshDir, "config.d", "dec.conf")); !os.IsNotExist(err) {
+		t.Fatalf("仅空 hosts 时不应留下 config.d/dec.conf: %v", err)
 	}
 }
