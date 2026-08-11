@@ -161,14 +161,17 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 			ptyStartupTimeout, anchor, err, snapshot)
 	}
 
+	// 以状态栏右侧的 "page X" 作为导航锚点：它每帧重绘，是当前页唯一稳定的屏上证据。
+	// 页面停留期间同一锚点会重复出现，因此按键前先取基线，再等计数增长。
 	tabTargets := []string{"Bundles", "Project", "Run", "Remote", "Settings", "Home"}
 	for _, target := range tabTargets {
+		anchor := "page " + target
+		baseline := countOccurrences(&mu, &buf, anchor)
 		if _, err := ptmx.Write([]byte("\t")); err != nil {
 			_ = cmd.Process.Kill()
 			t.Fatalf("向 pty 写入 tab 失败: %v", err)
 		}
-		anchor := "Switched to " + target
-		if err := waitForContains(&mu, &buf, anchor, ptyStartupTimeout); err != nil {
+		if err := waitForOccurrenceCount(&mu, &buf, anchor, baseline+1, ptyStartupTimeout); err != nil {
 			snapshot := snapshotOutput(&mu, &buf)
 			_ = cmd.Process.Kill()
 			t.Fatalf("TUI 未在 %s 内导航到 %s: %v\n当前输出:\n%s",
@@ -177,11 +180,12 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 	}
 
 	// Bubble Tea 将 Shift+Tab 识别为 ESC [ Z；从 Home 回退应回到 Settings。
+	settingsBaseline := countOccurrences(&mu, &buf, "page Settings")
 	if _, err := ptmx.Write([]byte("\x1b[Z")); err != nil {
 		_ = cmd.Process.Kill()
 		t.Fatalf("向 pty 写入 shift+tab 失败: %v", err)
 	}
-	if err := waitForOccurrenceCount(&mu, &buf, "Switched to Settings", 2, ptyStartupTimeout); err != nil {
+	if err := waitForOccurrenceCount(&mu, &buf, "page Settings", settingsBaseline+1, ptyStartupTimeout); err != nil {
 		snapshot := snapshotOutput(&mu, &buf)
 		_ = cmd.Process.Kill()
 		t.Fatalf("TUI 未在 %s 内通过 shift+tab 回到 Settings: %v\n当前输出:\n%s",
@@ -273,6 +277,12 @@ var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07`)
 // waitForContains 轮询检查 buffer 是否包含目标子串（剥离 ANSI 后），直到超时。
 func waitForContains(mu *sync.Mutex, buf *bytes.Buffer, needle string, timeout time.Duration) error {
 	return waitForOccurrenceCount(mu, buf, needle, 1, timeout)
+}
+
+func countOccurrences(mu *sync.Mutex, buf *bytes.Buffer, needle string) int {
+	mu.Lock()
+	defer mu.Unlock()
+	return strings.Count(plainOutput(buf.String()), needle)
 }
 
 func waitForOccurrenceCount(mu *sync.Mutex, buf *bytes.Buffer, needle string, minCount int, timeout time.Duration) error {
