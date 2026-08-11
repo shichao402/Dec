@@ -21,6 +21,32 @@ func mergeProjectAndUserEnabledBundles(projectEnabled []string) ([]string, error
 	return secrets.MergeEnabledBundles(projectEnabled, cfg.UserEnabledBundleNames()), nil
 }
 
+// userEnabledBundleSet 读取本机用户级启用列表；读取失败时返回空集合（展示层不因此报错）。
+func userEnabledBundleSet() map[string]struct{} {
+	set := make(map[string]struct{})
+	cfg, err := secrets.LoadConfig()
+	if err != nil {
+		return set
+	}
+	for _, name := range cfg.UserEnabledBundleNames() {
+		set[name] = struct{}{}
+	}
+	return set
+}
+
+// markUserEnabledBundles 按本机用户级启用给 overview 打标。
+func markUserEnabledBundles(bundles []BundleOverview) {
+	if len(bundles) == 0 {
+		return
+	}
+	userEnabled := userEnabledBundleSet()
+	for i := range bundles {
+		if _, ok := userEnabled[bundles[i].Name]; ok {
+			bundles[i].UserEnabled = true
+		}
+	}
+}
+
 // ensureVaultBundlesForUserEnable 在用户勾选启用时尚无 vault 包时创建最小 bundle.yaml 并 push。
 // 返回本次新建的 bundle 名（已存在的跳过）。
 func ensureVaultBundlesForUserEnable(names []string, reporter Reporter) ([]string, error) {

@@ -167,11 +167,8 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := applySecretsPull(ctx, result, projectRoot, enabledBundleNames, reporter); err != nil {
-		return nil, err
-	}
 
-	// 阶段 3：从 cache 渲染安装到 IDE，并执行非敏感 vars 替换
+	// 阶段 2：从 cache 渲染安装到 IDE，并执行非敏感 vars 替换
 	for idx, asset := range validAssets {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -196,6 +193,14 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 
 		result.PulledCount++
 		emit(reporter, EventInfo, "pull.asset", fmt.Sprintf("✅ [%-5s] %s (vault: %s)", asset.Type, asset.Name, asset.Vault), progress)
+	}
+
+	// 阶段 3：secrets 放在公开资产之后。Bitwarden 不可用（未解锁、网络故障）
+	// 不应连累已经就绪的 skill / rule / mcp，否则一次解锁失败会让整个项目看起来没装过资产。
+	if err := applySecretsPull(ctx, result, projectRoot, enabledBundleNames, reporter); err != nil {
+		emit(reporter, EventWarn, "pull.secrets",
+			fmt.Sprintf("Dec 资产已安装 %d 个，仅 secrets 未同步", result.PulledCount), nil)
+		return nil, err
 	}
 
 	commitHash := tx.CommitHash()

@@ -2311,6 +2311,11 @@ func (m model) renderPullPlanLines() []string {
 	enabled := app.ListEnabledBundles(m.assets)
 	names := make([]string, 0, len(enabled))
 	for _, bo := range enabled {
+		// 仅本机启用的包在 Bundles 页没有项目勾选，标出来避免"计划里凭空多一个包"。
+		if !bo.Enabled && bo.UserEnabled {
+			names = append(names, bo.Name+"(user)")
+			continue
+		}
 		names = append(names, bo.Name)
 	}
 

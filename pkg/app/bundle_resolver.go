@@ -27,6 +27,9 @@ type BundleOverview struct {
 	Members []string
 	// Enabled 表示该 bundle 是否出现在 ProjectConfig.EnabledBundles 中。
 	Enabled bool
+	// UserEnabled 表示该 bundle 是否出现在本机 user_enabled_bundles 中。
+	// 与 Enabled 独立；pull 目标集取二者并集（ADR 0003）。
+	UserEnabled bool
 }
 
 // ResolvedAssets 是解析后的目标资产集合及来源追踪信息。

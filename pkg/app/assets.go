@@ -166,12 +166,7 @@ func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) 
 			enabledSet[name] = struct{}{}
 		}
 	}
-	userEnabledSet := make(map[string]struct{})
-	if cfg, err := secrets.LoadConfig(); err == nil {
-		for _, name := range cfg.UserEnabledBundleNames() {
-			userEnabledSet[name] = struct{}{}
-		}
-	}
+	userEnabledSet := userEnabledBundleSet()
 
 	options := make([]AssetBundleOption, 0, len(resolved.Bundles))
 	for _, bo := range resolved.Bundles {
@@ -306,7 +301,10 @@ func effectiveAssetKey(item AssetSelectionItem) string {
 	return item.Type + ":" + item.Vault + ":" + item.Name
 }
 
-// ListEnabledBundles 返回当前 ProjectConfig.EnabledBundles 引用的 bundle 选项，供 TUI Remove 等场景展示。
+// ListEnabledBundles 返回本次 pull 会命中的 bundle 选项，供 TUI Pull 计划 / Remove 等场景展示。
+//
+// 取 project `enabled_bundles` 与本机 `user_enabled_bundles` 的并集，与 pull 的目标集口径一致
+// （ADR 0003）；只看 project 一侧会让用户级启用的包在计划里"隐身"。
 func ListEnabledBundles(state *AssetSelectionState) []AssetBundleOption {
 	if state == nil {
 		return nil
@@ -314,7 +312,7 @@ func ListEnabledBundles(state *AssetSelectionState) []AssetBundleOption {
 	seen := make(map[string]struct{})
 	out := make([]AssetBundleOption, 0)
 	for _, bo := range state.Bundles {
-		if !bo.Enabled {
+		if !bo.Enabled && !bo.UserEnabled {
 			continue
 		}
 		if _, dup := seen[bo.Name]; dup {

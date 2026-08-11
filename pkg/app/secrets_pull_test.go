@@ -117,8 +117,54 @@ members:
 	if !strings.Contains(err.Error(), "冲突") {
 		t.Fatalf("错误应描述路径冲突: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-bundle-skill", "SKILL.md")); !os.IsNotExist(err) {
-		t.Fatal("重叠校验失败时不应安装 IDE 资产")
+
+	// secrets 在公开资产之后执行：重叠校验只拦下密文落地，不回滚已就绪的 Dec 资产。
+	cached, readErr := os.ReadFile(filepath.Join(projectRoot, ".dec", "cache", "combo", "skills", "bundle-skill", "SKILL.md"))
+	if readErr != nil {
+		t.Fatalf("Dec 资产缓存应存在: %v", readErr)
+	}
+	if strings.Contains(string(cached), "secret") {
+		t.Fatalf("重叠的密文不应覆盖 Dec 资产: %s", cached)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-bundle-skill", "SKILL.md")); err != nil {
+		t.Fatalf("公开资产应已安装: %v", err)
+	}
+}
+
+// secrets 失败（未解锁 / 网络故障）不应让已就绪的公开资产落空。
+func TestPullProjectAssets_InstallsAssetsWhenSecretsFail(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/cli/skills/cli-skill/SKILL.md": "---\nname: cli-skill\n---\n",
+		"bundles/cli/bundle.yaml": `name: cli
+members:
+  - skill/cli-skill
+`,
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	// 仅本机启用，项目侧留空：同时覆盖 ADR 0003 的用户级 pull 路径。
+	if err := secrets.SaveConfig(&secrets.Config{UserEnabledBundles: []string{"cli"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{IDEs: []string{"cursor"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 无 session：secrets 阶段会尝试 web unlock，测试环境下被 guard 拒绝。
+	secrets.ClearSession()
+
+	if _, err := PullProjectAssets(context.Background(), projectRoot, "", nil); err == nil {
+		t.Fatal("期望 Bitwarden 未解锁时 pull 返回错误")
+	}
+
+	installed := filepath.Join(projectRoot, ".cursor", "skills", "dec-cli-skill", "SKILL.md")
+	if _, err := os.Stat(installed); err != nil {
+		t.Fatalf("secrets 失败不应阻断 IDE 安装: %v", err)
 	}
 }
 

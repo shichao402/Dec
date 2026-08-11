@@ -90,6 +90,7 @@ func LoadProjectOverviewOpts(projectRoot string, opts OverviewLoadOpts) (*Projec
 		if txErr == nil {
 			resolved, resolveErr := resolveDesiredAssets(projectConfig, tx.WorkDir(), nil)
 			if resolveErr == nil {
+				markUserEnabledBundles(resolved.Bundles)
 				overview.Bundles = resolved.Bundles
 				overview.AvailableBundleCount = len(resolved.Bundles)
 				names := make([]string, 0, len(resolved.Bundles))
