@@ -212,12 +212,19 @@ func (s *server) waitReady(ctx context.Context, baseURL string) error {
 }
 
 func isAddrInUse(err error) bool {
-	var opErr *net.OpError
-	if !errors.As(err, &opErr) {
+	if err == nil {
 		return false
 	}
+	// Unix：syscall.EADDRINUSE。Windows：实际 errno 是 WSAEADDRINUSE(10048)，
+	// 与 Go 的 syscall.EADDRINUSE 常量（伪值）不相等，必须单独判断。
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return true
+	}
 	var errno syscall.Errno
-	return errors.As(opErr.Err, &errno) && errno == syscall.EADDRINUSE
+	if !errors.As(err, &errno) {
+		return false
+	}
+	return errno == syscall.EADDRINUSE || errno == 10048
 }
 
 func resolveListenAddrs(listenAddr string) []string {

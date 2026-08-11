@@ -97,6 +97,22 @@ func TestListenTCP_FallbackWhenFixedPortInUse(t *testing.T) {
 	}
 }
 
+func TestIsAddrInUse_DetectsPlatformBindConflict(t *testing.T) {
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	t.Cleanup(func() { _ = blocker.Close() })
+
+	_, err = net.Listen("tcp", blocker.Addr().String())
+	if err == nil {
+		t.Fatal("期望第二次 Listen 失败")
+	}
+	if !isAddrInUse(err) {
+		t.Fatalf("isAddrInUse(%v) = false, 平台端口冲突应识别为 true", err)
+	}
+}
+
 func TestRun_UsesDefaultFixedPort(t *testing.T) {
 	ctx := context.Background()
 	var readyURL string
