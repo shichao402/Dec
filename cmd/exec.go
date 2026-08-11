@@ -42,6 +42,8 @@ func runExec(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	repairProjectOnStartup(root)
+
 	// cobra 保留 `--` 之后的参数在 args；若用户写了 `--`，Args 就是命令。
 	command := args
 	if len(command) == 0 {

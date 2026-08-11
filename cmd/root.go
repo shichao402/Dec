@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/tui"
+	"github.com/shichao402/Dec/pkg/compat"
+	"github.com/shichao402/Dec/pkg/diag"
 	"github.com/shichao402/Dec/pkg/update"
 	"github.com/shichao402/Dec/pkg/version"
 	"github.com/spf13/cobra"
@@ -137,11 +139,19 @@ func Execute(args []string, stdin, stdout, stderr *os.File) error {
 		if err != nil {
 			return fmt.Errorf("获取当前目录失败: %w", err)
 		}
+		repairProjectOnStartup(projectRoot)
 		emitUpdateHint(stderr)
 		return runTUIMode(projectRoot, stdin, stdout)
 	}
 
 	return runCLIMode(args, stdout, stderr)
+}
+
+// repairProjectOnStartup 在进入主逻辑前跑兼容修复；失败只记日志，不阻断启动。
+func repairProjectOnStartup(projectRoot string) {
+	for _, note := range compat.RepairOnStartup(projectRoot) {
+		diag.StartupLog("compat: %s", note)
+	}
 }
 
 func isInternalCLIArgs(args []string) bool {

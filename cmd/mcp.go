@@ -49,6 +49,7 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		root = cwd
 	}
 
+	repairProjectOnStartup(root)
 	return decmcp.Run(context.Background(), decmcp.Config{ProjectRoot: root})
 }
 
