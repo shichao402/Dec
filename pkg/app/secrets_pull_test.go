@@ -283,12 +283,20 @@ func TestPullEnabledSecretsBundles_MixedNotesAndSSHKeys(t *testing.T) {
 	if _, err := os.Stat(priv); err != nil {
 		t.Fatalf("SSH 私钥应落地: %v", err)
 	}
+	// managed Host 落在 ~/.ssh/config.d/dec.conf，主 config 只置顶 Include。
 	cfgRaw, err := os.ReadFile(filepath.Join(home, ".ssh", "config"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(cfgRaw), "vikunja.example.com") {
-		t.Fatalf("SSH config 应含 host:\n%s", cfgRaw)
+	if !strings.Contains(string(cfgRaw), "Include config.d/dec.conf") {
+		t.Fatalf("主 SSH config 应 Include managed 文件:\n%s", cfgRaw)
+	}
+	managedRaw, err := os.ReadFile(filepath.Join(home, ".ssh", "config.d", "dec.conf"))
+	if err != nil {
+		t.Fatalf("managed SSH config 应落地: %v", err)
+	}
+	if !strings.Contains(string(managedRaw), "vikunja.example.com") {
+		t.Fatalf("managed SSH config 应含 host:\n%s", managedRaw)
 	}
 }
 
