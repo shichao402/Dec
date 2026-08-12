@@ -1,0 +1,10 @@
+# 按钮出现在「代码 → 分支详情页」
+# https://cnb.cool/shichao402/Dec/-/tree/main
+branch:
+  - reg: ^main$
+    buttons:
+      - name: Release
+        description: 按当前 version.json 构建、发布到 COS，并创建 GitHub Release
+        event: web_trigger_release
+        groupName: Release
+        isDefault: true

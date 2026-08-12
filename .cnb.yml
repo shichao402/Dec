@@ -1,0 +1,124 @@
+# Dec 已迁到 CNB 主力。改 version.json 并推 main 即发布。
+# GitHub 仅作镜像（cnb-bridge 定时 CNB→GitHub）。
+# 密钥：shichao402/secrets 的 dec.env.yml（见 cnb-bridge/deploy/dec.env.template.yml）
+
+.release: &release
+  name: release
+  docker:
+    image: golang:1.26
+  imports:
+    - https://cnb.cool/shichao402/secrets/-/blob/main/dec.env.yml
+  stages:
+    - name: setup
+      script: |
+        set -euo pipefail
+        apt-get update
+        apt-get install -y --no-install-recommends git ca-certificates curl python3 tar
+        git fetch --tags --prune || true
+        VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
+        echo "$VERSION" > .release-version
+        echo "version=$VERSION"
+        if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "无效版本号: $VERSION"
+          exit 1
+        fi
+        if git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"; then
+          echo "Tag ${VERSION} 已存在，请先改 version.json"
+          exit 1
+        fi
+        rm -rf relkit
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+          git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/shichao402/relkit.git" relkit \
+            || git clone --depth 1 "https://cnb:${CNB_TOKEN}@cnb.cool/shichao402/relkit.git" relkit
+        else
+          git clone --depth 1 "https://cnb:${CNB_TOKEN}@cnb.cool/shichao402/relkit.git" relkit
+        fi
+        go mod edit -replace github.com/shichao402/relkit=./relkit
+
+    - name: test
+      script: |
+        set -euo pipefail
+        go test ./... -v
+        go test -tags=integration ./internal/tui/... -v
+
+    - name: build
+      script: |
+        set -euo pipefail
+        export VERSION
+        VERSION=$(cat .release-version)
+        bash scripts/build.sh --all
+
+    - name: rup-publish
+      script: |
+        set -euo pipefail
+        VERSION=$(cat .release-version)
+        VER="${VERSION#v}"
+        if [ -z "${RELKIT_AGENT_TOKEN:-}" ]; then
+          echo "RELKIT_AGENT_TOKEN 未配置，跳过 RUP 发布"
+          exit 0
+        fi
+        ( cd relkit && go build -o "$OLDPWD/relkit-bin" ./cmd/relkit )
+        ADD_ARGS=()
+        for f in dist/dec-*; do
+          [ -f "$f" ] || continue
+          base=$(basename "$f")
+          case "$base" in
+            dec-linux-amd64) os=linux; arch=amd64 ;;
+            dec-linux-arm64) os=linux; arch=arm64 ;;
+            dec-darwin-amd64) os=darwin; arch=amd64 ;;
+            dec-darwin-arm64) os=darwin; arch=arm64 ;;
+            dec-windows-amd64.exe) os=windows; arch=amd64 ;;
+            *) continue ;;
+          esac
+          ADD_ARGS+=(--add "$f" "id=$base,kind=binary,os=$os,arch=$arch")
+        done
+        CODE=$(python3 -c "maj,min,pat='${VER}'.split('.'); print(int(maj)*1000000+int(min)*1000+int(pat))")
+        ./relkit-bin stage "$VER" --code "$CODE" "${ADD_ARGS[@]}"
+        tar -C ".relkit/staged/${VER}" -czf staged.tar.gz .
+        AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com}"
+        SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
+        curl -fsS -X PUT \
+          -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+          --data-binary @staged.tar.gz \
+          "${AGENT_URL}/v1/staged/dec/${VER}"
+        curl -fsS -X POST \
+          -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d "{\"product\":\"dec\",\"version\":\"${VER}\",\"stagedSha256\":\"${SHA}\",\"idempotencyKey\":\"dec/${VER}/${SHA}\"}" \
+          "${AGENT_URL}/v1/publish"
+
+    - name: github-release
+      script: |
+        set -euo pipefail
+        VERSION=$(cat .release-version)
+        git config user.name "cnb-ci"
+        git config user.email "cnb-ci@users.noreply.cnb.cool"
+        git tag "${VERSION}"
+        git push origin "refs/tags/${VERSION}"
+        git push origin HEAD:refs/heads/ReleaseLatest --force
+        if [ -z "${GITHUB_TOKEN:-}" ]; then
+          echo "GITHUB_TOKEN 未配置，跳过 GitHub Release（等日桥接同步 tag）"
+          exit 0
+        fi
+        GH_VER=2.74.1
+        curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VER}/gh_${GH_VER}_linux_amd64.tar.gz" | tar -xz
+        export GH_TOKEN="$GITHUB_TOKEN"
+        ./gh_${GH_VER}_linux_amd64/bin/gh release create "${VERSION}" \
+          dist/dec-linux-amd64 \
+          dist/dec-linux-arm64 \
+          dist/dec-darwin-amd64 \
+          dist/dec-darwin-arm64 \
+          dist/dec-windows-amd64.exe \
+          --repo shichao402/Dec \
+          --generate-notes \
+          --target "$(git rev-parse HEAD)"
+
+main:
+  push:
+    - <<: *release
+      ifModify:
+        - version.json
+
+  web_trigger_release:
+    - <<: *release
+      name: release-now

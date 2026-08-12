@@ -1,6 +1,7 @@
 #!/bin/bash
 # Dec 发布准备脚本
-# 说明：版本号在本地写入 version.json，推送包含 version.json 变更的 main 提交后，GitHub Actions 会自动校验、打 tag、构建并创建 Release。
+# 说明：版本号在本地写入 version.json，推送到 CNB main（含 version.json 变更）后，
+# CNB 流水线会校验、打 tag、构建、发布到 COS，并创建 GitHub Release。
 # 用法：./scripts/release-yolo.sh [版本号]
 #       不传版本号时，仅执行本地测试与构建检查。
 #       传入版本号时，会先更新 version.json。

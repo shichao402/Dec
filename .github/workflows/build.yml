@@ -1,11 +1,10 @@
 name: Build & Release
 
+# 发布 CI 已迁到 CNB（.cnb.yml）。本 workflow 仅作应急手动触发。
+# 关闭 push 自动触发，避免 CNB→GitHub 回写 version.json 时在美国 runner 上重复发布
+#（连不上 publish.firoyang.com）。
+
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "version.json"
   workflow_dispatch:
 
 permissions:
