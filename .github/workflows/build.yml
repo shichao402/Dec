@@ -57,7 +57,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
+
+      - name: Checkout relkit (SDK dependency)
+        uses: actions/checkout@v5
+        with:
+          repository: shichao402/relkit
+          path: ../relkit
 
       - name: Run tests
         run: go test ./... -v
@@ -89,7 +95,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
+
+      - name: Checkout relkit (SDK dependency)
+        uses: actions/checkout@v5
+        with:
+          repository: shichao402/relkit
+          path: ../relkit
 
       - name: Use validated version
         id: version
@@ -114,6 +126,104 @@ jobs:
         with:
           name: dec-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.artifact }}
+
+  rup-publish:
+    name: RUP stage + publish (COS via agent)
+    needs: [build, validate]
+    if: ${{ needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip when agent token missing
+        id: gate
+        env:
+          RELKIT_AGENT_TOKEN: ${{ secrets.RELKIT_AGENT_TOKEN }}
+        run: |
+          if [ -z "${RELKIT_AGENT_TOKEN}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "RELKIT_AGENT_TOKEN not set; skipping RUP publish"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.gate.outputs.skip != 'true'
+
+      - name: Set up Go
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: Checkout relkit
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v5
+        with:
+          repository: shichao402/relkit
+          path: ../relkit
+
+      - name: Build relkit CLI
+        if: steps.gate.outputs.skip != 'true'
+        working-directory: ../relkit
+        run: go build -o "$GITHUB_WORKSPACE/relkit" ./cmd/relkit
+
+      - name: Download all build artifacts
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/download-artifact@v8
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Stage release tree
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          VER="${VERSION#v}"
+          ADD_ARGS=()
+          for f in dist/dec-*; do
+            base=$(basename "$f")
+            case "$base" in
+              dec-linux-amd64) os=linux; arch=amd64 ;;
+              dec-linux-arm64) os=linux; arch=arm64 ;;
+              dec-darwin-amd64) os=darwin; arch=amd64 ;;
+              dec-darwin-arm64) os=darwin; arch=arm64 ;;
+              dec-windows-amd64.exe) os=windows; arch=amd64 ;;
+              *) continue ;;
+            esac
+            ADD_ARGS+=(--add "$f" "id=$base,kind=binary,os=$os,arch=$arch")
+          done
+          CODE=$(python3 -c "maj,min,pat='${VER}'.split('.'); print(int(maj)*1000000+int(min)*1000+int(pat))")
+          ./relkit stage "$VER" --code "$CODE" "${ADD_ARGS[@]}"
+
+      - name: Pack staged tree
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          VER="${VERSION#v}"
+          tar -C ".relkit/staged/${VER}" -czf staged.tar.gz .
+
+      - name: Upload staged + trigger publish
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          RELKIT_AGENT_TOKEN: ${{ secrets.RELKIT_AGENT_TOKEN }}
+          RELKIT_AGENT_URL: ${{ secrets.RELKIT_AGENT_URL }}
+        run: |
+          set -euo pipefail
+          VER="${VERSION#v}"
+          AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com}"
+          SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
+          curl -fsS -X PUT \
+            -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+            --data-binary @staged.tar.gz \
+            "${AGENT_URL}/v1/staged/dec/${VER}"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"product\":\"dec\",\"version\":\"${VER}\",\"stagedSha256\":\"${SHA}\",\"idempotencyKey\":\"dec/${VER}/${SHA}\"}" \
+            "${AGENT_URL}/v1/publish"
 
   release:
     name: Release

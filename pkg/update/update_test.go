@@ -2,9 +2,6 @@ package update
 
 import (
 	"errors"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -37,118 +34,9 @@ func TestMirrorInstallCommandUsesCDN(t *testing.T) {
 
 func TestNetworkHelpMentionsMirrorAndProxy(t *testing.T) {
 	help := NetworkHelp()
-	for _, want := range []string{"cdn.jsdelivr.net", "raw.githubusercontent.com", "HTTPS_PROXY"} {
+	for _, want := range []string{"updates.firoyang.com", "cdn.jsdelivr.net", "HTTPS_PROXY"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("排障建议缺少 %q:\n%s", want, help)
-		}
-	}
-}
-
-func TestVersionSourcesCoverMirrorAndAPI(t *testing.T) {
-	sources := versionSources()
-	if len(sources) < 3 {
-		t.Fatalf("版本来源数量 = %d, 期望至少 3 个", len(sources))
-	}
-
-	names := make([]string, 0, len(sources))
-	for _, source := range sources {
-		names = append(names, source.name)
-	}
-	want := []string{"raw.githubusercontent.com", "cdn.jsdelivr.net", "api.github.com"}
-	for i, name := range want {
-		if names[i] != name {
-			t.Fatalf("第 %d 个来源 = %q, 期望 %q（顺序: %v）", i, names[i], name, names)
-		}
-	}
-}
-
-func TestParseVersionJSON(t *testing.T) {
-	got, err := parseVersionJSON([]byte(`{"version":"v1.2.3"}`))
-	if err != nil {
-		t.Fatalf("解析失败: %v", err)
-	}
-	if got != "v1.2.3" {
-		t.Fatalf("version = %q, 期望 v1.2.3", got)
-	}
-
-	if _, err := parseVersionJSON([]byte("not json")); err == nil {
-		t.Fatal("非法 JSON 应返回错误")
-	}
-}
-
-func TestParseReleaseTag(t *testing.T) {
-	got, err := parseReleaseTag([]byte(`{"tag_name":"v9.9.9","name":"release"}`))
-	if err != nil {
-		t.Fatalf("解析失败: %v", err)
-	}
-	if got != "v9.9.9" {
-		t.Fatalf("tag = %q, 期望 v9.9.9", got)
-	}
-}
-
-func TestFetchVersionFromRejectsBlankVersion(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"version":"  "}`)
-	}))
-	defer server.Close()
-
-	_, err := fetchVersionFrom(versionSource{name: "test", url: server.URL, parse: parseVersionJSON})
-	if err == nil || !strings.Contains(err.Error(), "远程版本号为空") {
-		t.Fatalf("空版本号应报错, 实际 err = %v", err)
-	}
-}
-
-func TestFetchVersionFromReportsHTTPStatus(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
-
-	_, err := fetchVersionFrom(versionSource{name: "test", url: server.URL, parse: parseVersionJSON})
-	if err == nil || !strings.Contains(err.Error(), "HTTP 404") {
-		t.Fatalf("404 应报错, 实际 err = %v", err)
-	}
-}
-
-func TestFetchFromSourcesFallsBackToNextSource(t *testing.T) {
-	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer failing.Close()
-
-	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"tag_name":"v2.0.0"}`)
-	}))
-	defer healthy.Close()
-
-	latest, err := fetchFromSources([]versionSource{
-		{name: "failing", url: failing.URL, parse: parseVersionJSON},
-		{name: "healthy", url: healthy.URL, parse: parseReleaseTag},
-	})
-	if err != nil {
-		t.Fatalf("应回退到可用来源, err = %v", err)
-	}
-	if latest != "v2.0.0" {
-		t.Fatalf("version = %q, 期望 v2.0.0", latest)
-	}
-}
-
-func TestFetchFromSourcesAggregatesFailures(t *testing.T) {
-	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer failing.Close()
-
-	_, err := fetchFromSources([]versionSource{
-		{name: "first", url: failing.URL, parse: parseVersionJSON},
-		{name: "second", url: failing.URL, parse: parseVersionJSON},
-	})
-	if err == nil {
-		t.Fatal("全部来源失败时应返回错误")
-	}
-	for _, want := range []string{"已尝试 2 个来源", "first", "second", "HTTP 500"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("聚合错误缺少 %q:\n%v", want, err)
 		}
 	}
 }
@@ -156,14 +44,14 @@ func TestFetchFromSourcesAggregatesFailures(t *testing.T) {
 func TestDescribeRequestErrorStripsURL(t *testing.T) {
 	timeoutErr := &url.Error{
 		Op:  "Get",
-		URL: "https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/version.json",
+		URL: "https://updates.firoyang.com/rup/directory/dec.pb",
 		Err: timeoutError{},
 	}
 	got := describeRequestError(timeoutErr)
 	if !strings.Contains(got, "请求超时") {
 		t.Fatalf("超时描述 = %q, 期望包含 请求超时", got)
 	}
-	if strings.Contains(got, "raw.githubusercontent.com") {
+	if strings.Contains(got, "updates.firoyang.com") {
 		t.Fatalf("超时描述不应重复 URL: %q", got)
 	}
 
@@ -226,8 +114,6 @@ func TestRecordFailedAttemptKeepsCachedVersion(t *testing.T) {
 	}
 }
 
-// CheckBackground 在 TUI 启动路径上被调用，必须立刻从缓存返回，
-// 网络请求只能发生在后台，否则网络不通时启动会卡住。
 func TestCheckBackgroundReturnsFromCacheWithoutWaitingForRefresh(t *testing.T) {
 	t.Setenv("DEC_HOME", t.TempDir())
 	mustSaveState(t, &CheckState{
@@ -243,7 +129,7 @@ func TestCheckBackgroundReturnsFromCacheWithoutWaitingForRefresh(t *testing.T) {
 		<-finished
 		refreshStateFn = old
 	}()
-	refreshStateFn = func() {
+	refreshStateFn = func(string) {
 		close(started)
 		time.Sleep(300 * time.Millisecond)
 		close(finished)
@@ -271,6 +157,13 @@ func TestCheckBackgroundReturnsNilWhenCacheIsCurrent(t *testing.T) {
 
 	if result := CheckBackground("v1.0.0"); result != nil {
 		t.Fatalf("已是最新版本时应返回 nil, 实际 %#v", result)
+	}
+}
+
+func TestEntryURLsPointAtUpdatesDomain(t *testing.T) {
+	urls := entryURLs()
+	if len(urls) == 0 || !strings.Contains(urls[0], "updates.firoyang.com") {
+		t.Fatalf("entryURLs = %v", urls)
 	}
 }
 

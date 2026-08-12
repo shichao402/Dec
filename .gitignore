@@ -34,7 +34,9 @@ Thumbs.db
 # 开发根目录（开发时使用）
 .root/
 
-# 构建产物
+.relkit/
+staged.tar.gz
+publish-req.json
 dist/
 logs/
 *.log
@@ -63,3 +65,8 @@ Documents/temp/*
 # 本地用户配置
 .config/
 mise.local.toml
+
+# relkit signing private keys (never commit)
+.relkit-keys/*.private.pb
+*.private.pb
+

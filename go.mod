@@ -1,12 +1,14 @@
 module github.com/shichao402/Dec
 
-go 1.25.0
+go 1.26.3
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/creack/pty v1.1.24
+	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/muesli/termenv v0.16.0
+	github.com/shichao402/relkit v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.8.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
@@ -26,7 +28,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
-	github.com/modelcontextprotocol/go-sdk v1.6.1 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -37,4 +38,7 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
+	google.golang.org/protobuf v1.36.5 // indirect
 )
+
+replace github.com/shichao402/relkit => ../relkit

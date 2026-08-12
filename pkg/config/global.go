@@ -302,6 +302,7 @@ const (
 	defaultRepoOwner    = "shichao402"
 	defaultRepoName     = "Dec"
 	defaultUpdateBranch = "ReleaseLatest"
+	defaultEntryURL     = "https://updates.firoyang.com/rup/directory/dec.pb"
 )
 
 // SystemConfig 系统配置
@@ -310,6 +311,10 @@ type SystemConfig struct {
 	RepoName     string
 	VersionURL   string
 	UpdateBranch string
+	// EntryURLs is the RUP directory bootstrap list (client-embedded).
+	EntryURLs []string
+	Product   string
+	Channel   string
 }
 
 // GetSystemConfig 获取系统配置（返回默认值）
@@ -320,6 +325,9 @@ func GetSystemConfig() *SystemConfig {
 		VersionURL: fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/version.json",
 			defaultRepoOwner, defaultRepoName, defaultUpdateBranch),
 		UpdateBranch: defaultUpdateBranch,
+		EntryURLs:    []string{defaultEntryURL},
+		Product:      "dec",
+		Channel:      "dev",
 	}
 }
 
