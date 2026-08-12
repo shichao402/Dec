@@ -63,7 +63,10 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: shichao402/relkit
-          path: ../relkit
+          path: relkit
+
+      - name: Point module replace at checked-out relkit
+        run: go mod edit -replace github.com/shichao402/relkit=./relkit
 
       - name: Run tests
         run: go test ./... -v
@@ -101,7 +104,10 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: shichao402/relkit
-          path: ../relkit
+          path: relkit
+
+      - name: Point module replace at checked-out relkit
+        run: go mod edit -replace github.com/shichao402/relkit=./relkit
 
       - name: Use validated version
         id: version
@@ -159,12 +165,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: shichao402/relkit
-          path: ../relkit
+          path: relkit
 
       - name: Build relkit CLI
         if: steps.gate.outputs.skip != 'true'
-        working-directory: ../relkit
-        run: go build -o "$GITHUB_WORKSPACE/relkit" ./cmd/relkit
+        working-directory: relkit
+        run: go build -o "$GITHUB_WORKSPACE/relkit-bin" ./cmd/relkit
 
       - name: Download all build artifacts
         if: steps.gate.outputs.skip != 'true'
@@ -194,7 +200,7 @@ jobs:
             ADD_ARGS+=(--add "$f" "id=$base,kind=binary,os=$os,arch=$arch")
           done
           CODE=$(python3 -c "maj,min,pat='${VER}'.split('.'); print(int(maj)*1000000+int(min)*1000+int(pat))")
-          ./relkit stage "$VER" --code "$CODE" "${ADD_ARGS[@]}"
+          ./relkit-bin stage "$VER" --code "$CODE" "${ADD_ARGS[@]}"
 
       - name: Pack staged tree
         if: steps.gate.outputs.skip != 'true'

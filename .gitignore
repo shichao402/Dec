@@ -35,6 +35,7 @@ Thumbs.db
 .root/
 
 .relkit/
+relkit/
 staged.tar.gz
 publish-req.json
 dist/
