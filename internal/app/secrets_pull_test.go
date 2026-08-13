@@ -354,13 +354,21 @@ func TestPlanSecretsSync_MergesUserEnabledBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planSecretsSync() = %v", err)
 	}
-	names := make([]string, 0, len(plan.Targets))
+	var machine, overlay, woaMachine int
 	for _, target := range plan.Targets {
-		if target.Kind == secrets.SyncKindBundle {
-			names = append(names, target.Name)
+		if target.Kind != secrets.SyncKindBundle {
+			continue
+		}
+		switch {
+		case target.Name == "vikunja" && target.Plane == secrets.SyncPlaneMachine:
+			machine++
+		case target.Name == "vikunja" && target.NoteNamePrefix != "":
+			overlay++
+		case target.Name == "woa" && target.Plane == secrets.SyncPlaneMachine:
+			woaMachine++
 		}
 	}
-	if len(names) != 2 || names[0] != "vikunja" || names[1] != "woa" {
-		t.Fatalf("bundle targets = %#v, 期望 [vikunja woa]", names)
+	if machine != 1 || overlay != 1 || woaMachine != 1 {
+		t.Fatalf("machine=%d overlay=%d woa=%d targets=%+v", machine, overlay, woaMachine, plan.Targets)
 	}
 }

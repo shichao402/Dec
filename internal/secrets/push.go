@@ -26,7 +26,10 @@ func folderNameForRequest(targetFolder string, binding BundleBinding, decBundleN
 
 // ScanSyncRoot 递归扫描 SyncTarget.LocalRoot，返回相对 LocalRoot 的 SecureNote 列表。
 func ScanSyncRoot(projectRoot string, target SyncTarget) ([]SecureNote, error) {
-	rootAbs := filepath.Join(projectRoot, filepath.FromSlash(target.LocalRoot))
+	rootAbs, err := ResolveAbsDir(projectRoot, target)
+	if err != nil {
+		return nil, err
+	}
 	info, err := os.Stat(rootAbs)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -92,6 +95,14 @@ func PushBundle(ctx context.Context, client Client, req PushBundleRequest) (*Pus
 		return nil, err
 	}
 	localSet := localSetFromNotes(localNotes)
+	remoteLocal := make(map[string]struct{}, len(localSet))
+	for rel := range localSet {
+		remoteName, nameErr := RemoteNoteName(target, rel)
+		if nameErr != nil {
+			return nil, nameErr
+		}
+		remoteLocal[remoteName] = struct{}{}
+	}
 
 	remote, err := client.ListFolderNotes(ctx, target.Folder)
 	if err != nil {
@@ -99,31 +110,39 @@ func PushBundle(ctx context.Context, client Client, req PushBundleRequest) (*Pus
 	}
 	var missing []string
 	for _, note := range remote {
-		rel, normErr := normalizeSyncRelPath(note.Name)
-		if normErr != nil {
-			// 远端脏名只报告，不阻断本地扫描 push。
+		rel, ok, mapErr := LocalNoteRelFromRemote(target, note.Name)
+		if mapErr != nil {
 			missing = append(missing, note.Name)
 			continue
 		}
-		if _, ok := localSet[rel]; !ok {
+		if !ok {
+			continue
+		}
+		remoteName, _ := RemoteNoteName(target, rel)
+		if _, has := remoteLocal[remoteName]; !has {
 			missing = append(missing, rel)
 		}
 	}
 
 	notes := make([]SecureNote, 0, len(localNotes))
 	for _, note := range localNotes {
-		notes = append(notes, note)
+		remoteName, nameErr := RemoteNoteName(target, note.RelativePath)
+		if nameErr != nil {
+			return nil, nameErr
+		}
+		notes = append(notes, SecureNote{RelativePath: remoteName, Content: note.Content})
 	}
 	if len(notes) == 0 {
 		return &PushBundleResult{MissingLocal: missing}, nil
 	}
 
-	candidates := make([]LandingCandidate, 0, len(notes))
-	for _, note := range notes {
+	candidates := make([]LandingCandidate, 0, len(localNotes))
+	for _, note := range localNotes {
 		candidates = append(candidates, LandingCandidate{
 			Folder:       target.Folder,
 			LocalRoot:    target.LocalRoot,
 			RelativePath: note.RelativePath,
+			Plane:        planeOf(target),
 		})
 	}
 	if err := ValidateLandingPaths(req.ProjectRoot, candidates); err != nil {
@@ -136,6 +155,11 @@ func PushBundle(ctx context.Context, client Client, req PushBundleRequest) (*Pus
 	}
 	if result != nil {
 		result.MissingLocal = missing
+		localPaths := make([]string, 0, len(localNotes))
+		for _, note := range localNotes {
+			localPaths = append(localPaths, note.RelativePath)
+		}
+		result.Paths = localPaths
 	}
 	return result, nil
 }
@@ -157,6 +181,7 @@ func AddSecureNote(ctx context.Context, client Client, projectRoot string, targe
 		Folder:       target.Folder,
 		LocalRoot:    target.LocalRoot,
 		RelativePath: rel,
+		Plane:        planeOf(target),
 	}}); err != nil {
 		return err
 	}
@@ -167,6 +192,11 @@ func AddSecureNote(ctx context.Context, client Client, projectRoot string, targe
 	content, err := os.ReadFile(abs)
 	if err != nil {
 		return fmt.Errorf("读取 %s 失败: %w", rel, err)
+	}
+
+	remoteName, err := RemoteNoteName(target, rel)
+	if err != nil {
+		return err
 	}
 
 	req := PushBundleRequest{
@@ -183,7 +213,7 @@ func AddSecureNote(ctx context.Context, client Client, projectRoot string, targe
 	} else {
 		req.DecBundleName = target.Name
 	}
-	_, err = client.PushBundle(ctx, req, []SecureNote{{RelativePath: rel, Content: string(content)}})
+	_, err = client.PushBundle(ctx, req, []SecureNote{{RelativePath: remoteName, Content: string(content)}})
 	return err
 }
 
@@ -197,6 +227,9 @@ func localSetFromNotes(notes []SecureNote) map[string]SecureNote {
 
 func pushRequestTarget(req PushBundleRequest) (SyncTarget, error) {
 	if req.Target.LocalRoot != "" && req.Target.Folder != "" {
+		if req.Target.Plane == "" {
+			req.Target.Plane = SyncPlaneProject
+		}
 		return req.Target, nil
 	}
 	name := strings.TrimSpace(req.DecBundleName)

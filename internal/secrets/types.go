@@ -9,14 +9,28 @@ const (
 	SyncKindBundle  SyncKind = "bundle"
 )
 
+// SyncPlane 区分本地同步根落在项目内还是机器级 ~/.dec/secrets。
+type SyncPlane string
+
+const (
+	// SyncPlaneProject 相对当前项目根（默认）。
+	SyncPlaneProject SyncPlane = "project"
+	// SyncPlaneMachine 相对 ~/.dec/secrets（user_enabled 机器默认）。
+	SyncPlaneMachine SyncPlane = "machine"
+)
+
 // SecretsRootDir 是项目内唯一普通 secret 明文边界。
 const SecretsRootDir = ".secrets"
 
 const (
 	// ProjectSecretsLocalRel 是 project 级 secrets 相对项目根的同步根。
 	ProjectSecretsLocalRel = ".secrets/project"
-	// BundleSecretsLocalRelPrefix 是 bundle 级 secrets 同步根前缀：.secrets/bundles/<name>。
+	// BundleSecretsLocalRelPrefix 是项目内 bundle 级 secrets 同步根前缀：.secrets/bundles/<name>。
 	BundleSecretsLocalRelPrefix = ".secrets/bundles"
+	// MachineBundleSecretsRelPrefix 是机器级 bundle secrets 相对 ~/.dec/secrets 的前缀：bundles/<name>。
+	MachineBundleSecretsRelPrefix = "bundles"
+	// ProjectBundleOverlayPrefix 是项目 Bitwarden folder 内覆盖层 Note 名前缀：bundles/<name>/。
+	ProjectBundleOverlayPrefix = "bundles/"
 )
 
 // ProjectSecretsDecBundleName 是 project 级 secrets 在内部 API 中使用的占位 Dec bundle 名。
@@ -35,7 +49,12 @@ type SyncTarget struct {
 	Kind      SyncKind
 	Name      string // project_name 或 Dec bundle 名
 	Folder    string // Bitwarden folder；bundle 默认 bundle/<name>，project 默认 Name
-	LocalRoot string // 项目根相对：.secrets/project 或 .secrets/bundles/<name>
+	LocalRoot string // project 平面：.secrets/...；machine 平面：bundles/<name>（相对 ~/.dec/secrets）
+	Plane     SyncPlane
+	// NoteNamePrefix 非空时：BW Note 名 = prefix + 相对 LocalRoot 路径（项目覆盖层）。
+	NoteNamePrefix string
+	// NoteNameExcludePrefixes：pull 时跳过这些 BW Note 名前缀（项目 SyncTarget 排除覆盖层）。
+	NoteNameExcludePrefixes []string
 }
 
 // SecureNote 表示一条待落地到 SyncTarget.LocalRoot 的 Secure Note。

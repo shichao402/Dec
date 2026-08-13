@@ -11,13 +11,17 @@ import (
 )
 
 // LoadEnvForBundle 读取指定 bundle + project 的 env/*.env。
-// 加载顺序：bundle → project（后者覆盖前者）；同一文件内重复键报错；
-// 两个不同 bundle 不应在同一次调用中出现（本函数只接受一个 bundle）。
+//
+// 合并顺序（后者同 key 覆盖前者）：
+//  1. ~/.dec/secrets/bundles/<bundle>/env/*.env
+//  2. <project>/.secrets/bundles/<bundle>/env/*.env
+//  3. <project>/.secrets/project/env/*.env
+//
+// 同一同步根内、跨文件重复键报错；跨层级允许覆盖。
 func LoadEnvForBundle(projectRoot, bundleName string) (map[string]string, error) {
 	out := make(map[string]string)
 
-	loadRoot := func(localRoot string) error {
-		envDir := filepath.Join(projectRoot, filepath.FromSlash(localRoot), "env")
+	loadLayer := func(envDir, displayRoot string) error {
 		entries, err := os.ReadDir(envDir)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -25,7 +29,8 @@ func LoadEnvForBundle(projectRoot, bundleName string) (map[string]string, error)
 			}
 			return err
 		}
-		fileOwned := make(map[string]string) // key -> file
+		localOwned := make(map[string]string)
+		batch := make(map[string]string)
 		for _, ent := range entries {
 			if ent.IsDir() {
 				continue
@@ -37,31 +42,57 @@ func LoadEnvForBundle(projectRoot, bundleName string) (map[string]string, error)
 			abs := filepath.Join(envDir, name)
 			vars, err := parseDotEnvFile(abs)
 			if err != nil {
-				return fmt.Errorf("%s: %w", path.Join(localRoot, "env", name), err)
+				return fmt.Errorf("%s: %w", path.Join(displayRoot, "env", name), err)
 			}
 			for k, v := range vars {
-				if prev, ok := fileOwned[k]; ok {
-					return fmt.Errorf("环境变量 %s 在 %s 与 %s 中重复定义", k, prev, path.Join(localRoot, "env", name))
+				display := path.Join(displayRoot, "env", name)
+				if prev, ok := localOwned[k]; ok {
+					return fmt.Errorf("环境变量 %s 在 %s 与 %s 中重复定义", k, prev, display)
 				}
-				fileOwned[k] = path.Join(localRoot, "env", name)
-				out[k] = v
+				localOwned[k] = display
+				batch[k] = v
 			}
+		}
+		for k, v := range batch {
+			out[k] = v
 		}
 		return nil
 	}
 
 	bundleName = strings.TrimSpace(bundleName)
 	if bundleName != "" {
-		target, err := NewBundleSyncTarget(bundleName, "")
+		machine, err := NewMachineBundleSyncTarget(bundleName, "")
 		if err != nil {
 			return nil, err
 		}
-		if err := loadRoot(target.LocalRoot); err != nil {
+		abs, err := ResolveAbsDir("", machine)
+		if err != nil {
 			return nil, err
 		}
+		if err := loadLayer(filepath.Join(abs, "env"), path.Join(".dec/secrets", machine.LocalRoot)); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(projectRoot) != "" {
+			proj, err := NewBundleSyncTarget(bundleName, "")
+			if err != nil {
+				return nil, err
+			}
+			abs, err := ResolveAbsDir(projectRoot, proj)
+			if err != nil {
+				return nil, err
+			}
+			if err := loadLayer(filepath.Join(abs, "env"), proj.LocalRoot); err != nil {
+				return nil, err
+			}
+		}
 	}
-	if err := loadRoot(ProjectSecretsLocalRel); err != nil {
-		return nil, err
+	if strings.TrimSpace(projectRoot) != "" {
+		if err := loadLayer(
+			filepath.Join(projectRoot, filepath.FromSlash(ProjectSecretsLocalRel), "env"),
+			ProjectSecretsLocalRel,
+		); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }

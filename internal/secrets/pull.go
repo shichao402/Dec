@@ -8,22 +8,25 @@ import (
 	"strings"
 )
 
-// WriteSecureNotes 将 Secure Note 写入 SyncTarget.LocalRoot，返回已写入的项目根相对路径。
+// WriteSecureNotes 将 Secure Note 写入 SyncTarget.LocalRoot，返回展示用相对路径。
 func WriteSecureNotes(projectRoot string, target SyncTarget, notes []SecureNote) ([]string, error) {
 	written := make([]string, 0, len(notes))
 	for _, note := range notes {
-		projectRel, err := ProjectRelPath(target, note.RelativePath)
+		display, err := RootRelPath(target, note.RelativePath)
 		if err != nil {
 			return written, err
 		}
-		dest := filepath.Join(projectRoot, filepath.FromSlash(projectRel))
+		dest, err := AbsolutePath(projectRoot, target, note.RelativePath)
+		if err != nil {
+			return written, err
+		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 			return written, fmt.Errorf("创建目录 %s 失败: %w", filepath.Dir(dest), err)
 		}
 		if err := os.WriteFile(dest, []byte(note.Content), 0600); err != nil {
-			return written, fmt.Errorf("写入 %s 失败: %w", projectRel, err)
+			return written, fmt.Errorf("写入 %s 失败: %w", display, err)
 		}
-		written = append(written, projectRel)
+		written = append(written, display)
 	}
 	return written, nil
 }
@@ -35,7 +38,7 @@ func ResolveBundleNotes(ctx context.Context, client Client, req PullBundleReques
 }
 
 // ResolveBundle 一次取回 Secure Notes 与 SSH Keys，不写盘。
-// Note.RelativePath 已规范化为相对 LocalRoot 的路径。
+// Note.RelativePath 已规范化为相对 LocalRoot 的路径（已剥 NoteNamePrefix / 应用 Exclude）。
 func ResolveBundle(ctx context.Context, client Client, req PullBundleRequest) ([]SecureNote, []SSHKeyItem, error) {
 	if client == nil {
 		client = DefaultClient()
@@ -54,9 +57,12 @@ func ResolveBundle(ctx context.Context, client Client, req PullBundleRequest) ([
 	mapped := make([]SecureNote, 0, len(result.Notes))
 	seen := make(map[string]struct{}, len(result.Notes))
 	for _, note := range result.Notes {
-		rel, normErr := normalizeSyncRelPath(note.RelativePath)
-		if normErr != nil {
-			return nil, nil, normErr
+		rel, ok, mapErr := LocalNoteRelFromRemote(target, note.RelativePath)
+		if mapErr != nil {
+			return nil, nil, mapErr
+		}
+		if !ok {
+			continue
 		}
 		if _, dup := seen[rel]; dup {
 			continue
@@ -64,8 +70,12 @@ func ResolveBundle(ctx context.Context, client Client, req PullBundleRequest) ([
 		seen[rel] = struct{}{}
 		mapped = append(mapped, SecureNote{RelativePath: rel, Content: note.Content})
 	}
-	keys := make([]SSHKeyItem, len(result.SSHKeys))
-	copy(keys, result.SSHKeys)
+	var keys []SSHKeyItem
+	// 覆盖层与项目 folder 共享；SSH 只由无 prefix 的目标拉取，避免重复落地。
+	if strings.TrimSpace(target.NoteNamePrefix) == "" {
+		keys = make([]SSHKeyItem, len(result.SSHKeys))
+		copy(keys, result.SSHKeys)
+	}
 	return mapped, keys, nil
 }
 
@@ -88,6 +98,7 @@ func PullBundle(ctx context.Context, client Client, req PullBundleRequest) ([]st
 			Folder:       target.Folder,
 			LocalRoot:    target.LocalRoot,
 			RelativePath: note.RelativePath,
+			Plane:        planeOf(target),
 		})
 	}
 	if err := ValidateLandingPaths(req.ProjectRoot, candidates); err != nil {
@@ -98,6 +109,9 @@ func PullBundle(ctx context.Context, client Client, req PullBundleRequest) ([]st
 
 func requestTarget(req PullBundleRequest) (SyncTarget, error) {
 	if req.Target.LocalRoot != "" && req.Target.Folder != "" {
+		if req.Target.Plane == "" {
+			req.Target.Plane = SyncPlaneProject
+		}
 		return req.Target, nil
 	}
 	name := strings.TrimSpace(req.DecBundleName)

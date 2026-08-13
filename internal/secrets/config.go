@@ -257,31 +257,81 @@ func equalStringSlices(left, right []string) bool {
 }
 
 // ResolveSyncTargets 解析一次 pull/push 的全部 SyncTarget。
-// 同一同步集合内 Bitwarden folder 名冲突时直接失败。
-// enabledBundles 应为已合并的 project∪user 列表（见 MergeEnabledBundles）。
-func (c *Config) ResolveSyncTargets(enabledBundles []string, projectName string) ([]SyncTarget, error) {
-	enabledBundles = NormalizeBundleNames(enabledBundles)
-	targets := make([]SyncTarget, 0, len(enabledBundles)+1)
-	seenFolder := make(map[string]string) // folder -> label
+//
+// - 仅 user：机器平面 ↔ bundle/<name>
+// - 仅 project：项目 .secrets/bundles/<name> ↔ bundle/<name>
+// - 两者都有：机器默认 ↔ bundle/<name>；另加项目覆盖层（项目 folder + bundles/<name>/ 前缀）
+// - 项目级 secrets：.secrets/project ↔ 项目 folder（排除覆盖层前缀）
+func (c *Config) ResolveSyncTargets(projectEnabled, userEnabled []string, projectName string) ([]SyncTarget, error) {
+	projectEnabled = NormalizeBundleNames(projectEnabled)
+	userEnabled = NormalizeBundleNames(userEnabled)
+	projSet := make(map[string]struct{}, len(projectEnabled))
+	for _, n := range projectEnabled {
+		projSet[n] = struct{}{}
+	}
+	userSet := make(map[string]struct{}, len(userEnabled))
+	for _, n := range userEnabled {
+		userSet[n] = struct{}{}
+	}
+
+	targets := make([]SyncTarget, 0, len(projectEnabled)+len(userEnabled)+1)
+	seenKey := make(map[string]string) // folder\x00prefix -> label
+	var overlayPrefixes []string
 
 	add := func(t SyncTarget, label string) error {
-		prev, ok := seenFolder[t.Folder]
-		if ok && prev != label {
-			return fmt.Errorf("Bitwarden folder %q 同时绑定 %s 与 %s", t.Folder, prev, label)
+		if t.Plane == "" {
+			t.Plane = SyncPlaneProject
 		}
-		seenFolder[t.Folder] = label
+		key := t.Folder + "\x00" + t.NoteNamePrefix
+		prev, ok := seenKey[key]
+		if ok && prev != label {
+			return fmt.Errorf("Bitwarden folder %q (prefix %q) 同时绑定 %s 与 %s", t.Folder, t.NoteNamePrefix, prev, label)
+		}
+		seenKey[key] = label
 		targets = append(targets, t)
 		return nil
 	}
 
-	for _, bundleName := range enabledBundles {
+	all := MergeEnabledBundles(projectEnabled, userEnabled)
+	for _, bundleName := range all {
 		binding := c.ResolveBinding(bundleName)
-		target, err := NewBundleSyncTarget(bundleName, binding.SecretsBundleName)
-		if err != nil {
-			return nil, err
-		}
-		if err := add(target, fmt.Sprintf("bundle %q", bundleName)); err != nil {
-			return nil, err
+		_, inProj := projSet[bundleName]
+		_, inUser := userSet[bundleName]
+		switch {
+		case inUser && !inProj:
+			target, err := NewMachineBundleSyncTarget(bundleName, binding.SecretsBundleName)
+			if err != nil {
+				return nil, err
+			}
+			if err := add(target, fmt.Sprintf("machine bundle %q", bundleName)); err != nil {
+				return nil, err
+			}
+		case inProj && !inUser:
+			target, err := NewBundleSyncTarget(bundleName, binding.SecretsBundleName)
+			if err != nil {
+				return nil, err
+			}
+			if err := add(target, fmt.Sprintf("bundle %q", bundleName)); err != nil {
+				return nil, err
+			}
+		default: // both
+			machine, err := NewMachineBundleSyncTarget(bundleName, binding.SecretsBundleName)
+			if err != nil {
+				return nil, err
+			}
+			if err := add(machine, fmt.Sprintf("machine bundle %q", bundleName)); err != nil {
+				return nil, err
+			}
+			if folder, ok := c.ResolveProjectSecrets(projectName); ok {
+				overlay, err := NewProjectBundleOverlayTarget(bundleName, folder)
+				if err != nil {
+					return nil, err
+				}
+				if err := add(overlay, fmt.Sprintf("project overlay bundle %q", bundleName)); err != nil {
+					return nil, err
+				}
+				overlayPrefixes = append(overlayPrefixes, overlay.NoteNamePrefix)
+			}
 		}
 	}
 
@@ -290,9 +340,11 @@ func (c *Config) ResolveSyncTargets(enabledBundles []string, projectName string)
 		if err != nil {
 			return nil, err
 		}
-		// project folder 显式覆盖名可能与 projectName 不同；用 ResolveProjectSecrets 的 folder。
 		if folder != target.Name {
 			target.Folder = folder
+		}
+		if len(overlayPrefixes) > 0 {
+			target.NoteNameExcludePrefixes = append([]string{}, overlayPrefixes...)
 		}
 		if err := add(target, fmt.Sprintf("project %q", target.Name)); err != nil {
 			return nil, err

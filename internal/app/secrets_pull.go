@@ -26,8 +26,7 @@ func planSecretsSync(projectRoot string, enabledBundles []string, cfg *secrets.C
 	if cfg == nil {
 		cfg = &secrets.Config{}
 	}
-	merged := secrets.MergeEnabledBundles(enabledBundles, cfg.UserEnabledBundleNames())
-	targets, err := cfg.ResolveSyncTargets(merged, projectName)
+	targets, err := cfg.ResolveSyncTargets(enabledBundles, cfg.UserEnabledBundleNames(), projectName)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +47,14 @@ type secretsPullSummary struct {
 }
 
 func warnUnignoredSecrets(projectRoot string, landingPaths []string, reporter Reporter) {
-	unignored := secrets.UnignoredLandingPaths(projectRoot, landingPaths)
+	var projectPaths []string
+	for _, p := range landingPaths {
+		slash := filepath.ToSlash(p)
+		if strings.HasPrefix(slash, secrets.SecretsRootDir+"/") || slash == secrets.SecretsRootDir {
+			projectPaths = append(projectPaths, slash)
+		}
+	}
+	unignored := secrets.UnignoredLandingPaths(projectRoot, projectPaths)
 	if len(unignored) == 0 {
 		return
 	}
@@ -147,6 +153,7 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 				Folder:       target.Folder,
 				LocalRoot:    target.LocalRoot,
 				RelativePath: note.RelativePath,
+				Plane:        target.Plane,
 			})
 		}
 
@@ -265,9 +272,13 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 }
 
 func formatSyncTargetLabel(t secrets.SyncTarget) string {
-	switch t.Kind {
-	case secrets.SyncKindProject:
+	switch {
+	case t.Kind == secrets.SyncKindProject:
 		return fmt.Sprintf("project secrets %q", t.Name)
+	case t.Plane == secrets.SyncPlaneMachine:
+		return fmt.Sprintf("machine secrets bundle %q", t.Name)
+	case t.NoteNamePrefix != "":
+		return fmt.Sprintf("project overlay bundle %q", t.Name)
 	default:
 		return fmt.Sprintf("secrets bundle %q", t.Name)
 	}

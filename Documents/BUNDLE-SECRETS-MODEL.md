@@ -215,8 +215,18 @@ password: "<token>"
 # provider: generic
 ```
 
-Pull：先写入 `.secrets/.../cnb_gitgcm.yaml`，再 `git config credential.https://cnb.cool.provider` + `git credential approve`。  
-普通 `env/*.env` **不**走 Handler。详见 [0005](decisions/0005-secrets-machine-handlers.md)。
+Pull：先写入同步根（机器级见 0007：`~/.dec/secrets/bundles/cnb/`），再 `git config` + `git credential approve`。  
+普通 `env/*.env` **不**走 Handler。详见 [0005](decisions/0005-secrets-machine-handlers.md)、[0007](decisions/0007-machine-secrets-root.md)。
+
+## 机器级 secrets 根与项目覆盖（0007）
+
+| 启用 | 本地根 | Bitwarden |
+|------|--------|-----------|
+| 仅 user | `~/.dec/secrets/bundles/<name>/` | `bundle/<name>` |
+| 仅 project | `<project>/.secrets/bundles/<name>/` | `bundle/<name>` |
+| 两者都有 | 机器默认同上；覆盖：`<project>/.secrets/bundles/<name>/` | 默认 `bundle/<name>`；覆盖在**项目 folder**，Note 名 `bundles/<name>/...` |
+
+`dec exec` 合并：机器 env → 项目 bundle env → `.secrets/project/env`（后者同 key 覆盖）。
 
 ## 零重叠 Invariant
 

@@ -3,6 +3,7 @@
 - **状态**：已接受（实施中）
 - **日期**：2026-08-13
 - **影响范围**：`internal/secrets/handler/`、`internal/app/secrets_pull.go`、`Documents/BUNDLE-SECRETS-MODEL.md`、`schema/secrets/v1/`（文档）
+- **修订**：2026-08-13 — 机器级 Note 默认落 `~/.dec/secrets/bundles/`（见 [0007](0007-machine-secrets-root.md)）
 
 ## 问题
 

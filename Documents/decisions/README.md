@@ -27,3 +27,4 @@
 | [0004](0004-remote-page.md) | Remote 页：远端 CRUD，Delete 退役 | 已接受（已实现） |
 | [0005](0005-secrets-machine-handlers.md) | Secrets Machine Handlers：SourceKind + 名字路由 | 已接受（实施中） |
 | [0006](0006-retire-pkg-for-internal.md) | 源码布局：废除 `pkg/`，统一到 `internal/` | 已接受（已实现） |
+| [0007](0007-machine-secrets-root.md) | 机器级 bundle secrets 根 + 项目覆盖层 | 已接受（实施中） |

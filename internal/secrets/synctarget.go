@@ -23,7 +23,12 @@ func DefaultBundleFolder(bundleName string) string {
 	return BundleFolderPrefix + name
 }
 
-// NewBundleSyncTarget 构造 bundle 级 SyncTarget；folder 默认 bundle/<name>。
+// MachineSecretsRoot 返回 ~/.dec/secrets（与 config.yaml 同树）。
+func MachineSecretsRoot() (string, error) {
+	return secretsDir()
+}
+
+// NewBundleSyncTarget 构造项目平面 bundle SyncTarget；folder 默认 bundle/<name>。
 func NewBundleSyncTarget(bundleName, folder string) (SyncTarget, error) {
 	name := strings.TrimSpace(bundleName)
 	if name == "" {
@@ -41,6 +46,51 @@ func NewBundleSyncTarget(bundleName, folder string) (SyncTarget, error) {
 		Name:      name,
 		Folder:    folder,
 		LocalRoot: path.Join(BundleSecretsLocalRelPrefix, name),
+		Plane:     SyncPlaneProject,
+	}, nil
+}
+
+// NewMachineBundleSyncTarget 构造机器平面 bundle SyncTarget（~/.dec/secrets/bundles/<name>）。
+func NewMachineBundleSyncTarget(bundleName, folder string) (SyncTarget, error) {
+	name := strings.TrimSpace(bundleName)
+	if name == "" {
+		return SyncTarget{}, fmt.Errorf("bundle 名不能为空")
+	}
+	if name == ProjectSecretsDecBundleName {
+		return SyncTarget{}, fmt.Errorf("保留名 %q 不能用作 bundle", ProjectSecretsDecBundleName)
+	}
+	folder = strings.TrimSpace(folder)
+	if folder == "" {
+		folder = DefaultBundleFolder(name)
+	}
+	return SyncTarget{
+		Kind:      SyncKindBundle,
+		Name:      name,
+		Folder:    folder,
+		LocalRoot: path.Join(MachineBundleSecretsRelPrefix, name),
+		Plane:     SyncPlaneMachine,
+	}, nil
+}
+
+// NewProjectBundleOverlayTarget 构造项目覆盖层：本地 .secrets/bundles/<name>，
+// Bitwarden 项目 folder 中 Note 名带 bundles/<name>/ 前缀。
+func NewProjectBundleOverlayTarget(bundleName, projectFolder string) (SyncTarget, error) {
+	name := strings.TrimSpace(bundleName)
+	if name == "" {
+		return SyncTarget{}, fmt.Errorf("bundle 名不能为空")
+	}
+	projectFolder = strings.TrimSpace(projectFolder)
+	if projectFolder == "" {
+		return SyncTarget{}, fmt.Errorf("project folder 不能为空")
+	}
+	prefix := path.Join(strings.TrimSuffix(ProjectBundleOverlayPrefix, "/"), name) + "/"
+	return SyncTarget{
+		Kind:           SyncKindBundle,
+		Name:           name,
+		Folder:         projectFolder,
+		LocalRoot:      path.Join(BundleSecretsLocalRelPrefix, name),
+		Plane:          SyncPlaneProject,
+		NoteNamePrefix: prefix,
 	}, nil
 }
 
@@ -59,12 +109,16 @@ func NewProjectSyncTarget(projectName, folder string) (SyncTarget, error) {
 		Name:      name,
 		Folder:    folder,
 		LocalRoot: ProjectSecretsLocalRel,
+		Plane:     SyncPlaneProject,
 	}, nil
 }
 
 // ResolveTarget 优先返回 req.Target；否则从旧字段推导。
 func ResolveTarget(kind SyncKind, name string, binding BundleBinding, explicit SyncTarget) (SyncTarget, error) {
 	if explicit.LocalRoot != "" && explicit.Folder != "" {
+		if explicit.Plane == "" {
+			explicit.Plane = SyncPlaneProject
+		}
 		return explicit, nil
 	}
 	folder := strings.TrimSpace(binding.SecretsBundleName)
@@ -88,8 +142,36 @@ func ResolveTarget(kind SyncKind, name string, binding BundleBinding, explicit S
 	}
 }
 
-// ProjectRelPath 把同步根相对路径转为项目根相对路径。
-func ProjectRelPath(target SyncTarget, noteRel string) (string, error) {
+// planeOf 返回有效平面（空视为 project）。
+func planeOf(t SyncTarget) SyncPlane {
+	if t.Plane == SyncPlaneMachine {
+		return SyncPlaneMachine
+	}
+	return SyncPlaneProject
+}
+
+// ResolveAbsDir 返回 SyncTarget.LocalRoot 的绝对目录。
+func ResolveAbsDir(projectRoot string, target SyncTarget) (string, error) {
+	root := strings.Trim(filepath.ToSlash(target.LocalRoot), "/")
+	if root == "" {
+		return "", fmt.Errorf("SyncTarget.LocalRoot 不能为空")
+	}
+	if planeOf(target) == SyncPlaneMachine {
+		base, err := MachineSecretsRoot()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(base, filepath.FromSlash(root)), nil
+	}
+	if strings.TrimSpace(projectRoot) == "" {
+		return "", fmt.Errorf("project 平面需要 projectRoot")
+	}
+	return filepath.Join(projectRoot, filepath.FromSlash(root)), nil
+}
+
+// RootRelPath 把同步根相对路径转为「展示/校验用」相对路径。
+// project 平面：相对项目根；machine 平面：~/.dec/secrets/bundles/... 风格（以 .dec/secrets 为逻辑前缀）。
+func RootRelPath(target SyncTarget, noteRel string) (string, error) {
 	rel, err := normalizeSyncRelPath(noteRel)
 	if err != nil {
 		return "", err
@@ -98,16 +180,83 @@ func ProjectRelPath(target SyncTarget, noteRel string) (string, error) {
 	if root == "" {
 		return "", fmt.Errorf("SyncTarget.LocalRoot 不能为空")
 	}
-	return path.Join(root, rel), nil
+	joined := path.Join(root, rel)
+	if planeOf(target) == SyncPlaneMachine {
+		return path.Join(".dec/secrets", joined), nil
+	}
+	return joined, nil
+}
+
+// ProjectRelPath 把同步根相对路径转为项目根相对路径（仅 project 平面）。
+// 兼容旧调用；machine 平面请用 RootRelPath / AbsolutePath。
+func ProjectRelPath(target SyncTarget, noteRel string) (string, error) {
+	if planeOf(target) == SyncPlaneMachine {
+		return RootRelPath(target, noteRel)
+	}
+	return RootRelPath(target, noteRel)
 }
 
 // AbsolutePath 返回 note 在磁盘上的绝对路径。
 func AbsolutePath(projectRoot string, target SyncTarget, noteRel string) (string, error) {
-	projectRel, err := ProjectRelPath(target, noteRel)
+	rel, err := normalizeSyncRelPath(noteRel)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(projectRoot, filepath.FromSlash(projectRel)), nil
+	dir, err := ResolveAbsDir(projectRoot, target)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, filepath.FromSlash(rel)), nil
+}
+
+// RemoteNoteName 返回写入 Bitwarden 的 Note 名。
+func RemoteNoteName(target SyncTarget, noteRel string) (string, error) {
+	rel, err := normalizeSyncRelPath(noteRel)
+	if err != nil {
+		return "", err
+	}
+	prefix := strings.TrimSpace(target.NoteNamePrefix)
+	if prefix == "" {
+		return rel, nil
+	}
+	prefix = strings.ReplaceAll(prefix, "\\", "/")
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	return prefix + rel, nil
+}
+
+// LocalNoteRelFromRemote 把 BW Note 名转为相对 LocalRoot 的路径；不匹配则 ok=false。
+func LocalNoteRelFromRemote(target SyncTarget, remoteName string) (rel string, ok bool, err error) {
+	name := strings.ReplaceAll(strings.TrimSpace(remoteName), "\\", "/")
+	for _, ex := range target.NoteNameExcludePrefixes {
+		ex = strings.ReplaceAll(strings.TrimSpace(ex), "\\", "/")
+		if ex == "" {
+			continue
+		}
+		if !strings.HasSuffix(ex, "/") {
+			ex += "/"
+		}
+		if name == strings.TrimSuffix(ex, "/") || strings.HasPrefix(name, ex) {
+			return "", false, nil
+		}
+	}
+	prefix := strings.TrimSpace(target.NoteNamePrefix)
+	if prefix != "" {
+		prefix = strings.ReplaceAll(prefix, "\\", "/")
+		if !strings.HasSuffix(prefix, "/") {
+			prefix += "/"
+		}
+		if !strings.HasPrefix(name, prefix) {
+			return "", false, nil
+		}
+		name = strings.TrimPrefix(name, prefix)
+	}
+	rel, err = normalizeSyncRelPath(name)
+	if err != nil {
+		return "", false, err
+	}
+	return rel, true, nil
 }
 
 // normalizeSyncRelPath 规范化相对 SyncTarget.LocalRoot 的 Note 名。
@@ -141,4 +290,13 @@ func IsEnvNote(noteRel string) bool {
 	dir, base := path.Split(rel)
 	dir = strings.Trim(dir, "/")
 	return dir == "env" && strings.HasSuffix(strings.ToLower(base), ".env")
+}
+
+// ProjectBundleOverlayNotePrefix 返回项目 folder 内覆盖层前缀 bundles/<name>/。
+func ProjectBundleOverlayNotePrefix(bundleName string) string {
+	name := strings.TrimSpace(bundleName)
+	if name == "" {
+		return ""
+	}
+	return path.Join(strings.TrimSuffix(ProjectBundleOverlayPrefix, "/"), name) + "/"
 }
