@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/editor"
+	"github.com/shichao402/Dec/internal/serviceapi"
 )
 
 type remoteEditKind string
@@ -79,10 +80,10 @@ func prepareRemoteEditCmd(projectRoot string, item app.DeleteSelectionItem, edit
 		})
 		switch item.Kind {
 		case app.DeleteKindSecret:
-			sess, err := app.PrepareRemoteNoteEdit(context.Background(), projectRoot, item, reporter)
+			sess, err := serviceapi.PrepareRemoteNoteEdit(context.Background(), projectRoot, item, reporter)
 			return remoteEditPreparedMsg{kind: remoteEditKindNote, noteSess: sess, editorCmd: editorCmd, err: err, logs: logs}
 		case app.DeleteKindSSHKey:
-			sess, err := app.PrepareRemoteSSHHostsEdit(context.Background(), projectRoot, item, reporter)
+			sess, err := serviceapi.PrepareRemoteSSHHostsEdit(context.Background(), projectRoot, item, reporter)
 			return remoteEditPreparedMsg{kind: remoteEditKindSSH, sshSess: sess, editorCmd: editorCmd, err: err, logs: logs}
 		default:
 			return remoteEditPreparedMsg{err: fmt.Errorf("不支持的编辑类型"), logs: logs}
@@ -165,7 +166,7 @@ func commitRemoteNoteEditCmd(sess app.RemoteNoteEditSession) tea.Cmd {
 				logs = append(logs, msg)
 			}
 		})
-		err := app.CommitRemoteNoteEdit(context.Background(), sess, reporter)
+		err := serviceapi.CommitRemoteNoteEdit(context.Background(), sess, reporter)
 		return remoteEditDoneMsg{kind: remoteEditKindNote, err: err, logs: logs}
 	}
 }
@@ -178,7 +179,7 @@ func commitRemoteSSHEditCmd(sess app.RemoteSSHHostsEditSession) tea.Cmd {
 				logs = append(logs, msg)
 			}
 		})
-		err := app.CommitRemoteSSHHostsEdit(context.Background(), sess, reporter)
+		err := serviceapi.CommitRemoteSSHHostsEdit(context.Background(), sess, reporter)
 		return remoteEditDoneMsg{kind: remoteEditKindSSH, err: err, logs: logs}
 	}
 }

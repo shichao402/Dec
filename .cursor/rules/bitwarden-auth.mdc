@@ -10,17 +10,17 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 
 ## Session 存储（硬约束）
 
-- Bitwarden session **仅在当前进程内存**中保存；进程退出即失效。
+- Bitwarden session **仅在本机单例 `dec-server` 进程内存**中保存；服务进程退出即失效。TUI / MCP 门面共享服务 session，但拿不到 session 明文。
 - **禁止**将 session 持久化到磁盘：`~/.dec/secrets/session`、`BW_SESSION` 文件、或任何 env/配置文件形式的 session 缓存均不允许。
 - 不存在 `~/.dec/secrets/state.json` 之类的本地同步状态文件（已删除，见 `Documents/decisions/0001-secrets-landing-path.md`），不要为了缓存 session 而重新引入。
-- 同一进程内已有有效 session → 直接复用；无 session → 先尝试程序化解锁（见下），失败再阻塞等待 web unlock。
+- `dec-server` 内已有有效 session → 直接复用；无 session → 先尝试程序化解锁（见下），失败再阻塞等待 web unlock。
 
 ## 开发 / Agent 程序化解锁
 
 - 新进程需要 Bitwarden API 时，可设置环境变量 **`DEC_BW_PASSWORD`**（主密码，**仅当前进程**，禁止写入代码、配置或磁盘）。
 - 配合 `~/.dec/secrets/device.json` 中的 `two_factor_remember` 令牌，可在无浏览器、无 2FA 的情况下建立 session。
 - **未设置** `DEC_BW_PASSWORD` 或 remember token 失效 / 仍需 2FA 时，**回退 web unlock**（这是预期行为，不是 bug）。
-- Agent / CI 在启动 `dec` 或调用 `internal/app` 前，须 `export DEC_BW_PASSWORD=…`；TUI 与主进程同进程，**不会**从其他 shell 继承未 export 的变量。
+- Agent / CI 若需程序化解锁，须在**首次拉起 `dec-server` 的门面环境**中设置 `DEC_BW_PASSWORD`；门面不会把密码经 RPC 传给已运行的服务。
 - 集成 / live 测试把凭据放在 `.secrets/dec/integration/bitwarden.yaml`（gitignored），由 `TestMain` 调 `secrets.ApplyIntegrationAuth` 注入进程环境。
 
 ## 测试禁止弹窗（硬约束）
@@ -49,11 +49,11 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 
 ## TUI-first
 
-- 认证由 TUI 进程（或等价 `internal/app` 调用链）在 pull secrets bundle 等操作时 **自动触发**。
+- 认证由 `dec-server` 中的 `internal/app` 调用链在 pull secrets bundle 等操作时 **自动触发**；TUI / MCP 只展示服务回传的进度。
 - Settings 页配置 Bitwarden 连接信息；解锁仅在缺 session 时按需弹出。
 
 ## 实现落点（规划）
 
 - `internal/secrets/unlock/`：本地 HTTP 服务、浏览器打开、unlock 回调
-- `internal/secrets/`：进程内 session 缓存与 Bitwarden API 客户端
+- `internal/secrets/`：`dec-server` 进程内 session 缓存与 Bitwarden API 客户端
 - `internal/tui/` Run 页：pull 流程在 secrets 步骤前检查/等待 session；Note 内容落地到 **`.secrets/` SyncTarget 根**（不进 `.dec/cache/`）

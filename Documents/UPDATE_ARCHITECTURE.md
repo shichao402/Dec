@@ -8,8 +8,8 @@ Dec CLI 的检查/下载已切换到 `github.com/shichao402/relkit/sdk`，发布
 - 内嵌公钥 `dec-2026`（见 `internal/update` 与根目录 `relkit.json`）
 - `CurrentCode` = `sdk.SemverCode(version)`（`v1.13.25` → `1013025`）
 - 默认 channel：`dev`（目前仅个人使用；正式对外再切回 `stable`）
-- selectors：`os` / `arch`（与 stage 时一致）
-- Apply：`sdk/apply.ReplaceExecutable`（Windows rename-aside + 下次启动清理）
+- selectors：`os` / `arch` / `component`，component 为 `dec`、`dec-server`、`dec-mcp`、`dec-exec`
+- Apply：先把同版本四个组件全部下载并校验，再用 `sdk/apply.ReplaceFile` 替换同一 `bin/` 下的程序（Windows rename-aside + 下次启动清理）
 
 入口仍是：
 
@@ -21,7 +21,7 @@ Dec CLI 的检查/下载已切换到 `github.com/shichao402/relkit/sdk`，发布
 
 ## 发布
 
-1. CI 多平台构建产物 `dec-{os}-{arch}`  
+1. CI 多平台构建四个产物：`{dec,dec-server,dec-mcp,dec-exec}-{os}-{arch}`  
 2. `relkit stage` 固化 staged 树（无私钥）  
 3. 打包 `staged.tar.gz` → `PUT` `https://publish.firoyang.com/v1/staged/dec/{version}`  
 4. `POST /v1/publish` → 发布机签名并写 COS  

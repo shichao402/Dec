@@ -499,7 +499,7 @@ func installAssetToIDE(itemType, assetName, vaultName, srcPath, projectRoot stri
 			return fmt.Errorf("解析 MCP 配置失败: %w", err)
 		}
 		cmd, args := stripExternalEnvLauncher(server.Command, server.Args)
-		server.Command, server.Args, server.Env = WrapMCPServerWithExec(projectRoot, vaultName, "dec", cmd, args, server.Env)
+		server.Command, server.Args, server.Env = WrapMCPServerWithExec(projectRoot, vaultName, "dec-exec", cmd, args, server.Env)
 		existingConfig, err := ideImpl.LoadMCPConfig(projectRoot)
 		if err != nil {
 			return fmt.Errorf("加载 IDE MCP 配置失败: %w", err)
@@ -880,6 +880,15 @@ func saveVersionMeta(projectRoot, commitHash string) {
 // stripExternalEnvLauncher 去掉历史外部启动器外壳（如 mise exec ... --），返回真实命令。
 func stripExternalEnvLauncher(command string, args []string) (string, []string) {
 	command = strings.TrimSpace(command)
+	if command == "dec-exec" {
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--" && i+1 < len(args) {
+				return args[i+1], append([]string(nil), args[i+2:]...)
+			}
+		}
+		return command, args
+	}
+	// 兼容旧配置：dec exec -- ...
 	if command == "dec" && len(args) > 0 && args[0] == "exec" {
 		for i := 0; i < len(args); i++ {
 			if args[i] == "--" && i+1 < len(args) {

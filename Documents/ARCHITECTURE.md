@@ -13,7 +13,18 @@
 
 ## 概览
 
-Dec 是一个以 **TUI** 为第一交互入口的个人 AI 资产管理工具，用于把 Skills、Rules、MCP 配置保存在个人 Vault 中，并在不同项目、不同 IDE 间复用。
+Dec 是一个以 **TUI** 为第一人机入口、以 **MCP** 为 Agent 入口的个人 AI 资产管理工具，用于把 Skills、Rules、MCP 配置保存在个人 Vault 中，并在不同项目、不同 IDE 间复用。
+
+运行时采用「一机一服务、多门面」：
+
+| 程序 | 职责 |
+|------|------|
+| `dec-server` | 本机单例；持有 `internal/app` 业务、Bitwarden 内存 session、project 写操作锁与进度广播 |
+| `dec` | TUI 门面；无服务时自动拉起 `dec-server` |
+| `dec-mcp` | Agent stdio MCP 门面；无服务时自动拉起 `dec-server` |
+| `dec-exec` | 独立 env 注入程序；只读已落地 `.secrets/**/env/*.env`，不经过服务、不碰 session |
+
+门面与服务通过仅绑定 `127.0.0.1` 的 gRPC 通信，端点与本机随机 token 写在 `~/.dec/run/server.json`。同一 project 的 pull/push 等写操作互斥；未发起操作的门面可旁观该 project 当前操作的实时进度。详见 [0008](decisions/0008-service-facade-split.md)。
 
 配置与资产按 **Project > Bundle** 两层组织：
 
@@ -235,7 +246,7 @@ Pull 后落地:
   <workspace>/.secrets/bundles/vikunja/env/vikunja.env   # 不进 .dec/
 ```
 
-环境变量由 hidden `dec exec --bundle vikunja` 读取 `env/*.env` 注入子进程。
+环境变量由独立 `dec-exec --bundle vikunja` 读取 `env/*.env` 注入子进程。
 
 ### SSH Key（机器级落地）
 
@@ -284,7 +295,7 @@ bundles/vikunja/
 ├── bundle.yaml
 ├── skills/vikunja-workflow/SKILL.md
 ├── rules/vikunja-integration.mdc
-└── mcp/vikunja-mcp.json          # command: dec exec，无 token 占位
+└── mcp/vikunja-mcp.json          # command: dec-exec，无 token 占位
 ```
 
 **Bitwarden — secrets bundle**（folder `vikunja`，默认同 Dec bundle 名）：
@@ -425,7 +436,7 @@ pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感
 3. `.dec/vars.d/*.yaml`（按文件名字典序合并；主文件覆盖同名键）
 4. `~/.dec/local/vars.yaml` 中的 `vars`
 
-私密 env（如 `VIKUNJA_API_TOKEN`）由 hidden `dec exec` 从 `.secrets/bundles/<name>/env/*.env` 注入子进程，**不通过**占位符替换注入。未定义占位符保留原样并通过 Reporter 提示。
+私密 env（如 `VIKUNJA_API_TOKEN`）由独立 `dec-exec` 从 `.secrets/bundles/<name>/env/*.env` 注入子进程，**不通过**占位符替换注入。未定义占位符保留原样并通过 Reporter 提示。
 
 ## 模块划分
 
@@ -514,7 +525,7 @@ Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真�
 - 存储根分离：Dec → `.dec/`；Secure Note → `.secrets/`；SSH Key → `~/.ssh/`
 - SyncTarget：Bitwarden folder ↔ `.secrets/project` 或 `.secrets/bundles/<name>/`；Note 名 = 相对同步根路径
 - Pull：按 project bundle 列表 → Dec Git bundle → Bitwarden → 零重叠校验 → 独立落地 + IDE 渲染
-- MCP 经 hidden `dec exec` 注入 `env/*.env`；不再依赖 mise 落地路径
+- MCP 经独立 `dec-exec` 注入 `env/*.env`；不再依赖 mise 落地路径
 - Schema：`Project`（`schema/dec/v1/projects.proto`）、`BundleBinding`、`SecretsConfig`（`schema/secrets/v1/`）
 - TUI：Run 页一次 pull；Bundles 页选 bundle；Settings 页配置 Bitwarden
 

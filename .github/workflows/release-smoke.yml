@@ -42,7 +42,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
 
       - name: Run tests
         run: go test ./... -v
@@ -60,17 +60,25 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
 
       - name: Build linux-amd64 artifact
         run: |
-          go build -ldflags "-X main.Version=${{ needs.prepare.outputs.version }} -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')" -o dec-linux-amd64 .
+          LDFLAGS="-X main.Version=${{ needs.prepare.outputs.version }} -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')"
+          go build -ldflags "$LDFLAGS" -o dec-linux-amd64 .
+          for component in dec-server dec-mcp dec-exec; do
+            go build -ldflags "$LDFLAGS" -o "${component}-linux-amd64" "./cmd/${component}"
+          done
 
       - name: Upload smoke artifact
         uses: actions/upload-artifact@v6
         with:
           name: smoke-linux-amd64
-          path: dec-linux-amd64
+          path: |
+            dec-linux-amd64
+            dec-server-linux-amd64
+            dec-mcp-linux-amd64
+            dec-exec-linux-amd64
 
   verify-artifacts:
     name: Verify Downloaded Artifact
@@ -86,6 +94,9 @@ jobs:
       - name: Verify artifact exists
         run: |
           test -f dist/dec-linux-amd64
+          test -f dist/dec-server-linux-amd64
+          test -f dist/dec-mcp-linux-amd64
+          test -f dist/dec-exec-linux-amd64
           ls -lah dist
 
   draft-release:

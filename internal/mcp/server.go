@@ -1,7 +1,6 @@
 // Package mcp 提供 Dec 的 MCP（stdio）接口层。
 //
-// 架构约束：IDE 启动一次 `dec mcp` 后进程常驻；所有 tool 调用在同一进程内
-// 直接调用 internal/app，禁止 shell out 到 dec CLI 子进程（否则 Bitwarden session 无法复用）。
+// 架构约束：dec-mcp 是薄门面；业务与 Bitwarden session 由本机 dec-server 持有。
 package mcp
 
 import (
@@ -12,6 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/serviceapi"
 )
 
 // Config 配置 Dec MCP Server。
@@ -83,6 +83,12 @@ func Run(ctx context.Context, cfg Config) error {
 	if cfg.ProjectRoot == "" {
 		return fmt.Errorf("无法确定项目根目录：请设置 --project-root 或 DEC_PROJECT_ROOT")
 	}
+	api, err := serviceapi.Connect(ctx, "mcp", fmt.Sprintf("mcp-%d", os.Getpid()))
+	if err != nil {
+		return fmt.Errorf("连接 dec-server 失败: %w", err)
+	}
+	defer api.Close()
+	serviceapi.SetDefault(api)
 
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "dec",
@@ -114,11 +120,17 @@ func (s *Server) projectRoot() string {
 type statusParams struct{}
 
 func (s *Server) handleStatus(ctx context.Context, _ *mcp.CallToolRequest, _ statusParams) (*mcp.CallToolResult, any, error) {
-	overview, err := app.LoadProjectOverview(s.projectRoot())
+	overview, err := serviceapi.LoadProjectOverview(s.projectRoot(), true)
 	if err != nil {
 		return toolFail(err, nil)
 	}
-	return toolOK(overview, nil)
+	data := map[string]any{"project": overview}
+	if api, apiErr := serviceapi.Default(); apiErr == nil {
+		if active, activeErr := api.GetActiveOperation(ctx, s.projectRoot()); activeErr == nil && active != nil && active.Active {
+			data["active_operation"] = active
+		}
+	}
+	return toolOK(data, nil)
 }
 
 type connectRepoParams struct {
@@ -127,7 +139,7 @@ type connectRepoParams struct {
 
 func (s *Server) handleConnectRepo(ctx context.Context, _ *mcp.CallToolRequest, in connectRepoParams) (*mcp.CallToolResult, any, error) {
 	reporter, logs := newCollector()
-	result, err := app.ConnectRepo(in.RepoURL, reporter)
+	result, err := serviceapi.ConnectRepo(in.RepoURL, reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}
@@ -140,13 +152,13 @@ type initProjectParams struct {
 
 func (s *Server) handleInitProject(ctx context.Context, _ *mcp.CallToolRequest, in initProjectParams) (*mcp.CallToolResult, any, error) {
 	reporter, logs := newCollector()
-	prepared, err := app.PrepareProjectConfigInit(s.projectRoot(), reporter)
+	prepared, err := serviceapi.PrepareProjectConfigInit(s.projectRoot(), reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}
 	out := map[string]any{"init": prepared}
 	if in.ApplyVaultProject {
-		applied, applyErr := app.ApplyVaultProject(s.projectRoot(), reporter)
+		applied, applyErr := serviceapi.ApplyVaultProject(s.projectRoot(), reporter)
 		if applyErr != nil {
 			return toolFail(applyErr, logs())
 		}
@@ -159,7 +171,7 @@ type listAssetsParams struct{}
 
 func (s *Server) handleListAssets(ctx context.Context, _ *mcp.CallToolRequest, _ listAssetsParams) (*mcp.CallToolResult, any, error) {
 	reporter, logs := newCollector()
-	state, err := app.LoadAssetSelection(s.projectRoot(), reporter)
+	state, err := serviceapi.LoadAssetSelection(s.projectRoot(), reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}
@@ -173,7 +185,7 @@ type setAssetsParams struct {
 func (s *Server) handleSetAssets(ctx context.Context, _ *mcp.CallToolRequest, in setAssetsParams) (*mcp.CallToolResult, any, error) {
 	reporter, logs := newCollector()
 
-	result, err := app.SaveEnabledBundles(s.projectRoot(), in.EnabledBundles, reporter)
+	result, err := serviceapi.SaveEnabledBundles(s.projectRoot(), in.EnabledBundles, reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}
@@ -184,7 +196,7 @@ type pullParams struct{}
 
 func (s *Server) handlePull(ctx context.Context, _ *mcp.CallToolRequest, _ pullParams) (*mcp.CallToolResult, any, error) {
 	reporter, logs := newCollector()
-	result, err := app.PullProjectAssets(s.toolContext(ctx), s.projectRoot(), "", reporter)
+	result, err := serviceapi.PullProjectAssets(ctx, s.projectRoot(), reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}
@@ -195,7 +207,7 @@ type pushParams struct{}
 
 func (s *Server) handlePush(ctx context.Context, _ *mcp.CallToolRequest, _ pushParams) (*mcp.CallToolResult, any, error) {
 	reporter, logs := newCollector()
-	result, err := app.PushProjectAssets(s.toolContext(ctx), s.projectRoot(), reporter)
+	result, err := serviceapi.PushProjectAssets(ctx, s.projectRoot(), reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}
@@ -205,7 +217,7 @@ func (s *Server) handlePush(ctx context.Context, _ *mcp.CallToolRequest, _ pushP
 type previewPushParams struct{}
 
 func (s *Server) handlePreviewPush(ctx context.Context, _ *mcp.CallToolRequest, _ previewPushParams) (*mcp.CallToolResult, any, error) {
-	result, err := app.PreviewPushProjectAssets(s.projectRoot())
+	result, err := serviceapi.PreviewPushProjectAssets(ctx, s.projectRoot(), nil)
 	if err != nil {
 		return toolFail(err, nil)
 	}
@@ -222,7 +234,7 @@ func (s *Server) handleListSecrets(ctx context.Context, _ *mcp.CallToolRequest, 
 	if in.IncludeRemote != nil {
 		includeRemote = *in.IncludeRemote
 	}
-	result, err := app.ListSecretsMetadata(s.toolContext(ctx), s.projectRoot(), includeRemote, reporter)
+	result, err := serviceapi.ListSecretsMetadata(ctx, s.projectRoot(), includeRemote, reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}
@@ -233,7 +245,7 @@ type listDeleteCandidatesParams struct{}
 
 func (s *Server) handleListDeleteCandidates(ctx context.Context, _ *mcp.CallToolRequest, _ listDeleteCandidatesParams) (*mcp.CallToolResult, any, error) {
 	reporter, logs := newCollector()
-	candidates, err := app.ListDeleteCandidates(s.toolContext(ctx), s.projectRoot(), true, reporter)
+	candidates, err := serviceapi.ListDeleteCandidates(ctx, s.projectRoot(), true, reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}
@@ -269,7 +281,7 @@ func (s *Server) handleDelete(ctx context.Context, _ *mcp.CallToolRequest, in de
 			BundleName:    item.BundleName,
 		})
 	}
-	result, err := app.DeleteProjectItems(s.toolContext(ctx), app.DeleteProjectInput{
+	result, err := serviceapi.DeleteProjectItems(ctx, app.DeleteProjectInput{
 		ProjectRoot: s.projectRoot(),
 		Items:       items,
 		Confirmed:   in.Confirmed,

@@ -1,9 +1,12 @@
-version: v1
-managed:
-  enabled: true
-  go_package_prefix:
-    default: github.com/shichao402/Dec/schema
+version: v2
+inputs:
+  - directory: .
+    paths:
+      - service
 plugins:
   - remote: buf.build/protocolbuffers/go
+    out: gen/go
+    opt: paths=source_relative
+  - remote: buf.build/grpc/go
     out: gen/go
     opt: paths=source_relative

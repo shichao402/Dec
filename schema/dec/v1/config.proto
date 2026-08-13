@@ -9,6 +9,8 @@ message GlobalConfig {
   string repo_url = 1 [json_name = "repo_url"];
   repeated string ides = 2;
   string editor = 3;
+  // dec-server 在无门面连接后退出前的等待时长（Go duration，如 "30m"）。
+  string server_idle_timeout = 4 [json_name = "server_idle_timeout"];
 }
 
 // ProjectConfig 对应 <workspace>/.dec/config.yaml（version v2）。

@@ -19,8 +19,8 @@ func TestPushProjectAssets_PruneDecOrphansWhenCacheRemoved(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/combo/skills/keep-skill/SKILL.md":    "---\nname: keep-skill\n---\nkeep\n",
-		"bundles/combo/skills/remove-skill/SKILL.md":  "---\nname: remove-skill\n---\nold\n",
+		"bundles/combo/skills/keep-skill/SKILL.md":   "---\nname: keep-skill\n---\nkeep\n",
+		"bundles/combo/skills/remove-skill/SKILL.md": "---\nname: remove-skill\n---\nold\n",
 		"bundles/combo/bundle.yaml": `name: combo
 members:
   - skill/keep-skill
@@ -74,9 +74,9 @@ func TestDeleteProjectItems_RejectsUnconfirmed(t *testing.T) {
 	_, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
 		ProjectRoot: t.TempDir(),
 		Items: []DeleteSelectionItem{{
-			Kind: DeleteKindDecAsset,
-			Type: "skill",
-			Name: "demo",
+			Kind:  DeleteKindDecAsset,
+			Type:  "skill",
+			Name:  "demo",
 			Vault: "default",
 		}},
 	}, nil)

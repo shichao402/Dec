@@ -6,6 +6,7 @@
 │  Run           ││                                                                                │
 │  Remote        ││ Global Settings                                                                │
 │ Settings       ││   Repo URL: git@github.com:demo/dec.git                                        │
+│                ││   Server idle timeout: 30m                                                     │
 │                ││   [ ] codex                                                                    │
 │                ││   [x] cursor                                                                   │
 │                ││                                                                                │
@@ -19,7 +20,6 @@
 │                ││ 配置文件: /tmp/.dec/config.yaml                                                │
 │                ││ 本机 Vars: /tmp/.dec/local/vars.yaml                                           │
 │                ││ 保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。                            │
-│                ││                                                                                │
 │                ││                                                                                │
 │                ││                                                                                │
 │                ││                                                                                │

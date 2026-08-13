@@ -122,7 +122,7 @@ func TestSaveGlobalSettingsConfiguresAllSupportedIDEsByDefault(t *testing.T) {
 	if !ok {
 		t.Fatalf("cursor mcp.json 应包含 dec 条目: %#v", mcpCfg.MCPServers)
 	}
-	if decMCP.Command != "dec" || len(decMCP.Args) < 1 || decMCP.Args[0] != "mcp" {
+	if decMCP.Command != "dec-mcp" || len(decMCP.Args) < 1 || decMCP.Args[0] != "--project-root" {
 		t.Fatalf("dec MCP 配置 = %#v", decMCP)
 	}
 	if !result.VarsCreated {
@@ -283,4 +283,3 @@ func TestListUserSecretBundleCandidates_MergesSources(t *testing.T) {
 		t.Fatalf("缺少候选 %#v, got %#v", want, got)
 	}
 }
-

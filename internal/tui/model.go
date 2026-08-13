@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -13,6 +14,7 @@ import (
 	"github.com/shichao402/Dec/internal/diag"
 	"github.com/shichao402/Dec/internal/editor"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/serviceapi"
 	"github.com/shichao402/Dec/internal/update"
 )
 
@@ -31,9 +33,9 @@ type vaultInferenceLoadedMsg struct {
 }
 
 type overviewVaultEnrichedMsg struct {
-	bundles               []app.BundleOverview
-	availableBundleCount  int
-	err                   error
+	bundles              []app.BundleOverview
+	availableBundleCount int
+	err                  error
 }
 
 type vaultProjectAppliedMsg struct {
@@ -132,6 +134,22 @@ type runCompletedMsg struct {
 	err        error
 }
 
+type activeOperationPolledMsg struct {
+	active      bool
+	operationID string
+	operation   string
+	facade      string
+	err         error
+}
+
+type observedOperationEventMsg struct {
+	event app.OperationEvent
+}
+
+type observedOperationDoneMsg struct {
+	err error
+}
+
 type removeEventMsg struct {
 	event app.OperationEvent
 }
@@ -152,63 +170,67 @@ type updateDoneMsg struct {
 }
 
 var runPullOperation = func(ctx context.Context, projectRoot string, reporter app.Reporter) (*app.PullProjectAssetsResult, error) {
-	return app.PullProjectAssets(ctx, projectRoot, "", reporter)
+	return serviceapi.PullProjectAssets(ctx, projectRoot, reporter)
 }
 
 var runPushOperation = func(ctx context.Context, projectRoot string, reporter app.Reporter) (*app.PushProjectAssetsResult, error) {
-	return app.PushProjectAssets(ctx, projectRoot, reporter)
+	return serviceapi.PushProjectAssets(ctx, projectRoot, reporter)
 }
 
 var runRemoveOperation = func(input app.RemoveBundleInput, reporter app.Reporter) (*app.RemoveBundleResult, error) {
-	return app.RemoveBundle(input, reporter)
+	return serviceapi.RemoveBundle(context.Background(), input, reporter)
 }
 
 var previewPushOperation = func(projectRoot string) (*app.PushProjectAssetsPreview, error) {
-	return app.PreviewPushProjectAssets(projectRoot)
+	return serviceapi.PreviewPushProjectAssets(context.Background(), projectRoot, nil)
 }
 
 var loadGlobalSettingsOperation = func(reporter app.Reporter) (*app.GlobalSettingsState, error) {
-	return app.LoadGlobalSettings(reporter)
+	return serviceapi.LoadGlobalSettings(reporter)
 }
 
 var saveGlobalSettingsOperation = func(input app.SaveGlobalSettingsInput, reporter app.Reporter) (*app.SaveGlobalSettingsResult, error) {
-	return app.SaveGlobalSettings(input, reporter)
+	return serviceapi.SaveGlobalSettings(input, reporter)
 }
 
 var ensureBuiltinIDEAssetsOperation = func(ideNames []string, reporter app.Reporter) []string {
-	return app.EnsureBuiltinIDEAssets(ideNames, reporter)
+	warnings, err := serviceapi.EnsureBuiltinIDEAssets(ideNames, reporter)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	return warnings
 }
 
 var loadProjectSettingsOperation = func(projectRoot string, reporter app.Reporter) (*app.ProjectSettingsState, error) {
-	return app.LoadProjectSettings(projectRoot, reporter)
+	return serviceapi.LoadProjectSettings(projectRoot, reporter)
 }
 
 var saveProjectSettingsOperation = func(input app.SaveProjectSettingsInput, reporter app.Reporter) (*app.SaveProjectSettingsResult, error) {
-	return app.SaveProjectSettings(input, reporter)
+	return serviceapi.SaveProjectSettings(input, reporter)
 }
 
 var prepareProjectConfigInitOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
-	return app.PrepareProjectConfigInit(projectRoot, reporter)
+	return serviceapi.PrepareProjectConfigInit(projectRoot, reporter)
 }
 
 var ensureLocalProjectConfigOperation = func(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
-	return app.EnsureLocalProjectConfig(projectRoot, reporter)
+	return serviceapi.EnsureLocalProjectConfig(projectRoot, reporter)
 }
 
 var inferVaultProjectOperation = func(projectRoot string, reporter app.Reporter) (*app.VaultProjectInference, error) {
-	return app.InferVaultProject(projectRoot, reporter)
+	return serviceapi.InferVaultProject(projectRoot, reporter)
 }
 
 var applyVaultProjectOperation = func(projectRoot string, reporter app.Reporter) (*app.VaultProjectAutoApplyResult, error) {
-	return app.ApplyVaultProject(projectRoot, reporter)
+	return serviceapi.ApplyVaultProject(projectRoot, reporter)
 }
 
 var loadProjectVarsViewOperation = func(projectRoot string) (*app.ProjectVarsView, error) {
-	return app.LoadProjectVarsView(projectRoot)
+	return serviceapi.LoadProjectVarsView(projectRoot)
 }
 
 var ensureProjectVarsFileOperation = func(projectRoot string) (*app.EnsureProjectVarsFileResult, error) {
-	return app.EnsureProjectVarsFile(projectRoot)
+	return serviceapi.EnsureProjectVarsFile(projectRoot)
 }
 
 var updateCheckOperation = func(currentVersion string) (*update.CheckResult, error) {
@@ -250,74 +272,79 @@ type model struct {
 	assetsDirty      bool
 	savingAssets     bool
 	// "bundle" 表示只显示 bundle 节点（以及它们展开的成员）；其他值只影响单资产行的过滤。
-	settingsCursor              int
-	settingsDirty               bool
-	savingSettings              bool
-	settingsRepoInput           string
-	settingsRepoEditing         bool
-	settingsSelectedIDEs        []string
+	settingsCursor                int
+	settingsDirty                 bool
+	savingSettings                bool
+	settingsRepoInput             string
+	settingsRepoEditing           bool
+	settingsIdleTimeoutInput      string
+	settingsIdleTimeoutEditing    bool
+	settingsSelectedIDEs          []string
 	settingsSelectedSecretBundles []string
-	projectSettings             *app.ProjectSettingsState
-	projectSettingsErr          error
-	projectSettingsCursor       int
-	projectSettingsDirty        bool
-	savingProjectSettings       bool
-	projectSettingsOverride     bool
-	projectSettingsSelectedIDEs []string
-	lastInitResult              *app.ConfigInitPreparation
-	lastInitErr                 error
-	projectVars                 *app.ProjectVarsView
-	projectVarsErr              error
-	lastEditErr                 error
-	runningPull                 bool
-	runProgress                 *app.Progress
-	runEvents                   []string
-	runPinLine                  string
-	runShowHelp                 bool
-	runResult                   *app.PullProjectAssetsResult
-	pushResult                  *app.PushProjectAssetsResult
-	runErr                      error
-	runStream                   <-chan tea.Msg
-	runCtx                      context.Context
-	runCancel                   context.CancelFunc
-	runMode                     string // "pull" | "push" | "remove" | "update"
-	removeStage                 string // "", "select", "confirm", "running"
-	removeCursor                int
-	removeFilter                string
-	removeFilterInput           bool
-	removeTarget                *app.AssetBundleOption
-	runningRemove               bool
-	removeResult                *app.RemoveBundleResult
-	removeErr                   error
-	pushStage                   string // "", "loading", "summary", "confirm", "running"
-	pushPreview                 *app.PushProjectAssetsPreview
-	pushPreviewErr              error
-	pushPreviewLoad             asyncLoad
-	updateStage                 string // "", "checking", "result", "confirm", "running", "done"
-	updateResult                *update.CheckResult
-	updateErr                   error
-	updateDoneVersion           string
-	updatingBinary              bool
-	deleteCandidates            []app.DeleteCandidate
-	deleteTree                  TreeList
-	deleteFilter                string
-	deleteFilterInput           bool
-	deleteStage                 string // "", "list", "summary", "confirm", "running"
-	deleteCandidatesLoaded      bool
-	deleteLoad                  asyncLoad // 跨页飞行的候选列表加载（切页不取消）
-	deleteLoadErr               error
-	deleteIncludeRemote         bool
-	runningDelete               bool
-	deleteResult                *app.DeleteProjectResult
-	deleteErr                   error
-	remoteNoteEdit              *app.RemoteNoteEditSession
-	remoteSSHEdit               *app.RemoteSSHHostsEditSession
-	shellRefresh                asyncBatch // overview/assets/settings/projectSettings/projectVars
-	projectVarsLoad             asyncLoad  // 独立重载 .dec/vars.yaml
-	builtinAssetsLoad           asyncLoad  // 同步内置 IDE assets
-	localProjectLoad            asyncLoad  // 生成本地 project 配置
-	vaultApplyLoad              asyncLoad  // 应用推断的 vault project
-	projectInitLoad             asyncLoad  // Project 页扫描仓库
+	projectSettings               *app.ProjectSettingsState
+	projectSettingsErr            error
+	projectSettingsCursor         int
+	projectSettingsDirty          bool
+	savingProjectSettings         bool
+	projectSettingsOverride       bool
+	projectSettingsSelectedIDEs   []string
+	lastInitResult                *app.ConfigInitPreparation
+	lastInitErr                   error
+	projectVars                   *app.ProjectVarsView
+	projectVarsErr                error
+	lastEditErr                   error
+	runningPull                   bool
+	runProgress                   *app.Progress
+	runEvents                     []string
+	runPinLine                    string
+	runShowHelp                   bool
+	runResult                     *app.PullProjectAssetsResult
+	pushResult                    *app.PushProjectAssetsResult
+	runErr                        error
+	runStream                     <-chan tea.Msg
+	runCtx                        context.Context
+	runCancel                     context.CancelFunc
+	runMode                       string // "pull" | "push" | "remove" | "update"
+	observedOperationID           string
+	observedOperationFacade       string
+	observedStream                <-chan tea.Msg
+	removeStage                   string // "", "select", "confirm", "running"
+	removeCursor                  int
+	removeFilter                  string
+	removeFilterInput             bool
+	removeTarget                  *app.AssetBundleOption
+	runningRemove                 bool
+	removeResult                  *app.RemoveBundleResult
+	removeErr                     error
+	pushStage                     string // "", "loading", "summary", "confirm", "running"
+	pushPreview                   *app.PushProjectAssetsPreview
+	pushPreviewErr                error
+	pushPreviewLoad               asyncLoad
+	updateStage                   string // "", "checking", "result", "confirm", "running", "done"
+	updateResult                  *update.CheckResult
+	updateErr                     error
+	updateDoneVersion             string
+	updatingBinary                bool
+	deleteCandidates              []app.DeleteCandidate
+	deleteTree                    TreeList
+	deleteFilter                  string
+	deleteFilterInput             bool
+	deleteStage                   string // "", "list", "summary", "confirm", "running"
+	deleteCandidatesLoaded        bool
+	deleteLoad                    asyncLoad // 跨页飞行的候选列表加载（切页不取消）
+	deleteLoadErr                 error
+	deleteIncludeRemote           bool
+	runningDelete                 bool
+	deleteResult                  *app.DeleteProjectResult
+	deleteErr                     error
+	remoteNoteEdit                *app.RemoteNoteEditSession
+	remoteSSHEdit                 *app.RemoteSSHHostsEditSession
+	shellRefresh                  asyncBatch // overview/assets/settings/projectSettings/projectVars
+	projectVarsLoad               asyncLoad  // 独立重载 .dec/vars.yaml
+	builtinAssetsLoad             asyncLoad  // 同步内置 IDE assets
+	localProjectLoad              asyncLoad  // 生成本地 project 配置
+	vaultApplyLoad                asyncLoad  // 应用推断的 vault project
+	projectInitLoad               asyncLoad  // Project 页扫描仓库
 	// configInitMode 为 true 时表示由 dec config init 拉起：聚焦 Assets/bundle 视图，保存后退出。
 	configInitMode bool
 	// vaultInference Home 页待确认的 vault project 推断（来自目录名匹配）。
@@ -329,12 +356,12 @@ type model struct {
 	// focus 是当前键盘交互上下文（侧栏 / 内容 / bundle 成员）。
 	focus focusContext
 	// addSecretStage 是 Project 页「登记新 secret」的阶段；空串表示流程未开启。
-	addSecretStage       string
-	addSecretPathInput   string
-	addSecretTargets     []app.SecretTargetOption
-	addSecretTargetIdx   int
-	addSecretResult      *app.AddSecretResult
-	addSecretErr         error
+	addSecretStage     string
+	addSecretPathInput string
+	addSecretTargets   []app.SecretTargetOption
+	addSecretTargetIdx int
+	addSecretResult    *app.AddSecretResult
+	addSecretErr       error
 }
 
 func newModel(projectRoot, currentVersion string) model {
@@ -356,12 +383,12 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 		}
 	}
 	m := model{
-		projectRoot:     projectRoot,
-		currentVersion:  currentVersion,
-		pages:           []string{"Home", "Bundles", "Project", "Run", "Remote", "Settings"},
-		configInitMode:  opts.ConfigInitMode,
-		focus:           focusSidebar,
-		logs:            logs,
+		projectRoot:    projectRoot,
+		currentVersion: currentVersion,
+		pages:          []string{"Home", "Bundles", "Project", "Run", "Remote", "Settings"},
+		configInitMode: opts.ConfigInitMode,
+		focus:          focusSidebar,
+		logs:           logs,
 	}
 	if opts.ConfigInitMode {
 		m.pageIndex = 1 // Bundles
@@ -435,6 +462,43 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.refreshCmd(), m.startDeleteCandidatesLoad(m.deleteIncludeRemote, true))
 	case shellRefreshKickMsg:
 		diag.StartupLog("shellRefreshKickMsg → refreshCmd")
+		return m, tea.Batch(m.refreshCmd(), pollActiveOperationCmd(m.projectRoot, 0))
+	case activeOperationPolledMsg:
+		if msg.err == nil && msg.active && !m.runningPull && !m.runningRemove && m.observedOperationID != msg.operationID {
+			stream := make(chan tea.Msg, 64)
+			m.observedOperationID = msg.operationID
+			m.observedOperationFacade = msg.facade
+			m.observedStream = stream
+			m.runMode = msg.operation
+			m.runProgress = nil
+			m.runEvents = nil
+			m.pushLog(fmt.Sprintf("%s 正在执行 %s，已开始旁观进度", msg.facade, msg.operation))
+			return m, tea.Batch(
+				startWatchOperationCmd(m.projectRoot, msg.operationID, stream),
+				waitRunMsg(stream),
+				pollActiveOperationCmd(m.projectRoot, time.Second),
+			)
+		}
+		if !msg.active && m.observedOperationID != "" && m.observedStream == nil {
+			m.observedOperationID = ""
+			m.observedOperationFacade = ""
+		}
+		return m, pollActiveOperationCmd(m.projectRoot, time.Second)
+	case observedOperationEventMsg:
+		m.recordRunEvent(msg.event)
+		if m.observedStream != nil {
+			return m, waitRunMsg(m.observedStream)
+		}
+		return m, nil
+	case observedOperationDoneMsg:
+		m.observedStream = nil
+		if msg.err != nil {
+			m.pushLog("旁观操作结束: " + msg.err.Error())
+		} else {
+			m.pushLog("旁观操作已完成")
+		}
+		m.observedOperationID = ""
+		m.observedOperationFacade = ""
 		return m, m.refreshCmd()
 	case overviewLoadedMsg:
 		if !m.shellRefresh.acceptPart(msg.loadGen) {
@@ -565,6 +629,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settingsErr = msg.err
 		m.savingSettings = false
 		m.settingsRepoEditing = false
+		m.settingsIdleTimeoutEditing = false
 		m.settingsDirty = false
 		if msg.err != nil {
 			m.pushLog("Global settings load failed: " + msg.err.Error())
@@ -572,6 +637,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.state != nil {
 			m.settingsRepoInput = msg.state.RepoURL
+			m.settingsIdleTimeoutInput = msg.state.ServerIdleTimeout
 			m.settingsSelectedIDEs = cloneStrings(msg.state.SelectedIDEs)
 			m.settingsSelectedSecretBundles = cloneStrings(msg.state.UserEnabledBundles)
 			m.normalizeSettingsCursor()
@@ -858,6 +924,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.settingsRepoEditing && m.isSettingsPage() {
 			return m.handleSettingsRepoInput(msg)
 		}
+		if m.settingsIdleTimeoutEditing && m.isSettingsPage() {
+			return m.handleSettingsIdleTimeoutInput(msg)
+		}
 		if m.removeFilterInput && m.isRunPage() {
 			return m.handleRemoveFilterInput(msg)
 		}
@@ -954,6 +1023,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if msg.String() == "enter" {
 						m.beginSettingsRepoEdit()
 					}
+				} else if m.settingsCursor == 1 {
+					if msg.String() == "enter" {
+						m.beginSettingsIdleTimeoutEdit()
+					}
 				} else if m.settingsCursorIDEIndex() >= 0 {
 					m.toggleCurrentSettingsIDE()
 				} else if m.settingsCursorSecretBundleIndex() >= 0 {
@@ -971,7 +1044,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "e":
 			if m.isSettingsPage() && !m.savingSettings {
-				m.beginSettingsRepoEdit()
+				if m.settingsCursor == 1 {
+					m.beginSettingsIdleTimeoutEdit()
+				} else {
+					m.beginSettingsRepoEdit()
+				}
 				return m, nil
 			}
 			if m.isProjectPage() && !m.savingProjectSettings && !m.projectInitLoad.busy() {
@@ -994,7 +1071,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.isSettingsPage() && !m.savingSettings && m.settings != nil && m.settingsErr == nil {
 				m.savingSettings = true
 				m.pushLog("Saving global settings")
-				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), cloneStrings(m.settingsSelectedIDEs), cloneStrings(m.settingsSelectedSecretBundles))
+				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), strings.TrimSpace(m.settingsIdleTimeoutInput), cloneStrings(m.settingsSelectedIDEs), cloneStrings(m.settingsSelectedSecretBundles))
 			}
 			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
 				if m.projectSettingsOverride && len(normalizedStringList(m.projectSettingsSelectedIDEs)) == 0 {
@@ -1192,7 +1269,7 @@ func (m *model) refreshCmd() tea.Cmd {
 func loadOverviewCmd(projectRoot string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		done := diag.StartupSpan(fmt.Sprintf("loadOverviewCmd gen=%d skipVault", loadGen))
-		overview, err := app.LoadProjectOverviewOpts(projectRoot, app.OverviewLoadOpts{IncludeVaultBundles: false})
+		overview, err := serviceapi.LoadProjectOverview(projectRoot, false)
 		if err != nil {
 			done(fmt.Sprintf("err=%v", err))
 		} else if overview == nil {
@@ -1222,7 +1299,7 @@ func loadVaultInferenceCmd(projectRoot string) tea.Cmd {
 func enrichOverviewVaultCmd(projectRoot string) tea.Cmd {
 	return func() tea.Msg {
 		done := diag.StartupSpan("enrichOverviewVaultCmd")
-		overview, err := app.LoadProjectOverviewOpts(projectRoot, app.OverviewLoadOpts{IncludeVaultBundles: true})
+		overview, err := serviceapi.LoadProjectOverview(projectRoot, true)
 		if err != nil {
 			done(fmt.Sprintf("err=%v", err))
 			return overviewVaultEnrichedMsg{err: err}
@@ -1249,7 +1326,7 @@ func applyVaultProjectCmd(projectRoot string, loadGen uint64) tea.Cmd {
 func loadAssetsCmd(projectRoot string, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		done := diag.StartupSpan(fmt.Sprintf("loadAssetsCmd gen=%d", loadGen))
-		state, err := app.LoadAssetSelection(projectRoot, nil)
+		state, err := serviceapi.LoadAssetSelection(projectRoot, nil)
 		if err != nil {
 			done(fmt.Sprintf("err=%v", err))
 		} else if state == nil {
@@ -1263,7 +1340,7 @@ func loadAssetsCmd(projectRoot string, loadGen uint64) tea.Cmd {
 
 func saveAssetsCmd(projectRoot string, bundles []string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := app.SaveEnabledBundles(projectRoot, bundles, nil)
+		result, err := serviceapi.SaveEnabledBundles(projectRoot, bundles, nil)
 		return assetsSavedMsg{result: result, err: err}
 	}
 }
@@ -1281,10 +1358,11 @@ func loadSettingsCmd(loadGen uint64) tea.Cmd {
 	}
 }
 
-func saveSettingsCmd(repoURL string, ides []string, userSecretBundles []string) tea.Cmd {
+func saveSettingsCmd(repoURL, idleTimeout string, ides []string, userSecretBundles []string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := saveGlobalSettingsOperation(app.SaveGlobalSettingsInput{
 			RepoURL:            repoURL,
+			ServerIdleTimeout:  idleTimeout,
 			IDEs:               cloneStrings(ides),
 			UserEnabledBundles: append([]string{}, userSecretBundles...), // 非 nil，空表示清空用户级启用
 		}, nil)
@@ -1405,6 +1483,44 @@ func waitRunMsg(stream <-chan tea.Msg) tea.Cmd {
 	}
 }
 
+func pollActiveOperationCmd(projectRoot string, delay time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		api, err := serviceapi.Default()
+		if err != nil {
+			return activeOperationPolledMsg{err: err}
+		}
+		active, err := api.GetActiveOperation(context.Background(), projectRoot)
+		if err != nil {
+			return activeOperationPolledMsg{err: err}
+		}
+		return activeOperationPolledMsg{
+			active:      active != nil && active.Active,
+			operationID: active.GetOperationId(),
+			operation:   active.GetOperation(),
+			facade:      active.GetFacade(),
+		}
+	}
+}
+
+func startWatchOperationCmd(projectRoot, operationID string, stream chan<- tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		go func() {
+			api, err := serviceapi.Default()
+			if err == nil {
+				err = api.WatchOperation(context.Background(), projectRoot, operationID, app.ReporterFunc(func(event app.OperationEvent) {
+					stream <- observedOperationEventMsg{event: event}
+				}))
+			}
+			stream <- observedOperationDoneMsg{err: err}
+			close(stream)
+		}()
+		return nil
+	}
+}
+
 func cloneStrings(values []string) []string {
 	if values == nil {
 		return nil
@@ -1461,7 +1577,34 @@ func (m model) handleSettingsRepoInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) handleSettingsIdleTimeoutInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.settingsIdleTimeoutEditing = false
+		m.syncSettingsDirty()
+		return m, nil
+	case tea.KeyEnter:
+		m.settingsIdleTimeoutEditing = false
+		m.syncSettingsDirty()
+		m.pushLog("服务空闲超时已更新: " + fallbackValue(strings.TrimSpace(m.settingsIdleTimeoutInput), "30m"))
+		return m, nil
+	case tea.KeyBackspace, tea.KeyCtrlH:
+		m.settingsIdleTimeoutInput = trimLastRune(m.settingsIdleTimeoutInput)
+		m.syncSettingsDirty()
+		return m, nil
+	}
+	if len(msg.Runes) > 0 && !msg.Alt {
+		m.settingsIdleTimeoutInput += string(msg.Runes)
+		m.syncSettingsDirty()
+	}
+	return m, nil
+}
+
 func (m *model) startPullRun() tea.Cmd {
+	if m.observedOperationID != "" {
+		m.pushLog("当前 project 已有操作进行中，不能重复 pull/push")
+		return nil
+	}
 	stream := make(chan tea.Msg, 64)
 	ctx, cancel := context.WithCancel(context.Background())
 	m.runningPull = true
@@ -1480,6 +1623,10 @@ func (m *model) startPullRun() tea.Cmd {
 }
 
 func (m *model) beginPushConfirmation() tea.Cmd {
+	if m.observedOperationID != "" {
+		m.pushLog("当前 project 已有操作进行中，不能重复 pull/push")
+		return nil
+	}
 	if m.pushPreviewLoad.busy() {
 		return nil
 	}
@@ -2247,6 +2394,8 @@ func (m model) renderRunPage(width int) string {
 func (m model) renderRunHeader() string {
 	mode := "就绪"
 	switch {
+	case m.observedOperationID != "":
+		mode = fmt.Sprintf("%s 正在 %s（旁观）", m.observedOperationFacade, strings.ToUpper(m.runMode))
 	case m.runningPull && m.runMode == "push":
 		mode = "Push 执行中"
 	case m.runningPull:
@@ -2273,6 +2422,8 @@ func (m model) renderRunHeader() string {
 
 func (m model) renderRunActionBar() string {
 	switch {
+	case m.observedOperationID != "":
+		return shellMutedStyle.Render("该 project 写操作已锁定 · 正在旁观进度 · ? 帮助")
 	case m.runningPull && m.runMode == "push":
 		return shellMutedStyle.Render("Esc 取消 push  ·  ? 帮助")
 	case m.runningPull:
@@ -2285,7 +2436,7 @@ func (m model) renderRunActionBar() string {
 }
 
 func (m model) renderRunStateBlock(width int) []string {
-	if m.runningPull || m.runningRemove {
+	if m.runningPull || m.runningRemove || m.observedOperationID != "" {
 		return m.renderRunActiveBlock(width)
 	}
 	if m.runResult == nil && m.pushResult == nil && m.runErr == nil && m.removeResult == nil && m.removeErr == nil {
@@ -2339,7 +2490,7 @@ func (m model) renderSecretsSyncPlanLines() []string {
 	if m.overview == nil || !m.overview.ProjectConfigReady {
 		return nil
 	}
-	targets, err := app.ListSecretSyncTargets(m.projectRoot)
+	targets, err := serviceapi.ListSecretSyncTargets(m.projectRoot)
 	if err != nil || len(targets) == 0 {
 		return []string{shellMutedStyle.Render("Secrets  无已解析 SyncTarget（需启用 bundle 或配置 project secrets）")}
 	}
@@ -2836,13 +2987,19 @@ func (m model) renderSettingsList() string {
 	} else {
 		lines = append(lines, shellLogStyle.Render(repoLine))
 	}
+	idleLine := fmt.Sprintf("%s Server idle timeout: %s", settingsCursorMarker(m.settingsCursor == 1 && m.focus != focusSidebar), fallbackValue(strings.TrimSpace(m.settingsIdleTimeoutInput), "30m"))
+	if m.settingsCursor == 1 && m.focus != focusSidebar {
+		lines = append(lines, shellSelectedRow.Render(idleLine))
+	} else {
+		lines = append(lines, shellLogStyle.Render(idleLine))
+	}
 	for idx, ideName := range m.settings.AvailableIDEs {
 		selected := settingsContainsIDE(m.settingsSelectedIDEs, ideName)
 		checked := " "
 		if selected {
 			checked = "x"
 		}
-		row := idx + 1
+		row := idx + 2
 		line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.settingsCursor == row && m.focus != focusSidebar), checked, ideName)
 		switch {
 		case m.settingsCursor == row && m.focus != focusSidebar:
@@ -2894,6 +3051,13 @@ func (m model) renderSettingsDetails() string {
 			fmt.Sprintf("本机 Vars: %s", m.settings.VarsPath),
 			"保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。",
 		)
+	case m.settingsCursor == 1:
+		lines = append(lines,
+			fmt.Sprintf("当前值: %s", fallbackValue(strings.TrimSpace(m.settingsIdleTimeoutInput), "30m")),
+			"最后一个 TUI/MCP 门面断开后开始计时；超时后 dec-server 退出并清除内存 session。",
+			"格式使用 Go duration，例如 15m、30m、1h。按 Enter 或 e 编辑，保存后下次空闲计时生效。",
+			fmt.Sprintf("配置文件: %s", m.settings.ConfigPath),
+		)
 	case m.settingsCursorIDEIndex() >= 0:
 		ideName := m.currentSettingsIDEName()
 		lines = append(lines,
@@ -2916,6 +3080,9 @@ func (m model) renderSettingsDetails() string {
 	}
 	if m.settingsRepoEditing {
 		lines = append(lines, "", shellWarnStyle.Render("Repo URL 输入模式已开启。"))
+	}
+	if m.settingsIdleTimeoutEditing {
+		lines = append(lines, "", shellWarnStyle.Render("服务空闲超时输入模式已开启。"))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -3104,16 +3271,16 @@ func (m model) settingsSecretBundleRows() []string {
 
 func (m model) settingsSecretBundleRowStart() int {
 	if m.settings == nil {
-		return 1
+		return 2
 	}
-	return 1 + len(m.settings.AvailableIDEs)
+	return 2 + len(m.settings.AvailableIDEs)
 }
 
 func (m model) settingsCursorIDEIndex() int {
-	if m.settings == nil || m.settingsCursor <= 0 {
+	if m.settings == nil || m.settingsCursor <= 1 {
 		return -1
 	}
-	idx := m.settingsCursor - 1
+	idx := m.settingsCursor - 2
 	if idx < 0 || idx >= len(m.settings.AvailableIDEs) {
 		return -1
 	}
@@ -3232,7 +3399,7 @@ func (m model) settingsRowCount() int {
 	if m.settings == nil {
 		return 0
 	}
-	return 1 + len(m.settings.AvailableIDEs) + len(m.settingsSecretBundleRows())
+	return 2 + len(m.settings.AvailableIDEs) + len(m.settingsSecretBundleRows())
 }
 
 func (m model) canNavigateAssets() bool {
@@ -3282,6 +3449,15 @@ func (m *model) beginSettingsRepoEdit() {
 	m.pushLog("Repo URL input opened")
 }
 
+func (m *model) beginSettingsIdleTimeoutEdit() {
+	if m.settings == nil {
+		return
+	}
+	m.settingsCursor = 1
+	m.settingsIdleTimeoutEditing = true
+	m.pushLog("服务空闲超时输入已打开")
+}
+
 func (m *model) toggleCurrentSettingsIDE() {
 	ideName := m.currentSettingsIDEName()
 	if strings.TrimSpace(ideName) == "" {
@@ -3320,6 +3496,7 @@ func (m *model) syncSettingsDirty() {
 	currentRepo := strings.TrimSpace(m.settingsRepoInput)
 	loadedRepo := strings.TrimSpace(m.settings.RepoURL)
 	m.settingsDirty = currentRepo != loadedRepo ||
+		strings.TrimSpace(m.settingsIdleTimeoutInput) != strings.TrimSpace(m.settings.ServerIdleTimeout) ||
 		!equalNormalizedStrings(m.settingsSelectedIDEs, m.settings.SelectedIDEs) ||
 		!equalNormalizedStrings(m.settingsSelectedSecretBundles, m.settings.UserEnabledBundles)
 }

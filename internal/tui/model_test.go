@@ -19,13 +19,13 @@ func TestModelViewRendersHomeOverview(t *testing.T) {
 	m.height = 36
 
 	updated, _ := m.Update(overviewLoadedMsg{overview: &app.ProjectOverview{
-		ProjectRoot:        "/tmp/dec-project",
-		RepoConnected:      true,
-		RepoRemoteURL:      "git@github.com:demo/dec.git",
-		ProjectConfigPath:  "/tmp/dec-project/.dec/config.yaml",
-		ProjectConfigReady: true,
-		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
-		VarsFileReady:      true,
+		ProjectRoot:          "/tmp/dec-project",
+		RepoConnected:        true,
+		RepoRemoteURL:        "git@github.com:demo/dec.git",
+		ProjectConfigPath:    "/tmp/dec-project/.dec/config.yaml",
+		ProjectConfigReady:   true,
+		VarsPath:             "/tmp/dec-project/.dec/vars.yaml",
+		VarsFileReady:        true,
 		AvailableBundleCount: 2,
 		EnabledBundleCount:   1,
 		Bundles: []app.BundleOverview{
@@ -696,7 +696,7 @@ func TestModelSettingsHotkeysToggleIDEAndStartEdit(t *testing.T) {
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
-	m.settingsCursor = 2
+	m.settingsCursor = 3 // repo(0) + idle timeout(1) + cursor IDE(2) + codex IDE(3)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m = updated.(model)
@@ -727,7 +727,7 @@ func TestModelSettingsHotkeysToggleUserSecretBundle(t *testing.T) {
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
-	m.settingsCursor = 2 // repo(0) + IDE(1) + first secret bundle
+	m.settingsCursor = 3 // repo(0) + idle timeout(1) + IDE(2) + first secret bundle(3)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m = updated.(model)
@@ -736,6 +736,37 @@ func TestModelSettingsHotkeysToggleUserSecretBundle(t *testing.T) {
 	}
 	if !m.settingsDirty {
 		t.Fatal("切换 user secret bundle 后应 dirty")
+	}
+}
+
+func TestModelObservesOtherFacadeProjectOperation(t *testing.T) {
+	m := newModel(t.TempDir(), "v1.0.0")
+	m.pageIndex = 3 // Run
+
+	updated, cmd := m.Update(activeOperationPolledMsg{
+		active:      true,
+		operationID: "op-1",
+		operation:   "pull",
+		facade:      "mcp",
+	})
+	m = updated.(model)
+	if m.observedOperationID != "op-1" || m.observedOperationFacade != "mcp" {
+		t.Fatalf("未进入旁观状态: id=%q facade=%q", m.observedOperationID, m.observedOperationFacade)
+	}
+	if cmd == nil {
+		t.Fatal("检测到 MCP 操作后应启动 watch 命令")
+	}
+	if got := m.renderRunHeader(); !strings.Contains(got, "mcp") || !strings.Contains(got, "旁观") {
+		t.Fatalf("Run 标题未显示旁观方: %q", got)
+	}
+
+	updated, _ = m.Update(observedOperationEventMsg{event: app.OperationEvent{
+		Message:  "拉取中",
+		Progress: &app.Progress{Phase: "pull", Current: 1, Total: 2},
+	}})
+	m = updated.(model)
+	if m.runProgress == nil || m.runProgress.Current != 1 {
+		t.Fatalf("未显示旁观进度: %#v", m.runProgress)
 	}
 }
 

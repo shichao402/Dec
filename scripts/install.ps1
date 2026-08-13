@@ -57,6 +57,7 @@ function Install-Dec {
     $installDir = if ($env:DEC_HOME) { $env:DEC_HOME } else { Join-Path $env:USERPROFILE ".dec" }
     $binDir = Join-Path $installDir "bin"
     $binaryPath = Join-Path $binDir "dec.exe"
+    $binaries = @("dec", "dec-server", "dec-mcp", "dec-exec")
     $updateBranch = if ($env:DEC_BRANCH) { $env:DEC_BRANCH } else { "ReleaseLatest" }
 
     Write-ColorOutput "检测到平台: $platform" -Type "Info"
@@ -94,8 +95,15 @@ function Install-Dec {
             if ($currentVersion) {
                 Write-ColorOutput "当前已安装版本: $currentVersion" -Type "Info"
                 if ((Compare-Versions -Version1 $currentVersion -Version2 $latestVersion) -ge 0) {
-                    Write-ColorOutput "已是最新版本，无需更新" -Type "Success"
-                    exit 0
+                    $suiteComplete = $true
+                    foreach ($binary in $binaries) {
+                        if (-not (Test-Path (Join-Path $binDir "$binary.exe"))) { $suiteComplete = $false }
+                    }
+                    if ($suiteComplete) {
+                        Write-ColorOutput "已是最新版本，且四个程序完整" -Type "Success"
+                        exit 0
+                    }
+                    Write-ColorOutput "主程序已是最新版本，但服务/门面程序不完整，将修复安装" -Type "Warning"
                 }
                 # 版本较旧，提示用户选择
                 $answer = Read-Host "检测到旧版本 $currentVersion，最新版本为 $latestVersion，是否覆盖安装？[Y/n]"
@@ -126,17 +134,19 @@ function Install-Dec {
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 
     $downloadTag = if ($updateBranch -eq "ReleaseTest") { "test-$latestVersion" } else { $latestVersion }
-    $binaryName = "dec-$platform.exe"
-    $downloadUrl = "https://github.com/shichao402/Dec/releases/download/$downloadTag/$binaryName"
-
-    Write-ColorOutput "下载预编译版本..." -Type "Info"
-    try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $binaryPath -ErrorAction Stop
-        Write-ColorOutput "二进制下载完成" -Type "Success"
-    } catch {
-        Write-ColorOutput "下载失败: $downloadUrl" -Type "Error"
-        exit 1
+    Write-ColorOutput "下载 Dec 程序组..." -Type "Info"
+    foreach ($binary in $binaries) {
+        $binaryName = "$binary-$platform.exe"
+        $downloadUrl = "https://github.com/shichao402/Dec/releases/download/$downloadTag/$binaryName"
+        $targetPath = Join-Path $binDir "$binary.exe"
+        try {
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -ErrorAction Stop
+        } catch {
+            Write-ColorOutput "下载失败: $downloadUrl" -Type "Error"
+            exit 1
+        }
     }
+    Write-ColorOutput "四个程序下载完成" -Type "Success"
 
     Write-ColorOutput "配置环境变量..." -Type "Info"
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -164,8 +174,7 @@ function Install-Dec {
     Write-Host ""
     Write-ColorOutput "之后可以运行：" -Type "Info"
     Write-Host "  dec --help"
-    Write-Host "  dec config repo <your-vault-repo-url>"
-    Write-Host "  dec list"
+    Write-Host "  dec            # 打开 TUI；Settings 中连接仓库"
     Write-Host ""
 }
 

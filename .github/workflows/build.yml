@@ -121,16 +121,22 @@ jobs:
         run: |
           EXT=""
           if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          OUTPUT="dec-${GOOS}-${GOARCH}${EXT}"
-          # CGO_ENABLED=0 确保产物为纯静态二进制，不依赖构建机 glibc（避免在老 Linux 上报 GLIBC_2.3x not found）
-          go build -ldflags "-X main.Version=${{ steps.version.outputs.version }} -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')" -o "$OUTPUT" .
-          echo "artifact=${OUTPUT}" >> "$GITHUB_ENV"
+          LDFLAGS="-X main.Version=${{ steps.version.outputs.version }} -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')"
+          # CGO_ENABLED=0 确保产物为纯静态二进制，不依赖构建机 glibc。
+          go build -ldflags "$LDFLAGS" -o "dec-${GOOS}-${GOARCH}${EXT}" .
+          for component in dec-server dec-mcp dec-exec; do
+            go build -ldflags "$LDFLAGS" -o "${component}-${GOOS}-${GOARCH}${EXT}" "./cmd/${component}"
+          done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
           name: dec-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: ${{ env.artifact }}
+          path: |
+            dec-${{ matrix.goos }}-${{ matrix.goarch }}*
+            dec-server-${{ matrix.goos }}-${{ matrix.goarch }}*
+            dec-mcp-${{ matrix.goos }}-${{ matrix.goarch }}*
+            dec-exec-${{ matrix.goos }}-${{ matrix.goarch }}*
 
   rup-publish:
     name: RUP stage + publish (COS via agent)
@@ -189,14 +195,15 @@ jobs:
           for f in dist/dec-*; do
             base=$(basename "$f")
             case "$base" in
-              dec-linux-amd64) os=linux; arch=amd64 ;;
-              dec-linux-arm64) os=linux; arch=arm64 ;;
-              dec-darwin-amd64) os=darwin; arch=amd64 ;;
-              dec-darwin-arm64) os=darwin; arch=arm64 ;;
-              dec-windows-amd64.exe) os=windows; arch=amd64 ;;
+              *-linux-amd64) os=linux; arch=amd64 ;;
+              *-linux-arm64) os=linux; arch=arm64 ;;
+              *-darwin-amd64) os=darwin; arch=amd64 ;;
+              *-darwin-arm64) os=darwin; arch=arm64 ;;
+              *-windows-amd64.exe) os=windows; arch=amd64 ;;
               *) continue ;;
             esac
-            ADD_ARGS+=(--add "$f" "id=$base,kind=binary,os=$os,arch=$arch")
+            component="${base%-${os}-${arch}*}"
+            ADD_ARGS+=(--add "$f" "id=$base,kind=binary,os=$os,arch=$arch,component=$component")
           done
           CODE=$(python3 -c "maj,min,pat='${VER}'.split('.'); print(int(maj)*1000000+int(min)*1000+int(pat))")
           ./relkit-bin stage "$VER" --code "$CODE" "${ADD_ARGS[@]}"

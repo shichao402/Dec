@@ -1,8 +1,6 @@
 package mcp
 
 import (
-	"context"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/shichao402/Dec/internal/app"
 )
@@ -44,8 +42,4 @@ func toolOK(data any, logs []logEntry) (*mcp.CallToolResult, toolResponse, error
 
 func toolFail(err error, logs []logEntry) (*mcp.CallToolResult, toolResponse, error) {
 	return nil, toolResponse{OK: false, Error: err.Error(), Logs: logs}, nil
-}
-
-func (s *Server) toolContext(ctx context.Context) context.Context {
-	return app.WithUnlockConfig(ctx, app.UnlockConfig{Timeout: app.MCPSessionUnlockTimeout})
 }

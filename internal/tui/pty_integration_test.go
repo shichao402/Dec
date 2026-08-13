@@ -105,6 +105,7 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 		"LANG="+lang,
 		"LC_ALL="+lang,
 		"DEC_NO_TUI=",
+		"DEC_HOME="+t.TempDir(),
 		unlock.EnvNoWebUnlock+"=1",
 	)
 	if pw := strings.TrimSpace(os.Getenv("DEC_BW_PASSWORD")); pw != "" {
@@ -231,13 +232,21 @@ func buildDecBinary(t *testing.T) string {
 	repoRoot := findRepoRoot(t)
 	outDir := t.TempDir()
 	outBin := filepath.Join(outDir, "dec")
-
-	build := exec.Command("go", "build", "-o", outBin, ".")
-	build.Dir = repoRoot
-	build.Env = os.Environ()
-	out, err := build.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go build dec 失败: %v\n%s", err, out)
+	targets := []struct {
+		name string
+		pkg  string
+	}{
+		{"dec", "."},
+		{"dec-server", "./cmd/dec-server"},
+	}
+	for _, target := range targets {
+		build := exec.Command("go", "build", "-o", filepath.Join(outDir, target.name), target.pkg)
+		build.Dir = repoRoot
+		build.Env = os.Environ()
+		out, err := build.CombinedOutput()
+		if err != nil {
+			t.Fatalf("go build %s 失败: %v\n%s", target.name, err, out)
+		}
 	}
 	return outBin
 }

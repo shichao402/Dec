@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/serviceapi"
 )
 
 type deleteLoadedMsg struct {
@@ -27,11 +28,11 @@ type deleteCompletedMsg struct {
 }
 
 var listDeleteCandidatesOperation = func(ctx context.Context, projectRoot string, includeRemote bool, reporter app.Reporter) ([]app.DeleteCandidate, error) {
-	return app.ListDeleteCandidates(ctx, projectRoot, includeRemote, reporter)
+	return serviceapi.ListDeleteCandidates(ctx, projectRoot, includeRemote, reporter)
 }
 
 var runDeleteOperation = func(ctx context.Context, input app.DeleteProjectInput, reporter app.Reporter) (*app.DeleteProjectResult, error) {
-	return app.DeleteProjectItems(ctx, input, reporter)
+	return serviceapi.DeleteProjectItems(ctx, input, reporter)
 }
 
 func loadDeleteCandidatesCmd(ctx context.Context, projectRoot string, includeRemote bool, loadGen uint64) tea.Cmd {

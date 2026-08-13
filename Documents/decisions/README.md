@@ -28,3 +28,4 @@
 | [0005](0005-secrets-machine-handlers.md) | Secrets Machine Handlers：SourceKind + 名字路由 | 已接受（实施中） |
 | [0006](0006-retire-pkg-for-internal.md) | 源码布局：废除 `pkg/`，统一到 `internal/` | 已接受（已实现） |
 | [0007](0007-machine-secrets-root.md) | 机器级 bundle secrets 根 + 项目覆盖层 | 已接受（实施中） |
+| [0008](0008-service-facade-split.md) | Dec 服务 / 门面拆分 | 已接受（规划中） |

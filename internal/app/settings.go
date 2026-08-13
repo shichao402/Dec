@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/shichao402/Dec/internal/assets"
 	"github.com/shichao402/Dec/internal/config"
@@ -34,6 +35,7 @@ type GlobalSettingsState struct {
 	UserEnabledBundles     []string // 本机启用的 Dec bundle 短名（user_enabled_bundles）
 	SecretsConfigPath      string
 	BitwardenSessionReady  bool
+	ServerIdleTimeout      string
 }
 
 type ConnectRepoResult struct {
@@ -46,19 +48,29 @@ type SaveGlobalSettingsInput struct {
 	RepoURL            string
 	IDEs               []string
 	UserEnabledBundles []string // nil = 不改 secrets 用户级启用；非 nil（含空切片）= 写回
+	ServerIdleTimeout  string
 }
 
 type SaveGlobalSettingsResult struct {
-	RepoURL            string
-	IDEs               []string
-	UserEnabledBundles []string
-	ConfigPath         string
-	VarsPath           string
-	VarsCreated        bool
-	BareRepo           string
-	InstallWarnings    []string
-	SecretsConfigPath  string
+	RepoURL             string
+	IDEs                []string
+	UserEnabledBundles  []string
+	ConfigPath          string
+	VarsPath            string
+	VarsCreated         bool
+	BareRepo            string
+	InstallWarnings     []string
+	SecretsConfigPath   string
 	CreatedVaultBundles []string // 本次为用户级启用新建的 vault 占位
+	ServerIdleTimeout   string
+}
+
+func normalizedServerIdleTimeout(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "30m"
+	}
+	return value
 }
 
 func LoadGlobalSettings(reporter Reporter) (*GlobalSettingsState, error) {
@@ -78,9 +90,10 @@ func LoadGlobalSettings(reporter Reporter) (*GlobalSettingsState, error) {
 	}
 
 	state := &GlobalSettingsState{
-		ConfigPath:       configPath,
-		VarsPath:         varsPath,
-		ConfiguredEditor: strings.TrimSpace(globalConfig.Editor),
+		ConfigPath:        configPath,
+		VarsPath:          varsPath,
+		ConfiguredEditor:  strings.TrimSpace(globalConfig.Editor),
+		ServerIdleTimeout: normalizedServerIdleTimeout(globalConfig.ServerIdleTimeout),
 	}
 
 	availableIDEs := ide.List()
@@ -318,6 +331,14 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 
 	globalConfig.RepoURL = targetRepoURL
 	globalConfig.IDEs = append([]string(nil), targetIDEs...)
+	globalConfig.ServerIdleTimeout = normalizedServerIdleTimeout(input.ServerIdleTimeout)
+	if idle, err := time.ParseDuration(globalConfig.ServerIdleTimeout); err != nil || idle <= 0 {
+		if err == nil {
+			err = fmt.Errorf("必须大于 0")
+		}
+		return nil, fmt.Errorf("服务空闲超时格式无效（例如 30m、1h）: %w", err)
+	}
+	result.ServerIdleTimeout = globalConfig.ServerIdleTimeout
 	if err := config.SaveGlobalConfig(globalConfig); err != nil {
 		return nil, fmt.Errorf("保存全局配置失败: %w", err)
 	}

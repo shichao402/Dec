@@ -1,6 +1,7 @@
 package ide
 
 import (
+	"path/filepath"
 	"sort"
 	"testing"
 )
@@ -19,7 +20,7 @@ func TestGetUnregisteredIDEReturnsFallback(t *testing.T) {
 	}
 	// fallback 应使用 .unknown-ide 作为目录
 	dir := unknown.RulesDir("/project")
-	if dir != "/project/.unknown-ide/rules" {
+	if dir != filepath.Join("/project", ".unknown-ide", "rules") {
 		t.Fatalf("未注册 IDE 的 RulesDir 应为 /project/.unknown-ide/rules，得到 %s", dir)
 	}
 }
@@ -65,7 +66,7 @@ func TestListContainsAllRegistered(t *testing.T) {
 func TestCodebuddyMCPConfigPath(t *testing.T) {
 	cb := Get("codebuddy")
 	path := cb.MCPConfigPath("/project")
-	if path != "/project/.mcp.json" {
+	if path != filepath.Join("/project", ".mcp.json") {
 		t.Fatalf("CodeBuddy MCP 配置路径应为 /project/.mcp.json，得到 %s", path)
 	}
 }
@@ -73,7 +74,7 @@ func TestCodebuddyMCPConfigPath(t *testing.T) {
 func TestCursorMCPConfigPath(t *testing.T) {
 	cursor := Get("cursor")
 	path := cursor.MCPConfigPath("/project")
-	if path != "/project/.cursor/mcp.json" {
+	if path != filepath.Join("/project", ".cursor", "mcp.json") {
 		t.Fatalf("Cursor MCP 配置路径应为 /project/.cursor/mcp.json，得到 %s", path)
 	}
 }
@@ -81,20 +82,20 @@ func TestCursorMCPConfigPath(t *testing.T) {
 func TestCodexMCPConfigPath(t *testing.T) {
 	codex := Get("codex")
 	path := codex.MCPConfigPath("/project")
-	if path != "/project/.codex/config.toml" {
+	if path != filepath.Join("/project", ".codex", "config.toml") {
 		t.Fatalf("Codex MCP 配置路径应为 /project/.codex/config.toml，得到 %s", path)
 	}
 }
 
 func TestCodexInternalProjectUsesCodexPath(t *testing.T) {
 	impl := Get("codex-internal")
-	if rulesDir := impl.RulesDir("/project"); rulesDir != "/project/.codex/rules" {
+	if rulesDir := impl.RulesDir("/project"); rulesDir != filepath.Join("/project", ".codex", "rules") {
 		t.Fatalf("codex-internal 项目级 RulesDir 应复用 /project/.codex/rules，得到 %s", rulesDir)
 	}
-	if skillsDir := impl.SkillsDir("/project"); skillsDir != "/project/.codex/skills" {
+	if skillsDir := impl.SkillsDir("/project"); skillsDir != filepath.Join("/project", ".codex", "skills") {
 		t.Fatalf("codex-internal 项目级 SkillsDir 应复用 /project/.codex/skills，得到 %s", skillsDir)
 	}
-	if path := impl.MCPConfigPath("/project"); path != "/project/.codex/config.toml" {
+	if path := impl.MCPConfigPath("/project"); path != filepath.Join("/project", ".codex", "config.toml") {
 		t.Fatalf("codex-internal 项目级 MCP 配置应复用 /project/.codex/config.toml，得到 %s", path)
 	}
 }
@@ -105,12 +106,12 @@ func TestIDEDirectoryStructure(t *testing.T) {
 		rulesDir  string
 		skillsDir string
 	}{
-		{"cursor", "/project/.cursor/rules", "/project/.cursor/skills"},
-		{"codebuddy", "/project/.codebuddy/rules", "/project/.codebuddy/skills"},
-		{"claude", "/project/.claude/rules", "/project/.claude/skills"},
-		{"claude-internal", "/project/.claude/rules", "/project/.claude/skills"},
-		{"codex", "/project/.codex/rules", "/project/.codex/skills"},
-		{"codex-internal", "/project/.codex/rules", "/project/.codex/skills"},
+		{"cursor", filepath.Join("/project", ".cursor", "rules"), filepath.Join("/project", ".cursor", "skills")},
+		{"codebuddy", filepath.Join("/project", ".codebuddy", "rules"), filepath.Join("/project", ".codebuddy", "skills")},
+		{"claude", filepath.Join("/project", ".claude", "rules"), filepath.Join("/project", ".claude", "skills")},
+		{"claude-internal", filepath.Join("/project", ".claude", "rules"), filepath.Join("/project", ".claude", "skills")},
+		{"codex", filepath.Join("/project", ".codex", "rules"), filepath.Join("/project", ".codex", "skills")},
+		{"codex-internal", filepath.Join("/project", ".codex", "rules"), filepath.Join("/project", ".codex", "skills")},
 	}
 
 	for _, tt := range tests {
@@ -130,8 +131,8 @@ func TestInternalIDEUserRoots(t *testing.T) {
 		homeDir  string
 		wantRoot string
 	}{
-		{"claude-internal", "/home/dev", "/home/dev/.claude-internal"},
-		{"codex-internal", "/home/dev", "/home/dev/.codex-internal"},
+		{"claude-internal", "/home/dev", filepath.Join("/home/dev", ".claude-internal")},
+		{"codex-internal", "/home/dev", filepath.Join("/home/dev", ".codex-internal")},
 	}
 
 	for _, tt := range tests {

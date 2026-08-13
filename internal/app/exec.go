@@ -10,7 +10,7 @@ import (
 	"github.com/shichao402/Dec/internal/secrets"
 )
 
-// ExecWithSecretsInput 描述一次 dec exec 注入启动。
+// ExecWithSecretsInput 描述一次 dec-exec 注入启动。
 type ExecWithSecretsInput struct {
 	ProjectRoot string
 	Bundle      string
@@ -78,15 +78,14 @@ func RunExecWithSecrets(input ExecWithSecretsInput) (int, error) {
 	return 1, err
 }
 
-// WrapMCPServerWithExec 把 MCP server 启动命令包进 dec exec。
+// WrapMCPServerWithExec 把 MCP server 启动命令包进独立 dec-exec。
 // 原 command/args 整体后移；清掉会泄露的 env 占位符注入。
 func WrapMCPServerWithExec(projectRoot, bundle, decBin string, command string, args []string, env map[string]string) (string, []string, map[string]string) {
 	if strings.TrimSpace(decBin) == "" {
-		decBin = "dec"
+		decBin = "dec-exec"
 	}
 	root, _ := filepath.Abs(projectRoot)
 	wrappedArgs := []string{
-		"exec",
 		"--project-root", root,
 	}
 	if strings.TrimSpace(bundle) != "" {
@@ -96,7 +95,7 @@ func WrapMCPServerWithExec(projectRoot, bundle, decBin string, command string, a
 	for _, a := range args {
 		wrappedArgs = append(wrappedArgs, strings.ReplaceAll(a, "${workspaceFolder}", root))
 	}
-	// 保留非密钥类显式 env；${workspaceFolder} 写成绝对项目根；其它 ${VAR} 占位去掉（由 dec exec 注入）。
+	// 保留非密钥类显式 env；${workspaceFolder} 写成绝对项目根；其它 ${VAR} 占位去掉（由 dec-exec 注入）。
 	cleanEnv := make(map[string]string)
 	for k, v := range env {
 		v = strings.ReplaceAll(v, "${workspaceFolder}", root)

@@ -6,12 +6,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/repo"
+	"github.com/shichao402/Dec/internal/service"
+	"github.com/shichao402/Dec/internal/serviceapi"
+	"github.com/shichao402/Dec/internal/servicehost"
 )
 
 func TestHandleStatus_NoConfig(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
+	startTestService(t)
 	root := t.TempDir()
 	s := New(Config{ProjectRoot: root})
 
@@ -26,9 +32,13 @@ func TestHandleStatus_NoConfig(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("expected ok, got %#v", resp)
 	}
-	overview, ok := resp.Data.(*app.ProjectOverview)
+	data, ok := resp.Data.(map[string]any)
 	if !ok {
 		t.Fatalf("data type = %T", resp.Data)
+	}
+	overview, ok := data["project"].(*app.ProjectOverview)
+	if !ok {
+		t.Fatalf("project data type = %T", data["project"])
 	}
 	if overview.ProjectRoot != root {
 		t.Fatalf("ProjectRoot = %q", overview.ProjectRoot)
@@ -38,6 +48,7 @@ func TestHandleStatus_NoConfig(t *testing.T) {
 func TestHandleConnectRepoAndInit(t *testing.T) {
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
+	startTestService(t)
 
 	remote := setupRemoteRepo(t, map[string]string{
 		"bundles/default/skills/helloworld/SKILL.md": "---\nname: helloworld\n---\n",
@@ -60,6 +71,40 @@ func TestHandleConnectRepoAndInit(t *testing.T) {
 	if err != nil || !initResp.OK {
 		t.Fatalf("handleInitProject() = %#v, %v", initResp, err)
 	}
+}
+
+func startTestService(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- servicehost.Run(ctx, "test") }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := service.ReadMetadata(); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("dec-server 测试实例未就绪")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	api, err := serviceapi.Connect(context.Background(), "mcp-test", "mcp-test")
+	if err != nil {
+		cancel()
+		t.Fatalf("连接测试 dec-server: %v", err)
+	}
+	serviceapi.SetDefault(api)
+	t.Cleanup(func() {
+		_ = api.Close()
+		serviceapi.SetDefault(nil)
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("测试 dec-server 未退出")
+		}
+	})
 }
 
 func TestResolveProjectRoot(t *testing.T) {

@@ -14,9 +14,9 @@ func TestInsertTreePath_CreatesIntermediateDirs(t *testing.T) {
 		SelectMode: TreeSelectLeaf,
 	})
 	rows := (&TreeList{Roots: []*TreeNode{root}, Expanded: map[string]bool{
-		"root:secrets":        true,
-		"group:vikunja":       true,
-		"group:vikunja/env":   true,
+		"root:secrets":      true,
+		"group:vikunja":     true,
+		"group:vikunja/env": true,
 	}}).VisibleRows()
 	if len(rows) != 4 {
 		t.Fatalf("rows = %d, want 4", len(rows))

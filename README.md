@@ -18,7 +18,7 @@ Dec 的解决方案：
 - 个人维度：在 TUI **Settings** 页连接你的资产仓库
 - 项目维度：TUI **Home** 初始化 project；**Bundles** 页调整 bundle；**Run** 页拉取到项目
 - IDE 维度：Dec 自动将资产部署到配置的 IDE 目录
-- 私密维度：Bitwarden folder ↔ 项目 **`.secrets/`** 同步根（project / bundle 同构）；env 经 hidden `dec exec` 注入；SSH Key 落地机器级 `~/.ssh/`，均不进 `.dec/`
+- 私密维度：Bitwarden folder ↔ 项目 **`.secrets/`** 同步根（project / bundle 同构）；env 经独立 `dec-exec` 注入；SSH Key 落地机器级 `~/.ssh/`，均不进 `.dec/`
 
 > **交互入口**：在交互式终端运行 `dec` 启动 TUI。CLI 仅保留 `dec --version` 与内部 hidden 命令。
 
@@ -49,7 +49,7 @@ Dec 的解决方案：
         └── skills/helloworld/...
 ```
 
-同名 Bitwarden folder 与 `.secrets` 同步根镜像；Secure Note 名 = 相对同步根路径（如 `env/vikunja.env` → `.secrets/bundles/vikunja/env/vikunja.env`），SSH Key pull 到 `~/.ssh/dec_<bundle>_<name>`；公开资产仍在 `.dec/cache/`。MCP 安装时包一层 `dec exec --bundle …`。详见 [Documents/BUNDLE-SECRETS-MODEL.md](Documents/BUNDLE-SECRETS-MODEL.md) 与 [ADR 0002](Documents/decisions/0002-secrets-synctarget-root.md)。
+同名 Bitwarden folder 与 `.secrets` 同步根镜像；Secure Note 名 = 相对同步根路径（如 `env/vikunja.env` → `.secrets/bundles/vikunja/env/vikunja.env`），SSH Key pull 到 `~/.ssh/dec_<bundle>_<name>`；公开资产仍在 `.dec/cache/`。MCP 安装时包一层 `dec-exec --bundle …`。详见 [Documents/BUNDLE-SECRETS-MODEL.md](Documents/BUNDLE-SECRETS-MODEL.md) 与 [ADR 0002](Documents/decisions/0002-secrets-synctarget-root.md)。
 
 ### 2. 项目配置
 
@@ -163,7 +163,7 @@ TUI 侧栏页面：
 3. `.dec/vars.d/*.yaml` 中的 `vars`（按文件名字典序合并，主文件覆盖同名键）
 4. `~/.dec/local/vars.yaml` 中的机器级变量
 
-私密 env 从 `.secrets/**/env/*.env` 读取，经 hidden `dec exec` 注入子进程（MCP 安装时自动包装），不通过模板占位符注入。未定义的公开占位符会保留原样，并在拉取时提示。可在 TUI **Project** 页按 `e` 编辑 `.dec/vars.yaml`。
+私密 env 从 `.secrets/**/env/*.env` 读取，经独立 `dec-exec` 注入子进程（MCP 安装时自动包装），不通过模板占位符注入。未定义的公开占位符会保留原样，并在拉取时提示。可在 TUI **Project** 页按 `e` 编辑 `.dec/vars.yaml`。
 
 ### 5. 推送与新增资产
 

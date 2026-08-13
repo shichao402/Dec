@@ -6,13 +6,13 @@
 │  Run             ││                                                                                                                      │
 │  Remote          ││ Global Settings                                          Details                                                     │
 │ Settings         ││   Repo URL: git@github.com:demo/dec.git                  当前远端: git@github.com:demo/dec.git                       │
-│                  ││   [ ] codex                                              Bare Repo: 未连接                                           │
-│                  ││   [x] cursor                                             配置文件: /tmp/.dec/config.yaml                             │
-│                  ││                                                          本机 Vars: /tmp/.dec/local/vars.yaml                        │
-│                  ││ 本机启用的 bundles                                       保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。         │
+│                  ││   Server idle timeout: 30m                               Bare Repo: 未连接                                           │
+│                  ││   [ ] codex                                              配置文件: /tmp/.dec/config.yaml                             │
+│                  ││   [x] cursor                                             本机 Vars: /tmp/.dec/local/vars.yaml                        │
+│                  ││                                                          保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。         │
+│                  ││ 本机启用的 bundles                                                                                                   │
 │                  ││   [ ] vikunja                                                                                                        │
 │                  ││   [x] woa                                                                                                            │
-│                  ││                                                                                                                      │
 │                  ││                                                                                                                      │
 │                  ││                                                                                                                      │
 │                  ││                                                                                                                      │

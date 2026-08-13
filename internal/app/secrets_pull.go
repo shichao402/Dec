@@ -37,13 +37,13 @@ func planSecretsSync(projectRoot string, enabledBundles []string, cfg *secrets.C
 var secretsClientFactory = secrets.DefaultClient
 
 type secretsPullSummary struct {
-	SkippedReason   string
-	NoteCount       int
-	SSHKeyCount     int
-	HandlerCount    int
-	HandlerNames    []string
-	LandingPaths    []string
-	SSHKeyNames     []string
+	SkippedReason string
+	NoteCount     int
+	SSHKeyCount   int
+	HandlerCount  int
+	HandlerNames  []string
+	LandingPaths  []string
+	SSHKeyNames   []string
 }
 
 func warnUnignoredSecrets(projectRoot string, landingPaths []string, reporter Reporter) {

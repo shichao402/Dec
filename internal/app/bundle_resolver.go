@@ -13,7 +13,8 @@ import (
 	"sort"
 
 	"github.com/shichao402/Dec/internal/bundle"
-	"github.com/shichao402/Dec/internal/types")
+	"github.com/shichao402/Dec/internal/types"
+)
 
 // BundleOverview 描述一次解析中涉及的 bundle 状态，供 TUI / CLI 呈现。
 type BundleOverview struct {
@@ -59,9 +60,9 @@ type ResolvedAssets struct {
 //  2. 对 EnabledBundles 中的每个 bundle 名，在所有 vault 中搜索匹配项：
 //     - 找不到：reporter warning + Bundles 不新增条目（因为我们没找到其声明）。
 //     - 找到唯一匹配：展开 members，对每个成员检查资产文件是否存在；存在就并入目标集，
-//       来源记 "bundle/<name>"；不存在则 reporter warning 跳过该成员。
+//     来源记 "bundle/<name>"；不存在则 reporter warning 跳过该成员。
 //     - 命中多个 vault：目前视为 warning 并使用第一个（按 vault 字典序），因为跨 vault
-//       bundle 短名冲突是父卡里 #17 明确标为「未验证需求」的场景。
+//     bundle 短名冲突是父卡里 #17 明确标为「未验证需求」的场景。
 //  3. Bundles 列表同时包含启用和未启用（用于 TUI 的 overview 渲染）。
 func resolveDesiredAssets(projectConfig *types.ProjectConfig, repoDir string, reporter Reporter) (*ResolvedAssets, error) {
 	reporter = defaultReporter(reporter)

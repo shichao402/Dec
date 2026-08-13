@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package service.v1;
+
+option go_package = "github.com/shichao402/Dec/schema/gen/go/service/v1;servicev1";
+
+// DecService 是本机唯一 dec-server 暴露给 TUI / MCP 门面的接口。
+service DecService {
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  rpc KeepAlive(stream KeepAliveRequest) returns (stream KeepAliveResponse);
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+  rpc RunOperation(RunOperationRequest) returns (stream RunOperationResponse);
+  rpc GetActiveOperation(GetActiveOperationRequest) returns (GetActiveOperationResponse);
+  rpc WatchOperation(WatchOperationRequest) returns (stream WatchOperationResponse);
+}
+
+message PingRequest {}
+
+message PingResponse {
+  string version = 1;
+  string instance_id = 2;
+}
+
+message ShutdownRequest {
+  string reason = 1;
+}
+
+message ShutdownResponse {
+  bool accepted = 1;
+}
+
+message KeepAliveRequest {
+  string client_id = 1;
+  string facade = 2;
+}
+
+message KeepAliveResponse {
+  int64 server_time_unix_ms = 1;
+}
+
+// Invoke 承载短操作。payload_json/result_json 使用现有 app DTO 的 JSON 表示，
+// 避免服务拆分与业务 DTO 全量 protobuf 化互相阻塞。
+message InvokeRequest {
+  string method = 1;
+  string project_root = 2;
+  bytes payload_json = 3;
+  int64 unlock_timeout_ms = 4;
+}
+
+message InvokeResponse {
+  bytes result_json = 1;
+  repeated OperationEvent events = 2;
+}
+
+message RunOperationRequest {
+  string operation = 1;
+  string project_root = 2;
+  string client_id = 3;
+  string facade = 4;
+  bytes payload_json = 5;
+  int64 unlock_timeout_ms = 6;
+}
+
+message GetActiveOperationRequest {
+  string project_root = 1;
+}
+
+message WatchOperationRequest {
+  string project_root = 1;
+  string operation_id = 2;
+}
+
+message ActiveOperation {
+  bool active = 1;
+  string operation_id = 2;
+  string operation = 3;
+  string client_id = 4;
+  string facade = 5;
+  int64 started_at_unix_ms = 6;
+}
+
+message Progress {
+  string phase = 1;
+  int32 current = 2;
+  int32 total = 3;
+}
+
+message OperationEvent {
+  int64 time_unix_ms = 1;
+  string level = 2;
+  string scope = 3;
+  string message = 4;
+  Progress progress = 5;
+}
+
+message RunOperationResponse {
+  string operation_id = 1;
+  ActiveOperation active = 2;
+  OperationEvent event = 3;
+  bytes result_json = 4;
+  string error = 5;
+  bool done = 6;
+}
+
+message GetActiveOperationResponse {
+  ActiveOperation operation = 1;
+}
+
+message WatchOperationResponse {
+  string operation_id = 1;
+  ActiveOperation active = 2;
+  OperationEvent event = 3;
+  bytes result_json = 4;
+  string error = 5;
+  bool done = 6;
+}

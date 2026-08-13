@@ -127,10 +127,10 @@ func TestAddSecret_RendersPromptAndOutcome(t *testing.T) {
 	}
 
 	done, _ := updated.Update(addSecretDoneMsg{result: &app.AddSecretResult{
-		Folder:        "demo",
-		NoteRelPath:   "env/vikunja.env",
+		Folder:         "demo",
+		NoteRelPath:    "env/vikunja.env",
 		ProjectRelPath: ".secrets/project/env/vikunja.env",
-		LandingPath:   ".secrets/project/env/vikunja.env",
+		LandingPath:    ".secrets/project/env/vikunja.env",
 	}})
 	after := done.(model)
 	if after.addSecretStage != "" {

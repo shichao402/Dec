@@ -13,7 +13,7 @@ Dec 以 **TUI**（`internal/tui/`）为第一交互入口。无参运行 `dec` �
 
 - **TUI-first**：日常操作（连接仓库、初始化 project、选择 bundle、pull/push/remove）均在 TUI 完成，不暴露 `dec pull`、`dec config` 等用户面 CLI 子命令。
 - **单二进制**：Bubble Tea 生态（`bubbletea`、`bubbles`、`lipgloss`），无 Node.js 或前端运行时。
-- **分层复用**：TUI 与 Agent / CI 共用 `internal/app/` 用例层；TUI 禁止 shell out 调 CLI 子命令。
+- **服务 / 门面**：TUI 与 Agent MCP 都通过本机 gRPC 调 `dec-server`；只有服务进程调用 `internal/app/`。TUI 禁止内嵌 app 降级或 shell out 调业务子命令。
 - **结构化事件**：长任务通过 `Reporter` / `OperationEvent` 暴露进度，TUI Run 页渲染日志与阶段状态。
 
 ## 2. 入口路由
@@ -51,7 +51,9 @@ cmd/
   root.go              # 入口路由、dec --version
   freshness_check.go   # hidden __freshness-check
 
-internal/app/               # 用例层（TUI 与 Agent 共用）
+internal/serviceapi/        # TUI / MCP 共用的服务客户端
+internal/servicehost/       # dec-server gRPC 与 project 操作协调
+internal/app/               # 服务端用例层
   project.go           # project init、配置写入
   assets.go            # Assets 页选择与持久化
   operations.go        # pull / push / remove 编排
@@ -67,7 +69,7 @@ internal/config/ internal/repo/ internal/ide/ internal/vars/ internal/types/
 internal/freshness/         # 远端新鲜度后台检查
 ```
 
-TUI **不得**直接调用 `cmd/*` 或 `fmt.Printf` 式业务输出；所有动作走 `internal/app` 并订阅 `Reporter` 事件。
+TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务输出；所有动作走 `internal/serviceapi`，由服务把 `Reporter` 事件映射为进度流。TUI 还会按 project 旁观 MCP 发起的活跃操作。
 
 ## 5. 关键交互流
 
@@ -90,7 +92,7 @@ TUI **不得**直接调用 `cmd/*` 或 `fmt.Printf` 式业务输出；所有动�
 3. 自动拉 Bitwarden secrets bundle → Secure Note 项目根相对路径；SSH Key → `~/.ssh/`
 4. 零重叠校验 → 从 cache 渲染 IDE + 非敏感 vars 占位符替换
 
-缺 Bitwarden session 时自动触发 web unlock（进程内存 session，见 [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md#bitwarden-认证)）。
+缺 Bitwarden session 时由 `dec-server` 自动触发 web unlock（服务进程内存 session，见 [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md#bitwarden-认证)）。
 
 ### 5.4 Project 页变量编辑
 
@@ -135,7 +137,7 @@ TUI **不得**直接调用 `cmd/*` 或 `fmt.Printf` 式业务输出；所有动�
 ## 7. 非交互与 Agent
 
 - `DEC_NO_TUI=1` 或 stdout 非 TTY：不启动 TUI，输出简短说明
-- Agent / CI 应调用 `internal/app/` API（如 `app.PullProjectAssets`），而非假设存在 CLI 子命令
+- Agent 通过 `dec-mcp`，内部 CI 代码通过服务客户端调用 `dec-server`，而非假设存在 CLI 子命令
 
 ## 8. 已知限制
 

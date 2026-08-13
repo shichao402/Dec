@@ -1,7 +1,6 @@
 {
-  "command": "dec",
+  "command": "dec-mcp",
   "args": [
-    "mcp",
     "--project-root",
     "${workspaceFolder}"
   ]

@@ -9,10 +9,10 @@ import (
 type TreeSelectMode int
 
 const (
-	TreeSelectNone TreeSelectMode = iota // 目录：仅导航/展开
-	TreeSelectLeaf                       // 叶子：独立勾选
-	TreeSelectBranch                     // 分支自身可勾选（如 bundle 启用/删除整包）
-	TreeSelectReadOnly                   // 只读子项（bundle 成员展示）
+	TreeSelectNone     TreeSelectMode = iota // 目录：仅导航/展开
+	TreeSelectLeaf                           // 叶子：独立勾选
+	TreeSelectBranch                         // 分支自身可勾选（如 bundle 启用/删除整包）
+	TreeSelectReadOnly                       // 只读子项（bundle 成员展示）
 )
 
 // TreeNode 为通用目录树节点；Children 为空且 SelectMode 为 Leaf/Branch 时视为叶子。

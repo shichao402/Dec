@@ -72,7 +72,7 @@ func stateDir() (string, error) {
 	return root, nil
 }
 
-func newUpdater(currentVersion string) (*sdk.Updater, error) {
+func newUpdater(currentVersion, component string) (*sdk.Updater, error) {
 	keys, err := trustedKeys()
 	if err != nil {
 		return nil, err
@@ -87,8 +87,9 @@ func newUpdater(currentVersion string) (*sdk.Updater, error) {
 		return nil, err
 	}
 	selectors := map[string]string{
-		"os":   runtime.GOOS,
-		"arch": runtime.GOARCH,
+		"os":        runtime.GOOS,
+		"arch":      runtime.GOARCH,
+		"component": component,
 	}
 	cfg := config.GetSystemConfig()
 	channel := cfg.Channel
@@ -109,7 +110,7 @@ func newUpdater(currentVersion string) (*sdk.Updater, error) {
 
 // Check checks whether a newer version is available via RUP.
 func Check(currentVersion string) (*CheckResult, error) {
-	u, err := newUpdater(currentVersion)
+	u, err := newUpdater(currentVersion, "dec")
 	if err != nil {
 		recordFailedAttempt()
 		return nil, err
@@ -188,7 +189,7 @@ func recordFailedAttempt() {
 // DoUpdate downloads and replaces the current binary via RUP + sdk/apply.
 func DoUpdate(currentVersion, latestVersion string) error {
 	latest := strings.TrimSpace(latestVersion)
-	u, err := newUpdater(currentVersion)
+	u, err := newUpdater(currentVersion, "dec")
 	if err != nil {
 		return err
 	}
@@ -219,13 +220,50 @@ func DoUpdate(currentVersion, latestVersion string) error {
 	if runtime.GOOS == "windows" {
 		ext = ".exe"
 	}
-	dest := filepath.Join(tmpDir, "dec"+ext)
-	if err := u.Download(context.Background(), result.Available, dest); err != nil {
-		return fmt.Errorf("下载失败: %w", err)
+	type componentDownload struct {
+		name string
+		path string
 	}
-	_ = apply.CleanupStaleExecutable()
-	if err := apply.ReplaceExecutable(dest); err != nil {
+	components := []string{"dec-server", "dec-mcp", "dec-exec", "dec"}
+	downloads := make([]componentDownload, 0, len(components))
+	for _, component := range components {
+		componentUpdater, err := newUpdater(currentVersion, component)
+		if err != nil {
+			return err
+		}
+		componentResult := componentUpdater.CheckForce(context.Background(), true)
+		if componentResult.Err != nil {
+			return componentResult.Err
+		}
+		if componentResult.Available == nil {
+			return fmt.Errorf("发布缺少 %s 组件", component)
+		}
+		dest := filepath.Join(tmpDir, component+ext)
+		if err := componentUpdater.Download(context.Background(), componentResult.Available, dest); err != nil {
+			return fmt.Errorf("下载 %s 失败: %w", component, err)
+		}
+		downloads = append(downloads, componentDownload{name: component, path: dest})
+	}
+
+	executable, err := os.Executable()
+	if err != nil {
 		return err
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return err
+	}
+	binDir := filepath.Dir(executable)
+	for _, download := range downloads {
+		target := filepath.Join(binDir, download.name+ext)
+		if _, err := os.Stat(target); os.IsNotExist(err) {
+			if err := os.WriteFile(target, nil, 0o755); err != nil {
+				return fmt.Errorf("创建 %s 安装位失败: %w", download.name, err)
+			}
+		}
+		if err := apply.ReplaceFile(download.path, target); err != nil {
+			return fmt.Errorf("替换 %s 失败: %w", download.name, err)
+		}
 	}
 	now := time.Now()
 	_ = saveState(&CheckState{LastCheck: now, LatestVersion: targetVer, LastAttempt: now})

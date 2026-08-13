@@ -127,7 +127,7 @@ Dec Git Vault 与 Bitwarden secrets bundle 在 **bundle 内** 使用相同的相
 Dec Git Vault（bundle: vikunja）
 bundles/vikunja/
   skills/vikunja-workflow/SKILL.md
-  mcp/vikunja-mcp.json             # 无 token；运行时经 dec exec 注入 env
+  mcp/vikunja-mcp.json             # 无 token；运行时经 dec-exec 注入 env
   rules/vikunja-integration.mdc
 
 Bitwarden folder: vikunja
@@ -149,10 +149,10 @@ Bitwarden folder: vikunja
 
 Note 名来自远端，按不可信输入处理：绝对路径、`~` 展开、`..` 逃逸、盘符一律拒绝；落进 `.dec/`、经符号链接逃出项目根、或已被 git 跟踪同样拒绝。校验在写任何文件**之前**完成。
 
-## 环境变量与 `dec exec`
+## 环境变量与 `dec-exec`
 
 - 环境变量 **只认** `env/*.env`（dotenv，单行标量 `KEY=value`）。
-- Hidden CLI **`dec exec --bundle <name> -- <cmd>`** 按 bundle 作用域合并 `env/*.env` 后启动子进程；第三方 MCP 配置 `command: dec`、`args: ["exec", "--bundle", "vikunja", "--", ...]`。
+- 独立程序 **`dec-exec --bundle <name> -- <cmd>`** 按 bundle 作用域合并 `env/*.env` 后启动子进程；第三方 MCP 配置 `command: dec-exec`、`args: ["--bundle", "vikunja", "--", ...]`。
 - **不再**依赖 mise / 外部 env 启动器把密文部署到 `.config/mise/`。
 - `{{VAR_NAME}}` 占位符仍可用于 `.dec/vars.yaml` 驱动的 **非敏感** 模板变量，与 Bitwarden secrets 无关。
 
@@ -226,7 +226,7 @@ Pull：先写入同步根（机器级见 0007：`~/.dec/secrets/bundles/cnb/`）
 | 仅 project | `<project>/.secrets/bundles/<name>/` | `bundle/<name>` |
 | 两者都有 | 机器默认同上；覆盖：`<project>/.secrets/bundles/<name>/` | 默认 `bundle/<name>`；覆盖在**项目 folder**，Note 名 `bundles/<name>/...` |
 
-`dec exec` 合并：机器 env → 项目 bundle env → `.secrets/project/env`（后者同 key 覆盖）。
+`dec-exec` 合并：机器 env → 项目 bundle env → `.secrets/project/env`（后者同 key 覆盖）。
 
 ## 零重叠 Invariant
 
@@ -288,19 +288,19 @@ Push：Dec 公开资产走 Git push（源为 `.dec/cache/`）；secrets 走 Bitw
 | Secrets 管理 | Settings 页 | Bitwarden 连接、folder 绑定 |
 | 新增一条 secret | Project 页 `A` | 登记 `.secrets/` 下已有文件 |
 | 删除 / 编辑 secret | Remote 页 | 删除二次确认；`e` 外部编辑 Note / SSH Hosts |
-| MCP 运行时注入 | `dec exec`（hidden） | 按 bundle 合并 `env/*.env` 后启动子进程 |
+| MCP 运行时注入 | `dec-exec`（独立程序） | 按 bundle 合并 `env/*.env` 后启动子进程 |
 
 不在 TUI 外暴露 `dec secrets pull` 等独立子命令；与 [TUI 优先](../.cursor/rules/tui-first.mdc) 一致。
 
 ## Bitwarden 认证
 
-拉取 secrets bundle 需要有效的 Bitwarden session。认证由 **TUI 进程内** 触发，**无独立 CLI 子命令**。
+拉取 secrets bundle 需要有效的 Bitwarden session。认证由 **`dec-server` 进程内**触发，TUI / MCP 门面共享该服务进程内的 session；**无独立 CLI 子命令**。
 
 ### Session 存储
 
 | 规则 | 说明 |
 |------|------|
-| 仅存进程内存 | session **仅在当前 Dec/TUI 进程** 中保存 |
+| 仅存进程内存 | session **仅在当前 `dec-server` 进程**中保存 |
 | 禁止落盘 | 无 `~/.dec/secrets/session`、无 `BW_SESSION` 文件缓存 |
 | 进程内复用 | 同一进程内已有有效 session 则直接复用 |
 | 无缓存则阻塞 | 无 session 时 web unlock，成功后写入进程内存 |

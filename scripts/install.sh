@@ -91,6 +91,7 @@ main() {
     local install_dir="${DEC_HOME:-${HOME}/.dec}"
     local bin_dir="${install_dir}/bin"
     local binary_path="${bin_dir}/dec"
+    local binaries=("dec" "dec-server" "dec-mcp" "dec-exec")
     local update_branch="${DEC_BRANCH:-ReleaseLatest}"
 
     print_info "检测到平台: ${platform}"
@@ -138,8 +139,15 @@ main() {
             local compare_result
             compare_result=$(compare_versions "${current_version}" "${latest_version}")
             if [ "${compare_result}" -ge 0 ]; then
-                print_success "已是最新版本，无需更新"
-                exit 0
+                local suite_complete=true
+                for binary in "${binaries[@]}"; do
+                    [ -x "${bin_dir}/${binary}" ] || suite_complete=false
+                done
+                if [ "${suite_complete}" = true ]; then
+                    print_success "已是最新版本，且四个程序完整"
+                    exit 0
+                fi
+                print_warning "主程序已是最新版本，但服务/门面程序不完整，将修复安装"
             fi
             # 版本较旧，提示用户选择
             if [ -t 0 ]; then
@@ -177,22 +185,26 @@ main() {
         download_tag="test-${latest_version}"
     fi
 
-    local binary_name="dec-${platform}"
-    local download_url="https://github.com/shichao402/Dec/releases/download/${download_tag}/${binary_name}"
-
-    print_info "下载预编译版本..."
-    # 先删除旧二进制再下载，避免 macOS 上 stuck exec 占用同一 inode 导致新进程卡在 dyld。
-    rm -f "${binary_path}"
-    if ! curl -fsSL -o "${binary_path}" "${download_url}"; then
-        print_error "下载失败: ${download_url}"
-        exit 1
-    fi
-    chmod +x "${binary_path}"
+    print_info "下载 Dec 程序组..."
+    for binary in "${binaries[@]}"; do
+        local binary_name="${binary}-${platform}"
+        local download_url="https://github.com/shichao402/Dec/releases/download/${download_tag}/${binary_name}"
+        local target="${bin_dir}/${binary}"
+        # 先删除旧二进制再下载，避免 macOS 上 stuck exec 占用同一 inode 导致新进程卡在 dyld。
+        rm -f "${target}"
+        if ! curl -fsSL -o "${target}" "${download_url}"; then
+            print_error "下载失败: ${download_url}"
+            exit 1
+        fi
+        chmod +x "${target}"
+    done
     # macOS: 清除下载的扩展属性（com.apple.provenance 等），否则二进制可能被系统阻止执行
     if [ "$(uname -s)" = "Darwin" ]; then
-        xattr -cr "${binary_path}" 2>/dev/null || true
+        for binary in "${binaries[@]}"; do
+            xattr -cr "${bin_dir}/${binary}" 2>/dev/null || true
+        done
     fi
-    print_success "二进制下载完成"
+    print_success "四个程序下载完成"
 
     local shell_rc=""
     case "${SHELL}" in
@@ -233,8 +245,7 @@ main() {
     echo ""
     print_info "之后可以运行："
     echo "  dec --help"
-    echo "  dec config repo <your-vault-repo-url>"
-    echo "  dec list"
+    echo "  dec            # 打开 TUI；Settings 中连接仓库"
     echo ""
 }
 

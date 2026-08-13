@@ -35,17 +35,17 @@ func homeModelAtWidth(width int) model {
 	m.width = width
 	m.height = 36
 	m.overview = &app.ProjectOverview{
-		ProjectRoot:        "/tmp/dec-project",
-		RepoConnected:      true,
-		RepoRemoteURL:      "git@github.com:demo/dec.git",
-		ProjectConfigPath:  "/tmp/dec-project/.dec/config.yaml",
-		ProjectConfigReady: true,
-		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
-		VarsFileReady:      true,
+		ProjectRoot:          "/tmp/dec-project",
+		RepoConnected:        true,
+		RepoRemoteURL:        "git@github.com:demo/dec.git",
+		ProjectConfigPath:    "/tmp/dec-project/.dec/config.yaml",
+		ProjectConfigReady:   true,
+		VarsPath:             "/tmp/dec-project/.dec/vars.yaml",
+		VarsFileReady:        true,
 		AvailableBundleCount: 5,
 		EnabledBundleCount:   2,
-		IDEs:               []string{"codex", "cursor"},
-		Editor:             "code --wait",
+		IDEs:                 []string{"codex", "cursor"},
+		Editor:               "code --wait",
 	}
 	return m
 }
@@ -176,10 +176,10 @@ func TestViewAtBaselineWidths_ProjectNoOverflow(t *testing.T) {
 					"LONG_PATH_VALUE_THAT_SHOULD_TRUNCATE_NICELY",
 				},
 				ResolvedVars: map[string]app.PlaceholderStatus{
-					"API_TOKEN":  {Source: app.PlaceholderSourceProject, Value: "secret"},
-					"DB_HOST":    {Source: app.PlaceholderSourceGlobal, Value: "localhost"},
+					"API_TOKEN":   {Source: app.PlaceholderSourceProject, Value: "secret"},
+					"DB_HOST":     {Source: app.PlaceholderSourceGlobal, Value: "localhost"},
 					"DB_PASSWORD": {},
-					"SSH_KEY":    {Source: app.PlaceholderSourceProject, Value: strings.Repeat("x", 80)},
+					"SSH_KEY":     {Source: app.PlaceholderSourceProject, Value: strings.Repeat("x", 80)},
 					"LONG_PATH_VALUE_THAT_SHOULD_TRUNCATE_NICELY": {Source: app.PlaceholderSourceProject, Value: "/very/long/path/" + strings.Repeat("seg/", 20)},
 				},
 			}

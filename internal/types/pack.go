@@ -37,9 +37,10 @@ type MCPServer struct {
 
 // GlobalConfig 全局配置结构 (~/.dec/config.yaml)
 type GlobalConfig struct {
-	RepoURL string   `yaml:"repo_url,omitempty"`
-	IDEs    []string `yaml:"ides,omitempty"`
-	Editor  string   `yaml:"editor,omitempty"`
+	RepoURL           string   `yaml:"repo_url,omitempty"`
+	IDEs              []string `yaml:"ides,omitempty"`
+	Editor            string   `yaml:"editor,omitempty"`
+	ServerIdleTimeout string   `yaml:"server_idle_timeout,omitempty"`
 }
 
 const ProjectConfigVersionV2 = "v2"
@@ -157,8 +158,8 @@ type VarsConfig struct {
 
 // AssetVars 按资产类型和名称限定的变量
 type AssetVars struct {
-	MCPs   map[string]AssetVarEntry `yaml:"mcp,omitempty"`
-	Rules  map[string]AssetVarEntry `yaml:"rule,omitempty"`
+	MCPs     map[string]AssetVarEntry `yaml:"mcp,omitempty"`
+	Rules    map[string]AssetVarEntry `yaml:"rule,omitempty"`
 	Skills   map[string]AssetVarEntry `yaml:"skill,omitempty"`
 	Commands map[string]AssetVarEntry `yaml:"command,omitempty"`
 }

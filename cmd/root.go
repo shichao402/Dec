@@ -1,14 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/serviceapi"
 	"github.com/shichao402/Dec/internal/tui"
-	"github.com/shichao402/Dec/internal/compat"
-	"github.com/shichao402/Dec/internal/diag"
 	"github.com/shichao402/Dec/internal/update"
 	"github.com/shichao402/Dec/internal/version"
 	"github.com/spf13/cobra"
@@ -37,10 +37,10 @@ type entryContext struct {
 }
 
 var (
-	detectTTY     = isTerminalFile
-	getWorkingDir = os.Getwd
-	runCLIMode    = executeCLI
-	runTUIMode    = executeTUI
+	detectTTY      = isTerminalFile
+	getWorkingDir  = os.Getwd
+	runCLIMode     = executeCLI
+	runTUIMode     = executeTUI
 	emitUpdateHint = func(w io.Writer) {
 		if w == nil {
 			return
@@ -139,7 +139,6 @@ func Execute(args []string, stdin, stdout, stderr *os.File) error {
 		if err != nil {
 			return fmt.Errorf("获取当前目录失败: %w", err)
 		}
-		repairProjectOnStartup(projectRoot)
 		emitUpdateHint(stderr)
 		return runTUIMode(projectRoot, stdin, stdout)
 	}
@@ -147,19 +146,12 @@ func Execute(args []string, stdin, stdout, stderr *os.File) error {
 	return runCLIMode(args, stdout, stderr)
 }
 
-// repairProjectOnStartup 在进入主逻辑前跑兼容修复；失败只记日志，不阻断启动。
-func repairProjectOnStartup(projectRoot string) {
-	for _, note := range compat.RepairOnStartup(projectRoot) {
-		diag.StartupLog("compat: %s", note)
-	}
-}
-
 func isInternalCLIArgs(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
 	switch args[0] {
-	case "__freshness-check", "mcp", "exec":
+	case "__freshness-check":
 		return true
 	default:
 		return false
@@ -190,6 +182,12 @@ func executeCLI(args []string, stdout, stderr io.Writer) error {
 }
 
 func executeTUI(projectRoot string, input io.Reader, output io.Writer) error {
+	api, err := serviceapi.Connect(context.Background(), "tui", fmt.Sprintf("tui-%d", os.Getpid()))
+	if err != nil {
+		return fmt.Errorf("连接 dec-server 失败: %w", err)
+	}
+	defer api.Close()
+	serviceapi.SetDefault(api)
 	return tui.Run(projectRoot, GetVersion(), input, output)
 }
 

@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/serviceapi"
 )
 
 // 登记新 secret 的分阶段状态：先选 SyncTarget 归属，再输入相对同步根路径。
@@ -32,7 +33,7 @@ func addSecretCmd(projectRoot string, target secrets.SyncTarget, noteRel string)
 				logs = append(logs, msg)
 			}
 		})
-		result, err := app.AddSecretToTarget(context.Background(), projectRoot, target, noteRel, reporter)
+		result, err := serviceapi.AddSecretToTarget(context.Background(), projectRoot, target, noteRel, reporter)
 		return addSecretDoneMsg{result: result, err: err, logs: logs}
 	}
 }
@@ -44,7 +45,7 @@ func (m *model) beginAddSecret() {
 	m.addSecretResult = nil
 	m.addSecretErr = nil
 
-	targets, err := app.SuggestSecretTargets(m.projectRoot)
+	targets, err := serviceapi.SuggestSecretTargets(m.projectRoot)
 	if err != nil {
 		m.addSecretTargets = nil
 		m.pushLog("读取可选 secrets 归属失败: " + err.Error())

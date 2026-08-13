@@ -52,7 +52,7 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
 		"bundle/vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=old\n"}},
-		"Dec":     {{RelativePath: "config/private.yaml", Content: "old"}},
+		"Dec":            {{RelativePath: "config/private.yaml", Content: "old"}},
 	}}
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }

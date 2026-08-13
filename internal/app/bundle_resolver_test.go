@@ -246,10 +246,10 @@ func TestResolveDesiredAssets_EmptyRepoDir(t *testing.T) {
 func TestResolveDesiredAssets_SkipsDotDirs(t *testing.T) {
 	// 保证隐藏目录（.git / .dec 等）不会被当作 vault 扫描。
 	repoDir := setupRepoWithVault(t, map[string]string{
-		".git/config":                    "",
-		".dec/whatever":                  "",
+		".git/config":                       "",
+		".dec/whatever":                     "",
 		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"bundles/combo/bundle.yaml":     "name: combo\nmembers:\n  - skill/foo\n",
+		"bundles/combo/bundle.yaml":         "name: combo\nmembers:\n  - skill/foo\n",
 	})
 	cfg := &types.ProjectConfig{EnabledBundles: []string{"combo"}}
 

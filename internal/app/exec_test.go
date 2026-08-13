@@ -14,7 +14,7 @@ func TestWrapMCPServerWithExec_WrapsCommandAndStripsPlaceholders(t *testing.T) {
 	cmd, args, env := WrapMCPServerWithExec(
 		`D:\proj`,
 		"vikunja",
-		"dec",
+		"dec-exec",
 		"npx",
 		[]string{"-y", "@shichao402/vikunja-mcp"},
 		map[string]string{
@@ -22,11 +22,11 @@ func TestWrapMCPServerWithExec_WrapsCommandAndStripsPlaceholders(t *testing.T) {
 			"PKV_WORKSPACE_ROOT": "D:/workspace",
 		},
 	)
-	if cmd != "dec" {
+	if cmd != "dec-exec" {
 		t.Fatalf("command = %q", cmd)
 	}
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "exec") || !strings.Contains(joined, "--bundle") || !strings.Contains(joined, "vikunja") {
+	if cmd != "dec-exec" || !strings.Contains(joined, "--bundle") || !strings.Contains(joined, "vikunja") {
 		t.Fatalf("args = %#v", args)
 	}
 	if !strings.Contains(joined, "--") || args[len(args)-3] != "npx" {

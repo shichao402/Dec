@@ -85,15 +85,15 @@ func snapshotHomeModel(width int) model {
 		ProjectName:           "dec-project",
 		ProjectNameFromConfig: true,
 		RepoConnected:         true,
-		RepoRemoteURL:      "git@github.com:demo/dec.git",
-		ProjectConfigPath:  "/tmp/dec-project/.dec/config.yaml",
-		ProjectConfigReady: true,
-		VarsPath:           "/tmp/dec-project/.dec/vars.yaml",
-		VarsFileReady:      true,
+		RepoRemoteURL:         "git@github.com:demo/dec.git",
+		ProjectConfigPath:     "/tmp/dec-project/.dec/config.yaml",
+		ProjectConfigReady:    true,
+		VarsPath:              "/tmp/dec-project/.dec/vars.yaml",
+		VarsFileReady:         true,
 		AvailableBundleCount:  5,
 		EnabledBundleCount:    2,
-		IDEs:               []string{"codex", "cursor"},
-		Editor:             "code --wait",
+		IDEs:                  []string{"codex", "cursor"},
+		Editor:                "code --wait",
 	}
 	return m
 }
@@ -277,7 +277,7 @@ func snapshotDeleteModel(width int) model {
 			Kind: app.DeleteKindSSHKey, Label: "[ssh] deploy",
 			SSHKeyName: "deploy", DecBundleName: "vikunja", SecretsBundle: "vikunja",
 			LocalRoot: ".secrets/bundles/vikunja",
-			TreeRoot: "secrets", TreeBranch: "vikunja", GroupOrder: 1, GroupTitle: "vikunja (bundle)",
+			TreeRoot:  "secrets", TreeBranch: "vikunja", GroupOrder: 1, GroupTitle: "vikunja (bundle)",
 		},
 		{
 			Kind: app.DeleteKindBundle, Label: "[bundle] vikunja / vikunja · 2 成员", BundleName: "vikunja", Vault: "vikunja",

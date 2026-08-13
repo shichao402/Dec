@@ -47,6 +47,7 @@ else
 fi
 
 BINARY_NAME="dec"
+BINARY_NAMES=("dec" "dec-server" "dec-mcp" "dec-exec")
 BUILD_ALL=false
 CLEAN_BEFORE=true
 CLEAN_AFTER=false
@@ -166,11 +167,12 @@ if [ "${CLEAN_BEFORE}" = true ]; then
     fi
     
     # 清理根目录下的可执行文件
-    if [ -f "${BINARY_NAME}" ]; then
-        print_info "清理根目录下的可执行文件: ${BINARY_NAME}"
-        rm -f "${BINARY_NAME}"
-        print_success "可执行文件已清理"
-    fi
+    for binary in "${BINARY_NAMES[@]}"; do
+        if [ -f "${binary}" ]; then
+            print_info "清理根目录下的可执行文件: ${binary}"
+            rm -f "${binary}"
+        fi
+    done
     
     echo "" | tee -a "${LOG_FILE}"
 fi
@@ -180,29 +182,17 @@ build_platform() {
     local os=$1
     local arch=$2
     local ext=$3
-    local output_name="${BINARY_NAME}-${os}-${arch}${ext}"
-    local output_path="${OUTPUT_DIR}/${output_name}"
-    
-    print_info "构建 ${os}-${arch}..."
-    print_info "  输出: ${output_path}"
-    
-    # 构建命令
-    # CGO_ENABLED=0 确保产物为纯静态二进制，不依赖构建机 glibc
-    # （否则在 Ubuntu 24.04/glibc 2.39 上构建的 Linux 产物会要求目标机 glibc ≥ 2.34）
-    GOOS="${os}" GOARCH="${arch}" CGO_ENABLED=0 go build \
-        -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
-        -o "${output_path}" \
-        . 2>&1 | tee -a "${LOG_FILE}"
-    
-    if [ $? -eq 0 ]; then
-        local size=$(ls -lh "${output_path}" | awk '{print $5}')
-        print_success "${os}-${arch} 构建完成 (${size})"
+    print_info "构建 ${os}-${arch} 程序组..."
+    for binary in "${BINARY_NAMES[@]}"; do
+        local package="."
+        if [ "${binary}" != "dec" ]; then package="./cmd/${binary}"; fi
+        local output_path="${OUTPUT_DIR}/${binary}-${os}-${arch}${ext}"
+        GOOS="${os}" GOARCH="${arch}" CGO_ENABLED=0 go build \
+            -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
+            -o "${output_path}" "${package}" 2>&1 | tee -a "${LOG_FILE}" || return 1
         echo "${output_path}" >> "${OUTPUT_DIR}/.build-manifest"
-        return 0
-    else
-        print_error "${os}-${arch} 构建失败"
-        return 1
-    fi
+    done
+    print_success "${os}-${arch} 程序组构建完成"
 }
 
 # 构建指定平台（支持通过 GOOS/GOARCH 环境变量指定）
@@ -221,24 +211,7 @@ build_current() {
             ext=".exe"
         fi
         
-        local output_name="${BINARY_NAME}-${target_os}-${target_arch}${ext}"
-        local output_path="${OUTPUT_DIR}/${output_name}"
-        
-        print_info "输出: ${output_path}"
-        
-        GOOS="${target_os}" GOARCH="${target_arch}" CGO_ENABLED=0 go build \
-            -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
-            -o "${output_path}" \
-            . 2>&1 | tee -a "${LOG_FILE}"
-        
-        if [ $? -eq 0 ]; then
-            local size=$(ls -lh "${output_path}" | awk '{print $5}')
-            print_success "构建完成: ${output_name} (${size})"
-            echo "${output_path}" >> "${OUTPUT_DIR}/.build-manifest"
-        else
-            print_error "构建失败"
-            exit 1
-        fi
+        build_platform "${target_os}" "${target_arch}" "${ext}" || exit 1
     else
         # 构建当前平台（本地开发场景）
         print_header "构建当前平台版本"
@@ -246,33 +219,19 @@ build_current() {
         local current_os=$(go env GOOS)
         local current_arch=$(go env GOARCH)
         
-        local output_path="${OUTPUT_DIR}/${BINARY_NAME}"
-        if [ "${current_os}" = "windows" ]; then
-            output_path="${OUTPUT_DIR}/${BINARY_NAME}.exe"
-        fi
-        
         print_info "构建当前平台: ${current_os}-${current_arch}"
-        print_info "输出: ${output_path}"
-        
-        CGO_ENABLED=0 go build \
-            -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
-            -o "${output_path}" \
-            . 2>&1 | tee -a "${LOG_FILE}"
-        
-        if [ $? -eq 0 ]; then
-            local size=$(ls -lh "${output_path}" | awk '{print $5}')
-            print_success "构建完成 (${size})"
+        local ext=""
+        if [ "${current_os}" = "windows" ]; then ext=".exe"; fi
+        for binary in "${BINARY_NAMES[@]}"; do
+            local package="."
+            if [ "${binary}" != "dec" ]; then package="./cmd/${binary}"; fi
+            local output_path="${OUTPUT_DIR}/${binary}${ext}"
+            CGO_ENABLED=0 go build \
+                -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
+                -o "${output_path}" "${package}" 2>&1 | tee -a "${LOG_FILE}" || exit 1
             echo "${output_path}" >> "${OUTPUT_DIR}/.build-manifest"
-            
-            # 同时在根目录创建符号链接（Unix-like）或复制（Windows）
-            if [ "$(uname -s)" != "MINGW"* ] && [ "$(uname -s)" != "MSYS"* ]; then
-                ln -sf "$(realpath "${output_path}")" "${BINARY_NAME}"
-                print_info "已创建符号链接: ${BINARY_NAME} -> ${output_path}"
-            fi
-        else
-            print_error "构建失败"
-            exit 1
-        fi
+        done
+        print_success "当前平台程序组构建完成"
     fi
 }
 
@@ -337,17 +296,11 @@ EOF
     if [ -f "${OUTPUT_DIR}/.build-manifest" ]; then
         # 如果指定了平台，只包含匹配的文件
         if [ -n "${GOOS}" ] && [ -n "${GOARCH}" ]; then
-            local expected_name="${BINARY_NAME}-${build_os}-${build_arch}"
-            if [ "${build_os}" = "windows" ]; then
-                expected_name="${expected_name}.exe"
-            fi
-            # 查找匹配的文件
             while IFS= read -r file; do
-                if [ -f "${file}" ] && [[ "$(basename "${file}")" == "${expected_name}" ]]; then
+                if [ -f "${file}" ] && [[ "$(basename "${file}")" == *"-${build_os}-${build_arch}"* ]]; then
                     local size=$(ls -lh "${file}" | awk '{print $5}')
                     local sha256=$(sha256sum "${file}" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "${file}" 2>/dev/null | cut -d' ' -f1 || echo "N/A")
                     echo "  - $(basename "${file}") (${size}, SHA256: ${sha256})" >> "${manifest_file}"
-                    break
                 fi
             done < "${OUTPUT_DIR}/.build-manifest"
         else

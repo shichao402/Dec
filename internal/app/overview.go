@@ -13,19 +13,19 @@ import (
 )
 
 type ProjectOverview struct {
-	ProjectRoot        string
+	ProjectRoot string
 	// ProjectName 是项目短名。优先取 ProjectConfig.ProjectName；未设置时回退到 filepath.Base(ProjectRoot)。
 	// 回退值不会写回 yaml，只用于展示和工具调用。
-	ProjectName        string
+	ProjectName string
 	// ProjectNameFromConfig 标识 ProjectName 是否直接来自 .dec/config.yaml；为 false 说明是 basename 回退。
 	// TUI 等展示层可据此提示用户是否已显式命名。
 	ProjectNameFromConfig bool
-	RepoConnected      bool
-	RepoRemoteURL      string
-	ProjectConfigPath  string
-	ProjectConfigReady bool
-	VarsPath           string
-	VarsFileReady      bool
+	RepoConnected         bool
+	RepoRemoteURL         string
+	ProjectConfigPath     string
+	ProjectConfigReady    bool
+	VarsPath              string
+	VarsFileReady         bool
 	// AvailableBundleCount 是仓库里扫描到的 bundle 总数（含未启用）。
 	AvailableBundleCount int
 	// EnabledBundleCount 记录 project config 中 enabled_bundles 声明的数量。
@@ -33,7 +33,7 @@ type ProjectOverview struct {
 	EnabledBundleCount int
 	// Bundles 在仓库已连接时填充：扫描所有 vault 内的 bundle 声明，标注是否启用。
 	// 未连接仓库或仓库读取失败时保持为 nil，调用方应容忍空列表。
-	Bundles []BundleOverview
+	Bundles     []BundleOverview
 	IDEs        []string
 	IDEWarnings []string
 	Editor      string
@@ -126,8 +126,8 @@ func LoadProjectOverviewOpts(projectRoot string, opts OverviewLoadOpts) (*Projec
 }
 
 // ResolveProjectName 按优先级解析项目短名：
-//   1. ProjectConfig.ProjectName（显式配置）
-//   2. filepath.Base(projectRoot)（fallback，不写回 yaml）
+//  1. ProjectConfig.ProjectName（显式配置）
+//  2. filepath.Base(projectRoot)（fallback，不写回 yaml）
 //
 // 第二个返回值 fromConfig 标识结果是否来自 1。调用方可据此决定是否提示用户显式命名。
 // projectRoot 为空时（理论上不该发生）第二段回退到 "unknown"。
