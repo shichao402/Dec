@@ -1,6 +1,9 @@
-# Dec 已迁到 CNB 主力。改 version.json 并推 main 即发布。
+# Dec 已迁到 CNB 主力。按 relkit 渠道 tag 发版：
+#   git tag  dev/vX.Y.Z    && git push origin  dev/vX.Y.Z     → RUP channel=dev
+#   git tag  stable/vX.Y.Z && git push origin  stable/vX.Y.Z  → RUP channel=stable
+# 推送前请先把 version.json 改成对应 vX.Y.Z 并推到 main。
 # GitHub 仅作镜像（cnb-bridge 定时 CNB→GitHub）。
-# 密钥：shichao402/keystores (KeyStore) 的 dec.env.yml（见 cnb-bridge/deploy/dec.env.template.yml）
+# 密钥：shichao402/keystores (KeyStore) 的 dec.env.yml
 
 .release: &release
   name: release
@@ -15,17 +18,44 @@
         apt-get update
         apt-get install -y --no-install-recommends git ca-certificates curl python3 tar
         git fetch --tags --prune || true
-        VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
-        echo "$VERSION" > .release-version
-        echo "version=$VERSION"
+
+        TAG="${CNB_BRANCH:-}"
+        case "$TAG" in
+          dev/*)
+            CHANNEL=dev
+            VERSION="${TAG#dev/}"
+            ;;
+          stable/*)
+            CHANNEL=stable
+            VERSION="${TAG#stable/}"
+            ;;
+          *)
+            # web_trigger / 手动：从 version.json 取版本，默认进 dev
+            CHANNEL="${RELEASE_CHANNEL:-dev}"
+            VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
+            echo "非渠道 tag 触发（branch/tag=$TAG），使用 version.json=$VERSION channel=$CHANNEL"
+            ;;
+        esac
+
         if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "无效版本号: $VERSION"
+          echo "无效版本号: $VERSION（期望 vMAJOR.MINOR.PATCH）"
           exit 1
         fi
-        if git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"; then
-          echo "Tag ${VERSION} 已存在，请先改 version.json"
+        if [[ "$CHANNEL" != "dev" && "$CHANNEL" != "stable" ]]; then
+          echo "无效渠道: $CHANNEL（期望 dev 或 stable）"
           exit 1
         fi
+
+        FILE_VER=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
+        if [ "$FILE_VER" != "$VERSION" ]; then
+          echo "version.json ($FILE_VER) 与发布版本 ($VERSION) 不一致"
+          exit 1
+        fi
+
+        echo "$VERSION" > .release-version
+        echo "$CHANNEL" > .release-channel
+        echo "version=$VERSION channel=$CHANNEL tag=$TAG"
+
         rm -rf relkit
         if [ -n "${GITHUB_TOKEN:-}" ]; then
           git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/shichao402/relkit.git" relkit \
@@ -44,14 +74,15 @@
     - name: build
       script: |
         set -euo pipefail
-        export VERSION
         VERSION=$(cat .release-version)
+        export VERSION
         bash scripts/build.sh --all
 
     - name: rup-publish
       script: |
         set -euo pipefail
         VERSION=$(cat .release-version)
+        CHANNEL=$(cat .release-channel)
         VER="${VERSION#v}"
         if [ -z "${RELKIT_AGENT_TOKEN:-}" ]; then
           echo "RELKIT_AGENT_TOKEN 未配置，跳过 RUP 发布"
@@ -74,7 +105,7 @@
           ADD_ARGS+=(--add "$f" "id=$base,kind=binary,os=$os,arch=$arch,component=$component")
         done
         CODE=$(python3 -c "maj,min,pat='${VER}'.split('.'); print(int(maj)*1000000+int(min)*1000+int(pat))")
-        ./relkit-bin stage "$VER" --code "$CODE" "${ADD_ARGS[@]}"
+        ./relkit-bin stage "$VER" --code "$CODE" --channel "$CHANNEL" "${ADD_ARGS[@]}"
         tar -C ".relkit/staged/${VER}" -czf staged.tar.gz .
         AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com}"
         SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
@@ -85,17 +116,25 @@
         curl -fsS -X POST \
           -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
           -H "Content-Type: application/json" \
-          -d "{\"product\":\"dec\",\"version\":\"${VER}\",\"stagedSha256\":\"${SHA}\",\"idempotencyKey\":\"dec/${VER}/${SHA}\"}" \
+          -d "{\"product\":\"dec\",\"version\":\"${VER}\",\"stagedSha256\":\"${SHA}\",\"idempotencyKey\":\"dec/${CHANNEL}/${VER}/${SHA}\"}" \
           "${AGENT_URL}/v1/publish"
 
     - name: github-release
       script: |
         set -euo pipefail
         VERSION=$(cat .release-version)
+        CHANNEL=$(cat .release-channel)
+        if [ "$CHANNEL" != "stable" ]; then
+          echo "channel=$CHANNEL，跳过 GitHub Release / ReleaseLatest（仅 stable 推）"
+          exit 0
+        fi
         git config user.name "cnb-ci"
         git config user.email "cnb-ci@users.noreply.cnb.cool"
-        git tag "${VERSION}"
-        git push origin "refs/tags/${VERSION}"
+        # 安装脚本与 GitHub Release 仍用裸版本 tag vX.Y.Z
+        if ! git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"; then
+          git tag "${VERSION}"
+          git push origin "refs/tags/${VERSION}"
+        fi
         git push origin HEAD:refs/heads/ReleaseLatest --force
         if [ -z "${GITHUB_TOKEN:-}" ]; then
           echo "GITHUB_TOKEN 未配置，跳过 GitHub Release（等日桥接同步 tag）"
@@ -110,12 +149,17 @@
           --generate-notes \
           --target "$(git rev-parse HEAD)"
 
-main:
-  push:
+"dev/*":
+  tag_push:
     - <<: *release
-      ifModify:
-        - version.json
+      name: release-dev
 
+"stable/*":
+  tag_push:
+    - <<: *release
+      name: release-stable
+
+main:
   web_trigger_release:
     - <<: *release
       name: release-now

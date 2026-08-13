@@ -21,10 +21,21 @@ Dec CLI 的检查/下载已切换到 `github.com/shichao402/relkit/sdk`，发布
 
 ## 发布
 
-1. CI 多平台构建四个产物：`{dec,dec-server,dec-mcp,dec-exec}-{os}-{arch}`  
-2. `relkit stage` 固化 staged 树（无私钥）  
-3. 打包 `staged.tar.gz` → `PUT` `https://publish.firoyang.com/v1/staged/dec/{version}`  
-4. `POST /v1/publish` → 发布机签名并写 COS  
+CNB（`.cnb.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json` 推 main 自动发版：
+
+| Git tag | RUP channel | 额外动作 |
+|---------|-------------|---------|
+| `dev/vX.Y.Z` | `dev` | 仅 COS / RUP |
+| `stable/vX.Y.Z` | `stable` | 另推裸 tag `vX.Y.Z`、`ReleaseLatest`、GitHub Release |
+
+流程：
+
+1. 改 `version.json` 为 `vX.Y.Z`，提交并推 `main`
+2. 打渠道 tag 并推送（例：`git tag dev/vX.Y.Z && git push origin dev/vX.Y.Z`）
+3. CNB 多平台构建四个产物：`{dec,dec-server,dec-mcp,dec-exec}-{os}-{arch}`
+4. `relkit stage --channel <dev|stable>` 固化 staged 树（无私钥）
+5. 打包 `staged.tar.gz` → `PUT` `https://publish.firoyang.com/v1/staged/dec/{version}`
+6. `POST /v1/publish` → 发布机签名并写 COS
 
 密钥：`RELKIT_PRIVATE_KEY` / `COS_SECRET_*` 只在发布机；CI 只有 `RELKIT_AGENT_TOKEN`。
 

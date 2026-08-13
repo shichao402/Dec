@@ -1,7 +1,8 @@
 #!/bin/bash
 # Dec 发布准备脚本
-# 说明：版本号在本地写入 version.json，推送到 CNB main（含 version.json 变更）后，
-# CNB 流水线会校验、打 tag、构建、发布到 COS，并创建 GitHub Release。
+# 说明：版本号写入 version.json 并推 main 后，再打渠道 tag 触发 CNB：
+#   dev/vX.Y.Z     → RUP channel=dev
+#   stable/vX.Y.Z  → RUP channel=stable（另推 ReleaseLatest / GitHub Release）
 # 用法：./scripts/release-yolo.sh [版本号]
 #       不传版本号时，仅执行本地测试与构建检查。
 #       传入版本号时，会先更新 version.json。
@@ -97,20 +98,22 @@ PY
     step "后续步骤"
     echo "1. 检查 dist/ 目录中的二进制与 BUILD_INFO 文件"
     echo "2. 更新 CHANGELOG 与 README（如有需要）"
-    echo "3. 提交本次变更并推送到 main"
+    echo "3. 提交 version.json 等变更并推送到 main"
+    echo "4. 打渠道 tag 并推送，触发 CNB 发布"
     echo ""
     echo "   说明："
-    echo "   - 只有 version.json 发生变更时，GitHub Actions 才会执行发布"
-    echo "   - 发布流程会自动校验版本号、创建 tag、构建并创建 GitHub Release"
-    echo "   - 无需手动打 tag"
+    echo "   - 发版由 CNB 监听渠道 tag（见 .cnb.yml），不再靠改 version.json 推 main 自动发"
+    echo "   - 开发渠道：dev/${target} → RUP channel=dev"
+    echo "   - 正式渠道：stable/${target} → RUP channel=stable + ReleaseLatest / GitHub Release"
     echo ""
     if [ -n "$1" ]; then
         echo "   推荐命令："
         echo "   git add version.json <其他变更>"
         echo "   git commit -m \"chore: release ${target}\""
         echo "   git push origin main"
+        echo "   git tag \"dev/${target}\" && git push origin \"dev/${target}\"   # 或 stable/${target}"
     else
-        warn "本次未修改 version.json；如果直接 push，GitHub Actions 不会触发发布。"
+        warn "本次未修改 version.json；发版前请先升版本，再推 main 并打渠道 tag。"
     fi
 }
 
