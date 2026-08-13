@@ -1,13 +1,13 @@
 # Dec 已迁到 CNB 主力。改 version.json 并推 main 即发布。
 # GitHub 仅作镜像（cnb-bridge 定时 CNB→GitHub）。
-# 密钥：shichao402/secrets 的 dec.env.yml（见 cnb-bridge/deploy/dec.env.template.yml）
+# 密钥：shichao402/keystores (KeyStore) 的 dec.env.yml（见 cnb-bridge/deploy/dec.env.template.yml）
 
 .release: &release
   name: release
   docker:
     image: golang:1.26
   imports:
-    - https://cnb.cool/shichao402/secrets/-/blob/main/dec.env.yml
+    - https://cnb.cool/shichao402/keystores/-/blob/main/dec.env.yml
   stages:
     - name: setup
       script: |
