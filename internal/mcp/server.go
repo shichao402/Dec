@@ -1,7 +1,7 @@
 // Package mcp 提供 Dec 的 MCP（stdio）接口层。
 //
 // 架构约束：IDE 启动一次 `dec mcp` 后进程常驻；所有 tool 调用在同一进程内
-// 直接调用 pkg/app，禁止 shell out 到 dec CLI 子进程（否则 Bitwarden session 无法复用）。
+// 直接调用 internal/app，禁止 shell out 到 dec CLI 子进程（否则 Bitwarden session 无法复用）。
 package mcp
 
 import (
@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/internal/app"
 )
 
 // Config 配置 Dec MCP Server。

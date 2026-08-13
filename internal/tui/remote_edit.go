@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/shichao402/Dec/pkg/app"
-	"github.com/shichao402/Dec/pkg/editor"
+	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/editor"
 )
 
 type remoteEditKind string

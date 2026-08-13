@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/internal/app"
 	"github.com/spf13/cobra"
 )
 

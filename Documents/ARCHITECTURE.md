@@ -9,7 +9,7 @@
 - [TUI_ARCHITECTURE.md](./TUI_ARCHITECTURE.md)：TUI 页面、测试策略与入口路由
 - [schema/dec/v1/README.md](../schema/dec/v1/README.md)：Dec 配置 Protobuf schema
 - [schema/secrets/v1/README.md](../schema/secrets/v1/README.md)：Secrets bundle Protobuf schema
-- `pkg/assets/dec/SKILL.md`：Dec Skill 的完整使用说明
+- `internal/assets/dec/SKILL.md`：Dec Skill 的完整使用说明
 
 ## 概览
 
@@ -24,7 +24,7 @@ Dec 是一个以 **TUI** 为第一交互入口的个人 AI 资产管理工具，
 
 公开资产以 **bundle** 组织在 Git Vault，落地在 **`.dec/`**；私密文件以 **SyncTarget**（`.secrets/project/` 或 `.secrets/bundles/<name>/`）同构存放在 Bitwarden，SSH Key 落地 **机器级 `~/.ssh/`**。TUI **Run** 页一次 pull 先解析 project 的 bundle 列表，再逐 bundle 拉 Dec Git bundle、自动拉 secrets bundle，两边 **独立落地**（敏感文件不进 `.dec/cache/`），且 **`.dec/` 树与 `.secrets/` 树不得相交**。详见 [0002](decisions/0002-secrets-synctarget-root.md)。
 
-用户操作通过 TUI Shell（`internal/tui/`）完成，业务逻辑在 `pkg/app/`：
+用户操作通过 TUI Shell（`internal/tui/`）完成，业务逻辑在 `internal/app/`：
 
 - 仓库连接：TUI **Settings** 页
 - 项目初始化 / project 选择：TUI **Home** 或首次进入引导
@@ -35,7 +35,7 @@ Dec 是一个以 **TUI** 为第一交互入口的个人 AI 资产管理工具，
 ## 文档边界
 
 - `README.md` 负责概览、安装、快速上手
-- `pkg/assets/dec/SKILL.md` 负责完整的用户操作语义
+- `internal/assets/dec/SKILL.md` 负责完整的用户操作语义
 - 本文档保留架构、目录结构、模块边界和关键运行机制
 
 ## 三层目录总览
@@ -359,11 +359,11 @@ TUI **Settings** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 三套内容平面：
 
-- **Dec 产品源码**：`pkg/assets/`、`cmd/`、`pkg/`、`Documents/` 等，通过构建进入二进制
+- **Dec 产品源码**：`internal/`、`cmd/`、`Documents/` 等，通过构建进入二进制
 - **项目级落地产物**：`.dec/`、`.cursor/`、`.claude/` 等，由 TUI pull 写入
 - **Vault 资产源**：远端 `projects/`、`projects/<name>.yaml` 与各 `bundles/<name>/` 目录与项目 `.dec/cache/`
 
-修改 `pkg/assets/` 走源码 commit + release；`.dec/cache/` 变更走 TUI **Run** 页 push；project 声明变更走 vault `projects/` push。
+修改 `internal/assets/` 走源码 commit + release；`.dec/cache/` 变更走 TUI **Run** 页 push；project 声明变更走 vault `projects/` push。
 
 ### 4. 资产生命周期
 
@@ -409,7 +409,7 @@ MCP 采用非覆盖式合并：
 
 ### 6. freshness 被动检查
 
-`pkg/freshness/` 在后台检查远端 Vault 是否有新提交。实现位于 `pkg/freshness/` 与 hidden 子命令 `__freshness-check`：
+`internal/freshness/` 在后台检查远端 Vault 是否有新提交。实现位于 `internal/freshness/` 与 hidden 子命令 `__freshness-check`：
 
 - 分离子进程执行 fetch，不阻塞 TUI 主流程
 - cache：`~/.dec/local/freshness-result.<sha1>.json`，24h TTL
@@ -437,7 +437,7 @@ pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感
 - `freshness_check.go`：hidden 子命令，供 freshness 后台 worker 使用
 - `output.go`：输出辅助
 
-### `pkg/app/`
+### `internal/app/`
 
 用例层，编排 repo/config/ide 为可复用操作：
 
@@ -456,32 +456,32 @@ Bubble Tea 交互层：
 - `app.go`：程序启动与 IO 绑定
 - `model.go`：Shell model，Home / Assets / Project / Run / Settings 页
 
-### `pkg/config/`
+### `internal/config/`
 
 - `global.go`：全局配置、有效 IDE / editor 解析
 - `project.go`：项目级 `.dec/config.yaml` 与 `.dec/vars.yaml`
 
-### `pkg/repo/`
+### `internal/repo/`
 
 Git 仓库连接、bare repo 管理、事务 worktree。
 
-### `pkg/ide/`
+### `internal/ide/`
 
 IDE 抽象层，区分项目级输出目录与用户级内置资产安装目录。
 
-### `pkg/assets/`
+### `internal/assets/`
 
 内置 skill 内容（`dec`、`dec-extract-asset`），通过 embed 打包进二进制。
 
-### `pkg/types/`
+### `internal/types/`
 
 全局配置、Project、ProjectConfig、资产列表、Bundle、MCP 配置等结构体。
 
-### `pkg/vars/`
+### `internal/vars/`
 
 变量文件加载、占位符提取与替换。
 
-### `pkg/version/`、`pkg/update/`、`pkg/freshness/`
+### `internal/version/`、`internal/update/`、`internal/freshness/`
 
 版本信息、自更新、远端新鲜度检查。
 
@@ -489,7 +489,7 @@ IDE 抽象层，区分项目级输出目录与用户级内置资产安装目录�
 
 ### TUI 驱动
 
-日常交互通过 TUI 页面完成；Agent / CI 调用 `pkg/app/` API。
+日常交互通过 TUI 页面完成；Agent / CI 调用 `internal/app/` API。
 
 ### Project > Bundle
 

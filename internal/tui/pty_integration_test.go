@@ -30,8 +30,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/shichao402/Dec/pkg/secrets"
-	"github.com/shichao402/Dec/pkg/secrets/unlock"
+	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/secrets/unlock"
 )
 
 const (

@@ -9,7 +9,7 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 
 ## 设计原则
 
-- 新功能先设计 TUI 页面/快捷键/消息流，再实现 `pkg/app/` 业务逻辑。
+- 新功能先设计 TUI 页面/快捷键/消息流，再实现 `internal/app/` 业务逻辑。
 - **不要新增**独立 Cobra 子命令（pull、config、push 等用户面能力均在 TUI）。
 - 保留最小 CLI 面：`dec --version`、内部 hidden 命令（如 `__freshness-check`、**`dec exec`**）、非 TTY 时的简短提示。
 - Secrets / Bitwarden / SSH / env 部署等操作通过 TUI 触达（Settings、Run、**Bundles** 等页）。
@@ -36,7 +36,7 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 ## 非交互环境
 
 - `DEC_NO_TUI=1` 或 stdout 非 TTY：不启动 TUI，输出简短说明后退出。
-- Agent / CI 应调用 `pkg/app/` API，或 hidden `dec exec` 注入 env；**不要**假设存在 `dec pull` 等用户面子命令。
+- Agent / CI 应调用 `internal/app/` API，或 hidden `dec exec` 注入 env；**不要**假设存在 `dec pull` 等用户面子命令。
 
 ## 反例
 
@@ -44,6 +44,6 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 // ❌ 新增用户-facing 子命令
 RootCmd.AddCommand(&cobra.Command{Use: "sync", ...})
 
-// ✅ 在 TUI Run 页绑定快捷键，调用 pkg/app
+// ✅ 在 TUI Run 页绑定快捷键，调用 internal/app
 result, err := app.PullProjectAssets(projectRoot, opts, reporter)
 ```

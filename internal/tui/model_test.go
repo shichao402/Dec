@@ -3,13 +3,14 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/shichao402/Dec/pkg/app"
-	"github.com/shichao402/Dec/pkg/types"
-	"github.com/shichao402/Dec/pkg/update"
+	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/types"
+	"github.com/shichao402/Dec/internal/update"
 )
 
 func TestModelViewRendersHomeOverview(t *testing.T) {
@@ -954,6 +955,34 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("Remote 页应展示目录树，缺少 %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestModelDeletePageKeepsLastRowVisible(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 4
+	m.focus = focusContent
+	m.width = 100
+	m.height = 30
+	for i := 0; i < 40; i++ {
+		name := fmt.Sprintf("item%02d.env", i)
+		m.deleteCandidates = append(m.deleteCandidates, app.DeleteCandidate{
+			Kind: app.DeleteKindSecret, Label: "[secret] env/" + name,
+			SecretPath: "env/" + name, LocalRoot: ".secrets/bundles/demo", SecretsBundle: "demo",
+			TreeRoot: "secrets", TreeBranch: "demo", GroupTitle: "demo (bundle)",
+		})
+	}
+	m.deleteCandidatesLoaded = true
+	m.rebuildDeleteTree()
+	m.syncTreeViewports()
+	rows := m.deleteTree.VisibleRows()
+	m.deleteTree.MoveCursor(len(rows))
+	lastLabel := rows[len(rows)-1].Node.Label
+
+	view := m.View()
+	// 头部提示会折行；若视口按逻辑行数估算就会多算一行，末行被主卡裁掉。
+	if !strings.Contains(view, lastLabel) {
+		t.Fatalf("光标停在最后一行 %q 时该行应可见:\n%s", lastLabel, view)
 	}
 }
 

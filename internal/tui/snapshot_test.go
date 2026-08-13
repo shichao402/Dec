@@ -9,7 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
-	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/internal/app"
 )
 
 // updateSnapshots 通过 `-update` flag 重建 testdata 下的 golden 文件。

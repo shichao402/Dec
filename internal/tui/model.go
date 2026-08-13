@@ -9,11 +9,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/shichao402/Dec/pkg/app"
-	"github.com/shichao402/Dec/pkg/diag"
-	"github.com/shichao402/Dec/pkg/editor"
-	"github.com/shichao402/Dec/pkg/secrets"
-	"github.com/shichao402/Dec/pkg/update"
+	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/diag"
+	"github.com/shichao402/Dec/internal/editor"
+	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/update"
 )
 
 type overviewLoadedMsg struct {

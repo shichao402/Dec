@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/shichao402/Dec/pkg/update"
+	"github.com/shichao402/Dec/internal/update"
 	"github.com/spf13/cobra"
 )
 

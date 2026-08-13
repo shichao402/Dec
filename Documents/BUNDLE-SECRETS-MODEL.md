@@ -160,6 +160,8 @@ Note 名来自远端，按不可信输入处理：绝对路径、`~` 展开、`.
 
 OpenSSH、Git、`ssh`/`scp` 等工具默认只读取 **机器级** `~/.ssh/`。SSH 私钥 **不进 `.secrets/`**，Pull 后落地到用户主目录 `~/.ssh/`。
 
+> **模型**：SSH 属于有限源类型 `ssh_item` 的默认处理；结构化机器副作用见 [0005 Machine Handlers](decisions/0005-secrets-machine-handlers.md)。
+
 ### Bitwarden SSH Key Item
 
 | 字段 | 含义 |
@@ -190,6 +192,31 @@ my-app/.secrets/bundles/vikunja/env/vikunja.env
 ~/.ssh/dec_vikunja_deploy
 ~/.ssh/dec_vikunja_deploy.pub
 ```
+
+## Machine Handlers（0005）
+
+除默认落盘 / 默认 SSH 外，可用 **结构化处理器 Note** 写入机器平面副作用：
+
+| 约定 | 说明 |
+|------|------|
+| 源类型 | 有限：`note` / `ssh_item` |
+| Handler | 按名字开放注册；首个内置 `gitgcm` |
+| Note 名 | `{实例}_{处理器}.yaml`（路由看 basename） |
+| 正文 | YAML，且 `kind` 必须等于处理器名 |
+
+例：Bitwarden note `cnb_gitgcm.yaml`：
+
+```yaml
+kind: gitgcm
+host: cnb.cool
+username: cnb
+password: "<token>"
+# protocol: https
+# provider: generic
+```
+
+Pull：先写入 `.secrets/.../cnb_gitgcm.yaml`，再 `git config credential.https://cnb.cool.provider` + `git credential approve`。  
+普通 `env/*.env` **不**走 Handler。详见 [0005](decisions/0005-secrets-machine-handlers.md)。
 
 ## 零重叠 Invariant
 
@@ -229,6 +256,7 @@ sequenceDiagram
   else 校验通过
     BW->>Sec: 4. Secure Note → .secrets/...
     BW->>Sec: 4. SSH Key → ~/.ssh/
+    Sec->>Sec: 4b. 匹配 *_<handler>.yaml → Machine Handler（如 gitgcm → GCM）
     DecRoot->>IDE: 5. 从 cache 渲染安装
     TUI->>TUI: 6. 非敏感占位符替换（vars.yaml）
   end

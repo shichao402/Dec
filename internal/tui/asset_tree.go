@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/internal/app"
 )
 
 type assetTreePayload struct {

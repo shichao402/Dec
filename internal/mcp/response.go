@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/internal/app"
 )
 
 // logEntry 是写入 MCP tool 响应的精简日志行。

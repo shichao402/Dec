@@ -3,7 +3,7 @@ package cmd
 import (
 	"os"
 
-	"github.com/shichao402/Dec/pkg/freshness"
+	"github.com/shichao402/Dec/internal/freshness"
 	"github.com/spf13/cobra"
 )
 

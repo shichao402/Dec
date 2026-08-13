@@ -30,6 +30,7 @@ Bitwarden folder: vikunja
 - Pull 后落到 `<project>/.secrets/bundles/vikunja/env/vikunja.env`，**不进** `.dec/cache/`。
 - 环境变量只认 `env/*.env`；由 hidden `dec exec` 按 bundle 注入。
 - **SSH Key**：落地 `~/.ssh/dec_<bundle>_<name>`；有 hosts 时更新 Dec 管理 `~/.ssh/config` 区块。
+- **Machine Handlers**（[0005](../../Documents/decisions/0005-secrets-machine-handlers.md)）：`{实例}_{处理器}.yaml` 先落盘再 Apply；如 `cnb_gitgcm.yaml` → GCM。
 
 **Invariant**：`.dec/` 树与 `.secrets/` 树 **不得相交**；`.secrets/` 须被 `.gitignore` 忽略。
 

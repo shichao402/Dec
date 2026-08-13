@@ -3,7 +3,7 @@
 - **状态**：已接受（实施中）
 - **日期**：2026-08-09
 - **取代**：[0001-secrets-landing-path.md](0001-secrets-landing-path.md)
-- **影响范围**：`pkg/secrets/`、`pkg/app/secrets_*.go`、`pkg/app/delete.go`、`internal/tui/`、`Documents/BUNDLE-SECRETS-MODEL.md`、`schema/secrets/v1/`、`.cursor/rules/`
+- **影响范围**：`internal/secrets/`、`internal/app/secrets_*.go`、`internal/app/delete.go`、`internal/tui/`、`Documents/BUNDLE-SECRETS-MODEL.md`、`schema/secrets/v1/`、`.cursor/rules/`
 
 ## 问题
 

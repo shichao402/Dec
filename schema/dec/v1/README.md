@@ -30,4 +30,4 @@ buf lint
 buf generate
 ```
 
-生成物默认输出到 `schema/gen/go/`（见 `buf.gen.yaml`）。当前 Dec 运行时仍使用 `pkg/types/` 手写 struct 与 adapter，生成类型供后续接入。
+生成物默认输出到 `schema/gen/go/`（见 `buf.gen.yaml`）。当前 Dec 运行时仍使用 `internal/types/` 手写 struct 与 adapter，生成类型供后续接入。

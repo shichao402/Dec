@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/internal/app"
 )
 
 type deleteLoadedMsg struct {
@@ -326,6 +326,57 @@ func startDeleteRunCmd(ctx context.Context, input app.DeleteProjectInput, stream
 	}
 }
 
+// remoteHeadLines 是 Remote 列表上方的固定行（标题 / 快捷键 / 筛选输入提示）。
+func (m model) remoteHeadLines() []string {
+	head := fmt.Sprintf("Remote · 共 %d 项 · 已选 %d", len(m.visibleDeleteCandidates()), len(m.selectedDeleteItems()))
+	if filter := m.currentDeleteFilterLabel(); filter != "<none>" {
+		head += " · 筛选 " + filter
+	}
+	lines := []string{head}
+	if m.deleteLoad.busy() {
+		lines = append(lines, shellWarnStyle.Render("刷新中…（含远端 Bitwarden orphan 时可能较慢）"))
+	} else {
+		lines = append(lines, shellMutedStyle.Render("space 选中 · a 全选 · e 编辑 · d 删除 · A 登记 · / 筛选 · r 刷新 · PgUp/PgDn 翻页"))
+	}
+	if m.deleteFilterInput {
+		lines = append(lines, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))
+	}
+	return lines
+}
+
+// remoteFooterLines 是 Remote 列表下方的固定行（运行中 / 错误 / 上次结果）。
+func (m model) remoteFooterLines() []string {
+	footer := make([]string, 0, 3)
+	if m.runningDelete {
+		footer = append(footer, shellWarnStyle.Render("正在删除… Esc 取消"))
+	}
+	if m.deleteErr != nil {
+		footer = append(footer, shellWarnStyle.Render("删除失败: "+m.deleteErr.Error()))
+	}
+	if m.deleteResult != nil {
+		footer = append(footer, shellGoodStyle.Render(fmt.Sprintf("上次删除：Dec %d · secrets %d · ssh %d · bundle %d",
+			m.deleteResult.DecDeleted, m.deleteResult.SecretsDeleted, m.deleteResult.SSHKeysDeleted, m.deleteResult.BundlesDeleted)))
+	}
+	return footer
+}
+
+func remoteScrollHint(from, to, total int) string {
+	return fmt.Sprintf("列表 %d–%d / %d  ·  j/k 移动 · PgUp/PgDn 翻页", from, to, total)
+}
+
+// remoteScrollHintProbe 给出滚动提示行的最长形态，用于在渲染前估高度。
+func remoteScrollHintProbe(total int) string {
+	return remoteScrollHint(total, total, total)
+}
+
+// remoteListChromeHeight 是 Remote 列表之外的固定区域按 width 折行后的实际行数。
+func (m model) remoteListChromeHeight(width int) int {
+	h := wrappedHeight(width, m.remoteHeadLines())
+	h += wrappedHeight(width, m.remoteFooterLines())
+	h += wrappedHeight(width, []string{remoteScrollHintProbe(len(m.deleteTree.VisibleRows()))})
+	return h
+}
+
 func (m model) renderDeletePage(width, height int) string {
 	if m.deleteStage == "summary" || m.deleteStage == "confirm" {
 		return m.renderDeleteConfirmPage(width)
@@ -344,53 +395,31 @@ func (m model) renderDeletePage(width, height int) string {
 
 	visible := mm.visibleDeleteCandidates()
 	allRows := tree.VisibleRows()
-	selectedCount := len(mm.selectedDeleteItems())
-	lines := []string{
-		fmt.Sprintf("Remote · 共 %d 项 · 已选 %d", len(visible), selectedCount),
-	}
-	if filter := mm.currentDeleteFilterLabel(); filter != "<none>" {
-		lines[0] += " · 筛选 " + filter
-	}
-	if m.deleteLoad.busy() {
-		lines = append(lines, shellWarnStyle.Render("刷新中…（含远端 Bitwarden orphan 时可能较慢）"))
-	} else {
-		lines = append(lines, shellMutedStyle.Render("space 选中 · a 全选 · e 编辑 · d 删除 · A 登记 · / 筛选 · r 刷新 · PgUp/PgDn 翻页"))
-	}
-	if mm.deleteFilterInput {
-		lines = append(lines, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))
-	}
+	lines := mm.remoteHeadLines()
 	if len(visible) == 0 {
 		lines = append(lines, shellMutedStyle.Render("没有远端候选项。可按 A 登记 secret，或先到 Run 页 pull。"))
 		return wrapLines(width, lines)
 	}
 
-	footer := make([]string, 0, 3)
-	if m.runningDelete {
-		footer = append(footer, shellWarnStyle.Render("正在删除… Esc 取消"))
-	}
-	if m.deleteErr != nil {
-		footer = append(footer, shellWarnStyle.Render("删除失败: "+m.deleteErr.Error()))
-	}
-	if m.deleteResult != nil {
-		footer = append(footer, shellGoodStyle.Render(fmt.Sprintf("上次删除：Dec %d · secrets %d · ssh %d · bundle %d",
-			m.deleteResult.DecDeleted, m.deleteResult.SecretsDeleted, m.deleteResult.SSHKeysDeleted, m.deleteResult.BundlesDeleted)))
-	}
+	footer := mm.remoteFooterLines()
 
-	listBudget := height - len(lines) - len(footer)
+	listBudget := height - wrappedHeight(width, lines) - wrappedHeight(width, footer)
 	if listBudget < 1 {
 		listBudget = 1
 	}
-	// 视口含滚动提示行时留一行给提示
+	// 视口含滚动提示行时留出提示实际折行后的高度
 	scrollHint := len(allRows) > listBudget
 	vp := listBudget
-	if scrollHint && vp > 1 {
-		vp--
+	if scrollHint {
+		vp -= wrappedHeight(width, []string{remoteScrollHintProbe(len(allRows))})
+		if vp < 1 {
+			vp = 1
+		}
 	}
 	tree.SetViewport(vp)
 	window := tree.WindowRows()
 	if scrollHint {
-		lines = append(lines, shellMutedStyle.Render(fmt.Sprintf("列表 %d–%d / %d  ·  j/k 移动 · PgUp/PgDn 翻页",
-			tree.Offset+1, tree.Offset+len(window), len(allRows))))
+		lines = append(lines, shellMutedStyle.Render(remoteScrollHint(tree.Offset+1, tree.Offset+len(window), len(allRows))))
 	}
 	for i, row := range window {
 		abs := tree.Offset + i

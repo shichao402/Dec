@@ -4,7 +4,7 @@
 - **日期**：2026-08-09
 - **修订**：2026-08-09 — 纠正首版实现偏差：用户级对象是 **Dec bundle**，不是「仅 secrets」；secrets-only 在**勾选启用**时才写入 vault 占位
 - **关联**：[0002-secrets-synctarget-root.md](0002-secrets-synctarget-root.md)
-- **影响范围**：`~/.dec/secrets/config.yaml` 的 `user_enabled_bundles`（语义：本机启用的 Dec bundle 短名）、`pkg/app` pull / Settings、vault `bundles/<name>/` 按需创建；**不**改 Bitwarden `bundle/<name>` folder 协议
+- **影响范围**：`~/.dec/secrets/config.yaml` 的 `user_enabled_bundles`（语义：本机启用的 Dec bundle 短名）、`internal/app` pull / Settings、vault `bundles/<name>/` 按需创建；**不**改 Bitwarden `bundle/<name>` folder 协议
 
 ## 问题
 

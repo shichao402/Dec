@@ -3,7 +3,7 @@
 - **状态**：已接受（已实现）
 - **日期**：2026-08-10
 - **关联**：[0002-secrets-synctarget-root.md](0002-secrets-synctarget-root.md)、[0003-user-enabled-secret-bundles.md](0003-user-enabled-secret-bundles.md)
-- **影响范围**：TUI 侧栏页 `Delete` → `Remote`；`pkg/app` 删除/编辑 API；Bitwarden Secure Note 与 SSH Key Notes（Hosts）写回；设计文档与规则中的「Delete 页」表述
+- **影响范围**：TUI 侧栏页 `Delete` → `Remote`；`internal/app` 删除/编辑 API；Bitwarden Secure Note 与 SSH Key Notes（Hosts）写回；设计文档与规则中的「Delete 页」表述
 
 ## 问题
 

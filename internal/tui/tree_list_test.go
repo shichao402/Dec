@@ -185,12 +185,12 @@ func TestTreeList_ViewportFollowsCursorAndPage(t *testing.T) {
 	if tree.Cursor != 7 {
 		t.Fatalf("Cursor = %d, want 7", tree.Cursor)
 	}
-	if tree.Offset != 3 { // 7 落在 [3,8)
-		t.Fatalf("Offset = %d, want 3", tree.Offset)
+	if tree.Offset != 4 { // 视口 5 → margin 1，光标下方留 1 行：窗口 [4,9)
+		t.Fatalf("Offset = %d, want 4", tree.Offset)
 	}
 	win := tree.WindowRows()
-	if len(win) != 5 || win[0].Node.ID != "n03" {
-		t.Fatalf("window start = %s, want n03", win[0].Node.ID)
+	if len(win) != 5 || win[0].Node.ID != "n04" {
+		t.Fatalf("window start = %s, want n04", win[0].Node.ID)
 	}
 	tree.PageCursor(1)
 	if tree.Cursor != 12 {
@@ -198,5 +198,62 @@ func TestTreeList_ViewportFollowsCursorAndPage(t *testing.T) {
 	}
 	if tree.Cursor < tree.Offset || tree.Cursor >= tree.Offset+tree.Viewport {
 		t.Fatalf("翻页后光标应在视口内 cursor=%d offset=%d vp=%d", tree.Cursor, tree.Offset, tree.Viewport)
+	}
+}
+
+func TestTreeList_ScrollMarginKeepsCursorOffEdges(t *testing.T) {
+	roots := make([]*TreeNode, 0, 40)
+	for i := 0; i < 40; i++ {
+		id := fmt.Sprintf("n%02d", i)
+		roots = append(roots, &TreeNode{ID: id, Label: id, SelectMode: TreeSelectLeaf})
+	}
+	tree := &TreeList{Roots: roots}
+	tree.SetViewport(9) // margin = 3：光标越过约 1/3 与 2/3 位置即滚动
+
+	// 列表开头：光标可以贴到第一行，不强行留白。
+	if tree.Offset != 0 {
+		t.Fatalf("初始 Offset = %d, want 0", tree.Offset)
+	}
+	tree.MoveCursor(2)
+	if tree.Offset != 0 {
+		t.Fatalf("开头附近不应滚动, offset=%d", tree.Offset)
+	}
+
+	// 光标到达视口内第 6 行（下方只剩 3 行）时开始下滚。
+	tree.MoveCursor(3) // cursor=5
+	if tree.Offset != 0 {
+		t.Fatalf("cursor=5 仍应在 [0,9) 内不滚, offset=%d", tree.Offset)
+	}
+	tree.MoveCursor(1) // cursor=6
+	if tree.Offset != 1 {
+		t.Fatalf("cursor=6 应下滚一行, offset=%d", tree.Offset)
+	}
+
+	tree.MoveCursor(10) // cursor=16
+	if got := tree.Cursor - tree.Offset; got != 5 {
+		t.Fatalf("持续下移时光标应停在视口第 6 行, 相对位置=%d offset=%d", got, tree.Offset)
+	}
+
+	// 回上：光标到视口内第 4 行（上方只剩 3 行）时开始上滚。
+	tree.MoveCursor(-2) // cursor=14, offset 仍 11
+	if tree.Offset != 11 {
+		t.Fatalf("上移 2 行还在留白内, offset=%d", tree.Offset)
+	}
+	tree.MoveCursor(-1) // cursor=13
+	if tree.Offset != 10 {
+		t.Fatalf("cursor=13 应上滚一行, offset=%d", tree.Offset)
+	}
+
+	// 列表末尾：光标可以贴到最后一行。
+	tree.MoveCursor(100)
+	if tree.Cursor != 39 {
+		t.Fatalf("Cursor = %d, want 39", tree.Cursor)
+	}
+	if tree.Offset != 31 {
+		t.Fatalf("末尾 Offset = %d, want 31（最后一行可见）", tree.Offset)
+	}
+	win := tree.WindowRows()
+	if len(win) != 9 || win[len(win)-1].Node.ID != "n39" {
+		t.Fatalf("末尾窗口应包含 n39, last=%s len=%d", win[len(win)-1].Node.ID, len(win))
 	}
 }

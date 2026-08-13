@@ -2,7 +2,7 @@
 
 - **状态**：已被 [0002](0002-secrets-synctarget-root.md) 取代
 - **日期**：2026-07-27
-- **影响范围**：`pkg/secrets/`（`paths.go` 已删、新增 `landing.go` / `remote.go`）、`pkg/app/secrets_pull.go`、`pkg/app/secrets_push.go`、`pkg/app/delete.go`、`internal/tui/`、`Documents/BUNDLE-SECRETS-MODEL.md`、`schema/secrets/v1/`（`state.proto` 已删）
+- **影响范围**：`internal/secrets/`（`paths.go` 已删、新增 `landing.go` / `remote.go`）、`internal/app/secrets_pull.go`、`internal/app/secrets_push.go`、`internal/app/delete.go`、`internal/tui/`、`Documents/BUNDLE-SECRETS-MODEL.md`、`schema/secrets/v1/`（`state.proto` 已删）
 
 > **取代说明（2026-08-09）**：本决策把 Note 名定为项目根消费者路径，使 push 无法安全枚举本地文件，且密文散落。0002 改为 `.secrets` SyncTarget 镜像 + `dec exec` 注入。下文保留作历史。
 
@@ -17,7 +17,7 @@ Bitwarden Secure Note 拉到本地后应该落在哪个路径？这件事在仓�
 
 | 层面 | 实际取值 | 出处 |
 |------|----------|------|
-| Bitwarden 匹配键 | `mise/conf.d/vikunja.toml`（裸相对路径，无前缀） | `CanonicalNoteName`（`pkg/secrets/paths.go`） |
+| Bitwarden 匹配键 | `mise/conf.d/vikunja.toml`（裸相对路径，无前缀） | `CanonicalNoteName`（`internal/secrets/paths.go`） |
 | 本地落地（代码现状） | `.secrets/<secrets_bundle>/mise/conf.d/vikunja.toml` | `LandingPathForNote`、`SecretsRootDir` 常量 |
 | 本地落地（规范文档） | `.config/mise/conf.d/vikunja.toml` | 见下方三处 |
 
@@ -115,7 +115,7 @@ SSH Key 维持既有例外：落地机器级 `~/.ssh/`（OpenSSH 不认项目内
 
 1. `paths.go`（`CanonicalNoteName` / `LandingPathForNote` / `SecretsRootDir` / `ScanSecretsBundleFiles`）**整个文件删除**
 2. pull 改两阶段：先取回全部 folder 的 note，汇总后一次校验，再写盘。跨 folder 撞车只有在汇总视图下才看得见
-3. 落地前校验集中在 `pkg/secrets/landing.go`：非法路径（绝对路径 / `~` / `..` / 盘符）、跨 folder 撞车、`.dec/` 重叠、符号链接逃逸、git 跟踪
+3. 落地前校验集中在 `internal/secrets/landing.go`：非法路径（绝对路径 / `~` / `..` / 盘符）、跨 folder 撞车、`.dec/` 重叠、符号链接逃逸、git 跟踪
 4. push 改为按远端 note 列表读本地文件；**删掉了删远端孤儿的逻辑**，本地缺文件只报告
 5. `updateSecureNote` 原样回传远端 name 密文，不再用本地推导的名字重新加密：
    note 名就是落地路径，push 无权把一条 secret 改指到另一个文件上（修掉了盘点中发现的「update 会就地重命名」）
@@ -133,4 +133,4 @@ Bitwarden 里已丢失原始目标路径信息，无法自动推断；apply 时�
 
 - `Documents/BUNDLE-SECRETS-MODEL.md` — 详细设计
 - `.cursor/rules/bundle-secrets-mirror.mdc` — 存储根分离与零重叠约束
-- `pkg/secrets/landing.go` — 落地前校验
+- `internal/secrets/landing.go` — 落地前校验

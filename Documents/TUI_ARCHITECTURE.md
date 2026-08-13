@@ -13,7 +13,7 @@ Dec 以 **TUI**（`internal/tui/`）为第一交互入口。无参运行 `dec` �
 
 - **TUI-first**：日常操作（连接仓库、初始化 project、选择 bundle、pull/push/remove）均在 TUI 完成，不暴露 `dec pull`、`dec config` 等用户面 CLI 子命令。
 - **单二进制**：Bubble Tea 生态（`bubbletea`、`bubbles`、`lipgloss`），无 Node.js 或前端运行时。
-- **分层复用**：TUI 与 Agent / CI 共用 `pkg/app/` 用例层；TUI 禁止 shell out 调 CLI 子命令。
+- **分层复用**：TUI 与 Agent / CI 共用 `internal/app/` 用例层；TUI 禁止 shell out 调 CLI 子命令。
 - **结构化事件**：长任务通过 `Reporter` / `OperationEvent` 暴露进度，TUI Run 页渲染日志与阶段状态。
 
 ## 2. 入口路由
@@ -51,7 +51,7 @@ cmd/
   root.go              # 入口路由、dec --version
   freshness_check.go   # hidden __freshness-check
 
-pkg/app/               # 用例层（TUI 与 Agent 共用）
+internal/app/               # 用例层（TUI 与 Agent 共用）
   project.go           # project init、配置写入
   assets.go            # Assets 页选择与持久化
   operations.go        # pull / push / remove 编排
@@ -63,11 +63,11 @@ internal/tui/          # Bubble Tea 展示层
   app.go               # tea.Program 启动
   model.go             # Shell model、页面渲染与快捷键
 
-pkg/config/ pkg/repo/ pkg/ide/ pkg/vars/ pkg/types/
-pkg/freshness/         # 远端新鲜度后台检查
+internal/config/ internal/repo/ internal/ide/ internal/vars/ internal/types/
+internal/freshness/         # 远端新鲜度后台检查
 ```
 
-TUI **不得**直接调用 `cmd/*` 或 `fmt.Printf` 式业务输出；所有动作走 `pkg/app` 并订阅 `Reporter` 事件。
+TUI **不得**直接调用 `cmd/*` 或 `fmt.Printf` 式业务输出；所有动作走 `internal/app` 并订阅 `Reporter` 事件。
 
 ## 5. 关键交互流
 
@@ -123,7 +123,7 @@ TUI **不得**直接调用 `cmd/*` 或 `fmt.Printf` 式业务输出；所有动�
 
 | 层级 | 位置 | 覆盖 |
 |------|------|------|
-| 用例层单测 | `pkg/app/*_test.go` | 结构化结果与事件序列 |
+| 用例层单测 | `internal/app/*_test.go` | 结构化结果与事件序列 |
 | TUI model | `internal/tui/model_test.go` | 状态迁移、快捷键、Reporter 接入 |
 | 宽度回归 | `internal/tui/width_test.go` | 60 / 80 / 100 / 140 列不溢出 |
 | Snapshot | `internal/tui/snapshot_test.go` | Home / Assets / Run / Settings × 80 / 100 / 140 |
@@ -135,10 +135,10 @@ TUI **不得**直接调用 `cmd/*` 或 `fmt.Printf` 式业务输出；所有动�
 ## 7. 非交互与 Agent
 
 - `DEC_NO_TUI=1` 或 stdout 非 TTY：不启动 TUI，输出简短说明
-- Agent / CI 应调用 `pkg/app/` API（如 `app.PullProjectAssets`），而非假设存在 CLI 子命令
+- Agent / CI 应调用 `internal/app/` API（如 `app.PullProjectAssets`），而非假设存在 CLI 子命令
 
 ## 8. 已知限制
 
-- **freshness**：`pkg/freshness/` 后台检查已实现，与 TUI 启动 / Run 页的深度集成待完善
+- **freshness**：`internal/freshness/` 后台检查已实现，与 TUI 启动 / Run 页的深度集成待完善
 - **remove 按名称查找**：多个 vault 存在同名同类型资产时，按扫描顺序命中第一个
 - **CodeBuddy MCP**：项目根 `.mcp.json`；Codex 为 `.codex/config.toml`

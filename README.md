@@ -109,7 +109,7 @@ Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 | Codex Internal | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 
-更详细的使用语义见 `pkg/assets/dec/SKILL.md`，实现与存储结构见 [Documents/ARCHITECTURE.md](Documents/ARCHITECTURE.md)。
+更详细的使用语义见 `internal/assets/dec/SKILL.md`，实现与存储结构见 [Documents/ARCHITECTURE.md](Documents/ARCHITECTURE.md)。
 
 说明：`claude-internal` 的项目级部署复用 `.claude/`，用户级目录为 `~/.claude-internal/`。`codex-internal` 的项目级部署复用 `.codex/`，用户级目录为 `~/.codex-internal/`。Codex MCP 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
 
@@ -229,7 +229,7 @@ Dec 以 TUI 为主入口。CLI 仅保留：
 
 ### 远端资产新鲜度
 
-`pkg/freshness/` 提供后台远端检查能力，待 TUI 启动与 Run 页集成。
+`internal/freshness/` 提供后台远端检查能力，待 TUI 启动与 Run 页集成。
 
 ## 资产格式要求
 
@@ -331,8 +331,8 @@ go test ./...
 - [Documents/TUI_ARCHITECTURE.md](Documents/TUI_ARCHITECTURE.md) — TUI 页面、入口路由与测试策略
 - [schema/dec/v1/README.md](schema/dec/v1/README.md) — Dec 配置 Protobuf schema
 - [schema/secrets/v1/README.md](schema/secrets/v1/README.md) — Secrets bundle Protobuf schema
-- `pkg/assets/dec/SKILL.md` — Dec Skill 的完整使用说明
-- `pkg/assets/dec-extract-asset/SKILL.md` — 把当前项目能力沉淀为 Dec 资产的内置 Skill
+- `internal/assets/dec/SKILL.md` — Dec Skill 的完整使用说明
+- `internal/assets/dec-extract-asset/SKILL.md` — 把当前项目能力沉淀为 Dec 资产的内置 Skill
 
 ## 许可证
 

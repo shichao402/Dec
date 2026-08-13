@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/shichao402/Dec/pkg/app"
-	"github.com/shichao402/Dec/pkg/secrets"
+	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/secrets"
 )
 
 func projectPageModelForAddSecret(t *testing.T) model {

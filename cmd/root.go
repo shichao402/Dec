@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/tui"
-	"github.com/shichao402/Dec/pkg/compat"
-	"github.com/shichao402/Dec/pkg/diag"
-	"github.com/shichao402/Dec/pkg/update"
-	"github.com/shichao402/Dec/pkg/version"
+	"github.com/shichao402/Dec/internal/compat"
+	"github.com/shichao402/Dec/internal/diag"
+	"github.com/shichao402/Dec/internal/update"
+	"github.com/shichao402/Dec/internal/version"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

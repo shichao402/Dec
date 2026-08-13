@@ -5,7 +5,7 @@ Dec CLI 的检查/下载已切换到 `github.com/shichao402/relkit/sdk`，发布
 ## 客户端
 
 - 内嵌 `entryUrls`：`https://updates.firoyang.com/rup/directory/dec.pb`
-- 内嵌公钥 `dec-2026`（见 `pkg/update` 与根目录 `relkit.json`）
+- 内嵌公钥 `dec-2026`（见 `internal/update` 与根目录 `relkit.json`）
 - `CurrentCode` = `sdk.SemverCode(version)`（`v1.13.25` → `1013025`）
 - 默认 channel：`dev`（目前仅个人使用；正式对外再切回 `stable`）
 - selectors：`os` / `arch`（与 stage 时一致）

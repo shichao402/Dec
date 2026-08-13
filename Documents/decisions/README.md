@@ -25,3 +25,5 @@
 | [0002](0002-secrets-synctarget-root.md) | Secrets SyncTarget：`.secrets` 同步根镜像 | 已接受（实施中） |
 | [0003](0003-user-enabled-secret-bundles.md) | 用户级 Bundle 启用（机器平面） | 已接受（已实现，2026-08-09 修订） |
 | [0004](0004-remote-page.md) | Remote 页：远端 CRUD，Delete 退役 | 已接受（已实现） |
+| [0005](0005-secrets-machine-handlers.md) | Secrets Machine Handlers：SourceKind + 名字路由 | 已接受（实施中） |
+| [0006](0006-retire-pkg-for-internal.md) | 源码布局：废除 `pkg/`，统一到 `internal/` | 已接受（已实现） |

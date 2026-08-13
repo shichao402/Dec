@@ -1,6 +1,6 @@
 ---
 description: schema/ 下 Protobuf 为 Dec 配置与资产声明的 schema 真相源
-globs: schema/**/*.proto, pkg/types/**/*.go, pkg/config/**/*.go, pkg/app/**/*.go
+globs: schema/**/*.proto, internal/types/**/*.go, internal/config/**/*.go, internal/app/**/*.go
 alwaysApply: false
 ---
 
@@ -24,7 +24,7 @@ alwaysApply: false
 
 ## 实现约定
 
-- 修改 schema 时先改 `schema/**/*.proto`，再同步 `pkg/types/` 手写 struct 与 adapter（生成物见 `schema/gen/go/`）。
+- 修改 schema 时先改 `schema/**/*.proto`，再同步 `internal/types/` 手写 struct 与 adapter（生成物见 `schema/gen/go/`）。
 - 统一使用 **bundle** 命名；资产正文不进 proto，只声明引用与元数据。
 - Pull 时 Dec bundle（→ `.dec/`）与 **同名** secrets bundle（→ 项目根）成对拉取；`.dec/` 与敏感路径冲突必须报错（见 `Documents/BUNDLE-SECRETS-MODEL.md`）。
 - secrets bundle 名默认与 Dec bundle 名一致；显式绑定见 `BundleBinding`。

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/internal/app"
 )
 
 func TestIOBusyLabelPriority(t *testing.T) {

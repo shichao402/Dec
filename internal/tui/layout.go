@@ -167,8 +167,8 @@ func (m model) renderPageBody(width, height int) string {
 	}
 }
 
-// mainInnerBodyHeight 估计主卡内正文可用行数（与 renderMain 预算一致）。
-func (m model) mainInnerBodyHeight() int {
+// mainLayoutMetrics 复算 View 使用的尺寸预算，供渲染前的视口估算使用。
+func (m model) mainLayoutMetrics() layoutMetrics {
 	width := m.width
 	if width <= 0 {
 		width = 100
@@ -181,7 +181,12 @@ func (m model) mainInnerBodyHeight() int {
 	if bar := m.renderStatusBar(width); bar != "" {
 		statusH = lipgloss.Height(bar)
 	}
-	lm := computeLayoutMetrics(width, height, statusH)
+	return computeLayoutMetrics(width, height, statusH)
+}
+
+// mainInnerBodyHeight 估计主卡内正文可用行数（与 renderMain 预算一致）。
+func (m model) mainInnerBodyHeight() int {
+	lm := m.mainLayoutMetrics()
 	header := fitLine(m.renderPageHeader(lm.innerWidth), lm.innerWidth)
 	headerH := lipgloss.Height(shellCardStyle.Width(lm.mainWidth).Render(header))
 	bodyHeight := lm.contentHeight - headerH
@@ -196,35 +201,10 @@ func (m model) mainInnerBodyHeight() int {
 }
 
 func (m *model) syncTreeViewports() {
+	lm := m.mainLayoutMetrics()
 	bodyH := m.mainInnerBodyHeight()
-	m.deleteTree.SetViewport(max(1, bodyH-m.remoteListChromeLines()))
+	m.deleteTree.SetViewport(max(1, bodyH-m.remoteListChromeHeight(lm.innerWidth)))
 	m.assetTree.SetViewport(max(1, bodyH-m.bundlesListChromeLines()))
-}
-
-func (m model) remoteListChromeLines() int {
-	// 标题 + 快捷键提示 (+ 可选刷新/筛选提示) + 可选页脚
-	n := 2
-	if m.deleteLoad.busy() {
-		// busy 行替换普通 hints 仍算 1，上面已含 hints 位；加载时仍是 2 行头
-	}
-	if m.deleteFilterInput {
-		n++
-	}
-	if filter := strings.TrimSpace(m.deleteFilter); filter != "" && !m.deleteFilterInput {
-		// 筛选项合进标题行，不额外占行
-	}
-	if m.runningDelete {
-		n++
-	}
-	if m.deleteErr != nil {
-		n++
-	}
-	if m.deleteResult != nil {
-		n++
-	}
-	// 可滚动提示一行
-	n++
-	return n
 }
 
 func (m model) bundlesListChromeLines() int {
@@ -398,6 +378,15 @@ func wrapLines(width int, lines []string) string {
 		filtered = append(filtered, lipgloss.NewStyle().Width(width).Render(strings.TrimRight(line, " \t")))
 	}
 	return strings.Join(filtered, "\n")
+}
+
+// wrappedHeight 返回这些行经 wrapLines 折行后实际占用的终端行数。
+func wrappedHeight(width int, lines []string) int {
+	block := wrapLines(width, lines)
+	if block == "" {
+		return 0
+	}
+	return lipgloss.Height(block)
 }
 
 func joinSections(parts ...string) string {

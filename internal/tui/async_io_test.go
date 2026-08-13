@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shichao402/Dec/pkg/app"
+	"github.com/shichao402/Dec/internal/app"
 )
 
 func TestAsyncLoad_BeginFinishAndStale(t *testing.T) {

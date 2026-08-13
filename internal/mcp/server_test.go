@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/shichao402/Dec/pkg/app"
-	"github.com/shichao402/Dec/pkg/repo"
+	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/repo"
 )
 
 func TestHandleStatus_NoConfig(t *testing.T) {

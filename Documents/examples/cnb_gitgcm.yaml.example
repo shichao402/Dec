@@ -1,0 +1,12 @@
+# 示例：CNB HTTPS → Git Credential Manager
+# Bitwarden Secure Note 名必须是：cnb_gitgcm.yaml
+# （可放在 SyncTarget 根或子目录；路由看 basename）
+#
+# 放入用户级启用的 secrets bundle（如 bundle/common-git）后 pull 即可。
+
+kind: gitgcm
+host: cnb.cool
+username: cnb
+password: "替换为 CNB 个人访问令牌"
+# protocol: https
+# provider: generic

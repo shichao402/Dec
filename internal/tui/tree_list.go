@@ -238,7 +238,22 @@ func (t *TreeList) SetViewport(viewport int) {
 	t.EnsureCursorVisible()
 }
 
-// EnsureCursorVisible 调整 Offset，使 Cursor 落在 [Offset, Offset+Viewport) 内。
+// scrollMargin 是光标与视口上下边缘之间保持的行数：约 1/3 视口高度，
+// 使光标越过 ~33% / ~66% 处列表就提前滚动，而不是撞到边缘才动。
+// 列表首尾附近由 EnsureCursorVisible 的 Offset 夹取回落，光标仍能走到第一/最后一行。
+func (t *TreeList) scrollMargin() int {
+	if t.Viewport <= 2 {
+		return 0
+	}
+	margin := t.Viewport / 3
+	// 上下留白之和必须小于视口，否则两侧约束互相打架。
+	if limit := (t.Viewport - 1) / 2; margin > limit {
+		margin = limit
+	}
+	return margin
+}
+
+// EnsureCursorVisible 调整 Offset，使 Cursor 连同上下 scrollMargin 行都落在视口内。
 func (t *TreeList) EnsureCursorVisible() {
 	rows := t.VisibleRows()
 	n := len(rows)
@@ -250,11 +265,12 @@ func (t *TreeList) EnsureCursorVisible() {
 		t.Offset = 0
 		return
 	}
-	if t.Cursor < t.Offset {
-		t.Offset = t.Cursor
+	margin := t.scrollMargin()
+	if top := t.Cursor - margin; top < t.Offset {
+		t.Offset = top
 	}
-	if t.Cursor >= t.Offset+t.Viewport {
-		t.Offset = t.Cursor - t.Viewport + 1
+	if bottom := t.Cursor + margin; bottom >= t.Offset+t.Viewport {
+		t.Offset = bottom - t.Viewport + 1
 	}
 	maxOff := n - t.Viewport
 	if maxOff < 0 {
