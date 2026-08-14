@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 // LandingCandidate 是一条待落地的 secrets 文件及其 SyncTarget 归属。
@@ -236,7 +238,7 @@ func UnignoredLandingPaths(projectRoot string, relPaths []string) []string {
 		return nil
 	}
 
-	cmd := exec.Command("git", "check-ignore", "-z", "--stdin")
+	cmd := sysproc.Command("git", "check-ignore", "-z", "--stdin")
 	cmd.Dir = projectRoot
 	cmd.Stdin = strings.NewReader(strings.Join(relPaths, "\x00"))
 	out, err := cmd.Output()
@@ -268,7 +270,7 @@ func isGitWorkTree(projectRoot string) bool {
 }
 
 func runGit(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+	cmd := sysproc.Command("git", args...)
 	cmd.Dir = dir
 	return cmd.Output()
 }

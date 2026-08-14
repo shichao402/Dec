@@ -5,13 +5,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/shichao402/Dec/internal/diag"
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 // bareOpMu 串行化 bare 上的 fetch / worktree 增删，避免 TUI 并联 refresh 在 Windows 上互卡。
@@ -161,7 +161,7 @@ func randomBranchName(prefix string) (string, error) {
 }
 
 func addDetachedWorktree(bareDir, worktreeDir, startPoint string) error {
-	cmd := exec.Command("git", "--git-dir", bareDir, "worktree", "add", "--detach", worktreeDir, startPoint)
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "worktree", "add", "--detach", worktreeDir, startPoint)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree add 失败: %s", strings.TrimSpace(string(output)))
@@ -170,7 +170,7 @@ func addDetachedWorktree(bareDir, worktreeDir, startPoint string) error {
 }
 
 func removeWorktree(bareDir, worktreeDir string) error {
-	cmd := exec.Command("git", "--git-dir", bareDir, "worktree", "remove", "--force", worktreeDir)
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "worktree", "remove", "--force", worktreeDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree remove 失败: %s", strings.TrimSpace(string(output)))
@@ -237,11 +237,11 @@ func (t *Transaction) cleanup() error {
 		_ = os.RemoveAll(t.worktreeDir)
 	}
 
-	pruneCmd := exec.Command("git", "--git-dir", t.bareDir, "worktree", "prune")
+	pruneCmd := sysproc.Command("git", "--git-dir", t.bareDir, "worktree", "prune")
 	_ = pruneCmd.Run()
 
 	if t.tempBranch != "" {
-		deleteCmd := exec.Command("git", "--git-dir", t.bareDir, "branch", "-D", t.tempBranch)
+		deleteCmd := sysproc.Command("git", "--git-dir", t.bareDir, "branch", "-D", t.tempBranch)
 		_ = deleteCmd.Run()
 	}
 
@@ -311,6 +311,6 @@ func (t *Transaction) syncBareRef(git *GitOps) {
 	if err != nil {
 		return
 	}
-	cmd := exec.Command("git", "--git-dir", t.bareDir, "update-ref", fmt.Sprintf("refs/heads/%s", t.branch), hash)
+	cmd := sysproc.Command("git", "--git-dir", t.bareDir, "update-ref", fmt.Sprintf("refs/heads/%s", t.branch), hash)
 	_ = cmd.Run()
 }

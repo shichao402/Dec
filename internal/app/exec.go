@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 // ExecWithSecretsInput 描述一次 dec-exec 注入启动。
@@ -62,7 +63,7 @@ func RunExecWithSecrets(input ExecWithSecretsInput) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	cmd := exec.Command(input.Command[0], input.Command[1:]...)
+	cmd := sysproc.Command(input.Command[0], input.Command[1:]...)
 	cmd.Dir = input.ProjectRoot
 	cmd.Env = env
 	cmd.Stdin = os.Stdin

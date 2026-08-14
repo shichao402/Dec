@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/sysproc"
 	"gopkg.in/yaml.v3"
 )
 
@@ -103,7 +103,7 @@ func parseGitGCMDoc(content string) (*GitGCMDoc, error) {
 }
 
 func defaultGitRunner(ctx context.Context, stdin string, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := sysproc.CommandContext(ctx, "git", args...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}

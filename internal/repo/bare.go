@@ -3,9 +3,10 @@ package repo
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 const (
@@ -47,7 +48,7 @@ func isBareRepo(dir string) (bool, error) {
 		return false, err
 	}
 
-	cmd := exec.Command("git", "--git-dir", dir, "rev-parse", "--is-bare-repository")
+	cmd := sysproc.Command("git", "--git-dir", dir, "rev-parse", "--is-bare-repository")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("git rev-parse --is-bare-repository: %s", strings.TrimSpace(string(output)))
@@ -98,7 +99,7 @@ func FetchBare() error {
 		return fmt.Errorf("仓库未连接\n\n请先到 Settings 页配置 Repo URL")
 	}
 
-	cmd := exec.Command("git", "--git-dir", bareDir, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git fetch --prune origin: %s", strings.TrimSpace(string(output)))
@@ -132,7 +133,7 @@ func GetDefaultBranch() (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command("git", "--git-dir", bareDir, "symbolic-ref", "--short", "HEAD")
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "symbolic-ref", "--short", "HEAD")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		branch := strings.TrimSpace(string(output))
@@ -216,7 +217,7 @@ func MigrateToBare() error {
 }
 
 func setBareRemoteURL(bareDir, remote, url string) error {
-	cmd := exec.Command("git", "--git-dir", bareDir, "remote", "set-url", remote, url)
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "remote", "set-url", remote, url)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git remote set-url 失败: %s", strings.TrimSpace(string(output)))
@@ -225,7 +226,7 @@ func setBareRemoteURL(bareDir, remote, url string) error {
 }
 
 func addBareRemoteURL(bareDir, remote, url string) error {
-	cmd := exec.Command("git", "--git-dir", bareDir, "remote", "add", remote, url)
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "remote", "add", remote, url)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git remote add 失败: %s", strings.TrimSpace(string(output)))
@@ -234,7 +235,7 @@ func addBareRemoteURL(bareDir, remote, url string) error {
 }
 
 func hasBareRemote(bareDir, remote string) (bool, error) {
-	cmd := exec.Command("git", "--git-dir", bareDir, "remote")
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "remote")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("git remote 失败: %s", strings.TrimSpace(string(output)))
@@ -248,7 +249,7 @@ func hasBareRemote(bareDir, remote string) (bool, error) {
 }
 
 func getBareRemoteURL(bareDir, remote string) (string, error) {
-	cmd := exec.Command("git", "--git-dir", bareDir, "config", "--get", fmt.Sprintf("remote.%s.url", remote))
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "config", "--get", fmt.Sprintf("remote.%s.url", remote))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("读取 remote %s URL 失败: %s", remote, strings.TrimSpace(string(output)))
@@ -282,7 +283,7 @@ func syncBareHeadToRemote(bareDir string) error {
 		return nil
 	}
 
-	cmd := exec.Command("git", "--git-dir", bareDir, "symbolic-ref", "HEAD", fmt.Sprintf("refs/heads/%s", branch))
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "symbolic-ref", "HEAD", fmt.Sprintf("refs/heads/%s", branch))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("同步默认分支失败: %s", strings.TrimSpace(string(output)))
@@ -291,7 +292,7 @@ func syncBareHeadToRemote(bareDir string) error {
 }
 
 func getRemoteHeadBranch(bareDir string) (string, error) {
-	cmd := exec.Command("git", "--git-dir", bareDir, "ls-remote", "--symref", "origin", "HEAD")
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "ls-remote", "--symref", "origin", "HEAD")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("读取远端默认分支失败: %s", strings.TrimSpace(string(output)))
@@ -317,7 +318,7 @@ func getRemoteHeadBranch(bareDir string) (string, error) {
 }
 
 func gitCloneBare(url, targetDir string) error {
-	cmd := exec.Command("git", "clone", "--bare", url, targetDir)
+	cmd := sysproc.Command("git", "clone", "--bare", url, targetDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git clone --bare 失败: %s", strings.TrimSpace(string(output)))

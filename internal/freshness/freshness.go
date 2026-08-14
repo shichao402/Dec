@@ -14,12 +14,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/shichao402/Dec/internal/repo"
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 // DefaultInterval 默认节流窗口。
@@ -95,7 +95,7 @@ func FetchRemoteHead() (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command("git", "--git-dir", bareDir, "rev-parse", fmt.Sprintf("refs/heads/%s", branch))
+	cmd := sysproc.Command("git", "--git-dir", bareDir, "rev-parse", fmt.Sprintf("refs/heads/%s", branch))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("读取 refs/heads/%s 失败: %s", branch, strings.TrimSpace(string(output)))

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 func normalizeRepoURL(url string) string {
@@ -121,7 +123,7 @@ func NewGitOps(workDir string) *GitOps {
 }
 
 func (g *GitOps) run(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := sysproc.Command("git", args...)
 	cmd.Dir = g.workDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -328,7 +330,7 @@ func (g *GitOps) IsClean() (bool, error) {
 
 // HasCachedDiff 检查暂存区是否相对 HEAD 有实质差异。
 func (g *GitOps) HasCachedDiff() (bool, error) {
-	cmd := exec.Command("git", "-C", g.workDir, "diff", "--cached", "--quiet")
+	cmd := sysproc.Command("git", "-C", g.workDir, "diff", "--cached", "--quiet")
 	err := cmd.Run()
 	if err == nil {
 		return false, nil
@@ -344,7 +346,7 @@ func (g *GitOps) HasCachedDiff() (bool, error) {
 // ========================================
 
 func gitClone(url, targetDir string) error {
-	cmd := exec.Command("git", "clone", url, targetDir)
+	cmd := sysproc.Command("git", "clone", url, targetDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git clone 失败: %s", strings.TrimSpace(string(output)))
