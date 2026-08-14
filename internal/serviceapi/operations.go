@@ -7,16 +7,18 @@ import (
 	"github.com/shichao402/Dec/internal/secrets"
 )
 
+// invoke 解出 **T，好让服务端的 null 结果如实变成 nil 指针。
+// 用 *T 会把「无结果」误报成一个字段全空的结果，调用方的 nil 判断就此失效。
 func invoke[T any](ctx context.Context, method, projectRoot string, input any, reporter app.Reporter) (*T, error) {
 	api, err := Default()
 	if err != nil {
 		return nil, err
 	}
-	var out T
+	var out *T
 	if err := api.Invoke(ctx, method, projectRoot, input, &out, reporter); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out, nil
 }
 
 func run[T any](ctx context.Context, operation, projectRoot string, input any, reporter app.Reporter) (*T, error) {
@@ -24,11 +26,11 @@ func run[T any](ctx context.Context, operation, projectRoot string, input any, r
 	if err != nil {
 		return nil, err
 	}
-	var out T
+	var out *T
 	if err := api.Run(ctx, operation, projectRoot, input, &out, reporter); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out, nil
 }
 
 func LoadProjectOverview(projectRoot string, includeVaultBundles bool) (*app.ProjectOverview, error) {
