@@ -51,6 +51,16 @@ logs/
 # 项目敏感文件与集成测试 Bitwarden 凭据（勿提交）
 .secrets/
 
+# dec pull 在本仓库自身产生的本地产物：缓存、版本戳、以及渲染到各 IDE 的资产副本。
+# mcp.json 含本机绝对路径，换机即失效；skills 副本头部本身标注了「勿直接编辑」。
+# 只忽略产物路径，不要写成 .cursor/ —— 那会连带吞掉仓库自己的 .cursor/rules/。
+.dec/cache/
+.dec/.version
+.mcp.json
+.cursor/mcp.json
+.cursor/skills/
+.codebuddy/skills/
+
 # 临时文件
 resources/temp/*
 !resources/temp/.gitkeep
