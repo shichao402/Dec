@@ -11,7 +11,7 @@
 │                ││ Details                                                    │
 │                ││ Bundle: default                                            │
 │                ││ Vault: default                                             │
-│                ││ 状态: 项目已勾选（保存后随本项目 pull 下发）               │
+│                ││ 状态: 当前平面已勾选（保存后随本平面 pull 下发）           │
 │                ││ 成员: 1 个                                                 │
 │                ││ 按 l 或 Enter 展开查看成员                                 │
 │                ││                                                            │

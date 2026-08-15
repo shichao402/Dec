@@ -51,6 +51,12 @@ type OverviewLoadOpts struct {
 }
 
 func LoadProjectOverviewOpts(projectRoot string, opts OverviewLoadOpts) (*ProjectOverview, error) {
+	return LoadWorkspaceOverviewOpts(NewWorkspace(WorkspaceProject, projectRoot), opts)
+}
+
+// LoadWorkspaceOverviewOpts 加载当前平面的启用列表和可见 bundle。
+func LoadWorkspaceOverviewOpts(workspace Workspace, opts OverviewLoadOpts) (*ProjectOverview, error) {
+	projectRoot := workspace.Root
 	overview := &ProjectOverview{ProjectRoot: projectRoot}
 
 	connected, err := repo.IsConnected()
@@ -72,7 +78,19 @@ func LoadProjectOverviewOpts(projectRoot string, opts OverviewLoadOpts) (*Projec
 	overview.ProjectConfigReady = mgr.Exists()
 
 	var projectConfig *types.ProjectConfig
-	if overview.ProjectConfigReady {
+	if workspace.EffectivePlane() == WorkspaceUser {
+		globalConfig, loadErr := config.LoadGlobalConfig()
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		projectConfig = &types.ProjectConfig{EnabledBundles: append([]string(nil), globalConfig.EnabledBundles...)}
+		overview.ProjectConfigPath, _ = config.GetGlobalConfigPath()
+		overview.VarsPath, _ = config.GetGlobalVarsPath()
+		overview.ProjectConfigReady = true
+		overview.EnabledBundleCount = len(projectConfig.EnabledBundles)
+		overview.ProjectName = "user"
+		overview.ProjectNameFromConfig = true
+	} else if overview.ProjectConfigReady {
 		loaded, err := mgr.LoadProjectConfig()
 		if err != nil {
 			return nil, err
@@ -81,16 +99,17 @@ func LoadProjectOverviewOpts(projectRoot string, opts OverviewLoadOpts) (*Projec
 		overview.EnabledBundleCount = len(loaded.EnabledBundles)
 	}
 
-	overview.ProjectName, overview.ProjectNameFromConfig = ResolveProjectName(projectRoot, projectConfig)
+	if workspace.EffectivePlane() != WorkspaceUser {
+		overview.ProjectName, overview.ProjectNameFromConfig = ResolveProjectName(projectRoot, projectConfig)
+	}
 
 	// 仓库已连接时扫描 vault 内的 bundle 声明，并根据 EnabledBundles 标记启用状态。
 	// 失败时不阻塞 overview（bundle 是增量能力，项目级配置仍应可读）。
 	if connected && opts.IncludeVaultBundles {
 		tx, txErr := repo.NewLocalReadTransaction()
 		if txErr == nil {
-			resolved, resolveErr := resolveDesiredAssets(projectConfig, tx.WorkDir(), nil)
+			resolved, resolveErr := resolveDesiredAssetsForPlane(projectConfig, tx.WorkDir(), workspace.EffectivePlane(), nil)
 			if resolveErr == nil {
-				markUserEnabledBundles(resolved.Bundles)
 				overview.Bundles = resolved.Bundles
 				overview.AvailableBundleCount = len(resolved.Bundles)
 				names := make([]string, 0, len(resolved.Bundles))

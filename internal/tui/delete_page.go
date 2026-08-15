@@ -27,15 +27,15 @@ type deleteCompletedMsg struct {
 	err    error
 }
 
-var listDeleteCandidatesOperation = func(ctx context.Context, projectRoot string, includeRemote bool, reporter app.Reporter) ([]app.DeleteCandidate, error) {
-	return serviceapi.ListDeleteCandidates(ctx, projectRoot, includeRemote, reporter)
+var listDeleteCandidatesOperation = func(ctx context.Context, workspace app.Workspace, includeRemote bool, reporter app.Reporter) ([]app.DeleteCandidate, error) {
+	return serviceapi.ListWorkspaceDeleteCandidates(ctx, workspace, includeRemote, reporter)
 }
 
 var runDeleteOperation = func(ctx context.Context, input app.DeleteProjectInput, reporter app.Reporter) (*app.DeleteProjectResult, error) {
 	return serviceapi.DeleteProjectItems(ctx, input, reporter)
 }
 
-func loadDeleteCandidatesCmd(ctx context.Context, projectRoot string, includeRemote bool, loadGen uint64) tea.Cmd {
+func loadDeleteCandidatesCmd(ctx context.Context, workspace app.Workspace, includeRemote bool, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		var logs []string
 		reporter := app.ReporterFunc(func(event app.OperationEvent) {
@@ -43,7 +43,7 @@ func loadDeleteCandidatesCmd(ctx context.Context, projectRoot string, includeRem
 				logs = append(logs, msg)
 			}
 		})
-		candidates, err := listDeleteCandidatesOperation(ctx, projectRoot, includeRemote, reporter)
+		candidates, err := listDeleteCandidatesOperation(ctx, workspace, includeRemote, reporter)
 		return deleteLoadedMsg{candidates: candidates, err: err, logs: logs, loadGen: loadGen, includeRemote: includeRemote}
 	}
 }
@@ -66,7 +66,7 @@ func (m *model) startDeleteCandidatesLoad(includeRemote, force bool) tea.Cmd {
 		}
 	}
 	ctx, gen := m.deleteLoad.begin()
-	return loadDeleteCandidatesCmd(ctx, m.projectRoot, includeRemote, gen)
+	return loadDeleteCandidatesCmd(ctx, m.workspace(), includeRemote, gen)
 }
 
 // onPageChanged 只负责「进入某页时是否需要确保有数据」，不取消已在飞的 IO。
@@ -138,6 +138,7 @@ func selectionFromCandidate(c app.DeleteCandidate) app.DeleteSelectionItem {
 		Vault:         c.Vault,
 		SecretPath:    c.SecretPath,
 		LocalRoot:     c.LocalRoot,
+		Plane:         c.Plane,
 		SecretsBundle: c.SecretsBundle,
 		SSHKeyName:    c.SSHKeyName,
 		DecBundleName: c.DecBundleName,
@@ -307,6 +308,7 @@ func (m *model) startDeleteRun() tea.Cmd {
 	m.runCancel = cancel
 	input := app.DeleteProjectInput{
 		ProjectRoot: m.projectRoot,
+		Plane:       m.plane,
 		Items:       selected,
 		Confirmed:   true,
 	}

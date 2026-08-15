@@ -118,7 +118,60 @@ func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
 	}
 }
 
-func setupSecretsConfigForPushTest(t *testing.T) {
+// 用户平面 push 只扫 ~/.dec/secrets，不得把项目内 .secrets 推上去（ADR 0009 平面隔离）。
+func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) {
+	decHome := setupSecretsConfigForPushTest(t)
+
+	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+		"bundle/tencent-cloud": {{RelativePath: "env/tencent.env", Content: "TOKEN=old\n"}},
+		"Dec":                  {{RelativePath: "config/private.yaml", Content: "old"}},
+	}}
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{
+		EnabledBundles: []string{"tencent-cloud"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "Dec",
+		EnabledBundles: []string{"vikunja"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 项目平面的落地文件：本轮 push 必须完全无视它们。
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/project/config/private.yaml", "token: from-project\n")
+
+	machineEnv := filepath.Join(decHome, "secrets", "bundles", "tencent-cloud", "env", "tencent.env")
+	if err := os.MkdirAll(filepath.Dir(machineEnv), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(machineEnv, []byte("TOKEN=new\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := PushWorkspaceSecretsBundles(context.Background(),
+		NewWorkspace(WorkspaceUser, projectRoot), nil)
+	if err != nil {
+		t.Fatalf("PushWorkspaceSecretsBundles() = %v", err)
+	}
+	if result.UpdatedCount != 1 {
+		t.Fatalf("UpdatedCount = %d, 期望只推用户平面那 1 条: %#v", result.UpdatedCount, result)
+	}
+	if got := stub.NotesByFolder["bundle/tencent-cloud"][0].Content; got != "TOKEN=new\n" {
+		t.Fatalf("用户平面 secret 未被推送: %q", got)
+	}
+	if got := stub.NotesByFolder["Dec"][0].Content; got != "old" {
+		t.Fatalf("项目平面 folder 被用户平面 push 改写了: %q", got)
+	}
+}
+
+func setupSecretsConfigForPushTest(t *testing.T) string {
 	t.Helper()
 	decHome := t.TempDir()
 	setEnvForProjectTest(t, "DEC_HOME", decHome)
@@ -136,6 +189,7 @@ func setupSecretsConfigForPushTest(t *testing.T) {
 	secrets.SetSession("test-session")
 	secrets.SetUserKey(make([]byte, 64))
 	t.Cleanup(secrets.ClearSession)
+	return decHome
 }
 
 func writeProjectFileForPushTest(t *testing.T, projectRoot, rel, content string) {

@@ -1,8 +1,9 @@
 # 0007 — 机器级 bundle secrets 根 + 项目覆盖层
 
-- **状态**：已接受（实施中）
+- **状态**：已接受（实施中）；**项目覆盖层与三层 env 合并已被 [0009](0009-bundle-binary-scope.md) 取代**
 - **日期**：2026-08-13
-- **关联**：[0002](0002-secrets-synctarget-root.md)、[0003](0003-user-enabled-secret-bundles.md)、[0005](0005-secrets-machine-handlers.md)
+- **修订**：2026-08-14 — [0009](0009-bundle-binary-scope.md) 删除 user∩project overlay；机器根仅服务 `scope: user` 的 bundle；env 按平面单层加载
+- **关联**：[0002](0002-secrets-synctarget-root.md)、[0003](0003-user-enabled-secret-bundles.md)、[0005](0005-secrets-machine-handlers.md)、[0009](0009-bundle-binary-scope.md)
 - **影响范围**：`internal/secrets/`（SyncTarget / env / pull / push / landing）、`internal/app/secrets_*.go`、`Documents/BUNDLE-SECRETS-MODEL.md`
 
 ## 问题

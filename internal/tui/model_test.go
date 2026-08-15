@@ -434,7 +434,7 @@ func TestModelRunPageHotkeysStartPull(t *testing.T) {
 func TestModelRunPageHotkeysStartPush(t *testing.T) {
 	oldPreview := previewPushOperation
 	defer func() { previewPushOperation = oldPreview }()
-	previewPushOperation = func(projectRoot string) (*app.PushProjectAssetsPreview, error) {
+	previewPushOperation = func(workspace app.Workspace) (*app.PushProjectAssetsPreview, error) {
 		return &app.PushProjectAssetsPreview{
 			EnabledBundleCount: 1,
 			EnabledBundleNames: []string{"vikunja"},
@@ -474,7 +474,7 @@ func TestModelRunPageHotkeysStartPush(t *testing.T) {
 func TestModelRunPagePushFlowDoubleConfirmAndCancel(t *testing.T) {
 	oldPreview := previewPushOperation
 	defer func() { previewPushOperation = oldPreview }()
-	previewPushOperation = func(projectRoot string) (*app.PushProjectAssetsPreview, error) {
+	previewPushOperation = func(workspace app.Workspace) (*app.PushProjectAssetsPreview, error) {
 		return &app.PushProjectAssetsPreview{EnabledBundleCount: 1}, nil
 	}
 
@@ -522,11 +522,11 @@ func TestModelRunPagePushConfirmTriggersRunPushOperation(t *testing.T) {
 		runPushOperation = oldPush
 	}()
 
-	previewPushOperation = func(projectRoot string) (*app.PushProjectAssetsPreview, error) {
+	previewPushOperation = func(workspace app.Workspace) (*app.PushProjectAssetsPreview, error) {
 		return &app.PushProjectAssetsPreview{EnabledBundleCount: 1}, nil
 	}
 	called := false
-	runPushOperation = func(ctx context.Context, projectRoot string, reporter app.Reporter) (*app.PushProjectAssetsResult, error) {
+	runPushOperation = func(ctx context.Context, workspace app.Workspace, reporter app.Reporter) (*app.PushProjectAssetsResult, error) {
 		called = true
 		return &app.PushProjectAssetsResult{DecPushedCount: 1}, nil
 	}
@@ -660,7 +660,7 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 		SelectedIDEs:           []string{"cursor"},
 		EffectiveIDEs:          []string{"cursor"},
 		AvailableSecretBundles: []string{"woa"},
-		UserEnabledBundles:     []string{"woa"},
+		EnabledBundles:         []string{"woa"},
 		SecretsConfigPath:      "/tmp/.dec/secrets/config.yaml",
 	}
 	m.settingsRepoInput = m.settings.RepoURL
@@ -783,22 +783,22 @@ func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
 		if len(input.IDEs) != 1 || input.IDEs[0] != "cursor" {
 			t.Fatalf("IDEs = %#v, 期望 %#v", input.IDEs, []string{"cursor"})
 		}
-		if input.UserEnabledBundles == nil {
-			t.Fatal("UserEnabledBundles 不应为 nil")
+		if input.EnabledBundles == nil {
+			t.Fatal("EnabledBundles 不应为 nil")
 		}
-		if len(input.UserEnabledBundles) != 1 || input.UserEnabledBundles[0] != "woa" {
-			t.Fatalf("UserEnabledBundles = %#v, 期望 [woa]", input.UserEnabledBundles)
+		if len(input.EnabledBundles) != 1 || input.EnabledBundles[0] != "woa" {
+			t.Fatalf("EnabledBundles = %#v, 期望 [woa]", input.EnabledBundles)
 		}
-		return &app.SaveGlobalSettingsResult{IDEs: []string{"cursor"}, UserEnabledBundles: []string{"woa"}}, nil
+		return &app.SaveGlobalSettingsResult{IDEs: []string{"cursor"}, EnabledBundles: []string{"woa"}}, nil
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 5
 	m.settings = &app.GlobalSettingsState{
-		RepoURL:            "git@github.com:demo/dec.git",
-		AvailableIDEs:      []string{"cursor"},
-		SelectedIDEs:       []string{"cursor"},
-		UserEnabledBundles: []string{"woa"},
+		RepoURL:        "git@github.com:demo/dec.git",
+		AvailableIDEs:  []string{"cursor"},
+		SelectedIDEs:   []string{"cursor"},
+		EnabledBundles: []string{"woa"},
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
@@ -838,8 +838,8 @@ func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 		if len(input.IDEs) != 0 {
 			t.Fatalf("IDEs = %#v, 期望显式空切片", input.IDEs)
 		}
-		if input.UserEnabledBundles == nil {
-			t.Fatal("UserEnabledBundles 不应为 nil")
+		if input.EnabledBundles == nil {
+			t.Fatal("EnabledBundles 不应为 nil")
 		}
 		return &app.SaveGlobalSettingsResult{}, nil
 	}
@@ -1037,7 +1037,7 @@ func TestModelDeletePageTabSwitchDoesNotReloadCandidates(t *testing.T) {
 	defer func() { listDeleteCandidatesOperation = oldList }()
 
 	calls := 0
-	listDeleteCandidatesOperation = func(ctx context.Context, projectRoot string, includeRemote bool, reporter app.Reporter) ([]app.DeleteCandidate, error) {
+	listDeleteCandidatesOperation = func(ctx context.Context, workspace app.Workspace, includeRemote bool, reporter app.Reporter) ([]app.DeleteCandidate, error) {
 		calls++
 		return []app.DeleteCandidate{
 			{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli"},

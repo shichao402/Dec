@@ -1,10 +1,11 @@
 # 0003 — 用户级 Bundle 启用（机器平面）
 
-- **状态**：已接受（已实现，2026-08-09 修订）
+- **状态**：已接受（已实现，2026-08-09 修订）；**并集语义与启用列表落点已被 [0009](0009-bundle-binary-scope.md) 取代**
 - **日期**：2026-08-09
 - **修订**：2026-08-09 — 纠正首版实现偏差：用户级对象是 **Dec bundle**，不是「仅 secrets」；secrets-only 在**勾选启用**时才写入 vault 占位
-- **关联**：[0002-secrets-synctarget-root.md](0002-secrets-synctarget-root.md)
-- **影响范围**：`~/.dec/secrets/config.yaml` 的 `user_enabled_bundles`（语义：本机启用的 Dec bundle 短名）、`internal/app` pull / Settings、vault `bundles/<name>/` 按需创建；**不**改 Bitwarden `bundle/<name>` folder 协议
+- **修订**：2026-08-14 — [0009](0009-bundle-binary-scope.md) 取消 Project ∪ User 并集；启用列表迁到 `~/.dec/config.yaml` 的 `enabled_bundles`；user / project 由 `bundle.yaml` 的 `scope` 声明且平面隔离
+- **关联**：[0002-secrets-synctarget-root.md](0002-secrets-synctarget-root.md)、[0009-bundle-binary-scope.md](0009-bundle-binary-scope.md)
+- **影响范围**：原 `~/.dec/secrets/config.yaml` 的 `user_enabled_bundles`（已迁出）、`internal/app` pull / Settings、vault `bundles/<name>/` 按需创建；**不**改 Bitwarden `bundle/<name>` folder 协议
 
 ## 问题
 

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -14,7 +15,7 @@ var (
 )
 
 func main() {
-	var projectRoot, bundle string
+	var projectRoot, bundle, plane string
 	root := &cobra.Command{
 		Use:          "dec-exec --bundle NAME -- <command> [args...]",
 		Short:        "注入已落地的 Dec secrets 环境变量后执行命令",
@@ -34,6 +35,7 @@ func main() {
 			code, err := app.RunExecWithSecrets(app.ExecWithSecretsInput{
 				ProjectRoot: projectRoot,
 				Bundle:      bundle,
+				Plane:       parsePlane(plane),
 				Command:     args,
 			})
 			if err != nil {
@@ -47,8 +49,16 @@ func main() {
 	}
 	root.Flags().StringVar(&projectRoot, "project-root", "", "项目根目录（默认当前目录）")
 	root.Flags().StringVar(&bundle, "bundle", "", "只注入该 bundle + project 的 env")
+	root.Flags().StringVar(&plane, "plane", "project", "secrets 平面：project 或 user")
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func parsePlane(value string) secrets.SyncPlane {
+	if value == "user" || value == "machine" {
+		return secrets.SyncPlaneMachine
+	}
+	return secrets.SyncPlaneProject
 }

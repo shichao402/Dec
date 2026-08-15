@@ -11,6 +11,7 @@ import (
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/secrets/handler"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -35,11 +36,12 @@ type DeleteCandidate struct {
 	Type          string
 	Name          string
 	Vault         string
-	SecretPath    string // secrets：相对 SyncTarget.LocalRoot（= Bitwarden Note 名）
-	LocalRoot     string // secrets：.secrets/project 或 .secrets/bundles/<name>
-	SecretsBundle string // secrets / ssh：Bitwarden folder
-	SSHKeyName    string // ssh：逻辑名
-	DecBundleName string // ssh：用于本地 ~/.ssh/dec_<bundle>_<name>
+	SecretPath    string            // secrets：相对 SyncTarget.LocalRoot（= Bitwarden Note 名）
+	LocalRoot     string            // secrets：.secrets/project 或 .secrets/bundles/<name>（machine 平面为 bundles/<name>）
+	Plane         secrets.SyncPlane // secrets：本地同步根所在平面（project / machine），用于正确解析绝对路径
+	SecretsBundle string            // secrets / ssh：Bitwarden folder
+	SSHKeyName    string            // ssh：逻辑名
+	DecBundleName string            // ssh：用于本地 ~/.ssh/dec_<bundle>_<name>
 	BundleName    string
 	Members       []AssetSelectionItem
 	Orphan        bool
@@ -57,6 +59,7 @@ type DeleteSelectionItem struct {
 	Vault         string
 	SecretPath    string
 	LocalRoot     string
+	Plane         secrets.SyncPlane
 	SecretsBundle string
 	SSHKeyName    string
 	DecBundleName string
@@ -65,10 +68,16 @@ type DeleteSelectionItem struct {
 }
 
 // DeleteProjectInput 描述 Remote 页批量删除输入。
+// Plane 为空视为项目平面，保持旧调用语义。
 type DeleteProjectInput struct {
 	ProjectRoot string
+	Plane       WorkspacePlane
 	Items       []DeleteSelectionItem
 	Confirmed   bool
+}
+
+func (in DeleteProjectInput) workspace() Workspace {
+	return NewWorkspace(in.Plane, in.ProjectRoot)
 }
 
 // DeleteProjectResult 汇总 Remote 页批量删除结果。
@@ -88,21 +97,26 @@ var ErrDeleteNotConfirmed = fmt.Errorf("delete 未确认")
 // ListDeleteCandidates 列出当前项目可删除的 Dec 资产、secrets 文件与 bundle。
 // includeRemote 为 true 且 Bitwarden 已配置时，会按需触发 web unlock 并补充远端 Secure Note 候选项。
 func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote bool, reporter Reporter) ([]DeleteCandidate, error) {
+	return ListWorkspaceDeleteCandidates(ctx, NewWorkspace(WorkspaceProject, projectRoot), includeRemote, reporter)
+}
+
+// ListWorkspaceDeleteCandidates 按平面列出可删除项。
+// 用户平面扫 ~/.dec/cache 与 ~/.dec/secrets，只暴露 scope: user 的 bundle。
+func ListWorkspaceDeleteCandidates(ctx context.Context, workspace Workspace, includeRemote bool, reporter Reporter) ([]DeleteCandidate, error) {
 	reporter = defaultReporter(reporter)
-	projectRoot = strings.TrimSpace(projectRoot)
-	if projectRoot == "" {
+	projectRoot := strings.TrimSpace(workspace.Root)
+	if projectRoot == "" && workspace.EffectivePlane() == WorkspaceProject {
 		return nil, fmt.Errorf("项目根目录不能为空")
 	}
 
-	mgr := config.NewProjectConfigManager(projectRoot)
-	projectConfig, err := mgr.LoadProjectConfig()
+	projectConfig, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
 		return nil, err
 	}
 
 	var candidates []DeleteCandidate
 	seenDec := make(map[string]struct{})
-	groupCtx := newDeleteGroupContext(projectRoot, projectConfig)
+	groupCtx := newDeleteGroupContext(workspace, projectConfig)
 
 	addDec := func(kind DeleteItemKind, itemType, name, vault string, orphan bool) {
 		key := itemType + ":" + vault + ":" + name
@@ -130,7 +144,7 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 	}
 
 	walkCacheDec := func(vault, itemType, name string) {
-		cachePath := getCachePath(projectRoot, vault, itemType, name)
+		cachePath := getWorkspaceCachePath(workspace, vault, itemType, name)
 		if cachePath == "" {
 			return
 		}
@@ -140,11 +154,8 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		addDec(DeleteKindDecAsset, itemType, name, vault, false)
 	}
 
-	enabledBundles, mergeErr := mergeProjectAndUserEnabledBundles(projectConfig.EnabledBundles)
-	if mergeErr != nil {
-		emit(reporter, EventWarn, "delete.list", "合并用户级 bundles 失败，仅用 project："+mergeErr.Error(), nil)
-		enabledBundles = append([]string(nil), projectConfig.EnabledBundles...)
-	}
+	// 平面隔离（ADR 0009）：project 上下文的删除候选只看项目启用列表。
+	enabledBundles := config.NormalizeBundleNames(projectConfig.EnabledBundles)
 
 	for _, spec := range []struct {
 		dir   string
@@ -158,7 +169,7 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		{"mcp", "mcp", func(s string) string { return strings.TrimSuffix(s, ".json") }, false},
 	} {
 		for _, bundleName := range enabledBundles {
-			dir := filepath.Join(projectRoot, ".dec", "cache", bundleName, spec.dir)
+			dir := filepath.Join(workspaceCacheDir(workspace), bundleName, spec.dir)
 			entries, readErr := os.ReadDir(dir)
 			if readErr != nil {
 				continue
@@ -182,7 +193,7 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		}
 	}
 
-	// LocalRead 浏览 vault：启用包 ∪ vault 内全部 bundle（不 Fetch）。
+	// LocalRead 浏览 vault：启用包 ∪ vault 内同平面 bundle（不 Fetch）。
 	_ = withAppReadRepo(func(tx *repo.Transaction) error {
 		repoDir := tx.WorkDir()
 		vaultBundles, _, scanErr := scanVaultBundles(repoDir, reporter)
@@ -190,9 +201,21 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 			emit(reporter, EventWarn, "delete.list", "扫描 vault bundles 失败（仅展示本地 cache）："+scanErr.Error(), nil)
 			return nil
 		}
+		wantScope := bundleScopeForPlane(workspace.EffectivePlane())
 		bundleNames := make([]string, 0, len(vaultBundles)+len(enabledBundles))
 		seenBundle := make(map[string]struct{})
-		for name := range vaultBundles {
+		for name, matches := range vaultBundles {
+			// 平面隔离（ADR 0009）：不把另一平面的 bundle 列进删除候选。
+			inPlane := false
+			for _, match := range matches {
+				if match.bundle.Scope == wantScope {
+					inPlane = true
+					break
+				}
+			}
+			if !inPlane {
+				continue
+			}
 			seenBundle[name] = struct{}{}
 			bundleNames = append(bundleNames, name)
 		}
@@ -215,7 +238,7 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 					continue
 				}
 				name := parts[1]
-				cachePath := getCachePath(projectRoot, bundleName, itemType, name)
+				cachePath := getWorkspaceCachePath(workspace, bundleName, itemType, name)
 				_, cacheErr := os.Stat(cachePath)
 				localExists := cacheErr == nil
 				if !localExists {
@@ -235,7 +258,7 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 
 	// secrets：本地 SyncTarget 扫描 ∪（可选）远端 orphan。
 	seenSecret := make(map[string]struct{})
-	addSecret := func(secretsBundle, localRoot, notePath string, localExists bool) {
+	addSecret := func(secretsBundle, localRoot string, plane secrets.SyncPlane, notePath string, localExists bool) {
 		notePath = strings.TrimSpace(notePath)
 		if notePath == "" {
 			return
@@ -254,6 +277,7 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 			Kind:          DeleteKindSecret,
 			SecretPath:    notePath,
 			LocalRoot:     localRoot,
+			Plane:         plane,
 			SecretsBundle: secretsBundle,
 			Label:         fmt.Sprintf("[secret] %s%s", notePath, tag),
 			Orphan:        !localExists,
@@ -293,15 +317,15 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		})
 	}
 
-	appendLocalSecretCandidates(projectRoot, projectConfig, addSecret, reporter)
+	appendLocalSecretCandidates(workspace, projectConfig, addSecret, reporter)
 
 	if includeRemote {
-		if err := appendRemoteSecretCandidates(ctx, projectRoot, projectConfig, addSecret, addSSHKey, reporter); err != nil {
+		if err := appendRemoteSecretCandidates(ctx, workspace, projectConfig, addSecret, addSSHKey, reporter); err != nil {
 			return nil, err
 		}
 	}
 
-	if state, loadErr := LoadAssetSelection(projectRoot, reporter); loadErr == nil {
+	if state, loadErr := LoadWorkspaceAssetSelection(workspace, reporter); loadErr == nil {
 		for _, bo := range ListEnabledBundles(state) {
 			groupBundle, groupOrder := groupCtx.forDecBundle(bo.Name)
 			candidates = append(candidates, DeleteCandidate{
@@ -329,7 +353,9 @@ type deleteGroupContext struct {
 	projectName    string
 }
 
-func newDeleteGroupContext(projectRoot string, projectConfig *types.ProjectConfig) *deleteGroupContext {
+func newDeleteGroupContext(workspace Workspace, projectConfig *types.ProjectConfig) *deleteGroupContext {
+	projectRoot := workspace.Root
+	userPlane := workspace.EffectivePlane() == WorkspaceUser
 	ctx := &deleteGroupContext{
 		bundleOrder:  make(map[string]int),
 		secretsToDec: make(map[string]string),
@@ -358,15 +384,18 @@ func newDeleteGroupContext(projectRoot string, projectConfig *types.ProjectConfi
 					ctx.bundleOrder[decBundle] = len(ctx.bundleOrder) + 100
 				}
 			}
-			projectName, _ := ResolveProjectName(projectRoot, projectConfig)
-			ctx.projectName = projectName
-			if name, enabled := cfg.ResolveProjectSecrets(projectName); enabled {
-				ctx.projectSecrets = name
-				ctx.secretsToDec[name] = secrets.ProjectSecretsDecBundleName
+			// 用户平面没有 project secrets 归属，跳过这一组，避免把项目 folder 混进来。
+			if !userPlane {
+				projectName, _ := ResolveProjectName(projectRoot, projectConfig)
+				ctx.projectName = projectName
+				if name, enabled := cfg.ResolveProjectSecrets(projectName); enabled {
+					ctx.projectSecrets = name
+					ctx.secretsToDec[name] = secrets.ProjectSecretsDecBundleName
+				}
 			}
 		}
 	}
-	if ctx.projectName == "" {
+	if ctx.projectName == "" && !userPlane {
 		ctx.projectName, _ = ResolveProjectName(projectRoot, projectConfig)
 	}
 	return ctx
@@ -465,24 +494,25 @@ func sortDeleteCandidates(candidates []DeleteCandidate) {
 }
 
 func appendLocalSecretCandidates(
-	projectRoot string,
+	workspace Workspace,
 	projectConfig *types.ProjectConfig,
-	addSecret func(secretsBundle, localRoot, notePath string, localExists bool),
+	addSecret func(secretsBundle, localRoot string, plane secrets.SyncPlane, notePath string, localExists bool),
 	reporter Reporter,
 ) {
 	reporter = defaultReporter(reporter)
+	projectRoot := workspace.Root
 	cfg, err := secrets.LoadConfig()
 	if err != nil {
 		emit(reporter, EventWarn, "delete.secrets", "读取 secrets 配置失败，跳过本地 secrets 扫描: "+err.Error(), nil)
 		return
 	}
-	plan, err := planSecretsSync(projectRoot, projectConfig.EnabledBundles, cfg)
+	plan, err := planWorkspaceSecretsSync(workspace, projectConfig.EnabledBundles, cfg)
 	if err != nil {
 		emit(reporter, EventWarn, "delete.secrets", "规划 SyncTarget 失败，跳过本地 secrets 扫描: "+err.Error(), nil)
 		return
 	}
 	if len(plan.Targets) == 0 {
-		emit(reporter, EventInfo, "delete.secrets", "无 SyncTarget（project∪user 均未启用 secrets 归属）", nil)
+		emit(reporter, EventInfo, "delete.secrets", "无 SyncTarget（当前平面未启用 secrets 归属）", nil)
 		return
 	}
 	for _, target := range plan.Targets {
@@ -493,27 +523,33 @@ func appendLocalSecretCandidates(
 			continue
 		}
 		for _, note := range notes {
-			addSecret(target.Folder, target.LocalRoot, note.RelativePath, true)
+			addSecret(target.Folder, target.LocalRoot, target.Plane, note.RelativePath, true)
 		}
 	}
 }
 
 func appendRemoteSecretCandidates(
 	ctx context.Context,
-	projectRoot string,
+	workspace Workspace,
 	projectConfig *types.ProjectConfig,
-	addSecret func(secretsBundle, localRoot, notePath string, localExists bool),
+	addSecret func(secretsBundle, localRoot string, plane secrets.SyncPlane, notePath string, localExists bool),
 	addSSHKey func(secretsBundle, decBundleName, keyName string, localExists bool),
 	reporter Reporter,
 ) error {
 	reporter = defaultReporter(reporter)
+	projectRoot := workspace.Root
 	configured, err := secrets.IsConfigured()
 	if err != nil {
 		emit(reporter, EventWarn, "delete.secrets", "读取 Bitwarden 配置失败: "+err.Error(), nil)
 		return nil
 	}
 	if !configured {
-		emit(reporter, EventInfo, "delete.secrets", "Bitwarden 未配置：仅展示本地 .secrets（到 Settings 填写连接信息）", nil)
+		localRootLabel := ".secrets"
+		if workspace.EffectivePlane() == WorkspaceUser {
+			localRootLabel = "~/.dec/secrets"
+		}
+		emit(reporter, EventInfo, "delete.secrets",
+			fmt.Sprintf("Bitwarden 未配置：仅展示本地 %s（到 Settings 填写连接信息）", localRootLabel), nil)
 		return nil
 	}
 	cfg, err := secrets.LoadConfig()
@@ -534,7 +570,7 @@ func appendRemoteSecretCandidates(
 	}
 
 	client := secretsClientFactory()
-	plan, err := planSecretsSync(projectRoot, projectConfig.EnabledBundles, cfg)
+	plan, err := planWorkspaceSecretsSync(workspace, projectConfig.EnabledBundles, cfg)
 	if err != nil {
 		emit(reporter, EventWarn, "delete.secrets", "规划 SyncTarget 失败: "+err.Error(), nil)
 		return nil
@@ -559,7 +595,7 @@ func appendRemoteSecretCandidates(
 					localExists = true
 				}
 			}
-			addSecret(folder, target.LocalRoot, note.Name, localExists)
+			addSecret(folder, target.LocalRoot, target.Plane, note.Name, localExists)
 		}
 		owner := target.Name
 		if target.Kind == secrets.SyncKindProject {
@@ -605,6 +641,7 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 
 	result := &DeleteProjectResult{}
 	var lastCommit string
+	workspace := input.workspace()
 
 	for _, item := range input.Items {
 		if err := ctx.Err(); err != nil {
@@ -619,6 +656,7 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 			emit(reporter, EventInfo, "delete.bundle", fmt.Sprintf("删除 bundle %s", bundleName), nil)
 			bundleResult, err := RemoveBundle(RemoveBundleInput{
 				ProjectRoot: input.ProjectRoot,
+				Plane:       input.Plane,
 				BundleName:  bundleName,
 				Members:     append([]AssetSelectionItem(nil), item.Members...),
 				Confirmed:   true,
@@ -628,18 +666,19 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 					return nil, err
 				}
 				emit(reporter, EventInfo, "delete.bundle", fmt.Sprintf("vault 无 bundle %s，仅清理本地", bundleName), nil)
-				if localErr := deleteLocalBundleOnly(input.ProjectRoot, bundleName, item.Members, reporter); localErr != nil {
+				if localErr := deleteLocalBundleOnly(workspace, bundleName, item.Members, reporter); localErr != nil {
 					return nil, localErr
 				}
 			} else if bundleResult != nil && bundleResult.VersionCommit != "" {
 				lastCommit = bundleResult.VersionCommit
 			}
 			result.BundlesDeleted++
-			pruneEmptyDecCacheBundle(input.ProjectRoot, bundleName, reporter)
+			pruneEmptyDecCacheBundle(workspace, bundleName, reporter)
 		case DeleteKindDecAsset:
 			emit(reporter, EventInfo, "delete.dec", fmt.Sprintf("删除 [%s] %s", item.Type, item.Name), nil)
 			assetResult, err := RemoveAsset(RemoveAssetInput{
 				ProjectRoot: input.ProjectRoot,
+				Plane:       input.Plane,
 				Type:        item.Type,
 				Name:        item.Name,
 				Vault:       item.Vault,
@@ -650,17 +689,17 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 					return nil, err
 				}
 				emit(reporter, EventInfo, "delete.dec", fmt.Sprintf("vault 无 [%s] %s，仅清理本地", item.Type, item.Name), nil)
-				if localErr := deleteLocalDecAssetOnly(input.ProjectRoot, item.Type, item.Name, item.Vault, reporter); localErr != nil {
+				if localErr := deleteLocalDecAssetOnly(workspace, item.Type, item.Name, item.Vault, reporter); localErr != nil {
 					return nil, localErr
 				}
 			} else if assetResult != nil && assetResult.VersionCommit != "" {
 				lastCommit = assetResult.VersionCommit
 			}
 			result.DecDeleted++
-			pruneEmptyDecCacheBundle(input.ProjectRoot, item.Vault, reporter)
+			pruneEmptyDecCacheBundle(workspace, item.Vault, reporter)
 		case DeleteKindSecret:
 			emit(reporter, EventInfo, "delete.secrets", fmt.Sprintf("删除 secret %s", item.SecretPath), nil)
-			if err := deleteSecretItem(ctx, input.ProjectRoot, item.SecretsBundle, item.LocalRoot, item.SecretPath, reporter); err != nil {
+			if err := deleteSecretItem(ctx, workspace, item.SecretsBundle, item.LocalRoot, item.Plane, item.SecretPath, reporter); err != nil {
 				return nil, err
 			}
 			result.SecretsDeleted++
@@ -683,19 +722,44 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 	return result, nil
 }
 
-func deleteSecretItem(ctx context.Context, projectRoot, secretsBundleName, localRoot, notePath string, reporter Reporter) error {
+func deleteSecretItem(ctx context.Context, workspace Workspace, secretsBundleName, localRoot string, plane secrets.SyncPlane, notePath string, reporter Reporter) error {
+	projectRoot := workspace.Root
 	notePath = strings.TrimSpace(notePath)
 	if notePath == "" {
 		return fmt.Errorf("Secure Note 路径不能为空")
 	}
 	localRoot = strings.TrimSpace(localRoot)
+
+	// 平面隔离（ADR 0009）：machine 平面 LocalRoot 是 bundles/<name>（相对 ~/.dec/secrets），
+	// 不能直接 Join 到项目根，否则会误落到 <project>/bundles/...；统一走 secrets.AbsolutePath 解析。
 	var localPath string
 	if localRoot != "" {
-		localPath = filepath.Join(projectRoot, filepath.FromSlash(localRoot), filepath.FromSlash(notePath))
+		abs, absErr := secrets.AbsolutePath(projectRoot, secrets.SyncTarget{LocalRoot: localRoot, Plane: plane}, notePath)
+		if absErr != nil {
+			return fmt.Errorf("解析 secret 绝对路径失败: %w", absErr)
+		}
+		localPath = abs
 	} else {
 		// 兼容旧调用：若未传 LocalRoot，把 notePath 当项目根相对路径处理。
 		localPath = filepath.Join(projectRoot, filepath.FromSlash(notePath))
 	}
+
+	// gitgcm：删除前先撤销机器平面副作用（git credential reject + --unset provider）。
+	// 优先读本地正文；本地缺失时尝试从远端拉正文再 revoke（能做最好，不阻塞删除）。
+	if handler.Default().Find(handler.SourceNote, handler.NoteRouteName(notePath)) != nil {
+		if content, ok := readSecretNoteContent(ctx, projectRoot, secretsBundleName, localRoot, plane, notePath, localPath, reporter); ok {
+			if _, revErr := handler.RevokeNotes(ctx, nil, []handler.Item{{
+				Source:      handler.SourceNote,
+				Name:        notePath,
+				NoteContent: content,
+			}}); revErr != nil {
+				emit(reporter, EventWarn, "delete.secrets", fmt.Sprintf("  撤销机器平面副作用失败（继续删除）: %v", revErr), nil)
+			} else {
+				emit(reporter, EventInfo, "delete.secrets", fmt.Sprintf("  已撤销 %s 的机器平面副作用", notePath), nil)
+			}
+		}
+	}
+
 	if _, err := os.Stat(localPath); err == nil {
 		if rmErr := os.Remove(localPath); rmErr != nil {
 			return fmt.Errorf("删除本地文件 %s 失败: %w", localPath, rmErr)
@@ -727,6 +791,47 @@ func deleteSecretItem(ctx context.Context, projectRoot, secretsBundleName, local
 	}
 	emit(reporter, EventInfo, "delete.secrets", fmt.Sprintf("  已删 Bitwarden Note %s", notePath), nil)
 	return nil
+}
+
+// readSecretNoteContent 读取待删 Secure Note 正文，供 Handler.Revoke 使用。
+// 优先读本地文件；本地缺失且已有 Bitwarden session 时尽力从远端拉正文（不触发 web unlock）。
+func readSecretNoteContent(
+	ctx context.Context,
+	projectRoot, secretsBundleName, localRoot string,
+	plane secrets.SyncPlane,
+	notePath, localPath string,
+	reporter Reporter,
+) (string, bool) {
+	if localPath != "" {
+		if data, err := os.ReadFile(localPath); err == nil {
+			return string(data), true
+		}
+	}
+	configured, err := secrets.IsConfigured()
+	if err != nil || !configured {
+		return "", false
+	}
+	if !secrets.HasSession() || !secrets.HasUserKey() {
+		return "", false
+	}
+	client := secretsClientFactory()
+	result, err := client.PullBundle(ctx, secrets.PullBundleRequest{
+		ProjectRoot: projectRoot,
+		Target:      secrets.SyncTarget{Folder: secretsBundleName, LocalRoot: localRoot, Plane: plane},
+		Binding:     secrets.BundleBinding{SecretsBundleName: secretsBundleName},
+	})
+	if err != nil || result == nil {
+		if err != nil {
+			emit(reporter, EventWarn, "delete.secrets", fmt.Sprintf("  拉取远端 %s 正文失败（跳过 revoke）: %v", notePath, err), nil)
+		}
+		return "", false
+	}
+	for _, note := range result.Notes {
+		if note.RelativePath == notePath {
+			return note.Content, true
+		}
+	}
+	return "", false
 }
 
 func deleteSSHKeyItem(ctx context.Context, decBundleName, secretsBundleName, keyName string, reporter Reporter) error {
@@ -787,14 +892,14 @@ func isVaultMissingErr(err error) bool {
 	return strings.Contains(msg, "未找到")
 }
 
-func deleteLocalDecAssetOnly(projectRoot, itemType, name, vault string, reporter Reporter) error {
-	projectIDEs := resolveProjectIDEs(projectRoot, reporter)
+func deleteLocalDecAssetOnly(workspace Workspace, itemType, name, vault string, reporter Reporter) error {
+	projectIDEs := resolveWorkspaceIDEs(workspace, reporter)
 	for _, ideImpl := range projectIDEs {
-		if _, err := removeAssetFromIDE(itemType, name, projectRoot, ideImpl); err != nil {
+		if _, err := removeAssetFromIDE(itemType, name, workspace, ideImpl); err != nil {
 			emit(reporter, EventWarn, "delete.dec", fmt.Sprintf("IDE %s 清理失败: %v", ideImpl.Name(), err), nil)
 		}
 	}
-	cachePath := getCachePath(projectRoot, vault, itemType, name)
+	cachePath := getWorkspaceCachePath(workspace, vault, itemType, name)
 	if cachePath == "" {
 		return nil
 	}
@@ -812,43 +917,41 @@ func deleteLocalDecAssetOnly(projectRoot, itemType, name, vault string, reporter
 	return nil
 }
 
-func deleteLocalBundleOnly(projectRoot, bundleName string, members []AssetSelectionItem, reporter Reporter) error {
-	projectIDEs := resolveProjectIDEs(projectRoot, reporter)
+func deleteLocalBundleOnly(workspace Workspace, bundleName string, members []AssetSelectionItem, reporter Reporter) error {
+	projectIDEs := resolveWorkspaceIDEs(workspace, reporter)
 	for _, member := range members {
 		for _, ideImpl := range projectIDEs {
-			if _, err := removeAssetFromIDE(member.Type, member.Name, projectRoot, ideImpl); err != nil {
+			if _, err := removeAssetFromIDE(member.Type, member.Name, workspace, ideImpl); err != nil {
 				emit(reporter, EventWarn, "delete.bundle", fmt.Sprintf("IDE %s 清理 %s 失败: %v", ideImpl.Name(), member.Name, err), nil)
 			}
 		}
 	}
-	cacheBundleDir := filepath.Join(projectRoot, ".dec", "cache", bundleName)
+	cacheBundleDir := filepath.Join(workspaceCacheDir(workspace), bundleName)
 	if _, err := os.Stat(cacheBundleDir); err == nil {
 		if err := os.RemoveAll(cacheBundleDir); err != nil {
 			return fmt.Errorf("删除本地 bundle cache 失败: %w", err)
 		}
 		emit(reporter, EventInfo, "delete.bundle", "已删本地 bundle 缓存", nil)
 	}
-	mgr := config.NewProjectConfigManager(projectRoot)
-	if projectConfig, err := mgr.LoadProjectConfig(); err == nil {
-		if updated, ok := removeEnabledBundle(projectConfig.EnabledBundles, bundleName); ok {
-			projectConfig.EnabledBundles = updated
-			if saveErr := mgr.SaveProjectConfig(projectConfig); saveErr != nil {
-				emit(reporter, EventWarn, "delete.bundle", fmt.Sprintf("项目配置更新失败: %v", saveErr), nil)
-			} else {
-				emit(reporter, EventInfo, "delete.bundle", "已从 enabled_bundles 移除", nil)
-			}
-		}
+	if changed, err := removeWorkspaceEnabledBundle(workspace, bundleName); err != nil {
+		emit(reporter, EventWarn, "delete.bundle", fmt.Sprintf("启用列表更新失败: %v", err), nil)
+	} else if changed {
+		emit(reporter, EventInfo, "delete.bundle", "已从 enabled_bundles 移除", nil)
 	}
 	return nil
 }
 
-// pruneEmptyDecCacheBundle 删除 .dec/cache/<bundle> 下已空的类型目录，若整个 bundle 目录变空则删掉目录。
-func pruneEmptyDecCacheBundle(projectRoot, bundleName string, reporter Reporter) {
+// pruneEmptyDecCacheBundle 删除 cache/<bundle> 下已空的类型目录，若整个 bundle 目录变空则删掉目录。
+func pruneEmptyDecCacheBundle(workspace Workspace, bundleName string, reporter Reporter) {
 	bundleName = strings.TrimSpace(bundleName)
-	if projectRoot == "" || bundleName == "" {
+	if bundleName == "" {
 		return
 	}
-	bundleDir := filepath.Join(projectRoot, ".dec", "cache", bundleName)
+	cacheDir := workspaceCacheDir(workspace)
+	if cacheDir == "" {
+		return
+	}
+	bundleDir := filepath.Join(cacheDir, bundleName)
 	if _, err := os.Stat(bundleDir); err != nil {
 		return
 	}
@@ -870,7 +973,8 @@ func pruneEmptyDecCacheBundle(projectRoot, bundleName string, reporter Reporter)
 			emit(reporter, EventWarn, "delete.prune", fmt.Sprintf("清理空目录 %s 失败: %v", bundleDir, err), nil)
 			return
 		}
-		emit(reporter, EventInfo, "delete.prune", fmt.Sprintf("已移除空目录 .dec/cache/%s", bundleName), nil)
+		emit(reporter, EventInfo, "delete.prune",
+			fmt.Sprintf("已移除空目录 %s%s", displayCacheDir(workspace), bundleName), nil)
 	}
 }
 

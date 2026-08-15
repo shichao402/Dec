@@ -33,6 +33,30 @@ func run[T any](ctx context.Context, operation, projectRoot string, input any, r
 	return out, nil
 }
 
+func invokeWorkspace[T any](ctx context.Context, method string, workspace app.Workspace, input any, reporter app.Reporter) (*T, error) {
+	api, err := Default()
+	if err != nil {
+		return nil, err
+	}
+	var out *T
+	if err := api.InvokeWorkspace(ctx, method, workspace, input, &out, reporter); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func runWorkspace[T any](ctx context.Context, operation string, workspace app.Workspace, input any, reporter app.Reporter) (*T, error) {
+	api, err := Default()
+	if err != nil {
+		return nil, err
+	}
+	var out *T
+	if err := api.RunWorkspace(ctx, operation, workspace, input, &out, reporter); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func LoadProjectOverview(projectRoot string, includeVaultBundles bool) (*app.ProjectOverview, error) {
 	return invoke[app.ProjectOverview](context.Background(), "load_project_overview", projectRoot,
 		struct{ IncludeVaultBundles bool }{includeVaultBundles}, nil)
@@ -42,8 +66,22 @@ func LoadAssetSelection(projectRoot string, reporter app.Reporter) (*app.AssetSe
 	return invoke[app.AssetSelectionState](context.Background(), "load_asset_selection", projectRoot, nil, reporter)
 }
 
+func LoadWorkspaceOverview(workspace app.Workspace, includeVaultBundles bool) (*app.ProjectOverview, error) {
+	return invokeWorkspace[app.ProjectOverview](context.Background(), "load_project_overview", workspace,
+		struct{ IncludeVaultBundles bool }{includeVaultBundles}, nil)
+}
+
+func LoadWorkspaceAssetSelection(workspace app.Workspace, reporter app.Reporter) (*app.AssetSelectionState, error) {
+	return invokeWorkspace[app.AssetSelectionState](context.Background(), "load_asset_selection", workspace, nil, reporter)
+}
+
 func SaveEnabledBundles(projectRoot string, bundles []string, reporter app.Reporter) (*app.SaveBundleSelectionResult, error) {
 	return invoke[app.SaveBundleSelectionResult](context.Background(), "save_enabled_bundles", projectRoot,
+		struct{ EnabledBundles []string }{bundles}, reporter)
+}
+
+func SaveWorkspaceEnabledBundles(workspace app.Workspace, bundles []string, reporter app.Reporter) (*app.SaveBundleSelectionResult, error) {
+	return invokeWorkspace[app.SaveBundleSelectionResult](context.Background(), "save_enabled_bundles", workspace,
 		struct{ EnabledBundles []string }{bundles}, reporter)
 }
 
@@ -93,6 +131,18 @@ func invokeSlice[T any](ctx context.Context, method, root string, input any, rep
 	return out, nil
 }
 
+func invokeSliceWorkspace[T any](ctx context.Context, method string, workspace app.Workspace, input any, reporter app.Reporter) ([]T, error) {
+	api, err := Default()
+	if err != nil {
+		return nil, err
+	}
+	var out []T
+	if err := api.InvokeWorkspace(ctx, method, workspace, input, &out, reporter); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func LoadProjectSettings(projectRoot string, reporter app.Reporter) (*app.ProjectSettingsState, error) {
 	return invoke[app.ProjectSettingsState](context.Background(), "load_project_settings", projectRoot, nil, reporter)
 }
@@ -127,24 +177,43 @@ func ListDeleteCandidates(ctx context.Context, projectRoot string, includeRemote
 		struct{ IncludeRemote bool }{includeRemote}, reporter)
 }
 
+func ListWorkspaceDeleteCandidates(ctx context.Context, workspace app.Workspace, includeRemote bool, reporter app.Reporter) ([]app.DeleteCandidate, error) {
+	return invokeSliceWorkspace[app.DeleteCandidate](ctx, "list_delete_candidates", workspace,
+		struct{ IncludeRemote bool }{includeRemote}, reporter)
+}
+
 func PullProjectAssets(ctx context.Context, projectRoot string, reporter app.Reporter) (*app.PullProjectAssetsResult, error) {
 	return run[app.PullProjectAssetsResult](ctx, "pull", projectRoot, nil, reporter)
+}
+
+func PullWorkspaceAssets(ctx context.Context, workspace app.Workspace, reporter app.Reporter) (*app.PullProjectAssetsResult, error) {
+	return runWorkspace[app.PullProjectAssetsResult](ctx, "pull", workspace, nil, reporter)
 }
 
 func PushProjectAssets(ctx context.Context, projectRoot string, reporter app.Reporter) (*app.PushProjectAssetsResult, error) {
 	return run[app.PushProjectAssetsResult](ctx, "push", projectRoot, nil, reporter)
 }
 
+func PushWorkspaceAssets(ctx context.Context, workspace app.Workspace, reporter app.Reporter) (*app.PushProjectAssetsResult, error) {
+	return runWorkspace[app.PushProjectAssetsResult](ctx, "push", workspace, nil, reporter)
+}
+
 func PreviewPushProjectAssets(ctx context.Context, projectRoot string, reporter app.Reporter) (*app.PushProjectAssetsPreview, error) {
 	return run[app.PushProjectAssetsPreview](ctx, "preview_push", projectRoot, nil, reporter)
 }
 
+func PreviewPushWorkspaceAssets(ctx context.Context, workspace app.Workspace, reporter app.Reporter) (*app.PushProjectAssetsPreview, error) {
+	return runWorkspace[app.PushProjectAssetsPreview](ctx, "preview_push", workspace, nil, reporter)
+}
+
 func RemoveBundle(ctx context.Context, input app.RemoveBundleInput, reporter app.Reporter) (*app.RemoveBundleResult, error) {
-	return run[app.RemoveBundleResult](ctx, "remove_bundle", input.ProjectRoot, input, reporter)
+	return runWorkspace[app.RemoveBundleResult](ctx, "remove_bundle",
+		app.NewWorkspace(input.Plane, input.ProjectRoot), input, reporter)
 }
 
 func DeleteProjectItems(ctx context.Context, input app.DeleteProjectInput, reporter app.Reporter) (*app.DeleteProjectResult, error) {
-	return run[app.DeleteProjectResult](ctx, "delete", input.ProjectRoot, input, reporter)
+	return runWorkspace[app.DeleteProjectResult](ctx, "delete",
+		app.NewWorkspace(input.Plane, input.ProjectRoot), input, reporter)
 }
 
 func AddSecretToTarget(ctx context.Context, projectRoot string, target secrets.SyncTarget, noteRel string, reporter app.Reporter) (*app.AddSecretResult, error) {

@@ -46,6 +46,7 @@ message InvokeRequest {
   string project_root = 2;
   bytes payload_json = 3;
   int64 unlock_timeout_ms = 4;
+  string workspace_plane = 5; // "project" | "user"；空兼容为 project
 }
 
 message InvokeResponse {
@@ -60,6 +61,7 @@ message RunOperationRequest {
   string facade = 4;
   bytes payload_json = 5;
   int64 unlock_timeout_ms = 6;
+  string workspace_plane = 7; // "project" | "user"；空兼容为 project
 }
 
 message GetActiveOperationRequest {

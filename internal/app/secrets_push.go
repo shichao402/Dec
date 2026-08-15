@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/secrets"
 )
 
@@ -18,8 +17,15 @@ type PushSecretsResult struct {
 }
 
 func PushSecretsBundles(ctx context.Context, projectRoot string, reporter Reporter) (*PushSecretsResult, error) {
+	return PushWorkspaceSecretsBundles(ctx, NewWorkspace(WorkspaceProject, projectRoot), reporter)
+}
+
+// PushWorkspaceSecretsBundles 把当前平面的 secrets 落地文件推回 Bitwarden。
+// 用户平面扫描 ~/.dec/secrets/bundles/<name>/，不触碰项目内 .secrets。
+func PushWorkspaceSecretsBundles(ctx context.Context, workspace Workspace, reporter Reporter) (*PushSecretsResult, error) {
 	reporter = defaultReporter(reporter)
 	result := &PushSecretsResult{}
+	projectRoot := workspace.Root
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -35,8 +41,7 @@ func PushSecretsBundles(ctx context.Context, projectRoot string, reporter Report
 		return result, nil
 	}
 
-	mgr := config.NewProjectConfigManager(projectRoot)
-	projectConfig, err := mgr.LoadProjectConfig()
+	projectConfig, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +52,7 @@ func PushSecretsBundles(ctx context.Context, projectRoot string, reporter Report
 		return nil, err
 	}
 
-	plan, err := planSecretsSync(projectRoot, enabledBundles, cfg)
+	plan, err := planWorkspaceSecretsSync(workspace, enabledBundles, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -55,6 +60,11 @@ func PushSecretsBundles(ctx context.Context, projectRoot string, reporter Report
 		result.SkippedReason = "无已启用 bundle 或 project secrets"
 		emit(reporter, EventInfo, "push.secrets", "无已启用 bundle 或 project secrets，跳过 secrets 推送", nil)
 		return result, nil
+	}
+
+	syncRootLabel := ".secrets"
+	if workspace.EffectivePlane() == WorkspaceUser {
+		syncRootLabel = "~/.dec/secrets"
 	}
 
 	if !secrets.HasSession() {
@@ -65,7 +75,7 @@ func PushSecretsBundles(ctx context.Context, projectRoot string, reporter Report
 
 	client := secretsClientFactory()
 	total := plan.Total
-	emit(reporter, EventInfo, "push.secrets", fmt.Sprintf("推送 %d 个 secrets 目标（扫描 .secrets 同步根）", total), &Progress{Phase: "secrets", Current: 0, Total: total})
+	emit(reporter, EventInfo, "push.secrets", fmt.Sprintf("推送 %d 个 secrets 目标（扫描 %s 同步根）", total, syncRootLabel), &Progress{Phase: "secrets", Current: 0, Total: total})
 
 	for i, target := range plan.Targets {
 		if err := ctx.Err(); err != nil {

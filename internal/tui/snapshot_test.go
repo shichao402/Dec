@@ -155,7 +155,7 @@ func snapshotSettingsModel(width int) model {
 		SelectedIDEs:           []string{"cursor"},
 		EffectiveIDEs:          []string{"cursor"},
 		AvailableSecretBundles: []string{"vikunja", "woa"},
-		UserEnabledBundles:     []string{"woa"},
+		EnabledBundles:         []string{"woa"},
 		SecretsConfigPath:      "/tmp/.dec/secrets/config.yaml",
 	}
 	m.settingsRepoInput = m.settings.RepoURL

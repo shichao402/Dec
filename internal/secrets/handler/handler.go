@@ -32,6 +32,8 @@ type Handler interface {
 	Source() SourceKind
 	Match(name string) bool
 	Apply(ctx context.Context, item Item) error
+	// Revoke 撤销 Apply 造成的机器平面副作用（删除 Secure Note 时调用）。
+	Revoke(ctx context.Context, item Item) error
 }
 
 // Registry 按源类型注册 Handler；Match 时后者覆盖前者同 Kind 亦可并存，按注册顺序找第一个 Match。
@@ -162,4 +164,31 @@ func ApplyNotes(ctx context.Context, reg *Registry, items []Item) (applied []str
 		applied = append(applied, name)
 	}
 	return applied, nil
+}
+
+// RevokeNotes 对匹配到 Handler 的 Note 执行撤销（与 ApplyNotes 对称）。
+// 未匹配则跳过。任一 Handler 失败则返回错误。
+func RevokeNotes(ctx context.Context, reg *Registry, items []Item) (revoked []string, err error) {
+	if reg == nil {
+		reg = Default()
+	}
+	for _, item := range items {
+		if item.Source == "" {
+			item.Source = SourceNote
+		}
+		if item.Source != SourceNote {
+			return revoked, fmt.Errorf("RevokeNotes 仅接受 SourceNote，收到 %s", item.Source)
+		}
+		name := NoteRouteName(item.Name)
+		item.Name = name
+		h := reg.Find(SourceNote, name)
+		if h == nil {
+			continue
+		}
+		if err := h.Revoke(ctx, item); err != nil {
+			return revoked, fmt.Errorf("handler %s (%s): %w", h.Kind(), name, err)
+		}
+		revoked = append(revoked, name)
+	}
+	return revoked, nil
 }

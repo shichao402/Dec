@@ -17,16 +17,25 @@ type secretsSyncPlan struct {
 }
 
 func planSecretsSync(projectRoot string, enabledBundles []string, cfg *secrets.Config) (*secretsSyncPlan, error) {
-	mgr := config.NewProjectConfigManager(projectRoot)
-	projectConfig, err := mgr.LoadProjectConfig()
-	if err != nil {
-		return nil, err
+	return planWorkspaceSecretsSync(NewWorkspace(WorkspaceProject, projectRoot), enabledBundles, cfg)
+}
+
+func planWorkspaceSecretsSync(workspace Workspace, enabledBundles []string, cfg *secrets.Config) (*secretsSyncPlan, error) {
+	projectRoot := workspace.Root
+	projectName := ""
+	if workspace.EffectivePlane() == WorkspaceProject {
+		mgr := config.NewProjectConfigManager(projectRoot)
+		projectConfig, err := mgr.LoadProjectConfig()
+		if err != nil {
+			return nil, err
+		}
+		projectName, _ = ResolveProjectName(projectRoot, projectConfig)
 	}
-	projectName, _ := ResolveProjectName(projectRoot, projectConfig)
 	if cfg == nil {
 		cfg = &secrets.Config{}
 	}
-	targets, err := cfg.ResolveSyncTargets(enabledBundles, cfg.UserEnabledBundleNames(), projectName)
+	// 平面隔离（ADR 0009）：project 上下文只解析项目平面 target。
+	targets, err := cfg.ResolveSyncTargets(workspace.SecretsPlane(), enabledBundles, projectName)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +77,12 @@ func warnUnignoredSecrets(projectRoot string, landingPaths []string, reporter Re
 // pullEnabledSecretsBundles 拉取全部 SyncTarget。
 // 不做「停用即清理」：删除走 Remote 页显式确认。
 func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledBundles []string, reporter Reporter) (*secretsPullSummary, error) {
+	return pullEnabledSecretsBundlesForWorkspace(ctx, NewWorkspace(WorkspaceProject, projectRoot), enabledBundles, reporter)
+}
+
+func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Workspace, enabledBundles []string, reporter Reporter) (*secretsPullSummary, error) {
 	reporter = defaultReporter(reporter)
+	projectRoot := workspace.Root
 	summary := &secretsPullSummary{}
 
 	if err := ctx.Err(); err != nil {
@@ -89,7 +103,7 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planSecretsSync(projectRoot, enabledBundles, cfg)
+	plan, err := planWorkspaceSecretsSync(workspace, enabledBundles, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +203,7 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 		}
 	}
 
-	emit(reporter, EventInfo, "pull.secrets", "校验落地路径（.secrets 边界、跨 folder 冲突、git 跟踪）", nil)
+	emit(reporter, EventInfo, "pull.secrets", "校验落地路径边界与跨 folder 冲突", nil)
 	if err := secrets.ValidateLandingPaths(projectRoot, candidates); err != nil {
 		emit(reporter, EventError, "pull.secrets", err.Error(), nil)
 		return nil, err
@@ -255,7 +269,9 @@ func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledB
 		}
 	}
 
-	warnUnignoredSecrets(projectRoot, summary.LandingPaths, reporter)
+	if workspace.EffectivePlane() == WorkspaceProject {
+		warnUnignoredSecrets(projectRoot, summary.LandingPaths, reporter)
+	}
 
 	if summary.NoteCount == 0 && summary.SSHKeyCount == 0 && summary.HandlerCount == 0 {
 		emit(reporter, EventInfo, "pull.secrets", "secrets 同步完成（无变更；未删除多余项）", &Progress{Phase: "secrets", Current: total, Total: total})
@@ -275,10 +291,8 @@ func formatSyncTargetLabel(t secrets.SyncTarget) string {
 	switch {
 	case t.Kind == secrets.SyncKindProject:
 		return fmt.Sprintf("project secrets %q", t.Name)
-	case t.Plane == secrets.SyncPlaneMachine:
+	case secrets.IsMachinePlane(t.Plane):
 		return fmt.Sprintf("machine secrets bundle %q", t.Name)
-	case t.NoteNamePrefix != "":
-		return fmt.Sprintf("project overlay bundle %q", t.Name)
 	default:
 		return fmt.Sprintf("secrets bundle %q", t.Name)
 	}

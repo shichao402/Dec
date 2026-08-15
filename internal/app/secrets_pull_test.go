@@ -144,14 +144,12 @@ members:
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
-	// 仅本机启用，项目侧留空：同时覆盖 ADR 0003 的用户级 pull 路径。
-	if err := secrets.SaveConfig(&secrets.Config{UserEnabledBundles: []string{"cli"}}); err != nil {
-		t.Fatal(err)
-	}
-
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{IDEs: []string{"cursor"}}); err != nil {
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		IDEs:           []string{"cursor"},
+		EnabledBundles: []string{"cli"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -338,7 +336,13 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 	}
 }
 
-func TestPlanSecretsSync_MergesUserEnabledBundles(t *testing.T) {
+// 平面隔离（ADR 0009）：project 上下文的 plan 只含项目平面 target，不含机器平面。
+func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{EnabledBundles: []string{"woa", "vikunja"}}); err != nil {
+		t.Fatal(err)
+	}
+
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
@@ -348,27 +352,20 @@ func TestPlanSecretsSync_MergesUserEnabledBundles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := planSecretsSync(projectRoot, []string{"vikunja"}, &secrets.Config{
-		UserEnabledBundles: []string{"woa", "vikunja"},
-	})
+	plan, err := planSecretsSync(projectRoot, []string{"vikunja"}, &secrets.Config{})
 	if err != nil {
 		t.Fatalf("planSecretsSync() = %v", err)
 	}
-	var machine, overlay, woaMachine int
+	var projectBundle int
 	for _, target := range plan.Targets {
-		if target.Kind != secrets.SyncKindBundle {
-			continue
+		if secrets.IsMachinePlane(target.Plane) {
+			t.Fatalf("project 上下文不应产生机器平面 target: %+v", target)
 		}
-		switch {
-		case target.Name == "vikunja" && target.Plane == secrets.SyncPlaneMachine:
-			machine++
-		case target.Name == "vikunja" && target.NoteNamePrefix != "":
-			overlay++
-		case target.Name == "woa" && target.Plane == secrets.SyncPlaneMachine:
-			woaMachine++
+		if target.Kind == secrets.SyncKindBundle && target.Name == "vikunja" {
+			projectBundle++
 		}
 	}
-	if machine != 1 || overlay != 1 || woaMachine != 1 {
-		t.Fatalf("machine=%d overlay=%d woa=%d targets=%+v", machine, overlay, woaMachine, plan.Targets)
+	if projectBundle != 1 {
+		t.Fatalf("projectBundle = %d, targets=%+v", projectBundle, plan.Targets)
 	}
 }

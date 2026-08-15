@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -72,6 +73,73 @@ password: "secret-token"
 	}
 	if !strings.Contains(calls[1].stdin, "password=secret-token") || !strings.Contains(calls[1].stdin, "host=cnb.cool") {
 		t.Fatalf("approve stdin = %q", calls[1].stdin)
+	}
+}
+
+func TestGitGCMHandler_Revoke(t *testing.T) {
+	var calls []struct {
+		stdin string
+		args  []string
+	}
+	h := NewGitGCMHandler(func(_ context.Context, stdin string, args ...string) error {
+		calls = append(calls, struct {
+			stdin string
+			args  []string
+		}{stdin: stdin, args: append([]string(nil), args...)})
+		return nil
+	})
+
+	reg := NewRegistry()
+	reg.Register(h)
+
+	content := `
+kind: gitgcm
+host: cnb.cool
+username: cnb
+password: "secret-token"
+`
+	revoked, err := RevokeNotes(context.Background(), reg, []Item{{
+		Source:      SourceNote,
+		Name:        "cnb_gitgcm.yaml",
+		NoteContent: content,
+	}})
+	if err != nil {
+		t.Fatalf("RevokeNotes: %v", err)
+	}
+	if len(revoked) != 1 || revoked[0] != "cnb_gitgcm.yaml" {
+		t.Fatalf("revoked = %#v", revoked)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("git calls = %d, want 2: %#v", len(calls), calls)
+	}
+	if strings.Join(calls[0].args, " ") != "credential reject" {
+		t.Fatalf("call[0] = %#v, want credential reject", calls[0].args)
+	}
+	if !strings.Contains(calls[0].stdin, "host=cnb.cool") || !strings.Contains(calls[0].stdin, "username=cnb") {
+		t.Fatalf("reject stdin = %q", calls[0].stdin)
+	}
+	if strings.Contains(calls[0].stdin, "password=") {
+		t.Fatalf("reject stdin 不应包含 password: %q", calls[0].stdin)
+	}
+	if strings.Join(calls[1].args, " ") != "config --global --unset credential.https://cnb.cool.provider" {
+		t.Fatalf("call[1] = %#v, want config --global --unset ...", calls[1].args)
+	}
+}
+
+// --unset key 不存在（git 返回错误）时 Revoke 仍成功。
+func TestGitGCMHandler_RevokeToleratesMissingUnset(t *testing.T) {
+	h := NewGitGCMHandler(func(_ context.Context, _ string, args ...string) error {
+		if len(args) >= 2 && args[0] == "config" && args[1] == "--global" {
+			return fmt.Errorf("exit status 5")
+		}
+		return nil
+	})
+	err := h.Revoke(context.Background(), Item{
+		Name:        "cnb_gitgcm.yaml",
+		NoteContent: "kind: gitgcm\nhost: cnb.cool\nusername: cnb\n",
+	})
+	if err != nil {
+		t.Fatalf("Revoke 应容忍 --unset 失败, got %v", err)
 	}
 }
 

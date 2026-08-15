@@ -42,13 +42,18 @@ func (a *API) Close() error {
 }
 
 func (a *API) Invoke(ctx context.Context, method, projectRoot string, input, output any, reporter app.Reporter) error {
+	return a.InvokeWorkspace(ctx, method, app.NewWorkspace(app.WorkspaceProject, projectRoot), input, output, reporter)
+}
+
+func (a *API) InvokeWorkspace(ctx context.Context, method string, workspace app.Workspace, input, output any, reporter app.Reporter) error {
 	payload, err := json.Marshal(input)
 	if err != nil {
 		return err
 	}
 	request := &servicev1.InvokeRequest{
 		Method:          method,
-		ProjectRoot:     projectRoot,
+		ProjectRoot:     workspace.Root,
+		WorkspacePlane:  string(workspace.EffectivePlane()),
 		PayloadJson:     payload,
 		UnlockTimeoutMs: a.unlockTimeout.Milliseconds(),
 	}
@@ -71,13 +76,18 @@ func (a *API) Invoke(ctx context.Context, method, projectRoot string, input, out
 }
 
 func (a *API) Run(ctx context.Context, operation, projectRoot string, input, output any, reporter app.Reporter) error {
+	return a.RunWorkspace(ctx, operation, app.NewWorkspace(app.WorkspaceProject, projectRoot), input, output, reporter)
+}
+
+func (a *API) RunWorkspace(ctx context.Context, operation string, workspace app.Workspace, input, output any, reporter app.Reporter) error {
 	payload, err := json.Marshal(input)
 	if err != nil {
 		return err
 	}
 	request := &servicev1.RunOperationRequest{
 		Operation:       operation,
-		ProjectRoot:     projectRoot,
+		ProjectRoot:     workspace.Root,
+		WorkspacePlane:  string(workspace.EffectivePlane()),
 		ClientId:        a.clientID,
 		Facade:          a.facade,
 		PayloadJson:     payload,

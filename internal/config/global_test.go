@@ -108,6 +108,105 @@ func TestSaveGlobalConfig_RemovesLegacyLocalConfig(t *testing.T) {
 	}
 }
 
+// ADR 0009：用户平面启用列表从 ~/.dec/secrets/config.yaml 迁到 GlobalConfig.EnabledBundles。
+func TestLoadGlobalConfig_MergesLegacySecretsEnabledBundles(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+	writeLegacySecretsConfig(t, decHome, "server_url: https://vault.bitwarden.com\nuser_enabled_bundles:\n  - bundle/tencent-cloud\n  - woa\n  - woa\n")
+
+	cfg, err := LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig() 失败: %v", err)
+	}
+	want := []string{"tencent-cloud", "woa"}
+	if !reflect.DeepEqual(cfg.EnabledBundles, want) {
+		t.Fatalf("EnabledBundles = %#v, 期望 %#v", cfg.EnabledBundles, want)
+	}
+}
+
+func TestLoadGlobalConfig_PrefersOwnEnabledBundles(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+	writeLegacySecretsConfig(t, decHome, "user_enabled_bundles:\n  - legacy\n")
+	if err := os.WriteFile(filepath.Join(decHome, "config.yaml"), []byte("enabled_bundles:\n  - current\n"), 0644); err != nil {
+		t.Fatalf("写入全局配置失败: %v", err)
+	}
+
+	cfg, err := LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig() 失败: %v", err)
+	}
+	if !reflect.DeepEqual(cfg.EnabledBundles, []string{"current"}) {
+		t.Fatalf("EnabledBundles = %#v, 期望 [current]", cfg.EnabledBundles)
+	}
+}
+
+func TestSaveGlobalConfig_ClearsLegacySecretsEnabledBundles(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+	legacyPath := writeLegacySecretsConfig(t, decHome,
+		"server_url: https://vault.bitwarden.com\nemail: me@example.com\nuser_enabled_bundles:\n  - woa\nknown_secret_bundles:\n  - woa\n")
+
+	cfg, err := LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig() 失败: %v", err)
+	}
+	if err := SaveGlobalConfig(cfg); err != nil {
+		t.Fatalf("SaveGlobalConfig() 失败: %v", err)
+	}
+
+	legacyData, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatalf("读取旧 secrets 配置失败: %v", err)
+	}
+	if strings.Contains(string(legacyData), "user_enabled_bundles") {
+		t.Fatalf("旧 secrets 配置应清理 user_enabled_bundles, 实际:\n%s", legacyData)
+	}
+	for _, keep := range []string{"me@example.com", "known_secret_bundles"} {
+		if !strings.Contains(string(legacyData), keep) {
+			t.Fatalf("旧 secrets 配置应保留 %q, 实际:\n%s", keep, legacyData)
+		}
+	}
+
+	globalData, err := os.ReadFile(filepath.Join(decHome, "config.yaml"))
+	if err != nil {
+		t.Fatalf("读取全局配置失败: %v", err)
+	}
+	if !strings.Contains(string(globalData), "enabled_bundles:") {
+		t.Fatalf("全局配置应写入 enabled_bundles, 实际:\n%s", globalData)
+	}
+
+	// 迁移后重新加载不应再依赖旧位置。
+	names, err := UserEnabledBundles()
+	if err != nil {
+		t.Fatalf("UserEnabledBundles() 失败: %v", err)
+	}
+	if !reflect.DeepEqual(names, []string{"woa"}) {
+		t.Fatalf("UserEnabledBundles() = %#v, 期望 [woa]", names)
+	}
+}
+
+func TestNormalizeBundleNames_TrimsPrefixAndDuplicates(t *testing.T) {
+	got := NormalizeBundleNames([]string{" woa ", "bundle/vikunja", "woa", "", "vikunja"})
+	if !reflect.DeepEqual(got, []string{"woa", "vikunja"}) {
+		t.Fatalf("NormalizeBundleNames = %#v", got)
+	}
+}
+
+func writeLegacySecretsConfig(t *testing.T, decHome, content string) string {
+	t.Helper()
+
+	dir := filepath.Join(decHome, "secrets")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("创建旧 secrets 目录失败: %v", err)
+	}
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("写入旧 secrets 配置失败: %v", err)
+	}
+	return path
+}
+
 func TestGetEffectiveIDEs_PrefersProjectThenGlobalThenDefault(t *testing.T) {
 	decHome := t.TempDir()
 	setEnvForGlobalTest(t, "DEC_HOME", decHome)

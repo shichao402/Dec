@@ -41,6 +41,9 @@ type GlobalConfig struct {
 	IDEs              []string `yaml:"ides,omitempty"`
 	Editor            string   `yaml:"editor,omitempty"`
 	ServerIdleTimeout string   `yaml:"server_idle_timeout,omitempty"`
+	// EnabledBundles 是用户平面启用的 bundle 短名列表（ADR 0009）。
+	// 仅应包含 scope: user 的包；与 ProjectConfig.EnabledBundles 字段同名同语义。
+	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
 }
 
 const ProjectConfigVersionV2 = "v2"
@@ -109,11 +112,20 @@ type ProjectConfig struct {
 	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
 }
 
+// BundleScope 是 bundle 的二元作用域（ADR 0009）。
+type BundleScope string
+
+const (
+	BundleScopeUser    BundleScope = "user"
+	BundleScopeProject BundleScope = "project"
+)
+
 // Bundle 描述 vault 内声明的一组资产启用单位。
 //
 // Bundle 的 YAML 声明位于 bundles/<name>/bundle.yaml：
 //
 //	name: vikunja
+//	scope: project
 //	description: Vikunja 任务管理完整工作流
 //	members:
 //	  - mcp/vikunja-mcp
@@ -124,6 +136,8 @@ type ProjectConfig struct {
 type Bundle struct {
 	// Name 为 bundle 短名，在 vault 内唯一，用于 config.yaml 引用。
 	Name string `yaml:"name"`
+	// Scope 为 user | project（ADR 0009）；决定启用平面与落地平面。
+	Scope BundleScope `yaml:"scope"`
 	// Description 是 TUI 渲染用的一句话描述。
 	Description string `yaml:"description,omitempty"`
 	// Members 列出 bundle 的成员资产，格式为 <type>/<asset-name>。

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 
-	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/types"
@@ -26,10 +25,14 @@ type PushProjectAssetsPreview struct {
 
 // PreviewPushProjectAssets 轻量检测 Push 将涉及的内容，供 TUI 确认页展示。
 func PreviewPushProjectAssets(projectRoot string) (*PushProjectAssetsPreview, error) {
+	return PreviewPushWorkspaceAssets(NewWorkspace(WorkspaceProject, projectRoot))
+}
+
+// PreviewPushWorkspaceAssets 按平面预览 Push 影响面。
+func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview, error) {
 	preview := &PushProjectAssetsPreview{}
 
-	mgr := config.NewProjectConfigManager(projectRoot)
-	projectConfig, err := mgr.LoadProjectConfig()
+	projectConfig, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +50,7 @@ func PreviewPushProjectAssets(projectRoot string) (*PushProjectAssetsPreview, er
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planSecretsSync(projectRoot, preview.EnabledBundleNames, cfg)
+	plan, err := planWorkspaceSecretsSync(workspace, preview.EnabledBundleNames, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +62,7 @@ func PreviewPushProjectAssets(projectRoot string) (*PushProjectAssetsPreview, er
 		}
 	}
 
-	candidate, hasChanges, skipped, decErr := previewDecPushChanges(context.Background(), projectRoot, projectConfig, nil)
+	candidate, hasChanges, skipped, decErr := previewDecPushChanges(context.Background(), workspace, projectConfig, nil)
 	if decErr != nil {
 		preview.DecSkippedReason = decErr.Error()
 	} else {
@@ -72,7 +75,7 @@ func PreviewPushProjectAssets(projectRoot string) (*PushProjectAssetsPreview, er
 	return preview, nil
 }
 
-func previewDecPushChanges(ctx context.Context, projectRoot string, projectConfig *types.ProjectConfig, reporter Reporter) (candidateCount int, hasChanges bool, skippedReason string, err error) {
+func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConfig *types.ProjectConfig, reporter Reporter) (candidateCount int, hasChanges bool, skippedReason string, err error) {
 	if len(projectConfig.EnabledBundles) == 0 {
 		return 0, false, "无已启用 bundle", nil
 	}
@@ -82,7 +85,7 @@ func previewDecPushChanges(ctx context.Context, projectRoot string, projectConfi
 			return err
 		}
 		repoDir := tx.WorkDir()
-		resolved, resolveErr := resolveDesiredAssets(projectConfig, repoDir, reporter)
+		resolved, resolveErr := resolveDesiredAssetsForPlane(projectConfig, repoDir, workspace.EffectivePlane(), reporter)
 		if resolveErr != nil {
 			return resolveErr
 		}
@@ -93,7 +96,7 @@ func previewDecPushChanges(ctx context.Context, projectRoot string, projectConfi
 			return nil
 		}
 
-		synced, pruned, syncErr := syncDecVaultFromCache(projectRoot, repoDir, projectConfig, resolved, reporter)
+		synced, pruned, syncErr := syncDecVaultFromCache(workspace, repoDir, projectConfig, resolved, reporter)
 		if syncErr != nil {
 			return syncErr
 		}
@@ -102,7 +105,7 @@ func previewDecPushChanges(ctx context.Context, projectRoot string, projectConfi
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			ok, pushErr := pushBundleYAMLFromCache(projectRoot, repoDir, bundleName, reporter)
+			ok, pushErr := pushBundleYAMLFromCache(workspace, repoDir, bundleName, reporter)
 			if pushErr != nil {
 				return pushErr
 			}

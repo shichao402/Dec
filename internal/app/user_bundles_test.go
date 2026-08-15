@@ -43,23 +43,13 @@ func TestEnsureVaultBundlesForUserEnable_CreatesMissing(t *testing.T) {
 	if !strings.Contains(string(data), "name: woa") {
 		t.Fatalf("bundle.yaml = %s", data)
 	}
-}
-
-func TestMergeProjectAndUserEnabledBundles(t *testing.T) {
-	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
-	if err := secrets.SaveConfig(&secrets.Config{UserEnabledBundles: []string{"woa", "vikunja"}}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := mergeProjectAndUserEnabledBundles([]string{"vikunja", "cli"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 3 || got[0] != "vikunja" || got[1] != "cli" || got[2] != "woa" {
-		t.Fatalf("merged = %#v", got)
+	if !strings.Contains(string(data), "scope: user") {
+		t.Fatalf("占位 bundle 应声明 scope: user, 实际: %s", data)
 	}
 }
 
-func TestPullProjectAssets_UsesUserEnabledWhenProjectEmpty(t *testing.T) {
+// 平面隔离（ADR 0009）：project 上下文的 pull 不再并入用户平面启用列表。
+func TestPullProjectAssets_IgnoresUserEnabledBundles(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/cli/skills/cli-skill/SKILL.md": "---\nname: cli-skill\n---\n",
@@ -71,7 +61,7 @@ members:
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
-	if err := secrets.SaveConfig(&secrets.Config{UserEnabledBundles: []string{"cli"}}); err != nil {
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, EnabledBundles: []string{"cli"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -98,7 +88,10 @@ members:
 	if err != nil {
 		t.Fatalf("PullProjectAssets() = %v", err)
 	}
-	if result.RequestedCount != 1 {
-		t.Fatalf("RequestedCount = %d, 期望 1（用户级启用 cli）", result.RequestedCount)
+	if result.RequestedCount != 0 {
+		t.Fatalf("RequestedCount = %d, 期望 0（用户平面启用不参与项目 pull）", result.RequestedCount)
+	}
+	if !strings.Contains(result.SkippedReason, "没有已启用的 bundle") {
+		t.Fatalf("SkippedReason = %q", result.SkippedReason)
 	}
 }

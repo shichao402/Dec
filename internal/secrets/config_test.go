@@ -232,38 +232,58 @@ func TestSaveEmail_SkipsPlaceholder(t *testing.T) {
 	}
 }
 
-func TestNormalizeAndMergeEnabledBundles(t *testing.T) {
+func TestNormalizeBundleNames(t *testing.T) {
 	got := NormalizeBundleNames([]string{"  woa ", "bundle/vikunja", "woa", ""})
 	if len(got) != 2 || got[0] != "woa" || got[1] != "vikunja" {
 		t.Fatalf("NormalizeBundleNames = %#v", got)
 	}
-	merged := MergeEnabledBundles([]string{"vikunja", "cli"}, []string{"woa", "vikunja"})
-	if len(merged) != 3 || merged[0] != "vikunja" || merged[1] != "cli" || merged[2] != "woa" {
-		t.Fatalf("MergeEnabledBundles = %#v", merged)
-	}
 }
 
-func TestLoadSaveConfig_UserEnabledBundles(t *testing.T) {
+func TestLoadSaveConfig_ClearsLegacyUserEnabledBundles(t *testing.T) {
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
 
-	if err := SaveConfig(&Config{UserEnabledBundles: []string{" woa ", "bundle/vikunja", "woa"}}); err != nil {
-		t.Fatalf("SaveConfig() = %v", err)
+	configPath := filepath.Join(decHome, "secrets", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
 	}
+	legacy := "server_url: https://vault.bitwarden.com\nemail: a@b.com\nuser_enabled_bundles:\n  - woa\n  - bundle/vikunja\n"
+	if err := os.WriteFile(configPath, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	peek, err := PeekLegacyUserEnabledBundles()
+	if err != nil {
+		t.Fatalf("PeekLegacyUserEnabledBundles() = %v", err)
+	}
+	if len(peek) != 2 || peek[0] != "woa" || peek[1] != "vikunja" {
+		t.Fatalf("peek = %#v", peek)
+	}
+
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig() = %v", err)
 	}
-	names := cfg.UserEnabledBundleNames()
+	names := cfg.LegacyUserEnabledBundleNames()
 	if len(names) != 2 || names[0] != "woa" || names[1] != "vikunja" {
-		t.Fatalf("UserEnabledBundleNames = %#v", names)
+		t.Fatalf("LegacyUserEnabledBundleNames = %#v", names)
 	}
-	data, err := os.ReadFile(filepath.Join(decHome, "secrets", "config.yaml"))
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig() = %v", err)
+	}
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "user_enabled_bundles") {
-		t.Fatalf("config 应含 user_enabled_bundles:\n%s", data)
+	if strings.Contains(string(data), "user_enabled_bundles") {
+		t.Fatalf("SaveConfig 后不应再持久化 user_enabled_bundles:\n%s", data)
+	}
+	peekAfter, err := PeekLegacyUserEnabledBundles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peekAfter) != 0 {
+		t.Fatalf("清空后 peek = %#v", peekAfter)
 	}
 }
 

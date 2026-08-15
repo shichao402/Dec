@@ -10,16 +10,18 @@ import (
 	"unicode"
 )
 
-// LoadEnvForBundle 读取指定 bundle + project 的 env/*.env。
+// LoadEnvForBundle 按单一平面读取 bundle 的 env/*.env（ADR 0009，无跨层合并）。
 //
-// 合并顺序（后者同 key 覆盖前者）：
-//  1. ~/.dec/secrets/bundles/<bundle>/env/*.env
-//  2. <project>/.secrets/bundles/<bundle>/env/*.env
-//  3. <project>/.secrets/project/env/*.env
+//	plane=machine|user：仅 ~/.dec/secrets/bundles/<bundle>/env/*.env
+//	plane=project（空视为 project）：仅 <project>/.secrets/bundles/<bundle>/env/*.env
 //
-// 同一同步根内、跨文件重复键报错；跨层级允许覆盖。
-func LoadEnvForBundle(projectRoot, bundleName string) (map[string]string, error) {
+// 同一同步根内、跨文件重复键报错。
+func LoadEnvForBundle(projectRoot, bundleName string, plane SyncPlane) (map[string]string, error) {
 	out := make(map[string]string)
+	bundleName = strings.TrimSpace(bundleName)
+	if bundleName == "" {
+		return out, nil
+	}
 
 	loadLayer := func(envDir, displayRoot string) error {
 		entries, err := os.ReadDir(envDir)
@@ -59,8 +61,7 @@ func LoadEnvForBundle(projectRoot, bundleName string) (map[string]string, error)
 		return nil
 	}
 
-	bundleName = strings.TrimSpace(bundleName)
-	if bundleName != "" {
+	if IsMachinePlane(plane) {
 		machine, err := NewMachineBundleSyncTarget(bundleName, "")
 		if err != nil {
 			return nil, err
@@ -72,27 +73,25 @@ func LoadEnvForBundle(projectRoot, bundleName string) (map[string]string, error)
 		if err := loadLayer(filepath.Join(abs, "env"), path.Join(".dec/secrets", machine.LocalRoot)); err != nil {
 			return nil, err
 		}
-		if strings.TrimSpace(projectRoot) != "" {
-			proj, err := NewBundleSyncTarget(bundleName, "")
-			if err != nil {
-				return nil, err
-			}
-			abs, err := ResolveAbsDir(projectRoot, proj)
-			if err != nil {
-				return nil, err
-			}
-			if err := loadLayer(filepath.Join(abs, "env"), proj.LocalRoot); err != nil {
-				return nil, err
-			}
-		}
+		return out, nil
 	}
-	if strings.TrimSpace(projectRoot) != "" {
-		if err := loadLayer(
-			filepath.Join(projectRoot, filepath.FromSlash(ProjectSecretsLocalRel), "env"),
-			ProjectSecretsLocalRel,
-		); err != nil {
-			return nil, err
-		}
+
+	if plane != SyncPlaneProject && plane != "" {
+		return nil, fmt.Errorf("未知 SyncPlane %q", plane)
+	}
+	if strings.TrimSpace(projectRoot) == "" {
+		return nil, fmt.Errorf("project 平面需要 projectRoot")
+	}
+	proj, err := NewBundleSyncTarget(bundleName, "")
+	if err != nil {
+		return nil, err
+	}
+	abs, err := ResolveAbsDir(projectRoot, proj)
+	if err != nil {
+		return nil, err
+	}
+	if err := loadLayer(filepath.Join(abs, "env"), proj.LocalRoot); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

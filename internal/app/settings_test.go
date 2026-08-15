@@ -229,33 +229,62 @@ func TestEnsureBuiltinIDEAssetsInstallsDecMCP(t *testing.T) {
 	}
 }
 
-func TestSaveGlobalSettings_PersistsUserEnabledBundles(t *testing.T) {
+func TestEnsureBuiltinIDEAssetsUsesClaudeInternalUserMCPPath(t *testing.T) {
+	homeDir := t.TempDir()
+	setEnvForProjectTest(t, "HOME", homeDir)
+
+	warnings := EnsureBuiltinIDEAssets([]string{"claude-internal"}, nil)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	internalPath := filepath.Join(homeDir, ".claude-internal", "mcp.json")
+	data, err := os.ReadFile(internalPath)
+	if err != nil {
+		t.Fatalf("claude-internal MCP 应写入 %s: %v", internalPath, err)
+	}
+	if !strings.Contains(string(data), `"dec"`) {
+		t.Fatalf("claude-internal mcp.json = %s", string(data))
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, ".claude", "mcp.json")); !os.IsNotExist(err) {
+		t.Fatalf("不应误写入 ~/.claude/mcp.json，stat err = %v", err)
+	}
+}
+
+func TestSaveGlobalSettings_PersistsEnabledBundlesInGlobalConfig(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/cli/bundle.yaml": "name: cli\nmembers: []\n",
+		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
 
 	result, err := SaveGlobalSettings(SaveGlobalSettingsInput{
-		RepoURL:            remote,
-		IDEs:               []string{"cursor"},
-		UserEnabledBundles: []string{"woa", "cli"},
+		RepoURL:        remote,
+		IDEs:           []string{"cursor"},
+		EnabledBundles: []string{"woa", "cli"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("SaveGlobalSettings() = %v", err)
 	}
-	if len(result.UserEnabledBundles) != 2 {
-		t.Fatalf("UserEnabledBundles = %#v", result.UserEnabledBundles)
+	if len(result.EnabledBundles) != 2 {
+		t.Fatalf("EnabledBundles = %#v", result.EnabledBundles)
+	}
+
+	globalConfig, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig() = %v", err)
+	}
+	if len(globalConfig.EnabledBundles) != 2 || globalConfig.EnabledBundles[0] != "woa" {
+		t.Fatalf("GlobalConfig.EnabledBundles = %#v", globalConfig.EnabledBundles)
 	}
 
 	state, err := LoadGlobalSettings(nil)
 	if err != nil {
 		t.Fatalf("LoadGlobalSettings() = %v", err)
 	}
-	if len(state.UserEnabledBundles) != 2 || state.UserEnabledBundles[0] != "woa" || state.UserEnabledBundles[1] != "cli" {
-		t.Fatalf("state.UserEnabledBundles = %#v", state.UserEnabledBundles)
+	if len(state.EnabledBundles) != 2 || state.EnabledBundles[0] != "woa" || state.EnabledBundles[1] != "cli" {
+		t.Fatalf("state.EnabledBundles = %#v", state.EnabledBundles)
 	}
 	found := false
 	for _, name := range state.AvailableSecretBundles {

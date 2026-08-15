@@ -57,6 +57,32 @@ func TestResolveDesiredAssets_NilConfigScansBundles(t *testing.T) {
 	}
 }
 
+func TestResolveDesiredAssetsFiltersWorkspacePlane(t *testing.T) {
+	repoDir := setupRepoWithVault(t, map[string]string{
+		"bundles/project/skills/project-skill/SKILL.md": "---\nname: project-skill\n---\n",
+		"bundles/project/bundle.yaml":                   "name: project\nscope: project\nmembers:\n  - skill/project-skill\n",
+		"bundles/user/skills/user-skill/SKILL.md":       "---\nname: user-skill\n---\n",
+		"bundles/user/bundle.yaml":                      "name: user\nscope: user\nmembers:\n  - skill/user-skill\n",
+	})
+	cfg := &types.ProjectConfig{EnabledBundles: []string{"project", "user"}}
+
+	project, err := resolveDesiredAssetsForPlane(cfg, repoDir, WorkspaceProject, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Bundles) != 1 || project.Bundles[0].Name != "project" || len(project.Assets) != 1 {
+		t.Fatalf("project 平面解析异常: %#v", project)
+	}
+
+	user, err := resolveDesiredAssetsForPlane(cfg, repoDir, WorkspaceUser, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(user.Bundles) != 1 || user.Bundles[0].Name != "user" || len(user.Assets) != 1 {
+		t.Fatalf("user 平面解析异常: %#v", user)
+	}
+}
+
 func TestResolveDesiredAssets_BundleExpandsMembers(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",

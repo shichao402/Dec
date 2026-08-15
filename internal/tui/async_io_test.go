@@ -46,7 +46,7 @@ func TestDeleteLoad_SurvivesPageLeaveAndDedups(t *testing.T) {
 
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	listDeleteCandidatesOperation = func(ctx context.Context, projectRoot string, includeRemote bool, reporter app.Reporter) ([]app.DeleteCandidate, error) {
+	listDeleteCandidatesOperation = func(ctx context.Context, workspace app.Workspace, includeRemote bool, reporter app.Reporter) ([]app.DeleteCandidate, error) {
 		started <- struct{}{}
 		select {
 		case <-release:

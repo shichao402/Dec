@@ -44,6 +44,8 @@ dec --version / dec --help / dec __freshness-check
 
 侧栏导航：`Home` → `Bundles` → `Project` → `Run` → `Remote` → `Settings`（`tab` / `shift+tab` 切换）。
 
+`dec --user` 进入用户平面，页列为 `Home` → `Bundles` → `Run` → `Remote` → `Settings`。Bundles / Run / Remote 的读写落点按平面解析（`~/.dec/cache`、`~/.dec/secrets`、`~/.cursor` 等），只暴露 `scope: user` 的 bundle；Project 页不开放（项目变量在用户平面无对应概念）。见 [0009](decisions/0009-bundle-binary-scope.md) §4。
+
 ## 4. 模块分层
 
 ```text

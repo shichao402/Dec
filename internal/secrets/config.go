@@ -20,20 +20,20 @@ const secretsConfigHeader = `# Bitwarden secrets 连接配置
 #   自托管示例:         https://vault.example.com
 # email: 登录邮箱（web unlock 成功后自动写入）
 # project_secrets: 可选；project 级 Bitwarden folder 名，默认 = project_name
-# user_enabled_bundles: 本机始终启用的 Dec bundle 短名（公开资产 ∪ secrets；与各 project enabled_bundles 并集）
 # known_secret_bundles: 本机已知的 secrets-related bundle 名（枚举/pull 后写入，供 Settings 候选；启用缺失 vault 包时再创建）
 # bundles: 可选显式别名绑定；默认同名，一般不需要
+# 用户平面启用列表已迁至 ~/.dec/config.yaml 的 enabled_bundles（ADR 0009）
 
 `
 
 // Config 对应 ~/.dec/secrets/config.yaml。
 type Config struct {
-	ServerURL           string          `yaml:"server_url"`
-	Email               string          `yaml:"email"`
-	ProjectSecrets      string          `yaml:"project_secrets,omitempty"`
-	UserEnabledBundles  []string        `yaml:"user_enabled_bundles,omitempty"`
-	KnownSecretBundles  []string        `yaml:"known_secret_bundles,omitempty"`
-	Bundles             []BundleBinding `yaml:"bundles,omitempty"`
+	ServerURL          string          `yaml:"server_url"`
+	Email              string          `yaml:"email"`
+	ProjectSecrets     string          `yaml:"project_secrets,omitempty"`
+	UserEnabledBundles []string        `yaml:"user_enabled_bundles,omitempty"` // 遗留：仅 Load 读取；Save 前清空（ADR 0009）
+	KnownSecretBundles []string        `yaml:"known_secret_bundles,omitempty"`
+	Bundles            []BundleBinding `yaml:"bundles,omitempty"`
 }
 
 func secretsDir() (string, error) {
@@ -81,11 +81,12 @@ func LoadConfig() (*Config, error) {
 }
 
 // SaveConfig 写入 ~/.dec/secrets/config.yaml。
+// 写入前清空 UserEnabledBundles（已迁至 GlobalConfig.EnabledBundles，不再持久化）。
 func SaveConfig(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("secrets 配置不能为空")
 	}
-	cfg.UserEnabledBundles = NormalizeBundleNames(cfg.UserEnabledBundles)
+	cfg.UserEnabledBundles = nil
 	cfg.KnownSecretBundles = NormalizeBundleNames(cfg.KnownSecretBundles)
 	applyConfigDefaults(cfg)
 	path, err := ConfigPath()
@@ -203,17 +204,22 @@ func NormalizeBundleNames(names []string) []string {
 	return out
 }
 
-// MergeEnabledBundles 合并 project 与 user 级启用列表（并集、保序：project 在前）。
-func MergeEnabledBundles(projectEnabled, userEnabled []string) []string {
-	return NormalizeBundleNames(append(append([]string{}, projectEnabled...), userEnabled...))
-}
-
-// UserEnabledBundleNames 返回规范化后的用户级启用列表。
-func (c *Config) UserEnabledBundleNames() []string {
+// LegacyUserEnabledBundleNames 返回已加载 Config 中遗留 user_enabled_bundles（规范化）。
+// 供迁移到 GlobalConfig.EnabledBundles；新代码勿再依赖。
+func (c *Config) LegacyUserEnabledBundleNames() []string {
 	if c == nil {
 		return nil
 	}
 	return NormalizeBundleNames(c.UserEnabledBundles)
+}
+
+// PeekLegacyUserEnabledBundles 读取磁盘上旧字段供 GlobalConfig 迁移（不经 Save 清空）。
+func PeekLegacyUserEnabledBundles() ([]string, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return cfg.LegacyUserEnabledBundleNames(), nil
 }
 
 // KnownSecretBundleNames 返回本机已知的 secrets bundle 逻辑名（非启用）。
@@ -256,49 +262,32 @@ func equalStringSlices(left, right []string) bool {
 	return true
 }
 
-// ResolveSyncTargets 解析一次 pull/push 的全部 SyncTarget。
+// ResolveSyncTargets 按当前工作平面解析 SyncTarget。
 //
-// - 仅 user：机器平面 ↔ bundle/<name>
-// - 仅 project：项目 .secrets/bundles/<name> ↔ bundle/<name>
-// - 两者都有：机器默认 ↔ bundle/<name>；另加项目覆盖层（项目 folder + bundles/<name>/ 前缀）
-// - 项目级 secrets：.secrets/project ↔ 项目 folder（排除覆盖层前缀）
-func (c *Config) ResolveSyncTargets(projectEnabled, userEnabled []string, projectName string) ([]SyncTarget, error) {
-	projectEnabled = NormalizeBundleNames(projectEnabled)
-	userEnabled = NormalizeBundleNames(userEnabled)
-	projSet := make(map[string]struct{}, len(projectEnabled))
-	for _, n := range projectEnabled {
-		projSet[n] = struct{}{}
-	}
-	userSet := make(map[string]struct{}, len(userEnabled))
-	for _, n := range userEnabled {
-		userSet[n] = struct{}{}
-	}
-
-	targets := make([]SyncTarget, 0, len(projectEnabled)+len(userEnabled)+1)
-	seenKey := make(map[string]string) // folder\x00prefix -> label
-	var overlayPrefixes []string
+//	plane=project：仅用 enabled 生成项目平面 bundle target + project secrets target
+//	plane=machine|user：仅用 enabled 生成机器平面 bundle target；不生成 project secrets
+func (c *Config) ResolveSyncTargets(plane SyncPlane, enabled []string, projectName string) ([]SyncTarget, error) {
+	enabled = NormalizeBundleNames(enabled)
+	targets := make([]SyncTarget, 0, len(enabled)+1)
+	seenFolder := make(map[string]string) // folder -> label
 
 	add := func(t SyncTarget, label string) error {
 		if t.Plane == "" {
 			t.Plane = SyncPlaneProject
 		}
-		key := t.Folder + "\x00" + t.NoteNamePrefix
-		prev, ok := seenKey[key]
+		prev, ok := seenFolder[t.Folder]
 		if ok && prev != label {
-			return fmt.Errorf("Bitwarden folder %q (prefix %q) 同时绑定 %s 与 %s", t.Folder, t.NoteNamePrefix, prev, label)
+			return fmt.Errorf("Bitwarden folder %q 同时绑定 %s 与 %s", t.Folder, prev, label)
 		}
-		seenKey[key] = label
+		seenFolder[t.Folder] = label
 		targets = append(targets, t)
 		return nil
 	}
 
-	all := MergeEnabledBundles(projectEnabled, userEnabled)
-	for _, bundleName := range all {
-		binding := c.ResolveBinding(bundleName)
-		_, inProj := projSet[bundleName]
-		_, inUser := userSet[bundleName]
-		switch {
-		case inUser && !inProj:
+	switch {
+	case IsMachinePlane(plane):
+		for _, bundleName := range enabled {
+			binding := c.ResolveBinding(bundleName)
 			target, err := NewMachineBundleSyncTarget(bundleName, binding.SecretsBundleName)
 			if err != nil {
 				return nil, err
@@ -306,7 +295,10 @@ func (c *Config) ResolveSyncTargets(projectEnabled, userEnabled []string, projec
 			if err := add(target, fmt.Sprintf("machine bundle %q", bundleName)); err != nil {
 				return nil, err
 			}
-		case inProj && !inUser:
+		}
+	case plane == SyncPlaneProject || plane == "":
+		for _, bundleName := range enabled {
+			binding := c.ResolveBinding(bundleName)
 			target, err := NewBundleSyncTarget(bundleName, binding.SecretsBundleName)
 			if err != nil {
 				return nil, err
@@ -314,41 +306,21 @@ func (c *Config) ResolveSyncTargets(projectEnabled, userEnabled []string, projec
 			if err := add(target, fmt.Sprintf("bundle %q", bundleName)); err != nil {
 				return nil, err
 			}
-		default: // both
-			machine, err := NewMachineBundleSyncTarget(bundleName, binding.SecretsBundleName)
+		}
+		if folder, ok := c.ResolveProjectSecrets(projectName); ok {
+			target, err := NewProjectSyncTarget(projectName, folder)
 			if err != nil {
 				return nil, err
 			}
-			if err := add(machine, fmt.Sprintf("machine bundle %q", bundleName)); err != nil {
+			if folder != target.Name {
+				target.Folder = folder
+			}
+			if err := add(target, fmt.Sprintf("project %q", target.Name)); err != nil {
 				return nil, err
 			}
-			if folder, ok := c.ResolveProjectSecrets(projectName); ok {
-				overlay, err := NewProjectBundleOverlayTarget(bundleName, folder)
-				if err != nil {
-					return nil, err
-				}
-				if err := add(overlay, fmt.Sprintf("project overlay bundle %q", bundleName)); err != nil {
-					return nil, err
-				}
-				overlayPrefixes = append(overlayPrefixes, overlay.NoteNamePrefix)
-			}
 		}
-	}
-
-	if folder, ok := c.ResolveProjectSecrets(projectName); ok {
-		target, err := NewProjectSyncTarget(projectName, folder)
-		if err != nil {
-			return nil, err
-		}
-		if folder != target.Name {
-			target.Folder = folder
-		}
-		if len(overlayPrefixes) > 0 {
-			target.NoteNameExcludePrefixes = append([]string{}, overlayPrefixes...)
-		}
-		if err := add(target, fmt.Sprintf("project %q", target.Name)); err != nil {
-			return nil, err
-		}
+	default:
+		return nil, fmt.Errorf("未知 SyncPlane %q", plane)
 	}
 
 	return targets, nil

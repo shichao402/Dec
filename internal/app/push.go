@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/shichao402/Dec/internal/bundle"
-	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/types"
 )
@@ -23,6 +22,12 @@ type PushProjectAssetsResult struct {
 
 // PushProjectAssets 将本地 .dec/cache/ 与 secrets 落地文件推送到远端（Dec Git vault + Bitwarden）。
 func PushProjectAssets(ctx context.Context, projectRoot string, reporter Reporter) (*PushProjectAssetsResult, error) {
+	return PushWorkspaceAssets(ctx, NewWorkspace(WorkspaceProject, projectRoot), reporter)
+}
+
+// PushWorkspaceAssets 把当前平面的本地缓存与 secrets 落地文件推回远端。
+// 用户平面读 ~/.dec/cache 与 ~/.dec/secrets，只涉及 scope: user 的 bundle。
+func PushWorkspaceAssets(ctx context.Context, workspace Workspace, reporter Reporter) (*PushProjectAssetsResult, error) {
 	reporter = defaultReporter(reporter)
 	result := &PushProjectAssetsResult{}
 
@@ -30,7 +35,7 @@ func PushProjectAssets(ctx context.Context, projectRoot string, reporter Reporte
 		return nil, err
 	}
 
-	decPushed, decSkipped, commit, err := pushDecBundles(ctx, projectRoot, reporter)
+	decPushed, decSkipped, commit, err := pushDecBundles(ctx, workspace, reporter)
 	if err != nil {
 		return nil, fmt.Errorf("push.dec 失败: %w", err)
 	}
@@ -42,7 +47,7 @@ func PushProjectAssets(ctx context.Context, projectRoot string, reporter Reporte
 		return nil, err
 	}
 
-	secretsResult, err := PushSecretsBundles(ctx, projectRoot, reporter)
+	secretsResult, err := PushWorkspaceSecretsBundles(ctx, workspace, reporter)
 	if err != nil {
 		return nil, fmt.Errorf("push.secrets 失败: %w", err)
 	}
@@ -54,9 +59,8 @@ func PushProjectAssets(ctx context.Context, projectRoot string, reporter Reporte
 	return result, nil
 }
 
-func pushDecBundles(ctx context.Context, projectRoot string, reporter Reporter) (pushedCount int, skippedReason, versionCommit string, err error) {
-	mgr := config.NewProjectConfigManager(projectRoot)
-	projectConfig, err := mgr.LoadProjectConfig()
+func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter) (pushedCount int, skippedReason, versionCommit string, err error) {
+	projectConfig, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
 		return 0, "", "", err
 	}
@@ -67,14 +71,14 @@ func pushDecBundles(ctx context.Context, projectRoot string, reporter Reporter) 
 		return 0, skippedReason, "", nil
 	}
 
-	emit(reporter, EventInfo, "push.dec", "检查 .dec/cache/ 变更…", nil)
+	emit(reporter, EventInfo, "push.dec", fmt.Sprintf("检查 %s 变更…", displayCacheDir(workspace)), nil)
 
 	err = withAppWriteRepo(func(tx *repo.Transaction) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		repoDir := tx.WorkDir()
-		resolved, resolveErr := resolveDesiredAssets(projectConfig, repoDir, reporter)
+		resolved, resolveErr := resolveDesiredAssetsForPlane(projectConfig, repoDir, workspace.EffectivePlane(), reporter)
 		if resolveErr != nil {
 			return resolveErr
 		}
@@ -90,7 +94,7 @@ func pushDecBundles(ctx context.Context, projectRoot string, reporter Reporter) 
 			emit(reporter, EventInfo, "push.dec", fmt.Sprintf("同步 %d 个 Dec 资产", len(assets)), &Progress{Phase: "dec", Current: 0, Total: len(assets)})
 		}
 
-		synced, pruned, syncErr := syncDecVaultFromCache(projectRoot, repoDir, projectConfig, resolved, reporter)
+		synced, pruned, syncErr := syncDecVaultFromCache(workspace, repoDir, projectConfig, resolved, reporter)
 		if syncErr != nil {
 			return syncErr
 		}
@@ -99,7 +103,7 @@ func pushDecBundles(ctx context.Context, projectRoot string, reporter Reporter) 
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			ok, pushErr := pushBundleYAMLFromCache(projectRoot, repoDir, bundleName, reporter)
+			ok, pushErr := pushBundleYAMLFromCache(workspace, repoDir, bundleName, reporter)
 			if pushErr != nil {
 				return pushErr
 			}
@@ -144,8 +148,8 @@ func pushDecBundles(ctx context.Context, projectRoot string, reporter Reporter) 
 	return pushedCount, skippedReason, versionCommit, nil
 }
 
-func pushBundleYAMLFromCache(projectRoot, repoDir, bundleName string, reporter Reporter) (bool, error) {
-	cacheDir := filepath.Join(projectRoot, ".dec", "cache", bundleName)
+func pushBundleYAMLFromCache(workspace Workspace, repoDir, bundleName string, reporter Reporter) (bool, error) {
+	cacheDir := filepath.Join(workspaceCacheDir(workspace), bundleName)
 	var cachePath string
 	for _, name := range []string{"bundle.yaml", "bundle.yml"} {
 		candidate := filepath.Join(cacheDir, name)

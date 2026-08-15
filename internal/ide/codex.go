@@ -30,6 +30,7 @@ func newCodexIDE(name string) IDE {
 		dirKey:        ".codex",
 		userDirKey:    "." + name,
 		mcpConfigPath: filepath.Join(".codex", "config.toml"),
+		userMCPPath:   filepath.Join("."+name, "config.toml"),
 	}}
 }
 
@@ -78,7 +79,11 @@ func MigrateLegacyCodexProject(projectRoot string) ([]string, error) {
 }
 
 func (c *codexIDE) WriteMCPConfig(projectRoot string, config *types.MCPConfig) error {
-	configPath := c.MCPConfigPath(projectRoot)
+	return c.WriteMCPConfigForPlane(PlaneProject, projectRoot, "", config)
+}
+
+func (c *codexIDE) WriteMCPConfigForPlane(plane Plane, projectRoot, homeDir string, config *types.MCPConfig) error {
+	configPath := c.MCPConfigPathForPlane(plane, projectRoot, homeDir)
 
 	var existing []byte
 	data, err := os.ReadFile(configPath)
@@ -101,7 +106,11 @@ func (c *codexIDE) WriteMCPConfig(projectRoot string, config *types.MCPConfig) e
 }
 
 func (c *codexIDE) LoadMCPConfig(projectRoot string) (*types.MCPConfig, error) {
-	configPath := c.MCPConfigPath(projectRoot)
+	return c.LoadMCPConfigForPlane(PlaneProject, projectRoot, "")
+}
+
+func (c *codexIDE) LoadMCPConfigForPlane(plane Plane, projectRoot, homeDir string) (*types.MCPConfig, error) {
+	configPath := c.MCPConfigPathForPlane(plane, projectRoot, homeDir)
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {

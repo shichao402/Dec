@@ -16,10 +16,12 @@ func TestWrapMCPServerWithExec_WrapsCommandAndStripsPlaceholders(t *testing.T) {
 		"vikunja",
 		"dec-exec",
 		"npx",
-		[]string{"-y", "@shichao402/vikunja-mcp"},
+		[]string{"-y", "@shichao402/vikunja-mcp", "--root", "${workspaceFolder}/data"},
 		map[string]string{
 			"VIKUNJA_URL":        "${VIKUNJA_URL}",
 			"PKV_WORKSPACE_ROOT": "D:/workspace",
+			"MCP_WORKSPACE":      "${workspaceFolder}/mcp",
+			"MIXED_PLACEHOLDERS": "${workspaceFolder}/${TOKEN}",
 		},
 	)
 	if cmd != "dec-exec" {
@@ -29,8 +31,14 @@ func TestWrapMCPServerWithExec_WrapsCommandAndStripsPlaceholders(t *testing.T) {
 	if cmd != "dec-exec" || !strings.Contains(joined, "--bundle") || !strings.Contains(joined, "vikunja") {
 		t.Fatalf("args = %#v", args)
 	}
-	if !strings.Contains(joined, "--") || args[len(args)-3] != "npx" {
+	if !strings.Contains(joined, "-- npx") {
 		t.Fatalf("应保留真实命令在 -- 之后: %#v", args)
+	}
+	if len(args) < 2 || args[0] != "--project-root" || args[1] != "${workspaceFolder}" {
+		t.Fatalf("--project-root 应保留 workspace 占位符: %#v", args)
+	}
+	if !strings.Contains(joined, "${workspaceFolder}/data") {
+		t.Fatalf("原 args 中的 workspace 占位符应保留: %#v", args)
 	}
 	if _, ok := env["VIKUNJA_URL"]; ok {
 		t.Fatalf("应去掉 ${VAR} 占位 env: %#v", env)
@@ -38,9 +46,15 @@ func TestWrapMCPServerWithExec_WrapsCommandAndStripsPlaceholders(t *testing.T) {
 	if env["PKV_WORKSPACE_ROOT"] != "D:/workspace" {
 		t.Fatalf("应保留非占位 env: %#v", env)
 	}
+	if env["MCP_WORKSPACE"] != "${workspaceFolder}/mcp" {
+		t.Fatalf("应保留含 workspace 占位符的 env: %#v", env)
+	}
+	if _, ok := env["MIXED_PLACEHOLDERS"]; ok {
+		t.Fatalf("含其它变量占位符的 env 仍应去掉: %#v", env)
+	}
 }
 
-func TestBuildExecEnviron_LoadsBundleAndProjectEnv(t *testing.T) {
+func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 	root := t.TempDir()
 	bundleTarget, err := secrets.NewBundleSyncTarget("vikunja", "")
 	if err != nil {
@@ -63,7 +77,7 @@ func TestBuildExecEnviron_LoadsBundleAndProjectEnv(t *testing.T) {
 	mustWrite(filepath.ToSlash(filepath.Join(bundleTarget.LocalRoot, "env", "vikunja.env")), "TOKEN=from-bundle\nSHARED=bundle\n")
 	mustWrite(filepath.ToSlash(filepath.Join(projectTarget.LocalRoot, "env", "app.env")), "SHARED=project\nPROJECT_ONLY=1\n")
 
-	env, err := BuildExecEnviron(root, "vikunja", []string{"PATH=/bin", "SHARED=base"})
+	env, err := BuildExecEnviron(root, "vikunja", secrets.SyncPlaneProject, []string{"PATH=/bin", "SHARED=base"})
 	if err != nil {
 		t.Fatalf("BuildExecEnviron() = %v", err)
 	}
@@ -77,12 +91,11 @@ func TestBuildExecEnviron_LoadsBundleAndProjectEnv(t *testing.T) {
 	if got["TOKEN"] != "from-bundle" {
 		t.Fatalf("TOKEN = %q", got["TOKEN"])
 	}
-	if got["PROJECT_ONLY"] != "1" {
-		t.Fatalf("PROJECT_ONLY = %q", got["PROJECT_ONLY"])
+	if _, ok := got["PROJECT_ONLY"]; ok {
+		t.Fatalf("不应再合并 .secrets/project/env: %#v", got)
 	}
-	// project 覆盖 bundle
-	if got["SHARED"] != "project" {
-		t.Fatalf("SHARED = %q, 期望 project 覆盖", got["SHARED"])
+	if got["SHARED"] != "bundle" {
+		t.Fatalf("SHARED = %q, 期望仅 bundle 层", got["SHARED"])
 	}
 	if got["PATH"] != "/bin" {
 		t.Fatalf("PATH 应保留基环境: %q", got["PATH"])

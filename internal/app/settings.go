@@ -32,7 +32,7 @@ type GlobalSettingsState struct {
 	ConfiguredEditor       string
 	ConnectedBarePath      string
 	AvailableSecretBundles []string // Settings 候选：vault ∪ known ∪ BW ∪ 已启用（语义：本机 bundle）
-	UserEnabledBundles     []string // 本机启用的 Dec bundle 短名（user_enabled_bundles）
+	EnabledBundles         []string // 用户平面启用的 bundle 短名（GlobalConfig.enabled_bundles，ADR 0009）
 	SecretsConfigPath      string
 	BitwardenSessionReady  bool
 	ServerIdleTimeout      string
@@ -45,23 +45,24 @@ type ConnectRepoResult struct {
 }
 
 type SaveGlobalSettingsInput struct {
-	RepoURL            string
-	IDEs               []string
-	UserEnabledBundles []string // nil = 不改 secrets 用户级启用；非 nil（含空切片）= 写回
-	ServerIdleTimeout  string
+	RepoURL string
+	IDEs    []string
+	// EnabledBundles nil = 不改用户平面启用列表；非 nil（含空切片）= 写回 GlobalConfig.EnabledBundles。
+	EnabledBundles    []string
+	ServerIdleTimeout string
 }
 
 type SaveGlobalSettingsResult struct {
 	RepoURL             string
 	IDEs                []string
-	UserEnabledBundles  []string
+	EnabledBundles      []string
 	ConfigPath          string
 	VarsPath            string
 	VarsCreated         bool
 	BareRepo            string
 	InstallWarnings     []string
 	SecretsConfigPath   string
-	CreatedVaultBundles []string // 本次为用户级启用新建的 vault 占位
+	CreatedVaultBundles []string // 本次为用户平面启用新建的 vault 占位
 	ServerIdleTimeout   string
 }
 
@@ -94,6 +95,7 @@ func LoadGlobalSettings(reporter Reporter) (*GlobalSettingsState, error) {
 		VarsPath:          varsPath,
 		ConfiguredEditor:  strings.TrimSpace(globalConfig.Editor),
 		ServerIdleTimeout: normalizedServerIdleTimeout(globalConfig.ServerIdleTimeout),
+		EnabledBundles:    config.NormalizeBundleNames(globalConfig.EnabledBundles),
 	}
 
 	availableIDEs := ide.List()
@@ -160,7 +162,6 @@ func attachUserSecretBundleSettings(state *GlobalSettingsState, reporter Reporte
 	if err != nil {
 		return fmt.Errorf("加载 secrets 配置失败: %w", err)
 	}
-	state.UserEnabledBundles = cfg.UserEnabledBundleNames()
 
 	client := secretsClientFactory()
 	var remoteNames []string
@@ -183,7 +184,7 @@ func attachUserSecretBundleSettings(state *GlobalSettingsState, reporter Reporte
 		cfg = refreshed
 	}
 	state.AvailableSecretBundles = listUserSecretBundleCandidates(
-		state.UserEnabledBundles,
+		state.EnabledBundles,
 		cfg.KnownSecretBundleNames(),
 		remoteNames,
 		vaultNames,
@@ -300,17 +301,13 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 
 	var savedUserBundles []string
 	var secretsConfigPath string
-	// 先写用户级 secrets，避免后续 repo.Connect 失败导致勾选丢失。
-	if input.UserEnabledBundles != nil {
-		secretsCfg, err := secrets.LoadConfig()
-		if err != nil {
-			return nil, fmt.Errorf("加载 secrets 配置失败: %w", err)
+	// 先落盘用户平面启用列表，避免后续 repo.Connect 失败导致勾选丢失。
+	if input.EnabledBundles != nil {
+		globalConfig.EnabledBundles = config.NormalizeBundleNames(input.EnabledBundles)
+		if err := config.SaveGlobalConfig(globalConfig); err != nil {
+			return nil, fmt.Errorf("保存用户平面启用 bundle 失败: %w", err)
 		}
-		secretsCfg.UserEnabledBundles = secrets.NormalizeBundleNames(input.UserEnabledBundles)
-		if err := secrets.SaveConfig(secretsCfg); err != nil {
-			return nil, fmt.Errorf("保存用户级 secret bundles 失败: %w", err)
-		}
-		savedUserBundles = secretsCfg.UserEnabledBundleNames()
+		savedUserBundles = append([]string(nil), globalConfig.EnabledBundles...)
 		_ = secrets.RememberSecretBundles(savedUserBundles)
 		if path, err := secrets.ConfigPath(); err == nil {
 			secretsConfigPath = path
@@ -322,10 +319,10 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 	}
 
 	result := &SaveGlobalSettingsResult{
-		RepoURL:            targetRepoURL,
-		IDEs:               append([]string(nil), targetIDEs...),
-		UserEnabledBundles: savedUserBundles,
-		SecretsConfigPath:  secretsConfigPath,
+		RepoURL:           targetRepoURL,
+		IDEs:              append([]string(nil), targetIDEs...),
+		EnabledBundles:    savedUserBundles,
+		SecretsConfigPath: secretsConfigPath,
 	}
 	result.InstallWarnings = append(result.InstallWarnings, EnsureBuiltinIDEAssets(targetIDEs, reporter)...)
 
@@ -461,13 +458,12 @@ func InstallBuiltinAssetsForIDE(ideName string) error {
 	}
 
 	ideImpl := ide.Get(ideName)
-	userRoot := ideImpl.UserRootDir(homeDir)
 	bundle := assets.GlobalAssets()
 
-	if err := installBuiltinSkills(filepath.Join(userRoot, "skills"), bundle.Skills); err != nil {
+	if err := installBuiltinSkills(ideImpl.SkillsDirForPlane(ide.PlaneUser, "", homeDir), bundle.Skills); err != nil {
 		return fmt.Errorf("安装内置 skills 失败: %w", err)
 	}
-	if err := installBuiltinRules(filepath.Join(userRoot, "rules"), bundle.Rules); err != nil {
+	if err := installBuiltinRules(ideImpl.RulesDirForPlane(ide.PlaneUser, "", homeDir), bundle.Rules); err != nil {
 		return fmt.Errorf("安装内置 rules 失败: %w", err)
 	}
 	if err := installBuiltinMCPs(ideName, homeDir, bundle.MCPs); err != nil {
@@ -526,8 +522,8 @@ func installBuiltinMCPs(ideName, homeDir string, mcps []assets.MCPAsset) error {
 		return nil
 	}
 
-	configRoot := builtinMCPConfigRoot(ideName, homeDir)
-	configPath := ide.Get(ideName).MCPConfigPath(configRoot)
+	ideImpl := ide.Get(ideName)
+	configPath := ideImpl.MCPConfigPathForPlane(ide.PlaneUser, "", homeDir)
 
 	for _, asset := range mcps {
 		var server types.MCPServer
@@ -539,7 +535,7 @@ func installBuiltinMCPs(ideName, homeDir string, mcps []assets.MCPAsset) error {
 			serverName = managedName(asset.Name)
 		}
 		if isCodexIDE(ideName) {
-			if err := mergeCodexBuiltinMCPEntry(ideName, configRoot, serverName, server); err != nil {
+			if err := mergeCodexBuiltinMCPEntry(ideName, homeDir, serverName, server); err != nil {
 				return err
 			}
 			continue
@@ -555,9 +551,9 @@ func isCodexIDE(ideName string) bool {
 	return ideName == "codex" || ideName == "codex-internal"
 }
 
-func mergeCodexBuiltinMCPEntry(ideName, configRoot, serverName string, server types.MCPServer) error {
+func mergeCodexBuiltinMCPEntry(ideName, homeDir, serverName string, server types.MCPServer) error {
 	ideImpl := ide.Get(ideName)
-	existing, err := ideImpl.LoadMCPConfig(configRoot)
+	existing, err := ideImpl.LoadMCPConfigForPlane(ide.PlaneUser, "", homeDir)
 	if err != nil {
 		return fmt.Errorf("加载 MCP 配置失败: %w", err)
 	}
@@ -565,7 +561,7 @@ func mergeCodexBuiltinMCPEntry(ideName, configRoot, serverName string, server ty
 		existing.MCPServers = make(map[string]types.MCPServer)
 	}
 	existing.MCPServers[serverName] = server
-	return ideImpl.WriteMCPConfig(configRoot, existing)
+	return ideImpl.WriteMCPConfigForPlane(ide.PlaneUser, "", homeDir, existing)
 }
 
 // mergeJSONBuiltinMCPEntry 仅合并 dec MCP 条目，保留其它 server 的未知字段（如 transportType）。
@@ -610,12 +606,6 @@ func mergeJSONBuiltinMCPEntry(configPath, serverName string, server types.MCPSer
 		return err
 	}
 	return os.WriteFile(configPath, append(out, '\n'), 0644)
-}
-
-// builtinMCPConfigRoot 返回传给 IDE.MCPConfigPath 的根路径。
-// MCPConfigPath 以 workspace / 用户主目录为根，再拼 .cursor/mcp.json 等路径。
-func builtinMCPConfigRoot(_ string, homeDir string) string {
-	return homeDir
 }
 
 func writeBuiltinFiles(rootDir string, files []assets.FileAsset) error {

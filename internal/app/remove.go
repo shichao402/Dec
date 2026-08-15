@@ -14,8 +14,10 @@ import (
 )
 
 // RemoveAssetInput 描述一次 remove 操作的输入。
+// Plane 为空视为项目平面。
 type RemoveAssetInput struct {
 	ProjectRoot string
+	Plane       WorkspacePlane
 	Type        string
 	Name        string
 	Vault       string
@@ -38,8 +40,10 @@ type RemoveAssetResult struct {
 var ErrRemoveNotConfirmed = fmt.Errorf("remove 未确认")
 
 // RemoveBundleInput 描述一次 bundle 级 remove 操作的输入。
+// Plane 为空视为项目平面。
 type RemoveBundleInput struct {
 	ProjectRoot string
+	Plane       WorkspacePlane
 	BundleName  string
 	// Members 为 bundle 成员（用于 IDE/cache 清理）；为空时在远端删除前从 repo 扫描。
 	Members   []AssetSelectionItem
@@ -65,10 +69,11 @@ func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResu
 
 	projectRoot := strings.TrimSpace(input.ProjectRoot)
 	bundleName := strings.TrimSpace(input.BundleName)
+	workspace := NewWorkspace(input.Plane, projectRoot)
 
 	emit(reporter, EventInfo, "remove.prepare", fmt.Sprintf("🗑  准备删除 bundle %s", bundleName), nil)
 
-	if projectRoot == "" {
+	if projectRoot == "" && workspace.EffectivePlane() == WorkspaceProject {
 		return nil, fmt.Errorf("项目根目录不能为空")
 	}
 	if bundleName == "" {
@@ -117,11 +122,11 @@ func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResu
 	result.MemberCount = len(members)
 
 	// Stage 2: IDE 清理（尽力而为）。
-	projectIDEs := resolveProjectIDEs(projectRoot, reporter)
+	projectIDEs := resolveWorkspaceIDEs(workspace, reporter)
 	removedIDEs := make(map[string]struct{})
 	for _, member := range members {
 		for _, ideImpl := range projectIDEs {
-			removed, err := removeAssetFromIDE(member.Type, member.Name, projectRoot, ideImpl)
+			removed, err := removeAssetFromIDE(member.Type, member.Name, workspace, ideImpl)
 			if err != nil {
 				emit(reporter, EventWarn, "remove.ide", fmt.Sprintf("IDE %s 清理 %s 失败: %v", ideImpl.Name(), member.Name, err), nil)
 				continue
@@ -142,7 +147,7 @@ func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResu
 	}
 
 	// Stage 3: 本地 bundle cache 清理。
-	cacheBundleDir := filepath.Join(projectRoot, ".dec", "cache", bundleName)
+	cacheBundleDir := filepath.Join(workspaceCacheDir(workspace), bundleName)
 	if _, err := os.Stat(cacheBundleDir); err == nil {
 		if err := os.RemoveAll(cacheBundleDir); err != nil {
 			emit(reporter, EventWarn, "remove.cache", fmt.Sprintf("缓存清理失败: %v", err), nil)
@@ -152,22 +157,12 @@ func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResu
 		}
 	}
 
-	// Stage 4: 项目配置更新。
-	mgr := config.NewProjectConfigManager(projectRoot)
-	if projectConfig, err := mgr.LoadProjectConfig(); err == nil {
-		changed := false
-		if updated, ok := removeEnabledBundle(projectConfig.EnabledBundles, bundleName); ok {
-			projectConfig.EnabledBundles = updated
-			changed = true
-		}
-		if changed {
-			if err := mgr.SaveProjectConfig(projectConfig); err != nil {
-				emit(reporter, EventWarn, "remove.config", fmt.Sprintf("项目配置更新失败: %v", err), nil)
-			} else {
-				result.ConfigUpdated = true
-				emit(reporter, EventInfo, "remove.config", "📝 已更新项目配置", nil)
-			}
-		}
+	// Stage 4: 当前平面启用列表更新。
+	if changed, err := removeWorkspaceEnabledBundle(workspace, bundleName); err != nil {
+		emit(reporter, EventWarn, "remove.config", fmt.Sprintf("启用列表更新失败: %v", err), nil)
+	} else if changed {
+		result.ConfigUpdated = true
+		emit(reporter, EventInfo, "remove.config", "📝 已更新启用列表", nil)
 	}
 
 	summary := fmt.Sprintf("✅ 已删除 bundle %s（%d 个成员）", bundleName, result.MemberCount)
@@ -237,10 +232,11 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 	itemType := strings.TrimSpace(input.Type)
 	assetName := strings.TrimSpace(input.Name)
 	vaultHint := strings.TrimSpace(input.Vault)
+	workspace := NewWorkspace(input.Plane, projectRoot)
 
 	emit(reporter, EventInfo, "remove.prepare", fmt.Sprintf("🗑  准备删除 [%s] %s", itemType, assetName), nil)
 
-	if projectRoot == "" {
+	if projectRoot == "" && workspace.EffectivePlane() == WorkspaceProject {
 		return nil, fmt.Errorf("项目根目录不能为空")
 	}
 	if assetName == "" {
@@ -289,9 +285,9 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 	}
 
 	// Stage 2: IDE 清理（尽力而为）。
-	projectIDEs := resolveProjectIDEs(projectRoot, reporter)
+	projectIDEs := resolveWorkspaceIDEs(workspace, reporter)
 	for _, ideImpl := range projectIDEs {
-		removed, err := removeAssetFromIDE(itemType, assetName, projectRoot, ideImpl)
+		removed, err := removeAssetFromIDE(itemType, assetName, workspace, ideImpl)
 		if err != nil {
 			emit(reporter, EventWarn, "remove.ide", fmt.Sprintf("IDE %s 清理失败: %v", ideImpl.Name(), err), nil)
 			continue
@@ -305,7 +301,7 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 	}
 
 	// Stage 3: 本地缓存清理。
-	cachePath := getCachePath(projectRoot, result.Vault, itemType, assetName)
+	cachePath := getWorkspaceCachePath(workspace, result.Vault, itemType, assetName)
 	if cachePath != "" {
 		if _, err := os.Stat(cachePath); err == nil {
 			if err := os.RemoveAll(cachePath); err != nil {
@@ -384,10 +380,14 @@ func withAppWriteRepo(fn func(*repo.Transaction) error) error {
 
 // resolveProjectIDEs 解析当前项目可用的 IDE 列表用于资产清理。
 func resolveProjectIDEs(projectRoot string, reporter Reporter) []ide.IDE {
-	mgr := config.NewProjectConfigManager(projectRoot)
-	projectConfig, err := mgr.LoadProjectConfig()
+	return resolveWorkspaceIDEs(NewWorkspace(WorkspaceProject, projectRoot), reporter)
+}
+
+// resolveWorkspaceIDEs 解析当前平面用于资产清理的 IDE 列表。
+func resolveWorkspaceIDEs(workspace Workspace, reporter Reporter) []ide.IDE {
+	projectConfig, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
-		emit(reporter, EventWarn, "remove.ide", fmt.Sprintf("加载项目配置失败: %v", err), nil)
+		emit(reporter, EventWarn, "remove.ide", fmt.Sprintf("加载配置失败: %v", err), nil)
 		return nil
 	}
 
@@ -400,5 +400,5 @@ func resolveProjectIDEs(projectRoot string, reporter Reporter) []ide.IDE {
 		emit(reporter, EventWarn, "remove.ide", warning, nil)
 	}
 
-	return uniqueProjectIDEs(projectRoot, selection.IDEs)
+	return uniqueWorkspaceIDEs(workspace, selection.IDEs)
 }

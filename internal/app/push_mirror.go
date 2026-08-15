@@ -9,7 +9,7 @@ import (
 )
 
 // syncDecVaultFromCache 将 enabled 范围内的 vault 资产与本地 cache 对齐：复制存在项、删除 cache 已缺失项。
-func syncDecVaultFromCache(projectRoot, repoDir string, projectConfig *types.ProjectConfig, resolved *ResolvedAssets, reporter Reporter) (synced, pruned int, err error) {
+func syncDecVaultFromCache(workspace Workspace, repoDir string, projectConfig *types.ProjectConfig, resolved *ResolvedAssets, reporter Reporter) (synced, pruned int, err error) {
 	assets := resolved.Assets
 	if len(assets) == 0 && len(projectConfig.EnabledBundles) == 0 {
 		return 0, 0, nil
@@ -19,7 +19,7 @@ func syncDecVaultFromCache(projectRoot, repoDir string, projectConfig *types.Pro
 
 	for idx, asset := range assets {
 		progress := &Progress{Phase: "dec", Current: idx + 1, Total: len(assets)}
-		cachePath := getCachePath(projectRoot, asset.Vault, asset.Type, asset.Name)
+		cachePath := getWorkspaceCachePath(workspace, asset.Vault, asset.Type, asset.Name)
 		destPath := resolveAssetFile(repoDir, asset.Vault, asset.Type, asset.Name)
 		if destPath == "" {
 			continue
@@ -70,7 +70,7 @@ func syncDecVaultFromCache(projectRoot, repoDir string, projectConfig *types.Pro
 			if assetInResolved(assets, bundleName, itemType, assetName) {
 				continue
 			}
-			cachePath := getCachePath(projectRoot, bundleName, itemType, assetName)
+			cachePath := getWorkspaceCachePath(workspace, bundleName, itemType, assetName)
 			vaultPath := resolveAssetFile(repoDir, bundleName, itemType, assetName)
 			if vaultPath == "" {
 				continue

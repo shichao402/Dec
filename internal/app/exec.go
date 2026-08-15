@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/shichao402/Dec/internal/secrets"
@@ -15,13 +14,18 @@ import (
 type ExecWithSecretsInput struct {
 	ProjectRoot string
 	Bundle      string
-	Command     []string // 目标命令 argv；不可为空
-	Environ     []string // 可选基环境；nil 则用 os.Environ()
+	Plane       secrets.SyncPlane // 空则默认 project
+	Command     []string          // 目标命令 argv；不可为空
+	Environ     []string          // 可选基环境；nil 则用 os.Environ()
 }
 
 // BuildExecEnviron 构造注入后的环境变量列表（不打印值）。
-func BuildExecEnviron(projectRoot, bundle string, base []string) ([]string, error) {
-	vars, err := secrets.LoadEnvForBundle(projectRoot, bundle)
+// plane 为空时默认 project。
+func BuildExecEnviron(projectRoot, bundle string, plane secrets.SyncPlane, base []string) ([]string, error) {
+	if plane == "" {
+		plane = secrets.SyncPlaneProject
+	}
+	vars, err := secrets.LoadEnvForBundle(projectRoot, bundle, plane)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +63,7 @@ func RunExecWithSecrets(input ExecWithSecretsInput) (int, error) {
 	if len(input.Command) == 0 {
 		return 1, fmt.Errorf("必须指定要执行的命令")
 	}
-	env, err := BuildExecEnviron(input.ProjectRoot, input.Bundle, input.Environ)
+	env, err := BuildExecEnviron(input.ProjectRoot, input.Bundle, input.Plane, input.Environ)
 	if err != nil {
 		return 1, err
 	}
@@ -82,25 +86,31 @@ func RunExecWithSecrets(input ExecWithSecretsInput) (int, error) {
 // WrapMCPServerWithExec 把 MCP server 启动命令包进独立 dec-exec。
 // 原 command/args 整体后移；清掉会泄露的 env 占位符注入。
 func WrapMCPServerWithExec(projectRoot, bundle, decBin string, command string, args []string, env map[string]string) (string, []string, map[string]string) {
+	return WrapMCPServerWithExecForPlane(projectRoot, bundle, secrets.SyncPlaneProject, decBin, command, args, env)
+}
+
+// WrapMCPServerWithExecForPlane 显式记录 secrets 平面，避免用户级 MCP 回落到项目 secrets。
+func WrapMCPServerWithExecForPlane(projectRoot, bundle string, plane secrets.SyncPlane, decBin string, command string, args []string, env map[string]string) (string, []string, map[string]string) {
 	if strings.TrimSpace(decBin) == "" {
 		decBin = "dec-exec"
 	}
-	root, _ := filepath.Abs(projectRoot)
+	const workspaceFolder = "${workspaceFolder}"
 	wrappedArgs := []string{
-		"--project-root", root,
+		"--project-root", workspaceFolder,
+	}
+	if secrets.IsMachinePlane(plane) {
+		wrappedArgs = append(wrappedArgs, "--plane", "user")
 	}
 	if strings.TrimSpace(bundle) != "" {
 		wrappedArgs = append(wrappedArgs, "--bundle", bundle)
 	}
 	wrappedArgs = append(wrappedArgs, "--", command)
-	for _, a := range args {
-		wrappedArgs = append(wrappedArgs, strings.ReplaceAll(a, "${workspaceFolder}", root))
-	}
-	// 保留非密钥类显式 env；${workspaceFolder} 写成绝对项目根；其它 ${VAR} 占位去掉（由 dec-exec 注入）。
+	wrappedArgs = append(wrappedArgs, args...)
+	// 保留非密钥类显式 env 和 ${workspaceFolder}；其它 ${VAR} 占位去掉（由 dec-exec 注入）。
 	cleanEnv := make(map[string]string)
 	for k, v := range env {
-		v = strings.ReplaceAll(v, "${workspaceFolder}", root)
-		if strings.Contains(v, "${") {
+		withoutWorkspace := strings.ReplaceAll(v, workspaceFolder, "")
+		if strings.Contains(withoutWorkspace, "${") {
 			continue
 		}
 		cleanEnv[k] = v

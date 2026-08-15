@@ -23,23 +23,22 @@ func TestRenderAssetList_SelectedRowNotDuplicated(t *testing.T) {
 	}
 }
 
-func TestRenderAssetList_UserEnabledAccentTag(t *testing.T) {
+func TestRenderAssetList_DoesNotRenderCrossPlaneUserTag(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 1
 	m.focus = focusContent
 	m.assets = assetsStateWithBundle()
-	m.assets.Bundles[0].UserEnabled = true
 	m.refreshAssetTree()
 
 	list := m.renderAssetList(20)
-	if !strings.Contains(list, "user") {
-		t.Fatalf("user 级启用应带 user 标签:\n%s", list)
+	if strings.Contains(list, "user") {
+		t.Fatalf("Bundles 页不应渲染跨平面 user 标签:\n%s", list)
 	}
 	page := m.renderBundlesPage(100, 40)
 	if !strings.Contains(page, "项目已启用") {
 		t.Fatalf("摘要应标明项目启用计数:\n%s", page)
 	}
-	if !strings.Contains(page, "本机启用") {
-		t.Fatalf("摘要应提示本机启用数:\n%s", page)
+	if strings.Contains(page, "本机启用") || strings.Contains(page, "pull 为并集") {
+		t.Fatalf("摘要不应再提示跨平面并集:\n%s", page)
 	}
 }

@@ -72,28 +72,6 @@ func NewMachineBundleSyncTarget(bundleName, folder string) (SyncTarget, error) {
 	}, nil
 }
 
-// NewProjectBundleOverlayTarget 构造项目覆盖层：本地 .secrets/bundles/<name>，
-// Bitwarden 项目 folder 中 Note 名带 bundles/<name>/ 前缀。
-func NewProjectBundleOverlayTarget(bundleName, projectFolder string) (SyncTarget, error) {
-	name := strings.TrimSpace(bundleName)
-	if name == "" {
-		return SyncTarget{}, fmt.Errorf("bundle 名不能为空")
-	}
-	projectFolder = strings.TrimSpace(projectFolder)
-	if projectFolder == "" {
-		return SyncTarget{}, fmt.Errorf("project folder 不能为空")
-	}
-	prefix := path.Join(strings.TrimSuffix(ProjectBundleOverlayPrefix, "/"), name) + "/"
-	return SyncTarget{
-		Kind:           SyncKindBundle,
-		Name:           name,
-		Folder:         projectFolder,
-		LocalRoot:      path.Join(BundleSecretsLocalRelPrefix, name),
-		Plane:          SyncPlaneProject,
-		NoteNamePrefix: prefix,
-	}, nil
-}
-
 // NewProjectSyncTarget 构造 project 级 SyncTarget；folder 默认同 project 名。
 func NewProjectSyncTarget(projectName, folder string) (SyncTarget, error) {
 	name := strings.TrimSpace(projectName)
@@ -144,7 +122,7 @@ func ResolveTarget(kind SyncKind, name string, binding BundleBinding, explicit S
 
 // planeOf 返回有效平面（空视为 project）。
 func planeOf(t SyncTarget) SyncPlane {
-	if t.Plane == SyncPlaneMachine {
+	if IsMachinePlane(t.Plane) {
 		return SyncPlaneMachine
 	}
 	return SyncPlaneProject
@@ -190,9 +168,6 @@ func RootRelPath(target SyncTarget, noteRel string) (string, error) {
 // ProjectRelPath 把同步根相对路径转为项目根相对路径（仅 project 平面）。
 // 兼容旧调用；machine 平面请用 RootRelPath / AbsolutePath。
 func ProjectRelPath(target SyncTarget, noteRel string) (string, error) {
-	if planeOf(target) == SyncPlaneMachine {
-		return RootRelPath(target, noteRel)
-	}
 	return RootRelPath(target, noteRel)
 }
 
@@ -209,50 +184,16 @@ func AbsolutePath(projectRoot string, target SyncTarget, noteRel string) (string
 	return filepath.Join(dir, filepath.FromSlash(rel)), nil
 }
 
-// RemoteNoteName 返回写入 Bitwarden 的 Note 名。
+// RemoteNoteName 返回写入 Bitwarden 的 Note 名（= 相对 LocalRoot 的路径）。
 func RemoteNoteName(target SyncTarget, noteRel string) (string, error) {
-	rel, err := normalizeSyncRelPath(noteRel)
-	if err != nil {
-		return "", err
-	}
-	prefix := strings.TrimSpace(target.NoteNamePrefix)
-	if prefix == "" {
-		return rel, nil
-	}
-	prefix = strings.ReplaceAll(prefix, "\\", "/")
-	if !strings.HasSuffix(prefix, "/") {
-		prefix += "/"
-	}
-	return prefix + rel, nil
+	_ = target
+	return normalizeSyncRelPath(noteRel)
 }
 
-// LocalNoteRelFromRemote 把 BW Note 名转为相对 LocalRoot 的路径；不匹配则 ok=false。
+// LocalNoteRelFromRemote 把 BW Note 名转为相对 LocalRoot 的路径。
 func LocalNoteRelFromRemote(target SyncTarget, remoteName string) (rel string, ok bool, err error) {
-	name := strings.ReplaceAll(strings.TrimSpace(remoteName), "\\", "/")
-	for _, ex := range target.NoteNameExcludePrefixes {
-		ex = strings.ReplaceAll(strings.TrimSpace(ex), "\\", "/")
-		if ex == "" {
-			continue
-		}
-		if !strings.HasSuffix(ex, "/") {
-			ex += "/"
-		}
-		if name == strings.TrimSuffix(ex, "/") || strings.HasPrefix(name, ex) {
-			return "", false, nil
-		}
-	}
-	prefix := strings.TrimSpace(target.NoteNamePrefix)
-	if prefix != "" {
-		prefix = strings.ReplaceAll(prefix, "\\", "/")
-		if !strings.HasSuffix(prefix, "/") {
-			prefix += "/"
-		}
-		if !strings.HasPrefix(name, prefix) {
-			return "", false, nil
-		}
-		name = strings.TrimPrefix(name, prefix)
-	}
-	rel, err = normalizeSyncRelPath(name)
+	_ = target
+	rel, err = normalizeSyncRelPath(remoteName)
 	if err != nil {
 		return "", false, err
 	}
@@ -290,13 +231,4 @@ func IsEnvNote(noteRel string) bool {
 	dir, base := path.Split(rel)
 	dir = strings.Trim(dir, "/")
 	return dir == "env" && strings.HasSuffix(strings.ToLower(base), ".env")
-}
-
-// ProjectBundleOverlayNotePrefix 返回项目 folder 内覆盖层前缀 bundles/<name>/。
-func ProjectBundleOverlayNotePrefix(bundleName string) string {
-	name := strings.TrimSpace(bundleName)
-	if name == "" {
-		return ""
-	}
-	return path.Join(strings.TrimSuffix(ProjectBundleOverlayPrefix, "/"), name) + "/"
 }

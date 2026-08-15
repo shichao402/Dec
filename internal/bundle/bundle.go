@@ -199,6 +199,17 @@ func parseBundleYAML(data []byte, source string) (types.Bundle, error) {
 		return types.Bundle{}, fmt.Errorf("bundle 文件 %s 的 name %q 非法，只允许字母数字 / - / _，且首字符为字母数字", source, bundle.Name)
 	}
 
+	scope := types.BundleScope(strings.TrimSpace(string(bundle.Scope)))
+	switch scope {
+	case types.BundleScopeUser, types.BundleScopeProject:
+		bundle.Scope = scope
+	case "":
+		// ADR 0009 迁移期：缺省按 project，调用方可再用本机启用列表推断后写回 vault。
+		bundle.Scope = types.BundleScopeProject
+	default:
+		return types.Bundle{}, fmt.Errorf("bundle 文件 %s 的 scope %q 非法，仅允许 user 或 project", source, bundle.Scope)
+	}
+
 	if len(bundle.Members) == 0 {
 		// ADR 0003：secrets-only / 本机启用占位允许 members: []。
 		return bundle, nil

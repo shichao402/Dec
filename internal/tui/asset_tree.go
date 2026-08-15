@@ -13,7 +13,6 @@ type assetTreePayload struct {
 	bundleIndex   int
 	memberIndex   int
 	bundleEnabled bool
-	userEnabled   bool
 }
 
 func assetBundleNodeID(name string) string {
@@ -55,7 +54,6 @@ func (m model) buildAssetTreeRoots() []*TreeNode {
 				kind:          assetRowBundle,
 				bundleIndex:   i,
 				bundleEnabled: enabled,
-				userEnabled:   m.userBundleEnabled(bo.Name),
 			},
 		}
 		typeGroups := make(map[string][]int)

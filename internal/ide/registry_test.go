@@ -142,3 +142,40 @@ func TestInternalIDEUserRoots(t *testing.T) {
 		}
 	}
 }
+
+func TestIDEPlanePaths(t *testing.T) {
+	tests := []struct {
+		ide       string
+		wantRoot  string
+		wantMCP   string
+		wantSkill string
+	}{
+		{"cursor", filepath.Join("/home/dev", ".cursor"), filepath.Join("/home/dev", ".cursor", "mcp.json"), filepath.Join("/home/dev", ".cursor", "skills")},
+		{"codebuddy", filepath.Join("/home/dev", ".codebuddy"), filepath.Join("/home/dev", ".mcp.json"), filepath.Join("/home/dev", ".codebuddy", "skills")},
+		{"claude-internal", filepath.Join("/home/dev", ".claude-internal"), filepath.Join("/home/dev", ".claude-internal", "mcp.json"), filepath.Join("/home/dev", ".claude-internal", "skills")},
+		{"codex-internal", filepath.Join("/home/dev", ".codex-internal"), filepath.Join("/home/dev", ".codex-internal", "config.toml"), filepath.Join("/home/dev", ".codex-internal", "skills")},
+	}
+
+	for _, tt := range tests {
+		impl := Get(tt.ide)
+		if got := impl.PlaneRoot(PlaneUser, "/project", "/home/dev"); got != tt.wantRoot {
+			t.Errorf("%s PlaneRoot(user) = %s, 期望 %s", tt.ide, got, tt.wantRoot)
+		}
+		if got := impl.MCPConfigPathForPlane(PlaneUser, "/project", "/home/dev"); got != tt.wantMCP {
+			t.Errorf("%s MCPConfigPathForPlane(user) = %s, 期望 %s", tt.ide, got, tt.wantMCP)
+		}
+		if got := impl.SkillsDirForPlane(PlaneUser, "/project", "/home/dev"); got != tt.wantSkill {
+			t.Errorf("%s SkillsDirForPlane(user) = %s, 期望 %s", tt.ide, got, tt.wantSkill)
+		}
+	}
+}
+
+func TestInternalIDEProjectPlaneKeepsSharedDirectory(t *testing.T) {
+	impl := Get("claude-internal")
+	if got := impl.PlaneRoot(PlaneProject, "/project", "/home/dev"); got != filepath.Join("/project", ".claude") {
+		t.Fatalf("PlaneRoot(project) = %s", got)
+	}
+	if got := impl.MCPConfigPathForPlane(PlaneProject, "/project", "/home/dev"); got != filepath.Join("/project", ".claude", "mcp.json") {
+		t.Fatalf("MCPConfigPathForPlane(project) = %s", got)
+	}
+}

@@ -26,11 +26,8 @@ type BundleOverview struct {
 	VaultName string
 	// Members 是 bundle 声明的成员引用列表（按 YAML 顺序），含 <type>/<name> 原文。
 	Members []string
-	// Enabled 表示该 bundle 是否出现在 ProjectConfig.EnabledBundles 中。
+	// Enabled 表示该 bundle 是否出现在当前平面的 enabled_bundles 中。
 	Enabled bool
-	// UserEnabled 表示该 bundle 是否出现在本机 user_enabled_bundles 中。
-	// 与 Enabled 独立；pull 目标集取二者并集（ADR 0003）。
-	UserEnabled bool
 }
 
 // ResolvedAssets 是解析后的目标资产集合及来源追踪信息。
@@ -65,6 +62,12 @@ type ResolvedAssets struct {
 //     bundle 短名冲突是父卡里 #17 明确标为「未验证需求」的场景。
 //  3. Bundles 列表同时包含启用和未启用（用于 TUI 的 overview 渲染）。
 func resolveDesiredAssets(projectConfig *types.ProjectConfig, repoDir string, reporter Reporter) (*ResolvedAssets, error) {
+	return resolveDesiredAssetsForPlane(projectConfig, repoDir, WorkspaceProject, reporter)
+}
+
+// resolveDesiredAssetsForPlane 只暴露并解析当前工作空间平面的 bundle。
+// scope 为空在 bundle.LoadBundle 中已规范化为 project。
+func resolveDesiredAssetsForPlane(projectConfig *types.ProjectConfig, repoDir string, plane WorkspacePlane, reporter Reporter) (*ResolvedAssets, error) {
 	reporter = defaultReporter(reporter)
 	result := &ResolvedAssets{
 		Sources: make(map[string][]string),
@@ -76,6 +79,26 @@ func resolveDesiredAssets(projectConfig *types.ProjectConfig, repoDir string, re
 	if err != nil {
 		return nil, err
 	}
+	wantScope := bundleScopeForPlane(plane)
+	filteredBundles := make(map[string][]vaultBundle)
+	for name, matches := range vaultBundles {
+		for _, match := range matches {
+			if match.bundle.Scope == wantScope {
+				filteredBundles[name] = append(filteredBundles[name], match)
+			}
+		}
+	}
+	filteredOverviews := make([]BundleOverview, 0, len(bundleOverviews))
+	for _, overview := range bundleOverviews {
+		for _, match := range filteredBundles[overview.Name] {
+			if match.vaultName == overview.VaultName {
+				filteredOverviews = append(filteredOverviews, overview)
+				break
+			}
+		}
+	}
+	vaultBundles = filteredBundles
+	bundleOverviews = filteredOverviews
 	result.Bundles = bundleOverviews
 
 	if projectConfig == nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/internal/secrets"
@@ -57,6 +58,38 @@ func TestPrepareAndCommitRemoteNoteEdit(t *testing.T) {
 	notes := stub.NotesByFolder["bundle/vikunja"]
 	if len(notes) != 1 || notes[0].Content != "NEW=2\n" {
 		t.Fatalf("notes = %#v", notes)
+	}
+}
+
+// 机器平面候选项的 LocalRoot 是 bundles/<name>（相对 ~/.dec/secrets）。
+// 还原 SyncTarget 时若丢掉 Plane，编辑路径会误落到 <project>/bundles/...。
+func TestSyncTargetFromRemoteItem_PreservesMachinePlane(t *testing.T) {
+	target, err := secrets.NewMachineBundleSyncTarget("tencent-cloud", "bundle/tencent-cloud")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := syncTargetFromRemoteItem(DeleteSelectionItem{
+		Kind:          DeleteKindSecret,
+		SecretPath:    "env/tencent.env",
+		LocalRoot:     target.LocalRoot,
+		Plane:         target.Plane,
+		SecretsBundle: target.Folder,
+		DecBundleName: target.Name,
+	})
+	if err != nil {
+		t.Fatalf("syncTargetFromRemoteItem: %v", err)
+	}
+	if !secrets.IsMachinePlane(got.Plane) {
+		t.Fatalf("Plane = %q, 期望机器平面", got.Plane)
+	}
+
+	projectRoot := t.TempDir()
+	abs, err := secrets.AbsolutePath(projectRoot, got, "env/tencent.env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(abs, projectRoot) {
+		t.Fatalf("机器平面 note 落到了项目根内: %q", abs)
 	}
 }
 

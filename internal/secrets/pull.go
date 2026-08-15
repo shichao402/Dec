@@ -38,7 +38,7 @@ func ResolveBundleNotes(ctx context.Context, client Client, req PullBundleReques
 }
 
 // ResolveBundle 一次取回 Secure Notes 与 SSH Keys，不写盘。
-// Note.RelativePath 已规范化为相对 LocalRoot 的路径（已剥 NoteNamePrefix / 应用 Exclude）。
+// Note.RelativePath 已规范化为相对 LocalRoot 的路径。
 func ResolveBundle(ctx context.Context, client Client, req PullBundleRequest) ([]SecureNote, []SSHKeyItem, error) {
 	if client == nil {
 		client = DefaultClient()
@@ -70,12 +70,8 @@ func ResolveBundle(ctx context.Context, client Client, req PullBundleRequest) ([
 		seen[rel] = struct{}{}
 		mapped = append(mapped, SecureNote{RelativePath: rel, Content: note.Content})
 	}
-	var keys []SSHKeyItem
-	// 覆盖层与项目 folder 共享；SSH 只由无 prefix 的目标拉取，避免重复落地。
-	if strings.TrimSpace(target.NoteNamePrefix) == "" {
-		keys = make([]SSHKeyItem, len(result.SSHKeys))
-		copy(keys, result.SSHKeys)
-	}
+	keys := make([]SSHKeyItem, len(result.SSHKeys))
+	copy(keys, result.SSHKeys)
 	return mapped, keys, nil
 }
 

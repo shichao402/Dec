@@ -45,15 +45,63 @@ func (h *GitGCMHandler) Match(name string) bool {
 }
 
 func (h *GitGCMHandler) Apply(ctx context.Context, item Item) error {
-	doc, err := parseGitGCMDoc(item.NoteContent)
+	res, err := resolveGitGCM(item, true)
 	if err != nil {
 		return err
 	}
+
+	if err := h.Run(ctx, "", "config", "--global", res.credKey, res.provider); err != nil {
+		return fmt.Errorf("设置 %s: %w", res.credKey, err)
+	}
+
+	stdin := fmt.Sprintf("protocol=%s\nhost=%s\nusername=%s\npassword=%s\n\n", res.protocol, res.host, res.user, res.pass)
+	if err := h.Run(ctx, stdin, "credential", "approve"); err != nil {
+		return fmt.Errorf("git credential approve: %w", err)
+	}
+	return nil
+}
+
+// Revoke 撤销 Apply 写入的 Git Credential Manager 凭据：
+//   - git credential reject（同 protocol/host/username；password 可省略）
+//   - git config --global --unset credential.<proto>://<host>.provider（不存在时容忍）
+func (h *GitGCMHandler) Revoke(ctx context.Context, item Item) error {
+	res, err := resolveGitGCM(item, false)
+	if err != nil {
+		return err
+	}
+
+	stdin := fmt.Sprintf("protocol=%s\nhost=%s\nusername=%s\n\n", res.protocol, res.host, res.user)
+	if err := h.Run(ctx, stdin, "credential", "reject"); err != nil {
+		return fmt.Errorf("git credential reject: %w", err)
+	}
+
+	// key 不存在时 git 返回退出码 5；撤销语义下视为已满足，容忍失败。
+	if err := h.Run(ctx, "", "config", "--global", "--unset", res.credKey); err != nil {
+		return nil
+	}
+	return nil
+}
+
+// gitGCMResolved 是从 Item 解析并校验后的 gitgcm 参数。
+type gitGCMResolved struct {
+	protocol string
+	provider string
+	host     string
+	user     string
+	pass     string
+	credKey  string
+}
+
+func resolveGitGCM(item Item, requirePassword bool) (gitGCMResolved, error) {
+	doc, err := parseGitGCMDoc(item.NoteContent)
+	if err != nil {
+		return gitGCMResolved{}, err
+	}
 	if _, processor, ok := ParseProcessorNoteName(item.Name); !ok || processor != "gitgcm" {
-		return fmt.Errorf("note 名不符合 *_gitgcm.yaml: %q", item.Name)
+		return gitGCMResolved{}, fmt.Errorf("note 名不符合 *_gitgcm.yaml: %q", item.Name)
 	}
 	if doc.Kind != "gitgcm" {
-		return fmt.Errorf("YAML kind=%q，与文件名处理器 gitgcm 不一致", doc.Kind)
+		return gitGCMResolved{}, fmt.Errorf("YAML kind=%q，与文件名处理器 gitgcm 不一致", doc.Kind)
 	}
 
 	protocol := doc.Protocol
@@ -67,26 +115,27 @@ func (h *GitGCMHandler) Apply(ctx context.Context, item Item) error {
 	host := strings.TrimSpace(doc.Host)
 	user := strings.TrimSpace(doc.Username)
 	pass := doc.Password
-	if host == "" || user == "" || pass == "" {
-		return fmt.Errorf("gitgcm 需要非空 host、username、password")
+	if host == "" || user == "" {
+		return gitGCMResolved{}, fmt.Errorf("gitgcm 需要非空 host、username")
+	}
+	if requirePassword && pass == "" {
+		return gitGCMResolved{}, fmt.Errorf("gitgcm 需要非空 password")
 	}
 	if strings.ContainsAny(host, " \t\r\n") || strings.Contains(host, "://") {
-		return fmt.Errorf("非法 host: %q", host)
+		return gitGCMResolved{}, fmt.Errorf("非法 host: %q", host)
 	}
 	if protocol != "https" && protocol != "http" {
-		return fmt.Errorf("不支持的 protocol: %q", protocol)
+		return gitGCMResolved{}, fmt.Errorf("不支持的 protocol: %q", protocol)
 	}
 
-	credKey := fmt.Sprintf("credential.%s://%s.provider", protocol, host)
-	if err := h.Run(ctx, "", "config", "--global", credKey, provider); err != nil {
-		return fmt.Errorf("设置 %s: %w", credKey, err)
-	}
-
-	stdin := fmt.Sprintf("protocol=%s\nhost=%s\nusername=%s\npassword=%s\n\n", protocol, host, user, pass)
-	if err := h.Run(ctx, stdin, "credential", "approve"); err != nil {
-		return fmt.Errorf("git credential approve: %w", err)
-	}
-	return nil
+	return gitGCMResolved{
+		protocol: protocol,
+		provider: provider,
+		host:     host,
+		user:     user,
+		pass:     pass,
+		credKey:  fmt.Sprintf("credential.%s://%s.provider", protocol, host),
+	}, nil
 }
 
 func parseGitGCMDoc(content string) (*GitGCMDoc, error) {

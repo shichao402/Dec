@@ -212,9 +212,6 @@ func (m model) bundlesListChromeLines() int {
 	if m.configInitMode {
 		n++
 	}
-	if m.countUserEnabledBundles() > 0 {
-		n++
-	}
 	if m.assetsDirty {
 		n++
 	}

@@ -43,9 +43,15 @@ type PullProjectAssetsResult struct {
 }
 
 func PullProjectAssets(ctx context.Context, projectRoot, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
+	return PullWorkspaceAssets(ctx, NewWorkspace(WorkspaceProject, projectRoot), version, reporter)
+}
+
+// PullWorkspaceAssets 拉取并安装当前工作空间平面的公开资产与 secrets。
+func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
 	reporter = defaultReporter(reporter)
+	projectRoot := workspace.Root
 	mgr := config.NewProjectConfigManager(projectRoot)
-	projectConfig, err := mgr.LoadProjectConfig()
+	projectConfig, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -63,30 +69,31 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	for _, warning := range ideSelection.Warnings {
 		emit(reporter, EventWarn, "pull.ide", warning, nil)
 	}
-	projectIDEs := uniqueProjectIDEs(projectRoot, ideSelection.IDEs)
+	projectIDEs := uniqueWorkspaceIDEs(workspace, ideSelection.IDEs)
 	result.EffectiveIDEs = projectIDENames(projectIDEs)
 
-	migrationNotes, err := migrateLegacyProjectLayouts(projectRoot, projectIDEs)
-	if err != nil {
-		return nil, fmt.Errorf("迁移旧版项目布局失败: %w", err)
+	var migrationNotes []string
+	if workspace.EffectivePlane() == WorkspaceProject {
+		migrationNotes, err = migrateLegacyProjectLayouts(projectRoot, projectIDEs)
+		if err != nil {
+			return nil, fmt.Errorf("迁移旧版项目布局失败: %w", err)
+		}
 	}
 	result.MigrationNotes = append(result.MigrationNotes, migrationNotes...)
 	for _, note := range migrationNotes {
 		emit(reporter, EventInfo, "pull.migrate", note, nil)
 	}
 
-	mergedEnabled, err := mergeProjectAndUserEnabledBundles(projectConfig.EnabledBundles)
-	if err != nil {
-		return nil, fmt.Errorf("合并用户级启用 bundle 失败: %w", err)
-	}
+	// 平面隔离（ADR 0009）：project 上下文只处理项目启用列表，不再并入用户平面。
+	projectEnabled := config.NormalizeBundleNames(projectConfig.EnabledBundles)
 	pullConfig := *projectConfig
-	pullConfig.EnabledBundles = mergedEnabled
+	pullConfig.EnabledBundles = projectEnabled
 
-	if len(mergedEnabled) == 0 {
-		result.SkippedReason = "config.yaml 与本机用户级均无已启用的 bundle"
+	if len(projectEnabled) == 0 {
+		result.SkippedReason = "config.yaml 中没有已启用的 bundle"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
-		emit(reporter, EventInfo, "pull.prepare", "在 TUI Bundles 页勾选项目 bundle，或在 Settings 启用本机 bundle 后按 s 保存", nil)
-		applyAssetCleanup(result, projectRoot, nil, projectIDEs, reporter)
+		emit(reporter, EventInfo, "pull.prepare", "在 TUI Bundles 页勾选项目 bundle 后按 s 保存", nil)
+		applyAssetCleanup(result, workspace, nil, projectIDEs, reporter)
 		return result, nil
 	}
 
@@ -105,7 +112,7 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 
 	repoDir := tx.WorkDir()
 
-	resolved, err := resolveDesiredAssets(&pullConfig, repoDir, reporter)
+	resolved, err := resolveDesiredAssetsForPlane(&pullConfig, repoDir, workspace.EffectivePlane(), reporter)
 	if err != nil {
 		return nil, err
 	}
@@ -122,13 +129,13 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	}
 	result.AssetSources = finalSources
 
-	applyAssetCleanup(result, projectRoot, validAssets, projectIDEs, reporter)
+	applyAssetCleanup(result, workspace, validAssets, projectIDEs, reporter)
 
-	enabledBundleNames := append([]string(nil), mergedEnabled...)
+	enabledBundleNames := append([]string(nil), projectEnabled...)
 	if len(validAssets) == 0 {
 		result.SkippedReason = "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
-		if err := applySecretsPull(ctx, result, projectRoot, enabledBundleNames, reporter); err != nil {
+		if err := applySecretsPull(ctx, result, workspace, enabledBundleNames, reporter); err != nil {
 			return nil, err
 		}
 		return result, nil
@@ -147,7 +154,7 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 			continue
 		}
 
-		cachePath := getCachePath(projectRoot, asset.Vault, asset.Type, asset.Name)
+		cachePath := getWorkspaceCachePath(workspace, asset.Vault, asset.Type, asset.Name)
 		switch asset.Type {
 		case "skill", "command":
 			if err := copyDir(fullPath, cachePath); err != nil {
@@ -178,18 +185,20 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
 			continue
 		}
-		cachePath := getCachePath(projectRoot, asset.Vault, asset.Type, asset.Name)
+		cachePath := getWorkspaceCachePath(workspace, asset.Vault, asset.Type, asset.Name)
 		if _, err := os.Stat(cachePath); err != nil {
 			continue
 		}
 
-		if err := installAssetToIDEs(asset.Type, asset.Name, asset.Vault, fullPath, projectRoot, projectIDEs); err != nil {
+		if err := installAssetToIDEs(asset.Type, asset.Name, asset.Vault, fullPath, workspace, projectIDEs); err != nil {
 			result.FailedCount++
 			emit(reporter, EventWarn, "pull.asset", fmt.Sprintf("⚠️  [%-5s] %s (%v)", asset.Type, asset.Name, err), progress)
 			continue
 		}
 
-		substituteAssetVars(asset.Type, asset.Name, projectRoot, projectIDEs, mgr, reporter)
+		if workspace.EffectivePlane() == WorkspaceProject {
+			substituteAssetVars(asset.Type, asset.Name, projectRoot, projectIDEs, mgr, reporter)
+		}
 
 		result.PulledCount++
 		emit(reporter, EventInfo, "pull.asset", fmt.Sprintf("✅ [%-5s] %s (vault: %s)", asset.Type, asset.Name, asset.Vault), progress)
@@ -197,7 +206,7 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 
 	// 阶段 3：secrets 放在公开资产之后。Bitwarden 不可用（未解锁、网络故障）
 	// 不应连累已经就绪的 skill / rule / mcp，否则一次解锁失败会让整个项目看起来没装过资产。
-	if err := applySecretsPull(ctx, result, projectRoot, enabledBundleNames, reporter); err != nil {
+	if err := applySecretsPull(ctx, result, workspace, enabledBundleNames, reporter); err != nil {
 		emit(reporter, EventWarn, "pull.secrets",
 			fmt.Sprintf("Dec 资产已安装 %d 个，仅 secrets 未同步", result.PulledCount), nil)
 		return nil, err
@@ -206,7 +215,7 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	commitHash := tx.CommitHash()
 	if commitHash != "" {
 		result.VersionCommit = commitHash
-		saveVersionMeta(projectRoot, commitHash)
+		saveVersionMeta(workspaceCacheRoot(workspace), commitHash)
 	}
 
 	summary := fmt.Sprintf("✅ 完成：%d 个资产已拉取", result.PulledCount)
@@ -221,8 +230,8 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	return result, nil
 }
 
-func applyAssetCleanup(result *PullProjectAssetsResult, projectRoot string, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE, reporter Reporter) {
-	result.CleanedAssets = cleanupRemovedAssets(projectRoot, enabledAssets, projectIDEs)
+func applyAssetCleanup(result *PullProjectAssetsResult, workspace Workspace, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE, reporter Reporter) {
+	result.CleanedAssets = cleanupRemovedAssets(workspace, enabledAssets, projectIDEs)
 	if len(result.CleanedAssets) == 0 {
 		return
 	}
@@ -232,11 +241,13 @@ func applyAssetCleanup(result *PullProjectAssetsResult, projectRoot string, enab
 	}
 }
 
-func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, projectRoot string, enabledBundles []string, reporter Reporter) error {
-	if err := secrets.EnsureSecretsGitignore(projectRoot); err != nil {
-		emit(reporter, EventWarn, "pull.secrets", fmt.Sprintf("写入 .gitignore 失败: %v", err), nil)
+func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, workspace Workspace, enabledBundles []string, reporter Reporter) error {
+	if workspace.EffectivePlane() == WorkspaceProject {
+		if err := secrets.EnsureSecretsGitignore(workspace.Root); err != nil {
+			emit(reporter, EventWarn, "pull.secrets", fmt.Sprintf("写入 .gitignore 失败: %v", err), nil)
+		}
 	}
-	secretsSummary, err := pullEnabledSecretsBundles(ctx, projectRoot, enabledBundles, reporter)
+	secretsSummary, err := pullEnabledSecretsBundlesForWorkspace(ctx, workspace, enabledBundles, reporter)
 	if err != nil {
 		return err
 	}
@@ -246,17 +257,18 @@ func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, proj
 	return nil
 }
 
-func uniqueProjectIDEs(projectRoot string, ideNames []string) []ide.IDE {
+func uniqueWorkspaceIDEs(workspace Workspace, ideNames []string) []ide.IDE {
 	result := make([]ide.IDE, 0, len(ideNames))
 	seen := make(map[string]struct{}, len(ideNames))
+	home, _ := os.UserHomeDir()
 
 	for _, ideName := range ideNames {
 		ideImpl := ide.Get(ideName)
 		key := strings.Join([]string{
-			filepath.Clean(ideImpl.SkillsDir(projectRoot)),
-			filepath.Clean(ideImpl.CommandsDir(projectRoot)),
-			filepath.Clean(ideImpl.RulesDir(projectRoot)),
-			filepath.Clean(ideImpl.MCPConfigPath(projectRoot)),
+			filepath.Clean(ideImpl.SkillsDirForPlane(workspace.IDEPlane(), workspace.Root, home)),
+			filepath.Clean(ideImpl.CommandsDirForPlane(workspace.IDEPlane(), workspace.Root, home)),
+			filepath.Clean(ideImpl.RulesDirForPlane(workspace.IDEPlane(), workspace.Root, home)),
+			filepath.Clean(ideImpl.MCPConfigPathForPlane(workspace.IDEPlane(), workspace.Root, home)),
 		}, "|")
 		if _, ok := seen[key]; ok {
 			continue
@@ -266,6 +278,10 @@ func uniqueProjectIDEs(projectRoot string, ideNames []string) []ide.IDE {
 	}
 
 	return result
+}
+
+func uniqueProjectIDEs(projectRoot string, ideNames []string) []ide.IDE {
+	return uniqueWorkspaceIDEs(NewWorkspace(WorkspaceProject, projectRoot), ideNames)
 }
 
 func projectIDENames(projectIDEs []ide.IDE) []string {
@@ -310,8 +326,8 @@ func migrateLegacyProjectLayouts(projectRoot string, projectIDEs []ide.IDE) ([]s
 	return notes, nil
 }
 
-func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE) []string {
-	cacheDir := filepath.Join(projectRoot, ".dec", "cache")
+func cleanupRemovedAssets(workspace Workspace, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE) []string {
+	cacheDir := workspaceCacheDir(workspace)
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
 		return nil
 	}
@@ -355,7 +371,7 @@ func cleanupRemovedAssets(projectRoot string, enabledAssets []types.TypedAssetRe
 				}
 
 				for _, ideImpl := range projectIDEs {
-					_, _ = removeAssetFromIDE(assetType, name, projectRoot, ideImpl)
+					_, _ = removeAssetFromIDE(assetType, name, workspace, ideImpl)
 				}
 				_ = os.RemoveAll(filepath.Join(subDir, entry.Name()))
 				removed = append(removed, fmt.Sprintf("[%-5s] %s (vault: %s)", assetType, name, vaultName))
@@ -412,7 +428,39 @@ func resolveAssetFile(repoDir, vault, itemType, assetName string) string {
 }
 
 func getCachePath(projectRoot, vault, itemType, assetName string) string {
-	base := filepath.Join(projectRoot, ".dec", "cache", vault, typeSubDir(itemType))
+	return getWorkspaceCachePath(NewWorkspace(WorkspaceProject, projectRoot), vault, itemType, assetName)
+}
+
+func workspaceCacheDir(workspace Workspace) string {
+	if workspace.EffectivePlane() == WorkspaceUser {
+		root, err := repo.GetRootDir()
+		if err == nil {
+			return filepath.Join(root, "cache")
+		}
+	}
+	return filepath.Join(workspace.Root, ".dec", "cache")
+}
+
+// displayCacheDir 给日志用的缓存目录短名，避免把用户 home 绝对路径打进 TUI。
+func displayCacheDir(workspace Workspace) string {
+	if workspace.EffectivePlane() == WorkspaceUser {
+		return "~/.dec/cache/"
+	}
+	return ".dec/cache/"
+}
+
+func workspaceCacheRoot(workspace Workspace) string {
+	if workspace.EffectivePlane() == WorkspaceUser {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return home
+		}
+	}
+	return workspace.Root
+}
+
+func getWorkspaceCachePath(workspace Workspace, vault, itemType, assetName string) string {
+	base := filepath.Join(workspaceCacheDir(workspace), vault, typeSubDir(itemType))
 	switch itemType {
 	case "skill", "command":
 		return filepath.Join(base, assetName)
@@ -432,12 +480,12 @@ func managedName(name string) string {
 	return "dec-" + name
 }
 
-func installAssetToIDEs(itemType, assetName, vaultName, srcPath, projectRoot string, projectIDEs []ide.IDE) error {
+func installAssetToIDEs(itemType, assetName, vaultName, srcPath string, workspace Workspace, projectIDEs []ide.IDE) error {
 	installed := make([]ide.IDE, 0, len(projectIDEs))
 
 	for _, ideImpl := range projectIDEs {
-		if err := installAssetToIDE(itemType, assetName, vaultName, srcPath, projectRoot, ideImpl); err != nil {
-			rollbackErrors := rollbackInstalledAsset(itemType, assetName, projectRoot, installed)
+		if err := installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath, workspace, ideImpl); err != nil {
+			rollbackErrors := rollbackInstalledAsset(itemType, assetName, workspace, installed)
 			if len(rollbackErrors) > 0 {
 				return fmt.Errorf("安装到 %s 失败: %v；回滚失败: %s", ideImpl.Name(), err, strings.Join(rollbackErrors, "; "))
 			}
@@ -449,11 +497,11 @@ func installAssetToIDEs(itemType, assetName, vaultName, srcPath, projectRoot str
 	return nil
 }
 
-func rollbackInstalledAsset(itemType, assetName, projectRoot string, installed []ide.IDE) []string {
+func rollbackInstalledAsset(itemType, assetName string, workspace Workspace, installed []ide.IDE) []string {
 	var rollbackErrors []string
 	for i := len(installed) - 1; i >= 0; i-- {
 		ideImpl := installed[i]
-		removed, err := removeAssetFromIDE(itemType, assetName, projectRoot, ideImpl)
+		removed, err := removeAssetFromIDE(itemType, assetName, workspace, ideImpl)
 		if err != nil {
 			rollbackErrors = append(rollbackErrors, fmt.Sprintf("%s: %v", ideImpl.Name(), err))
 		} else if !removed {
@@ -464,23 +512,30 @@ func rollbackInstalledAsset(itemType, assetName, projectRoot string, installed [
 }
 
 func installAssetToIDE(itemType, assetName, vaultName, srcPath, projectRoot string, ideImpl ide.IDE) error {
+	return installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath, NewWorkspace(WorkspaceProject, projectRoot), ideImpl)
+}
+
+func installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath string, workspace Workspace, ideImpl ide.IDE) error {
 	managed := managedName(assetName)
+	home, _ := os.UserHomeDir()
+	plane := workspace.IDEPlane()
+	projectRoot := workspace.Root
 
 	switch itemType {
 	case "skill":
-		destDir := filepath.Join(ideImpl.SkillsDir(projectRoot), managed)
+		destDir := filepath.Join(ideImpl.SkillsDirForPlane(plane, projectRoot, home), managed)
 		if err := copyDir(srcPath, destDir); err != nil {
 			return err
 		}
 		return injectRenderedHeaderDir(destDir, vaultName)
 	case "command":
-		destDir := filepath.Join(ideImpl.CommandsDir(projectRoot), managed)
+		destDir := filepath.Join(ideImpl.CommandsDirForPlane(plane, projectRoot, home), managed)
 		if err := copyDir(srcPath, destDir); err != nil {
 			return err
 		}
 		return injectRenderedHeaderDir(destDir, vaultName)
 	case "rule":
-		destDir := ideImpl.RulesDir(projectRoot)
+		destDir := ideImpl.RulesDirForPlane(plane, projectRoot, home)
 		if err := os.MkdirAll(destDir, 0755); err != nil {
 			return err
 		}
@@ -499,8 +554,8 @@ func installAssetToIDE(itemType, assetName, vaultName, srcPath, projectRoot stri
 			return fmt.Errorf("解析 MCP 配置失败: %w", err)
 		}
 		cmd, args := stripExternalEnvLauncher(server.Command, server.Args)
-		server.Command, server.Args, server.Env = WrapMCPServerWithExec(projectRoot, vaultName, "dec-exec", cmd, args, server.Env)
-		existingConfig, err := ideImpl.LoadMCPConfig(projectRoot)
+		server.Command, server.Args, server.Env = WrapMCPServerWithExecForPlane(projectRoot, vaultName, workspace.SecretsPlane(), "dec-exec", cmd, args, server.Env)
+		existingConfig, err := ideImpl.LoadMCPConfigForPlane(plane, projectRoot, home)
 		if err != nil {
 			return fmt.Errorf("加载 IDE MCP 配置失败: %w", err)
 		}
@@ -508,18 +563,21 @@ func installAssetToIDE(itemType, assetName, vaultName, srcPath, projectRoot stri
 			existingConfig.MCPServers = make(map[string]types.MCPServer)
 		}
 		existingConfig.MCPServers[managed] = server
-		return ideImpl.WriteMCPConfig(projectRoot, existingConfig)
+		return ideImpl.WriteMCPConfigForPlane(plane, projectRoot, home, existingConfig)
 	default:
 		return nil
 	}
 }
 
-func removeAssetFromIDE(itemType, assetName, projectRoot string, ideImpl ide.IDE) (bool, error) {
+func removeAssetFromIDE(itemType, assetName string, workspace Workspace, ideImpl ide.IDE) (bool, error) {
 	managed := managedName(assetName)
+	home, _ := os.UserHomeDir()
+	plane := workspace.IDEPlane()
+	projectRoot := workspace.Root
 
 	switch itemType {
 	case "skill":
-		destDir := filepath.Join(ideImpl.SkillsDir(projectRoot), managed)
+		destDir := filepath.Join(ideImpl.SkillsDirForPlane(plane, projectRoot, home), managed)
 		if _, err := os.Stat(destDir); os.IsNotExist(err) {
 			return false, nil
 		} else if err != nil {
@@ -527,7 +585,7 @@ func removeAssetFromIDE(itemType, assetName, projectRoot string, ideImpl ide.IDE
 		}
 		return true, os.RemoveAll(destDir)
 	case "command":
-		destDir := filepath.Join(ideImpl.CommandsDir(projectRoot), managed)
+		destDir := filepath.Join(ideImpl.CommandsDirForPlane(plane, projectRoot, home), managed)
 		if _, err := os.Stat(destDir); os.IsNotExist(err) {
 			return false, nil
 		} else if err != nil {
@@ -535,7 +593,7 @@ func removeAssetFromIDE(itemType, assetName, projectRoot string, ideImpl ide.IDE
 		}
 		return true, os.RemoveAll(destDir)
 	case "rule":
-		destPath := filepath.Join(ideImpl.RulesDir(projectRoot), managed+".mdc")
+		destPath := filepath.Join(ideImpl.RulesDirForPlane(plane, projectRoot, home), managed+".mdc")
 		if err := os.Remove(destPath); os.IsNotExist(err) {
 			return false, nil
 		} else if err != nil {
@@ -543,7 +601,7 @@ func removeAssetFromIDE(itemType, assetName, projectRoot string, ideImpl ide.IDE
 		}
 		return true, nil
 	case "mcp":
-		existingConfig, err := ideImpl.LoadMCPConfig(projectRoot)
+		existingConfig, err := ideImpl.LoadMCPConfigForPlane(plane, projectRoot, home)
 		if err != nil {
 			return false, nil
 		}
@@ -551,7 +609,7 @@ func removeAssetFromIDE(itemType, assetName, projectRoot string, ideImpl ide.IDE
 			return false, nil
 		}
 		delete(existingConfig.MCPServers, managed)
-		return true, ideImpl.WriteMCPConfig(projectRoot, existingConfig)
+		return true, ideImpl.WriteMCPConfigForPlane(plane, projectRoot, home, existingConfig)
 	default:
 		return false, nil
 	}

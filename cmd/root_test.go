@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"testing"
+
+	"github.com/shichao402/Dec/internal/app"
 )
 
 func setEnvForRootTest(t *testing.T, key, value string) {
@@ -28,6 +30,7 @@ func stubEntryExecutionForRootTest(t *testing.T) {
 	oldGetWorkingDir := getWorkingDir
 	oldRunCLIMode := runCLIMode
 	oldRunTUIMode := runTUIMode
+	oldRunTUIWorkspaceMode := runTUIWorkspaceMode
 	oldEmitUpdateHint := emitUpdateHint
 
 	t.Cleanup(func() {
@@ -35,10 +38,35 @@ func stubEntryExecutionForRootTest(t *testing.T) {
 		getWorkingDir = oldGetWorkingDir
 		runCLIMode = oldRunCLIMode
 		runTUIMode = oldRunTUIMode
+		runTUIWorkspaceMode = oldRunTUIWorkspaceMode
 		emitUpdateHint = oldEmitUpdateHint
 	})
 
 	emitUpdateHint = func(io.Writer) {}
+}
+
+func TestExecuteRoutesUserFlagToUserTUI(t *testing.T) {
+	stubEntryExecutionForRootTest(t)
+	setEnvForRootTest(t, "TERM", "xterm-256color")
+	setEnvForRootTest(t, "DEC_NO_TUI", "")
+	detectTTY = func(*os.File) bool { return true }
+	getWorkingDir = func() (string, error) { return t.TempDir(), nil }
+	runTUIMode = func(string, io.Reader, io.Writer) error {
+		t.Fatal("--user 不应启动项目平面 TUI")
+		return nil
+	}
+	var gotPlane app.WorkspacePlane
+	runTUIWorkspaceMode = func(workspace app.Workspace, _ io.Reader, _ io.Writer) error {
+		gotPlane = workspace.EffectivePlane()
+		return nil
+	}
+
+	if err := Execute([]string{"--user"}, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		t.Fatal(err)
+	}
+	if gotPlane != app.WorkspaceUser {
+		t.Fatalf("workspace plane = %q", gotPlane)
+	}
 }
 
 func TestRootVersionString(t *testing.T) {

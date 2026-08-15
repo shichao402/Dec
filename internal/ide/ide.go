@@ -10,6 +10,14 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
+// Plane 表示 IDE 资产的安装平面。
+type Plane string
+
+const (
+	PlaneProject Plane = "project"
+	PlaneUser    Plane = "user"
+)
+
 // IDE 接口定义了不同 IDE 的目录结构和文件操作
 type IDE interface {
 	// Name 返回 IDE 名称
@@ -18,14 +26,20 @@ type IDE interface {
 	// UserRootDir 返回用户级根目录
 	UserRootDir(homeDir string) string
 
+	// PlaneRoot 返回指定安装平面的 IDE 根目录
+	PlaneRoot(plane Plane, projectRoot, homeDir string) string
+
 	// RulesDir 返回规则输出目录
 	RulesDir(projectRoot string) string
+	RulesDirForPlane(plane Plane, projectRoot, homeDir string) string
 
 	// SkillsDir 返回 Skills 输出目录
 	SkillsDir(projectRoot string) string
+	SkillsDirForPlane(plane Plane, projectRoot, homeDir string) string
 
 	// MCPConfigPath 返回 MCP 配置文件路径
 	MCPConfigPath(projectRoot string) string
+	MCPConfigPathForPlane(plane Plane, projectRoot, homeDir string) string
 
 	// WriteRules 写入规则文件到 IDE 目录
 	WriteRules(projectRoot string, rules []RuleFile) error
@@ -35,15 +49,18 @@ type IDE interface {
 
 	// CommandsDir 返回 Commands 输出目录
 	CommandsDir(projectRoot string) string
+	CommandsDirForPlane(plane Plane, projectRoot, homeDir string) string
 
 	// WriteCommand 写入单个 Command 目录到 IDE Commands 目录
 	WriteCommand(projectRoot string, commandName string, files []SkillFile) error
 
 	// WriteMCPConfig 写入 MCP 配置到 IDE 目录
 	WriteMCPConfig(projectRoot string, config *types.MCPConfig) error
+	WriteMCPConfigForPlane(plane Plane, projectRoot, homeDir string, config *types.MCPConfig) error
 
 	// LoadMCPConfig 加载现有的 MCP 配置
 	LoadMCPConfig(projectRoot string) (*types.MCPConfig, error)
+	LoadMCPConfigForPlane(plane Plane, projectRoot, homeDir string) (*types.MCPConfig, error)
 }
 
 // SkillFile 表示 Skill 中的一个文件
@@ -64,6 +81,7 @@ type baseIDE struct {
 	dirKey        string // 项目级目录名（如 .cursor, .codebuddy）
 	userDirKey    string // 用户级目录名；为空时复用 dirKey
 	mcpConfigPath string // MCP 配置文件路径（可选，为空则使用默认 {dirKey}/mcp.json）
+	userMCPPath   string // 用户级 MCP 路径（相对 homeDir）；为空则使用 {userDirKey}/mcp.json
 }
 
 func (b *baseIDE) Name() string {
@@ -74,19 +92,48 @@ func (b *baseIDE) UserRootDir(homeDir string) string {
 	return filepath.Join(homeDir, b.userDirKeyOrDefault())
 }
 
+func (b *baseIDE) PlaneRoot(plane Plane, projectRoot, homeDir string) string {
+	if plane == PlaneUser {
+		return b.UserRootDir(homeDir)
+	}
+	return filepath.Join(projectRoot, b.dirKey)
+}
+
 func (b *baseIDE) RulesDir(projectRoot string) string {
-	return filepath.Join(projectRoot, b.dirKey, "rules")
+	return b.RulesDirForPlane(PlaneProject, projectRoot, "")
+}
+
+func (b *baseIDE) RulesDirForPlane(plane Plane, projectRoot, homeDir string) string {
+	return filepath.Join(b.PlaneRoot(plane, projectRoot, homeDir), "rules")
 }
 
 func (b *baseIDE) SkillsDir(projectRoot string) string {
-	return filepath.Join(projectRoot, b.dirKey, "skills")
+	return b.SkillsDirForPlane(PlaneProject, projectRoot, "")
+}
+
+func (b *baseIDE) SkillsDirForPlane(plane Plane, projectRoot, homeDir string) string {
+	return filepath.Join(b.PlaneRoot(plane, projectRoot, homeDir), "skills")
 }
 
 func (b *baseIDE) CommandsDir(projectRoot string) string {
-	return filepath.Join(projectRoot, b.dirKey, "commands")
+	return b.CommandsDirForPlane(PlaneProject, projectRoot, "")
+}
+
+func (b *baseIDE) CommandsDirForPlane(plane Plane, projectRoot, homeDir string) string {
+	return filepath.Join(b.PlaneRoot(plane, projectRoot, homeDir), "commands")
 }
 
 func (b *baseIDE) MCPConfigPath(projectRoot string) string {
+	return b.MCPConfigPathForPlane(PlaneProject, projectRoot, "")
+}
+
+func (b *baseIDE) MCPConfigPathForPlane(plane Plane, projectRoot, homeDir string) string {
+	if plane == PlaneUser {
+		if b.userMCPPath != "" {
+			return filepath.Join(homeDir, b.userMCPPath)
+		}
+		return filepath.Join(b.UserRootDir(homeDir), "mcp.json")
+	}
 	if b.mcpConfigPath != "" {
 		return filepath.Join(projectRoot, b.mcpConfigPath)
 	}
@@ -148,7 +195,11 @@ func (b *baseIDE) writeSkillDir(baseDir, name string, files []SkillFile) error {
 }
 
 func (b *baseIDE) WriteMCPConfig(projectRoot string, config *types.MCPConfig) error {
-	configPath := b.MCPConfigPath(projectRoot)
+	return b.WriteMCPConfigForPlane(PlaneProject, projectRoot, "", config)
+}
+
+func (b *baseIDE) WriteMCPConfigForPlane(plane Plane, projectRoot, homeDir string, config *types.MCPConfig) error {
+	configPath := b.MCPConfigPathForPlane(plane, projectRoot, homeDir)
 
 	// 确保目录存在
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
@@ -164,7 +215,11 @@ func (b *baseIDE) WriteMCPConfig(projectRoot string, config *types.MCPConfig) er
 }
 
 func (b *baseIDE) LoadMCPConfig(projectRoot string) (*types.MCPConfig, error) {
-	configPath := b.MCPConfigPath(projectRoot)
+	return b.LoadMCPConfigForPlane(PlaneProject, projectRoot, "")
+}
+
+func (b *baseIDE) LoadMCPConfigForPlane(plane Plane, projectRoot, homeDir string) (*types.MCPConfig, error) {
+	configPath := b.MCPConfigPathForPlane(plane, projectRoot, homeDir)
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {

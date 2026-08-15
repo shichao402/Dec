@@ -6,7 +6,6 @@ import (
 
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
-	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -265,31 +264,53 @@ func TestListEffectiveEnabledAssetsDeduplicatesAcrossBundles(t *testing.T) {
 	}
 }
 
-func TestLoadAssetSelectionMarksUserEnabled(t *testing.T) {
+func TestLoadAssetSelectionDoesNotMergeUserEnabled(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
 		"bundles/cli/rules/cli-release-rules.mdc":          "description: test\n",
+		"bundles/cli/bundle.yaml":                         "name: cli\nscope: user\nmembers:\n  - rules/cli-release-rules\n",
+		"bundles/default/bundle.yaml":                     "name: default\nscope: project\nmembers:\n  - skills/project-workflow\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
-	if err := secrets.SaveConfig(&secrets.Config{UserEnabledBundles: []string{"cli"}}); err != nil {
-		t.Fatalf("SaveConfig() 失败: %v", err)
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, EnabledBundles: []string{"cli"}}); err != nil {
+		t.Fatalf("SaveGlobalConfig() 失败: %v", err)
 	}
 
 	state, err := LoadAssetSelection(t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("LoadAssetSelection() 失败: %v", err)
 	}
-	if !bundleUserEnabledInState(state, "cli") {
-		t.Fatal("cli 应标记 UserEnabled")
-	}
-	if bundleUserEnabledInState(state, "default") {
-		t.Fatal("default 未在用户级启用，不应标记 UserEnabled")
-	}
 	if bundleEnabledInState(state, "cli") {
-		t.Fatal("cli 仅用户级启用时，项目 Enabled 应为 false")
+		t.Fatal("cli 为 scope:user，项目平面 Bundles 列表不应启用它")
+	}
+	for _, bo := range state.Bundles {
+		if bo.Name == "cli" {
+			t.Fatal("项目平面不应列出 scope:user 的 cli bundle")
+		}
+	}
+}
+
+func TestSaveWorkspaceEnabledBundlesUserWritesGlobalConfig(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	if _, err := SaveWorkspaceEnabledBundles(NewWorkspace(WorkspaceUser, ""), []string{"cli"}, nil); err != nil {
+		t.Fatalf("SaveWorkspaceEnabledBundles(user) 失败: %v", err)
+	}
+	global, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(global.EnabledBundles, []string{"cli"}) {
+		t.Fatalf("GlobalConfig.EnabledBundles = %#v", global.EnabledBundles)
 	}
 }
 
@@ -297,15 +318,6 @@ func bundleEnabledInState(state *AssetSelectionState, name string) bool {
 	for _, bo := range state.Bundles {
 		if bo.Name == name && bo.Enabled {
 			return true
-		}
-	}
-	return false
-}
-
-func bundleUserEnabledInState(state *AssetSelectionState, name string) bool {
-	for _, bo := range state.Bundles {
-		if bo.Name == name {
-			return bo.UserEnabled
 		}
 	}
 	return false

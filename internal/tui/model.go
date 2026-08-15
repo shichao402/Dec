@@ -173,16 +173,16 @@ var runPullOperation = func(ctx context.Context, projectRoot string, reporter ap
 	return serviceapi.PullProjectAssets(ctx, projectRoot, reporter)
 }
 
-var runPushOperation = func(ctx context.Context, projectRoot string, reporter app.Reporter) (*app.PushProjectAssetsResult, error) {
-	return serviceapi.PushProjectAssets(ctx, projectRoot, reporter)
+var runPushOperation = func(ctx context.Context, workspace app.Workspace, reporter app.Reporter) (*app.PushProjectAssetsResult, error) {
+	return serviceapi.PushWorkspaceAssets(ctx, workspace, reporter)
 }
 
 var runRemoveOperation = func(input app.RemoveBundleInput, reporter app.Reporter) (*app.RemoveBundleResult, error) {
 	return serviceapi.RemoveBundle(context.Background(), input, reporter)
 }
 
-var previewPushOperation = func(projectRoot string) (*app.PushProjectAssetsPreview, error) {
-	return serviceapi.PreviewPushProjectAssets(context.Background(), projectRoot, nil)
+var previewPushOperation = func(workspace app.Workspace) (*app.PushProjectAssetsPreview, error) {
+	return serviceapi.PreviewPushWorkspaceAssets(context.Background(), workspace, nil)
 }
 
 var loadGlobalSettingsOperation = func(reporter app.Reporter) (*app.GlobalSettingsState, error) {
@@ -251,6 +251,7 @@ var updateMirrorInstallCommand = func() string {
 
 type model struct {
 	projectRoot    string
+	plane          app.WorkspacePlane
 	currentVersion string
 	pages          []string
 	pageIndex      int
@@ -384,17 +385,26 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 	}
 	m := model{
 		projectRoot:    projectRoot,
+		plane:          app.NewWorkspace(opts.Plane, projectRoot).EffectivePlane(),
 		currentVersion: currentVersion,
 		pages:          []string{"Home", "Bundles", "Project", "Run", "Remote", "Settings"},
 		configInitMode: opts.ConfigInitMode,
 		focus:          focusSidebar,
 		logs:           logs,
 	}
+	if m.plane == app.WorkspaceUser {
+		// 用户平面没有 project vars，Project 页无对应概念；Remote 按平面过滤后可用。
+		m.pages = []string{"Home", "Bundles", "Run", "Remote", "Settings"}
+	}
 	if opts.ConfigInitMode {
 		m.pageIndex = 1 // Bundles
 		m.focus = focusContent
 	}
 	return m
+}
+
+func (m model) workspace() app.Workspace {
+	return app.NewWorkspace(m.plane, m.projectRoot)
 }
 
 func (m model) Init() tea.Cmd {
@@ -518,7 +528,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pushLog(fmt.Sprintf("Overview loaded: %d enabled bundles (vault scan deferred)", msg.overview.EnabledBundleCount))
 		cmds := []tea.Cmd{loadVaultInferenceCmd(m.projectRoot)}
 		if msg.overview.RepoConnected {
-			cmds = append(cmds, enrichOverviewVaultCmd(m.projectRoot))
+			cmds = append(cmds, enrichWorkspaceOverviewVaultCmd(m.workspace()))
 		}
 		return m, tea.Batch(cmds...)
 	case vaultInferenceLoadedMsg:
@@ -639,7 +649,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsRepoInput = msg.state.RepoURL
 			m.settingsIdleTimeoutInput = msg.state.ServerIdleTimeout
 			m.settingsSelectedIDEs = cloneStrings(msg.state.SelectedIDEs)
-			m.settingsSelectedSecretBundles = cloneStrings(msg.state.UserEnabledBundles)
+			m.settingsSelectedSecretBundles = cloneStrings(msg.state.EnabledBundles)
 			m.normalizeSettingsCursor()
 			m.syncSettingsDirty()
 			m.pushLog(fmt.Sprintf("Global settings loaded: %d IDEs, %d user bundles",
@@ -669,7 +679,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.result != nil {
 			m.pushLog(fmt.Sprintf("Global settings saved: %d IDEs, %d user bundles",
-				len(msg.result.IDEs), len(msg.result.UserEnabledBundles)))
+				len(msg.result.IDEs), len(msg.result.EnabledBundles)))
 			for _, name := range msg.result.CreatedVaultBundles {
 				m.pushLog("Created vault placeholder bundle: " + name)
 			}
@@ -1066,7 +1076,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.isBundlesPage() && !m.savingAssets && m.assets != nil && m.assetsErr == nil {
 				m.savingAssets = true
 				m.pushLog("Saving bundle selection")
-				return m, saveAssetsCmd(m.projectRoot, cloneStrings(m.bundleSelection))
+				return m, saveWorkspaceAssetsCmd(m.workspace(), cloneStrings(m.bundleSelection))
 			}
 			if m.isSettingsPage() && !m.savingSettings && m.settings != nil && m.settingsErr == nil {
 				m.savingSettings = true
@@ -1257,19 +1267,29 @@ const refreshPartCount = 5
 func (m *model) refreshCmd() tea.Cmd {
 	gen := m.shellRefresh.beginParts(refreshPartCount)
 	diag.StartupLog("refreshCmd start gen=%d parts=%d", gen, refreshPartCount)
+	projectSettingsCmd := loadProjectSettingsCmd(m.projectRoot, gen)
+	projectVarsCmd := loadProjectVarsCmd(m.projectRoot, gen, false)
+	if m.plane == app.WorkspaceUser {
+		projectSettingsCmd = func() tea.Msg { return projectSettingsLoadedMsg{loadGen: gen} }
+		projectVarsCmd = func() tea.Msg { return projectVarsLoadedMsg{loadGen: gen} }
+	}
 	return tea.Batch(
-		loadOverviewCmd(m.projectRoot, gen),
-		loadAssetsCmd(m.projectRoot, gen),
+		loadWorkspaceOverviewCmd(m.workspace(), gen),
+		loadWorkspaceAssetsCmd(m.workspace(), gen),
 		loadSettingsCmd(gen),
-		loadProjectSettingsCmd(m.projectRoot, gen),
-		loadProjectVarsCmd(m.projectRoot, gen, false),
+		projectSettingsCmd,
+		projectVarsCmd,
 	)
 }
 
 func loadOverviewCmd(projectRoot string, loadGen uint64) tea.Cmd {
+	return loadWorkspaceOverviewCmd(app.NewWorkspace(app.WorkspaceProject, projectRoot), loadGen)
+}
+
+func loadWorkspaceOverviewCmd(workspace app.Workspace, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		done := diag.StartupSpan(fmt.Sprintf("loadOverviewCmd gen=%d skipVault", loadGen))
-		overview, err := serviceapi.LoadProjectOverview(projectRoot, false)
+		overview, err := serviceapi.LoadWorkspaceOverview(workspace, false)
 		if err != nil {
 			done(fmt.Sprintf("err=%v", err))
 		} else if overview == nil {
@@ -1297,9 +1317,13 @@ func loadVaultInferenceCmd(projectRoot string) tea.Cmd {
 }
 
 func enrichOverviewVaultCmd(projectRoot string) tea.Cmd {
+	return enrichWorkspaceOverviewVaultCmd(app.NewWorkspace(app.WorkspaceProject, projectRoot))
+}
+
+func enrichWorkspaceOverviewVaultCmd(workspace app.Workspace) tea.Cmd {
 	return func() tea.Msg {
 		done := diag.StartupSpan("enrichOverviewVaultCmd")
-		overview, err := serviceapi.LoadProjectOverview(projectRoot, true)
+		overview, err := serviceapi.LoadWorkspaceOverview(workspace, true)
 		if err != nil {
 			done(fmt.Sprintf("err=%v", err))
 			return overviewVaultEnrichedMsg{err: err}
@@ -1324,9 +1348,13 @@ func applyVaultProjectCmd(projectRoot string, loadGen uint64) tea.Cmd {
 }
 
 func loadAssetsCmd(projectRoot string, loadGen uint64) tea.Cmd {
+	return loadWorkspaceAssetsCmd(app.NewWorkspace(app.WorkspaceProject, projectRoot), loadGen)
+}
+
+func loadWorkspaceAssetsCmd(workspace app.Workspace, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		done := diag.StartupSpan(fmt.Sprintf("loadAssetsCmd gen=%d", loadGen))
-		state, err := serviceapi.LoadAssetSelection(projectRoot, nil)
+		state, err := serviceapi.LoadWorkspaceAssetSelection(workspace, nil)
 		if err != nil {
 			done(fmt.Sprintf("err=%v", err))
 		} else if state == nil {
@@ -1339,8 +1367,12 @@ func loadAssetsCmd(projectRoot string, loadGen uint64) tea.Cmd {
 }
 
 func saveAssetsCmd(projectRoot string, bundles []string) tea.Cmd {
+	return saveWorkspaceAssetsCmd(app.NewWorkspace(app.WorkspaceProject, projectRoot), bundles)
+}
+
+func saveWorkspaceAssetsCmd(workspace app.Workspace, bundles []string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := serviceapi.SaveEnabledBundles(projectRoot, bundles, nil)
+		result, err := serviceapi.SaveWorkspaceEnabledBundles(workspace, bundles, nil)
 		return assetsSavedMsg{result: result, err: err}
 	}
 }
@@ -1361,10 +1393,10 @@ func loadSettingsCmd(loadGen uint64) tea.Cmd {
 func saveSettingsCmd(repoURL, idleTimeout string, ides []string, userSecretBundles []string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := saveGlobalSettingsOperation(app.SaveGlobalSettingsInput{
-			RepoURL:            repoURL,
-			ServerIdleTimeout:  idleTimeout,
-			IDEs:               cloneStrings(ides),
-			UserEnabledBundles: append([]string{}, userSecretBundles...), // 非 nil，空表示清空用户级启用
+			RepoURL:           repoURL,
+			ServerIdleTimeout: idleTimeout,
+			IDEs:              cloneStrings(ides),
+			EnabledBundles:    append([]string{}, userSecretBundles...), // 非 nil，空表示清空用户平面启用
 		}, nil)
 		return settingsSavedMsg{result: result, err: err}
 	}
@@ -1448,11 +1480,22 @@ func openProjectVarsEditorCmd(projectRoot, editorCmd string) tea.Cmd {
 }
 
 func startPullRunCmd(ctx context.Context, projectRoot string, stream chan<- tea.Msg) tea.Cmd {
+	return startWorkspacePullRunCmd(ctx, app.NewWorkspace(app.WorkspaceProject, projectRoot), stream)
+}
+
+func startWorkspacePullRunCmd(ctx context.Context, workspace app.Workspace, stream chan<- tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
-			result, err := runPullOperation(ctx, projectRoot, app.ReporterFunc(func(event app.OperationEvent) {
+			var result *app.PullProjectAssetsResult
+			var err error
+			reporter := app.ReporterFunc(func(event app.OperationEvent) {
 				stream <- runEventMsg{event: event}
-			}))
+			})
+			if workspace.EffectivePlane() == app.WorkspaceUser {
+				result, err = serviceapi.PullWorkspaceAssets(ctx, workspace, reporter)
+			} else {
+				result, err = runPullOperation(ctx, workspace.Root, reporter)
+			}
 			stream <- runCompletedMsg{result: result, err: err}
 			close(stream)
 		}()
@@ -1460,10 +1503,10 @@ func startPullRunCmd(ctx context.Context, projectRoot string, stream chan<- tea.
 	}
 }
 
-func startPushRunCmd(ctx context.Context, projectRoot string, stream chan<- tea.Msg) tea.Cmd {
+func startPushRunCmd(ctx context.Context, workspace app.Workspace, stream chan<- tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
-			result, err := runPushOperation(ctx, projectRoot, app.ReporterFunc(func(event app.OperationEvent) {
+			result, err := runPushOperation(ctx, workspace, app.ReporterFunc(func(event app.OperationEvent) {
 				stream <- runEventMsg{event: event}
 			}))
 			stream <- runCompletedMsg{pushResult: result, err: err}
@@ -1619,7 +1662,7 @@ func (m *model) startPullRun() tea.Cmd {
 	m.runCtx = ctx
 	m.runCancel = cancel
 	m.pushLog("Run page started pull")
-	return tea.Batch(startPullRunCmd(ctx, m.projectRoot, stream), waitRunMsg(stream))
+	return tea.Batch(startWorkspacePullRunCmd(ctx, m.workspace(), stream), waitRunMsg(stream))
 }
 
 func (m *model) beginPushConfirmation() tea.Cmd {
@@ -1637,12 +1680,12 @@ func (m *model) beginPushConfirmation() tea.Cmd {
 	m.pushResult = nil
 	m.runErr = nil
 	m.pushLog("Push 预览加载中…")
-	return loadPushPreviewCmd(m.projectRoot, gen)
+	return loadPushPreviewCmd(m.workspace(), gen)
 }
 
-func loadPushPreviewCmd(projectRoot string, loadGen uint64) tea.Cmd {
+func loadPushPreviewCmd(workspace app.Workspace, loadGen uint64) tea.Cmd {
 	return func() tea.Msg {
-		preview, err := previewPushOperation(projectRoot)
+		preview, err := previewPushOperation(workspace)
 		return pushPreviewLoadedMsg{preview: preview, err: err, loadGen: loadGen}
 	}
 }
@@ -1715,7 +1758,7 @@ func (m *model) startPushRun() tea.Cmd {
 	m.runCtx = ctx
 	m.runCancel = cancel
 	m.pushLog("Run page started push")
-	return tea.Batch(startPushRunCmd(ctx, m.projectRoot, stream), waitRunMsg(stream))
+	return tea.Batch(startPushRunCmd(ctx, m.workspace(), stream), waitRunMsg(stream))
 }
 
 func (m *model) beginRemoveSelection() {
@@ -1875,6 +1918,7 @@ func (m *model) startRemoveRun() tea.Cmd {
 	m.runStream = stream
 	input := app.RemoveBundleInput{
 		ProjectRoot: m.projectRoot,
+		Plane:       m.plane,
 		BundleName:  m.removeTarget.Name,
 		Members:     append([]app.AssetSelectionItem(nil), m.removeTarget.Members...),
 		Confirmed:   true,
@@ -2093,16 +2137,13 @@ func (m model) renderBundlesPage(width, height int) string {
 		summary = append(summary, shellTitleStyle.Render("项目配置初始化 — 勾选要启用的 bundle"))
 	}
 	status := fmt.Sprintf("%d/%d 项目已启用", len(m.bundleSelection), len(m.assets.Bundles))
-	if n := m.countUserEnabledBundles(); n > 0 {
-		status += fmt.Sprintf(" · %d 个本机启用", n)
+	if m.plane == app.WorkspaceUser {
+		status = fmt.Sprintf("%d/%d 用户平面已启用", len(m.bundleSelection), len(m.assets.Bundles))
 	}
 	if filter := m.currentAssetFilterLabel(); filter != "<none>" {
 		status += " · 筛选: " + filter
 	}
 	summary = append(summary, status)
-	if m.countUserEnabledBundles() > 0 {
-		summary = append(summary, shellMutedStyle.Render("青色 ")+shellAccentStyle.Render("user")+shellMutedStyle.Render(" = Settings 本机已启用；pull 为并集，一般无需再勾项目"))
-	}
 	if m.assetsDirty {
 		summary = append(summary, shellWarnStyle.Render("有未保存修改，按 s 保存"))
 	}
@@ -2462,11 +2503,6 @@ func (m model) renderPullPlanLines() []string {
 	enabled := app.ListEnabledBundles(m.assets)
 	names := make([]string, 0, len(enabled))
 	for _, bo := range enabled {
-		// 仅本机启用的包在 Bundles 页没有项目勾选，标出来避免"计划里凭空多一个包"。
-		if !bo.Enabled && bo.UserEnabled {
-			names = append(names, bo.Name+"(user)")
-			continue
-		}
 		names = append(names, bo.Name)
 	}
 
@@ -3070,10 +3106,11 @@ func (m model) renderSettingsDetails() string {
 		name := m.currentSettingsSecretBundleName()
 		lines = append(lines,
 			fmt.Sprintf("本机 bundle: %s", fallbackValue(name, "<none>")),
-			"本机始终启用的 Dec bundle（与各 project enabled_bundles 并集；含公开资产与 secrets）。",
-			"secrets-only：勾选保存时若 vault 无此包，会创建最小 bundle.yaml 并 push。",
+			"用户平面启用的 Dec bundle（scope: user；ADR 0009）。与项目平面隔离，不并集。",
+			"secrets-only：勾选保存时若 vault 无此包，会创建最小 bundle.yaml（scope: user）并 push。",
 			"候选来自 vault / known_secret_bundles / Bitwarden；仅发现不会改 Git vault。",
-			fmt.Sprintf("配置文件: %s", fallbackValue(m.settings.SecretsConfigPath, "~/.dec/secrets/config.yaml")),
+			"也可用 dec --user 在 Bundles 页管理同一列表（~/.dec/config.yaml enabled_bundles）。",
+			fmt.Sprintf("配置文件: %s", fallbackValue(m.settings.ConfigPath, "~/.dec/config.yaml")),
 			fmt.Sprintf("Bitwarden session: %s", formatReady(m.settings.BitwardenSessionReady, "就绪", "未解锁")),
 			fmt.Sprintf("当前状态: %s", formatReady(settingsContainsIDE(m.settingsSelectedSecretBundles, name), "已启用", "未启用")),
 		)
@@ -3116,10 +3153,8 @@ func (m model) renderAssetList(listBudget int) string {
 			marker = ">"
 		}
 		bundleEnabled := false
-		userEnabled := false
 		if p, ok := tr.Node.Payload.(assetTreePayload); ok {
 			bundleEnabled = p.bundleEnabled
-			userEnabled = p.kind == assetRowBundle && p.userEnabled
 		}
 		line := renderAssetTreeLine(tr, &mm.assetTree, marker, bundleEnabled)
 		var styled string
@@ -3129,9 +3164,6 @@ func (m model) renderAssetList(listBudget int) string {
 			styled = shellEnabledRow.Render(line)
 		} else {
 			styled = shellLogStyle.Render(line)
-		}
-		if userEnabled {
-			styled += " " + shellAccentStyle.Render("user")
 		}
 		lines = append(lines, styled)
 	}
@@ -3167,16 +3199,9 @@ func (m model) renderAssetDetails() string {
 			switch p.kind {
 			case assetRowBundle:
 				bo := m.assets.Bundles[p.bundleIndex]
-				projectOn := m.bundleSelected(bo.Name)
-				userOn := m.userBundleEnabled(bo.Name)
 				status := "未选中"
-				switch {
-				case projectOn && userOn:
-					status = "项目已勾选 · 本机已启用（pull 并集，效果相同）"
-				case projectOn:
-					status = "项目已勾选（保存后随本项目 pull 下发）"
-				case userOn:
-					status = "本机已启用（Settings；一般无需再勾项目）"
+				if m.bundleSelected(bo.Name) {
+					status = "当前平面已勾选（保存后随本平面 pull 下发）"
 				}
 				lines = append(lines,
 					fmt.Sprintf("Bundle: %s", bo.Name),
@@ -3339,45 +3364,6 @@ func (m model) bundleSelected(name string) bool {
 	return false
 }
 
-// userBundleEnabled 表示本机 Settings 是否启用该 bundle。
-// settings 已加载时以 settingsSelectedSecretBundles 为准（含未保存勾选）；否则回退 AssetBundleOption.UserEnabled。
-func (m model) userBundleEnabled(name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return false
-	}
-	if m.settings != nil {
-		for _, n := range m.settingsSelectedSecretBundles {
-			if n == name {
-				return true
-			}
-		}
-		return false
-	}
-	if m.assets == nil {
-		return false
-	}
-	for _, bo := range m.assets.Bundles {
-		if bo.Name == name {
-			return bo.UserEnabled
-		}
-	}
-	return false
-}
-
-func (m model) countUserEnabledBundles() int {
-	if m.assets == nil {
-		return 0
-	}
-	n := 0
-	for _, bo := range m.assets.Bundles {
-		if m.userBundleEnabled(bo.Name) {
-			n++
-		}
-	}
-	return n
-}
-
 func (m model) canNavigateSettings() bool {
 	return m.settings != nil && m.settingsRowCount() > 0
 }
@@ -3498,7 +3484,7 @@ func (m *model) syncSettingsDirty() {
 	m.settingsDirty = currentRepo != loadedRepo ||
 		strings.TrimSpace(m.settingsIdleTimeoutInput) != strings.TrimSpace(m.settings.ServerIdleTimeout) ||
 		!equalNormalizedStrings(m.settingsSelectedIDEs, m.settings.SelectedIDEs) ||
-		!equalNormalizedStrings(m.settingsSelectedSecretBundles, m.settings.UserEnabledBundles)
+		!equalNormalizedStrings(m.settingsSelectedSecretBundles, m.settings.EnabledBundles)
 }
 
 func settingsContainsIDE(values []string, target string) bool {

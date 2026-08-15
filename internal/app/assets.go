@@ -31,11 +31,8 @@ type AssetBundleOption struct {
 	// Members 为 bundle 成员解析后的定位信息，顺序与 bundle YAML 中声明保持一致。
 	// 若成员解析失败或资产不存在，这里会跳过（LoadAssetSelection 已通过 reporter 打 warning）。
 	Members []AssetSelectionItem
-	// Enabled 表示当前 ProjectConfig.EnabledBundles 是否已引用该 bundle。
+	// Enabled 表示当前平面的 enabled_bundles 是否已引用该 bundle。
 	Enabled bool
-	// UserEnabled 表示本机 Settings 的 user_enabled_bundles 是否已包含该 bundle。
-	// 与 Enabled 独立；pull 取二者并集（见 ADR 0003）。
-	UserEnabled bool
 }
 
 // AssetSelectionState 是 Bundles 页的数据源：仓库里全部 bundle + 当前启用态。
@@ -59,6 +56,11 @@ type SaveBundleSelectionResult struct {
 }
 
 func LoadAssetSelection(projectRoot string, reporter Reporter) (*AssetSelectionState, error) {
+	return LoadWorkspaceAssetSelection(NewWorkspace(WorkspaceProject, projectRoot), reporter)
+}
+
+// LoadWorkspaceAssetSelection 加载指定平面可见且可启用的 bundle。
+func LoadWorkspaceAssetSelection(workspace Workspace, reporter Reporter) (*AssetSelectionState, error) {
 	reporter = defaultReporter(reporter)
 	connected, err := repo.IsConnected()
 	if err != nil {
@@ -68,6 +70,7 @@ func LoadAssetSelection(projectRoot string, reporter Reporter) (*AssetSelectionS
 		return nil, fmt.Errorf("仓库未连接\n\n在 Settings 页填写 Dec 仓库地址后重试")
 	}
 
+	projectRoot := workspace.Root
 	mgr := config.NewProjectConfigManager(projectRoot)
 	state := &AssetSelectionState{
 		ProjectRoot: projectRoot,
@@ -76,7 +79,20 @@ func LoadAssetSelection(projectRoot string, reporter Reporter) (*AssetSelectionS
 	}
 
 	var existingConfig *types.ProjectConfig
-	if mgr.Exists() {
+	if workspace.EffectivePlane() == WorkspaceUser {
+		globalConfig, loadErr := config.LoadGlobalConfig()
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		globalPath, pathErr := config.GetGlobalConfigPath()
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		state.ConfigPath = globalPath
+		state.VarsPath, _ = config.GetGlobalVarsPath()
+		state.ExistingConfig = true
+		existingConfig = &types.ProjectConfig{EnabledBundles: append([]string(nil), globalConfig.EnabledBundles...)}
+	} else if mgr.Exists() {
 		state.ExistingConfig = true
 		emit(reporter, EventInfo, "assets.load", "检测到现有项目配置，准备加载 bundle 选择状态", nil)
 		loadedConfig, err := mgr.LoadProjectConfig()
@@ -86,7 +102,7 @@ func LoadAssetSelection(projectRoot string, reporter Reporter) (*AssetSelectionS
 		existingConfig = loadedConfig
 	}
 
-	state.Bundles = loadBundleSelection(existingConfig, reporter)
+	state.Bundles = loadBundleSelectionForPlane(existingConfig, workspace.EffectivePlane(), reporter)
 
 	if _, err := os.Stat(state.VarsPath); err == nil {
 		state.VarsFileReady = true
@@ -103,7 +119,38 @@ func LoadAssetSelection(projectRoot string, reporter Reporter) (*AssetSelectionS
 // bundles 为 nil 或空表示「一个 bundle 都不启用」，会清空 enabled_bundles。
 // 除 enabled_bundles 外的字段（IDEs / Editor / Version / ProjectName）一律从磁盘原样带过。
 func SaveEnabledBundles(projectRoot string, bundles []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
+	return SaveWorkspaceEnabledBundles(NewWorkspace(WorkspaceProject, projectRoot), bundles, reporter)
+}
+
+// SaveWorkspaceEnabledBundles 将选择写入所属平面的唯一配置源。
+func SaveWorkspaceEnabledBundles(workspace Workspace, bundles []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
 	reporter = defaultReporter(reporter)
+	if workspace.EffectivePlane() == WorkspaceUser {
+		globalConfig, err := config.LoadGlobalConfig()
+		if err != nil {
+			return nil, err
+		}
+		globalConfig.EnabledBundles = normalizeEnabledBundles(bundles)
+		configPath, err := config.GetGlobalConfigPath()
+		if err != nil {
+			return nil, err
+		}
+		result := &SaveBundleSelectionResult{
+			ConfigPath:         configPath,
+			EnabledBundleCount: len(globalConfig.EnabledBundles),
+		}
+		result.VarsPath, _ = config.GetGlobalVarsPath()
+		emit(reporter, EventInfo, "assets.save", "写入用户平面配置", &Progress{Phase: "write", Current: 1, Total: 2})
+		if err := config.SaveGlobalConfig(globalConfig); err != nil {
+			return nil, fmt.Errorf("写入用户平面配置失败: %w", err)
+		}
+		if _, err := ensureVaultBundlesForUserEnable(globalConfig.EnabledBundles, reporter); err != nil {
+			return nil, err
+		}
+		emit(reporter, EventInfo, "assets.save", "bundle 选择已保存", &Progress{Phase: "write", Current: 2, Total: 2})
+		return result, nil
+	}
+	projectRoot := workspace.Root
 	mgr := config.NewProjectConfigManager(projectRoot)
 	result := &SaveBundleSelectionResult{
 		ConfigPath: filepath.Join(mgr.GetDecDir(), "config.yaml"),
@@ -141,6 +188,10 @@ func SaveEnabledBundles(projectRoot string, bundles []string, reporter Reporter)
 // 本函数只为 Bundles 页展示服务，任何错误都降级为 reporter warning，不向上传播；
 // 失败时返回 nil，调用方按"没有 bundle"处理。
 func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) []AssetBundleOption {
+	return loadBundleSelectionForPlane(projectConfig, WorkspaceProject, reporter)
+}
+
+func loadBundleSelectionForPlane(projectConfig *types.ProjectConfig, plane WorkspacePlane, reporter Reporter) []AssetBundleOption {
 	tx, err := repo.NewLocalReadTransaction()
 	if err != nil {
 		emit(reporter, EventWarn, "assets.bundle",
@@ -149,7 +200,7 @@ func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) 
 	}
 	defer tx.Close()
 
-	resolved, err := resolveDesiredAssets(projectConfig, tx.WorkDir(), reporter)
+	resolved, err := resolveDesiredAssetsForPlane(projectConfig, tx.WorkDir(), plane, reporter)
 	if err != nil {
 		emit(reporter, EventWarn, "assets.bundle",
 			fmt.Sprintf("解析 bundle 声明失败，Bundles 页将不展示 bundle: %v", err), nil)
@@ -166,8 +217,6 @@ func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) 
 			enabledSet[name] = struct{}{}
 		}
 	}
-	userEnabledSet := userEnabledBundleSet()
-
 	options := make([]AssetBundleOption, 0, len(resolved.Bundles))
 	for _, bo := range resolved.Bundles {
 		opt := AssetBundleOption{
@@ -178,9 +227,6 @@ func loadBundleSelection(projectConfig *types.ProjectConfig, reporter Reporter) 
 		}
 		if _, ok := enabledSet[bo.Name]; ok {
 			opt.Enabled = true
-		}
-		if _, ok := userEnabledSet[bo.Name]; ok {
-			opt.UserEnabled = true
 		}
 		opt.Members = buildBundleMemberItems(bo, tx.WorkDir())
 		options = append(options, opt)
@@ -303,8 +349,7 @@ func effectiveAssetKey(item AssetSelectionItem) string {
 
 // ListEnabledBundles 返回本次 pull 会命中的 bundle 选项，供 TUI Pull 计划 / Remove 等场景展示。
 //
-// 取 project `enabled_bundles` 与本机 `user_enabled_bundles` 的并集，与 pull 的目标集口径一致
-// （ADR 0003）；只看 project 一侧会让用户级启用的包在计划里"隐身"。
+// 启用状态已由 Workspace 平面隔离，不再合并另一个平面的选择。
 func ListEnabledBundles(state *AssetSelectionState) []AssetBundleOption {
 	if state == nil {
 		return nil
@@ -312,7 +357,7 @@ func ListEnabledBundles(state *AssetSelectionState) []AssetBundleOption {
 	seen := make(map[string]struct{})
 	out := make([]AssetBundleOption, 0)
 	for _, bo := range state.Bundles {
-		if !bo.Enabled && !bo.UserEnabled {
+		if !bo.Enabled {
 			continue
 		}
 		if _, dup := seen[bo.Name]; dup {

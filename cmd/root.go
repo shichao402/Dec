@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/serviceapi"
 	"github.com/shichao402/Dec/internal/tui"
 	"github.com/shichao402/Dec/internal/update"
@@ -37,11 +38,12 @@ type entryContext struct {
 }
 
 var (
-	detectTTY      = isTerminalFile
-	getWorkingDir  = os.Getwd
-	runCLIMode     = executeCLI
-	runTUIMode     = executeTUI
-	emitUpdateHint = func(w io.Writer) {
+	detectTTY           = isTerminalFile
+	getWorkingDir       = os.Getwd
+	runCLIMode          = executeCLI
+	runTUIMode          = executeTUI
+	runTUIWorkspaceMode = executeTUIWorkspace
+	emitUpdateHint      = func(w io.Writer) {
 		if w == nil {
 			return
 		}
@@ -63,6 +65,7 @@ var RootCmd = &cobra.Command{
 
 示例:
   dec                # 启动 TUI（默认）
+  dec --user         # 启动用户平面 TUI
   dec --version      # 显示版本号
   dec update         # 检查并更新到最新版本`,
 	SilenceErrors: true,
@@ -71,6 +74,10 @@ var RootCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Dec 需要交互式终端\n\n在 TTY 中运行 dec 启动 TUI，或使用 dec --version 查看版本")
 	},
+}
+
+func init() {
+	RootCmd.PersistentFlags().Bool("user", false, "启动用户平面 TUI（只管理 scope: user bundles）")
 }
 
 // SetVersion 设置版本信息（从编译参数注入）
@@ -140,6 +147,9 @@ func Execute(args []string, stdin, stdout, stderr *os.File) error {
 			return fmt.Errorf("获取当前目录失败: %w", err)
 		}
 		emitUpdateHint(stderr)
+		if isUserTUIArgs(args) {
+			return runTUIWorkspaceMode(app.NewWorkspace(app.WorkspaceUser, ""), stdin, stdout)
+		}
 		return runTUIMode(projectRoot, stdin, stdout)
 	}
 
@@ -159,7 +169,7 @@ func isInternalCLIArgs(args []string) bool {
 }
 
 func decideEntryMode(ctx entryContext) entryMode {
-	if len(ctx.Args) != 0 {
+	if len(ctx.Args) != 0 && !isUserTUIArgs(ctx.Args) {
 		return entryModeCLI
 	}
 	if strings.TrimSpace(ctx.NoTUI) == "1" {
@@ -174,6 +184,10 @@ func decideEntryMode(ctx entryContext) entryMode {
 	return entryModeTUI
 }
 
+func isUserTUIArgs(args []string) bool {
+	return len(args) == 1 && args[0] == "--user"
+}
+
 func executeCLI(args []string, stdout, stderr io.Writer) error {
 	RootCmd.SetArgs(args)
 	RootCmd.SetOut(stdout)
@@ -182,13 +196,17 @@ func executeCLI(args []string, stdout, stderr io.Writer) error {
 }
 
 func executeTUI(projectRoot string, input io.Reader, output io.Writer) error {
+	return executeTUIWorkspace(app.NewWorkspace(app.WorkspaceProject, projectRoot), input, output)
+}
+
+func executeTUIWorkspace(workspace app.Workspace, input io.Reader, output io.Writer) error {
 	api, err := serviceapi.Connect(context.Background(), "tui", fmt.Sprintf("tui-%d", os.Getpid()))
 	if err != nil {
 		return fmt.Errorf("连接 dec-server 失败: %w", err)
 	}
 	defer api.Close()
 	serviceapi.SetDefault(api)
-	return tui.Run(projectRoot, GetVersion(), input, output)
+	return tui.RunWithOptions(workspace.Root, GetVersion(), tui.RunOptions{Plane: workspace.EffectivePlane()}, input, output)
 }
 
 func isTerminalFile(file *os.File) bool {

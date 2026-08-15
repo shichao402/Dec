@@ -49,7 +49,8 @@ func GetGlobalConfigPath() (string, error) {
 }
 
 // LoadGlobalConfig 加载全局配置。
-// 兼容旧版本 ~/.dec/local/config.yaml 中的 IDE 配置，并在内存中合并到返回值。
+// 兼容旧版本 ~/.dec/local/config.yaml 中的 IDE 配置，以及旧版
+// ~/.dec/secrets/config.yaml 中的 user_enabled_bundles（ADR 0009），并在内存中合并到返回值。
 func LoadGlobalConfig() (*types.GlobalConfig, error) {
 	configPath, err := GetGlobalConfigPath()
 	if err != nil {
@@ -77,10 +78,20 @@ func LoadGlobalConfig() (*types.GlobalConfig, error) {
 		config.IDEs = legacyIDEs
 	}
 
+	config.EnabledBundles = NormalizeBundleNames(config.EnabledBundles)
+	if len(config.EnabledBundles) == 0 {
+		legacyBundles, err := loadLegacySecretsEnabledBundles()
+		if err != nil {
+			return nil, err
+		}
+		config.EnabledBundles = legacyBundles
+	}
+
 	return config, nil
 }
 
-// SaveGlobalConfig 保存全局配置，并在成功后清理旧版 ~/.dec/local/config.yaml。
+// SaveGlobalConfig 保存全局配置，并在成功后清理旧版 ~/.dec/local/config.yaml
+// 与旧版 secrets 配置里的 user_enabled_bundles（已迁到本文件的 enabled_bundles）。
 func SaveGlobalConfig(config *types.GlobalConfig) error {
 	configPath, err := GetGlobalConfigPath()
 	if err != nil {
@@ -91,12 +102,16 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 		return fmt.Errorf("创建配置目录失败: %w", err)
 	}
 
+	if config != nil {
+		config.EnabledBundles = NormalizeBundleNames(config.EnabledBundles)
+	}
+
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("序列化配置失败: %w", err)
 	}
 
-	header := "# Dec 全局配置\n# repo_url: 个人资产仓库地址\n# ides: 默认 IDE 列表，例如：\n#   ides:\n#     - cursor\n#     - codebuddy\n# editor: 交互式编辑器命令（如 vim / vi / code --wait），例如：\n#   editor: code --wait\n# server_idle_timeout: 最后一个门面断开后服务退出前的等待时长（如 30m、1h）\n\n"
+	header := "# Dec 全局配置\n# repo_url: 个人资产仓库地址\n# ides: 默认 IDE 列表，例如：\n#   ides:\n#     - cursor\n#     - codebuddy\n# editor: 交互式编辑器命令（如 vim / vi / code --wait），例如：\n#   editor: code --wait\n# server_idle_timeout: 最后一个门面断开后服务退出前的等待时长（如 30m、1h）\n# enabled_bundles: 用户平面启用的 bundle 短名（scope: user），例如：\n#   enabled_bundles:\n#     - tencent-cloud\n\n"
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入全局配置失败: %w", err)
 	}
@@ -104,8 +119,45 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 	if err := removeLegacyLocalConfig(); err != nil {
 		return err
 	}
+	if err := removeLegacySecretsEnabledBundles(); err != nil {
+		return err
+	}
 
 	return nil
+}
+
+// UserEnabledBundles 返回全局配置中的用户平面启用列表（已规范化）。
+func UserEnabledBundles() ([]string, error) {
+	config, err := LoadGlobalConfig()
+	if err != nil {
+		return nil, err
+	}
+	return NormalizeBundleNames(config.EnabledBundles), nil
+}
+
+// bundleFolderPrefix 是 Bitwarden folder 里 bundle 级前缀；启用列表只存短名。
+const bundleFolderPrefix = "bundle/"
+
+// NormalizeBundleNames 去空白、剥离 bundle/ 前缀、去重，保序。
+// 与 secrets.NormalizeBundleNames 同语义（config 不依赖 secrets 包）。
+func NormalizeBundleNames(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(names))
+	out := make([]string, 0, len(names))
+	for _, raw := range names {
+		name := strings.TrimPrefix(strings.TrimSpace(raw), bundleFolderPrefix)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 // SetRepoURL 设置仓库 URL
@@ -281,6 +333,110 @@ func loadLegacyLocalIDEs() ([]string, error) {
 	}
 
 	return legacy.IDEs, nil
+}
+
+// legacyUserEnabledBundlesKey 是 ADR 0009 之前用户平面启用列表在 secrets 配置里的字段名。
+const legacyUserEnabledBundlesKey = "user_enabled_bundles"
+
+func getLegacySecretsConfigPath() (string, error) {
+	rootDir, err := repo.GetRootDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(rootDir, "secrets", "config.yaml"), nil
+}
+
+// loadLegacySecretsEnabledBundles 读取旧版 ~/.dec/secrets/config.yaml 的 user_enabled_bundles。
+func loadLegacySecretsEnabledBundles() ([]string, error) {
+	legacyPath, err := getLegacySecretsConfigPath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("读取旧 secrets 配置失败: %w", err)
+	}
+
+	var legacy struct {
+		UserEnabledBundles []string `yaml:"user_enabled_bundles,omitempty"`
+	}
+	if err := yaml.Unmarshal(data, &legacy); err != nil {
+		return nil, fmt.Errorf("解析旧 secrets 配置失败: %w", err)
+	}
+
+	return NormalizeBundleNames(legacy.UserEnabledBundles), nil
+}
+
+// removeLegacySecretsEnabledBundles 删除旧 secrets 配置里的 user_enabled_bundles，保留其余字段与注释。
+func removeLegacySecretsEnabledBundles() error {
+	legacyPath, err := getLegacySecretsConfigPath()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("读取旧 secrets 配置失败: %w", err)
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("解析旧 secrets 配置失败: %w", err)
+	}
+	if !removeYAMLMappingKey(&doc, legacyUserEnabledBundlesKey) {
+		return nil
+	}
+
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return fmt.Errorf("序列化旧 secrets 配置失败: %w", err)
+	}
+	if err := os.WriteFile(legacyPath, out, 0600); err != nil {
+		return fmt.Errorf("清理旧 secrets 启用列表失败: %w", err)
+	}
+	return nil
+}
+
+// removeYAMLMappingKey 从文档根映射中删除指定键，返回是否有改动。
+func removeYAMLMappingKey(doc *yaml.Node, key string) bool {
+	if doc == nil || len(doc.Content) == 0 {
+		return false
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value != key {
+			continue
+		}
+		// 键被删除时把它携带的注释挪到后继键，避免丢失文件头说明。
+		if i+2 < len(root.Content) {
+			next := root.Content[i+2]
+			next.HeadComment = joinYAMLComments(root.Content[i].HeadComment, next.HeadComment)
+		}
+		root.Content = append(root.Content[:i], root.Content[i+2:]...)
+		return true
+	}
+	return false
+}
+
+func joinYAMLComments(first, second string) string {
+	switch {
+	case strings.TrimSpace(first) == "":
+		return second
+	case strings.TrimSpace(second) == "":
+		return first
+	default:
+		return first + "\n" + second
+	}
 }
 
 func removeLegacyLocalConfig() error {

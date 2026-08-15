@@ -36,7 +36,8 @@ func (s *Server) Invoke(ctx context.Context, req *servicev1.InvokeRequest) (*ser
 	}
 	collector := &eventCollector{}
 	s.ensureProjectRepaired(req.ProjectRoot, collector)
-	result, err := dispatchInvoke(ctx, req.Method, req.ProjectRoot, req.PayloadJson, collector)
+	workspace := app.NewWorkspace(app.WorkspacePlane(req.WorkspacePlane), req.ProjectRoot)
+	result, err := dispatchInvokeWorkspace(ctx, req.Method, workspace, req.PayloadJson, collector)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -71,21 +72,26 @@ func isMachineMutation(method string) bool {
 }
 
 func dispatchInvoke(ctx context.Context, method, projectRoot string, payload []byte, reporter app.Reporter) (any, error) {
+	return dispatchInvokeWorkspace(ctx, method, app.NewWorkspace(app.WorkspaceProject, projectRoot), payload, reporter)
+}
+
+func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.Workspace, payload []byte, reporter app.Reporter) (any, error) {
+	projectRoot := workspace.Root
 	switch method {
 	case "load_project_overview":
 		var in struct{ IncludeVaultBundles bool }
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return app.LoadProjectOverviewOpts(projectRoot, app.OverviewLoadOpts{IncludeVaultBundles: in.IncludeVaultBundles})
+		return app.LoadWorkspaceOverviewOpts(workspace, app.OverviewLoadOpts{IncludeVaultBundles: in.IncludeVaultBundles})
 	case "load_asset_selection":
-		return app.LoadAssetSelection(projectRoot, reporter)
+		return app.LoadWorkspaceAssetSelection(workspace, reporter)
 	case "save_enabled_bundles":
 		var in struct{ EnabledBundles []string }
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return app.SaveEnabledBundles(projectRoot, in.EnabledBundles, reporter)
+		return app.SaveWorkspaceEnabledBundles(workspace, in.EnabledBundles, reporter)
 	case "connect_repo":
 		var in struct{ RepoURL string }
 		if err := decode(payload, &in); err != nil {
@@ -142,7 +148,7 @@ func dispatchInvoke(ctx context.Context, method, projectRoot string, payload []b
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return app.ListDeleteCandidates(ctx, projectRoot, in.IncludeRemote, reporter)
+		return app.ListWorkspaceDeleteCandidates(ctx, workspace, in.IncludeRemote, reporter)
 	case "prepare_remote_note_edit":
 		var in app.DeleteSelectionItem
 		if err := decode(payload, &in); err != nil {
@@ -199,7 +205,8 @@ func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.Se
 	if req.UnlockTimeoutMs > 0 {
 		operationCtx = app.WithUnlockConfig(operationCtx, app.UnlockConfig{Timeout: time.Duration(req.UnlockTimeoutMs) * time.Millisecond})
 	}
-	result, runErr := dispatchOperation(operationCtx, req.Operation, req.ProjectRoot, req.PayloadJson, reporter)
+	workspace := app.NewWorkspace(app.WorkspacePlane(req.WorkspacePlane), req.ProjectRoot)
+	result, runErr := dispatchOperationWorkspace(operationCtx, req.Operation, workspace, req.PayloadJson, reporter)
 	var resultJSON []byte
 	if runErr == nil {
 		resultJSON, runErr = json.Marshal(result)
@@ -226,19 +233,25 @@ func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.Se
 }
 
 func dispatchOperation(ctx context.Context, operation, projectRoot string, payload []byte, reporter app.Reporter) (any, error) {
+	return dispatchOperationWorkspace(ctx, operation, app.NewWorkspace(app.WorkspaceProject, projectRoot), payload, reporter)
+}
+
+func dispatchOperationWorkspace(ctx context.Context, operation string, workspace app.Workspace, payload []byte, reporter app.Reporter) (any, error) {
+	projectRoot := workspace.Root
 	switch operation {
 	case "pull":
-		return app.PullProjectAssets(ctx, projectRoot, "", reporter)
+		return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
 	case "push":
-		return app.PushProjectAssets(ctx, projectRoot, reporter)
+		return app.PushWorkspaceAssets(ctx, workspace, reporter)
 	case "preview_push":
-		return app.PreviewPushProjectAssets(projectRoot)
+		return app.PreviewPushWorkspaceAssets(workspace)
 	case "remove_bundle":
 		var in app.RemoveBundleInput
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
 		in.ProjectRoot = projectRoot
+		in.Plane = workspace.EffectivePlane()
 		return app.RemoveBundle(in, reporter)
 	case "delete":
 		var in app.DeleteProjectInput
@@ -246,6 +259,7 @@ func dispatchOperation(ctx context.Context, operation, projectRoot string, paylo
 			return nil, err
 		}
 		in.ProjectRoot = projectRoot
+		in.Plane = workspace.EffectivePlane()
 		return app.DeleteProjectItems(ctx, in, reporter)
 	case "add_secret":
 		var in struct {

@@ -53,6 +53,7 @@ func synthesizeVaultBundles(repoDir string, byName map[string][]vaultBundle, ove
 		}
 		b := types.Bundle{
 			Name:        bundleName,
+			Scope:       types.BundleScopeProject,
 			Description: fmt.Sprintf("%s 资产包（bundle 内全部资产）", bundleName),
 			Members:     members,
 		}

@@ -196,15 +196,19 @@ func CommitRemoteSSHHostsEdit(ctx context.Context, session RemoteSSHHostsEditSes
 	return nil
 }
 
+// syncTargetFromRemoteItem 还原候选项对应的 SyncTarget。
+// 必须带上 item.Plane：machine 平面的 LocalRoot 是 bundles/<name>（相对 ~/.dec/secrets），
+// 丢了平面会让 AbsolutePath 误落到 <project>/bundles/...。
 func syncTargetFromRemoteItem(item DeleteSelectionItem) (secrets.SyncTarget, error) {
 	folder := strings.TrimSpace(item.SecretsBundle)
 	localRoot := strings.TrimSpace(item.LocalRoot)
 	if folder == "" {
 		return secrets.SyncTarget{}, fmt.Errorf("缺少 secrets folder")
 	}
-	if localRoot == secrets.ProjectSecretsLocalRel || (!strings.HasPrefix(folder, secrets.BundleFolderPrefix) && localRoot == "") {
-		name := folder
-		return secrets.NewProjectSyncTarget(name, folder)
+	if !secrets.IsMachinePlane(item.Plane) {
+		if localRoot == secrets.ProjectSecretsLocalRel || (!strings.HasPrefix(folder, secrets.BundleFolderPrefix) && localRoot == "") {
+			return secrets.NewProjectSyncTarget(folder, folder)
+		}
 	}
 	bundleName := strings.TrimSpace(item.DecBundleName)
 	if bundleName == "" {
@@ -216,7 +220,11 @@ func syncTargetFromRemoteItem(item DeleteSelectionItem) (secrets.SyncTarget, err
 			Name:      bundleName,
 			Folder:    folder,
 			LocalRoot: localRoot,
+			Plane:     item.Plane,
 		}, nil
+	}
+	if secrets.IsMachinePlane(item.Plane) {
+		return secrets.NewMachineBundleSyncTarget(bundleName, folder)
 	}
 	return secrets.NewBundleSyncTarget(bundleName, folder)
 }

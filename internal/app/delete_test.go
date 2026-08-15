@@ -11,6 +11,7 @@ import (
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/secrets/handler"
 	"github.com/shichao402/Dec/internal/types"
 	"gopkg.in/yaml.v3"
 )
@@ -440,6 +441,66 @@ func TestDeleteProjectItems_RemovesSSHKeyLocalAndRemote(t *testing.T) {
 	}
 	if len(stub.SSHKeysByFolder["bundle/vikunja"]) != 0 {
 		t.Fatalf("远端 SSH Key 应已删除: %#v", stub.SSHKeysByFolder["bundle/vikunja"])
+	}
+}
+
+func TestDeleteProjectItems_RevokesGitGCMNote(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+			"bundle/vikunja": {{RelativePath: "cnb_gitgcm.yaml", Content: "kind: gitgcm\nhost: cnb.cool\nusername: cnb\npassword: tok\n"}},
+		}}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	var calls [][]string
+	reg := handler.NewRegistry()
+	reg.Register(handler.NewGitGCMHandler(func(_ context.Context, _ string, args ...string) error {
+		calls = append(calls, append([]string(nil), args...))
+		return nil
+	}))
+	restore := handler.SetDefault(reg)
+	t.Cleanup(restore)
+
+	projectRoot := t.TempDir()
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/cnb_gitgcm.yaml",
+		"kind: gitgcm\nhost: cnb.cool\nusername: cnb\npassword: tok\n")
+
+	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
+		ProjectRoot: projectRoot,
+		Confirmed:   true,
+		Items: []DeleteSelectionItem{{
+			Kind:          DeleteKindSecret,
+			SecretPath:    "cnb_gitgcm.yaml",
+			LocalRoot:     ".secrets/bundles/vikunja",
+			Plane:         secrets.SyncPlaneProject,
+			SecretsBundle: "bundle/vikunja",
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("DeleteProjectItems() = %v", err)
+	}
+	if result.SecretsDeleted != 1 {
+		t.Fatalf("SecretsDeleted = %d, want 1", result.SecretsDeleted)
+	}
+
+	var sawReject, sawUnset bool
+	for _, c := range calls {
+		joined := strings.Join(c, " ")
+		if joined == "credential reject" {
+			sawReject = true
+		}
+		if joined == "config --global --unset credential.https://cnb.cool.provider" {
+			sawUnset = true
+		}
+	}
+	if !sawReject || !sawUnset {
+		t.Fatalf("应调用 credential reject 与 --unset provider: %#v", calls)
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", "cnb_gitgcm.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("本地 gitgcm note 应已删除, err=%v", err)
 	}
 }
 

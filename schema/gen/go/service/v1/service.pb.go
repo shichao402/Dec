@@ -301,6 +301,7 @@ type InvokeRequest struct {
 	ProjectRoot     string                 `protobuf:"bytes,2,opt,name=project_root,json=projectRoot,proto3" json:"project_root,omitempty"`
 	PayloadJson     []byte                 `protobuf:"bytes,3,opt,name=payload_json,json=payloadJson,proto3" json:"payload_json,omitempty"`
 	UnlockTimeoutMs int64                  `protobuf:"varint,4,opt,name=unlock_timeout_ms,json=unlockTimeoutMs,proto3" json:"unlock_timeout_ms,omitempty"`
+	WorkspacePlane  string                 `protobuf:"bytes,5,opt,name=workspace_plane,json=workspacePlane,proto3" json:"workspace_plane,omitempty"` // "project" | "user"；空兼容为 project
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -363,6 +364,13 @@ func (x *InvokeRequest) GetUnlockTimeoutMs() int64 {
 	return 0
 }
 
+func (x *InvokeRequest) GetWorkspacePlane() string {
+	if x != nil {
+		return x.WorkspacePlane
+	}
+	return ""
+}
+
 type InvokeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ResultJson    []byte                 `protobuf:"bytes,1,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
@@ -423,6 +431,7 @@ type RunOperationRequest struct {
 	Facade          string                 `protobuf:"bytes,4,opt,name=facade,proto3" json:"facade,omitempty"`
 	PayloadJson     []byte                 `protobuf:"bytes,5,opt,name=payload_json,json=payloadJson,proto3" json:"payload_json,omitempty"`
 	UnlockTimeoutMs int64                  `protobuf:"varint,6,opt,name=unlock_timeout_ms,json=unlockTimeoutMs,proto3" json:"unlock_timeout_ms,omitempty"`
+	WorkspacePlane  string                 `protobuf:"bytes,7,opt,name=workspace_plane,json=workspacePlane,proto3" json:"workspace_plane,omitempty"` // "project" | "user"；空兼容为 project
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -497,6 +506,13 @@ func (x *RunOperationRequest) GetUnlockTimeoutMs() int64 {
 		return x.UnlockTimeoutMs
 	}
 	return 0
+}
+
+func (x *RunOperationRequest) GetWorkspacePlane() string {
+	if x != nil {
+		return x.WorkspacePlane
+	}
+	return ""
 }
 
 type GetActiveOperationRequest struct {
@@ -1046,23 +1062,25 @@ const file_service_v1_service_proto_rawDesc = "" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x16\n" +
 	"\x06facade\x18\x02 \x01(\tR\x06facade\"B\n" +
 	"\x11KeepAliveResponse\x12-\n" +
-	"\x13server_time_unix_ms\x18\x01 \x01(\x03R\x10serverTimeUnixMs\"\x99\x01\n" +
+	"\x13server_time_unix_ms\x18\x01 \x01(\x03R\x10serverTimeUnixMs\"\xc2\x01\n" +
 	"\rInvokeRequest\x12\x16\n" +
 	"\x06method\x18\x01 \x01(\tR\x06method\x12!\n" +
 	"\fproject_root\x18\x02 \x01(\tR\vprojectRoot\x12!\n" +
 	"\fpayload_json\x18\x03 \x01(\fR\vpayloadJson\x12*\n" +
-	"\x11unlock_timeout_ms\x18\x04 \x01(\x03R\x0funlockTimeoutMs\"e\n" +
+	"\x11unlock_timeout_ms\x18\x04 \x01(\x03R\x0funlockTimeoutMs\x12'\n" +
+	"\x0fworkspace_plane\x18\x05 \x01(\tR\x0eworkspacePlane\"e\n" +
 	"\x0eInvokeResponse\x12\x1f\n" +
 	"\vresult_json\x18\x01 \x01(\fR\n" +
 	"resultJson\x122\n" +
-	"\x06events\x18\x02 \x03(\v2\x1a.service.v1.OperationEventR\x06events\"\xda\x01\n" +
+	"\x06events\x18\x02 \x03(\v2\x1a.service.v1.OperationEventR\x06events\"\x83\x02\n" +
 	"\x13RunOperationRequest\x12\x1c\n" +
 	"\toperation\x18\x01 \x01(\tR\toperation\x12!\n" +
 	"\fproject_root\x18\x02 \x01(\tR\vprojectRoot\x12\x1b\n" +
 	"\tclient_id\x18\x03 \x01(\tR\bclientId\x12\x16\n" +
 	"\x06facade\x18\x04 \x01(\tR\x06facade\x12!\n" +
 	"\fpayload_json\x18\x05 \x01(\fR\vpayloadJson\x12*\n" +
-	"\x11unlock_timeout_ms\x18\x06 \x01(\x03R\x0funlockTimeoutMs\">\n" +
+	"\x11unlock_timeout_ms\x18\x06 \x01(\x03R\x0funlockTimeoutMs\x12'\n" +
+	"\x0fworkspace_plane\x18\a \x01(\tR\x0eworkspacePlane\">\n" +
 	"\x19GetActiveOperationRequest\x12!\n" +
 	"\fproject_root\x18\x01 \x01(\tR\vprojectRoot\"]\n" +
 	"\x15WatchOperationRequest\x12!\n" +
