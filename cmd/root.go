@@ -200,7 +200,7 @@ func executeTUI(projectRoot string, input io.Reader, output io.Writer) error {
 }
 
 func executeTUIWorkspace(workspace app.Workspace, input io.Reader, output io.Writer) error {
-	api, err := serviceapi.Connect(context.Background(), "tui", fmt.Sprintf("tui-%d", os.Getpid()))
+	api, err := serviceapi.Connect(context.Background(), "tui", fmt.Sprintf("tui-%d", os.Getpid()), GetVersion())
 	if err != nil {
 		return fmt.Errorf("连接 dec-server 失败: %w", err)
 	}

@@ -17,14 +17,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ValidMemberTypes 列出成员引用允许的类型前缀。
-//
-// 与 vault 中的四种资产目录对齐：
-//   - skills   / skill   -> skill
-//   - commands / command -> command
-//   - rules    / rule    -> rule
-//   - mcp      / mcps    -> mcp
-var ValidMemberTypes = []string{"skill", "command", "rule", "mcp"}
+// ValidMemberTypes 列出成员引用允许的归一化类型（源自 VaultAssetKinds）。
+var ValidMemberTypes = memberTypesFromKinds()
 
 // bundleNameRegexp 约束 bundle name 为字母数字加 - _。
 var bundleNameRegexp = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
@@ -225,16 +219,16 @@ func parseBundleYAML(data []byte, source string) (types.Bundle, error) {
 }
 
 func normalizeMemberType(raw string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "skill", "skills":
-		return "skill", true
-	case "command", "commands":
-		return "command", true
-	case "rule", "rules":
-		return "rule", true
-	case "mcp", "mcps":
-		return "mcp", true
-	default:
-		return "", false
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	for _, k := range VaultAssetKinds {
+		if raw == k.Type || raw == k.Dir {
+			return k.Type, true
+		}
+		for _, alias := range k.Aliases {
+			if raw == alias {
+				return k.Type, true
+			}
+		}
 	}
+	return "", false
 }

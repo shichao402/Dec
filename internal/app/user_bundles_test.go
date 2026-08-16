@@ -46,6 +46,43 @@ func TestEnsureVaultBundlesForUserEnable_CreatesMissing(t *testing.T) {
 	if !strings.Contains(string(data), "scope: user") {
 		t.Fatalf("占位 bundle 应声明 scope: user, 实际: %s", data)
 	}
+
+	cliData, err := os.ReadFile(filepath.Join(tx.WorkDir(), "bundles", "cli", "bundle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cliData), "scope: user") {
+		t.Fatalf("启用时已有 cli 应升级为 scope: user, 实际: %s", cliData)
+	}
+}
+
+func TestEnsureVaultBundlesForUserEnable_UpgradesExistingProjectScope(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/cli/bundle.yaml": "name: cli\nscope: project\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	created, err := ensureVaultBundlesForUserEnable([]string{"cli"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created) != 0 {
+		t.Fatalf("created = %#v, 期望空（仅升级）", created)
+	}
+	tx, err := repo.NewReadTransaction()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Close()
+	data, err := os.ReadFile(filepath.Join(tx.WorkDir(), "bundles", "cli", "bundle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "scope: user") {
+		t.Fatalf("应升级为 scope: user, 实际: %s", data)
+	}
 }
 
 // 平面隔离（ADR 0009）：project 上下文的 pull 不再并入用户平面启用列表。
@@ -91,7 +128,7 @@ members:
 	if result.RequestedCount != 0 {
 		t.Fatalf("RequestedCount = %d, 期望 0（用户平面启用不参与项目 pull）", result.RequestedCount)
 	}
-	if !strings.Contains(result.SkippedReason, "没有已启用的 bundle") {
+	if result.SkippedReason != "未启用 bundle" {
 		t.Fatalf("SkippedReason = %q", result.SkippedReason)
 	}
 }

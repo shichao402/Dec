@@ -14,6 +14,10 @@ func (m model) ioBusyLabel() string {
 		return "Remove running…"
 	case m.updatingBinary:
 		return "Updating… Esc cancel"
+	case m.restartingServer || m.serverRestartStage == "running":
+		return "Restarting dec-server…"
+	case m.serverRestartStage == "confirm":
+		return "y/Enter restart · n/Esc cancel"
 	case m.updateStage == "checking":
 		return "Checking updates…"
 	case m.pushPreviewLoad.busy() || m.pushStage == "loading":
@@ -41,6 +45,8 @@ func (m model) ioBusyLabel() string {
 		return "Loading remote list…"
 	case m.projectVarsLoad.busy():
 		return "Reloading project vars…"
+	case m.globalVarsLoad.busy():
+		return "Reloading global vars…"
 	case m.shellRefresh.busy():
 		return "Refreshing…"
 	}
@@ -59,13 +65,16 @@ func (m model) statusBarLeftHints() string {
 		if m.deleteStage == "summary" {
 			return "y/Enter continue · n/Esc cancel"
 		}
+		if m.deleteStage == "typed" {
+			return "type folder or DELETE · Enter confirm · Esc back"
+		}
 		if m.deleteStage == "confirm" {
 			return "y confirm delete · n/Esc back"
 		}
 		if m.deleteFilterInput {
 			return "filter · Enter apply · Esc cancel"
 		}
-		return "q quit | j/k | PgUp/Dn | space | e edit | d delete | r refresh"
+		return "q quit | j/k | PgUp/Dn | space | e edit | A add | d delete | r refresh"
 	}
 	return "q quit | j/k nav | l/h in-out | r refresh"
 }

@@ -2,24 +2,24 @@
 │ Dec Shell      ││ Settings · Settings ready, 1 IDEs, 1 bundles               │
 │  Home          │╰────────────────────────────────────────────────────────────╯
 │  Bundles       │╭────────────────────────────────────────────────────────────╮
-│  Project       ││ 首次保存会创建 ~/.dec/local/vars.yaml                      │
-│  Run           ││                                                            │
-│  Remote        ││ Global Settings                                            │
-│ Settings       ││   Repo URL: git@github.com:demo/dec.git                    │
-│                ││   Server idle timeout: 30m                                 │
+│  Project       ││ 全局设置                                                   │
+│  Run           ││   Repo URL: git@github.com:demo/dec.git                    │
+│  Remote        ││   服务空闲超时: 30m                                        │
+│ Settings       ││   重启 dec-server                                          │
+│                ││   本机变量 · e 外部编辑 (已存在)                           │
 │                ││   [ ] codex                                                │
 │                ││   [x] cursor                                               │
 │                ││                                                            │
-│                ││ 本机启用的 bundles                                         │
+│                ││ 用户 bundles                                               │
 │                ││   [ ] vikunja                                              │
 │                ││   [x] woa                                                  │
 │                ││                                                            │
-│                ││ Details                                                    │
-│                ││ 当前远端: git@github.com:demo/dec.git                      │
-│                ││ Bare Repo: 未连接                                          │
-│                ││ 配置文件: /tmp/.dec/config.yaml                            │
-│                ││ 本机 Vars: /tmp/.dec/local/vars.yaml                       │
-│                ││ 保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。        │
+│                ││ 详情                                                       │
+│                ││ 状态: 已连接                                               │
+│                ││ 远端: git@github.com:demo/dec.git                          │
+│                ││ Enter 编辑                                                 │
+│                ││                                                            │
+│                ││                                                            │
 │                ││                                                            │
 │                ││                                                            │
 │                ││                                                            │

@@ -254,6 +254,260 @@ func TestListDeleteCandidates_IncludesRemoteOnlySecrets(t *testing.T) {
 	t.Fatalf("应列出远端-only secret: %#v", candidates)
 }
 
+// ADR 0004：Remote 应列「包内外」secrets；未启用但 vault 同平面存在的包，远端 Note 仍要出现。
+func TestListDeleteCandidates_ListsRemoteSecretsOutsideEnabled(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForProjectTest(t, "DEC_HOME", decHome)
+	secretsDir := filepath.Join(decHome, "secrets")
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := secrets.Config{ServerURL: "https://vault.example.com"}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{
+			NotesByFolder: map[string][]secrets.SecureNote{
+				"bundle/vikunja": {{RelativePath: "env/outside.env", Content: "TOKEN=1\n"}},
+			},
+		}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/vikunja/bundle.yaml": "name: vikunja\nscope: project\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() = %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "Demo",
+		EnabledBundles: nil, // 未启用
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, true, nil)
+	if err != nil {
+		t.Fatalf("ListDeleteCandidates() = %v", err)
+	}
+	for _, c := range candidates {
+		if c.Kind == DeleteKindSecret && c.SecretPath == "env/outside.env" {
+			if c.SecretsBundle != "bundle/vikunja" {
+				t.Fatalf("SecretsBundle = %q, want bundle/vikunja", c.SecretsBundle)
+			}
+			return
+		}
+	}
+	t.Fatalf("未启用包的远端 secret 也应出现在 Remote: %#v", candidates)
+}
+
+// 本地停用后残留的 .secrets/bundles/<name> 仍应出现在 Remote（删除入口）。
+func TestListDeleteCandidates_ListsLocalSecretsForDisabledBundle(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	useStubSecretsSession(t)
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		EnabledBundles: nil,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/env/left.env", "TOKEN=1\n")
+
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
+	if err != nil {
+		t.Fatalf("ListDeleteCandidates() = %v", err)
+	}
+	for _, c := range candidates {
+		if c.Kind == DeleteKindSecret && c.SecretPath == "env/left.env" {
+			return
+		}
+	}
+	t.Fatalf("停用后本地残留 secret 应可在 Remote 列出: %#v", candidates)
+}
+
+func TestListDeleteCandidates_IncludesCommandsFromVault(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	useStubSecretsSession(t)
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/pkv/commands/pkv/note.md": "# pkv\n",
+		// 无 bundle.yaml：靠 synthesize + listBundleAssetMembers 发现 command
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() = %v", err)
+	}
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{}); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
+	if err != nil {
+		t.Fatalf("ListDeleteCandidates() = %v", err)
+	}
+	for _, c := range candidates {
+		if c.Kind == DeleteKindDecAsset && c.Type == "command" && c.Name == "pkv" && c.Vault == "pkv" {
+			return
+		}
+	}
+	t.Fatalf("vault commands 应出现在 Remote: %#v", candidates)
+}
+
+// writeRemoteBrowseSecretsConfig 准备一个「已配置 Bitwarden + 有 session」的隔离 DEC_HOME。
+func writeRemoteBrowseSecretsConfig(t *testing.T, cfg secrets.Config) {
+	t.Helper()
+	decHome := t.TempDir()
+	setEnvForProjectTest(t, "DEC_HOME", decHome)
+	secretsDir := filepath.Join(decHome, "secrets")
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ServerURL == "" {
+		cfg.ServerURL = "https://vault.example.com"
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+}
+
+func hasSecretCandidate(candidates []DeleteCandidate, folder, notePath string) bool {
+	for _, c := range candidates {
+		if c.Kind == DeleteKindSecret && c.SecretsBundle == folder && c.SecretPath == notePath {
+			return true
+		}
+	}
+	return false
+}
+
+// ADR 0004：Bitwarden 上存在、但本机启用列表 / 同步根 / vault 里都没有的 folder
+// 属于孤儿，Remote 必须能看见它才能删。浏览候选只从本地名单推导时它永远不可见。
+func TestListDeleteCandidates_DiscoversOrphanRemoteFolder(t *testing.T) {
+	writeRemoteBrowseSecretsConfig(t, secrets.Config{})
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{
+			NotesByFolder: map[string][]secrets.SecureNote{
+				"bundle/orphan": {{RelativePath: "env/left-behind.env", Content: "TOKEN=1\n"}},
+			},
+		}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/known/bundle.yaml": "name: known\nscope: project\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() = %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "Demo"}); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, true, nil)
+	if err != nil {
+		t.Fatalf("ListDeleteCandidates() = %v", err)
+	}
+	if !hasSecretCandidate(candidates, "bundle/orphan", "env/left-behind.env") {
+		t.Fatalf("Bitwarden 孤儿 folder 应出现在 Remote: %#v", candidates)
+	}
+}
+
+// ADR 0004 修订：Remote 全量可见，scope 只作元数据；跨平面 folder 也应出现。
+func TestListDeleteCandidates_OrphanDiscoveryCrossPlaneVisible(t *testing.T) {
+	writeRemoteBrowseSecretsConfig(t, secrets.Config{})
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{
+			NotesByFolder: map[string][]secrets.SecureNote{
+				"bundle/user-only": {{RelativePath: "env/machine.env", Content: "TOKEN=1\n"}},
+			},
+		}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/user-only/bundle.yaml": "name: user-only\nscope: user\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() = %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "Demo"}); err != nil {
+		t.Fatal(err)
+	}
+
+	projectCandidates, err := ListDeleteCandidates(context.Background(), projectRoot, true, nil)
+	if err != nil {
+		t.Fatalf("ListDeleteCandidates() = %v", err)
+	}
+	if !hasSecretCandidate(projectCandidates, "bundle/user-only", "env/machine.env") {
+		t.Fatalf("跨平面 folder 应出现在项目平面 Remote: %#v", projectCandidates)
+	}
+
+	userCandidates, err := ListWorkspaceDeleteCandidates(
+		context.Background(), NewWorkspace(WorkspaceUser, ""), true, nil)
+	if err != nil {
+		t.Fatalf("ListWorkspaceDeleteCandidates(user) = %v", err)
+	}
+	if !hasSecretCandidate(userCandidates, "bundle/user-only", "env/machine.env") {
+		t.Fatalf("scope=user 的 bundle 应出现在用户平面 Remote: %#v", userCandidates)
+	}
+}
+
+// known_secret_bundles 是本机见过的 secrets 包；Remote 浏览也要拿它当候选，
+// 否则「vault 包已删、Bitwarden folder 还在」的残留无从清理。
+func TestPlanWorkspaceSecretsBrowse_IncludesKnownSecretBundles(t *testing.T) {
+	writeRemoteBrowseSecretsConfig(t, secrets.Config{
+		KnownSecretBundles: []string{"remembered"},
+	})
+
+	cfg, err := secrets.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := planWorkspaceSecretsBrowse(
+		NewWorkspace(WorkspaceProject, t.TempDir()), nil, cfg, nil)
+	if err != nil {
+		t.Fatalf("planWorkspaceSecretsBrowse() = %v", err)
+	}
+	for _, target := range plan.Targets {
+		if target.Folder == "bundle/remembered" {
+			return
+		}
+	}
+	t.Fatalf("known_secret_bundles 应进入浏览候选: %#v", plan.Targets)
+}
+
 func TestListDeleteCandidates_SkipsRemoteWhenDisabled(t *testing.T) {
 	decHome := t.TempDir()
 	setEnvForProjectTest(t, "DEC_HOME", decHome)
@@ -315,8 +569,11 @@ func TestListDeleteCandidates_GroupsDecAssetsUnderBundle(t *testing.T) {
 	}
 	for _, c := range candidates {
 		if c.Kind == DeleteKindDecAsset && c.Name == "demo" {
-			if c.TreeRoot != ".dec" || c.TreeBranch != "vikunja" {
-				t.Fatalf("Dec 资产 tree = %q/%q, want .dec/vikunja", c.TreeRoot, c.TreeBranch)
+			if c.Partition != PartitionLocal {
+				t.Fatalf("本地 cache 资产应属本地分区, got %q", c.Partition)
+			}
+			if c.TreeRoot != localTreeRootDec || c.TreeBranch != "vikunja" {
+				t.Fatalf("Dec 资产 tree = %q/%q, want %s/vikunja", c.TreeRoot, c.TreeBranch, localTreeRootDec)
 			}
 			return
 		}
@@ -397,7 +654,7 @@ func TestListDeleteCandidates_IncludesSSHKeys(t *testing.T) {
 	t.Fatalf("应列出 SSH Key 候选项: %#v", candidates)
 }
 
-func TestDeleteProjectItems_RemovesSSHKeyLocalAndRemote(t *testing.T) {
+func TestDeleteProjectItems_RemovesSSHKeyRemoteOnlyLeavesLocal(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -423,11 +680,13 @@ func TestDeleteProjectItems_RemovesSSHKeyLocalAndRemote(t *testing.T) {
 	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
 		ProjectRoot: t.TempDir(),
 		Confirmed:   true,
+		Mode:        DeleteModeRemote,
 		Items: []DeleteSelectionItem{{
 			Kind:          DeleteKindSSHKey,
 			SSHKeyName:    "deploy",
 			DecBundleName: "vikunja",
 			SecretsBundle: "bundle/vikunja",
+			Partition:     PartitionRemote,
 		}},
 	}, nil)
 	if err != nil {
@@ -436,11 +695,32 @@ func TestDeleteProjectItems_RemovesSSHKeyLocalAndRemote(t *testing.T) {
 	if result.SSHKeysDeleted != 1 {
 		t.Fatalf("SSHKeysDeleted = %d", result.SSHKeysDeleted)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".ssh", "dec_vikunja_deploy")); !os.IsNotExist(err) {
-		t.Fatal("本地私钥应已删除")
+	if _, err := os.Stat(filepath.Join(home, ".ssh", "dec_vikunja_deploy")); err != nil {
+		t.Fatal("远端删除不应碰本地私钥")
 	}
 	if len(stub.SSHKeysByFolder["bundle/vikunja"]) != 0 {
 		t.Fatalf("远端 SSH Key 应已删除: %#v", stub.SSHKeysByFolder["bundle/vikunja"])
+	}
+
+	result, err = CleanupLocal(context.Background(), DeleteProjectInput{
+		ProjectRoot: t.TempDir(),
+		Confirmed:   true,
+		Items: []DeleteSelectionItem{{
+			Kind:          DeleteKindSSHKey,
+			SSHKeyName:    "deploy",
+			DecBundleName: "vikunja",
+			SecretsBundle: "bundle/vikunja",
+			Partition:     PartitionLocal,
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("CleanupLocal() = %v", err)
+	}
+	if result.SSHKeysDeleted != 1 {
+		t.Fatalf("SSHKeysDeleted = %d", result.SSHKeysDeleted)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".ssh", "dec_vikunja_deploy")); !os.IsNotExist(err) {
+		t.Fatal("本地清理后私钥应已删除")
 	}
 }
 
@@ -471,12 +751,14 @@ func TestDeleteProjectItems_RevokesGitGCMNote(t *testing.T) {
 	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
 		ProjectRoot: projectRoot,
 		Confirmed:   true,
+		Mode:        DeleteModeRemote,
 		Items: []DeleteSelectionItem{{
 			Kind:          DeleteKindSecret,
 			SecretPath:    "cnb_gitgcm.yaml",
 			LocalRoot:     ".secrets/bundles/vikunja",
 			Plane:         secrets.SyncPlaneProject,
 			SecretsBundle: "bundle/vikunja",
+			Partition:     PartitionRemote,
 		}},
 	}, nil)
 	if err != nil {
@@ -499,8 +781,8 @@ func TestDeleteProjectItems_RevokesGitGCMNote(t *testing.T) {
 	if !sawReject || !sawUnset {
 		t.Fatalf("应调用 credential reject 与 --unset provider: %#v", calls)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", "cnb_gitgcm.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("本地 gitgcm note 应已删除, err=%v", err)
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", "cnb_gitgcm.yaml")); err != nil {
+		t.Fatalf("远端删除不应碰本地 gitgcm note, err=%v", err)
 	}
 }
 
@@ -529,11 +811,13 @@ func TestDeleteProjectItems_LocalOnlyDecAssetAndPruneEmptyBundleDir(t *testing.T
 	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
 		ProjectRoot: projectRoot,
 		Confirmed:   true,
+		Mode:        DeleteModeLocal,
 		Items: []DeleteSelectionItem{{
-			Kind:  DeleteKindDecAsset,
-			Type:  "skill",
-			Name:  "helloworld",
-			Vault: "default",
+			Kind:      DeleteKindDecAsset,
+			Type:      "skill",
+			Name:      "helloworld",
+			Vault:     "default",
+			Partition: PartitionLocal,
 		}},
 	}, nil)
 	if err != nil {
@@ -544,5 +828,226 @@ func TestDeleteProjectItems_LocalOnlyDecAssetAndPruneEmptyBundleDir(t *testing.T
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", "cache", "default")); !os.IsNotExist(err) {
 		t.Fatalf("空的 .dec/cache/default 应被删掉, err=%v", err)
+	}
+}
+
+func TestDeleteProjectItems_ProjectPlaneRejectsEmptyRoot(t *testing.T) {
+	_, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
+		ProjectRoot: "",
+		Plane:       WorkspaceProject,
+		Confirmed:   true,
+		Items: []DeleteSelectionItem{{
+			Kind:       DeleteKindSecret,
+			SecretPath: "env/app.env",
+		}},
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "项目根目录不能为空") {
+		t.Fatalf("项目平面空根应报错, got %v", err)
+	}
+}
+
+// 用户平面 Remote 删除不依赖 projectRoot（ADR 0009）：本地 secrets、Dec cache、SSH 均走机器路径。
+func TestDeleteProjectItems_UserPlaneEmptyRootDeletesLocalSecretAndRemote(t *testing.T) {
+	decHome := setupSecretsConfigForPushTest(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	localNote := filepath.Join(decHome, "secrets", "bundles", "woa", "env", "app.env")
+	if err := os.MkdirAll(filepath.Dir(localNote), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localNote, []byte("TOKEN=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stub := &secrets.StubClient{
+		NotesByFolder: map[string][]secrets.SecureNote{
+			"bundle/woa": {{RelativePath: "env/app.env", Content: "TOKEN=1\n"}},
+		},
+	}
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
+		ProjectRoot: "",
+		Plane:       WorkspaceUser,
+		Confirmed:   true,
+		Mode:        DeleteModeRemote,
+		Items: []DeleteSelectionItem{{
+			Kind:          DeleteKindSecret,
+			SecretPath:    "env/app.env",
+			LocalRoot:     "bundles/woa",
+			Plane:         secrets.SyncPlaneMachine,
+			SecretsBundle: "bundle/woa",
+			Partition:     PartitionRemote,
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("DeleteProjectItems(user) = %v", err)
+	}
+	if result.SecretsDeleted != 1 {
+		t.Fatalf("SecretsDeleted = %d, want 1", result.SecretsDeleted)
+	}
+	if _, err := os.Stat(localNote); err != nil {
+		t.Fatalf("远端删除不应碰本地文件, err=%v", err)
+	}
+	if len(stub.NotesByFolder["bundle/woa"]) != 0 {
+		t.Fatalf("远端 Note 应已删除: %#v", stub.NotesByFolder["bundle/woa"])
+	}
+	if _, err := CleanupLocal(context.Background(), DeleteProjectInput{
+		ProjectRoot: "",
+		Plane:       WorkspaceUser,
+		Confirmed:   true,
+		Items: []DeleteSelectionItem{{
+			Kind:          DeleteKindSecret,
+			SecretPath:    "env/app.env",
+			LocalRoot:     "bundles/woa",
+			Plane:         secrets.SyncPlaneMachine,
+			SecretsBundle: "bundle/woa",
+			Partition:     PartitionLocal,
+		}},
+	}, nil); err != nil {
+		t.Fatalf("CleanupLocal = %v", err)
+	}
+	if _, err := os.Stat(localNote); !os.IsNotExist(err) {
+		t.Fatalf("本地清理后文件应已删除, err=%v", err)
+	}
+}
+
+func TestDeleteProjectItems_UserPlaneEmptyRootDeletesDecCache(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForProjectTest(t, "DEC_HOME", decHome)
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/woa/bundle.yaml": "name: woa\nscope: user\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() = %v", err)
+	}
+
+	skillDir := filepath.Join(decHome, "cache", "woa", "skills", "demo")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
+		ProjectRoot: "",
+		Plane:       WorkspaceUser,
+		Confirmed:   true,
+		Mode:        DeleteModeLocal,
+		Items: []DeleteSelectionItem{{
+			Kind:      DeleteKindDecAsset,
+			Type:      "skill",
+			Name:      "demo",
+			Vault:     "woa",
+			Partition: PartitionLocal,
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("DeleteProjectItems(user dec) = %v", err)
+	}
+	if result.DecDeleted != 1 {
+		t.Fatalf("DecDeleted = %d, want 1", result.DecDeleted)
+	}
+	if _, err := os.Stat(filepath.Join(decHome, "cache", "woa")); !os.IsNotExist(err) {
+		t.Fatalf("空的 ~/.dec/cache/woa 应被删掉, err=%v", err)
+	}
+}
+
+func TestDeleteProjectItems_UserPlaneEmptyRootDeletesSSHKey(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	stub := &secrets.StubClient{
+		SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
+			"bundle/woa": {{Name: "deploy", Hosts: []string{"woa.example.com"}, PrivateKey: "priv\n", PublicKey: "pub\n"}},
+		},
+	}
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	landings, err := secrets.PrepareSSHKeyLandings("woa", stub.SSHKeysByFolder["bundle/woa"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.WriteSSHKeyLandings(landings); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
+		ProjectRoot: "",
+		Plane:       WorkspaceUser,
+		Confirmed:   true,
+		Mode:        DeleteModeRemote,
+		Items: []DeleteSelectionItem{{
+			Kind:          DeleteKindSSHKey,
+			SSHKeyName:    "deploy",
+			DecBundleName: "woa",
+			SecretsBundle: "bundle/woa",
+			Partition:     PartitionRemote,
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("DeleteProjectItems(user ssh) = %v", err)
+	}
+	if result.SSHKeysDeleted != 1 {
+		t.Fatalf("SSHKeysDeleted = %d, want 1", result.SSHKeysDeleted)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".ssh", "dec_woa_deploy")); err != nil {
+		t.Fatal("远端删除不应碰本地私钥")
+	}
+	if len(stub.SSHKeysByFolder["bundle/woa"]) != 0 {
+		t.Fatalf("远端 SSH Key 应已删除: %#v", stub.SSHKeysByFolder["bundle/woa"])
+	}
+}
+
+// ADR 0004 修订：Remote 全量可见；合成 scope=project 的包也出现在用户平面库存中。
+func TestListDeleteCandidates_SyntheticProjectBundleVisibleOnUserPlane(t *testing.T) {
+	writeRemoteBrowseSecretsConfig(t, secrets.Config{})
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{
+			NotesByFolder: map[string][]secrets.SecureNote{
+				"bundle/pkv": {{RelativePath: "pkv.include", Content: "x\n"}},
+			},
+		}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/pkv/commands/pkv/note.md": "# pkv\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() = %v", err)
+	}
+
+	userCandidates, err := ListWorkspaceDeleteCandidates(
+		context.Background(), NewWorkspace(WorkspaceUser, ""), true, nil)
+	if err != nil {
+		t.Fatalf("ListWorkspaceDeleteCandidates(user) = %v", err)
+	}
+	if !hasSecretCandidate(userCandidates, "bundle/pkv", "pkv.include") {
+		t.Fatalf("合成 scope=project 的 pkv 应出现在用户平面 Remote: %#v", userCandidates)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "Demo"}); err != nil {
+		t.Fatal(err)
+	}
+	projectCandidates, err := ListDeleteCandidates(context.Background(), projectRoot, true, nil)
+	if err != nil {
+		t.Fatalf("ListDeleteCandidates() = %v", err)
+	}
+	if !hasSecretCandidate(projectCandidates, "bundle/pkv", "pkv.include") {
+		t.Fatalf("合成 scope=project 的 pkv 应出现在项目平面 Remote: %#v", projectCandidates)
 	}
 }

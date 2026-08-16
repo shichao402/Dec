@@ -82,6 +82,9 @@ func (m model) routeDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	if !m.isDeletePage() {
 		return m, nil, false
 	}
+	if m.addSecretStage != "" {
+		return m, nil, false
+	}
 	if m.focus == focusSidebar && msg.String() != "r" {
 		return m, nil, false
 	}
@@ -89,7 +92,7 @@ func (m model) routeDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		model, cmd := m.handleDeleteFilterInput(msg)
 		return model, cmd, true
 	}
-	if m.deleteStage == "summary" || m.deleteStage == "confirm" {
+	if m.deleteStage == "summary" || m.deleteStage == "confirm" || m.deleteStage == "typed" {
 		model, cmd := m.handleDeleteStageKey(msg)
 		return model, cmd, true
 	}
@@ -144,6 +147,9 @@ func selectionFromCandidate(c app.DeleteCandidate) app.DeleteSelectionItem {
 		DecBundleName: c.DecBundleName,
 		BundleName:    c.BundleName,
 		Members:       append([]app.AssetSelectionItem(nil), c.Members...),
+		Partition:     c.Partition,
+		ScopeTag:      c.ScopeTag,
+		Unmanaged:     c.Unmanaged,
 	}
 }
 
@@ -151,7 +157,7 @@ func (m model) handleDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.deleteFilterInput {
 		return m.handleDeleteFilterInput(msg)
 	}
-	if m.deleteStage == "summary" || m.deleteStage == "confirm" {
+	if m.deleteStage == "summary" || m.deleteStage == "confirm" || m.deleteStage == "typed" {
 		return m.handleDeleteStageKey(msg)
 	}
 	if m.runningDelete {
@@ -204,6 +210,9 @@ func (m model) handleDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.deleteTree.SelectAllAtCursor()
 		m.pushLog(fmt.Sprintf("Remote 已全选 %d 项", m.deleteTree.CountSelectable()))
 		return m, nil
+	case "A":
+		m.beginAddSecret(true)
+		return m, nil
 	case "e":
 		cmd := m.startRemoteEditAtCursor()
 		return m, cmd
@@ -246,11 +255,21 @@ func (m model) handleDeleteStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "summary":
 		switch msg.String() {
 		case "y", "enter":
-			m.deleteStage = "confirm"
-			m.pushLog("Remote 进入最终确认")
+			spec := app.AnalyzeDeleteTypedConfirm(m.selectedDeleteItems(), m.workspace())
+			m.deleteTypedSpec = spec
+			m.deleteTypedInput = ""
+			if spec.Required {
+				m.deleteStage = "typed"
+				m.pushLog("Remote 跨上下文删除：请输入 " + spec.Expect + " 或 DELETE 确认")
+			} else {
+				m.deleteStage = "confirm"
+				m.pushLog("Remote 进入最终确认")
+			}
 			return m, nil
 		case "n", "esc", "h", "left":
 			m.deleteStage = ""
+			m.deleteTypedInput = ""
+			m.deleteTypedSpec = app.DeleteTypedConfirmSpec{}
 			m.pushLog("Remote 已取消删除")
 			return m, nil
 		}
@@ -264,6 +283,29 @@ func (m model) handleDeleteStageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pushLog("Remote 返回摘要")
 			return m, nil
 		}
+	case "typed":
+		switch msg.Type {
+		case tea.KeyEsc:
+			m.deleteStage = "summary"
+			m.deleteTypedInput = ""
+			m.pushLog("Remote 返回摘要")
+			return m, nil
+		case tea.KeyEnter:
+			if !app.MatchDeleteTypedConfirm(m.deleteTypedInput, m.deleteTypedSpec) {
+				m.pushLog(fmt.Sprintf("输入不匹配：请输入 %q 或 DELETE", m.deleteTypedSpec.Expect))
+				return m, nil
+			}
+			m.deleteStage = "running"
+			m.deleteTypedInput = ""
+			return m, m.startDeleteRun()
+		case tea.KeyBackspace, tea.KeyCtrlH:
+			m.deleteTypedInput = trimLastRune(m.deleteTypedInput)
+			return m, nil
+		}
+		if len(msg.Runes) > 0 && !msg.Alt {
+			m.deleteTypedInput += string(msg.Runes)
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -337,9 +379,9 @@ func (m model) remoteHeadLines() []string {
 	}
 	lines := []string{head}
 	if m.deleteLoad.busy() {
-		lines = append(lines, shellWarnStyle.Render("刷新中…（含远端 Bitwarden orphan 时可能较慢）"))
+		lines = append(lines, shellWarnStyle.Render("刷新中…"))
 	} else {
-		lines = append(lines, shellMutedStyle.Render("space 选中 · a 全选 · e 编辑 · d 删除 · A 登记 · / 筛选 · r 刷新 · PgUp/PgDn 翻页"))
+		lines = append(lines, shellMutedStyle.Render("a 全选 · A 登记 · / 筛选"))
 	}
 	if m.deleteFilterInput {
 		lines = append(lines, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))
@@ -381,7 +423,7 @@ func (m model) remoteListChromeHeight(width int) int {
 }
 
 func (m model) renderDeletePage(width, height int) string {
-	if m.deleteStage == "summary" || m.deleteStage == "confirm" {
+	if m.deleteStage == "summary" || m.deleteStage == "confirm" || m.deleteStage == "typed" {
 		return m.renderDeleteConfirmPage(width)
 	}
 	mm := m
@@ -400,7 +442,7 @@ func (m model) renderDeletePage(width, height int) string {
 	allRows := tree.VisibleRows()
 	lines := mm.remoteHeadLines()
 	if len(visible) == 0 {
-		lines = append(lines, shellMutedStyle.Render("没有远端候选项。可按 A 登记 secret，或先到 Run 页 pull。"))
+		lines = append(lines, shellMutedStyle.Render("暂无远端项 · A 登记 Secret · Run 页 Pull 获取"))
 		return wrapLines(width, lines)
 	}
 
@@ -440,29 +482,68 @@ func (m model) renderDeletePage(width, height int) string {
 
 func (m model) renderDeleteConfirmPage(width int) string {
 	selected := m.selectedDeleteItems()
-	lines := []string{shellTitleStyle.Render("Delete · 确认")}
+	mode, modeErr := app.InferDeleteMode(selected, "")
+	modeLabel := "将改远端、不碰本地"
+	if mode == app.DeleteModeLocal {
+		modeLabel = "只清本机，不写 Bitwarden / 不写 vault"
+	}
+	lines := []string{shellTitleStyle.Render("Remote · 确认")}
+	if modeErr != nil {
+		lines = append(lines, shellWarnStyle.Render(modeErr.Error()))
+		return wrapLines(width, lines)
+	}
 	switch m.deleteStage {
 	case "summary":
-		lines = append(lines, shellMutedStyle.Render("操作  y/Enter 继续 · n/Esc/h 取消"), "")
-		lines = append(lines, fmt.Sprintf("将删除 %d 项：", len(selected)))
+		lines = append(lines, fmt.Sprintf("%s · %d 项：", modeLabel, len(selected)))
 		for _, item := range selected {
 			switch item.Kind {
 			case app.DeleteKindBundle:
 				lines = append(lines, fmt.Sprintf("  bundle %s", item.BundleName))
 			case app.DeleteKindSecret:
-				lines = append(lines, fmt.Sprintf("  secret %s", item.SecretPath))
+				folder := item.SecretsBundle
+				if folder == "" {
+					folder = "?"
+				}
+				mark := ""
+				if item.Unmanaged {
+					mark = " · 跨上下文"
+				}
+				if item.ScopeTag != "" {
+					mark += " · scope:" + item.ScopeTag
+				}
+				lines = append(lines, fmt.Sprintf("  secret %s · folder %s%s", item.SecretPath, folder, mark))
 			case app.DeleteKindSSHKey:
-				lines = append(lines, fmt.Sprintf("  ssh %s", item.SSHKeyName))
+				mark := ""
+				if item.Unmanaged {
+					mark = " · 跨上下文"
+				}
+				lines = append(lines, fmt.Sprintf("  ssh %s · folder %s%s", item.SSHKeyName, item.SecretsBundle, mark))
 			default:
-				lines = append(lines, fmt.Sprintf("  [%s] %s / %s", item.Type, item.Name, item.Vault))
+				mark := ""
+				if item.ScopeTag != "" {
+					mark = " · scope:" + item.ScopeTag
+				}
+				lines = append(lines, fmt.Sprintf("  [%s] %s / %s%s", item.Type, item.Name, item.Vault, mark))
 			}
+		}
+		spec := app.AnalyzeDeleteTypedConfirm(selected, m.workspace())
+		if spec.Required {
+			lines = append(lines, shellWarnStyle.Render("跨上下文风险："+spec.Reason))
+			lines = append(lines, shellMutedStyle.Render("下一步需输入 "+spec.Expect+" 或 DELETE"))
 		}
 	case "confirm":
 		lines = append(lines,
-			shellMutedStyle.Render("操作  y 确认删除 · n/Esc/h 返回摘要"),
-			"",
-			shellWarnStyle.Render("⚠️  删除不可逆：远端 vault、本地 cache/IDE、Bitwarden Note/SSH Key 将被移除。"),
-			fmt.Sprintf("共 %d 项待删除。", len(selected)),
+			shellWarnStyle.Render(fmt.Sprintf("最终确认：%s（不可逆）", modeLabel)),
+			fmt.Sprintf("共 %d 项。", len(selected)),
+		)
+	case "typed":
+		lines = append(lines,
+			shellWarnStyle.Render("跨上下文删除 · 请真正输入确认短语"),
+			shellWarnStyle.Render(m.deleteTypedSpec.Reason),
+			fmt.Sprintf("共 %d 项 · %s", len(selected), modeLabel),
+			fmt.Sprintf("请输入 %q 或 DELETE：", m.deleteTypedSpec.Expect),
+			shellSelectedRow.Render(fallbackValue(m.deleteTypedInput, "<输入>")+"▌"),
+			shellMutedStyle.Render("Enter 执行 · Esc 返回摘要"),
 		)
 	}
 	return wrapLines(width, lines)

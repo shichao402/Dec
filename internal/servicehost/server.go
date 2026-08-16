@@ -105,7 +105,17 @@ func Run(ctx context.Context, version string) error {
 		grpcServer.GracefulStop()
 		return ctx.Err()
 	case <-stopRequested:
-		grpcServer.GracefulStop()
+		// KeepAlive 等长连接会拖住 GracefulStop；更新/手动重启需尽快退出。
+		done := make(chan struct{})
+		go func() {
+			grpcServer.GracefulStop()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			grpcServer.Stop()
+		}
 		return nil
 	case err := <-errCh:
 		return err
@@ -129,6 +139,10 @@ func (s *Server) Ping(context.Context, *servicev1.PingRequest) (*servicev1.PingR
 }
 
 func (s *Server) Shutdown(context.Context, *servicev1.ShutdownRequest) (*servicev1.ShutdownResponse, error) {
+	if op := s.broker.firstActive(); op != nil && op.Active {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"dec-server 正执行 %s（%s），请等待完成后再重启", op.Operation, op.Facade)
+	}
 	if s.requestStop != nil {
 		go s.requestStop()
 	}

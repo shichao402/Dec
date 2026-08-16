@@ -77,6 +77,19 @@ func (b *operationBroker) active(projectRoot string) *servicev1.ActiveOperation 
 	return cloneActive(state.meta)
 }
 
+// firstActive 返回任意 project 上第一个未结束的活跃操作；无则 nil。
+func (b *operationBroker) firstActive() *servicev1.ActiveOperation {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, state := range b.byProject {
+		if state == nil || state.done || state.meta == nil || !state.meta.Active {
+			continue
+		}
+		return cloneActive(state.meta)
+	}
+	return nil
+}
+
 func (b *operationBroker) publish(projectRoot string, message *servicev1.WatchOperationResponse) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

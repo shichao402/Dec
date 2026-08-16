@@ -391,3 +391,107 @@ func TestAPIClient_PullBundle_DecryptsSSHKey(t *testing.T) {
 		t.Fatalf("ListFolderSSHKeys = %#v", listed)
 	}
 }
+
+// Bitwarden 只有整库 /folders 与 /ciphers 列表接口，浏览 N 个 folder 不能变成 2N 次全库下载。
+func TestAPIClient_ListFolderNotes_ReusesVaultSnapshot(t *testing.T) {
+	userKey := bytes.Repeat([]byte{0x09}, 64)
+	itemKey, err := generateCipherKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encItemKey, err := encryptVaultBytes(itemKey, userKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustEncItem := func(plain string) string {
+		t.Helper()
+		out, encErr := encryptVaultString(plain, itemKey)
+		if encErr != nil {
+			t.Fatal(encErr)
+		}
+		return out
+	}
+	mustEncUser := func(plain string) string {
+		t.Helper()
+		out, encErr := encryptVaultString(plain, userKey)
+		if encErr != nil {
+			t.Fatal(encErr)
+		}
+		return out
+	}
+
+	var folderCalls, cipherCalls, deleteCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBitwardenHeaders(t, r)
+		switch {
+		case r.URL.Path == "/api/folders":
+			folderCalls++
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{
+				Data: []bwFolder{
+					{ID: "f1", Name: mustEncUser("bundle/one")},
+					{ID: "f2", Name: mustEncUser("bundle/two")},
+				},
+			})
+		case r.URL.Path == "/api/ciphers" && r.Method == http.MethodGet:
+			cipherCalls++
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{
+				Data: []bwCipher{
+					{ID: "n1", Type: cipherTypeSecureNote, FolderID: "f1", Key: encItemKey,
+						Name: mustEncItem("env/one.env"), Notes: mustEncItem("A=1\n")},
+					{ID: "n2", Type: cipherTypeSecureNote, FolderID: "f2", Key: encItemKey,
+						Name: mustEncItem("env/two.env"), Notes: mustEncItem("B=2\n")},
+				},
+			})
+		case strings.HasPrefix(r.URL.Path, "/api/ciphers/") && r.Method == http.MethodDelete:
+			deleteCalls++
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewAPIClient(&Config{ServerURL: srv.URL}, "sess-cache", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetUserKey(userKey)
+	t.Cleanup(ClearSession)
+
+	ctx := context.Background()
+	for _, folder := range []string{"bundle/one", "bundle/two"} {
+		notes, listErr := client.ListFolderNotes(ctx, folder)
+		if listErr != nil {
+			t.Fatalf("ListFolderNotes(%s) = %v", folder, listErr)
+		}
+		if len(notes) != 1 {
+			t.Fatalf("ListFolderNotes(%s) = %#v", folder, notes)
+		}
+		if _, listErr = client.ListFolderSSHKeys(ctx, folder); listErr != nil {
+			t.Fatalf("ListFolderSSHKeys(%s) = %v", folder, listErr)
+		}
+	}
+	if _, err = client.ListSecretBundleNames(ctx); err != nil {
+		t.Fatalf("ListSecretBundleNames() = %v", err)
+	}
+	if folderCalls != 1 || cipherCalls != 1 {
+		t.Fatalf("folders=%d ciphers=%d, 期望各 1 次全库下载", folderCalls, cipherCalls)
+	}
+
+	// 写操作后必须重新取快照，否则删除完还会读到旧 cipher。
+	if err = client.DeleteSecureNote(ctx, DeleteSecureNoteRequest{
+		Binding:  BundleBinding{SecretsBundleName: "bundle/one"},
+		NotePath: "env/one.env",
+	}); err != nil {
+		t.Fatalf("DeleteSecureNote() = %v", err)
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("deleteCalls = %d, want 1", deleteCalls)
+	}
+	if _, err = client.ListFolderNotes(ctx, "bundle/one"); err != nil {
+		t.Fatalf("ListFolderNotes() = %v", err)
+	}
+	if folderCalls != 2 || cipherCalls != 2 {
+		t.Fatalf("写操作后 folders=%d ciphers=%d, 期望快照失效后各重取 1 次", folderCalls, cipherCalls)
+	}
+}

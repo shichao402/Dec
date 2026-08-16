@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/ide"
 	"github.com/shichao402/Dec/internal/repo"
@@ -40,6 +41,11 @@ type PullProjectAssetsResult struct {
 	SecretsSkippedReason string
 	SecretsNoteCount     int
 	SecretsSSHKeyCount   int
+	// 孤儿清理：Git 资产见 CleanedAssets；secrets/SSH/登记见下列字段。
+	OrphanSecretPaths    []string
+	OrphanSSHKeys        []string
+	OrphanClearedBundles []string
+	OrphanReportedOnly   []string
 }
 
 func PullProjectAssets(ctx context.Context, projectRoot, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
@@ -90,9 +96,8 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	pullConfig.EnabledBundles = projectEnabled
 
 	if len(projectEnabled) == 0 {
-		result.SkippedReason = "config.yaml 中没有已启用的 bundle"
-		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
-		emit(reporter, EventInfo, "pull.prepare", "在 TUI Bundles 页勾选项目 bundle 后按 s 保存", nil)
+		result.SkippedReason = "未启用 bundle"
+		emit(reporter, EventInfo, "pull.prepare", "请先在 Bundles 页勾选并保存", nil)
 		applyAssetCleanup(result, workspace, nil, projectIDEs, reporter)
 		return result, nil
 	}
@@ -136,7 +141,9 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 		result.SkippedReason = "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
 		if err := applySecretsPull(ctx, result, workspace, enabledBundleNames, reporter); err != nil {
-			return nil, err
+			result.NonFatalWarnings = append(result.NonFatalWarnings, err.Error())
+			emit(reporter, EventWarn, "pull.secrets", "Secrets 未同步（无公开资产可拉取）", nil)
+			return result, nil
 		}
 		return result, nil
 	}
@@ -206,10 +213,17 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 
 	// 阶段 3：secrets 放在公开资产之后。Bitwarden 不可用（未解锁、网络故障）
 	// 不应连累已经就绪的 skill / rule / mcp，否则一次解锁失败会让整个项目看起来没装过资产。
+	// 契约：公开资产已落地时 secrets 失败 → result + NonFatalWarnings，error 为 nil。
 	if err := applySecretsPull(ctx, result, workspace, enabledBundleNames, reporter); err != nil {
 		emit(reporter, EventWarn, "pull.secrets",
-			fmt.Sprintf("Dec 资产已安装 %d 个，仅 secrets 未同步", result.PulledCount), nil)
-		return nil, err
+			fmt.Sprintf("已安装 %d 个公开资产；Secrets 未同步", result.PulledCount), nil)
+		result.NonFatalWarnings = append(result.NonFatalWarnings, err.Error())
+		commitHash := tx.CommitHash()
+		if commitHash != "" {
+			result.VersionCommit = commitHash
+			saveVersionMeta(workspaceCacheRoot(workspace), commitHash)
+		}
+		return result, nil
 	}
 
 	commitHash := tx.CommitHash()
@@ -221,6 +235,10 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	summary := fmt.Sprintf("✅ 完成：%d 个资产已拉取", result.PulledCount)
 	if result.FailedCount > 0 {
 		summary += fmt.Sprintf("，%d 个失败", result.FailedCount)
+	}
+	orphanN := len(result.CleanedAssets) + len(result.OrphanSecretPaths) + len(result.OrphanSSHKeys)
+	if orphanN > 0 {
+		summary += fmt.Sprintf("，清理 %d 项孤儿", orphanN)
 	}
 	if len(result.EffectiveIDEs) > 0 {
 		summary += fmt.Sprintf(" (IDE: %s)", strings.Join(result.EffectiveIDEs, ", "))
@@ -235,7 +253,8 @@ func applyAssetCleanup(result *PullProjectAssetsResult, workspace Workspace, ena
 	if len(result.CleanedAssets) == 0 {
 		return
 	}
-	emit(reporter, EventInfo, "pull.cleanup", fmt.Sprintf("🧹 清理 %d 个不再启用的资产", len(result.CleanedAssets)), nil)
+	emit(reporter, EventInfo, "pull.cleanup",
+		fmt.Sprintf("🧹 清理 %d 个本地孤儿 Dec 资产（不在本次目标集：远端已删或未启用）", len(result.CleanedAssets)), nil)
 	for _, asset := range result.CleanedAssets {
 		emit(reporter, EventInfo, "pull.cleanup", asset, nil)
 	}
@@ -248,13 +267,16 @@ func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, work
 		}
 	}
 	secretsSummary, err := pullEnabledSecretsBundlesForWorkspace(ctx, workspace, enabledBundles, reporter)
-	if err != nil {
-		return err
+	if secretsSummary != nil {
+		result.SecretsSkippedReason = secretsSummary.SkippedReason
+		result.SecretsNoteCount = secretsSummary.NoteCount
+		result.SecretsSSHKeyCount = secretsSummary.SSHKeyCount
+		result.OrphanSecretPaths = append(result.OrphanSecretPaths, secretsSummary.Orphans.RemovedSecretPaths...)
+		result.OrphanSSHKeys = append(result.OrphanSSHKeys, secretsSummary.Orphans.RemovedSSHKeys...)
+		result.OrphanClearedBundles = append(result.OrphanClearedBundles, secretsSummary.Orphans.ClearedBundles...)
+		result.OrphanReportedOnly = append(result.OrphanReportedOnly, secretsSummary.Orphans.ReportedOnly...)
 	}
-	result.SecretsSkippedReason = secretsSummary.SkippedReason
-	result.SecretsNoteCount = secretsSummary.NoteCount
-	result.SecretsSSHKeyCount = secretsSummary.SSHKeyCount
-	return nil
+	return err
 }
 
 func uniqueWorkspaceIDEs(workspace Workspace, ideNames []string) []ide.IDE {
@@ -344,26 +366,15 @@ func cleanupRemovedAssets(workspace Workspace, enabledAssets []types.TypedAssetR
 			continue
 		}
 		vaultName := vaultDir.Name()
-		for _, sub := range []string{"skills", "commands", "rules", "mcp"} {
-			subDir := filepath.Join(cacheDir, vaultName, sub)
+		for _, kind := range bundle.VaultAssetKinds {
+			subDir := filepath.Join(cacheDir, vaultName, kind.Dir)
 			entries, err := os.ReadDir(subDir)
 			if err != nil {
 				continue
 			}
 			for _, entry := range entries {
-				name := entry.Name()
-				assetType := sub
-				if sub == "rules" {
-					assetType = "rule"
-					name = strings.TrimSuffix(name, ".mdc")
-				} else if sub == "mcp" {
-					assetType = "mcp"
-					name = strings.TrimSuffix(name, ".json")
-				} else if sub == "commands" {
-					assetType = "command"
-				} else {
-					assetType = "skill"
-				}
+				name := bundle.AssetEntryName(kind, entry.Name())
+				assetType := kind.Type
 
 				key := vaultName + ":" + assetType + ":" + name
 				if enabledSet[key] {
@@ -399,32 +410,16 @@ func removeDirIfEmpty(dir string) error {
 }
 
 func typeSubDir(itemType string) string {
-	switch itemType {
-	case "skill":
-		return "skills"
-	case "command":
-		return "commands"
-	case "rule":
-		return "rules"
-	case "mcp":
-		return "mcp"
-	default:
-		return ""
-	}
+	return bundle.TypeSubDir(itemType)
 }
 
 func resolveAssetFile(repoDir, vault, itemType, assetName string) string {
-	base := filepath.Join(repoDir, types.VaultBundlesDir, vault, typeSubDir(itemType))
-	switch itemType {
-	case "skill", "command":
-		return filepath.Join(base, assetName)
-	case "rule":
-		return filepath.Join(base, assetName+".mdc")
-	case "mcp":
-		return filepath.Join(base, assetName+".json")
-	default:
+	kind, ok := bundle.KindByType(itemType)
+	if !ok {
 		return ""
 	}
+	base := filepath.Join(repoDir, types.VaultBundlesDir, vault, kind.Dir)
+	return filepath.Join(base, bundle.AssetFileName(kind, assetName))
 }
 
 func getCachePath(projectRoot, vault, itemType, assetName string) string {
@@ -460,17 +455,12 @@ func workspaceCacheRoot(workspace Workspace) string {
 }
 
 func getWorkspaceCachePath(workspace Workspace, vault, itemType, assetName string) string {
-	base := filepath.Join(workspaceCacheDir(workspace), vault, typeSubDir(itemType))
-	switch itemType {
-	case "skill", "command":
-		return filepath.Join(base, assetName)
-	case "rule":
-		return filepath.Join(base, assetName+".mdc")
-	case "mcp":
-		return filepath.Join(base, assetName+".json")
-	default:
+	kind, ok := bundle.KindByType(itemType)
+	if !ok {
 		return ""
 	}
+	base := filepath.Join(workspaceCacheDir(workspace), vault, kind.Dir)
+	return filepath.Join(base, bundle.AssetFileName(kind, assetName))
 }
 
 func managedName(name string) string {

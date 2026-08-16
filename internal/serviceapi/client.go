@@ -3,6 +3,7 @@ package serviceapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -15,20 +16,28 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+var ErrActiveOperation = errors.New("dec-server 有进行中的操作，拒绝重启")
+
 type API struct {
 	client        *service.Client
 	clientID      string
 	facade        string
+	clientVersion string
 	unlockTimeout time.Duration
 	mu            sync.Mutex
 }
 
-func Connect(ctx context.Context, facade, clientID string) (*API, error) {
-	client, err := service.Connect(ctx, facade, clientID)
+func Connect(ctx context.Context, facade, clientID, clientVersion string) (*API, error) {
+	client, err := service.Connect(ctx, facade, clientID, clientVersion)
 	if err != nil {
 		return nil, err
 	}
-	api := &API{client: client, clientID: clientID, facade: facade}
+	api := &API{
+		client:        client,
+		clientID:      clientID,
+		facade:        facade,
+		clientVersion: clientVersion,
+	}
 	if facade == "mcp" {
 		api.unlockTimeout = app.MCPSessionUnlockTimeout
 	}
@@ -38,7 +47,111 @@ func Connect(ctx context.Context, facade, clientID string) (*API, error) {
 func (a *API) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.client == nil {
+		return nil
+	}
 	return a.client.Close()
+}
+
+func (a *API) ServerVersion() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.client == nil {
+		return ""
+	}
+	return a.client.ServerVersion()
+}
+
+func (a *API) ClientVersion() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.client == nil {
+		return a.clientVersion
+	}
+	return a.client.ClientVersion()
+}
+
+func (a *API) VersionMismatch() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.client == nil {
+		return false
+	}
+	return a.client.VersionMismatch()
+}
+
+// RestartOptions 控制 Shutdown → 等待退出 → 重连。
+type RestartOptions struct {
+	Reason string
+	// SkipActiveCheck 为 true 时跳过门面侧 GetActiveOperation 预检（服务端仍会拒绝忙碌 Shutdown）。
+	SkipActiveCheck bool
+	ProjectRoot     string
+}
+
+// ShutdownServer 请求服务退出并等待发现文件/锁消失；不自动重连。
+func (a *API) ShutdownServer(ctx context.Context, reason string) error {
+	a.mu.Lock()
+	client := a.client
+	a.mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("dec-server 客户端尚未连接")
+	}
+	_, err := client.RPC().Shutdown(ctx, &servicev1.ShutdownRequest{Reason: reason})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.FailedPrecondition {
+			return fmt.Errorf("%w: %s", ErrActiveOperation, st.Message())
+		}
+		return err
+	}
+	_ = client.Close()
+	a.mu.Lock()
+	a.client = nil
+	a.mu.Unlock()
+	return service.WaitUntilStopped(ctx)
+}
+
+// RestartServer = Shutdown → 等退出 → Connect 拉起新进程。
+func (a *API) RestartServer(ctx context.Context, opts RestartOptions) error {
+	if !opts.SkipActiveCheck {
+		roots := []string{opts.ProjectRoot}
+		if opts.ProjectRoot != "" {
+			roots = append(roots, "")
+		}
+		for _, root := range roots {
+			op, err := a.GetActiveOperation(ctx, root)
+			if err != nil {
+				continue
+			}
+			if op != nil && op.Active {
+				return fmt.Errorf("%w: %s（%s）", ErrActiveOperation, op.Operation, op.Facade)
+			}
+		}
+	}
+	reason := opts.Reason
+	if reason == "" {
+		reason = "restart"
+	}
+	if err := a.ShutdownServer(ctx, reason); err != nil {
+		return err
+	}
+	return a.reconnect(ctx)
+}
+
+// ShutdownIfRunning 在有存活服务时连接并关闭；服务未运行则直接返回。
+// 用于 `dec update` 等 CLI：更新二进制后停掉旧进程，不拉起新实例。
+func ShutdownIfRunning(ctx context.Context, clientVersion, reason string) error {
+	if _, err := service.ReadMetadata(); err != nil {
+		return nil
+	}
+	api, err := Connect(ctx, "cli", fmt.Sprintf("cli-%d", time.Now().UnixNano()), clientVersion)
+	if err != nil {
+		return err
+	}
+	defer api.Close()
+	if reason == "" {
+		reason = "update"
+	}
+	return api.ShutdownServer(ctx, reason)
 }
 
 func (a *API) Invoke(ctx context.Context, method, projectRoot string, input, output any, reporter app.Reporter) error {
@@ -131,8 +244,10 @@ func (a *API) RunWorkspace(ctx context.Context, operation string, workspace app.
 func (a *API) reconnect(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_ = a.client.Close()
-	client, err := service.Connect(ctx, a.facade, a.clientID)
+	if a.client != nil {
+		_ = a.client.Close()
+	}
+	client, err := service.Connect(ctx, a.facade, a.clientID, a.clientVersion)
 	if err != nil {
 		return err
 	}
@@ -143,6 +258,9 @@ func (a *API) reconnect(ctx context.Context) error {
 func (a *API) rpc() servicev1.DecServiceClient {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.client == nil {
+		return nil
+	}
 	return a.client.RPC()
 }
 
@@ -155,8 +273,12 @@ func shouldReconnect(err error) bool {
 }
 
 func (a *API) GetActiveOperation(ctx context.Context, projectRoot string) (*servicev1.ActiveOperation, error) {
+	rpc := a.rpc()
+	if rpc == nil {
+		return nil, fmt.Errorf("dec-server 客户端尚未连接")
+	}
 	request := &servicev1.GetActiveOperationRequest{ProjectRoot: projectRoot}
-	resp, err := a.rpc().GetActiveOperation(ctx, request)
+	resp, err := rpc.GetActiveOperation(ctx, request)
 	if shouldReconnect(err) {
 		if reconnectErr := a.reconnect(ctx); reconnectErr == nil {
 			resp, err = a.rpc().GetActiveOperation(ctx, request)
@@ -169,11 +291,15 @@ func (a *API) GetActiveOperation(ctx context.Context, projectRoot string) (*serv
 }
 
 func (a *API) WatchOperation(ctx context.Context, projectRoot, operationID string, reporter app.Reporter) error {
+	rpc := a.rpc()
+	if rpc == nil {
+		return fmt.Errorf("dec-server 客户端尚未连接")
+	}
 	request := &servicev1.WatchOperationRequest{
 		ProjectRoot: projectRoot,
 		OperationId: operationID,
 	}
-	stream, err := a.rpc().WatchOperation(ctx, request)
+	stream, err := rpc.WatchOperation(ctx, request)
 	if shouldReconnect(err) {
 		if reconnectErr := a.reconnect(ctx); reconnectErr == nil {
 			stream, err = a.rpc().WatchOperation(ctx, request)

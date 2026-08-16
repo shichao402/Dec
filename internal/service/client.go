@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,15 +21,17 @@ import (
 const TokenHeader = "x-dec-token"
 
 type Client struct {
-	conn   *grpc.ClientConn
-	rpc    servicev1.DecServiceClient
-	token  string
-	cancel context.CancelFunc
-	once   sync.Once
+	conn          *grpc.ClientConn
+	rpc           servicev1.DecServiceClient
+	token         string
+	clientVersion string
+	serverVersion string
+	cancel        context.CancelFunc
+	once          sync.Once
 }
 
-func Connect(ctx context.Context, facade, clientID string) (*Client, error) {
-	client, err := connectExisting(ctx)
+func Connect(ctx context.Context, facade, clientID, clientVersion string) (*Client, error) {
+	client, err := connectExisting(ctx, clientVersion)
 	if err == nil {
 		client.startPresence(facade, clientID)
 		return client, nil
@@ -45,7 +48,7 @@ func Connect(ctx context.Context, facade, clientID string) (*Client, error) {
 			return nil, ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 		}
-		client, lastErr = connectExisting(ctx)
+		client, lastErr = connectExisting(ctx, clientVersion)
 		if lastErr == nil {
 			client.startPresence(facade, clientID)
 			return client, nil
@@ -54,7 +57,7 @@ func Connect(ctx context.Context, facade, clientID string) (*Client, error) {
 	return nil, fmt.Errorf("dec-server 启动后未就绪: %w", lastErr)
 }
 
-func connectExisting(ctx context.Context) (*Client, error) {
+func connectExisting(ctx context.Context, clientVersion string) (*Client, error) {
 	meta, err := ReadMetadata()
 	if err != nil {
 		return nil, err
@@ -68,20 +71,53 @@ func connectExisting(ctx context.Context) (*Client, error) {
 		return nil, err
 	}
 	client := &Client{
-		conn:  conn,
-		rpc:   servicev1.NewDecServiceClient(conn),
-		token: meta.Token,
+		conn:          conn,
+		rpc:           servicev1.NewDecServiceClient(conn),
+		token:         meta.Token,
+		clientVersion: strings.TrimSpace(clientVersion),
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
 	defer cancel()
-	if _, err := client.rpc.Ping(pingCtx, &servicev1.PingRequest{}); err != nil {
+	pong, err := client.rpc.Ping(pingCtx, &servicev1.PingRequest{})
+	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
+	client.serverVersion = strings.TrimSpace(pong.GetVersion())
 	return client, nil
 }
 
 func (c *Client) RPC() servicev1.DecServiceClient { return c.rpc }
+
+func (c *Client) ClientVersion() string { return c.clientVersion }
+
+func (c *Client) ServerVersion() string { return c.serverVersion }
+
+// VersionMismatch 在客户端与服务端版本字符串不一致时返回 true。
+// 双方同为 "dev" 时无法区分新旧二进制，返回 false（依赖 Settings 手动重启）。
+func (c *Client) VersionMismatch() bool {
+	return VersionsMismatch(c.clientVersion, c.serverVersion)
+}
+
+// VersionsMismatch 比较门面与 dec-server 的版本字符串。
+func VersionsMismatch(clientVersion, serverVersion string) bool {
+	client := normalizeVersion(clientVersion)
+	server := normalizeVersion(serverVersion)
+	if client == "" || server == "" {
+		return false
+	}
+	if client == "dev" && server == "dev" {
+		return false
+	}
+	return client != server
+}
+
+func normalizeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	v = strings.TrimPrefix(v, "V")
+	return strings.ToLower(v)
+}
 
 func (c *Client) Close() error {
 	var err error

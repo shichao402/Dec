@@ -89,7 +89,7 @@ func startTestService(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	api, err := serviceapi.Connect(context.Background(), "mcp-test", "mcp-test")
+	api, err := serviceapi.Connect(context.Background(), "mcp-test", "mcp-test", "test")
 	if err != nil {
 		cancel()
 		t.Fatalf("连接测试 dec-server: %v", err)

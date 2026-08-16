@@ -8,98 +8,172 @@ import (
 )
 
 func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
-	decRoot := &TreeNode{ID: "delete-root:.dec", Label: "Dec (Git vault)", SelectMode: TreeSelectBranch}
-	secRoot := &TreeNode{ID: "delete-root:secrets", Label: "Secrets (Bitwarden)", SelectMode: TreeSelectBranch}
-	hasDec, hasSec := false, false
+	decRemote := &TreeNode{ID: "delete-root:.dec", Label: "远端 · Dec (Git vault)", SelectMode: TreeSelectBranch}
+	secRemote := &TreeNode{ID: "delete-root:secrets", Label: "远端 · Secrets (Bitwarden) · 将改远端、不碰本地", SelectMode: TreeSelectBranch}
+	decLocal := &TreeNode{ID: "delete-root:local-dec", Label: "本地 · Dec cache · 只清本机，不写 vault", SelectMode: TreeSelectBranch}
+	secLocal := &TreeNode{ID: "delete-root:local-secrets", Label: "本地 · Secrets · 只清本机，不写 Bitwarden", SelectMode: TreeSelectBranch}
+	unfiledRoot := &TreeNode{
+		ID:         "delete-root:unfiled",
+		Label:      "无文件夹 · 非Dec管理 · 只读（请到 Bitwarden Web）",
+		SelectMode: TreeSelectNone,
+	}
+	hasDecRemote, hasSecRemote, hasDecLocal, hasSecLocal, hasUnfiled := false, false, false, false, false
 
-	targetGroups := make(map[string]*TreeNode)
-	getSecretsGroup := func(c app.DeleteCandidate) *TreeNode {
-		key := strings.TrimSpace(c.LocalRoot)
-		if key == "" {
-			key = strings.TrimSpace(c.GroupTitle)
+	targetGroups := make(map[string]*secretsGroupNode)
+	getSecretsGroup := func(c app.DeleteCandidate, root *TreeNode) *TreeNode {
+		key := secretsGroupKey(c)
+		group, ok := targetGroups[key]
+		if !ok {
+			group = &secretsGroupNode{node: &TreeNode{
+				ID:         "delete-secrets-group:" + key,
+				SelectMode: TreeSelectBranch,
+			}}
+			targetGroups[key] = group
+			root.Children = append(root.Children, group.node)
 		}
-		if key == "" {
-			key = strings.TrimSpace(c.SecretsBundle)
-		}
-		if node, ok := targetGroups[key]; ok {
-			return node
-		}
-		label := deleteSyncTargetGroupLabel(c)
-		node := &TreeNode{
-			ID:         "delete-secrets-group:" + key,
-			Label:      label,
-			SelectMode: TreeSelectBranch,
-		}
-		targetGroups[key] = node
-		secRoot.Children = append(secRoot.Children, node)
-		return node
+		group.absorb(c)
+		return group.node
 	}
 
 	for i, c := range candidates {
+		if c.ReadOnly {
+			hasUnfiled = true
+			leaf := &TreeNode{
+				ID:         fmt.Sprintf("readonly-%d", i),
+				Label:      deleteLeafLabel(c),
+				SelectMode: TreeSelectReadOnly,
+				Payload:    i,
+			}
+			unfiledRoot.Children = append(unfiledRoot.Children, leaf)
+			continue
+		}
 		leaf := &TreeNode{
 			ID:         fmt.Sprintf("c%d", i),
 			Label:      deleteLeafLabel(c),
 			SelectMode: TreeSelectLeaf,
 			Payload:    i,
 		}
+		local := c.Partition == app.PartitionLocal
 		switch c.Kind {
 		case app.DeleteKindSecret:
-			hasSec = true
-			group := getSecretsGroup(c)
-			insertTreePath(group, secretsParentSegments(c.SecretPath), leaf)
+			if local {
+				hasSecLocal = true
+				group := getSecretsGroup(c, secLocal)
+				insertTreePath(group, secretsParentSegments(c.SecretPath), leaf)
+			} else {
+				hasSecRemote = true
+				group := getSecretsGroup(c, secRemote)
+				insertTreePath(group, secretsParentSegments(c.SecretPath), leaf)
+			}
 		case app.DeleteKindSSHKey:
-			hasSec = true
-			group := getSecretsGroup(c)
-			insertTreePath(group, []string{"SSH · machine"}, leaf)
+			if local {
+				hasSecLocal = true
+				group := getSecretsGroup(c, secLocal)
+				insertTreePath(group, []string{"SSH · machine"}, leaf)
+			} else {
+				hasSecRemote = true
+				group := getSecretsGroup(c, secRemote)
+				insertTreePath(group, []string{"SSH · machine"}, leaf)
+			}
 		case app.DeleteKindBundle:
-			hasDec = true
+			hasDecRemote = true
 			bundle := strings.TrimSpace(c.BundleName)
 			if bundle == "" {
 				bundle = strings.TrimSpace(c.TreeBranch)
 			}
-			insertTreePath(decRoot, []string{"cache", bundle}, leaf)
+			insertTreePath(decRemote, []string{"cache", bundle}, leaf)
 		case app.DeleteKindDecAsset:
-			hasDec = true
-			insertTreePath(decRoot, decCacheParentSegments(c.Vault, c.Type, c.Name), leaf)
+			if local {
+				hasDecLocal = true
+				insertTreePath(decLocal, decCacheParentSegments(c.Vault, c.Type, c.Name), leaf)
+			} else {
+				hasDecRemote = true
+				insertTreePath(decRemote, decCacheParentSegments(c.Vault, c.Type, c.Name), leaf)
+			}
 		default:
-			hasDec = true
+			hasDecRemote = true
 			branch := strings.TrimSpace(c.TreeBranch)
 			if branch == "" {
 				branch = "other"
 			}
-			insertTreePath(decRoot, []string{"cache", branch}, leaf)
+			insertTreePath(decRemote, []string{"cache", branch}, leaf)
 		}
 	}
 
-	sortPathTreeChildren(decRoot.Children)
-	sortPathTreeChildren(secRoot.Children)
 	for _, group := range targetGroups {
-		sortPathTreeChildren(group.Children)
+		group.node.Label = group.label()
+	}
+
+	sortPathTreeChildren(decRemote.Children)
+	sortPathTreeChildren(secRemote.Children)
+	sortPathTreeChildren(decLocal.Children)
+	sortPathTreeChildren(secLocal.Children)
+	sortPathTreeChildren(unfiledRoot.Children)
+	for _, group := range targetGroups {
+		sortPathTreeChildren(group.node.Children)
 	}
 
 	var roots []*TreeNode
-	if hasDec {
-		roots = append(roots, decRoot)
+	if hasDecRemote {
+		roots = append(roots, decRemote)
 	}
-	if hasSec {
-		roots = append(roots, secRoot)
+	if hasSecRemote {
+		roots = append(roots, secRemote)
+	}
+	if hasUnfiled {
+		roots = append(roots, unfiledRoot)
+	}
+	if hasDecLocal {
+		roots = append(roots, decLocal)
+	}
+	if hasSecLocal {
+		roots = append(roots, secLocal)
 	}
 	return roots
 }
 
-func deleteSyncTargetGroupLabel(c app.DeleteCandidate) string {
-	title := strings.TrimSpace(c.GroupTitle)
-	if title == "" {
-		title = strings.TrimSpace(c.SecretsBundle)
-	}
-	root := strings.TrimSpace(c.LocalRoot)
-	if root != "" {
-		if title != "" {
-			return fmt.Sprintf("%s → %s", title, root)
+// secretsGroupNode 汇总同一 Bitwarden folder 下的展示信息。
+// Secure Note 带 LocalRoot、SSH Key 落 ~/.ssh 没有 LocalRoot，
+// 二者必须收敛到同一个 folder 节点，标题按「有本地映射优先」取。
+type secretsGroupNode struct {
+	node      *TreeNode
+	title     string
+	localRoot string
+}
+
+func (g *secretsGroupNode) absorb(c app.DeleteCandidate) {
+	if g.title == "" {
+		title := strings.TrimSpace(c.GroupTitle)
+		if title == "" {
+			title = strings.TrimSpace(c.SecretsBundle)
 		}
-		return root
+		g.title = title
 	}
-	return title
+	if g.localRoot == "" {
+		g.localRoot = strings.TrimSpace(c.LocalRoot)
+	}
+}
+
+func (g *secretsGroupNode) label() string {
+	if g.localRoot != "" {
+		if g.title != "" {
+			return fmt.Sprintf("%s → %s", g.title, g.localRoot)
+		}
+		return g.localRoot
+	}
+	return g.title
+}
+
+// secretsGroupKey 以 Bitwarden folder 为分组身份；folder 缺失才退回本地根 / 标题。
+func secretsGroupKey(c app.DeleteCandidate) string {
+	id := strings.TrimSpace(c.SecretsBundle)
+	if id == "" {
+		id = strings.TrimSpace(c.LocalRoot)
+	}
+	if id == "" {
+		id = strings.TrimSpace(c.GroupTitle)
+	}
+	return string(c.Partition) + "\x00" + id
 }
 
 func deleteLeafLabel(c app.DeleteCandidate) string {
@@ -107,15 +181,28 @@ func deleteLeafLabel(c app.DeleteCandidate) string {
 	case app.DeleteKindBundle:
 		return "[bundle] " + strings.TrimPrefix(c.Label, "[bundle] ")
 	case app.DeleteKindSecret:
+		if c.ReadOnly {
+			typ := strings.TrimSpace(c.Type)
+			if typ == "" {
+				typ = "item"
+			}
+			return fmt.Sprintf("[%s] %s", typ, strings.TrimSpace(c.Name))
+		}
 		leaf := secretsLeafName(c.SecretPath)
 		if c.Orphan {
 			leaf += " · 仅远端"
+		}
+		if c.Unmanaged {
+			leaf += " · 非Dec管理"
 		}
 		return leaf
 	case app.DeleteKindSSHKey:
 		leaf := "[ssh] " + strings.TrimSpace(c.SSHKeyName)
 		if c.Orphan {
 			leaf += " · 仅远端"
+		}
+		if c.Unmanaged {
+			leaf += " · 非Dec管理"
 		}
 		return leaf
 	case app.DeleteKindDecAsset:
@@ -142,6 +229,9 @@ func (m *model) rebuildDeleteTree() {
 	}
 	if len(m.deleteTree.Expanded) == 0 {
 		m.deleteTree.DefaultExpandAll()
+		// 「无文件夹」默认折叠
+		m.deleteTree.ensureExpanded()
+		m.deleteTree.Expanded["delete-root:unfiled"] = false
 	}
 	m.deleteTree.FocusFirstSelectable()
 	m.deleteTree.normalizeCursor()

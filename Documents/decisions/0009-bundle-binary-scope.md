@@ -47,11 +47,11 @@ members: [...]
 
 ### 3. 平面隔离
 
-用户级上下文（`dec --user`）只访问用户平面；项目级上下文只访问项目平面。
+用户级上下文（`dec --user`）只访问用户平面；项目级上下文只访问项目平面——**适用于 Bundles / pull / push / env / 启用列表**。
 
 - 删除 `mergeProjectAndUserEnabledBundles` 与并集语义；project pull 只处理 `scope: project` 的包。
 - `LoadEnvForBundle` 降为按平面单层：user bundle 只读机器层；project bundle 只读项目层。删除「`.secrets/project/env` 覆盖 user bundle」逃生口。
-- Bundles / Remote / delete 候选按上下文过滤。
+- ~~Bundles / Remote / delete 候选按上下文过滤。~~ **修订（2026-08-16，方案 R）**：Remote 库存**不再**按上下文过滤；`scope` 在 Remote 中仅为分组标签。平面隔离保留在 Bundles / pull / push / env / 启用列表。见 [0004](0004-remote-page.md) 修订。
 - RPC 显式携带 scope，不用哨兵 `projectRoot` 伪装。
 
 **不隔离**：Bitwarden session（`dec-server` 进程内存）与 `~/.dec/secrets/device.json` 设备信任继续共享——它们是认证，不是资产可见性。
@@ -66,7 +66,7 @@ members: [...]
 |------|----------------|
 | pull / push（Dec 资产） | `~/.dec/cache/<bundle>/` ↔ vault `bundles/<name>/` |
 | push（secrets） | `~/.dec/secrets/bundles/<name>/` → Bitwarden `bundle/<name>` |
-| Remote 删除 / 编辑 | 候选按 `scope: user` 过滤；本地清理走 `~/.dec/cache`、`~/.cursor` 等用户级目录 |
+| Remote 删除 / 编辑 | **全量远端库存**（不按 `scope: user` 过滤）；本地清理走独立「本地」分区（`~/.dec/cache`、`~/.dec/secrets`、`~/.ssh` 等） |
 | 启用列表变更 | `~/.dec/config.yaml` 的 `enabled_bundles` |
 
 **Project 页不在用户平面开放**：它编辑的是 `.dec/vars.yaml` 项目变量，用户平面没有对应概念。

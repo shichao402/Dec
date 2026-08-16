@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gofrs/flock"
 	"github.com/shichao402/Dec/internal/repo"
@@ -137,4 +139,29 @@ func AcquireServerLock() (*flock.Flock, error) {
 		return nil, fmt.Errorf("dec-server 已在运行")
 	}
 	return lock, nil
+}
+
+// WaitUntilStopped 等待本机 dec-server 退出（发现文件消失，且锁可抢）。
+func WaitUntilStopped(ctx context.Context) error {
+	deadline := time.Now().Add(15 * time.Second)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+		deadline = dl
+	}
+	for {
+		if _, err := ReadMetadata(); err != nil {
+			lock, err := AcquireServerLock()
+			if err == nil {
+				_ = lock.Unlock()
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("等待 dec-server 退出超时")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }

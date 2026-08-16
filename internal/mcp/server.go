@@ -16,7 +16,8 @@ import (
 
 // Config 配置 Dec MCP Server。
 type Config struct {
-	ProjectRoot string
+	ProjectRoot   string
+	ClientVersion string
 }
 
 // Server 持有 MCP 服务状态。
@@ -33,7 +34,7 @@ func New(cfg Config) *Server {
 func (s *Server) Register(mcpServer *mcp.Server) {
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_status",
-		Description: "查看当前项目的 Dec 状态（仓库连接、配置、bundle 概览）",
+		Description: "查看某平面的 Dec 状态（仓库连接、配置、bundle 概览；plane=project|user）。plane=user 看个人跨项目平面。",
 	}, s.handleStatus)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_connect_repo",
@@ -45,35 +46,35 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handleInitProject)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_assets",
-		Description: "列出仓库内全部 bundle 及其成员与启用状态",
+		Description: "列出某平面已启用的 bundle 及成员（plane=project|user|both）。想知道「当前项目/我个人装了什么、能改什么」先调它。",
 	}, s.handleListAssets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_set_assets",
-		Description: "保存 bundle 启用选择到 .dec/config.yaml",
+		Description: "设置某平面的 bundle 启用列表（写 enabled_bundles）。plane=project 写 <project>/.dec/config.yaml；plane=user 写 ~/.dec/config.yaml（个人跨项目复用）。改完通常再 dec_pull 同一平面落地。",
 	}, s.handleSetAssets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_pull",
-		Description: "拉取已启用 Dec bundle 与 secrets，并安装到 IDE 目录",
+		Description: "拉取并安装某平面已启用的 Dec bundle 与 secrets（plane=project|user|both）。project 装进 <project> 内 IDE 目录，user 装进 ~ 用户级 IDE 目录。secrets 失败不阻断公开资产，走部分成功 + 警告。",
 	}, s.handlePull)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_push",
-		Description: "推送 .dec/cache/ 与 secrets 变更到远端（Dec Git + Bitwarden）",
+		Description: "把某平面的本地改动推回远端（plane=project|user|both）：Dec 资产推 Git，secrets 推 Bitwarden。改了项目内 token 用 plane=project；改了个人凭据/SSH 用 plane=user；两边都改过用 both。",
 	}, s.handlePush)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_preview_push",
-		Description: "预览 push 将涉及的 Dec 与 secrets 变更（不写入远端）",
+		Description: "预览某平面 push 将涉及的 Dec 与 secrets 变更（plane=project|user|both，不写远端）。推之前先 preview 确认范围。",
 	}, s.handlePreviewPush)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_secrets",
-		Description: "列出私密资产元数据（路径、存在性）；绝不返回 token/密钥/文件正文",
+		Description: "列出某平面私密资产元数据（路径、本地/远端存在性；plane=project|user|both）。绝不返回 token/密钥/正文。",
 	}, s.handleListSecrets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_delete_candidates",
-		Description: "列出可删除的 Dec 资产、secrets 与 bundle",
+		Description: "列出某平面可删除的 Dec 资产、secrets 与 bundle（plane=project|user|both）。删除前先用它拿候选。",
 	}, s.handleListDeleteCandidates)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_delete",
-		Description: "删除选中的 Dec 资产、secrets 或 bundle（需 confirmed=true）",
+		Description: "删除选中的 Dec 资产、secrets 或 bundle（需 confirmed=true）。plane=project|user，一次只作用一个平面，不支持 both。",
 	}, s.handleDelete)
 }
 
@@ -83,9 +84,19 @@ func Run(ctx context.Context, cfg Config) error {
 	if cfg.ProjectRoot == "" {
 		return fmt.Errorf("无法确定项目根目录：请设置 --project-root 或 DEC_PROJECT_ROOT")
 	}
-	api, err := serviceapi.Connect(ctx, "mcp", fmt.Sprintf("mcp-%d", os.Getpid()))
+	api, err := serviceapi.Connect(ctx, "mcp", fmt.Sprintf("mcp-%d", os.Getpid()), cfg.ClientVersion)
 	if err != nil {
 		return fmt.Errorf("连接 dec-server 失败: %w", err)
+	}
+	if api.VersionMismatch() {
+		fmt.Fprintf(os.Stderr, "dec-mcp: 服务版本 %s 与客户端 %s 不一致，正在重启 dec-server…\n",
+			api.ServerVersion(), api.ClientVersion())
+		if err := api.RestartServer(ctx, serviceapi.RestartOptions{
+			Reason:      "version-mismatch",
+			ProjectRoot: cfg.ProjectRoot,
+		}); err != nil {
+			return fmt.Errorf("重启版本不匹配的 dec-server 失败: %w", err)
+		}
 	}
 	defer api.Close()
 	serviceapi.SetDefault(api)
@@ -117,14 +128,21 @@ func (s *Server) projectRoot() string {
 	return s.cfg.ProjectRoot
 }
 
-type statusParams struct{}
+type statusParams struct {
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project=项目平面；user=用户平面（等价 dec --user）。留空默认 project；不支持 both。"`
+}
 
-func (s *Server) handleStatus(ctx context.Context, _ *mcp.CallToolRequest, _ statusParams) (*mcp.CallToolResult, any, error) {
-	overview, err := serviceapi.LoadProjectOverview(s.projectRoot(), true)
+func (s *Server) handleStatus(ctx context.Context, _ *mcp.CallToolRequest, in statusParams) (*mcp.CallToolResult, any, error) {
+	plane, err := parseSinglePlane(in.Plane)
 	if err != nil {
 		return toolFail(err, nil)
 	}
-	data := map[string]any{"project": overview}
+	ws := app.NewWorkspace(plane, s.projectRoot())
+	overview, err := serviceapi.LoadWorkspaceOverview(ws, true)
+	if err != nil {
+		return toolFail(err, nil)
+	}
+	data := map[string]any{"plane": string(plane), "project": overview}
 	if api, apiErr := serviceapi.Default(); apiErr == nil {
 		if active, activeErr := api.GetActiveOperation(ctx, s.projectRoot()); activeErr == nil && active != nil && active.Active {
 			data["active_operation"] = active
@@ -167,89 +185,87 @@ func (s *Server) handleInitProject(ctx context.Context, _ *mcp.CallToolRequest, 
 	return toolOK(out, logs())
 }
 
-type listAssetsParams struct{}
+type listAssetsParams struct {
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+}
 
-func (s *Server) handleListAssets(ctx context.Context, _ *mcp.CallToolRequest, _ listAssetsParams) (*mcp.CallToolResult, any, error) {
-	reporter, logs := newCollector()
-	state, err := serviceapi.LoadAssetSelection(s.projectRoot(), reporter)
-	if err != nil {
-		return toolFail(err, logs())
-	}
-	return toolOK(state, logs())
+func (s *Server) handleListAssets(ctx context.Context, _ *mcp.CallToolRequest, in listAssetsParams) (*mcp.CallToolResult, any, error) {
+	return s.dispatchPlanes(ctx, in.Plane, func(_ context.Context, ws app.Workspace, reporter app.Reporter) (any, error) {
+		return serviceapi.LoadWorkspaceAssetSelection(ws, reporter)
+	})
 }
 
 type setAssetsParams struct {
 	EnabledBundles []string `json:"enabled_bundles" jsonschema:"启用的 bundle 名称列表；传空数组表示全部取消"`
+	Plane          string   `json:"plane,omitempty" jsonschema:"作用平面：project=写项目 enabled_bundles；user=写用户 enabled_bundles。留空默认 project；不支持 both。"`
 }
 
 func (s *Server) handleSetAssets(ctx context.Context, _ *mcp.CallToolRequest, in setAssetsParams) (*mcp.CallToolResult, any, error) {
-	reporter, logs := newCollector()
-
-	result, err := serviceapi.SaveEnabledBundles(s.projectRoot(), in.EnabledBundles, reporter)
-	if err != nil {
-		return toolFail(err, logs())
-	}
-	return toolOK(result, logs())
-}
-
-type pullParams struct{}
-
-func (s *Server) handlePull(ctx context.Context, _ *mcp.CallToolRequest, _ pullParams) (*mcp.CallToolResult, any, error) {
-	reporter, logs := newCollector()
-	result, err := serviceapi.PullProjectAssets(ctx, s.projectRoot(), reporter)
-	if err != nil {
-		return toolFail(err, logs())
-	}
-	return toolOK(result, logs())
-}
-
-type pushParams struct{}
-
-func (s *Server) handlePush(ctx context.Context, _ *mcp.CallToolRequest, _ pushParams) (*mcp.CallToolResult, any, error) {
-	reporter, logs := newCollector()
-	result, err := serviceapi.PushProjectAssets(ctx, s.projectRoot(), reporter)
-	if err != nil {
-		return toolFail(err, logs())
-	}
-	return toolOK(result, logs())
-}
-
-type previewPushParams struct{}
-
-func (s *Server) handlePreviewPush(ctx context.Context, _ *mcp.CallToolRequest, _ previewPushParams) (*mcp.CallToolResult, any, error) {
-	result, err := serviceapi.PreviewPushProjectAssets(ctx, s.projectRoot(), nil)
+	plane, err := parseSinglePlane(in.Plane)
 	if err != nil {
 		return toolFail(err, nil)
 	}
-	return toolOK(result, nil)
+	reporter, logs := newCollector()
+	result, err := serviceapi.SaveWorkspaceEnabledBundles(app.NewWorkspace(plane, s.projectRoot()), in.EnabledBundles, reporter)
+	if err != nil {
+		return toolFail(err, logs())
+	}
+	return toolOK(result, logs())
+}
+
+type pullParams struct {
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+}
+
+func (s *Server) handlePull(ctx context.Context, _ *mcp.CallToolRequest, in pullParams) (*mcp.CallToolResult, any, error) {
+	return s.dispatchPlanes(ctx, in.Plane, func(ctx context.Context, ws app.Workspace, reporter app.Reporter) (any, error) {
+		return serviceapi.PullWorkspaceAssets(ctx, ws, reporter)
+	})
+}
+
+type pushParams struct {
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+}
+
+func (s *Server) handlePush(ctx context.Context, _ *mcp.CallToolRequest, in pushParams) (*mcp.CallToolResult, any, error) {
+	return s.dispatchPlanes(ctx, in.Plane, func(ctx context.Context, ws app.Workspace, reporter app.Reporter) (any, error) {
+		return serviceapi.PushWorkspaceAssets(ctx, ws, reporter)
+	})
+}
+
+type previewPushParams struct {
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+}
+
+func (s *Server) handlePreviewPush(ctx context.Context, _ *mcp.CallToolRequest, in previewPushParams) (*mcp.CallToolResult, any, error) {
+	return s.dispatchPlanes(ctx, in.Plane, func(ctx context.Context, ws app.Workspace, reporter app.Reporter) (any, error) {
+		return serviceapi.PreviewPushWorkspaceAssets(ctx, ws, reporter)
+	})
 }
 
 type listSecretsParams struct {
-	IncludeRemote *bool `json:"include_remote,omitempty" jsonschema:"是否检查 Bitwarden 远端存在性（默认 true，可能触发 web unlock）"`
+	IncludeRemote *bool  `json:"include_remote,omitempty" jsonschema:"是否检查 Bitwarden 远端存在性（默认 true，可能触发 web unlock）"`
+	Plane         string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
 }
 
 func (s *Server) handleListSecrets(ctx context.Context, _ *mcp.CallToolRequest, in listSecretsParams) (*mcp.CallToolResult, any, error) {
-	reporter, logs := newCollector()
 	includeRemote := true
 	if in.IncludeRemote != nil {
 		includeRemote = *in.IncludeRemote
 	}
-	result, err := serviceapi.ListSecretsMetadata(ctx, s.projectRoot(), includeRemote, reporter)
-	if err != nil {
-		return toolFail(err, logs())
-	}
-	return toolOK(result, logs())
+	return s.dispatchPlanes(ctx, in.Plane, func(ctx context.Context, ws app.Workspace, reporter app.Reporter) (any, error) {
+		return serviceapi.ListWorkspaceSecretsMetadata(ctx, ws, includeRemote, reporter)
+	})
 }
 
-type listDeleteCandidatesParams struct{}
+type listDeleteCandidatesParams struct {
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+}
 
-func (s *Server) handleListDeleteCandidates(ctx context.Context, _ *mcp.CallToolRequest, _ listDeleteCandidatesParams) (*mcp.CallToolResult, any, error) {
-	reporter, logs := newCollector()
-	candidates, err := serviceapi.ListDeleteCandidates(ctx, s.projectRoot(), true, reporter)
-	if err != nil {
-		return toolFail(err, logs())
-	}
-	return toolOK(candidates, logs())
+func (s *Server) handleListDeleteCandidates(ctx context.Context, _ *mcp.CallToolRequest, in listDeleteCandidatesParams) (*mcp.CallToolResult, any, error) {
+	return s.dispatchPlanes(ctx, in.Plane, func(ctx context.Context, ws app.Workspace, reporter app.Reporter) (any, error) {
+		return serviceapi.ListWorkspaceDeleteCandidates(ctx, ws, true, reporter)
+	})
 }
 
 type deleteItemInput struct {
@@ -265,9 +281,14 @@ type deleteItemInput struct {
 type deleteParams struct {
 	Items     []deleteItemInput `json:"items" jsonschema:"要删除的条目"`
 	Confirmed bool              `json:"confirmed" jsonschema:"必须为 true 才会执行删除"`
+	Plane     string            `json:"plane,omitempty" jsonschema:"作用平面：project|user。留空默认 project；不支持 both。候选项须来自同平面的 dec_list_delete_candidates。"`
 }
 
 func (s *Server) handleDelete(ctx context.Context, _ *mcp.CallToolRequest, in deleteParams) (*mcp.CallToolResult, any, error) {
+	plane, err := parseSinglePlane(in.Plane)
+	if err != nil {
+		return toolFail(err, nil)
+	}
 	reporter, logs := newCollector()
 	items := make([]app.DeleteSelectionItem, 0, len(in.Items))
 	for _, item := range in.Items {
@@ -283,6 +304,7 @@ func (s *Server) handleDelete(ctx context.Context, _ *mcp.CallToolRequest, in de
 	}
 	result, err := serviceapi.DeleteProjectItems(ctx, app.DeleteProjectInput{
 		ProjectRoot: s.projectRoot(),
+		Plane:       plane,
 		Items:       items,
 		Confirmed:   in.Confirmed,
 	}, reporter)

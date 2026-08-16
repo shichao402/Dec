@@ -74,6 +74,13 @@ func (m model) View() string {
 		height = 30
 	}
 
+	if m.serverRestartStage == "confirm" || m.serverRestartStage == "running" ||
+		(m.serverRestartStage == "done" && m.serverRestartReason != "update") {
+		statusBar := m.renderStatusBar(width)
+		body := m.renderServerRestartOverlay(width)
+		return lipgloss.JoinVertical(lipgloss.Left, body, statusBar)
+	}
+
 	statusBar := m.renderStatusBar(width)
 	lm := computeLayoutMetrics(width, height, lipgloss.Height(statusBar))
 

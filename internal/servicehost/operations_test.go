@@ -54,4 +54,7 @@ func TestOperationBrokerDifferentProjectsCanRunConcurrently(t *testing.T) {
 	if _, err := broker.start(t.TempDir(), "push", "tui", "tui"); err != nil {
 		t.Fatalf("不同 project 不应互斥: %v", err)
 	}
+	if op := broker.firstActive(); op == nil || !op.Active {
+		t.Fatalf("firstActive 应返回活跃操作, got %#v", op)
+	}
 }

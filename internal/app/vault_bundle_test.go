@@ -28,6 +28,47 @@ func TestSynthesizeVaultBundles_CreatesImplicitBundlePerVault(t *testing.T) {
 	}
 }
 
+func TestListBundleAssetMembers_IncludesCommands(t *testing.T) {
+	repoDir := setupRepoWithVault(t, map[string]string{
+		"bundles/pkv/commands/pkv/pkv-download.md": "# pkv-download\n",
+		"bundles/pkv/skills/helper/SKILL.md":       "---\nname: helper\n---\n",
+	})
+	got := listBundleAssetMembers(repoDir, "pkv")
+	want := map[string]bool{"commands/pkv": true, "skills/helper": true}
+	if len(got) != len(want) {
+		t.Fatalf("members = %#v, want %d entries", got, len(want))
+	}
+	for _, m := range got {
+		if !want[m] {
+			t.Fatalf("unexpected member %q in %#v", m, got)
+		}
+	}
+}
+
+func TestListBundleAssetMembers_AllKnownKinds(t *testing.T) {
+	repoDir := setupRepoWithVault(t, map[string]string{
+		"bundles/demo/skills/s1/SKILL.md": "---\nname: s1\n---\n",
+		"bundles/demo/commands/c1/note.md": "# c1\n",
+		"bundles/demo/rules/r1.mdc":        "---\ndescription: r1\n---\n",
+		"bundles/demo/mcp/m1.json":         `{"mcpServers":{}}`,
+	})
+	got := listBundleAssetMembers(repoDir, "demo")
+	want := map[string]bool{
+		"skills/s1":   true,
+		"commands/c1": true,
+		"rules/r1":    true,
+		"mcp/m1":      true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("members = %#v, want %d entries covering all VaultAssetKinds", got, len(want))
+	}
+	for _, m := range got {
+		if !want[m] {
+			t.Fatalf("unexpected member %q in %#v", m, got)
+		}
+	}
+}
+
 func TestSynthesizeVaultBundles_SkipsWhenExplicitBundleExists(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",

@@ -37,7 +37,7 @@ func startServer(t *testing.T) *API {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	api, err := Connect(ctx, "tui", "test-client")
+	api, err := Connect(ctx, "tui", "test-client", "test")
 	if err != nil {
 		t.Fatalf("连接 dec-server 失败: %v", err)
 	}
@@ -58,5 +58,22 @@ func TestInferVaultProjectReturnsNilWhenServerHasNoResult(t *testing.T) {
 	}
 	if inference != nil {
 		t.Fatalf("未连接仓库时应无推断结果，实际 = %#v", inference)
+	}
+}
+
+func TestServerVersionAndShutdown(t *testing.T) {
+	api := startServer(t)
+	if api.ServerVersion() != "test" {
+		t.Fatalf("ServerVersion = %q, 期望 test", api.ServerVersion())
+	}
+	if api.VersionMismatch() {
+		t.Fatal("同为 test 时不应判定 mismatch")
+	}
+
+	if err := api.ShutdownServer(context.Background(), "test"); err != nil {
+		t.Fatalf("ShutdownServer 失败: %v", err)
+	}
+	if _, err := service.ReadMetadata(); err == nil {
+		t.Fatal("Shutdown 后服务发现文件应消失")
 	}
 }

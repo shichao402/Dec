@@ -8,14 +8,14 @@
 │  Settings      ││ > [x] ▸ default · 1 个成员                                 │
 │                ││   [ ] ▸ cli · 1 个成员                                     │
 │                ││                                                            │
-│                ││ Details                                                    │
+│                ││ 详情                                                       │
 │                ││ Bundle: default                                            │
-│                ││ Vault: default                                             │
-│                ││ 状态: 当前平面已勾选（保存后随本平面 pull 下发）           │
-│                ││ 成员: 1 个                                                 │
 │                ││ 按 l 或 Enter 展开查看成员                                 │
 │                ││                                                            │
 │                ││ default 资产包                                             │
+│                ││                                                            │
+│                ││                                                            │
+│                ││                                                            │
 │                ││                                                            │
 │                ││                                                            │
 │                ││                                                            │

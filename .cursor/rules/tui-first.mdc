@@ -26,11 +26,11 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 | project 初始化 / 选择 | Home 页（首次进入引导） |
 | 扫描资产 / bundle 选择 | **Bundles** 页 |
 | pull / push / remove | Run 页 |
-| 浏览 / 删 / 改远端（Note · SSH Hosts） | **Remote** 页 |
+| 浏览 / 删 / 改远端（Note · SSH Hosts）；任意 folder 登记；无文件夹只读 | **Remote** 页 |
 | 浏览 / 筛选资产 | Bundles 页 |
 | 项目概览 / project 初始化 | Home 页 |
 | 项目变量编辑 | Project 页 |
-| 全局 / Bitwarden / 本机 bundle 启用 | Settings 页 |
+| 全局 / Bitwarden / 本机 bundle 启用 / 本机 vars / 重启服务 | Settings 页 |
 
 若 TUI 尚未覆盖某能力，在代码中留 `TODO(tui)` 并在 Home 建议下一步中指向对应页面，而不是恢复 CLI 子命令。
 

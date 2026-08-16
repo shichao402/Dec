@@ -25,6 +25,7 @@ type remoteEditPreparedMsg struct {
 	editorCmd string
 	err       error
 	logs      []string
+	register  bool // true = A 登记新建，而非编辑已有
 }
 
 type remoteEditDoneMsg struct {
@@ -96,7 +97,14 @@ func (m *model) handleRemoteEditPrepared(msg remoteEditPreparedMsg) tea.Cmd {
 		m.pushLog(line)
 	}
 	if msg.err != nil {
-		m.pushLog("Remote 编辑准备失败: " + msg.err.Error())
+		if msg.register {
+			m.addSecretStage = ""
+			m.addSecretErr = msg.err
+			m.remoteRegisterPending = false
+			m.pushLog("Remote 登记准备失败: " + msg.err.Error())
+		} else {
+			m.pushLog("Remote 编辑准备失败: " + msg.err.Error())
+		}
 		return nil
 	}
 	path := ""
@@ -104,12 +112,20 @@ func (m *model) handleRemoteEditPrepared(msg remoteEditPreparedMsg) tea.Cmd {
 	case remoteEditKindNote:
 		if msg.noteSess == nil {
 			m.pushLog("Remote 编辑准备失败: 空会话")
+			if msg.register {
+				m.addSecretStage = ""
+				m.remoteRegisterPending = false
+			}
 			return nil
 		}
 		m.remoteNoteEdit = msg.noteSess
 		m.remoteSSHEdit = nil
 		path = msg.noteSess.Path
-		m.pushLog("Remote：外部编辑 Secure Note…")
+		if msg.register {
+			m.pushLog("Remote：外部编辑新 Secure Note…")
+		} else {
+			m.pushLog("Remote：外部编辑 Secure Note…")
+		}
 	case remoteEditKindSSH:
 		if msg.sshSess == nil {
 			m.pushLog("Remote 编辑准备失败: 空会话")
@@ -124,17 +140,23 @@ func (m *model) handleRemoteEditPrepared(msg remoteEditPreparedMsg) tea.Cmd {
 	if err != nil {
 		m.pushLog("Remote 打开编辑器失败: " + err.Error())
 		m.clearRemoteEditSession()
+		if msg.register {
+			m.addSecretStage = ""
+			m.remoteRegisterPending = false
+		}
 		return nil
 	}
 	kind := msg.kind
+	register := msg.register
 	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
-		return remoteEditEditorClosedMsg{kind: kind, err: runErr}
+		return remoteEditEditorClosedMsg{kind: kind, err: runErr, register: register}
 	})
 }
 
 type remoteEditEditorClosedMsg struct {
-	kind remoteEditKind
-	err  error
+	kind     remoteEditKind
+	err      error
+	register bool
 }
 
 func (m *model) handleRemoteEditEditorClosed(msg remoteEditEditorClosedMsg) tea.Cmd {
@@ -144,9 +166,16 @@ func (m *model) handleRemoteEditEditorClosed(msg remoteEditEditorClosedMsg) tea.
 	switch msg.kind {
 	case remoteEditKindNote:
 		if m.remoteNoteEdit == nil {
+			if msg.register {
+				m.addSecretStage = ""
+				m.remoteRegisterPending = false
+			}
 			return nil
 		}
 		sess := *m.remoteNoteEdit
+		if msg.register {
+			return commitRemoteNoteRegisterCmd(sess)
+		}
 		return commitRemoteNoteEditCmd(sess)
 	case remoteEditKindSSH:
 		if m.remoteSSHEdit == nil {
@@ -156,6 +185,25 @@ func (m *model) handleRemoteEditEditorClosed(msg remoteEditEditorClosedMsg) tea.
 		return commitRemoteSSHEditCmd(sess)
 	}
 	return nil
+}
+
+func commitRemoteNoteRegisterCmd(sess app.RemoteNoteEditSession) tea.Cmd {
+	return func() tea.Msg {
+		var logs []string
+		reporter := app.ReporterFunc(func(event app.OperationEvent) {
+			if msg := strings.TrimSpace(event.Message); msg != "" {
+				logs = append(logs, msg)
+			}
+		})
+		err := serviceapi.CommitRemoteNoteRegister(context.Background(), sess, reporter)
+		result := &app.AddSecretResult{
+			Kind:        sess.Target.Kind,
+			TargetName:  sess.Target.Name,
+			Folder:      sess.Target.Folder,
+			NoteRelPath: sess.NoteRel,
+		}
+		return addSecretDoneMsg{result: result, err: err, logs: logs}
+	}
 }
 
 func commitRemoteNoteEditCmd(sess app.RemoteNoteEditSession) tea.Cmd {

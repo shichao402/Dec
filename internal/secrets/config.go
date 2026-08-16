@@ -250,6 +250,37 @@ func RememberSecretBundles(names []string) error {
 	return SaveConfig(cfg)
 }
 
+// ForgetSecretBundles 从 known_secret_bundles 移除指定短名（幂等）。
+// 用于 bundle 删除后避免 Settings 候选 / 再启用路径把已删包「记回来」。
+func ForgetSecretBundles(names []string) error {
+	names = NormalizeBundleNames(names)
+	if len(names) == 0 {
+		return nil
+	}
+	drop := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		drop[name] = struct{}{}
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	before := cfg.KnownSecretBundleNames()
+	after := make([]string, 0, len(before))
+	for _, name := range before {
+		if _, skip := drop[name]; skip {
+			continue
+		}
+		after = append(after, name)
+	}
+	after = NormalizeBundleNames(after)
+	if equalStringSlices(before, after) {
+		return nil
+	}
+	cfg.KnownSecretBundles = after
+	return SaveConfig(cfg)
+}
+
 func equalStringSlices(left, right []string) bool {
 	if len(left) != len(right) {
 		return false

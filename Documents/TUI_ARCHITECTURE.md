@@ -38,13 +38,13 @@ dec --version / dec --help / dec __freshness-check
 | **Home** | 项目概览、建议下一步、**project 初始化**（自动匹配 vault 同名 project、选择或新建） |
 | **Bundles** | 扫描 vault bundle、浏览/搜索资产、调整项目 `enabled_bundles` / `enabled` 并保存 |
 | **Project** | 项目级 IDE / editor 覆盖、**项目变量**（`.dec/vars.yaml` 只读预览，按 `e` 挂起外部编辑器） |
-| **Run** | pull / push / remove；一次 pull 解析 project bundle 列表 → Dec Git bundle + Bitwarden secrets bundle |
-| **Remote** | 浏览 / 删除 / 外部编辑远端对象（Dec Git vault + Bitwarden SyncTarget / SSH Hosts）；原 Delete 页退役并入此页（ADR 0004） |
-| **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、本机用户级 bundle 启用 |
+| **Run** | pull / push / remove；一次 pull 解析 project bundle 列表 → Dec Git bundle + Bitwarden secrets bundle；成功对照远端的启用集自动 prune 本地孤儿（无法确认只报告） |
+| **Remote** | 上下文无关的完整远端浏览器/编辑器（Dec Git vault 全量 + Bitwarden 全部 folder + 无文件夹只读区）；`e` temp 编辑、`A` 任意 folder 登记、远端/本地删除拆分、跨上下文 typed confirm（ADR 0004） |
+| **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、本机用户级 bundle 启用、**本机 vars** 外部编辑、服务版本 mismatch 提示与重启 `dec-server` |
 
 侧栏导航：`Home` → `Bundles` → `Project` → `Run` → `Remote` → `Settings`（`tab` / `shift+tab` 切换）。
 
-`dec --user` 进入用户平面，页列为 `Home` → `Bundles` → `Run` → `Remote` → `Settings`。Bundles / Run / Remote 的读写落点按平面解析（`~/.dec/cache`、`~/.dec/secrets`、`~/.cursor` 等），只暴露 `scope: user` 的 bundle；Project 页不开放（项目变量在用户平面无对应概念）。见 [0009](decisions/0009-bundle-binary-scope.md) §4。
+`dec --user` 进入用户平面，页列为 `Home` → `Bundles` → `Run` → `Remote` → `Settings`。Bundles / Run 的读写落点按平面解析（`~/.dec/cache`、`~/.dec/secrets`、`~/.cursor` 等），只暴露 `scope: user` 的 bundle；**Remote 页可见性不按平面过滤**（全量远端库存 + 本机清理分区）。Project 页不开放（项目变量在用户平面无对应概念）。见 [0009](decisions/0009-bundle-binary-scope.md) §4 与 [0004](decisions/0004-remote-page.md)。
 
 ## 4. 模块分层
 
@@ -93,6 +93,7 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 2. 逐 bundle 拉 Dec Git → `.dec/cache/<bundle>/`
 3. 自动拉 Bitwarden secrets bundle → Secure Note 项目根相对路径；SSH Key → `~/.ssh/`
 4. 零重叠校验 → 从 cache 渲染 IDE + 非敏感 vars 占位符替换
+5. **孤儿 reconcile**：仅对本次启用且远端对照成功的 SyncTarget / vault 目标集清理本地孤儿；无法确认则只报告（见 [0010](decisions/0010-pull-orphan-and-ops.md)）
 
 缺 Bitwarden session 时由 `dec-server` 自动触发 web unlock（服务进程内存 session，见 [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md#bitwarden-认证)）。
 
@@ -101,6 +102,19 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 - 按 `e` 通过 `tea.ExecProcess` 挂起 TUI、拉起外部编辑器编辑 `.dec/vars.yaml`
 - **禁止**在 TUI 内直接调用 `editor.Open`（会与 Bubble Tea 持有的 TTY 冲突）
 - `.dec/cache/` 不存在时显示提示，占位符扫描依赖 prior pull
+
+### 5.4b Settings 本机 vars / 服务重启
+
+- 本机用户级 vars（`~/.dec/local/vars.yaml`）同样按 `e` 外部编辑
+- 门面与 `dec-server` 版本不一致时提示；Settings 可确认重启服务（清空进程内 Bitwarden session）
+
+### 5.4c Remote 页要点
+
+- 进入默认拉全量远端库存（`ListRemoteInventory`）；`r` 强制刷新
+- `e`：Secure Note / SSH Hosts → temp → 写回远端（不种本地）
+- `A`：任意远端 folder 登记（temp 或本地路径）
+- `d`：远端分区只改远端；本地分区只清本机；跨上下文需 typed confirm
+- 「无文件夹」只读折叠区，不可勾选删除
 
 ### 5.5 跨页异步 IO（强制约定）
 

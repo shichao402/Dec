@@ -3,10 +3,13 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/secrets/handler"
 )
@@ -42,6 +45,213 @@ func planWorkspaceSecretsSync(workspace Workspace, enabledBundles []string, cfg 
 	return &secretsSyncPlan{Targets: targets, Total: len(targets)}, nil
 }
 
+// planWorkspaceSecretsBrowse 为 Remote / secrets 元数据浏览规划 SyncTarget（ADR 0004）。
+// 与 pull 不同：覆盖「包内外」——启用包 ∪ 本地同步根已有 bundle 目录 ∪ vault 同平面包
+// ∪ 本机 known_secret_bundles。pull 仍只用 enabled，避免把未启用包的远端 Note 拉进工作区。
+//
+// known_secret_bundles 是「本机见过的 secrets 包」，里面混着两个平面的名字，
+// 因此要减掉 vault 里明确属于另一平面的包（ADR 0009 平面隔离）。
+func planWorkspaceSecretsBrowse(workspace Workspace, enabledBundles []string, cfg *secrets.Config, reporter Reporter) (*secretsSyncPlan, error) {
+	reporter = defaultReporter(reporter)
+	scopes := loadVaultBundleScopes(workspace, reporter)
+	names := make(map[string]struct{})
+	add := func(list []string) {
+		for _, n := range config.NormalizeBundleNames(list) {
+			if n == "" {
+				continue
+			}
+			names[n] = struct{}{}
+		}
+	}
+	addUnclaimed := func(list []string) {
+		for _, n := range config.NormalizeBundleNames(list) {
+			if n == "" || scopes.belongsToOtherPlane(n) {
+				continue
+			}
+			names[n] = struct{}{}
+		}
+	}
+	add(enabledBundles)
+	add(listLocalSecretBundleNames(workspace))
+	add(scopes.inPlaneNames())
+	addUnclaimed(cfg.KnownSecretBundleNames())
+
+	browse := make([]string, 0, len(names))
+	for n := range names {
+		browse = append(browse, n)
+	}
+	sort.Strings(browse)
+	return planWorkspaceSecretsSync(workspace, browse, cfg)
+}
+
+// vaultBundleScopes 记录 vault 中 bundle 名的平面归属，用于 ADR 0009 平面隔离。
+// 不在 vault 里的名字两边都不属于——它是「无主」的，当前平面可以看见并清理。
+type vaultBundleScopes struct {
+	inPlane    map[string]struct{}
+	otherPlane map[string]struct{}
+}
+
+func (s vaultBundleScopes) belongsToOtherPlane(name string) bool {
+	if _, ok := s.inPlane[name]; ok {
+		return false
+	}
+	_, ok := s.otherPlane[name]
+	return ok
+}
+
+func (s vaultBundleScopes) inPlaneNames() []string {
+	names := make([]string, 0, len(s.inPlane))
+	for name := range s.inPlane {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// loadVaultBundleScopes 一次扫描 vault，按 scope 把 bundle 名分到本平面 / 另一平面（LocalRead，不 Fetch）。
+func loadVaultBundleScopes(workspace Workspace, reporter Reporter) vaultBundleScopes {
+	scopes := vaultBundleScopes{
+		inPlane:    make(map[string]struct{}),
+		otherPlane: make(map[string]struct{}),
+	}
+	_ = withAppReadRepo(func(tx *repo.Transaction) error {
+		vaultBundles, _, scanErr := scanVaultBundles(tx.WorkDir(), reporter)
+		if scanErr != nil {
+			emit(reporter, EventWarn, "secrets.browse", "扫描 vault bundles 失败（secrets 浏览不含 vault 包）: "+scanErr.Error(), nil)
+			return nil
+		}
+		wantScope := bundleScopeForPlane(workspace.EffectivePlane())
+		for name, matches := range vaultBundles {
+			for _, match := range matches {
+				if match.bundle.Scope == wantScope {
+					scopes.inPlane[name] = struct{}{}
+				} else {
+					scopes.otherPlane[name] = struct{}{}
+				}
+			}
+		}
+		return nil
+	})
+	return scopes
+}
+
+// listLocalSecretBundleNames 扫描本机同步根下已有的 bundles/<name> 目录（停用后残留也要能在 Remote 里删）。
+func listLocalSecretBundleNames(workspace Workspace) []string {
+	var root string
+	if workspace.EffectivePlane() == WorkspaceUser {
+		machineRoot, err := secrets.MachineSecretsRoot()
+		if err != nil {
+			return nil
+		}
+		root = filepath.Join(machineRoot, filepath.FromSlash(secrets.MachineBundleSecretsRelPrefix))
+	} else {
+		projectRoot := strings.TrimSpace(workspace.Root)
+		if projectRoot == "" {
+			return nil
+		}
+		root = filepath.Join(projectRoot, filepath.FromSlash(secrets.BundleSecretsLocalRelPrefix))
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() || name == "" || name[0] == '.' {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// listVaultInPlaneBundleNames 返回 vault 内当前平面的 bundle 名（LocalRead，不 Fetch）。
+func listVaultInPlaneBundleNames(workspace Workspace, reporter Reporter) []string {
+	return loadVaultBundleScopes(workspace, reporter).inPlaneNames()
+}
+
+// discoverRemoteSecretTargets 补上「Bitwarden 上有、但本机名单没有」的 folder。
+//
+// ADR 0004（修订）：Remote 是上下文无关的完整远端浏览器——枚举全部 folder
+// （`bundle/*` + 裸名如 Dec / relkit），不再按当前平面 / scope 过滤可见性。
+// LocalRoot 仅在能推断时填充（供「本地是否存在」标注）；裸 folder 可无 LocalRoot。
+// 故意不 RememberSecretBundles：浏览不写回 known。
+func discoverRemoteSecretTargets(
+	ctx context.Context,
+	client secrets.Client,
+	workspace Workspace,
+	scopes vaultBundleScopes,
+	planned []secrets.SyncTarget,
+	reporter Reporter,
+) []secrets.SyncTarget {
+	reporter = defaultReporter(reporter)
+	folders, err := client.ListAllFolderNames(ctx)
+	if err != nil {
+		emit(reporter, EventWarn, "delete.secrets",
+			fmt.Sprintf("枚举 Bitwarden folder 失败（仅展示已知包）: %v", err), nil)
+		return nil
+	}
+	covered := make(map[string]struct{}, len(planned))
+	for _, target := range planned {
+		covered[target.Folder] = struct{}{}
+	}
+
+	var extra []secrets.SyncTarget
+	for _, folder := range folders {
+		folder = strings.TrimSpace(folder)
+		if folder == "" {
+			continue
+		}
+		if _, ok := covered[folder]; ok {
+			continue
+		}
+		target, buildErr := remoteInventoryTarget(folder, workspace, scopes)
+		if buildErr != nil {
+			emit(reporter, EventWarn, "delete.secrets",
+				fmt.Sprintf("跳过远端 folder %s: %v", folder, buildErr), nil)
+			continue
+		}
+		covered[folder] = struct{}{}
+		extra = append(extra, target)
+	}
+	if len(extra) > 0 {
+		emit(reporter, EventInfo, "delete.secrets",
+			fmt.Sprintf("发现 %d 个本机名单外的远端 folder", len(extra)), nil)
+	}
+	return extra
+}
+
+// remoteInventoryTarget 为 Remote 全量库存构造 SyncTarget。
+// scope 只影响 LocalRoot 推断（元数据），不决定是否可见。
+func remoteInventoryTarget(folder string, workspace Workspace, scopes vaultBundleScopes) (secrets.SyncTarget, error) {
+	folder = strings.TrimSpace(folder)
+	if folder == "" {
+		return secrets.SyncTarget{}, fmt.Errorf("folder 为空")
+	}
+	if strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
+		name := strings.TrimSpace(strings.TrimPrefix(folder, secrets.BundleFolderPrefix))
+		if name == "" {
+			return secrets.SyncTarget{}, fmt.Errorf("非法 bundle folder %q", folder)
+		}
+		// 按 vault scope 选 LocalRoot 平面；无主名字跟当前工作区平面走。
+		useMachine := workspace.EffectivePlane() == WorkspaceUser
+		if scopes.belongsToOtherPlane(name) {
+			useMachine = !useMachine
+		}
+		if useMachine {
+			return secrets.NewMachineBundleSyncTarget(name, folder)
+		}
+		return secrets.NewBundleSyncTarget(name, folder)
+	}
+	// 裸 folder：project 级远端节点；不强制 LocalRoot（其它项目 / 非当前工作区）。
+	return secrets.SyncTarget{
+		Kind:   secrets.SyncKindProject,
+		Name:   folder,
+		Folder: folder,
+	}, nil
+}
+
 // secretsClientFactory 供测试注入 stub Client。
 var secretsClientFactory = secrets.DefaultClient
 
@@ -53,6 +263,7 @@ type secretsPullSummary struct {
 	HandlerNames  []string
 	LandingPaths  []string
 	SSHKeyNames   []string
+	Orphans       OrphanCleanupReport
 }
 
 func warnUnignoredSecrets(projectRoot string, landingPaths []string, reporter Reporter) {
@@ -75,7 +286,7 @@ func warnUnignoredSecrets(projectRoot string, landingPaths []string, reporter Re
 }
 
 // pullEnabledSecretsBundles 拉取全部 SyncTarget。
-// 不做「停用即清理」：删除走 Remote 页显式确认。
+// 停用包不清理；对本次成功对照过远端的启用 SyncTarget，会 prune 本地孤儿 Note/SSH。
 func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledBundles []string, reporter Reporter) (*secretsPullSummary, error) {
 	return pullEnabledSecretsBundlesForWorkspace(ctx, NewWorkspace(WorkspaceProject, projectRoot), enabledBundles, reporter)
 }
@@ -84,6 +295,22 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 	reporter = defaultReporter(reporter)
 	projectRoot := workspace.Root
 	summary := &secretsPullSummary{}
+	secretsConfirmed := make(map[string]bool)
+	vaultPresent, vaultScanOK := vaultPresentInPlane(workspace, reporter)
+
+	finishMissingVault := func() {
+		if !vaultScanOK {
+			if len(enabledBundles) > 0 {
+				emit(reporter, EventInfo, "pull.reconcile",
+					"跳过 vault 缺失包收敛（本轮未能确认 vault 目录）", nil)
+			}
+			emitOrphanCleanupSummary(summary.Orphans, reporter)
+			return
+		}
+		missing := reconcileMissingVaultBundles(workspace, enabledBundles, vaultPresent, secretsConfirmed, reporter)
+		summary.Orphans.merge(missing)
+		emitOrphanCleanupSummary(summary.Orphans, reporter)
+	}
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -96,6 +323,7 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 	if !configured {
 		summary.SkippedReason = "Bitwarden 未配置"
 		emit(reporter, EventInfo, "pull.secrets", "Bitwarden 未配置，跳过 secrets 同步", nil)
+		finishMissingVault()
 		return summary, nil
 	}
 
@@ -110,17 +338,19 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 	if plan.Total == 0 {
 		summary.SkippedReason = "无已启用 bundle 或 project secrets"
 		emit(reporter, EventInfo, "pull.secrets", "无已启用 bundle 或 project secrets，跳过 secrets 同步", nil)
+		finishMissingVault()
 		return summary, nil
 	}
 
 	if !secrets.HasSession() {
-		emit(reporter, EventInfo, "pull.secrets", "[auth] pull: Bitwarden session required", nil)
 		if err := ensureBitwardenSession(ctx, reporter, "pull.secrets"); err != nil {
-			return nil, err
+			finishMissingVault()
+			return summary, err
 		}
 	}
 	if !secrets.HasUserKey() {
-		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
+		finishMissingVault()
+		return summary, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
 
 	client := secretsClientFactory()
@@ -159,7 +389,8 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 			},
 		})
 		if pullErr != nil {
-			return nil, fmt.Errorf("拉取 %s 失败: %w", label, pullErr)
+			finishMissingVault()
+			return summary, fmt.Errorf("拉取 %s 失败: %w", label, pullErr)
 		}
 		fetchedNotes[i] = notes
 		for _, note := range notes {
@@ -206,7 +437,8 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 	emit(reporter, EventInfo, "pull.secrets", "校验落地路径边界与跨 folder 冲突", nil)
 	if err := secrets.ValidateLandingPaths(projectRoot, candidates); err != nil {
 		emit(reporter, EventError, "pull.secrets", err.Error(), nil)
-		return nil, err
+		finishMissingVault()
+		return summary, err
 	}
 
 	for i, target := range plan.Targets {
@@ -260,12 +492,19 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 				names = append(names, landing.Name)
 			}
 			emit(reporter, EventInfo, "pull.secrets",
-				fmt.Sprintf("  落地 %d 个 SSH Key: %s（未隐式删除本地/远端多余项）", len(names), strings.Join(names, ", ")), progress)
+				fmt.Sprintf("  落地 %d 个 SSH Key: %s", len(names), strings.Join(names, ", ")), progress)
+		}
+
+		// 远端列表已成功取回 → 以远端为权威 prune 本地孤儿（停用包不在 plan 内，不会误清）。
+		pruned := pruneOrphanSecretsForTarget(projectRoot, target, fetchedNotes[i], fetchedKeys[i], reporter)
+		summary.Orphans.merge(pruned)
+		if target.Kind == secrets.SyncKindBundle {
+			secretsConfirmed[target.Name] = true
 		}
 
 		if len(paths) == 0 && len(fetchedKeys[i]) == 0 && target.Folder != "" {
 			emit(reporter, EventInfo, "pull.secrets",
-				fmt.Sprintf("  Bitwarden folder %q 无 Secure Note / SSH Key 或 folder 不存在，跳过", target.Folder), progress)
+				fmt.Sprintf("  Bitwarden folder %q 无 Secure Note / SSH Key 或 folder 不存在", target.Folder), progress)
 		}
 	}
 
@@ -273,18 +512,55 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 		warnUnignoredSecrets(projectRoot, summary.LandingPaths, reporter)
 	}
 
-	if summary.NoteCount == 0 && summary.SSHKeyCount == 0 && summary.HandlerCount == 0 {
-		emit(reporter, EventInfo, "pull.secrets", "secrets 同步完成（无变更；未删除多余项）", &Progress{Phase: "secrets", Current: total, Total: total})
+	finishMissingVault()
+
+	orphanN := len(summary.Orphans.RemovedSecretPaths) + len(summary.Orphans.RemovedSSHKeys)
+	if summary.NoteCount == 0 && summary.SSHKeyCount == 0 && summary.HandlerCount == 0 && orphanN == 0 {
+		emit(reporter, EventInfo, "pull.secrets", "secrets 同步完成（无变更）", &Progress{Phase: "secrets", Current: total, Total: total})
 	} else {
 		msg := fmt.Sprintf("secrets 同步完成：%d 个文件 · %d 个 SSH Key", summary.NoteCount, summary.SSHKeyCount)
 		if summary.HandlerCount > 0 {
 			msg += fmt.Sprintf(" · %d 个 handler", summary.HandlerCount)
 		}
-		msg += "（未删除多余项）"
+		if orphanN > 0 {
+			msg += fmt.Sprintf(" · 清理 %d 项孤儿", orphanN)
+		}
 		emit(reporter, EventInfo, "pull.secrets", msg,
 			&Progress{Phase: "secrets", Current: total, Total: total})
 	}
 	return summary, nil
+}
+
+// vaultPresentInPlane 返回当前平面 vault 中存在的 bundle 名集合（LocalRead）。
+// ok=false 表示本轮未能确认 vault（未连接 / 扫描失败），调用方不得据此做「远端已删」收敛。
+func vaultPresentInPlane(workspace Workspace, reporter Reporter) (map[string]struct{}, bool) {
+	present := make(map[string]struct{})
+	ok := false
+	err := withAppReadRepo(func(tx *repo.Transaction) error {
+		ok = true
+		vaultBundles, _, scanErr := scanVaultBundles(tx.WorkDir(), reporter)
+		if scanErr != nil {
+			emit(reporter, EventWarn, "pull.reconcile", "扫描 vault bundles 失败: "+scanErr.Error(), nil)
+			ok = false
+			return nil
+		}
+		wantScope := bundleScopeForPlane(workspace.EffectivePlane())
+		for name, matches := range vaultBundles {
+			for _, match := range matches {
+				if match.bundle.Scope == wantScope {
+					present[name] = struct{}{}
+					break
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		emit(reporter, EventWarn, "pull.reconcile",
+			fmt.Sprintf("读取 vault 失败（跳过缺失包收敛）: %v", err), nil)
+		return present, false
+	}
+	return present, ok
 }
 
 func formatSyncTargetLabel(t secrets.SyncTarget) string {

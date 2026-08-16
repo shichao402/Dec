@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
+	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -70,6 +70,7 @@ func synthesizeVaultBundles(repoDir string, byName map[string][]vaultBundle, ove
 }
 
 // listBundleAssetMembers 列出 bundles/<name>/ 内全部资产，返回 bundle members 引用。
+// 目录清单来自 bundle.VaultAssetKinds，避免与 Bundles/Remote/cache 扫描分裂。
 func listBundleAssetMembers(repoDir, bundleName string) []string {
 	bundlePath := filepath.Join(repoDir, types.VaultBundlesDir, bundleName)
 	type memberRef struct {
@@ -78,16 +79,8 @@ func listBundleAssetMembers(repoDir, bundleName string) []string {
 	}
 	var refs []memberRef
 
-	for _, spec := range []struct {
-		dir    string
-		prefix string
-		trim   func(string) string
-	}{
-		{"skills", "skills", func(s string) string { return s }},
-		{"rules", "rules", func(s string) string { return strings.TrimSuffix(s, ".mdc") }},
-		{"mcp", "mcp", func(s string) string { return strings.TrimSuffix(s, ".json") }},
-	} {
-		dir := filepath.Join(bundlePath, spec.dir)
+	for _, kind := range bundle.VaultAssetKinds {
+		dir := filepath.Join(bundlePath, kind.Dir)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
@@ -96,16 +89,19 @@ func listBundleAssetMembers(repoDir, bundleName string) []string {
 			if entry.Name() == ".gitkeep" {
 				continue
 			}
-			if spec.dir == "skills" {
+			if kind.DirEntries {
 				if entry.IsDir() {
-					refs = append(refs, memberRef{prefix: spec.prefix, name: entry.Name()})
+					refs = append(refs, memberRef{prefix: kind.Dir, name: entry.Name()})
 				}
 				continue
 			}
 			if entry.IsDir() {
 				continue
 			}
-			refs = append(refs, memberRef{prefix: spec.prefix, name: spec.trim(entry.Name())})
+			refs = append(refs, memberRef{
+				prefix: kind.Dir,
+				name:   bundle.AssetEntryName(kind, entry.Name()),
+			})
 		}
 	}
 

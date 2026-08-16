@@ -148,6 +148,7 @@ func snapshotSettingsModel(width int) model {
 	m.settings = &app.GlobalSettingsState{
 		ConfigPath:             "/tmp/.dec/config.yaml",
 		VarsPath:               "/tmp/.dec/local/vars.yaml",
+		VarsFileReady:          true,
 		RepoConnected:          true,
 		RepoURL:                "git@github.com:demo/dec.git",
 		ConnectedRepoURL:       "git@github.com:demo/dec.git",

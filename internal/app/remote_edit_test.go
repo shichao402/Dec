@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,22 +10,17 @@ import (
 	"github.com/shichao402/Dec/internal/secrets"
 )
 
-func TestPrepareAndCommitRemoteNoteEdit(t *testing.T) {
+func TestPrepareAndCommitRemoteNoteEdit_UsesTempFile(t *testing.T) {
 	secrets.SetSession("test-session")
 	projectRoot := t.TempDir()
-	target, err := secrets.NewBundleSyncTarget("vikunja", "bundle/vikunja")
-	if err != nil {
-		t.Fatal(err)
-	}
 	noteRel := "env/vikunja.env"
-	abs, err := secrets.AbsolutePath(projectRoot, target, noteRel)
-	if err != nil {
+	// 本地同步根已有旧内容：编辑不得覆盖它。
+	localRoot := ".secrets/bundles/vikunja"
+	localAbs := filepath.Join(projectRoot, filepath.FromSlash(localRoot), filepath.FromSlash(noteRel))
+	if err := os.MkdirAll(filepath.Dir(localAbs), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(abs, []byte("OLD=1\n"), 0o600); err != nil {
+	if err := os.WriteFile(localAbs, []byte("LOCAL=unchanged\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -38,18 +34,21 @@ func TestPrepareAndCommitRemoteNoteEdit(t *testing.T) {
 	item := DeleteSelectionItem{
 		Kind:          DeleteKindSecret,
 		SecretPath:    noteRel,
-		LocalRoot:     target.LocalRoot,
-		SecretsBundle: target.Folder,
-		DecBundleName: target.Name,
+		LocalRoot:     localRoot,
+		SecretsBundle: "bundle/vikunja",
+		DecBundleName: "vikunja",
 	}
 	sess, err := PrepareRemoteNoteEdit(t.Context(), projectRoot, item, nil)
 	if err != nil {
 		t.Fatalf("PrepareRemoteNoteEdit: %v", err)
 	}
-	if sess.Path != abs {
-		t.Fatalf("Path = %q, want %q", sess.Path, abs)
+	if !sess.TempFile {
+		t.Fatal("应使用临时文件")
 	}
-	if err := os.WriteFile(abs, []byte("NEW=2\n"), 0o600); err != nil {
+	if sess.Path == localAbs {
+		t.Fatalf("不应编辑本地同步根: %q", sess.Path)
+	}
+	if err := os.WriteFile(sess.Path, []byte("NEW=2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := CommitRemoteNoteEdit(t.Context(), *sess, nil); err != nil {
@@ -58,6 +57,46 @@ func TestPrepareAndCommitRemoteNoteEdit(t *testing.T) {
 	notes := stub.NotesByFolder["bundle/vikunja"]
 	if len(notes) != 1 || notes[0].Content != "NEW=2\n" {
 		t.Fatalf("notes = %#v", notes)
+	}
+	got, err := os.ReadFile(localAbs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "LOCAL=unchanged\n" {
+		t.Fatalf("本地同步根不应被编辑写回: %q", got)
+	}
+}
+
+func TestPrepareRemoteNoteEdit_BareFolderWithoutLocalRoot(t *testing.T) {
+	secrets.SetSession("test-session")
+	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+		"relkit": {{RelativePath: "env/x.env", Content: "X=1\n"}},
+	}}
+	orig := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = orig })
+
+	sess, err := PrepareRemoteNoteEdit(t.Context(), t.TempDir(), DeleteSelectionItem{
+		Kind:          DeleteKindSecret,
+		SecretPath:    "env/x.env",
+		SecretsBundle: "relkit",
+	}, nil)
+	if err != nil {
+		t.Fatalf("PrepareRemoteNoteEdit bare: %v", err)
+	}
+	if !sess.TempFile || sess.Path == "" {
+		t.Fatalf("应落到临时文件: %#v", sess)
+	}
+	raw, _ := os.ReadFile(sess.Path)
+	if string(raw) != "X=1\n" {
+		t.Fatalf("temp content = %q", raw)
+	}
+	_ = os.WriteFile(sess.Path, []byte("X=2\n"), 0o600)
+	if err := CommitRemoteNoteEdit(t.Context(), *sess, nil); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if stub.NotesByFolder["relkit"][0].Content != "X=2\n" {
+		t.Fatalf("bare folder note = %#v", stub.NotesByFolder["relkit"])
 	}
 }
 
@@ -124,5 +163,38 @@ func TestCommitRemoteSSHHostsEdit(t *testing.T) {
 	got := stub.SSHKeysByFolder["bundle/vikunja"][0].Hosts
 	if len(got) != 1 || got[0] != "new.example.com" {
 		t.Fatalf("hosts = %#v", got)
+	}
+}
+
+func TestListRemoteInventory_ListsBareFolder(t *testing.T) {
+	writeRemoteBrowseSecretsConfig(t, secrets.Config{})
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{
+			NotesByFolder: map[string][]secrets.SecureNote{
+				"relkit": {{RelativePath: "env/r.env", Content: "R=1\n"}},
+			},
+		}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	projectRoot := t.TempDir()
+	candidates, err := ListRemoteInventory(context.Background(), NewWorkspace(WorkspaceProject, projectRoot), true, nil)
+	if err != nil {
+		t.Fatalf("ListRemoteInventory: %v", err)
+	}
+	if !hasSecretCandidate(candidates, "relkit", "env/r.env") {
+		t.Fatalf("裸 folder 应出现在 Remote: %#v", candidates)
+	}
+	for _, c := range candidates {
+		if c.SecretsBundle == "relkit" && c.SecretPath == "env/r.env" {
+			if c.Partition != PartitionRemote {
+				t.Fatalf("裸 folder 应属远端分区")
+			}
+			if !c.Unmanaged {
+				t.Fatalf("裸 folder 应标注非 Dec管理")
+			}
+			return
+		}
 	}
 }

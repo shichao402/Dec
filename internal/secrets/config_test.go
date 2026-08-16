@@ -306,3 +306,24 @@ func TestRememberSecretBundles_MergesIdempotent(t *testing.T) {
 	}
 }
 
+func TestForgetSecretBundles_RemovesIdempotent(t *testing.T) {
+	decHome := t.TempDir()
+	t.Setenv("DEC_HOME", decHome)
+	if err := RememberSecretBundles([]string{"pkv", "woa", "vikunja"}); err != nil {
+		t.Fatalf("RememberSecretBundles() = %v", err)
+	}
+	if err := ForgetSecretBundles([]string{"pkv", "missing"}); err != nil {
+		t.Fatalf("ForgetSecretBundles() = %v", err)
+	}
+	if err := ForgetSecretBundles([]string{"pkv"}); err != nil {
+		t.Fatalf("ForgetSecretBundles() 二次 = %v", err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.KnownSecretBundleNames()
+	if len(got) != 2 || got[0] != "woa" || got[1] != "vikunja" {
+		t.Fatalf("KnownSecretBundleNames = %#v", got)
+	}
+}

@@ -241,16 +241,17 @@ sequenceDiagram
   end
 ```
 
-Pull **不做清理**：停用后已落地文件保留，删除走 Remote 页（含 gitgcm 撤销）。
+- Pull **对本次启用并成功对照远端的 SyncTarget** 会自动 prune 本地孤儿 Note/SSH；停用包与未能确认远端的敏感落地只报告不删。Git 资产仍按目标集清理 `.dec/cache` 与 IDE 安装产物。
+- Remote 浏览（`ListRemoteInventory` / `ListAllFolderNames`）**不**写回 `known_secret_bundles`；known 仅由 pull 等发现路径更新。删除远端时应收敛 projects 声明 / known / enabled，避免幽灵复活（见 [0010](decisions/0010-pull-orphan-and-ops.md)）。
 
 ## TUI 用户体验
 
 | 场景 | 用户操作 | 系统行为 |
 |------|----------|----------|
-| 用户平面 | `dec --user` | 工作空间切到用户平面；只见 user-scope bundle |
-| 项目平面 | `dec`（项目工作区） | 只见 project-scope bundle |
+| 用户平面 | `dec --user` | 工作空间切到用户平面；Bundles/Run 只见 user-scope bundle |
+| 项目平面 | `dec`（项目工作区） | Bundles/Run 只见 project-scope bundle |
 | 首次启用 | Bundles 页调整 → Run 页 pull | 按当前平面完成 Dec + secrets |
-| Secrets 管理 | Settings / Remote | Bitwarden 连接；按平面过滤 |
+| Secrets 管理 | Settings / Remote | Bitwarden 连接；Remote **全量**浏览（folder + 无文件夹只读）；`A` 任意 folder 登记；跨上下文删除 typed confirm |
 | MCP 运行时注入 | `dec-exec` | 按 scope 单层加载 `env/*.env` |
 
 不在 TUI 外暴露 `dec secrets pull` 等独立子命令。

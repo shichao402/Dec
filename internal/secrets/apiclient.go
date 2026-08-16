@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 const (
@@ -49,10 +50,21 @@ type bwListResponse[T any] struct {
 }
 
 // APIClient 使用 Bitwarden Vault API 拉取 Secure Notes。
+//
+// 一次浏览可能要跨十几个 folder 取 Note / SSH Key，而 Bitwarden 只提供整库
+// /ciphers 与 /folders 列表接口。实例内缓存这两份快照，让「列 N 个 folder」
+// 退化为一次下载；任何写操作后立即失效。DefaultClient 每次调用都新建实例，
+// 缓存生命周期天然就是一次业务操作。
 type APIClient struct {
-	APIURL  string
-	Token   string
-	HTTP    *http.Client
+	APIURL string
+	Token  string
+	HTTP   *http.Client
+
+	snapshotMu sync.Mutex
+	folders    []bwFolder
+	foldersOK  bool
+	ciphers    []bwCipher
+	ciphersOK  bool
 }
 
 // NewAPIClient 创建带 session 的 Vault API 客户端。
@@ -290,6 +302,7 @@ func (c *APIClient) updateSSHKeyNotes(ctx context.Context, cipher bwCipher, user
 }
 
 func (c *APIClient) deleteCipher(ctx context.Context, cipherID string) error {
+	c.invalidateSnapshot()
 	reqURL := strings.TrimRight(c.APIURL, "/") + "/ciphers/" + cipherID
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, reqURL, nil)
 	if err != nil {
@@ -397,9 +410,11 @@ func (c *APIClient) findFolderID(ctx context.Context, name string, userKey []byt
 		return "", err
 	}
 	for _, folder := range folders {
+		// 解不开的 folder 属于 Dec 读不懂的条目（例如 organization 共享），
+		// 跳过而不是让整次查找失败——否则一个外来 folder 会拖垮全部浏览。
 		decryptedName, err := decryptVaultString(folder.Name, userKey)
 		if err != nil {
-			return "", fmt.Errorf("解密 Bitwarden folder 名称失败: %w", err)
+			continue
 		}
 		if decryptedName == name {
 			return folder.ID, nil
@@ -409,19 +424,43 @@ func (c *APIClient) findFolderID(ctx context.Context, name string, userKey []byt
 }
 
 func (c *APIClient) listFolders(ctx context.Context) ([]bwFolder, error) {
+	c.snapshotMu.Lock()
+	defer c.snapshotMu.Unlock()
+	if c.foldersOK {
+		return c.folders, nil
+	}
 	var out bwListResponse[bwFolder]
 	if err := c.getJSON(ctx, c.APIURL+"/folders", &out); err != nil {
 		return nil, fmt.Errorf("列出 Bitwarden folder 失败: %w", err)
 	}
-	return out.Data, nil
+	c.folders = out.Data
+	c.foldersOK = true
+	return c.folders, nil
 }
 
 func (c *APIClient) listCiphers(ctx context.Context) ([]bwCipher, error) {
+	c.snapshotMu.Lock()
+	defer c.snapshotMu.Unlock()
+	if c.ciphersOK {
+		return c.ciphers, nil
+	}
 	var out bwListResponse[bwCipher]
 	if err := c.getJSON(ctx, c.APIURL+"/ciphers", &out); err != nil {
 		return nil, fmt.Errorf("列出 Bitwarden cipher 失败: %w", err)
 	}
-	return out.Data, nil
+	c.ciphers = out.Data
+	c.ciphersOK = true
+	return c.ciphers, nil
+}
+
+// invalidateSnapshot 丢弃 folder / cipher 快照，任何写操作后必须调用。
+func (c *APIClient) invalidateSnapshot() {
+	c.snapshotMu.Lock()
+	defer c.snapshotMu.Unlock()
+	c.folders = nil
+	c.foldersOK = false
+	c.ciphers = nil
+	c.ciphersOK = false
 }
 
 func itemDecryptionKey(encryptedKey string, userKey []byte) ([]byte, error) {
@@ -439,6 +478,7 @@ func itemDecryptionKey(encryptedKey string, userKey []byte) ([]byte, error) {
 }
 
 func (c *APIClient) postJSON(ctx context.Context, reqURL string, body any) error {
+	c.invalidateSnapshot()
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -466,6 +506,7 @@ func (c *APIClient) postJSON(ctx context.Context, reqURL string, body any) error
 }
 
 func (c *APIClient) putJSON(ctx context.Context, reqURL string, body any) error {
+	c.invalidateSnapshot()
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err

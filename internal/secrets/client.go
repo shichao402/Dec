@@ -19,6 +19,17 @@ type Client interface {
 	ListFolderSSHKeys(ctx context.Context, folderName string) ([]RemoteSSHKey, error)
 	// ListSecretBundleNames 枚举 Bitwarden 上带 bundle/ 前缀的 folder，返回逻辑名（去前缀）。
 	ListSecretBundleNames(ctx context.Context) ([]string, error)
+	// ListAllFolderNames 枚举 vault 中全部可解密 folder 全名（含 bundle/* 与裸名）。
+	ListAllFolderNames(ctx context.Context) ([]string, error)
+	// ListUnfiledItems 枚举无 folder（FolderID 为空）的条目元数据，不含正文。
+	ListUnfiledItems(ctx context.Context) ([]UnfiledItem, error)
+}
+
+// UnfiledItem 是 Bitwarden「无文件夹」条目的只读元数据。
+type UnfiledItem struct {
+	ID   string
+	Name string
+	Type string // note | ssh | login | card | identity | other
 }
 
 // StubClient 测试/开发用 stub；按 Bitwarden folder 返回预设 Note / SSH Key。
@@ -26,6 +37,7 @@ type StubClient struct {
 	NotesByFolder       map[string][]SecureNote
 	SSHKeysByFolder     map[string][]SSHKeyItem
 	SecretBundleFolders []string // 逻辑名；用于 ListSecretBundleNames 单测
+	UnfiledItems        []UnfiledItem
 }
 
 func stubFolder(reqFolder, bindingFolder, decBundleName string) string {

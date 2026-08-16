@@ -64,7 +64,7 @@ func isProjectMutation(method string) bool {
 
 func isMachineMutation(method string) bool {
 	switch method {
-	case "connect_repo", "save_global_settings", "ensure_builtin_ide_assets":
+	case "connect_repo", "save_global_settings", "ensure_builtin_ide_assets", "ensure_global_vars":
 		return true
 	default:
 		return false
@@ -114,6 +114,10 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 			return nil, err
 		}
 		return app.SaveGlobalSettings(in, reporter)
+	case "load_global_vars":
+		return app.LoadGlobalVarsView()
+	case "ensure_global_vars":
+		return app.EnsureGlobalVarsFile()
 	case "ensure_builtin_ide_assets":
 		var in struct{ IDENames []string }
 		if err := decode(payload, &in); err != nil {
@@ -137,12 +141,14 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.ListSecretSyncTargets(projectRoot)
 	case "suggest_secret_targets":
 		return app.SuggestSecretTargets(projectRoot)
+	case "suggest_remote_register_folders":
+		return app.SuggestRemoteRegisterFolders(ctx, projectRoot, reporter)
 	case "list_secrets":
 		var in struct{ IncludeRemote bool }
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return app.ListSecretsMetadata(ctx, projectRoot, in.IncludeRemote, reporter)
+		return app.ListWorkspaceSecretsMetadata(ctx, workspace, in.IncludeRemote, reporter)
 	case "list_delete_candidates":
 		var in struct{ IncludeRemote bool }
 		if err := decode(payload, &in); err != nil {
@@ -155,6 +161,15 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 			return nil, err
 		}
 		return app.PrepareRemoteNoteEdit(ctx, projectRoot, in, reporter)
+	case "prepare_remote_note_register":
+		var in struct {
+			Folder  string
+			NoteRel string
+		}
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.PrepareRemoteNoteRegister(ctx, projectRoot, in.Folder, in.NoteRel, reporter)
 	case "prepare_remote_ssh_hosts_edit":
 		var in app.DeleteSelectionItem
 		if err := decode(payload, &in); err != nil {
@@ -270,12 +285,28 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 			return nil, err
 		}
 		return app.AddSecretToTarget(ctx, projectRoot, in.Target, in.NoteRel, reporter)
+	case "register_remote_note_from_path":
+		var in struct {
+			Folder    string
+			NoteRel   string
+			LocalPath string
+		}
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.RegisterRemoteNoteFromPath(ctx, projectRoot, in.Folder, in.NoteRel, in.LocalPath, reporter)
 	case "commit_remote_note_edit":
 		var in app.RemoteNoteEditSession
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
 		return struct{}{}, app.CommitRemoteNoteEdit(ctx, in, reporter)
+	case "commit_remote_note_register":
+		var in app.RemoteNoteEditSession
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return struct{}{}, app.CommitRemoteNoteRegister(ctx, in, reporter)
 	case "commit_remote_ssh_hosts_edit":
 		var in app.RemoteSSHHostsEditSession
 		if err := decode(payload, &in); err != nil {

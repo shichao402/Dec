@@ -21,7 +21,7 @@ func TestPullProjectAssetsSkipsWithoutEnabledAssets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	want := "config.yaml 中没有已启用的 bundle"
+	want := "未启用 bundle"
 	if result.SkippedReason != want {
 		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, want)
 	}

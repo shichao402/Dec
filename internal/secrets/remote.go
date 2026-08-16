@@ -201,6 +201,32 @@ func decryptSSHKeyCipher(cipher bwCipher, userKey []byte) (SSHKeyItem, error) {
 
 // ListSecretBundleNames 枚举 vault 中所有 bundle/<name> folder，返回逻辑名（已排序去重）。
 func (c *APIClient) ListSecretBundleNames(ctx context.Context) ([]string, error) {
+	all, err := c.ListAllFolderNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	names := make([]string, 0)
+	for _, name := range all {
+		if !strings.HasPrefix(name, BundleFolderPrefix) {
+			continue
+		}
+		logical := strings.TrimSpace(strings.TrimPrefix(name, BundleFolderPrefix))
+		if logical == "" {
+			continue
+		}
+		if _, ok := seen[logical]; ok {
+			continue
+		}
+		seen[logical] = struct{}{}
+		names = append(names, logical)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// ListAllFolderNames 枚举 vault 中全部可解密 folder 全名（含 bundle/* 与裸名如 Dec / relkit）。
+func (c *APIClient) ListAllFolderNames(ctx context.Context) ([]string, error) {
 	userKey := UserKey()
 	if len(userKey) == 0 {
 		return nil, errVaultKeyNotReady
@@ -214,21 +240,17 @@ func (c *APIClient) ListSecretBundleNames(ctx context.Context) ([]string, error)
 	for _, folder := range folders {
 		rawName, err := decryptVaultString(folder.Name, userKey)
 		if err != nil {
-			return nil, fmt.Errorf("解密 folder 名失败: %w", err)
+			continue
 		}
 		name := strings.TrimSpace(rawName)
-		if !strings.HasPrefix(name, BundleFolderPrefix) {
+		if name == "" {
 			continue
 		}
-		logical := strings.TrimSpace(strings.TrimPrefix(name, BundleFolderPrefix))
-		if logical == "" {
+		if _, ok := seen[name]; ok {
 			continue
 		}
-		if _, ok := seen[logical]; ok {
-			continue
-		}
-		seen[logical] = struct{}{}
-		names = append(names, logical)
+		seen[name] = struct{}{}
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names, nil
@@ -257,13 +279,12 @@ func (c *StubClient) ListFolderSSHKeys(_ context.Context, folderName string) ([]
 }
 
 func (c *StubClient) ListSecretBundleNames(_ context.Context) ([]string, error) {
-	seen := make(map[string]struct{})
-	for folder := range c.NotesByFolder {
-		if name, ok := stubSecretBundleName(folder); ok {
-			seen[name] = struct{}{}
-		}
+	all, err := c.ListAllFolderNames(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	for folder := range c.SSHKeysByFolder {
+	seen := make(map[string]struct{})
+	for _, folder := range all {
 		if name, ok := stubSecretBundleName(folder); ok {
 			seen[name] = struct{}{}
 		}
@@ -273,7 +294,46 @@ func (c *StubClient) ListSecretBundleNames(_ context.Context) ([]string, error) 
 		if name == "" {
 			continue
 		}
-		seen[name] = struct{}{}
+		if strings.HasPrefix(name, BundleFolderPrefix) {
+			name = strings.TrimPrefix(name, BundleFolderPrefix)
+		}
+		if name != "" {
+			seen[name] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func (c *StubClient) ListAllFolderNames(_ context.Context) ([]string, error) {
+	seen := make(map[string]struct{})
+	for folder := range c.NotesByFolder {
+		folder = strings.TrimSpace(folder)
+		if folder != "" {
+			seen[folder] = struct{}{}
+		}
+	}
+	for folder := range c.SSHKeysByFolder {
+		folder = strings.TrimSpace(folder)
+		if folder != "" {
+			seen[folder] = struct{}{}
+		}
+	}
+	for _, folder := range c.SecretBundleFolders {
+		folder = strings.TrimSpace(folder)
+		if folder == "" {
+			continue
+		}
+		if !strings.HasPrefix(folder, BundleFolderPrefix) {
+			// SecretBundleFolders 历史存逻辑名；补全为 bundle/<name> 以便与 NotesByFolder 键一致。
+			seen[DefaultBundleFolder(folder)] = struct{}{}
+			continue
+		}
+		seen[folder] = struct{}{}
 	}
 	names := make([]string, 0, len(seen))
 	for name := range seen {
@@ -302,4 +362,86 @@ func (NoopClient) ListFolderSSHKeys(_ context.Context, _ string) ([]RemoteSSHKey
 
 func (NoopClient) ListSecretBundleNames(_ context.Context) ([]string, error) {
 	return nil, nil
+}
+
+func (NoopClient) ListAllFolderNames(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (NoopClient) ListUnfiledItems(_ context.Context) ([]UnfiledItem, error) {
+	return nil, nil
+}
+
+func (c *StubClient) ListUnfiledItems(_ context.Context) ([]UnfiledItem, error) {
+	if c == nil || len(c.UnfiledItems) == 0 {
+		return nil, nil
+	}
+	out := make([]UnfiledItem, len(c.UnfiledItems))
+	copy(out, c.UnfiledItems)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Type != out[j].Type {
+			return out[i].Type < out[j].Type
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+// ListUnfiledItems 枚举 FolderID 为空的 cipher 元数据（不解密正文）。
+func (c *APIClient) ListUnfiledItems(ctx context.Context) ([]UnfiledItem, error) {
+	userKey := UserKey()
+	if len(userKey) == 0 {
+		return nil, errVaultKeyNotReady
+	}
+	ciphers, err := c.listCiphers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UnfiledItem, 0)
+	for _, cipher := range ciphers {
+		if strings.TrimSpace(cipher.FolderID) != "" {
+			continue
+		}
+		itemKey, err := itemDecryptionKey(cipher.Key, userKey)
+		if err != nil {
+			continue
+		}
+		name, err := decryptVaultString(strings.TrimSpace(cipher.Name), itemKey)
+		if err != nil {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		out = append(out, UnfiledItem{
+			ID:   cipher.ID,
+			Name: name,
+			Type: unfiledCipherTypeLabel(cipher.Type),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Type != out[j].Type {
+			return out[i].Type < out[j].Type
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+func unfiledCipherTypeLabel(t int) string {
+	switch t {
+	case 1:
+		return "login"
+	case cipherTypeSecureNote:
+		return "note"
+	case 3:
+		return "card"
+	case 4:
+		return "identity"
+	case cipherTypeSSHKey:
+		return "ssh"
+	default:
+		return "other"
+	}
 }

@@ -114,6 +114,14 @@ func SaveGlobalSettings(input app.SaveGlobalSettingsInput, reporter app.Reporter
 	return invoke[app.SaveGlobalSettingsResult](context.Background(), "save_global_settings", "", input, reporter)
 }
 
+func LoadGlobalVarsView() (*app.GlobalVarsView, error) {
+	return invoke[app.GlobalVarsView](context.Background(), "load_global_vars", "", nil, nil)
+}
+
+func EnsureGlobalVarsFile() (*app.EnsureGlobalVarsFileResult, error) {
+	return invoke[app.EnsureGlobalVarsFileResult](context.Background(), "ensure_global_vars", "", nil, nil)
+}
+
 func EnsureBuiltinIDEAssets(ideNames []string, reporter app.Reporter) ([]string, error) {
 	return invokeSlice[string](context.Background(), "ensure_builtin_ide_assets", "",
 		struct{ IDENames []string }{ideNames}, reporter)
@@ -167,8 +175,17 @@ func SuggestSecretTargets(projectRoot string) ([]app.SecretTargetOption, error) 
 	return invokeSlice[app.SecretTargetOption](context.Background(), "suggest_secret_targets", projectRoot, nil, nil)
 }
 
+func SuggestRemoteRegisterFolders(ctx context.Context, projectRoot string) ([]app.SecretTargetOption, error) {
+	return invokeSlice[app.SecretTargetOption](ctx, "suggest_remote_register_folders", projectRoot, nil, nil)
+}
+
 func ListSecretsMetadata(ctx context.Context, projectRoot string, includeRemote bool, reporter app.Reporter) (*app.ListSecretsMetadataResult, error) {
 	return invoke[app.ListSecretsMetadataResult](ctx, "list_secrets", projectRoot,
+		struct{ IncludeRemote bool }{includeRemote}, reporter)
+}
+
+func ListWorkspaceSecretsMetadata(ctx context.Context, workspace app.Workspace, includeRemote bool, reporter app.Reporter) (*app.ListSecretsMetadataResult, error) {
+	return invokeWorkspace[app.ListSecretsMetadataResult](ctx, "list_secrets", workspace,
 		struct{ IncludeRemote bool }{includeRemote}, reporter)
 }
 
@@ -223,8 +240,23 @@ func AddSecretToTarget(ctx context.Context, projectRoot string, target secrets.S
 	}{target, noteRel}, reporter)
 }
 
+func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRel, localPath string, reporter app.Reporter) (*app.AddSecretResult, error) {
+	return run[app.AddSecretResult](ctx, "register_remote_note_from_path", projectRoot, struct {
+		Folder    string
+		NoteRel   string
+		LocalPath string
+	}{folder, noteRel, localPath}, reporter)
+}
+
 func PrepareRemoteNoteEdit(ctx context.Context, projectRoot string, item app.DeleteSelectionItem, reporter app.Reporter) (*app.RemoteNoteEditSession, error) {
 	return invoke[app.RemoteNoteEditSession](ctx, "prepare_remote_note_edit", projectRoot, item, reporter)
+}
+
+func PrepareRemoteNoteRegister(ctx context.Context, projectRoot, folder, noteRel string, reporter app.Reporter) (*app.RemoteNoteEditSession, error) {
+	return invoke[app.RemoteNoteEditSession](ctx, "prepare_remote_note_register", projectRoot, struct {
+		Folder  string
+		NoteRel string
+	}{folder, noteRel}, reporter)
 }
 
 func PrepareRemoteSSHHostsEdit(ctx context.Context, projectRoot string, item app.DeleteSelectionItem, reporter app.Reporter) (*app.RemoteSSHHostsEditSession, error) {
@@ -233,6 +265,11 @@ func PrepareRemoteSSHHostsEdit(ctx context.Context, projectRoot string, item app
 
 func CommitRemoteNoteEdit(ctx context.Context, session app.RemoteNoteEditSession, reporter app.Reporter) error {
 	_, err := run[struct{}](ctx, "commit_remote_note_edit", session.ProjectRoot, session, reporter)
+	return err
+}
+
+func CommitRemoteNoteRegister(ctx context.Context, session app.RemoteNoteEditSession, reporter app.Reporter) error {
+	_, err := run[struct{}](ctx, "commit_remote_note_register", session.ProjectRoot, session, reporter)
 	return err
 }
 

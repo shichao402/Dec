@@ -110,12 +110,16 @@ members:
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	_, err = PullProjectAssets(context.Background(), projectRoot, "", nil)
-	if err == nil {
-		t.Fatal("期望 secrets 路径重叠时 pull 失败")
+	result, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
+	if err != nil {
+		t.Fatalf("secrets 冲突应为部分成功（公开资产保留）: %v", err)
 	}
-	if !strings.Contains(err.Error(), "冲突") {
-		t.Fatalf("错误应描述路径冲突: %v", err)
+	if result == nil || len(result.NonFatalWarnings) == 0 {
+		t.Fatal("期望 NonFatalWarnings 记录 secrets 冲突")
+	}
+	joined := strings.Join(result.NonFatalWarnings, "\n")
+	if !strings.Contains(joined, "冲突") {
+		t.Fatalf("警告应描述路径冲突: %v", result.NonFatalWarnings)
 	}
 
 	// secrets 在公开资产之后执行：重叠校验只拦下密文落地，不回滚已就绪的 Dec 资产。
@@ -156,8 +160,12 @@ members:
 	// 无 session：secrets 阶段会尝试 web unlock，测试环境下被 guard 拒绝。
 	secrets.ClearSession()
 
-	if _, err := PullProjectAssets(context.Background(), projectRoot, "", nil); err == nil {
-		t.Fatal("期望 Bitwarden 未解锁时 pull 返回错误")
+	result, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
+	if err != nil {
+		t.Fatalf("secrets 失败应为部分成功: %v", err)
+	}
+	if result == nil || len(result.NonFatalWarnings) == 0 {
+		t.Fatal("期望 NonFatalWarnings 记录解锁失败")
 	}
 
 	installed := filepath.Join(projectRoot, ".cursor", "skills", "dec-cli-skill", "SKILL.md")
@@ -175,12 +183,16 @@ func containsScopeMessage(events []OperationEvent, scope, fragment string) bool 
 	return false
 }
 
-// pull 不再做「停用即清理」：密文落在 .secrets/ 同步根，没有可以安全 RemoveAll 的目录。
-// 已存在的项目内文件必须原样留着，等 Remote 页逐条确认。
-func TestPullEnabledSecretsBundles_NeverDeletesExistingProjectFiles(t *testing.T) {
+// 远端仍有的 Note 在 pull 后保留；远端已删的 Note 会被 prune。
+// 停用 bundle 的本地 secrets 不在本次 SyncTarget 内，不会被误清。
+func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	origFactory := secretsClientFactory
-	secretsClientFactory = func() secrets.Client { return &secrets.StubClient{} }
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+			"Demo": {{RelativePath: "config/server.yaml", Content: "keep: true\n"}},
+		}}
+	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	projectRoot := t.TempDir()
@@ -188,19 +200,41 @@ func TestPullEnabledSecretsBundles_NeverDeletesExistingProjectFiles(t *testing.T
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "Demo"}); err != nil {
 		t.Fatal(err)
 	}
-	untouched := filepath.Join(projectRoot, ".secrets", "project", "config", "server.yaml")
-	if err := os.MkdirAll(filepath.Dir(untouched), 0755); err != nil {
+	keep := filepath.Join(projectRoot, ".secrets", "project", "config", "server.yaml")
+	gone := filepath.Join(projectRoot, ".secrets", "project", "config", "orphan.yaml")
+	if err := os.MkdirAll(filepath.Dir(keep), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(untouched, []byte("keep: true\n"), 0600); err != nil {
+	if err := os.WriteFile(keep, []byte("keep: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gone, []byte("orphan: 1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// 停用包本地残留：不在 pull 范围，不得误删。
+	disabled := filepath.Join(projectRoot, ".secrets", "bundles", "disabled", "env", "x.env")
+	if err := os.MkdirAll(filepath.Dir(disabled), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(disabled, []byte("X=1\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := pullEnabledSecretsBundles(context.Background(), projectRoot, nil, nil); err != nil {
+	summary, err := pullEnabledSecretsBundles(context.Background(), projectRoot, nil, nil)
+	if err != nil {
 		t.Fatalf("pullEnabledSecretsBundles() 失败: %v", err)
 	}
-	if _, err := os.Stat(untouched); err != nil {
-		t.Fatalf("项目内既有文件不应被 pull 清理: %v", err)
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("远端仍在的 Note 应保留: %v", err)
+	}
+	if _, err := os.Stat(gone); !os.IsNotExist(err) {
+		t.Fatalf("远端已删的 Note 应被 prune, err=%v", err)
+	}
+	if _, err := os.Stat(disabled); err != nil {
+		t.Fatalf("未启用 bundle 的本地 secrets 不应被清: %v", err)
+	}
+	if len(summary.Orphans.RemovedSecretPaths) == 0 {
+		t.Fatalf("应报告清理了孤儿 Note: %#v", summary.Orphans)
 	}
 }
 

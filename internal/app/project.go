@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/types"
@@ -232,8 +233,8 @@ func readBundleEntries(repoDir string) ([]folderEntry, error) {
 
 func listFolderAssets(folderDir, folderName string) []AssetInfo {
 	var assets []AssetInfo
-	for _, subDir := range []string{"skills", "commands", "rules", "mcp"} {
-		dir := filepath.Join(folderDir, subDir)
+	for _, kind := range bundle.VaultAssetKinds {
+		dir := filepath.Join(folderDir, kind.Dir)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
@@ -242,23 +243,16 @@ func listFolderAssets(folderDir, folderName string) []AssetInfo {
 			if entry.Name() == ".gitkeep" {
 				continue
 			}
-
-			name := entry.Name()
-			assetType := subDir
-			if subDir == "rules" {
-				assetType = "rule"
-				name = strings.TrimSuffix(name, ".mdc")
-			} else if subDir == "mcp" {
-				name = strings.TrimSuffix(name, ".json")
-			} else if subDir == "commands" {
-				assetType = "command"
-			} else {
-				assetType = "skill"
+			if kind.DirEntries {
+				if !entry.IsDir() {
+					continue
+				}
+			} else if entry.IsDir() {
+				continue
 			}
-
 			assets = append(assets, AssetInfo{
-				Name:  name,
-				Type:  assetType,
+				Name:  bundle.AssetEntryName(kind, entry.Name()),
+				Type:  kind.Type,
 				Vault: folderName,
 			})
 		}

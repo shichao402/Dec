@@ -3,6 +3,8 @@ package tui
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/shichao402/Dec/internal/bundle"
 )
 
 // insertTreePath 在 root 下沿 segments 创建目录节点，并在末端挂上 leaf。
@@ -75,18 +77,10 @@ func treeChildLess(a, b *TreeNode) bool {
 }
 
 func assetTypeSubDir(itemType string) string {
-	switch itemType {
-	case "skill":
-		return "skills"
-	case "command":
-		return "commands"
-	case "rule":
-		return "rules"
-	case "mcp":
-		return "mcp"
-	default:
-		return itemType
+	if sub := bundle.TypeSubDir(itemType); sub != "" {
+		return sub
 	}
+	return itemType
 }
 
 func decCacheParentSegments(vault, itemType, name string) []string {
@@ -98,14 +92,10 @@ func decCacheParentSegments(vault, itemType, name string) []string {
 }
 
 func decCacheLeafName(itemType, name string) string {
-	switch itemType {
-	case "rule":
-		return name + ".mdc"
-	case "mcp":
-		return name + ".json"
-	default:
-		return name
+	if kind, ok := bundle.KindByType(itemType); ok {
+		return bundle.AssetFileName(kind, name)
 	}
+	return name
 }
 
 func decCachePathSegments(vault, itemType, name string) []string {
@@ -137,12 +127,8 @@ func secretsLeafName(landingPath string) string {
 
 func memberPathSegments(mbType, name string) []string {
 	sub := assetTypeSubDir(mbType)
-	switch mbType {
-	case "rule":
-		return []string{sub, name + ".mdc"}
-	case "mcp":
-		return []string{sub, name + ".json"}
-	default:
-		return []string{sub, name}
+	if kind, ok := bundle.KindByType(mbType); ok {
+		return []string{sub, bundle.AssetFileName(kind, name)}
 	}
+	return []string{sub, name}
 }

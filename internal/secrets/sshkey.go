@@ -117,6 +117,28 @@ func validateSSHHost(raw string) (string, error) {
 	return canonical, err
 }
 
+// NormalizeSSHHosts 校验并去重 Hosts；非法项返回 error（供 Remote 编辑提交使用）。
+func NormalizeSSHHosts(rawHosts []string) ([]string, error) {
+	out := make([]string, 0, len(rawHosts))
+	seen := make(map[string]struct{})
+	for _, raw := range rawHosts {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || strings.HasPrefix(raw, "#") {
+			continue
+		}
+		canonical, err := validateSSHHost(raw)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[canonical]; ok {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		out = append(out, canonical)
+	}
+	return out, nil
+}
+
 // parseSSHHostsNotes 解析 SSH Key Item 的 Notes 字段（可选；有内容时一行一个 host）。
 func parseSSHHostsNotes(notes string) []string {
 	var hosts []string

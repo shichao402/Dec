@@ -35,13 +35,16 @@ Dec 是一个以 **TUI** 为第一人机入口、以 **MCP** 为 Agent 入口的
 
 公开资产以 **bundle** 组织在 Git Vault，落地在 **`.dec/`**；私密文件以 **SyncTarget**（`.secrets/project/` 或 `.secrets/bundles/<name>/`）同构存放在 Bitwarden，SSH Key 落地 **机器级 `~/.ssh/`**。TUI **Run** 页一次 pull 先解析 project 的 bundle 列表，再逐 bundle 拉 Dec Git bundle、自动拉 secrets bundle，两边 **独立落地**（敏感文件不进 `.dec/cache/`），且 **`.dec/` 树与 `.secrets/` 树不得相交**。详见 [0002](decisions/0002-secrets-synctarget-root.md)。
 
-用户操作通过 TUI Shell（`internal/tui/`）完成，业务逻辑在 `internal/app/`：
+用户操作通过 TUI Shell（`internal/tui/`）完成，业务逻辑在 `internal/app/`（仅 `dec-server` 内执行）：
 
-- 仓库连接：TUI **Settings** 页
-- 项目初始化 / project 选择：TUI **Home** 或首次进入引导
-- bundle 与资产调整：TUI **Assets** 页
-- 资产管理：TUI **Assets** 浏览 + **Run** 页 pull/push/remove
+- 仓库连接 / 本机 vars / 服务版本与重启：TUI **Settings** 页
+- 项目初始化 / project 选择：TUI **Home**
+- bundle 启用与资产浏览：TUI **Bundles** 页
+- pull / push / remove（含成功对照后的孤儿 reconcile）：TUI **Run** 页
+- 全量远端浏览 / temp 编辑 / 任意 folder 登记 / 远端与本地删除拆分：TUI **Remote** 页（ADR 0004）
 - 版本信息：`dec --version`
+
+资产目录类型（skill / command / rule / mcp）以 `internal/bundle.VaultAssetKinds` 为共用真相源。
 
 ## 文档边界
 

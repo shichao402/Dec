@@ -105,6 +105,16 @@ type projectVarsEditedMsg struct {
 	err error
 }
 
+type globalVarsLoadedMsg struct {
+	view    *app.GlobalVarsView
+	err     error
+	loadGen uint64
+}
+
+type globalVarsEditedMsg struct {
+	err error
+}
+
 type pushPreviewLoadedMsg struct {
 	preview *app.PushProjectAssetsPreview
 	err     error
@@ -122,6 +132,15 @@ const (
 	focusSidebar        focusContext = "sidebar"
 	focusContent        focusContext = "content"
 	focusBundleExpanded focusContext = "bundleExpanded"
+)
+
+// Settings 列表固定行（IDE / bundles 之前）。
+const (
+	settingsRowRepo          = 0
+	settingsRowIdleTimeout   = 1
+	settingsRowRestartServer = 2
+	settingsRowGlobalVars    = 3
+	settingsFixedRowCount    = 4
 )
 
 type runEventMsg struct {
@@ -233,6 +252,14 @@ var ensureProjectVarsFileOperation = func(projectRoot string) (*app.EnsureProjec
 	return serviceapi.EnsureProjectVarsFile(projectRoot)
 }
 
+var loadGlobalVarsViewOperation = func() (*app.GlobalVarsView, error) {
+	return serviceapi.LoadGlobalVarsView()
+}
+
+var ensureGlobalVarsFileOperation = func() (*app.EnsureGlobalVarsFileResult, error) {
+	return serviceapi.EnsureGlobalVarsFile()
+}
+
 var updateCheckOperation = func(currentVersion string) (*update.CheckResult, error) {
 	return update.Check(currentVersion)
 }
@@ -330,7 +357,7 @@ type model struct {
 	deleteTree                    TreeList
 	deleteFilter                  string
 	deleteFilterInput             bool
-	deleteStage                   string // "", "list", "summary", "confirm", "running"
+	deleteStage                   string // "", "list", "summary", "confirm", "typed", "running"
 	deleteCandidatesLoaded        bool
 	deleteLoad                    asyncLoad // 跨页飞行的候选列表加载（切页不取消）
 	deleteLoadErr                 error
@@ -338,10 +365,14 @@ type model struct {
 	runningDelete                 bool
 	deleteResult                  *app.DeleteProjectResult
 	deleteErr                     error
+	deleteTypedInput              string
+	deleteTypedSpec               app.DeleteTypedConfirmSpec
 	remoteNoteEdit                *app.RemoteNoteEditSession
 	remoteSSHEdit                 *app.RemoteSSHHostsEditSession
+	remoteRegisterPending         bool // A 登记走 temp 编辑器时为 true
 	shellRefresh                  asyncBatch // overview/assets/settings/projectSettings/projectVars
 	projectVarsLoad               asyncLoad  // 独立重载 .dec/vars.yaml
+	globalVarsLoad                asyncLoad  // 独立重载 ~/.dec/local/vars.yaml
 	builtinAssetsLoad             asyncLoad  // 同步内置 IDE assets
 	localProjectLoad              asyncLoad  // 生成本地 project 配置
 	vaultApplyLoad                asyncLoad  // 应用推断的 vault project
@@ -356,13 +387,24 @@ type model struct {
 	vaultAutoApplyNotice string
 	// focus 是当前键盘交互上下文（侧栏 / 内容 / bundle 成员）。
 	focus focusContext
-	// addSecretStage 是 Project 页「登记新 secret」的阶段；空串表示流程未开启。
-	addSecretStage     string
-	addSecretPathInput string
-	addSecretTargets   []app.SecretTargetOption
-	addSecretTargetIdx int
-	addSecretResult    *app.AddSecretResult
-	addSecretErr       error
+	// addSecretStage 是 Project/Remote 页「登记新 secret」的阶段；空串表示流程未开启。
+	addSecretStage       string
+	addSecretPathInput   string
+	addSecretContentPath string // Remote：显式本地路径
+	addSecretSourceMode  string // Remote："temp" | "path"
+	addSecretTargets     []app.SecretTargetOption
+	addSecretTargetIdx   int
+	addSecretResult      *app.AddSecretResult
+	addSecretErr         error
+	addSecretRemoteMode  bool // true = Remote 任意 folder 登记
+
+	serverVersion                  string
+	serverVersionMismatch          bool
+	serverVersionMismatchDismissed bool
+	serverRestartStage             string // "", "confirm", "running", "done"
+	serverRestartReason            string // "mismatch" | "manual" | "update"
+	serverRestartErr               error
+	restartingServer               bool
 }
 
 func newModel(projectRoot, currentVersion string) model {
@@ -472,7 +514,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.refreshCmd(), m.startDeleteCandidatesLoad(m.deleteIncludeRemote, true))
 	case shellRefreshKickMsg:
 		diag.StartupLog("shellRefreshKickMsg → refreshCmd")
-		return m, tea.Batch(m.refreshCmd(), pollActiveOperationCmd(m.projectRoot, 0))
+		return m, tea.Batch(m.refreshCmd(), pollActiveOperationCmd(m.projectRoot, 0), probeServerVersionCmd())
+	case serverVersionMsg:
+		if msg.err != nil {
+			m.pushLog("探测服务版本失败: " + msg.err.Error())
+			return m, nil
+		}
+		m.serverVersion = msg.serverVersion
+		m.serverVersionMismatch = msg.mismatch
+		if msg.mismatch && !m.serverVersionMismatchDismissed && m.serverRestartStage == "" {
+			m.beginServerRestartConfirm("mismatch")
+			m.pushLog(fmt.Sprintf("服务版本不一致: client=%s server=%s", msg.clientVersion, msg.serverVersion))
+		}
+		return m, nil
+	case serverRestartDoneMsg:
+		m.restartingServer = false
+		m.serverRestartErr = msg.err
+		m.serverRestartStage = "done"
+		if msg.err != nil {
+			m.pushLog("重启 dec-server 失败: " + msg.err.Error())
+			return m, nil
+		}
+		m.serverVersion = msg.serverVersion
+		m.serverVersionMismatch = VersionsMismatch(m.currentVersion, msg.serverVersion)
+		m.serverVersionMismatchDismissed = false
+		m.pushLog(fmt.Sprintf("dec-server 已重启: %s", fallbackValue(msg.serverVersion, "未知")))
+		if msg.reason == "update" {
+			m.serverRestartStage = ""
+		}
+		return m, nil
 	case activeOperationPolledMsg:
 		if msg.err == nil && msg.active && !m.runningPull && !m.runningRemove && m.observedOperationID != msg.operationID {
 			stream := make(chan tea.Msg, 64)
@@ -796,6 +866,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		gen := m.projectVarsLoad.beginGen()
 		return m, loadProjectVarsCmd(m.projectRoot, gen, true)
+	case globalVarsEditedMsg:
+		m.lastEditErr = msg.err
+		if msg.err != nil {
+			m.pushLog("Editor exited with error: " + msg.err.Error())
+		} else {
+			m.pushLog("Editor session finished; reloading global vars")
+		}
+		gen := m.globalVarsLoad.beginGen()
+		return m, loadGlobalVarsCmd(gen)
+	case globalVarsLoadedMsg:
+		if !m.globalVarsLoad.finish(msg.loadGen) {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.pushLog("Global vars load failed: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.view != nil && m.settings != nil {
+			m.settings.VarsPath = msg.view.VarsPath
+			m.settings.VarsFileReady = msg.view.VarsFileReady
+			if strings.TrimSpace(msg.view.EditorCommand) != "" {
+				m.settings.ConfiguredEditor = msg.view.EditorCommand
+			}
+			m.pushLog(fmt.Sprintf("Global vars loaded: %d keys, ready=%v", len(msg.view.Vars), msg.view.VarsFileReady))
+		}
+		return m, nil
 	case remoteEditPreparedMsg:
 		return m, m.handleRemoteEditPrepared(msg)
 	case remoteEditEditorClosedMsg:
@@ -821,11 +917,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.addSecretStage = ""
 		m.addSecretResult = msg.result
 		m.addSecretErr = msg.err
+		m.remoteRegisterPending = false
+		m.clearRemoteEditSession()
 		for _, line := range msg.logs {
 			m.pushLog(line)
 		}
 		if msg.err != nil {
 			m.pushLog("登记 secret 失败: " + msg.err.Error())
+			return m, nil
+		}
+		if m.addSecretRemoteMode || m.isRemotePage() {
+			m.pushLog("Remote 登记已保存")
+			return m, m.startDeleteCandidatesLoad(true, true)
 		}
 		return m, nil
 	case runEventMsg:
@@ -869,6 +972,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.pushLog(fmt.Sprintf("Run pull finished: %d pulled / %d failed · %s",
 				msg.result.PulledCount, msg.result.FailedCount, secretsMsg))
+			for _, warning := range msg.result.NonFatalWarnings {
+				m.pushLog("Pull warning: " + warning)
+			}
 		}
 		return m, m.refreshCmd()
 	case removeEventMsg:
@@ -923,8 +1029,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pushLog(fmt.Sprintf("Update succeeded: %s", msg.targetVersion))
-		return m, nil
+		m.currentVersion = msg.targetVersion
+		m.serverRestartReason = "update"
+		return m, m.startServerRestart()
 	case tea.KeyMsg:
+		if m.serverRestartStage == "confirm" || m.serverRestartStage == "running" || m.serverRestartStage == "done" {
+			return m.handleServerRestartKey(msg)
+		}
 		if routedModel, routedCmd, routed := m.routeDeletePageKey(msg); routed {
 			return routedModel, routedCmd
 		}
@@ -1029,14 +1140,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.isSettingsPage() && !m.savingSettings && m.focus != focusSidebar {
-				if m.settingsCursor == 0 {
+				if m.settingsCursor == settingsRowRepo {
 					if msg.String() == "enter" {
 						m.beginSettingsRepoEdit()
 					}
-				} else if m.settingsCursor == 1 {
+				} else if m.settingsCursor == settingsRowIdleTimeout {
 					if msg.String() == "enter" {
 						m.beginSettingsIdleTimeoutEdit()
 					}
+				} else if m.settingsCursor == settingsRowRestartServer {
+					if msg.String() == "enter" {
+						m.beginServerRestartConfirm("manual")
+						m.pushLog("确认重启 dec-server？")
+					}
+				} else if m.settingsCursor == settingsRowGlobalVars {
+					return m, m.openGlobalVarsEditor()
 				} else if m.settingsCursorIDEIndex() >= 0 {
 					m.toggleCurrentSettingsIDE()
 				} else if m.settingsCursorSecretBundleIndex() >= 0 {
@@ -1054,10 +1172,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "e":
 			if m.isSettingsPage() && !m.savingSettings {
-				if m.settingsCursor == 1 {
-					m.beginSettingsIdleTimeoutEdit()
-				} else {
+				switch m.settingsCursor {
+				case settingsRowRepo:
 					m.beginSettingsRepoEdit()
+				case settingsRowIdleTimeout:
+					m.beginSettingsIdleTimeoutEdit()
+				case settingsRowGlobalVars:
+					return m, m.openGlobalVarsEditor()
 				}
 				return m, nil
 			}
@@ -1112,12 +1233,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "A":
-			if (m.isProjectPage() || m.isRemotePage()) && m.projectSettings != nil && m.projectSettingsErr == nil {
+			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil {
 				if !m.projectSettings.ProjectConfigReady {
 					m.pushLog("登记 secret 需要先有 .dec/config.yaml，按 i 在 Project 页生成本地 project")
 					return m, nil
 				}
-				m.beginAddSecret()
+				m.beginAddSecret(false)
+				return m, nil
+			}
+			if m.isRemotePage() {
+				m.beginAddSecret(true)
 				return m, nil
 			}
 			return m, nil
@@ -1477,6 +1602,41 @@ func openProjectVarsEditorCmd(projectRoot, editorCmd string) tea.Cmd {
 	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
 		return projectVarsEditedMsg{err: runErr}
 	})
+}
+
+func loadGlobalVarsCmd(loadGen uint64) tea.Cmd {
+	return func() tea.Msg {
+		view, err := loadGlobalVarsViewOperation()
+		return globalVarsLoadedMsg{view: view, err: err, loadGen: loadGen}
+	}
+}
+
+// openGlobalVarsEditorCmd 挂起 TUI 用 tea.ExecProcess 拉起外部编辑器编辑 ~/.dec/local/vars.yaml。
+func openGlobalVarsEditorCmd(editorCmd string) tea.Cmd {
+	ensured, err := ensureGlobalVarsFileOperation()
+	if err != nil {
+		return func() tea.Msg {
+			return globalVarsEditedMsg{err: err}
+		}
+	}
+	cmd, err := editor.BuildCommand(ensured.Path, editorCmd)
+	if err != nil {
+		return func() tea.Msg {
+			return globalVarsEditedMsg{err: err}
+		}
+	}
+	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
+		return globalVarsEditedMsg{err: runErr}
+	})
+}
+
+func (m *model) openGlobalVarsEditor() tea.Cmd {
+	editorCmd := ""
+	if m.settings != nil {
+		editorCmd = m.settings.ConfiguredEditor
+	}
+	m.pushLog("Opening external editor for ~/.dec/local/vars.yaml")
+	return openGlobalVarsEditorCmd(editorCmd)
 }
 
 func startPullRunCmd(ctx context.Context, projectRoot string, stream chan<- tea.Msg) tea.Cmd {
@@ -2097,11 +2257,10 @@ func (m model) renderHomePage(width int) string {
 	} else if m.hasVaultInferencePrompt() {
 		inf := m.vaultInference
 		lines = append(lines,
-			shellWarnStyle.Render("根据目录名推断 vault project，请确认是否应用"),
-			fmt.Sprintf("推断 project: %s", inf.ProjectName),
-			fmt.Sprintf("Vault 路径: %s", inf.VaultPath),
+			shellWarnStyle.Render("检测到项目配置，是否应用？"),
+			fmt.Sprintf("项目: %s", inf.ProjectName),
 			fmt.Sprintf("Bundles (%d): %s", len(inf.EnabledBundles), formatInferenceBundleNames(inf.EnabledBundles)),
-			shellMutedStyle.Render("y / Enter 应用 · n 跳过并手动选择"),
+			shellMutedStyle.Render("y/Enter 应用 · n 跳过"),
 			"",
 		)
 	}
@@ -2115,7 +2274,7 @@ func (m model) renderHomePage(width int) string {
 		fmt.Sprintf("项目名: %s", formatProjectNameDisplay(m.overview)),
 		fmt.Sprintf("仓库: %s · %s", formatReady(m.overview.RepoConnected, "已连接", "未连接"), fallbackValue(m.overview.RepoRemoteURL, "未连接")),
 		fmt.Sprintf("配置: %s · 变量: %s", formatReady(m.overview.ProjectConfigReady, "已初始化", "未初始化"), formatReady(m.overview.VarsFileReady, "已存在", "未生成")),
-		fmt.Sprintf("Vault bundle: %d 个 | 已启用: %d 个", countOverviewAvailableBundles(m.overview), countOverviewEnabledBundles(m.overview)),
+		fmt.Sprintf("Bundle: 可选 %d 个 · 已启用 %d 个", countOverviewAvailableBundles(m.overview), countOverviewEnabledBundles(m.overview)),
 		fmt.Sprintf("IDE: %s · 编辑器: %s", fallbackValue(strings.Join(m.overview.IDEs, ", "), "<none>"), fallbackValue(m.overview.Editor, "未配置")),
 	)
 	if warn := formatWarnings(m.overview.IDEWarnings); !strings.HasSuffix(warn, "无") {
@@ -2198,7 +2357,6 @@ func (m model) renderProjectPage(width int) string {
 		summary = append(summary, shellMutedStyle.Render("尚未初始化 .dec/config.yaml，按 i 在本页生成本地 project。"))
 	} else if m.overview != nil {
 		summary = append(summary, fmt.Sprintf("project_name: %s", formatProjectNameDisplay(m.overview)))
-		summary = append(summary, shellMutedStyle.Render("可选：Run 页 Push 将 Dec cache 与 secrets 推送到远端"))
 	}
 	if m.projectSettingsDirty {
 		summary = append(summary, shellWarnStyle.Render("有未保存修改，按 s 保存"))
@@ -2267,17 +2425,16 @@ func (m model) renderProjectSettingsList() string {
 }
 
 func (m model) renderProjectSettingsDetails() string {
-	lines := []string{shellTitleStyle.Render("Details")}
+	lines := []string{shellTitleStyle.Render("详情")}
 	if m.projectSettings == nil {
 		return strings.Join(lines, "\n")
 	}
 	if m.projectSettingsCursor == 0 {
 		lines = append(lines,
-			"模式切换：决定是否用项目级 IDE 覆盖全局默认。",
-			fmt.Sprintf("覆盖开关: %s", formatReady(m.projectSettingsOverride, "已开启", "未开启（继承全局）")),
+			fmt.Sprintf("模式: %s", formatReady(m.projectSettingsOverride, "项目覆盖", "继承全局")),
 			fmt.Sprintf("全局默认: %s", fallbackValue(strings.Join(normalizedStringList(m.projectSettings.GlobalIDEs), ", "), "<未配置>")),
-			fmt.Sprintf("当前生效: %s", fallbackValue(strings.Join(projectEffectivePreview(m.projectSettings, m.projectSettingsOverride, m.projectSettingsSelectedIDEs), ", "), "<none>")),
-			shellMutedStyle.Render("按 space 切换；c 可一键清除覆盖回落全局。"),
+			fmt.Sprintf("生效 IDE: %s", fallbackValue(strings.Join(projectEffectivePreview(m.projectSettings, m.projectSettingsOverride, m.projectSettingsSelectedIDEs), ", "), "<none>")),
+			shellMutedStyle.Render("space 切换 · c 恢复继承"),
 		)
 	} else {
 		ideName := m.currentProjectSettingsIDEName()
@@ -2287,12 +2444,12 @@ func (m model) renderProjectSettingsDetails() string {
 		}
 		lines = append(lines,
 			fmt.Sprintf("IDE: %s", ideName),
-			fmt.Sprintf("当前状态: %s", state),
+			fmt.Sprintf("状态: %s", state),
 		)
 		if !m.projectSettingsOverride {
-			lines = append(lines, shellMutedStyle.Render("当前处于继承模式。按 space 切到第一行开启覆盖后再选择 IDE。"))
+			lines = append(lines, shellMutedStyle.Render("先在首行开启项目覆盖"))
 		} else {
-			lines = append(lines, shellMutedStyle.Render("按 space 在此 IDE 上切换。保存后将写入 .dec/config.yaml。"))
+			lines = append(lines, shellMutedStyle.Render("space 切换"))
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -2528,9 +2685,9 @@ func (m model) renderSecretsSyncPlanLines() []string {
 	}
 	targets, err := serviceapi.ListSecretSyncTargets(m.projectRoot)
 	if err != nil || len(targets) == 0 {
-		return []string{shellMutedStyle.Render("Secrets  无已解析 SyncTarget（需启用 bundle 或配置 project secrets）")}
+		return []string{shellMutedStyle.Render("Secrets  无同步目标（请启用 bundle 或配置 project secrets）")}
 	}
-	lines := []string{shellMutedStyle.Render("Secrets  按 SyncTarget 拉取（未删除多余项）：")}
+	lines := []string{shellMutedStyle.Render("Secrets  拉取以下目标（不清理本地文件）：")}
 	for _, t := range targets {
 		lines = append(lines, fmt.Sprintf("  · %s", t.Label))
 	}
@@ -2588,11 +2745,7 @@ func (m model) renderRunActiveBlock(width int) []string {
 }
 
 func (m model) renderRunIdleGuide() []string {
-	lines := []string{
-		shellMutedStyle.Render("p 拉取 Dec bundle + secrets（按 SyncTarget 分组）+ IDE 安装"),
-		shellMutedStyle.Render("P 推送到远端（两次确认；未删除多余项）"),
-		shellMutedStyle.Render("删除 / 编辑远端请切到 Remote 页"),
-	}
+	lines := []string{}
 	lines = append(lines, m.renderPullPlanLines()...)
 	lines = append(lines, shellMutedStyle.Render("上次  尚无操作记录"))
 	return lines
@@ -2606,16 +2759,29 @@ func (m model) renderRunLastResult() []string {
 		secretsLine := fmt.Sprintf("Secrets  落地 %d 个文件 · %d 个 SSH Key", m.runResult.SecretsNoteCount, m.runResult.SecretsSSHKeyCount)
 		if m.runResult.SecretsSkippedReason != "" && m.runResult.SecretsNoteCount == 0 && m.runResult.SecretsSSHKeyCount == 0 {
 			secretsLine = "Secrets  " + m.runResult.SecretsSkippedReason
-		} else if m.runResult.SecretsNoteCount > 0 || m.runResult.SecretsSSHKeyCount > 0 {
-			secretsLine += "（同步根 .secrets/project · .secrets/bundles/<name>；未删除多余项）"
+		}
+		orphanN := len(m.runResult.CleanedAssets) + len(m.runResult.OrphanSecretPaths) + len(m.runResult.OrphanSSHKeys)
+		if orphanN > 0 {
+			secretsLine += fmt.Sprintf(" · 清理 %d 项孤儿", orphanN)
 		}
 		lines = append(lines, secretsLine)
+		if orphanN > 0 && len(m.runResult.OrphanSecretPaths)+len(m.runResult.OrphanSSHKeys) > 0 {
+			for _, p := range m.runResult.OrphanSecretPaths {
+				lines = append(lines, shellMutedStyle.Render("  - "+p))
+			}
+			for _, k := range m.runResult.OrphanSSHKeys {
+				lines = append(lines, shellMutedStyle.Render("  - ssh:"+k))
+			}
+		}
 		if grouped := formatRunEventsBySyncTarget(m.runEvents); len(grouped) > 0 {
 			lines = append(lines, grouped...)
 		}
 		lines = append(lines, fmt.Sprintf("IDE   %s", fallbackValue(strings.Join(m.runResult.EffectiveIDEs, ", "), "<none>")))
 		if strings.TrimSpace(m.runResult.VersionCommit) != "" {
 			lines = append(lines, fmt.Sprintf("Commit %s", m.runResult.VersionCommit))
+		}
+		for _, warning := range m.runResult.NonFatalWarnings {
+			lines = append(lines, shellWarnStyle.Render("⚠ "+warning))
 		}
 	}
 	if m.pushResult != nil {
@@ -2630,7 +2796,7 @@ func (m model) renderRunLastResult() []string {
 		if m.pushResult.SecretsSkippedReason != "" && m.pushResult.SecretsCreatedCount+m.pushResult.SecretsUpdatedCount == 0 {
 			secretsLine = "Secrets  " + m.pushResult.SecretsSkippedReason
 		} else if m.pushResult.SecretsCreatedCount+m.pushResult.SecretsUpdatedCount > 0 {
-			secretsLine += "（按 SyncTarget 扫描 .secrets/；未删除多余项）"
+			secretsLine += "（未删除远端项）"
 		}
 		lines = append(lines, secretsLine)
 		if grouped := formatRunEventsBySyncTarget(m.runEvents); len(grouped) > 0 {
@@ -2712,7 +2878,7 @@ func (m model) renderPushSummary() []string {
 	if p.ProjectSecretsName != "" {
 		lines = append(lines, fmt.Sprintf("Project secrets: %s", p.ProjectSecretsName))
 	}
-	secretsLine := fmt.Sprintf("Secrets  %d 个 Bitwarden folder（待推文件按远端 Note 列表确定）", p.SecretsTargetCount)
+	secretsLine := fmt.Sprintf("Secrets  %d 个目标", p.SecretsTargetCount)
 	if !p.BitwardenConfigured {
 		secretsLine += "（Bitwarden 未配置，将跳过）"
 	}
@@ -2724,18 +2890,15 @@ func (m model) renderPushSummary() []string {
 	} else {
 		lines = append(lines, "Dec cache  无本地变更")
 	}
-	lines = append(lines, shellMutedStyle.Render("按 y/Enter 进入最终确认 · n/esc 取消"))
 	return lines
 }
 
 func (m model) renderPushConfirm() []string {
 	lines := []string{shellTitleStyle.Render("Push 最终确认")}
 	lines = append(lines,
-		shellWarnStyle.Render("⚠️  将推送到远端 Dec Git vault 与 Bitwarden，操作不可逆。"),
-		shellMutedStyle.Render("Dec cache 变更将 commit 并 push 到 vault 仓库。"),
-		shellMutedStyle.Render("各 Bitwarden folder 已有的 Secure Note 将按本地对应文件更新（不删远端）。"),
-		shellMutedStyle.Render("执行中若 Bitwarden 未解锁，将自动尝试解锁（可设 DEC_BW_PASSWORD 免浏览器）。"),
-		shellMutedStyle.Render("按 y 确认执行 · n/esc 返回摘要"),
+		shellWarnStyle.Render("将更新 Dec Git vault 与 Bitwarden。"),
+		shellMutedStyle.Render("Dec 变更将提交并推送；Secrets 只新建或更新，不删除。"),
+		shellMutedStyle.Render("y 确认 · n/Esc 返回"),
 	)
 	return lines
 }
@@ -2744,8 +2907,6 @@ func (m model) renderRunRemovePage(width int) string {
 	lines := []string{
 		shellTitleStyle.Render("Run · Remove"),
 		fmt.Sprintf("状态 %s", m.runStatusLabel()),
-		shellMutedStyle.Render("操作  j/k 移动 · Enter 选中 · / 筛选 · Esc 返回"),
-		shellWarnStyle.Render("⚠ 删除整包不可逆；Bitwarden secrets 需自行处理"),
 	}
 	switch m.removeStage {
 	case "select":
@@ -2849,7 +3010,7 @@ func isRunImportantLine(line string) bool {
 		strings.Contains(line, "拉取 secrets bundle") ||
 		strings.Contains(line, "推送 project secrets") ||
 		strings.Contains(line, "推送 secrets bundle") ||
-		strings.Contains(line, "未删除多余项") ||
+		(strings.Contains(line, "清理") && strings.Contains(line, "孤儿")) ||
 		strings.Contains(line, "无法自动打开") ||
 		strings.Contains(line, "失败") ||
 		strings.Contains(line, "⚠")
@@ -2927,9 +3088,9 @@ func (m model) renderRemoveSelect() []string {
 	lines := []string{shellTitleStyle.Render("Remove 选择器")}
 	lines = append(lines, fmt.Sprintf("筛选: %s · 共 %d 个 bundle", m.currentRemoveFilterLabel(), len(bundles)))
 	if m.removeFilterInput {
-		lines = append(lines, shellMutedStyle.Render("筛选输入中：输入关键字后按 Enter 应用，Esc 退出。"))
+		lines = append(lines, shellMutedStyle.Render("输入筛选 · Enter 应用 · Esc 退出"))
 	} else {
-		lines = append(lines, shellMutedStyle.Render("快捷键：j/k 移动 · enter/space 选中 · / 筛选 · c 清空 · esc 取消"))
+		lines = append(lines, shellMutedStyle.Render("j/k 移动 · Enter 选择 · / 筛选 · c 清空 · Esc 返回"))
 	}
 	if len(bundles) == 0 {
 		if m.assets != nil && len(app.ListEnabledBundles(m.assets)) == 0 {
@@ -2975,9 +3136,9 @@ func (m model) renderRemoveConfirm() []string {
 		fmt.Sprintf("Bundle: %s", m.removeTarget.Name),
 		fmt.Sprintf("Vault: %s", vault),
 		fmt.Sprintf("成员数: %d", len(m.removeTarget.Members)),
-		shellWarnStyle.Render("⚠️  删除操作不可逆：将从远端仓库删除整包、清理 IDE 与本地 cache，并从 enabled_bundles 移除。"),
-		shellMutedStyle.Render("Bitwarden secrets bundle 不会自动删除，敏感文件需自行处理。"),
-		shellMutedStyle.Render("按 y 确认执行 · n/esc 取消返回选择器"),
+		shellWarnStyle.Render("将删除远端 bundle、本地 cache 和 IDE 文件，并取消启用。"),
+		shellMutedStyle.Render("Bitwarden secrets 不会删除。"),
+		shellMutedStyle.Render("y 确认 · n/Esc 返回"),
 	)
 	return lines
 }
@@ -2994,11 +3155,13 @@ func (m model) renderSettingsPage(width int) string {
 	if m.settingsDirty {
 		summary = append(summary, shellWarnStyle.Render("有未保存修改，按 s 保存"))
 	}
+	if m.serverVersionMismatch {
+		summary = append(summary, shellWarnStyle.Render(fmt.Sprintf(
+			"服务版本不一致 (client %s / server %s)；可在下方重启",
+			fallbackValue(m.currentVersion, "?"), fallbackValue(m.serverVersion, "?"))))
+	}
 	if m.settingsRepoEditing {
 		summary = append(summary, shellMutedStyle.Render("Repo URL 输入中：Enter 应用 · Esc 退出"))
-	}
-	if !m.settings.VarsFileReady {
-		summary = append(summary, shellMutedStyle.Render("首次保存会创建 ~/.dec/local/vars.yaml"))
 	}
 	if m.savingSettings {
 		summary = append(summary, shellWarnStyle.Render("正在保存全局设置..."))
@@ -3016,18 +3179,42 @@ func (m model) renderSettingsPage(width int) string {
 }
 
 func (m model) renderSettingsList() string {
-	lines := []string{shellTitleStyle.Render("Global Settings")}
-	repoLine := fmt.Sprintf("%s Repo URL: %s", settingsCursorMarker(m.settingsCursor == 0 && m.focus != focusSidebar), fallbackValue(strings.TrimSpace(m.settingsRepoInput), "<none>"))
-	if m.settingsCursor == 0 && m.focus != focusSidebar {
+	lines := []string{shellTitleStyle.Render("全局设置")}
+	repoLine := fmt.Sprintf("%s Repo URL: %s", settingsCursorMarker(m.settingsCursor == settingsRowRepo && m.focus != focusSidebar), fallbackValue(strings.TrimSpace(m.settingsRepoInput), "<none>"))
+	if m.settingsCursor == settingsRowRepo && m.focus != focusSidebar {
 		lines = append(lines, shellSelectedRow.Render(repoLine))
 	} else {
 		lines = append(lines, shellLogStyle.Render(repoLine))
 	}
-	idleLine := fmt.Sprintf("%s Server idle timeout: %s", settingsCursorMarker(m.settingsCursor == 1 && m.focus != focusSidebar), fallbackValue(strings.TrimSpace(m.settingsIdleTimeoutInput), "30m"))
-	if m.settingsCursor == 1 && m.focus != focusSidebar {
+	idleLine := fmt.Sprintf("%s 服务空闲超时: %s", settingsCursorMarker(m.settingsCursor == settingsRowIdleTimeout && m.focus != focusSidebar), fallbackValue(strings.TrimSpace(m.settingsIdleTimeoutInput), "30m"))
+	if m.settingsCursor == settingsRowIdleTimeout && m.focus != focusSidebar {
 		lines = append(lines, shellSelectedRow.Render(idleLine))
 	} else {
 		lines = append(lines, shellLogStyle.Render(idleLine))
+	}
+	restartMark := ""
+	if m.serverVersionMismatch {
+		restartMark = " (!)"
+	}
+	restartLine := fmt.Sprintf("%s 重启 dec-server%s", settingsCursorMarker(m.settingsCursor == settingsRowRestartServer && m.focus != focusSidebar), restartMark)
+	if m.settingsCursor == settingsRowRestartServer && m.focus != focusSidebar {
+		lines = append(lines, shellSelectedRow.Render(restartLine))
+	} else if m.serverVersionMismatch {
+		lines = append(lines, shellWarnStyle.Render(restartLine))
+	} else {
+		lines = append(lines, shellLogStyle.Render(restartLine))
+	}
+	varsReady := ""
+	if m.settings.VarsFileReady {
+		varsReady = " (已存在)"
+	} else if strings.TrimSpace(m.settings.VarsPath) != "" {
+		varsReady = " (未生成)"
+	}
+	varsLine := fmt.Sprintf("%s 本机变量 · e 外部编辑%s", settingsCursorMarker(m.settingsCursor == settingsRowGlobalVars && m.focus != focusSidebar), varsReady)
+	if m.settingsCursor == settingsRowGlobalVars && m.focus != focusSidebar {
+		lines = append(lines, shellSelectedRow.Render(varsLine))
+	} else {
+		lines = append(lines, shellLogStyle.Render(varsLine))
 	}
 	for idx, ideName := range m.settings.AvailableIDEs {
 		selected := settingsContainsIDE(m.settingsSelectedIDEs, ideName)
@@ -3035,7 +3222,7 @@ func (m model) renderSettingsList() string {
 		if selected {
 			checked = "x"
 		}
-		row := idx + 2
+		row := settingsFixedRowCount + idx
 		line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.settingsCursor == row && m.focus != focusSidebar), checked, ideName)
 		switch {
 		case m.settingsCursor == row && m.focus != focusSidebar:
@@ -3046,12 +3233,12 @@ func (m model) renderSettingsList() string {
 			lines = append(lines, shellLogStyle.Render(line))
 		}
 	}
-	lines = append(lines, "", shellMutedStyle.Render("本机启用的 bundles"))
+	lines = append(lines, "", shellMutedStyle.Render("用户 bundles"))
 	rows := m.settingsSecretBundleRows()
 	if len(rows) == 0 {
-		hint := "（暂无候选）pull 或解锁 Bitwarden 后按 r 刷新；勾选启用时会补 vault 占位"
+		hint := "暂无候选；Pull 后按 r 刷新"
 		if m.settings != nil && !m.settings.BitwardenSessionReady {
-			hint = "（暂无候选）未解锁 Bitwarden；pull/解锁后按 r 刷新。启用 secrets-only 时会创建 vault 包"
+			hint = "Bitwarden 未解锁；Pull 后按 r 刷新"
 		}
 		lines = append(lines, shellMutedStyle.Render("  "+hint))
 	} else {
@@ -3077,49 +3264,62 @@ func (m model) renderSettingsList() string {
 }
 
 func (m model) renderSettingsDetails() string {
-	lines := []string{shellTitleStyle.Render("Details")}
+	lines := []string{shellTitleStyle.Render("详情")}
 	switch {
-	case m.settingsCursor == 0:
+	case m.settingsCursor == settingsRowRepo:
 		lines = append(lines,
-			fmt.Sprintf("当前远端: %s", fallbackValue(m.settings.ConnectedRepoURL, "未连接")),
-			fmt.Sprintf("Bare Repo: %s", fallbackValue(m.settings.ConnectedBarePath, "未连接")),
-			fmt.Sprintf("配置文件: %s", m.settings.ConfigPath),
-			fmt.Sprintf("本机 Vars: %s", m.settings.VarsPath),
-			"保存时会先确保仓库连接，再写回 ~/.dec/config.yaml。",
+			fmt.Sprintf("状态: %s", formatReady(m.settings.RepoConnected, "已连接", "未连接")),
+			fmt.Sprintf("远端: %s", fallbackValue(m.settings.ConnectedRepoURL, "未连接")),
+			shellMutedStyle.Render("Enter 编辑"),
 		)
-	case m.settingsCursor == 1:
+	case m.settingsCursor == settingsRowIdleTimeout:
 		lines = append(lines,
-			fmt.Sprintf("当前值: %s", fallbackValue(strings.TrimSpace(m.settingsIdleTimeoutInput), "30m")),
-			"最后一个 TUI/MCP 门面断开后开始计时；超时后 dec-server 退出并清除内存 session。",
-			"格式使用 Go duration，例如 15m、30m、1h。按 Enter 或 e 编辑，保存后下次空闲计时生效。",
-			fmt.Sprintf("配置文件: %s", m.settings.ConfigPath),
+			fmt.Sprintf("超时: %s", fallbackValue(strings.TrimSpace(m.settingsIdleTimeoutInput), "30m")),
+			"客户端全部断开后计时；超时退出服务并清除 session。",
+			shellMutedStyle.Render("格式: 15m / 1h · Enter 编辑"),
+		)
+	case m.settingsCursor == settingsRowRestartServer:
+		match := "一致"
+		if m.serverVersionMismatch {
+			match = "不一致"
+		} else if strings.TrimSpace(m.serverVersion) == "" {
+			match = "未知"
+		}
+		lines = append(lines,
+			fmt.Sprintf("客户端: %s", fallbackValue(m.currentVersion, "未知")),
+			fmt.Sprintf("服务端: %s", fallbackValue(m.serverVersion, "未知")),
+			fmt.Sprintf("版本: %s", match),
+			shellWarnStyle.Render("重启会清除 Bitwarden session。"),
+			shellMutedStyle.Render("Enter 确认重启"),
+		)
+	case m.settingsCursor == settingsRowGlobalVars:
+		path := fallbackValue(m.settings.VarsPath, "~/.dec/local/vars.yaml")
+		ready := "未生成"
+		if m.settings.VarsFileReady {
+			ready = "已存在"
+		}
+		lines = append(lines,
+			fmt.Sprintf("路径: %s", compactPath(path, 48)),
+			fmt.Sprintf("状态: %s", ready),
+			shellMutedStyle.Render("上方表单写入 config.yaml；本项编辑机器级变量。"),
+			shellMutedStyle.Render(fmt.Sprintf("编辑器: %s · e/Enter 打开", fallbackValue(m.settings.ConfiguredEditor, "vim"))),
 		)
 	case m.settingsCursorIDEIndex() >= 0:
 		ideName := m.currentSettingsIDEName()
 		lines = append(lines,
 			fmt.Sprintf("IDE: %s", ideName),
-			"启动 dec 或保存 Settings 时，会在用户级目录同步内置 dec skill 与 dec MCP。",
-			"dec MCP 写入 ~/.cursor/mcp.json 等；Cursor 打开各项目时用 ${workspaceFolder} 作为项目根。",
-			fmt.Sprintf("当前状态: %s", formatReady(settingsContainsIDE(m.settingsSelectedIDEs, ideName), "已选中", "未选中")),
+			"启用后同步用户级 Dec Skill 与 MCP。",
+			shellMutedStyle.Render("space 切换"),
 		)
 	default:
 		name := m.currentSettingsSecretBundleName()
 		lines = append(lines,
-			fmt.Sprintf("本机 bundle: %s", fallbackValue(name, "<none>")),
-			"用户平面启用的 Dec bundle（scope: user；ADR 0009）。与项目平面隔离，不并集。",
-			"secrets-only：勾选保存时若 vault 无此包，会创建最小 bundle.yaml（scope: user）并 push。",
-			"候选来自 vault / known_secret_bundles / Bitwarden；仅发现不会改 Git vault。",
-			"也可用 dec --user 在 Bundles 页管理同一列表（~/.dec/config.yaml enabled_bundles）。",
-			fmt.Sprintf("配置文件: %s", fallbackValue(m.settings.ConfigPath, "~/.dec/config.yaml")),
-			fmt.Sprintf("Bitwarden session: %s", formatReady(m.settings.BitwardenSessionReady, "就绪", "未解锁")),
-			fmt.Sprintf("当前状态: %s", formatReady(settingsContainsIDE(m.settingsSelectedSecretBundles, name), "已启用", "未启用")),
+			fmt.Sprintf("Bundle: %s", fallbackValue(name, "<none>")),
+			fmt.Sprintf("Bitwarden: %s", formatReady(m.settings.BitwardenSessionReady, "已解锁", "未解锁")),
+			"仅用于用户平面，与项目 bundles 隔离。",
+			"Vault 中不存在时，启用会创建 secrets-only bundle。",
+			shellMutedStyle.Render("space 切换"),
 		)
-	}
-	if m.settingsRepoEditing {
-		lines = append(lines, "", shellWarnStyle.Render("Repo URL 输入模式已开启。"))
-	}
-	if m.settingsIdleTimeoutEditing {
-		lines = append(lines, "", shellWarnStyle.Render("服务空闲超时输入模式已开启。"))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -3193,22 +3393,18 @@ func (m model) renderAssetRowLine(row assetRow, marker string) string {
 }
 
 func (m model) renderAssetDetails() string {
-	lines := []string{shellTitleStyle.Render("Details")}
+	lines := []string{shellTitleStyle.Render("详情")}
 	if m.assets != nil {
 		if p, ok := m.assetPayloadAtCursor(); ok {
 			switch p.kind {
 			case assetRowBundle:
 				bo := m.assets.Bundles[p.bundleIndex]
-				status := "未选中"
-				if m.bundleSelected(bo.Name) {
-					status = "当前平面已勾选（保存后随本平面 pull 下发）"
-				}
 				lines = append(lines,
 					fmt.Sprintf("Bundle: %s", bo.Name),
-					fmt.Sprintf("Vault: %s", bo.Vault),
-					fmt.Sprintf("状态: %s", status),
-					fmt.Sprintf("成员: %d 个", len(bo.Members)),
 				)
+				if bo.Vault != "" && bo.Vault != bo.Name {
+					lines = append(lines, fmt.Sprintf("Vault: %s", bo.Vault))
+				}
 				if m.assetTree.Expanded[assetBundleNodeID(bo.Name)] {
 					lines = append(lines, "", shellTitleStyle.Render("成员列表"))
 					for _, mb := range bo.Members {
@@ -3229,7 +3425,7 @@ func (m model) renderAssetDetails() string {
 					fmt.Sprintf("Type: %s", mb.Type),
 					fmt.Sprintf("Vault: %s", mb.Vault),
 					fmt.Sprintf("Name: %s", mb.Name),
-					shellMutedStyle.Render("成员由 bundle 带入，只读。"),
+					shellMutedStyle.Render("Bundle 成员，只读"),
 				)
 				return strings.Join(lines, "\n")
 			}
@@ -3252,16 +3448,6 @@ func (m model) renderAssetDetails() string {
 		}
 	}
 
-	if m.assets != nil {
-		lines = append(lines,
-			"",
-			fmt.Sprintf("Config: %s", m.assets.ConfigPath),
-			fmt.Sprintf("Vars: %s", m.assets.VarsPath),
-		)
-		if !m.assets.VarsFileReady {
-			lines = append(lines, "Vars 模板会在首次保存时创建。")
-		}
-	}
 	if m.savingAssets {
 		lines = append(lines, "", shellWarnStyle.Render("正在保存 bundle 选择..."))
 	}
@@ -3296,16 +3482,16 @@ func (m model) settingsSecretBundleRows() []string {
 
 func (m model) settingsSecretBundleRowStart() int {
 	if m.settings == nil {
-		return 2
+		return settingsFixedRowCount
 	}
-	return 2 + len(m.settings.AvailableIDEs)
+	return settingsFixedRowCount + len(m.settings.AvailableIDEs)
 }
 
 func (m model) settingsCursorIDEIndex() int {
-	if m.settings == nil || m.settingsCursor <= 1 {
+	if m.settings == nil || m.settingsCursor < settingsFixedRowCount {
 		return -1
 	}
-	idx := m.settingsCursor - 2
+	idx := m.settingsCursor - settingsFixedRowCount
 	if idx < 0 || idx >= len(m.settings.AvailableIDEs) {
 		return -1
 	}
@@ -3385,7 +3571,7 @@ func (m model) settingsRowCount() int {
 	if m.settings == nil {
 		return 0
 	}
-	return 2 + len(m.settings.AvailableIDEs) + len(m.settingsSecretBundleRows())
+	return settingsFixedRowCount + len(m.settings.AvailableIDEs) + len(m.settingsSecretBundleRows())
 }
 
 func (m model) canNavigateAssets() bool {
@@ -3430,7 +3616,7 @@ func (m *model) beginSettingsRepoEdit() {
 	if m.settings == nil {
 		return
 	}
-	m.settingsCursor = 0
+	m.settingsCursor = settingsRowRepo
 	m.settingsRepoEditing = true
 	m.pushLog("Repo URL input opened")
 }
@@ -3439,7 +3625,7 @@ func (m *model) beginSettingsIdleTimeoutEdit() {
 	if m.settings == nil {
 		return
 	}
-	m.settingsCursor = 1
+	m.settingsCursor = settingsRowIdleTimeout
 	m.settingsIdleTimeoutEditing = true
 	m.pushLog("服务空闲超时输入已打开")
 }
@@ -3970,9 +4156,12 @@ func formatProjectNameDisplay(overview *app.ProjectOverview) string {
 	if overview == nil {
 		return "<unknown>"
 	}
-	name := overview.ProjectName
+	name := strings.TrimSpace(overview.ProjectName)
+	if name == "" {
+		return "<未设置>"
+	}
 	if !overview.ProjectNameFromConfig {
-		return fmt.Sprintf("%s (目录推断，未写入 config)", name)
+		return fmt.Sprintf("%s（未写入配置）", name)
 	}
 	return name
 }
@@ -4025,23 +4214,22 @@ func formatOverviewEnabledBundleNames(overview *app.ProjectOverview) string {
 }
 
 func suggestNextAction(overview *app.ProjectOverview, vaultInferencePending, vaultInferenceDismissed bool) string {
-	const flow = "Settings 连仓库 → Home 确认/生成本地 project → Bundles 勾选 → Run pull"
 	if overview == nil {
-		return flow + "（等待项目概览加载）"
+		return "正在加载项目概览…"
 	}
 	if !overview.RepoConnected {
-		return flow + "（当前：Settings 页配置 Repo URL）"
+		return "到 Settings 配置 Repo URL"
 	}
 	if vaultInferencePending {
-		return flow + "（当前：Home 页确认 vault project，y 应用 / n 跳过）"
+		return "确认检测到的项目配置：y 应用 · n 跳过"
 	}
 	if !overview.ProjectConfigReady {
-		return flow + "（当前：Home 确认或生成本地 project）"
+		return "按 i 生成本地项目配置"
 	}
 	if countOverviewEnabledBundles(overview) == 0 {
-		return flow + "（当前：Bundles 页勾选并保存）"
+		return "到 Bundles 勾选并保存"
 	}
-	return flow + "（当前：Run 页 pull）"
+	return "到 Run 页按 p 拉取"
 }
 
 func formatInferenceBundleNames(bundles []string) string {

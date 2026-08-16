@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/secrets"
 )
 
@@ -35,9 +34,14 @@ type ListSecretsMetadataResult struct {
 // ListSecretsMetadata 列出项目私密资产元数据；绝不返回文件或 Note 正文。
 // includeRemote 为 true 且 Bitwarden 已配置时，会按需触发解锁并检查远端是否存在对应 Note。
 func ListSecretsMetadata(ctx context.Context, projectRoot string, includeRemote bool, reporter Reporter) (*ListSecretsMetadataResult, error) {
+	return ListWorkspaceSecretsMetadata(ctx, NewWorkspace(WorkspaceProject, projectRoot), includeRemote, reporter)
+}
+
+// ListWorkspaceSecretsMetadata 按平面列出私密资产元数据（ADR 0009 平面隔离）。
+// 用户平面读机器根 secrets，项目平面读项目根 secrets；绝不返回正文。
+func ListWorkspaceSecretsMetadata(ctx context.Context, workspace Workspace, includeRemote bool, reporter Reporter) (*ListSecretsMetadataResult, error) {
 	reporter = defaultReporter(reporter)
-	projectRoot = strings.TrimSpace(projectRoot)
-	if projectRoot == "" {
+	if strings.TrimSpace(workspace.Root) == "" {
 		return nil, fmt.Errorf("项目根目录不能为空")
 	}
 
@@ -63,7 +67,6 @@ func ListSecretsMetadata(ctx context.Context, projectRoot string, includeRemote 
 
 	if configured {
 		if !secrets.HasSession() {
-			emit(reporter, EventInfo, "secrets.list", "[auth] secrets list: Bitwarden session required", nil)
 			if err := ensureBitwardenSession(ctx, reporter, "secrets.list"); err != nil {
 				result.SkippedReason = "远端未检查: " + err.Error()
 				return finalizeSecretsMetadata(result, byKey), nil
@@ -71,7 +74,7 @@ func ListSecretsMetadata(ctx context.Context, projectRoot string, includeRemote 
 			result.SessionActive = true
 		}
 		if secrets.HasSession() && secrets.HasUserKey() {
-			if err := mergeRemoteSecretMetadata(ctx, projectRoot, byKey, reporter); err != nil {
+			if err := mergeRemoteSecretMetadataForWorkspace(ctx, workspace, byKey, reporter); err != nil {
 				result.SkippedReason = "远端检查部分失败: " + err.Error()
 			} else {
 				result.RemoteChecked = true
@@ -101,9 +104,9 @@ func sortSecretMetadata(files []SecretFileMetadata) {
 	})
 }
 
-func mergeRemoteSecretMetadata(ctx context.Context, projectRoot string, byKey map[string]*SecretFileMetadata, reporter Reporter) error {
-	mgr := config.NewProjectConfigManager(projectRoot)
-	projectConfig, err := mgr.LoadProjectConfig()
+func mergeRemoteSecretMetadataForWorkspace(ctx context.Context, workspace Workspace, byKey map[string]*SecretFileMetadata, reporter Reporter) error {
+	projectRoot := workspace.Root
+	projectConfig, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
 		return err
 	}
@@ -111,14 +114,17 @@ func mergeRemoteSecretMetadata(ctx context.Context, projectRoot string, byKey ma
 	if err != nil {
 		return err
 	}
-	plan, err := planSecretsSync(projectRoot, projectConfig.EnabledBundles, cfg)
+	plan, err := planWorkspaceSecretsBrowse(workspace, projectConfig.EnabledBundles, cfg, reporter)
 	if err != nil {
 		return err
 	}
 	client := secretsClientFactory()
+	targets := append([]secrets.SyncTarget(nil), plan.Targets...)
+	targets = append(targets, discoverRemoteSecretTargets(
+		ctx, client, workspace, loadVaultBundleScopes(workspace, reporter), targets, reporter)...)
 
 	// ListFolderNotes 只回 note 名（相对同步根），不回正文——元数据接口绝不能碰到密钥内容。
-	for _, target := range plan.Targets {
+	for _, target := range targets {
 		label := formatSyncTargetLabel(target)
 		notes, listErr := client.ListFolderNotes(ctx, target.Folder)
 		if listErr != nil {
@@ -143,7 +149,11 @@ func mergeRemoteSecretMetadata(ctx context.Context, projectRoot string, byKey ma
 			}
 			exists := true
 			meta.RemoteExists = &exists
-			if info, statErr := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(projectRel))); statErr == nil {
+			localAbs, absErr := secrets.AbsolutePath(projectRoot, target, noteRel)
+			if absErr != nil {
+				localAbs = filepath.Join(projectRoot, filepath.FromSlash(projectRel))
+			}
+			if info, statErr := os.Stat(localAbs); statErr == nil {
 				meta.LocalExists = true
 				meta.LocalSizeBytes = info.Size()
 				meta.LocalModifiedUnix = info.ModTime().Unix()

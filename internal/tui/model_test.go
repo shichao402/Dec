@@ -44,7 +44,7 @@ func TestModelViewRendersHomeOverview(t *testing.T) {
 		"Bundles",
 		"项目名:",
 		"git@github.com:demo/dec.git",
-		"Vault bundle: 2 个 | 已启用: 1 个",
+		"Bundle: 可选 2 个 · 已启用 1 个",
 		"IDE: codex, cursor",
 		"编辑器: code --wait",
 		"下一步",
@@ -142,11 +142,10 @@ func TestModelHomeShowsVaultInferencePrompt(t *testing.T) {
 	m = updated.(model)
 	view := m.View()
 	checks := []string{
-		"根据目录名推断 vault project，请确认是否应用",
-		"推断 project: Dec",
-		"projects/Dec.yaml",
+		"检测到项目配置，是否应用？",
+		"项目: Dec",
 		"dec-agent, dec-vikunja",
-		"y / Enter 应用 · n 跳过并手动选择",
+		"y/Enter 应用 · n 跳过",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
@@ -231,8 +230,8 @@ func TestModelHomeVaultInferenceDismiss(t *testing.T) {
 		t.Fatalf("dismiss 后不应展示确认块:\n%s", view)
 	}
 	got := suggestNextAction(m.overview, false, true)
-	if !strings.Contains(got, "Bundles") {
-		t.Fatalf("dismiss 后建议下一步应指向 Bundles 页: %q", got)
+	if !strings.Contains(got, "生成本地项目配置") {
+		t.Fatalf("dismiss 后建议下一步应指向本地配置: %q", got)
 	}
 }
 
@@ -266,7 +265,7 @@ func TestModelAssetsPageRendersSelectionState(t *testing.T) {
 	view := m.View()
 	checks := []string{
 		"Bundle 列表",
-		"Details",
+		"详情",
 		"[x] ▸ default · 1 个成员",
 		"[ ] ▸ cli · 1 个成员",
 		"1/2 项目已启用",
@@ -670,17 +669,24 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 
 	view := m.View()
 	checks := []string{
-		"Global Settings",
+		"全局设置",
 		"Repo URL:",
-		"当前远端:",
+		"远端:",
+		"重启 dec-server",
+		"本机变量 · e 外部编辑",
 		"[x] cursor",
 		"[ ] codex",
-		"本机启用的 bundles",
+		"用户 bundles",
 		"[x] woa",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
 			t.Fatalf("Settings View() 缺少 %q:\n%s", check, view)
+		}
+	}
+	for _, redundant := range []string{"Bare Repo:", "配置文件:", "本机 Vars:", "保存时会"} {
+		if strings.Contains(view, redundant) {
+			t.Fatalf("Settings View() 不应显示冗余详情 %q:\n%s", redundant, view)
 		}
 	}
 }
@@ -696,7 +702,7 @@ func TestModelSettingsHotkeysToggleIDEAndStartEdit(t *testing.T) {
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
-	m.settingsCursor = 3 // repo(0) + idle timeout(1) + cursor IDE(2) + codex IDE(3)
+	m.settingsCursor = 5 // repo(0) + idle(1) + restart(2) + 本机变量(3) + cursor IDE(4) + codex IDE(5)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m = updated.(model)
@@ -727,7 +733,7 @@ func TestModelSettingsHotkeysToggleUserSecretBundle(t *testing.T) {
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
-	m.settingsCursor = 3 // repo(0) + idle timeout(1) + IDE(2) + first secret bundle(3)
+	m.settingsCursor = 5 // repo(0) + idle(1) + restart(2) + 本机变量(3) + IDE(4) + first secret bundle(5)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m = updated.(model)
@@ -876,14 +882,13 @@ func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 }
 
 func TestSuggestNextAction(t *testing.T) {
-	const flow = "Settings 连仓库 → Home 确认/生成本地 project → Bundles 勾选 → Run pull"
-	if got := suggestNextAction(&app.ProjectOverview{}, false, false); !strings.Contains(got, flow) || !strings.Contains(got, "Settings") {
+	if got := suggestNextAction(&app.ProjectOverview{}, false, false); got != "到 Settings 配置 Repo URL" {
 		t.Fatalf("未连接仓库时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, false, false); !strings.Contains(got, flow) || !strings.Contains(got, "Home") {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, false, false); got != "按 i 生成本地项目配置" {
 		t.Fatalf("未初始化项目时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, true, false); !strings.Contains(got, "确认 vault project") {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, true, false); !strings.Contains(got, "确认检测到的项目配置") {
 		t.Fatalf("推断待确认时建议动作错误: %q", got)
 	}
 	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true}, false, false); !strings.Contains(got, "Bundles") {
@@ -972,11 +977,11 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 
 	view := m.View()
 	for _, want := range []string{
-		"▾ Dec (Git vault)",
+		"▾ 远端 · Dec (Git vault)",
 		"▾ cache",
 		"▾ vikunja",
 		"↳ demo",
-		"▾ Secrets (Bitwarden)",
+		"▾ 远端 · Secrets (Bitwarden)",
 		".secrets/bundles/vikunja",
 		"vikunja.env",
 		"SSH · machine",
@@ -1440,6 +1445,8 @@ func TestModelRunPageUpdateCheckFailureEntersDone(t *testing.T) {
 func TestModelRunPageUpdateConfirmYTriggersDoUpdate(t *testing.T) {
 	oldDo := updateDoUpdateOperation
 	defer func() { updateDoUpdateOperation = oldDo }()
+	oldRestart := restartServerOperation
+	defer func() { restartServerOperation = oldRestart }()
 	called := false
 	updateDoUpdateOperation = func(currentVersion, latestVersion string) error {
 		called = true
@@ -1450,6 +1457,14 @@ func TestModelRunPageUpdateConfirmYTriggersDoUpdate(t *testing.T) {
 			t.Fatalf("latestVersion = %q, 期望 %q", latestVersion, "v1.2.0")
 		}
 		return nil
+	}
+	restartCalled := false
+	restartServerOperation = func(projectRoot, reason string) (string, error) {
+		restartCalled = true
+		if reason != "update" {
+			t.Fatalf("restart reason = %q, 期望 update", reason)
+		}
+		return "v1.2.0", nil
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
@@ -1477,7 +1492,7 @@ func TestModelRunPageUpdateConfirmYTriggersDoUpdate(t *testing.T) {
 		t.Fatal("应调用 updateDoUpdateOperation")
 	}
 
-	updated, _ = m.Update(done)
+	updated, cmd = m.Update(done)
 	m = updated.(model)
 	if m.updatingBinary {
 		t.Fatal("done 后应退出 updatingBinary")
@@ -1490,6 +1505,28 @@ func TestModelRunPageUpdateConfirmYTriggersDoUpdate(t *testing.T) {
 	}
 	if m.updateDoneVersion != "v1.2.0" {
 		t.Fatalf("updateDoneVersion = %q, 期望 v1.2.0", m.updateDoneVersion)
+	}
+	if !m.restartingServer || m.serverRestartStage != "running" {
+		t.Fatalf("更新成功后应自动重启服务: restarting=%v stage=%q", m.restartingServer, m.serverRestartStage)
+	}
+	if cmd == nil {
+		t.Fatal("更新成功后应返回 restart 命令")
+	}
+	rawRestart := cmd()
+	restartMsg, ok := rawRestart.(serverRestartDoneMsg)
+	if !ok {
+		t.Fatalf("restart 返回 = %T, 期望 serverRestartDoneMsg", rawRestart)
+	}
+	if !restartCalled {
+		t.Fatal("应调用 restartServerOperation")
+	}
+	updated, _ = m.Update(restartMsg)
+	m = updated.(model)
+	if m.restartingServer || m.serverRestartStage != "" {
+		t.Fatalf("update 重启完成后应清空 restart 状态: restarting=%v stage=%q", m.restartingServer, m.serverRestartStage)
+	}
+	if m.serverVersion != "v1.2.0" {
+		t.Fatalf("serverVersion = %q, 期望 v1.2.0", m.serverVersion)
 	}
 }
 
@@ -2177,6 +2214,82 @@ func TestModelProjectVarsEditedMsgSurfacesError(t *testing.T) {
 	}
 }
 
+func TestModelSettingsGlobalVarsEditKeyInvokesCmd(t *testing.T) {
+	oldEnsure := ensureGlobalVarsFileOperation
+	defer func() { ensureGlobalVarsFileOperation = oldEnsure }()
+
+	called := false
+	ensureGlobalVarsFileOperation = func() (*app.EnsureGlobalVarsFileResult, error) {
+		called = true
+		return &app.EnsureGlobalVarsFileResult{Path: "/tmp/.dec/local/vars.yaml", Created: true}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 5
+	m.focus = focusContent
+	m.settings = &app.GlobalSettingsState{
+		VarsPath:         "/tmp/.dec/local/vars.yaml",
+		ConfiguredEditor: "vim",
+		AvailableIDEs:    []string{"cursor"},
+	}
+	m.settingsCursor = settingsRowGlobalVars
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	if cmd == nil {
+		t.Fatal("按 e 应返回 tea.Cmd")
+	}
+	if !called {
+		t.Fatal("按 e 应触发 ensureGlobalVarsFileOperation")
+	}
+}
+
+func TestModelGlobalVarsEditedMsgRefreshesSettings(t *testing.T) {
+	oldLoad := loadGlobalVarsViewOperation
+	defer func() { loadGlobalVarsViewOperation = oldLoad }()
+
+	loaded := false
+	loadGlobalVarsViewOperation = func() (*app.GlobalVarsView, error) {
+		loaded = true
+		return &app.GlobalVarsView{
+			VarsPath:      "/tmp/.dec/local/vars.yaml",
+			VarsFileReady: true,
+			Vars:          map[string]string{"A": "1"},
+			EditorCommand: "vim",
+		}, nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 5
+	m.settings = &app.GlobalSettingsState{
+		VarsPath:      "/tmp/.dec/local/vars.yaml",
+		VarsFileReady: false,
+	}
+	m.settingsDirty = true
+
+	updated, cmd := m.Update(globalVarsEditedMsg{err: nil})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("globalVarsEditedMsg 后应返回 reload tea.Cmd")
+	}
+	msg := cmd()
+	loadedMsg, ok := msg.(globalVarsLoadedMsg)
+	if !ok {
+		t.Fatalf("cmd 返回 = %T, 期望 globalVarsLoadedMsg", msg)
+	}
+	if !loaded {
+		t.Fatal("编辑完成后应重新加载 global vars view")
+	}
+
+	updated, _ = m.Update(loadedMsg)
+	m = updated.(model)
+	if !m.settings.VarsFileReady {
+		t.Fatal("刷新后 VarsFileReady 应为 true")
+	}
+	if !m.settingsDirty {
+		t.Fatal("刷新本机变量不应清掉 settings dirty")
+	}
+}
+
 // -------- #93 Bundle-aware Assets 页 --------
 
 // 构造一个带 2 个 bundle 的 Bundles 页状态：vikunja（2 成员）+ cli（1 成员）。
@@ -2415,5 +2528,55 @@ func TestNewModelWithOptionsDefaultsMatchLegacy(t *testing.T) {
 	}
 	if opts.configInitMode {
 		t.Fatal("默认 RunOptions 不应开启 configInitMode")
+	}
+}
+
+func TestModelSettingsRestartServerConfirmAndRefuseBusy(t *testing.T) {
+	oldRestart := restartServerOperation
+	defer func() { restartServerOperation = oldRestart }()
+	restartServerOperation = func(projectRoot, reason string) (string, error) {
+		return "v1.0.0", nil
+	}
+
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 5
+	m.focus = focusContent
+	m.serverVersion = "v1.0.0"
+	m.settings = &app.GlobalSettingsState{AvailableIDEs: []string{"cursor"}}
+	m.settingsCursor = settingsRowRestartServer
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.serverRestartStage != "confirm" || m.serverRestartReason != "manual" {
+		t.Fatalf("Enter 后应进入 confirm: stage=%q reason=%q", m.serverRestartStage, m.serverRestartReason)
+	}
+	view := m.View()
+	if !strings.Contains(view, "Bitwarden session") {
+		t.Fatalf("确认页应提示 session 清除:\n%s", view)
+	}
+
+	m.runningPull = true
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = updated.(model)
+	if m.serverRestartStage != "done" || m.serverRestartErr == nil {
+		t.Fatalf("忙碌时应拒绝重启: stage=%q err=%v", m.serverRestartStage, m.serverRestartErr)
+	}
+}
+
+func TestModelVersionMismatchTriggersConfirm(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	updated, _ := m.Update(serverVersionMsg{
+		serverVersion: "v0.9.0",
+		clientVersion: "v1.0.0",
+		mismatch:      true,
+	})
+	m = updated.(model)
+	if !m.serverVersionMismatch || m.serverRestartStage != "confirm" {
+		t.Fatalf("版本不一致应弹出确认: mismatch=%v stage=%q", m.serverVersionMismatch, m.serverRestartStage)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = updated.(model)
+	if m.serverRestartStage != "" || !m.serverVersionMismatchDismissed {
+		t.Fatalf("取消后应 dismiss: stage=%q dismissed=%v", m.serverRestartStage, m.serverVersionMismatchDismissed)
 	}
 }

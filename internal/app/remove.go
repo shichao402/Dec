@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/ide"
 	"github.com/shichao402/Dec/internal/repo"
@@ -52,18 +53,22 @@ type RemoveBundleInput struct {
 
 // RemoveBundleResult 汇总一次 bundle 级 remove 操作的结果。
 type RemoveBundleResult struct {
-	ProjectRoot      string
-	BundleName       string
-	MemberCount      int
-	RemovedFromIDEs  []string
-	RemovedFromCache bool
-	ConfigUpdated    bool
-	VersionCommit    string
+	ProjectRoot       string
+	BundleName        string
+	MemberCount       int
+	RemovedFromIDEs   []string
+	RemovedFromCache  bool
+	ConfigUpdated     bool
+	VersionCommit     string
+	PrunedProjects    []string
+	RemovedSecretDirs []string
+	Remnants          []string
 }
 
-// RemoveBundle 执行 bundle 级删除：远端删除 bundles/<name>/、清理 IDE / cache / 项目配置。
+// RemoveBundle 执行 bundle 级删除：远端删除 bundles/<name>/、清理 IDE / cache / 启用与登记。
 //
-// 不会自动删除 Bitwarden secrets bundle；敏感文件需用户自行处理。
+// 会同步摘掉 vault projects/*.yaml 引用、known_secret_bundles、两平面 enabled_bundles，
+// 以及本地 secrets 同步根 / SSH Key 落地。不会自动清空 Bitwarden folder（见 Remnants 提示）。
 func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, error) {
 	reporter = defaultReporter(reporter)
 
@@ -90,7 +95,7 @@ func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResu
 
 	members := append([]AssetSelectionItem(nil), input.Members...)
 
-	// Stage 1: 远端删除整包（最关键，失败直接返回错误）。
+	// Stage 1: 远端删除整包 + 摘掉 projects/*.yaml 引用（同一次 commit）。
 	emit(reporter, EventInfo, "remove.repo", "连接资产仓库...", nil)
 	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
 		repoDir := tx.WorkDir()
@@ -106,6 +111,15 @@ func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResu
 		}
 		if err := os.RemoveAll(bundlePath); err != nil {
 			return fmt.Errorf("删除远端 bundle 失败: %w", err)
+		}
+		pruned, pruneErr := pruneBundleFromVaultProjects(repoDir, bundleName)
+		if pruneErr != nil {
+			return fmt.Errorf("从 projects 声明摘除 bundle 失败: %w", pruneErr)
+		}
+		result.PrunedProjects = pruned
+		if len(pruned) > 0 {
+			emit(reporter, EventInfo, "remove.repo",
+				fmt.Sprintf("已从 projects 声明移除: %s", strings.Join(pruned, ", ")), nil)
 		}
 		commitMsg := fmt.Sprintf("remove bundle: %s", bundleName)
 		if _, err := tx.CommitAndPush(commitMsg); err != nil {
@@ -157,13 +171,11 @@ func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResu
 		}
 	}
 
-	// Stage 4: 当前平面启用列表更新。
-	if changed, err := removeWorkspaceEnabledBundle(workspace, bundleName); err != nil {
-		emit(reporter, EventWarn, "remove.config", fmt.Sprintf("启用列表更新失败: %v", err), nil)
-	} else if changed {
-		result.ConfigUpdated = true
-		emit(reporter, EventInfo, "remove.config", "📝 已更新启用列表", nil)
-	}
+	// Stage 4: 收敛清理登记与 secrets/SSH 落地（含两平面 enabled）。
+	cleanup := cleanupDeletedBundleLocalState(workspace, bundleName, reporter)
+	result.ConfigUpdated = cleanup.ClearedProjectEnable || cleanup.ClearedUserEnable
+	result.RemovedSecretDirs = cleanup.RemovedSecretDirs
+	result.Remnants = cleanup.Remnants
 
 	summary := fmt.Sprintf("✅ 已删除 bundle %s（%d 个成员）", bundleName, result.MemberCount)
 	emit(reporter, EventInfo, "remove.finish", summary, nil)
@@ -204,19 +216,30 @@ func bundleSelectionItemsFromRepo(repoDir, bundleName string) []AssetSelectionIt
 	return items
 }
 
-func memberPrefixToAssetType(prefix string) string {
-	switch prefix {
-	case "skills":
-		return "skill"
-	case "commands":
-		return "command"
-	case "rules":
-		return "rule"
-	case "mcp":
-		return "mcp"
-	default:
-		return ""
+// removeVaultBundleIfEmpty 在磁盘上已无任何资产成员时删除 bundles/<name>/（含空壳 bundle.yaml）。
+func removeVaultBundleIfEmpty(repoDir, bundleName string) (bool, error) {
+	bundleName = strings.TrimSpace(bundleName)
+	if repoDir == "" || bundleName == "" {
+		return false, nil
 	}
+	if len(listBundleAssetMembers(repoDir, bundleName)) > 0 {
+		return false, nil
+	}
+	bundlePath := filepath.Join(repoDir, types.VaultBundlesDir, bundleName)
+	if _, err := os.Stat(bundlePath); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("检查空 bundle 目录失败: %w", err)
+	}
+	if err := os.RemoveAll(bundlePath); err != nil {
+		return false, fmt.Errorf("删除空 bundle 目录失败: %w", err)
+	}
+	return true, nil
+}
+
+func memberPrefixToAssetType(prefix string) string {
+	return bundle.DirToType(prefix)
 }
 
 // RemoveAsset 执行一次资产删除：远端 commit、清理 IDE / cache / 项目配置。
@@ -242,7 +265,7 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 	if assetName == "" {
 		return nil, fmt.Errorf("资产名称不能为空")
 	}
-	if !isRemovableAssetType(itemType) {
+	if !bundle.IsKnownType(itemType) {
 		return nil, fmt.Errorf("不支持的资产类型: %s (支持: skill, command, rule, mcp)", itemType)
 	}
 	if !input.Confirmed {
@@ -269,6 +292,22 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 
 		if err := os.RemoveAll(fullPath); err != nil {
 			return fmt.Errorf("删除远端资产失败: %w", err)
+		}
+
+		// 合成 / 显式 bundle 删到无成员时，整包摘掉并清理 projects 声明，避免「空壳 + 项目声明」再启用复活。
+		if emptied, emptyErr := removeVaultBundleIfEmpty(repoDir, foundVault); emptyErr != nil {
+			return emptyErr
+		} else if emptied {
+			pruned, pruneErr := pruneBundleFromVaultProjects(repoDir, foundVault)
+			if pruneErr != nil {
+				return fmt.Errorf("从 projects 声明摘除空 bundle 失败: %w", pruneErr)
+			}
+			if len(pruned) > 0 {
+				emit(reporter, EventInfo, "remove.repo",
+					fmt.Sprintf("bundle %s 已空，已从 projects 声明移除: %s", foundVault, strings.Join(pruned, ", ")), nil)
+			} else {
+				emit(reporter, EventInfo, "remove.repo", fmt.Sprintf("bundle %s 已空，已删除空目录", foundVault), nil)
+			}
 		}
 
 		commitMsg := fmt.Sprintf("remove: %s/%s", foundVault, assetName)
@@ -312,9 +351,18 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 			}
 		}
 	}
+	pruneEmptyDecCacheBundle(workspace, result.Vault, reporter)
 
-	// 单资产删除不改项目配置：资产的启用态由所属 bundle 承载，
-	// 只删掉某个成员并不意味着用户要取消整个 bundle。
+	// 远端 bundle 已空时，收敛清理本机登记，避免 known / enabled / secrets 残留被 push 写回。
+	if result.Vault != "" {
+		_ = withAppReadRepo(func(tx *repo.Transaction) error {
+			bundlePath := filepath.Join(tx.WorkDir(), types.VaultBundlesDir, result.Vault)
+			if _, err := os.Stat(bundlePath); os.IsNotExist(err) {
+				cleanupDeletedBundleLocalState(workspace, result.Vault, reporter)
+			}
+			return nil
+		})
+	}
 
 	summary := fmt.Sprintf("✅ 已删除 [%s] %s (vault: %s)", itemType, assetName, result.Vault)
 	emit(reporter, EventInfo, "remove.finish", summary, nil)
@@ -322,7 +370,7 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 }
 
 func isRemovableAssetType(t string) bool {
-	return t == "skill" || t == "command" || t == "rule" || t == "mcp"
+	return bundle.IsKnownType(t)
 }
 
 // locateAssetInRepo 在 repo 中定位资产文件。vaultHint 非空时优先走该 bundle；为空时遍历 bundles/ 子目录查找唯一匹配。
