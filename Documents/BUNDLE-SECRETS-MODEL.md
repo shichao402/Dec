@@ -46,7 +46,7 @@ projects/my-app.yaml              my-app/
 bundles/vikunja/                    │   └── cache/vikunja/
   scope: project                    ├── .secrets/
   skills/...                        │   └── bundles/vikunja/
-                                    │       └── env/vikunja.env
+                                    │       └── .env/vikunja.env
 bundles/tencent-cloud/              └── .cursor/
   scope: user
   skills/...                      ~/.cursor/skills/dec-tencent-cloud/
@@ -62,12 +62,12 @@ bundles/tencent-cloud/              └── .cursor/
 SyncTarget{kind: bundle, name: vikunja, plane: project}
   folder: bundle/vikunja
   LocalRoot: .secrets/bundles/vikunja
-  note "env/vikunja.env" → <project>/.secrets/bundles/vikunja/env/vikunja.env
+  note ".env/vikunja.env" → <project>/.secrets/bundles/vikunja/.env/vikunja.env
 
 SyncTarget{kind: bundle, name: tencent-cloud, plane: machine}
   folder: bundle/tencent-cloud
   LocalRoot: bundles/tencent-cloud（相对 ~/.dec/secrets）
-  note "env/x.env" → ~/.dec/secrets/bundles/tencent-cloud/env/x.env
+  note ".env/x.env" → ~/.dec/secrets/bundles/tencent-cloud/.env/x.env
 
 SyncTarget{kind: project, name: my-app}
   folder: my-app
@@ -150,7 +150,7 @@ bundles/vikunja/
 
 Bitwarden folder: bundle/vikunja
   Secure Note 名 = 相对同步根的路径
-  → env/vikunja.env
+  → .env/vikunja.env
 ```
 
 ### Bitwarden Secure Note 命名
@@ -255,8 +255,8 @@ sequenceDiagram
 | 用户平面 | `dec --user` | 工作空间切到用户平面；Bundles/Run 只见 user-scope bundle |
 | 项目平面 | `dec`（项目工作区） | Bundles/Run 只见 project-scope bundle |
 | 首次启用 | Bundles 页调整 → Run 页 pull | 按当前平面完成 Dec + secrets |
-| Secrets 管理 | Settings / Remote | Bitwarden 连接；Remote **全量**浏览（folder + 无文件夹只读）；`n` 登记到光标所在 folder、`N` 登记到新 folder；跨上下文删除 typed confirm |
-| MCP 运行时注入 | `dec-exec` | 按 scope 单层加载 `env/*.env` |
+| Secrets 管理 | Settings / Remote | Bitwarden 连接；Remote **全量**浏览（folder + 无文件夹只读）；`n` 登记到光标所在 folder、`N` 登记到新 folder，类型为同级 Processor（`note` / `.env` / `.gcm` / `.sshkey`）；跨上下文删除 typed confirm |
+| MCP 运行时注入 | `dec-exec` | 按 scope 单层加载 `.env/*.env` |
 
 不在 TUI 外暴露 `dec secrets pull` 等独立子命令。
 

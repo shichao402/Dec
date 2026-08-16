@@ -14,7 +14,7 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 - 保留最小 CLI 面：`dec --version`、内部 hidden 命令（如 `__freshness-check`）、非 TTY 时的简短提示。Agent MCP 与 env 注入分别是独立程序 `dec-mcp`、`dec-exec`。
 - Secrets / Bitwarden / SSH / env 部署等操作通过 TUI 触达（Settings、Run、**Bundles** 等页）。
 - **Run** 页 pull：解析 project bundle 列表 → 拉 Dec Git bundle（→ `.dec/cache/`）+ 自动拉 Bitwarden **secrets bundle**（→ **`.secrets/`** 同步根，零路径重叠）；见 `Documents/BUNDLE-SECRETS-MODEL.md`。
-- **`dec-exec`**（独立程序）：按 bundle 作用域读取 `.secrets/**/env/*.env` 并启动子进程，供 MCP / Agent 运行时注入；不经过 `dec-server`、不碰 session，也不是用户面 secrets 管理入口。
+- **`dec-exec`**（独立程序）：按 bundle 作用域读取 `.secrets/**/.env/*.env` 并启动子进程，供 MCP / Agent 运行时注入；不经过 `dec-server`、不碰 session，也不是用户面 secrets 管理入口。
 - **服务 / 门面**：`dec-server` 是一机单例业务服务；`dec` TUI 与 `dec-mcp` 是薄门面，连不上时自动拉起服务，禁止回退到门面内嵌 `internal/app`。
 - **跨页异步 IO**：慢 IO（尤其远端）跟 Shell 生命周期走，不跟当前页；切页禁止打断在飞请求；独立 busy 信号 + 防重复 + gen 丢弃过期结果（`internal/tui/async_io.go`，见 `Documents/TUI_ARCHITECTURE.md` §5.5）。
 
@@ -26,7 +26,7 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 | project 初始化 / 选择 | Home 页（首次进入引导） |
 | 扫描资产 / bundle 选择 | **Bundles** 页 |
 | pull / push / remove | Run 页 |
-| 浏览 / 删 / 改远端（Note · SSH Hosts）；按光标 folder 登记（`n`）/ 新 folder 登记（`N`）；无文件夹只读 | **Remote** 页 |
+| 浏览 / 删 / 改远端（Note · SSH Hosts）；按光标 folder 登记（`n`）/ 新 folder 登记（`N`），类型为同级 Processor（`note` / `.env` / `.gcm` / `.sshkey`）；无文件夹只读 | **Remote** 页 |
 | 浏览 / 筛选资产 | Bundles 页 |
 | 项目概览 / project 初始化 | Home 页 |
 | 项目变量编辑 | Project 页 |

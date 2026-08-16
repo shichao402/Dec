@@ -112,8 +112,9 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 
 - 进入默认拉全量远端库存（`ListRemoteInventory`）；`r` 强制刷新
 - `e`：Secure Note / SSH Hosts → temp → 写回远端（不种本地）
-- `n`：光标所在 folder 登记；`N`：手输新 folder。Processor 同级（`note` / `.env` / `.gcm` / `.sshkey`），来源由类型声明（temp/路径/系统选文件/本机生成）；不枚举远端 folder 候选
+- `n`：光标所在 folder 登记；`N`：手输新 folder。Processor 同级（`note` / `.env` / `.gcm` / `.sshkey`），来源由类型声明（temp/路径/系统选文件/本机生成）；不枚举远端 folder 候选。folder 不存在时由登记本身按需创建
 - `a` 全选 / `A` 全不选
+- 列表态 `q` / `ctrl+c` 退出 TUI；表单 / 确认态 `Esc` 先退回列表
 - `d`：远端分区只改远端；本地分区只清本机；跨上下文需 typed confirm
 - 「无文件夹」只读折叠区，不可勾选删除
 

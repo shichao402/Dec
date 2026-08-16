@@ -2,7 +2,7 @@
 
 - **状态**：已接受
 - **日期**：2026-08-13
-- **影响范围**：`internal/secrets/sectype.go`、`internal/secrets/handler/`、`internal/app/secrets_pull.go`、`Documents/BUNDLE-SECRETS-MODEL.md`
+- **影响范围**：`internal/secrets/sectype.go`、`internal/secrets/processor.go`、`internal/secrets/handler/`、`internal/app/secrets_pull.go`、`internal/app/remote_register.go`、`Documents/BUNDLE-SECRETS-MODEL.md`
 - **修订**：
   - 2026-08-13 — 机器级 Note 默认落 `~/.dec/secrets/bundles/`（见 [0007](0007-machine-secrets-root.md)）
   - 2026-08-17 — **点类型目录**取代 `{实例}_{处理器}.yaml`；统一 `.gcm` / `.sshkey` / `.env`
@@ -71,6 +71,8 @@ Revoke：删除 Note 前 `credential reject` + `--unset provider`。
 | `.sshkey` | SSH Key Item Writer | 本机生成 / 路径 / 系统选文件 |
 
 TUI 只跑统一状态机（归属 → Processor → 名称 → 来源 → 提交），不按类型开旁路。GCM Apply 属于 Pull 后处理，不属于创建链路。
+
+Writer 契约对齐：两条 Writer（`PushBundle` / `CreateSSHKey`）都支持「目标 folder 不存在时按需创建」，供 Remote `N` 使用。
 
 ## 理由
 

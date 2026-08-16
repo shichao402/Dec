@@ -1,7 +1,7 @@
 # 0004 — Remote 页：上下文无关的完整远端编辑器
 
-- **状态**：已接受（已实现；2026-08-16 修订为方案 R；同日补齐 A / typed confirm / 无文件夹）
-- **日期**：2026-08-10；**修订**：2026-08-16
+- **状态**：已接受（已实现；2026-08-16 修订为方案 R；同日补齐 A / typed confirm / 无文件夹；2026-08-17 登记改为同级 Processor）
+- **日期**：2026-08-10；**修订**：2026-08-16、2026-08-17
 - **关联**：[0002-secrets-synctarget-root.md](0002-secrets-synctarget-root.md)、[0003-user-enabled-secret-bundles.md](0003-user-enabled-secret-bundles.md)、[0009-bundle-binary-scope.md](0009-bundle-binary-scope.md)
 - **影响范围**：TUI Remote 页；`ListRemoteInventory` / 删除 Mode；Bitwarden Secure Note 与 SSH Hosts 写回；与当前 project / `--user` 解耦的可见性
 
@@ -53,6 +53,7 @@
    - Processor 同级：`note` / `.env` / `.gcm` / `.sshkey`；各自声明名称规则、来源控件与 Bitwarden Writer（Secure Note 或 SSH Key Item）  
    - 内容来源由 Processor 声明：Note 类为外部编辑器 / 路径 / 系统选文件；`.sshkey` 为本机生成 / 路径 / 系统选文件  
    - **不强制**落本地同步根（Note）；SSH Key 创建成功后按现有契约尝试落地 `~/.ssh`（已存在则不覆盖）  
+   - `N` 指定的 folder 允许尚不存在：提交时按需创建 Bitwarden folder（Secure Note 与 SSH Key Item 两条 Writer 同此契约）  
    - Remote 页 `a`/`A` = 全选/全不选；Project 页 `A` 仍为「本地同步根已有文件 → 登记到对应 SyncTarget」，归属仍从 `SuggestSecretTargets` 轮转选择
 
 7. **进入即尝试含远端列表**  
@@ -76,9 +77,12 @@
 | 编辑顺带种本地盘 | 其它项目裸 folder 无可靠 LocalRoot；与「pull 才更新本地」不一致 |
 | 仅文案提示跨上下文风险 | 不足以防误删；必须真正输入确认 |
 | 登记表单内轮转选择归属 | 候选几十个、tab 轮转难定位，且要为此枚举远端 folder（可能触发解锁）；光标本就停在目标 folder 上 |
+| `.sshkey` 从类型列表剔除、只提示去 Bitwarden Web 手建 | 同一入口出现「有的类型能建、有的不能」的断层；SSH Key 与 note / `.env` / `.gcm` 是同级 Processor，只是 Writer 不同 |
+| 为 `.sshkey` 做一条专用登记旁路 | 会长出第二套状态机；来源差异（本机生成）应由 Processor 声明，而不是分叉流程 |
+| 登记前要求用户先在远端建好 folder | `N` 的语义就是新 folder；建 folder 是登记的一部分 |
 
 ## 后果
 
 - 用户话术：删/改**远端** → Remote 远端分区；清**本机残留** → Remote 本地分区；启停包 → Bundles / Settings；登记到已有 folder → 光标停到该 folder 后 Remote `n`；登记到新 folder → Remote `N`。
 - 快照与集成测试页名从 `Delete` 改为 `Remote`。
-- 实现落点：`internal/app/remote_inventory.go`、`remote_edit.go`、`delete_typed_confirm.go`；`internal/tui/delete_page.go`、`delete_tree.go`、`add_secret.go`；`internal/secrets` `ListAllFolderNames` / `ListUnfiledItems`。
+- 实现落点：`internal/app/remote_inventory.go`、`remote_edit.go`、`remote_register.go`、`delete_typed_confirm.go`；`internal/tui/delete_page.go`、`delete_tree.go`、`add_secret.go`、`file_picker.go`；`internal/secrets` `processor.go`、`sshkey_material.go`、`ListAllFolderNames` / `ListUnfiledItems` / `CreateSSHKey`。

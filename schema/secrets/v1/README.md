@@ -16,21 +16,21 @@ SyncTarget{bundle: vikunja}
   LocalRoot: .secrets/bundles/vikunja
 
 Dec bundle（→ .dec/cache/vikunja/）:
-  mcp/vikunja-mcp.json          # command: dec exec，无 token
+  mcp/vikunja-mcp.json          # command: dec-exec，无 token
 
 Bitwarden folder: vikunja
   Secure Note 名（相对 LocalRoot）:
-  → env/vikunja.env
+  → .env/vikunja.env
 
-  [SSH Key] deploy  Notes: vikunja.example.com
+  [SSH Key] .sshkey/deploy  Notes: vikunja.example.com
   → ~/.ssh/dec_vikunja_deploy
 ```
 
-- **Secure Note 名称** = 相对 **SyncTarget.LocalRoot** 的路径（如 `env/vikunja.env`）。
-- Pull 后落到 `<project>/.secrets/bundles/vikunja/env/vikunja.env`，**不进** `.dec/cache/`。
-- 环境变量只认 `env/*.env`；由 hidden `dec exec` 按 bundle 注入。
-- **SSH Key**：落地 `~/.ssh/dec_<bundle>_<name>`；有 hosts 时更新 Dec 管理 `~/.ssh/config` 区块。
-- **Machine Handlers**（[0005](../../Documents/decisions/0005-secrets-machine-handlers.md)）：点类型目录 `.gcm/` / `.sshkey/` / `.env/`；如 `.gcm/cnb.yaml` → GCM。
+- **Secure Note 名称** = 相对 **SyncTarget.LocalRoot** 的路径（如 `.env/vikunja.env`）。
+- Pull 后落到 `<project>/.secrets/bundles/vikunja/.env/vikunja.env`，**不进** `.dec/cache/`。
+- 环境变量只认 `.env/*.env`；由独立 `dec-exec` 按 bundle 注入。
+- **SSH Key**：Item 名 `.sshkey/<实例>`，落地 `~/.ssh/dec_<bundle>_<实例>`；有 hosts 时更新 Dec 管理 `~/.ssh/config` 区块。
+- **点类型目录**（[0005](../../Documents/decisions/0005-secrets-machine-handlers.md)）：`.gcm/` / `.sshkey/` / `.env/` 决定识别与处理；如 `.gcm/cnb.yaml` → GCM handler。同一张表也是 Remote 登记的同级 Processor（各自声明来源与 Bitwarden Writer）。
 
 **Invariant**：`.dec/` 树与 `.secrets/` 树 **不得相交**；`.secrets/` 须被 `.gitignore` 忽略。
 
