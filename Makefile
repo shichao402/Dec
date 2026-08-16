@@ -2,15 +2,24 @@
 
 BINARY_NAMES=dec dec-server dec-mcp dec-exec
 DIST_DIR=dist
+RELKIT_DIR=../relkit
+RELKIT_REPO=https://github.com/shichao402/relkit.git
 VERSION=$(shell cat version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "dev")
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
-.PHONY: all build build-all test clean install-dev install-dev-test fmt lint help
+.PHONY: all build build-all test clean install-dev install-dev-test fmt lint help ensure-relkit
 
 all: build
 
-build:
+# go.mod 用 replace 指向同级 ../relkit，缺失时 go build 只会报 replace 目录不存在。
+ensure-relkit:
+	@if [ ! -d $(RELKIT_DIR) ]; then \
+		echo "📥 clone 同级依赖 relkit 到 $(RELKIT_DIR)..."; \
+		git clone --depth 1 $(RELKIT_REPO) $(RELKIT_DIR); \
+	fi
+
+build: ensure-relkit
 	@mkdir -p $(DIST_DIR)
 	@echo "🔨 构建 Dec 程序组..."
 	@echo "📌 版本: $(VERSION)"
@@ -20,10 +29,10 @@ build:
 	go build $(LDFLAGS) -o $(DIST_DIR)/dec-exec ./cmd/dec-exec
 	@echo "✅ 构建完成: $(DIST_DIR)/{dec,dec-server,dec-mcp,dec-exec}"
 
-build-all:
+build-all: ensure-relkit
 	@./scripts/build.sh --all
 
-test:
+test: ensure-relkit
 	@echo "🧪 运行 Go 单元测试..."
 	go test ./... -v -cover
 
@@ -33,10 +42,10 @@ clean:
 	rm -rf $(DIST_DIR) logs/
 	@echo "✅ 清理完成"
 
-install-dev:
+install-dev: ensure-relkit
 	@./scripts/install-dev.sh
 
-install-dev-test:
+install-dev-test: ensure-relkit
 	@./scripts/install-dev.sh --test
 
 fmt:
@@ -63,6 +72,7 @@ help:
 	@echo "  make install-dev-test - 安装前先运行单元测试"
 	@echo ""
 	@echo "其他目标："
+	@echo "  make ensure-relkit   - 缺失时 clone 同级依赖 relkit"
 	@echo "  make clean           - 清理构建产物"
 	@echo "  make fmt             - 格式化 Go 代码"
 	@echo "  make lint            - 运行 golangci-lint"
