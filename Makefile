@@ -3,7 +3,7 @@
 BINARY_NAMES=dec dec-server dec-mcp dec-exec
 DIST_DIR=dist
 RELKIT_DIR=../relkit
-RELKIT_REPO=https://github.com/shichao402/relkit.git
+RELKIT_REPO=https://cnb.cool/shichao402/relkit.git
 VERSION=$(shell cat version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "dev")
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
