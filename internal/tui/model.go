@@ -369,7 +369,8 @@ type model struct {
 	deleteTypedSpec               app.DeleteTypedConfirmSpec
 	remoteNoteEdit                *app.RemoteNoteEditSession
 	remoteSSHEdit                 *app.RemoteSSHHostsEditSession
-	remoteRegisterPending         bool       // n 登记走 temp 编辑器时为 true
+	remoteRegisterSess            *app.RemoteRegisterSession
+	remoteRegisterPending         bool       // n 登记：Esc 可退出等待，迟到结果只记日志
 	shellRefresh                  asyncBatch // overview/assets/settings/projectSettings/projectVars
 	projectVarsLoad               asyncLoad  // 独立重载 .dec/vars.yaml
 	globalVarsLoad                asyncLoad  // 独立重载 ~/.dec/local/vars.yaml
@@ -391,7 +392,7 @@ type model struct {
 	addSecretStage       string
 	addSecretPathInput   string
 	addSecretContentPath string // Remote：显式本地路径
-	addSecretSourceMode  string // Remote："temp" | "path"
+	addSecretSourceMode  string // Remote：Processor 声明的来源模式
 	addSecretTargets     []app.SecretTargetOption
 	addSecretTargetsLoad asyncLoad // Project 页候选归属枚举（禁止同步调用）
 	addSecretTargetIdx   int
@@ -400,7 +401,7 @@ type model struct {
 	addSecretRemoteMode  bool   // true = Remote 登记（归属为 Bitwarden folder）
 	addSecretFolder      string // Remote：光标反推出的 folder，或 N 手输的新 folder
 	addSecretFolderNew   bool   // Remote：folder 由用户手输（可能尚不存在）
-	addSecretTypeIdx     int    // Remote：点类型表索引（含普通 note）
+	addSecretTypeIdx     int    // Remote：Processor 表索引
 	addSecretInitialBody string // Remote temp 预填正文
 	// addSecretNotice 是表单内可见的校验/说明行。登记表单整页渲染，日志区不可见，
 	// 校验失败只 pushLog 会让用户以为按键无效。
@@ -906,6 +907,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleRemoteEditEditorClosed(msg)
 	case remoteEditDoneMsg:
 		return m, m.handleRemoteEditDone(msg)
+	case remoteRegisterPreparedMsg:
+		return m, m.handleRemoteRegisterPrepared(msg)
+	case remoteRegisterEditorClosedMsg:
+		return m, m.handleRemoteRegisterEditorClosed(msg)
+	case filePickedMsg:
+		return m, m.handleFilePicked(msg)
 	case pushPreviewLoadedMsg:
 		if !m.pushPreviewLoad.finish(msg.loadGen) {
 			return m, nil
@@ -933,6 +940,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addSecretErr = msg.err
 		}
 		m.remoteRegisterPending = false
+		m.remoteRegisterSess = nil
 		m.clearRemoteEditSession()
 		for _, line := range msg.logs {
 			m.pushLog(line)

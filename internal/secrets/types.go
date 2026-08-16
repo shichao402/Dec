@@ -112,6 +112,15 @@ type PushBundleResult struct {
 	MissingLocal []string
 }
 
+// CreateSSHKeyRequest 创建一条 Bitwarden SSH Key Item。
+// Key.Name 必须是 `.sshkey/<实例>`；CreateFolderIfMissing 仅供 Remote 新 folder 登记。
+type CreateSSHKeyRequest struct {
+	Binding               BundleBinding
+	Target                SyncTarget
+	Key                   SSHKeyItem
+	CreateFolderIfMissing bool
+}
+
 // DeleteSecureNoteRequest 删除单条 Secure Note 的输入。
 type DeleteSecureNoteRequest struct {
 	Binding  BundleBinding

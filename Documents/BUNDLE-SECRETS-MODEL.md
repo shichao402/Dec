@@ -191,7 +191,8 @@ BW SSH Key Item 规范名：`.sshkey/<实例>`（pull 会迁移裸名）。本�
 |------|------|
 | 点目录 | `.gcm` / `.env` / `.sshkey` = 特殊语义；未知点目录硬失败 |
 | 源类型 | 有限：`note` / `ssh_item` |
-| Handler | 按完整相对路径首段 Match；内置 `gcm` |
+| Processor | Remote 登记同级：`note` / `.env` / `.gcm` / `.sshkey`；各自声明来源与 Writer |
+| Handler | Pull 后按完整相对路径首段 Match；内置 `gcm`（机器副作用，非创建链路） |
 | 正文 | **由处理器自定**（框架不约束 YAML） |
 | 迁移 | pull 前一次性改名；废弃 `*_gitgcm.yaml`、`env/`、裸 SSH 名 |
 

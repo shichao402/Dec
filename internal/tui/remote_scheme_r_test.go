@@ -128,7 +128,7 @@ func TestRemoteAddSecret_TakesFolderFromCursor(t *testing.T) {
 		t.Fatal("归属来自光标，不应再触发候选枚举")
 	}
 	view := after.View()
-	if !strings.Contains(view, "Remote · 登记 Secure Note") || !strings.Contains(view, "folder Dec") {
+	if !strings.Contains(view, "Remote · 登记 Secret") || !strings.Contains(view, "folder Dec") {
 		t.Fatalf("表单应展示光标解析出的归属:\n%s", view)
 	}
 
@@ -137,11 +137,12 @@ func TestRemoteAddSecret_TakesFolderFromCursor(t *testing.T) {
 	if after.addSecretStage != addSecretStagePath {
 		t.Fatalf("stage=%q want path", after.addSecretStage)
 	}
-	updated = typeRunes(after, ".env/x.env")
+	// 默认 note：输入普通路径（点类型路径须先改选对应 Processor）
+	updated = typeRunes(after, "config/x.json")
 	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	after = updated.(model)
 	if after.addSecretStage != addSecretStageSource {
-		t.Fatalf("stage=%q want source", after.addSecretStage)
+		t.Fatalf("stage=%q want source; notice=%q", after.addSecretStage, after.addSecretNotice)
 	}
 }
 
@@ -151,8 +152,8 @@ func TestRemoteAddSecret_CursorInTypeDirPreselectsType(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	after := updated.(model)
-	types := remoteAddSecretTypes()
-	if after.addSecretTypeIdx >= len(types) || types[after.addSecretTypeIdx].ID != secrets.SecretTypeEnv {
+	procs := remoteAddSecretProcessors()
+	if after.addSecretTypeIdx >= len(procs) || procs[after.addSecretTypeIdx].ID != secrets.SecretTypeEnv {
 		t.Fatalf("光标停在 .env 目录时应预选 .env 类型, idx=%d", after.addSecretTypeIdx)
 	}
 	updated, _ = after.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -162,12 +163,23 @@ func TestRemoteAddSecret_CursorInTypeDirPreselectsType(t *testing.T) {
 	}
 }
 
-// .sshkey 是 BW SSH Key Item，本流程建不出来；不能让它出现在类型轮转里变成死路。
-func TestRemoteAddSecret_TypeCycleExcludesSSHKey(t *testing.T) {
-	types := remoteAddSecretTypes()
-	for _, tp := range types {
-		if tp.ID == secrets.SecretTypeSSHKey {
-			t.Fatal("类型轮转不应包含 .sshkey")
+// 四种 Processor 同级：note / .gcm / .env / .sshkey 都在轮转里，且都能进入名称阶段。
+func TestRemoteAddSecret_TypeCycleIncludesAllProcessors(t *testing.T) {
+	procs := remoteAddSecretProcessors()
+	want := map[secrets.SecretTypeID]bool{
+		secrets.SecretTypePlain:  false,
+		secrets.SecretTypeGCM:    false,
+		secrets.SecretTypeEnv:    false,
+		secrets.SecretTypeSSHKey: false,
+	}
+	for _, p := range procs {
+		if _, ok := want[p.ID]; ok {
+			want[p.ID] = true
+		}
+	}
+	for id, seen := range want {
+		if !seen {
+			t.Fatalf("类型表缺少 %s", id)
 		}
 	}
 
@@ -175,8 +187,7 @@ func TestRemoteAddSecret_TypeCycleExcludesSSHKey(t *testing.T) {
 	focusTreeRow(t, &m, "Dec")
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 
-	// 轮转一整圈都必须能推进到下一阶段，不能有停在原地的类型。
-	for i := 0; i < len(types); i++ {
+	for i := 0; i < len(procs); i++ {
 		next, _ := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		if stage := next.(model).addSecretStage; stage != addSecretStagePath {
 			t.Fatalf("第 %d 个类型 Enter 后 stage=%q，期望进入 path", i, stage)
@@ -185,8 +196,8 @@ func TestRemoteAddSecret_TypeCycleExcludesSSHKey(t *testing.T) {
 	}
 }
 
-// 光标停在 .sshkey 目录下按 n：表单里必须直接看到去处说明，且不能提交出一条 .sshkey Note。
-func TestRemoteAddSecret_SSHKeyDirShowsInlineHint(t *testing.T) {
+// 光标停在 .sshkey 目录下按 n：预选 .sshkey，进入名称后进 generate/path/picker 来源阶段。
+func TestRemoteAddSecret_SSHKeyDirEntersSSHSources(t *testing.T) {
 	m := remotePageModelWithCandidates(t)
 	m.deleteCandidates = append(m.deleteCandidates, app.DeleteCandidate{
 		Kind: app.DeleteKindSSHKey, SSHKeyName: ".sshkey/deploy", SecretsBundle: "Dec",
@@ -197,22 +208,26 @@ func TestRemoteAddSecret_SSHKeyDirShowsInlineHint(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	after := updated.(model)
-	if !strings.Contains(after.View(), "SSH Key Item") {
-		t.Fatalf("表单内应直接展示 SSH Key 的去处说明:\n%s", after.View())
+	procs := remoteAddSecretProcessors()
+	if after.addSecretTypeIdx >= len(procs) || procs[after.addSecretTypeIdx].ID != secrets.SecretTypeSSHKey {
+		t.Fatalf("应预选 .sshkey, idx=%d", after.addSecretTypeIdx)
 	}
-
 	updated, _ = after.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	updated = typeRunes(updated, ".sshkey/deploy2")
-	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	after = updated.(model)
-	if after.addSecretStage != addSecretStagePath {
-		t.Fatalf(".sshkey 路径不应推进到内容来源, stage=%q", after.addSecretStage)
+	if after.addSecretPathInput != ".sshkey/deploy" {
+		t.Fatalf("应预填 .sshkey/deploy, got %q", after.addSecretPathInput)
 	}
-	if cmd != nil {
-		t.Fatal(".sshkey 路径不应触发登记命令")
+	updated, _ = after.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	after = updated.(model)
+	if after.addSecretStage != addSecretStageSource {
+		t.Fatalf("应进入来源阶段, stage=%q", after.addSecretStage)
 	}
-	if !strings.Contains(after.View(), "SSH Key Item") {
-		t.Fatalf("拦截后应在表单内说明原因:\n%s", after.View())
+	if after.addSecretSourceMode != string(secrets.SourceGenerate) {
+		t.Fatalf("默认来源应为 generate, got %q", after.addSecretSourceMode)
+	}
+	view := after.View()
+	if !strings.Contains(view, "本机生成") || !strings.Contains(view, "系统选文件") {
+		t.Fatalf("来源提示应列出 generate/path/picker:\n%s", view)
 	}
 }
 

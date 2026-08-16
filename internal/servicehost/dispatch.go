@@ -169,6 +169,13 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 			return nil, err
 		}
 		return app.PrepareRemoteNoteRegister(ctx, projectRoot, in.Folder, in.NoteRel, in.InitialBody, reporter)
+	case "prepare_remote_register":
+		var in app.RemoteRegisterInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		in.ProjectRoot = projectRoot
+		return app.PrepareRemoteRegister(ctx, in, reporter)
 	case "prepare_remote_ssh_hosts_edit":
 		var in app.DeleteSelectionItem
 		if err := decode(payload, &in); err != nil {
@@ -294,6 +301,12 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 			return nil, err
 		}
 		return app.RegisterRemoteNoteFromPath(ctx, projectRoot, in.Folder, in.NoteRel, in.LocalPath, reporter)
+	case "commit_remote_register":
+		var in app.RemoteRegisterSession
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.CommitRemoteRegister(ctx, in, reporter)
 	case "commit_remote_note_edit":
 		var in app.RemoteNoteEditSession
 		if err := decode(payload, &in); err != nil {

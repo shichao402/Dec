@@ -34,10 +34,10 @@ func TestNormalizeSyncRelPath_KeepsBarePathWithoutDotSlash(t *testing.T) {
 	t.Parallel()
 
 	for raw, want := range map[string]string{
-		"config/private.yaml":     "config/private.yaml",
-		"env/app.env":             "env/app.env",
-		"./config/private.yaml":   "config/private.yaml",
-		"env//nested/./app.env":   "env/nested/app.env",
+		"config/private.yaml":   "config/private.yaml",
+		"env/app.env":           "env/app.env",
+		"./config/private.yaml": "config/private.yaml",
+		"env//nested/./app.env": "env/nested/app.env",
 	} {
 		got, err := normalizeSyncRelPath(raw)
 		if err != nil {

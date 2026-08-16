@@ -44,14 +44,15 @@
    Secure Note / SSH Hosts：temp file → 编辑 → 直接写回远端；**不自动种/更新本地同步根**（用户需 pull）。  
    **禁止**在 TUI 内嵌密码式输入或多行编辑器。
 
-6. **`n` / `N` 登记（归属由光标决定）**  
+6. **`n` / `N` 登记（归属由光标决定；Processor 同级）**  
    - Remote 页 `n`：归属 = **光标所在 folder**（树上 folder 分组节点是其所有子孙节点 ID 的前缀，直接按前缀反推）；表单内**不再选归属**，归属不对就 `Esc` 退出、移动光标重按 `n`  
-   - 光标停在点类型目录（`.env` / `.gcm` 等）之下时，类型阶段默认选中该类型  
+   - 光标停在点类型目录（`.env` / `.gcm` / `.sshkey` 等）之下时，类型阶段默认选中该 Processor  
    - 光标落在分区根 / Dec vault / 「无文件夹」等归属不唯一的位置：**不开表单**，只提示移动光标或按 `N`  
    - Remote 页 `N`：手输 folder 名，用于新 bundle（`bundle/<名>`）、新 project folder、或尚未出现在树上的空 folder  
    - 归属不再需要枚举远端 folder，`n` / `N` 不触发 Bitwarden 解锁；登记表单在 Remote 页整页渲染，任何阶段 `Esc` 可退出  
-   - 内容来源：外部编辑器（temp）**或**显式本地路径；写回 Bitwarden  
-   - **不强制**落本地同步根（与 temp 编辑语义一致）  
+   - Processor 同级：`note` / `.env` / `.gcm` / `.sshkey`；各自声明名称规则、来源控件与 Bitwarden Writer（Secure Note 或 SSH Key Item）  
+   - 内容来源由 Processor 声明：Note 类为外部编辑器 / 路径 / 系统选文件；`.sshkey` 为本机生成 / 路径 / 系统选文件  
+   - **不强制**落本地同步根（Note）；SSH Key 创建成功后按现有契约尝试落地 `~/.ssh`（已存在则不覆盖）  
    - Remote 页 `a`/`A` = 全选/全不选；Project 页 `A` 仍为「本地同步根已有文件 → 登记到对应 SyncTarget」，归属仍从 `SuggestSecretTargets` 轮转选择
 
 7. **进入即尝试含远端列表**  

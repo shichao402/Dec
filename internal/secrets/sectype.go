@@ -23,18 +23,12 @@ const (
 	SecretTypePlain  SecretTypeID = "note" // 非点目录普通 Note
 )
 
-// SecretType 描述一种点类型目录的识别契约。
+// SecretType 描述一种点类型目录的识别契约（由 Processor 派生）。
 type SecretType struct {
 	ID       SecretTypeID
-	Dir      string // 含点前缀，如 .gcm
+	Dir      string // 含点前缀，如 .gcm；普通 note 为空
 	Source   string // note | ssh_item | note_env
 	Template string // Remote 登记预填正文；空表示无预填
-}
-
-var registeredSecretTypes = []SecretType{
-	{ID: SecretTypeGCM, Dir: TypeDirGCM, Source: "note", Template: defaultGCMTemplate},
-	{ID: SecretTypeEnv, Dir: TypeDirEnv, Source: "note_env", Template: "# KEY=value\n"},
-	{ID: SecretTypeSSHKey, Dir: TypeDirSSHKey, Source: "ssh_item"},
 }
 
 const defaultGCMTemplate = `host: example.com
@@ -44,33 +38,38 @@ password: "token"
 # provider: generic
 `
 
-// RegisteredSecretTypes 返回内置点类型表（只读副本语义：调用方勿改元素）。
+// RegisteredSecretTypes 返回点类型表（不含普通 note；识别/迁移用）。
 func RegisteredSecretTypes() []SecretType {
-	out := make([]SecretType, len(registeredSecretTypes))
-	copy(out, registeredSecretTypes)
+	out := make([]SecretType, 0, len(registeredProcessors))
+	for _, p := range registeredProcessors {
+		if p.Dir == "" {
+			continue
+		}
+		out = append(out, p.AsSecretType())
+	}
 	return out
 }
 
 // LookupSecretTypeByDir 按点目录名查找（如 ".gcm"）。
 func LookupSecretTypeByDir(dir string) (SecretType, bool) {
 	dir = strings.Trim(strings.TrimSpace(dir), "/")
-	for _, t := range registeredSecretTypes {
-		if t.Dir == dir {
-			return t, true
-		}
+	if dir == "" {
+		return SecretType{}, false
 	}
-	return SecretType{}, false
+	p, ok := LookupProcessorByDir(dir)
+	if !ok || p.Dir == "" {
+		return SecretType{}, false
+	}
+	return p.AsSecretType(), true
 }
 
-// LookupSecretTypeByID 按类型 id 查找（如 "gcm"）。
+// LookupSecretTypeByID 按类型 id 查找（如 "gcm"）；不含普通 note。
 func LookupSecretTypeByID(id string) (SecretType, bool) {
-	id = strings.TrimSpace(strings.ToLower(id))
-	for _, t := range registeredSecretTypes {
-		if string(t.ID) == id {
-			return t, true
-		}
+	p, ok := LookupProcessor(id)
+	if !ok || p.Dir == "" {
+		return SecretType{}, false
 	}
-	return SecretType{}, false
+	return p.AsSecretType(), true
 }
 
 // TypePath 是解析后的点类型路径。
@@ -148,6 +147,11 @@ func SuggestNotePath(typeID SecretTypeID, instance string) string {
 			instance += ".env"
 		}
 		return path.Join(TypeDirEnv, instance)
+	case SecretTypeSSHKey:
+		if instance == "" {
+			instance = "deploy"
+		}
+		return CanonicalSSHKeyName(instance)
 	default:
 		return instance
 	}

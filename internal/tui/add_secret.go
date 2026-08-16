@@ -7,17 +7,18 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/editor"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/serviceapi"
 )
 
 // 登记新 secret 的分阶段状态。
 // Project 页：先选归属（本地同步根），再输入相对路径。
-// Remote 页：归属来自光标所在 folder（n）或手输新 folder（N），再选类型、路径、内容来源。
+// Remote 页：归属来自光标所在 folder（n）或手输新 folder（N），再选 Processor、名称、来源。
 const (
 	addSecretStageTarget  = "target" // Project only：轮转本地同步根
 	addSecretStageFolder  = "folder" // Remote only：手输新 folder
-	addSecretStageType    = "type"   // Remote only：点类型
+	addSecretStageType    = "type"   // Remote only：Processor
 	addSecretStagePath    = "path"
 	addSecretStageSource  = "source" // Remote only
 	addSecretStageRunning = "running"
@@ -35,6 +36,13 @@ type addSecretTargetsMsg struct {
 	targets []app.SecretTargetOption
 	err     error
 	loadGen uint64
+}
+
+type remoteRegisterPreparedMsg struct {
+	sess      *app.RemoteRegisterSession
+	editorCmd string
+	err       error
+	logs      []string
 }
 
 // suggestSecretTargetsCmd 走服务 RPC 枚举候选归属，耗时不可预期，
@@ -59,7 +67,7 @@ func addSecretCmd(projectRoot string, target secrets.SyncTarget, noteRel string)
 	}
 }
 
-func registerRemoteFromPathCmd(projectRoot, folder, noteRel, localPath string) tea.Cmd {
+func prepareRemoteRegisterCmd(in app.RemoteRegisterInput, editorCmd string) tea.Cmd {
 	return func() tea.Msg {
 		var logs []string
 		reporter := app.ReporterFunc(func(event app.OperationEvent) {
@@ -67,61 +75,45 @@ func registerRemoteFromPathCmd(projectRoot, folder, noteRel, localPath string) t
 				logs = append(logs, msg)
 			}
 		})
-		result, err := serviceapi.RegisterRemoteNoteFromPath(context.Background(), projectRoot, folder, noteRel, localPath, reporter)
+		sess, err := serviceapi.PrepareRemoteRegister(context.Background(), in, reporter)
+		return remoteRegisterPreparedMsg{sess: sess, editorCmd: editorCmd, err: err, logs: logs}
+	}
+}
+
+func commitRemoteRegisterCmd(sess app.RemoteRegisterSession) tea.Cmd {
+	return func() tea.Msg {
+		var logs []string
+		reporter := app.ReporterFunc(func(event app.OperationEvent) {
+			if msg := strings.TrimSpace(event.Message); msg != "" {
+				logs = append(logs, msg)
+			}
+		})
+		result, err := serviceapi.CommitRemoteRegister(context.Background(), sess, reporter)
 		return addSecretDoneMsg{result: result, err: err, logs: logs}
 	}
 }
 
-func prepareRemoteRegisterCmd(projectRoot, folder, noteRel, initialBody, editorCmd string) tea.Cmd {
-	return func() tea.Msg {
-		var logs []string
-		reporter := app.ReporterFunc(func(event app.OperationEvent) {
-			if msg := strings.TrimSpace(event.Message); msg != "" {
-				logs = append(logs, msg)
-			}
-		})
-		sess, err := serviceapi.PrepareRemoteNoteRegister(context.Background(), projectRoot, folder, noteRel, initialBody, reporter)
-		return remoteEditPreparedMsg{
-			kind:      remoteEditKindNote,
-			noteSess:  sess,
-			editorCmd: editorCmd,
-			err:       err,
-			logs:      logs,
-			register:  true,
-		}
-	}
+// remoteAddSecretProcessors 返回 Remote 登记同级 Processor 表。
+func remoteAddSecretProcessors() []secrets.Processor {
+	return secrets.RegisteredProcessors()
 }
 
-// remoteAddSecretTypes 返回 Remote 登记可选类型：普通 note + 以 Secure Note 落地的点类型。
-// .sshkey 是 BW SSH Key Item，不能由本流程创建，因此不进可选列表（选中即死路）。
-func remoteAddSecretTypes() []secrets.SecretType {
-	out := []secrets.SecretType{{ID: secrets.SecretTypePlain, Dir: "", Source: "note"}}
-	for _, t := range secrets.RegisteredSecretTypes() {
-		if t.ID == secrets.SecretTypeSSHKey {
-			continue
-		}
-		out = append(out, t)
+func remoteAddSecretTypeLabel(p secrets.Processor) string {
+	if p.Label != "" {
+		return p.Label
 	}
-	return out
+	if p.Dir != "" {
+		return p.Dir
+	}
+	return string(p.ID)
 }
 
-// sshKeyRegisterHint 是 .sshkey 不走本流程时给用户的去处说明。
-const sshKeyRegisterHint = ".sshkey 是 Bitwarden SSH Key Item，不能登记成 Secure Note：请在 Bitwarden 新建 SSH Key，Item 名用 .sshkey/<实例>"
-
-func remoteAddSecretTypeLabel(t secrets.SecretType) string {
-	switch t.ID {
-	case secrets.SecretTypePlain:
-		return "note（任意路径）"
-	case secrets.SecretTypeGCM:
-		return ".gcm（Git Credential Manager）"
-	case secrets.SecretTypeEnv:
-		return ".env（dotenv / dec-exec）"
-	default:
-		if t.Dir != "" {
-			return t.Dir
-		}
-		return string(t.ID)
+func currentRemoteProcessor(m model) (secrets.Processor, bool) {
+	procs := remoteAddSecretProcessors()
+	if m.addSecretTypeIdx < 0 || m.addSecretTypeIdx >= len(procs) {
+		return secrets.Processor{}, false
 	}
+	return procs[m.addSecretTypeIdx], true
 }
 
 // remoteRegisterAnchor 是从 Remote 光标就近反推出的登记落点。
@@ -186,25 +178,12 @@ func treeDirUnderGroup(groupID, nodeID string) string {
 	return strings.Join(segs, "/")
 }
 
-// validateRemoteNotePath 在提交前拦掉本流程写不出来的 Note 名：
-// 未知点目录会在服务端硬失败，.sshkey 则根本不是 Secure Note。
-func validateRemoteNotePath(rel string) error {
-	tp, ok, err := secrets.ParseTypePath(rel)
-	if err != nil {
-		return err
-	}
-	if ok && tp.Type.ID == secrets.SecretTypeSSHKey {
-		return fmt.Errorf("%s", sshKeyRegisterHint)
-	}
-	return nil
-}
-
 func normalizeRemoteFolderInput(raw string) string {
 	folder := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
 	return strings.Trim(folder, "/")
 }
 
-// remoteTypeIdxForDir 让光标所在的点目录直接决定默认类型。
+// remoteTypeIdxForDir 让光标所在的点目录直接决定默认 Processor。
 func remoteTypeIdxForDir(dir string) int {
 	head := dir
 	if idx := strings.Index(head, "/"); idx >= 0 {
@@ -214,8 +193,8 @@ func remoteTypeIdxForDir(dir string) int {
 	if head == "" {
 		return 0
 	}
-	for i, t := range remoteAddSecretTypes() {
-		if t.Dir != "" && t.Dir == head {
+	for i, p := range remoteAddSecretProcessors() {
+		if p.Dir != "" && p.Dir == head {
 			return i
 		}
 	}
@@ -225,7 +204,7 @@ func remoteTypeIdxForDir(dir string) int {
 func (m *model) resetAddSecretForm(remoteMode bool) {
 	m.addSecretPathInput = ""
 	m.addSecretContentPath = ""
-	m.addSecretSourceMode = "temp"
+	m.addSecretSourceMode = string(secrets.SourceTemp)
 	m.addSecretTargetIdx = 0
 	m.addSecretTypeIdx = 0
 	m.addSecretInitialBody = ""
@@ -237,6 +216,7 @@ func (m *model) resetAddSecretForm(remoteMode bool) {
 	m.addSecretErr = nil
 	m.addSecretRemoteMode = remoteMode
 	m.remoteRegisterPending = false
+	m.remoteRegisterSess = nil
 }
 
 // noteAddSecret 同时写表单内提示与日志：表单整页渲染时日志区不可见。
@@ -255,7 +235,6 @@ func (m *model) beginAddSecret() tea.Cmd {
 }
 
 // beginRemoteRegisterAtCursor 是 Remote 页 n：归属直接取光标所在 folder，表单内不再选归属。
-// 归属不对就 Esc 退出、移动光标重按 n。
 func (m *model) beginRemoteRegisterAtCursor() tea.Cmd {
 	anchor, ok := m.cursorRegisterAnchor()
 	if !ok {
@@ -265,27 +244,19 @@ func (m *model) beginRemoteRegisterAtCursor() tea.Cmd {
 	m.resetAddSecretForm(true)
 	m.addSecretFolder = anchor.Folder
 	m.addSecretTypeIdx = remoteTypeIdxForDir(anchor.Dir)
+	if p, ok := currentRemoteProcessor(*m); ok {
+		m.addSecretSourceMode = string(p.DefaultSource)
+	}
 	m.addSecretStage = addSecretStageType
 	where := anchor.Folder
 	if anchor.Dir != "" {
 		where += "/" + anchor.Dir
 	}
 	m.pushLog(fmt.Sprintf("Remote 登记 → %s（光标所在）；选择类型（tab 轮转 · Esc 取消）", where))
-	if isSSHKeyDir(anchor.Dir) {
-		m.noteAddSecret(sshKeyRegisterHint)
-	}
 	return nil
 }
 
-func isSSHKeyDir(dir string) bool {
-	head := dir
-	if idx := strings.Index(head, "/"); idx >= 0 {
-		head = head[:idx]
-	}
-	return strings.TrimSpace(head) == secrets.TypeDirSSHKey
-}
-
-// beginRemoteRegisterNewFolder 是 Remote 页 N：folder 尚未出现在树上（新 bundle / 新 project / 空 folder）时手输。
+// beginRemoteRegisterNewFolder 是 Remote 页 N：folder 尚未出现在树上时手输。
 func (m *model) beginRemoteRegisterNewFolder() tea.Cmd {
 	m.resetAddSecretForm(true)
 	m.addSecretFolderNew = true
@@ -323,14 +294,15 @@ func (m *model) cancelAddSecret() {
 	m.addSecretFolderNew = false
 	m.addSecretRemoteMode = false
 	m.remoteRegisterPending = false
+	m.remoteRegisterSess = nil
 	m.pushLog("已取消登记 secret")
 }
 
 // abandonAddSecretRun 让用户在远端请求久久不返回时也能退出表单。
-// 在飞的请求由服务端继续跑完，结果只落日志，不再回写这轮表单。
 func (m *model) abandonAddSecretRun() {
 	m.addSecretStage = ""
 	m.remoteRegisterPending = false
+	m.remoteRegisterSess = nil
 	m.pushLog("已退出登记等待：后台请求仍在进行，结果只记入日志")
 }
 
@@ -351,16 +323,14 @@ func (m model) handleAddSecretKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.addSecretTargetIdx = (m.addSecretTargetIdx + 1) % len(m.addSecretTargets)
 		}
 		if m.addSecretStage == addSecretStageType && m.addSecretRemoteMode {
-			types := remoteAddSecretTypes()
-			if len(types) > 0 {
-				m.addSecretTypeIdx = (m.addSecretTypeIdx + 1) % len(types)
+			procs := remoteAddSecretProcessors()
+			if len(procs) > 0 {
+				m.addSecretTypeIdx = (m.addSecretTypeIdx + 1) % len(procs)
 			}
 		}
 		if m.addSecretStage == addSecretStageSource && m.addSecretRemoteMode {
-			if m.addSecretSourceMode == "temp" {
-				m.addSecretSourceMode = "path"
-			} else {
-				m.addSecretSourceMode = "temp"
+			if p, ok := currentRemoteProcessor(m); ok {
+				m.addSecretSourceMode = string(p.CycleSourceMode(secrets.SourceMode(m.addSecretSourceMode)))
 			}
 		}
 		return m, nil
@@ -372,7 +342,7 @@ func (m model) handleAddSecretKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.addSecretStage == addSecretStagePath {
 			m.addSecretPathInput = trimLastRune(m.addSecretPathInput)
 		}
-		if m.addSecretStage == addSecretStageSource && m.addSecretSourceMode == "path" {
+		if m.addSecretStage == addSecretStageSource && m.addSecretSourceMode == string(secrets.SourcePath) {
 			m.addSecretContentPath = trimLastRune(m.addSecretContentPath)
 		}
 		return m, nil
@@ -388,7 +358,7 @@ func (m model) handleAddSecretKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case addSecretStagePath:
 			m.addSecretPathInput += string(msg.Runes)
 		case addSecretStageSource:
-			if m.addSecretSourceMode == "path" {
+			if m.addSecretSourceMode == string(secrets.SourcePath) {
 				m.addSecretContentPath += string(msg.Runes)
 			}
 		}
@@ -427,31 +397,21 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 	}
 
 	if m.addSecretStage == addSecretStageType {
-		types := remoteAddSecretTypes()
-		if len(types) == 0 {
+		p, ok := currentRemoteProcessor(m)
+		if !ok {
 			return m, nil
 		}
-		if m.addSecretTypeIdx >= len(types) {
-			m.addSecretTypeIdx = 0
-		}
-		st := types[m.addSecretTypeIdx]
-		m.addSecretInitialBody = st.Template
-		switch st.ID {
-		case secrets.SecretTypeGCM:
-			m.addSecretPathInput = secrets.SuggestNotePath(secrets.SecretTypeGCM, "cnb")
-		case secrets.SecretTypeEnv:
-			m.addSecretPathInput = secrets.SuggestNotePath(secrets.SecretTypeEnv, "app")
-		default:
-			m.addSecretPathInput = ""
-		}
+		m.addSecretInitialBody = p.Template
+		m.addSecretPathInput = p.SuggestName()
+		m.addSecretSourceMode = string(p.DefaultSource)
 		m.addSecretStage = addSecretStagePath
-		m.pushLog(fmt.Sprintf("输入 Note 名（相对 folder %s）；已按类型预填建议路径", m.addSecretFolder))
+		m.pushLog(fmt.Sprintf("输入名称（相对 folder %s）；已按类型预填建议路径", m.addSecretFolder))
 		return m, nil
 	}
 
 	rel := strings.TrimSpace(m.addSecretPathInput)
 	if rel == "" {
-		m.noteAddSecret("相对路径 / Note 名不能为空")
+		m.noteAddSecret("相对路径 / 名称不能为空")
 		return m, nil
 	}
 
@@ -461,31 +421,50 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 			m.noteAddSecret("没有解析到归属 folder，请 Esc 后重新按 n / N")
 			return m, nil
 		}
-		if err := validateRemoteNotePath(rel); err != nil {
+		p, ok := currentRemoteProcessor(m)
+		if !ok {
+			m.noteAddSecret("未选择类型")
+			return m, nil
+		}
+		name, err := p.NormalizeName(rel)
+		if err != nil {
 			m.noteAddSecret(err.Error())
 			return m, nil
 		}
+		m.addSecretPathInput = name
+
 		if m.addSecretStage == addSecretStagePath {
 			m.addSecretStage = addSecretStageSource
-			m.addSecretSourceMode = "temp"
-			m.pushLog("选择内容来源：temp 外部编辑器，或显式本地路径（tab 切换）")
+			m.addSecretSourceMode = string(p.DefaultSource)
+			m.pushLog(fmt.Sprintf("选择内容来源（%s；tab 轮转）", sourceModesHint(p)))
 			return m, nil
 		}
 		if m.addSecretStage == addSecretStageSource {
-			if m.addSecretSourceMode == "path" {
-				localPath := strings.TrimSpace(m.addSecretContentPath)
-				if localPath == "" {
-					m.noteAddSecret("请输入本地文件路径，或 tab 切到 temp 编辑器")
-					return m, nil
-				}
+			mode := secrets.SourceMode(m.addSecretSourceMode)
+			if mode == secrets.SourcePicker {
 				m.addSecretStage = addSecretStageRunning
-				m.pushLog(fmt.Sprintf("登记 %s → %s（本地路径）", rel, folder))
-				return m, registerRemoteFromPathCmd(m.projectRoot, folder, rel, localPath)
+				m.remoteRegisterPending = true
+				m.pushLog("打开系统文件选择器…")
+				return m, pickLocalFileCmd(pickerPromptFor(p))
+			}
+			in := app.RemoteRegisterInput{
+				ProjectRoot:  m.projectRoot,
+				Folder:       folder,
+				TypeID:       p.ID,
+				Name:         name,
+				SourceMode:   mode,
+				LocalPath:    strings.TrimSpace(m.addSecretContentPath),
+				InitialBody:  m.addSecretInitialBody,
+				CreateFolder: true,
+			}
+			if mode == secrets.SourcePath && strings.TrimSpace(in.LocalPath) == "" {
+				m.noteAddSecret("请输入本地文件路径，或 tab 切换其它来源")
+				return m, nil
 			}
 			m.addSecretStage = addSecretStageRunning
 			m.remoteRegisterPending = true
-			m.pushLog(fmt.Sprintf("打开临时编辑器登记 %s → %s", rel, folder))
-			return m, prepareRemoteRegisterCmd(m.projectRoot, folder, rel, m.addSecretInitialBody, m.effectiveEditor())
+			m.pushLog(fmt.Sprintf("登记 %s → %s（%s）", name, folder, mode))
+			return m, prepareRemoteRegisterCmd(in, m.effectiveEditor())
 		}
 	}
 
@@ -505,6 +484,131 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 	return m, addSecretCmd(m.projectRoot, target, rel)
 }
 
+func sourceModesHint(p secrets.Processor) string {
+	parts := make([]string, 0, len(p.SourceModes))
+	for _, m := range p.SourceModes {
+		parts = append(parts, sourceModeLabel(m))
+	}
+	return strings.Join(parts, " / ")
+}
+
+func sourceModeLabel(mode secrets.SourceMode) string {
+	switch mode {
+	case secrets.SourceTemp:
+		return "外部编辑器"
+	case secrets.SourcePath:
+		return "本地路径"
+	case secrets.SourceGenerate:
+		return "本机生成"
+	case secrets.SourcePicker:
+		return "系统选文件"
+	default:
+		return string(mode)
+	}
+}
+
+func pickerPromptFor(p secrets.Processor) string {
+	if p.WritesSSHItem() {
+		return "选择 SSH 私钥文件"
+	}
+	return "选择要登记的文件"
+}
+
+func (m *model) handleRemoteRegisterPrepared(msg remoteRegisterPreparedMsg) tea.Cmd {
+	for _, line := range msg.logs {
+		m.pushLog(line)
+	}
+	if !m.remoteRegisterPending {
+		m.pushLog("Remote：登记已退出，忽略迟到的准备结果")
+		return nil
+	}
+	if msg.err != nil {
+		m.addSecretStage = ""
+		m.addSecretErr = msg.err
+		m.remoteRegisterPending = false
+		m.pushLog("Remote 登记准备失败: " + msg.err.Error())
+		return nil
+	}
+	if msg.sess == nil {
+		m.addSecretStage = ""
+		m.remoteRegisterPending = false
+		m.pushLog("Remote 登记准备失败: 空会话")
+		return nil
+	}
+	m.remoteRegisterSess = msg.sess
+	if msg.sess.NeedsEditor {
+		m.pushLog("Remote：外部编辑新内容…")
+		cmd, err := editor.BuildCommand(msg.sess.EditorPath, msg.editorCmd)
+		if err != nil {
+			m.pushLog("Remote 打开编辑器失败: " + err.Error())
+			m.addSecretStage = ""
+			m.remoteRegisterPending = false
+			m.remoteRegisterSess = nil
+			return nil
+		}
+		return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
+			return remoteRegisterEditorClosedMsg{err: runErr}
+		})
+	}
+	sess := *msg.sess
+	return commitRemoteRegisterCmd(sess)
+}
+
+type remoteRegisterEditorClosedMsg struct {
+	err error
+}
+
+func (m *model) handleRemoteRegisterEditorClosed(msg remoteRegisterEditorClosedMsg) tea.Cmd {
+	if msg.err != nil {
+		m.pushLog("Remote 编辑器异常: " + msg.err.Error())
+	}
+	if m.remoteRegisterSess == nil {
+		m.addSecretStage = ""
+		m.remoteRegisterPending = false
+		return nil
+	}
+	sess := *m.remoteRegisterSess
+	return commitRemoteRegisterCmd(sess)
+}
+
+func (m *model) handleFilePicked(msg filePickedMsg) tea.Cmd {
+	if !m.remoteRegisterPending && m.addSecretStage != addSecretStageRunning {
+		return nil
+	}
+	if msg.canceled {
+		m.addSecretStage = addSecretStageSource
+		m.remoteRegisterPending = false
+		m.noteAddSecret("已取消文件选择")
+		return nil
+	}
+	if msg.err != nil {
+		m.addSecretStage = addSecretStageSource
+		m.remoteRegisterPending = false
+		m.noteAddSecret(msg.err.Error())
+		return nil
+	}
+	m.addSecretContentPath = strings.TrimSpace(msg.path)
+	m.addSecretSourceMode = string(secrets.SourcePath)
+	p, ok := currentRemoteProcessor(*m)
+	if !ok {
+		m.addSecretStage = ""
+		m.remoteRegisterPending = false
+		return nil
+	}
+	in := app.RemoteRegisterInput{
+		ProjectRoot:  m.projectRoot,
+		Folder:       strings.TrimSpace(m.addSecretFolder),
+		TypeID:       p.ID,
+		Name:         strings.TrimSpace(m.addSecretPathInput),
+		SourceMode:   secrets.SourcePath,
+		LocalPath:    m.addSecretContentPath,
+		InitialBody:  m.addSecretInitialBody,
+		CreateFolder: true,
+	}
+	m.pushLog(fmt.Sprintf("已选择 %s；继续登记…", m.addSecretContentPath))
+	return prepareRemoteRegisterCmd(in, m.effectiveEditor())
+}
+
 func (m model) renderAddSecretBlock() string {
 	return strings.Join(m.addSecretBlockLines(), "\n")
 }
@@ -512,11 +616,11 @@ func (m model) renderAddSecretBlock() string {
 func (m model) addSecretBlockLines() []string {
 	title := "登记新 secret"
 	if m.addSecretRemoteMode {
-		title = "Remote · 登记 Secure Note"
+		title = "Remote · 登记 Secret"
 	}
 	lines := []string{shellTitleStyle.Render(title)}
 	if m.addSecretRemoteMode {
-		lines = append(lines, shellMutedStyle.Render("归属来自光标所在 folder；内容来自 temp 或本地路径；不种本地同步根。"))
+		lines = append(lines, shellMutedStyle.Render("归属来自光标所在 folder；类型同级；写入器由类型决定。"))
 	} else {
 		lines = append(lines, shellMutedStyle.Render("Note 名 = 相对同步根路径；文件须先写到对应 .secrets/ 目录。"))
 	}
@@ -534,13 +638,13 @@ func (m model) addSecretBlockLines() []string {
 		opt := m.addSecretTargets[m.addSecretTargetIdx]
 		targetLine = fmt.Sprintf("归属: %s", opt.Label)
 	}
-	pathLine := fmt.Sprintf("Note 路径: %s", fallbackValue(m.addSecretPathInput, "<待输入>"))
+	pathLine := fmt.Sprintf("名称: %s", fallbackValue(m.addSecretPathInput, "<待输入>"))
 	typeLine := "类型: note（任意路径）"
-	if types := remoteAddSecretTypes(); m.addSecretTypeIdx >= 0 && m.addSecretTypeIdx < len(types) {
-		typeLine = "类型: " + remoteAddSecretTypeLabel(types[m.addSecretTypeIdx])
+	if p, ok := currentRemoteProcessor(m); ok {
+		typeLine = "类型: " + remoteAddSecretTypeLabel(p)
 	}
-	sourceLine := "内容: 外部编辑器 (temp)"
-	if m.addSecretSourceMode == "path" {
+	sourceLine := "内容: " + sourceModeLabel(secrets.SourceMode(m.addSecretSourceMode))
+	if m.addSecretSourceMode == string(secrets.SourcePath) {
 		sourceLine = fmt.Sprintf("内容: 本地路径 %s", fallbackValue(m.addSecretContentPath, "<待输入>"))
 	}
 
@@ -568,9 +672,7 @@ func (m model) addSecretBlockLines() []string {
 			shellMutedStyle.Render("Enter 下一步 · Esc 取消"))
 	case addSecretStageType:
 		lines = append(lines, shellLogStyle.Render(targetLine), shellSelectedRow.Render(typeLine+"▌"), shellLogStyle.Render(pathLine))
-		lines = append(lines,
-			shellMutedStyle.Render("SSH Key 不在此列：请在 Bitwarden 建 SSH Key Item，Item 名用 .sshkey/<实例>。"),
-			shellMutedStyle.Render("tab 轮转类型 · Enter 下一步 · Esc 取消"))
+		lines = append(lines, shellMutedStyle.Render("tab 轮转类型 · Enter 下一步 · Esc 取消"))
 	case addSecretStagePath:
 		lines = append(lines, shellLogStyle.Render(targetLine))
 		if m.addSecretRemoteMode {
@@ -581,7 +683,11 @@ func (m model) addSecretBlockLines() []string {
 	case addSecretStageSource:
 		lines = append(lines, shellLogStyle.Render(targetLine), shellLogStyle.Render(typeLine), shellLogStyle.Render(pathLine))
 		lines = append(lines, shellSelectedRow.Render(sourceLine+"▌"))
-		lines = append(lines, shellMutedStyle.Render("tab 切换 temp/路径 · Enter 执行 · Esc 取消"))
+		if p, ok := currentRemoteProcessor(m); ok {
+			lines = append(lines, shellMutedStyle.Render("tab 切换 "+sourceModesHint(p)+" · Enter 执行 · Esc 取消"))
+		} else {
+			lines = append(lines, shellMutedStyle.Render("tab 切换来源 · Enter 执行 · Esc 取消"))
+		}
 	case addSecretStageRunning:
 		lines = append(lines, shellLogStyle.Render(targetLine))
 		if m.addSecretRemoteMode {
@@ -607,7 +713,7 @@ func (m model) renderAddSecretOutcome() string {
 	if m.addSecretResult != nil {
 		extra := m.addSecretResult.ProjectRelPath
 		if m.addSecretRemoteMode {
-			extra = "不种本地同步根"
+			extra = "远端已写入"
 		}
 		return shellMutedStyle.Render(fmt.Sprintf("已登记 %s → %s（%s）",
 			m.addSecretResult.NoteRelPath, m.addSecretResult.Folder, extra))

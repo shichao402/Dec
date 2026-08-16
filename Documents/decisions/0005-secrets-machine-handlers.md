@@ -59,7 +59,18 @@ Revoke：删除 Note 前 `credential reject` + `--unset provider`。
 
 仍是 BW SSH Item，**不是** Secure Note。规范 Item 名为 `.sshkey/<实例>`；落地文件名只用实例。
 
-因此 Remote 登记（`n` / `N`）只产出 Secure Note：`.sshkey` **不进类型选项**，输入 `.sshkey/...` 的 Note 名也直接拦下并提示去 Bitwarden 建 SSH Key Item——留一个选不动的类型等于死路。
+### Remote 登记：同级 Processor
+
+`note` / `.env` / `.gcm` / `.sshkey` 在 Remote `n`/`N` 里是**同级 Processor**：
+
+| Processor | Bitwarden Writer | 登记来源 |
+|-----------|------------------|----------|
+| `note` | Secure Note Writer | temp / 路径 / 系统选文件 |
+| `.env` | Secure Note Writer | 同上 |
+| `.gcm` | Secure Note Writer | 同上；Pull 后才 GCM Apply |
+| `.sshkey` | SSH Key Item Writer | 本机生成 / 路径 / 系统选文件 |
+
+TUI 只跑统一状态机（归属 → Processor → 名称 → 来源 → 提交），不按类型开旁路。GCM Apply 属于 Pull 后处理，不属于创建链路。
 
 ## 理由
 

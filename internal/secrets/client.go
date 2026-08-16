@@ -10,6 +10,7 @@ import (
 type Client interface {
 	PullBundle(ctx context.Context, req PullBundleRequest) (*PullBundleResult, error)
 	PushBundle(ctx context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error)
+	CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) error
 	DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error
 	DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) error
 	UpdateSSHKeyHosts(ctx context.Context, req UpdateSSHKeyHostsRequest) error
@@ -95,6 +96,26 @@ func (c *StubClient) PushBundle(_ context.Context, req PushBundleRequest, notes 
 	}
 	c.NotesByFolder[folder] = merged
 	return result, nil
+}
+
+func (c *StubClient) CreateSSHKey(_ context.Context, req CreateSSHKeyRequest) error {
+	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, "")
+	if c.SSHKeysByFolder == nil {
+		c.SSHKeysByFolder = make(map[string][]SSHKeyItem)
+	}
+	name := strings.TrimSpace(req.Key.Name)
+	if _, err := SSHKeyInstance(name); err != nil {
+		return err
+	}
+	for _, key := range c.SSHKeysByFolder[folder] {
+		if key.Name == name {
+			return fmt.Errorf("SSH Key 已存在: %q", name)
+		}
+	}
+	key := req.Key
+	key.Hosts = append([]string(nil), req.Key.Hosts...)
+	c.SSHKeysByFolder[folder] = append(c.SSHKeysByFolder[folder], key)
+	return nil
 }
 
 func (c *StubClient) DeleteSecureNote(_ context.Context, req DeleteSecureNoteRequest) error {
@@ -208,6 +229,10 @@ func (NoopClient) PullBundle(_ context.Context, _ PullBundleRequest) (*PullBundl
 
 func (NoopClient) PushBundle(_ context.Context, _ PushBundleRequest, _ []SecureNote) (*PushBundleResult, error) {
 	return &PushBundleResult{}, nil
+}
+
+func (NoopClient) CreateSSHKey(_ context.Context, _ CreateSSHKeyRequest) error {
+	return nil
 }
 
 func (NoopClient) DeleteSecureNote(_ context.Context, _ DeleteSecureNoteRequest) error {

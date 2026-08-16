@@ -244,6 +244,14 @@ func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRe
 	}{folder, noteRel, localPath}, reporter)
 }
 
+func PrepareRemoteRegister(ctx context.Context, in app.RemoteRegisterInput, reporter app.Reporter) (*app.RemoteRegisterSession, error) {
+	return invoke[app.RemoteRegisterSession](ctx, "prepare_remote_register", in.ProjectRoot, in, reporter)
+}
+
+func CommitRemoteRegister(ctx context.Context, session app.RemoteRegisterSession, reporter app.Reporter) (*app.AddSecretResult, error) {
+	return run[app.AddSecretResult](ctx, "commit_remote_register", session.ProjectRoot, session, reporter)
+}
+
 func PrepareRemoteNoteEdit(ctx context.Context, projectRoot string, item app.DeleteSelectionItem, reporter app.Reporter) (*app.RemoteNoteEditSession, error) {
 	return invoke[app.RemoteNoteEditSession](ctx, "prepare_remote_note_edit", projectRoot, item, reporter)
 }

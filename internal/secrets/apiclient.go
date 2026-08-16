@@ -181,6 +181,55 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 	return result, nil
 }
 
+func (c *APIClient) CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) error {
+	userKey := UserKey()
+	if len(userKey) == 0 {
+		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
+	}
+	folderName := folderNameForRequest(req.Target.Folder, req.Binding, "")
+	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	if err != nil {
+		return err
+	}
+	if folderID == "" {
+		if !req.CreateFolderIfMissing {
+			return fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+		}
+		folderID, err = c.createFolder(ctx, folderName, userKey)
+		if err != nil {
+			return fmt.Errorf("创建 Bitwarden folder %q 失败: %w", folderName, err)
+		}
+	}
+
+	key := req.Key
+	key.Name = strings.TrimSpace(key.Name)
+	if _, err := SSHKeyInstance(key.Name); err != nil {
+		return err
+	}
+	if err := validateSSHKeyMaterial(key.PrivateKey); err != nil {
+		return fmt.Errorf("SSH Key %q 私钥格式无效", key.Name)
+	}
+	if strings.TrimSpace(key.PublicKey) == "" {
+		return fmt.Errorf("SSH Key %q 缺少公钥", key.Name)
+	}
+	if strings.TrimSpace(key.KeyFingerprint) == "" {
+		return fmt.Errorf("SSH Key %q 缺少 fingerprint", key.Name)
+	}
+	key.Hosts, err = NormalizeSSHHosts(key.Hosts)
+	if err != nil {
+		return err
+	}
+
+	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey)
+	if err != nil {
+		return err
+	}
+	if _, exists := existing[key.Name]; exists {
+		return fmt.Errorf("SSH Key 已存在: %q", key.Name)
+	}
+	return c.createSSHKey(ctx, folderID, userKey, key)
+}
+
 func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error {
 	userKey := UserKey()
 	if len(userKey) == 0 {
@@ -213,6 +262,57 @@ func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRe
 		return nil
 	}
 	return c.deleteCipher(ctx, cipher.ID)
+}
+
+func (c *APIClient) createSSHKey(ctx context.Context, folderID string, userKey []byte, key SSHKeyItem) error {
+	itemKey, err := generateCipherKey()
+	if err != nil {
+		return err
+	}
+	encrypt := func(label, plain string) (string, error) {
+		enc, encErr := encryptVaultString(strings.TrimSpace(plain), itemKey)
+		if encErr != nil {
+			return "", fmt.Errorf("加密 SSH Key %s 失败: %w", label, encErr)
+		}
+		return enc, nil
+	}
+	encName, err := encrypt("名称", key.Name)
+	if err != nil {
+		return err
+	}
+	encPrivate, err := encrypt("私钥", key.PrivateKey)
+	if err != nil {
+		return err
+	}
+	encPublic, err := encrypt("公钥", key.PublicKey)
+	if err != nil {
+		return err
+	}
+	encFingerprint, err := encrypt("fingerprint", key.KeyFingerprint)
+	if err != nil {
+		return err
+	}
+	encNotes, err := encryptNoteField(formatSSHHostsNotes(key.Hosts), itemKey)
+	if err != nil {
+		return err
+	}
+	encItemKey, err := encryptVaultBytes(itemKey, userKey)
+	if err != nil {
+		return err
+	}
+	return c.postJSON(ctx, c.APIURL+"/ciphers", map[string]any{
+		"type":     cipherTypeSSHKey,
+		"name":     encName,
+		"notes":    encNotes,
+		"folderId": folderID,
+		"favorite": false,
+		"key":      encItemKey,
+		"sshKey": map[string]any{
+			"privateKey":     encPrivate,
+			"publicKey":      encPublic,
+			"keyFingerprint": encFingerprint,
+		},
+	})
 }
 
 func (c *APIClient) DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) error {
