@@ -54,8 +54,8 @@ members:
 	if err := os.WriteFile(orphanIDE, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	keepNote := filepath.Join(projectRoot, ".secrets", "bundles", "pkv", "env", "keep.env")
-	goneNote := filepath.Join(projectRoot, ".secrets", "bundles", "pkv", "env", "gone.env")
+	keepNote := filepath.Join(projectRoot, ".secrets", "bundles", "pkv", ".env", "keep.env")
+	goneNote := filepath.Join(projectRoot, ".secrets", "bundles", "pkv", ".env", "gone.env")
 	if err := os.MkdirAll(filepath.Dir(keepNote), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ members:
 		t.Fatal(err)
 	}
 	landings, err := secrets.PrepareSSHKeyLandings("pkv", []secrets.SSHKeyItem{
-		{Name: "orphan", PrivateKey: "priv\n", PublicKey: "pub\n"},
+		{Name: ".sshkey/orphan", PrivateKey: "priv\n", PublicKey: "pub\n"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ members:
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"bundle/pkv": {{RelativePath: "env/keep.env", Content: "K=1\n"}},
+				"bundle/pkv": {{RelativePath: ".env/keep.env", Content: "K=1\n"}},
 				"Demo":       {},
 			},
 		}
@@ -154,7 +154,7 @@ members:
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/active": {{RelativePath: "env/a.env", Content: "A=1\n"}},
+			"bundle/active": {{RelativePath: ".env/a.env", Content: "A=1\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })

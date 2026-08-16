@@ -26,7 +26,7 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 | project 初始化 / 选择 | Home 页（首次进入引导） |
 | 扫描资产 / bundle 选择 | **Bundles** 页 |
 | pull / push / remove | Run 页 |
-| 浏览 / 删 / 改远端（Note · SSH Hosts）；任意 folder 登记；无文件夹只读 | **Remote** 页 |
+| 浏览 / 删 / 改远端（Note · SSH Hosts）；按光标 folder 登记（`n`）/ 新 folder 登记（`N`）；无文件夹只读 | **Remote** 页 |
 | 浏览 / 筛选资产 | Bundles 页 |
 | 项目概览 / project 初始化 | Home 页 |
 | 项目变量编辑 | Project 页 |

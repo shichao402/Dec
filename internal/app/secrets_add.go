@@ -73,7 +73,7 @@ func AddSecretToTarget(ctx context.Context, projectRoot string, target secrets.S
 	}
 	noteRel = filepath.ToSlash(strings.TrimSpace(noteRel))
 	if noteRel == "" {
-		return nil, fmt.Errorf("必须指定相对同步根的路径（如 env/vikunja.env）")
+		return nil, fmt.Errorf("必须指定相对同步根的路径（如 .env/vikunja.env）")
 	}
 
 	configured, err := secrets.IsConfigured()

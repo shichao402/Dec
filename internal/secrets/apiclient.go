@@ -141,7 +141,13 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 		return nil, err
 	}
 	if folderID == "" {
-		return nil, fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+		if !req.CreateFolderIfMissing {
+			return nil, fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+		}
+		folderID, err = c.createFolder(ctx, folderName, userKey)
+		if err != nil {
+			return nil, fmt.Errorf("创建 Bitwarden folder %q 失败: %w", folderName, err)
+		}
 	}
 
 	existing, err := c.folderCiphers(ctx, folderID, userKey)
@@ -278,6 +284,116 @@ func (c *APIClient) UpdateSSHKeyHosts(ctx context.Context, req UpdateSSHKeyHosts
 	return c.updateSSHKeyNotes(ctx, cipher, userKey, formatSSHHostsNotes(req.Hosts))
 }
 
+func (c *APIClient) RenameSecureNote(ctx context.Context, req RenameSecureNoteRequest) error {
+	userKey := UserKey()
+	if len(userKey) == 0 {
+		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
+	}
+	folderName := strings.TrimSpace(req.Binding.SecretsBundleName)
+	if folderName == "" {
+		folderName = strings.TrimSpace(req.Target.Folder)
+	}
+	if folderName == "" {
+		return fmt.Errorf("secrets bundle 名称不能为空")
+	}
+	oldPath := strings.TrimSpace(req.OldPath)
+	newPath := strings.TrimSpace(req.NewPath)
+	if oldPath == "" || newPath == "" {
+		return fmt.Errorf("RenameSecureNote 需要 OldPath 与 NewPath")
+	}
+	if _, err := normalizeSyncRelPath(newPath); err != nil {
+		return err
+	}
+
+	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	if err != nil {
+		return err
+	}
+	if folderID == "" {
+		return fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+	}
+	existing, err := c.folderCiphers(ctx, folderID, userKey)
+	if err != nil {
+		return err
+	}
+	cipher, ok := findExistingCipher(existing, oldPath)
+	if !ok {
+		return fmt.Errorf("Secure Note %q 不在 folder %q", oldPath, folderName)
+	}
+	if _, conflict := findExistingCipher(existing, newPath); conflict {
+		return fmt.Errorf("目标 Note 已存在: %q", newPath)
+	}
+	return c.renameCipherName(ctx, cipher, userKey, newPath, cipherTypeSecureNote)
+}
+
+func (c *APIClient) RenameSSHKey(ctx context.Context, req RenameSSHKeyRequest) error {
+	userKey := UserKey()
+	if len(userKey) == 0 {
+		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
+	}
+	folderName := strings.TrimSpace(req.Binding.SecretsBundleName)
+	if folderName == "" {
+		folderName = strings.TrimSpace(req.Target.Folder)
+	}
+	if folderName == "" {
+		return fmt.Errorf("secrets bundle 名称不能为空")
+	}
+	oldName := strings.TrimSpace(req.OldName)
+	newName := strings.TrimSpace(req.NewName)
+	if oldName == "" || newName == "" {
+		return fmt.Errorf("RenameSSHKey 需要 OldName 与 NewName")
+	}
+
+	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	if err != nil {
+		return err
+	}
+	if folderID == "" {
+		return fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+	}
+	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey)
+	if err != nil {
+		return err
+	}
+	cipher, ok := existing[oldName]
+	if !ok {
+		return fmt.Errorf("SSH Key %q 不在 folder %q", oldName, folderName)
+	}
+	if _, conflict := existing[newName]; conflict {
+		return fmt.Errorf("目标 SSH Key 已存在: %q", newName)
+	}
+	return c.renameCipherName(ctx, cipher, userKey, newName, cipherTypeSSHKey)
+}
+
+// renameCipherName 用新明文名重新加密 name 字段，其余字段原样回传。
+func (c *APIClient) renameCipherName(ctx context.Context, cipher bwCipher, userKey []byte, newName string, cipherType int) error {
+	itemKey, err := itemDecryptionKey(cipher.Key, userKey)
+	if err != nil {
+		return err
+	}
+	encName, err := encryptVaultString(newName, itemKey)
+	if err != nil {
+		return err
+	}
+	body := map[string]any{
+		"type":     cipherType,
+		"name":     encName,
+		"notes":    cipher.Notes,
+		"folderId": cipher.FolderID,
+		"favorite": false,
+	}
+	if cipherType == cipherTypeSecureNote {
+		body["secureNote"] = secureNotePayload()
+	}
+	if cipherType == cipherTypeSSHKey {
+		body["sshKey"] = cipher.SSHKey
+	}
+	if strings.TrimSpace(cipher.Key) != "" {
+		body["key"] = cipher.Key
+	}
+	return c.putJSON(ctx, c.APIURL+"/ciphers/"+cipher.ID, body)
+}
+
 func (c *APIClient) updateSSHKeyNotes(ctx context.Context, cipher bwCipher, userKey []byte, notesPlain string) error {
 	itemKey, err := itemDecryptionKey(cipher.Key, userKey)
 	if err != nil {
@@ -402,6 +518,31 @@ func (c *APIClient) updateSecureNote(ctx context.Context, cipher bwCipher, userK
 		body["key"] = cipher.Key
 	}
 	return c.putJSON(ctx, c.APIURL+"/ciphers/"+cipher.ID, body)
+}
+
+// createFolder 在 Bitwarden 新建 folder（name 用 user key 直接加密，无 item key），
+// 建完使快照失效并回查 ID。仅供 Remote 登记新 folder 使用。
+func (c *APIClient) createFolder(ctx context.Context, name string, userKey []byte) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("folder 名不能为空")
+	}
+	encName, err := encryptVaultString(name, userKey)
+	if err != nil {
+		return "", err
+	}
+	if err := c.postJSON(ctx, c.APIURL+"/folders", map[string]any{"name": encName}); err != nil {
+		return "", err
+	}
+	// postJSON 已使快照失效，findFolderID 会重新拉取并命中新 folder。
+	id, err := c.findFolderID(ctx, name, userKey)
+	if err != nil {
+		return "", err
+	}
+	if id == "" {
+		return "", fmt.Errorf("folder 已创建但未能回查到 ID")
+	}
+	return id, nil
 }
 
 func (c *APIClient) findFolderID(ctx context.Context, name string, userKey []byte) (string, error) {

@@ -69,11 +69,11 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 			if local {
 				hasSecLocal = true
 				group := getSecretsGroup(c, secLocal)
-				insertTreePath(group, []string{"SSH · machine"}, leaf)
+				insertTreePath(group, secretsParentSegments(c.SSHKeyName), leaf)
 			} else {
 				hasSecRemote = true
 				group := getSecretsGroup(c, secRemote)
-				insertTreePath(group, []string{"SSH · machine"}, leaf)
+				insertTreePath(group, secretsParentSegments(c.SSHKeyName), leaf)
 			}
 		case app.DeleteKindBundle:
 			hasDecRemote = true
@@ -102,6 +102,7 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 
 	for _, group := range targetGroups {
 		group.node.Label = group.label()
+		group.node.Payload = group.ref()
 	}
 
 	sortPathTreeChildren(decRemote.Children)
@@ -132,6 +133,13 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 	return roots
 }
 
+// secretsFolderRef 挂在 folder 分组节点上，供 Remote 登记从光标就近反推归属。
+type secretsFolderRef struct {
+	Folder    string
+	Title     string
+	Partition app.RemotePartition
+}
+
 // secretsGroupNode 汇总同一 Bitwarden folder 下的展示信息。
 // Secure Note 带 LocalRoot、SSH Key 落 ~/.ssh 没有 LocalRoot，
 // 二者必须收敛到同一个 folder 节点，标题按「有本地映射优先」取。
@@ -139,6 +147,8 @@ type secretsGroupNode struct {
 	node      *TreeNode
 	title     string
 	localRoot string
+	folder    string
+	partition app.RemotePartition
 }
 
 func (g *secretsGroupNode) absorb(c app.DeleteCandidate) {
@@ -152,6 +162,16 @@ func (g *secretsGroupNode) absorb(c app.DeleteCandidate) {
 	if g.localRoot == "" {
 		g.localRoot = strings.TrimSpace(c.LocalRoot)
 	}
+	if g.folder == "" {
+		g.folder = strings.TrimSpace(c.SecretsBundle)
+	}
+	if g.partition == "" {
+		g.partition = c.Partition
+	}
+}
+
+func (g *secretsGroupNode) ref() secretsFolderRef {
+	return secretsFolderRef{Folder: g.folder, Title: g.title, Partition: g.partition}
 }
 
 func (g *secretsGroupNode) label() string {
@@ -197,7 +217,7 @@ func deleteLeafLabel(c app.DeleteCandidate) string {
 		}
 		return leaf
 	case app.DeleteKindSSHKey:
-		leaf := "[ssh] " + strings.TrimSpace(c.SSHKeyName)
+		leaf := "[ssh] " + secretsLeafName(c.SSHKeyName)
 		if c.Orphan {
 			leaf += " · 仅远端"
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -273,7 +274,7 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 			DecBundleName: decBundleName,
 			SecretsBundle: secretsBundle,
 			Plane:         plane,
-			Label:         fmt.Sprintf("[ssh] %s%s", keyName, tag),
+			Label:         fmt.Sprintf("[ssh] %s%s", sshKeyDisplayName(keyName), tag),
 			Orphan:        partition == PartitionRemote && !localExists,
 			TreeRoot:      treeRoot,
 			TreeBranch:    groupBundle,
@@ -443,6 +444,14 @@ func InferDeleteMode(items []DeleteSelectionItem, explicit DeleteMode) (DeleteMo
 		return DeleteModeLocal, nil
 	}
 	return DeleteModeRemote, nil
+}
+
+func sshKeyDisplayName(keyName string) string {
+	keyName = strings.TrimSpace(strings.ReplaceAll(keyName, "\\", "/"))
+	if keyName == "" {
+		return keyName
+	}
+	return path.Base(keyName)
 }
 
 // DeleteRemoteOnly 只改远端（Bitwarden / Git vault），不碰本地同步根与 cache。

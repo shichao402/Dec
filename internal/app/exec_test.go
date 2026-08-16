@@ -74,8 +74,8 @@ func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mustWrite(filepath.ToSlash(filepath.Join(bundleTarget.LocalRoot, "env", "vikunja.env")), "TOKEN=from-bundle\nSHARED=bundle\n")
-	mustWrite(filepath.ToSlash(filepath.Join(projectTarget.LocalRoot, "env", "app.env")), "SHARED=project\nPROJECT_ONLY=1\n")
+	mustWrite(filepath.ToSlash(filepath.Join(bundleTarget.LocalRoot, ".env", "vikunja.env")), "TOKEN=from-bundle\nSHARED=bundle\n")
+	mustWrite(filepath.ToSlash(filepath.Join(projectTarget.LocalRoot, ".env", "app.env")), "SHARED=project\nPROJECT_ONLY=1\n")
 
 	env, err := BuildExecEnviron(root, "vikunja", secrets.SyncPlaneProject, []string{"PATH=/bin", "SHARED=base"})
 	if err != nil {
@@ -108,7 +108,7 @@ func TestRunExecWithSecrets_InjectsEnvIntoChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	envPath := filepath.Join(root, filepath.FromSlash(bundleTarget.LocalRoot), "env", "vikunja.env")
+	envPath := filepath.Join(root, filepath.FromSlash(bundleTarget.LocalRoot), ".env", "vikunja.env")
 	if err := os.MkdirAll(filepath.Dir(envPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -141,11 +141,11 @@ func TestAbsolutePath_WindowsSeparators(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	abs, err := secrets.AbsolutePath(root, target, `env\tencent-cloud.env`)
+	abs, err := secrets.AbsolutePath(root, target, `.env\tencent-cloud.env`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSuffix := filepath.Join(".secrets", "bundles", "tencent-cloud", "env", "tencent-cloud.env")
+	wantSuffix := filepath.Join(".secrets", "bundles", "tencent-cloud", ".env", "tencent-cloud.env")
 	if !strings.HasSuffix(abs, wantSuffix) {
 		t.Fatalf("abs = %q, 应归一化 Windows 路径并落到 %q", abs, wantSuffix)
 	}

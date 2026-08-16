@@ -104,14 +104,14 @@ func TestLoadEnvForBundle_MachineOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	machineEnv := filepath.Join(machineRoot, "bundles", "demo", "env")
+	machineEnv := filepath.Join(machineRoot, "bundles", "demo", ".env")
 	if err := os.MkdirAll(machineEnv, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(machineEnv, "a.env"), []byte("A=machine\nB=machine\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	projEnv := filepath.Join(projectRoot, ".secrets", "bundles", "demo", "env")
+	projEnv := filepath.Join(projectRoot, ".secrets", "bundles", "demo", ".env")
 	if err := os.MkdirAll(projEnv, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -140,14 +140,14 @@ func TestLoadEnvForBundle_ProjectOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	machineEnv := filepath.Join(machineRoot, "bundles", "demo", "env")
+	machineEnv := filepath.Join(machineRoot, "bundles", "demo", ".env")
 	if err := os.MkdirAll(machineEnv, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(machineEnv, "a.env"), []byte("A=machine\nB=machine\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	projEnv := filepath.Join(projectRoot, ".secrets", "bundles", "demo", "env")
+	projEnv := filepath.Join(projectRoot, ".secrets", "bundles", "demo", ".env")
 	if err := os.MkdirAll(projEnv, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestLoadEnvForBundle_ProjectOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 第三层不应再参与合并
-	projectLayer := filepath.Join(projectRoot, ".secrets", "project", "env")
+	projectLayer := filepath.Join(projectRoot, ".secrets", "project", ".env")
 	if err := os.MkdirAll(projectLayer, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +174,6 @@ func TestLoadEnvForBundle_ProjectOnly(t *testing.T) {
 		t.Fatalf("project plane 不应读到 machine 层: %#v", vars)
 	}
 	if _, ok := vars["D"]; ok {
-		t.Fatalf("不应再合并 .secrets/project/env: %#v", vars)
+		t.Fatalf("不应再合并 .secrets/project/.env: %#v", vars)
 	}
 }

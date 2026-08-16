@@ -565,9 +565,9 @@ func deleteSecretItem(ctx context.Context, workspace Workspace, secretsBundleNam
 		localPath = filepath.Join(projectRoot, filepath.FromSlash(notePath))
 	}
 
-	// gitgcm：删除前先撤销机器平面副作用（git credential reject + --unset provider）。
+	// gcm handler：删除前先撤销机器平面副作用（git credential reject + --unset provider）。
 	// 优先读本地正文；本地缺失时尝试从远端拉正文再 revoke（能做最好，不阻塞删除）。
-	if handler.Default().Find(handler.SourceNote, handler.NoteRouteName(notePath)) != nil {
+	if handler.Default().Find(handler.SourceNote, notePath) != nil {
 		if content, ok := readSecretNoteContent(ctx, projectRoot, secretsBundleName, localRoot, plane, notePath, localPath, reporter); ok {
 			if _, revErr := handler.RevokeNotes(ctx, nil, []handler.Item{{
 				Source:      handler.SourceNote,
@@ -951,7 +951,7 @@ func deleteSecretItemRemoteOnly(ctx context.Context, workspace Workspace, secret
 			localPath = abs
 		}
 	}
-	if handler.Default().Find(handler.SourceNote, handler.NoteRouteName(notePath)) != nil {
+	if handler.Default().Find(handler.SourceNote, notePath) != nil {
 		if content, ok := readSecretNoteContent(ctx, projectRoot, secretsBundleName, localRoot, plane, notePath, localPath, reporter); ok {
 			if _, revErr := handler.RevokeNotes(ctx, nil, []handler.Item{{
 				Source:      handler.SourceNote,

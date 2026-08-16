@@ -141,8 +141,6 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.ListSecretSyncTargets(projectRoot)
 	case "suggest_secret_targets":
 		return app.SuggestSecretTargets(projectRoot)
-	case "suggest_remote_register_folders":
-		return app.SuggestRemoteRegisterFolders(ctx, projectRoot, reporter)
 	case "list_secrets":
 		var in struct{ IncludeRemote bool }
 		if err := decode(payload, &in); err != nil {
@@ -163,13 +161,14 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.PrepareRemoteNoteEdit(ctx, projectRoot, in, reporter)
 	case "prepare_remote_note_register":
 		var in struct {
-			Folder  string
-			NoteRel string
+			Folder      string
+			NoteRel     string
+			InitialBody string
 		}
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return app.PrepareRemoteNoteRegister(ctx, projectRoot, in.Folder, in.NoteRel, reporter)
+		return app.PrepareRemoteNoteRegister(ctx, projectRoot, in.Folder, in.NoteRel, in.InitialBody, reporter)
 	case "prepare_remote_ssh_hosts_edit":
 		var in app.DeleteSelectionItem
 		if err := decode(payload, &in); err != nil {

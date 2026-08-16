@@ -379,6 +379,17 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 		emit(reporter, EventInfo, "pull.secrets",
 			fmt.Sprintf("拉取 %s (folder: %s → %s)", label, target.Folder, target.LocalRoot), progress)
 
+		if mig, migErr := secrets.MigrateTypeDirNames(ctx, client, projectRoot, target); migErr != nil {
+			return nil, fmt.Errorf("迁移 %s 点类型目录标识失败: %w", label, migErr)
+		} else if mig != nil && (len(mig.RenamedNotes) > 0 || len(mig.RenamedSSH) > 0) {
+			for _, line := range mig.RenamedNotes {
+				emit(reporter, EventInfo, "pull.secrets", "  迁移 Note "+line, progress)
+			}
+			for _, line := range mig.RenamedSSH {
+				emit(reporter, EventInfo, "pull.secrets", "  迁移 SSH "+line, progress)
+			}
+		}
+
 		notes, keys, pullErr := secrets.ResolveBundle(ctx, client, secrets.PullBundleRequest{
 			ProjectRoot:   projectRoot,
 			Target:        target,
@@ -393,6 +404,9 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 			return summary, fmt.Errorf("拉取 %s 失败: %w", label, pullErr)
 		}
 		fetchedNotes[i] = notes
+		if err := secrets.ValidateNoteTypePaths(noteRels(notes)); err != nil {
+			return nil, fmt.Errorf("%s: %w", label, err)
+		}
 		for _, note := range notes {
 			candidates = append(candidates, secrets.LandingCandidate{
 				Folder:       target.Folder,

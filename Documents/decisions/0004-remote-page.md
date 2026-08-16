@@ -44,11 +44,15 @@
    Secure Note / SSH Hosts：temp file → 编辑 → 直接写回远端；**不自动种/更新本地同步根**（用户需 pull）。  
    **禁止**在 TUI 内嵌密码式输入或多行编辑器。
 
-6. **`A` 登记（任意 folder）**  
-   - Remote 页 `A`：可选**任意远端 folder**（`SuggestRemoteRegisterFolders` = 本机 SyncTarget ∪ `ListAllFolderNames`），不绑死当前 enabled SyncTarget  
+6. **`n` / `N` 登记（归属由光标决定）**  
+   - Remote 页 `n`：归属 = **光标所在 folder**（树上 folder 分组节点是其所有子孙节点 ID 的前缀，直接按前缀反推）；表单内**不再选归属**，归属不对就 `Esc` 退出、移动光标重按 `n`  
+   - 光标停在点类型目录（`.env` / `.gcm` 等）之下时，类型阶段默认选中该类型  
+   - 光标落在分区根 / Dec vault / 「无文件夹」等归属不唯一的位置：**不开表单**，只提示移动光标或按 `N`  
+   - Remote 页 `N`：手输 folder 名，用于新 bundle（`bundle/<名>`）、新 project folder、或尚未出现在树上的空 folder  
+   - 归属不再需要枚举远端 folder，`n` / `N` 不触发 Bitwarden 解锁；登记表单在 Remote 页整页渲染，任何阶段 `Esc` 可退出  
    - 内容来源：外部编辑器（temp）**或**显式本地路径；写回 Bitwarden  
    - **不强制**落本地同步根（与 temp 编辑语义一致）  
-   - Project 页 `A` 仍为「本地同步根已有文件 → 登记到对应 SyncTarget」
+   - Remote 页 `a`/`A` = 全选/全不选；Project 页 `A` 仍为「本地同步根已有文件 → 登记到对应 SyncTarget」，归属仍从 `SuggestSecretTargets` 轮转选择
 
 7. **进入即尝试含远端列表**  
    Remote 进入时默认 `includeRemote=true`；`r` 强制刷新。切页不打断在飞 IO（见 TUI §5.5）。浏览孤儿 **不** 写回 `known_secret_bundles`。
@@ -70,9 +74,10 @@
 | 远端删 + 本地清默认同一事务 | 误删风险；与用户心智不一致 |
 | 编辑顺带种本地盘 | 其它项目裸 folder 无可靠 LocalRoot；与「pull 才更新本地」不一致 |
 | 仅文案提示跨上下文风险 | 不足以防误删；必须真正输入确认 |
+| 登记表单内轮转选择归属 | 候选几十个、tab 轮转难定位，且要为此枚举远端 folder（可能触发解锁）；光标本就停在目标 folder 上 |
 
 ## 后果
 
-- 用户话术：删/改**远端** → Remote 远端分区；清**本机残留** → Remote 本地分区；启停包 → Bundles / Settings；登记任意 folder → Remote `A`。
+- 用户话术：删/改**远端** → Remote 远端分区；清**本机残留** → Remote 本地分区；启停包 → Bundles / Settings；登记到已有 folder → 光标停到该 folder 后 Remote `n`；登记到新 folder → Remote `N`。
 - 快照与集成测试页名从 `Delete` 改为 `Remote`。
 - 实现落点：`internal/app/remote_inventory.go`、`remote_edit.go`、`delete_typed_confirm.go`；`internal/tui/delete_page.go`、`delete_tree.go`、`add_secret.go`；`internal/secrets` `ListAllFolderNames` / `ListUnfiledItems`。

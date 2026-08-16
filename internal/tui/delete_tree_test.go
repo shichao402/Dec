@@ -12,7 +12,7 @@ func TestBuildDeleteTree_MergesNoteAndSSHUnderSameFolder(t *testing.T) {
 	roots := buildDeleteTree([]app.DeleteCandidate{
 		{
 			Kind:          app.DeleteKindSecret,
-			SecretPath:    "env/github.env",
+			SecretPath:    ".env/github.env",
 			SecretsBundle: "bundle/github",
 			LocalRoot:     "bundles/github",
 			Partition:     app.PartitionRemote,
@@ -21,7 +21,7 @@ func TestBuildDeleteTree_MergesNoteAndSSHUnderSameFolder(t *testing.T) {
 		},
 		{
 			Kind:          app.DeleteKindSSHKey,
-			SSHKeyName:    "github_commit",
+			SSHKeyName:    ".sshkey/github_commit",
 			DecBundleName: "github",
 			SecretsBundle: "bundle/github",
 			Partition:     app.PartitionRemote,
@@ -55,14 +55,14 @@ func TestBuildDeleteTree_MergesNoteAndSSHUnderSameFolder(t *testing.T) {
 	var envDir, sshDir *TreeNode
 	for _, child := range group.Children {
 		switch child.Label {
-		case "env":
+		case ".env":
 			envDir = child
-		case "SSH · machine":
+		case ".sshkey":
 			sshDir = child
 		}
 	}
 	if envDir == nil || sshDir == nil {
-		t.Fatalf("同一分组下应同时含 env 与 SSH 子分组: %#v", group.Children)
+		t.Fatalf("同一分组下应同时含 .env 与 .sshkey 子分组: %#v", group.Children)
 	}
 	if len(envDir.Children) != 1 || !strings.Contains(envDir.Children[0].Label, "github.env") {
 		t.Fatalf("env 子分组内容异常: %#v", envDir.Children)

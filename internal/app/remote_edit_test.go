@@ -13,7 +13,7 @@ import (
 func TestPrepareAndCommitRemoteNoteEdit_UsesTempFile(t *testing.T) {
 	secrets.SetSession("test-session")
 	projectRoot := t.TempDir()
-	noteRel := "env/vikunja.env"
+	noteRel := ".env/vikunja.env"
 	// 本地同步根已有旧内容：编辑不得覆盖它。
 	localRoot := ".secrets/bundles/vikunja"
 	localAbs := filepath.Join(projectRoot, filepath.FromSlash(localRoot), filepath.FromSlash(noteRel))
@@ -70,7 +70,7 @@ func TestPrepareAndCommitRemoteNoteEdit_UsesTempFile(t *testing.T) {
 func TestPrepareRemoteNoteEdit_BareFolderWithoutLocalRoot(t *testing.T) {
 	secrets.SetSession("test-session")
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"relkit": {{RelativePath: "env/x.env", Content: "X=1\n"}},
+		"relkit": {{RelativePath: ".env/x.env", Content: "X=1\n"}},
 	}}
 	orig := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
@@ -78,7 +78,7 @@ func TestPrepareRemoteNoteEdit_BareFolderWithoutLocalRoot(t *testing.T) {
 
 	sess, err := PrepareRemoteNoteEdit(t.Context(), t.TempDir(), DeleteSelectionItem{
 		Kind:          DeleteKindSecret,
-		SecretPath:    "env/x.env",
+		SecretPath:    ".env/x.env",
 		SecretsBundle: "relkit",
 	}, nil)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestSyncTargetFromRemoteItem_PreservesMachinePlane(t *testing.T) {
 	}
 	got, err := syncTargetFromRemoteItem(DeleteSelectionItem{
 		Kind:          DeleteKindSecret,
-		SecretPath:    "env/tencent.env",
+		SecretPath:    ".env/tencent.env",
 		LocalRoot:     target.LocalRoot,
 		Plane:         target.Plane,
 		SecretsBundle: target.Folder,
@@ -123,7 +123,7 @@ func TestSyncTargetFromRemoteItem_PreservesMachinePlane(t *testing.T) {
 	}
 
 	projectRoot := t.TempDir()
-	abs, err := secrets.AbsolutePath(projectRoot, got, "env/tencent.env")
+	abs, err := secrets.AbsolutePath(projectRoot, got, ".env/tencent.env")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestCommitRemoteSSHHostsEdit(t *testing.T) {
 	secrets.SetSession("test-session")
 	stub := &secrets.StubClient{SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
 		"bundle/vikunja": {{
-			Name:       "deploy",
+			Name:       ".sshkey/deploy",
 			PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----\n",
 			PublicKey:  "ssh-ed25519 AAAA deploy",
 			Hosts:      []string{"old.example.com"},
@@ -153,7 +153,7 @@ func TestCommitRemoteSSHHostsEdit(t *testing.T) {
 	err := CommitRemoteSSHHostsEdit(t.Context(), RemoteSSHHostsEditSession{
 		Path:          tmp,
 		Folder:        "bundle/vikunja",
-		KeyName:       "deploy",
+		KeyName:       ".sshkey/deploy",
 		DecBundleName: "vikunja",
 		TempFile:      false,
 	}, nil)
@@ -172,7 +172,7 @@ func TestListRemoteInventory_ListsBareFolder(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"relkit": {{RelativePath: "env/r.env", Content: "R=1\n"}},
+				"relkit": {{RelativePath: ".env/r.env", Content: "R=1\n"}},
 			},
 		}
 	}
@@ -183,11 +183,11 @@ func TestListRemoteInventory_ListsBareFolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRemoteInventory: %v", err)
 	}
-	if !hasSecretCandidate(candidates, "relkit", "env/r.env") {
+	if !hasSecretCandidate(candidates, "relkit", ".env/r.env") {
 		t.Fatalf("裸 folder 应出现在 Remote: %#v", candidates)
 	}
 	for _, c := range candidates {
-		if c.SecretsBundle == "relkit" && c.SecretPath == "env/r.env" {
+		if c.SecretsBundle == "relkit" && c.SecretPath == ".env/r.env" {
 			if c.Partition != PartitionRemote {
 				t.Fatalf("裸 folder 应属远端分区")
 			}

@@ -10,10 +10,10 @@ import (
 	"unicode"
 )
 
-// LoadEnvForBundle 按单一平面读取 bundle 的 env/*.env（ADR 0009，无跨层合并）。
+// LoadEnvForBundle 按单一平面读取 bundle 的 .env/*.env（ADR 0009，无跨层合并）。
 //
-//	plane=machine|user：仅 ~/.dec/secrets/bundles/<bundle>/env/*.env
-//	plane=project（空视为 project）：仅 <project>/.secrets/bundles/<bundle>/env/*.env
+//	plane=machine|user：仅 ~/.dec/secrets/bundles/<bundle>/.env/*.env
+//	plane=project（空视为 project）：仅 <project>/.secrets/bundles/<bundle>/.env/*.env
 //
 // 同一同步根内、跨文件重复键报错。
 func LoadEnvForBundle(projectRoot, bundleName string, plane SyncPlane) (map[string]string, error) {
@@ -44,10 +44,10 @@ func LoadEnvForBundle(projectRoot, bundleName string, plane SyncPlane) (map[stri
 			abs := filepath.Join(envDir, name)
 			vars, err := parseDotEnvFile(abs)
 			if err != nil {
-				return fmt.Errorf("%s: %w", path.Join(displayRoot, "env", name), err)
+				return fmt.Errorf("%s: %w", path.Join(displayRoot, TypeDirEnv, name), err)
 			}
 			for k, v := range vars {
-				display := path.Join(displayRoot, "env", name)
+				display := path.Join(displayRoot, TypeDirEnv, name)
 				if prev, ok := localOwned[k]; ok {
 					return fmt.Errorf("环境变量 %s 在 %s 与 %s 中重复定义", k, prev, display)
 				}
@@ -70,7 +70,7 @@ func LoadEnvForBundle(projectRoot, bundleName string, plane SyncPlane) (map[stri
 		if err != nil {
 			return nil, err
 		}
-		if err := loadLayer(filepath.Join(abs, "env"), path.Join(".dec/secrets", machine.LocalRoot)); err != nil {
+		if err := loadLayer(filepath.Join(abs, TypeDirEnv), path.Join(".dec/secrets", machine.LocalRoot)); err != nil {
 			return nil, err
 		}
 		return out, nil
@@ -90,7 +90,7 @@ func LoadEnvForBundle(projectRoot, bundleName string, plane SyncPlane) (map[stri
 	if err != nil {
 		return nil, err
 	}
-	if err := loadLayer(filepath.Join(abs, "env"), proj.LocalRoot); err != nil {
+	if err := loadLayer(filepath.Join(abs, TypeDirEnv), proj.LocalRoot); err != nil {
 		return nil, err
 	}
 	return out, nil

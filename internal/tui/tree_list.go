@@ -433,13 +433,19 @@ func (t *TreeList) BranchCheckState(node *TreeNode) (all, any bool) {
 	return all, any
 }
 
-func (t *TreeList) SelectAllAtCursor() {
-	rows := t.VisibleRows()
-	if len(rows) == 0 {
-		return
-	}
+// SelectAll 勾选全部可选项。
+func (t *TreeList) SelectAll() {
+	t.setAllSelected(true)
+}
+
+// ClearSelection 取消全部勾选（反全选）。
+func (t *TreeList) ClearSelection() {
+	t.setAllSelected(false)
+}
+
+func (t *TreeList) setAllSelected(on bool) {
 	for i := range t.Selected {
-		t.Selected[i] = true
+		t.Selected[i] = on
 	}
 }
 

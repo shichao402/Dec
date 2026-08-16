@@ -10,8 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// GitGCMDoc 是 *_gitgcm.yaml 的正文结构。
-type GitGCMDoc struct {
+// GCMDoc 是 .gcm/* 正文结构（gcm 处理器自有契约）。
+type GCMDoc struct {
 	Kind     string `yaml:"kind"`
 	Host     string `yaml:"host"`
 	Username string `yaml:"username"`
@@ -20,32 +20,42 @@ type GitGCMDoc struct {
 	Provider string `yaml:"provider,omitempty"`
 }
 
+// GitGCMDoc 是 GCMDoc 的旧名别名（测试 / 迁移兼容）。
+type GitGCMDoc = GCMDoc
+
 // GitRunner 执行 git 子命令；测试可注入。
 type GitRunner func(ctx context.Context, stdin string, args ...string) error
 
-// GitGCMHandler 将 YAML Note 写入 Git Credential Manager（via git credential）。
-type GitGCMHandler struct {
+// GCMHandler 将 Note 写入 Git Credential Manager（via git credential）。
+type GCMHandler struct {
 	Run GitRunner
 }
 
-// NewGitGCMHandler 使用给定 runner；nil 则用真实 git。
-func NewGitGCMHandler(run GitRunner) *GitGCMHandler {
+// GitGCMHandler 是 GCMHandler 的旧名别名。
+type GitGCMHandler = GCMHandler
+
+// NewGCMHandler 使用给定 runner；nil 则用真实 git。
+func NewGCMHandler(run GitRunner) *GCMHandler {
 	if run == nil {
 		run = defaultGitRunner
 	}
-	return &GitGCMHandler{Run: run}
+	return &GCMHandler{Run: run}
 }
 
-func (h *GitGCMHandler) Kind() string       { return "gitgcm" }
-func (h *GitGCMHandler) Source() SourceKind { return SourceNote }
-
-func (h *GitGCMHandler) Match(name string) bool {
-	_, processor, ok := ParseProcessorNoteName(name)
-	return ok && processor == "gitgcm"
+// NewGitGCMHandler 是 NewGCMHandler 的旧名。
+func NewGitGCMHandler(run GitRunner) *GCMHandler {
+	return NewGCMHandler(run)
 }
 
-func (h *GitGCMHandler) Apply(ctx context.Context, item Item) error {
-	res, err := resolveGitGCM(item, true)
+func (h *GCMHandler) Kind() string       { return "gcm" }
+func (h *GCMHandler) Source() SourceKind { return SourceNote }
+
+func (h *GCMHandler) Match(name string) bool {
+	return MatchGCMPath(name)
+}
+
+func (h *GCMHandler) Apply(ctx context.Context, item Item) error {
+	res, err := resolveGCM(item, true)
 	if err != nil {
 		return err
 	}
@@ -61,11 +71,9 @@ func (h *GitGCMHandler) Apply(ctx context.Context, item Item) error {
 	return nil
 }
 
-// Revoke 撤销 Apply 写入的 Git Credential Manager 凭据：
-//   - git credential reject（同 protocol/host/username；password 可省略）
-//   - git config --global --unset credential.<proto>://<host>.provider（不存在时容忍）
-func (h *GitGCMHandler) Revoke(ctx context.Context, item Item) error {
-	res, err := resolveGitGCM(item, false)
+// Revoke 撤销 Apply 写入的 Git Credential Manager 凭据。
+func (h *GCMHandler) Revoke(ctx context.Context, item Item) error {
+	res, err := resolveGCM(item, false)
 	if err != nil {
 		return err
 	}
@@ -75,15 +83,13 @@ func (h *GitGCMHandler) Revoke(ctx context.Context, item Item) error {
 		return fmt.Errorf("git credential reject: %w", err)
 	}
 
-	// key 不存在时 git 返回退出码 5；撤销语义下视为已满足，容忍失败。
 	if err := h.Run(ctx, "", "config", "--global", "--unset", res.credKey); err != nil {
 		return nil
 	}
 	return nil
 }
 
-// gitGCMResolved 是从 Item 解析并校验后的 gitgcm 参数。
-type gitGCMResolved struct {
+type gcmResolved struct {
 	protocol string
 	provider string
 	host     string
@@ -92,16 +98,16 @@ type gitGCMResolved struct {
 	credKey  string
 }
 
-func resolveGitGCM(item Item, requirePassword bool) (gitGCMResolved, error) {
-	doc, err := parseGitGCMDoc(item.NoteContent)
+func resolveGCM(item Item, requirePassword bool) (gcmResolved, error) {
+	doc, err := parseGCMDoc(item.NoteContent)
 	if err != nil {
-		return gitGCMResolved{}, err
+		return gcmResolved{}, err
 	}
-	if _, processor, ok := ParseProcessorNoteName(item.Name); !ok || processor != "gitgcm" {
-		return gitGCMResolved{}, fmt.Errorf("note 名不符合 *_gitgcm.yaml: %q", item.Name)
+	if !MatchGCMPath(item.Name) {
+		return gcmResolved{}, fmt.Errorf("note 路径不符合 .gcm/*: %q", item.Name)
 	}
-	if doc.Kind != "gitgcm" {
-		return gitGCMResolved{}, fmt.Errorf("YAML kind=%q，与文件名处理器 gitgcm 不一致", doc.Kind)
+	if k := strings.TrimSpace(doc.Kind); k != "" && k != "gcm" && k != "gitgcm" {
+		return gcmResolved{}, fmt.Errorf("YAML kind=%q，期望 gcm（或留空）", doc.Kind)
 	}
 
 	protocol := doc.Protocol
@@ -116,19 +122,19 @@ func resolveGitGCM(item Item, requirePassword bool) (gitGCMResolved, error) {
 	user := strings.TrimSpace(doc.Username)
 	pass := doc.Password
 	if host == "" || user == "" {
-		return gitGCMResolved{}, fmt.Errorf("gitgcm 需要非空 host、username")
+		return gcmResolved{}, fmt.Errorf("gcm 需要非空 host、username")
 	}
 	if requirePassword && pass == "" {
-		return gitGCMResolved{}, fmt.Errorf("gitgcm 需要非空 password")
+		return gcmResolved{}, fmt.Errorf("gcm 需要非空 password")
 	}
 	if strings.ContainsAny(host, " \t\r\n") || strings.Contains(host, "://") {
-		return gitGCMResolved{}, fmt.Errorf("非法 host: %q", host)
+		return gcmResolved{}, fmt.Errorf("非法 host: %q", host)
 	}
 	if protocol != "https" && protocol != "http" {
-		return gitGCMResolved{}, fmt.Errorf("不支持的 protocol: %q", protocol)
+		return gcmResolved{}, fmt.Errorf("不支持的 protocol: %q", protocol)
 	}
 
-	return gitGCMResolved{
+	return gcmResolved{
 		protocol: protocol,
 		provider: provider,
 		host:     host,
@@ -138,10 +144,10 @@ func resolveGitGCM(item Item, requirePassword bool) (gitGCMResolved, error) {
 	}, nil
 }
 
-func parseGitGCMDoc(content string) (*GitGCMDoc, error) {
-	var doc GitGCMDoc
+func parseGCMDoc(content string) (*GCMDoc, error) {
+	var doc GCMDoc
 	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
-		return nil, fmt.Errorf("解析 gitgcm YAML: %w", err)
+		return nil, fmt.Errorf("解析 gcm YAML: %w", err)
 	}
 	doc.Kind = strings.TrimSpace(doc.Kind)
 	doc.Host = strings.TrimSpace(doc.Host)

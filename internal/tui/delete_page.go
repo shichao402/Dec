@@ -165,6 +165,11 @@ func (m model) handleDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
+	case "q", "ctrl+c":
+		// Remote 列表拦截全部按键（见 routeDeletePageKey），退出必须在这里自己处理，
+		// 否则永远走不到全局 quit 分支。
+		m.pushLog("Exit requested")
+		return m, tea.Quit
 	case "esc", "h", "left":
 		m.syncTreeViewports()
 		if m.deleteTree.CollapseAtCursor() {
@@ -207,12 +212,17 @@ func (m model) handleDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "a":
-		m.deleteTree.SelectAllAtCursor()
+		m.deleteTree.SelectAll()
 		m.pushLog(fmt.Sprintf("Remote 已全选 %d 项", m.deleteTree.CountSelectable()))
 		return m, nil
 	case "A":
-		m.beginAddSecret(true)
+		m.deleteTree.ClearSelection()
+		m.pushLog("Remote 已全不选")
 		return m, nil
+	case "n":
+		return m, m.beginRemoteRegisterAtCursor()
+	case "N":
+		return m, m.beginRemoteRegisterNewFolder()
 	case "e":
 		cmd := m.startRemoteEditAtCursor()
 		return m, cmd
@@ -381,7 +391,7 @@ func (m model) remoteHeadLines() []string {
 	if m.deleteLoad.busy() {
 		lines = append(lines, shellWarnStyle.Render("刷新中…"))
 	} else {
-		lines = append(lines, shellMutedStyle.Render("a 全选 · A 登记 · / 筛选"))
+		lines = append(lines, shellMutedStyle.Render("a 全选 · A 全不选 · n 登记到光标 folder · N 登记到新 folder · / 筛选"))
 	}
 	if m.deleteFilterInput {
 		lines = append(lines, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))
@@ -401,6 +411,9 @@ func (m model) remoteFooterLines() []string {
 	if m.deleteResult != nil {
 		footer = append(footer, shellGoodStyle.Render(fmt.Sprintf("上次删除：Dec %d · secrets %d · ssh %d · bundle %d",
 			m.deleteResult.DecDeleted, m.deleteResult.SecretsDeleted, m.deleteResult.SSHKeysDeleted, m.deleteResult.BundlesDeleted)))
+	}
+	if outcome := m.renderAddSecretOutcome(); outcome != "" {
+		footer = append(footer, outcome)
 	}
 	return footer
 }
@@ -423,6 +436,9 @@ func (m model) remoteListChromeHeight(width int) int {
 }
 
 func (m model) renderDeletePage(width, height int) string {
+	if m.addSecretStage != "" {
+		return wrapLines(width, m.addSecretBlockLines())
+	}
 	if m.deleteStage == "summary" || m.deleteStage == "confirm" || m.deleteStage == "typed" {
 		return m.renderDeleteConfirmPage(width)
 	}
@@ -442,7 +458,7 @@ func (m model) renderDeletePage(width, height int) string {
 	allRows := tree.VisibleRows()
 	lines := mm.remoteHeadLines()
 	if len(visible) == 0 {
-		lines = append(lines, shellMutedStyle.Render("暂无远端项 · A 登记 Secret · Run 页 Pull 获取"))
+		lines = append(lines, shellMutedStyle.Render("暂无远端项 · n 登记 Secret · Run 页 Pull 获取"))
 		return wrapLines(width, lines)
 	}
 

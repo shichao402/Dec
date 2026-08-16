@@ -24,17 +24,17 @@ func TestAddProjectSecret_CreatesNoteNamedBySyncRelPath(t *testing.T) {
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"tencent-cloud"}}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/tencent-cloud/env/tencent.env", "SECRET_ID=abc\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/tencent-cloud/.env/tencent.env", "SECRET_ID=abc\n")
 
-	result, err := AddProjectSecret(context.Background(), projectRoot, "tencent-cloud", "env/tencent.env", nil)
+	result, err := AddProjectSecret(context.Background(), projectRoot, "tencent-cloud", ".env/tencent.env", nil)
 	if err != nil {
 		t.Fatalf("AddProjectSecret() = %v", err)
 	}
-	if result.Folder != "tencent-cloud" || result.LandingPath != ".secrets/bundles/tencent-cloud/env/tencent.env" {
+	if result.Folder != "tencent-cloud" || result.LandingPath != ".secrets/bundles/tencent-cloud/.env/tencent.env" {
 		t.Fatalf("result = %#v", result)
 	}
 	notes := stub.NotesByFolder["tencent-cloud"]
-	if len(notes) != 1 || notes[0].RelativePath != "env/tencent.env" {
+	if len(notes) != 1 || notes[0].RelativePath != ".env/tencent.env" {
 		t.Fatalf("notes = %#v, note 名应相对同步根", notes)
 	}
 	if notes[0].Content != "SECRET_ID=abc\n" {
@@ -55,7 +55,7 @@ func TestAddProjectSecret_RejectsMissingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := AddProjectSecret(context.Background(), projectRoot, "tencent-cloud", "env/absent.env", nil)
+	_, err := AddProjectSecret(context.Background(), projectRoot, "tencent-cloud", ".env/absent.env", nil)
 	if err == nil {
 		t.Fatal("文件不存在时应报错")
 	}

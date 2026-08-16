@@ -126,7 +126,9 @@ func TestAddSecret_RendersPromptAndOutcome(t *testing.T) {
 		t.Fatalf("Project 页应展示登记输入区:\n%s", view)
 	}
 
-	done, _ := updated.Update(addSecretDoneMsg{result: &app.AddSecretResult{
+	running := updated.(model)
+	running.addSecretStage = addSecretStageRunning
+	done, _ := running.Update(addSecretDoneMsg{result: &app.AddSecretResult{
 		Folder:         "demo",
 		NoteRelPath:    "env/vikunja.env",
 		ProjectRelPath: ".secrets/project/env/vikunja.env",

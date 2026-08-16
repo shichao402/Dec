@@ -369,7 +369,7 @@ type model struct {
 	deleteTypedSpec               app.DeleteTypedConfirmSpec
 	remoteNoteEdit                *app.RemoteNoteEditSession
 	remoteSSHEdit                 *app.RemoteSSHHostsEditSession
-	remoteRegisterPending         bool // A 登记走 temp 编辑器时为 true
+	remoteRegisterPending         bool       // n 登记走 temp 编辑器时为 true
 	shellRefresh                  asyncBatch // overview/assets/settings/projectSettings/projectVars
 	projectVarsLoad               asyncLoad  // 独立重载 .dec/vars.yaml
 	globalVarsLoad                asyncLoad  // 独立重载 ~/.dec/local/vars.yaml
@@ -393,10 +393,18 @@ type model struct {
 	addSecretContentPath string // Remote：显式本地路径
 	addSecretSourceMode  string // Remote："temp" | "path"
 	addSecretTargets     []app.SecretTargetOption
+	addSecretTargetsLoad asyncLoad // Project 页候选归属枚举（禁止同步调用）
 	addSecretTargetIdx   int
 	addSecretResult      *app.AddSecretResult
 	addSecretErr         error
-	addSecretRemoteMode  bool // true = Remote 任意 folder 登记
+	addSecretRemoteMode  bool   // true = Remote 登记（归属为 Bitwarden folder）
+	addSecretFolder      string // Remote：光标反推出的 folder，或 N 手输的新 folder
+	addSecretFolderNew   bool   // Remote：folder 由用户手输（可能尚不存在）
+	addSecretTypeIdx     int    // Remote：点类型表索引（含普通 note）
+	addSecretInitialBody string // Remote temp 预填正文
+	// addSecretNotice 是表单内可见的校验/说明行。登记表单整页渲染，日志区不可见，
+	// 校验失败只 pushLog 会让用户以为按键无效。
+	addSecretNotice string
 
 	serverVersion                  string
 	serverVersionMismatch          bool
@@ -913,14 +921,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Push 确认页已打开：%d 个 enabled bundle", msg.preview.EnabledBundleCount))
 		}
 		return m, nil
+	case addSecretTargetsMsg:
+		m.applyAddSecretTargets(msg)
+		return m, nil
 	case addSecretDoneMsg:
-		m.addSecretStage = ""
-		m.addSecretResult = msg.result
-		m.addSecretErr = msg.err
+		// 用户 Esc 退出等待后又开了新一轮表单：迟到的结果只落日志，不覆盖新表单。
+		stale := m.addSecretStage != "" && m.addSecretStage != addSecretStageRunning
+		if !stale {
+			m.addSecretStage = ""
+			m.addSecretResult = msg.result
+			m.addSecretErr = msg.err
+		}
 		m.remoteRegisterPending = false
 		m.clearRemoteEditSession()
 		for _, line := range msg.logs {
 			m.pushLog(line)
+		}
+		if stale {
+			if msg.err != nil {
+				m.pushLog("上一轮登记失败: " + msg.err.Error())
+			} else {
+				m.pushLog("上一轮登记已完成")
+			}
+			return m, nil
 		}
 		if msg.err != nil {
 			m.pushLog("登记 secret 失败: " + msg.err.Error())
@@ -1238,12 +1261,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.pushLog("登记 secret 需要先有 .dec/config.yaml，按 i 在 Project 页生成本地 project")
 					return m, nil
 				}
-				m.beginAddSecret(false)
-				return m, nil
+				return m, m.beginAddSecret()
 			}
+			return m, nil
+		case "n":
 			if m.isRemotePage() {
-				m.beginAddSecret(true)
-				return m, nil
+				return m, m.beginRemoteRegisterAtCursor()
 			}
 			return m, nil
 		case "R":

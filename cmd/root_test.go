@@ -87,7 +87,7 @@ func TestRootVersionString(t *testing.T) {
 	}
 }
 
-func TestGetVersionFallsBackToVersionFileWhenAppVersionIsDev(t *testing.T) {
+func TestGetVersionIgnoresWorkingDirVersionFile(t *testing.T) {
 	tempDir := t.TempDir()
 	versionFile := tempDir + "/version.json"
 	if err := os.WriteFile(versionFile, []byte("{\n  \"version\": \"v9.9.9\"\n}\n"), 0644); err != nil {
@@ -107,8 +107,11 @@ func TestGetVersionFallsBackToVersionFileWhenAppVersionIsDev(t *testing.T) {
 	RootCmd.Version = getVersionString()
 	chdirForTest(t, tempDir)
 
-	if got := GetVersion(); got != "v9.9.9" {
-		t.Fatalf("GetVersion() = %q, 期望 %q", got, "v9.9.9")
+	if got := GetVersion(); got != "dev" {
+		t.Fatalf("GetVersion() = %q, 期望 %q（工作目录 version.json 不得参与版本判定）", got, "dev")
+	}
+	if RootCmd.Version != "dev" {
+		t.Fatalf("RootCmd.Version = %q, 期望 %q", RootCmd.Version, "dev")
 	}
 }
 

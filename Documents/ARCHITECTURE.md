@@ -41,7 +41,7 @@ Dec 是一个以 **TUI** 为第一人机入口、以 **MCP** 为 Agent 入口的
 - 项目初始化 / project 选择：TUI **Home**
 - bundle 启用与资产浏览：TUI **Bundles** 页
 - pull / push / remove（含成功对照后的孤儿 reconcile）：TUI **Run** 页
-- 全量远端浏览 / temp 编辑 / 任意 folder 登记 / 远端与本地删除拆分：TUI **Remote** 页（ADR 0004）
+- 全量远端浏览 / temp 编辑 / 按光标 folder 登记（`n`，新 folder 用 `N`）/ 远端与本地删除拆分：TUI **Remote** 页（ADR 0004）
 - 版本信息：`dec --version`
 
 资产目录类型（skill / command / rule / mcp）以 `internal/bundle.VaultAssetKinds` 为共用真相源。

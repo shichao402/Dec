@@ -9,9 +9,9 @@ import (
 
 func TestParseProcessorNoteName(t *testing.T) {
 	tests := []struct {
-		name              string
+		name               string
 		wantInst, wantProc string
-		ok                bool
+		ok                 bool
 	}{
 		{"cnb_gitgcm.yaml", "cnb", "gitgcm", true},
 		{"handlers/cnb_gitgcm.yaml", "cnb", "gitgcm", true},
@@ -31,12 +31,12 @@ func TestParseProcessorNoteName(t *testing.T) {
 	}
 }
 
-func TestGitGCMHandler_Apply(t *testing.T) {
+func TestGCMHandler_Apply(t *testing.T) {
 	var calls []struct {
 		stdin string
 		args  []string
 	}
-	h := NewGitGCMHandler(func(_ context.Context, stdin string, args ...string) error {
+	h := NewGCMHandler(func(_ context.Context, stdin string, args ...string) error {
 		cp := append([]string(nil), args...)
 		calls = append(calls, struct {
 			stdin string
@@ -49,20 +49,19 @@ func TestGitGCMHandler_Apply(t *testing.T) {
 	reg.Register(h)
 
 	content := `
-kind: gitgcm
 host: cnb.cool
 username: cnb
 password: "secret-token"
 `
 	applied, err := ApplyNotes(context.Background(), reg, []Item{{
 		Source:      SourceNote,
-		Name:        "cnb_gitgcm.yaml",
+		Name:        ".gcm/cnb.yaml",
 		NoteContent: content,
 	}})
 	if err != nil {
 		t.Fatalf("ApplyNotes: %v", err)
 	}
-	if len(applied) != 1 || applied[0] != "cnb_gitgcm.yaml" {
+	if len(applied) != 1 || applied[0] != ".gcm/cnb.yaml" {
 		t.Fatalf("applied = %#v", applied)
 	}
 	if len(calls) != 2 {
@@ -76,12 +75,12 @@ password: "secret-token"
 	}
 }
 
-func TestGitGCMHandler_Revoke(t *testing.T) {
+func TestGCMHandler_Revoke(t *testing.T) {
 	var calls []struct {
 		stdin string
 		args  []string
 	}
-	h := NewGitGCMHandler(func(_ context.Context, stdin string, args ...string) error {
+	h := NewGCMHandler(func(_ context.Context, stdin string, args ...string) error {
 		calls = append(calls, struct {
 			stdin string
 			args  []string
@@ -93,20 +92,19 @@ func TestGitGCMHandler_Revoke(t *testing.T) {
 	reg.Register(h)
 
 	content := `
-kind: gitgcm
 host: cnb.cool
 username: cnb
 password: "secret-token"
 `
 	revoked, err := RevokeNotes(context.Background(), reg, []Item{{
 		Source:      SourceNote,
-		Name:        "cnb_gitgcm.yaml",
+		Name:        ".gcm/cnb.yaml",
 		NoteContent: content,
 	}})
 	if err != nil {
 		t.Fatalf("RevokeNotes: %v", err)
 	}
-	if len(revoked) != 1 || revoked[0] != "cnb_gitgcm.yaml" {
+	if len(revoked) != 1 || revoked[0] != ".gcm/cnb.yaml" {
 		t.Fatalf("revoked = %#v", revoked)
 	}
 	if len(calls) != 2 {
@@ -126,30 +124,29 @@ password: "secret-token"
 	}
 }
 
-// --unset key 不存在（git 返回错误）时 Revoke 仍成功。
-func TestGitGCMHandler_RevokeToleratesMissingUnset(t *testing.T) {
-	h := NewGitGCMHandler(func(_ context.Context, _ string, args ...string) error {
+func TestGCMHandler_RevokeToleratesMissingUnset(t *testing.T) {
+	h := NewGCMHandler(func(_ context.Context, _ string, args ...string) error {
 		if len(args) >= 2 && args[0] == "config" && args[1] == "--global" {
 			return fmt.Errorf("exit status 5")
 		}
 		return nil
 	})
 	err := h.Revoke(context.Background(), Item{
-		Name:        "cnb_gitgcm.yaml",
-		NoteContent: "kind: gitgcm\nhost: cnb.cool\nusername: cnb\n",
+		Name:        ".gcm/cnb.yaml",
+		NoteContent: "host: cnb.cool\nusername: cnb\n",
 	})
 	if err != nil {
 		t.Fatalf("Revoke 应容忍 --unset 失败, got %v", err)
 	}
 }
 
-func TestGitGCMHandler_KindMismatch(t *testing.T) {
-	h := NewGitGCMHandler(func(context.Context, string, ...string) error { return nil })
+func TestGCMHandler_KindMismatch(t *testing.T) {
+	h := NewGCMHandler(func(context.Context, string, ...string) error { return nil })
 	err := h.Apply(context.Background(), Item{
-		Name:        "cnb_gitgcm.yaml",
+		Name:        ".gcm/cnb.yaml",
 		NoteContent: "kind: other\nhost: cnb.cool\nusername: cnb\npassword: x\n",
 	})
-	if err == nil || !strings.Contains(err.Error(), "不一致") {
+	if err == nil || !strings.Contains(err.Error(), "期望 gcm") {
 		t.Fatalf("want kind mismatch, got %v", err)
 	}
 }
@@ -157,12 +154,12 @@ func TestGitGCMHandler_KindMismatch(t *testing.T) {
 func TestApplyNotes_SkipsOrdinaryEnv(t *testing.T) {
 	called := false
 	reg := NewRegistry()
-	reg.Register(NewGitGCMHandler(func(context.Context, string, ...string) error {
+	reg.Register(NewGCMHandler(func(context.Context, string, ...string) error {
 		called = true
 		return nil
 	}))
 	applied, err := ApplyNotes(context.Background(), reg, []Item{{
-		Name:        "env/foo.env",
+		Name:        ".env/foo.env",
 		NoteContent: "A=1\n",
 	}})
 	if err != nil {
@@ -170,5 +167,14 @@ func TestApplyNotes_SkipsOrdinaryEnv(t *testing.T) {
 	}
 	if called || len(applied) != 0 {
 		t.Fatalf("should skip env note: called=%v applied=%v", called, applied)
+	}
+}
+
+func TestMatchGCMPath(t *testing.T) {
+	if !MatchGCMPath(".gcm/cnb.yaml") {
+		t.Fatal("want match")
+	}
+	if MatchGCMPath("cnb_gitgcm.yaml") {
+		t.Fatal("旧名不应再 Match")
 	}
 }

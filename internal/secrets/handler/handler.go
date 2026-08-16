@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/shichao402/Dec/internal/secrets"
 )
 
 // SourceKind 对齐 Bitwarden 可同步条目类型（有限闭集）。
@@ -20,7 +22,7 @@ const (
 // Item 是一次 Handler.Apply 的输入。
 type Item struct {
 	Source      SourceKind
-	Name        string // 路由名：Note 用 basename；SSH 用逻辑名
+	Name        string // 相对同步根路径（完整路径，如 .gcm/cnb.yaml）
 	NoteContent string // SourceNote 时为正文
 	ProjectRoot string
 	BundleName  string
@@ -59,6 +61,7 @@ func (r *Registry) Register(h Handler) {
 }
 
 // Find 返回第一个 Match 成功的 Handler；无匹配返回 nil。
+// name 应为完整相对路径（点类型目录路由依赖路径首段）。
 func (r *Registry) Find(source SourceKind, name string) Handler {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -77,11 +80,11 @@ var (
 
 func newDefaultRegistry() *Registry {
 	r := NewRegistry()
-	r.Register(NewGitGCMHandler(nil))
+	r.Register(NewGCMHandler(nil))
 	return r
 }
 
-// Default 返回进程级默认 Registry（含内置 gitgcm）。
+// Default 返回进程级默认 Registry（含内置 gcm）。
 func Default() *Registry {
 	defaultMu.RLock()
 	defer defaultMu.RUnlock()
@@ -105,12 +108,17 @@ func SetDefault(r *Registry) (restore func()) {
 	}
 }
 
-// NoteRouteName 从 SyncTarget 相对路径取出路由名（basename）。
-func NoteRouteName(relativePath string) string {
-	return path.Base(filepath.ToSlash(strings.TrimSpace(relativePath)))
+// NormalizeNotePath 规范化相对同步根路径（slash）。
+func NormalizeNotePath(relativePath string) string {
+	return path.Clean(filepath.ToSlash(strings.TrimSpace(relativePath)))
 }
 
-// ParseProcessorNoteName 解析 {实例}_{处理器}.yaml|.yml。
+// NoteRouteName 从 SyncTarget 相对路径取出 basename（遗留辅助；路由请用完整路径）。
+func NoteRouteName(relativePath string) string {
+	return path.Base(NormalizeNotePath(relativePath))
+}
+
+// ParseProcessorNoteName 解析旧约定 {实例}_{处理器}.yaml|.yml（仅迁移器用）。
 // 未匹配约定时 ok=false（不是错误）。
 func ParseProcessorNoteName(name string) (instance, processor string, ok bool) {
 	base := NoteRouteName(name)
@@ -139,6 +147,12 @@ func ParseProcessorNoteName(name string) (instance, processor string, ok bool) {
 	return instance, processor, true
 }
 
+// MatchGCMPath 判断相对路径是否由 gcm 处理器处理（.gcm/...）。
+func MatchGCMPath(name string) bool {
+	tp, ok, err := secrets.ParseTypePath(name)
+	return err == nil && ok && tp.Type.ID == secrets.SecretTypeGCM
+}
+
 // ApplyNotes 对已落地（或待落地）的 Note 执行匹配到的 Handler。
 // 未匹配则跳过。任一 Handler 失败则返回错误。
 func ApplyNotes(ctx context.Context, reg *Registry, items []Item) (applied []string, err error) {
@@ -152,7 +166,7 @@ func ApplyNotes(ctx context.Context, reg *Registry, items []Item) (applied []str
 		if item.Source != SourceNote {
 			return applied, fmt.Errorf("ApplyNotes 仅接受 SourceNote，收到 %s", item.Source)
 		}
-		name := NoteRouteName(item.Name)
+		name := NormalizeNotePath(item.Name)
 		item.Name = name
 		h := reg.Find(SourceNote, name)
 		if h == nil {
@@ -179,7 +193,7 @@ func RevokeNotes(ctx context.Context, reg *Registry, items []Item) (revoked []st
 		if item.Source != SourceNote {
 			return revoked, fmt.Errorf("RevokeNotes 仅接受 SourceNote，收到 %s", item.Source)
 		}
-		name := NoteRouteName(item.Name)
+		name := NormalizeNotePath(item.Name)
 		item.Name = name
 		h := reg.Find(SourceNote, name)
 		if h == nil {

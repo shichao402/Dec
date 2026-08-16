@@ -74,7 +74,10 @@ func (m model) statusBarLeftHints() string {
 		if m.deleteFilterInput {
 			return "filter · Enter apply · Esc cancel"
 		}
-		return "q quit | j/k | PgUp/Dn | space | e edit | A add | d delete | r refresh"
+		if m.addSecretStage != "" {
+			return "register · tab switch · Enter next · Esc cancel"
+		}
+		return "q quit | j/k | space | a all | A none | n/N add | e edit | d delete | r refresh"
 	}
 	return "q quit | j/k nav | l/h in-out | r refresh"
 }

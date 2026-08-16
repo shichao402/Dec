@@ -39,7 +39,7 @@ dec --version / dec --help / dec __freshness-check
 | **Bundles** | 扫描 vault bundle、浏览/搜索资产、调整项目 `enabled_bundles` / `enabled` 并保存 |
 | **Project** | 项目级 IDE / editor 覆盖、**项目变量**（`.dec/vars.yaml` 只读预览，按 `e` 挂起外部编辑器） |
 | **Run** | pull / push / remove；一次 pull 解析 project bundle 列表 → Dec Git bundle + Bitwarden secrets bundle；成功对照远端的启用集自动 prune 本地孤儿（无法确认只报告） |
-| **Remote** | 上下文无关的完整远端浏览器/编辑器（Dec Git vault 全量 + Bitwarden 全部 folder + 无文件夹只读区）；`e` temp 编辑、`A` 任意 folder 登记、远端/本地删除拆分、跨上下文 typed confirm（ADR 0004） |
+| **Remote** | 上下文无关的完整远端浏览器/编辑器（Dec Git vault 全量 + Bitwarden 全部 folder + 无文件夹只读区）；`e` temp 编辑、`n` 登记到光标所在 folder / `N` 登记到新 folder、`a`/`A` 全选/全不选、远端/本地删除拆分、跨上下文 typed confirm（ADR 0004） |
 | **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、本机用户级 bundle 启用、**本机 vars** 外部编辑、服务版本 mismatch 提示与重启 `dec-server` |
 
 侧栏导航：`Home` → `Bundles` → `Project` → `Run` → `Remote` → `Settings`（`tab` / `shift+tab` 切换）。
@@ -112,7 +112,8 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 
 - 进入默认拉全量远端库存（`ListRemoteInventory`）；`r` 强制刷新
 - `e`：Secure Note / SSH Hosts → temp → 写回远端（不种本地）
-- `A`：任意远端 folder 登记（temp 或本地路径）
+- `n`：任意远端 folder 登记（temp 或本地路径）；候选 folder 枚举可能触发解锁，走 `addSecretTargetsLoad` 异步加载，禁止在 `Update` 里同步调用
+- `a` 全选 / `A` 全不选
 - `d`：远端分区只改远端；本地分区只清本机；跨上下文需 typed confirm
 - 「无文件夹」只读折叠区，不可勾选删除
 

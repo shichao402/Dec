@@ -13,7 +13,7 @@ func TestAnalyzeDeleteTypedConfirm_UnmanagedRequiresTyped(t *testing.T) {
 	spec := AnalyzeDeleteTypedConfirm([]DeleteSelectionItem{{
 		Kind:          DeleteKindSecret,
 		SecretsBundle: "relkit",
-		SecretPath:    "env/x.env",
+		SecretPath:    ".env/x.env",
 		Partition:     PartitionRemote,
 		Unmanaged:     true,
 	}}, NewWorkspace(WorkspaceProject, t.TempDir()))
@@ -38,7 +38,7 @@ func TestAnalyzeDeleteTypedConfirm_SameContextNoTyped(t *testing.T) {
 	spec := AnalyzeDeleteTypedConfirm([]DeleteSelectionItem{{
 		Kind:          DeleteKindSecret,
 		SecretsBundle: "Dec",
-		SecretPath:    "env/a.env",
+		SecretPath:    ".env/a.env",
 		Partition:     PartitionRemote,
 	}}, NewWorkspace(WorkspaceProject, t.TempDir()))
 	if spec.Required {
@@ -48,12 +48,12 @@ func TestAnalyzeDeleteTypedConfirm_SameContextNoTyped(t *testing.T) {
 
 func TestAnalyzeDeleteTypedConfirm_CrossPlaneScope(t *testing.T) {
 	spec := AnalyzeDeleteTypedConfirm([]DeleteSelectionItem{{
-		Kind:       DeleteKindDecAsset,
-		Type:       "skill",
-		Name:       "tencent-cloud",
-		Vault:      "tencent-cloud",
-		Partition:  PartitionRemote,
-		ScopeTag:   "user",
+		Kind:      DeleteKindDecAsset,
+		Type:      "skill",
+		Name:      "tencent-cloud",
+		Vault:     "tencent-cloud",
+		Partition: PartitionRemote,
+		ScopeTag:  "user",
 	}}, NewWorkspace(WorkspaceProject, t.TempDir()))
 	if !spec.Required || spec.Expect != "tencent-cloud" {
 		t.Fatalf("跨平面 Dec 资产应要求 typed: %#v", spec)
@@ -82,11 +82,11 @@ func TestRegisterRemoteNoteFromPath_PushesWithoutLocalRoot(t *testing.T) {
 	if err := os.WriteFile(src, []byte("TOKEN=1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := RegisterRemoteNoteFromPath(context.Background(), projectRoot, "relkit", "env/token.env", src, nil)
+	result, err := RegisterRemoteNoteFromPath(context.Background(), projectRoot, "relkit", ".env/token.env", src, nil)
 	if err != nil {
 		t.Fatalf("RegisterRemoteNoteFromPath: %v", err)
 	}
-	if result.Folder != "relkit" || result.NoteRelPath != "env/token.env" {
+	if result.Folder != "relkit" || result.NoteRelPath != ".env/token.env" {
 		t.Fatalf("result = %#v", result)
 	}
 	notes := stub.NotesByFolder["relkit"]
@@ -102,7 +102,7 @@ func TestPrepareRemoteNoteRegister_UsesTemp(t *testing.T) {
 	secretsClientFactory = func() secrets.Client { return stub }
 	t.Cleanup(func() { secretsClientFactory = orig })
 
-	sess, err := PrepareRemoteNoteRegister(context.Background(), t.TempDir(), "bundle/vikunja", "env/new.env", nil)
+	sess, err := PrepareRemoteNoteRegister(context.Background(), t.TempDir(), "bundle/vikunja", ".env/new.env", "", nil)
 	if err != nil {
 		t.Fatalf("PrepareRemoteNoteRegister: %v", err)
 	}

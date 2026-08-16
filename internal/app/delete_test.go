@@ -135,14 +135,14 @@ func TestListDeleteCandidates_IncludesLocalSecretsWithoutRemote(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/env/vikunja.env", "TOKEN=1\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.env/vikunja.env", "TOKEN=1\n")
 
 	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
 	if err != nil {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
 	for _, c := range candidates {
-		if c.Kind == DeleteKindSecret && c.SecretPath == "env/vikunja.env" && !c.Orphan {
+		if c.Kind == DeleteKindSecret && c.SecretPath == ".env/vikunja.env" && !c.Orphan {
 			return
 		}
 	}
@@ -156,7 +156,7 @@ func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T)
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
+			"bundle/vikunja": {{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -168,7 +168,7 @@ func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
 
 	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, true, nil)
 	if err != nil {
@@ -178,7 +178,7 @@ func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T)
 		if c.Kind != DeleteKindSecret {
 			continue
 		}
-		if c.SecretPath != "env/vikunja.env" {
+		if c.SecretPath != ".env/vikunja.env" {
 			t.Fatalf("SecretPath = %q, 期望相对同步根的 note 名", c.SecretPath)
 		}
 		if c.Orphan {
@@ -217,7 +217,7 @@ func TestListDeleteCandidates_IncludesRemoteOnlySecrets(t *testing.T) {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
 				"bundle/vikunja": {{
-					RelativePath: "env/remote-only.env",
+					RelativePath: ".env/remote-only.env",
 					Content:      "VIKUNJA_API_TOKEN=1\n",
 				}},
 			},
@@ -279,7 +279,7 @@ func TestListDeleteCandidates_ListsRemoteSecretsOutsideEnabled(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"bundle/vikunja": {{RelativePath: "env/outside.env", Content: "TOKEN=1\n"}},
+				"bundle/vikunja": {{RelativePath: ".env/outside.env", Content: "TOKEN=1\n"}},
 			},
 		}
 	}
@@ -306,7 +306,7 @@ func TestListDeleteCandidates_ListsRemoteSecretsOutsideEnabled(t *testing.T) {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
 	for _, c := range candidates {
-		if c.Kind == DeleteKindSecret && c.SecretPath == "env/outside.env" {
+		if c.Kind == DeleteKindSecret && c.SecretPath == ".env/outside.env" {
 			if c.SecretsBundle != "bundle/vikunja" {
 				t.Fatalf("SecretsBundle = %q, want bundle/vikunja", c.SecretsBundle)
 			}
@@ -327,14 +327,14 @@ func TestListDeleteCandidates_ListsLocalSecretsForDisabledBundle(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/env/left.env", "TOKEN=1\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.env/left.env", "TOKEN=1\n")
 
 	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
 	if err != nil {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
 	for _, c := range candidates {
-		if c.Kind == DeleteKindSecret && c.SecretPath == "env/left.env" {
+		if c.Kind == DeleteKindSecret && c.SecretPath == ".env/left.env" {
 			return
 		}
 	}
@@ -411,7 +411,7 @@ func TestListDeleteCandidates_DiscoversOrphanRemoteFolder(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"bundle/orphan": {{RelativePath: "env/left-behind.env", Content: "TOKEN=1\n"}},
+				"bundle/orphan": {{RelativePath: ".env/left-behind.env", Content: "TOKEN=1\n"}},
 			},
 		}
 	}
@@ -434,7 +434,7 @@ func TestListDeleteCandidates_DiscoversOrphanRemoteFolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
-	if !hasSecretCandidate(candidates, "bundle/orphan", "env/left-behind.env") {
+	if !hasSecretCandidate(candidates, "bundle/orphan", ".env/left-behind.env") {
 		t.Fatalf("Bitwarden 孤儿 folder 应出现在 Remote: %#v", candidates)
 	}
 }
@@ -447,7 +447,7 @@ func TestListDeleteCandidates_OrphanDiscoveryCrossPlaneVisible(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"bundle/user-only": {{RelativePath: "env/machine.env", Content: "TOKEN=1\n"}},
+				"bundle/user-only": {{RelativePath: ".env/machine.env", Content: "TOKEN=1\n"}},
 			},
 		}
 	}
@@ -470,7 +470,7 @@ func TestListDeleteCandidates_OrphanDiscoveryCrossPlaneVisible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
-	if !hasSecretCandidate(projectCandidates, "bundle/user-only", "env/machine.env") {
+	if !hasSecretCandidate(projectCandidates, "bundle/user-only", ".env/machine.env") {
 		t.Fatalf("跨平面 folder 应出现在项目平面 Remote: %#v", projectCandidates)
 	}
 
@@ -479,7 +479,7 @@ func TestListDeleteCandidates_OrphanDiscoveryCrossPlaneVisible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWorkspaceDeleteCandidates(user) = %v", err)
 	}
-	if !hasSecretCandidate(userCandidates, "bundle/user-only", "env/machine.env") {
+	if !hasSecretCandidate(userCandidates, "bundle/user-only", ".env/machine.env") {
 		t.Fatalf("scope=user 的 bundle 应出现在用户平面 Remote: %#v", userCandidates)
 	}
 }
@@ -611,7 +611,7 @@ func TestListDeleteCandidates_IncludesSSHKeys(t *testing.T) {
 
 	stub := &secrets.StubClient{
 		SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-			"bundle/vikunja": {{Name: "deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n"}},
+			"bundle/vikunja": {{Name: ".sshkey/deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n"}},
 		},
 	}
 	origFactory := secretsClientFactory
@@ -638,7 +638,7 @@ func TestListDeleteCandidates_IncludesSSHKeys(t *testing.T) {
 		t.Fatalf("ListDeleteCandidates() = %v", err)
 	}
 	for _, c := range candidates {
-		if c.Kind == DeleteKindSSHKey && c.SSHKeyName == "deploy" {
+		if c.Kind == DeleteKindSSHKey && c.SSHKeyName == ".sshkey/deploy" {
 			if c.Orphan {
 				t.Fatalf("本地存在的 SSH Key 不应标 Orphan: %#v", c)
 			}
@@ -662,7 +662,7 @@ func TestDeleteProjectItems_RemovesSSHKeyRemoteOnlyLeavesLocal(t *testing.T) {
 
 	stub := &secrets.StubClient{
 		SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-			"bundle/vikunja": {{Name: "deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n", PublicKey: "pub\n"}},
+			"bundle/vikunja": {{Name: ".sshkey/deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n", PublicKey: "pub\n"}},
 		},
 	}
 	origFactory := secretsClientFactory
@@ -683,7 +683,7 @@ func TestDeleteProjectItems_RemovesSSHKeyRemoteOnlyLeavesLocal(t *testing.T) {
 		Mode:        DeleteModeRemote,
 		Items: []DeleteSelectionItem{{
 			Kind:          DeleteKindSSHKey,
-			SSHKeyName:    "deploy",
+			SSHKeyName:    ".sshkey/deploy",
 			DecBundleName: "vikunja",
 			SecretsBundle: "bundle/vikunja",
 			Partition:     PartitionRemote,
@@ -707,7 +707,7 @@ func TestDeleteProjectItems_RemovesSSHKeyRemoteOnlyLeavesLocal(t *testing.T) {
 		Confirmed:   true,
 		Items: []DeleteSelectionItem{{
 			Kind:          DeleteKindSSHKey,
-			SSHKeyName:    "deploy",
+			SSHKeyName:    ".sshkey/deploy",
 			DecBundleName: "vikunja",
 			SecretsBundle: "bundle/vikunja",
 			Partition:     PartitionLocal,
@@ -730,7 +730,7 @@ func TestDeleteProjectItems_RevokesGitGCMNote(t *testing.T) {
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/vikunja": {{RelativePath: "cnb_gitgcm.yaml", Content: "kind: gitgcm\nhost: cnb.cool\nusername: cnb\npassword: tok\n"}},
+			"bundle/vikunja": {{RelativePath: ".gcm/cnb.yaml", Content: "\nhost: cnb.cool\nusername: cnb\npassword: tok\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -745,8 +745,8 @@ func TestDeleteProjectItems_RevokesGitGCMNote(t *testing.T) {
 	t.Cleanup(restore)
 
 	projectRoot := t.TempDir()
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/cnb_gitgcm.yaml",
-		"kind: gitgcm\nhost: cnb.cool\nusername: cnb\npassword: tok\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.gcm/cnb.yaml",
+		"\nhost: cnb.cool\nusername: cnb\npassword: tok\n")
 
 	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
 		ProjectRoot: projectRoot,
@@ -754,7 +754,7 @@ func TestDeleteProjectItems_RevokesGitGCMNote(t *testing.T) {
 		Mode:        DeleteModeRemote,
 		Items: []DeleteSelectionItem{{
 			Kind:          DeleteKindSecret,
-			SecretPath:    "cnb_gitgcm.yaml",
+			SecretPath:    ".gcm/cnb.yaml",
 			LocalRoot:     ".secrets/bundles/vikunja",
 			Plane:         secrets.SyncPlaneProject,
 			SecretsBundle: "bundle/vikunja",
@@ -781,7 +781,7 @@ func TestDeleteProjectItems_RevokesGitGCMNote(t *testing.T) {
 	if !sawReject || !sawUnset {
 		t.Fatalf("应调用 credential reject 与 --unset provider: %#v", calls)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", "cnb_gitgcm.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", ".gcm/cnb.yaml")); err != nil {
 		t.Fatalf("远端删除不应碰本地 gitgcm note, err=%v", err)
 	}
 }
@@ -838,7 +838,7 @@ func TestDeleteProjectItems_ProjectPlaneRejectsEmptyRoot(t *testing.T) {
 		Confirmed:   true,
 		Items: []DeleteSelectionItem{{
 			Kind:       DeleteKindSecret,
-			SecretPath: "env/app.env",
+			SecretPath: ".env/app.env",
 		}},
 	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "项目根目录不能为空") {
@@ -853,7 +853,7 @@ func TestDeleteProjectItems_UserPlaneEmptyRootDeletesLocalSecretAndRemote(t *tes
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	localNote := filepath.Join(decHome, "secrets", "bundles", "woa", "env", "app.env")
+	localNote := filepath.Join(decHome, "secrets", "bundles", "woa", ".env", "app.env")
 	if err := os.MkdirAll(filepath.Dir(localNote), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -863,7 +863,7 @@ func TestDeleteProjectItems_UserPlaneEmptyRootDeletesLocalSecretAndRemote(t *tes
 
 	stub := &secrets.StubClient{
 		NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/woa": {{RelativePath: "env/app.env", Content: "TOKEN=1\n"}},
+			"bundle/woa": {{RelativePath: ".env/app.env", Content: "TOKEN=1\n"}},
 		},
 	}
 	origFactory := secretsClientFactory
@@ -877,7 +877,7 @@ func TestDeleteProjectItems_UserPlaneEmptyRootDeletesLocalSecretAndRemote(t *tes
 		Mode:        DeleteModeRemote,
 		Items: []DeleteSelectionItem{{
 			Kind:          DeleteKindSecret,
-			SecretPath:    "env/app.env",
+			SecretPath:    ".env/app.env",
 			LocalRoot:     "bundles/woa",
 			Plane:         secrets.SyncPlaneMachine,
 			SecretsBundle: "bundle/woa",
@@ -902,7 +902,7 @@ func TestDeleteProjectItems_UserPlaneEmptyRootDeletesLocalSecretAndRemote(t *tes
 		Confirmed:   true,
 		Items: []DeleteSelectionItem{{
 			Kind:          DeleteKindSecret,
-			SecretPath:    "env/app.env",
+			SecretPath:    ".env/app.env",
 			LocalRoot:     "bundles/woa",
 			Plane:         secrets.SyncPlaneMachine,
 			SecretsBundle: "bundle/woa",
@@ -966,7 +966,7 @@ func TestDeleteProjectItems_UserPlaneEmptyRootDeletesSSHKey(t *testing.T) {
 
 	stub := &secrets.StubClient{
 		SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-			"bundle/woa": {{Name: "deploy", Hosts: []string{"woa.example.com"}, PrivateKey: "priv\n", PublicKey: "pub\n"}},
+			"bundle/woa": {{Name: ".sshkey/deploy", Hosts: []string{"woa.example.com"}, PrivateKey: "priv\n", PublicKey: "pub\n"}},
 		},
 	}
 	origFactory := secretsClientFactory
@@ -988,7 +988,7 @@ func TestDeleteProjectItems_UserPlaneEmptyRootDeletesSSHKey(t *testing.T) {
 		Mode:        DeleteModeRemote,
 		Items: []DeleteSelectionItem{{
 			Kind:          DeleteKindSSHKey,
-			SSHKeyName:    "deploy",
+			SSHKeyName:    ".sshkey/deploy",
 			DecBundleName: "woa",
 			SecretsBundle: "bundle/woa",
 			Partition:     PartitionRemote,

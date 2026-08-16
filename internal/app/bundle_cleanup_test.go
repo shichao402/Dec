@@ -159,7 +159,7 @@ bundles:
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/pkv/env/left.env", "X=1\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/pkv/.env/left.env", "X=1\n")
 
 	_, err := RemoveAsset(RemoveAssetInput{
 		ProjectRoot: projectRoot,
@@ -236,7 +236,7 @@ bundles:
 	}
 
 	// 模拟「旧 bug」残留：本地又出现 secrets / cache，且误把 pkv 写回 enabled。
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/pkv/env/ghost.env", "GHOST=1\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/pkv/.env/ghost.env", "GHOST=1\n")
 	cacheCmd := filepath.Join(projectRoot, ".dec", "cache", "pkv", "commands", "pkv", "note.md")
 	if err := os.MkdirAll(filepath.Dir(cacheCmd), 0755); err != nil {
 		t.Fatal(err)
@@ -310,7 +310,7 @@ func TestDiscoverRemoteSecretTargets_DoesNotRememberOrphans(t *testing.T) {
 
 	client := &secrets.StubClient{
 		NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/pkv": {{RelativePath: "env/x.env", Content: "X=1\n"}},
+			"bundle/pkv": {{RelativePath: ".env/x.env", Content: "X=1\n"}},
 		},
 	}
 	// StubClient.ListSecretBundleNames 从 NotesByFolder 推导

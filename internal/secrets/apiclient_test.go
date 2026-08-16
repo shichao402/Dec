@@ -220,6 +220,126 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 	}
 }
 
+// 缺 folder 且未开 CreateFolderIfMissing：push 必须报错，不静默建 folder。
+func TestAPIClient_PushBundle_MissingFolderErrorsWithoutFlag(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBitwardenHeaders(t, r)
+		switch r.URL.Path {
+		case "/api/folders":
+			if r.Method == http.MethodPost {
+				t.Fatal("未开 CreateFolderIfMissing 不应 POST /folders")
+			}
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{Data: nil})
+		case "/api/ciphers":
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{Data: nil})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewAPIClient(&Config{ServerURL: srv.URL}, "sess-nofolder", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetUserKey(bytes.Repeat([]byte{0x05}, 64))
+	t.Cleanup(ClearSession)
+
+	_, err = client.PushBundle(context.Background(), PushBundleRequest{
+		Target:  SyncTarget{Folder: "cnb"},
+		Binding: BundleBinding{SecretsBundleName: "cnb"},
+	}, []SecureNote{{RelativePath: ".gcm/cnb.yaml", Content: "x"}})
+	if err == nil || !strings.Contains(err.Error(), "不存在") {
+		t.Fatalf("缺 folder 且未开 flag 应报 folder 不存在, got %v", err)
+	}
+}
+
+// 开 CreateFolderIfMissing：folder 不存在时先 POST /folders 建 folder，再落 note。
+func TestAPIClient_PushBundle_CreatesFolderWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	userKey := bytes.Repeat([]byte{0x06}, 64)
+	var (
+		folderPosts int
+		folderName  string
+		cipherPosts int
+		created     bool
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBitwardenHeaders(t, r)
+		switch {
+		case r.URL.Path == "/api/folders" && r.Method == http.MethodPost:
+			folderPosts++
+			var body map[string]any
+			data, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(data, &body)
+			enc, _ := body["name"].(string)
+			if !looksEncrypted(enc) {
+				t.Fatalf("folder name 应加密: %q", enc)
+			}
+			if name, err := decryptVaultString(enc, userKey); err == nil {
+				folderName = name
+			}
+			created = true
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/api/folders" && r.Method == http.MethodGet:
+			if created {
+				_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{Data: []bwFolder{{ID: "f-new", Name: enc(t, "cnb", userKey)}}})
+			} else {
+				_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{Data: nil})
+			}
+		case r.URL.Path == "/api/ciphers" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{Data: nil})
+		case r.URL.Path == "/api/ciphers" && r.Method == http.MethodPost:
+			cipherPosts++
+			var body map[string]any
+			data, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(data, &body)
+			if body["folderId"] != "f-new" {
+				t.Fatalf("note 应落到新建 folder f-new, got %v", body["folderId"])
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewAPIClient(&Config{ServerURL: srv.URL}, "sess-mkfolder", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetUserKey(userKey)
+	t.Cleanup(ClearSession)
+
+	result, err := client.PushBundle(context.Background(), PushBundleRequest{
+		Target:                SyncTarget{Folder: "cnb"},
+		Binding:               BundleBinding{SecretsBundleName: "cnb"},
+		CreateFolderIfMissing: true,
+	}, []SecureNote{{RelativePath: ".gcm/cnb.yaml", Content: "host: cnb.cool\n"}})
+	if err != nil {
+		t.Fatalf("PushBundle() = %v", err)
+	}
+	if folderPosts != 1 || folderName != "cnb" {
+		t.Fatalf("应恰好建一次 folder cnb, posts=%d name=%q", folderPosts, folderName)
+	}
+	if cipherPosts != 1 || result.Created != 1 {
+		t.Fatalf("应在新 folder 建 1 条 note, cipherPosts=%d result=%#v", cipherPosts, result)
+	}
+}
+
+// enc 是测试辅助：用给定 key 加密明文，模拟 Bitwarden folder name 密文。
+func enc(t *testing.T, plain string, key []byte) string {
+	t.Helper()
+	s, err := encryptVaultString(plain, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
 // note 名只有一种合法形态（项目根相对落地路径），匹配按精确名走。
 func TestAPIClient_PushBundle_UpdateMatchesNameExactly(t *testing.T) {
 	t.Parallel()

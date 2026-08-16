@@ -25,7 +25,7 @@ type remoteEditPreparedMsg struct {
 	editorCmd string
 	err       error
 	logs      []string
-	register  bool // true = A 登记新建，而非编辑已有
+	register  bool // true = n 登记新建，而非编辑已有
 }
 
 type remoteEditDoneMsg struct {
@@ -95,6 +95,11 @@ func prepareRemoteEditCmd(projectRoot string, item app.DeleteSelectionItem, edit
 func (m *model) handleRemoteEditPrepared(msg remoteEditPreparedMsg) tea.Cmd {
 	for _, line := range msg.logs {
 		m.pushLog(line)
+	}
+	// 用户已 Esc 退出登记等待：迟到的会话不再拉起编辑器。
+	if msg.register && !m.remoteRegisterPending {
+		m.pushLog("Remote：登记已退出，忽略迟到的编辑会话")
+		return nil
 	}
 	if msg.err != nil {
 		if msg.register {

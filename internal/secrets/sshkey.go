@@ -46,17 +46,30 @@ func SSHDir() (string, error) {
 	return filepath.Join(home, ".ssh"), nil
 }
 
-// SSHKeyFileName 生成私钥文件名（不含目录）：dec_<bundle>_<name>。
+// SSHKeyFileName 生成私钥文件名（不含目录）：dec_<bundle>_<实例>。
+// keyName 可以是 `.sshkey/<实例>` 或已剥前缀的实例名。
 func SSHKeyFileName(decBundleName, keyName string) (string, error) {
 	bundle, err := validateSSHSafeName("bundle", decBundleName)
 	if err != nil {
 		return "", err
 	}
-	name, err := validateSSHSafeName("SSH Key", keyName)
+	name, err := SSHKeyInstanceFromAny(keyName)
 	if err != nil {
 		return "", err
 	}
 	return "dec_" + bundle + "_" + name, nil
+}
+
+// SSHKeyInstanceFromAny 接受 `.sshkey/<实例>` 或裸实例名，返回落地用实例。
+func SSHKeyInstanceFromAny(fullOrInstance string) (string, error) {
+	fullOrInstance = strings.TrimSpace(fullOrInstance)
+	if fullOrInstance == "" {
+		return "", fmt.Errorf("SSH Key 名称不能为空")
+	}
+	if inst, err := SSHKeyInstance(fullOrInstance); err == nil {
+		return inst, nil
+	}
+	return validateSSHSafeName("SSH Key", fullOrInstance)
 }
 
 func validateSSHSafeName(kind, value string) (string, error) {
@@ -188,31 +201,31 @@ func PrepareSSHKeyLandings(decBundleName string, keys []SSHKeyItem) ([]SSHKeyLan
 	out := make([]SSHKeyLanding, 0, len(keys))
 	seenNames := make(map[string]struct{}, len(keys))
 	seenFiles := make(map[string]string, len(keys)) // filename -> key name
-	seenHosts := make(map[string]string, len(keys))  // host -> key name
+	seenHosts := make(map[string]string, len(keys)) // host -> key name
 
 	for _, key := range keys {
-		fileBase, err := SSHKeyFileName(decBundleName, key.Name)
+		instance, err := SSHKeyInstance(key.Name)
 		if err != nil {
 			return nil, err
 		}
-		name, err := validateSSHSafeName("SSH Key", key.Name)
+		fileBase, err := SSHKeyFileName(decBundleName, instance)
 		if err != nil {
 			return nil, err
 		}
-		if _, dup := seenNames[name]; dup {
-			return nil, fmt.Errorf("SSH Key 名称重复: %q", name)
+		if _, dup := seenNames[instance]; dup {
+			return nil, fmt.Errorf("SSH Key 名称重复: %q", key.Name)
 		}
-		seenNames[name] = struct{}{}
+		seenNames[instance] = struct{}{}
 		if prev, ok := seenFiles[fileBase]; ok {
-			return nil, fmt.Errorf("SSH Key 文件名冲突: %q 与 %q 均映射到 %s", prev, name, fileBase)
+			return nil, fmt.Errorf("SSH Key 文件名冲突: %q 与 %q 均映射到 %s", prev, key.Name, fileBase)
 		}
-		seenFiles[fileBase] = name
+		seenFiles[fileBase] = key.Name
 
 		if strings.TrimSpace(key.PrivateKey) == "" {
-			return nil, fmt.Errorf("SSH Key %q 缺少私钥", name)
+			return nil, fmt.Errorf("SSH Key %q 缺少私钥", key.Name)
 		}
 		if err := validateSSHKeyMaterial(key.PrivateKey); err != nil {
-			return nil, fmt.Errorf("SSH Key %q 私钥格式无效", name)
+			return nil, fmt.Errorf("SSH Key %q 私钥格式无效", key.Name)
 		}
 
 		// Hosts 可为空：仅落地密钥文件，不写 SSH config Host 条目。
@@ -221,12 +234,12 @@ func PrepareSSHKeyLandings(decBundleName string, keys []SSHKeyItem) ([]SSHKeyLan
 		for _, raw := range key.Hosts {
 			hostPattern, _, canonical, hostErr := parseSSHHostSpec(raw)
 			if hostErr != nil {
-				return nil, fmt.Errorf("SSH Key %q: %w", name, hostErr)
+				return nil, fmt.Errorf("SSH Key %q: %w", key.Name, hostErr)
 			}
 			if prev, ok := seenHosts[hostPattern]; ok {
-				return nil, fmt.Errorf("SSH host %q 冲突：同时由 Key %q 与 %q 声明", hostPattern, prev, name)
+				return nil, fmt.Errorf("SSH host %q 冲突：同时由 Key %q 与 %q 声明", hostPattern, prev, key.Name)
 			}
-			seenHosts[hostPattern] = name
+			seenHosts[hostPattern] = key.Name
 			hosts = append(hosts, canonical)
 		}
 
@@ -234,7 +247,7 @@ func PrepareSSHKeyLandings(decBundleName string, keys []SSHKeyItem) ([]SSHKeyLan
 		pubPath := privPath + ".pub"
 		out = append(out, SSHKeyLanding{
 			DecBundleName: decBundleName,
-			Name:          name,
+			Name:          instance, // 落地 / config 用实例名
 			Hosts:         hosts,
 			PrivateKey:    key.PrivateKey,
 			PublicKey:     strings.TrimSpace(key.PublicKey),

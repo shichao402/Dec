@@ -11,10 +11,12 @@ import (
 	"github.com/shichao402/Dec/internal/serviceapi"
 	"github.com/shichao402/Dec/internal/tui"
 	"github.com/shichao402/Dec/internal/update"
-	"github.com/shichao402/Dec/internal/version"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
+
+// devVersion 为未注入编译期版本时的统一取值，与 dec-server 的默认版本保持一致。
+const devVersion = "dev"
 
 var (
 	appVersion   string
@@ -88,7 +90,7 @@ func SetVersion(v, bt string) {
 }
 
 func hasInjectedVersion() bool {
-	return appVersion != "" && appVersion != "unknown" && appVersion != "dev"
+	return appVersion != "" && appVersion != "unknown" && appVersion != devVersion
 }
 
 // getVersionString 获取版本字符串
@@ -100,30 +102,18 @@ func getVersionString() string {
 		return appVersion
 	}
 
-	workDir, err := os.Getwd()
-	if err == nil {
-		if ver, err := version.GetVersion(workDir); err == nil {
-			return ver
-		}
-	}
-
-	return "dev"
+	return devVersion
 }
 
-// GetVersion 获取当前版本号（供其他包使用）
+// GetVersion 获取当前版本号（供其他包使用）。
+// 未注入版本时一律为 dev：不得回退到工作目录的 version.json——那可能是任意项目的
+// 版本号，会与恒为 dev 的 dec-server 误判成版本不一致。
 func GetVersion() string {
 	if hasInjectedVersion() {
 		return appVersion
 	}
 
-	workDir, err := os.Getwd()
-	if err == nil {
-		if ver, err := version.GetVersion(workDir); err == nil {
-			return ver
-		}
-	}
-
-	return "dev"
+	return devVersion
 }
 
 // Execute 根据终端环境在最小 CLI 与默认 TUI 入口之间分流。

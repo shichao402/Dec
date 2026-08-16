@@ -1,13 +1,13 @@
-# 示例：CNB HTTPS → Git Credential Manager
+# 示例：CNB HTTPS → Git Credential Manager（点类型目录 `.gcm/`）
 #
-# Bitwarden Secure Note 名：cnb_gitgcm.yaml
+# Bitwarden Secure Note 名：.gcm/cnb.yaml
 # 本地机器根（仅 user_enabled、无项目覆盖时）：
-#   ~/.dec/secrets/bundles/cnb/cnb_gitgcm.yaml
+#   ~/.dec/secrets/bundles/cnb/.gcm/cnb.yaml
 # Bitwarden folder：bundle/cnb
 #
 # 放入 user_enabled_bundles: [cnb] 后 pull 即可写入 GCM。
+# 旧名 cnb_gitgcm.yaml 会在 pull 时一次性迁移到本路径。
 
-kind: gitgcm
 host: cnb.cool
 username: cnb
 password: "替换为 CNB 个人访问令牌"

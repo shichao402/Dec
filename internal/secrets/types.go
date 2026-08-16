@@ -97,6 +97,9 @@ type PushBundleRequest struct {
 	Target        SyncTarget
 	DecBundleName string
 	Binding       BundleBinding
+	// CreateFolderIfMissing 仅用于 Remote 登记新 folder：push 时 folder 不存在则先建。
+	// 常规 push / 编辑已有 folder 不设，folder 缺失仍按错误处理。
+	CreateFolderIfMissing bool
 }
 
 // PushBundleResult 推送结果。
@@ -129,4 +132,20 @@ type UpdateSSHKeyHostsRequest struct {
 	KeyName string
 	Target  SyncTarget
 	Hosts   []string // 规范化后写入 Notes；空切片清空 Notes
+}
+
+// RenameSecureNoteRequest 将远端 Secure Note 改名（= 改相对同步根路径）。
+type RenameSecureNoteRequest struct {
+	Binding BundleBinding
+	OldPath string
+	NewPath string
+	Target  SyncTarget
+}
+
+// RenameSSHKeyRequest 将远端 SSH Key Item 改名。
+type RenameSSHKeyRequest struct {
+	Binding BundleBinding
+	OldName string
+	NewName string
+	Target  SyncTarget
 }

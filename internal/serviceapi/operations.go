@@ -175,10 +175,6 @@ func SuggestSecretTargets(projectRoot string) ([]app.SecretTargetOption, error) 
 	return invokeSlice[app.SecretTargetOption](context.Background(), "suggest_secret_targets", projectRoot, nil, nil)
 }
 
-func SuggestRemoteRegisterFolders(ctx context.Context, projectRoot string) ([]app.SecretTargetOption, error) {
-	return invokeSlice[app.SecretTargetOption](ctx, "suggest_remote_register_folders", projectRoot, nil, nil)
-}
-
 func ListSecretsMetadata(ctx context.Context, projectRoot string, includeRemote bool, reporter app.Reporter) (*app.ListSecretsMetadataResult, error) {
 	return invoke[app.ListSecretsMetadataResult](ctx, "list_secrets", projectRoot,
 		struct{ IncludeRemote bool }{includeRemote}, reporter)
@@ -252,11 +248,12 @@ func PrepareRemoteNoteEdit(ctx context.Context, projectRoot string, item app.Del
 	return invoke[app.RemoteNoteEditSession](ctx, "prepare_remote_note_edit", projectRoot, item, reporter)
 }
 
-func PrepareRemoteNoteRegister(ctx context.Context, projectRoot, folder, noteRel string, reporter app.Reporter) (*app.RemoteNoteEditSession, error) {
+func PrepareRemoteNoteRegister(ctx context.Context, projectRoot, folder, noteRel, initialBody string, reporter app.Reporter) (*app.RemoteNoteEditSession, error) {
 	return invoke[app.RemoteNoteEditSession](ctx, "prepare_remote_note_register", projectRoot, struct {
-		Folder  string
-		NoteRel string
-	}{folder, noteRel}, reporter)
+		Folder      string
+		NoteRel     string
+		InitialBody string
+	}{folder, noteRel, initialBody}, reporter)
 }
 
 func PrepareRemoteSSHHostsEdit(ctx context.Context, projectRoot string, item app.DeleteSelectionItem, reporter app.Reporter) (*app.RemoteSSHHostsEditSession, error) {

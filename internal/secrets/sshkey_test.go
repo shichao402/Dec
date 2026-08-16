@@ -59,7 +59,7 @@ func TestPrepareAndWriteSSHKeyLandings_HostPort(t *testing.T) {
 	sshDir := filepath.Join(home, ".ssh")
 
 	landings, err := PrepareSSHKeyLandings("woa", []SSHKeyItem{{
-		Name: "devcloud",
+		Name: ".sshkey/devcloud",
 		Hosts: []string{
 			"21.214.34.79:36000",
 			"osgamecore.devcloud.woa.com:36000",
@@ -111,9 +111,9 @@ func TestPrepareAndWriteSSHKeyLandings_HostPort(t *testing.T) {
 func TestPrepareSSHKeyLandings_HostPortConflictSameHost(t *testing.T) {
 	useTempSSHHome(t)
 	_, err := PrepareSSHKeyLandings("woa", []SSHKeyItem{{
-		Name: "a", Hosts: []string{"same.example.com:36000"}, PrivateKey: "key-a\n",
+		Name: ".sshkey/a", Hosts: []string{"same.example.com:36000"}, PrivateKey: "key-a\n",
 	}, {
-		Name: "b", Hosts: []string{"same.example.com:22022"}, PrivateKey: "key-b\n",
+		Name: ".sshkey/b", Hosts: []string{"same.example.com:22022"}, PrivateKey: "key-b\n",
 	}})
 	if err == nil || !strings.Contains(err.Error(), "冲突") {
 		t.Fatalf("同 Host 不同 Port 仍应冲突: %v", err)
@@ -125,7 +125,7 @@ func TestWriteSSHKeyLandings_DifferentPortsSplitBlocks(t *testing.T) {
 	sshDir := filepath.Join(home, ".ssh")
 
 	landings, err := PrepareSSHKeyLandings("woa", []SSHKeyItem{{
-		Name: "devcloud",
+		Name: ".sshkey/devcloud",
 		Hosts: []string{
 			"a.example.com:36000",
 			"b.example.com:22022",
@@ -149,7 +149,7 @@ func TestWriteSSHKeyLandings_PreservesOtherPortOnUpsert(t *testing.T) {
 	sshDir := filepath.Join(home, ".ssh")
 
 	other, err := PrepareSSHKeyLandings("other", []SSHKeyItem{{
-		Name: "key", Hosts: []string{"other.example.com:36000"},
+		Name: ".sshkey/key", Hosts: []string{"other.example.com:36000"},
 		PrivateKey: "o\n", PublicKey: "op\n",
 	}})
 	if err != nil {
@@ -160,7 +160,7 @@ func TestWriteSSHKeyLandings_PreservesOtherPortOnUpsert(t *testing.T) {
 	}
 
 	mine, err := PrepareSSHKeyLandings("woa", []SSHKeyItem{{
-		Name: "devcloud", Hosts: []string{"woa.example.com"},
+		Name: ".sshkey/devcloud", Hosts: []string{"woa.example.com"},
 		PrivateKey: "w\n", PublicKey: "wp\n",
 	}})
 	if err != nil {
@@ -219,15 +219,15 @@ func TestPrepareSSHKeyLandings_RejectsHostInjectionAndConflicts(t *testing.T) {
 	useTempSSHHome(t)
 
 	_, err := PrepareSSHKeyLandings("vikunja", []SSHKeyItem{{
-		Name: "deploy", Hosts: []string{"host.com ProxyCommand=evil"}, PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----",
+		Name: ".sshkey/deploy", Hosts: []string{"host.com ProxyCommand=evil"}, PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----",
 	}})
 	if err == nil {
 		t.Fatal("含空格的 host 应被拒绝")
 	}
 
 	_, err = PrepareSSHKeyLandings("vikunja", []SSHKeyItem{
-		{Name: "a", Hosts: []string{"same.example.com"}, PrivateKey: "key-a\n"},
-		{Name: "b", Hosts: []string{"same.example.com"}, PrivateKey: "key-b\n"},
+		{Name: ".sshkey/a", Hosts: []string{"same.example.com"}, PrivateKey: "key-a\n"},
+		{Name: ".sshkey/b", Hosts: []string{"same.example.com"}, PrivateKey: "key-b\n"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "冲突") {
 		t.Fatalf("同批 host 冲突应报错: %v", err)
@@ -251,7 +251,7 @@ func TestWriteSSHKeyLandings_PreservesUserConfigAndOtherProjectEntries(t *testin
 	}
 
 	landings, err := PrepareSSHKeyLandings("vikunja", []SSHKeyItem{{
-		Name:       "deploy",
+		Name:       ".sshkey/deploy",
 		Hosts:      []string{"vikunja.example.com"},
 		PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV\n-----END OPENSSH PRIVATE KEY-----\n",
 		PublicKey:  "ssh-ed25519 AAAA deploy@dec\n",
@@ -302,7 +302,7 @@ func TestWriteSSHKeyLandings_PreservesUserConfigAndOtherProjectEntries(t *testin
 
 	// 再次 pull 同 key 但换 host：应替换本 IdentityFile，仍保留 other。
 	landings2, err := PrepareSSHKeyLandings("vikunja", []SSHKeyItem{{
-		Name:       "deploy",
+		Name:       ".sshkey/deploy",
 		Hosts:      []string{"vikunja-new.example.com"},
 		PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV2\n-----END OPENSSH PRIVATE KEY-----\n",
 		PublicKey:  "ssh-ed25519 BBBB deploy@dec\n",
@@ -340,7 +340,7 @@ func TestRemoveSSHKeyLanding_RemovesFilesAndManagedEntries(t *testing.T) {
 	sshDir := filepath.Join(home, ".ssh")
 
 	landings, err := PrepareSSHKeyLandings("vikunja", []SSHKeyItem{{
-		Name: "deploy", Hosts: []string{"vikunja.example.com"},
+		Name: ".sshkey/deploy", Hosts: []string{"vikunja.example.com"},
 		PrivateKey: "priv\n", PublicKey: "pub\n",
 	}})
 	if err != nil {
@@ -351,7 +351,7 @@ func TestRemoveSSHKeyLanding_RemovesFilesAndManagedEntries(t *testing.T) {
 	}
 	// 再写入另一项目条目
 	other, err := PrepareSSHKeyLandings("other", []SSHKeyItem{{
-		Name: "key", Hosts: []string{"other.example.com"},
+		Name: ".sshkey/key", Hosts: []string{"other.example.com"},
 		PrivateKey: "o\n", PublicKey: "op\n",
 	}})
 	if err != nil {
@@ -410,7 +410,7 @@ func TestPrepareAndWriteSSHKeyLandings_EmptyHosts_WritesKeysOnly(t *testing.T) {
 
 	// 先写入带 host 的 key，再以空 hosts 重 pull：应保留密钥文件、清掉本 IdentityFile 的 Host 条目。
 	withHost, err := PrepareSSHKeyLandings("vikunja", []SSHKeyItem{{
-		Name: "deploy", Hosts: []string{"vikunja.example.com"},
+		Name: ".sshkey/deploy", Hosts: []string{"vikunja.example.com"},
 		PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV\n-----END OPENSSH PRIVATE KEY-----\n",
 		PublicKey:  "ssh-ed25519 AAAA deploy@dec\n",
 	}})
@@ -422,7 +422,7 @@ func TestPrepareAndWriteSSHKeyLandings_EmptyHosts_WritesKeysOnly(t *testing.T) {
 	}
 
 	other, err := PrepareSSHKeyLandings("other", []SSHKeyItem{{
-		Name: "key", Hosts: []string{"other.example.com"},
+		Name: ".sshkey/key", Hosts: []string{"other.example.com"},
 		PrivateKey: "o\n", PublicKey: "op\n",
 	}})
 	if err != nil {
@@ -433,7 +433,7 @@ func TestPrepareAndWriteSSHKeyLandings_EmptyHosts_WritesKeysOnly(t *testing.T) {
 	}
 
 	emptyHosts, err := PrepareSSHKeyLandings("vikunja", []SSHKeyItem{{
-		Name:       "deploy",
+		Name:       ".sshkey/deploy",
 		Hosts:      nil,
 		PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV2\n-----END OPENSSH PRIVATE KEY-----\n",
 		PublicKey:  "ssh-ed25519 BBBB deploy@dec\n",
@@ -481,7 +481,7 @@ func TestWriteSSHKeyLandings_EmptyHostsOnly_NoHostBlock(t *testing.T) {
 	sshDir := filepath.Join(home, ".ssh")
 
 	landings, err := PrepareSSHKeyLandings("vikunja", []SSHKeyItem{{
-		Name: "deploy", Hosts: nil,
+		Name: ".sshkey/deploy", Hosts: nil,
 		PrivateKey: "priv\n", PublicKey: "pub\n",
 	}})
 	if err != nil {

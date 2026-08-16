@@ -52,7 +52,7 @@ Remote **浏览**库存**不得** `RememberSecretBundles`（与 pull 发现写�
 
 ### 6. secrets 全量可见口径
 
-- `ListAllFolderNames` / Remote inventory / `SuggestRemoteRegisterFolders` 使用同一「全量 folder」口径
+- `ListAllFolderNames` / Remote inventory 使用同一「全量 folder」口径；Remote 登记归属直接取自该库存渲染出的树（光标所在 folder），不再单独枚举候选
 - 与 Bundles/pull 的平面过滤分离（见 [0004](0004-remote-page.md)、[0009](0009-bundle-binary-scope.md)）
 
 ## 被否方案

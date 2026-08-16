@@ -13,6 +13,8 @@ type Client interface {
 	DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error
 	DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) error
 	UpdateSSHKeyHosts(ctx context.Context, req UpdateSSHKeyHostsRequest) error
+	RenameSecureNote(ctx context.Context, req RenameSecureNoteRequest) error
+	RenameSSHKey(ctx context.Context, req RenameSSHKeyRequest) error
 	// ListFolderNotes 枚举 folder 下的 note 名（相对 SyncTarget.LocalRoot）。
 	ListFolderNotes(ctx context.Context, folderName string) ([]RemoteNote, error)
 	// ListFolderSSHKeys 枚举 folder 下的 SSH Key 逻辑名。
@@ -73,7 +75,6 @@ func (c *StubClient) PushBundle(_ context.Context, req PushBundleRequest, notes 
 	if c.NotesByFolder == nil {
 		c.NotesByFolder = make(map[string][]SecureNote)
 	}
-	// 与 APIClient 一致：只 create/update，不删除本次未覆盖的远端 note。
 	merged := append([]SecureNote(nil), c.NotesByFolder[folder]...)
 	indexOf := make(map[string]int, len(merged))
 	for i, note := range merged {
@@ -150,6 +151,54 @@ func (c *StubClient) UpdateSSHKeyHosts(_ context.Context, req UpdateSSHKeyHostsR
 	return fmt.Errorf("SSH Key %q 不在 folder %q", req.KeyName, folder)
 }
 
+func (c *StubClient) RenameSecureNote(_ context.Context, req RenameSecureNoteRequest) error {
+	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, "")
+	oldPath := strings.TrimSpace(req.OldPath)
+	newPath := strings.TrimSpace(req.NewPath)
+	if oldPath == "" || newPath == "" {
+		return fmt.Errorf("RenameSecureNote 需要 OldPath 与 NewPath")
+	}
+	notes := c.NotesByFolder[folder]
+	for i, note := range notes {
+		if note.RelativePath != oldPath {
+			continue
+		}
+		for _, other := range notes {
+			if other.RelativePath == newPath {
+				return fmt.Errorf("目标 Note 已存在: %q", newPath)
+			}
+		}
+		notes[i].RelativePath = newPath
+		c.NotesByFolder[folder] = notes
+		return nil
+	}
+	return fmt.Errorf("Secure Note %q 不在 folder %q", oldPath, folder)
+}
+
+func (c *StubClient) RenameSSHKey(_ context.Context, req RenameSSHKeyRequest) error {
+	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, "")
+	oldName := strings.TrimSpace(req.OldName)
+	newName := strings.TrimSpace(req.NewName)
+	if oldName == "" || newName == "" {
+		return fmt.Errorf("RenameSSHKey 需要 OldName 与 NewName")
+	}
+	keys := c.SSHKeysByFolder[folder]
+	for i, key := range keys {
+		if key.Name != oldName {
+			continue
+		}
+		for _, other := range keys {
+			if other.Name == newName {
+				return fmt.Errorf("目标 SSH Key 已存在: %q", newName)
+			}
+		}
+		keys[i].Name = newName
+		c.SSHKeysByFolder[folder] = keys
+		return nil
+	}
+	return fmt.Errorf("SSH Key %q 不在 folder %q", oldName, folder)
+}
+
 // NoopClient 未配置 Bitwarden API 时的空实现。
 type NoopClient struct{}
 
@@ -170,6 +219,14 @@ func (NoopClient) DeleteSSHKey(_ context.Context, _ DeleteSSHKeyRequest) error {
 }
 
 func (NoopClient) UpdateSSHKeyHosts(_ context.Context, _ UpdateSSHKeyHostsRequest) error {
+	return nil
+}
+
+func (NoopClient) RenameSecureNote(_ context.Context, _ RenameSecureNoteRequest) error {
+	return nil
+}
+
+func (NoopClient) RenameSSHKey(_ context.Context, _ RenameSSHKeyRequest) error {
 	return nil
 }
 

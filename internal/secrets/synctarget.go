@@ -222,7 +222,7 @@ func normalizeSyncRelPath(raw string) (string, error) {
 	return clean, nil
 }
 
-// IsEnvNote 判断 note 是否属于 env 注入源（env/*.env）。
+// IsEnvNote 判断 note 是否属于 env 注入源（.env/*.env）。
 func IsEnvNote(noteRel string) bool {
 	rel, err := normalizeSyncRelPath(noteRel)
 	if err != nil {
@@ -230,5 +230,5 @@ func IsEnvNote(noteRel string) bool {
 	}
 	dir, base := path.Split(rel)
 	dir = strings.Trim(dir, "/")
-	return dir == "env" && strings.HasSuffix(strings.ToLower(base), ".env")
+	return dir == TypeDirEnv && strings.HasSuffix(strings.ToLower(base), ".env")
 }

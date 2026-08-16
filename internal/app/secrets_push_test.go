@@ -51,7 +51,7 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"bundle/vikunja": {{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=old\n"}},
+		"bundle/vikunja": {{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=old\n"}},
 		"Dec":            {{RelativePath: "config/private.yaml", Content: "old"}},
 	}}
 	origFactory := secretsClientFactory
@@ -66,7 +66,7 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
 	writeProjectFileForPushTest(t, projectRoot, ".secrets/project/config/private.yaml", "token: abc\n")
 
 	result, err := PushSecretsBundles(context.Background(), projectRoot, nil)
@@ -123,7 +123,7 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	decHome := setupSecretsConfigForPushTest(t)
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"bundle/tencent-cloud": {{RelativePath: "env/tencent.env", Content: "TOKEN=old\n"}},
+		"bundle/tencent-cloud": {{RelativePath: ".env/tencent.env", Content: "TOKEN=old\n"}},
 		"Dec":                  {{RelativePath: "config/private.yaml", Content: "old"}},
 	}}
 	origFactory := secretsClientFactory
@@ -147,7 +147,7 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	// 项目平面的落地文件：本轮 push 必须完全无视它们。
 	writeProjectFileForPushTest(t, projectRoot, ".secrets/project/config/private.yaml", "token: from-project\n")
 
-	machineEnv := filepath.Join(decHome, "secrets", "bundles", "tencent-cloud", "env", "tencent.env")
+	machineEnv := filepath.Join(decHome, "secrets", "bundles", "tencent-cloud", ".env", "tencent.env")
 	if err := os.MkdirAll(filepath.Dir(machineEnv), 0o700); err != nil {
 		t.Fatal(err)
 	}

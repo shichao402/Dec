@@ -958,13 +958,13 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 			TreeRoot: ".dec", TreeBranch: "vikunja", GroupOrder: 0, GroupTitle: "vikunja",
 		},
 		{
-			Kind: app.DeleteKindSecret, Label: "[secret] env/vikunja.env",
-			SecretPath: "env/vikunja.env", LocalRoot: ".secrets/bundles/vikunja", SecretsBundle: "vikunja",
+			Kind: app.DeleteKindSecret, Label: "[secret] .env/vikunja.env",
+			SecretPath: ".env/vikunja.env", LocalRoot: ".secrets/bundles/vikunja", SecretsBundle: "vikunja",
 			TreeRoot: "secrets", TreeBranch: "vikunja", GroupOrder: 0, GroupTitle: "vikunja (bundle)",
 		},
 		{
 			Kind: app.DeleteKindSSHKey, Label: "[ssh] deploy",
-			SSHKeyName: "deploy", DecBundleName: "vikunja", SecretsBundle: "vikunja",
+			SSHKeyName: ".sshkey/deploy", DecBundleName: "vikunja", SecretsBundle: "vikunja",
 			LocalRoot: ".secrets/bundles/vikunja", TreeRoot: "secrets", TreeBranch: "vikunja", GroupOrder: 0, GroupTitle: "vikunja (bundle)",
 		},
 		{
@@ -984,7 +984,7 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 		"▾ 远端 · Secrets (Bitwarden)",
 		".secrets/bundles/vikunja",
 		"vikunja.env",
-		"SSH · machine",
+		".sshkey",
 		"[ssh] deploy",
 		"[bundle]",
 	} {

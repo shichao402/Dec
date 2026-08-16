@@ -165,10 +165,10 @@ Note 名来自远端，按不可信输入处理：绝对路径、`~` 展开、`.
 
 ## 环境变量与 `dec-exec`
 
-- 环境变量 **只认** `env/*.env`（dotenv，单行标量 `KEY=value`）。
+- 环境变量 **只认** `.env/*.env`（dotenv，单行标量 `KEY=value`）。
 - **`dec-exec --bundle <name>`** 按 bundle 的 scope **单层**加载：
-  - `scope: user` → 仅 `~/.dec/secrets/bundles/<name>/env/*.env`
-  - `scope: project` → 仅 `<project>/.secrets/bundles/<name>/env/*.env`
+  - `scope: user` → 仅 `~/.dec/secrets/bundles/<name>/.env/*.env`
+  - `scope: project` → 仅 `<project>/.secrets/bundles/<name>/.env/*.env`
 - **不再**做机器层 → 项目层 → project env 的三层覆盖。
 - MCP 配置保留 `${workspaceFolder}`，由 IDE 展开；`command: dec-exec`。
 - `{{VAR_NAME}}` 仍用于 `.dec/vars.yaml` 的 **非敏感** 模板变量。
@@ -177,22 +177,25 @@ Note 名来自远端，按不可信输入处理：绝对路径、`~` 展开、`.
 
 OpenSSH、Git、`ssh`/`scp` 等工具默认只读取 **机器级** `~/.ssh/`。SSH 私钥 **不进 `.secrets/`**。纯 SSH、跨项目复用的包应声明 `scope: user`（0009）。
 
+BW SSH Key Item 规范名：`.sshkey/<实例>`（pull 会迁移裸名）。本地文件仍用实例名：
+
 | 产物 | 路径 |
 |------|------|
-| 私钥 | `~/.ssh/dec_<bundle>_<name>` |
-| 公钥 | `~/.ssh/dec_<bundle>_<name>.pub` |
+| 私钥 | `~/.ssh/dec_<bundle>_<实例>` |
+| 公钥 | `~/.ssh/dec_<bundle>_<实例>.pub` |
 | SSH config | `~/.ssh/config.d/dec.conf`（主 `~/.ssh/config` 顶部 `Include`） |
 
-## Machine Handlers（0005）
+## 点类型目录 / Machine Handlers（0005）
 
 | 约定 | 说明 |
 |------|------|
+| 点目录 | `.gcm` / `.env` / `.sshkey` = 特殊语义；未知点目录硬失败 |
 | 源类型 | 有限：`note` / `ssh_item` |
-| Handler | 按名字开放注册；首个内置 `gitgcm` |
-| Note 名 | `{实例}_{处理器}.yaml`（路由看 basename） |
-| 正文 | YAML，且 `kind` 必须等于处理器名 |
+| Handler | 按完整相对路径首段 Match；内置 `gcm` |
+| 正文 | **由处理器自定**（框架不约束 YAML） |
+| 迁移 | pull 前一次性改名；废弃 `*_gitgcm.yaml`、`env/`、裸 SSH 名 |
 
-Pull：先写入同步根（user scope：`~/.dec/secrets/bundles/<name>/`），再 Apply。停用 / 删除时须撤销机器副作用（如 `git credential reject`）。详见 [0005](decisions/0005-secrets-machine-handlers.md)、[0009](decisions/0009-bundle-binary-scope.md)。
+Pull：迁移 → 写入同步根 → Handler Apply。停用 / 删除时须撤销机器副作用（如 `git credential reject`）。详见 [0005](decisions/0005-secrets-machine-handlers.md)、[0009](decisions/0009-bundle-binary-scope.md)。
 
 ## 机器级 secrets 根（0007，经 0009 修订）
 
@@ -251,7 +254,7 @@ sequenceDiagram
 | 用户平面 | `dec --user` | 工作空间切到用户平面；Bundles/Run 只见 user-scope bundle |
 | 项目平面 | `dec`（项目工作区） | Bundles/Run 只见 project-scope bundle |
 | 首次启用 | Bundles 页调整 → Run 页 pull | 按当前平面完成 Dec + secrets |
-| Secrets 管理 | Settings / Remote | Bitwarden 连接；Remote **全量**浏览（folder + 无文件夹只读）；`A` 任意 folder 登记；跨上下文删除 typed confirm |
+| Secrets 管理 | Settings / Remote | Bitwarden 连接；Remote **全量**浏览（folder + 无文件夹只读）；`n` 登记到光标所在 folder、`N` 登记到新 folder；跨上下文删除 typed confirm |
 | MCP 运行时注入 | `dec-exec` | 按 scope 单层加载 `env/*.env` |
 
 不在 TUI 外暴露 `dec secrets pull` 等独立子命令。
