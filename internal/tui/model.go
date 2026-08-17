@@ -3107,6 +3107,10 @@ func (m model) renderRunLastResult() []string {
 	if m.runResult != nil {
 		lines = append(lines, fmt.Sprintf("Pull  请求 %d · 成功 %d · 失败 %d",
 			m.runResult.RequestedCount, m.runResult.PulledCount, m.runResult.FailedCount))
+		// 一排 0 本身不解释任何事情；跳过原因是唯一能说明「为什么没拉」的那句话。
+		if reason := strings.TrimSpace(m.runResult.SkippedReason); reason != "" && m.runResult.PulledCount == 0 {
+			lines = append(lines, shellWarnStyle.Render("Dec   "+reason))
+		}
 		secretsLine := fmt.Sprintf("Secrets  落地 %d 个文件 · %d 个 SSH Key", m.runResult.SecretsNoteCount, m.runResult.SecretsSSHKeyCount)
 		if m.runResult.SecretsSkippedReason != "" && m.runResult.SecretsNoteCount == 0 && m.runResult.SecretsSSHKeyCount == 0 {
 			secretsLine = "Secrets  " + m.runResult.SecretsSkippedReason

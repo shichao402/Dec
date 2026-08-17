@@ -35,6 +35,8 @@ type PullProjectAssetsResult struct {
 	NonFatalWarnings   []string
 	// BundleOverviews 记录本轮解析时发现的所有 bundle（含未启用的），供 CLI / TUI 呈现。
 	BundleOverviews []BundleOverview
+	// MissingBundles 是 enabled_bundles 里引用了、但当前平面的 vault 中已找不到声明的 bundle。
+	MissingBundles []string
 	// AssetSources 以 "type:vault:name" 为 key，值是每个目标资产的来源 bundle 列表
 	// （例如 ["bundle/vikunja"]）。供多来源追溯使用。
 	AssetSources         map[string][]string
@@ -122,6 +124,15 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 		return nil, err
 	}
 	result.BundleOverviews = resolved.Bundles
+
+	// 只发 reporter 事件不够：事件区只留最近几条，「引用的 bundle 已不在仓库」这类
+	// 开头就发出的告警会被后续 secrets 事件挤掉，用户只看到一排 0 却不知道为什么。
+	if missing := missingEnabledBundleNames(projectEnabled, resolved.Bundles); len(missing) > 0 {
+		result.MissingBundles = missing
+		result.NonFatalWarnings = append(result.NonFatalWarnings, fmt.Sprintf(
+			"enabled_bundles 里有 %d 个 bundle 在仓库中已不存在：%s（本次忽略；到 Bundles 页重新保存即可清掉）",
+			len(missing), strings.Join(missing, ", ")))
+	}
 
 	// bundle 解析阶段已校验过成员文件存在性，这里无需再做一次白名单过滤。
 	validAssets := resolved.Assets
@@ -246,6 +257,24 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	emit(reporter, EventInfo, "pull.finish", summary, &Progress{Phase: "done", Current: len(validAssets), Total: len(validAssets)})
 
 	return result, nil
+}
+
+// missingEnabledBundleNames 返回启用列表里在本平面 vault 中找不到声明的 bundle 名（保序）。
+func missingEnabledBundleNames(enabled []string, resolved []BundleOverview) []string {
+	if len(enabled) == 0 {
+		return nil
+	}
+	known := make(map[string]struct{}, len(resolved))
+	for _, bo := range resolved {
+		known[bo.Name] = struct{}{}
+	}
+	var missing []string
+	for _, name := range enabled {
+		if _, ok := known[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 func applyAssetCleanup(result *PullProjectAssetsResult, workspace Workspace, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE, reporter Reporter) {
