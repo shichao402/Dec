@@ -108,6 +108,14 @@ Bootstrap 仍枚举**全部** folder 按 host 匹配——这是打破环依赖�
 
 Bundles 页对应地把这类条目标为 `OtherPlane`，展示「属于项目平面」、复选框画成 `[-]`，并拒绝 `space` 勾选。
 
+### 7a. 项目平面同样校验（只校验，不修复）
+
+项目平面的保存路径起初直接写盘，于是已从 vault 删除的 bundle 名能一直留在 `enabled_bundles` 里，pull 每次只回一句「引用的 bundle 找不到声明，已忽略」。校验现在两平面对称：本平面 vault 里看不见的名字不进 `enabled_bundles`，并区分两种理由——「仓库里没有这个 bundle（可能已被删除）」与「属于用户平面（`scope: user`）」。
+
+与用户平面不同，项目平面**只校验不修复**：不创建占位（project bundle 由 vault 显式维护），更不改写别人的 scope——那正是第 7 条禁止的动作。隐式 bundle（目录有资产但无 manifest）算可见；仓库未连接时无从校验，放行以免离线存不了。
+
+被拒条目必须回传给用户（`SaveBundleSelectionResult.RejectedBundles`）并在 TUI 显示。此前该字段没有任何渲染，用户只会看到「勾了却没生效」——静默丢勾选和静默改 scope 一样不可接受。
+
 ### 8. 文案对齐（修订 0012 第 3 条）
 
 `AssetBundleOption.SecretsOnly` 的展示文案不再用「仅 secrets」——0003 的 2026-08-09 修订已明确交代过不用该词，因为它暗示存在一种「不是 bundle 的 secrets 实体」，与一等公民模型冲突。改用「仓库未登记」：它仍是 bundle，只是 Git 那一半尚未落 manifest。

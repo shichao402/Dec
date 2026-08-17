@@ -127,6 +127,7 @@ enabled_bundles:    # 从 projects/my-app.yaml 同步；Bundles 页可调整
 ```
 
 `enabled_bundles` 是唯一的资产启用入口：成员资产随 bundle 一并解析下发，不能单独启用或排除。
+保存时按平面校验 vault 声明：本平面看不见的名字（仓库里已删除、或 `scope: user`）不写入 `enabled_bundles`，被拒条目连同理由回传给 TUI；仓库未连接时放行以免离线存不了。项目平面只校验、不创建占位也不改写 scope（见 [0013](decisions/0013-secrets-belong-to-declared-target.md) §7a）。
 早期版本的 `available` / `enabled` 字段已移除，`LoadProjectConfig` 读到旧配置时会把 `enabled` 涉及的 vault 折叠成 bundle 引用并立即回写，`available` 作为扫描缓存直接丢弃。
 
 **职责划分**：
@@ -479,6 +480,8 @@ Bubble Tea 交互层：
 
 - `global.go`：全局配置、有效 IDE / editor 解析
 - `project.go`：项目级 `.dec/config.yaml` 与 `.dec/vars.yaml`
+
+`ProjectConfigManager` 的读写入口一律要求**真实的项目根**：空 `projectRoot`（用户平面）返回 `ErrProjectRootRequired`，`.dec/` 解析后等于 Dec 根目录时报错。两者都会让项目配置写到全局配置那个文件上，见 [0015](decisions/0015-project-config-boundary.md)。
 
 ### `internal/repo/`
 

@@ -17,6 +17,8 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 - **`dec-exec`**（独立程序）：按 bundle 作用域读取 `.secrets/**/.env/*.env` 并启动子进程，供 MCP / Agent 运行时注入；不经过 `dec-server`、不碰 session，也不是用户面 secrets 管理入口。
 - **服务 / 门面**：`dec-server` 是一机单例业务服务；`dec` TUI 与 `dec-mcp` 是薄门面，连不上时自动拉起服务，禁止回退到门面内嵌 `internal/app`。
 - **跨页异步 IO**：慢 IO（尤其远端）跟 Shell 生命周期走，不跟当前页；切页禁止打断在飞请求；独立 busy 信号 + 防重复 + gen 丢弃过期结果（`internal/tui/async_io.go`，见 `Documents/TUI_ARCHITECTURE.md` §5.5）。
+- **按平面分流**：`dec --user` 的 `Workspace.Root` 为空，用户平面**没有**项目配置 / `project_name` / vault project 推断。空 projectRoot 会让 `.dec/` 退化成相对服务 cwd 的路径并覆盖 `~/.dec/config.yaml`（ADR 0015）。
+- **结构化结果优先于事件区**：结果里已有结论（跳过原因、被拒 bundle、缺失 bundle）必须渲染在结果区；事件区只留最近十余条，靠它承载告警等于不告警。
 
 ## TUI 页与能力映射
 

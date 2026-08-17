@@ -35,3 +35,4 @@
 | [0012](0012-user-bundle-single-entry.md) | 用户平面 bundle 启用收拢到 Bundles 页 | 已接受（已实现）；「仅 secrets」文案被 0013 修订 |
 | [0013](0013-secrets-belong-to-declared-target.md) | Secrets 必须归属已声明 SyncTarget：写入接口类型级收口 | 已接受；可写归属被 0014 收成仅 bundle |
 | [0014](0014-bundle-sole-writable-aggregate.md) | Bundle 是唯一可写聚合根 | 已接受（已实现） |
+| [0015](0015-project-config-boundary.md) | 项目配置的边界：用户平面没有 project，`.dec/` 不得落在 Dec 根目录 | 已接受（已实现） |

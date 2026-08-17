@@ -36,7 +36,7 @@ dec --version / dec --help / dec __freshness-check
 | 页面 | 职责 |
 |------|------|
 | **Home** | 项目概览、建议下一步、**project 初始化**（自动匹配 vault 同名 project、选择或新建） |
-| **Bundles** | 扫描 vault bundle、浏览/搜索资产、调整项目 `enabled_bundles` / `enabled` 并保存 |
+| **Bundles** | 扫描 vault bundle、浏览/搜索资产、调整 `enabled_bundles` 并保存（保存按平面校验 vault 声明，被拒条目在事件区列明） |
 | **Project** | 项目级 IDE / editor 覆盖、**项目变量**（`.dec/vars.yaml` 只读预览，按 `e` 挂起外部编辑器） |
 | **Run** | pull / push / remove；一次 pull 解析 project bundle 列表 → Dec Git bundle + Bitwarden secrets bundle；成功对照远端的启用集自动 prune 本地孤儿（无法确认只报告） |
 | **Remote** | 上下文无关的完整远端浏览器/编辑器（Dec Git vault 全量 + Bitwarden 全部 folder + 无文件夹只读区）；`e` temp 编辑、`n` 登记到光标所在 folder / `N` 登记到新 folder、`a`/`A` 全选/全不选、远端/本地删除拆分、跨上下文 typed confirm（ADR 0004） |
@@ -45,6 +45,8 @@ dec --version / dec --help / dec __freshness-check
 侧栏导航：`Home` → `Bundles` → `Project` → `Run` → `Remote` → `Settings`（`tab` / `shift+tab` 切换）。
 
 `dec --user` 进入用户平面，页列为 `Home` → `Bundles` → `Run` → `Remote` → `Settings`。Bundles / Run 的读写落点按平面解析（`~/.dec/cache`、`~/.dec/secrets`、`~/.cursor` 等），只暴露 `scope: user` 的 bundle；**Remote 页可见性不按平面过滤**（全量远端库存 + 本机清理分区）。Project 页不开放（项目变量在用户平面无对应概念）。见 [0009](decisions/0009-bundle-binary-scope.md) §4 与 [0004](decisions/0004-remote-page.md)。
+
+用户平面的 `Workspace.Root` 是空串，**不得**发起任何项目配置读写：Home 加载完 overview 后的 vault project 推断只在项目平面发起。空项目根会让 `.dec/` 退化成相对 `dec-server` cwd 的路径，进而覆盖全局配置；`ProjectConfigManager` 已在实现侧直接拒绝，TUI 这层不发起是为了不去撞那道墙。见 [0015](decisions/0015-project-config-boundary.md)。
 
 用户平面的 Bundles 页是 `GlobalConfig.EnabledBundles` 的**唯一写入口**（Settings 只读展示计数，避免两处基于各自快照互相覆盖）。候选除 vault 扫描结果外，还合入 `known_secret_bundles` 与 Bitwarden folder 枚举。补进来的候选按 vault scope 分流（ADR 0013）：vault 尚无 manifest 的标 `SecretsOnly`，展示「仓库未登记」，勾选保存时由 `ensureVaultBundlesForUserEnable` 补一份 `scope: user` 声明，标记随之消失；vault 已有 manifest 但 scope 属于另一平面的标 `OtherPlane`，展示「属于项目平面」、复选框为 `[-]` 且不可勾选——跨平面要先显式改 manifest 的 scope，绝不由一次勾选静默改写。保存时先校验/修复共享 vault 再写本机启用列表，被拒条目不进 `enabled_bundles`。无 Bitwarden session 时候选退化为 known ∪ 已启用，不为列候选触发 web unlock。
 
@@ -88,7 +90,7 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 
 ### 5.2 新机器同名 project 自动匹配
 
-工作区目录 basename 与 vault 中 `projects/<basename>.yaml` 同名时，Home 初始化 **自动应用** vault project，写入本地 `project_name` 与 `enabled_bundles`，无需手工复制 bundle 列表。详见 [ARCHITECTURE.md — Project 初始化](./ARCHITECTURE.md#project-初始化tuifirst)。
+工作区目录 basename 与 vault 中 `projects/<basename>.yaml` 同名时，Home 初始化 **自动应用** vault project，写入本地 `project_name` 与 `enabled_bundles`，无需手工复制 bundle 列表。详见 [ARCHITECTURE.md — Project 初始化](./ARCHITECTURE.md#project-初始化tuifirst)。**仅项目平面**：`dec --user` 没有工作区目录，不做这一步（[0015](decisions/0015-project-config-boundary.md)）。
 
 ### 5.3 Run 页 pull
 
@@ -99,6 +101,13 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 5. **孤儿 reconcile**：仅对本次启用且远端对照成功的 SyncTarget / vault 目标集清理本地孤儿；无法确认则只报告（见 [0010](decisions/0010-pull-orphan-and-ops.md)）
 
 缺 Bitwarden session 时由 `dec-server` 自动触发 web unlock（服务进程内存 session，见 [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md#bitwarden-认证)）。
+
+**结果区必须解释「零结果」**。「请求 0 · 成功 0 · 失败 0」自身不说明任何事情，用户无法区分「没启用」「启用的 bundle 已从仓库删除」「资产被过滤」。因此：
+
+- `PulledCount == 0` 时结果区显式渲染 `SkippedReason`，而不只依赖事件流；
+- 「`enabled_bundles` 引用的 bundle 在仓库中已不存在」这类判断在解析阶段就有结论，必须进 `PullProjectAssetsResult`（`MissingBundles` + `NonFatalWarnings`）而非只发一条 reporter 事件——事件区只保留最近十余条，开头的告警会被后续 secrets 事件挤掉，正是用户看到一排 0 却无从解释的原因。
+
+同理，Bundles 页保存后 `RejectedBundles` 逐条显示（[0013](decisions/0013-secrets-belong-to-declared-target.md) §7a）。凡是「结构化结果里已有结论」的信息，都不靠会滚走的事件区承载。
 
 ### 5.4 Project 页变量编辑
 

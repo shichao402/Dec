@@ -61,7 +61,7 @@ type SaveBundleSelectionResult struct {
 	VarsCreated        bool
 	EnabledBundleCount int
 	// RejectedBundles 是本次勾选中未能启用的条目（含原因），已从 enabled_bundles 排除。
-	// 仅用户平面会出现：跨平面启用需先显式改 vault manifest 的 scope（ADR 0013）。
+	// 两平面都会出现：跨平面启用需先显式改 vault manifest 的 scope（ADR 0013 §7 / §7a）。
 	RejectedBundles []string
 }
 
