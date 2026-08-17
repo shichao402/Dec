@@ -738,6 +738,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.result != nil {
 			m.pushLog(fmt.Sprintf("Bundle selection saved: %d bundles", msg.result.EnabledBundleCount))
+			// 被拒的勾选不进 enabled_bundles；不说出来就是「勾了却没生效」。
+			for _, rejected := range msg.result.RejectedBundles {
+				m.pushLog("未启用: " + rejected)
+			}
 		}
 		if m.configInitMode {
 			m.pushLog("项目配置已保存，退出初始化")

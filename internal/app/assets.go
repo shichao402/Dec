@@ -189,7 +189,23 @@ func SaveWorkspaceEnabledBundles(workspace Workspace, bundles []string, reporter
 		projectConfig = &types.ProjectConfig{}
 	}
 
-	projectConfig.EnabledBundles = normalizeEnabledBundles(bundles)
+	// 与用户平面一样先校验仓库声明：本平面看不见的名字不能进 enabled_bundles，
+	// 否则每次 pull 只会得到一句「引用的 bundle 找不到声明，已忽略」。
+	requested := normalizeEnabledBundles(bundles)
+	emit(reporter, EventInfo, "assets.save", "校验仓库 bundle 声明", nil)
+	rejected, err := validateProjectEnabledBundles(requested, reporter)
+	if err != nil {
+		return nil, err
+	}
+	if len(rejected) > 0 {
+		requested = excludeBundleNames(requested, projectRejectedNames(rejected))
+		for _, rj := range rejected {
+			result.RejectedBundles = append(result.RejectedBundles,
+				fmt.Sprintf("%s（%s）", rj.Name, rj.Reason))
+		}
+	}
+
+	projectConfig.EnabledBundles = requested
 	result.EnabledBundleCount = len(projectConfig.EnabledBundles)
 
 	emit(reporter, EventInfo, "assets.save", "写入项目配置", &Progress{Phase: "write", Current: 1, Total: 2})
