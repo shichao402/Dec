@@ -20,6 +20,9 @@ func MigrateTypeDirNames(ctx context.Context, client Client, projectRoot string,
 	if client == nil {
 		client = DefaultClient()
 	}
+	if err := RequireDeclared(target); err != nil {
+		return nil, err
+	}
 	folder := strings.TrimSpace(target.Folder)
 	if folder == "" {
 		return nil, fmt.Errorf("MigrateTypeDirNames 需要 Target.Folder")

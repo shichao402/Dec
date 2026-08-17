@@ -23,6 +23,14 @@ type GCMDoc struct {
 // GitGCMDoc 是 GCMDoc 的旧名别名（测试 / 迁移兼容）。
 type GitGCMDoc = GCMDoc
 
+// GCMIdentity 是 GCM Note 可安全展示/匹配的非秘密元数据。
+// Password 永不进入该类型，避免候选列表或 RPC 响应泄露 token。
+type GCMIdentity struct {
+	Host     string
+	Username string
+	Protocol string
+}
+
 // GitRunner 执行 git 子命令；测试可注入。
 type GitRunner func(ctx context.Context, stdin string, args ...string) error
 
@@ -52,6 +60,15 @@ func (h *GCMHandler) Source() SourceKind { return SourceNote }
 
 func (h *GCMHandler) Match(name string) bool {
 	return MatchGCMPath(name)
+}
+
+// InspectGCM 解析 GCM Note 的非秘密身份信息，用于 repo bootstrap 按 host 查找候选。
+func InspectGCM(name, content string) (GCMIdentity, error) {
+	res, err := resolveGCM(Item{Name: name, NoteContent: content}, false)
+	if err != nil {
+		return GCMIdentity{}, err
+	}
+	return GCMIdentity{Host: res.host, Username: res.user, Protocol: res.protocol}, nil
 }
 
 func (h *GCMHandler) Apply(ctx context.Context, item Item) error {

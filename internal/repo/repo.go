@@ -4,6 +4,7 @@ package repo
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,118 @@ import (
 
 	"github.com/shichao402/Dec/internal/sysproc"
 )
+
+// authRequiredMarker 让「需要重新认证」这一语义能跨进程存活。
+//
+// 门面（TUI）与 dec-server 之间的操作失败只回传错误文本，Go 错误类型在 RPC 边界就丢了。
+// pull 失败后门面必须能区分「仓库凭证过期」与其他失败（尤其 Bitwarden 401），才敢提示走
+// GCM bootstrap，所以在错误文本里带一个稳定标记；展示前由 StripAuthMarker 去掉。
+const authRequiredMarker = "[dec:repo-auth-required]"
+
+// AuthenticationError 表示 HTTPS 仓库操作明确失败于凭证阶段。
+// 上层可据此进入 Bitwarden → GCM bootstrap 确认流程；网络/DNS/仓库地址错误不得误触发。
+type AuthenticationError struct {
+	Host string
+	Err  error
+}
+
+func (e *AuthenticationError) Error() string {
+	if e == nil {
+		return "仓库认证失败"
+	}
+	return fmt.Sprintf("%s 仓库 %s 认证失败: %v", authRequiredMarker, e.Host, e.Err)
+}
+
+func (e *AuthenticationError) Unwrap() error { return e.Err }
+
+func IsAuthenticationError(err error) bool {
+	var target *AuthenticationError
+	return errors.As(err, &target)
+}
+
+// MessageIndicatesAuthRequired 判断一段（可能跨进程传回的）错误文本是否源自仓库认证失败。
+func MessageIndicatesAuthRequired(message string) bool {
+	return strings.Contains(message, authRequiredMarker)
+}
+
+// StripAuthMarker 去掉展示给用户时无意义的机器标记。
+func StripAuthMarker(message string) string {
+	return strings.TrimSpace(strings.ReplaceAll(message, authRequiredMarker, ""))
+}
+
+// classifyRemoteAuthError 把 git 远端操作失败按凭证原因分类。
+// repoURL 决定是否 HTTPS 与 host；非 HTTPS 或非凭证类失败原样返回，避免误导用户走 bootstrap。
+func classifyRemoteAuthError(repoURL, message string, err error) error {
+	host, hostErr := RepoHost(repoURL)
+	if hostErr != nil || !isHTTPSRepoURL(repoURL) || !looksLikeAuthenticationFailure(message) {
+		return err
+	}
+	return &AuthenticationError{Host: host, Err: err}
+}
+
+// RepoHost 返回仓库 URL 的主机名。支持 https://host/... 与 git@host:path。
+func RepoHost(repoURL string) (string, error) {
+	raw := strings.TrimSpace(repoURL)
+	if raw == "" {
+		return "", fmt.Errorf("仓库地址为空")
+	}
+	if parsed, err := url.Parse(raw); err == nil && parsed.Hostname() != "" {
+		return strings.ToLower(parsed.Hostname()), nil
+	}
+	if at := strings.LastIndex(raw, "@"); at >= 0 {
+		raw = raw[at+1:]
+	}
+	if colon := strings.Index(raw, ":"); colon > 0 {
+		return strings.ToLower(strings.TrimSpace(raw[:colon])), nil
+	}
+	return "", fmt.Errorf("无法从仓库地址解析主机: %q", repoURL)
+}
+
+// Probe 在不修改本地 repo 的前提下验证远端可访问性。
+// 禁止终端/GCM 交互，认证失败交由 TUI 显式确认是否走 Bitwarden bootstrap。
+func Probe(repoURL string) error {
+	repoURL = strings.TrimSpace(repoURL)
+	cmd := sysproc.Command("git", "ls-remote", "--heads", repoURL)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	message := strings.TrimSpace(string(output))
+	if message == "" {
+		message = err.Error()
+	}
+	return classifyRemoteAuthError(repoURL, message, fmt.Errorf("git ls-remote: %s", message))
+}
+
+func isHTTPSRepoURL(repoURL string) bool {
+	lower := strings.ToLower(strings.TrimSpace(repoURL))
+	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://")
+}
+
+func looksLikeAuthenticationFailure(message string) bool {
+	lower := strings.ToLower(message)
+	for _, marker := range []string{
+		"authentication failed",
+		"credentials have expired",
+		"credential has expired",
+		"could not read username",
+		"terminal prompts disabled",
+		"access denied",
+		"authorization failed",
+		"unauthorized",
+		"http 401",
+		"error: 401",
+		"http 403",
+		"error: 403",
+		"repository not found",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 func normalizeRepoURL(url string) string {
 	trimmed := strings.TrimSpace(url)

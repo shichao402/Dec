@@ -23,12 +23,15 @@ func TestEnsureVaultBundlesForUserEnable_CreatesMissing(t *testing.T) {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
 
-	created, err := ensureVaultBundlesForUserEnable([]string{"cli", "woa"}, nil)
+	repair, err := ensureVaultBundlesForUserEnable([]string{"cli", "woa"}, nil)
 	if err != nil {
 		t.Fatalf("ensureVaultBundlesForUserEnable() = %v", err)
 	}
-	if len(created) != 1 || created[0] != "woa" {
-		t.Fatalf("created = %#v, 期望 [woa]", created)
+	if len(repair.Created) != 1 || repair.Created[0] != "woa" {
+		t.Fatalf("created = %#v, 期望 [woa]", repair.Created)
+	}
+	if len(repair.Rejected) != 0 {
+		t.Fatalf("无 project 引用且缺省 scope 不应被拒: %#v", repair.Rejected)
 	}
 
 	tx, err := repo.NewReadTransaction()
@@ -56,7 +59,9 @@ func TestEnsureVaultBundlesForUserEnable_CreatesMissing(t *testing.T) {
 	}
 }
 
-func TestEnsureVaultBundlesForUserEnable_UpgradesExistingProjectScope(t *testing.T) {
+// ADR 0013：显式 scope: project 是 manifest 作者的明确声明，勾选用户平面不得静默改写它，
+// 否则所有引用该 bundle 的 project 会因平面隔离突然拉不到资产。
+func TestEnsureVaultBundlesForUserEnable_RejectsExplicitProjectScope(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/cli/bundle.yaml": "name: cli\nscope: project\nmembers: []\n",
@@ -64,13 +69,17 @@ func TestEnsureVaultBundlesForUserEnable_UpgradesExistingProjectScope(t *testing
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
-	created, err := ensureVaultBundlesForUserEnable([]string{"cli"}, nil)
+	repair, err := ensureVaultBundlesForUserEnable([]string{"cli"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(created) != 0 {
-		t.Fatalf("created = %#v, 期望空（仅升级）", created)
+	if len(repair.Created) != 0 || len(repair.Upgraded) != 0 {
+		t.Fatalf("不应创建或升级: %#v", repair)
 	}
+	if len(repair.Rejected) != 1 || repair.Rejected[0].Name != "cli" {
+		t.Fatalf("应拒绝 cli: %#v", repair.Rejected)
+	}
+
 	tx, err := repo.NewReadTransaction()
 	if err != nil {
 		t.Fatal(err)
@@ -80,8 +89,162 @@ func TestEnsureVaultBundlesForUserEnable_UpgradesExistingProjectScope(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "scope: user") {
-		t.Fatalf("应升级为 scope: user, 实际: %s", data)
+	if !strings.Contains(string(data), "scope: project") {
+		t.Fatalf("manifest 不应被改写, 实际: %s", data)
+	}
+}
+
+// 缺省 scope 允许按 ADR 0009 迁移期推断，但前提是没有 project 还在引用它。
+func TestEnsureVaultBundlesForUserEnable_RejectsDefaultScopeUsedByProject(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/vikunja/bundle.yaml": "name: vikunja\nmembers: []\n",
+		"projects/Dec.yaml":           "name: Dec\nbundles:\n  - vikunja\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	repair, err := ensureVaultBundlesForUserEnable([]string{"vikunja"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repair.Upgraded) != 0 {
+		t.Fatalf("被 project 引用的包不应升级: %#v", repair)
+	}
+	if len(repair.Rejected) != 1 || !strings.Contains(repair.Rejected[0].Reason, "Dec") {
+		t.Fatalf("拒绝原因应点明引用它的 project: %#v", repair.Rejected)
+	}
+
+	tx, err := repo.NewReadTransaction()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Close()
+	data, err := os.ReadFile(filepath.Join(tx.WorkDir(), "bundles", "vikunja", "bundle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "scope: user") {
+		t.Fatalf("manifest 不应被改写为 user, 实际: %s", data)
+	}
+}
+
+// 拒绝项不能留在 enabled_bundles 里，否则会是一个「勾了但平面隔离永远看不见」的条目。
+func TestSaveWorkspaceEnabledBundles_ExcludesRejectedFromUserConfig(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/cli/bundle.yaml":     "name: cli\nscope: user\nmembers: []\n",
+		"bundles/vikunja/bundle.yaml": "name: vikunja\nscope: project\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := SaveWorkspaceEnabledBundles(NewWorkspace(WorkspaceUser, ""), []string{"cli", "vikunja"}, nil)
+	if err != nil {
+		t.Fatalf("SaveWorkspaceEnabledBundles() = %v", err)
+	}
+	if result.EnabledBundleCount != 1 {
+		t.Fatalf("EnabledBundleCount = %d, 期望 1", result.EnabledBundleCount)
+	}
+	if len(result.RejectedBundles) != 1 || !strings.Contains(result.RejectedBundles[0], "vikunja") {
+		t.Fatalf("应报告被拒的 vikunja: %#v", result.RejectedBundles)
+	}
+
+	saved, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.EnabledBundles) != 1 || saved.EnabledBundles[0] != "cli" {
+		t.Fatalf("enabled_bundles = %#v, 期望仅 [cli]", saved.EnabledBundles)
+	}
+}
+
+// ADR 0012：用户平面 Bundles 页是启用列表的唯一入口，因此候选必须包含只存在于
+// Bitwarden / known 的 bundle，否则 secrets-only bundle 无法被首次勾选。
+func TestLoadWorkspaceAssetSelection_UserPlaneIncludesSecretsOnlyCandidates(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, EnabledBundles: []string{"cli"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{SecretBundleFolders: []string{"vikunja"}}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	state, err := LoadWorkspaceAssetSelection(NewWorkspace(WorkspaceUser, ""), nil)
+	if err != nil {
+		t.Fatalf("LoadWorkspaceAssetSelection() = %v", err)
+	}
+
+	byName := make(map[string]AssetBundleOption, len(state.Bundles))
+	for _, bo := range state.Bundles {
+		byName[bo.Name] = bo
+	}
+	cli, ok := byName["cli"]
+	if !ok || cli.SecretsOnly || !cli.Enabled {
+		t.Fatalf("vault bundle cli 应为已启用的普通条目: %#v", cli)
+	}
+	vikunja, ok := byName["vikunja"]
+	if !ok {
+		t.Fatalf("仅 Bitwarden 存在的 bundle 应出现在候选中: %#v", state.Bundles)
+	}
+	if !vikunja.SecretsOnly || vikunja.Enabled {
+		t.Fatalf("vikunja 应标记 SecretsOnly 且未启用: %#v", vikunja)
+	}
+}
+
+// ADR 0013：known_secret_bundles 混着两平面的名字。vault 里已有 manifest、只是 scope 属于
+// 另一平面的条目必须标 OtherPlane——标成 SecretsOnly 会谎称「vault 尚无 manifest」，
+// 并诱导用户勾选，进而触发跨平面 scope 改写。
+func TestLoadWorkspaceAssetSelection_MarksOtherPlaneInsteadOfSecretsOnly(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/vikunja/bundle.yaml": "name: vikunja\nscope: project\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.RememberSecretBundles([]string{"vikunja"}); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := LoadWorkspaceAssetSelection(NewWorkspace(WorkspaceUser, ""), nil)
+	if err != nil {
+		t.Fatalf("LoadWorkspaceAssetSelection() = %v", err)
+	}
+	var found bool
+	for _, bo := range state.Bundles {
+		if bo.Name != "vikunja" {
+			continue
+		}
+		found = true
+		if bo.SecretsOnly {
+			t.Fatalf("vault 已有 manifest，不应标 SecretsOnly: %#v", bo)
+		}
+		if !bo.OtherPlane {
+			t.Fatalf("应标 OtherPlane: %#v", bo)
+		}
+	}
+	if !found {
+		t.Fatalf("候选中应出现 vikunja: %#v", state.Bundles)
 	}
 }
 

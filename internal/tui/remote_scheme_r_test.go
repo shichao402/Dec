@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -299,6 +301,28 @@ func TestRemoteAddSecret_EmptyNewFolderDoesNotAdvance(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Fatal("空 folder 名不应触发命令")
+	}
+}
+
+func TestRemoteAddSecret_NewBareFolderRequiresDeclaredProject(t *testing.T) {
+	oldValidate := validateRemoteRegisterFolderOperation
+	validateRemoteRegisterFolderOperation = func(context.Context, app.Workspace, string) error {
+		return fmt.Errorf("folder %q 不是 vault 已声明的 project；新建归属请改用 %q", "relkit", "bundle/relkit")
+	}
+	t.Cleanup(func() { validateRemoteRegisterFolderOperation = oldValidate })
+
+	m := remotePageModelWithCandidates(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	updated = typeRunes(updated, "relkit")
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	after := updated.(model)
+	if after.addSecretStage != addSecretStageFolderCheck || cmd == nil {
+		t.Fatalf("裸名应先异步校验 vault 声明: stage=%q cmd=%v", after.addSecretStage, cmd)
+	}
+	updated, _ = after.Update(cmd())
+	after = updated.(model)
+	if after.addSecretStage != addSecretStageFolder || !strings.Contains(after.addSecretNotice, "bundle/relkit") {
+		t.Fatalf("非法裸名应留在 folder 阶段并提示 bundle/<名>: stage=%q notice=%q", after.addSecretStage, after.addSecretNotice)
 	}
 }
 

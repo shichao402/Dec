@@ -1,15 +1,16 @@
 # Bundle 同构与 Secrets Bundle 模型
 
 > 落地路径的决策依据见 [decisions/0002](decisions/0002-secrets-synctarget-root.md)（取代 [0001](decisions/0001-secrets-landing-path.md)）：
-> **SyncTarget 为唯一同步单位；Bitwarden folder ↔ 本地 `.secrets` 同步根；Note 名 = 相对该同步根的路径。**
+> **SyncTarget 为 Bundle 私密半边的内部同步单位；Bitwarden folder ↔ 本地 `.secrets` 同步根；Note 名 = 相对该同步根的路径。**
 >
-> Bundle 二元 scope 与平面隔离见 [decisions/0009](decisions/0009-bundle-binary-scope.md)（修订 [0003](decisions/0003-user-enabled-secret-bundles.md) 并集语义、[0007](decisions/0007-machine-secrets-root.md) 覆盖层）。
+> Bundle 二元 scope 与平面隔离见 [decisions/0009](decisions/0009-bundle-binary-scope.md)。
+> **可写对象 = Bundle** 见 [decisions/0014](decisions/0014-bundle-sole-writable-aggregate.md)（取消 project 级裸 folder 可写归属）。
 
 本文档描述 Dec **Project / bundle** 与 Bitwarden **secrets bundle** 的同构组织方式、`.secrets` 同步根、拉取落地流程，以及零路径重叠 invariant。实现细节见 `Documents/ARCHITECTURE.md`；schema 声明见 `schema/dec/v1/` 与 `schema/secrets/v1/`。
 
 ## 一句话
 
-Dec 以 **Project**（vault `projects/<name>.yaml`）声明启用哪些 **project-scope bundle**；`dec --user` 管理 **user-scope bundle**。公开资产按 scope 分别落到用户级 IDE 目录或项目 IDE 目录；Bitwarden secrets 按 scope 落到 `~/.dec/secrets/bundles/<name>/` 或 `<project>/.secrets/`。两平面隔离，不并集、不做 overlay。
+**可写对象只有 Bundle**（公开半边在 Git vault，私密半边可选在 Bitwarden `bundle/<name>`）。Project / User 只引用或启用 Bundle，不直接写 secrets。公开资产按 scope 落到用户或项目 IDE 目录；secrets 落到 `~/.dec/secrets/bundles/<name>/` 或 `<project>/.secrets/bundles/<name>/`。两平面隔离，不并集、不做 overlay。
 
 ## Bundle 二元 scope（0009）
 
@@ -68,11 +69,6 @@ SyncTarget{kind: bundle, name: tencent-cloud, plane: machine}
   folder: bundle/tencent-cloud
   LocalRoot: bundles/tencent-cloud（相对 ~/.dec/secrets）
   note ".env/x.env" → ~/.dec/secrets/bundles/tencent-cloud/.env/x.env
-
-SyncTarget{kind: project, name: my-app}
-  folder: my-app
-  LocalRoot: .secrets/project
-  note "config/private.yaml" → <project>/.secrets/project/config/private.yaml
 ```
 
 - **Bitwarden folder** 默认严格同名；显式别名见 `BundleBinding`。
@@ -87,13 +83,13 @@ Project（projects/my-app.yaml）          Bundle（bundles/vikunja/）
 name: my-app                              scope: project
 bundles:                                  skills/vikunja-workflow/
   - vikunja          ──pull 时展开──►     rules/vikunja-integration.mdc
-  - helloworld                            mcp/vikunja-mcp.json
+  - my-app                                mcp/vikunja-mcp.json
                                           bundle.yaml
+                                          （私密半边可选）bundle/vikunja
 
 Pull（project 上下文）：
   1. 解析 enabled_bundles（仅 scope: project）
   2. Dec Git → 项目 .dec/cache + IDE；Bitwarden → .secrets/bundles/<bundle>/
-  3. 若有 project_name：额外同步 project 级 folder → .secrets/project/
 
 Pull（dec --user）：
   1. 解析 ~/.dec/config.yaml 的 enabled_bundles（仅 scope: user）
@@ -101,18 +97,18 @@ Pull（dec --user）：
 ```
 
 - secrets bundle **仍与 Dec bundle 一一绑定**。
-- **project 级 secrets** 与 project-scope bundle 级并列，仅存在于项目上下文。
+- **项目专属密文件** = 某个 `scope: project` 的 Bundle（常与项目同名），由 `projects/*.yaml` 引用；**不再**有裸 project folder 可写归属（ADR 0014）。
 
-## Project 级 secrets
+## Bundle 私密半边落盘
 
-| 维度 | bundle 级（project scope） | bundle 级（user scope） | project 级 |
-|------|---------------------------|------------------------|------------|
-| 触发条件 | 项目 `enabled_bundles` | `~/.dec/config.yaml` 的 `enabled_bundles` | 有 `project_name` |
-| Bitwarden folder | `bundle/<name>` | `bundle/<name>` | `project_secrets` 或 `project_name` |
-| 本地同步根 | `.secrets/bundles/<bundle>/` | `~/.dec/secrets/bundles/<bundle>/` | `.secrets/project/` |
-| SSH Key | 一律 `~/.ssh/` | 一律 `~/.ssh/` | — |
+| 维度 | bundle 级（project scope） | bundle 级（user scope） |
+|------|---------------------------|------------------------|
+| 触发条件 | 项目 `enabled_bundles` | `~/.dec/config.yaml` 的 `enabled_bundles` |
+| Bitwarden folder | `bundle/<name>` | `bundle/<name>` |
+| 本地同步根 | `.secrets/bundles/<bundle>/` | `~/.dec/secrets/bundles/<bundle>/` |
+| SSH Key | 一律 `~/.ssh/` | 一律 `~/.ssh/` |
 
-`known_secret_bundles` 仍是本机发现缓存，落在 `~/.dec/secrets/config.yaml`，**不等于**启用。
+`known_secret_bundles` 仍是本机发现缓存，落在 `~/.dec/secrets/config.yaml`，**不等于**启用；禁止任何启用语义（ADR 0014）。
 
 `~/.dec/config.yaml` 示例（启用列表）：
 
@@ -128,13 +124,14 @@ enabled_bundles:
 `~/.dec/secrets/config.yaml` 示例（仅 secrets 职责）：
 
 ```yaml
-project_secrets: my-app   # 可选
 bundles:
   - dec_bundle: vikunja
     secrets_bundle: custom_alias
 known_secret_bundles:
   - woa
 ```
+
+存量 `.secrets/project/` 与裸 project folder 用 `MigrateProjectSecretsToBundle` 迁入 `bundle/<project_name>`。
 
 **跨 folder 撞车**：两个 folder 的 note 汇总后映射到同一落地路径时，pull 在写盘前报错并中止。
 
@@ -264,6 +261,11 @@ sequenceDiagram
 
 拉取 secrets 需要有效 session。认证由 **`dec-server` 进程内**触发；user / project 门面共享同一服务 session。详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)。
 
+首次连接 HTTPS 私仓存在特殊自举路径（[0011](decisions/0011-private-repo-gcm-bootstrap.md)）：
+仅在 Git 明确认定认证失败且用户确认后，服务不依赖 bundle manifest，直接枚举 Bitwarden
+中现有 `.gcm/*` Note，按正文 `host` 匹配仓库、复用 GCM Processor Apply 并重试。
+这只是基础能力的特殊编排；不新增 secret 类型、SyncTarget、token 副本或本地 session。
+
 ## 配置与绑定
 
 - **Project 声明**：vault `projects/<name>.yaml` 的 `bundles`
@@ -283,6 +285,7 @@ sequenceDiagram
 
 - [decisions/0002-secrets-synctarget-root.md](decisions/0002-secrets-synctarget-root.md)
 - [decisions/0009-bundle-binary-scope.md](decisions/0009-bundle-binary-scope.md)
+- [decisions/0011-private-repo-gcm-bootstrap.md](decisions/0011-private-repo-gcm-bootstrap.md)
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)
 - [.cursor/rules/bundle-secrets-mirror.mdc](../.cursor/rules/bundle-secrets-mirror.mdc)

@@ -92,10 +92,10 @@ func TestPrepareRemoteNoteEdit_BareFolderWithoutLocalRoot(t *testing.T) {
 		t.Fatalf("temp content = %q", raw)
 	}
 	_ = os.WriteFile(sess.Path, []byte("X=2\n"), 0o600)
-	if err := CommitRemoteNoteEdit(t.Context(), *sess, nil); err != nil {
-		t.Fatalf("Commit: %v", err)
+	if err := CommitRemoteNoteEdit(t.Context(), *sess, nil); err == nil || !strings.Contains(err.Error(), "bundle/<名>") {
+		t.Fatalf("未声明裸 folder 的编辑提交应拒绝并提示迁移, got %v", err)
 	}
-	if stub.NotesByFolder["relkit"][0].Content != "X=2\n" {
+	if stub.NotesByFolder["relkit"][0].Content != "X=1\n" {
 		t.Fatalf("bare folder note = %#v", stub.NotesByFolder["relkit"])
 	}
 }
@@ -150,8 +150,13 @@ func TestCommitRemoteSSHHostsEdit(t *testing.T) {
 	if err := os.WriteFile(tmp, []byte("new.example.com\n# comment\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := CommitRemoteSSHHostsEdit(t.Context(), RemoteSSHHostsEditSession{
+	target, err := secrets.NewBundleSyncTarget("vikunja", "bundle/vikunja")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = CommitRemoteSSHHostsEdit(t.Context(), RemoteSSHHostsEditSession{
 		Path:          tmp,
+		Target:        target,
 		Folder:        "bundle/vikunja",
 		KeyName:       ".sshkey/deploy",
 		DecBundleName: "vikunja",

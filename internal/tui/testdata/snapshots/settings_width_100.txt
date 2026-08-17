@@ -10,14 +10,14 @@
 │                ││   [ ] codex                                                                    │
 │                ││   [x] cursor                                                                   │
 │                ││                                                                                │
-│                ││ 用户 bundles                                                                   │
-│                ││   [ ] vikunja                                                                  │
-│                ││   [x] woa                                                                      │
+│                ││ 用户 bundles：已启用 1 个 · 在 dec --user 的 Bundles 页管理                    │
 │                ││                                                                                │
 │                ││ 详情                                                                           │
 │                ││ 状态: 已连接                                                                   │
 │                ││ 远端: git@github.com:demo/dec.git                                              │
 │                ││ Enter 编辑                                                                     │
+│                ││                                                                                │
+│                ││                                                                                │
 │                ││                                                                                │
 │                ││                                                                                │
 │                ││                                                                                │

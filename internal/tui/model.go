@@ -1,10 +1,9 @@
-package tui
+﻿package tui
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/diag"
 	"github.com/shichao402/Dec/internal/editor"
-	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/serviceapi"
 	"github.com/shichao402/Dec/internal/update"
 )
@@ -63,6 +61,16 @@ type settingsLoadedMsg struct {
 
 type settingsSavedMsg struct {
 	result *app.SaveGlobalSettingsResult
+	err    error
+}
+
+type repoBootstrapEventMsg struct{ event app.OperationEvent }
+type repoBootstrapPreparedMsg struct {
+	result *app.PrepareRepoGCMBootstrapResult
+	err    error
+}
+type repoBootstrapAppliedMsg struct {
+	result *app.ApplyRepoGCMBootstrapResult
 	err    error
 }
 
@@ -212,6 +220,14 @@ var saveGlobalSettingsOperation = func(input app.SaveGlobalSettingsInput, report
 	return serviceapi.SaveGlobalSettings(input, reporter)
 }
 
+var prepareRepoGCMBootstrapOperation = func(ctx context.Context, repoURL string, reporter app.Reporter) (*app.PrepareRepoGCMBootstrapResult, error) {
+	return serviceapi.PrepareRepoGCMBootstrap(ctx, repoURL, reporter)
+}
+
+var applyRepoGCMBootstrapOperation = func(ctx context.Context, input app.ApplyRepoGCMBootstrapInput, reporter app.Reporter) (*app.ApplyRepoGCMBootstrapResult, error) {
+	return serviceapi.ApplyRepoGCMBootstrap(ctx, input, reporter)
+}
+
 var ensureBuiltinIDEAssetsOperation = func(ideNames []string, reporter app.Reporter) []string {
 	warnings, err := serviceapi.EnsureBuiltinIDEAssets(ideNames, reporter)
 	if err != nil {
@@ -300,109 +316,120 @@ type model struct {
 	assetsDirty      bool
 	savingAssets     bool
 	// "bundle" 表示只显示 bundle 节点（以及它们展开的成员）；其他值只影响单资产行的过滤。
-	settingsCursor                int
-	settingsDirty                 bool
-	savingSettings                bool
-	settingsRepoInput             string
-	settingsRepoEditing           bool
-	settingsIdleTimeoutInput      string
-	settingsIdleTimeoutEditing    bool
-	settingsSelectedIDEs          []string
-	settingsSelectedSecretBundles []string
-	projectSettings               *app.ProjectSettingsState
-	projectSettingsErr            error
-	projectSettingsCursor         int
-	projectSettingsDirty          bool
-	savingProjectSettings         bool
-	projectSettingsOverride       bool
-	projectSettingsSelectedIDEs   []string
-	lastInitResult                *app.ConfigInitPreparation
-	lastInitErr                   error
-	projectVars                   *app.ProjectVarsView
-	projectVarsErr                error
-	lastEditErr                   error
-	runningPull                   bool
-	runProgress                   *app.Progress
-	runEvents                     []string
-	runPinLine                    string
-	runShowHelp                   bool
-	runResult                     *app.PullProjectAssetsResult
-	pushResult                    *app.PushProjectAssetsResult
-	runErr                        error
-	runStream                     <-chan tea.Msg
-	runCtx                        context.Context
-	runCancel                     context.CancelFunc
-	runMode                       string // "pull" | "push" | "remove" | "update"
-	observedOperationID           string
-	observedOperationFacade       string
-	observedStream                <-chan tea.Msg
-	removeStage                   string // "", "select", "confirm", "running"
-	removeCursor                  int
-	removeFilter                  string
-	removeFilterInput             bool
-	removeTarget                  *app.AssetBundleOption
-	runningRemove                 bool
-	removeResult                  *app.RemoveBundleResult
-	removeErr                     error
-	pushStage                     string // "", "loading", "summary", "confirm", "running"
-	pushPreview                   *app.PushProjectAssetsPreview
-	pushPreviewErr                error
-	pushPreviewLoad               asyncLoad
-	updateStage                   string // "", "checking", "result", "confirm", "running", "done"
-	updateResult                  *update.CheckResult
-	updateErr                     error
-	updateDoneVersion             string
-	updatingBinary                bool
-	deleteCandidates              []app.DeleteCandidate
-	deleteTree                    TreeList
-	deleteFilter                  string
-	deleteFilterInput             bool
-	deleteStage                   string // "", "list", "summary", "confirm", "typed", "running"
-	deleteCandidatesLoaded        bool
-	deleteLoad                    asyncLoad // 跨页飞行的候选列表加载（切页不取消）
-	deleteLoadErr                 error
-	deleteIncludeRemote           bool
-	runningDelete                 bool
-	deleteResult                  *app.DeleteProjectResult
-	deleteErr                     error
-	deleteTypedInput              string
-	deleteTypedSpec               app.DeleteTypedConfirmSpec
-	remoteNoteEdit                *app.RemoteNoteEditSession
-	remoteSSHEdit                 *app.RemoteSSHHostsEditSession
-	remoteRegisterSess            *app.RemoteRegisterSession
-	remoteRegisterPending         bool       // n 登记：Esc 可退出等待，迟到结果只记日志
-	shellRefresh                  asyncBatch // overview/assets/settings/projectSettings/projectVars
-	projectVarsLoad               asyncLoad  // 独立重载 .dec/vars.yaml
-	globalVarsLoad                asyncLoad  // 独立重载 ~/.dec/local/vars.yaml
-	builtinAssetsLoad             asyncLoad  // 同步内置 IDE assets
-	localProjectLoad              asyncLoad  // 生成本地 project 配置
-	vaultApplyLoad                asyncLoad  // 应用推断的 vault project
-	projectInitLoad               asyncLoad  // Project 页扫描仓库
+	settingsCursor              int
+	settingsDirty               bool
+	savingSettings              bool
+	settingsRepoInput           string
+	settingsRepoEditing         bool
+	settingsIdleTimeoutInput    string
+	settingsIdleTimeoutEditing  bool
+	settingsSelectedIDEs        []string
+	repoBootstrapStage          string // "", "confirm", "loading", "select", "applying"
+	repoBootstrapSource         string // "settings" | "run"：决定成功后重试 Settings 保存还是 Run pull
+	repoBootstrapHost           string
+	repoBootstrapError          string
+	repoBootstrapCandidates     []app.RepoGCMCandidate
+	repoBootstrapCursor         int
+	repoBootstrapStream         chan tea.Msg
+	repoBootstrapCancel         context.CancelFunc
+	projectSettings             *app.ProjectSettingsState
+	projectSettingsErr          error
+	projectSettingsCursor       int
+	projectSettingsDirty        bool
+	savingProjectSettings       bool
+	projectSettingsOverride     bool
+	projectSettingsSelectedIDEs []string
+	lastInitResult              *app.ConfigInitPreparation
+	lastInitErr                 error
+	projectVars                 *app.ProjectVarsView
+	projectVarsErr              error
+	lastEditErr                 error
+	runningPull                 bool
+	runProgress                 *app.Progress
+	runEvents                   []string
+	runPinLine                  string
+	runShowHelp                 bool
+	runResult                   *app.PullProjectAssetsResult
+	pushResult                  *app.PushProjectAssetsResult
+	runErr                      error
+	runStream                   <-chan tea.Msg
+	runCtx                      context.Context
+	runCancel                   context.CancelFunc
+	runMode                     string // "pull" | "push" | "remove" | "update"
+	observedOperationID         string
+	observedOperationFacade     string
+	observedStream              <-chan tea.Msg
+	removeStage                 string // "", "select", "confirm", "running"
+	removeCursor                int
+	removeFilter                string
+	removeFilterInput           bool
+	removeTarget                *app.AssetBundleOption
+	runningRemove               bool
+	removeResult                *app.RemoveBundleResult
+	removeErr                   error
+	pushStage                   string // "", "loading", "summary", "confirm", "running"
+	pushPreview                 *app.PushProjectAssetsPreview
+	pushPreviewErr              error
+	pushPreviewLoad             asyncLoad
+	updateStage                 string // "", "checking", "result", "confirm", "running", "done"
+	updateResult                *update.CheckResult
+	updateErr                   error
+	updateDoneVersion           string
+	updatingBinary              bool
+	deleteCandidates            []app.DeleteCandidate
+	deleteTree                  TreeList
+	deleteFilter                string
+	deleteFilterInput           bool
+	deleteStage                 string // "", "list", "summary", "confirm", "typed", "running"
+	deleteCandidatesLoaded      bool
+	deleteLoad                  asyncLoad // 跨页飞行的候选列表加载（切页不取消）
+	deleteLoadErr               error
+	deleteIncludeRemote         bool
+	runningDelete               bool
+	deleteResult                *app.DeleteProjectResult
+	deleteErr                   error
+	deleteTypedInput            string
+	deleteTypedSpec             app.DeleteTypedConfirmSpec
+	remoteNoteEdit              *app.RemoteNoteEditSession
+	remoteSSHEdit               *app.RemoteSSHHostsEditSession
+	remoteRegisterSess          *app.RemoteRegisterSession
+	remoteRegisterPending       bool       // n 登记：Esc 可退出等待，迟到结果只记日志
+	shellRefresh                asyncBatch // overview/assets/settings/projectSettings/projectVars
+	projectVarsLoad             asyncLoad  // 独立重载 .dec/vars.yaml
+	globalVarsLoad              asyncLoad  // 独立重载 ~/.dec/local/vars.yaml
+	builtinAssetsLoad           asyncLoad  // 同步内置 IDE assets
+	localProjectLoad            asyncLoad  // 生成本地 project 配置
+	vaultApplyLoad              asyncLoad  // 应用推断的 vault project
+	projectInitLoad             asyncLoad  // Project 页扫描仓库
 	// configInitMode 为 true 时表示由 dec config init 拉起：聚焦 Assets/bundle 视图，保存后退出。
 	configInitMode bool
 	// vaultInference Home 页待确认的 vault project 推断（来自目录名匹配）。
 	vaultInference *app.VaultProjectInference
 	// vaultInferenceDismissed 用户本次会话内已拒绝推断，刷新前不再提示。
 	vaultInferenceDismissed bool
+	// localProjectInitConfirm Home 页等待用户确认是否在当前目录创建 .dec/config.yaml。
+	// 未显式按 y 前绝不落盘，避免误开目录时污染该目录。
+	localProjectInitConfirm bool
 	// vaultAutoApplyNotice Home 页展示 vault 应用成功提示（仅本次会话内最近一次）。
 	vaultAutoApplyNotice string
 	// focus 是当前键盘交互上下文（侧栏 / 内容 / bundle 成员）。
 	focus focusContext
 	// addSecretStage 是 Project/Remote 页「登记新 secret」的阶段；空串表示流程未开启。
-	addSecretStage       string
-	addSecretPathInput   string
-	addSecretContentPath string // Remote：显式本地路径
-	addSecretSourceMode  string // Remote：Processor 声明的来源模式
-	addSecretTargets     []app.SecretTargetOption
-	addSecretTargetsLoad asyncLoad // Project 页候选归属枚举（禁止同步调用）
-	addSecretTargetIdx   int
-	addSecretResult      *app.AddSecretResult
-	addSecretErr         error
-	addSecretRemoteMode  bool   // true = Remote 登记（归属为 Bitwarden folder）
-	addSecretFolder      string // Remote：光标反推出的 folder，或 N 手输的新 folder
-	addSecretFolderNew   bool   // Remote：folder 由用户手输（可能尚不存在）
-	addSecretTypeIdx     int    // Remote：Processor 表索引
-	addSecretInitialBody string // Remote temp 预填正文
+	addSecretStage          string
+	addSecretPathInput      string
+	addSecretContentPath    string // Remote：显式本地路径
+	addSecretSourceMode     string // Remote：Processor 声明的来源模式
+	addSecretTargets        []app.SecretTargetOption
+	addSecretTargetsLoad    asyncLoad // Project 页候选归属枚举（禁止同步调用）
+	addSecretTargetIdx      int
+	addSecretResult         *app.AddSecretResult
+	addSecretErr            error
+	addSecretRemoteMode     bool   // true = Remote 登记（归属为 Bitwarden folder）
+	addSecretFolder         string // Remote：光标反推出的 folder，或 N 手输的新 folder
+	addSecretFolderNew      bool   // Remote：folder 由用户手输（可能尚不存在）
+	addSecretFolderCheckGen uint64
+	addSecretTypeIdx        int    // Remote：Processor 表索引
+	addSecretInitialBody    string // Remote temp 预填正文
 	// addSecretNotice 是表单内可见的校验/说明行。登记表单整页渲染，日志区不可见，
 	// 校验失败只 pushLog 会让用户以为按键无效。
 	addSecretNotice string
@@ -604,8 +631,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		diag.StartupLog("overviewLoadedMsg applied enabled=%d available=%d repoConnected=%v",
 			msg.overview.EnabledBundleCount, msg.overview.AvailableBundleCount, msg.overview.RepoConnected)
+		if msg.overview.ProjectConfigReady {
+			m.localProjectInitConfirm = false
+		}
 		m.pushLog(fmt.Sprintf("Overview loaded: %d enabled bundles (vault scan deferred)", msg.overview.EnabledBundleCount))
-		cmds := []tea.Cmd{loadVaultInferenceCmd(m.projectRoot)}
+		var cmds []tea.Cmd
+		// 用户平面没有项目根（workspace.Root 为空），vault project 推断无从谈起；
+		// 照常发起会让服务端拿空 projectRoot 去读 cwd 下的 .dec/config.yaml。
+		if m.plane != app.WorkspaceUser {
+			cmds = append(cmds, loadVaultInferenceCmd(m.projectRoot))
+		}
 		if msg.overview.RepoConnected {
 			cmds = append(cmds, enrichWorkspaceOverviewVaultCmd(m.workspace()))
 		}
@@ -614,26 +649,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			diag.StartupLog("vaultInferenceLoadedMsg err=%v", msg.err)
 			m.pushLog("Vault project infer failed: " + msg.err.Error())
-			// Infer 失败时仍允许本地 fallback
-			if m.overview != nil && !m.overview.ProjectConfigReady && !m.localProjectLoad.busy() {
-				gen := m.localProjectLoad.beginGen()
-				m.pushLog("无 vault 推断结果，生成本地 project 配置")
-				return m, ensureLocalProjectCmd(m.projectRoot, gen)
+			if m.overview != nil && !m.overview.ProjectConfigReady {
+				m.localProjectInitConfirm = true
+				m.pushLog("当前目录尚未初始化；等待用户确认后再创建 .dec/config.yaml")
 			}
 			return m, nil
 		}
 		m.vaultInference = msg.vaultInference
 		if msg.vaultInference != nil {
+			m.localProjectInitConfirm = false
 			diag.StartupLog("vaultInferenceLoadedMsg hit project=%s bundles=%d", msg.vaultInference.ProjectName, len(msg.vaultInference.EnabledBundles))
 			m.vaultInferenceDismissed = false
 			m.pushLog(fmt.Sprintf("Vault project inferred from directory: %s (%d bundles)", msg.vaultInference.ProjectName, len(msg.vaultInference.EnabledBundles)))
 			return m, nil
 		}
 		diag.StartupLog("vaultInferenceLoadedMsg nil (no match)")
-		if m.overview != nil && !m.overview.ProjectConfigReady && !m.localProjectLoad.busy() {
-			gen := m.localProjectLoad.beginGen()
-			m.pushLog("无 vault project 匹配，生成本地 project 配置")
-			return m, ensureLocalProjectCmd(m.projectRoot, gen)
+		if m.overview != nil && !m.overview.ProjectConfigReady {
+			m.localProjectInitConfirm = true
+			m.pushLog("无 vault project 匹配；等待用户确认后再初始化当前目录")
 		}
 		return m, nil
 	case overviewVaultEnrichedMsg:
@@ -661,6 +694,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.vaultInference = nil
 		m.vaultInferenceDismissed = false
+		m.localProjectInitConfirm = false
 		if msg.result != nil && msg.result.Applied {
 			name := msg.result.ProjectName
 			m.vaultAutoApplyNotice = fmt.Sprintf("已从 vault 应用 project %s", name)
@@ -728,11 +762,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsRepoInput = msg.state.RepoURL
 			m.settingsIdleTimeoutInput = msg.state.ServerIdleTimeout
 			m.settingsSelectedIDEs = cloneStrings(msg.state.SelectedIDEs)
-			m.settingsSelectedSecretBundles = cloneStrings(msg.state.EnabledBundles)
 			m.normalizeSettingsCursor()
 			m.syncSettingsDirty()
 			m.pushLog(fmt.Sprintf("Global settings loaded: %d IDEs, %d user bundles",
-				len(m.settingsSelectedIDEs), len(m.settingsSelectedSecretBundles)))
+				len(m.settingsSelectedIDEs), m.settingsUserBundleCount()))
 			if msg.state.RepoConnected && len(m.settingsSelectedIDEs) > 0 && !m.builtinAssetsLoad.busy() {
 				gen := m.builtinAssetsLoad.beginGen()
 				return m, ensureBuiltinIDEAssetsCmd(cloneStrings(m.settingsSelectedIDEs), gen)
@@ -756,6 +789,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog("Global settings save failed: " + msg.err.Error())
 			return m, nil
 		}
+		if msg.result != nil && msg.result.RepoAuthRequired {
+			m.enterRepoBootstrapConfirm("settings", msg.result.RepoHost, msg.result.ConnectError)
+			m.pushLog(fmt.Sprintf("仓库 %s 需要认证；等待确认是否从 Bitwarden 查找 GCM", msg.result.RepoHost))
+			return m, nil
+		}
 		if msg.result != nil {
 			m.pushLog(fmt.Sprintf("Global settings saved: %d IDEs, %d user bundles",
 				len(msg.result.IDEs), len(msg.result.EnabledBundles)))
@@ -767,6 +805,63 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.refreshCmd()
+	case repoBootstrapEventMsg:
+		if strings.TrimSpace(msg.event.Message) != "" {
+			m.pushLog(msg.event.Message)
+		}
+		if m.repoBootstrapStream != nil {
+			return m, waitRunMsg(m.repoBootstrapStream)
+		}
+		return m, nil
+	case repoBootstrapPreparedMsg:
+		cancelled := m.repoBootstrapStage == ""
+		m.finishRepoBootstrapOperation()
+		if cancelled {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.repoBootstrapStage = "confirm"
+			m.repoBootstrapError = msg.err.Error()
+			m.pushLog("仓库认证 bootstrap 准备失败: " + msg.err.Error())
+			return m, nil
+		}
+		m.repoBootstrapCandidates = nil
+		if msg.result != nil {
+			m.repoBootstrapHost = msg.result.RepoHost
+			m.repoBootstrapCandidates = append([]app.RepoGCMCandidate(nil), msg.result.Candidates...)
+		}
+		m.repoBootstrapCursor = 0
+		if len(m.repoBootstrapCandidates) == 0 {
+			m.repoBootstrapStage = "confirm"
+			m.repoBootstrapError = "Bitwarden 中没有匹配该仓库 host 的 .gcm/* Note"
+			m.pushLog(m.repoBootstrapError)
+			return m, nil
+		}
+		m.repoBootstrapStage = "select"
+		m.repoBootstrapError = ""
+		m.pushLog(fmt.Sprintf("找到 %d 个 GCM 候选，请选择", len(m.repoBootstrapCandidates)))
+		return m, nil
+	case repoBootstrapAppliedMsg:
+		cancelled := m.repoBootstrapStage == ""
+		source := m.repoBootstrapSource
+		m.finishRepoBootstrapOperation()
+		if cancelled {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.repoBootstrapStage = "select"
+			m.repoBootstrapError = msg.err.Error()
+			m.pushLog("应用 GCM 失败: " + msg.err.Error())
+			return m, nil
+		}
+		m.clearRepoBootstrap()
+		if source == "run" {
+			m.pushLog("GCM 已应用并验证通过，正在重试 pull")
+			return m, m.startPullRun()
+		}
+		m.pushLog("GCM 已应用并验证通过，正在重试保存 Settings")
+		m.savingSettings = true
+		return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), strings.TrimSpace(m.settingsIdleTimeoutInput), cloneStrings(m.settingsSelectedIDEs))
 	case projectSettingsLoadedMsg:
 		if !m.shellRefresh.acceptPart(msg.loadGen) {
 			return m, nil
@@ -809,6 +904,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.localProjectLoad.finish(msg.loadGen) {
 			return m, nil
 		}
+		m.localProjectInitConfirm = false
 		if msg.err != nil {
 			m.pushLog("本地 project 生成失败: " + msg.err.Error())
 			return m, nil
@@ -911,6 +1007,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleRemoteRegisterPrepared(msg)
 	case remoteRegisterEditorClosedMsg:
 		return m, m.handleRemoteRegisterEditorClosed(msg)
+	case remoteFolderValidatedMsg:
+		m.applyRemoteFolderValidation(msg)
+		return m, nil
 	case filePickedMsg:
 		return m, m.handleFilePicked(msg)
 	case pushPreviewLoadedMsg:
@@ -986,10 +1085,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.runErr = msg.err
 		if msg.err != nil {
+			errText := msg.err.Error()
 			if m.runMode == "push" {
-				m.pushLog("Run push failed: " + msg.err.Error())
+				m.pushLog("Run push failed: " + app.StripRepoAuthMarker(errText))
 			} else {
-				m.pushLog("Run pull failed: " + msg.err.Error())
+				m.pushLog("Run pull failed: " + app.StripRepoAuthMarker(errText))
+				// 凭证过期是 Run 页最常见的「环依赖」触发点：不依赖 Settings 换 URL，直接进 bootstrap。
+				if app.IsRepoAuthRequiredMessage(errText) {
+					m.enterRepoBootstrapConfirm("run", m.bootstrapRepoHost(), app.StripRepoAuthMarker(errText))
+					m.pushLog(fmt.Sprintf("仓库 %s 需要认证；等待确认是否从 Bitwarden 查找 GCM", fallbackValue(m.repoBootstrapHost, "<unknown>")))
+				}
 			}
 			return m, nil
 		}
@@ -1073,6 +1178,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.assetFilterInput && m.isBundlesPage() {
 			return m.handleAssetFilterInput(msg)
 		}
+		if m.repoBootstrapStage != "" {
+			return m.handleRepoBootstrapKey(msg)
+		}
 		if m.settingsRepoEditing && m.isSettingsPage() {
 			return m.handleSettingsRepoInput(msg)
 		}
@@ -1096,6 +1204,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.isHomePage() && m.hasVaultInferencePrompt() {
 			return m.handleVaultInferenceKey(msg)
+		}
+		if (m.isHomePage() || m.isProjectPage()) && m.localProjectInitConfirm {
+			return m.handleLocalProjectInitConfirmKey(msg)
 		}
 		if m.isHomePage() && m.vaultApplyLoad.busy() {
 			return m, nil
@@ -1188,8 +1299,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.openGlobalVarsEditor()
 				} else if m.settingsCursorIDEIndex() >= 0 {
 					m.toggleCurrentSettingsIDE()
-				} else if m.settingsCursorSecretBundleIndex() >= 0 {
-					m.toggleCurrentSettingsSecretBundle()
 				}
 				return m, nil
 			}
@@ -1233,7 +1342,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.isSettingsPage() && !m.savingSettings && m.settings != nil && m.settingsErr == nil {
 				m.savingSettings = true
 				m.pushLog("Saving global settings")
-				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), strings.TrimSpace(m.settingsIdleTimeoutInput), cloneStrings(m.settingsSelectedIDEs), cloneStrings(m.settingsSelectedSecretBundles))
+				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), strings.TrimSpace(m.settingsIdleTimeoutInput), cloneStrings(m.settingsSelectedIDEs))
 			}
 			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
 				if m.projectSettingsOverride && len(normalizedStringList(m.projectSettingsSelectedIDEs)) == 0 {
@@ -1258,9 +1367,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.projectInitLoad.busy() || m.savingProjectSettings || m.localProjectLoad.busy() {
 					return m, nil
 				}
-				gen := m.localProjectLoad.beginGen()
-				m.pushLog("在本页生成本地 project 配置...")
-				return m, ensureLocalProjectCmd(m.projectRoot, gen)
+				m.localProjectInitConfirm = true
+				m.pushLog("请确认当前目录无误后再初始化")
+				return m, nil
 			}
 			return m, nil
 		case "A":
@@ -1546,15 +1655,42 @@ func loadSettingsCmd(loadGen uint64) tea.Cmd {
 	}
 }
 
-func saveSettingsCmd(repoURL, idleTimeout string, ides []string, userSecretBundles []string) tea.Cmd {
+func saveSettingsCmd(repoURL, idleTimeout string, ides []string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := saveGlobalSettingsOperation(app.SaveGlobalSettingsInput{
 			RepoURL:           repoURL,
 			ServerIdleTimeout: idleTimeout,
 			IDEs:              cloneStrings(ides),
-			EnabledBundles:    append([]string{}, userSecretBundles...), // 非 nil，空表示清空用户平面启用
+			// EnabledBundles 留 nil：用户平面启用列表只由 Bundles 页写入。
+			// 传非 nil（含空切片）会按「清空」语义覆盖 GlobalConfig.EnabledBundles。
 		}, nil)
 		return settingsSavedMsg{result: result, err: err}
+	}
+}
+
+func startPrepareRepoBootstrapCmd(ctx context.Context, repoURL string, stream chan<- tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		go func() {
+			result, err := prepareRepoGCMBootstrapOperation(ctx, repoURL, app.ReporterFunc(func(event app.OperationEvent) {
+				stream <- repoBootstrapEventMsg{event: event}
+			}))
+			stream <- repoBootstrapPreparedMsg{result: result, err: err}
+			close(stream)
+		}()
+		return nil
+	}
+}
+
+func startApplyRepoBootstrapCmd(ctx context.Context, input app.ApplyRepoGCMBootstrapInput, stream chan<- tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		go func() {
+			result, err := applyRepoGCMBootstrapOperation(ctx, input, app.ReporterFunc(func(event app.OperationEvent) {
+				stream <- repoBootstrapEventMsg{event: event}
+			}))
+			stream <- repoBootstrapAppliedMsg{result: result, err: err}
+			close(stream)
+		}()
+		return nil
 	}
 }
 
@@ -1760,6 +1896,142 @@ func cloneStrings(values []string) []string {
 		return nil
 	}
 	return append([]string{}, values...)
+}
+
+func (m model) handleRepoBootstrapKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.repoBootstrapStage {
+	case "confirm":
+		switch msg.String() {
+		case "y", "enter":
+			ctx, cancel := context.WithCancel(context.Background())
+			stream := make(chan tea.Msg)
+			m.repoBootstrapStage = "loading"
+			m.repoBootstrapError = ""
+			m.repoBootstrapCancel = cancel
+			m.repoBootstrapStream = stream
+			return m, tea.Batch(
+				startPrepareRepoBootstrapCmd(ctx, m.bootstrapRepoURL(), stream),
+				waitRunMsg(stream),
+			)
+		case "n", "esc":
+			cancelledFrom := m.repoBootstrapSource
+			m.clearRepoBootstrap()
+			if cancelledFrom == "run" {
+				m.pushLog("已取消私仓 GCM bootstrap；可先到 Remote 页登记 .gcm Note 后再 pull")
+			} else {
+				m.pushLog("已取消私仓 GCM bootstrap；Settings 未保存")
+			}
+			return m, nil
+		}
+	case "select":
+		switch msg.String() {
+		case "up", "k":
+			if m.repoBootstrapCursor > 0 {
+				m.repoBootstrapCursor--
+			}
+		case "down", "j":
+			if m.repoBootstrapCursor+1 < len(m.repoBootstrapCandidates) {
+				m.repoBootstrapCursor++
+			}
+		case "enter", "y":
+			if len(m.repoBootstrapCandidates) == 0 {
+				return m, nil
+			}
+			candidate := m.repoBootstrapCandidates[m.repoBootstrapCursor]
+			ctx, cancel := context.WithCancel(context.Background())
+			stream := make(chan tea.Msg)
+			m.repoBootstrapStage = "applying"
+			m.repoBootstrapError = ""
+			m.repoBootstrapCancel = cancel
+			m.repoBootstrapStream = stream
+			input := app.ApplyRepoGCMBootstrapInput{
+				RepoURL: m.bootstrapRepoURL(), Folder: candidate.Folder, NotePath: candidate.NotePath,
+			}
+			return m, tea.Batch(startApplyRepoBootstrapCmd(ctx, input, stream), waitRunMsg(stream))
+		case "n", "esc":
+			cancelledFrom := m.repoBootstrapSource
+			m.clearRepoBootstrap()
+			if cancelledFrom == "run" {
+				m.pushLog("已取消私仓 GCM bootstrap；可先到 Remote 页登记 .gcm Note 后再 pull")
+			} else {
+				m.pushLog("已取消私仓 GCM bootstrap；Settings 未保存")
+			}
+		}
+	case "loading", "applying":
+		if msg.String() == "esc" {
+			if m.repoBootstrapCancel != nil {
+				m.repoBootstrapCancel()
+			}
+			m.repoBootstrapStage = ""
+			m.pushLog("已请求取消私仓 GCM bootstrap")
+		}
+	}
+	return m, nil
+}
+
+func (m *model) finishRepoBootstrapOperation() {
+	if m.repoBootstrapCancel != nil {
+		m.repoBootstrapCancel()
+	}
+	m.repoBootstrapCancel = nil
+	m.repoBootstrapStream = nil
+}
+
+func (m *model) clearRepoBootstrap() {
+	m.finishRepoBootstrapOperation()
+	m.repoBootstrapStage = ""
+	m.repoBootstrapSource = ""
+	m.repoBootstrapHost = ""
+	m.repoBootstrapError = ""
+	m.repoBootstrapCandidates = nil
+	m.repoBootstrapCursor = 0
+}
+
+func (m *model) enterRepoBootstrapConfirm(source, host, errMsg string) {
+	m.repoBootstrapStage = "confirm"
+	m.repoBootstrapSource = source
+	m.repoBootstrapHost = strings.TrimSpace(host)
+	m.repoBootstrapError = strings.TrimSpace(errMsg)
+	m.repoBootstrapCandidates = nil
+	m.repoBootstrapCursor = 0
+}
+
+// bootstrapRepoURL 优先用 Settings 输入/缓存，其次 overview 远端 URL；都空则交给服务端 resolve。
+func (m model) bootstrapRepoURL() string {
+	if u := strings.TrimSpace(m.settingsRepoInput); u != "" {
+		return u
+	}
+	if m.settings != nil {
+		if u := strings.TrimSpace(m.settings.RepoURL); u != "" {
+			return u
+		}
+		if u := strings.TrimSpace(m.settings.ConnectedRepoURL); u != "" {
+			return u
+		}
+	}
+	if m.overview != nil {
+		if u := strings.TrimSpace(m.overview.RepoRemoteURL); u != "" {
+			return u
+		}
+	}
+	return ""
+}
+
+func (m model) bootstrapRepoHost() string {
+	if host := strings.TrimSpace(m.repoBootstrapHost); host != "" {
+		return host
+	}
+	url := m.bootstrapRepoURL()
+	if url == "" {
+		return ""
+	}
+	if parsed := strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://"); parsed != "" {
+		if slash := strings.IndexByte(parsed, '/'); slash >= 0 {
+			return strings.ToLower(parsed[:slash])
+		}
+		return strings.ToLower(parsed)
+	}
+	return ""
 }
 
 func (m model) handleAssetFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -2171,11 +2443,29 @@ func (m model) handleVaultInferenceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, applyVaultProjectCmd(m.projectRoot, gen)
 	case "n", "esc":
 		m.vaultInferenceDismissed = true
-		m.pushLog("已跳过 vault project 推断，将生成本地 project")
-		if m.overview != nil && !m.overview.ProjectConfigReady && !m.localProjectLoad.busy() {
-			gen := m.localProjectLoad.beginGen()
-			return m, ensureLocalProjectCmd(m.projectRoot, gen)
+		m.pushLog("已跳过 vault project 推断")
+		if m.overview != nil && !m.overview.ProjectConfigReady {
+			m.localProjectInitConfirm = true
+			m.pushLog("等待确认后再初始化当前目录")
 		}
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) handleLocalProjectInitConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "enter":
+		if m.localProjectLoad.busy() {
+			return m, nil
+		}
+		m.localProjectInitConfirm = false
+		gen := m.localProjectLoad.beginGen()
+		m.pushLog("用户已确认，初始化当前目录...")
+		return m, ensureLocalProjectCmd(m.projectRoot, gen)
+	case "n", "esc":
+		m.localProjectInitConfirm = false
+		m.pushLog("已取消初始化；当前目录未写入任何 Dec 配置")
 		return m, nil
 	}
 	return m, nil
@@ -2294,9 +2584,17 @@ func (m model) renderHomePage(width int) string {
 			shellMutedStyle.Render("y/Enter 应用 · n 跳过"),
 			"",
 		)
+	} else if m.localProjectInitConfirm {
+		lines = append(lines,
+			shellWarnStyle.Render("当前目录尚未初始化，是否创建 Dec 项目配置？"),
+			fmt.Sprintf("目录: %s", m.projectRoot),
+			shellWarnStyle.Render("将写入: .dec/config.yaml（可能同时创建 .dec/vars.yaml）"),
+			shellMutedStyle.Render("y/Enter 确认初始化 · n/Esc 保持目录不变"),
+			"",
+		)
 	}
 
-	next := suggestNextAction(m.overview, m.hasVaultInferencePrompt(), m.vaultInferenceDismissed)
+	next := suggestNextAction(m.overview, m.hasVaultInferencePrompt(), m.localProjectInitConfirm)
 	lines = append(lines,
 		shellAccentStyle.Render("下一步"),
 		next,
@@ -2385,7 +2683,7 @@ func (m model) renderProjectPage(width int) string {
 		summary = append(summary, fmt.Sprintf("已启用 bundle (%d): %s", countOverviewEnabledBundles(m.overview), formatOverviewEnabledBundleNames(m.overview)))
 	}
 	if !m.projectSettings.ProjectConfigReady {
-		summary = append(summary, shellMutedStyle.Render("尚未初始化 .dec/config.yaml，按 i 在本页生成本地 project。"))
+		summary = append(summary, shellMutedStyle.Render("尚未初始化 .dec/config.yaml，按 i 发起初始化确认。"))
 	} else if m.overview != nil {
 		summary = append(summary, fmt.Sprintf("project_name: %s", formatProjectNameDisplay(m.overview)))
 	}
@@ -2408,6 +2706,14 @@ func (m model) renderProjectPage(width int) string {
 	list := m.renderProjectSettingsList()
 	detail := m.renderProjectSettingsDetails()
 	parts := []string{wrapLines(width, summary), renderSplitPane(width, list, detail)}
+	if m.localProjectInitConfirm {
+		parts = append([]string{strings.Join([]string{
+			shellWarnStyle.Render("确认初始化当前目录？"),
+			fmt.Sprintf("目录: %s", m.projectRoot),
+			shellWarnStyle.Render("将写入: .dec/config.yaml（可能同时创建 .dec/vars.yaml）"),
+			shellMutedStyle.Render("y/Enter 确认初始化 · n/Esc 保持目录不变"),
+		}, "\n")}, parts...)
+	}
 	if m.addSecretStage != "" {
 		parts = append(parts, m.renderAddSecretBlock())
 	}
@@ -2583,6 +2889,16 @@ func truncateVarValue(v string) string {
 }
 
 func (m model) renderRunPage(width int) string {
+	if m.repoBootstrapStage != "" {
+		sections := []string{
+			m.renderRunHeader(),
+			m.renderRepoBootstrapBlock(),
+		}
+		if m.runErr != nil {
+			sections = append(sections, "", shellWarnStyle.Render("Pull 错误: "+app.StripRepoAuthMarker(m.runErr.Error())))
+		}
+		return wrapLines(width, sections)
+	}
 	if m.pushStage == "loading" || m.pushStage == "summary" || m.pushStage == "confirm" {
 		return m.renderRunPushPage(width)
 	}
@@ -2716,7 +3032,7 @@ func (m model) renderSecretsSyncPlanLines() []string {
 	}
 	targets, err := serviceapi.ListSecretSyncTargets(m.projectRoot)
 	if err != nil || len(targets) == 0 {
-		return []string{shellMutedStyle.Render("Secrets  无同步目标（请启用 bundle 或配置 project secrets）")}
+		return []string{shellMutedStyle.Render("Secrets  无同步目标（请启用 bundle）")}
 	}
 	lines := []string{shellMutedStyle.Render("Secrets  拉取以下目标（不清理本地文件）：")}
 	for _, t := range targets {
@@ -2842,7 +3158,7 @@ func (m model) renderRunLastResult() []string {
 		if m.runMode == "push" {
 			label = "Push 错误"
 		}
-		lines = append(lines, shellWarnStyle.Render(label+": "+m.runErr.Error()))
+		lines = append(lines, shellWarnStyle.Render(label+": "+app.StripRepoAuthMarker(m.runErr.Error())))
 	}
 	if m.removeResult != nil {
 		lines = append(lines, fmt.Sprintf("Remove  bundle %s · %d 成员", m.removeResult.BundleName, m.removeResult.MemberCount))
@@ -3203,10 +3519,55 @@ func (m model) renderSettingsPage(width int) string {
 
 	list := m.renderSettingsList()
 	detail := m.renderSettingsDetails()
+	if m.repoBootstrapStage != "" {
+		return joinSections(m.renderRepoBootstrapBlock(), wrapLines(width, summary), renderSplitPane(width, list, detail))
+	}
 	if len(summary) == 0 {
 		return renderSplitPane(width, list, detail)
 	}
 	return joinSections(wrapLines(width, summary), renderSplitPane(width, list, detail))
+}
+
+func (m model) renderRepoBootstrapBlock() string {
+	lines := []string{shellWarnStyle.Render("私仓认证 · Bitwarden GCM Bootstrap")}
+	switch m.repoBootstrapStage {
+	case "confirm":
+		lines = append(lines,
+			fmt.Sprintf("仓库主机: %s", fallbackValue(m.repoBootstrapHost, "<unknown>")),
+			"Git HTTPS 认证失败。是否从 Bitwarden 查找 host 匹配的 .gcm/* Note？",
+			shellMutedStyle.Render("只复用现有 Note 与 GCM Processor；token 不返回 TUI、不另行落盘。"),
+			shellMutedStyle.Render("y/Enter 查找 · n/Esc 取消"),
+		)
+	case "loading":
+		lines = append(lines,
+			fmt.Sprintf("仓库主机: %s", fallbackValue(m.repoBootstrapHost, "<unknown>")),
+			shellMutedStyle.Render("正在解锁/扫描 Bitwarden… · Esc 取消"),
+		)
+	case "select":
+		lines = append(lines, fmt.Sprintf("仓库主机: %s · 请选择 GCM Note", fallbackValue(m.repoBootstrapHost, "<unknown>")))
+		for i, candidate := range m.repoBootstrapCandidates {
+			marker := "  "
+			if i == m.repoBootstrapCursor {
+				marker = "> "
+			}
+			line := fmt.Sprintf("%s%s/%s · user=%s", marker, candidate.Folder, candidate.NotePath, candidate.Username)
+			if candidate.Unmanaged {
+				line += " · 不属于任何 bundle，pull 不维护；请迁移到 bundle/<名>"
+			}
+			if i == m.repoBootstrapCursor {
+				lines = append(lines, shellSelectedRow.Render(line))
+			} else {
+				lines = append(lines, line)
+			}
+		}
+		lines = append(lines, shellMutedStyle.Render("↑/↓ 选择 · Enter 应用并验证 · n/Esc 取消"))
+	case "applying":
+		lines = append(lines, shellMutedStyle.Render("正在应用 GCM 并验证仓库访问… · Esc 取消"))
+	}
+	if msg := strings.TrimSpace(m.repoBootstrapError); msg != "" {
+		lines = append(lines, shellWarnStyle.Render(msg))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) renderSettingsList() string {
@@ -3264,33 +3625,10 @@ func (m model) renderSettingsList() string {
 			lines = append(lines, shellLogStyle.Render(line))
 		}
 	}
-	lines = append(lines, "", shellMutedStyle.Render("用户 bundles"))
-	rows := m.settingsSecretBundleRows()
-	if len(rows) == 0 {
-		hint := "暂无候选；Pull 后按 r 刷新"
-		if m.settings != nil && !m.settings.BitwardenSessionReady {
-			hint = "Bitwarden 未解锁；Pull 后按 r 刷新"
-		}
-		lines = append(lines, shellMutedStyle.Render("  "+hint))
-	} else {
-		for idx, name := range rows {
-			selected := settingsContainsIDE(m.settingsSelectedSecretBundles, name)
-			checked := " "
-			if selected {
-				checked = "x"
-			}
-			row := m.settingsSecretBundleRowStart() + idx
-			line := fmt.Sprintf("%s [%s] %s", settingsCursorMarker(m.settingsCursor == row && m.focus != focusSidebar), checked, name)
-			switch {
-			case m.settingsCursor == row && m.focus != focusSidebar:
-				lines = append(lines, shellSelectedRow.Render(line))
-			case selected:
-				lines = append(lines, shellEnabledRow.Render(line))
-			default:
-				lines = append(lines, shellLogStyle.Render(line))
-			}
-		}
-	}
+	// 用户平面 bundle 启用只在 `dec --user` 的 Bundles 页管理：
+	// 两处写同一份 GlobalConfig.EnabledBundles 会互相覆盖（各自基于加载时快照）。
+	lines = append(lines, "", shellMutedStyle.Render(
+		fmt.Sprintf("用户 bundles：已启用 %d 个 · 在 dec --user 的 Bundles 页管理", len(normalizedStringList(m.settings.EnabledBundles)))))
 	return strings.Join(lines, "\n")
 }
 
@@ -3343,13 +3681,11 @@ func (m model) renderSettingsDetails() string {
 			shellMutedStyle.Render("space 切换"),
 		)
 	default:
-		name := m.currentSettingsSecretBundleName()
 		lines = append(lines,
-			fmt.Sprintf("Bundle: %s", fallbackValue(name, "<none>")),
+			fmt.Sprintf("用户 bundles: 已启用 %d 个", m.settingsUserBundleCount()),
 			fmt.Sprintf("Bitwarden: %s", formatReady(m.settings.BitwardenSessionReady, "已解锁", "未解锁")),
-			"仅用于用户平面，与项目 bundles 隔离。",
-			"Vault 中不存在时，启用会创建 secrets-only bundle。",
-			shellMutedStyle.Render("space 切换"),
+			"启用列表由用户平面维护，与项目 bundles 隔离。",
+			shellMutedStyle.Render("在 dec --user 的 Bundles 页勾选并保存。"),
 		)
 	}
 	return strings.Join(lines, "\n")
@@ -3412,6 +3748,12 @@ func (m model) renderAssetRowLine(row assetRow, marker string) string {
 	if row.bundleEnabled {
 		checked = "x"
 	}
+	if bo.OtherPlane {
+		return fmt.Sprintf("%s [-]   %s · 属于项目平面", marker, bo.Name)
+	}
+	if bo.SecretsOnly {
+		return fmt.Sprintf("%s [%s]   %s · 仓库未登记", marker, checked, bo.Name)
+	}
 	arrow := "▸"
 	if m.assetTree.Expanded[assetBundleNodeID(bo.Name)] {
 		arrow = "▾"
@@ -3435,6 +3777,21 @@ func (m model) renderAssetDetails() string {
 				)
 				if bo.Vault != "" && bo.Vault != bo.Name {
 					lines = append(lines, fmt.Sprintf("Vault: %s", bo.Vault))
+				}
+				if bo.OtherPlane {
+					lines = append(lines,
+						shellMutedStyle.Render("仓库里已有该 bundle，但 scope 不是 user，属于项目平面。"),
+						shellMutedStyle.Render("不能在此启用：要移到用户平面，需先显式改 vault manifest 的 scope，"),
+						shellMutedStyle.Render("并确认没有 project 还在引用它（否则那些项目会拉不到资产）。"),
+					)
+					return strings.Join(lines, "\n")
+				}
+				if bo.SecretsOnly {
+					lines = append(lines,
+						shellMutedStyle.Render("Bitwarden 里已有同名 secrets；仓库尚未登记该 bundle。"),
+						shellMutedStyle.Render("勾选并保存后会创建 scope: user 的 bundle 声明。"),
+					)
+					return strings.Join(lines, "\n")
 				}
 				if m.assetTree.Expanded[assetBundleNodeID(bo.Name)] {
 					lines = append(lines, "", shellTitleStyle.Render("成员列表"))
@@ -3493,46 +3850,12 @@ func (m model) currentSettingsIDEName() string {
 	return m.settings.AvailableIDEs[idx]
 }
 
-func (m model) currentSettingsSecretBundleName() string {
-	idx := m.settingsCursorSecretBundleIndex()
-	rows := m.settingsSecretBundleRows()
-	if idx < 0 || idx >= len(rows) {
-		return ""
-	}
-	return rows[idx]
-}
-
-func (m model) settingsSecretBundleRows() []string {
-	if m.settings == nil {
-		return nil
-	}
-	names := secrets.NormalizeBundleNames(append(append([]string{}, m.settings.AvailableSecretBundles...), m.settingsSelectedSecretBundles...))
-	sort.Strings(names)
-	return names
-}
-
-func (m model) settingsSecretBundleRowStart() int {
-	if m.settings == nil {
-		return settingsFixedRowCount
-	}
-	return settingsFixedRowCount + len(m.settings.AvailableIDEs)
-}
-
 func (m model) settingsCursorIDEIndex() int {
 	if m.settings == nil || m.settingsCursor < settingsFixedRowCount {
 		return -1
 	}
 	idx := m.settingsCursor - settingsFixedRowCount
 	if idx < 0 || idx >= len(m.settings.AvailableIDEs) {
-		return -1
-	}
-	return idx
-}
-
-func (m model) settingsCursorSecretBundleIndex() int {
-	start := m.settingsSecretBundleRowStart()
-	idx := m.settingsCursor - start
-	if idx < 0 || idx >= len(m.settingsSecretBundleRows()) {
 		return -1
 	}
 	return idx
@@ -3589,20 +3912,24 @@ func (m model) settingsIDECount() int {
 	return len(normalizedStringList(m.settingsSelectedIDEs))
 }
 
-func (m model) settingsSecretBundleCount() int {
-	return len(normalizedStringList(m.settingsSelectedSecretBundles))
+// settingsUserBundleCount 只用于展示：用户平面启用列表由 Bundles 页写入，Settings 不再编辑。
+func (m model) settingsUserBundleCount() int {
+	if m.settings == nil {
+		return 0
+	}
+	return len(normalizedStringList(m.settings.EnabledBundles))
 }
 
 // settingsCountsLabel 是 Settings 顶栏/底栏共用的计数文案（SSOT）。
 func (m model) settingsCountsLabel() string {
-	return fmt.Sprintf("%d IDEs, %d bundles", m.settingsIDECount(), m.settingsSecretBundleCount())
+	return fmt.Sprintf("%d IDEs, %d bundles", m.settingsIDECount(), m.settingsUserBundleCount())
 }
 
 func (m model) settingsRowCount() int {
 	if m.settings == nil {
 		return 0
 	}
-	return settingsFixedRowCount + len(m.settings.AvailableIDEs) + len(m.settingsSecretBundleRows())
+	return settingsFixedRowCount + len(m.settings.AvailableIDEs)
 }
 
 func (m model) canNavigateAssets() bool {
@@ -3676,21 +4003,6 @@ func (m *model) toggleCurrentSettingsIDE() {
 	m.syncSettingsDirty()
 }
 
-func (m *model) toggleCurrentSettingsSecretBundle() {
-	name := m.currentSettingsSecretBundleName()
-	if strings.TrimSpace(name) == "" {
-		return
-	}
-	if settingsContainsIDE(m.settingsSelectedSecretBundles, name) {
-		m.settingsSelectedSecretBundles = settingsRemoveIDE(m.settingsSelectedSecretBundles, name)
-		m.pushLog("User bundle disabled: " + name)
-	} else {
-		m.settingsSelectedSecretBundles = append(m.settingsSelectedSecretBundles, name)
-		m.pushLog("User bundle enabled: " + name)
-	}
-	m.syncSettingsDirty()
-}
-
 func (m *model) syncSettingsDirty() {
 	if m.settings == nil {
 		m.settingsDirty = false
@@ -3700,8 +4012,7 @@ func (m *model) syncSettingsDirty() {
 	loadedRepo := strings.TrimSpace(m.settings.RepoURL)
 	m.settingsDirty = currentRepo != loadedRepo ||
 		strings.TrimSpace(m.settingsIdleTimeoutInput) != strings.TrimSpace(m.settings.ServerIdleTimeout) ||
-		!equalNormalizedStrings(m.settingsSelectedIDEs, m.settings.SelectedIDEs) ||
-		!equalNormalizedStrings(m.settingsSelectedSecretBundles, m.settings.EnabledBundles)
+		!equalNormalizedStrings(m.settingsSelectedIDEs, m.settings.SelectedIDEs)
 }
 
 func settingsContainsIDE(values []string, target string) bool {
@@ -3901,6 +4212,10 @@ func (m *model) toggleCurrentAsset() {
 	switch p.kind {
 	case assetRowBundle:
 		bo := m.assets.Bundles[p.bundleIndex]
+		if bo.OtherPlane {
+			m.pushLog(fmt.Sprintf("%s 属于项目平面，不能在此启用：需先在仓库显式改 bundle.yaml 的 scope", bo.Name))
+			return
+		}
 		if m.bundleSelected(bo.Name) {
 			next := make([]string, 0, len(m.bundleSelection))
 			for _, n := range m.bundleSelection {
@@ -4071,6 +4386,9 @@ func (m model) currentSummary() string {
 		if m.settings == nil {
 			return "Loading global settings"
 		}
+		if m.repoBootstrapStage != "" {
+			return "Private repo authentication: " + m.repoBootstrapStage
+		}
 		if m.savingSettings {
 			return "Saving global settings"
 		}
@@ -4083,6 +4401,9 @@ func (m model) currentSummary() string {
 		return "Settings ready, " + m.settingsCountsLabel()
 	}
 	if m.isRunPage() {
+		if m.repoBootstrapStage != "" {
+			return "Private repo authentication: " + m.repoBootstrapStage
+		}
 		if m.runningPull {
 			if m.runMode == "push" {
 				return "Push running"
@@ -4174,6 +4495,9 @@ func (m model) currentSummary() string {
 	if m.hasVaultInferencePrompt() {
 		return fmt.Sprintf("Vault project %s inferred, awaiting confirmation", m.vaultInference.ProjectName)
 	}
+	if m.localProjectInitConfirm {
+		return "Project config missing, awaiting explicit initialization confirmation"
+	}
 	if !m.overview.RepoConnected {
 		return "Repository not connected yet"
 	}
@@ -4244,7 +4568,7 @@ func formatOverviewEnabledBundleNames(overview *app.ProjectOverview) string {
 	return strings.Join(names, ", ")
 }
 
-func suggestNextAction(overview *app.ProjectOverview, vaultInferencePending, vaultInferenceDismissed bool) string {
+func suggestNextAction(overview *app.ProjectOverview, vaultInferencePending, localInitPending bool) string {
 	if overview == nil {
 		return "正在加载项目概览…"
 	}
@@ -4254,8 +4578,11 @@ func suggestNextAction(overview *app.ProjectOverview, vaultInferencePending, vau
 	if vaultInferencePending {
 		return "确认检测到的项目配置：y 应用 · n 跳过"
 	}
+	if localInitPending {
+		return "确认当前目录是否正确：y 初始化 · n 保持不变"
+	}
 	if !overview.ProjectConfigReady {
-		return "按 i 生成本地项目配置"
+		return "到 Project 页按 i 发起初始化确认"
 	}
 	if countOverviewEnabledBundles(overview) == 0 {
 		return "到 Bundles 勾选并保存"

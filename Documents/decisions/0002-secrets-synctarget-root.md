@@ -3,6 +3,7 @@
 - **状态**：已接受（实施中）
 - **日期**：2026-08-09
 - **取代**：[0001-secrets-landing-path.md](0001-secrets-landing-path.md)
+- **修订**：[0014](0014-bundle-sole-writable-aggregate.md) — **取消** `SyncKindProject` / 裸 project folder 作为 Dec 可写归属；私密内容只经 `bundle/<name>`；`.secrets/project/` 退役为存量迁移源
 - **影响范围**：`internal/secrets/`、`internal/app/secrets_*.go`、`internal/app/delete.go`、`internal/tui/`、`Documents/BUNDLE-SECRETS-MODEL.md`、`schema/secrets/v1/`、`.cursor/rules/`
 
 ## 问题

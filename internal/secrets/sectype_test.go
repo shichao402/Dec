@@ -70,7 +70,10 @@ func TestMigrateTypeDirNames(t *testing.T) {
 			"bundle/cnb": {{Name: "deploy", PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----\n"}},
 		},
 	}
-	target := SyncTarget{Kind: SyncKindBundle, Name: "cnb", Folder: "bundle/cnb", LocalRoot: "bundles/cnb", Plane: SyncPlaneMachine}
+	target, err := NewMachineBundleSyncTarget("cnb", "bundle/cnb")
+	if err != nil {
+		t.Fatal(err)
+	}
 	res, err := MigrateTypeDirNames(context.Background(), stub, "", target)
 	if err != nil {
 		t.Fatal(err)

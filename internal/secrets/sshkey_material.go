@@ -37,6 +37,10 @@ func GenerateSSHKeyMaterial(comment string) (SSHKeyMaterial, error) {
 }
 
 // LoadSSHKeyMaterialFromPrivatePath 从已有私钥文件派生公钥与 fingerprint。
+//
+// Windows 上 OpenSSH 要求私钥 ACL 仅当前用户可读；用户从 Temp / 网盘 / 解压目录
+// 选中的文件常带继承组权限。这里不改动源文件，而是写入一份 ACL 收紧的临时副本
+// 再调用 ssh-keygen（与 WriteSSHKeyLandings 同用 writeSecureFile）。
 func LoadSSHKeyMaterialFromPrivatePath(privPath string) (SSHKeyMaterial, error) {
 	privPath = strings.TrimSpace(privPath)
 	if privPath == "" {
@@ -61,7 +65,13 @@ func LoadSSHKeyMaterialFromPrivatePath(privPath string) (SSHKeyMaterial, error) 
 		return SSHKeyMaterial{}, fmt.Errorf("私钥格式无效")
 	}
 
-	pubOut, err := exec.Command("ssh-keygen", "-y", "-f", privPath).CombinedOutput()
+	securePath, cleanup, err := materializeSecurePrivateKey(privBytes)
+	if err != nil {
+		return SSHKeyMaterial{}, err
+	}
+	defer cleanup()
+
+	pubOut, err := exec.Command("ssh-keygen", "-y", "-f", securePath).CombinedOutput()
 	if err != nil {
 		return SSHKeyMaterial{}, fmt.Errorf("从私钥派生公钥失败: %w (%s)", err, strings.TrimSpace(string(pubOut)))
 	}
@@ -70,7 +80,7 @@ func LoadSSHKeyMaterialFromPrivatePath(privPath string) (SSHKeyMaterial, error) 
 		return SSHKeyMaterial{}, fmt.Errorf("派生公钥为空")
 	}
 
-	fpOut, err := exec.Command("ssh-keygen", "-lf", privPath).CombinedOutput()
+	fpOut, err := exec.Command("ssh-keygen", "-lf", securePath).CombinedOutput()
 	if err != nil {
 		return SSHKeyMaterial{}, fmt.Errorf("计算 fingerprint 失败: %w (%s)", err, strings.TrimSpace(string(fpOut)))
 	}
@@ -83,6 +93,21 @@ func LoadSSHKeyMaterialFromPrivatePath(privPath string) (SSHKeyMaterial, error) 
 		PublicKey:      pub + "\n",
 		KeyFingerprint: fp,
 	}, nil
+}
+
+// materializeSecurePrivateKey 把私钥正文落到 ACL/mode 收紧的临时文件，供 ssh-keygen 读取。
+func materializeSecurePrivateKey(priv []byte) (path string, cleanup func(), err error) {
+	dir, err := os.MkdirTemp("", "dec-sshkey-load-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup = func() { _ = os.RemoveAll(dir) }
+	path = filepath.Join(dir, "id_ed25519")
+	if err := writeSecureFile(path, priv, 0o600); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("准备安全私钥临时文件失败: %w", err)
+	}
+	return path, cleanup, nil
 }
 
 // parseSSHKeygenFingerprint 从 `ssh-keygen -lf` 输出取 SHA256:… 段。

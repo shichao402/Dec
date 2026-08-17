@@ -90,6 +90,15 @@ func ConnectRepo(repoURL string, reporter app.Reporter) (*app.ConnectRepoResult,
 		struct{ RepoURL string }{repoURL}, reporter)
 }
 
+func PrepareRepoGCMBootstrap(ctx context.Context, repoURL string, reporter app.Reporter) (*app.PrepareRepoGCMBootstrapResult, error) {
+	return run[app.PrepareRepoGCMBootstrapResult](ctx, "prepare_repo_gcm_bootstrap", "",
+		struct{ RepoURL string }{repoURL}, reporter)
+}
+
+func ApplyRepoGCMBootstrap(ctx context.Context, input app.ApplyRepoGCMBootstrapInput, reporter app.Reporter) (*app.ApplyRepoGCMBootstrapResult, error) {
+	return run[app.ApplyRepoGCMBootstrapResult](ctx, "apply_repo_gcm_bootstrap", "", input, reporter)
+}
+
 func PrepareProjectConfigInit(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
 	return invoke[app.ConfigInitPreparation](context.Background(), "prepare_project_config_init", projectRoot, nil, reporter)
 }
@@ -244,12 +253,20 @@ func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRe
 	}{folder, noteRel, localPath}, reporter)
 }
 
+func ValidateRemoteRegisterFolder(ctx context.Context, workspace app.Workspace, folder string) error {
+	_, err := invokeWorkspace[struct{}](ctx, "validate_remote_register_folder", workspace,
+		struct{ Folder string }{folder}, nil)
+	return err
+}
+
 func PrepareRemoteRegister(ctx context.Context, in app.RemoteRegisterInput, reporter app.Reporter) (*app.RemoteRegisterSession, error) {
-	return invoke[app.RemoteRegisterSession](ctx, "prepare_remote_register", in.ProjectRoot, in, reporter)
+	workspace := app.NewWorkspace(in.Plane, in.ProjectRoot)
+	return invokeWorkspace[app.RemoteRegisterSession](ctx, "prepare_remote_register", workspace, in, reporter)
 }
 
 func CommitRemoteRegister(ctx context.Context, session app.RemoteRegisterSession, reporter app.Reporter) (*app.AddSecretResult, error) {
-	return run[app.AddSecretResult](ctx, "commit_remote_register", session.ProjectRoot, session, reporter)
+	workspace := app.NewWorkspace(session.Plane, session.ProjectRoot)
+	return runWorkspace[app.AddSecretResult](ctx, "commit_remote_register", workspace, session, reporter)
 }
 
 func PrepareRemoteNoteEdit(ctx context.Context, projectRoot string, item app.DeleteSelectionItem, reporter app.Reporter) (*app.RemoteNoteEditSession, error) {

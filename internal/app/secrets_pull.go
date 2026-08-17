@@ -245,11 +245,7 @@ func remoteInventoryTarget(folder string, workspace Workspace, scopes vaultBundl
 		return secrets.NewBundleSyncTarget(name, folder)
 	}
 	// 裸 folder：project 级远端节点；不强制 LocalRoot（其它项目 / 非当前工作区）。
-	return secrets.SyncTarget{
-		Kind:   secrets.SyncKindProject,
-		Name:   folder,
-		Folder: folder,
-	}, nil
+	return secrets.NewBrowseFolder(folder)
 }
 
 // secretsClientFactory 供测试注入 stub Client。
@@ -336,8 +332,8 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 		return nil, err
 	}
 	if plan.Total == 0 {
-		summary.SkippedReason = "无已启用 bundle 或 project secrets"
-		emit(reporter, EventInfo, "pull.secrets", "无已启用 bundle 或 project secrets，跳过 secrets 同步", nil)
+		summary.SkippedReason = "无已启用 bundle"
+		emit(reporter, EventInfo, "pull.secrets", "无已启用 bundle，跳过 secrets 同步", nil)
 		finishMissingVault()
 		return summary, nil
 	}

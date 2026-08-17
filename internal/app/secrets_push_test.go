@@ -52,7 +52,7 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
 		"bundle/vikunja": {{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=old\n"}},
-		"Dec":            {{RelativePath: "config/private.yaml", Content: "old"}},
+		"bundle/Dec":     {{RelativePath: "config/private.yaml", Content: "old"}},
 	}}
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
@@ -62,12 +62,12 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "Dec",
-		EnabledBundles: []string{"vikunja"},
+		EnabledBundles: []string{"vikunja", "Dec"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/project/config/private.yaml", "token: abc\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/Dec/config/private.yaml", "token: abc\n")
 
 	result, err := PushSecretsBundles(context.Background(), projectRoot, nil)
 	if err != nil {
@@ -79,8 +79,8 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	if got := stub.NotesByFolder["bundle/vikunja"][0].Content; got != "VIKUNJA_API_TOKEN=abc\n" {
 		t.Fatalf("bundle secret 未被本地覆盖: %q", got)
 	}
-	if got := stub.NotesByFolder["Dec"][0].Content; got != "token: abc\n" {
-		t.Fatalf("project secret 未被本地覆盖: %q", got)
+	if got := stub.NotesByFolder["bundle/Dec"][0].Content; got != "token: abc\n" {
+		t.Fatalf("project-scope bundle secret 未被本地覆盖: %q", got)
 	}
 }
 
@@ -88,7 +88,7 @@ func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"Dec": {{RelativePath: "config/private.yaml", Content: "只在远端存在"}},
+		"bundle/Dec": {{RelativePath: "config/private.yaml", Content: "只在远端存在"}},
 	}}
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
@@ -96,7 +96,10 @@ func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "Dec"}); err != nil {
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "Dec",
+		EnabledBundles: []string{"Dec"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,7 +113,7 @@ func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
 	if len(result.MissingLocal) != 1 || result.MissingLocal[0] != "config/private.yaml" {
 		t.Fatalf("MissingLocal = %#v", result.MissingLocal)
 	}
-	if len(stub.NotesByFolder["Dec"]) != 1 {
+	if len(stub.NotesByFolder["bundle/Dec"]) != 1 {
 		t.Fatal("本地缺文件不应导致远端 note 被删")
 	}
 	if !containsScopeMessage(events, "push.secrets", "Remote 页") {
@@ -124,7 +127,7 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
 		"bundle/tencent-cloud": {{RelativePath: ".env/tencent.env", Content: "TOKEN=old\n"}},
-		"Dec":                  {{RelativePath: "config/private.yaml", Content: "old"}},
+		"bundle/Dec":           {{RelativePath: "config/private.yaml", Content: "old"}},
 	}}
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
@@ -140,12 +143,12 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "Dec",
-		EnabledBundles: []string{"vikunja"},
+		EnabledBundles: []string{"Dec"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	// 项目平面的落地文件：本轮 push 必须完全无视它们。
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/project/config/private.yaml", "token: from-project\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/Dec/config/private.yaml", "token: from-project\n")
 
 	machineEnv := filepath.Join(decHome, "secrets", "bundles", "tencent-cloud", ".env", "tencent.env")
 	if err := os.MkdirAll(filepath.Dir(machineEnv), 0o700); err != nil {
@@ -166,7 +169,7 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	if got := stub.NotesByFolder["bundle/tencent-cloud"][0].Content; got != "TOKEN=new\n" {
 		t.Fatalf("用户平面 secret 未被推送: %q", got)
 	}
-	if got := stub.NotesByFolder["Dec"][0].Content; got != "old" {
+	if got := stub.NotesByFolder["bundle/Dec"][0].Content; got != "old" {
 		t.Fatalf("项目平面 folder 被用户平面 push 改写了: %q", got)
 	}
 }

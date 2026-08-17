@@ -66,13 +66,10 @@ func TestResolveSyncTargets_ProjectPlane(t *testing.T) {
 			}
 		case tg.Kind == SyncKindProject:
 			projectSecrets++
-			if tg.Folder != "my-app" || tg.LocalRoot != ProjectSecretsLocalRel {
-				t.Fatalf("project target = %+v", tg)
-			}
 		}
 	}
-	if machine != 0 || projectBundle != 1 || projectSecrets != 1 {
-		t.Fatalf("machine=%d projectBundle=%d projectSecrets=%d", machine, projectBundle, projectSecrets)
+	if machine != 0 || projectBundle != 1 || projectSecrets != 0 {
+		t.Fatalf("machine=%d projectBundle=%d projectSecrets=%d (ADR 0014: no project target)", machine, projectBundle, projectSecrets)
 	}
 }
 

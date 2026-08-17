@@ -170,6 +170,9 @@ func AddSecureNote(ctx context.Context, client Client, projectRoot string, targe
 	if client == nil {
 		client = DefaultClient()
 	}
+	if err := RequireDeclared(target); err != nil {
+		return err
+	}
 	if target.Folder == "" || target.LocalRoot == "" {
 		return fmt.Errorf("SyncTarget 不完整")
 	}
@@ -226,26 +229,15 @@ func localSetFromNotes(notes []SecureNote) map[string]SecureNote {
 }
 
 func pushRequestTarget(req PushBundleRequest) (SyncTarget, error) {
-	if req.Target.LocalRoot != "" && req.Target.Folder != "" {
-		if req.Target.Plane == "" {
-			req.Target.Plane = SyncPlaneProject
-		}
-		return req.Target, nil
-	}
 	name := strings.TrimSpace(req.DecBundleName)
 	if name == "" {
 		name = strings.TrimSpace(req.Binding.DecBundleName)
 	}
-	if name == ProjectSecretsDecBundleName || req.Target.Kind == SyncKindProject {
-		folder := strings.TrimSpace(req.Binding.SecretsBundleName)
-		if folder == "" {
-			folder = strings.TrimSpace(req.Target.Folder)
-		}
-		projName := strings.TrimSpace(req.Target.Name)
-		if projName == "" {
-			projName = folder
-		}
-		return NewProjectSyncTarget(projName, folder)
+	kind := req.Target.Kind
+	if name == ProjectSecretsDecBundleName || kind == SyncKindProject {
+		kind = SyncKindProject
+	} else if kind == "" {
+		kind = SyncKindBundle
 	}
-	return NewBundleSyncTarget(name, req.Binding.SecretsBundleName)
+	return ResolveTarget(kind, name, req.Binding, req.Target)
 }

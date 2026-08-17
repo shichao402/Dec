@@ -48,6 +48,39 @@ func (c *APIClient) ListFolderNotes(ctx context.Context, folderName string) ([]R
 	return notes, nil
 }
 
+// GetSecureNote 读取 folder 下指定 Secure Note 的正文。
+// 与 ListFolderNotes 分开，确保候选枚举阶段只暴露元数据；调用方明确选中后才解密正文。
+func (c *APIClient) GetSecureNote(ctx context.Context, folderName, noteName string) (*SecureNote, error) {
+	userKey := UserKey()
+	if len(userKey) == 0 {
+		return nil, errVaultKeyNotReady
+	}
+	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	if err != nil {
+		return nil, err
+	}
+	if folderID == "" {
+		return nil, fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+	}
+	ciphers, err := c.folderCiphers(ctx, folderID, userKey)
+	if err != nil {
+		return nil, err
+	}
+	cipher, ok := ciphers[strings.TrimSpace(noteName)]
+	if !ok {
+		return nil, fmt.Errorf("Secure Note %q 不在 folder %q", noteName, folderName)
+	}
+	itemKey, err := itemDecryptionKey(cipher.Key, userKey)
+	if err != nil {
+		return nil, err
+	}
+	content, err := decryptVaultString(cipher.Notes, itemKey)
+	if err != nil {
+		return nil, fmt.Errorf("解密 Secure Note %q: %w", noteName, err)
+	}
+	return &SecureNote{RelativePath: strings.TrimSpace(noteName), Content: content}, nil
+}
+
 // ListFolderSSHKeys 枚举某个 Bitwarden folder 下的 SSH Key（仅元信息）。
 func (c *APIClient) ListFolderSSHKeys(ctx context.Context, folderName string) ([]RemoteSSHKey, error) {
 	userKey := UserKey()

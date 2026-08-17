@@ -130,6 +130,9 @@ func (c *APIClient) PullBundle(ctx context.Context, req PullBundleRequest) (*Pul
 }
 
 func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error) {
+	if err := RequireDeclared(req.Target); err != nil {
+		return nil, err
+	}
 	userKey := UserKey()
 	if len(userKey) == 0 {
 		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
@@ -182,6 +185,9 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 }
 
 func (c *APIClient) CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) error {
+	if err := RequireDeclared(req.Target); err != nil {
+		return err
+	}
 	userKey := UserKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
@@ -231,13 +237,13 @@ func (c *APIClient) CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) e
 }
 
 func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error {
+	folderName, err := requireDeleteFolder(req.Target, req.Binding)
+	if err != nil {
+		return err
+	}
 	userKey := UserKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
-	}
-	folderName := strings.TrimSpace(req.Binding.SecretsBundleName)
-	if folderName == "" {
-		return fmt.Errorf("secrets bundle 名称不能为空")
 	}
 	notePath := strings.TrimSpace(req.NotePath)
 	if notePath == "" {
@@ -316,13 +322,13 @@ func (c *APIClient) createSSHKey(ctx context.Context, folderID string, userKey [
 }
 
 func (c *APIClient) DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) error {
+	folderName, err := requireDeleteFolder(req.Target, req.Binding)
+	if err != nil {
+		return err
+	}
 	userKey := UserKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
-	}
-	folderName := strings.TrimSpace(req.Binding.SecretsBundleName)
-	if folderName == "" {
-		return fmt.Errorf("secrets bundle 名称不能为空")
 	}
 	keyName := strings.TrimSpace(req.KeyName)
 	if keyName == "" {
@@ -349,6 +355,9 @@ func (c *APIClient) DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) e
 }
 
 func (c *APIClient) UpdateSSHKeyHosts(ctx context.Context, req UpdateSSHKeyHostsRequest) error {
+	if err := RequireDeclared(req.Target); err != nil {
+		return err
+	}
 	userKey := UserKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
@@ -385,6 +394,9 @@ func (c *APIClient) UpdateSSHKeyHosts(ctx context.Context, req UpdateSSHKeyHosts
 }
 
 func (c *APIClient) RenameSecureNote(ctx context.Context, req RenameSecureNoteRequest) error {
+	if err := RequireDeclared(req.Target); err != nil {
+		return err
+	}
 	userKey := UserKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
@@ -427,6 +439,9 @@ func (c *APIClient) RenameSecureNote(ctx context.Context, req RenameSecureNoteRe
 }
 
 func (c *APIClient) RenameSSHKey(ctx context.Context, req RenameSSHKeyRequest) error {
+	if err := RequireDeclared(req.Target); err != nil {
+		return err
+	}
 	userKey := UserKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")

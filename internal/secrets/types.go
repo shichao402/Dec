@@ -1,7 +1,7 @@
 package secrets
 
-// SyncKind 区分 project 级与 bundle 级 secrets 目标。
-// Bitwarden 上协议完全相同，差别只在本地同步根与 TUI 文案。
+// SyncKind 区分历史 project 级与 bundle 级 secrets 目标。
+// ADR 0014 后写入路径只承认 SyncKindBundle；SyncKindProject 仅迁移/只读兼容。
 type SyncKind string
 
 const (
@@ -51,6 +51,7 @@ type SyncTarget struct {
 	Folder    string // Bitwarden folder；bundle 默认 bundle/<name>，project 默认 Name
 	LocalRoot string // project 平面：.secrets/...；machine 平面：bundles/<name>（相对 ~/.dec/secrets）
 	Plane     SyncPlane
+	declared  bool // 仅声明型构造函数可置 true；包外字面量只能得到只读/待重建 target
 }
 
 // IsMachinePlane 判断是否为用户/机器平面（machine 与 user 同义）。

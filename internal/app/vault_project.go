@@ -38,6 +38,9 @@ type VaultProjectInference struct {
 // NeedsVaultProjectAutoApply 判断当前项目是否应尝试从 vault 匹配 project。
 // 仅在无 config 或 config 未设置 project_name 时返回 true。
 func NeedsVaultProjectAutoApply(projectRoot string) (bool, error) {
+	if strings.TrimSpace(projectRoot) == "" {
+		return false, fmt.Errorf("判断 vault project 归属需要项目根目录：用户平面没有 project 概念")
+	}
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if !mgr.Exists() {
 		return true, nil
@@ -78,6 +81,9 @@ func LoadVaultProject(repoDir, name string) (*types.Project, bool, error) {
 // 不写入任何本地配置；用户已显式设置 project_name 后返回 nil。
 func InferVaultProject(projectRoot string, reporter Reporter) (*VaultProjectInference, error) {
 	reporter = defaultReporter(reporter)
+	if strings.TrimSpace(projectRoot) == "" {
+		return nil, fmt.Errorf("vault project 推断需要项目根目录：用户平面没有 project 概念")
+	}
 
 	connected, err := repo.IsConnected()
 	if err != nil {

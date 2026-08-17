@@ -100,9 +100,21 @@ func FetchBare() error {
 	}
 
 	cmd := sysproc.Command("git", "--git-dir", bareDir, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+	// 禁止交互：凭证过期时不能让 git/GCM 弹窗阻塞 dec-server，失败后由门面显式确认走 bootstrap。
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git fetch --prune origin: %s", strings.TrimSpace(string(output)))
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		fetchErr := fmt.Errorf("git fetch --prune origin: %s", message)
+		// origin URL 读不到就退化成普通错误：分类只是为了给出 bootstrap 提示，不该反过来掩盖 fetch 失败。
+		originURL, urlErr := getBareRemoteURL(bareDir, "origin")
+		if urlErr != nil {
+			return fetchErr
+		}
+		return classifyRemoteAuthError(originURL, message, fetchErr)
 	}
 	if err := syncBareHeadToRemote(bareDir); err != nil {
 		return err

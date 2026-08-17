@@ -173,15 +173,7 @@ func newDeleteGroupContext(workspace Workspace, projectConfig *types.ProjectConf
 					ctx.bundleOrder[decBundle] = len(ctx.bundleOrder) + 100
 				}
 			}
-			// 用户平面没有 project secrets 归属，跳过这一组，避免把项目 folder 混进来。
-			if !userPlane {
-				projectName, _ := ResolveProjectName(projectRoot, projectConfig)
-				ctx.projectName = projectName
-				if name, enabled := cfg.ResolveProjectSecrets(projectName); enabled {
-					ctx.projectSecrets = name
-					ctx.secretsToDec[name] = secrets.ProjectSecretsDecBundleName
-				}
-			}
+			// ADR 0014：用户/项目平面都不再注入裸 project secrets 归属。
 		}
 	}
 	if ctx.projectName == "" && !userPlane {
@@ -603,9 +595,14 @@ func deleteSecretItem(ctx context.Context, workspace Workspace, secretsBundleNam
 	}
 
 	client := secretsClientFactory()
+	target, err := secrets.NewBrowseFolder(secretsBundleName)
+	if err != nil {
+		return err
+	}
 	if err := client.DeleteSecureNote(ctx, secrets.DeleteSecureNoteRequest{
 		Binding:  secrets.BundleBinding{SecretsBundleName: secretsBundleName},
 		NotePath: notePath,
+		Target:   target,
 	}); err != nil {
 		return fmt.Errorf("删除 Bitwarden Secure Note %q 失败: %w", notePath, err)
 	}
@@ -635,9 +632,13 @@ func readSecretNoteContent(
 		return "", false
 	}
 	client := secretsClientFactory()
+	target, targetErr := secrets.NewBrowseFolder(secretsBundleName)
+	if targetErr != nil {
+		return "", false
+	}
 	result, err := client.PullBundle(ctx, secrets.PullBundleRequest{
 		ProjectRoot: projectRoot,
-		Target:      secrets.SyncTarget{Folder: secretsBundleName, LocalRoot: localRoot, Plane: plane},
+		Target:      target,
 		Binding:     secrets.BundleBinding{SecretsBundleName: secretsBundleName},
 	})
 	if err != nil || result == nil {
@@ -684,9 +685,14 @@ func deleteSSHKeyItem(ctx context.Context, decBundleName, secretsBundleName, key
 	}
 
 	client := secretsClientFactory()
+	target, err := secrets.NewBrowseFolder(secretsBundleName)
+	if err != nil {
+		return err
+	}
 	if err := client.DeleteSSHKey(ctx, secrets.DeleteSSHKeyRequest{
 		Binding: secrets.BundleBinding{SecretsBundleName: secretsBundleName},
 		KeyName: keyName,
+		Target:  target,
 	}); err != nil {
 		return fmt.Errorf("删除 Bitwarden SSH Key %q 失败: %w", keyName, err)
 	}
@@ -978,9 +984,14 @@ func deleteSecretItemRemoteOnly(ctx context.Context, workspace Workspace, secret
 		}
 	}
 	client := secretsClientFactory()
+	target, err := secrets.NewBrowseFolder(secretsBundleName)
+	if err != nil {
+		return err
+	}
 	if err := client.DeleteSecureNote(ctx, secrets.DeleteSecureNoteRequest{
 		Binding:  secrets.BundleBinding{SecretsBundleName: secretsBundleName},
 		NotePath: notePath,
+		Target:   target,
 	}); err != nil {
 		return fmt.Errorf("删除 Bitwarden Secure Note %q 失败: %w", notePath, err)
 	}
@@ -1023,9 +1034,14 @@ func deleteSSHKeyItemRemoteOnly(ctx context.Context, secretsBundleName, keyName 
 		}
 	}
 	client := secretsClientFactory()
+	target, err := secrets.NewBrowseFolder(secretsBundleName)
+	if err != nil {
+		return err
+	}
 	if err := client.DeleteSSHKey(ctx, secrets.DeleteSSHKeyRequest{
 		Binding: secrets.BundleBinding{SecretsBundleName: secretsBundleName},
 		KeyName: keyName,
+		Target:  target,
 	}); err != nil {
 		return fmt.Errorf("删除 Bitwarden SSH Key %q 失败: %w", keyName, err)
 	}

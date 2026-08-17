@@ -16,12 +16,13 @@ import (
 // Project 页：先选归属（本地同步根），再输入相对路径。
 // Remote 页：归属来自光标所在 folder（n）或手输新 folder（N），再选 Processor、名称、来源。
 const (
-	addSecretStageTarget  = "target" // Project only：轮转本地同步根
-	addSecretStageFolder  = "folder" // Remote only：手输新 folder
-	addSecretStageType    = "type"   // Remote only：Processor
-	addSecretStagePath    = "path"
-	addSecretStageSource  = "source" // Remote only
-	addSecretStageRunning = "running"
+	addSecretStageTarget      = "target" // Project only：轮转本地同步根
+	addSecretStageFolder      = "folder" // Remote only：手输新 folder
+	addSecretStageFolderCheck = "folder-check"
+	addSecretStageType        = "type" // Remote only：Processor
+	addSecretStagePath        = "path"
+	addSecretStageSource      = "source" // Remote only
+	addSecretStageRunning     = "running"
 )
 
 type addSecretDoneMsg struct {
@@ -44,6 +45,14 @@ type remoteRegisterPreparedMsg struct {
 	err       error
 	logs      []string
 }
+
+type remoteFolderValidatedMsg struct {
+	folder string
+	err    error
+	gen    uint64
+}
+
+var validateRemoteRegisterFolderOperation = serviceapi.ValidateRemoteRegisterFolder
 
 // suggestSecretTargetsCmd 走服务 RPC 枚举候选归属，耗时不可预期，
 // 必须放在 tea.Cmd 里跑，不能在 Update 中同步调用。
@@ -77,6 +86,13 @@ func prepareRemoteRegisterCmd(in app.RemoteRegisterInput, editorCmd string) tea.
 		})
 		sess, err := serviceapi.PrepareRemoteRegister(context.Background(), in, reporter)
 		return remoteRegisterPreparedMsg{sess: sess, editorCmd: editorCmd, err: err, logs: logs}
+	}
+}
+
+func validateRemoteRegisterFolderCmd(workspace app.Workspace, folder string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		err := validateRemoteRegisterFolderOperation(context.Background(), workspace, folder)
+		return remoteFolderValidatedMsg{folder: folder, err: err, gen: gen}
 	}
 }
 
@@ -183,6 +199,20 @@ func normalizeRemoteFolderInput(raw string) string {
 	return strings.Trim(folder, "/")
 }
 
+func validateRemoteFolderInputShape(folder string) error {
+	if strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
+		name := strings.TrimSpace(strings.TrimPrefix(folder, secrets.BundleFolderPrefix))
+		if name == "" || name == "." || name == ".." || strings.Contains(name, "/") {
+			return fmt.Errorf("bundle folder 必须是 bundle/<名>")
+		}
+		return nil
+	}
+	if strings.Contains(folder, "/") {
+		return fmt.Errorf("folder 只接受 bundle/<名> 或 vault 已声明的 project 名")
+	}
+	return nil
+}
+
 // remoteTypeIdxForDir 让光标所在的点目录直接决定默认 Processor。
 func remoteTypeIdxForDir(dir string) int {
 	head := dir
@@ -202,6 +232,7 @@ func remoteTypeIdxForDir(dir string) int {
 }
 
 func (m *model) resetAddSecretForm(remoteMode bool) {
+	m.addSecretFolderCheckGen++
 	m.addSecretPathInput = ""
 	m.addSecretContentPath = ""
 	m.addSecretSourceMode = string(secrets.SourceTemp)
@@ -261,7 +292,7 @@ func (m *model) beginRemoteRegisterNewFolder() tea.Cmd {
 	m.resetAddSecretForm(true)
 	m.addSecretFolderNew = true
 	m.addSecretStage = addSecretStageFolder
-	m.pushLog("Remote 登记：输入 folder 名（bundle/<名> = secrets bundle；裸名 = project folder）")
+	m.pushLog("Remote 登记：输入 bundle/<名>，或 vault 已声明的 project 名")
 	return nil
 }
 
@@ -285,6 +316,7 @@ func (m *model) applyAddSecretTargets(msg addSecretTargetsMsg) {
 }
 
 func (m *model) cancelAddSecret() {
+	m.addSecretFolderCheckGen++
 	m.addSecretTargetsLoad.clear()
 	m.addSecretStage = ""
 	m.addSecretPathInput = ""
@@ -307,9 +339,13 @@ func (m *model) abandonAddSecretRun() {
 }
 
 func (m model) handleAddSecretKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.addSecretStage == addSecretStageRunning {
+	if m.addSecretStage == addSecretStageRunning || m.addSecretStage == addSecretStageFolderCheck {
 		if msg.Type == tea.KeyEsc {
-			m.abandonAddSecretRun()
+			if m.addSecretStage == addSecretStageFolderCheck {
+				m.cancelAddSecret()
+			} else {
+				m.abandonAddSecretRun()
+			}
 		}
 		return m, nil
 	}
@@ -387,10 +423,21 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 	if m.addSecretStage == addSecretStageFolder {
 		folder := normalizeRemoteFolderInput(m.addSecretFolder)
 		if folder == "" {
-			m.noteAddSecret("folder 名不能为空（bundle/<名> 或裸 project 名）")
+			m.noteAddSecret("folder 名不能为空（须为 bundle/<名>）")
+			return m, nil
+		}
+		if err := validateRemoteFolderInputShape(folder); err != nil {
+			m.noteAddSecret(err.Error())
 			return m, nil
 		}
 		m.addSecretFolder = folder
+		if !strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
+			m.addSecretFolderCheckGen++
+			gen := m.addSecretFolderCheckGen
+			m.addSecretStage = addSecretStageFolderCheck
+			m.noteAddSecret("正在校验 vault project 声明…（Esc 取消）")
+			return m, validateRemoteRegisterFolderCmd(m.workspace(), folder, gen)
+		}
 		m.addSecretStage = addSecretStageType
 		m.pushLog(fmt.Sprintf("Remote 登记 → folder %s；选择类型（tab 轮转）", folder))
 		return m, nil
@@ -449,6 +496,7 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 			}
 			in := app.RemoteRegisterInput{
 				ProjectRoot:  m.projectRoot,
+				Plane:        m.plane,
 				Folder:       folder,
 				TypeID:       p.ID,
 				Name:         name,
@@ -473,15 +521,38 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	opt := m.addSecretTargets[m.addSecretTargetIdx]
-	target := secrets.SyncTarget{
-		Kind:      opt.Kind,
-		Name:      opt.Name,
-		Folder:    opt.Folder,
-		LocalRoot: opt.LocalRoot,
+	var (
+		target secrets.SyncTarget
+		err    error
+	)
+	switch opt.Kind {
+	case secrets.SyncKindBundle:
+		target, err = secrets.NewBundleSyncTarget(opt.Name, opt.Folder)
+	default:
+		err = fmt.Errorf("未知 secrets 归属类型 %q（ADR 0014 仅支持 bundle）", opt.Kind)
+	}
+	if err != nil {
+		m.noteAddSecret(err.Error())
+		return m, nil
 	}
 	m.addSecretStage = addSecretStageRunning
 	m.pushLog(fmt.Sprintf("登记 %s → %s", rel, opt.Label))
 	return m, addSecretCmd(m.projectRoot, target, rel)
+}
+
+func (m *model) applyRemoteFolderValidation(msg remoteFolderValidatedMsg) {
+	if m.addSecretStage != addSecretStageFolderCheck ||
+		msg.gen != m.addSecretFolderCheckGen ||
+		msg.folder != strings.TrimSpace(m.addSecretFolder) {
+		return
+	}
+	if msg.err != nil {
+		m.addSecretStage = addSecretStageFolder
+		m.noteAddSecret(msg.err.Error())
+		return
+	}
+	m.addSecretStage = addSecretStageType
+	m.pushLog(fmt.Sprintf("Remote 登记 → folder %s；选择类型（tab 轮转）", msg.folder))
 }
 
 func sourceModesHint(p secrets.Processor) string {
@@ -597,6 +668,7 @@ func (m *model) handleFilePicked(msg filePickedMsg) tea.Cmd {
 	}
 	in := app.RemoteRegisterInput{
 		ProjectRoot:  m.projectRoot,
+		Plane:        m.plane,
 		Folder:       strings.TrimSpace(m.addSecretFolder),
 		TypeID:       p.ID,
 		Name:         strings.TrimSpace(m.addSecretPathInput),

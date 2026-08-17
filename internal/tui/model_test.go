@@ -216,8 +216,8 @@ func TestModelHomeVaultInferenceDismiss(t *testing.T) {
 
 	updated, cmd := m.handleVaultInferenceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = updated.(model)
-	if cmd == nil {
-		t.Fatal("按 n 且未初始化 config 时应触发本地 project 生成")
+	if cmd != nil {
+		t.Fatal("拒绝 vault 推断后不得自动生成本地 project")
 	}
 	if !m.vaultInferenceDismissed {
 		t.Fatal("按 n 后应标记 dismissed")
@@ -225,13 +225,53 @@ func TestModelHomeVaultInferenceDismiss(t *testing.T) {
 	if m.hasVaultInferencePrompt() {
 		t.Fatal("dismiss 后不应再显示确认提示")
 	}
+	if !m.localProjectInitConfirm {
+		t.Fatal("拒绝 vault 推断后应进入本地初始化确认，而不是直接落盘")
+	}
 	view := m.View()
 	if strings.Contains(view, "请确认是否应用") {
 		t.Fatalf("dismiss 后不应展示确认块:\n%s", view)
 	}
 	got := suggestNextAction(m.overview, false, true)
-	if !strings.Contains(got, "生成本地项目配置") {
-		t.Fatalf("dismiss 后建议下一步应指向本地配置: %q", got)
+	if !strings.Contains(got, "y 初始化") {
+		t.Fatalf("dismiss 后建议下一步应要求确认: %q", got)
+	}
+}
+
+func TestModelHomeNoVaultMatchRequiresExplicitInitConfirmation(t *testing.T) {
+	m := newModel("/tmp/wrong-directory", "v1.0.0")
+	m.width = 120
+	m.height = 36
+	m.overview = &app.ProjectOverview{
+		ProjectRoot:        "/tmp/wrong-directory",
+		RepoConnected:      true,
+		ProjectConfigReady: false,
+	}
+
+	updated, cmd := m.Update(vaultInferenceLoadedMsg{vaultInference: nil})
+	m = updated.(model)
+	if cmd != nil || m.localProjectLoad.busy() {
+		t.Fatal("vault 无匹配时不得自动初始化当前目录")
+	}
+	if !m.localProjectInitConfirm {
+		t.Fatal("vault 无匹配时应等待用户显式确认")
+	}
+	view := m.View()
+	for _, want := range []string{
+		"当前目录尚未初始化，是否创建 Dec 项目配置？",
+		"/tmp/wrong-directory",
+		"y/Enter 确认初始化",
+		"n/Esc 保持目录不变",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("初始化确认缺少 %q:\n%s", want, view)
+		}
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = updated.(model)
+	if cmd != nil || m.localProjectInitConfirm || m.localProjectLoad.busy() {
+		t.Fatal("按 n 后应保持目录不变并退出确认")
 	}
 }
 
@@ -664,7 +704,6 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
-	m.settingsSelectedSecretBundles = []string{"woa"}
 	m.normalizeSettingsCursor()
 
 	view := m.View()
@@ -676,15 +715,15 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 		"本机变量 · e 外部编辑",
 		"[x] cursor",
 		"[ ] codex",
-		"用户 bundles",
-		"[x] woa",
+		"用户 bundles：已启用 1 个",
+		"dec --user",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
 			t.Fatalf("Settings View() 缺少 %q:\n%s", check, view)
 		}
 	}
-	for _, redundant := range []string{"Bare Repo:", "配置文件:", "本机 Vars:", "保存时会"} {
+	for _, redundant := range []string{"Bare Repo:", "配置文件:", "本机 Vars:", "保存时会", "[x] woa"} {
 		if strings.Contains(view, redundant) {
 			t.Fatalf("Settings View() 不应显示冗余详情 %q:\n%s", redundant, view)
 		}
@@ -721,7 +760,9 @@ func TestModelSettingsHotkeysToggleIDEAndStartEdit(t *testing.T) {
 	}
 }
 
-func TestModelSettingsHotkeysToggleUserSecretBundle(t *testing.T) {
+// 用户平面 bundle 启用只由 Bundles 页写入：Settings 不再提供可勾选行，
+// 光标也不该越过 IDE 区，避免第二个写入口覆盖 GlobalConfig.EnabledBundles。
+func TestModelSettingsHasNoUserBundleRows(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 5
 	m.focus = focusContent
@@ -730,18 +771,25 @@ func TestModelSettingsHotkeysToggleUserSecretBundle(t *testing.T) {
 		AvailableIDEs:          []string{"cursor"},
 		SelectedIDEs:           []string{"cursor"},
 		AvailableSecretBundles: []string{"woa"},
+		EnabledBundles:         []string{"woa"},
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
-	m.settingsCursor = 5 // repo(0) + idle(1) + restart(2) + 本机变量(3) + IDE(4) + first secret bundle(5)
+
+	if got := m.settingsRowCount(); got != settingsFixedRowCount+1 {
+		t.Fatalf("settingsRowCount = %d, 期望固定行 + 1 个 IDE", got)
+	}
+
+	m.settingsCursor = settingsFixedRowCount + 1 // 越过唯一 IDE 行
+	m.normalizeSettingsCursor()
+	if m.settingsCursor >= settingsFixedRowCount+1 {
+		t.Fatalf("光标应被收回到最后一个 IDE 行, got %d", m.settingsCursor)
+	}
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m = updated.(model)
-	if !settingsContainsIDE(m.settingsSelectedSecretBundles, "woa") {
-		t.Fatalf("space 应启用 user secret bundle, 实际: %#v", m.settingsSelectedSecretBundles)
-	}
-	if !m.settingsDirty {
-		t.Fatal("切换 user secret bundle 后应 dirty")
+	if !equalNormalizedStrings(m.settings.EnabledBundles, []string{"woa"}) {
+		t.Fatalf("Settings 不应改动用户平面启用列表: %#v", m.settings.EnabledBundles)
 	}
 }
 
@@ -789,11 +837,9 @@ func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
 		if len(input.IDEs) != 1 || input.IDEs[0] != "cursor" {
 			t.Fatalf("IDEs = %#v, 期望 %#v", input.IDEs, []string{"cursor"})
 		}
-		if input.EnabledBundles == nil {
-			t.Fatal("EnabledBundles 不应为 nil")
-		}
-		if len(input.EnabledBundles) != 1 || input.EnabledBundles[0] != "woa" {
-			t.Fatalf("EnabledBundles = %#v, 期望 [woa]", input.EnabledBundles)
+		// nil = 不改用户平面启用列表：Settings 保存不得覆盖 Bundles 页的选择。
+		if input.EnabledBundles != nil {
+			t.Fatalf("EnabledBundles 应为 nil, got %#v", input.EnabledBundles)
 		}
 		return &app.SaveGlobalSettingsResult{IDEs: []string{"cursor"}, EnabledBundles: []string{"woa"}}, nil
 	}
@@ -808,7 +854,6 @@ func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
-	m.settingsSelectedSecretBundles = []string{"woa"}
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	m = updated.(model)
@@ -831,6 +876,116 @@ func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
 	}
 }
 
+func TestModelSettingsRepoAuthRequiredEntersExplicitBootstrapConfirm(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 5
+	m.width = 120
+	m.height = 36
+	m.settings = &app.GlobalSettingsState{AvailableIDEs: []string{"cursor"}}
+	m.settingsRepoInput = "https://cnb.cool/example/private.git"
+	m.settingsSelectedIDEs = []string{"cursor"}
+	m.savingSettings = true
+
+	updated, cmd := m.Update(settingsSavedMsg{result: &app.SaveGlobalSettingsResult{
+		RepoURL:          m.settingsRepoInput,
+		RepoAuthRequired: true,
+		RepoHost:         "cnb.cool",
+		ConnectError:     "credentials expired",
+	}})
+	m = updated.(model)
+	if cmd != nil || m.savingSettings || m.repoBootstrapStage != "confirm" || m.repoBootstrapSource != "settings" {
+		t.Fatalf("auth required state: saving=%v stage=%q source=%q cmd=%v", m.savingSettings, m.repoBootstrapStage, m.repoBootstrapSource, cmd)
+	}
+	view := m.View()
+	for _, want := range []string{"私仓认证", "cnb.cool", "y/Enter 查找", "token 不返回 TUI"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("bootstrap 确认缺少 %q:\n%s", want, view)
+		}
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = updated.(model)
+	if cmd != nil || m.repoBootstrapStage != "" {
+		t.Fatal("按 n 应取消 bootstrap，且不执行任何命令")
+	}
+}
+
+func TestModelRunPullAuthRequiredEntersBootstrapConfirm(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 3 // Run
+	m.width = 120
+	m.height = 36
+	m.runningPull = true
+	m.runMode = "pull"
+	m.overview = &app.ProjectOverview{RepoRemoteURL: "https://cnb.cool/shichao402/dec-source-private/"}
+
+	authErr := errors.New("[dec:repo-auth-required] 仓库 cnb.cool 认证失败: git fetch --prune origin: Credentials have Expired")
+	updated, cmd := m.Update(runCompletedMsg{err: authErr})
+	m = updated.(model)
+	if cmd != nil || m.runningPull || m.repoBootstrapStage != "confirm" || m.repoBootstrapSource != "run" {
+		t.Fatalf("pull auth state: running=%v stage=%q source=%q cmd=%v", m.runningPull, m.repoBootstrapStage, m.repoBootstrapSource, cmd)
+	}
+	if m.repoBootstrapHost != "cnb.cool" {
+		t.Fatalf("host=%q", m.repoBootstrapHost)
+	}
+	view := m.View()
+	for _, want := range []string{"私仓认证", "cnb.cool", "y/Enter 查找"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("Run 页 bootstrap 确认缺少 %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "[dec:repo-auth-required]") {
+		t.Fatalf("展示不应保留机器标记:\n%s", view)
+	}
+}
+
+func TestModelRunBootstrapApplyRetriesPull(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 3 // Run
+	m.repoBootstrapStage = "applying"
+	m.repoBootstrapSource = "run"
+	m.overview = &app.ProjectOverview{RepoRemoteURL: "https://cnb.cool/example/private.git"}
+
+	updated, cmd := m.Update(repoBootstrapAppliedMsg{result: &app.ApplyRepoGCMBootstrapResult{
+		RepoURL: "https://cnb.cool/example/private.git", RepoHost: "cnb.cool",
+	}})
+	m = updated.(model)
+	if m.repoBootstrapStage != "" || m.repoBootstrapSource != "" {
+		t.Fatalf("成功后应清空 bootstrap: stage=%q source=%q", m.repoBootstrapStage, m.repoBootstrapSource)
+	}
+	if cmd == nil || !m.runningPull || m.runMode != "pull" {
+		t.Fatalf("成功后应重试 pull: cmd=%v running=%v mode=%q", cmd, m.runningPull, m.runMode)
+	}
+}
+
+func TestModelSettingsRepoBootstrapCandidateSelection(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.pageIndex = 5
+	m.settings = &app.GlobalSettingsState{AvailableIDEs: []string{"cursor"}}
+	m.settingsRepoInput = "https://cnb.cool/example/private.git"
+	m.repoBootstrapStage = "loading"
+
+	updated, _ := m.Update(repoBootstrapPreparedMsg{result: &app.PrepareRepoGCMBootstrapResult{
+		RepoHost: "cnb.cool",
+		Candidates: []app.RepoGCMCandidate{
+			{Folder: "bundle/a", NotePath: ".gcm/a.yaml", Username: "alice"},
+			{Folder: "legacy", NotePath: ".gcm/b.yaml", Username: "bob", Unmanaged: true},
+		},
+	}})
+	m = updated.(model)
+	if m.repoBootstrapStage != "select" || len(m.repoBootstrapCandidates) != 2 {
+		t.Fatalf("stage=%q candidates=%#v", m.repoBootstrapStage, m.repoBootstrapCandidates)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	if m.repoBootstrapCursor != 1 {
+		t.Fatalf("cursor=%d", m.repoBootstrapCursor)
+	}
+	if view := m.renderRepoBootstrapBlock(); !strings.Contains(view, "不属于任何 bundle，pull 不维护") {
+		t.Fatalf("非托管候选应显示 pull 不维护提示:\n%s", view)
+	}
+}
+
 func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 	oldSave := saveGlobalSettingsOperation
 	defer func() { saveGlobalSettingsOperation = oldSave }()
@@ -844,8 +999,8 @@ func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 		if len(input.IDEs) != 0 {
 			t.Fatalf("IDEs = %#v, 期望显式空切片", input.IDEs)
 		}
-		if input.EnabledBundles == nil {
-			t.Fatal("EnabledBundles 不应为 nil")
+		if input.EnabledBundles != nil {
+			t.Fatalf("EnabledBundles 应为 nil, got %#v", input.EnabledBundles)
 		}
 		return &app.SaveGlobalSettingsResult{}, nil
 	}
@@ -885,7 +1040,7 @@ func TestSuggestNextAction(t *testing.T) {
 	if got := suggestNextAction(&app.ProjectOverview{}, false, false); got != "到 Settings 配置 Repo URL" {
 		t.Fatalf("未连接仓库时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, false, false); got != "按 i 生成本地项目配置" {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, false, false); got != "到 Project 页按 i 发起初始化确认" {
 		t.Fatalf("未初始化项目时建议动作错误: %q", got)
 	}
 	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, true, false); !strings.Contains(got, "确认检测到的项目配置") {
@@ -1922,11 +2077,22 @@ func TestModelProjectPageInitKeyTriggersCmd(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = updated.(model)
+	if m.localProjectLoad.busy() {
+		t.Fatal("按 i 后未经确认不得进入 localProjectLoad busy 状态")
+	}
+	if cmd != nil || called {
+		t.Fatal("按 i 后未经确认不得调用 ensureLocalProjectConfigOperation")
+	}
+	if !m.localProjectInitConfirm {
+		t.Fatal("按 i 后应进入初始化确认状态")
+	}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = updated.(model)
 	if !m.localProjectLoad.busy() {
-		t.Fatal("按 i 后应进入 localProjectLoad busy 状态")
+		t.Fatal("按 y 确认后应进入 localProjectLoad busy 状态")
 	}
 	if cmd == nil {
-		t.Fatal("按 i 后应返回 tea.Cmd")
+		t.Fatal("按 y 确认后应返回 tea.Cmd")
 	}
 	msg := cmd()
 	if _, ok := msg.(localProjectEnsuredMsg); !ok {
@@ -1998,15 +2164,20 @@ func TestModelProjectPageInitWorksWithoutRepoConnected(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = updated.(model)
-	if !m.localProjectLoad.busy() {
-		t.Fatal("未连仓库下按 i 仍应生成本地 project")
+	if m.localProjectLoad.busy() || cmd != nil {
+		t.Fatal("未连仓库下按 i 也必须先确认，不得直接生成")
 	}
-	if cmd == nil {
-		t.Fatal("按 i 应返回 ensureLocalProjectCmd")
+	if !m.localProjectInitConfirm {
+		t.Fatal("按 i 应进入初始化确认")
 	}
 	view := m.View()
-	if !strings.Contains(view, "按 i 在本页生成本地 project") {
-		t.Fatalf("View 应提示在本页初始化:\n%s", view)
+	if !strings.Contains(view, "y/Enter 确认初始化") {
+		t.Fatalf("View 应展示初始化确认:\n%s", view)
+	}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = updated.(model)
+	if !m.localProjectLoad.busy() || cmd == nil {
+		t.Fatal("未连仓库下显式确认后仍应生成本地 project")
 	}
 }
 

@@ -1,12 +1,67 @@
 package repo
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestRepoHost(t *testing.T) {
+	for input, want := range map[string]string{
+		"https://cnb.cool/owner/repo.git": "cnb.cool",
+		"https://user@GitHub.com/x/y":     "github.com",
+		"git@gitlab.example.com:x/y.git":  "gitlab.example.com",
+	} {
+		got, err := RepoHost(input)
+		if err != nil || got != want {
+			t.Fatalf("RepoHost(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+}
+
+func TestAuthenticationErrorClassification(t *testing.T) {
+	err := &AuthenticationError{Host: "cnb.cool", Err: errors.New("credentials expired")}
+	if !IsAuthenticationError(err) || !errors.Is(err, err.Err) {
+		t.Fatalf("classification failed: %v", err)
+	}
+	if !MessageIndicatesAuthRequired(err.Error()) {
+		t.Fatalf("Error() 应携带跨进程标记: %q", err.Error())
+	}
+	if stripped := StripAuthMarker(err.Error()); strings.Contains(stripped, authRequiredMarker) || !strings.Contains(stripped, "cnb.cool") {
+		t.Fatalf("StripAuthMarker 结果异常: %q", stripped)
+	}
+	for _, message := range []string{
+		"remote: Your Credentials have Expired.",
+		"fatal: Authentication failed",
+		"fatal: could not read Username: terminal prompts disabled",
+	} {
+		if !looksLikeAuthenticationFailure(message) {
+			t.Fatalf("应识别认证错误: %q", message)
+		}
+	}
+	if looksLikeAuthenticationFailure("Could not resolve host: cnb.cool") {
+		t.Fatal("DNS 错误不得识别为认证错误")
+	}
+
+	classified := classifyRemoteAuthError(
+		"https://cnb.cool/owner/repo.git",
+		"remote: Your Credentials have Expired.",
+		errors.New("git fetch failed"),
+	)
+	if !IsAuthenticationError(classified) {
+		t.Fatalf("HTTPS 凭证过期应分类为 AuthenticationError, got %v", classified)
+	}
+	if dns := classifyRemoteAuthError(
+		"https://cnb.cool/owner/repo.git",
+		"Could not resolve host: cnb.cool",
+		errors.New("git fetch failed"),
+	); IsAuthenticationError(dns) {
+		t.Fatal("DNS 错误不得分类为 AuthenticationError")
+	}
+}
 
 func TestGitOpsPull_FastForwardsWhenRemoteAdvances(t *testing.T) {
 	localDir, remoteWorkDir := setupGitOpsTestRepos(t)

@@ -57,8 +57,8 @@ func PushWorkspaceSecretsBundles(ctx context.Context, workspace Workspace, repor
 		return nil, err
 	}
 	if plan.Total == 0 {
-		result.SkippedReason = "无已启用 bundle 或 project secrets"
-		emit(reporter, EventInfo, "push.secrets", "无已启用 bundle 或 project secrets，跳过 secrets 推送", nil)
+		result.SkippedReason = "无已启用 bundle"
+		emit(reporter, EventInfo, "push.secrets", "无已启用 bundle，跳过 secrets 推送", nil)
 		return result, nil
 	}
 

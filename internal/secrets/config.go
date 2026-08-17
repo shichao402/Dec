@@ -161,8 +161,9 @@ func (c *Config) ProjectSecretsName() string {
 	return strings.TrimSpace(c.ProjectSecrets)
 }
 
-// ResolveProjectSecrets 解析 project 级 secrets folder。
-// project_secrets 未设时回退为 projectName；两者皆空时 enabled=false。
+// ResolveProjectSecrets 解析历史 project 级 secrets folder 名（仅迁移/只读兼容）。
+//
+// Deprecated: ADR 0014 取消 project 级可写归属；pull/push plan 不再使用本函数。
 func (c *Config) ResolveProjectSecrets(projectName string) (name string, enabled bool) {
 	if explicit := c.ProjectSecretsName(); explicit != "" {
 		return explicit, true
@@ -295,11 +296,12 @@ func equalStringSlices(left, right []string) bool {
 
 // ResolveSyncTargets 按当前工作平面解析 SyncTarget。
 //
-//	plane=project：仅用 enabled 生成项目平面 bundle target + project secrets target
-//	plane=machine|user：仅用 enabled 生成机器平面 bundle target；不生成 project secrets
+//	plane=project：仅用 enabled 生成项目平面 bundle target（ADR 0014：不再追加裸 project target）
+//	plane=machine|user：仅用 enabled 生成机器平面 bundle target
 func (c *Config) ResolveSyncTargets(plane SyncPlane, enabled []string, projectName string) ([]SyncTarget, error) {
+	_ = projectName // 保留参数兼容旧调用方；project 级可写归属已取消
 	enabled = NormalizeBundleNames(enabled)
-	targets := make([]SyncTarget, 0, len(enabled)+1)
+	targets := make([]SyncTarget, 0, len(enabled))
 	seenFolder := make(map[string]string) // folder -> label
 
 	add := func(t SyncTarget, label string) error {
@@ -335,18 +337,6 @@ func (c *Config) ResolveSyncTargets(plane SyncPlane, enabled []string, projectNa
 				return nil, err
 			}
 			if err := add(target, fmt.Sprintf("bundle %q", bundleName)); err != nil {
-				return nil, err
-			}
-		}
-		if folder, ok := c.ResolveProjectSecrets(projectName); ok {
-			target, err := NewProjectSyncTarget(projectName, folder)
-			if err != nil {
-				return nil, err
-			}
-			if folder != target.Name {
-				target.Folder = folder
-			}
-			if err := add(target, fmt.Sprintf("project %q", target.Name)); err != nil {
 				return nil, err
 			}
 		}

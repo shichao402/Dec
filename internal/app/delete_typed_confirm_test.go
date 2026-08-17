@@ -71,6 +71,9 @@ func TestAnalyzeDeleteTypedConfirm_MultiFolderExpectsDELETE(t *testing.T) {
 }
 
 func TestRegisterRemoteNoteFromPath_PushesWithoutLocalRoot(t *testing.T) {
+	setupRemoteRegisterRepo(t, map[string]string{
+		"bundles/relkit/bundle.yaml": "name: relkit\nscope: project\nmembers: []\n",
+	})
 	secrets.SetSession("test-session")
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{}}
 	orig := secretsClientFactory
@@ -82,20 +85,23 @@ func TestRegisterRemoteNoteFromPath_PushesWithoutLocalRoot(t *testing.T) {
 	if err := os.WriteFile(src, []byte("TOKEN=1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := RegisterRemoteNoteFromPath(context.Background(), projectRoot, "relkit", ".env/token.env", src, nil)
+	result, err := RegisterRemoteNoteFromPath(context.Background(), projectRoot, "bundle/relkit", ".env/token.env", src, nil)
 	if err != nil {
 		t.Fatalf("RegisterRemoteNoteFromPath: %v", err)
 	}
-	if result.Folder != "relkit" || result.NoteRelPath != ".env/token.env" {
+	if result.Folder != "bundle/relkit" || result.NoteRelPath != ".env/token.env" {
 		t.Fatalf("result = %#v", result)
 	}
-	notes := stub.NotesByFolder["relkit"]
+	notes := stub.NotesByFolder["bundle/relkit"]
 	if len(notes) != 1 || notes[0].Content != "TOKEN=1\n" {
 		t.Fatalf("notes = %#v", notes)
 	}
 }
 
 func TestPrepareRemoteNoteRegister_UsesTemp(t *testing.T) {
+	setupRemoteRegisterRepo(t, map[string]string{
+		"bundles/vikunja/bundle.yaml": "name: vikunja\nscope: project\nmembers: []\n",
+	})
 	secrets.SetSession("test-session")
 	stub := &secrets.StubClient{}
 	orig := secretsClientFactory

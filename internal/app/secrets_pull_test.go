@@ -190,18 +190,21 @@ func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T)
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"Demo": {{RelativePath: "config/server.yaml", Content: "keep: true\n"}},
+			"bundle/Demo": {{RelativePath: "config/server.yaml", Content: "keep: true\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "Demo"}); err != nil {
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "Demo",
+		EnabledBundles: []string{"Demo"},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	keep := filepath.Join(projectRoot, ".secrets", "project", "config", "server.yaml")
-	gone := filepath.Join(projectRoot, ".secrets", "project", "config", "orphan.yaml")
+	keep := filepath.Join(projectRoot, ".secrets", "bundles", "Demo", "config", "server.yaml")
+	gone := filepath.Join(projectRoot, ".secrets", "bundles", "Demo", "config", "orphan.yaml")
 	if err := os.MkdirAll(filepath.Dir(keep), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +223,7 @@ func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T)
 		t.Fatal(err)
 	}
 
-	summary, err := pullEnabledSecretsBundles(context.Background(), projectRoot, nil, nil)
+	summary, err := pullEnabledSecretsBundles(context.Background(), projectRoot, []string{"Demo"}, nil)
 	if err != nil {
 		t.Fatalf("pullEnabledSecretsBundles() 失败: %v", err)
 	}

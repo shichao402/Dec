@@ -11,6 +11,15 @@ import (
 	"testing"
 )
 
+func declaredBundleTarget(t testing.TB, name, folder string) SyncTarget {
+	t.Helper()
+	target, err := NewBundleSyncTarget(name, folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return target
+}
+
 func TestAPIClient_PushBundle_CreateSecureNotePayload(t *testing.T) {
 	t.Parallel()
 
@@ -60,6 +69,7 @@ func TestAPIClient_PushBundle_CreateSecureNotePayload(t *testing.T) {
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
 		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
+		Target:        declaredBundleTarget(t, "vikunja", "vikunja"),
 	}, []SecureNote{{RelativePath: noteName, Content: content}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
@@ -186,6 +196,7 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
 		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
+		Target:        declaredBundleTarget(t, "vikunja", "vikunja"),
 	}, []SecureNote{{RelativePath: legacyName, Content: newContent}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
@@ -248,7 +259,7 @@ func TestAPIClient_PushBundle_MissingFolderErrorsWithoutFlag(t *testing.T) {
 	t.Cleanup(ClearSession)
 
 	_, err = client.PushBundle(context.Background(), PushBundleRequest{
-		Target:  SyncTarget{Folder: "cnb"},
+		Target:  declaredBundleTarget(t, "cnb", "cnb"),
 		Binding: BundleBinding{SecretsBundleName: "cnb"},
 	}, []SecureNote{{RelativePath: ".gcm/cnb.yaml", Content: "x"}})
 	if err == nil || !strings.Contains(err.Error(), "不存在") {
@@ -315,7 +326,7 @@ func TestAPIClient_PushBundle_CreatesFolderWhenMissing(t *testing.T) {
 	t.Cleanup(ClearSession)
 
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
-		Target:                SyncTarget{Folder: "cnb"},
+		Target:                declaredBundleTarget(t, "cnb", "cnb"),
 		Binding:               BundleBinding{SecretsBundleName: "cnb"},
 		CreateFolderIfMissing: true,
 	}, []SecureNote{{RelativePath: ".gcm/cnb.yaml", Content: "host: cnb.cool\n"}})
@@ -392,6 +403,7 @@ func TestAPIClient_PushBundle_UpdateMatchesNameExactly(t *testing.T) {
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
 		DecBundleName: "vikunja",
 		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
+		Target:        declaredBundleTarget(t, "vikunja", "vikunja"),
 	}, []SecureNote{{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=new\n"}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)

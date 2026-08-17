@@ -1,6 +1,7 @@
 # 0004 — Remote 页：上下文无关的完整远端编辑器
 
 - **状态**：已接受（已实现；2026-08-16 修订为方案 R；同日补齐 A / typed confirm / 无文件夹；2026-08-17 登记改为同级 Processor）
+- **第 6 条 `N` 的 folder 输入已被 [0013](0013-secrets-belong-to-declared-target.md) 收紧，再被 [0014](0014-bundle-sole-writable-aggregate.md) 限为仅 `bundle/<名>`**：已声明 project 名不再是合法写入归属
 - **日期**：2026-08-10；**修订**：2026-08-16、2026-08-17
 - **关联**：[0002-secrets-synctarget-root.md](0002-secrets-synctarget-root.md)、[0003-user-enabled-secret-bundles.md](0003-user-enabled-secret-bundles.md)、[0009-bundle-binary-scope.md](0009-bundle-binary-scope.md)
 - **影响范围**：TUI Remote 页；`ListRemoteInventory` / 删除 Mode；Bitwarden Secure Note 与 SSH Hosts 写回；与当前 project / `--user` 解耦的可见性

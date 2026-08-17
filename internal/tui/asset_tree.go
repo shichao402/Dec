@@ -13,6 +13,8 @@ type assetTreePayload struct {
 	bundleIndex   int
 	memberIndex   int
 	bundleEnabled bool
+	// otherPlane 让渲染层画出「不可勾选」的复选框，无需回查 AssetSelectionState。
+	otherPlane bool
 }
 
 func assetBundleNodeID(name string) string {
@@ -54,6 +56,7 @@ func (m model) buildAssetTreeRoots() []*TreeNode {
 				kind:          assetRowBundle,
 				bundleIndex:   i,
 				bundleEnabled: enabled,
+				otherPlane:    bo.OtherPlane,
 			},
 		}
 		typeGroups := make(map[string][]int)
@@ -106,6 +109,12 @@ func memberLeafLabel(itemType, name string) string {
 }
 
 func formatAssetBundleLabel(bo app.AssetBundleOption) string {
+	if bo.OtherPlane {
+		return fmt.Sprintf("%s · 属于项目平面", bo.Name)
+	}
+	if bo.SecretsOnly {
+		return fmt.Sprintf("%s · 仓库未登记", bo.Name)
+	}
 	label := bo.Name
 	if bo.Name != bo.Vault {
 		label = fmt.Sprintf("%s (%s)", bo.Name, bo.Vault)
@@ -162,6 +171,9 @@ func renderAssetTreeLine(row TreeRow, tree *TreeList, marker string, bundleEnabl
 			checked := " "
 			if bundleEnabled {
 				checked = "x"
+			}
+			if p.otherPlane {
+				checked = "-"
 			}
 			arrow := "▸"
 			if tree.Expanded[row.Node.ID] {

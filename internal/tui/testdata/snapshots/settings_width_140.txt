@@ -10,9 +10,9 @@
 │                  ││   [ ] codex                                                                                                          │
 │                  ││   [x] cursor                                                                                                         │
 │                  ││                                                                                                                      │
-│                  ││ 用户 bundles                                                                                                         │
-│                  ││   [ ] vikunja                                                                                                        │
-│                  ││   [x] woa                                                                                                            │
+│                  ││ 用户 bundles：已启用 1 个 · 在 dec --user 的 Bundles                                                                 │
+│                  ││ 页管理                                                                                                               │
+│                  ││                                                                                                                      │
 │                  ││                                                                                                                      │
 │                  ││                                                                                                                      │
 │                  ││                                                                                                                      │

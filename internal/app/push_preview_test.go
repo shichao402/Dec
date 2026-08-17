@@ -27,8 +27,8 @@ func TestPreviewPushProjectAssets_CountsSecretsTargetsNotFiles(t *testing.T) {
 	if preview.EnabledBundleCount != 1 {
 		t.Fatalf("EnabledBundleCount = %d, want 1", preview.EnabledBundleCount)
 	}
-	// 1 个 bundle folder + 1 个 project folder。
-	if preview.SecretsTargetCount != 2 {
-		t.Fatalf("SecretsTargetCount = %d, want 2", preview.SecretsTargetCount)
+	// 只有 bundle folder：ADR 0014 之后 project 不再是可写归属。
+	if preview.SecretsTargetCount != 1 {
+		t.Fatalf("SecretsTargetCount = %d, want 1", preview.SecretsTargetCount)
 	}
 }

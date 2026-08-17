@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,6 +73,30 @@ func TestConnectRepoPersistsGlobalConfig(t *testing.T) {
 	}
 	if len(events) != 2 {
 		t.Fatalf("事件数 = %d, 期望 2", len(events))
+	}
+}
+
+func TestConnectRepoReturnsStructuredAuthRequiredWithoutPersisting(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	oldProbe := probeRepoForSettings
+	probeRepoForSettings = func(string) error {
+		return &repo.AuthenticationError{Host: "cnb.cool", Err: errors.New("credentials expired")}
+	}
+	t.Cleanup(func() { probeRepoForSettings = oldProbe })
+
+	result, err := ConnectRepo("https://cnb.cool/example/private.git", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.RepoAuthRequired || result.RepoHost != "cnb.cool" {
+		t.Fatalf("result = %#v", result)
+	}
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RepoURL != "" {
+		t.Fatalf("认证确认前不得保存 repo_url，got %q", cfg.RepoURL)
 	}
 }
 

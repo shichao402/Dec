@@ -40,11 +40,13 @@ dec --version / dec --help / dec __freshness-check
 | **Project** | 项目级 IDE / editor 覆盖、**项目变量**（`.dec/vars.yaml` 只读预览，按 `e` 挂起外部编辑器） |
 | **Run** | pull / push / remove；一次 pull 解析 project bundle 列表 → Dec Git bundle + Bitwarden secrets bundle；成功对照远端的启用集自动 prune 本地孤儿（无法确认只报告） |
 | **Remote** | 上下文无关的完整远端浏览器/编辑器（Dec Git vault 全量 + Bitwarden 全部 folder + 无文件夹只读区）；`e` temp 编辑、`n` 登记到光标所在 folder / `N` 登记到新 folder、`a`/`A` 全选/全不选、远端/本地删除拆分、跨上下文 typed confirm（ADR 0004） |
-| **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、本机用户级 bundle 启用、**本机 vars** 外部编辑、服务版本 mismatch 提示与重启 `dec-server` |
+| **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、**本机 vars** 外部编辑、服务版本 mismatch 提示与重启 `dec-server`；用户级 bundle 启用只做只读计数展示 |
 
 侧栏导航：`Home` → `Bundles` → `Project` → `Run` → `Remote` → `Settings`（`tab` / `shift+tab` 切换）。
 
 `dec --user` 进入用户平面，页列为 `Home` → `Bundles` → `Run` → `Remote` → `Settings`。Bundles / Run 的读写落点按平面解析（`~/.dec/cache`、`~/.dec/secrets`、`~/.cursor` 等），只暴露 `scope: user` 的 bundle；**Remote 页可见性不按平面过滤**（全量远端库存 + 本机清理分区）。Project 页不开放（项目变量在用户平面无对应概念）。见 [0009](decisions/0009-bundle-binary-scope.md) §4 与 [0004](decisions/0004-remote-page.md)。
+
+用户平面的 Bundles 页是 `GlobalConfig.EnabledBundles` 的**唯一写入口**（Settings 只读展示计数，避免两处基于各自快照互相覆盖）。候选除 vault 扫描结果外，还合入 `known_secret_bundles` 与 Bitwarden folder 枚举。补进来的候选按 vault scope 分流（ADR 0013）：vault 尚无 manifest 的标 `SecretsOnly`，展示「仓库未登记」，勾选保存时由 `ensureVaultBundlesForUserEnable` 补一份 `scope: user` 声明，标记随之消失；vault 已有 manifest 但 scope 属于另一平面的标 `OtherPlane`，展示「属于项目平面」、复选框为 `[-]` 且不可勾选——跨平面要先显式改 manifest 的 scope，绝不由一次勾选静默改写。保存时先校验/修复共享 vault 再写本机启用列表，被拒条目不进 `enabled_bundles`。无 Bitwarden session 时候选退化为 known ∪ 已启用，不为列候选触发 web unlock。
 
 ## 4. 模块分层
 
@@ -56,6 +58,7 @@ cmd/
 internal/serviceapi/        # TUI / MCP 共用的服务客户端
 internal/servicehost/       # dec-server gRPC 与 project 操作协调
 internal/app/               # 服务端用例层
+  bundle_writer.go     # ADR 0014：Bundle 唯一写入门面
   project.go           # project init、配置写入
   assets.go            # Assets 页选择与持久化
   operations.go        # pull / push / remove 编排
@@ -107,12 +110,19 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 
 - 本机用户级 vars（`~/.dec/local/vars.yaml`）同样按 `e` 外部编辑
 - 门面与 `dec-server` 版本不一致时提示；Settings 可确认重启服务（清空进程内 Bitwarden session）
+- Settings 连接 HTTPS 私仓若明确认证失败，进入 [0011](decisions/0011-private-repo-gcm-bootstrap.md)
+  确认态：`y` 后以流式 operation 解锁/扫描 Bitwarden，候选只展示 folder、`.gcm/*`
+  路径和 username；用户选择后 Apply + 验证并自动重试原保存。`n/Esc` 不读取/应用凭证。
+- Run 页 pull 时若 `git fetch` 明确 HTTPS 认证失败（含凭证过期），同样进入上述确认态；
+  Apply 成功后自动重试 pull。Bitwarden 尚无匹配 Note 时，先到 Remote 页登记 `.gcm/*`
+  （登记不依赖私仓可达），再回到确认步骤。
+- Repo Bootstrap 的 web unlock URL 必须随 operation event 实时回传；禁止改成 unary 后在响应末尾一次性返回。
 
 ### 5.4c Remote 页要点
 
 - 进入默认拉全量远端库存（`ListRemoteInventory`）；`r` 强制刷新
 - `e`：Secure Note / SSH Hosts → temp → 写回远端（不种本地）
-- `n`：光标所在 folder 登记；`N`：手输新 folder。Processor 同级（`note` / `.env` / `.gcm` / `.sshkey`），来源由类型声明（temp/路径/系统选文件/本机生成）；不枚举远端 folder 候选。folder 不存在时由登记本身按需创建
+- `n`：光标所在 folder 登记；`N`：手输新 folder（**仅** `bundle/<名>`，ADR 0014）。Processor 同级（`note` / `.env` / `.gcm` / `.sshkey`），来源由类型声明（temp/路径/系统选文件/本机生成）；不枚举远端 folder 候选。folder 不存在时由登记本身按需创建
 - `a` 全选 / `A` 全不选
 - 列表态 `q` / `ctrl+c` 退出 TUI；表单 / 确认态 `Esc` 先退回列表
 - `d`：远端分区只改远端；本地分区只清本机；跨上下文需 typed confirm

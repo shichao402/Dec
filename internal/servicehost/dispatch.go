@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,7 +38,8 @@ func (s *Server) Invoke(ctx context.Context, req *servicev1.InvokeRequest) (*ser
 	collector := &eventCollector{}
 	s.ensureProjectRepaired(req.ProjectRoot, collector)
 	workspace := app.NewWorkspace(app.WorkspacePlane(req.WorkspacePlane), req.ProjectRoot)
-	result, err := dispatchInvokeWorkspace(ctx, req.Method, workspace, req.PayloadJson, collector)
+	writer := app.DefaultBundleWriter()
+	result, err := dispatchInvokeWorkspace(ctx, req.Method, workspace, req.PayloadJson, collector, writer)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -72,10 +74,10 @@ func isMachineMutation(method string) bool {
 }
 
 func dispatchInvoke(ctx context.Context, method, projectRoot string, payload []byte, reporter app.Reporter) (any, error) {
-	return dispatchInvokeWorkspace(ctx, method, app.NewWorkspace(app.WorkspaceProject, projectRoot), payload, reporter)
+	return dispatchInvokeWorkspace(ctx, method, app.NewWorkspace(app.WorkspaceProject, projectRoot), payload, reporter, app.DefaultBundleWriter())
 }
 
-func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.Workspace, payload []byte, reporter app.Reporter) (any, error) {
+func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.Workspace, payload []byte, reporter app.Reporter, writer app.BundleWriter) (any, error) {
 	projectRoot := workspace.Root
 	switch method {
 	case "load_project_overview":
@@ -91,7 +93,7 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return app.SaveWorkspaceEnabledBundles(workspace, in.EnabledBundles, reporter)
+		return writer.SaveEnabledBundles(workspace, in.EnabledBundles, reporter)
 	case "connect_repo":
 		var in struct{ RepoURL string }
 		if err := decode(payload, &in); err != nil {
@@ -169,13 +171,23 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 			return nil, err
 		}
 		return app.PrepareRemoteNoteRegister(ctx, projectRoot, in.Folder, in.NoteRel, in.InitialBody, reporter)
+	case "validate_remote_register_folder":
+		var in struct{ Folder string }
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		if err := writer.ValidateRemoteRegisterFolder(workspace, in.Folder); err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
 	case "prepare_remote_register":
 		var in app.RemoteRegisterInput
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
 		in.ProjectRoot = projectRoot
-		return app.PrepareRemoteRegister(ctx, in, reporter)
+		in.Plane = workspace.EffectivePlane()
+		return writer.PrepareRemoteRegister(ctx, in, reporter)
 	case "prepare_remote_ssh_hosts_edit":
 		var in app.DeleteSelectionItem
 		if err := decode(payload, &in); err != nil {
@@ -236,7 +248,8 @@ func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.Se
 		operationCtx = app.WithUnlockConfig(operationCtx, app.UnlockConfig{Timeout: time.Duration(req.UnlockTimeoutMs) * time.Millisecond})
 	}
 	workspace := app.NewWorkspace(app.WorkspacePlane(req.WorkspacePlane), req.ProjectRoot)
-	result, runErr := dispatchOperationWorkspace(operationCtx, req.Operation, workspace, req.PayloadJson, reporter)
+	writer := app.DefaultBundleWriter()
+	result, runErr := dispatchOperationWorkspace(operationCtx, req.Operation, workspace, req.PayloadJson, reporter, writer)
 	var resultJSON []byte
 	if runErr == nil {
 		resultJSON, runErr = json.Marshal(result)
@@ -263,10 +276,10 @@ func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.Se
 }
 
 func dispatchOperation(ctx context.Context, operation, projectRoot string, payload []byte, reporter app.Reporter) (any, error) {
-	return dispatchOperationWorkspace(ctx, operation, app.NewWorkspace(app.WorkspaceProject, projectRoot), payload, reporter)
+	return dispatchOperationWorkspace(ctx, operation, app.NewWorkspace(app.WorkspaceProject, projectRoot), payload, reporter, app.DefaultBundleWriter())
 }
 
-func dispatchOperationWorkspace(ctx context.Context, operation string, workspace app.Workspace, payload []byte, reporter app.Reporter) (any, error) {
+func dispatchOperationWorkspace(ctx context.Context, operation string, workspace app.Workspace, payload []byte, reporter app.Reporter, writer app.BundleWriter) (any, error) {
 	projectRoot := workspace.Root
 	switch operation {
 	case "pull":
@@ -275,6 +288,20 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		return app.PushWorkspaceAssets(ctx, workspace, reporter)
 	case "preview_push":
 		return app.PreviewPushWorkspaceAssets(workspace)
+	case "prepare_repo_gcm_bootstrap":
+		var in struct {
+			RepoURL string
+		}
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.PrepareRepoGCMBootstrap(ctx, in.RepoURL, reporter)
+	case "apply_repo_gcm_bootstrap":
+		var in app.ApplyRepoGCMBootstrapInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.ApplyRepoGCMBootstrap(ctx, in, reporter)
 	case "remove_bundle":
 		var in app.RemoveBundleInput
 		if err := decode(payload, &in); err != nil {
@@ -282,7 +309,7 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		}
 		in.ProjectRoot = projectRoot
 		in.Plane = workspace.EffectivePlane()
-		return app.RemoveBundle(in, reporter)
+		return writer.RemoveBundle(in, reporter)
 	case "delete":
 		var in app.DeleteProjectInput
 		if err := decode(payload, &in); err != nil {
@@ -290,7 +317,7 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		}
 		in.ProjectRoot = projectRoot
 		in.Plane = workspace.EffectivePlane()
-		return app.DeleteProjectItems(ctx, in, reporter)
+		return writer.DeleteItems(ctx, in, reporter)
 	case "add_secret":
 		var in struct {
 			Target  secrets.SyncTarget
@@ -299,7 +326,7 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return app.AddSecretToTarget(ctx, projectRoot, in.Target, in.NoteRel, reporter)
+		return writer.AddSecretToTarget(ctx, projectRoot, in.Target, in.NoteRel, reporter)
 	case "register_remote_note_from_path":
 		var in struct {
 			Folder    string
@@ -309,31 +336,48 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return app.RegisterRemoteNoteFromPath(ctx, projectRoot, in.Folder, in.NoteRel, in.LocalPath, reporter)
+		return writer.RegisterRemoteNoteFromPath(ctx, projectRoot, in.Folder, in.NoteRel, in.LocalPath, reporter)
 	case "commit_remote_register":
 		var in app.RemoteRegisterSession
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return app.CommitRemoteRegister(ctx, in, reporter)
+		in.ProjectRoot = projectRoot
+		in.Plane = workspace.EffectivePlane()
+		return writer.CommitRemoteRegister(ctx, in, reporter)
 	case "commit_remote_note_edit":
 		var in app.RemoteNoteEditSession
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return struct{}{}, app.CommitRemoteNoteEdit(ctx, in, reporter)
+		return struct{}{}, writer.CommitRemoteNoteEdit(ctx, in, reporter)
 	case "commit_remote_note_register":
 		var in app.RemoteNoteEditSession
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return struct{}{}, app.CommitRemoteNoteRegister(ctx, in, reporter)
+		return struct{}{}, writer.CommitRemoteNoteRegister(ctx, in, reporter)
 	case "commit_remote_ssh_hosts_edit":
 		var in app.RemoteSSHHostsEditSession
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return struct{}{}, app.CommitRemoteSSHHostsEdit(ctx, in, reporter)
+		return struct{}{}, writer.CommitRemoteSSHHostsEdit(ctx, in, reporter)
+	case "migrate_unmanaged_note":
+		var in app.MigrateUnmanagedNoteInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return writer.MigrateUnmanagedNote(ctx, in, reporter)
+	case "migrate_project_secrets":
+		var in app.MigrateProjectSecretsInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(in.ProjectRoot) == "" {
+			in.ProjectRoot = projectRoot
+		}
+		return writer.MigrateProjectSecrets(ctx, in, reporter)
 	default:
 		return nil, fmt.Errorf("未知写操作 %q", operation)
 	}

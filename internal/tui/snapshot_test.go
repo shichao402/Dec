@@ -161,7 +161,6 @@ func snapshotSettingsModel(width int) model {
 	}
 	m.settingsRepoInput = m.settings.RepoURL
 	m.settingsSelectedIDEs = []string{"cursor"}
-	m.settingsSelectedSecretBundles = []string{"woa"}
 	m.normalizeSettingsCursor()
 	return m
 }

@@ -39,9 +39,12 @@ type GlobalSettingsState struct {
 }
 
 type ConnectRepoResult struct {
-	RepoURL    string
-	ConfigPath string
-	BareRepo   string
+	RepoURL          string
+	ConfigPath       string
+	BareRepo         string
+	RepoAuthRequired bool
+	RepoHost         string
+	ConnectError     string
 }
 
 type SaveGlobalSettingsInput struct {
@@ -64,7 +67,12 @@ type SaveGlobalSettingsResult struct {
 	SecretsConfigPath   string
 	CreatedVaultBundles []string // 本次为用户平面启用新建的 vault 占位
 	ServerIdleTimeout   string
+	RepoAuthRequired    bool
+	RepoHost            string
+	ConnectError        string
 }
+
+var probeRepoForSettings = repo.Probe
 
 func normalizedServerIdleTimeout(value string) string {
 	value = strings.TrimSpace(value)
@@ -163,21 +171,7 @@ func attachUserSecretBundleSettings(state *GlobalSettingsState, reporter Reporte
 		return fmt.Errorf("加载 secrets 配置失败: %w", err)
 	}
 
-	client := secretsClientFactory()
-	var remoteNames []string
-	if state.BitwardenSessionReady && client != nil {
-		names, listErr := client.ListSecretBundleNames(context.Background())
-		if listErr != nil {
-			emit(reporter, EventWarn, "settings.secrets",
-				fmt.Sprintf("枚举 Bitwarden secret bundles 失败（仍展示本机与 vault 候选）: %v", listErr), nil)
-		} else {
-			remoteNames = names
-			if err := secrets.RememberSecretBundles(names); err != nil {
-				emit(reporter, EventWarn, "settings.secrets",
-					fmt.Sprintf("写入 known_secret_bundles 失败: %v", err), nil)
-			}
-		}
-	}
+	remoteNames := listRemoteSecretBundleNames(state.BitwardenSessionReady, "settings.secrets", reporter)
 
 	vaultNames := listConnectedVaultBundleNames(reporter)
 	if refreshed, loadErr := secrets.LoadConfig(); loadErr == nil {
@@ -190,6 +184,26 @@ func attachUserSecretBundleSettings(state *GlobalSettingsState, reporter Reporte
 		vaultNames,
 	)
 	return nil
+}
+
+// listRemoteSecretBundleNames 枚举 Bitwarden 上的 secrets bundle 短名，并顺带记入 known。
+// 无 session 时返回 nil：候选退化为 known ∪ 已启用，绝不为了列候选去触发 web unlock。
+func listRemoteSecretBundleNames(sessionReady bool, stage string, reporter Reporter) []string {
+	client := secretsClientFactory()
+	if !sessionReady || client == nil {
+		return nil
+	}
+	names, listErr := client.ListSecretBundleNames(context.Background())
+	if listErr != nil {
+		emit(reporter, EventWarn, stage,
+			fmt.Sprintf("枚举 Bitwarden secret bundles 失败（仍展示本机与 vault 候选）: %v", listErr), nil)
+		return nil
+	}
+	if err := secrets.RememberSecretBundles(names); err != nil {
+		emit(reporter, EventWarn, stage,
+			fmt.Sprintf("写入 known_secret_bundles 失败: %v", err), nil)
+	}
+	return names
 }
 
 // listUserSecretBundleCandidates 合并已启用 / known / 远端枚举 / vault 扫描结果。
@@ -239,6 +253,15 @@ func ConnectRepo(repoURL string, reporter Reporter) (*ConnectRepoResult, error) 
 	}
 
 	emit(reporter, EventInfo, "settings.repo", "开始连接仓库", &Progress{Phase: "connect", Current: 1, Total: 2})
+	if err := probeRepoForSettings(repoURL); err != nil {
+		if repo.IsAuthenticationError(err) {
+			host, _ := repo.RepoHost(repoURL)
+			return &ConnectRepoResult{
+				RepoURL: repoURL, RepoAuthRequired: true, RepoHost: host, ConnectError: "Git HTTPS authentication failed",
+			}, nil
+		}
+		return nil, err
+	}
 	if err := repo.Connect(repoURL); err != nil {
 		return nil, err
 	}
@@ -298,6 +321,18 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 	}
 
 	emit(reporter, EventInfo, "settings.save", "开始保存全局设置", &Progress{Phase: "save", Current: 1, Total: 3})
+
+	if needsRepoProbe(targetRepoURL) {
+		if probeErr := probeRepoForSettings(targetRepoURL); probeErr != nil {
+			if repo.IsAuthenticationError(probeErr) {
+				host, _ := repo.RepoHost(targetRepoURL)
+				return &SaveGlobalSettingsResult{
+					RepoURL: targetRepoURL, RepoAuthRequired: true, RepoHost: host, ConnectError: "Git HTTPS authentication failed",
+				}, nil
+			}
+			return nil, probeErr
+		}
+	}
 
 	var savedUserBundles []string
 	var secretsConfigPath string
@@ -363,15 +398,29 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 	result.BareRepo = bareRepo
 
 	if len(savedUserBundles) > 0 {
-		created, err := ensureVaultBundlesForUserEnable(savedUserBundles, reporter)
+		repair, err := ensureVaultBundlesForUserEnable(savedUserBundles, reporter)
 		if err != nil {
 			return nil, err
 		}
-		result.CreatedVaultBundles = created
+		if repair != nil {
+			result.CreatedVaultBundles = repair.Created
+		}
 	}
 
 	emit(reporter, EventInfo, "settings.save", "已写入全局配置与本机变量模板", &Progress{Phase: "save", Current: 3, Total: 3})
 	return result, nil
+}
+
+func needsRepoProbe(targetRepoURL string) bool {
+	connected, err := repo.IsConnected()
+	if err != nil || !connected {
+		return true
+	}
+	current, err := repo.GetBareRemoteURL()
+	if err != nil {
+		return true
+	}
+	return !repo.RepoURLsEquivalent(current, targetRepoURL)
 }
 
 func resolveRepoURLForGlobalSettings(inputRepoURL string, globalConfig *types.GlobalConfig) (string, error) {

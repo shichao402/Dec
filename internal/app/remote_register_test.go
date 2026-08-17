@@ -8,10 +8,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 )
 
+func setupRemoteRegisterRepo(t *testing.T, files map[string]string) {
+	t.Helper()
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, files)
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPrepareAndCommitRemoteRegister_NotePath(t *testing.T) {
+	setupRemoteRegisterRepo(t, map[string]string{
+		"bundles/demo/bundle.yaml": "name: demo\nscope: project\nmembers: []\n",
+	})
 	secrets.SetSession("test-session")
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{}}
 	orig := secretsClientFactory
@@ -56,7 +69,12 @@ func TestPrepareAndCommitRemoteRegister_SSHGenerate(t *testing.T) {
 		t.Skip("ssh-keygen not available")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	// os.UserHomeDir 在 Unix 读取 HOME、Windows 读取 USERPROFILE。
+	// 使用统一 helper 同时隔离两者，避免测试把生成的私钥写进开发者真实 ~/.ssh。
+	setEnvForProjectTest(t, "HOME", home)
+	setupRemoteRegisterRepo(t, map[string]string{
+		"bundles/demo/bundle.yaml": "name: demo\nscope: project\nmembers: []\n",
+	})
 
 	secrets.SetSession("test-session")
 	stub := &secrets.StubClient{SSHKeysByFolder: map[string][]secrets.SSHKeyItem{}}
@@ -98,5 +116,98 @@ func TestPrepareAndCommitRemoteRegister_SSHGenerate(t *testing.T) {
 	priv := filepath.Join(home, ".ssh", "dec_demo_deploy")
 	if _, err := os.Stat(priv); err != nil {
 		t.Fatalf("expected local landing %s: %v", priv, err)
+	}
+}
+
+func TestCommitRemoteRegister_RejectsUndeclaredBareFolder(t *testing.T) {
+	setupRemoteRegisterRepo(t, map[string]string{
+		"projects/Dec.yaml": "name: Dec\nbundles: []\n",
+	})
+	secrets.SetSession("test-session")
+	t.Cleanup(secrets.ClearSession)
+
+	_, err := CommitRemoteRegister(t.Context(), RemoteRegisterSession{
+		ProjectRoot: t.TempDir(),
+		Folder:      "relkit",
+		TypeID:      secrets.SecretTypePlain,
+		Name:        "token.txt",
+		NoteContent: "secret",
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "bundle/relkit") {
+		t.Fatalf("裸名应拒绝并提示 bundle/<名>, got %v", err)
+	}
+}
+
+func TestCommitRemoteRegister_AcceptsBundleFolderAndCreatesPlaceholder(t *testing.T) {
+	setupRemoteRegisterRepo(t, map[string]string{"README.md": "fixture\n"})
+	secrets.SetSession("test-session")
+	t.Cleanup(secrets.ClearSession)
+	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{}}
+	orig := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = orig })
+
+	result, err := CommitRemoteRegister(t.Context(), RemoteRegisterSession{
+		ProjectRoot:  t.TempDir(),
+		Folder:       "bundle/foo",
+		TypeID:       secrets.SecretTypePlain,
+		Name:         "token.txt",
+		NoteContent:  "secret",
+		CreateFolder: true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Folder != "bundle/foo" || result.Kind != secrets.SyncKindBundle {
+		t.Fatalf("result = %#v", result)
+	}
+	tx, err := repo.NewReadTransaction()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Close()
+	data, err := os.ReadFile(filepath.Join(tx.WorkDir(), "bundles", "foo", "bundle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "name: foo") {
+		t.Fatalf("placeholder = %s", data)
+	}
+}
+
+func TestCommitRemoteRegister_RejectsBareProjectFolder(t *testing.T) {
+	setupRemoteRegisterRepo(t, map[string]string{
+		"projects/Dec.yaml": "name: Dec\nbundles: []\n",
+	})
+	secrets.SetSession("test-session")
+	t.Cleanup(secrets.ClearSession)
+	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{}}
+	orig := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = orig })
+
+	_, err := CommitRemoteRegister(t.Context(), RemoteRegisterSession{
+		ProjectRoot:  t.TempDir(),
+		Folder:       "Dec",
+		TypeID:       secrets.SecretTypePlain,
+		Name:         "token.txt",
+		NoteContent:  "secret",
+		CreateFolder: true,
+	}, nil)
+	if err == nil {
+		t.Fatal("expected reject bare project folder")
+	}
+	if !strings.Contains(err.Error(), "bundle/") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestValidateRemoteRegisterFolder_RejectsBareProject(t *testing.T) {
+	err := ValidateRemoteRegisterFolder(NewWorkspace(WorkspaceProject, t.TempDir()), "Dec")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "bundle/") {
+		t.Fatalf("err = %v", err)
 	}
 }

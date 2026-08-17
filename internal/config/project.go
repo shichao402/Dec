@@ -1,11 +1,14 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/types"
 	"gopkg.in/yaml.v3"
 )
@@ -58,6 +61,42 @@ func (m *ProjectConfigManager) GetDecDir() string {
 	return filepath.Join(m.projectRoot, ".dec")
 }
 
+// ErrProjectRootRequired 表示项目配置操作没拿到项目根目录。
+var ErrProjectRootRequired = errors.New("未指定项目根目录")
+
+// checkProjectRoot 拦下两类会破坏全局配置的项目根。
+//
+// 空 projectRoot（用户平面 workspace.Root 为空）会让 .dec/ 退化成相对服务进程 cwd
+// 的路径；当 cwd 恰好是 Dec 根目录的父目录时，"项目配置" 与 ~/.dec/config.yaml 是同
+// 一个文件，一次 v1→v2 升级就会把全局配置改写成项目配置格式，repo_url 与
+// enabled_bundles 随之丢失。项目根就是 Dec 根目录的父目录时同理。
+func (m *ProjectConfigManager) checkProjectRoot() error {
+	if strings.TrimSpace(m.projectRoot) == "" {
+		return fmt.Errorf("%w：用户平面没有项目配置，调用方需按平面分流", ErrProjectRootRequired)
+	}
+	decDir, err := filepath.Abs(m.GetDecDir())
+	if err != nil {
+		return fmt.Errorf("解析 .dec 目录失败: %w", err)
+	}
+	rootDir, err := repo.GetRootDir()
+	if err != nil {
+		return err
+	}
+	if sameDirPath(decDir, rootDir) {
+		return fmt.Errorf("项目根 %q 的 .dec/ 就是 Dec 根目录 %s：项目配置会覆盖全局配置", m.projectRoot, rootDir)
+	}
+	return nil
+}
+
+func sameDirPath(a, b string) bool {
+	a = filepath.Clean(a)
+	b = filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
 // GetVarsPath 获取项目变量定义文件路径
 func (m *ProjectConfigManager) GetVarsPath() string {
 	return filepath.Join(m.GetDecDir(), "vars.yaml")
@@ -68,8 +107,11 @@ func (m *ProjectConfigManager) GetVarsDir() string {
 	return filepath.Join(m.GetDecDir(), "vars.d")
 }
 
-// Exists 检查项目配置是否已存在
+// Exists 检查项目配置是否已存在。项目根不合法时一律视为不存在。
 func (m *ProjectConfigManager) Exists() bool {
+	if err := m.checkProjectRoot(); err != nil {
+		return false
+	}
 	_, err := os.Stat(filepath.Join(m.GetDecDir(), "config.yaml"))
 	return err == nil
 }
@@ -90,6 +132,9 @@ type projectConfigV1 struct {
 
 // LoadProjectConfig 加载项目配置，自动去重
 func (m *ProjectConfigManager) LoadProjectConfig() (*types.ProjectConfig, error) {
+	if err := m.checkProjectRoot(); err != nil {
+		return nil, err
+	}
 	configPath := filepath.Join(m.GetDecDir(), "config.yaml")
 
 	data, err := os.ReadFile(configPath)
@@ -131,6 +176,9 @@ func (m *ProjectConfigManager) LoadProjectConfig() (*types.ProjectConfig, error)
 
 // SaveProjectConfig 保存项目配置
 func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) error {
+	if err := m.checkProjectRoot(); err != nil {
+		return err
+	}
 	decDir := m.GetDecDir()
 	if err := os.MkdirAll(decDir, 0755); err != nil {
 		return fmt.Errorf("创建 .dec 目录失败: %w", err)
@@ -155,6 +203,9 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 
 // EnsureVarsConfigTemplate 确保项目变量定义模板存在，不覆盖已有文件。
 func (m *ProjectConfigManager) EnsureVarsConfigTemplate() (bool, error) {
+	if err := m.checkProjectRoot(); err != nil {
+		return false, err
+	}
 	decDir := m.GetDecDir()
 	if err := os.MkdirAll(decDir, 0755); err != nil {
 		return false, fmt.Errorf("创建 .dec 目录失败: %w", err)

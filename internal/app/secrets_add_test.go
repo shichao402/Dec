@@ -30,10 +30,10 @@ func TestAddProjectSecret_CreatesNoteNamedBySyncRelPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddProjectSecret() = %v", err)
 	}
-	if result.Folder != "tencent-cloud" || result.LandingPath != ".secrets/bundles/tencent-cloud/.env/tencent.env" {
+	if result.Folder != "bundle/tencent-cloud" || result.LandingPath != ".secrets/bundles/tencent-cloud/.env/tencent.env" {
 		t.Fatalf("result = %#v", result)
 	}
-	notes := stub.NotesByFolder["tencent-cloud"]
+	notes := stub.NotesByFolder["bundle/tencent-cloud"]
 	if len(notes) != 1 || notes[0].RelativePath != ".env/tencent.env" {
 		t.Fatalf("notes = %#v, note 名应相对同步根", notes)
 	}
@@ -91,12 +91,12 @@ func TestAddProjectSecret_RejectsPathEscapingProjectRoot(t *testing.T) {
 	secretsClientFactory = func() secrets.Client { return &secrets.StubClient{} }
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
-	if _, err := AddProjectSecret(context.Background(), t.TempDir(), "evil", "../outside.yaml", nil); err == nil {
+	if _, err := AddProjectSecret(context.Background(), t.TempDir(), "bundle/evil", "../outside.yaml", nil); err == nil {
 		t.Fatal("逃逸项目根的路径应被拒绝")
 	}
 }
 
-func TestSuggestSecretFolders_ProjectFolderFirst(t *testing.T) {
+func TestSuggestSecretFolders_OnlyEnabledBundles(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
@@ -111,10 +111,10 @@ func TestSuggestSecretFolders_ProjectFolderFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SuggestSecretFolders() = %v", err)
 	}
-	if len(folders) == 0 || folders[0] != "Demo" {
-		t.Fatalf("folders = %#v, 期望 project folder 打头", folders)
+	if len(folders) != 2 {
+		t.Fatalf("folders = %#v, 期望仅 2 个 bundle folder（ADR 0014）", folders)
 	}
-	if len(folders) != 3 {
-		t.Fatalf("folders = %#v, 期望 project + 2 个 bundle folder", folders)
+	if folders[0] != "bundle/combo" || folders[1] != "bundle/vikunja" {
+		t.Fatalf("folders = %#v, 期望按名排序的 bundle/*", folders)
 	}
 }

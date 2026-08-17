@@ -40,8 +40,9 @@ Bitwarden folder 仍为：bundle/<name>
 2. **Project 与 User 并集、幂等**  
    同名两边都启用不冲突；pull 资产与 secrets 共用合并后的名单。
 
-3. **TUI 入口在 Settings（全局）**  
-   Bundles 页仍只管**当前项目**的 enable；不在此「钉到本机」。
+3. **TUI 入口在 Settings（全局）** — *已被 [0012](0012-user-bundle-single-entry.md) 取代*  
+   Bundles 页仍只管**当前项目**的 enable；不在此「钉到本机」。  
+   （0009 引入用户平面后，`dec --user` 的 Bundles 页即用户平面上下文，入口已迁至该页。）
 
 4. **secrets-only → 启用时再建 vault 占位**  
    - 仅枚举 / pull 发现：写入本机 `known_secret_bundles`，**不**自动改 Git vault。  
@@ -72,8 +73,9 @@ Bitwarden folder 仍为：bundle/<name>
 **C. 枚举/pull 发现 secrets-only 就自动创建并 push vault。**  
 否决：未经确认改共享仓库；泄漏「存在某 secrets 包」的时机过早。
 
-**D. Bundles 页「钉选到本机」。**  
-否决：Bundles 是项目上下文；全局能力在 Settings。
+**D. Bundles 页「钉选到本机」。** — *已被 [0012](0012-user-bundle-single-entry.md) 推翻*  
+否决：Bundles 是项目上下文；全局能力在 Settings。  
+（0009 后存在独立的用户平面 Bundles 页，该否决前提不再成立。）
 
 **E. 允许长期 secrets-only 且永不进 vault。**  
 否决（作为默认路径）：刷新与清单不稳定；改为「启用时补占位」。未启用前仍可仅 known 缓存。

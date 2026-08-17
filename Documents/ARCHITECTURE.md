@@ -357,7 +357,11 @@ TUI **Settings** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 - 读操作基于 bare repo 的最新远端引用
 - 写操作通过短生命周期临时 worktree 完成，结束后自动清理
-- Dec 依赖系统 `git`，认证由用户 Git 环境负责
+- Dec 依赖系统 `git`，日常认证由用户 Git 环境负责
+- 首次连接 HTTPS 私仓若明确认证失败，Settings 可在用户确认后走
+  [0011 Repo GCM Bootstrap](decisions/0011-private-repo-gcm-bootstrap.md)：`dec-server`
+  直接按 repo host 从 Bitwarden 现有 `.gcm/*` Note 查找候选，复用 GCM Processor
+  Apply 并验证后重试；token 不经 RPC、不另行持久化
 
 ### 2. 有效 IDE 与编辑器解析
 

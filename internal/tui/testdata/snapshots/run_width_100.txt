@@ -11,7 +11,7 @@
 │                ││ Commit abc123                                                                  │
 │                ││ 本次 Pull 计划                                                                 │
 │                ││ Dec  bundle: default（→ .dec/cache/）                                          │
-│                ││ Secrets  无同步目标（请启用 bundle 或配置 project secrets）                    │
+│                ││ Secrets  无同步目标（请启用 bundle）                                           │
 │                ││ 事件                                                                           │
 │                ││ · 开始拉取                                                                     │
 │                ││ · 完成汇总                                                                     │

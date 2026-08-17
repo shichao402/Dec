@@ -22,12 +22,16 @@
 | 编号 | 标题 | 状态 |
 |------|------|------|
 | [0001](0001-secrets-landing-path.md) | Secrets 落地路径：消费者路径即落地路径 | 已被 0002 取代 |
-| [0002](0002-secrets-synctarget-root.md) | Secrets SyncTarget：`.secrets` 同步根镜像 | 已接受（实施中） |
-| [0003](0003-user-enabled-secret-bundles.md) | 用户级 Bundle 启用（机器平面） | 已接受；并集语义被 0009 取代 |
-| [0004](0004-remote-page.md) | Remote 页：上下文无关完整远端编辑器（方案 R） | 已接受（已实现） |
+| [0002](0002-secrets-synctarget-root.md) | Secrets SyncTarget：`.secrets` 同步根镜像 | 已接受；project 级可写归属被 0014 取消 |
+| [0003](0003-user-enabled-secret-bundles.md) | 用户级 Bundle 启用（机器平面） | 已接受；并集语义被 0009 取代，TUI 入口被 0012 取代 |
+| [0004](0004-remote-page.md) | Remote 页：上下文无关完整远端编辑器（方案 R） | 已接受（已实现）；`N` 被 0013 收紧，再被 0014 限为仅 `bundle/<名>` |
 | [0005](0005-secrets-machine-handlers.md) | Secrets Machine Handlers：点类型目录（`.gcm` / `.sshkey` / `.env`） | 已接受 |
 | [0006](0006-retire-pkg-for-internal.md) | 源码布局：废除 `pkg/`，统一到 `internal/` | 已接受（已实现） |
 | [0007](0007-machine-secrets-root.md) | 机器级 bundle secrets 根 + 项目覆盖层 | 已接受；覆盖层被 0009 取代 |
 | [0008](0008-service-facade-split.md) | Dec 服务 / 门面拆分 | 已接受（规划中） |
 | [0009](0009-bundle-binary-scope.md) | Bundle 二元 scope（user \| project） | 已接受（实施中） |
 | [0010](0010-pull-orphan-and-ops.md) | Pull 孤儿收敛、删除收敛与运维面修订 | 已接受（已实现） |
+| [0011](0011-private-repo-gcm-bootstrap.md) | 私仓 GCM Bootstrap：Bitwarden 作为启动信任根 | 已接受（已实现）；0013 补候选归属提示 |
+| [0012](0012-user-bundle-single-entry.md) | 用户平面 bundle 启用收拢到 Bundles 页 | 已接受（已实现）；「仅 secrets」文案被 0013 修订 |
+| [0013](0013-secrets-belong-to-declared-target.md) | Secrets 必须归属已声明 SyncTarget：写入接口类型级收口 | 已接受；可写归属被 0014 收成仅 bundle |
+| [0014](0014-bundle-sole-writable-aggregate.md) | Bundle 是唯一可写聚合根 | 已接受（已实现） |

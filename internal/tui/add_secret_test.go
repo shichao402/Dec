@@ -31,8 +31,7 @@ func TestAddSecret_TwoStagePromptRunsCommand(t *testing.T) {
 	opened, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
 	withTargets := opened.(model)
 	withTargets.addSecretTargets = []app.SecretTargetOption{
-		{Kind: secrets.SyncKindProject, Name: "demo", Folder: "demo", LocalRoot: ".secrets/project", Label: "project secrets \"demo\" → .secrets/project"},
-		{Kind: secrets.SyncKindBundle, Name: "vikunja", Folder: "vikunja", LocalRoot: ".secrets/bundles/vikunja", Label: "secrets bundle \"vikunja\" → .secrets/bundles/vikunja"},
+		{Kind: secrets.SyncKindBundle, Name: "vikunja", Folder: "bundle/vikunja", LocalRoot: ".secrets/bundles/vikunja", Label: "secrets bundle \"vikunja\" → .secrets/bundles/vikunja"},
 	}
 
 	updated, _ := withTargets.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -57,8 +56,8 @@ func TestAddSecret_TabCyclesTargets(t *testing.T) {
 	opened, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
 	withTargets := opened.(model)
 	withTargets.addSecretTargets = []app.SecretTargetOption{
-		{Label: "project", LocalRoot: ".secrets/project"},
 		{Label: "vikunja", LocalRoot: ".secrets/bundles/vikunja"},
+		{Label: "relkit", LocalRoot: ".secrets/bundles/relkit"},
 	}
 
 	updated, _ := withTargets.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -91,7 +90,7 @@ func TestAddSecret_EmptyPathDoesNotAdvance(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
 	withTargets := updated.(model)
-	withTargets.addSecretTargets = []app.SecretTargetOption{{Label: "project", LocalRoot: ".secrets/project"}}
+	withTargets.addSecretTargets = []app.SecretTargetOption{{Label: "vikunja", LocalRoot: ".secrets/bundles/vikunja"}}
 	updated, _ = withTargets.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -129,10 +128,10 @@ func TestAddSecret_RendersPromptAndOutcome(t *testing.T) {
 	running := updated.(model)
 	running.addSecretStage = addSecretStageRunning
 	done, _ := running.Update(addSecretDoneMsg{result: &app.AddSecretResult{
-		Folder:         "demo",
+		Folder:         "bundle/demo",
 		NoteRelPath:    "env/vikunja.env",
-		ProjectRelPath: ".secrets/project/env/vikunja.env",
-		LandingPath:    ".secrets/project/env/vikunja.env",
+		ProjectRelPath: ".secrets/bundles/demo/env/vikunja.env",
+		LandingPath:    ".secrets/bundles/demo/env/vikunja.env",
 	}})
 	after := done.(model)
 	if after.addSecretStage != "" {
