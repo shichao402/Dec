@@ -178,6 +178,67 @@ func removeWorktree(bareDir, worktreeDir string) error {
 	return nil
 }
 
+// PruneOrphanWorktrees 清理上次进程异常退出残留的事务工作树与临时分支。
+//
+// 仅应在 dec-server 启动时调用：单例锁已持有、进程内无活跃事务，因此 rootDir 下所有
+// `worktree-*` 目录都是孤儿，可安全删除。正常关闭时 Transaction.cleanup 已自行清理，
+// 这里只兜底 crash / kill 场景。
+func PruneOrphanWorktrees() (removed int, err error) {
+	bareOpMu.Lock()
+	defer bareOpMu.Unlock()
+
+	rootDir, err := GetRootDir()
+	if err != nil {
+		return 0, err
+	}
+	bareDir, err := GetBareRepoDir()
+	if err != nil {
+		return 0, err
+	}
+	// bare 未初始化 → 从未 worktree add 过，无需清理。
+	if ok, _ := isBareRepo(bareDir); !ok {
+		return 0, nil
+	}
+
+	entries, err := os.ReadDir(rootDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "worktree-") {
+			continue
+		}
+		dir := filepath.Join(rootDir, e.Name())
+		if rmErr := removeWorktree(bareDir, dir); rmErr != nil {
+			_ = os.RemoveAll(dir)
+		}
+		removed++
+	}
+
+	// 清理 git worktree 元数据与残留事务分支。
+	_ = sysproc.Command("git", "--git-dir", bareDir, "worktree", "prune").Run()
+	pruneOrphanTxBranches(bareDir)
+	return removed, nil
+}
+
+// pruneOrphanTxBranches 删除 crash 残留的 dec-tx-* 临时分支。
+func pruneOrphanTxBranches(bareDir string) {
+	out, err := sysproc.Command("git", "--git-dir", bareDir, "branch", "--list", "dec-tx-*").CombinedOutput()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "*"))
+		if name == "" {
+			continue
+		}
+		_ = sysproc.Command("git", "--git-dir", bareDir, "branch", "-D", name).Run()
+	}
+}
+
 func isNonFastForwardPushError(err error) bool {
 	if err == nil {
 		return false

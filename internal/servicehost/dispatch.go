@@ -191,11 +191,20 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 	}
 }
 
-func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.ServerStreamingServer[servicev1.RunOperationResponse]) error {
+func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.ServerStreamingServer[servicev1.RunOperationResponse]) (retErr error) {
 	state, err := s.broker.start(req.ProjectRoot, req.Operation, req.ClientId, req.Facade)
 	if err != nil {
 		return status.Error(codes.AlreadyExists, err.Error())
 	}
+	// 兜底：无论业务逻辑是否 panic，都要 finish，否则该 project 会永久卡在 busy。
+	// broker.finish 对已结束的 state 是幂等的，正常路径显式 finish 后此处不会重复标记。
+	defer func() {
+		if r := recover(); r != nil {
+			msg := fmt.Sprintf("operation panic: %v", r)
+			s.broker.finish(req.ProjectRoot, &servicev1.WatchOperationResponse{Error: msg, Done: true})
+			retErr = status.Error(codes.Internal, msg)
+		}
+	}()
 	if err := stream.Send(&servicev1.RunOperationResponse{
 		OperationId: state.meta.OperationId,
 		Active:      cloneActive(state.meta),

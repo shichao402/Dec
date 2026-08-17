@@ -33,7 +33,7 @@ type Client struct {
 func Connect(ctx context.Context, facade, clientID, clientVersion string) (*Client, error) {
 	client, err := connectExisting(ctx, clientVersion)
 	if err == nil {
-		client.startPresence(facade, clientID)
+		client.maybeStartPresence(facade, clientID)
 		return client, nil
 	}
 	if err := startServerProcess(); err != nil {
@@ -50,11 +50,26 @@ func Connect(ctx context.Context, facade, clientID, clientVersion string) (*Clie
 		}
 		client, lastErr = connectExisting(ctx, clientVersion)
 		if lastErr == nil {
-			client.startPresence(facade, clientID)
+			client.maybeStartPresence(facade, clientID)
 			return client, nil
 		}
 	}
 	return nil, fmt.Errorf("dec-server 启动后未就绪: %w", lastErr)
+}
+
+// facadeHoldsPresence 决定门面是否持有长连 KeepAlive。
+// 只有 TUI 这类「开着就应保活」的交互门面持有；MCP / CLI 是薄门面，
+// 只在具体 RPC 执行期间由服务端拦截器计入 presence，调用结束即释放，
+// 从而不会在进程变孤儿后长期拖住 dec-server 不空闲退出。
+func facadeHoldsPresence(facade string) bool {
+	return facade == "tui"
+}
+
+func (c *Client) maybeStartPresence(facade, clientID string) {
+	if !facadeHoldsPresence(facade) {
+		return
+	}
+	c.startPresence(facade, clientID)
 }
 
 func connectExisting(ctx context.Context, clientVersion string) (*Client, error) {
@@ -130,30 +145,51 @@ func (c *Client) Close() error {
 	return err
 }
 
+const (
+	keepAliveMinBackoff = time.Second
+	keepAliveMaxBackoff = 30 * time.Second
+)
+
 func (c *Client) startPresence(facade, clientID string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 	go func() {
+		backoff := keepAliveMinBackoff
 		for ctx.Err() == nil {
-			stream, err := c.rpc.KeepAlive(ctx)
-			if err != nil {
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(time.Second):
-					continue
-				}
-			}
-			if err := stream.Send(&servicev1.KeepAliveRequest{ClientId: clientID, Facade: facade}); err != nil {
+			if c.runKeepAliveOnce(ctx, facade, clientID) {
+				// 成功建立过流：重置退避，立即重连。
+				backoff = keepAliveMinBackoff
 				continue
 			}
-			for ctx.Err() == nil {
-				if _, err := stream.Recv(); err != nil {
-					break
-				}
+			// 建流 / 首发失败：退避后重试，避免空转烧 CPU。
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			if backoff *= 2; backoff > keepAliveMaxBackoff {
+				backoff = keepAliveMaxBackoff
 			}
 		}
 	}()
+}
+
+// runKeepAliveOnce 建立一条 KeepAlive 流并持续接收，直到出错或 ctx 取消。
+// 返回 true 表示流曾成功建立（调用方可立即重连并重置退避）；false 表示建流/首发失败。
+func (c *Client) runKeepAliveOnce(ctx context.Context, facade, clientID string) (established bool) {
+	stream, err := c.rpc.KeepAlive(ctx)
+	if err != nil {
+		return false
+	}
+	if err := stream.Send(&servicev1.KeepAliveRequest{ClientId: clientID, Facade: facade}); err != nil {
+		return false
+	}
+	for ctx.Err() == nil {
+		if _, err := stream.Recv(); err != nil {
+			break
+		}
+	}
+	return true
 }
 
 func clientUnaryToken(token string) grpc.UnaryClientInterceptor {

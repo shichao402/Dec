@@ -12,6 +12,8 @@ import (
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/compat"
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/diag"
+	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/service"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
 	"google.golang.org/grpc"
@@ -89,14 +91,16 @@ func Run(ctx context.Context, version string) error {
 	})
 
 	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(unaryAuth(token)),
-		grpc.StreamInterceptor(streamAuth(token)),
+		grpc.UnaryInterceptor(unaryAuth(token, host.presence)),
+		grpc.StreamInterceptor(streamAuth(token, host.presence)),
 	)
 	servicev1.RegisterDecServiceServer(grpcServer, host)
 	if err := service.WriteMetadata(listener.Addr().String(), token); err != nil {
 		return err
 	}
 	defer service.RemoveMetadata()
+
+	go pruneOrphanWorktreesAtStartup()
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- grpcServer.Serve(listener) }()
@@ -119,6 +123,19 @@ func Run(ctx context.Context, version string) error {
 		return nil
 	case err := <-errCh:
 		return err
+	}
+}
+
+// pruneOrphanWorktreesAtStartup 在服务启动时后台回收上次异常退出残留的事务工作树。
+// 单例锁保证此刻无其他实例、无活跃事务，清理是安全的。
+func pruneOrphanWorktreesAtStartup() {
+	removed, err := repo.PruneOrphanWorktrees()
+	if err != nil {
+		diag.StartupLog("pruneOrphanWorktrees error: %v", err)
+		return
+	}
+	if removed > 0 {
+		diag.StartupLog("pruneOrphanWorktrees removed=%d", removed)
 	}
 }
 
@@ -149,9 +166,9 @@ func (s *Server) Shutdown(context.Context, *servicev1.ShutdownRequest) (*service
 	return &servicev1.ShutdownResponse{Accepted: true}, nil
 }
 
+// KeepAlive 是 TUI 门面持有的长连流：其存活期由 streamAuth 拦截器计入 presence，
+// 因此服务在 TUI 打开期间不会空闲退出。MCP 门面不持有此流，只在具体 RPC 执行期间占用 presence。
 func (s *Server) KeepAlive(stream grpc.BidiStreamingServer[servicev1.KeepAliveRequest, servicev1.KeepAliveResponse]) error {
-	s.presence.connected()
-	defer s.presence.disconnected()
 	for {
 		if _, err := stream.Recv(); err != nil {
 			if err == io.EOF {
@@ -198,20 +215,28 @@ func (s *Server) WatchOperation(req *servicev1.WatchOperationRequest, stream grp
 	}
 }
 
-func unaryAuth(token string) grpc.UnaryServerInterceptor {
+// unaryAuth 校验 token，并在 RPC 执行期间把它计入 presence：
+// 任何在飞调用都视为活跃，避免无 TUI、仅 MCP 时长操作被空闲计时器误杀。
+func unaryAuth(token string, presence *presenceTracker) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if !validToken(ctx, token) {
 			return nil, status.Error(codes.Unauthenticated, "invalid dec-server token")
 		}
+		presence.connected()
+		defer presence.disconnected()
 		return handler(ctx, req)
 	}
 }
 
-func streamAuth(token string) grpc.StreamServerInterceptor {
+// streamAuth 校验 token，并在流存活期间计入 presence。
+// TUI 的 KeepAlive 长连流、以及各门面的 RunOperation / WatchOperation 流都由此占用 presence。
+func streamAuth(token string, presence *presenceTracker) grpc.StreamServerInterceptor {
 	return func(srv any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if !validToken(stream.Context(), token) {
 			return status.Error(codes.Unauthenticated, "invalid dec-server token")
 		}
+		presence.connected()
+		defer presence.disconnected()
 		return handler(srv, stream)
 	}
 }

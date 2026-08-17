@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -21,6 +22,10 @@ func main() {
 		ProjectRoot:   *projectRoot,
 		ClientVersion: Version,
 	}); err != nil {
+		// 信号 / 父进程退出触发的 ctx 取消属正常收尾，不作为错误。
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

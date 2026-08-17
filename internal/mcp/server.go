@@ -80,6 +80,9 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 
 // Run 启动 stdio MCP Server。
 func Run(ctx context.Context, cfg Config) error {
+	ctx, stopWatchers := withExitWatchers(ctx)
+	defer stopWatchers()
+
 	cfg.ProjectRoot = resolveProjectRoot(cfg.ProjectRoot)
 	if cfg.ProjectRoot == "" {
 		return fmt.Errorf("无法确定项目根目录：请设置 --project-root 或 DEC_PROJECT_ROOT")
