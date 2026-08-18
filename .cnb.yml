@@ -3,14 +3,15 @@
 #   git tag  stable/vX.Y.Z && git push origin  stable/vX.Y.Z  → RUP channel=stable
 # 推送前请先把 version.json 改成对应 vX.Y.Z 并推到 main。
 # GitHub 仅作镜像（cnb-bridge 定时 CNB→GitHub）。
-# 密钥：shichao402/keystores (KeyStore) 的 dec.env.yml
+# 密钥：shichao402/keystores (KeyStore) 的 relkit_release.env.yml
+#   RELKIT_PUBLISH_TOKEN / RELKIT_PUBLISH_URL（默认 https://publish.firoyang.com）
 
 .release: &release
   name: release
   docker:
     image: golang:1.26
   imports:
-    - https://cnb.cool/shichao402/keystores/-/blob/main/dec.env.yml
+    - https://cnb.cool/shichao402/keystores/-/blob/main/relkit_release.env.yml
   stages:
     - name: setup
       script: |
@@ -88,8 +89,8 @@
         VERSION=$(cat .release-version)
         CHANNEL=$(cat .release-channel)
         VER="${VERSION#v}"
-        if [ -z "${RELKIT_AGENT_TOKEN:-}" ]; then
-          echo "RELKIT_AGENT_TOKEN 未配置，跳过 RUP 发布"
+        if [ -z "${RELKIT_PUBLISH_TOKEN:-}" ]; then
+          echo "RELKIT_PUBLISH_TOKEN 未配置，跳过 RUP 发布"
           exit 0
         fi
         ( cd relkit && go build -o "$OLDPWD/relkit-bin" ./cmd/relkit )
@@ -112,17 +113,17 @@
         done
         ./relkit-bin "$@"
         tar -C ".relkit/staged/${VER}" -czf staged.tar.gz .
-        AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com}"
+        PUBLISH_URL="${RELKIT_PUBLISH_URL:-https://publish.firoyang.com}"
         SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
         curl -fsS -X PUT \
-          -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+          -H "Authorization: Bearer ${RELKIT_PUBLISH_TOKEN}" \
           --data-binary @staged.tar.gz \
-          "${AGENT_URL}/v1/staged/dec/${VER}"
+          "${PUBLISH_URL}/v1/staged/dec/${VER}"
         curl -fsS -X POST \
-          -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+          -H "Authorization: Bearer ${RELKIT_PUBLISH_TOKEN}" \
           -H "Content-Type: application/json" \
           -d "{\"product\":\"dec\",\"version\":\"${VER}\",\"stagedSha256\":\"${SHA}\",\"idempotencyKey\":\"dec/${CHANNEL}/${VER}/${SHA}\"}" \
-          "${AGENT_URL}/v1/publish"
+          "${PUBLISH_URL}/v1/publish"
 
     - name: github-release
       script: |

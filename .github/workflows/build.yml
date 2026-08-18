@@ -160,14 +160,14 @@ jobs:
     if: ${{ needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Skip when agent token missing
+      - name: Skip when publish token missing
         id: gate
         env:
-          RELKIT_AGENT_TOKEN: ${{ secrets.RELKIT_AGENT_TOKEN }}
+          RELKIT_PUBLISH_TOKEN: ${{ secrets.RELKIT_PUBLISH_TOKEN }}
         run: |
-          if [ -z "${RELKIT_AGENT_TOKEN}" ]; then
+          if [ -z "${RELKIT_PUBLISH_TOKEN}" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "RELKIT_AGENT_TOKEN not set; skipping RUP publish"
+            echo "RELKIT_PUBLISH_TOKEN not set; skipping RUP publish"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
@@ -244,22 +244,22 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.validate.outputs.version }}
-          RELKIT_AGENT_TOKEN: ${{ secrets.RELKIT_AGENT_TOKEN }}
-          RELKIT_AGENT_URL: ${{ secrets.RELKIT_AGENT_URL }}
+          RELKIT_PUBLISH_TOKEN: ${{ secrets.RELKIT_PUBLISH_TOKEN }}
+          RELKIT_PUBLISH_URL: ${{ secrets.RELKIT_PUBLISH_URL }}
         run: |
           set -euo pipefail
           VER="${VERSION#v}"
-          AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com}"
+          PUBLISH_URL="${RELKIT_PUBLISH_URL:-https://publish.firoyang.com}"
           SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
           curl -fsS -X PUT \
-            -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+            -H "Authorization: Bearer ${RELKIT_PUBLISH_TOKEN}" \
             --data-binary @staged.tar.gz \
-            "${AGENT_URL}/v1/staged/dec/${VER}"
+            "${PUBLISH_URL}/v1/staged/dec/${VER}"
           curl -fsS -X POST \
-            -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
+            -H "Authorization: Bearer ${RELKIT_PUBLISH_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{\"product\":\"dec\",\"version\":\"${VER}\",\"stagedSha256\":\"${SHA}\",\"idempotencyKey\":\"dec/${VER}/${SHA}\"}" \
-            "${AGENT_URL}/v1/publish"
+            "${PUBLISH_URL}/v1/publish"
 
   release:
     name: Release

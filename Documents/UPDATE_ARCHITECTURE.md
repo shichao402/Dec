@@ -48,7 +48,7 @@ CNB（`.cnb.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json
 
 - `.secrets/` 已 gitignore；**禁止**把私钥内容 commit 进 git。
 - `.env` **不用于** relkit 私钥。
-- `COS_SECRET_*` 只在发布机；CI 只有 `RELKIT_AGENT_TOKEN`（无私钥）。
+- `COS_SECRET_*` 只在发布机；CI 只有 `RELKIT_PUBLISH_TOKEN`（无私钥；可选 `RELKIT_PUBLISH_URL`，默认 `https://publish.firoyang.com`）。KeyStore 文件：`relkit_release.env.yml`。
 
 ## 与首次安装 / GitHub 的关系
 
