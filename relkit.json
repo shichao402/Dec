@@ -7,7 +7,7 @@
   "signing": {
     "keyId": "dec-2026",
     "privateKeyEnv": "RELKIT_PRIVATE_KEY",
-    "privateKeyPath": ".relkit-keys/dec-2026.private.pb",
+    "privateKeyPath": ".secrets/bundles/relkit/keys/dec-2026.private.pb",
     "publicKeys": [
       {
         "keyId": "dec-2026",

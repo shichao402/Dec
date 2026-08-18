@@ -77,7 +77,8 @@ Documents/temp/*
 .config/
 mise.local.toml
 
-# relkit signing private keys (never commit)
+# relkit 签名私钥：SSOT 在 .secrets/bundles/relkit/keys/（已由上方 .secrets/ 整树忽略）。
+# .relkit-keys/*.private.pb 为废弃本地路径，保留规则作防御；*.private.pb 防误提交。
 .relkit-keys/*.private.pb
 *.private.pb
 
