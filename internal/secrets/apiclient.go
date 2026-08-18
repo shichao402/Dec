@@ -493,7 +493,7 @@ func (c *APIClient) renameCipherName(ctx context.Context, cipher bwCipher, userK
 	body := map[string]any{
 		"type":     cipherType,
 		"name":     encName,
-		"notes":    cipher.Notes,
+		"notes":    optionalCipherField(cipher.Notes),
 		"folderId": cipher.FolderID,
 		"favorite": false,
 	}
@@ -565,6 +565,15 @@ func findExistingCipher(existing map[string]bwCipher, noteName string) (bwCipher
 
 func secureNotePayload() map[string]any {
 	return map[string]any{"type": 0}
+}
+
+// optionalCipherField 把空的密文字段回传成 null。Bitwarden 按 EncryptedString
+// 校验这些字段，空字符串会被判为非法密文（400 model state is invalid）。
+func optionalCipherField(enc string) any {
+	if strings.TrimSpace(enc) == "" {
+		return nil
+	}
+	return enc
 }
 
 func encryptNoteField(plain string, itemKey []byte) (any, error) {

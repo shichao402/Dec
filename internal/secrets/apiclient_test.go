@@ -524,6 +524,82 @@ func TestAPIClient_PullBundle_DecryptsSSHKey(t *testing.T) {
 	}
 }
 
+// Bitwarden 按 EncryptedString 校验 notes，空字符串会被判非法密文；没登记 hosts
+// 的 SSH Key（notes 为 null）重命名时必须回传 null 而不是 ""。
+func TestAPIClient_RenameSSHKey_EmptyNotesStaysNull(t *testing.T) {
+	userKey := bytes.Repeat([]byte{0x0b}, 64)
+	itemKey, err := generateCipherKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encItemKey, err := encryptVaultBytes(itemKey, userKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encName, err := encryptVaultString("tencent_cvm", itemKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encFolder, err := encryptVaultString("bundle/tencent-cloud", userKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var putBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBitwardenHeaders(t, r)
+		switch {
+		case r.URL.Path == "/api/folders":
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{
+				Data: []bwFolder{{ID: "f1", Name: encFolder}},
+			})
+		case r.URL.Path == "/api/ciphers" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{
+				Data: []bwCipher{{
+					ID: "ssh-1", Type: cipherTypeSSHKey, FolderID: "f1", Key: encItemKey,
+					Name: encName, SSHKey: &bwSSHKey{},
+				}},
+			})
+		case r.URL.Path == "/api/ciphers/ssh-1" && r.Method == http.MethodPut:
+			raw, readErr := io.ReadAll(r.Body)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if unmarshalErr := json.Unmarshal(raw, &putBody); unmarshalErr != nil {
+				t.Fatal(unmarshalErr)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewAPIClient(&Config{ServerURL: srv.URL}, "sess-rename", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetUserKey(userKey)
+	t.Cleanup(ClearSession)
+
+	target := declaredBundleTarget(t, "tencent-cloud", "bundle/tencent-cloud")
+	if err := client.RenameSSHKey(context.Background(), RenameSSHKeyRequest{
+		Binding: BundleBinding{DecBundleName: "tencent-cloud", SecretsBundleName: "bundle/tencent-cloud"},
+		OldName: "tencent_cvm",
+		NewName: ".sshkey/tencent_cvm",
+		Target:  target,
+	}); err != nil {
+		t.Fatalf("RenameSSHKey() = %v", err)
+	}
+	if putBody == nil {
+		t.Fatal("未收到 PUT /ciphers/ssh-1")
+	}
+	if notes, ok := putBody["notes"]; !ok || notes != nil {
+		t.Fatalf("notes = %#v，应为 null", putBody["notes"])
+	}
+}
+
 // Bitwarden 只有整库 /folders 与 /ciphers 列表接口，浏览 N 个 folder 不能变成 2N 次全库下载。
 func TestAPIClient_ListFolderNotes_ReusesVaultSnapshot(t *testing.T) {
 	userKey := bytes.Repeat([]byte{0x09}, 64)
