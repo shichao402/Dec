@@ -97,22 +97,30 @@ func TestPTYStartupAndQuit(t *testing.T) {
 func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang string) {
 	t.Helper()
 
+	// 预置最小项目配置，避免 Home 进入「是否初始化当前目录」确认态后吞掉 tab/shift+tab。
+	projectDir := t.TempDir()
+	decDir := filepath.Join(projectDir, ".dec")
+	if err := os.MkdirAll(decDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(.dec) failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(decDir, "config.yaml"), []byte("project_name: pty-smoke\n"), 0o644); err != nil {
+		t.Fatalf("write .dec/config.yaml failed: %v", err)
+	}
+
 	cmd := exec.Command(bin)
 	// 使用独立、最小的环境，避免外部 DEC_NO_TUI / TERM=dumb 影响默认入口分流。
 	// 子进程不是 go test 二进制，需显式禁止 web unlock，否则测试会弹出浏览器等人工输入。
+	// 不向子进程透传 DEC_BW_PASSWORD：PTY 冒烟只验证导航，避免 vault/remote 真连 Bitwarden。
 	cmd.Env = append(os.Environ(),
 		"TERM="+term,
 		"LANG="+lang,
 		"LC_ALL="+lang,
 		"DEC_NO_TUI=",
 		"DEC_HOME="+t.TempDir(),
+		"DEC_BW_PASSWORD=",
 		unlock.EnvNoWebUnlock+"=1",
 	)
-	if pw := strings.TrimSpace(os.Getenv("DEC_BW_PASSWORD")); pw != "" {
-		cmd.Env = append(cmd.Env, "DEC_BW_PASSWORD="+pw)
-	}
-	// 使用临时空目录作为 CWD，避免仓库内的 .dec/ 状态污染首屏。
-	cmd.Dir = t.TempDir()
+	cmd.Dir = projectDir
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
