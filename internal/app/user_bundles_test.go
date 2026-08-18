@@ -208,6 +208,146 @@ func TestLoadWorkspaceAssetSelection_UserPlaneIncludesSecretsOnlyCandidates(t *t
 	}
 }
 
+// known_secret_bundles 只增不减，远端删掉 folder 后名字会一直留着。远端核对成功且没人启用时，
+// 这类残留必须被摘掉——留着会以「Bitwarden 已有同名 secrets」的面目诱导用户勾选空 bundle。
+func TestLoadWorkspaceAssetSelection_PrunesKnownBundleMissingOnRemote(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.RememberSecretBundles([]string{"woa", "vikunja"}); err != nil {
+		t.Fatal(err)
+	}
+
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{SecretBundleFolders: []string{"woa"}}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	state, err := LoadWorkspaceAssetSelection(NewWorkspace(WorkspaceUser, ""), nil)
+	if err != nil {
+		t.Fatalf("LoadWorkspaceAssetSelection() = %v", err)
+	}
+	byName := make(map[string]AssetBundleOption, len(state.Bundles))
+	for _, bo := range state.Bundles {
+		byName[bo.Name] = bo
+	}
+	woa, ok := byName["woa"]
+	if !ok || !woa.SecretsOnly || woa.RemoteMissing || woa.RemoteUnverified {
+		t.Fatalf("远端存在的 woa 应是已核对的 SecretsOnly 候选: %#v", woa)
+	}
+	if _, ok := byName["vikunja"]; ok {
+		t.Fatalf("远端已无、也没人启用的 vikunja 不应留在候选里: %#v", state.Bundles)
+	}
+
+	cfg, err := secrets.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range cfg.KnownSecretBundleNames() {
+		if name == "vikunja" {
+			t.Fatalf("vikunja 应已从 known_secret_bundles 摘除: %#v", cfg.KnownSecretBundleNames())
+		}
+	}
+}
+
+// 已启用但远端无内容的 bundle 不能摘（用户还得能取消勾选），但必须如实标注，
+// 不能继续声称「Bitwarden 里已有同名 secrets」。
+func TestLoadWorkspaceAssetSelection_MarksEnabledBundleMissingOnRemote(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, EnabledBundles: []string{"vikunja"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	state, err := LoadWorkspaceAssetSelection(NewWorkspace(WorkspaceUser, ""), nil)
+	if err != nil {
+		t.Fatalf("LoadWorkspaceAssetSelection() = %v", err)
+	}
+	for _, bo := range state.Bundles {
+		if bo.Name != "vikunja" {
+			continue
+		}
+		if !bo.Enabled || !bo.SecretsOnly || !bo.RemoteMissing {
+			t.Fatalf("已启用但远端无内容应标 RemoteMissing: %#v", bo)
+		}
+		return
+	}
+	t.Fatalf("已启用的 vikunja 应留在候选里: %#v", state.Bundles)
+}
+
+// 无 session / 枚举失败时名单为空，不能当成「远端没有」：既不摘 known，也不下结论。
+func TestLoadWorkspaceAssetSelection_MarksRemoteUnverifiedWithoutSession(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.RememberSecretBundles([]string{"vikunja"}); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := LoadWorkspaceAssetSelection(NewWorkspace(WorkspaceUser, ""), nil)
+	if err != nil {
+		t.Fatalf("LoadWorkspaceAssetSelection() = %v", err)
+	}
+	var found bool
+	for _, bo := range state.Bundles {
+		if bo.Name != "vikunja" {
+			continue
+		}
+		found = true
+		if !bo.SecretsOnly || !bo.RemoteUnverified || bo.RemoteMissing {
+			t.Fatalf("未核对远端时应标 RemoteUnverified: %#v", bo)
+		}
+	}
+	if !found {
+		t.Fatalf("未核对远端时不应摘掉候选: %#v", state.Bundles)
+	}
+	cfg, err := secrets.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept bool
+	for _, name := range cfg.KnownSecretBundleNames() {
+		if name == "vikunja" {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Fatalf("未核对远端时不应摘 known_secret_bundles: %#v", cfg.KnownSecretBundleNames())
+	}
+}
+
 // ADR 0013：known_secret_bundles 混着两平面的名字。vault 里已有 manifest、只是 scope 属于
 // 另一平面的条目必须标 OtherPlane——标成 SecretsOnly 会谎称「vault 尚无 manifest」，
 // 并诱导用户勾选，进而触发跨平面 scope 改写。

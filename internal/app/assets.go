@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/config"
@@ -40,6 +41,13 @@ type AssetBundleOption struct {
 	// OtherPlane 表示 vault 里有该 bundle 的 manifest，但 scope 属于另一平面。
 	// 它不是「未登记」，也不能在本平面启用——跨平面要先显式改 manifest 的 scope（ADR 0013）。
 	OtherPlane bool
+	// RemoteMissing 表示本次核对过 Bitwarden，远端并没有同名 secrets folder：
+	// 该候选纯粹来自本机 known_secret_bundles / enabled_bundles 的残留记录。
+	// 仅在 SecretsOnly 为 true 时有意义，用于避免谎称「Bitwarden 已有同名 secrets」。
+	RemoteMissing bool
+	// RemoteUnverified 表示本次没能核对远端（无 session、枚举失败，或该 bundle 配了别名 folder），
+	// 因此既不能声称远端已有、也不能断言远端没有。仅在 SecretsOnly 为 true 时有意义。
+	RemoteUnverified bool
 }
 
 // AssetSelectionState 是 Bundles 页的数据源：仓库里全部 bundle + 当前启用态。
@@ -290,6 +298,10 @@ func loadBundleSelectionForPlane(projectConfig *types.ProjectConfig, plane Works
 // known_secret_bundles 混着两个平面的名字，所以补进来的候选必须再按 vault scope 分流：
 // vault 里已有 manifest、只是属于另一平面的，标 OtherPlane 而不是 SecretsOnly——否则会
 // 谎称「vault 尚无 manifest」，并诱导用户勾选，进而触发跨平面 scope 改写（ADR 0013）。
+//
+// known_secret_bundles 是只增不减的本机缓存（只有 pull reconcile / 删除 bundle 才摘），
+// 所以还要按远端名单分流：远端已核对且没有同名 folder 的候选是残留记录，不能标成
+// 「Bitwarden 已有」——那会诱导用户勾选出一个拉不到任何 secrets 的空 user bundle。
 func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Workspace, projectConfig *types.ProjectConfig, reporter Reporter) []AssetBundleOption {
 	existing := make(map[string]struct{}, len(options))
 	for _, opt := range options {
@@ -302,32 +314,51 @@ func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Works
 		enabled = projectConfig.EnabledBundles
 	}
 	sessionReady := secrets.HasSession() && secrets.HasUserKey()
-	remoteNames := listRemoteSecretBundleNames(sessionReady, "assets.bundle", reporter)
+	inventory := listRemoteSecretBundleInventory(sessionReady, "assets.bundle", reporter)
 	known := []string(nil)
+	aliased := map[string]struct{}{}
 	if cfg, err := secrets.LoadConfig(); err == nil {
 		known = cfg.KnownSecretBundleNames()
+		aliased = aliasedSecretBundleNames(cfg)
 	}
 
 	enabledSet := make(map[string]struct{}, len(enabled))
 	for _, name := range secrets.NormalizeBundleNames(enabled) {
 		enabledSet[name] = struct{}{}
 	}
-	candidates := secrets.NormalizeBundleNames(append(append(append([]string{}, enabled...), known...), remoteNames...))
+	var stale []string
+	candidates := secrets.NormalizeBundleNames(append(append(append([]string{}, enabled...), known...), inventory.Names...))
 	for _, name := range candidates {
 		if _, ok := existing[name]; ok {
 			continue
 		}
 		_, isEnabled := enabledSet[name]
+		_, hasAlias := aliased[name]
 		opt := AssetBundleOption{Name: name, Enabled: isEnabled}
-		if scopes.belongsToOtherPlane(name) {
+		switch {
+		case scopes.belongsToOtherPlane(name):
 			opt.OtherPlane = true
 			opt.Description = "属于项目平面（vault manifest 的 scope 不是 user）"
-		} else {
+		case inventory.has(name):
 			opt.SecretsOnly = true
 			opt.Description = "仓库未登记（Bitwarden 已有，vault 尚无 manifest）"
+		case !inventory.Checked || hasAlias:
+			// 没问过远端，或该 bundle 绑了别名 folder（远端枚举只覆盖 bundle/*），不下结论。
+			opt.SecretsOnly = true
+			opt.RemoteUnverified = true
+			opt.Description = "仓库未登记（本机记录，本次未核对 Bitwarden）"
+		case !isEnabled:
+			// 远端已核对、既没有 secrets folder 也没有 manifest，且没人在用：直接摘掉本机残留。
+			stale = append(stale, name)
+			continue
+		default:
+			opt.SecretsOnly = true
+			opt.RemoteMissing = true
+			opt.Description = "已启用但远端无内容（Bitwarden 无同名 secrets，vault 也无 manifest）"
 		}
 		options = append(options, opt)
 	}
+	forgetStaleKnownSecretBundles(stale, reporter)
 	sort.SliceStable(options, func(i, j int) bool {
 		if options[i].Name != options[j].Name {
 			return options[i].Name < options[j].Name
@@ -335,6 +366,42 @@ func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Works
 		return options[i].Vault < options[j].Vault
 	})
 	return options
+}
+
+// aliasedSecretBundleNames 返回配了显式 secrets folder 别名的 bundle 名。
+// 远端 bundle 枚举只覆盖 bundle/* folder，别名 bundle 不在其中，
+// 不能因为「不在名单里」就判它远端无 secrets。
+func aliasedSecretBundleNames(cfg *secrets.Config) map[string]struct{} {
+	out := map[string]struct{}{}
+	if cfg == nil {
+		return out
+	}
+	for _, b := range cfg.Bundles {
+		name := strings.TrimSpace(b.DecBundleName)
+		if name == "" {
+			continue
+		}
+		if strings.TrimSpace(b.SecretsBundleName) == secrets.DefaultBundleFolder(name) {
+			continue
+		}
+		out[name] = struct{}{}
+	}
+	return out
+}
+
+// forgetStaleKnownSecretBundles 摘掉远端已不存在、也没人启用的 known_secret_bundles 记录。
+// known 是只增不减的缓存，不摘的话这些名字会一直以「Bitwarden 已有」的面目留在候选里。
+func forgetStaleKnownSecretBundles(names []string, reporter Reporter) {
+	if len(names) == 0 {
+		return
+	}
+	if err := secrets.ForgetSecretBundles(names); err != nil {
+		emit(reporter, EventWarn, "assets.bundle",
+			fmt.Sprintf("清除 known_secret_bundles 残留失败: %v", err), nil)
+		return
+	}
+	emit(reporter, EventInfo, "assets.bundle",
+		fmt.Sprintf("已摘除远端已不存在的本机 bundle 记录: %s", strings.Join(names, ", ")), nil)
 }
 
 // buildBundleMemberItems 把 BundleOverview 里的成员引用解析成 AssetSelectionItem。

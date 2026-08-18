@@ -108,12 +108,25 @@ func memberLeafLabel(itemType, name string) string {
 	return segs[len(segs)-1]
 }
 
+// secretsOnlyBundleHint 描述「vault 尚无 manifest」的候选到底处在哪种状态。
+// 一律写「仓库未登记」会让本机残留记录看起来像远端已有 secrets 等着被启用。
+func secretsOnlyBundleHint(bo app.AssetBundleOption) string {
+	switch {
+	case bo.RemoteMissing:
+		return "远端无内容 · 本机残留"
+	case bo.RemoteUnverified:
+		return "仓库未登记 · 未核对远端"
+	default:
+		return "仓库未登记"
+	}
+}
+
 func formatAssetBundleLabel(bo app.AssetBundleOption) string {
 	if bo.OtherPlane {
 		return fmt.Sprintf("%s · 属于项目平面", bo.Name)
 	}
 	if bo.SecretsOnly {
-		return fmt.Sprintf("%s · 仓库未登记", bo.Name)
+		return fmt.Sprintf("%s · %s", bo.Name, secretsOnlyBundleHint(bo))
 	}
 	label := bo.Name
 	if bo.Name != bo.Vault {

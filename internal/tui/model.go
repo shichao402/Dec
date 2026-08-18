@@ -3760,7 +3760,7 @@ func (m model) renderAssetRowLine(row assetRow, marker string) string {
 		return fmt.Sprintf("%s [-]   %s · 属于项目平面", marker, bo.Name)
 	}
 	if bo.SecretsOnly {
-		return fmt.Sprintf("%s [%s]   %s · 仓库未登记", marker, checked, bo.Name)
+		return fmt.Sprintf("%s [%s]   %s · %s", marker, checked, bo.Name, secretsOnlyBundleHint(bo))
 	}
 	arrow := "▸"
 	if m.assetTree.Expanded[assetBundleNodeID(bo.Name)] {
@@ -3795,10 +3795,23 @@ func (m model) renderAssetDetails() string {
 					return strings.Join(lines, "\n")
 				}
 				if bo.SecretsOnly {
-					lines = append(lines,
-						shellMutedStyle.Render("Bitwarden 里已有同名 secrets；仓库尚未登记该 bundle。"),
-						shellMutedStyle.Render("勾选并保存后会创建 scope: user 的 bundle 声明。"),
-					)
+					switch {
+					case bo.RemoteMissing:
+						lines = append(lines,
+							shellMutedStyle.Render("Bitwarden 与仓库都没有该 bundle：这是本机残留的启用记录。"),
+							shellMutedStyle.Render("取消勾选并保存即可清掉；继续留着只会拉到空内容。"),
+						)
+					case bo.RemoteUnverified:
+						lines = append(lines,
+							shellMutedStyle.Render("本机记录里有该 bundle；本次未核对 Bitwarden（无 session 或枚举失败）。"),
+							shellMutedStyle.Render("勾选并保存后会创建 scope: user 的 bundle 声明。"),
+						)
+					default:
+						lines = append(lines,
+							shellMutedStyle.Render("Bitwarden 里已有同名 secrets；仓库尚未登记该 bundle。"),
+							shellMutedStyle.Render("勾选并保存后会创建 scope: user 的 bundle 声明。"),
+						)
+					}
 					return strings.Join(lines, "\n")
 				}
 				if m.assetTree.Expanded[assetBundleNodeID(bo.Name)] {

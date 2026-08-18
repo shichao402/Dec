@@ -186,24 +186,49 @@ func attachUserSecretBundleSettings(state *GlobalSettingsState, reporter Reporte
 	return nil
 }
 
+// remoteSecretBundleInventory 是一次 Bitwarden bundle folder 枚举的结果与可信度。
+//
+// 「远端确实没有同名 folder」与「这次没问过远端」必须分开：无 session / 枚举失败时
+// 名单为空，若当成前者用，候选文案会谎报「Bitwarden 已有同名 secrets」，
+// 还会误摘 known_secret_bundles 里其实有效的记录。
+type remoteSecretBundleInventory struct {
+	// Checked 为 true 表示本次成功枚举了远端，Names 可当作完整名单。
+	Checked bool
+	Names   []string
+}
+
+func (inv remoteSecretBundleInventory) has(name string) bool {
+	for _, n := range secrets.NormalizeBundleNames(inv.Names) {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
 // listRemoteSecretBundleNames 枚举 Bitwarden 上的 secrets bundle 短名，并顺带记入 known。
 // 无 session 时返回 nil：候选退化为 known ∪ 已启用，绝不为了列候选去触发 web unlock。
 func listRemoteSecretBundleNames(sessionReady bool, stage string, reporter Reporter) []string {
+	return listRemoteSecretBundleInventory(sessionReady, stage, reporter).Names
+}
+
+// listRemoteSecretBundleInventory 与 listRemoteSecretBundleNames 同源，额外回报是否真的核对过远端。
+func listRemoteSecretBundleInventory(sessionReady bool, stage string, reporter Reporter) remoteSecretBundleInventory {
 	client := secretsClientFactory()
 	if !sessionReady || client == nil {
-		return nil
+		return remoteSecretBundleInventory{}
 	}
 	names, listErr := client.ListSecretBundleNames(context.Background())
 	if listErr != nil {
 		emit(reporter, EventWarn, stage,
 			fmt.Sprintf("枚举 Bitwarden secret bundles 失败（仍展示本机与 vault 候选）: %v", listErr), nil)
-		return nil
+		return remoteSecretBundleInventory{}
 	}
 	if err := secrets.RememberSecretBundles(names); err != nil {
 		emit(reporter, EventWarn, stage,
 			fmt.Sprintf("写入 known_secret_bundles 失败: %v", err), nil)
 	}
-	return names
+	return remoteSecretBundleInventory{Checked: true, Names: names}
 }
 
 // listUserSecretBundleCandidates 合并已启用 / known / 远端枚举 / vault 扫描结果。
