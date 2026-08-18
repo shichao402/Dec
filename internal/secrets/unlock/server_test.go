@@ -57,7 +57,20 @@ func assertVisibleInputsShareClass(t *testing.T, html, class string, ids ...stri
 	}
 }
 
+func fixedUnlockPortFree() bool {
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", DefaultUnlockPort))
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
+}
+
 func TestListenTCP_DefaultFixedPort(t *testing.T) {
+	if !fixedUnlockPortFree() {
+		t.Skipf("固定端口 %d 已被占用，跳过首选端口断言", DefaultUnlockPort)
+	}
+
 	ln, err := listenTCP(resolveListenAddrs("")...)
 	if err != nil {
 		t.Fatalf("listenTCP() 失败: %v", err)
@@ -74,11 +87,17 @@ func TestListenTCP_DefaultFixedPort(t *testing.T) {
 }
 
 func TestListenTCP_FallbackWhenFixedPortInUse(t *testing.T) {
-	blocker, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", DefaultUnlockPort))
-	if err != nil {
-		t.Fatalf("占用固定端口失败: %v", err)
+	var blocker net.Listener
+	if fixedUnlockPortFree() {
+		var err error
+		blocker, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", DefaultUnlockPort))
+		if err != nil {
+			t.Fatalf("占用固定端口失败: %v", err)
+		}
+		t.Cleanup(func() { _ = blocker.Close() })
+	} else {
+		t.Logf("固定端口 %d 已被外部环境占用，直接验证 fallback", DefaultUnlockPort)
 	}
-	t.Cleanup(func() { _ = blocker.Close() })
 
 	ln, err := listenTCP(resolveListenAddrs("")...)
 	if err != nil {
@@ -115,6 +134,10 @@ func TestIsAddrInUse_DetectsPlatformBindConflict(t *testing.T) {
 }
 
 func TestRun_UsesDefaultFixedPort(t *testing.T) {
+	if !fixedUnlockPortFree() {
+		t.Skipf("固定端口 %d 已被占用，跳过首选端口断言", DefaultUnlockPort)
+	}
+
 	ctx := context.Background()
 	var readyURL string
 	err := Run(ctx, Options{
