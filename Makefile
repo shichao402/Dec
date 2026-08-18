@@ -2,8 +2,6 @@
 
 BINARY_NAMES=dec dec-server dec-mcp dec-exec
 DIST_DIR=dist
-RELKIT_DIR=../relkit
-RELKIT_REPO=https://cnb.cool/shichao402/relkit.git
 VERSION=$(shell cat version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "dev")
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
@@ -12,12 +10,9 @@ LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
 all: build
 
-# go.mod 用 replace 指向同级 ../relkit，缺失时 go build 只会报 replace 目录不存在。
+# go.mod replace → ./third_party/relkit；缺失时 sparse-checkout。
 ensure-relkit:
-	@if [ ! -d $(RELKIT_DIR) ]; then \
-		echo "📥 clone 同级依赖 relkit 到 $(RELKIT_DIR)..."; \
-		git clone --depth 1 $(RELKIT_REPO) $(RELKIT_DIR); \
-	fi
+	@python3 scripts/ensure_relkit_sparse.py --sdk-only --allow-stale
 
 build: ensure-relkit
 	@mkdir -p $(DIST_DIR)
@@ -72,7 +67,7 @@ help:
 	@echo "  make install-dev-test - 安装前先运行单元测试"
 	@echo ""
 	@echo "其他目标："
-	@echo "  make ensure-relkit   - 缺失时 clone 同级依赖 relkit"
+	@echo "  make ensure-relkit   - sparse-checkout relkit → third_party/relkit"
 	@echo "  make clean           - 清理构建产物"
 	@echo "  make fmt             - 格式化 Go 代码"
 	@echo "  make lint            - 运行 golangci-lint"

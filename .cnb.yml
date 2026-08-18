@@ -57,18 +57,7 @@
         echo "$CHANNEL" > .release-channel
         echo "version=$VERSION channel=$CHANNEL tag=$TAG"
 
-        rm -rf relkit
-        # CNB 为 SSOT；GitHub 仅作可选镜像 fallback
-        if [ -n "${CNB_TOKEN:-}" ]; then
-          git clone --depth 1 "https://cnb:${CNB_TOKEN}@cnb.cool/shichao402/relkit.git" relkit \
-            || { [ -n "${GITHUB_TOKEN:-}" ] && git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/shichao402/relkit.git" relkit; }
-        elif [ -n "${GITHUB_TOKEN:-}" ]; then
-          git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/shichao402/relkit.git" relkit
-        else
-          git clone --depth 1 "https://cnb.cool/shichao402/relkit.git" relkit \
-            || git clone --depth 1 "https://github.com/shichao402/relkit.git" relkit
-        fi
-        go mod edit -replace cnb.cool/shichao402/relkit=./relkit
+        python3 scripts/ensure_relkit_sparse.py --sdk-only
 
     - name: test
       script: |
@@ -93,7 +82,7 @@
           echo "RELKIT_PUBLISH_TOKEN 未配置，跳过 RUP 发布"
           exit 0
         fi
-        ( cd relkit && go build -o "$OLDPWD/relkit-bin" ./cmd/relkit )
+        ( cd third_party/relkit && go build -o "$OLDPWD/relkit-bin" ./cmd/relkit )
         # 不用 bash 数组：部分 runner 以 sh 执行 script，ADD_ARGS=() 会直接语法失败。
         CODE=$(python3 -c "maj,min,pat='${VER}'.split('.'); print(int(maj)*1000000+int(min)*1000+int(pat))")
         set -- stage "$VER" --code "$CODE" --channel "$CHANNEL"

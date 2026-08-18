@@ -58,22 +58,10 @@ jobs:
         with:
           go-version: "1.26"
 
-      - name: Checkout relkit (SDK dependency)
+      - name: Sparse-checkout relkit (SDK dependency)
         env:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
-        run: |
-          set -euo pipefail
-          # CNB 为 SSOT；GitHub 仅作可选镜像 fallback
-          if [ -n "${CNB_TOKEN:-}" ]; then
-            git clone --depth 1 "https://cnb:${CNB_TOKEN}@cnb.cool/shichao402/relkit.git" relkit \
-              || git clone --depth 1 "https://github.com/shichao402/relkit.git" relkit
-          else
-            git clone --depth 1 "https://cnb.cool/shichao402/relkit.git" relkit \
-              || git clone --depth 1 "https://github.com/shichao402/relkit.git" relkit
-          fi
-
-      - name: Point module replace at checked-out relkit
-        run: go mod edit -replace cnb.cool/shichao402/relkit=./relkit
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only
 
       - name: Run tests
         run: go test ./... -v
@@ -107,22 +95,10 @@ jobs:
         with:
           go-version: "1.26"
 
-      - name: Checkout relkit (SDK dependency)
+      - name: Sparse-checkout relkit (SDK dependency)
         env:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
-        run: |
-          set -euo pipefail
-          # CNB 为 SSOT；GitHub 仅作可选镜像 fallback
-          if [ -n "${CNB_TOKEN:-}" ]; then
-            git clone --depth 1 "https://cnb:${CNB_TOKEN}@cnb.cool/shichao402/relkit.git" relkit \
-              || git clone --depth 1 "https://github.com/shichao402/relkit.git" relkit
-          else
-            git clone --depth 1 "https://cnb.cool/shichao402/relkit.git" relkit \
-              || git clone --depth 1 "https://github.com/shichao402/relkit.git" relkit
-          fi
-
-      - name: Point module replace at checked-out relkit
-        run: go mod edit -replace cnb.cool/shichao402/relkit=./relkit
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only
 
       - name: Use validated version
         id: version
@@ -181,24 +157,15 @@ jobs:
         with:
           go-version: "1.26"
 
-      - name: Checkout relkit
+      - name: Sparse-checkout relkit
         if: steps.gate.outputs.skip != 'true'
         env:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
-        run: |
-          set -euo pipefail
-          # CNB 为 SSOT；GitHub 仅作可选镜像 fallback
-          if [ -n "${CNB_TOKEN:-}" ]; then
-            git clone --depth 1 "https://cnb:${CNB_TOKEN}@cnb.cool/shichao402/relkit.git" relkit \
-              || git clone --depth 1 "https://github.com/shichao402/relkit.git" relkit
-          else
-            git clone --depth 1 "https://cnb.cool/shichao402/relkit.git" relkit \
-              || git clone --depth 1 "https://github.com/shichao402/relkit.git" relkit
-          fi
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only
 
       - name: Build relkit CLI
         if: steps.gate.outputs.skip != 'true'
-        working-directory: relkit
+        working-directory: third_party/relkit
         run: go build -o "$GITHUB_WORKSPACE/relkit-bin" ./cmd/relkit
 
       - name: Download all build artifacts

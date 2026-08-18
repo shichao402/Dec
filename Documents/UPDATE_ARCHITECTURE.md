@@ -63,10 +63,16 @@ CNB（`.cnb.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json
 
 ## 本地依赖
 
-开发时 `go.mod` 使用：
+开发 / CI 通过 sparse-checkout 拉取 relkit：
 
 ```
-replace cnb.cool/shichao402/relkit => ../relkit
+scripts/ensure_relkit_sparse.py --sdk-only
 ```
 
-CI 会 checkout `shichao402/relkit` 到同级目录以满足该 replace。
+落到 `third_party/relkit/`，`go.mod` 使用：
+
+```
+replace cnb.cool/shichao402/relkit => ./third_party/relkit
+```
+
+上游默认 `https://cnb.cool/shichao402/relkit.git`（可用 `RELKIT_URL` / `RELKIT_REF` 覆盖）。

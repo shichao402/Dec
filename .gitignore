@@ -17,6 +17,11 @@
 # Dependency directories
 vendor/
 
+# relkit sparse-checkout（scripts/ensure_relkit_sparse）；保留 third_party/README.md
+/third_party/relkit/
+# 旧 CI 整仓 clone 落点，保留作防御
+/relkit/
+
 # Go workspace file
 go.work
 
@@ -35,12 +40,13 @@ Thumbs.db
 .root/
 
 .relkit/
-relkit/
 staged.tar.gz
 publish-req.json
 dist/
 logs/
 *.log
+relkit-bin
+relkit-bin.exe
 
 # 测试环境
 .test-install/
