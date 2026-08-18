@@ -65,6 +65,9 @@ func computeLayoutMetrics(width, height, statusHeight int) layoutMetrics {
 }
 
 func (m model) View() string {
+	frame := diagViewBegin()
+	defer func() { diagViewEnd(frame) }()
+
 	width := m.width
 	if width <= 0 {
 		width = 100

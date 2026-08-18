@@ -1169,6 +1169,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.serverRestartReason = "update"
 		return m, m.startServerRestart()
 	case tea.KeyMsg:
+		m.diagKeyReceived(msg)
 		if m.serverRestartStage == "confirm" || m.serverRestartStage == "running" || m.serverRestartStage == "done" {
 			return m.handleServerRestartKey(msg)
 		}
