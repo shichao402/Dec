@@ -330,12 +330,9 @@ func TestRemovedSubcommandReturnsError(t *testing.T) {
 	}
 }
 
-func TestUpdateSubcommandRegistered(t *testing.T) {
+func TestUpdateSubcommandRemoved(t *testing.T) {
 	cmd, _, err := RootCmd.Find([]string{"update"})
-	if err != nil {
-		t.Fatalf("查找 update 子命令失败: %v", err)
-	}
-	if cmd == nil || cmd.Name() != "update" {
-		t.Fatal("update 子命令应已注册")
+	if err == nil && cmd != nil && cmd.Name() == "update" {
+		t.Fatal("update 子命令应已移除；自更新仅走 TUI Run 页 u")
 	}
 }

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Dec 一键安装脚本 (Linux/macOS)
-# 使用方法: curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash
+# 主路径: curl -fsSL https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.sh | bash
+# 镜像备份: curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash
 
 set -e
 
@@ -98,10 +99,10 @@ main() {
     print_info "安装目录: ${install_dir}"
     print_info "更新分支: ${update_branch}"
 
-    # raw.githubusercontent.com 在部分网络下会间歇性超时，失败时回退到 CDN 镜像
+    # 版本信息：CNB 主路径，GitHub 仅作安装脚本内镜像备份
     local version_sources=(
+        "https://cnb.cool/shichao402/Dec/-/git/raw/${update_branch}/version.json"
         "https://raw.githubusercontent.com/shichao402/Dec/${update_branch}/version.json"
-        "https://cdn.jsdelivr.net/gh/shichao402/Dec@${update_branch}/version.json"
     )
     local version_json=""
     local i
@@ -185,15 +186,30 @@ main() {
         download_tag="test-${latest_version}"
     fi
 
+    local ver_nover="${latest_version#v}"
     print_info "下载 Dec 程序组..."
     for binary in "${binaries[@]}"; do
         local binary_name="${binary}-${platform}"
-        local download_url="https://github.com/shichao402/Dec/releases/download/${download_tag}/${binary_name}"
+        # COS/RUP 产物（与自更新同源）；未齐时回退 GitHub Release（仅首次安装）
+        local download_urls=(
+            "https://updates.firoyang.com/rup/artifact/dec/${ver_nover}/${binary_name}"
+            "https://github.com/shichao402/Dec/releases/download/${download_tag}/${binary_name}"
+        )
         local target="${bin_dir}/${binary}"
         # 先删除旧二进制再下载，避免 macOS 上 stuck exec 占用同一 inode 导致新进程卡在 dyld。
         rm -f "${target}"
-        if ! curl -fsSL -o "${target}" "${download_url}"; then
-            print_error "下载失败: ${download_url}"
+        local downloaded=false
+        local download_url=""
+        for download_url in "${download_urls[@]}"; do
+            if curl -fsSL --connect-timeout 8 --max-time 120 -o "${target}" "${download_url}"; then
+                downloaded=true
+                break
+            fi
+            print_warning "从 ${download_url} 下载失败，尝试下一个来源"
+            rm -f "${target}"
+        done
+        if [ "${downloaded}" != true ]; then
+            print_error "下载失败: ${binary_name}"
             exit 1
         fi
         chmod +x "${target}"

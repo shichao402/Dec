@@ -69,7 +69,8 @@ var RootCmd = &cobra.Command{
   dec                # 启动 TUI（默认）
   dec --user         # 启动用户平面 TUI
   dec --version      # 显示版本号
-  dec update         # 检查并更新到最新版本`,
+
+自更新：打开 TUI → Run 页按 u`,
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	Version:       getVersionString(),

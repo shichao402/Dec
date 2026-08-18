@@ -1,0 +1,51 @@
+{
+  "product": "dec",
+  "defaultChannel": "dev",
+  "channels": ["stable", "dev"],
+  "codeStrategy": "semver",
+  "retainVersions": 20,
+  "signing": {
+    "keyId": "dec-2026",
+    "privateKeyEnv": "RELKIT_PRIVATE_KEY",
+    "privateKeyPath": ".secrets/bundles/relkit/keys/dec-2026.private.pb",
+    "publicKeys": [
+      {
+        "keyId": "dec-2026",
+        "publicKeyBase64": "zVkesjz/3BhLrZ9qCvSJN0OdrIsePL4+v6AI9CCtio4="
+      }
+    ]
+  },
+  "backends": {
+    "cos": {
+      "type": "s3-compatible",
+      "endpoint": "https://cos.ap-guangzhou.myqcloud.com",
+      "bucket": "relkit-updates-1251882798",
+      "region": "ap-guangzhou",
+      "prefix": "rup/",
+      "baseUrl": "https://updates.firoyang.com/rup/",
+      "accessKeyEnv": "COS_SECRET_ID",
+      "secretKeyEnv": "COS_SECRET_KEY"
+    }
+  },
+  "publishTo": ["cos"],
+  "directory": {
+    "publishTo": ["cos"],
+    "entryUrls": [
+      "https://updates.firoyang.com/rup/directory/dec.pb"
+    ],
+    "services": [
+      {
+        "id": "cos-primary",
+        "priority": 10,
+        "indexUrl": "https://updates.firoyang.com/rup/index/dec/stable.pb",
+        "channel": "stable"
+      },
+      {
+        "id": "cos-dev",
+        "priority": 10,
+        "indexUrl": "https://updates.firoyang.com/rup/index/dec/dev.pb",
+        "channel": "dev"
+      }
+    ]
+  }
+}

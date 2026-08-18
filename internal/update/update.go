@@ -2,8 +2,6 @@ package update
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,8 +15,8 @@ import (
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/version"
-	"github.com/shichao402/relkit/sdk"
-	"github.com/shichao402/relkit/sdk/apply"
+	"cnb.cool/shichao402/relkit/sdk"
+	"cnb.cool/shichao402/relkit/sdk/apply"
 )
 
 const (
@@ -29,9 +27,6 @@ const (
 	channelName   = "dev"
 	keyID         = "dec-2026"
 )
-
-// Embedded trusted public key (base64). Must match relkit.json signing.publicKeys.
-const embeddedPublicKeyB64 = "zVkesjz/3BhLrZ9qCvSJN0OdrIsePL4+v6AI9CCtio4="
 
 // CheckState records last check status (legacy fields kept for TUI compatibility).
 type CheckState struct {
@@ -51,17 +46,6 @@ func entryURLs() []string {
 	return []string{
 		"https://updates.firoyang.com/rup/directory/dec.pb",
 	}
-}
-
-func trustedKeys() (sdk.TrustedKeys, error) {
-	raw, err := base64.StdEncoding.DecodeString(embeddedPublicKeyB64)
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid public key length %d", len(raw))
-	}
-	return sdk.TrustedKeys{keyID: ed25519.PublicKey(raw)}, nil
 }
 
 func stateDir() (string, error) {
@@ -270,25 +254,37 @@ func DoUpdate(currentVersion, latestVersion string) error {
 	return nil
 }
 
-// ManualInstallCommand returns the direct install command.
+// ManualInstallCommand returns the primary first-install command (CNB raw scripts).
+// This is for fresh installs / docs — not an update-failure escape hatch.
 func ManualInstallCommand() string {
 	return manualInstallCommand(runtime.GOOS, false)
 }
 
-// MirrorInstallCommand returns a CDN-mirrored install command (legacy GitHub path).
+// MirrorInstallCommand returns an optional GitHub mirror install command.
+// Prefer ManualInstallCommand; GitHub is a documentation backup, not required for self-update.
 func MirrorInstallCommand() string {
 	return manualInstallCommand(runtime.GOOS, true)
 }
 
-func manualInstallCommand(goos string, mirror bool) string {
+func manualInstallCommand(goos string, githubMirror bool) string {
 	cfg := config.GetSystemConfig()
 	branch := cfg.UpdateBranch
 	if branch == "" {
 		branch = "ReleaseLatest"
 	}
-	base := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/scripts", cfg.RepoOwner, cfg.RepoName, branch)
-	if mirror {
-		base = fmt.Sprintf("https://cdn.jsdelivr.net/gh/%s/%s@%s/scripts", cfg.RepoOwner, cfg.RepoName, branch)
+	owner := cfg.RepoOwner
+	if owner == "" {
+		owner = "shichao402"
+	}
+	name := cfg.RepoName
+	if name == "" {
+		name = "Dec"
+	}
+	var base string
+	if githubMirror {
+		base = fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/scripts", owner, name, branch)
+	} else {
+		base = fmt.Sprintf("https://cnb.cool/%s/%s/-/git/raw/%s/scripts", owner, name, branch)
 	}
 	if goos == "windows" {
 		return fmt.Sprintf("iwr -useb %s/install.ps1 | iex", base)
@@ -296,17 +292,20 @@ func manualInstallCommand(goos string, mirror bool) string {
 	return fmt.Sprintf("curl -fsSL %s/install.sh | bash", base)
 }
 
-// NetworkHelp returns troubleshooting hints.
+// NetworkHelp returns self-update troubleshooting hints (RUP/COS only).
+// Update failure is not an invitation to reinstall via GitHub/CNB install scripts.
 func NetworkHelp() string {
 	var sb strings.Builder
+	sb.WriteString("自更新检查/下载只走 https://updates.firoyang.com/ ，与首次安装无关。\n")
 	sb.WriteString("网络不可达时可以尝试：\n")
-	sb.WriteString("  1. 确认可访问 https://updates.firoyang.com/\n")
-	sb.WriteString("  2. 走 CDN 镜像手动覆盖安装：\n")
-	sb.WriteString("     " + MirrorInstallCommand() + "\n")
-	sb.WriteString("  3. 直连 GitHub 手动覆盖安装：\n")
-	sb.WriteString("     " + ManualInstallCommand() + "\n")
-	sb.WriteString("  4. 若使用代理客户端，需显式导出环境变量（Dec 不读取系统代理/PAC 设置）：\n")
-	sb.WriteString("     export HTTPS_PROXY=http://127.0.0.1:<端口>")
+	sb.WriteString("  1. 确认本机可访问 https://updates.firoyang.com/\n")
+	sb.WriteString("  2. 若使用代理客户端，需显式设置环境变量（Dec 不读取系统代理/PAC）：\n")
+	if runtime.GOOS == "windows" {
+		sb.WriteString("     $env:HTTPS_PROXY=\"http://127.0.0.1:<端口>\"\n")
+	} else {
+		sb.WriteString("     export HTTPS_PROXY=http://127.0.0.1:<端口>\n")
+	}
+	sb.WriteString("  3. 修好网络后重试；不必为此重装 Dec")
 	return sb.String()
 }
 
@@ -349,11 +348,11 @@ func saveState(state *CheckState) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
-// FormatUpdateHint formats an update hint.
+// FormatUpdateHint formats an update hint for stderr before TUI starts.
 func FormatUpdateHint(result *CheckResult) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("新版本可用: %s -> %s\n", result.CurrentVersion, result.LatestVersion))
-	sb.WriteString("运行 dec update 更新到最新版本")
+	sb.WriteString("打开 TUI → Run 页按 u 更新到最新版本")
 	return sb.String()
 }
 

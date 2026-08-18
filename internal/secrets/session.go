@@ -59,6 +59,19 @@ func HasSession() bool {
 	return Session() != ""
 }
 
+// InvalidateSession 清除仍等于 rejectedToken 的失效 session 与 vault key。
+// 若其它并发请求已经刷新了 session，则保持新值不变。
+func InvalidateSession(rejectedToken string) bool {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+	if session == "" || session != rejectedToken {
+		return false
+	}
+	session = ""
+	userKey = nil
+	return true
+}
+
 // ClearSession 清除进程内 session 与 vault key（测试用）。
 func ClearSession() {
 	sessionMu.Lock()

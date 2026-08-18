@@ -11,7 +11,7 @@ Dec 以 **TUI**（`internal/tui/`）为第一交互入口。无参运行 `dec` �
 
 ## 1. 设计目标
 
-- **TUI-first**：日常操作（连接仓库、初始化 project、选择 bundle、pull/push/remove）均在 TUI 完成，不暴露 `dec pull`、`dec config` 等用户面 CLI 子命令。
+- **TUI-first**：日常操作（连接仓库、初始化 project、选择 bundle、pull/push/remove、自更新）均在 TUI 完成，不暴露 `dec pull`、`dec config`、`dec update` 等用户面 CLI 子命令。
 - **单二进制**：Bubble Tea 生态（`bubbletea`、`bubbles`、`lipgloss`），无 Node.js 或前端运行时。
 - **服务 / 门面**：TUI 与 Agent MCP 都通过本机 gRPC 调 `dec-server`；只有服务进程调用 `internal/app/`。TUI 禁止内嵌 app 降级或 shell out 调业务子命令。
 - **结构化事件**：长任务通过 `Reporter` / `OperationEvent` 暴露进度，TUI Run 页渲染日志与阶段状态。
@@ -38,7 +38,7 @@ dec --version / dec --help / dec __freshness-check
 | **Home** | 项目概览、建议下一步、**project 初始化**（自动匹配 vault 同名 project、选择或新建） |
 | **Bundles** | 扫描 vault bundle、浏览/搜索资产、调整 `enabled_bundles` 并保存（保存按平面校验 vault 声明，被拒条目在事件区列明） |
 | **Project** | 项目级 IDE / editor 覆盖、**项目变量**（`.dec/vars.yaml` 只读预览，按 `e` 挂起外部编辑器） |
-| **Run** | pull / push / remove；一次 pull 解析 project bundle 列表 → Dec Git bundle + Bitwarden secrets bundle；成功对照远端的启用集自动 prune 本地孤儿（无法确认只报告） |
+| **Run** | pull / push / remove；按 `u` 自更新（检查 → 确认 → 下载替换）；一次 pull 解析 project bundle 列表 → Dec Git bundle + Bitwarden secrets bundle；成功对照远端的启用集自动 prune 本地孤儿（无法确认只报告） |
 | **Remote** | 上下文无关的完整远端浏览器/编辑器（Dec Git vault 全量 + Bitwarden 全部 folder + 无文件夹只读区）；`e` temp 编辑、`n` 登记到光标所在 folder / `N` 登记到新 folder、`a`/`A` 全选/全不选、远端/本地删除拆分、跨上下文 typed confirm（ADR 0004） |
 | **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、**本机 vars** 外部编辑、服务版本 mismatch 提示与重启 `dec-server`；用户级 bundle 启用只做只读计数展示 |
 

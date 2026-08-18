@@ -419,6 +419,12 @@ TUI **Settings** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 - 删除远端匹配资产，同步清理 `.dec/config.yaml` 与 `.dec/cache/`
 
+#### 自更新（Run 页 `u`）
+
+- 唯一用户面入口：TUI Run 页按 `u`（检查 → 确认 → 下载替换）
+- 无 `dec update` CLI；启动 TUI 前的 `CheckBackground` hint 引导到 Run 页 `u`
+- 实现见 `internal/update/` 与 [UPDATE_ARCHITECTURE.md](./UPDATE_ARCHITECTURE.md)
+
 ### 5. MCP 合并策略
 
 MCP 采用非覆盖式合并：

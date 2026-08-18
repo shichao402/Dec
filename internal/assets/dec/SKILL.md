@@ -51,7 +51,7 @@ Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skill
    - `.dec/vars.yaml`、用户本机配置、或任何看起来像密钥/口令的内容，不要因为这条规则就自动纳入提交
 
 8. **命令尾部出现「Dec 资产已落后远端」提示时**
-   - 触发信号：任意 `dec` 命令（`dec pull` / `dec push` / `dec update` 等同步类除外）在 stderr 输出一行形如 `💡 当前项目的 Dec 资产已落后远端（本地 <hash>，远端 <hash>）。执行 \`dec pull\` 可更新。` 的提示
+   - 触发信号：任意 `dec` 命令（`dec pull` / `dec push` 等同步类除外）在 stderr 输出一行形如 `💡 当前项目的 Dec 资产已落后远端（本地 <hash>，远端 <hash>）。执行 \`dec pull\` 可更新。` 的提示
    - 推荐应对流程：
      1. 先检查 `.dec/cache/` 是否有未 commit 的本地修改。如果有，要么先 `dec push` 把修改推上去，要么 `git stash` 暂存，避免 `dec pull` 触发合并冲突
      2. 执行 `dec pull` 拉取最新资产

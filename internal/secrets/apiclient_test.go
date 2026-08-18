@@ -20,6 +20,85 @@ func declaredBundleTarget(t testing.TB, name, folder string) SyncTarget {
 	return target
 }
 
+func TestAPIClient_ReauthenticatesOnceAfterUnauthorized(t *testing.T) {
+	ClearSession()
+	SetSession("stale-session")
+	t.Cleanup(ClearSession)
+
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		switch r.Header.Get("Authorization") {
+		case "Bearer stale-session":
+			http.Error(w, "expired", http.StatusUnauthorized)
+		case "Bearer fresh-session":
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{})
+		default:
+			http.Error(w, "unexpected token", http.StatusUnauthorized)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	oldReauthenticate := reauthenticateSession
+	reauthenticateSession = func(context.Context) error {
+		SetSession("fresh-session")
+		return nil
+	}
+	t.Cleanup(func() { reauthenticateSession = oldReauthenticate })
+
+	client, err := NewAPIClient(&Config{ServerURL: srv.URL}, "stale-session", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bwListResponse[bwFolder]
+	if err := client.getJSON(context.Background(), srv.URL, &out); err != nil {
+		t.Fatalf("getJSON() = %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if Session() != "fresh-session" || client.Token != "fresh-session" {
+		t.Fatalf("session=%q client.Token=%q", Session(), client.Token)
+	}
+}
+
+func TestAPIClient_DoesNotLoopWhenFreshSessionIsUnauthorized(t *testing.T) {
+	ClearSession()
+	SetSession("stale-session")
+	t.Cleanup(ClearSession)
+
+	var requests, reauthCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	oldReauthenticate := reauthenticateSession
+	reauthenticateSession = func(context.Context) error {
+		reauthCalls++
+		SetSession("fresh-session")
+		return nil
+	}
+	t.Cleanup(func() { reauthenticateSession = oldReauthenticate })
+
+	client, err := NewAPIClient(&Config{ServerURL: srv.URL}, "stale-session", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bwListResponse[bwFolder]
+	err = client.getJSON(context.Background(), srv.URL, &out)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 401") {
+		t.Fatalf("getJSON() = %v, want HTTP 401", err)
+	}
+	if requests != 2 || reauthCalls != 1 {
+		t.Fatalf("requests=%d reauthCalls=%d, want 2/1", requests, reauthCalls)
+	}
+	if HasSession() {
+		t.Fatalf("第二次 401 后 session 应被清除，got %q", Session())
+	}
+}
+
 func TestAPIClient_PushBundle_CreateSecureNotePayload(t *testing.T) {
 	t.Parallel()
 

@@ -1,5 +1,6 @@
 # Dec 一键安装脚本 (Windows PowerShell)
-# 使用方法: iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex
+# 主路径: iwr -useb https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.ps1 | iex
+# 镜像备份: iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -64,10 +65,10 @@ function Install-Dec {
     Write-ColorOutput "安装目录: $installDir" -Type "Info"
     Write-ColorOutput "更新分支: $updateBranch" -Type "Info"
 
-    # raw.githubusercontent.com 在部分网络下会间歇性超时，失败时回退到 CDN 镜像
+    # 版本信息：CNB 主路径，GitHub 仅作安装脚本内镜像备份
     $versionSources = @(
-        "https://raw.githubusercontent.com/shichao402/Dec/$updateBranch/version.json",
-        "https://cdn.jsdelivr.net/gh/shichao402/Dec@$updateBranch/version.json"
+        "https://cnb.cool/shichao402/Dec/-/git/raw/$updateBranch/version.json",
+        "https://raw.githubusercontent.com/shichao402/Dec/$updateBranch/version.json"
     )
     $latestVersion = $null
     for ($i = 0; $i -lt $versionSources.Count; $i++) {
@@ -134,15 +135,29 @@ function Install-Dec {
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 
     $downloadTag = if ($updateBranch -eq "ReleaseTest") { "test-$latestVersion" } else { $latestVersion }
+    $verNover = $latestVersion -replace '^v', ''
     Write-ColorOutput "下载 Dec 程序组..." -Type "Info"
     foreach ($binary in $binaries) {
         $binaryName = "$binary-$platform.exe"
-        $downloadUrl = "https://github.com/shichao402/Dec/releases/download/$downloadTag/$binaryName"
+        # COS/RUP 产物（与自更新同源）；未齐时回退 GitHub Release（仅首次安装）
+        $downloadUrls = @(
+            "https://updates.firoyang.com/rup/artifact/dec/$verNover/$binaryName",
+            "https://github.com/shichao402/Dec/releases/download/$downloadTag/$binaryName"
+        )
         $targetPath = Join-Path $binDir "$binary.exe"
-        try {
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -ErrorAction Stop
-        } catch {
-            Write-ColorOutput "下载失败: $downloadUrl" -Type "Error"
+        $downloaded = $false
+        foreach ($downloadUrl in $downloadUrls) {
+            try {
+                Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -TimeoutSec 120 -ErrorAction Stop
+                $downloaded = $true
+                break
+            } catch {
+                Write-ColorOutput "从 $downloadUrl 下载失败，尝试下一个来源" -Type "Warning"
+                if (Test-Path $targetPath) { Remove-Item -Force $targetPath }
+            }
+        }
+        if (-not $downloaded) {
+            Write-ColorOutput "下载失败: $binaryName" -Type "Error"
             exit 1
         }
     }

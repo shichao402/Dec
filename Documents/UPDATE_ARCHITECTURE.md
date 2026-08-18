@@ -11,11 +11,10 @@ Dec CLI 的检查/下载已切换到 `cnb.cool/shichao402/relkit/sdk`，发布�
 - selectors：`os` / `arch` / `component`，component 为 `dec`、`dec-server`、`dec-mcp`、`dec-exec`
 - Apply：先把同版本四个组件全部下载并校验，再用 `sdk/apply.ReplaceFile` 替换同一 `bin/` 下的程序（Windows rename-aside + 下次启动清理）
 
-入口仍是：
+入口：
 
-- `dec update`（CLI，无确认）
-- TUI Run 页 `u`（有确认）
-- 启动时 `CheckBackground`（非阻塞，读本地缓存）
+- TUI Run 页 `u`（有确认；唯一用户面入口）
+- 启动 TUI 前 `CheckBackground`（非阻塞，读本地缓存；hint 引导到 Run 页按 `u`）
 
 `CheckResult{CurrentVersion, LatestVersion, NeedUpdate}` 形状保持不变。
 
@@ -51,10 +50,16 @@ CNB（`.cnb.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json
 - `.env` **不用于** relkit 私钥。
 - `COS_SECRET_*` 只在发布机；CI 只有 `RELKIT_AGENT_TOKEN`（无私钥）。
 
-## 与 GitHub Releases 的关系
+## 与首次安装 / GitHub 的关系
 
-首次安装脚本（`install.sh` / `install.ps1`）与 GitHub Release / `ReleaseLatest` **暂时保留**。  
-日常自更新主路径已是 RUP/COS。安装脚本切 COS 是后续步骤。
+| 场景 | 路径 |
+|------|------|
+| 日常自更新（已装 RUP 客户端） | 只走 `https://updates.firoyang.com/`；失败时排查网络/代理，**不要**改跑 install 脚本 |
+| 全新安装 | **主路径 CNB raw**：`https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.sh`（Windows 换 `install.ps1`） |
+| 安装脚本拉二进制 | 优先 COS RUP artifact：`https://updates.firoyang.com/rup/artifact/dec/{version}/{name}`；GitHub Release 仅脚本内 fallback |
+| GitHub | 文档里的**镜像备份**（脚本 URL / Release asset），不是自更新逃生梯 |
+
+更老的、尚无 RUP 的 Dec：靠历史版本链跳到第一个含 RUP 的版本，而不是在失败提示里推销重装。
 
 ## 本地依赖
 

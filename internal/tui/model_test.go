@@ -1734,10 +1734,6 @@ func TestModelRunPageUpdateFailurePath(t *testing.T) {
 }
 
 func TestModelRunPageUpdateRenderingShowsConfirmPanel(t *testing.T) {
-	oldCmd := updateManualInstallCommand
-	defer func() { updateManualInstallCommand = oldCmd }()
-	updateManualInstallCommand = func() string { return "curl -fsSL example.com | bash" }
-
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
 	m.width = 120
@@ -1754,15 +1750,12 @@ func TestModelRunPageUpdateRenderingShowsConfirmPanel(t *testing.T) {
 	}
 }
 
-func TestModelRunPageUpdateDoneRenderingShowsFallbackOnFailure(t *testing.T) {
-	oldCmd := updateManualInstallCommand
-	oldMirror := updateMirrorInstallCommand
-	defer func() {
-		updateManualInstallCommand = oldCmd
-		updateMirrorInstallCommand = oldMirror
-	}()
-	updateManualInstallCommand = func() string { return "curl -fsSL example.com | bash" }
-	updateMirrorInstallCommand = func() string { return "curl -fsSL mirror.example.com | bash" }
+func TestModelRunPageUpdateDoneRenderingShowsNetworkHelpOnFailure(t *testing.T) {
+	oldHelp := updateNetworkHelp
+	defer func() { updateNetworkHelp = oldHelp }()
+	updateNetworkHelp = func() string {
+		return "自更新检查/下载只走 https://updates.firoyang.com/\n  1. 确认本机可访问 https://updates.firoyang.com/\n  3. 修好网络后重试；不必为此重装 Dec"
+	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
 	m.pageIndex = 3
@@ -1772,10 +1765,15 @@ func TestModelRunPageUpdateDoneRenderingShowsFallbackOnFailure(t *testing.T) {
 	m.updateErr = errors.New("download failed")
 
 	view := m.View()
-	checks := []string{"更新失败", "curl -fsSL example.com | bash", "curl -fsSL mirror.example.com | bash"}
+	checks := []string{"更新失败", "updates.firoyang.com", "不必为此重装"}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
 			t.Fatalf("失败视图缺少 %q:\n%s", check, view)
+		}
+	}
+	for _, ban := range []string{"install.sh", "example.com", "jsdelivr", "github.com"} {
+		if strings.Contains(view, ban) {
+			t.Fatalf("失败视图不应再推销重装脚本 %q:\n%s", ban, view)
 		}
 	}
 }

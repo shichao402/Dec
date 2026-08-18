@@ -535,25 +535,7 @@ func (c *APIClient) updateSSHKeyNotes(ctx context.Context, cipher bwCipher, user
 func (c *APIClient) deleteCipher(ctx context.Context, cipherID string) error {
 	c.invalidateSnapshot()
 	reqURL := strings.TrimRight(c.APIURL, "/") + "/ciphers/" + cipherID
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, reqURL, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	applyBitwardenHeaders(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s", formatAPIError(resp.StatusCode, respBody))
-	}
-	return nil
+	return c.doAuthenticatedJSON(ctx, http.MethodDelete, reqURL, nil, nil)
 }
 
 // findExistingCipher 按 note 名精确匹配。
@@ -748,26 +730,7 @@ func (c *APIClient) postJSON(ctx context.Context, reqURL string, body any) error
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Content-Type", "application/json")
-	applyBitwardenHeaders(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s", formatAPIError(resp.StatusCode, respBody))
-	}
-	return nil
+	return c.doAuthenticatedJSON(ctx, http.MethodPost, reqURL, data, nil)
 }
 
 func (c *APIClient) putJSON(ctx context.Context, reqURL string, body any) error {
@@ -776,51 +739,74 @@ func (c *APIClient) putJSON(ctx context.Context, reqURL string, body any) error 
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Content-Type", "application/json")
-	applyBitwardenHeaders(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s", formatAPIError(resp.StatusCode, respBody))
-	}
-	return nil
+	return c.doAuthenticatedJSON(ctx, http.MethodPut, reqURL, data, nil)
 }
 
 func (c *APIClient) getJSON(ctx context.Context, reqURL string, dest any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return err
+	return c.doAuthenticatedJSON(ctx, http.MethodGet, reqURL, nil, dest)
+}
+
+var reauthenticateSession = func(ctx context.Context) error {
+	return EnsureSession(ctx, nil)
+}
+
+// doAuthenticatedJSON 在 Bitwarden 拒绝过期 session 时清除内存凭据、重新解锁，
+// 并仅重试当前请求一次。请求体由字节切片重建，可安全重放 POST / PUT。
+func (c *APIClient) doAuthenticatedJSON(
+	ctx context.Context,
+	method, reqURL string,
+	requestBody []byte,
+	dest any,
+) error {
+	for attempt := 0; attempt < 2; attempt++ {
+		token := c.Token
+		var bodyReader io.Reader
+		if requestBody != nil {
+			bodyReader = bytes.NewReader(requestBody)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, reqURL, bodyReader)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		if requestBody != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		applyBitwardenHeaders(req)
+
+		resp, err := c.httpClient().Do(req)
+		if err != nil {
+			return err
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if resp.StatusCode == http.StatusUnauthorized {
+			InvalidateSession(token)
+			if attempt == 0 {
+				if err := reauthenticateSession(ctx); err != nil {
+					return fmt.Errorf("Bitwarden session 已失效，重新解锁失败: %w", err)
+				}
+				c.Token = Session()
+				if strings.TrimSpace(c.Token) == "" {
+					return fmt.Errorf("Bitwarden session 已失效，重新解锁未返回 session")
+				}
+				continue
+			}
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s", formatAPIError(resp.StatusCode, body))
+		}
+		if dest != nil {
+			if err := json.Unmarshal(body, dest); err != nil {
+				return fmt.Errorf("解析响应失败: %w", err)
+			}
+		}
+		return nil
 	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	applyBitwardenHeaders(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s", formatAPIError(resp.StatusCode, body))
-	}
-	if err := json.Unmarshal(body, dest); err != nil {
-		return fmt.Errorf("解析响应失败: %w", err)
-	}
-	return nil
+	return fmt.Errorf("Bitwarden session 重新解锁后仍不可用")
 }
 
 func formatAPIError(status int, body []byte) string {

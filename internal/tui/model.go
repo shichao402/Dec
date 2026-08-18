@@ -284,12 +284,8 @@ var updateDoUpdateOperation = func(currentVersion, latestVersion string) error {
 	return update.DoUpdate(currentVersion, latestVersion)
 }
 
-var updateManualInstallCommand = func() string {
-	return update.ManualInstallCommand()
-}
-
-var updateMirrorInstallCommand = func() string {
-	return update.MirrorInstallCommand()
+var updateNetworkHelp = func() string {
+	return update.NetworkHelp()
 }
 
 type model struct {
@@ -3409,14 +3405,14 @@ func (m model) renderUpdatePanel() []string {
 		lines = append(lines, shellMutedStyle.Render(fmt.Sprintf("正在下载并替换二进制到 %s ...", fallbackValue(target, "最新版本"))))
 	case "done":
 		if m.updateErr != nil {
-			lines = append(lines,
-				shellWarnStyle.Render("更新失败: "+m.updateErr.Error()),
-				shellMutedStyle.Render("可改用手动覆盖安装："),
-				"  "+updateManualInstallCommand(),
-				shellMutedStyle.Render("GitHub 直连不稳定时改走 CDN 镜像："),
-				"  "+updateMirrorInstallCommand(),
-				shellMutedStyle.Render("按 esc/enter 关闭面板"),
-			)
+			lines = append(lines, shellWarnStyle.Render("更新失败: "+m.updateErr.Error()))
+			for _, helpLine := range strings.Split(updateNetworkHelp(), "\n") {
+				if helpLine == "" {
+					continue
+				}
+				lines = append(lines, shellMutedStyle.Render(helpLine))
+			}
+			lines = append(lines, shellMutedStyle.Render("按 esc/enter 关闭面板"))
 			return lines
 		}
 		if m.updateResult != nil && !m.updateResult.NeedUpdate {

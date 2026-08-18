@@ -1,8 +1,14 @@
 package update
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,33 +16,38 @@ import (
 
 func TestManualInstallCommand(t *testing.T) {
 	linuxCmd := manualInstallCommand("linux", false)
-	if linuxCmd != "curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash" {
+	if linuxCmd != "curl -fsSL https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.sh | bash" {
 		t.Fatalf("linux 安装命令错误: %s", linuxCmd)
 	}
 
 	windowsCmd := manualInstallCommand("windows", false)
-	if windowsCmd != "iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex" {
+	if windowsCmd != "iwr -useb https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.ps1 | iex" {
 		t.Fatalf("windows 安装命令错误: %s", windowsCmd)
 	}
 }
 
-func TestMirrorInstallCommandUsesCDN(t *testing.T) {
+func TestMirrorInstallCommandUsesGitHubBackup(t *testing.T) {
 	linuxCmd := manualInstallCommand("linux", true)
-	if linuxCmd != "curl -fsSL https://cdn.jsdelivr.net/gh/shichao402/Dec@ReleaseLatest/scripts/install.sh | bash" {
+	if linuxCmd != "curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash" {
 		t.Fatalf("linux 镜像安装命令错误: %s", linuxCmd)
 	}
 
 	windowsCmd := manualInstallCommand("windows", true)
-	if windowsCmd != "iwr -useb https://cdn.jsdelivr.net/gh/shichao402/Dec@ReleaseLatest/scripts/install.ps1 | iex" {
+	if windowsCmd != "iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex" {
 		t.Fatalf("windows 镜像安装命令错误: %s", windowsCmd)
 	}
 }
 
-func TestNetworkHelpMentionsMirrorAndProxy(t *testing.T) {
+func TestNetworkHelpMentionsUpdatesDomainAndProxy(t *testing.T) {
 	help := NetworkHelp()
-	for _, want := range []string{"updates.firoyang.com", "cdn.jsdelivr.net", "HTTPS_PROXY"} {
+	for _, want := range []string{"updates.firoyang.com", "HTTPS_PROXY", "不必为此重装"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("排障建议缺少 %q:\n%s", want, help)
+		}
+	}
+	for _, ban := range []string{"github.com", "install.sh", "install.ps1", "jsdelivr", "cnb.cool"} {
+		if strings.Contains(help, ban) {
+			t.Fatalf("NetworkHelp 不应再推销安装脚本/镜像 %q:\n%s", ban, help)
 		}
 	}
 }
@@ -164,6 +175,53 @@ func TestEntryURLsPointAtUpdatesDomain(t *testing.T) {
 	urls := entryURLs()
 	if len(urls) == 0 || !strings.Contains(urls[0], "updates.firoyang.com") {
 		t.Fatalf("entryURLs = %v", urls)
+	}
+}
+
+func TestEmbeddedRelkitMatchesRootSSOT(t *testing.T) {
+	rootJSON, err := os.ReadFile(filepath.Join("..", "..", "relkit.json"))
+	if err != nil {
+		t.Fatalf("read repo-root relkit.json: %v (run tests from module root via go test ./internal/update/...)", err)
+	}
+	if !bytes.Equal(rootJSON, embeddedRelkitJSON) {
+		t.Fatal("internal/update/embed/relkit.json 与根目录 relkit.json 不一致；请运行: go generate ./internal/update")
+	}
+}
+
+func TestTrustedKeysFromEmbeddedRelkit(t *testing.T) {
+	keys, err := trustedKeys()
+	if err != nil {
+		t.Fatalf("trustedKeys: %v", err)
+	}
+	pk, ok := keys[keyID]
+	if !ok {
+		t.Fatalf("missing keyId %q in TrustedKeys", keyID)
+	}
+	if len(pk) != ed25519.PublicKeySize {
+		t.Fatalf("public key length = %d", len(pk))
+	}
+
+	var root relkitFile
+	rootJSON, err := os.ReadFile(filepath.Join("..", "..", "relkit.json"))
+	if err != nil {
+		t.Fatalf("read repo-root relkit.json: %v", err)
+	}
+	if err := json.Unmarshal(rootJSON, &root); err != nil {
+		t.Fatalf("parse root relkit.json: %v", err)
+	}
+	var wantB64 string
+	for _, pkCfg := range root.Signing.PublicKeys {
+		if pkCfg.KeyID == keyID {
+			wantB64 = pkCfg.PublicKeyBase64
+			break
+		}
+	}
+	if wantB64 == "" {
+		t.Fatalf("root relkit.json missing publicKeys entry for %q", keyID)
+	}
+	gotB64 := base64.StdEncoding.EncodeToString(pk)
+	if gotB64 != wantB64 {
+		t.Fatalf("dec-2026 public key = %q, want %q from root relkit.json", gotB64, wantB64)
 	}
 }
 

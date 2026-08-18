@@ -120,14 +120,18 @@ Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 #### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash
+curl -fsSL https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.sh | bash
 ```
 
 #### Windows PowerShell
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex
+iwr -useb https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.ps1 | iex
 ```
+
+镜像备份（GitHub）：`raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.{sh,ps1}`。
+
+安装脚本会优先从 `https://updates.firoyang.com/rup/artifact/...` 拉二进制，必要时再回退 GitHub Release。日常自更新只走 RUP/COS，失败时不必重装。
 
 ### 2. 启动 TUI
 
