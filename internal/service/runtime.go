@@ -141,22 +141,29 @@ func AcquireServerLock() (*flock.Flock, error) {
 	return lock, nil
 }
 
-// WaitUntilStopped 等待本机 dec-server 退出（发现文件消失，且锁可抢）。
+// WaitUntilStopped 等待本机 dec-server 退出。server.lock 是存活权威；
+// 抢到锁后顺手清理可能因 Windows 文件竞争而残留的发现文件。
 func WaitUntilStopped(ctx context.Context) error {
 	deadline := time.Now().Add(15 * time.Second)
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
 		deadline = dl
 	}
+	var lastMetadataErr, lastLockErr error
 	for {
 		if _, err := ReadMetadata(); err != nil {
-			lock, err := AcquireServerLock()
-			if err == nil {
-				_ = lock.Unlock()
-				return nil
-			}
+			lastMetadataErr = err
+		} else {
+			lastMetadataErr = nil
 		}
+		lock, err := AcquireServerLock()
+		if err == nil {
+			RemoveMetadata()
+			_ = lock.Unlock()
+			return nil
+		}
+		lastLockErr = err
 		if time.Now().After(deadline) {
-			return fmt.Errorf("等待 dec-server 退出超时")
+			return fmt.Errorf("等待 dec-server 退出超时（metadata=%v，lock=%v）", lastMetadataErr, lastLockErr)
 		}
 		select {
 		case <-ctx.Done():

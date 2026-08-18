@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -43,5 +44,23 @@ func TestNewTokenIsRandom(t *testing.T) {
 	}
 	if len(first) != 64 || first == second {
 		t.Fatalf("token 不符合 256-bit 随机要求: %q / %q", first, second)
+	}
+}
+
+func TestWaitUntilStoppedCleansStaleMetadataWhenLockIsFree(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
+	token, err := NewToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteMetadata("127.0.0.1:43210", token); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WaitUntilStopped(context.Background()); err != nil {
+		t.Fatalf("WaitUntilStopped() = %v", err)
+	}
+	if _, err := ReadMetadata(); !os.IsNotExist(err) {
+		t.Fatalf("残留 metadata 未清理: %v", err)
 	}
 }

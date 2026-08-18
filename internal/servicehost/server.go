@@ -161,7 +161,7 @@ func (s *Server) Shutdown(context.Context, *servicev1.ShutdownRequest) (*service
 			"dec-server 正执行 %s（%s），请等待完成后再重启", op.Operation, op.Facade)
 	}
 	if s.requestStop != nil {
-		go s.requestStop()
+		s.requestStop()
 	}
 	return &servicev1.ShutdownResponse{Accepted: true}, nil
 }
