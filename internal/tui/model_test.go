@@ -1129,6 +1129,7 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 	}
 	m.deleteCandidatesLoaded = true
 	m.rebuildDeleteTree()
+	expandDeleteTreeAll(&m)
 
 	view := m.View()
 	for _, want := range []string{
@@ -1185,6 +1186,8 @@ func TestModelDeletePageShowsBundleCandidates(t *testing.T) {
 		{Kind: app.DeleteKindBundle, BundleName: "vikunja", Label: "[bundle] vikunja / vikunja · 2 成员"},
 	}
 	m.deleteCandidatesLoaded = true
+	m.rebuildDeleteTree()
+	expandDeleteTreeAll(&m)
 
 	view := m.View()
 	if !strings.Contains(view, "[bundle] vikunja") {
@@ -1341,6 +1344,7 @@ func TestModelDeletePageSelectConfirmAndCancel(t *testing.T) {
 	}
 	m.deleteCandidatesLoaded = true
 	m.rebuildDeleteTree()
+	expandDeleteTreeAll(&m)
 
 	// 勾选两个 bundle 叶子（勿用根目录 space，那会级联全选/全消）。
 	for _, wantLabel := range []string{"[bundle] cli", "[bundle] vikunja"} {

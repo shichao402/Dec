@@ -22,6 +22,8 @@ type TreeNode struct {
 	SelectMode TreeSelectMode
 	Children   []*TreeNode
 	Payload    any
+	// CollapseDefault 表示初次展开时该节点自身保持折叠（其后代仍预展开，展开一层即见内容）。
+	CollapseDefault bool
 }
 
 // TreeRow 为当前可见的一行（已按展开状态扁平化）。
@@ -524,7 +526,8 @@ func (t *TreeList) CursorExpanded() bool {
 	return t.Expanded[row.Node.ID]
 }
 
-// DefaultExpandAll 展开所有有子节点的分支（用于 Remote 页初次加载）。
+// DefaultExpandAll 展开所有有子节点的分支（用于 Remote 页初次加载）；
+// 标了 CollapseDefault 的节点自身保持折叠，避免初次进页把整棵树铺满屏幕。
 func (t *TreeList) DefaultExpandAll() {
 	t.ensureExpanded()
 	var walk func(nodes []*TreeNode)
@@ -534,7 +537,7 @@ func (t *TreeList) DefaultExpandAll() {
 				continue
 			}
 			if treeNodeExpandable(n) {
-				t.Expanded[n.ID] = true
+				t.Expanded[n.ID] = !n.CollapseDefault
 			}
 			walk(n.Children)
 		}

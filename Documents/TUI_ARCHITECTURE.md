@@ -50,6 +50,8 @@ dec --version / dec --help / dec __freshness-check
 
 用户平面的 Bundles 页是 `GlobalConfig.EnabledBundles` 的**唯一写入口**（Settings 只读展示计数，避免两处基于各自快照互相覆盖）。候选除 vault 扫描结果外，还合入 `known_secret_bundles` 与 Bitwarden folder 枚举。补进来的候选按 vault scope 分流（ADR 0013）：vault 尚无 manifest 的标 `SecretsOnly`，展示「仓库未登记」，勾选保存时由 `ensureVaultBundlesForUserEnable` 补一份 `scope: user` 声明，标记随之消失；vault 已有 manifest 但 scope 属于另一平面的标 `OtherPlane`，展示「属于项目平面」、复选框为 `[-]` 且不可勾选——跨平面要先显式改 manifest 的 scope，绝不由一次勾选静默改写。保存时先校验/修复共享 vault 再写本机启用列表，被拒条目不进 `enabled_bundles`。无 Bitwarden session 时候选退化为 known ∪ 已启用，不为列候选触发 web unlock。
 
+`SecretsOnly` 还要再按**远端核对结果**分流：`known_secret_bundles` 是只增不减的本机缓存（只有 pull reconcile / 删除 bundle 才摘），远端删掉 folder 后名字会一直留着。远端枚举成功且名单里没有该名字时，未启用的直接 `ForgetSecretBundles` 摘掉本机残留（不进候选），已启用的标 `RemoteMissing`，展示「远端无内容 · 本机残留」——它已启用，得留着让用户能取消勾选。无 session / 枚举失败 / 该 bundle 绑了别名 folder（远端枚举只覆盖 `bundle/*`）时标 `RemoteUnverified`，展示「未核对远端」。「远端确实没有」与「这次没问过远端」必须分开：混同会让候选谎报「Bitwarden 已有同名 secrets」，并诱导用户勾出一个拉不到内容的空 user bundle。
+
 ## 4. 模块分层
 
 ```text
@@ -130,6 +132,8 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 ### 5.4c Remote 页要点
 
 - 进入默认拉全量远端库存（`ListRemoteInventory`）；`r` 强制刷新
+- 远端分区不做任何平面 / 启用过滤：`[bundle]` 整包项跟 vault 声明走，本地分区跟 `cache/` 目录实况走
+- 初次进页只展开到 bundle 这一层（Dec 侧 `cache/<bundle>`、Secrets 侧 folder 分组），子项默认折叠（`TreeNode.CollapseDefault`）
 - `e`：Secure Note / SSH Hosts → temp → 写回远端（不种本地）
 - `n`：光标所在 folder 登记；`N`：手输新 folder（**仅** `bundle/<名>`，ADR 0014）。Processor 同级（`note` / `.env` / `.gcm` / `.sshkey`），来源由类型声明（temp/路径/系统选文件/本机生成）；不枚举远端 folder 候选。folder 不存在时由登记本身按需创建
 - `a` 全选 / `A` 全不选

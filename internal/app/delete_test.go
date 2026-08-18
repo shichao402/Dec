@@ -124,6 +124,65 @@ func TestListDeleteCandidates_IncludesCacheAndSecrets(t *testing.T) {
 	}
 }
 
+// Remote 是完整远端浏览器：vault 里的 bundle 不论当前平面是否启用都要能整包删除，
+// 本机 cache 残留也不按 enabled_bundles 过滤，否则停用后的目录永远清不掉。
+func TestListDeleteCandidates_ListsVaultBundlesOutsideEnabled(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	useStubSecretsSession(t)
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/enabled/skills/kept/SKILL.md": "---\nname: kept\n---\n",
+		"bundles/enabled/bundle.yaml":          "name: enabled\nscope: project\nmembers:\n  - skill/kept\n",
+		"bundles/spare/skills/extra/SKILL.md":  "---\nname: extra\n---\n",
+		"bundles/spare/bundle.yaml":            "name: spare\nscope: project\nmembers:\n  - skill/extra\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"enabled"}}); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(projectRoot, ".dec", "cache", "spare", "skills", "extra", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(stale), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("---\nname: extra\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
+	if err != nil {
+		t.Fatalf("ListDeleteCandidates() = %v", err)
+	}
+	bundles := make(map[string]DeleteCandidate)
+	var staleLocal bool
+	for _, c := range candidates {
+		if c.Kind == DeleteKindBundle {
+			bundles[c.BundleName] = c
+		}
+		if c.Kind == DeleteKindDecAsset && c.Name == "extra" && c.Partition == PartitionLocal {
+			staleLocal = true
+		}
+	}
+	for _, name := range []string{"enabled", "spare"} {
+		c, ok := bundles[name]
+		if !ok {
+			t.Fatalf("vault 里的 bundle %q 应有整包删除项: %#v", name, bundles)
+		}
+		if len(c.Members) == 0 {
+			t.Fatalf("bundle %q 的成员应从 vault 解析出来: %#v", name, c)
+		}
+		if c.Partition != PartitionRemote {
+			t.Fatalf("bundle %q 应属远端分区, got %q", name, c.Partition)
+		}
+	}
+	if !staleLocal {
+		t.Fatalf("已停用 bundle 的 cache 残留应出现在本地分区: %#v", candidates)
+	}
+}
+
 // 远端有 note、本地也有文件 → 正常候选项，不标 Orphan。
 func TestListDeleteCandidates_IncludesLocalSecretsWithoutRemote(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())

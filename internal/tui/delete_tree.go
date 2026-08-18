@@ -13,9 +13,10 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 	decLocal := &TreeNode{ID: "delete-root:local-dec", Label: "本地 · Dec cache · 只清本机，不写 vault", SelectMode: TreeSelectBranch}
 	secLocal := &TreeNode{ID: "delete-root:local-secrets", Label: "本地 · Secrets · 只清本机，不写 Bitwarden", SelectMode: TreeSelectBranch}
 	unfiledRoot := &TreeNode{
-		ID:         "delete-root:unfiled",
-		Label:      "无文件夹 · 非Dec管理 · 只读（请到 Bitwarden Web）",
-		SelectMode: TreeSelectNone,
+		ID:              "delete-root:unfiled",
+		Label:           "无文件夹 · 非Dec管理 · 只读（请到 Bitwarden Web）",
+		SelectMode:      TreeSelectNone,
+		CollapseDefault: true,
 	}
 	hasDecRemote, hasSecRemote, hasDecLocal, hasSecLocal, hasUnfiled := false, false, false, false, false
 
@@ -103,6 +104,18 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 	for _, group := range targetGroups {
 		group.node.Label = group.label()
 		group.node.Payload = group.ref()
+	}
+
+	// 初次进页只展开到 bundle 这一层：Dec 侧是 cache/<bundle>，Secrets 侧是 folder 分组。
+	for _, root := range []*TreeNode{decRemote, decLocal} {
+		for _, cache := range root.Children {
+			for _, bundleNode := range cache.Children {
+				bundleNode.CollapseDefault = true
+			}
+		}
+	}
+	for _, group := range targetGroups {
+		group.node.CollapseDefault = true
 	}
 
 	sortPathTreeChildren(decRemote.Children)
@@ -249,9 +262,6 @@ func (m *model) rebuildDeleteTree() {
 	}
 	if len(m.deleteTree.Expanded) == 0 {
 		m.deleteTree.DefaultExpandAll()
-		// 「无文件夹」默认折叠
-		m.deleteTree.ensureExpanded()
-		m.deleteTree.Expanded["delete-root:unfiled"] = false
 	}
 	m.deleteTree.FocusFirstSelectable()
 	m.deleteTree.normalizeCursor()

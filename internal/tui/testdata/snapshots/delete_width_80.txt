@@ -7,21 +7,21 @@
 │  Remote        ││ folder · / 筛选                                            │
 │  Settings      ││ > [ ] ▾ 远端 · Dec (Git vault)                             │
 │                ││   [ ]   ▾ cache                                            │
-│                ││   [ ]     ▾ vikunja                                        │
-│                ││   [ ]       ↳ [bundle] vikunja / vikunja · 2 成员          │
-│                ││   [ ]     ▾ default                                        │
-│                ││   [ ]       ▾ skills                                       │
-│                ││   [ ]         ↳ demo                                       │
-│                ││   [ ]       ▾ rules                                        │
-│                ││   [ ]         ↳ demo-rule.mdc                              │
+│                ││   [ ]     ▸ vikunja                                        │
+│                ││   [ ]     ▸ default                                        │
 │                ││   [ ] ▾ 远端 · Secrets (Bitwarden) · 将改远端、不碰本地    │
-│                ││   [ ]   ▾ vikunja (bundle) → .secrets/bundles/vikunja      │
-│                ││   [ ]     ▾ .sshkey                                        │
-│                ││   [ ]       ↳ [ssh] deploy                                 │
-│                ││   [ ]     ▾ .env                                           │
-│                ││   [ ]       ↳ vikunja.env                                  │
-│                ││   [ ]   ▾ Dec (project)                                    │
-│                ││   [ ]     ↳ pkv.include                                    │
+│                ││   [ ]   ▸ vikunja (bundle) → .secrets/bundles/vikunja      │
+│                ││   [ ]   ▸ Dec (project)                                    │
+│                ││                                                            │
+│                ││                                                            │
+│                ││                                                            │
+│                ││                                                            │
+│                ││                                                            │
+│                ││                                                            │
+│                ││                                                            │
+│                ││                                                            │
+│                ││                                                            │
+│                ││                                                            │
 │                ││                                                            │
 │                ││                                                            │
 │                ││                                                            │

@@ -87,7 +87,8 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 		addDec(DeleteKindDecAsset, itemType, name, vault, false, PartitionLocal, scopeTag)
 	}
 
-	// 本地分区：当前工作区启用列表下的 cache 残留（只清本机）。
+	// 本地分区：当前工作区 cache 里实际存在的残留（含已停用 bundle 留下的目录），只清本机。
+	localCacheBundles := listLocalCacheBundleNames(workspace)
 	for _, spec := range []struct {
 		dir   string
 		typ   string
@@ -99,7 +100,7 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 		{"rules", "rule", func(s string) string { return strings.TrimSuffix(s, ".mdc") }, false},
 		{"mcp", "mcp", func(s string) string { return strings.TrimSuffix(s, ".json") }, false},
 	} {
-		for _, bundleName := range enabledBundles {
+		for _, bundleName := range localCacheBundles {
 			dir := filepath.Join(workspaceCacheDir(workspace), bundleName, spec.dir)
 			entries, readErr := os.ReadDir(dir)
 			if readErr != nil {
@@ -125,7 +126,7 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 		}
 	}
 
-	// 远端分区：Git vault 全量 bundles（scope 仅作分组标签）。
+	// 远端分区：Git vault 全量 bundles（scope 仅作分组标签，enabled 与否都展示）。
 	_ = withAppReadRepo(func(tx *repo.Transaction) error {
 		repoDir := tx.WorkDir()
 		vaultBundles, _, scanErr := scanVaultBundles(repoDir, reporter)
@@ -155,6 +156,7 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 		sort.Strings(bundleNames)
 		for _, bundleName := range bundleNames {
 			scopeTag := scopeByBundle[bundleName]
+			members := make([]AssetSelectionItem, 0)
 			for _, member := range listBundleAssetMembers(repoDir, bundleName) {
 				parts := strings.SplitN(member, "/", 2)
 				if len(parts) != 2 {
@@ -177,8 +179,28 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 						continue
 					}
 				}
+				members = append(members, AssetSelectionItem{Type: itemType, Name: name, Vault: bundleName})
 				addDec(DeleteKindDecAsset, itemType, name, bundleName, !localExists, PartitionRemote, scopeTag)
 			}
+			// 整包删除项跟着 vault 里真实存在的 bundle 走，不看当前平面启用列表。
+			if _, inVault := vaultBundles[bundleName]; !inVault {
+				continue
+			}
+			groupBundle, groupOrder := groupCtx.forDecBundle(bundleName)
+			candidates = append(candidates, DeleteCandidate{
+				Kind:       DeleteKindBundle,
+				BundleName: bundleName,
+				Vault:      vaultDirForBundle(vaultBundles, bundleName),
+				Members:    members,
+				Label: fmt.Sprintf("[bundle] %s / %s · %d 成员",
+					bundleName, vaultDirForBundle(vaultBundles, bundleName), len(members)),
+				TreeRoot:   ".dec",
+				TreeBranch: groupBundle,
+				GroupOrder: groupOrder,
+				GroupTitle: groupCtx.groupTitleWithScope(groupBundle, scopeTag),
+				Partition:  PartitionRemote,
+				ScopeTag:   scopeTag,
+			})
 		}
 		return nil
 	})
@@ -319,28 +341,39 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 		appendUnfiledRemoteCandidates(ctx, &candidates, reporter)
 	}
 
-	if state, loadErr := LoadWorkspaceAssetSelection(workspace, reporter); loadErr == nil {
-		for _, bo := range ListEnabledBundles(state) {
-			groupBundle, groupOrder := groupCtx.forDecBundle(bo.Name)
-			scopeTag := scopeByBundle[bo.Name]
-			candidates = append(candidates, DeleteCandidate{
-				Kind:       DeleteKindBundle,
-				BundleName: bo.Name,
-				Vault:      bo.Vault,
-				Members:    append([]AssetSelectionItem(nil), bo.Members...),
-				Label:      fmt.Sprintf("[bundle] %s / %s · %d 成员", bo.Name, fallbackVaultName(bo), len(bo.Members)),
-				TreeRoot:   ".dec",
-				TreeBranch: groupBundle,
-				GroupOrder: groupOrder,
-				GroupTitle: groupCtx.groupTitleWithScope(groupBundle, scopeTag),
-				Partition:  PartitionRemote,
-				ScopeTag:   scopeTag,
-			})
-		}
-	}
-
 	sortDeleteCandidates(candidates)
 	return candidates, nil
+}
+
+// listLocalCacheBundleNames 列出 cache/ 下真实存在的 bundle 目录名（不看启用列表）。
+func listLocalCacheBundleNames(workspace Workspace) []string {
+	cacheDir := workspaceCacheDir(workspace)
+	if strings.TrimSpace(cacheDir) == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	return names
+}
+
+// vaultDirForBundle 返回 bundle 声明所在的 vault 目录名；缺声明时退回 bundle 名。
+func vaultDirForBundle(vaultBundles map[string][]vaultBundle, bundleName string) string {
+	for _, match := range vaultBundles[bundleName] {
+		if dir := strings.TrimSpace(match.vaultName); dir != "" {
+			return dir
+		}
+	}
+	return bundleName
 }
 
 func (g *deleteGroupContext) groupTitleWithScope(groupBundle, scopeTag string) string {

@@ -417,13 +417,6 @@ func appendRemoteSecretCandidates(
 	return nil
 }
 
-func fallbackVaultName(bo AssetBundleOption) string {
-	if strings.TrimSpace(bo.Vault) != "" {
-		return bo.Vault
-	}
-	return bo.Name
-}
-
 // DeleteProjectItems 执行 Remote 页选中的删除。
 // Mode=remote：只改远端（vault / Bitwarden），不碰本地。
 // Mode=local：只清本机，不写 Bitwarden / 不写 vault。

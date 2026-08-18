@@ -33,7 +33,12 @@
    - Git vault：全量 bundles  
    - Bitwarden：`ListAllFolderNames` 枚举全部 `bundle/*` + 全部裸 folder  
    - 「无文件夹」：只读折叠区，标注「非 Dec 管理」；不可勾选删除；默认折叠；展开仅元数据（名称/类型），不读正文；处理请到 Bitwarden Web  
+   - **整包删除项（`[bundle]`）跟 vault 走**：vault 里有声明就列，与当前平面 `enabled_bundles` 无关；成员从 `bundles/<名>/` 现场解析（`enabled` 只影响 Bundles 页与 pull）  
+   - **本地分区按 cache 目录实况**：扫 `cache/` 下真实存在的目录，而不是启用列表——否则停用 bundle 留下的目录永远清不掉  
    - 平面隔离仍保留在 Bundles / pull / push / env / 启用列表（见 [0009](0009-bundle-binary-scope.md) 修订）
+
+3a. **初次进页只展开到 bundle 这一层**  
+   Dec 侧展开到 `cache/<bundle>`、Secrets 侧展开到 folder 分组，其子项默认折叠（`TreeNode.CollapseDefault`）；bundle 内部层级预先展开，展开一层即见内容，不必逐层敲。全量远端一次铺满屏幕等于没有层级。
 
 4. **删除拆语义**  
    - 默认 `d`（远端分区）：**只删远端**（Bitwarden Note/SSH、Git vault 资产），不碰本地同步根 / cache  
@@ -77,6 +82,8 @@
 | 远端删 + 本地清默认同一事务 | 误删风险；与用户心智不一致 |
 | 编辑顺带种本地盘 | 其它项目裸 folder 无可靠 LocalRoot；与「pull 才更新本地」不一致 |
 | 仅文案提示跨上下文风险 | 不足以防误删；必须真正输入确认 |
+| 整包删除项只列当前平面已启用的 bundle | 与「上下文无关的完整远端浏览器」矛盾：project 平面下私仓凭空少一截，用户会以为 vault 里没这些包 |
+| 初次进页全展开整棵树 | 全量远端有几十上百行，首屏被子项刷满，bundle 这层反而看不见 |
 | 登记表单内轮转选择归属 | 候选几十个、tab 轮转难定位，且要为此枚举远端 folder（可能触发解锁）；光标本就停在目标 folder 上 |
 | `.sshkey` 从类型列表剔除、只提示去 Bitwarden Web 手建 | 同一入口出现「有的类型能建、有的不能」的断层；SSH Key 与 note / `.env` / `.gcm` 是同级 Processor，只是 Writer 不同 |
 | 为 `.sshkey` 做一条专用登记旁路 | 会长出第二套状态机；来源差异（本机生成）应由 Processor 声明，而不是分叉流程 |

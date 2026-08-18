@@ -150,6 +150,7 @@ func TestRemoteAddSecret_TakesFolderFromCursor(t *testing.T) {
 
 func TestRemoteAddSecret_CursorInTypeDirPreselectsType(t *testing.T) {
 	m := remotePageModelWithCandidates(t)
+	expandDeleteTreeAll(&m)
 	focusTreeRowByLabel(t, &m, ".env")
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
@@ -206,6 +207,7 @@ func TestRemoteAddSecret_SSHKeyDirEntersSSHSources(t *testing.T) {
 		Partition: app.PartitionRemote, GroupTitle: "Dec",
 	})
 	m.rebuildDeleteTree()
+	expandDeleteTreeAll(&m)
 	focusTreeRowByLabel(t, &m, ".sshkey")
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})

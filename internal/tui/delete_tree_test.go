@@ -72,6 +72,67 @@ func TestBuildDeleteTree_MergesNoteAndSSHUnderSameFolder(t *testing.T) {
 	}
 }
 
+// 初次进页只展开到 bundle 这一层：Dec 侧 cache/<bundle>、Secrets 侧 folder 分组保持折叠。
+func TestRebuildDeleteTree_DefaultExpandsOnlyToBundleLevel(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.deleteCandidates = []app.DeleteCandidate{
+		{
+			Kind: app.DeleteKindDecAsset, Type: "skill", Name: "demo", Vault: "vikunja",
+			TreeRoot: ".dec", TreeBranch: "vikunja", Partition: app.PartitionRemote,
+		},
+		{
+			Kind: app.DeleteKindSecret, SecretPath: ".env/vikunja.env", SecretsBundle: "bundle/vikunja",
+			LocalRoot: "bundles/vikunja", TreeRoot: "secrets", TreeBranch: "bundle/vikunja",
+			Partition: app.PartitionRemote, GroupTitle: "bundle/vikunja",
+		},
+	}
+	m.deleteCandidatesLoaded = true
+	m.rebuildDeleteTree()
+
+	labels := make([]string, 0)
+	for _, row := range m.deleteTree.VisibleRows() {
+		labels = append(labels, row.Node.Label)
+	}
+	joined := strings.Join(labels, "\n")
+	for _, want := range []string{"cache", "vikunja", "bundle/vikunja → bundles/vikunja"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("默认应展开到 bundle 层，缺少 %q:\n%s", want, joined)
+		}
+	}
+	for _, unwanted := range []string{"demo", ".env"} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("bundle 子项默认应折叠，却出现 %q:\n%s", unwanted, joined)
+		}
+	}
+
+	// 展开一层就能看到内容：bundle 下的层级已预展开，不用逐层敲。
+	expandDeleteTreeAll(&m)
+	joined = ""
+	for _, row := range m.deleteTree.VisibleRows() {
+		joined += row.Node.Label + "\n"
+	}
+	for _, want := range []string{"demo", ".env", "vikunja.env"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("展开后应看到 %q:\n%s", want, joined)
+		}
+	}
+}
+
+// expandDeleteTreeAll 展开 Remote 树全部分支（测试里替代逐层敲 l）。
+func expandDeleteTreeAll(m *model) {
+	m.deleteTree.ensureExpanded()
+	var walk func(nodes []*TreeNode)
+	walk = func(nodes []*TreeNode) {
+		for _, n := range nodes {
+			if treeNodeExpandable(n) {
+				m.deleteTree.Expanded[n.ID] = true
+			}
+			walk(n.Children)
+		}
+	}
+	walk(m.deleteTree.Roots)
+}
+
 // 不同 folder 即便本地根相同也不应被合并。
 func TestBuildDeleteTree_KeepsDistinctFoldersSeparate(t *testing.T) {
 	roots := buildDeleteTree([]app.DeleteCandidate{
