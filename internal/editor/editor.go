@@ -64,7 +64,8 @@ func DefaultCommand() string {
 		if _, err := exec.LookPath("nano"); err == nil {
 			return "nano"
 		}
-		return ""
+		// CI / 最小镜像常无编辑器；仍返回可配置的默认命令，避免 Settings/Overview 空字符串。
+		return "vi"
 	}
 }
 
