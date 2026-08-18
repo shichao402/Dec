@@ -93,7 +93,9 @@
           exit 0
         fi
         ( cd relkit && go build -o "$OLDPWD/relkit-bin" ./cmd/relkit )
-        ADD_ARGS=()
+        # 不用 bash 数组：部分 runner 以 sh 执行 script，ADD_ARGS=() 会直接语法失败。
+        CODE=$(python3 -c "maj,min,pat='${VER}'.split('.'); print(int(maj)*1000000+int(min)*1000+int(pat))")
+        set -- stage "$VER" --code "$CODE" --channel "$CHANNEL"
         for f in dist/dec-*; do
           [ -f "$f" ] || continue
           base=$(basename "$f")
@@ -106,10 +108,9 @@
             *) continue ;;
           esac
           component="${base%-${os}-${arch}*}"
-          ADD_ARGS+=(--add "$f" "id=$base,kind=binary,os=$os,arch=$arch,component=$component")
+          set -- "$@" --add "$f" "id=$base,kind=binary,os=$os,arch=$arch,component=$component"
         done
-        CODE=$(python3 -c "maj,min,pat='${VER}'.split('.'); print(int(maj)*1000000+int(min)*1000+int(pat))")
-        ./relkit-bin stage "$VER" --code "$CODE" --channel "$CHANNEL" "${ADD_ARGS[@]}"
+        ./relkit-bin "$@"
         tar -C ".relkit/staged/${VER}" -czf staged.tar.gz .
         AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com}"
         SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
