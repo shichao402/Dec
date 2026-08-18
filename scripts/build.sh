@@ -241,22 +241,33 @@ build_all_platforms() {
     
     local failed=0
     local total=0
+
+    # 注意：不要用 `((total++)) || ((failed++))`——从 0 自增时算术表达式值为 0，
+    # 在 set -e 下会被当成失败并提前退出。
+    run_platform() {
+        if build_platform "$@"; then
+            total=$((total + 1))
+        else
+            failed=$((failed + 1))
+        fi
+    }
     
     # Linux
-    build_platform "linux" "amd64" "" && ((total++)) || ((failed++))
-    build_platform "linux" "arm64" "" && ((total++)) || ((failed++))
+    run_platform "linux" "amd64" ""
+    run_platform "linux" "arm64" ""
     
     # macOS
-    build_platform "darwin" "amd64" "" && ((total++)) || ((failed++))
-    build_platform "darwin" "arm64" "" && ((total++)) || ((failed++))
+    run_platform "darwin" "amd64" ""
+    run_platform "darwin" "arm64" ""
     
     # Windows
-    build_platform "windows" "amd64" ".exe" && ((total++)) || ((failed++))
+    run_platform "windows" "amd64" ".exe"
     
     echo "" | tee -a "${LOG_FILE}"
     print_info "构建统计: 成功 ${total} 个"
     if [ ${failed} -gt 0 ]; then
         print_warning "失败 ${failed} 个"
+        return 1
     fi
 }
 
