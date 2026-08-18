@@ -36,6 +36,35 @@ func insertTreePath(root *TreeNode, segments []string, leaf *TreeNode) {
 	parent.Children = append(parent.Children, leaf)
 }
 
+// insertReadOnlyTreePath 与 insertTreePath 相同，但目录不可勾选（Bundles 页成员只读）。
+func insertReadOnlyTreePath(root *TreeNode, segments []string, leaf *TreeNode) {
+	if root == nil || leaf == nil {
+		return
+	}
+	parent := root
+	prefix := root.ID
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg == "" || seg == "." {
+			continue
+		}
+		id := prefix + "/" + seg
+		branch := findTreeChildByID(parent, id)
+		if branch == nil {
+			branch = &TreeNode{
+				ID:         id,
+				Label:      seg,
+				SelectMode: TreeSelectNone,
+			}
+			parent.Children = append(parent.Children, branch)
+		}
+		parent = branch
+		prefix = id
+	}
+	leaf.ID = prefix + "/leaf:" + leaf.ID
+	parent.Children = append(parent.Children, leaf)
+}
+
 func findTreeChildByID(parent *TreeNode, id string) *TreeNode {
 	for _, child := range parent.Children {
 		if child != nil && child.ID == id {

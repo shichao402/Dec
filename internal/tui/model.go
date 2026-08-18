@@ -1,4 +1,4 @@
-﻿package tui
+package tui
 
 import (
 	"context"
@@ -3760,6 +3760,9 @@ func (m model) renderAssetRowLine(row assetRow, marker string) string {
 		return fmt.Sprintf("%s [-]   %s · 属于项目平面", marker, bo.Name)
 	}
 	if bo.SecretsOnly {
+		if len(bo.Members) > 0 {
+			return fmt.Sprintf("%s [%s]   %s · %s · %d 个成员", marker, checked, bo.Name, secretsOnlyBundleHint(bo), len(bo.Members))
+		}
 		return fmt.Sprintf("%s [%s]   %s · %s", marker, checked, bo.Name, secretsOnlyBundleHint(bo))
 	}
 	arrow := "▸"
@@ -3811,6 +3814,14 @@ func (m model) renderAssetDetails() string {
 							shellMutedStyle.Render("Bitwarden 里已有同名 secrets；仓库尚未登记该 bundle。"),
 							shellMutedStyle.Render("勾选并保存后会创建 scope: user 的 bundle 声明。"),
 						)
+					}
+					if m.assetTree.Expanded[assetBundleNodeID(bo.Name)] && len(bo.Members) > 0 {
+						lines = append(lines, "", shellTitleStyle.Render("成员列表"))
+						for _, mb := range bo.Members {
+							lines = append(lines, fmt.Sprintf("  · %s / %s", mb.Type, mb.Name))
+						}
+					} else if m.focus == focusContent && len(bo.Members) > 0 {
+						lines = append(lines, shellMutedStyle.Render("按 l 或 Enter 展开查看成员"))
 					}
 					return strings.Join(lines, "\n")
 				}
@@ -4296,6 +4307,13 @@ func (m *model) expandAssetAtCursor() {
 		nodeID := assetBundleNodeID(bo.Name)
 		seen := make(map[string]struct{})
 		for _, mb := range bo.Members {
+			if mb.Type == app.AssetMemberTypeSecret {
+				segs := secretsParentSegments(mb.Name)
+				if len(segs) > 0 {
+					m.assetTree.Expanded[nodeID+"/"+segs[0]] = true
+				}
+				continue
+			}
 			sub := assetTypeSubDir(mb.Type)
 			if _, dup := seen[sub]; dup {
 				continue

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,9 @@ import (
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/types"
 )
+
+// AssetMemberTypeSecret 是 Bundles 页展示用的 secrets 成员类型（Note / SSH Key 路径，无正文）。
+const AssetMemberTypeSecret = "secret"
 
 // AssetSelectionItem 描述 bundle 内的一个成员资产，仅供展示定位使用。
 type AssetSelectionItem struct {
@@ -124,6 +128,7 @@ func LoadWorkspaceAssetSelection(workspace Workspace, reporter Reporter) (*Asset
 	if workspace.EffectivePlane() == WorkspaceUser {
 		state.Bundles = appendSecretsOnlyBundleOptions(state.Bundles, workspace, existingConfig, reporter)
 	}
+	enrichBundleOptionsWithSecretMembers(state.Bundles, reporter)
 
 	if _, err := os.Stat(state.VarsPath); err == nil {
 		state.VarsFileReady = true
@@ -368,6 +373,117 @@ func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Works
 	return options
 }
 
+// enrichBundleOptionsWithSecretMembers 把 Bitwarden secrets 条目并入 Bundles 页成员列表。
+//
+// 有 session 时枚举 folder 下 Note / SSH Key 名（无正文）并覆盖写入本机缓存；
+// 无 session / NoopClient / 单 bundle 枚举失败时读缓存回填，不为列成员触发 web unlock。
+func enrichBundleOptionsWithSecretMembers(options []AssetBundleOption, reporter Reporter) {
+	if len(options) == 0 {
+		return
+	}
+	sessionReady := secrets.HasSession() && secrets.HasUserKey()
+	client := secretsClientFactory()
+	live := sessionReady && client != nil
+	if _, isNoop := client.(secrets.NoopClient); isNoop {
+		live = false
+	}
+
+	var cfg *secrets.Config
+	if loaded, err := secrets.LoadConfig(); err == nil {
+		cfg = loaded
+	}
+
+	updates := make(map[string][]string, len(options))
+	for i := range options {
+		name := options[i].Name
+		var paths []string
+		if live {
+			listed, listErr := listRemoteSecretMemberPaths(client, secretFolderForBundle(cfg, name))
+			if listErr != nil {
+				emit(reporter, EventWarn, "assets.bundle",
+					fmt.Sprintf("枚举 bundle %q 的 secrets 成员失败（回退本机缓存）: %v", name, listErr), nil)
+				paths = secrets.SecretBundleMembers(name)
+			} else {
+				updates[name] = listed
+				paths = listed
+			}
+		} else {
+			paths = secrets.SecretBundleMembers(name)
+		}
+		options[i].Members = appendSecretMemberItems(options[i], paths)
+	}
+	if len(updates) == 0 {
+		return
+	}
+	if err := secrets.RememberAllSecretBundleMembers(updates); err != nil {
+		emit(reporter, EventWarn, "assets.bundle",
+			fmt.Sprintf("写入 known_secret_bundle_members 失败: %v", err), nil)
+	}
+}
+
+func secretFolderForBundle(cfg *secrets.Config, bundleName string) string {
+	if cfg != nil {
+		return cfg.ResolveBinding(bundleName).SecretsBundleName
+	}
+	return secrets.DefaultBundleFolder(bundleName)
+}
+
+func listRemoteSecretMemberPaths(client secrets.Client, folder string) ([]string, error) {
+	notes, err := client.ListFolderNotes(context.Background(), folder)
+	if err != nil {
+		return nil, err
+	}
+	keys, err := client.ListFolderSSHKeys(context.Background(), folder)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(notes)+len(keys))
+	for _, note := range notes {
+		paths = append(paths, note.Name)
+	}
+	for _, key := range keys {
+		paths = append(paths, key.Name)
+	}
+	return paths, nil
+}
+
+func appendSecretMemberItems(opt AssetBundleOption, paths []string) []AssetSelectionItem {
+	if len(paths) == 0 {
+		return opt.Members
+	}
+	vault := strings.TrimSpace(opt.Vault)
+	if vault == "" {
+		vault = opt.Name
+	}
+	seen := make(map[string]struct{}, len(opt.Members)+len(paths))
+	out := make([]AssetSelectionItem, 0, len(opt.Members)+len(paths))
+	for _, item := range opt.Members {
+		key := item.Type + "\x00" + item.Name
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	for _, raw := range paths {
+		path := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+		if path == "" {
+			continue
+		}
+		key := AssetMemberTypeSecret + "\x00" + path
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, AssetSelectionItem{
+			Name:  path,
+			Type:  AssetMemberTypeSecret,
+			Vault: vault,
+		})
+	}
+	return out
+}
+
 // aliasedSecretBundleNames 返回配了显式 secrets folder 别名的 bundle 名。
 // 远端 bundle 枚举只覆盖 bundle/* folder，别名 bundle 不在其中，
 // 不能因为「不在名单里」就判它远端无 secrets。
@@ -514,15 +630,30 @@ func ListEffectiveEnabledGroups(state *AssetSelectionState) []EffectiveEnabledGr
 	}
 	var groups []EffectiveEnabledGroup
 	for _, bo := range ListEnabledBundles(state) {
-		if len(bo.Members) == 0 {
+		items := vaultMemberItems(bo.Members)
+		if len(items) == 0 {
 			continue
 		}
 		groups = append(groups, EffectiveEnabledGroup{
 			Label: "bundle/" + bo.Name,
-			Items: append([]AssetSelectionItem(nil), bo.Members...),
+			Items: items,
 		})
 	}
 	return groups
+}
+
+func vaultMemberItems(members []AssetSelectionItem) []AssetSelectionItem {
+	if len(members) == 0 {
+		return nil
+	}
+	out := make([]AssetSelectionItem, 0, len(members))
+	for _, item := range members {
+		if item.Type == AssetMemberTypeSecret {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func effectiveAssetKey(item AssetSelectionItem) string {

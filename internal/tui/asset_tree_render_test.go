@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/shichao402/Dec/internal/app"
 )
 
 func TestRenderAssetList_SelectedRowNotDuplicated(t *testing.T) {
@@ -41,4 +43,75 @@ func TestRenderAssetList_DoesNotRenderCrossPlaneUserTag(t *testing.T) {
 	if strings.Contains(page, "本机启用") || strings.Contains(page, "pull 为并集") {
 		t.Fatalf("摘要不应再提示跨平面并集:\n%s", page)
 	}
+}
+
+func TestFormatAssetBundleLabel_IncludesSecretMembers(t *testing.T) {
+	got := formatAssetBundleLabel(app.AssetBundleOption{
+		Name:  "agents-board",
+		Vault: "agents-board",
+		Members: []app.AssetSelectionItem{
+			{Name: "board", Type: "skill", Vault: "agents-board"},
+			{Name: ".env/foo.env", Type: app.AssetMemberTypeSecret, Vault: "agents-board"},
+			{Name: ".sshkey/deploy", Type: app.AssetMemberTypeSecret, Vault: "agents-board"},
+		},
+	})
+	if got != "agents-board · 3 个成员" {
+		t.Fatalf("label = %q", got)
+	}
+
+	secretsOnly := formatAssetBundleLabel(app.AssetBundleOption{
+		Name:        "pkv",
+		SecretsOnly: true,
+		Members:     []app.AssetSelectionItem{{Name: ".env/pkv.env", Type: app.AssetMemberTypeSecret, Vault: "pkv"}},
+	})
+	if secretsOnly != "pkv · 仓库未登记 · 1 个成员" {
+		t.Fatalf("secrets-only label = %q", secretsOnly)
+	}
+}
+
+func TestBuildAssetTreeRoots_ExpandsSecretPaths(t *testing.T) {
+	m := newModel("/tmp/dec-project", "v1.0.0")
+	m.assets = &app.AssetSelectionState{
+		Bundles: []app.AssetBundleOption{
+			{
+				Name:  "agents-board",
+				Vault: "agents-board",
+				Members: []app.AssetSelectionItem{
+					{Name: "board", Type: "skill", Vault: "agents-board"},
+					{Name: ".env/foo.env", Type: app.AssetMemberTypeSecret, Vault: "agents-board"},
+					{Name: ".sshkey/deploy", Type: app.AssetMemberTypeSecret, Vault: "agents-board"},
+				},
+			},
+		},
+	}
+	roots := m.buildAssetTreeRoots()
+	if len(roots) != 1 {
+		t.Fatalf("roots = %d", len(roots))
+	}
+	labels := collectTreeLabels(roots[0])
+	for _, want := range []string{"agents-board · 3 个成员", "skills", "board", ".env", "foo.env", ".sshkey", "deploy"} {
+		if !containsLabel(labels, want) {
+			t.Fatalf("树缺少 %q: %v", want, labels)
+		}
+	}
+}
+
+func collectTreeLabels(node *TreeNode) []string {
+	if node == nil {
+		return nil
+	}
+	out := []string{node.Label}
+	for _, child := range node.Children {
+		out = append(out, collectTreeLabels(child)...)
+	}
+	return out
+}
+
+func containsLabel(labels []string, want string) bool {
+	for _, label := range labels {
+		if label == want {
+			return true
+		}
+	}
+	return false
 }

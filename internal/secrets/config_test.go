@@ -327,3 +327,62 @@ func TestForgetSecretBundles_RemovesIdempotent(t *testing.T) {
 		t.Fatalf("KnownSecretBundleNames = %#v", got)
 	}
 }
+
+func TestRememberSecretBundleMembers_OverwritesAndClears(t *testing.T) {
+	decHome := t.TempDir()
+	t.Setenv("DEC_HOME", decHome)
+
+	if err := RememberSecretBundleMembers("agents-board", []string{".env/foo.env", ".sshkey/deploy", ".env/foo.env"}); err != nil {
+		t.Fatalf("RememberSecretBundleMembers() = %v", err)
+	}
+	got := SecretBundleMembers("agents-board")
+	if len(got) != 2 || got[0] != ".env/foo.env" || got[1] != ".sshkey/deploy" {
+		t.Fatalf("首次缓存 = %#v", got)
+	}
+
+	if err := RememberSecretBundleMembers("bundle/agents-board", []string{".env/bar.env"}); err != nil {
+		t.Fatalf("覆盖写入 = %v", err)
+	}
+	got = SecretBundleMembers("agents-board")
+	if len(got) != 1 || got[0] != ".env/bar.env" {
+		t.Fatalf("覆盖后应只剩新路径: %#v", got)
+	}
+
+	if err := RememberSecretBundleMembers("agents-board", nil); err != nil {
+		t.Fatalf("空列表写入 = %v", err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, ok := cfg.KnownSecretBundleMembers["agents-board"]
+	if !ok {
+		t.Fatal("空远端仍应留下 key，避免下次读到陈旧路径被当成「从未刷新」")
+	}
+	if len(paths) != 0 {
+		t.Fatalf("空列表应写成 [], got %#v", paths)
+	}
+}
+
+func TestForgetSecretBundles_DropsCachedMembers(t *testing.T) {
+	decHome := t.TempDir()
+	t.Setenv("DEC_HOME", decHome)
+	if err := RememberSecretBundles([]string{"pkv", "woa"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RememberAllSecretBundleMembers(map[string][]string{
+		"pkv": {".env/keep.env"},
+		"woa": {".sshkey/deploy"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ForgetSecretBundles([]string{"pkv"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := SecretBundleMembers("pkv"); len(got) != 0 {
+		t.Fatalf("Forget 后 pkv 成员缓存应清空: %#v", got)
+	}
+	if got := SecretBundleMembers("woa"); len(got) != 1 || got[0] != ".sshkey/deploy" {
+		t.Fatalf("未 Forget 的 woa 应保留: %#v", got)
+	}
+}

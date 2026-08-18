@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/internal/repo"
@@ -21,6 +22,7 @@ const secretsConfigHeader = `# Bitwarden secrets 连接配置
 # email: 登录邮箱（web unlock 成功后自动写入）
 # project_secrets: 可选；project 级 Bitwarden folder 名，默认 = project_name
 # known_secret_bundles: 本机已知的 secrets-related bundle 名（枚举/pull 后写入，供 Settings 候选；启用缺失 vault 包时再创建）
+# known_secret_bundle_members: bundle 短名 → secrets 条目路径（Note / SSH Key 名，无正文）。有 session 刷新时覆盖写入，无权限时供 Bundles 页回填成员数
 # bundles: 可选显式别名绑定；默认同名，一般不需要
 # 用户平面启用列表已迁至 ~/.dec/config.yaml 的 enabled_bundles（ADR 0009）
 
@@ -28,12 +30,13 @@ const secretsConfigHeader = `# Bitwarden secrets 连接配置
 
 // Config 对应 ~/.dec/secrets/config.yaml。
 type Config struct {
-	ServerURL          string          `yaml:"server_url"`
-	Email              string          `yaml:"email"`
-	ProjectSecrets     string          `yaml:"project_secrets,omitempty"`
-	UserEnabledBundles []string        `yaml:"user_enabled_bundles,omitempty"` // 遗留：仅 Load 读取；Save 前清空（ADR 0009）
-	KnownSecretBundles []string        `yaml:"known_secret_bundles,omitempty"`
-	Bundles            []BundleBinding `yaml:"bundles,omitempty"`
+	ServerURL                string              `yaml:"server_url"`
+	Email                    string              `yaml:"email"`
+	ProjectSecrets           string              `yaml:"project_secrets,omitempty"`
+	UserEnabledBundles       []string            `yaml:"user_enabled_bundles,omitempty"` // 遗留：仅 Load 读取；Save 前清空（ADR 0009）
+	KnownSecretBundles       []string            `yaml:"known_secret_bundles,omitempty"`
+	KnownSecretBundleMembers map[string][]string `yaml:"known_secret_bundle_members,omitempty"`
+	Bundles                  []BundleBinding     `yaml:"bundles,omitempty"`
 }
 
 func secretsDir() (string, error) {
@@ -76,6 +79,7 @@ func LoadConfig() (*Config, error) {
 	}
 	cfg.UserEnabledBundles = NormalizeBundleNames(cfg.UserEnabledBundles)
 	cfg.KnownSecretBundles = NormalizeBundleNames(cfg.KnownSecretBundles)
+	cfg.KnownSecretBundleMembers = normalizeKnownSecretBundleMembers(cfg.KnownSecretBundleMembers)
 	applyConfigDefaults(cfg)
 	return cfg, nil
 }
@@ -88,6 +92,7 @@ func SaveConfig(cfg *Config) error {
 	}
 	cfg.UserEnabledBundles = nil
 	cfg.KnownSecretBundles = NormalizeBundleNames(cfg.KnownSecretBundles)
+	cfg.KnownSecretBundleMembers = normalizeKnownSecretBundleMembers(cfg.KnownSecretBundleMembers)
 	applyConfigDefaults(cfg)
 	path, err := ConfigPath()
 	if err != nil {
@@ -275,11 +280,147 @@ func ForgetSecretBundles(names []string) error {
 		after = append(after, name)
 	}
 	after = NormalizeBundleNames(after)
-	if equalStringSlices(before, after) {
+	membersChanged := dropKnownSecretBundleMembers(cfg, drop)
+	if equalStringSlices(before, after) && !membersChanged {
 		return nil
 	}
 	cfg.KnownSecretBundles = after
 	return SaveConfig(cfg)
+}
+
+// SecretBundleMembers 返回本机缓存的 secrets 条目路径（Note / SSH Key 名，无正文）。
+func SecretBundleMembers(bundleName string) []string {
+	cfg, err := LoadConfig()
+	if err != nil || cfg == nil {
+		return nil
+	}
+	return cfg.SecretBundleMembers(bundleName)
+}
+
+// SecretBundleMembers 返回指定 bundle 的缓存路径副本。
+func (c *Config) SecretBundleMembers(bundleName string) []string {
+	names := NormalizeBundleNames([]string{bundleName})
+	if c == nil || len(names) == 0 || len(c.KnownSecretBundleMembers) == 0 {
+		return nil
+	}
+	paths := c.KnownSecretBundleMembers[names[0]]
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, len(paths))
+	copy(out, paths)
+	return out
+}
+
+// RememberSecretBundleMembers 覆盖写入一个 bundle 的 secrets 成员路径缓存。
+// paths 为空时写成空列表，避免下次无 session 时读到陈旧路径。
+func RememberSecretBundleMembers(bundleName string, paths []string) error {
+	names := NormalizeBundleNames([]string{bundleName})
+	if len(names) == 0 {
+		return nil
+	}
+	return RememberAllSecretBundleMembers(map[string][]string{names[0]: paths})
+}
+
+// RememberAllSecretBundleMembers 覆盖写入多个 bundle 的 secrets 成员路径（一次读改写）。
+// 未出现在 members 里的既有缓存保留；出现且路径为空的写成空列表。
+func RememberAllSecretBundleMembers(members map[string][]string) error {
+	if len(members) == 0 {
+		return nil
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	if cfg.KnownSecretBundleMembers == nil {
+		cfg.KnownSecretBundleMembers = make(map[string][]string, len(members))
+	}
+	changed := false
+	for rawName, paths := range members {
+		names := NormalizeBundleNames([]string{rawName})
+		if len(names) == 0 {
+			continue
+		}
+		normalized := normalizeSecretMemberPaths(paths)
+		if normalized == nil {
+			normalized = []string{}
+		}
+		prev := cfg.KnownSecretBundleMembers[names[0]]
+		if prev != nil && equalStringSlices(prev, normalized) {
+			continue
+		}
+		cfg.KnownSecretBundleMembers[names[0]] = normalized
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return SaveConfig(cfg)
+}
+
+func dropKnownSecretBundleMembers(cfg *Config, drop map[string]struct{}) bool {
+	if cfg == nil || len(cfg.KnownSecretBundleMembers) == 0 || len(drop) == 0 {
+		return false
+	}
+	changed := false
+	for name := range drop {
+		if _, ok := cfg.KnownSecretBundleMembers[name]; !ok {
+			continue
+		}
+		delete(cfg.KnownSecretBundleMembers, name)
+		changed = true
+	}
+	if len(cfg.KnownSecretBundleMembers) == 0 {
+		cfg.KnownSecretBundleMembers = nil
+	}
+	return changed
+}
+
+func normalizeKnownSecretBundleMembers(in map[string][]string) map[string][]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(in))
+	for rawName, paths := range in {
+		names := NormalizeBundleNames([]string{rawName})
+		if len(names) == 0 {
+			continue
+		}
+		normalized := normalizeSecretMemberPaths(paths)
+		if normalized == nil {
+			normalized = []string{}
+		}
+		out[names[0]] = normalized
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeSecretMemberPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		path := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+		path = strings.TrimPrefix(path, "./")
+		if path == "" || path == "." {
+			continue
+		}
+		if _, dup := seen[path]; dup {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func equalStringSlices(left, right []string) bool {

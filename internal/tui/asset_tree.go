@@ -61,6 +61,20 @@ func (m model) buildAssetTreeRoots() []*TreeNode {
 		}
 		typeGroups := make(map[string][]int)
 		for mi, mb := range bo.Members {
+			if mb.Type == app.AssetMemberTypeSecret {
+				leaf := &TreeNode{
+					ID:         fmt.Sprintf("secret:%d", mi),
+					Label:      memberLeafLabel(mb.Type, mb.Name),
+					SelectMode: TreeSelectReadOnly,
+					Payload: assetTreePayload{
+						kind:        assetRowBundleMember,
+						bundleIndex: i,
+						memberIndex: mi,
+					},
+				}
+				insertReadOnlyTreePath(node, secretsParentSegments(mb.Name), leaf)
+				continue
+			}
 			sub := assetTypeSubDir(mb.Type)
 			typeGroups[sub] = append(typeGroups[sub], mi)
 		}
@@ -101,6 +115,9 @@ func (m model) buildAssetTreeRoots() []*TreeNode {
 }
 
 func memberLeafLabel(itemType, name string) string {
+	if itemType == app.AssetMemberTypeSecret {
+		return secretsLeafName(name)
+	}
 	segs := memberPathSegments(itemType, name)
 	if len(segs) == 0 {
 		return name
@@ -125,14 +142,18 @@ func formatAssetBundleLabel(bo app.AssetBundleOption) string {
 	if bo.OtherPlane {
 		return fmt.Sprintf("%s · 属于项目平面", bo.Name)
 	}
+	count := len(bo.Members)
 	if bo.SecretsOnly {
+		if count > 0 {
+			return fmt.Sprintf("%s · %s · %d 个成员", bo.Name, secretsOnlyBundleHint(bo), count)
+		}
 		return fmt.Sprintf("%s · %s", bo.Name, secretsOnlyBundleHint(bo))
 	}
 	label := bo.Name
 	if bo.Name != bo.Vault {
 		label = fmt.Sprintf("%s (%s)", bo.Name, bo.Vault)
 	}
-	return fmt.Sprintf("%s · %d 个成员", label, len(bo.Members))
+	return fmt.Sprintf("%s · %d 个成员", label, count)
 }
 
 func (m model) visibleAssetRows() []assetRow {

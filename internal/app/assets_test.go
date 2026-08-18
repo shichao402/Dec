@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
 
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
+	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -269,8 +271,8 @@ func TestLoadAssetSelectionDoesNotMergeUserEnabled(t *testing.T) {
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
 		"bundles/cli/rules/cli-release-rules.mdc":          "description: test\n",
-		"bundles/cli/bundle.yaml":                         "name: cli\nscope: user\nmembers:\n  - rules/cli-release-rules\n",
-		"bundles/default/bundle.yaml":                     "name: default\nscope: project\nmembers:\n  - skills/project-workflow\n",
+		"bundles/cli/bundle.yaml":                          "name: cli\nscope: user\nmembers:\n  - rules/cli-release-rules\n",
+		"bundles/default/bundle.yaml":                      "name: default\nscope: project\nmembers:\n  - skills/project-workflow\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -317,6 +319,150 @@ func TestSaveWorkspaceEnabledBundlesUserWritesGlobalConfig(t *testing.T) {
 func bundleEnabledInState(state *AssetSelectionState, name string) bool {
 	for _, bo := range state.Bundles {
 		if bo.Name == name && bo.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLoadAssetSelection_IncludesRemoteSecretMembersAndCaches(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/agents-board/skills/board/SKILL.md": "---\nname: board\n---\n",
+		"bundles/agents-board/bundle.yaml":           "name: agents-board\nscope: project\nmembers:\n  - skill/board\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{
+			NotesByFolder: map[string][]secrets.SecureNote{
+				"bundle/agents-board": {{RelativePath: ".env/foo.env"}},
+			},
+			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
+				"bundle/agents-board": {{Name: ".sshkey/deploy"}},
+			},
+		}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	state, err := LoadAssetSelection(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("LoadAssetSelection() = %v", err)
+	}
+	bo := bundleOptionByName(t, state, "agents-board")
+	if len(bo.Members) != 3 {
+		t.Fatalf("members = %#v, 期望 vault skill + 2 secrets", bo.Members)
+	}
+	if !hasMember(bo, "skill", "board") || !hasMember(bo, AssetMemberTypeSecret, ".env/foo.env") || !hasMember(bo, AssetMemberTypeSecret, ".sshkey/deploy") {
+		t.Fatalf("应包含公开成员与 secrets 路径: %#v", bo.Members)
+	}
+	cached := secrets.SecretBundleMembers("agents-board")
+	if len(cached) != 2 || cached[0] != ".env/foo.env" || cached[1] != ".sshkey/deploy" {
+		t.Fatalf("应写入 known_secret_bundle_members: %#v", cached)
+	}
+}
+
+func TestLoadAssetSelection_UsesCachedSecretMembersWithoutSession(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/agents-board/skills/board/SKILL.md": "---\nname: board\n---\n",
+		"bundles/agents-board/bundle.yaml":           "name: agents-board\nscope: project\nmembers:\n  - skill/board\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.RememberSecretBundleMembers("agents-board", []string{".env/foo.env", ".sshkey/deploy"}); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := LoadAssetSelection(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("LoadAssetSelection() = %v", err)
+	}
+	bo := bundleOptionByName(t, state, "agents-board")
+	if !hasMember(bo, AssetMemberTypeSecret, ".env/foo.env") || !hasMember(bo, AssetMemberTypeSecret, ".sshkey/deploy") {
+		t.Fatalf("无 session 时应回填缓存成员: %#v", bo.Members)
+	}
+}
+
+func TestLoadWorkspaceAssetSelection_SecretsOnlyShowsCachedMembers(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote}); err != nil {
+		t.Fatal(err)
+	}
+
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{
+			SecretBundleFolders: []string{"pkv"},
+			NotesByFolder: map[string][]secrets.SecureNote{
+				"bundle/pkv": {{RelativePath: ".env/pkv.env"}},
+			},
+		}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	state, err := LoadWorkspaceAssetSelection(NewWorkspace(WorkspaceUser, ""), nil)
+	if err != nil {
+		t.Fatalf("LoadWorkspaceAssetSelection() = %v", err)
+	}
+	bo := bundleOptionByName(t, state, "pkv")
+	if !bo.SecretsOnly {
+		t.Fatalf("pkv 应为 SecretsOnly: %#v", bo)
+	}
+	if !hasMember(bo, AssetMemberTypeSecret, ".env/pkv.env") {
+		t.Fatalf("SecretsOnly 也应列出 secrets 成员: %#v", bo.Members)
+	}
+}
+
+func TestListEffectiveEnabledAssets_SkipsSecretMembers(t *testing.T) {
+	state := &AssetSelectionState{
+		Bundles: []AssetBundleOption{
+			{
+				Name:    "vikunja",
+				Enabled: true,
+				Members: []AssetSelectionItem{
+					{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja"},
+					{Name: ".env/vikunja.env", Type: AssetMemberTypeSecret, Vault: "vikunja"},
+				},
+			},
+		},
+	}
+	got := ListEffectiveEnabledAssets(state)
+	if len(got) != 1 || got[0].Type != "skill" {
+		t.Fatalf("pull 目标集不应含 secrets 展示项: %#v", got)
+	}
+}
+
+func bundleOptionByName(t *testing.T, state *AssetSelectionState, name string) AssetBundleOption {
+	t.Helper()
+	for _, bo := range state.Bundles {
+		if bo.Name == name {
+			return bo
+		}
+	}
+	t.Fatalf("找不到 bundle %q: %#v", name, state.Bundles)
+	return AssetBundleOption{}
+}
+
+func hasMember(bo AssetBundleOption, itemType, name string) bool {
+	for _, item := range bo.Members {
+		if item.Type == itemType && item.Name == name {
 			return true
 		}
 	}
