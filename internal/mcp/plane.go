@@ -10,12 +10,14 @@ import (
 )
 
 // planeParamDoc 解释支持 both 的工具的 plane 参数（ADR 0009 二元 scope / 平面隔离）。
-const planeParamDoc = "作用平面：project=项目平面（<project>/.dec 与 <project>/.secrets，只含 scope=project 的 bundle）；" +
-	"user=用户平面（~/.dec 与 ~/.dec/secrets，只含 scope=user 的 bundle，等价 dec --user）；" +
-	"both=先 project 再 user 各执行一次并分别回报。留空默认 project。"
+// 注意：若写入 jsonschema 标签，描述不得匹配 google/jsonschema-go 的 ^[^\s]*= 前缀禁令
+//（例如整段以「作用平面：project=」开头会 panic）。
+const planeParamDoc = "作用平面：project（项目平面，<project>/.dec 与 <project>/.secrets，只含 scope=project 的 bundle）；" +
+	"user（用户平面，~/.dec 与 ~/.dec/secrets，只含 scope=user 的 bundle，等价 dec --user）；" +
+	"both（先 project 再 user 各执行一次并分别回报）。留空默认 project。"
 
 // planeParamDocSingle 解释仅支持单平面的写操作的 plane 参数。
-const planeParamDocSingle = "作用平面：project=项目平面；user=用户平面（等价 dec --user）。" +
+const planeParamDocSingle = "作用平面：project（项目平面）、user（用户平面，等价 dec --user）。" +
 	"留空默认 project；此操作一次只作用一个平面，不支持 both，请显式二选一。"
 
 // parsePlanes 解析 plane 参数为待执行平面列表；both 展开成 [project, user]。

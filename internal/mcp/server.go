@@ -132,7 +132,7 @@ func (s *Server) projectRoot() string {
 }
 
 type statusParams struct {
-	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project=项目平面；user=用户平面（等价 dec --user）。留空默认 project；不支持 both。"`
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project（项目平面）、user（用户平面，等价 dec --user）。留空默认 project；不支持 both。"`
 }
 
 func (s *Server) handleStatus(ctx context.Context, _ *mcp.CallToolRequest, in statusParams) (*mcp.CallToolResult, any, error) {
@@ -200,7 +200,7 @@ func (s *Server) handleListAssets(ctx context.Context, _ *mcp.CallToolRequest, i
 
 type setAssetsParams struct {
 	EnabledBundles []string `json:"enabled_bundles" jsonschema:"启用的 bundle 名称列表；传空数组表示全部取消"`
-	Plane          string   `json:"plane,omitempty" jsonschema:"作用平面：project=写项目 enabled_bundles；user=写用户 enabled_bundles。留空默认 project；不支持 both。"`
+	Plane          string   `json:"plane,omitempty" jsonschema:"作用平面：project（写项目 enabled_bundles）、user（写用户 enabled_bundles）。留空默认 project；不支持 both。"`
 }
 
 func (s *Server) handleSetAssets(ctx context.Context, _ *mcp.CallToolRequest, in setAssetsParams) (*mcp.CallToolResult, any, error) {

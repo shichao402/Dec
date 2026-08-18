@@ -90,13 +90,27 @@ func WrapMCPServerWithExec(projectRoot, bundle, decBin string, command string, a
 }
 
 // WrapMCPServerWithExecForPlane 显式记录 secrets 平面，避免用户级 MCP 回落到项目 secrets。
+//
+// 用户平面的 MCP 配置写进 ~/.cursor/mcp.json，对任意项目生效，${workspaceFolder} 在那里
+// 指向当前打开的项目而不是 ~/.dec，会让 bundle 产物路径解析到不存在的位置；因此该平面下
+// 占位符一律就地展开成 home 绝对路径。
 func WrapMCPServerWithExecForPlane(projectRoot, bundle string, plane secrets.SyncPlane, decBin string, command string, args []string, env map[string]string) (string, []string, map[string]string) {
 	if strings.TrimSpace(decBin) == "" {
 		decBin = "dec-exec"
 	}
 	const workspaceFolder = "${workspaceFolder}"
+	rootRef := workspaceFolder
+	if secrets.IsMachinePlane(plane) {
+		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+			rootRef = home
+		}
+	}
+	resolveRoot := func(value string) string {
+		return strings.ReplaceAll(value, workspaceFolder, rootRef)
+	}
+
 	wrappedArgs := []string{
-		"--project-root", workspaceFolder,
+		"--project-root", rootRef,
 	}
 	if secrets.IsMachinePlane(plane) {
 		wrappedArgs = append(wrappedArgs, "--plane", "user")
@@ -104,8 +118,10 @@ func WrapMCPServerWithExecForPlane(projectRoot, bundle string, plane secrets.Syn
 	if strings.TrimSpace(bundle) != "" {
 		wrappedArgs = append(wrappedArgs, "--bundle", bundle)
 	}
-	wrappedArgs = append(wrappedArgs, "--", command)
-	wrappedArgs = append(wrappedArgs, args...)
+	wrappedArgs = append(wrappedArgs, "--", resolveRoot(command))
+	for _, arg := range args {
+		wrappedArgs = append(wrappedArgs, resolveRoot(arg))
+	}
 	// 保留非密钥类显式 env 和 ${workspaceFolder}；其它 ${VAR} 占位去掉（由 dec-exec 注入）。
 	cleanEnv := make(map[string]string)
 	for k, v := range env {
@@ -113,7 +129,7 @@ func WrapMCPServerWithExecForPlane(projectRoot, bundle string, plane secrets.Syn
 		if strings.Contains(withoutWorkspace, "${") {
 			continue
 		}
-		cleanEnv[k] = v
+		cleanEnv[k] = resolveRoot(v)
 	}
 	return decBin, wrappedArgs, cleanEnv
 }

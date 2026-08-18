@@ -54,6 +54,36 @@ func TestWrapMCPServerWithExec_WrapsCommandAndStripsPlaceholders(t *testing.T) {
 	}
 }
 
+func TestWrapMCPServerWithExecForPlane_UserPlaneResolvesWorkspacePlaceholder(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("无法解析 home: %v", err)
+	}
+	_, args, env := WrapMCPServerWithExecForPlane(
+		"",
+		"tencent-cloud",
+		secrets.SyncPlaneMachine,
+		"dec-exec",
+		"node",
+		[]string{"${workspaceFolder}/.dec/cache/tencent-cloud/server/run.mjs"},
+		map[string]string{"MCP_ROOT": "${workspaceFolder}/.dec"},
+	)
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "${workspaceFolder}") {
+		t.Fatalf("用户平面不应保留 workspace 占位符: %#v", args)
+	}
+	wantEntry := home + "/.dec/cache/tencent-cloud/server/run.mjs"
+	if args[len(args)-1] != wantEntry {
+		t.Fatalf("入口路径 = %q, 期望 %q", args[len(args)-1], wantEntry)
+	}
+	if len(args) < 2 || args[0] != "--project-root" || args[1] != home {
+		t.Fatalf("--project-root 应展开成 home: %#v", args)
+	}
+	if env["MCP_ROOT"] != home+"/.dec" {
+		t.Fatalf("env 中的占位符也应展开: %#v", env)
+	}
+}
+
 func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 	root := t.TempDir()
 	bundleTarget, err := secrets.NewBundleSyncTarget("vikunja", "")
