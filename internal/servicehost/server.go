@@ -100,7 +100,12 @@ func Run(ctx context.Context, version string) error {
 	}
 	defer service.RemoveMetadata()
 
-	go pruneOrphanWorktreesAtStartup()
+	go func() {
+		for _, note := range compat.RepairOnStartup("") {
+			diag.StartupLog("compat: %s", note)
+		}
+		pruneOrphanWorktreesAtStartup()
+	}()
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- grpcServer.Serve(listener) }()

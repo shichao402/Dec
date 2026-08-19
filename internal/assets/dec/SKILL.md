@@ -7,169 +7,119 @@ description: >
 
 # Dec 代理
 
-Dec 是一个个人 AI 知识仓库，帮助你积累和复用 AI 资产（Skills、Rules、MCP 配置）。
+Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用户交互以 **TUI** 为第一入口（无参运行 `dec`）；Agent 走 **`dec-mcp`** 调本机 `dec-server`。不要发明已下线的用户面子命令（旧的 list / search / config / pull CLI）。
 
-项目里由 Dec `pull` 出来的 IDE 配置文件并不等于“禁止提交”。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 这类项目级输出，如果内容是 Dec 托管资产生成的结果，通常可以按仓库约定单独提交；敏感值应继续放在 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置里，而不是重新写回这些输出文件。
+项目里由 Dec pull 出来的 IDE 配置不等于「禁止提交」。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 这类项目级输出，如果是托管资产生成的结果，通常可以按仓库约定单独提交。敏感值放 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置，不要写回这些输出文件。
 
 ## 何时使用
 
 ### 主动建议用户的场景
 
-1. **用户在新项目中需要初始化 Dec**
-   - 运行 `dec config init` 生成项目配置，从 available 复制需要的资产到 enabled
-   - 如资产模板使用 `{{VAR_NAME}}` 占位符，编辑 `.dec/vars.yaml` 填写变量
-   - 运行 `dec pull` 拉取所有已启用的资产
-   - pull 完成后，如当前仓库会跟踪 Dec 托管的 IDE 输出，主动询问用户是否要把这些变更单独 commit 到当前仓库
+1. **新项目需要接入 Dec**
+   - TUI **Home** 初始化项目（可选套用 vault 同名 project）；Agent 用 `dec_init_project`
+   - 模板有 `{{VAR_NAME}}` 时，到 TUI **Project** 页按 `e` 编辑 `.dec/vars.yaml`
+   - TUI **Bundles** 勾选并保存；Agent 用 `dec_set_assets` 后 `dec_pull`（`plane=project`）
+   - pull 后若仓库跟踪 Dec 托管的 IDE 输出，询问是否单独 commit
 
-2. **用户提到需要之前做过的工具/配置**
-   - 运行 `dec search "<query>"` 搜索已有资产
-   - 或用 `dec list` 列出所有资产
+2. **用户要找以前做过的工具/配置**
+   - Agent：`dec_list_assets`（`plane=project|user|both`）看已启用 bundle 与成员
+   - 用户：TUI **Bundles** 浏览/搜索
 
-3. **用户修改了已拉取的资产**
-   - 修改 `.dec/cache/` 中的缓存文件
-   - 运行 `dec push` 推送修改到远程仓库
-   - **禁止**手动去修改其他 IDE 目录中的同名文件，统一通过 dec 命令同步
+3. **用户改了已拉取的资产**
+   - 只改 `.dec/cache/`（项目）或 `~/.dec/cache/`（用户平面）
+   - TUI **Run** 页 push；Agent 用 `dec_push`（对应 `plane`）
+   - **禁止**手改其他 IDE 目录里的同名副本
 
-4. **用户需要新增资产**
-   - 如果用户是要把当前项目里已经存在的好用能力抽出来复用，优先使用 `dec-extract-asset` skill
-   - 否则按 Dec 资产流程在 `.dec/cache/<vault>/` 下创建内容
-   - 把资产写入 `.dec/config.yaml` 的 `enabled`
-   - 运行 `dec push` 推送到远程仓库
+4. **新增资产**
+   - 把当前项目里已验证的能力抽出来复用：优先 `dec-extract-asset`
+   - 否则在对应平面的 cache 下写内容，并确保目标 bundle 已启用
+   - TUI **Run** push；Agent：`dec_push`
 
-5. **用户需要从当前项目中沉淀已有能力**
-   - 优先使用 `dec-extract-asset` skill 做抽象和入库
-   - 确保结果最终落在 `.dec/cache/`，而不是只留在 IDE 目录
-   - 完成后运行 `dec push`
+5. **从当前项目沉淀已有能力**
+   - 用 `dec-extract-asset`；结果必须落到 cache，而不是只留在 IDE 目录
+   - 完成后 `dec_push` / Run 页 push
 
-6. **用户需要删除远程资产**
-   - 运行 `dec push --remove <type> <name>` 删除（需交互确认）
+6. **删除远端或本机托管资产**
+   - TUI **Remote** / **Run**；Agent 先 `dec_list_delete_candidates`，再 `dec_delete`（`confirmed=true`，一次一个平面）
 
-7. **用户刚执行完 `dec pull`**
-   - 检查当前项目仓库里由 Dec 托管的项目级 IDE 输出是否有变更，例如 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json`
-   - 默认把这类变更视为“可以提交，但应单独提交”的候选，而不是和业务代码混在同一笔提交里
-   - 主动询问用户是否要顺手创建一笔独立 commit；如果用户同意，再继续提交
-   - `.dec/vars.yaml`、用户本机配置、或任何看起来像密钥/口令的内容，不要因为这条规则就自动纳入提交
+7. **刚 pull 完**
+   - 检查 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 等项目级 IDE 输出
+   - 适合单独提交，不要和业务代码混在一笔里
+   - `.dec/vars.yaml`、本机配置、密钥类内容不要因为这条规则自动纳入
 
-8. **命令尾部出现「Dec 资产已落后远端」提示时**
-   - 触发信号：任意 `dec` 命令（`dec pull` / `dec push` 等同步类除外）在 stderr 输出一行形如 `💡 当前项目的 Dec 资产已落后远端（本地 <hash>，远端 <hash>）。执行 \`dec pull\` 可更新。` 的提示
-   - 推荐应对流程：
-     1. 先检查 `.dec/cache/` 是否有未 commit 的本地修改。如果有，要么先 `dec push` 把修改推上去，要么 `git stash` 暂存，避免 `dec pull` 触发合并冲突
-     2. 执行 `dec pull` 拉取最新资产
-     3. 查看 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 等 IDE 输出目录的 diff
-     4. 按第 7 条询问用户是否把 IDE 渲染产物单独 commit 到当前仓库
-   - 什么时候**不用**立刻更新：
-     - 用户正在关键路径（紧急修复、演示前）中，这条提示可以先搁置
-     - 提示来自 24h 节流周期的首次探测，资产差距可能只是小幅更新，用户可稍后处理
-   - 如何关掉这条提示：
-     - 临时关闭：`export DEC_FRESHNESS_CHECK=off`
-     - 调整节流：`export DEC_FRESHNESS_INTERVAL=7d` 等（接受 Go `time.ParseDuration` 格式）
+8. **命令尾部出现「Dec 资产已落后远端」**
+   - 任意 `dec` 启动（pull/push 等同步类除外）可能在 stderr 打 freshness 提示
+   - 先看 cache 有没有未推本地改动：有则先 push 或 stash，再 pull
+   - TUI **Run** pull，或 Agent `dec_pull`
+   - 再按第 7 条处理 IDE 输出 diff
+   - 关键路径可先搁置；临时关闭：`DEC_FRESHNESS_CHECK=off`
 
-## 快速参考
+## Agent MCP 快速参考
 
-### 资产管理
+当前平面用 `plane=project`（项目内 IDE 目录）或 `plane=user`（`~` 用户级 IDE 目录）。`dec --user` 对应 user 平面。
 
-| 操作 | 命令 | 说明 |
-|------|------|------|
-| 列出所有资产 | `dec list` | 显示仓库中的所有 Skills、Rules、MCP |
-| 搜索资产 | `dec search "<query>"` | 按资产名称搜索 |
-| 拉取资产 | `dec pull` | 拉取 config.yaml 中所有已启用的资产 |
-| 新增资产 | `dec push` | 先在 `.dec/config.yaml` 和 `.dec/cache/` 中写好资产，再推送 |
-| 拉取指定版本 | `dec pull --version <ref>` | 拉取指定 commit/tag 版本 |
-| 推送修改 | `dec push` | 将缓存中的修改推回远程仓库 |
-| 删除远程资产 | `dec push --remove <type> <name>` | 需交互确认 |
+| 目的 | 工具 |
+|------|------|
+| 状态 | `dec_status` |
+| 已启用 bundle / 成员 | `dec_list_assets` |
+| 改启用列表 | `dec_set_assets`（不支持 both；改完通常再 `dec_pull`） |
+| 拉取并渲染 | `dec_pull` |
+| 推回远端 | `dec_push`；先可用 `dec_preview_push` |
+| 私密资产元数据 | `dec_list_secrets`（绝不返回正文/密钥） |
+| 删除候选 / 删除 | `dec_list_delete_candidates` / `dec_delete` |
+| 连仓库 | `dec_connect_repo` |
+| 初始化项目 | `dec_init_project` |
 
-补充：`dec pull` 后，如果当前仓库希望跟踪 Dec 托管的 IDE 配置，agent 应询问用户是否要把这些变更单独 commit；推荐与业务代码分开提交。
+env 注入给子进程用独立程序 `dec-exec`，不经过 `dec-server`、不是用户面入口。
 
-### 配置和初始化
+## 用户 TUI 入口
 
-| 操作 | 命令 | 说明 |
-|------|------|------|
-| 连接仓库 | TUI Settings 页 | 配置 Repo URL |
-| 配置全局 IDE | `dec config global` | 为本机 IDE 安装 Dec 内置 Skills，并创建 `~/.dec/local/vars.yaml` 模板 |
-| 初始化项目 | `dec config init` | 生成项目配置和 `.dec/vars.yaml` 模板，选择启用的资产 |
-| 查看配置 | `dec config show` | 显示全局和项目配置 |
+| 操作 | 页面 |
+|------|------|
+| 连接仓库 / 全局 IDE / Bitwarden / 本机 vars | **Settings** |
+| 项目初始化 | **Home** |
+| 勾选 bundle | **Bundles**（`dec --user` 的 Bundles 管用户平面启用） |
+| 项目变量 | **Project**（用户平面无此页） |
+| pull / push / remove / 自更新 `u` | **Run** |
+| 远端浏览、登记、删除 | **Remote** |
 
-## 配置文件格式
+## 配置要点
 
-项目配置位于 `.dec/config.yaml`，当前版本为 `v2`，资产以 **bundle** 为单位启用：
+项目：`<project>/.dec/config.yaml` 的 `enabled_bundles`。用户平面：`~/.dec/config.yaml` 的 `enabled_bundles`（`scope: user`）。成员随 bundle 拉取，不能单资产启用。
 
 ```yaml
 version: v2
-
-project_name: my-app  # 引用 vault 中的 projects/my-app.yaml
-
-ides:               # 可选；当前项目覆盖全局 IDE 列表
+project_name: my-app
+ides:                 # 可选；覆盖全局 IDE
   - cursor
-  - codex
-
-editor: code --wait # 可选；也可写成 vim / vi
-
-enabled_bundles:    # 唯一的资产启用入口，短名与 vault 中的 bundles/<name>/ 对应
+enabled_bundles:
   - my-vault
-  - vikunja
 ```
 
-- `enabled_bundles` 是唯一的启用入口；bundle 成员随 bundle 一并拉取，不能单独启用或排除
-- 早期版本的 `available` / `enabled` 字段已移除；读到旧配置时 Dec 会把 `enabled` 涉及的 vault 折叠成 bundle 引用并回写，`available` 直接丢弃
-- 读取到没有 `version` 的旧配置时，Dec 会按 `v1` 自动迁移到 `v2` 后再继续执行
-- `ides` 可选，填写当前项目要部署到的 IDE 列表；不写则继承全局配置
-- `editor` 可选，项目级可覆盖全局交互式编辑器
-- pull 会清理不再属于任何已启用 bundle 的旧资产
-- 对于 Claude / Claude Internal，项目级输出统一写入 `.claude/`；只有用户级目录仍然区分 `~/.claude/` 与 `~/.claude-internal/`。
-- 对于 Codex / Codex Internal，项目级输出统一写入 `.codex/`；其中 MCP 会写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。只有用户级目录仍然区分 `~/.codex/` 与 `~/.codex-internal/`。
+- 早期 `available` / `enabled` 已移除；读到旧配置会迁移
+- `ides` 不写则继承 Settings 全局列表
+- pull 会清掉不在本次启用目标集里的 cache / IDE 托管副本（secrets/SSH 仅在远端对照成功时 prune）
+- Claude / Codex 项目级统一 `.claude/`、`.codex/`；用户级仍区分 `~/.claude-internal`、`~/.codex-internal`
 
 ## 占位符变量
 
-资产模板中可以使用 `{{VAR_NAME}}` 占位符，`dec pull` 时会替换为实际值。
-变量名必须以大写字母开头，只能包含大写字母、数字和下划线。
+模板里的 `{{VAR_NAME}}` 在 pull 时替换。须大写字母开头，只含大写字母、数字、下划线。
 
-变量优先级如下：
+优先级：
 
-1. `.dec/vars.yaml` 中的 `assets.<type>.<name>.vars`
-2. `.dec/vars.yaml` 中的 `vars`
-3. `~/.dec/local/vars.yaml` 中的 `vars`
+1. `.dec/vars.yaml` 的 `assets.<type>.<name>.vars`
+2. `.dec/vars.yaml` 的 `vars`
+3. `~/.dec/local/vars.yaml` 的 `vars`
 
-- `dec config global` 会创建 `~/.dec/local/vars.yaml` 模板，适合存放机器级敏感变量。
-- `dec config init` 会创建 `.dec/vars.yaml` 模板，适合项目级变量和按资产覆盖的变量。
+Settings 可编辑本机 vars；Project 页编辑项目 vars。缺失变量会提示并保留占位符。
 
-- 只把确实会按项目变化、且必须保留的值做成占位符，例如默认项目名、目录、URL。
-- 稳定的流程词汇或共享约定，例如固定 bucket 名、固定 label 名，不要默认变量化。
+## 新增资产（cache，不是 IDE 目录）
 
+推送源是 cache，不是 `.cursor/` 等渲染副本。
 
-示例：
-
-```yaml
-vars:
-  API_BASE_URL: "https://api.example.com"
-
-assets:
-  mcp:
-    my-mcp:
-      vars:
-        API_TOKEN: "<TOKEN>"
-```
-
-如果变量缺失，pull 时会提示，并保留原始 `{{VAR_NAME}}` 不替换。
-
-## 新增资产
-
-当前 `dec push` 的推送源是项目中的 `.dec/cache/`，不是 IDE 目录。
-也就是说，可以直接在已初始化项目的 `.dec/` 目录中组织并编写资产，然后执行 `dec push`。
-
-推荐流程：
-
-1. 先确保项目已经执行过 `dec config init`。
-2. 编辑 `.dec/config.yaml`，确认目标 bundle 在 `enabled_bundles` 中。
-   例如：
-
-   ```yaml
-   version: v2
-
-   enabled_bundles:
-     - my-vault
-   ```
-3. 在 `.dec/cache/<vault>/bundles/<name>/bundle.yaml` 中把新资产登记为 bundle 成员，否则 pull 不会下发。
-4. 在 `.dec/cache/` 下按类型创建资产文件：
+1. 项目已初始化（Home / `dec_init_project`）
+2. 目标 bundle 在对应平面 `enabled_bundles` 中
+3. cache 里登记 bundle 成员并写文件：
 
 ```text
 .dec/cache/<vault>/skills/<name>/SKILL.md
@@ -177,63 +127,31 @@ assets:
 .dec/cache/<vault>/mcp/<name>.json
 ```
 
-5. 如果模板里使用了 `{{VAR_NAME}}`，编辑 `.dec/vars.yaml` 或 `~/.dec/local/vars.yaml`。
-6. 运行 `dec push` 推送到远程仓库。
+用户平面把 `.dec/cache` 换成 `~/.dec/cache`。
+4. 有占位符则补 vars
+5. Run 页或 `dec_push`
 
-不要直接在 `.cursor/`、`.codex/` 等 IDE 目录里创建资产；这些目录只是 pull 后的部署结果，`dec push` 不会从那里读取新资产。
-
-但这不等于这些目录永远不能提交。如果它们是 Dec 托管资产生成的项目级输出，而且敏感值已经通过 vars / 本机配置抽离，那么可以按仓库约定把它们作为独立 commit 纳入当前项目；只是不要把它们当作新增资产的来源。
+不要把 IDE 目录当新增来源。项目级托管输出可以单独提交，只要敏感值已抽到 vars。
 
 ## 资产格式
 
-### Skill（目录）
-
-Skill 必须是一个包含 `SKILL.md` 的目录。
-
-### Rule（文件）
-
-Rule 是单个 `.mdc` 文件。
-
-### MCP（JSON 片段）
-
-MCP 必须是单个 server 片段 JSON，其中 `command` 必填，`args`、`env` 按需提供。
-
-Dec 仓库中的 MCP 资产仍然保存为 JSON 片段；部署到 Cursor / CodeBuddy / Claude / Claude Internal 等 IDE 时会写入对应的 JSON MCP 配置文件，部署到 Codex / Codex Internal 时则会转写到 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
+- **Skill**：含 `SKILL.md` 的目录
+- **Rule**：单个 `.mdc`
+- **MCP**：单个 server JSON 片段（`command` 必填）。部署到 Cursor / CodeBuddy / Claude 写 JSON；Codex 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]`
 
 ## 故障排查
 
-### "仓库未连接"
-
-在 TUI **Settings** 页配置仓库 URL。
-
-### "找不到资产"
-
-1. 确认资产名称：`dec search "<partial-name>"`
-2. 列出所有资产：`dec list`
-
-### "拉取失败"
-
-1. 检查仓库连接：`dec config show`
-2. 验证资产存在：`dec search <name>`
-3. 检查 `enabled_bundles` 是否包含目标 bundle，且该资产确实是 bundle 成员
-4. 如输出提示 `变量 {{XXX}} 未定义`，在 `.dec/vars.yaml` 或 `~/.dec/local/vars.yaml` 中补充
-
-### "没有启用任何 bundle"
-
-pull 会跳过并提示。到 TUI **Bundles** 页勾选 bundle 并按 `s` 保存，再重新执行。
+- 仓库未连接：Settings，或 `dec_connect_repo` / `dec_status`
+- 找不到资产：`dec_list_assets`；确认 bundle 已启用且成员名单包含它
+- 拉取失败：`dec_status`；检查 `enabled_bundles`；补齐未定义的 `{{VAR}}`
+- 没有启用任何 bundle：Bundles 勾选保存，或 `dec_set_assets`
 
 ## 修改资产的正确流程
 
-1. **修改 `.dec/cache/` 中的缓存文件**
-2. **推送修改**：`dec push`
-3. **在其他项目中拉取**：`dec pull`
+1. 改对应平面 cache
+2. push
+3. 其他项目 / 平面再 pull
 
-如果刚执行了 `dec pull`，且当前项目希望跟踪 Dec 生成的 IDE 配置，继续动作通常是：先看 diff，再问用户是否要把这些项目级输出单独 commit。
+刚 pull 完且仓库跟踪 IDE 输出：先看 diff，再问是否单独 commit。
 
-如果是因为看到「Dec 资产已落后远端」提示才来做同步，参考「主动建议用户的场景 → 8」的应对流程。
-
-**禁止**：直接操作 `~/.dec/repo.git` 或其他底层目录。所有操作必须通过 `dec` CLI 完成。
-
-## 更多信息
-
-运行 `dec --help` 查看完整帮助。
+**禁止**直接操作 `~/.dec/repo.git` 或手改托管 IDE 副本。Agent 用 MCP；真人用 TUI。

@@ -1,6 +1,9 @@
 package assets
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestGlobalAssetsIncludeBuiltinSkills(t *testing.T) {
 	bundle := GlobalAssets()
@@ -28,6 +31,34 @@ func TestGlobalAssetsIncludeBuiltinSkills(t *testing.T) {
 	for name, ok := range want {
 		if !ok {
 			t.Fatalf("内置 skill %s 缺少 SKILL.md 或未注册", name)
+		}
+	}
+}
+
+func TestBuiltinDecSkillUsesTUIMCPSurface(t *testing.T) {
+	bundle := GlobalAssets()
+	var body string
+	for _, skill := range bundle.Skills {
+		if skill.Name != "dec" {
+			continue
+		}
+		for _, file := range skill.Files {
+			if file.RelPath == "SKILL.md" {
+				body = string(file.Content)
+			}
+		}
+	}
+	if body == "" {
+		t.Fatal("缺少内置 dec/SKILL.md")
+	}
+	for _, banned := range []string{"`dec list`", "`dec search`", "`dec config init`", "`dec config global`", "`dec push --remove`", "`dec pull`"} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("内置 dec skill 仍含已下线 CLI %q", banned)
+		}
+	}
+	for _, want := range []string{"dec_pull", "dec_list_assets", "TUI"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("内置 dec skill 应包含 %q", want)
 		}
 	}
 }

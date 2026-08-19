@@ -11,22 +11,76 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/ide"
 	"github.com/shichao402/Dec/internal/secrets"
 )
 
 // RepairOnStartup 对 projectRoot 做启动修复，返回人类可读说明（可空）。
-// projectRoot 为空时直接返回；任何 I/O 错误只记入说明，不返回 error。
+// 用户平面（projectRoot 为空）仍会跑机器级条目；项目专属条目在有根目录时才跑。
+// 任何 I/O 错误只记入说明，不返回 error。
 func RepairOnStartup(projectRoot string) []string {
 	root := strings.TrimSpace(projectRoot)
-	if root == "" {
-		return nil
-	}
-
 	var notes []string
+	notes = append(notes, removeRetiredIDESkillCopies(root)...)
+	if root == "" {
+		return notes
+	}
 	notes = append(notes, removeLegacyDecConfigDir(root)...)
 	notes = append(notes, migrateSecretsConfig()...)
 	notes = append(notes, migrateLegacyLocalSecretsNotes(root)...)
 	return notes
+}
+
+// retiredIDESkillDirs 启动时从各 IDE skills 目录摘掉的托管副本名。
+// 条目失效后删掉对应名字或整段函数即可。
+var retiredIDESkillDirs = []string{
+	"dec-cli-skill",
+}
+
+func removeRetiredIDESkillCopies(projectRoot string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		if err != nil {
+			return []string{fmt.Sprintf("跳过退役 skill 清理：%v", err)}
+		}
+		return nil
+	}
+
+	var notes []string
+	seen := map[string]struct{}{}
+	for _, name := range ide.List() {
+		impl := ide.Get(name)
+		dirs := []string{impl.SkillsDirForPlane(ide.PlaneUser, "", home)}
+		if projectRoot != "" {
+			dirs = append(dirs, impl.SkillsDirForPlane(ide.PlaneProject, projectRoot, home))
+		}
+		for _, skillsDir := range dirs {
+			for _, retired := range retiredIDESkillDirs {
+				target := filepath.Join(skillsDir, retired)
+				if _, ok := seen[target]; ok {
+					continue
+				}
+				seen[target] = struct{}{}
+				if note := removeTreeIfExists(target); note != "" {
+					notes = append(notes, note)
+				}
+			}
+		}
+	}
+	return notes
+}
+
+func removeTreeIfExists(path string) string {
+	if _, err := os.Lstat(path); err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		return fmt.Sprintf("跳过清理 %s：%v", path, err)
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Sprintf("清理 %s 失败：%v", path, err)
+	}
+	return fmt.Sprintf("已删除退役 IDE 副本 %s", path)
 }
 
 func migrateSecretsConfig() []string {

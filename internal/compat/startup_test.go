@@ -3,11 +3,25 @@ package compat
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+func isolateHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("HOMEDRIVE", filepath.VolumeName(home))
+		t.Setenv("HOMEPATH", strings.TrimPrefix(home, filepath.VolumeName(home)))
+	}
+	return home
+}
+
 func TestRepairOnStartup_RemovesLegacyDecConfigDir(t *testing.T) {
+	isolateHome(t)
 	root := t.TempDir()
 	legacyDir := filepath.Join(root, ".dec", "config")
 	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
@@ -37,6 +51,7 @@ func TestRepairOnStartup_RemovesLegacyDecConfigDir(t *testing.T) {
 }
 
 func TestRepairOnStartup_IdempotentWhenAbsent(t *testing.T) {
+	isolateHome(t)
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".dec"), 0o755); err != nil {
 		t.Fatal(err)
@@ -52,15 +67,70 @@ func TestRepairOnStartup_IdempotentWhenAbsent(t *testing.T) {
 }
 
 func TestRepairOnStartup_EmptyRoot(t *testing.T) {
+	isolateHome(t)
 	if notes := RepairOnStartup(""); notes != nil {
-		t.Fatalf("空 root 应返回 nil, got %#v", notes)
+		t.Fatalf("空 root 且无退役副本时 notes 应为空, got %#v", notes)
 	}
-	if notes := RepairOnStartup("   "); notes != nil {
-		t.Fatalf("空白 root 应返回 nil, got %#v", notes)
+	if notes := RepairOnStartup("   "); len(notes) != 0 {
+		t.Fatalf("空白 root 且无退役副本时 notes 应为空, got %#v", notes)
 	}
 }
 
+func TestRepairOnStartup_RemovesRetiredCLISkillCopies(t *testing.T) {
+	home := isolateHome(t)
+	root := t.TempDir()
+	userCopy := filepath.Join(home, ".cursor", "skills", "dec-cli-skill")
+	projectCopy := filepath.Join(root, ".cursor", "skills", "dec-cli-skill")
+	keep := filepath.Join(home, ".cursor", "skills", "dec-tencent-cloud")
+	for _, dir := range []string{userCopy, projectCopy, keep} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: x\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	notes := RepairOnStartup(root)
+	if len(notes) != 2 {
+		t.Fatalf("应清理用户级+项目级各一份, notes=%#v", notes)
+	}
+	if _, err := os.Stat(userCopy); !os.IsNotExist(err) {
+		t.Fatalf("用户级 dec-cli-skill 应已删除, err=%v", err)
+	}
+	if _, err := os.Stat(projectCopy); !os.IsNotExist(err) {
+		t.Fatalf("项目级 dec-cli-skill 应已删除, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(keep, "SKILL.md")); err != nil {
+		t.Fatalf("无关 skill 应保留: %v", err)
+	}
+
+	if notes := RepairOnStartup(root); len(notes) != 0 {
+		t.Fatalf("幂等：第二次 notes 应为空, got %#v", notes)
+	}
+}
+
+func TestRepairOnStartup_EmptyRootStillClearsUserCopies(t *testing.T) {
+	home := isolateHome(t)
+	userCopy := filepath.Join(home, ".cursor", "skills", "dec-cli-skill")
+	if err := os.MkdirAll(userCopy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userCopy, "SKILL.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	notes := RepairOnStartup("")
+	if len(notes) != 1 {
+		t.Fatalf("空 projectRoot 仍应清用户级副本, notes=%#v", notes)
+	}
+	if _, err := os.Stat(userCopy); !os.IsNotExist(err) {
+		t.Fatalf("用户级副本应已删除, err=%v", err)
+	}
+}
+
+
 func TestRepairOnStartup_LeavesNonDirConfigAlone(t *testing.T) {
+	isolateHome(t)
 	root := t.TempDir()
 	decDir := filepath.Join(root, ".dec")
 	if err := os.MkdirAll(decDir, 0o755); err != nil {
