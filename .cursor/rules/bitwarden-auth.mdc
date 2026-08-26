@@ -13,7 +13,8 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 - Bitwarden session **仅在本机单例 `dec-server` 进程内存**中保存；服务进程退出即失效。TUI / MCP 门面共享服务 session，但拿不到 session 明文。
 - **禁止**将 session 持久化到磁盘：`~/.dec/secrets/session`、`BW_SESSION` 文件、或任何 env/配置文件形式的 session 缓存均不允许。
 - 不存在 `~/.dec/secrets/state.json` 之类的本地同步状态文件（已删除，见 `Documents/decisions/0001-secrets-landing-path.md`），不要为了缓存 session 而重新引入。
-- `dec-server` 内已有有效 session → 直接复用；无 session → 先尝试程序化解锁（见下），失败再阻塞等待 web unlock。
+- `dec-server` 内已有**未过期** session → 直接复用；无 session 或已过期 → 先尝试程序化解锁（见下），失败再阻塞等待 web unlock。
+- 客户端 session 默认寿命 **1 小时**（`DefaultSessionTTL`），对齐云端 Identity `access_token` 常见 `expires_in=3600`。到期后内存凭据作废，不依赖等 401。云端无法调该 TTL。个人账号的「保险库超时」只作用于官方 App，不管 Dec。
 
 ## 开发 / Agent 程序化解锁
 

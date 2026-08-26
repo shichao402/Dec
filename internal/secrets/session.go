@@ -1,18 +1,59 @@
 package secrets
 
-import "sync"
-
-var (
-	sessionMu sync.RWMutex
-	session   string
-	userKey   []byte
+import (
+	"sync"
+	"time"
 )
 
-// SetSession 写入进程内 Bitwarden session（禁止落盘）。
+// DefaultSessionTTL 对齐 Bitwarden Identity 常见的 access_token expires_in（约 3600s）。
+// 云端无法调该值；客户端到期后 HasSession 为假，须重新 EnsureSession。
+const DefaultSessionTTL = time.Hour
+
+var (
+	sessionMu       sync.Mutex
+	session         string
+	userKey         []byte
+	sessionDeadline time.Time
+	sessionNow      = time.Now
+)
+
+// SetSession 写入进程内 Bitwarden session（禁止落盘），默认 DefaultSessionTTL 后失效。
 func SetSession(token string) {
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
+	setSessionLocked(token, DefaultSessionTTL)
+}
+
+func setSessionLocked(token string, ttl time.Duration) {
 	session = token
+	if token == "" {
+		sessionDeadline = time.Time{}
+		return
+	}
+	if ttl <= 0 {
+		ttl = DefaultSessionTTL
+	}
+	sessionDeadline = sessionNow().Add(ttl)
+}
+
+func expireSessionLocked() {
+	session = ""
+	userKey = nil
+	sessionDeadline = time.Time{}
+}
+
+func dropIfSessionExpiredLocked() {
+	if session == "" {
+		return
+	}
+	if !sessionDeadline.IsZero() && !sessionNow().Before(sessionDeadline) {
+		expireSessionLocked()
+	}
+}
+
+func sessionLiveLocked() bool {
+	dropIfSessionExpiredLocked()
+	return session != ""
 }
 
 // SetUserKey 写入进程内 vault symmetric key（禁止落盘）。
@@ -30,8 +71,9 @@ func SetUserKey(key []byte) {
 
 // UserKey 返回当前进程内 vault symmetric key 副本。
 func UserKey() []byte {
-	sessionMu.RLock()
-	defer sessionMu.RUnlock()
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+	dropIfSessionExpiredLocked()
 	if len(userKey) == 0 {
 		return nil
 	}
@@ -42,19 +84,23 @@ func UserKey() []byte {
 
 // HasUserKey 判定进程内是否已有 vault symmetric key。
 func HasUserKey() bool {
-	sessionMu.RLock()
-	defer sessionMu.RUnlock()
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+	dropIfSessionExpiredLocked()
 	return len(userKey) == 64
 }
 
-// Session 返回当前进程内 session；无 session 时为空字符串。
+// Session 返回当前进程内未过期 session；无或已过期时为空字符串。
 func Session() string {
-	sessionMu.RLock()
-	defer sessionMu.RUnlock()
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+	if !sessionLiveLocked() {
+		return ""
+	}
 	return session
 }
 
-// HasSession 判定进程内是否已有 session。
+// HasSession 判定进程内是否已有未过期 session。
 func HasSession() bool {
 	return Session() != ""
 }
@@ -67,8 +113,7 @@ func InvalidateSession(rejectedToken string) bool {
 	if session == "" || session != rejectedToken {
 		return false
 	}
-	session = ""
-	userKey = nil
+	expireSessionLocked()
 	return true
 }
 
@@ -76,6 +121,5 @@ func InvalidateSession(rejectedToken string) bool {
 func ClearSession() {
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
-	session = ""
-	userKey = nil
+	expireSessionLocked()
 }

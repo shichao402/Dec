@@ -6,6 +6,8 @@
 
 - [README.md](../README.md)：项目概览与快速开始
 - [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md)：Project / bundle 与 secrets bundle 同构模型
+- [ROADMAP.md](./ROADMAP.md)：尚未排期的意向（含本机 Login with Device）
+- [research/secrets-ci-centralization.md](./research/secrets-ci-centralization.md)：密钥源唯一与 CI 下放调研（2026-08）
 - [TUI_ARCHITECTURE.md](./TUI_ARCHITECTURE.md)：TUI 页面、测试策略与入口路由
 - [schema/dec/v1/README.md](../schema/dec/v1/README.md)：Dec 配置 Protobuf schema
 - [schema/secrets/v1/README.md](../schema/secrets/v1/README.md)：Secrets bundle Protobuf schema

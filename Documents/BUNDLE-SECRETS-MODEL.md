@@ -259,7 +259,7 @@ sequenceDiagram
 
 ## Bitwarden 认证
 
-拉取 secrets 需要有效 session。认证由 **`dec-server` 进程内**触发；user / project 门面共享同一服务 session。详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)。
+拉取 secrets 需要有效 session。认证由 **`dec-server` 进程内**触发；user / project 门面共享同一服务 session。详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)。本机用 Bitwarden Login with Device（auth request）替代/并列 web unlock 见 [ROADMAP.md](./ROADMAP.md)，尚未实现。
 
 首次连接 HTTPS 私仓存在特殊自举路径（[0011](decisions/0011-private-repo-gcm-bootstrap.md)）：
 仅在 Git 明确认定认证失败且用户确认后，服务不依赖 bundle manifest，直接枚举 Bitwarden
@@ -286,6 +286,7 @@ sequenceDiagram
 - [decisions/0002-secrets-synctarget-root.md](decisions/0002-secrets-synctarget-root.md)
 - [decisions/0009-bundle-binary-scope.md](decisions/0009-bundle-binary-scope.md)
 - [decisions/0011-private-repo-gcm-bootstrap.md](decisions/0011-private-repo-gcm-bootstrap.md)
+- [research/secrets-ci-centralization.md](./research/secrets-ci-centralization.md)：CI / 机器身份 / PM vs SM（调研，非正式决策）
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)
 - [.cursor/rules/bundle-secrets-mirror.mdc](../.cursor/rules/bundle-secrets-mirror.mdc)
