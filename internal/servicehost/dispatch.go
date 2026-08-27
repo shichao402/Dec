@@ -88,8 +88,6 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.LoadWorkspaceOverviewOpts(workspace, app.OverviewLoadOpts{IncludeVaultBundles: in.IncludeVaultBundles})
 	case "load_asset_selection":
 		return app.LoadWorkspaceAssetSelection(workspace, reporter)
-	case "preview_p_migration":
-		return app.PreviewPMigration(ctx, workspace, reporter)
 	case "save_enabled_bundles":
 		var in struct {
 			EnabledProjects []string
@@ -295,18 +293,10 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 	switch operation {
 	case "pull":
 		return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
-	case "preview_p_migration":
-		return app.PreviewPMigration(ctx, workspace, reporter)
 	case "push":
 		return writer.PushWorkspace(ctx, workspace, reporter)
 	case "preview_push":
 		return app.PreviewPushWorkspaceAssets(workspace)
-	case "migrate_p":
-		var in struct{ Fingerprint string }
-		if err := decode(payload, &in); err != nil {
-			return nil, err
-		}
-		return app.RunPMigration(ctx, workspace, in.Fingerprint, reporter)
 	case "prepare_repo_gcm_bootstrap":
 		var in struct {
 			RepoURL string

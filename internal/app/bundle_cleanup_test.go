@@ -258,7 +258,7 @@ bundles:
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	_, err = PushProjectAssets(context.Background(), projectRoot, nil)
-	if err == nil || !strings.Contains(err.Error(), "普通 Push 已拒绝") {
+	if err == nil || !strings.Contains(err.Error(), "Push 已拒绝") {
 		t.Fatalf("旧结构 Push 应拒绝并引导迁移，err=%v", err)
 	}
 

@@ -101,7 +101,7 @@ func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConf
 		}
 		repoDir := tx.WorkDir()
 		if repositoryHasLegacyLayout(repoDir) {
-			return fmt.Errorf("检测到旧 projects/ 或 bundles/ 结构；请先执行 P 四象限迁移预览")
+			return fmt.Errorf("检测到旧 projects/ 或 bundles/ 结构；远端尚未完成一次性 P 迁移")
 		}
 		resolved, resolveErr := resolveDesiredAssetsForPlane(projectConfig, repoDir, workspace.EffectivePlane(), reporter)
 		if resolveErr != nil {

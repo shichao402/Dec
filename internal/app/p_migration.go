@@ -52,13 +52,14 @@ type PMigrationManifest struct {
 
 // PMigrationPlan 是完全只读的迁移预览结果，不包含任何 Bitwarden 正文。
 type PMigrationPlan struct {
-	Version        int                  `json:"version"`
-	Fingerprint    string               `json:"fingerprint"`
-	LegacyDetected bool                 `json:"legacy_detected"`
-	Manifests      []PMigrationManifest `json:"manifests,omitempty"`
-	GitMoves       []PMigrationGitMove  `json:"git_moves,omitempty"`
-	BWMoves        []PMigrationBWMove   `json:"bw_moves,omitempty"`
-	Issues         []PMigrationIssue    `json:"issues,omitempty"`
+	Version         int                  `json:"version"`
+	Fingerprint     string               `json:"fingerprint"`
+	LegacyDetected  bool                 `json:"legacy_detected"`
+	Manifests       []PMigrationManifest `json:"manifests,omitempty"`
+	GitMoves        []PMigrationGitMove  `json:"git_moves,omitempty"`
+	BWMoves         []PMigrationBWMove   `json:"bw_moves,omitempty"`
+	LegacyBWFolders []string             `json:"legacy_bw_folders,omitempty"`
+	Issues          []PMigrationIssue    `json:"issues,omitempty"`
 }
 
 func (p *PMigrationPlan) HasBlockers() bool {
@@ -177,9 +178,9 @@ func BuildPMigrationPlan(repoDir string, bw PMigrationBWSnapshot) (*PMigrationPl
 			b, ok := bundleByRaw[ref]
 			if !ok {
 				plan.Issues = append(plan.Issues, PMigrationIssue{
-					Code: "missing_reference", Severity: "error",
+					Code: "missing_reference", Severity: "warning",
 					Source: filepath.ToSlash(filepath.Join(types.VaultProjectsDir, project.FileName+".yaml")),
-					Target: ref, Message: fmt.Sprintf("project %q 引用缺失 bundle %q", project.FileName, ref),
+					Target: ref, Message: fmt.Sprintf("project %q 引用缺失 bundle %q，迁移时丢弃该 requires", project.FileName, ref),
 				})
 				continue
 			}
@@ -188,8 +189,8 @@ func BuildPMigrationPlan(repoDir string, bw PMigrationBWSnapshot) (*PMigrationPl
 			}
 			if b.Scope != types.BundleScopeProject {
 				plan.Issues = append(plan.Issues, PMigrationIssue{
-					Code: "invalid_user_reference", Severity: "error", Source: project.FileName, Target: ref,
-					Message: fmt.Sprintf("project %q 引用了 user bundle %q，无法转为 requires", project.FileName, ref),
+					Code: "invalid_user_reference", Severity: "warning", Source: project.FileName, Target: ref,
+					Message: fmt.Sprintf("project %q 引用了 user bundle %q，不写入 requires（由本机启用）", project.FileName, ref),
 				})
 				continue
 			}
@@ -201,44 +202,90 @@ func BuildPMigrationPlan(repoDir string, bw PMigrationBWSnapshot) (*PMigrationPl
 
 	for normalized, sources := range rawByNormalized {
 		sources = uniqueSorted(sources)
-		rawNames := map[string]struct{}{}
+		lowerRaw := map[string]struct{}{}
 		for _, source := range sources {
 			_, raw, _ := strings.Cut(source, "/")
-			rawNames[raw] = struct{}{}
+			lowerRaw[strings.ToLower(raw)] = struct{}{}
 		}
-		if len(rawNames) > 1 {
+		if len(lowerRaw) > 1 {
 			plan.Issues = append(plan.Issues, PMigrationIssue{
 				Code: "case_normalization_collision", Severity: "error",
 				Source: strings.Join(sources, ", "), Target: normalized,
 				Message: fmt.Sprintf("多个旧名称规范到同一 P %q", normalized),
 			})
-		}
-	}
-
-	for name, manifest := range manifestByName {
-		if existingPathExists(repoDir, filepath.ToSlash(filepath.Join(name, types.ProjectManifestFileName))) {
+		} else if len(sources) > 1 {
 			plan.Issues = append(plan.Issues, PMigrationIssue{
-				Code: "target_exists", Severity: "error", Target: name,
-				Message: fmt.Sprintf("目标 P %q 已存在，拒绝覆盖", name),
+				Code: "name_merged", Severity: "info",
+				Source: strings.Join(sources, ", "), Target: normalized,
+				Message: fmt.Sprintf("大小写不同的旧名称将合并为 P %q", normalized),
 			})
 		}
-		plan.Manifests = append(plan.Manifests, manifest)
 	}
 
-	for folder, contents := range bw.Folders {
+	legacyBWFolders := map[string]struct{}{}
+	// 按 folder 名排序迭代：同一 P 可能同时来自 bundle/<name> 与裸 folder，
+	// map 随机顺序会让 manifest Title 与去重结果漂移，指纹自校验永远失败。
+	bwFolderNames := make([]string, 0, len(bw.Folders))
+	for folder := range bw.Folders {
+		bwFolderNames = append(bwFolderNames, folder)
+	}
+	sort.Strings(bwFolderNames)
+	for _, folder := range bwFolderNames {
+		contents := bw.Folders[folder]
 		target, ok := legacyBWTarget(folder, projectNames, bundleByRaw)
 		if !ok {
 			clean := strings.Trim(strings.ReplaceAll(strings.TrimSpace(folder), "\\", "/"), "/")
-			if strings.HasPrefix(strings.ToLower(clean), "bundle/") {
-				plan.LegacyDetected = true
-				plan.Issues = append(plan.Issues, PMigrationIssue{
-					Code: "missing_bw_owner", Severity: "error", Source: folder,
-					Message: fmt.Sprintf("Bitwarden folder %q 没有对应的旧 bundle 声明", folder),
-				})
+			if _, _, isP := secrets.ParsePFolder(clean); isP {
+				continue
 			}
+			if orphan, orphanOK := orphanBWTarget(clean); orphanOK {
+				plan.LegacyDetected = true
+				legacyBWFolders[folder] = struct{}{}
+				target = orphan
+				ok = true
+				name := strings.Split(orphan, "/")[0]
+				if _, exists := manifestByName[name]; !exists {
+					manifestByName[name] = PMigrationManifest{Name: name, Title: clean}
+				}
+				plan.Issues = append(plan.Issues, PMigrationIssue{
+					Code: "orphan_bw_folder", Severity: "info", Source: folder, Target: target,
+					Message: fmt.Sprintf("无 vault 声明的 folder %q 迁入 %s", folder, target),
+				})
+			} else if strings.HasPrefix(strings.ToLower(clean), "bundle/") {
+				raw := clean[len("bundle/"):]
+				if len(clean) >= 7 && strings.EqualFold(clean[:7], "bundle/") {
+					raw = clean[7:]
+				}
+				name := NormalizeLegacyPName(raw)
+				if name != "" && types.IsValidPName(name) {
+					plan.LegacyDetected = true
+					legacyBWFolders[folder] = struct{}{}
+					target = name + "/private/user"
+					ok = true
+					if _, exists := manifestByName[name]; !exists {
+						manifestByName[name] = PMigrationManifest{Name: name, Title: raw}
+					}
+					plan.Issues = append(plan.Issues, PMigrationIssue{
+						Code: "orphan_bw_bundle", Severity: "info", Source: folder, Target: target,
+						Message: fmt.Sprintf("无 vault 声明的 %q 按 user secrets 迁入 %s", folder, target),
+					})
+				} else {
+					plan.LegacyDetected = true
+					plan.Issues = append(plan.Issues, PMigrationIssue{
+						Code: "missing_bw_owner", Severity: "error", Source: folder,
+						Message: fmt.Sprintf("Bitwarden folder %q 没有对应的旧 bundle 声明", folder),
+					})
+					continue
+				}
+			} else {
+				continue
+			}
+		}
+		if !ok {
 			continue
 		}
 		plan.LegacyDetected = true
+		legacyBWFolders[folder] = struct{}{}
 		for _, path := range contents.Notes {
 			clean, pathErr := migrationLogicalPath(path)
 			if pathErr != nil {
@@ -262,6 +309,14 @@ func BuildPMigrationPlan(repoDir string, bw PMigrationBWSnapshot) (*PMigrationPl
 			plan.BWMoves = append(plan.BWMoves, PMigrationBWMove{SourceFolder: folder, TargetFolder: target, Path: clean, Kind: "sshkey"})
 		}
 	}
+	plan.Manifests = nil
+	for _, manifest := range manifestByName {
+		plan.Manifests = append(plan.Manifests, manifest)
+	}
+	for folder := range legacyBWFolders {
+		plan.LegacyBWFolders = append(plan.LegacyBWFolders, folder)
+	}
+	dedupeBWMoves(plan)
 	checkMigrationTargetConflicts(repoDir, bw, plan)
 	sortMigrationPlan(plan)
 	plan.Fingerprint = migrationFingerprint(plan)
@@ -357,23 +412,64 @@ func readLegacyBundles(repoDir string) ([]legacyBundle, error) {
 	return out, nil
 }
 
+// legacyBWTarget 按旧名排序查找，保证同名不同大小写时映射结果稳定。
 func legacyBWTarget(folder string, projects map[string]string, bundles map[string]legacyBundle) (string, bool) {
 	clean := strings.Trim(strings.ReplaceAll(strings.TrimSpace(folder), "\\", "/"), "/")
 	if strings.HasPrefix(strings.ToLower(clean), "bundle/") {
 		raw := clean[len("bundle/"):]
-		for oldName, b := range bundles {
-			if strings.EqualFold(oldName, raw) && b.Normalized != "" {
+		for _, oldName := range sortedKeys(bundles) {
+			if b := bundles[oldName]; strings.EqualFold(oldName, raw) && b.Normalized != "" {
 				return b.Normalized + "/private/" + string(b.Scope), true
 			}
 		}
 		return "", false
 	}
-	for raw, normalized := range projects {
-		if strings.EqualFold(clean, raw) && normalized != "" {
+	for _, raw := range sortedKeys(projects) {
+		if normalized := projects[raw]; strings.EqualFold(clean, raw) && normalized != "" {
 			return normalized + "/private/project", true
 		}
 	}
 	return "", false
+}
+
+func sortedKeys[V any](values map[string]V) []string {
+	out := make([]string, 0, len(values))
+	for key := range values {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func orphanBWTarget(folder string) (string, bool) {
+	if folder == "" || strings.Contains(folder, "/") {
+		return "", false
+	}
+	name := NormalizeLegacyPName(folder)
+	if name == "" || !types.IsValidPName(name) {
+		return "", false
+	}
+	return name + "/private/project", true
+}
+
+func dedupeBWMoves(plan *PMigrationPlan) {
+	seen := map[string]PMigrationBWMove{}
+	var out []PMigrationBWMove
+	for _, move := range plan.BWMoves {
+		key := strings.ToLower(move.Kind + ":" + move.TargetFolder + "/" + move.Path)
+		if prev, ok := seen[key]; ok {
+			plan.Issues = append(plan.Issues, PMigrationIssue{
+				Code: "duplicate_bw_source", Severity: "info",
+				Source:  prev.SourceFolder + " ↔ " + move.SourceFolder,
+				Target:  move.TargetFolder + "/" + move.Path,
+				Message: fmt.Sprintf("重复 BW 项只迁移一次：%s", move.TargetFolder+"/"+move.Path),
+			})
+			continue
+		}
+		seen[key] = move
+		out = append(out, move)
+	}
+	plan.BWMoves = out
 }
 
 func checkMigrationTargetConflicts(repoDir string, bw PMigrationBWSnapshot, plan *PMigrationPlan) {
@@ -398,12 +494,13 @@ func checkMigrationTargetConflicts(repoDir string, bw PMigrationBWSnapshot, plan
 		} else {
 			bwTargets[key] = source
 		}
-		if existing, ok := bw.Folders[move.TargetFolder]; ok {
-			for _, path := range append(append([]string{}, existing.Notes...), existing.SSHKeys...) {
-				if strings.EqualFold(cleanLogicalPath(path), move.Path) {
-					addTargetConflict(plan, source, "existing Bitwarden", move.TargetFolder+"/"+move.Path)
-				}
-			}
+		if existing, ok := bw.Folders[move.TargetFolder]; ok && bwFolderHasPath(existing, move.Path) {
+			plan.Issues = append(plan.Issues, PMigrationIssue{
+				Code: "already_migrated_bw", Severity: "info", Source: source,
+				Target:  move.TargetFolder + "/" + move.Path,
+				Message: fmt.Sprintf("目标已有 %s，跳过写入并删除旧项", move.TargetFolder+"/"+move.Path),
+			})
+			continue
 		}
 		// BW 目标映射到 P/private/<plane>/<path>，不得与 Git 已有或待迁文件重叠。
 		logical := strings.ToLower(move.TargetFolder + "/" + move.Path)
@@ -431,6 +528,16 @@ func addTargetConflict(plan *PMigrationPlan, a, b, target string) {
 func existingPathExists(root, rel string) bool {
 	_, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
 	return err == nil
+}
+
+func bwFolderHasPath(folder PMigrationBWFolder, path string) bool {
+	want := strings.ToLower(cleanLogicalPath(path))
+	for _, name := range append(append([]string{}, folder.Notes...), folder.SSHKeys...) {
+		if strings.ToLower(cleanLogicalPath(name)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func cleanLogicalPath(path string) string {
@@ -478,6 +585,7 @@ func sortMigrationPlan(plan *PMigrationPlan) {
 		a, b := plan.BWMoves[i], plan.BWMoves[j]
 		return a.TargetFolder+"/"+a.Path+"/"+a.Kind < b.TargetFolder+"/"+b.Path+"/"+b.Kind
 	})
+	sort.Strings(plan.LegacyBWFolders)
 	sort.Slice(plan.Issues, func(i, j int) bool {
 		a, b := plan.Issues[i], plan.Issues[j]
 		return a.Severity+"/"+a.Code+"/"+a.Source < b.Severity+"/"+b.Code+"/"+b.Source
@@ -495,14 +603,12 @@ func migrationFingerprint(plan *PMigrationPlan) string {
 type PMigrationPhase string
 
 const (
-	PMigrationPending       PMigrationPhase = "pending"
-	PMigrationBackedUp      PMigrationPhase = "local_backed_up"
-	PMigrationGitPrepared   PMigrationPhase = "git_prepared"
-	PMigrationBWPrepared    PMigrationPhase = "bw_prepared"
-	PMigrationLocalSwitched PMigrationPhase = "local_switched"
-	PMigrationBWDeleted     PMigrationPhase = "legacy_bw_deleted"
-	PMigrationGitDeleted    PMigrationPhase = "legacy_git_deleted"
-	PMigrationComplete      PMigrationPhase = "complete"
+	PMigrationPending     PMigrationPhase = "pending"
+	PMigrationGitPrepared PMigrationPhase = "git_prepared"
+	PMigrationBWPrepared  PMigrationPhase = "bw_prepared"
+	PMigrationBWDeleted   PMigrationPhase = "legacy_bw_deleted"
+	PMigrationGitDeleted  PMigrationPhase = "legacy_git_deleted"
+	PMigrationComplete    PMigrationPhase = "complete"
 )
 
 type PMigrationJournal struct {
@@ -517,17 +623,15 @@ type PMigrationJournal struct {
 
 // PMigrationBackend 的每个方法都必须幂等；状态日志在每个成功步骤后原子落盘。
 type PMigrationBackend interface {
-	BackupLocal(context.Context, *PMigrationPlan) (string, error)
 	PrepareGit(context.Context, *PMigrationPlan) error
 	VerifyGit(context.Context, *PMigrationPlan) error
 	WriteBitwarden(context.Context, *PMigrationPlan) error
 	VerifyBitwarden(context.Context, *PMigrationPlan) error
-	SwitchLocal(context.Context, *PMigrationPlan, string) error
 	DeleteLegacyBitwarden(context.Context, *PMigrationPlan) error
 	DeleteLegacyGit(context.Context, *PMigrationPlan) error
 }
 
-// ExecutePMigration 从日志中的下一阶段继续；失败时保留日志和已验证的新节点，不提前删旧节点。
+// ExecutePMigration 只改 Git vault 与 Bitwarden。本地落地由新版本启动清理后重新 pull。
 func ExecutePMigration(ctx context.Context, plan *PMigrationPlan, journalPath string, backend PMigrationBackend, reporter Reporter) (*PMigrationJournal, error) {
 	if plan == nil || !plan.LegacyDetected {
 		return nil, fmt.Errorf("未检测到旧结构")
@@ -567,17 +671,6 @@ func ExecutePMigration(ctx context.Context, plan *PMigrationPlan, journalPath st
 		return nil
 	}
 	if journal.Phase == PMigrationPending {
-		if err := run(PMigrationBackedUp, func() error {
-			path, err := backend.BackupLocal(ctx, plan)
-			if err == nil {
-				journal.BackupPath = path
-			}
-			return err
-		}); err != nil {
-			return journal, err
-		}
-	}
-	if journal.Phase == PMigrationBackedUp {
 		if err := run(PMigrationGitPrepared, func() error {
 			if err := backend.PrepareGit(ctx, plan); err != nil {
 				return err
@@ -598,13 +691,6 @@ func ExecutePMigration(ctx context.Context, plan *PMigrationPlan, journalPath st
 		}
 	}
 	if journal.Phase == PMigrationBWPrepared {
-		if err := run(PMigrationLocalSwitched, func() error {
-			return backend.SwitchLocal(ctx, plan, journal.BackupPath)
-		}); err != nil {
-			return journal, err
-		}
-	}
-	if journal.Phase == PMigrationLocalSwitched {
 		if err := run(PMigrationBWDeleted, func() error { return backend.DeleteLegacyBitwarden(ctx, plan) }); err != nil {
 			return journal, err
 		}

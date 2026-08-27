@@ -270,6 +270,30 @@ func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRe
 	return c.deleteCipher(ctx, cipher.ID)
 }
 
+func (c *APIClient) DeleteFolder(ctx context.Context, folderName string) error {
+	folderName = strings.TrimSpace(folderName)
+	if folderName == "" {
+		return fmt.Errorf("folder 名不能为空")
+	}
+	if _, _, ok := ParsePFolder(folderName); ok {
+		return fmt.Errorf("拒绝删除 P folder %q", folderName)
+	}
+	userKey := UserKey()
+	if len(userKey) == 0 {
+		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
+	}
+	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	if err != nil {
+		return err
+	}
+	if folderID == "" {
+		return nil
+	}
+	c.invalidateSnapshot()
+	reqURL := strings.TrimRight(c.APIURL, "/") + "/folders/" + folderID
+	return c.doAuthenticatedJSON(ctx, http.MethodDelete, reqURL, nil, nil)
+}
+
 func (c *APIClient) createSSHKey(ctx context.Context, folderID string, userKey []byte, key SSHKeyItem) error {
 	itemKey, err := generateCipherKey()
 	if err != nil {

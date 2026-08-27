@@ -411,6 +411,27 @@ func (NoopClient) ListAllFolderNames(_ context.Context) ([]string, error) {
 	return nil, nil
 }
 
+func (c *StubClient) DeleteFolder(_ context.Context, folderName string) error {
+	folderName = strings.TrimSpace(folderName)
+	if folderName == "" {
+		return fmt.Errorf("folder 名不能为空")
+	}
+	if c == nil {
+		return nil
+	}
+	delete(c.NotesByFolder, folderName)
+	delete(c.SSHKeysByFolder, folderName)
+	kept := c.SecretBundleFolders[:0]
+	for _, folder := range c.SecretBundleFolders {
+		if strings.TrimSpace(folder) == folderName || DefaultBundleFolder(strings.TrimSpace(folder)) == folderName {
+			continue
+		}
+		kept = append(kept, folder)
+	}
+	c.SecretBundleFolders = kept
+	return nil
+}
+
 func (NoopClient) ListUnfiledItems(_ context.Context) ([]UnfiledItem, error) {
 	return nil, nil
 }

@@ -65,10 +65,8 @@ direct requires 的 `public/project`，不递归、不引入 user/private。Git 
 - 项目 push 只允许家 P；requires 副本不进入实际 push，也不进入 push 预览。
 - `internal/app/bundle_writer.go` 的 `PWriter` 统一承接 P 选择、push、Remote
   private 写入、delete/remove；服务端 dispatch 注入 writer，TUI/MCP 不内嵌 app。
-- 普通 push 发现非空 `projects/` 或 `bundles/` 会拒绝，并引导 Run 页 `m`。
-- Run 页迁移先流式只读 preview，再双重确认；执行日志原子落盘，每阶段幂等恢复，
-  新节点校验完成后才删除旧 BW/Git 节点。迁移只允许从项目工作区执行，并同时备份、
-  切换当前项目与本机用户平面；不会由启动、pull、push 自动执行。
+- 普通 push 发现非空 `projects/` 或 `bundles/` 会拒绝，提示远端尚未完成一次性 P 迁移。
+- 旧 Git/BW 结构由一次性远端迁移改写；新版本启动只清理本机旧 cache / `.secrets` 遗留并清空启用列表，由用户重新选择后 Pull。
 
 ## 文档边界
 

@@ -9,9 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/secrets"
-	"github.com/shichao402/Dec/internal/types"
 )
 
 func writeMigrationFile(t *testing.T, root, rel, body string) {
@@ -78,6 +76,50 @@ func TestBuildPMigrationPlan_ReportsMissingAndNormalizationCollision(t *testing.
 	}
 	if !codes["missing_reference"] || !codes["case_normalization_collision"] || !plan.HasBlockers() {
 		t.Fatalf("issues = %#v", plan.Issues)
+	}
+}
+
+func TestBuildPMigrationPlan_MergesCaseOnlyNamesAndDropsUserRequires(t *testing.T) {
+	root := t.TempDir()
+	writeMigrationFile(t, root, "projects/Dec.yaml", "name: Dec\nbundles: [tencent-cloud, pkv]\n")
+	writeMigrationFile(t, root, "bundles/dec/bundle.yaml", "name: dec\nscope: project\nmembers: []\n")
+	writeMigrationFile(t, root, "bundles/tencent-cloud/bundle.yaml", "name: tencent-cloud\nscope: user\nmembers: []\n")
+
+	plan, err := BuildPMigrationPlan(root, PMigrationBWSnapshot{Folders: map[string]PMigrationBWFolder{
+		"bundle/dec": {Notes: []string{"keys/dec-2026.private.pb"}},
+		"Dec":        {Notes: []string{"keys/dec-2026.private.pb"}},
+		"relkit":     {Notes: []string{".env/app.env"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.HasBlockers() {
+		t.Fatalf("unexpected blockers: %#v", plan.Issues)
+	}
+	codes := map[string]int{}
+	for _, issue := range plan.Issues {
+		codes[issue.Code]++
+	}
+	if codes["name_merged"] == 0 || codes["missing_reference"] == 0 || codes["invalid_user_reference"] == 0 || codes["orphan_bw_folder"] == 0 {
+		t.Fatalf("issues = %#v", plan.Issues)
+	}
+	var dec *PMigrationManifest
+	for i := range plan.Manifests {
+		if plan.Manifests[i].Name == "dec" {
+			dec = &plan.Manifests[i]
+		}
+	}
+	if dec == nil || len(dec.Requires) != 0 {
+		t.Fatalf("dec requires = %#v", dec)
+	}
+	var relkit bool
+	for _, move := range plan.BWMoves {
+		if move.TargetFolder == "relkit/private/project" {
+			relkit = true
+		}
+	}
+	if !relkit {
+		t.Fatalf("orphan folder not mapped: %#v", plan.BWMoves)
 	}
 }
 
@@ -155,9 +197,6 @@ func (b *migrationBackendStub) call(name string) error {
 	return nil
 }
 
-func (b *migrationBackendStub) BackupLocal(context.Context, *PMigrationPlan) (string, error) {
-	return "backup", b.call("backup")
-}
 func (b *migrationBackendStub) PrepareGit(context.Context, *PMigrationPlan) error {
 	return b.call("prepare-git")
 }
@@ -169,9 +208,6 @@ func (b *migrationBackendStub) WriteBitwarden(context.Context, *PMigrationPlan) 
 }
 func (b *migrationBackendStub) VerifyBitwarden(context.Context, *PMigrationPlan) error {
 	return b.call("verify-bw")
-}
-func (b *migrationBackendStub) SwitchLocal(context.Context, *PMigrationPlan, string) error {
-	return b.call("switch-local")
 }
 func (b *migrationBackendStub) DeleteLegacyBitwarden(context.Context, *PMigrationPlan) error {
 	return b.call("delete-bw")
@@ -214,7 +250,7 @@ func TestExecutePMigration_ResumesAfterFailureWithoutEarlyDelete(t *testing.T) {
 	if journal.Phase != PMigrationComplete {
 		t.Fatalf("phase = %q", journal.Phase)
 	}
-	want := []string{"write-bw", "verify-bw", "switch-local", "delete-bw", "delete-git"}
+	want := []string{"write-bw", "verify-bw", "delete-bw", "delete-git"}
 	if !reflect.DeepEqual(second.calls, want) {
 		t.Fatalf("resume calls = %#v, want %#v", second.calls, want)
 	}
@@ -231,25 +267,6 @@ func TestExecutePMigration_IsReentrantAfterComplete(t *testing.T) {
 	journal, err := ExecutePMigration(context.Background(), plan, journalPath, again, nil)
 	if err != nil || journal.Phase != PMigrationComplete || len(again.calls) != 0 {
 		t.Fatalf("journal=%#v calls=%#v err=%v", journal, again.calls, err)
-	}
-}
-
-func TestPreviewPMigration_ReturnsIncompleteJournalForProcessRestartRecovery(t *testing.T) {
-	root := t.TempDir()
-	plan := executableMigrationPlan(t)
-	path := filepath.Join(root, ".dec", "migrations", "p-four-quadrant-v1.json")
-	if err := savePMigrationJournal(path, &PMigrationJournal{
-		Version: PMigrationJournalVersion, PlanFingerprint: plan.Fingerprint,
-		Plan: plan, Phase: PMigrationGitPrepared,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := PreviewPMigration(context.Background(), NewWorkspace(WorkspaceProject, root), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Fingerprint != plan.Fingerprint {
-		t.Fatalf("recovered fingerprint=%q want=%q", got.Fingerprint, plan.Fingerprint)
 	}
 }
 
@@ -284,67 +301,92 @@ func TestLivePMigrationBackend_BitwardenUsesStubAndVerifiesBeforeDelete(t *testi
 	}
 }
 
-func TestLivePMigrationBackend_BackupAndSwitchLocalInTempWorkspace(t *testing.T) {
-	decHome := t.TempDir()
-	setEnvForProjectTest(t, "DEC_HOME", decHome)
+func TestBuildPMigrationPlan_TreatsExistingBWTargetAsAlreadyMigrated(t *testing.T) {
 	root := t.TempDir()
-	mgr := config.NewProjectConfigManager(root)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName: "My_App", EnabledBundles: []string{"My_App", "Shared_Tools"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	writeMigrationFile(t, root, ".dec/cache/My_App/rules/a.mdc", "rule")
-	writeMigrationFile(t, root, ".secrets/project/.env/app.env", "A=1")
-	writeMigrationFile(t, decHome, "cache/User_Tools/rules/u.mdc", "user rule")
-	plan := &PMigrationPlan{
-		GitMoves: []PMigrationGitMove{
-			{Source: "bundles/My_App/rules/a.mdc", Target: "my-app/public/project/rules/a.mdc"},
-			{Source: "bundles/User_Tools/rules/u.mdc", Target: "user-tools/public/user/rules/u.mdc"},
-		},
-		BWMoves: []PMigrationBWMove{{
-			SourceFolder: "My_App", TargetFolder: "my-app/private/project", Path: ".env/app.env", Kind: "note",
-		}},
-	}
-	backend := &livePMigrationBackend{workspace: NewWorkspace(WorkspaceProject, root)}
-	backup, err := backend.BackupLocal(context.Background(), plan)
+	writeMigrationFile(t, root, "bundles/app/bundle.yaml", "name: app\nscope: user\nmembers: []\n")
+
+	plan, err := BuildPMigrationPlan(root, PMigrationBWSnapshot{Folders: map[string]PMigrationBWFolder{
+		"bundle/app":              {Notes: []string{".env/app.env"}},
+		"app/private/user":        {Notes: []string{".env/app.env"}},
+		"InvestM":                 {Notes: []string{"config.yaml"}},
+		"investm/private/project": {Notes: []string{"config.yaml"}},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(backup, "config.yaml")); err != nil {
-		t.Fatalf("backup missing: %v", err)
+	if plan.HasBlockers() {
+		t.Fatalf("already-migrated target must not block: %#v", plan.Issues)
 	}
-	if err := backend.SwitchLocal(context.Background(), plan, backup); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := mgr.LoadProjectConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.ProjectName != "my-app" || !reflect.DeepEqual(cfg.EnabledBundles, []string{"my-app", "shared-tools"}) {
-		t.Fatalf("normalized config = %#v", cfg)
-	}
-	for _, rel := range []string{
-		".dec/cache/my-app/public/project/rules/a.mdc",
-		".secrets/my-app/.env/app.env",
-	} {
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
-			t.Fatalf("switched file %s missing: %v", rel, err)
+	var already int
+	for _, issue := range plan.Issues {
+		if issue.Code == "already_migrated_bw" {
+			already++
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, ".dec", "cache", "user-tools", "public", "user", "rules", "u.mdc")); !os.IsNotExist(err) {
-		t.Fatalf("user 象限不应迁入项目 cache: %v", err)
+	if already == 0 {
+		t.Fatalf("expected already_migrated_bw, got %#v", plan.Issues)
 	}
-	if _, err := os.Stat(filepath.Join(decHome, "cache", "user-tools", "public", "user", "rules", "u.mdc")); err != nil {
-		t.Fatalf("用户 cache 未切换: %v", err)
+	found := false
+	for _, folder := range plan.LegacyBWFolders {
+		if folder == "InvestM" || folder == "bundle/app" {
+			found = true
+		}
 	}
-	if _, err := os.Stat(filepath.Join(decHome, "cache", "my-app", "public", "project", "rules", "a.mdc")); !os.IsNotExist(err) {
-		t.Fatalf("project 象限不应迁入用户 cache: %v", err)
+	if !found {
+		t.Fatalf("legacy folders = %#v", plan.LegacyBWFolders)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".secrets/project")); !os.IsNotExist(err) {
-		t.Fatalf("legacy local secrets should be removed after backup, err=%v", err)
+}
+
+// 指纹必须只由远端内容决定：RunPMigration 会重做 preview 并比对指纹，
+// 任何 map 迭代顺序泄漏都会让迁移永远无法通过自校验。
+func TestBuildPMigrationPlan_FingerprintIsStableAcrossRuns(t *testing.T) {
+	root := t.TempDir()
+	snapshot := func() PMigrationBWSnapshot {
+		return PMigrationBWSnapshot{Folders: map[string]PMigrationBWFolder{
+			"bundle/dec":           {Notes: []string{"keys/dec.private.pb"}},
+			"Dec":                  {Notes: []string{"note.md"}},
+			"bundle/svnmergetool":  {Notes: []string{".env/tool.env"}},
+			"SvnMergeTool":         {Notes: []string{"config.yaml"}},
+			"bundle/tencent-cloud": {Notes: []string{".env/cloud.env"}},
+			"relkit":               {Notes: []string{".env/relkit.env"}},
+		}}
 	}
-	if _, err := os.Stat(filepath.Join(root, ".dec/cache/My_App")); !os.IsNotExist(err) {
-		t.Fatalf("legacy cache should be removed after backup, err=%v", err)
+	first, err := BuildPMigrationPlan(root, snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 8; i++ {
+		next, err := BuildPMigrationPlan(root, snapshot())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if next.Fingerprint != first.Fingerprint {
+			t.Fatalf("指纹不稳定: %q != %q", next.Fingerprint, first.Fingerprint)
+		}
+		if !reflect.DeepEqual(next.Manifests, first.Manifests) {
+			t.Fatalf("manifests 漂移:\n%#v\n%#v", next.Manifests, first.Manifests)
+		}
+	}
+}
+
+func TestLivePMigrationBackend_DeletesEmptyLegacyFolders(t *testing.T) {
+	client := &secrets.StubClient{
+		NotesByFolder: map[string][]secrets.SecureNote{
+			"Dec":              {},
+			"bundle/dec":       {},
+			"dec/private/user": {{RelativePath: "keys/dec.private.pb", Content: "x"}},
+		},
+		SecretBundleFolders: []string{"bundle/dec"},
+	}
+	plan := &PMigrationPlan{LegacyBWFolders: []string{"Dec", "bundle/dec"}}
+	backend := &livePMigrationBackend{workspace: NewWorkspace(WorkspaceProject, t.TempDir()), client: client}
+	if err := backend.DeleteLegacyBitwarden(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := client.NotesByFolder["Dec"]; ok {
+		t.Fatalf("empty legacy folder not deleted: %#v", client.NotesByFolder)
+	}
+	if _, ok := client.NotesByFolder["dec/private/user"]; !ok {
+		t.Fatal("P folder must stay")
 	}
 }

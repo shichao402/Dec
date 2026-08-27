@@ -7,11 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"time"
 
-	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
@@ -20,21 +17,6 @@ import (
 
 // PreviewPMigration 对已连接 Git vault 与 Bitwarden 仅做读取。
 func PreviewPMigration(ctx context.Context, workspace Workspace, reporter Reporter) (*PMigrationPlan, error) {
-	if journalPath, pathErr := pMigrationJournalPath(workspace); pathErr == nil {
-		if data, readErr := os.ReadFile(journalPath); readErr == nil {
-			var recovery PMigrationJournal
-			if err := json.Unmarshal(data, &recovery); err != nil {
-				return nil, fmt.Errorf("解析迁移恢复日志失败: %w", err)
-			}
-			if recovery.Version == PMigrationJournalVersion && recovery.Plan != nil && recovery.Phase != PMigrationComplete {
-				emit(reporter, EventWarn, "p.migrate.preview",
-					fmt.Sprintf("发现未完成迁移，将从阶段 %s 恢复", recovery.Phase), nil)
-				return recovery.Plan, nil
-			}
-		} else if !os.IsNotExist(readErr) {
-			return nil, readErr
-		}
-	}
 	var (
 		plan *PMigrationPlan
 		snap = PMigrationBWSnapshot{Folders: map[string]PMigrationBWFolder{}}
@@ -84,12 +66,46 @@ func PreviewPMigration(ctx context.Context, workspace Workspace, reporter Report
 	return plan, nil
 }
 
+// SyncPManifestsFromBitwarden 为已经是 P folder 的 BW 项补齐缺失的 Git dec.yaml。
+func SyncPManifestsFromBitwarden(ctx context.Context, reporter Reporter) error {
+	if err := ensureBitwardenSession(ctx, reporter, "p.migrate.manifests"); err != nil {
+		return err
+	}
+	client := secretsClientFactory()
+	folders, err := client.ListAllFolderNames(ctx)
+	if err != nil {
+		return err
+	}
+	names := map[string]struct{}{}
+	for _, folder := range folders {
+		pName, _, ok := secrets.ParsePFolder(folder)
+		if ok {
+			names[pName] = struct{}{}
+		}
+	}
+	return withAppWriteRepo(func(tx *repo.Transaction) error {
+		added := 0
+		for name := range names {
+			if _, err := pmodel.Load(tx.WorkDir(), name); err == nil {
+				continue
+			}
+			if err := pmodel.SaveManifest(tx.WorkDir(), types.P{Name: name, Title: name}); err != nil {
+				return err
+			}
+			added++
+			emit(reporter, EventInfo, "p.migrate.manifests", "补齐 P 声明："+name, nil)
+		}
+		if added == 0 {
+			return nil
+		}
+		_, err := tx.CommitAndPush("migrate: add missing P manifests from Bitwarden")
+		return err
+	})
+}
+
 // RunPMigration 执行已确认的 preview。调用前会重做只读 preview 并比对指纹，防止陈旧计划写入。
 func RunPMigration(ctx context.Context, workspace Workspace, expectedFingerprint string, reporter Reporter) (*PMigrationJournal, error) {
-	if workspace.EffectivePlane() != WorkspaceProject {
-		return nil, fmt.Errorf("P 迁移会删除全局旧远端结构，只能在项目工作区 Run 页执行，以便同时备份并切换项目与用户平面")
-	}
-	journalPath, err := pMigrationJournalPath(workspace)
+	journalPath, err := pMigrationJournalPath()
 	if err != nil {
 		return nil, err
 	}
@@ -98,16 +114,20 @@ func RunPMigration(ctx context.Context, workspace Workspace, expectedFingerprint
 		if err := json.Unmarshal(data, &recovery); err != nil {
 			return nil, fmt.Errorf("解析迁移恢复日志失败: %w", err)
 		}
-		if recovery.PlanFingerprint != strings.TrimSpace(expectedFingerprint) || recovery.Plan == nil {
-			return nil, fmt.Errorf("恢复日志与当前确认不匹配，请检查 %s", journalPath)
-		}
-		if len(recovery.Plan.BWMoves) > 0 {
-			if err := ensureBitwardenSession(ctx, reporter, "p.migrate.resume"); err != nil {
-				return nil, err
+		if recovery.Phase == PMigrationComplete {
+			_ = os.Remove(journalPath)
+		} else {
+			if recovery.PlanFingerprint != strings.TrimSpace(expectedFingerprint) || recovery.Plan == nil {
+				return nil, fmt.Errorf("恢复日志与当前确认不匹配，请检查 %s", journalPath)
 			}
+			if len(recovery.Plan.BWMoves) > 0 || len(recovery.Plan.LegacyBWFolders) > 0 {
+				if err := ensureBitwardenSession(ctx, reporter, "p.migrate.resume"); err != nil {
+					return nil, err
+				}
+			}
+			backend := &livePMigrationBackend{workspace: workspace, client: secretsClientFactory(), reporter: reporter}
+			return ExecutePMigration(ctx, recovery.Plan, journalPath, backend, reporter)
 		}
-		backend := &livePMigrationBackend{workspace: workspace, client: secretsClientFactory(), reporter: reporter}
-		return ExecutePMigration(ctx, recovery.Plan, journalPath, backend, reporter)
 	} else if !os.IsNotExist(readErr) {
 		return nil, readErr
 	}
@@ -126,13 +146,7 @@ func RunPMigration(ctx context.Context, workspace Workspace, expectedFingerprint
 	return ExecutePMigration(ctx, plan, journalPath, backend, reporter)
 }
 
-func pMigrationJournalPath(workspace Workspace) (string, error) {
-	if workspace.EffectivePlane() == WorkspaceProject {
-		if strings.TrimSpace(workspace.Root) == "" {
-			return "", config.ErrProjectRootRequired
-		}
-		return filepath.Join(workspace.Root, ".dec", "migrations", "p-four-quadrant-v1.json"), nil
-	}
+func pMigrationJournalPath() (string, error) {
 	root, err := repo.GetRootDir()
 	if err != nil {
 		return "", err
@@ -146,58 +160,14 @@ type livePMigrationBackend struct {
 	reporter  Reporter
 }
 
-func (b *livePMigrationBackend) BackupLocal(_ context.Context, _ *PMigrationPlan) (string, error) {
-	base, err := pMigrationJournalPath(b.workspace)
-	if err != nil {
-		return "", err
-	}
-	backup := filepath.Join(filepath.Dir(base), "backups", time.Now().UTC().Format("20060102T150405.000000000Z"))
-	var sources []string
-	if b.workspace.EffectivePlane() == WorkspaceProject {
-		sources = []string{
-			filepath.Join(b.workspace.Root, ".dec", "config.yaml"),
-			filepath.Join(b.workspace.Root, ".dec", "cache"),
-			filepath.Join(b.workspace.Root, secrets.SecretsRootDir),
-		}
-		root, rootErr := repo.GetRootDir()
-		if rootErr != nil {
-			return "", rootErr
-		}
-		for _, source := range []string{
-			filepath.Join(root, "config.yaml"),
-			filepath.Join(root, "cache"),
-			filepath.Join(root, "secrets"),
-		} {
-			if _, statErr := os.Stat(source); os.IsNotExist(statErr) {
-				continue
-			}
-			if err := copyTreeNoOverwrite(source, filepath.Join(backup, "user", filepath.Base(source))); err != nil {
-				return "", fmt.Errorf("备份用户平面 %s: %w", source, err)
-			}
-		}
-	} else {
-		root, rootErr := repo.GetRootDir()
-		if rootErr != nil {
-			return "", rootErr
-		}
-		sources = []string{filepath.Join(root, "config.yaml"), filepath.Join(root, "cache"), filepath.Join(root, "secrets")}
-	}
-	for _, source := range sources {
-		if _, statErr := os.Stat(source); os.IsNotExist(statErr) {
-			continue
-		}
-		if err := copyTreeNoOverwrite(source, filepath.Join(backup, filepath.Base(source))); err != nil {
-			return "", fmt.Errorf("备份 %s: %w", source, err)
-		}
-	}
-	return backup, nil
-}
-
 func (b *livePMigrationBackend) PrepareGit(ctx context.Context, plan *PMigrationPlan) error {
 	return withAppWriteRepo(func(tx *repo.Transaction) error {
 		for _, manifest := range plan.Manifests {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if _, err := pmodel.Load(tx.WorkDir(), manifest.Name); err == nil {
+				continue
 			}
 			if err := pmodel.SaveManifest(tx.WorkDir(), types.P{
 				Name: manifest.Name, Title: manifest.Title, Description: manifest.Description,
@@ -270,6 +240,9 @@ func (b *livePMigrationBackend) WriteBitwarden(ctx context.Context, plan *PMigra
 				if !ok {
 					return fmt.Errorf("旧 BW Note 已缺失: %s/%s", sourceFolder, move.Path)
 				}
+				if _, err := b.client.GetSecureNote(ctx, move.TargetFolder, move.Path); err == nil {
+					continue
+				}
 				if _, err := b.client.PushBundle(ctx, secrets.PushBundleRequest{Target: target, CreateFolderIfMissing: true}, []secrets.SecureNote{note}); err != nil {
 					return err
 				}
@@ -277,6 +250,9 @@ func (b *livePMigrationBackend) WriteBitwarden(ctx context.Context, plan *PMigra
 				key, ok := keysByPath[move.Path]
 				if !ok {
 					return fmt.Errorf("旧 BW SSH Key 已缺失: %s/%s", sourceFolder, move.Path)
+				}
+				if sshKeyExists(ctx, b.client, move.TargetFolder, move.Path) {
+					continue
 				}
 				if err := b.client.CreateSSHKey(ctx, secrets.CreateSSHKeyRequest{Target: target, Key: key, CreateFolderIfMissing: true}); err != nil &&
 					!strings.Contains(strings.ToLower(err.Error()), "已存在") {
@@ -314,53 +290,6 @@ func (b *livePMigrationBackend) VerifyBitwarden(ctx context.Context, plan *PMigr
 	return nil
 }
 
-func (b *livePMigrationBackend) SwitchLocal(_ context.Context, plan *PMigrationPlan, _ string) error {
-	if b.workspace.EffectivePlane() == WorkspaceProject {
-		mgr := config.NewProjectConfigManager(b.workspace.Root)
-		cfg, err := mgr.LoadProjectConfig()
-		if err != nil {
-			return err
-		}
-		cfg.ProjectName = NormalizeLegacyPName(cfg.ProjectName)
-		for i := range cfg.EnabledBundles {
-			cfg.EnabledBundles[i] = NormalizeLegacyPName(cfg.EnabledBundles[i])
-		}
-		cfg.EnabledBundles = uniqueSorted(cfg.EnabledBundles)
-		if err := migrateLocalTrees(b.workspace, plan); err != nil {
-			return err
-		}
-		if err := mgr.SaveProjectConfig(cfg); err != nil {
-			return err
-		}
-		// 远端旧树是全局删除的，因此同一次显式迁移还必须切换本机 user
-		// 平面的配置与落地；否则项目迁移成功后用户缓存会永久指向已删除结构。
-		global, err := config.LoadGlobalConfig()
-		if err != nil {
-			return err
-		}
-		for i := range global.EnabledBundles {
-			global.EnabledBundles[i] = NormalizeLegacyPName(global.EnabledBundles[i])
-		}
-		global.EnabledBundles = uniqueSorted(global.EnabledBundles)
-		if err := migrateLocalTrees(NewWorkspace(WorkspaceUser, ""), plan); err != nil {
-			return err
-		}
-		return config.SaveGlobalConfig(global)
-	}
-	cfg, err := config.LoadGlobalConfig()
-	if err != nil {
-		return err
-	}
-	for i := range cfg.EnabledBundles {
-		cfg.EnabledBundles[i] = NormalizeLegacyPName(cfg.EnabledBundles[i])
-	}
-	cfg.EnabledBundles = uniqueSorted(cfg.EnabledBundles)
-	if err := migrateLocalTrees(b.workspace, plan); err != nil {
-		return err
-	}
-	return config.SaveGlobalConfig(cfg)
-}
-
 func (b *livePMigrationBackend) DeleteLegacyBitwarden(ctx context.Context, plan *PMigrationPlan) error {
 	for _, move := range plan.BWMoves {
 		source, err := secrets.NewBrowseFolder(move.SourceFolder)
@@ -374,6 +303,14 @@ func (b *livePMigrationBackend) DeleteLegacyBitwarden(ctx context.Context, plan 
 		}
 		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "不在 folder") && !strings.Contains(strings.ToLower(err.Error()), "不存在") {
 			return err
+		}
+	}
+	for _, folder := range plan.LegacyBWFolders {
+		if _, _, isP := secrets.ParsePFolder(folder); isP {
+			continue
+		}
+		if err := b.client.DeleteFolder(ctx, folder); err != nil {
+			return fmt.Errorf("删除旧 BW folder %q: %w", folder, err)
 		}
 	}
 	return nil
@@ -399,113 +336,17 @@ func migrationBWMovesBySource(plan *PMigrationPlan) map[string][]PMigrationBWMov
 	return out
 }
 
-func migrateLocalTrees(workspace Workspace, plan *PMigrationPlan) error {
-	cacheRoot := workspaceCacheDir(workspace)
-	legacyCacheRoots := map[string]struct{}{}
-	for _, move := range plan.GitMoves {
-		parts := strings.Split(move.Source, "/")
-		if len(parts) < 4 || parts[0] != types.VaultBundlesDir {
-			continue
-		}
-		targetParts := strings.Split(move.Target, "/")
-		if len(targetParts) < 4 {
-			continue
-		}
-		wantPlane := string(types.AssetPlaneProject)
-		if workspace.EffectivePlane() == WorkspaceUser {
-			wantPlane = string(types.AssetPlaneUser)
-		}
-		if targetParts[2] != wantPlane {
-			continue
-		}
-		legacyCacheRoots[parts[1]] = struct{}{}
-		source := filepath.Join(cacheRoot, filepath.FromSlash(strings.Join(parts[1:], "/")))
-		target := filepath.Join(cacheRoot, filepath.FromSlash(strings.Join(targetParts, "/")))
-		if _, err := os.Stat(source); err == nil {
-			if err := copyFileNoOverwriteOrEqual(source, target); err != nil {
-				return err
-			}
-		}
-	}
-	for name := range legacyCacheRoots {
-		if err := os.RemoveAll(filepath.Join(cacheRoot, name)); err != nil {
-			return err
-		}
-	}
-	type localMove struct{ source, target string }
-	var moves []localMove
-	if workspace.EffectivePlane() == WorkspaceProject {
-		for _, bwMove := range plan.BWMoves {
-			if !strings.HasSuffix(bwMove.TargetFolder, "/private/project") {
-				continue
-			}
-			pName := strings.Split(bwMove.TargetFolder, "/")[0]
-			var sourceRoot string
-			if strings.HasPrefix(bwMove.SourceFolder, "bundle/") {
-				sourceRoot = filepath.Join(workspace.Root, secrets.BundleSecretsLocalRelPrefix, strings.TrimPrefix(bwMove.SourceFolder, "bundle/"))
-			} else {
-				sourceRoot = filepath.Join(workspace.Root, secrets.ProjectSecretsLocalRel)
-			}
-			moves = append(moves, localMove{sourceRoot, filepath.Join(workspace.Root, secrets.SecretsRootDir, pName)})
-		}
-	} else {
-		root, err := repo.GetRootDir()
-		if err != nil {
-			return err
-		}
-		for _, bwMove := range plan.BWMoves {
-			if !strings.HasSuffix(bwMove.TargetFolder, "/private/user") || !strings.HasPrefix(bwMove.SourceFolder, "bundle/") {
-				continue
-			}
-			pName := strings.Split(bwMove.TargetFolder, "/")[0]
-			moves = append(moves, localMove{
-				filepath.Join(root, "secrets", secrets.MachineBundleSecretsRelPrefix, strings.TrimPrefix(bwMove.SourceFolder, "bundle/")),
-				filepath.Join(root, "secrets", pName),
-			})
-		}
-	}
-	seen := map[string]struct{}{}
-	for _, move := range moves {
-		key := move.source + "\x00" + move.target
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		if _, err := os.Stat(move.source); os.IsNotExist(err) {
-			continue
-		}
-		if err := copyTreeNoOverwrite(move.source, move.target); err != nil {
-			return err
-		}
-		if err := os.RemoveAll(move.source); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func copyTreeNoOverwrite(source, target string) error {
-	info, err := os.Stat(source)
+func sshKeyExists(ctx context.Context, client secrets.Client, folder, path string) bool {
+	keys, err := client.ListFolderSSHKeys(ctx, folder)
 	if err != nil {
-		return err
+		return false
 	}
-	if !info.IsDir() {
-		return copyFileNoOverwriteOrEqual(source, target)
+	for _, key := range keys {
+		if cleanLogicalPath(key.Name) == path {
+			return true
+		}
 	}
-	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		dest := filepath.Join(target, rel)
-		if entry.IsDir() {
-			return os.MkdirAll(dest, 0o700)
-		}
-		return copyFileNoOverwriteOrEqual(path, dest)
-	})
+	return false
 }
 
 func copyFileNoOverwriteOrEqual(source, target string) error {
@@ -547,13 +388,4 @@ func filesEqual(a, b string) error {
 		return fmt.Errorf("目标已存在且内容不同")
 	}
 	return nil
-}
-
-func sortedMapKeys[T any](values map[string]T) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

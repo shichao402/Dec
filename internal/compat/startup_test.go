@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/shichao402/Dec/internal/secrets"
 )
 
 func isolateHome(t *testing.T) string {
@@ -128,7 +130,6 @@ func TestRepairOnStartup_EmptyRootStillClearsUserCopies(t *testing.T) {
 	}
 }
 
-
 func TestRepairOnStartup_LeavesNonDirConfigAlone(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
@@ -147,5 +148,104 @@ func TestRepairOnStartup_LeavesNonDirConfigAlone(t *testing.T) {
 	}
 	if _, err := os.Stat(configPath); err != nil {
 		t.Fatalf("非目录 config 应保留: %v", err)
+	}
+}
+
+func TestRepairOnStartup_PurgesLegacyPLayoutOnce(t *testing.T) {
+	home := isolateHome(t)
+	t.Setenv("DEC_HOME", home)
+	project := t.TempDir()
+	legacy := []string{
+		filepath.Join(home, "cache", "cnb"),
+		filepath.Join(home, "secrets", "bundles", "cnb"),
+		filepath.Join(project, ".dec", "cache", "dec"),
+		filepath.Join(project, ".secrets", "bundles", "dec"),
+		filepath.Join(project, ".dec"),
+	}
+	for _, dir := range legacy[:4] {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(project, ".dec", "config.yaml"), []byte("version: v2\nproject_name: Dec\nenabled_bundles:\n  - dec\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	notes := RepairOnStartup(project)
+	joined := strings.Join(notes, "\n")
+	if !strings.Contains(joined, "重新选择") {
+		t.Fatalf("notes = %#v", notes)
+	}
+	for _, dir := range []string{
+		filepath.Join(home, "cache"),
+		filepath.Join(home, "secrets", "bundles"),
+		filepath.Join(project, ".dec", "cache"),
+		filepath.Join(project, ".secrets", "bundles"),
+	} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("%s 应已删除, err=%v", dir, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(project, ".dec", "config.yaml")); err != nil {
+		t.Fatalf("项目配置应保留: %v", err)
+	}
+	notes = RepairOnStartup(project)
+	if len(notes) != 0 {
+		t.Fatalf("第二次应为空, got %#v", notes)
+	}
+}
+
+// 集成测试凭据放在 .secrets/dec/integration/ 下，但它不是 P 落地内容。
+// 启动清理误删会让 live 测试退回人工 web unlock。
+func TestRepairOnStartup_KeepsIntegrationAuthWhilePurgingSecrets(t *testing.T) {
+	home := isolateHome(t)
+	t.Setenv("DEC_HOME", home)
+	project := t.TempDir()
+
+	authPath := filepath.Join(project, filepath.FromSlash(secrets.IntegrationAuthRel))
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(authPath, []byte("email: t@example.com\npassword: pass\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	devicePath := filepath.Join(project, filepath.FromSlash(secrets.IntegrationDecHomeRel), "secrets", "device.json")
+	if err := os.MkdirAll(filepath.Dir(devicePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devicePath, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// 同一个 P 名下的真实落地内容仍必须被清掉。
+	stale := filepath.Join(project, ".secrets", "dec", ".env", "app.env")
+	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("TOKEN=old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(project, ".secrets", "relkit", ".env", "x.env")
+	if err := os.MkdirAll(filepath.Dir(other), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte("A=1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	RepairOnStartup(project)
+
+	if _, err := os.Stat(authPath); err != nil {
+		t.Fatalf("集成凭据必须保留: %v", err)
+	}
+	if _, err := os.Stat(devicePath); err != nil {
+		t.Fatalf("隔离 DEC_HOME 必须保留: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, ".secrets", "dec", ".env")); !os.IsNotExist(err) {
+		t.Fatalf("同 P 下的旧落地内容应删除, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, ".secrets", "relkit")); !os.IsNotExist(err) {
+		t.Fatalf("其它 P 落地内容应删除, err=%v", err)
 	}
 }

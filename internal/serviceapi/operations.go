@@ -239,17 +239,6 @@ func PreviewPushWorkspaceAssets(ctx context.Context, workspace app.Workspace, re
 	return runWorkspace[app.PushProjectAssetsPreview](ctx, "preview_push", workspace, nil, reporter)
 }
 
-func PreviewPMigration(ctx context.Context, workspace app.Workspace, reporter app.Reporter) (*app.PMigrationPlan, error) {
-	// 预览本身只读，但可能按需解锁 Bitwarden；走流式 operation 才能实时传回
-	// web unlock URL 和扫描进度，避免 unary 调用直到结束才一次性返回事件。
-	return runWorkspace[app.PMigrationPlan](ctx, "preview_p_migration", workspace, nil, reporter)
-}
-
-func RunPMigration(ctx context.Context, workspace app.Workspace, fingerprint string, reporter app.Reporter) (*app.PMigrationJournal, error) {
-	return runWorkspace[app.PMigrationJournal](ctx, "migrate_p", workspace,
-		struct{ Fingerprint string }{Fingerprint: fingerprint}, reporter)
-}
-
 func RemoveBundle(ctx context.Context, input app.RemoveBundleInput, reporter app.Reporter) (*app.RemoveBundleResult, error) {
 	return runWorkspace[app.RemoveBundleResult](ctx, "remove_bundle",
 		app.NewWorkspace(input.Plane, input.ProjectRoot), input, reporter)

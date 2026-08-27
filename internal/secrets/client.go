@@ -27,6 +27,8 @@ type Client interface {
 	ListSecretBundleNames(ctx context.Context) ([]string, error)
 	// ListAllFolderNames 枚举 vault 中全部可解密 folder 全名（含 bundle/* 与裸名）。
 	ListAllFolderNames(ctx context.Context) ([]string, error)
+	// DeleteFolder 删除指定 folder。folder 不存在视为成功；仍含条目时由调用方先清空。
+	DeleteFolder(ctx context.Context, folderName string) error
 	// ListUnfiledItems 枚举无 folder（FolderID 为空）的条目元数据，不含正文。
 	ListUnfiledItems(ctx context.Context) ([]UnfiledItem, error)
 }
@@ -310,6 +312,10 @@ func (NoopClient) RenameSecureNote(_ context.Context, req RenameSecureNoteReques
 
 func (NoopClient) RenameSSHKey(_ context.Context, req RenameSSHKeyRequest) error {
 	return RequireDeclared(req.Target)
+}
+
+func (NoopClient) DeleteFolder(_ context.Context, _ string) error {
+	return nil
 }
 
 // DefaultClient 在已配置且有 session + vault key 时返回真实 APIClient，否则 NoopClient。

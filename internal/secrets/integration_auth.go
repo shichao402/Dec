@@ -9,12 +9,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// IntegrationDirRel 是集成 / live 测试凭据与隔离 DEC_HOME 所在目录（勿提交 git）。
+// 它位于 .secrets/ 之下但不属于任何 P 的落地内容，清理 .secrets/ 时必须跳过，
+// 否则会连带删掉测试账号凭据与 device.json 的 remember token。
+const IntegrationDirRel = ".secrets/dec/integration"
+
 // IntegrationAuthRel 是项目内集成测试 Bitwarden 凭据的相对路径（勿提交 git）。
-const IntegrationAuthRel = ".secrets/dec/integration/bitwarden.yaml"
+const IntegrationAuthRel = IntegrationDirRel + "/bitwarden.yaml"
 
 // IntegrationDecHomeRel 是集成 / live 测试专用的隔离 DEC_HOME（勿提交 git）。
 // 复用同一目录可以保留 device.json 的 remember token，避免每次重跑都触发 2FA。
-const IntegrationDecHomeRel = ".secrets/dec/integration/dec-home"
+const IntegrationDecHomeRel = IntegrationDirRel + "/dec-home"
 
 // IntegrationAuth 描述集成 / live 测试用的 Bitwarden 账号（专用测试账户，2FA 关闭）。
 type IntegrationAuth struct {

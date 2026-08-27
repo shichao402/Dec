@@ -40,7 +40,7 @@ dec --version / dec --help / dec __freshness-check
 | **Home** | 项目概览、建议下一步、**project 初始化**（自动匹配 vault 同名 project、选择或新建） |
 | **Bundles** | P 仓库中浏览四象限并选择 P：project 更新家 P direct `requires`，user 更新 `enabled_projects`；legacy 仓库保留 bundle 兼容展示 |
 | **Project** | 项目级 IDE / editor 覆盖、**项目变量**（`.dec/vars.yaml` 只读预览，按 `e` 挂起外部编辑器） |
-| **Run** | pull / push / remove；`m` 做 P 迁移只读预览与双重确认；`u` 自更新；P pull 解析家 P/direct requires 或用户启用 P，再拉 Git 四象限与 BW private |
+| **Run** | pull / push / remove；`u` 自更新；P pull 解析家 P/direct requires 或用户启用 P，再拉 Git 四象限与 BW private |
 | **Remote** | 上下文无关的完整远端浏览器/编辑器（Dec Git vault 全量 + Bitwarden 全部 folder + 无文件夹只读区）；`e` temp 编辑、`n` 登记到光标所在 folder / `N` 登记到新 folder、`a`/`A` 全选/全不选、远端/本地删除拆分、跨上下文 typed confirm（ADR 0004） |
 | **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、**本机 vars** 外部编辑、服务版本 mismatch 提示与重启 `dec-server`；用户级 bundle 启用只做只读计数展示 |
 
@@ -49,8 +49,7 @@ dec --version / dec --help / dec __freshness-check
 `dec --user` 进入用户平面，页列为 `Home` → `Bundles` → `Run` → `Remote` → `Settings`。
 P 模型下 Bundles / Run 只安装显式启用 P 的 user 两象限，落点为
 `~/.dec/cache/<p>/...`、`~/.dec/secrets/<p>/` 与用户 IDE；**Remote 页可见性不按平面过滤**。
-Project 页不开放。破坏性 P 迁移不能从 user 平面执行，因为它会删除全局旧远端结构却无法
-备份一个项目工作区；须进入普通项目 TUI 的 Run 页执行。
+Project 页不开放。旧 Git/BW 布局由一次性远端迁移处理；新版本启动只清理本机遗留 cache / secrets，不在 TUI 提供迁移页。
 
 用户平面的 `Workspace.Root` 是空串，**不得**发起任何项目配置读写：Home 加载完 overview 后的 vault project 推断只在项目平面发起。空项目根会让 `.dec/` 退化成相对 `dec-server` cwd 的路径，进而覆盖全局配置；`ProjectConfigManager` 已在实现侧直接拒绝，TUI 这层不发起是为了不去撞那道墙。见 [0015](decisions/0015-project-config-boundary.md)。
 
@@ -169,16 +168,11 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 
 用户主动的 pull/push/remove/delete **执行**仍可用 Esc 取消（与「切页不打断加载」不同）。
 
-### 5.6 P 一次性迁移
+### 5.6 旧布局
 
-- Run 页 `m` 通过 `dec-server` 的流式 operation 做 Git/BW 元数据只读 preview；
-  按需 web unlock URL 与进度必须实时回传，不能用 unary 调用在结束后补事件。
-- preview 展示名称规范化、缺失引用、目标冲突、非法 BW 路径和 Git/BW 同路径冲突；
-  任一 blocker 都不能进入确认。
-- 用户需经过预览确认和最终确认两步，启动、普通 pull/push 均不会自动执行迁移。
-- 执行阶段为本地备份 → Git 写入并校验 → BW 写入并校验 → 本地切换 →
-  旧 BW 删除 → 旧 Git 删除；每阶段后原子写恢复日志，失败后再次 `m` 从日志继续。
-- 迁移从项目平面执行，同时备份/切换当前项目和本机用户平面；user TUI 只提示转到项目工作区。
+- 远端一次性迁移改写 Git vault 与 Bitwarden；不提供 TUI 迁移入口。
+- 新版本首次启动清理本机旧 cache、`.secrets/bundles`、`.secrets/project` 并清空启用列表。
+- 用户重新在 Bundles 选择 P 后 Pull。
 
 ## 6. 测试策略
 

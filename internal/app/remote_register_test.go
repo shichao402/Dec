@@ -202,7 +202,25 @@ func TestCommitRemoteRegister_RejectsBareProjectFolder(t *testing.T) {
 	}
 }
 
-func TestValidateRemoteRegisterFolder_RejectsBareProject(t *testing.T) {
+// 裸 folder 名在两种仓库形态下都非法，但引导语不同：旧仓库指向 bundle/<name>，
+// P 仓库指向 <p>/private/<plane>。必须自建仓库状态，否则会继承上个测试的仓库。
+func TestValidateRemoteRegisterFolder_RejectsBareProjectOnPRepository(t *testing.T) {
+	setupRemoteRegisterRepo(t, map[string]string{
+		"dec/dec.yaml": "name: dec\ntitle: Dec\n",
+	})
+	err := ValidateRemoteRegisterFolder(NewWorkspace(WorkspaceProject, t.TempDir()), "Dec")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "private/project") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestValidateRemoteRegisterFolder_RejectsBareProjectOnLegacyRepository(t *testing.T) {
+	setupRemoteRegisterRepo(t, map[string]string{
+		"projects/Dec.yaml": "name: Dec\nbundles: []\n",
+	})
 	err := ValidateRemoteRegisterFolder(NewWorkspace(WorkspaceProject, t.TempDir()), "Dec")
 	if err == nil {
 		t.Fatal("expected error")

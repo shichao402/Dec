@@ -161,16 +161,6 @@ type runCompletedMsg struct {
 	err        error
 }
 
-type migrationPreviewMsg struct {
-	plan *app.PMigrationPlan
-	err  error
-}
-
-type migrationCompletedMsg struct {
-	journal *app.PMigrationJournal
-	err     error
-}
-
 type activeOperationPolledMsg struct {
 	active      bool
 	operationID string
@@ -220,14 +210,6 @@ var runRemoveOperation = func(input app.RemoveBundleInput, reporter app.Reporter
 
 var previewPushOperation = func(workspace app.Workspace) (*app.PushProjectAssetsPreview, error) {
 	return serviceapi.PreviewPushWorkspaceAssets(context.Background(), workspace, nil)
-}
-
-var previewPMigrationOperation = func(ctx context.Context, workspace app.Workspace) (*app.PMigrationPlan, error) {
-	return serviceapi.PreviewPMigration(ctx, workspace, nil)
-}
-
-var runPMigrationOperation = func(ctx context.Context, workspace app.Workspace, fingerprint string, reporter app.Reporter) (*app.PMigrationJournal, error) {
-	return serviceapi.RunPMigration(ctx, workspace, fingerprint, reporter)
 }
 
 var loadGlobalSettingsOperation = func(reporter app.Reporter) (*app.GlobalSettingsState, error) {
@@ -385,10 +367,6 @@ type model struct {
 	pushPreview                 *app.PushProjectAssetsPreview
 	pushPreviewErr              error
 	pushPreviewLoad             asyncLoad
-	migrationStage              string // "", "loading", "preview", "confirm", "running", "done"
-	migrationPlan               *app.PMigrationPlan
-	migrationJournal            *app.PMigrationJournal
-	migrationErr                error
 	updateStage                 string // "", "checking", "result", "confirm", "running", "done"
 	updateResult                *update.CheckResult
 	updateErr                   error
@@ -1069,28 +1047,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Push 确认页已打开：%d 个 enabled bundle", msg.preview.EnabledBundleCount))
 		}
 		return m, nil
-	case migrationPreviewMsg:
-		m.migrationPlan = msg.plan
-		m.migrationErr = msg.err
-		m.migrationJournal = nil
-		m.migrationStage = "preview"
-		if msg.err != nil {
-			m.pushLog("P 迁移预览失败: " + msg.err.Error())
-		} else if msg.plan != nil {
-			m.pushLog(fmt.Sprintf("P 迁移只读预览：%d Git · %d BW · %d issues",
-				len(msg.plan.GitMoves), len(msg.plan.BWMoves), len(msg.plan.Issues)))
-		}
-		return m, nil
-	case migrationCompletedMsg:
-		m.migrationJournal = msg.journal
-		m.migrationErr = msg.err
-		m.migrationStage = "done"
-		if msg.err != nil {
-			m.pushLog("P 迁移暂停，可按 m 从恢复日志继续: " + msg.err.Error())
-		} else {
-			m.pushLog("P 四象限迁移完成")
-		}
-		return m, m.refreshCmd()
 	case addSecretTargetsMsg:
 		m.applyAddSecretTargets(msg)
 		return m, nil
@@ -1257,9 +1213,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.addSecretStage != "" && (m.isProjectPage() || m.isRemotePage()) {
 			return m.handleAddSecretKey(msg)
-		}
-		if m.isRunPage() && m.migrationStage != "" {
-			return m.handlePMigrationKey(msg)
 		}
 		if m.isRunPage() && m.pushStage != "" && !m.runningPull {
 			return m.handlePushStageKey(msg)
@@ -1476,15 +1429,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "P":
-			if m.isRunPage() && !m.runningPull && !m.runningRemove && m.pushStage == "" && m.migrationStage == "" && !m.updatingBinary && m.updateStage == "" {
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && m.pushStage == "" && !m.updatingBinary && m.updateStage == "" {
 				return m, m.beginPushConfirmation()
-			}
-			return m, nil
-		case "m":
-			if m.isRunPage() && !m.runningPull && !m.runningRemove && m.pushStage == "" && m.migrationStage == "" && !m.updatingBinary {
-				m.migrationStage = "loading"
-				m.migrationErr = nil
-				return m, previewPMigrationCmd(m.workspace())
 			}
 			return m, nil
 		case "u":
@@ -1916,57 +1862,6 @@ func startPushRunCmd(ctx context.Context, workspace app.Workspace, stream chan<-
 		}()
 		return nil
 	}
-}
-
-func previewPMigrationCmd(workspace app.Workspace) tea.Cmd {
-	return func() tea.Msg {
-		plan, err := previewPMigrationOperation(context.Background(), workspace)
-		return migrationPreviewMsg{plan: plan, err: err}
-	}
-}
-
-func runPMigrationCmd(workspace app.Workspace, fingerprint string) tea.Cmd {
-	return func() tea.Msg {
-		journal, err := runPMigrationOperation(context.Background(), workspace, fingerprint, nil)
-		return migrationCompletedMsg{journal: journal, err: err}
-	}
-}
-
-func (m model) handlePMigrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch m.migrationStage {
-	case "loading", "running":
-		return m, nil
-	case "preview":
-		switch msg.String() {
-		case "y", "enter":
-			if m.migrationErr == nil && m.migrationPlan != nil && m.migrationPlan.LegacyDetected && !m.migrationPlan.HasBlockers() {
-				m.migrationStage = "confirm"
-			}
-		case "n", "esc":
-			m.migrationStage = ""
-		}
-	case "confirm":
-		switch msg.String() {
-		case "y":
-			m.migrationStage = "running"
-			return m, runPMigrationCmd(m.workspace(), m.migrationPlan.Fingerprint)
-		case "n", "esc":
-			m.migrationStage = "preview"
-		}
-	case "done":
-		switch msg.String() {
-		case "m":
-			if m.migrationErr != nil && m.migrationPlan != nil {
-				m.migrationStage = "running"
-				return m, runPMigrationCmd(m.workspace(), m.migrationPlan.Fingerprint)
-			}
-			m.migrationStage = "loading"
-			return m, previewPMigrationCmd(m.workspace())
-		case "esc", "n", "enter":
-			m.migrationStage = ""
-		}
-	}
-	return m, nil
 }
 
 func waitRunMsg(stream <-chan tea.Msg) tea.Cmd {
@@ -3042,9 +2937,6 @@ func (m model) renderRunPage(width int) string {
 		}
 		return wrapLines(width, sections)
 	}
-	if m.migrationStage != "" {
-		return m.renderPMigrationPage(width)
-	}
 	if m.pushStage == "loading" || m.pushStage == "summary" || m.pushStage == "confirm" {
 		return m.renderRunPushPage(width)
 	}
@@ -3122,7 +3014,7 @@ func (m model) renderRunActionBar() string {
 	case m.runningRemove, m.updatingBinary:
 		return shellMutedStyle.Render("? 帮助")
 	default:
-		return shellMutedStyle.Render("p Pull  ·  P Push  ·  m Migrate  ·  u Update  ·  ? 帮助")
+		return shellMutedStyle.Render("p Pull  ·  P Push  ·  u Update  ·  ? 帮助")
 	}
 }
 
@@ -3346,65 +3238,12 @@ func (m model) renderRunHelpPanel() []string {
 		shellTitleStyle.Render("快捷键"),
 		shellMutedStyle.Render("p / s  执行 pull"),
 		shellMutedStyle.Render("P      推送到远端（两次确认）"),
-		shellMutedStyle.Render("m      只读预览旧结构迁移；确认后执行/恢复"),
 		shellMutedStyle.Render("删除 / 编辑远端请切到 Remote 页（侧栏 Run 之后）"),
 		shellMutedStyle.Render("u      检查并自更新 dec"),
 		shellMutedStyle.Render("r      刷新项目概览"),
 		shellMutedStyle.Render("Esc    取消进行中的 pull / push"),
 		shellMutedStyle.Render("?      开关此帮助"),
 	}
-}
-
-func (m model) renderPMigrationPage(width int) string {
-	lines := []string{shellTitleStyle.Render("Run · P 四象限迁移")}
-	switch m.migrationStage {
-	case "loading":
-		lines = append(lines, shellMutedStyle.Render("正在只读扫描 Git 与 Bitwarden 元数据…"))
-	case "preview":
-		if m.migrationErr != nil {
-			lines = append(lines, shellWarnStyle.Render("预览失败: "+m.migrationErr.Error()), shellMutedStyle.Render("Esc 返回"))
-			break
-		}
-		plan := m.migrationPlan
-		if plan == nil || !plan.LegacyDetected {
-			lines = append(lines, "未检测到旧 projects/、bundles/ 或旧 BW folder。", shellMutedStyle.Render("Esc 返回"))
-			break
-		}
-		lines = append(lines,
-			"此页仅展示预览，尚未写入任何远端。",
-			fmt.Sprintf("P %d · Git 文件 %d · BW 项 %d · 问题 %d", len(plan.Manifests), len(plan.GitMoves), len(plan.BWMoves), len(plan.Issues)))
-		for _, issue := range plan.Issues {
-			line := fmt.Sprintf("[%s] %s", issue.Code, issue.Message)
-			if issue.Severity == "error" {
-				lines = append(lines, shellWarnStyle.Render("阻断  "+line))
-			} else {
-				lines = append(lines, shellMutedStyle.Render("提示  "+line))
-			}
-		}
-		if plan.HasBlockers() {
-			lines = append(lines, shellWarnStyle.Render("存在阻断问题，不能执行 · Esc 返回"))
-		} else {
-			lines = append(lines, shellMutedStyle.Render("y/Enter 继续 · n/Esc 取消"))
-		}
-	case "confirm":
-		lines = append(lines,
-			shellWarnStyle.Render("最终确认：将先备份本地，再分阶段写 Git/BW；旧节点最后删除。"),
-			"任何失败都会保留恢复日志；再次按 m 可继续。",
-			shellMutedStyle.Render("y 执行 · n/Esc 返回预览"))
-	case "running":
-		lines = append(lines, shellMutedStyle.Render("迁移执行中，请勿关闭服务…"))
-	case "done":
-		if m.migrationErr != nil {
-			lines = append(lines, shellWarnStyle.Render("迁移暂停: "+m.migrationErr.Error()))
-			if m.migrationJournal != nil {
-				lines = append(lines, "恢复阶段: "+string(m.migrationJournal.Phase))
-			}
-			lines = append(lines, shellMutedStyle.Render("m 重新预览并恢复 · Esc 返回"))
-		} else {
-			lines = append(lines, "迁移完成；运行时将只读 P 模型。", shellMutedStyle.Render("Enter/Esc 返回"))
-		}
-	}
-	return wrapLines(width, lines)
 }
 
 func (m model) renderRunPushPage(width int) string {
