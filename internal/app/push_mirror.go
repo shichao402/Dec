@@ -19,8 +19,8 @@ func syncDecVaultFromCache(workspace Workspace, repoDir string, projectConfig *t
 
 	for idx, asset := range assets {
 		progress := &Progress{Phase: "dec", Current: idx + 1, Total: len(assets)}
-		cachePath := getWorkspaceCachePath(workspace, asset.Vault, asset.Type, asset.Name)
-		destPath := resolveAssetFile(repoDir, asset.Vault, asset.Type, asset.Name)
+		cachePath := getWorkspaceTypedCachePath(workspace, asset)
+		destPath := resolveTypedAssetFile(repoDir, asset)
 		if destPath == "" {
 			continue
 		}
@@ -55,6 +55,11 @@ func syncDecVaultFromCache(workspace Workspace, repoDir string, projectConfig *t
 		emit(reporter, EventInfo, "push.dec", fmt.Sprintf("  [%s] %s → %s", asset.Type, asset.Name, asset.Vault), progress)
 	}
 
+	// 新 P 模型没有 manifest 成员清单；resolved.Assets 已是该平面的完整可写集合。
+	// 旧 bundle 模型仍需用 manifest 找出 cache 删除项。
+	if hasPAssets(assets) {
+		return synced, pruned, nil
+	}
 	for bundleName := range bundlesToScan {
 		members := listBundleAssetMembers(repoDir, bundleName)
 		for _, member := range members {
@@ -90,6 +95,15 @@ func syncDecVaultFromCache(workspace Workspace, repoDir string, projectConfig *t
 		}
 	}
 	return synced, pruned, nil
+}
+
+func hasPAssets(assets []types.TypedAssetRef) bool {
+	for _, asset := range assets {
+		if asset.Visibility != "" && asset.Plane != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func collectEnabledBundleNames(projectConfig *types.ProjectConfig, assets []types.TypedAssetRef) map[string]struct{} {

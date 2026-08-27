@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -128,6 +129,12 @@ func parseSSHHostSpec(raw string) (host string, port int, canonical string, err 
 func validateSSHHost(raw string) (string, error) {
 	_, _, canonical, err := parseSSHHostSpec(raw)
 	return canonical, err
+}
+
+// SSHHostConflictKey 返回忽略端口的 Host 模式，用于跨 SyncTarget 冲突检测。
+func SSHHostConflictKey(raw string) (string, error) {
+	host, _, _, err := parseSSHHostSpec(raw)
+	return strings.ToLower(host), err
 }
 
 // NormalizeSSHHosts 校验并去重 Hosts；非法项返回 error（供 Remote 编辑提交使用）。
@@ -329,6 +336,128 @@ func WriteSSHKeyLandings(landings []SSHKeyLanding) error {
 	return upsertManagedSSHConfig(filepath.Join(sshDir, "config"), identityFiles, entries)
 }
 
+// WriteProjectSSHKeyLandings 将 project 平面的密钥写入既有 ~/.ssh 密钥区，但不把
+// 原始 Host 无条件写入全局 dec.conf。Host 只存在于项目专属 fragment，且仅由该
+// 工作区 includeIf 注入的 core.sshCommand 使用。
+func WriteProjectSSHKeyLandings(projectRoot string, landings []SSHKeyLanding) error {
+	if len(landings) == 0 {
+		return nil
+	}
+	paths, err := ProjectCredentialScopePaths(projectRoot)
+	if err != nil {
+		return err
+	}
+	sshDir, err := SSHDir()
+	if err != nil {
+		return err
+	}
+	if err := ensureSSHDir(sshDir); err != nil {
+		return err
+	}
+	// project 与 user 即使 P/key 同名也必须是不同落点；否则 project revoke 会删掉
+	// user 平面的机器级密钥。
+	scoped := make([]SSHKeyLanding, len(landings))
+	for i, landing := range landings {
+		fileBase, fileErr := projectSSHKeyFileName(paths.ID, landing.DecBundleName, landing.Name)
+		if fileErr != nil {
+			return fileErr
+		}
+		scoped[i] = landing
+		scoped[i].PrivatePath = filepath.Join(sshDir, fileBase)
+		scoped[i].PublicPath = scoped[i].PrivatePath + ".pub"
+		scoped[i].IdentityFile = scoped[i].PrivatePath
+	}
+	landings = scoped
+
+	removeSet := make(map[string]struct{}, len(landings))
+	for _, landing := range landings {
+		removeSet[normalizeIdentityPath(landing.IdentityFile)] = struct{}{}
+	}
+
+	raw, err := readFileOrEmpty(paths.SSHFragment)
+	if err != nil {
+		return err
+	}
+	existing := parseManagedEntries(raw)
+	kept := make([]sshManagedEntry, 0, len(existing))
+	seenHosts := make(map[string]string)
+	for _, entry := range existing {
+		if _, replace := removeSet[normalizeIdentityPath(entry.IdentityFile)]; replace {
+			continue
+		}
+		kept = append(kept, entry)
+		seenHosts[strings.ToLower(entry.Host)] = entry.IdentityFile
+	}
+	for _, landing := range landings {
+		for _, rawHost := range landing.Hosts {
+			host, port, _, hostErr := parseSSHHostSpec(rawHost)
+			if hostErr != nil {
+				return fmt.Errorf("SSH Key %q: %w", landing.Name, hostErr)
+			}
+			if prev, exists := seenHosts[strings.ToLower(host)]; exists {
+				return fmt.Errorf("project SSH host %q 冲突：同时由 %s 与 %s 声明", host, prev, landing.IdentityFile)
+			}
+			seenHosts[strings.ToLower(host)] = landing.IdentityFile
+			kept = append(kept, sshManagedEntry{Host: host, Port: port, IdentityFile: landing.IdentityFile})
+		}
+	}
+
+	// 所有冲突校验通过后才开始写密钥，避免失败批次留下半落地文件。
+	for _, landing := range landings {
+		if err := writeSecureFile(landing.PrivatePath, []byte(ensureTrailingNewline(landing.PrivateKey)), 0600); err != nil {
+			return fmt.Errorf("写入 SSH 私钥文件失败: %w", err)
+		}
+		if landing.PublicKey != "" {
+			if err := writeSecureFile(landing.PublicPath, []byte(ensureTrailingNewline(landing.PublicKey)), 0644); err != nil {
+				return fmt.Errorf("写入 SSH 公钥文件失败: %w", err)
+			}
+		}
+	}
+	if err := writeProjectSSHFragment(paths.SSHFragment, filepath.Join(sshDir, "config"), kept); err != nil {
+		return err
+	}
+	body := ""
+	if len(kept) > 0 {
+		body = "[core]\n\tsshCommand = ssh -F \"" + escapeGitConfigValue(filepath.ToSlash(paths.SSHFragment)) + "\""
+	}
+	return UpsertProjectGitBlock(projectRoot, projectSSHBlockBegin, projectSSHBlockEnd, body)
+}
+
+func writeProjectSSHFragment(fragmentPath, userConfigPath string, entries []sshManagedEntry) error {
+	if len(entries) == 0 {
+		if err := os.Remove(fragmentPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(fragmentPath), 0700); err != nil {
+		return fmt.Errorf("创建 project SSH config.d 失败: %w", err)
+	}
+	var b strings.Builder
+	for _, entry := range entries {
+		b.WriteString("Host ")
+		b.WriteString(entry.Host)
+		b.WriteByte('\n')
+		if entry.Port != 0 {
+			fmt.Fprintf(&b, "  Port %d\n", entry.Port)
+		}
+		b.WriteString("  IdentityFile none\n")
+		b.WriteString("  IdentityFile \"")
+		b.WriteString(strings.ReplaceAll(filepath.ToSlash(entry.IdentityFile), `"`, `\"`))
+		b.WriteString("\"\n  IdentitiesOnly yes\n\n")
+	}
+	// 普通用户 SSH 配置仍可提供 User/ProxyJump 等非密钥设置；项目 Host 块置前，
+	// 敏感身份由 IdentityFile none + IdentitiesOnly 固定。
+	b.WriteString("Include \"")
+	b.WriteString(strings.ReplaceAll(filepath.ToSlash(userConfigPath), `"`, `\"`))
+	b.WriteString("\"\n")
+	return writeSecureFile(fragmentPath, []byte(b.String()), 0600)
+}
+
+func escapeGitConfigValue(value string) string {
+	return strings.ReplaceAll(value, `"`, `\"`)
+}
+
 // RemoveSSHKeyLanding 删除本地私钥/公钥，并从 managed config 移除对应 IdentityFile 条目。
 func RemoveSSHKeyLanding(decBundleName, keyName string) error {
 	fileBase, err := SSHKeyFileName(decBundleName, keyName)
@@ -347,6 +476,135 @@ func RemoveSSHKeyLanding(decBundleName, keyName string) error {
 		}
 	}
 	return removeManagedSSHConfigEntries(filepath.Join(sshDir, "config"), []string{privPath})
+}
+
+// RemoveProjectSSHKeyLanding 只撤销指定工作区 fragment 中的 Host 绑定；不会改动
+// user 平面的全局 config.d/dec.conf。
+func RemoveProjectSSHKeyLanding(projectRoot, decBundleName, keyName string) error {
+	paths, err := ProjectCredentialScopePaths(projectRoot)
+	if err != nil {
+		return err
+	}
+	fileBase, err := projectSSHKeyFileName(paths.ID, decBundleName, keyName)
+	if err != nil {
+		return err
+	}
+	sshDir, err := SSHDir()
+	if err != nil {
+		return err
+	}
+	privPath := filepath.Join(sshDir, fileBase)
+	for _, name := range []string{privPath, privPath + ".pub"} {
+		if rmErr := os.Remove(name); rmErr != nil && !os.IsNotExist(rmErr) {
+			return fmt.Errorf("删除 %s 失败: %w", filepath.Base(name), rmErr)
+		}
+	}
+	raw, err := readFileOrEmpty(paths.SSHFragment)
+	if err != nil {
+		return err
+	}
+	var kept []sshManagedEntry
+	for _, entry := range parseManagedEntries(raw) {
+		if normalizeIdentityPath(entry.IdentityFile) != normalizeIdentityPath(privPath) {
+			kept = append(kept, entry)
+		}
+	}
+	if err := writeProjectSSHFragment(paths.SSHFragment, filepath.Join(sshDir, "config"), kept); err != nil {
+		return err
+	}
+	body := ""
+	if len(kept) > 0 {
+		body = "[core]\n\tsshCommand = ssh -F \"" + escapeGitConfigValue(filepath.ToSlash(paths.SSHFragment)) + "\""
+	}
+	return UpsertProjectGitBlock(projectRoot, projectSSHBlockBegin, projectSSHBlockEnd, body)
+}
+
+// InspectProjectSSHKeyLanding 同时检查密钥文件和工作区专属 Host fragment。
+func InspectProjectSSHKeyLanding(projectRoot, decBundleName, keyName string) (bool, error) {
+	paths, err := ProjectCredentialScopePaths(projectRoot)
+	if err != nil {
+		return false, err
+	}
+	fileBase, err := projectSSHKeyFileName(paths.ID, decBundleName, keyName)
+	if err != nil {
+		return false, err
+	}
+	sshDir, err := SSHDir()
+	if err != nil {
+		return false, err
+	}
+	priv := filepath.Join(sshDir, fileBase)
+	if _, err := os.Stat(priv); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	raw, err := readFileOrEmpty(paths.SSHFragment)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range parseManagedEntries(raw) {
+		if normalizeIdentityPath(entry.IdentityFile) == normalizeIdentityPath(priv) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func projectSSHKeyFileName(scopeID, decBundleName, keyName string) (string, error) {
+	bundle, err := validateSSHSafeName("bundle", decBundleName)
+	if err != nil {
+		return "", err
+	}
+	name, err := SSHKeyInstanceFromAny(keyName)
+	if err != nil {
+		return "", err
+	}
+	if _, err := validateSSHSafeName("project scope", scopeID); err != nil {
+		return "", err
+	}
+	return "dec_project_" + scopeID + "_" + bundle + "_" + name, nil
+}
+
+// ListProjectSSHKeyNames 列出指定工作区/P 的 project 专属密钥实例。
+func ListProjectSSHKeyNames(projectRoot, decBundleName string) ([]string, error) {
+	paths, err := ProjectCredentialScopePaths(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := validateSSHSafeName("bundle", decBundleName)
+	if err != nil {
+		return nil, err
+	}
+	sshDir, err := SSHDir()
+	if err != nil {
+		return nil, err
+	}
+	prefix := "dec_project_" + paths.ID + "_" + bundle + "_"
+	matches, err := filepath.Glob(filepath.Join(sshDir, prefix+"*"))
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	var names []string
+	for _, match := range matches {
+		base := strings.TrimSuffix(filepath.Base(match), ".pub")
+		if !strings.HasPrefix(base, prefix) {
+			continue
+		}
+		name := strings.TrimPrefix(base, prefix)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func ensureTrailingNewline(s string) string {

@@ -255,7 +255,7 @@ func parseManagedEntries(managed string) []sshManagedEntry {
 			}
 		case "identityfile":
 			if len(fields) > 1 {
-				identity = strings.Join(fields[1:], " ")
+				identity = strings.Trim(strings.Join(fields[1:], " "), `"'`)
 			}
 		case "port":
 			if len(fields) > 1 {

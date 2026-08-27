@@ -25,7 +25,7 @@ func BuildExecEnviron(projectRoot, bundle string, plane secrets.SyncPlane, base 
 	if plane == "" {
 		plane = secrets.SyncPlaneProject
 	}
-	vars, err := secrets.LoadEnvForBundle(projectRoot, bundle, plane)
+	vars, err := secrets.LoadEnvForP(projectRoot, bundle, plane)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func WrapMCPServerWithExecForPlane(projectRoot, bundle string, plane secrets.Syn
 		wrappedArgs = append(wrappedArgs, "--plane", "user")
 	}
 	if strings.TrimSpace(bundle) != "" {
-		wrappedArgs = append(wrappedArgs, "--bundle", bundle)
+		wrappedArgs = append(wrappedArgs, "--p", bundle)
 	}
 	wrappedArgs = append(wrappedArgs, "--", resolveRoot(command))
 	for _, arg := range args {

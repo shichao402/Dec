@@ -78,7 +78,11 @@ func LoadGlobalConfig() (*types.GlobalConfig, error) {
 		config.IDEs = legacyIDEs
 	}
 
+	config.EnabledProjects = NormalizeBundleNames(config.EnabledProjects)
 	config.EnabledBundles = NormalizeBundleNames(config.EnabledBundles)
+	if len(config.EnabledProjects) > 0 {
+		config.EnabledBundles = append([]string(nil), config.EnabledProjects...)
+	}
 	if len(config.EnabledBundles) == 0 {
 		legacyBundles, err := loadLegacySecretsEnabledBundles()
 		if err != nil {
@@ -102,16 +106,22 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 		return fmt.Errorf("创建配置目录失败: %w", err)
 	}
 
+	toWrite := config
 	if config != nil {
-		config.EnabledBundles = NormalizeBundleNames(config.EnabledBundles)
+		normalized := *config
+		normalized.EnabledBundles = NormalizeBundleNames(config.EnabledBundles)
+		config.EnabledBundles = append([]string(nil), normalized.EnabledBundles...)
+		normalized.EnabledProjects = append([]string(nil), normalized.EnabledBundles...)
+		normalized.EnabledBundles = nil
+		toWrite = &normalized
 	}
 
-	data, err := yaml.Marshal(config)
+	data, err := yaml.Marshal(toWrite)
 	if err != nil {
 		return fmt.Errorf("序列化配置失败: %w", err)
 	}
 
-	header := "# Dec 全局配置\n# repo_url: 个人资产仓库地址\n# ides: 默认 IDE 列表，例如：\n#   ides:\n#     - cursor\n#     - codebuddy\n# editor: 交互式编辑器命令（如 vim / vi / code --wait），例如：\n#   editor: code --wait\n# server_idle_timeout: 最后一个门面断开后服务退出前的等待时长（如 30m、1h）\n# enabled_bundles: 用户平面启用的 bundle 短名（scope: user），例如：\n#   enabled_bundles:\n#     - tencent-cloud\n\n"
+	header := "# Dec 全局配置\n# repo_url: 个人资产仓库地址\n# ides: 默认 IDE 列表，例如：\n#   ides:\n#     - cursor\n# editor: 交互式编辑器命令，例如：\n#   editor: code --wait\n# enabled_projects: 用户平面启用的 P（安装 public/user 与 private/user）\n# P 名必须为小写 kebab-case。\n\n"
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入全局配置失败: %w", err)
 	}

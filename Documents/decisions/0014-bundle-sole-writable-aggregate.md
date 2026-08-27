@@ -1,6 +1,6 @@
 # 0014 — Bundle 是唯一可写聚合根
 
-- **状态**：已接受（已实现）
+- **状态**：已被 [0016](0016-p-four-quadrant-model.md) 取代
 - **日期**：2026-08-17
 - **关联**：[0002](0002-secrets-synctarget-root.md)（取消 project 级可写归属）、[0004](0004-remote-page.md)（`N` 只接受 `bundle/<名>`）、[0009](0009-bundle-binary-scope.md)、[0011](0011-private-repo-gcm-bootstrap.md)、[0013](0013-secrets-belong-to-declared-target.md)（归属收成一类）
 - **影响范围**：`internal/app/bundle_writer.go`、Remote 登记、secrets pull/push plan、`SyncKindProject` 退役为兼容层、存量 `.secrets/project` 迁移

@@ -77,12 +77,23 @@ func LoadWorkspaceAssetSelection(workspace app.Workspace, reporter app.Reporter)
 
 func SaveEnabledBundles(projectRoot string, bundles []string, reporter app.Reporter) (*app.SaveBundleSelectionResult, error) {
 	return invoke[app.SaveBundleSelectionResult](context.Background(), "save_enabled_bundles", projectRoot,
-		struct{ EnabledBundles []string }{bundles}, reporter)
+		struct {
+			EnabledProjects []string
+			EnabledBundles  []string
+		}{EnabledProjects: bundles, EnabledBundles: bundles}, reporter)
 }
 
 func SaveWorkspaceEnabledBundles(workspace app.Workspace, bundles []string, reporter app.Reporter) (*app.SaveBundleSelectionResult, error) {
 	return invokeWorkspace[app.SaveBundleSelectionResult](context.Background(), "save_enabled_bundles", workspace,
-		struct{ EnabledBundles []string }{bundles}, reporter)
+		struct {
+			EnabledProjects []string
+			EnabledBundles  []string
+		}{EnabledProjects: bundles, EnabledBundles: bundles}, reporter)
+}
+
+// SaveWorkspaceProjects is the ADR 0016 name; SaveWorkspaceEnabledBundles is retained for clients.
+func SaveWorkspaceProjects(workspace app.Workspace, projects []string, reporter app.Reporter) (*app.SaveBundleSelectionResult, error) {
+	return SaveWorkspaceEnabledBundles(workspace, projects, reporter)
 }
 
 func ConnectRepo(repoURL string, reporter app.Reporter) (*app.ConnectRepoResult, error) {
@@ -104,7 +115,7 @@ func PrepareProjectConfigInit(projectRoot string, reporter app.Reporter) (*app.C
 }
 
 func EnsureLocalProjectConfig(projectRoot string, reporter app.Reporter) (*app.ConfigInitPreparation, error) {
-	return invoke[app.ConfigInitPreparation](context.Background(), "ensure_local_project_config", projectRoot, nil, reporter)
+	return invoke[app.ConfigInitPreparation](context.Background(), "ensure_home_p", projectRoot, nil, reporter)
 }
 
 func InferVaultProject(projectRoot string, reporter app.Reporter) (*app.VaultProjectInference, error) {
@@ -226,6 +237,17 @@ func PreviewPushProjectAssets(ctx context.Context, projectRoot string, reporter 
 
 func PreviewPushWorkspaceAssets(ctx context.Context, workspace app.Workspace, reporter app.Reporter) (*app.PushProjectAssetsPreview, error) {
 	return runWorkspace[app.PushProjectAssetsPreview](ctx, "preview_push", workspace, nil, reporter)
+}
+
+func PreviewPMigration(ctx context.Context, workspace app.Workspace, reporter app.Reporter) (*app.PMigrationPlan, error) {
+	// 预览本身只读，但可能按需解锁 Bitwarden；走流式 operation 才能实时传回
+	// web unlock URL 和扫描进度，避免 unary 调用直到结束才一次性返回事件。
+	return runWorkspace[app.PMigrationPlan](ctx, "preview_p_migration", workspace, nil, reporter)
+}
+
+func RunPMigration(ctx context.Context, workspace app.Workspace, fingerprint string, reporter app.Reporter) (*app.PMigrationJournal, error) {
+	return runWorkspace[app.PMigrationJournal](ctx, "migrate_p", workspace,
+		struct{ Fingerprint string }{Fingerprint: fingerprint}, reporter)
 }
 
 func RemoveBundle(ctx context.Context, input app.RemoveBundleInput, reporter app.Reporter) (*app.RemoveBundleResult, error) {

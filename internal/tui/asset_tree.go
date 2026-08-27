@@ -15,6 +15,7 @@ type assetTreePayload struct {
 	bundleEnabled bool
 	// otherPlane 让渲染层画出「不可勾选」的复选框，无需回查 AssetSelectionState。
 	otherPlane bool
+	homeP      bool
 }
 
 func assetBundleNodeID(name string) string {
@@ -57,14 +58,19 @@ func (m model) buildAssetTreeRoots() []*TreeNode {
 				bundleIndex:   i,
 				bundleEnabled: enabled,
 				otherPlane:    bo.OtherPlane,
+				homeP:         bo.Home,
 			},
 		}
 		typeGroups := make(map[string][]int)
 		for mi, mb := range bo.Members {
+			leafLabel := memberLeafLabel(mb.Type, mb.Name)
+			if bo.Model == "p" {
+				leafLabel = fmt.Sprintf("[%s/%s] %s", mb.Visibility, mb.Plane, leafLabel)
+			}
 			if mb.Type == app.AssetMemberTypeSecret {
 				leaf := &TreeNode{
 					ID:         fmt.Sprintf("secret:%d", mi),
-					Label:      memberLeafLabel(mb.Type, mb.Name),
+					Label:      leafLabel,
 					SelectMode: TreeSelectReadOnly,
 					Payload: assetTreePayload{
 						kind:        assetRowBundleMember,
@@ -93,9 +99,13 @@ func (m model) buildAssetTreeRoots() []*TreeNode {
 			}
 			for _, mi := range indices {
 				mb := bo.Members[mi]
+				leafLabel := memberLeafLabel(mb.Type, mb.Name)
+				if bo.Model == "p" {
+					leafLabel = fmt.Sprintf("[%s/%s] %s", mb.Visibility, mb.Plane, leafLabel)
+				}
 				typeNode.Children = append(typeNode.Children, &TreeNode{
 					ID:         fmt.Sprintf("%s:member:%d", typeID, mi),
-					Label:      memberLeafLabel(mb.Type, mb.Name),
+					Label:      leafLabel,
 					SelectMode: TreeSelectReadOnly,
 					Payload: assetTreePayload{
 						kind:        assetRowBundleMember,
@@ -143,6 +153,19 @@ func formatAssetBundleLabel(bo app.AssetBundleOption) string {
 		return fmt.Sprintf("%s · 属于项目平面", bo.Name)
 	}
 	count := len(bo.Members)
+	if bo.Model == "p" {
+		role := "可引用 P"
+		if bo.Home {
+			role = "家 P"
+		} else if bo.Required {
+			role = "直接 requires"
+		} else if bo.Enabled {
+			role = "用户已启用"
+		}
+		return fmt.Sprintf("%s · %s · public/user %d · private/user %d · public/project %d · private/project %d",
+			bo.Name, role, bo.Quadrants["public/user"], bo.Quadrants["private/user"],
+			bo.Quadrants["public/project"], bo.Quadrants["private/project"])
+	}
 	if bo.SecretsOnly {
 		if count > 0 {
 			return fmt.Sprintf("%s · %s · %d 个成员", bo.Name, secretsOnlyBundleHint(bo), count)
@@ -208,6 +231,9 @@ func renderAssetTreeLine(row TreeRow, tree *TreeList, marker string, bundleEnabl
 			}
 			if p.otherPlane {
 				checked = "-"
+			}
+			if p.homeP {
+				checked = "H"
 			}
 			arrow := "▸"
 			if tree.Expanded[row.Node.ID] {

@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -13,6 +14,7 @@ func useTempSSHHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	return home
 }
 
@@ -508,5 +510,86 @@ func TestWriteSSHKeyLandings_EmptyHostsOnly_NoHostBlock(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(sshDir, "config.d", "dec.conf")); !os.IsNotExist(err) {
 		t.Fatalf("仅空 hosts 时不应留下 config.d/dec.conf: %v", err)
+	}
+}
+
+func TestProjectSSHKeyLandingIsScopedByGitDirAndRevocable(t *testing.T) {
+	home := useTempSSHHome(t)
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	otherRoot := filepath.Join(t.TempDir(), "other")
+	for _, root := range []string{projectRoot, otherRoot} {
+		if err := os.MkdirAll(root, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
+			t.Fatalf("git init: %v: %s", err, out)
+		}
+	}
+	landings, err := PrepareSSHKeyLandings("my-app", []SSHKeyItem{{
+		Name: ".sshkey/deploy", Hosts: []string{"git.example.com:2222"},
+		PrivateKey: "private\n", PublicKey: "public\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProjectSSHKeyLandings(projectRoot, landings); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := ProjectCredentialScopePaths(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshFragment := mustReadSSHFile(t, paths.SSHFragment)
+	if !strings.Contains(sshFragment, "Host git.example.com") ||
+		!strings.Contains(sshFragment, "IdentityFile none") ||
+		!strings.Contains(sshFragment, "Port 2222") {
+		t.Fatalf("project SSH fragment 不完整:\n%s", sshFragment)
+	}
+	mainPath := filepath.Join(home, ".ssh", "config")
+	if raw, readErr := os.ReadFile(mainPath); readErr == nil && strings.Contains(string(raw), "git.example.com") {
+		t.Fatalf("project Host 不得写入全局 SSH config:\n%s", raw)
+	}
+	scoped, err := exec.Command("git", "-C", projectRoot, "config", "--get", "core.sshCommand").Output()
+	if err != nil || !strings.Contains(string(scoped), filepath.ToSlash(paths.SSHFragment)) {
+		t.Fatalf("project 应命中 sshCommand, err=%v out=%q", err, scoped)
+	}
+	if out, err := exec.Command("git", "-C", otherRoot, "config", "--get", "core.sshCommand").CombinedOutput(); err == nil {
+		t.Fatalf("其它仓库不应命中 project sshCommand: %q", out)
+	}
+	if ok, err := InspectProjectSSHKeyLanding(projectRoot, "my-app", "deploy"); err != nil || !ok {
+		t.Fatalf("InspectProjectSSHKeyLanding = %v, %v", ok, err)
+	}
+	if err := RemoveProjectSSHKeyLanding(projectRoot, "my-app", "deploy"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := InspectProjectSSHKeyLanding(projectRoot, "my-app", "deploy"); err != nil || ok {
+		t.Fatalf("revoke 后 Inspect = %v, %v", ok, err)
+	}
+	if out, err := exec.Command("git", "-C", projectRoot, "config", "--get", "core.sshCommand").CombinedOutput(); err == nil {
+		t.Fatalf("revoke 后不应残留 sshCommand: %q", out)
+	}
+}
+
+func TestProjectSSHKeyLandingRejectsExistingHostConflict(t *testing.T) {
+	useTempSSHHome(t)
+	projectRoot := t.TempDir()
+	first, err := PrepareSSHKeyLandings("my-app", []SSHKeyItem{{
+		Name: ".sshkey/first", Hosts: []string{"same.example.com"}, PrivateKey: "first\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProjectSSHKeyLandings(projectRoot, first); err != nil {
+		t.Fatal(err)
+	}
+	second, err := PrepareSSHKeyLandings("my-app", []SSHKeyItem{{
+		Name: ".sshkey/second", Hosts: []string{"same.example.com:2222"}, PrivateKey: "second\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = WriteProjectSSHKeyLandings(projectRoot, second)
+	if err == nil || !strings.Contains(err.Error(), "冲突") {
+		t.Fatalf("已有 project Host 应参与冲突检测: %v", err)
 	}
 }

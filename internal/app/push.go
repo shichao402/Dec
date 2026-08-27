@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/shichao402/Dec/internal/bundle"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/types"
 )
@@ -18,6 +20,9 @@ type PushProjectAssetsResult struct {
 	SecretsCreatedCount  int
 	SecretsUpdatedCount  int
 	SecretsSkippedReason string
+	Model                string
+	HomeProject          string
+	WritableProjects     []string
 }
 
 // PushProjectAssets 将本地 .dec/cache/ 与 secrets 落地文件推送到远端（Dec Git vault + Bitwarden）。
@@ -30,6 +35,19 @@ func PushProjectAssets(ctx context.Context, projectRoot string, reporter Reporte
 func PushWorkspaceAssets(ctx context.Context, workspace Workspace, reporter Reporter) (*PushProjectAssetsResult, error) {
 	reporter = defaultReporter(reporter)
 	result := &PushProjectAssetsResult{}
+	if usesP, _ := connectedRepositoryUsesPModel(); usesP {
+		result.Model = "p"
+		if cfg, loadErr := loadWorkspaceBundleConfig(workspace); loadErr == nil {
+			if workspace.EffectivePlane() == WorkspaceProject {
+				result.HomeProject = strings.TrimSpace(cfg.ProjectName)
+				if result.HomeProject != "" {
+					result.WritableProjects = []string{result.HomeProject}
+				}
+			} else {
+				result.WritableProjects = append([]string(nil), cfg.EnabledBundles...)
+			}
+		}
+	}
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -47,6 +65,13 @@ func PushWorkspaceAssets(ctx context.Context, workspace Workspace, reporter Repo
 		return nil, err
 	}
 
+	if result.Model == "p" && workspace.EffectivePlane() == WorkspaceProject &&
+		result.HomeProject != "" && !connectedPExists(result.HomeProject) {
+		result.SecretsSkippedReason = fmt.Sprintf("家 P %q 已不存在，跳过 private/project 推送", result.HomeProject)
+		emit(reporter, EventWarn, "push.secrets", result.SecretsSkippedReason, nil)
+		return result, nil
+	}
+
 	secretsResult, err := PushWorkspaceSecretsBundles(ctx, workspace, reporter)
 	if err != nil {
 		return nil, fmt.Errorf("push.secrets 失败: %w", err)
@@ -59,13 +84,35 @@ func PushWorkspaceAssets(ctx context.Context, workspace Workspace, reporter Repo
 	return result, nil
 }
 
+func connectedPExists(name string) bool {
+	exists := false
+	_ = withAppReadRepo(func(tx *repo.Transaction) error {
+		projects, err := pmodel.Scan(tx.WorkDir())
+		if err != nil {
+			return err
+		}
+		_, exists = projects[name]
+		return nil
+	})
+	return exists
+}
+
+func connectedRepositoryUsesPModel() (bool, error) {
+	tx, err := repo.NewLocalReadTransaction()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Close()
+	return repositoryUsesPModel(tx.WorkDir()), nil
+}
+
 func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter) (pushedCount int, skippedReason, versionCommit string, err error) {
 	projectConfig, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
 		return 0, "", "", err
 	}
 
-	if len(projectConfig.EnabledBundles) == 0 {
+	if len(projectConfig.EnabledBundles) == 0 && strings.TrimSpace(projectConfig.ProjectName) == "" {
 		skippedReason = "无已启用 bundle"
 		emit(reporter, EventInfo, "push.dec", "无已启用 bundle，跳过 Dec 推送", nil)
 		return 0, skippedReason, "", nil
@@ -78,12 +125,17 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 			return err
 		}
 		repoDir := tx.WorkDir()
+		if repositoryHasLegacyLayout(repoDir) {
+			return fmt.Errorf("检测到旧 projects/ 或 bundles/ 结构，普通 Push 已拒绝；请到 Run 页先执行 P 四象限迁移预览")
+		}
 		resolved, resolveErr := resolveDesiredAssetsForPlane(projectConfig, repoDir, workspace.EffectivePlane(), reporter)
 		if resolveErr != nil {
 			return resolveErr
 		}
 
-		assets := resolved.Assets
+		assets := writableResolvedAssets(workspace, projectConfig, resolved.Assets)
+		resolvedForPush := *resolved
+		resolvedForPush.Assets = assets
 		if len(assets) == 0 && len(projectConfig.EnabledBundles) == 0 {
 			skippedReason = "没有可推送的有效资产"
 			emit(reporter, EventInfo, "push.dec", skippedReason, nil)
@@ -94,21 +146,23 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 			emit(reporter, EventInfo, "push.dec", fmt.Sprintf("同步 %d 个 Dec 资产", len(assets)), &Progress{Phase: "dec", Current: 0, Total: len(assets)})
 		}
 
-		synced, pruned, syncErr := syncDecVaultFromCache(workspace, repoDir, projectConfig, resolved, reporter)
+		synced, pruned, syncErr := syncDecVaultFromCache(workspace, repoDir, projectConfig, &resolvedForPush, reporter)
 		if syncErr != nil {
 			return syncErr
 		}
 
-		for _, bundleName := range projectConfig.EnabledBundles {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			ok, pushErr := pushBundleYAMLFromCache(workspace, repoDir, bundleName, reporter)
-			if pushErr != nil {
-				return pushErr
-			}
-			if ok {
-				synced++
+		if !hasPAssets(resolved.Assets) {
+			for _, bundleName := range projectConfig.EnabledBundles {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				ok, pushErr := pushBundleYAMLFromCache(workspace, repoDir, bundleName, reporter)
+				if pushErr != nil {
+					return pushErr
+				}
+				if ok {
+					synced++
+				}
 			}
 		}
 
@@ -146,6 +200,20 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 		return 0, "", "", err
 	}
 	return pushedCount, skippedReason, versionCommit, nil
+}
+
+func writableResolvedAssets(workspace Workspace, cfg *types.ProjectConfig, assets []types.TypedAssetRef) []types.TypedAssetRef {
+	if workspace.EffectivePlane() == WorkspaceUser || cfg == nil || strings.TrimSpace(cfg.ProjectName) == "" {
+		return assets
+	}
+	out := make([]types.TypedAssetRef, 0, len(assets))
+	for _, asset := range assets {
+		if asset.Visibility != "" && asset.Vault != cfg.ProjectName {
+			continue
+		}
+		out = append(out, asset)
+	}
+	return out
 }
 
 func pushBundleYAMLFromCache(workspace Workspace, repoDir, bundleName string, reporter Reporter) (bool, error) {

@@ -9,9 +9,11 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/secrets/handler"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 type secretsSyncPlan struct {
@@ -36,6 +38,39 @@ func planWorkspaceSecretsSync(workspace Workspace, enabledBundles []string, cfg 
 	}
 	if cfg == nil {
 		cfg = &secrets.Config{}
+	}
+	var projects map[string]*pmodel.Loaded
+	pScanErr := withAppReadRepo(func(tx *repo.Transaction) error {
+		var scanErr error
+		projects, scanErr = pmodel.Scan(tx.WorkDir())
+		return scanErr
+	})
+	if pScanErr != nil && !strings.Contains(pScanErr.Error(), "仓库未连接") {
+		return nil, pScanErr
+	}
+	if len(projects) > 0 {
+		names := config.NormalizeBundleNames(enabledBundles)
+		if workspace.EffectivePlane() == WorkspaceProject {
+			names = []string{projectName}
+		} else {
+			filtered := names[:0]
+			for _, name := range names {
+				if _, ok := projects[name]; ok {
+					filtered = append(filtered, name)
+				}
+			}
+			names = filtered
+		}
+		for _, name := range names {
+			if _, ok := projects[name]; !ok {
+				return nil, fmt.Errorf("P %q 不存在，不能声明 secrets target", name)
+			}
+		}
+		targets, err := secrets.ResolvePSyncTargets(workspace.SecretsPlane(), names)
+		if err != nil {
+			return nil, err
+		}
+		return &secretsSyncPlan{Targets: targets, Total: len(targets)}, nil
 	}
 	// 平面隔离（ADR 0009）：project 上下文只解析项目平面 target。
 	targets, err := cfg.ResolveSyncTargets(workspace.SecretsPlane(), enabledBundles, projectName)
@@ -138,18 +173,27 @@ func loadVaultBundleScopes(workspace Workspace, reporter Reporter) vaultBundleSc
 // listLocalSecretBundleNames 扫描本机同步根下已有的 bundles/<name> 目录（停用后残留也要能在 Remote 里删）。
 func listLocalSecretBundleNames(workspace Workspace) []string {
 	var root string
+	usesP, _ := connectedRepositoryUsesPModel()
 	if workspace.EffectivePlane() == WorkspaceUser {
 		machineRoot, err := secrets.MachineSecretsRoot()
 		if err != nil {
 			return nil
 		}
-		root = filepath.Join(machineRoot, filepath.FromSlash(secrets.MachineBundleSecretsRelPrefix))
+		if usesP {
+			root = machineRoot
+		} else {
+			root = filepath.Join(machineRoot, filepath.FromSlash(secrets.MachineBundleSecretsRelPrefix))
+		}
 	} else {
 		projectRoot := strings.TrimSpace(workspace.Root)
 		if projectRoot == "" {
 			return nil
 		}
-		root = filepath.Join(projectRoot, filepath.FromSlash(secrets.BundleSecretsLocalRelPrefix))
+		if usesP {
+			root = filepath.Join(projectRoot, secrets.SecretsRootDir)
+		} else {
+			root = filepath.Join(projectRoot, filepath.FromSlash(secrets.BundleSecretsLocalRelPrefix))
+		}
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -228,6 +272,9 @@ func remoteInventoryTarget(folder string, workspace Workspace, scopes vaultBundl
 	folder = strings.TrimSpace(folder)
 	if folder == "" {
 		return secrets.SyncTarget{}, fmt.Errorf("folder 为空")
+	}
+	if pName, plane, ok := secrets.ParsePFolder(folder); ok {
+		return secrets.NewPSyncTarget(pName, plane)
 	}
 	if strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
 		name := strings.TrimSpace(strings.TrimPrefix(folder, secrets.BundleFolderPrefix))
@@ -365,6 +412,7 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 	var candidates []secrets.LandingCandidate
 	seenSSHFiles := make(map[string]string)
 	seenSSHHosts := make(map[string]string)
+	seenGCM := make(map[string]string)
 
 	for i, target := range plan.Targets {
 		if err := ctx.Err(); err != nil {
@@ -410,6 +458,11 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 				RelativePath: note.RelativePath,
 				Plane:        target.Plane,
 			})
+			if handler.MatchGCMPath(note.RelativePath) {
+				if inspectErr := addGCMConflict(seenGCM, label, note); inspectErr != nil {
+					return nil, inspectErr
+				}
+			}
 		}
 
 		owner := target.Name
@@ -427,16 +480,20 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 			}
 			seenSSHFiles[base] = label
 			for _, host := range landing.Hosts {
-				if prev, ok := seenSSHHosts[host]; ok {
+				hostKey, hostErr := secrets.SSHHostConflictKey(host)
+				if hostErr != nil {
+					return nil, fmt.Errorf("校验 %s 的 SSH host 失败: %w", label, hostErr)
+				}
+				if prev, ok := seenSSHHosts[hostKey]; ok {
 					return nil, fmt.Errorf("SSH host %q 冲突: 同时由 %s 与 %s 声明", host, prev, label)
 				}
-				seenSSHHosts[host] = label
+				seenSSHHosts[hostKey] = label
 			}
 		}
 		fetchedKeys[i] = landings
 
 		// 一旦该 SyncTarget 上有密钥内容，记住 bundle 逻辑名供 Settings 候选。
-		if target.Kind == secrets.SyncKindBundle && (len(notes) > 0 || len(keys) > 0) {
+		if (target.Kind == secrets.SyncKindBundle || target.Kind == secrets.SyncKindP) && (len(notes) > 0 || len(keys) > 0) {
 			if err := secrets.RememberSecretBundles([]string{target.Name}); err != nil {
 				emit(reporter, EventWarn, "pull.secrets",
 					fmt.Sprintf("写入 known_secret_bundles 失败: %v", err), nil)
@@ -446,6 +503,11 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 
 	emit(reporter, EventInfo, "pull.secrets", "校验落地路径边界与跨 folder 冲突", nil)
 	if err := secrets.ValidateLandingPaths(projectRoot, candidates); err != nil {
+		emit(reporter, EventError, "pull.secrets", err.Error(), nil)
+		finishMissingVault()
+		return summary, err
+	}
+	if err := validateNoPPrivateGitOverlap(plan.Targets, fetchedNotes, fetchedKeys); err != nil {
 		emit(reporter, EventError, "pull.secrets", err.Error(), nil)
 		finishMissingVault()
 		return summary, err
@@ -471,11 +533,12 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 		handlerItems := make([]handler.Item, 0, len(fetchedNotes[i]))
 		for _, note := range fetchedNotes[i] {
 			handlerItems = append(handlerItems, handler.Item{
-				Source:      handler.SourceNote,
-				Name:        note.RelativePath,
-				NoteContent: note.Content,
-				ProjectRoot: projectRoot,
-				BundleName:  target.Name,
+				Source:        handler.SourceNote,
+				Name:          note.RelativePath,
+				NoteContent:   note.Content,
+				ProjectRoot:   projectRoot,
+				BundleName:    target.Name,
+				ProjectScoped: target.Kind == secrets.SyncKindP && !secrets.IsMachinePlane(target.Plane),
 			})
 		}
 		applied, applyErr := handler.ApplyNotes(ctx, handler.Default(), handlerItems)
@@ -490,7 +553,13 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 		}
 
 		if len(fetchedKeys[i]) > 0 {
-			if writeErr := secrets.WriteSSHKeyLandings(fetchedKeys[i]); writeErr != nil {
+			var writeErr error
+			if target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+				writeErr = secrets.WriteSSHKeyLandings(fetchedKeys[i])
+			} else {
+				writeErr = secrets.WriteProjectSSHKeyLandings(projectRoot, fetchedKeys[i])
+			}
+			if writeErr != nil {
 				return nil, fmt.Errorf("落地 %s 的 SSH Key 失败: %w", label, writeErr)
 			}
 			for _, landing := range fetchedKeys[i] {
@@ -506,9 +575,9 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 		}
 
 		// 远端列表已成功取回 → 以远端为权威 prune 本地孤儿（停用包不在 plan 内，不会误清）。
-		pruned := pruneOrphanSecretsForTarget(projectRoot, target, fetchedNotes[i], fetchedKeys[i], reporter)
+		pruned := pruneOrphanSecretsForTarget(ctx, projectRoot, target, fetchedNotes[i], fetchedKeys[i], reporter)
 		summary.Orphans.merge(pruned)
-		if target.Kind == secrets.SyncKindBundle {
+		if target.Kind == secrets.SyncKindBundle || target.Kind == secrets.SyncKindP {
 			secretsConfirmed[target.Name] = true
 		}
 
@@ -541,6 +610,75 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 	return summary, nil
 }
 
+func addGCMConflict(seen map[string]string, label string, note secrets.SecureNote) error {
+	identity, err := handler.InspectGCM(note.RelativePath, note.Content)
+	if err != nil {
+		return fmt.Errorf("校验 %s 的 GCM %s 失败: %w", label, note.RelativePath, err)
+	}
+	key := strings.ToLower(identity.Protocol + "://" + identity.Host + "/" + identity.Path)
+	if prev, exists := seen[key]; exists {
+		return fmt.Errorf("GCM 凭据作用域 %q 冲突：同时由 %s 与 %s/%s 声明",
+			key, prev, label, note.RelativePath)
+	}
+	seen[key] = label + "/" + note.RelativePath
+	return nil
+}
+
+// validateNoPPrivateGitOverlap 拒绝同一 P/plane/相对路径同时由 Git private
+// 象限与 Bitwarden 持有。两者含义不同，但逻辑命名空间相同。
+func validateNoPPrivateGitOverlap(targets []secrets.SyncTarget, notes [][]secrets.SecureNote, keys [][]secrets.SSHKeyLanding) error {
+	hasP := false
+	for _, target := range targets {
+		if target.Kind == secrets.SyncKindP {
+			hasP = true
+			break
+		}
+	}
+	if !hasP {
+		return nil
+	}
+	return withAppReadRepo(func(tx *repo.Transaction) error {
+		for i, target := range targets {
+			if target.Kind != secrets.SyncKindP {
+				continue
+			}
+			plane := types.AssetPlaneProject
+			if secrets.IsMachinePlane(target.Plane) {
+				plane = types.AssetPlaneUser
+			}
+			root := filepath.Join(tx.WorkDir(), types.PQuadrantDir(target.Name, types.AssetVisibilityPrivate, plane))
+			check := func(rel string) error {
+				clean := filepath.FromSlash(strings.Trim(strings.ReplaceAll(rel, "\\", "/"), "/"))
+				if clean == "" {
+					return nil
+				}
+				if _, err := os.Stat(filepath.Join(root, clean)); err == nil {
+					return fmt.Errorf("P %q 的 private/%s/%s 同时由 Git 与 Bitwarden folder %q 持有，已拒绝同步",
+						target.Name, plane, filepath.ToSlash(clean), target.Folder)
+				} else if !os.IsNotExist(err) {
+					return err
+				}
+				return nil
+			}
+			if i < len(notes) {
+				for _, note := range notes[i] {
+					if err := check(note.RelativePath); err != nil {
+						return err
+					}
+				}
+			}
+			if i < len(keys) {
+				for _, key := range keys[i] {
+					if err := check(secrets.CanonicalSSHKeyName(key.Name)); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
+	})
+}
+
 // vaultPresentInPlane 返回当前平面 vault 中存在的 bundle 名集合（LocalRead）。
 // ok=false 表示本轮未能确认 vault（未连接 / 扫描失败），调用方不得据此做「远端已删」收敛。
 func vaultPresentInPlane(workspace Workspace, reporter Reporter) (map[string]struct{}, bool) {
@@ -548,6 +686,17 @@ func vaultPresentInPlane(workspace Workspace, reporter Reporter) (map[string]str
 	ok := false
 	err := withAppReadRepo(func(tx *repo.Transaction) error {
 		ok = true
+		projects, pErr := pmodel.Scan(tx.WorkDir())
+		if pErr != nil {
+			ok = false
+			return nil
+		}
+		if len(projects) > 0 {
+			for name := range projects {
+				present[name] = struct{}{}
+			}
+			return nil
+		}
 		vaultBundles, _, scanErr := scanVaultBundles(tx.WorkDir(), reporter)
 		if scanErr != nil {
 			emit(reporter, EventWarn, "pull.reconcile", "扫描 vault bundles 失败: "+scanErr.Error(), nil)
@@ -575,6 +724,13 @@ func vaultPresentInPlane(workspace Workspace, reporter Reporter) (map[string]str
 
 func formatSyncTargetLabel(t secrets.SyncTarget) string {
 	switch {
+	case t.Kind == secrets.SyncKindP:
+		return fmt.Sprintf("P %q private/%s secrets", t.Name, func() string {
+			if secrets.IsMachinePlane(t.Plane) {
+				return "user"
+			}
+			return "project"
+		}())
 	case t.Kind == secrets.SyncKindProject:
 		return fmt.Sprintf("project secrets %q", t.Name)
 	case secrets.IsMachinePlane(t.Plane):

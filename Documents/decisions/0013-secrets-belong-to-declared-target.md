@@ -1,6 +1,6 @@
 # 0013 — Secrets 必须归属已声明 SyncTarget：写入接口类型级收口
 
-- **状态**：已接受（已实现）；**§1 / §1a 两类归属已被 [0014](0014-bundle-sole-writable-aggregate.md) 收成仅 bundle**
+- **状态**：已被 [0016](0016-p-four-quadrant-model.md) 取代；§1 / §1a 曾被 [0014](0014-bundle-sole-writable-aggregate.md) 收成仅 bundle
 - **日期**：2026-08-17
 - **关联**：[0002](0002-secrets-synctarget-root.md)（本决策把其 folder 约定升级为强制归属）、[0004](0004-remote-page.md)（修订第 6 条 `N` 的 folder 输入）、[0005](0005-secrets-machine-handlers.md)、[0009](0009-bundle-binary-scope.md)、[0011](0011-private-repo-gcm-bootstrap.md)（补一条候选归属提示）、[0012](0012-user-bundle-single-entry.md)（修订「仅 secrets」文案）、[0014](0014-bundle-sole-writable-aggregate.md)
 - **影响范围**：`internal/secrets/synctarget.go` 类型可见性、`secrets.Client` 全部写方法、`internal/app/remote_register.go`、`internal/app/secrets_pull.go` 的 `remoteInventoryTarget`、`ResolveTarget`、Remote 页 `N` 表单、Bundles 页文案

@@ -9,6 +9,7 @@ import (
 
 	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/types"
 )
@@ -30,7 +31,10 @@ type ConfigInitPreparation struct {
 	// BundleCount 是扫描到的 bundle 数量，含 vault 级隐式 bundle。
 	BundleCount int
 	// BundleNames 列出可用 bundle 名称，供 init 提示使用。
-	BundleNames []string
+	BundleNames       []string
+	Model             string
+	HomeProject       string
+	AvailableProjects []string
 }
 
 func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigInitPreparation, error) {
@@ -68,7 +72,15 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 	}
 	prepared.AssetCount = len(allAssets)
 	if len(allAssets) == 0 {
-		return prepared, nil
+		hasP := false
+		_ = withLocalReadRepoDir(func(repoDir string) error {
+			projects, scanErr := pmodel.Scan(repoDir)
+			hasP = scanErr == nil && len(projects) > 0
+			return scanErr
+		})
+		if !hasP {
+			return prepared, nil
+		}
 	}
 
 	projectEditor := ""
@@ -97,9 +109,24 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 		Editor:         projectEditor,
 		EnabledBundles: enabledBundles,
 	}
+	prepared.HomeProject = projectName
 
 	// 扫描 bundle（含 vault 级隐式 bundle），供 init 提示与 TUI 使用。
 	if err := withLocalReadRepoDir(func(repoDir string) error {
+		projects, pErr := pmodel.Scan(repoDir)
+		if pErr != nil {
+			return pErr
+		}
+		if len(projects) > 0 {
+			prepared.Model = "p"
+			prepared.BundleCount = len(projects)
+			for name := range projects {
+				prepared.BundleNames = append(prepared.BundleNames, name)
+			}
+			sort.Strings(prepared.BundleNames)
+			prepared.AvailableProjects = append([]string(nil), prepared.BundleNames...)
+			return nil
+		}
 		_, bundleOverviews, scanErr := scanVaultBundles(repoDir, reporter)
 		if scanErr != nil {
 			return scanErr
@@ -175,6 +202,18 @@ func ScanAvailableAssets(reporter Reporter) ([]AssetInfo, error) {
 
 	var allAssets []AssetInfo
 	if err := withLocalReadRepoDir(func(repoDir string) error {
+		projects, pErr := pmodel.Scan(repoDir)
+		if pErr != nil {
+			return pErr
+		}
+		if len(projects) > 0 {
+			for name, project := range projects {
+				for _, asset := range project.Assets {
+					allAssets = append(allAssets, AssetInfo{Name: asset.Name, Type: asset.Type, Vault: name})
+				}
+			}
+			return nil
+		}
 		folders, err := readBundleEntries(repoDir)
 		if err != nil {
 			return fmt.Errorf("读取仓库失败: %w", err)

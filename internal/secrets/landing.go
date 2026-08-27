@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/sysproc"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 // LandingCandidate 是一条待落地的 secrets 文件及其 SyncTarget 归属。
@@ -27,7 +28,7 @@ type LandingCandidate struct {
 func ValidateLandingPaths(projectRoot string, candidates []LandingCandidate) error {
 	var projectCands, machineCands []LandingCandidate
 	for _, c := range candidates {
-		if c.Plane == SyncPlaneMachine {
+		if IsMachinePlane(c.Plane) {
 			machineCands = append(machineCands, c)
 		} else {
 			projectCands = append(projectCands, c)
@@ -92,8 +93,10 @@ func ValidateLandingPaths(projectRoot string, candidates []LandingCandidate) err
 			if root == "" {
 				return fmt.Errorf("LandingCandidate.LocalRoot 不能为空")
 			}
-			if !strings.HasPrefix(root, MachineBundleSecretsRelPrefix+"/") && root != MachineBundleSecretsRelPrefix {
-				return fmt.Errorf("机器级 secrets 落地路径必须位于 %s/ 下: %s", MachineBundleSecretsRelPrefix, root)
+			legacyBundleRoot := strings.HasPrefix(root, MachineBundleSecretsRelPrefix+"/") && root != MachineBundleSecretsRelPrefix
+			pRoot := !strings.Contains(root, "/") && types.IsValidPName(root)
+			if !legacyBundleRoot && !pRoot {
+				return fmt.Errorf("机器级 secrets 落地路径必须是 P 根或位于旧 %s/ 下: %s", MachineBundleSecretsRelPrefix, root)
 			}
 			display := path.Join(".dec/secrets", root, noteRel)
 			folder := strings.TrimSpace(candidate.Folder)

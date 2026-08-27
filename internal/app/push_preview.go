@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
@@ -21,6 +23,9 @@ type PushProjectAssetsPreview struct {
 	DecHasChanges       bool
 	DecSkippedReason    string
 	BitwardenConfigured bool
+	Model               string
+	HomeProject         string
+	WritableProjects    []string
 }
 
 // PreviewPushProjectAssets 轻量检测 Push 将涉及的内容，供 TUI 确认页展示。
@@ -39,6 +44,15 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 
 	preview.EnabledBundleNames = append([]string(nil), projectConfig.EnabledBundles...)
 	preview.EnabledBundleCount = len(preview.EnabledBundleNames)
+	if usesP, _ := connectedRepositoryUsesPModel(); usesP {
+		preview.Model = "p"
+		if workspace.EffectivePlane() == WorkspaceProject {
+			preview.HomeProject = projectConfig.ProjectName
+			preview.WritableProjects = []string{projectConfig.ProjectName}
+		} else {
+			preview.WritableProjects = append([]string(nil), projectConfig.EnabledBundles...)
+		}
+	}
 
 	configured, err := secrets.IsConfigured()
 	if err != nil {
@@ -76,7 +90,8 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 }
 
 func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConfig *types.ProjectConfig, reporter Reporter) (candidateCount int, hasChanges bool, skippedReason string, err error) {
-	if len(projectConfig.EnabledBundles) == 0 {
+	if len(projectConfig.EnabledBundles) == 0 &&
+		(workspace.EffectivePlane() == WorkspaceUser || strings.TrimSpace(projectConfig.ProjectName) == "") {
 		return 0, false, "无已启用 bundle", nil
 	}
 
@@ -85,32 +100,41 @@ func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConf
 			return err
 		}
 		repoDir := tx.WorkDir()
+		if repositoryHasLegacyLayout(repoDir) {
+			return fmt.Errorf("检测到旧 projects/ 或 bundles/ 结构；请先执行 P 四象限迁移预览")
+		}
 		resolved, resolveErr := resolveDesiredAssetsForPlane(projectConfig, repoDir, workspace.EffectivePlane(), reporter)
 		if resolveErr != nil {
 			return resolveErr
 		}
 
-		assets := resolved.Assets
+		// 与真正 push 使用同一可写边界：项目平面只能回推家 P，
+		// direct requires 的 public/project 副本只读，不能计入预览或被临时镜像。
+		assets := writableResolvedAssets(workspace, projectConfig, resolved.Assets)
+		resolvedForPreview := *resolved
+		resolvedForPreview.Assets = assets
 		if len(assets) == 0 && len(projectConfig.EnabledBundles) == 0 {
 			skippedReason = "没有可推送的有效资产"
 			return nil
 		}
 
-		synced, pruned, syncErr := syncDecVaultFromCache(workspace, repoDir, projectConfig, resolved, reporter)
+		synced, pruned, syncErr := syncDecVaultFromCache(workspace, repoDir, projectConfig, &resolvedForPreview, reporter)
 		if syncErr != nil {
 			return syncErr
 		}
 
-		for _, bundleName := range projectConfig.EnabledBundles {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			ok, pushErr := pushBundleYAMLFromCache(workspace, repoDir, bundleName, reporter)
-			if pushErr != nil {
-				return pushErr
-			}
-			if ok {
-				synced++
+		if !hasPAssets(assets) {
+			for _, bundleName := range projectConfig.EnabledBundles {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				ok, pushErr := pushBundleYAMLFromCache(workspace, repoDir, bundleName, reporter)
+				if pushErr != nil {
+					return pushErr
+				}
+				if ok {
+					synced++
+				}
 			}
 		}
 

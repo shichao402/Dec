@@ -86,6 +86,19 @@ func PushWorkspaceSecretsBundles(ctx context.Context, workspace Workspace, repor
 		emit(reporter, EventInfo, "push.secrets",
 			fmt.Sprintf("推送 %s (folder: %s ← %s)", label, target.Folder, target.LocalRoot), progress)
 
+		if target.Kind == secrets.SyncKindP {
+			localNotes, scanErr := secrets.ScanSyncRoot(projectRoot, target)
+			if scanErr != nil {
+				return nil, scanErr
+			}
+			if overlapErr := validateNoPPrivateGitOverlap(
+				[]secrets.SyncTarget{target},
+				[][]secrets.SecureNote{localNotes},
+				nil,
+			); overlapErr != nil {
+				return nil, overlapErr
+			}
+		}
 		pushResult, pushErr := secrets.PushBundle(ctx, client, secrets.PushBundleRequest{
 			ProjectRoot:   projectRoot,
 			Target:        target,

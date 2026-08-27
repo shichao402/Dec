@@ -6,11 +6,17 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/shichao402/Dec/internal/types"
 )
 
 // BundleFolderPrefix 是 Bitwarden 中 bundle 级 folder 的统一前缀，
 // 用于与 project 级 folder（裸实体名）区分。
 const BundleFolderPrefix = "bundle/"
+
+const (
+	PPrivateFolderSegment = "private"
+)
 
 // Declared 报告 target 是否由声明型构造函数产生。
 // 包外结构体字面量无法设置该标记，只能作为浏览节点或构造函数的重建输入。
@@ -101,6 +107,8 @@ func (t *SyncTarget) UnmarshalJSON(data []byte) error {
 		err     error
 	)
 	switch raw.Kind {
+	case SyncKindP:
+		rebuilt, err = NewPSyncTarget(raw.Name, raw.Plane)
 	case SyncKindProject:
 		rebuilt, err = NewProjectSyncTarget(raw.Name, raw.Folder)
 	case SyncKindBundle:
@@ -117,6 +125,62 @@ func (t *SyncTarget) UnmarshalJSON(data []byte) error {
 	}
 	*t = rebuilt
 	return nil
+}
+
+// PFolder 返回 ADR 0016 固定 Bitwarden folder 名。Bitwarden 的斜杠只是
+// folder 名的一部分，不表示层级。
+func PFolder(pName string, plane SyncPlane) string {
+	if IsMachinePlane(plane) {
+		return path.Join(strings.TrimSpace(pName), PPrivateFolderSegment, string(SyncPlaneUser))
+	}
+	return path.Join(strings.TrimSpace(pName), PPrivateFolderSegment, string(SyncPlaneProject))
+}
+
+// ParsePFolder 只识别 <p>/private/user 与 <p>/private/project。
+func ParsePFolder(folder string) (pName string, plane SyncPlane, ok bool) {
+	clean := strings.Trim(strings.TrimSpace(strings.ReplaceAll(folder, "\\", "/")), "/")
+	parts := strings.Split(clean, "/")
+	if len(parts) != 3 || parts[1] != PPrivateFolderSegment || !types.IsValidPName(parts[0]) {
+		return "", "", false
+	}
+	switch parts[2] {
+	case string(SyncPlaneUser), string(SyncPlaneMachine):
+		return parts[0], SyncPlaneMachine, true
+	case string(SyncPlaneProject):
+		return parts[0], SyncPlaneProject, true
+	default:
+		return "", "", false
+	}
+}
+
+// NewPSyncTarget 构造 ADR 0016 P + plane 声明目标。folder 与本地根均不可自定义：
+// user: <p>/private/user ↔ ~/.dec/secrets/<p>/
+// project: <p>/private/project ↔ <workspace>/.secrets/<p>/
+func NewPSyncTarget(pName string, plane SyncPlane) (SyncTarget, error) {
+	name := strings.TrimSpace(pName)
+	if !types.IsValidPName(name) {
+		return SyncTarget{}, fmt.Errorf("P 名 %q 非法，必须为小写 kebab-case", pName)
+	}
+	if plane == "" {
+		plane = SyncPlaneProject
+	}
+	if plane != SyncPlaneProject && !IsMachinePlane(plane) {
+		return SyncTarget{}, fmt.Errorf("未知 SyncPlane %q", plane)
+	}
+	normalizedPlane := SyncPlaneProject
+	localRoot := path.Join(SecretsRootDir, name)
+	if IsMachinePlane(plane) {
+		normalizedPlane = SyncPlaneMachine
+		localRoot = name
+	}
+	return SyncTarget{
+		Kind:      SyncKindP,
+		Name:      name,
+		Folder:    PFolder(name, normalizedPlane),
+		LocalRoot: localRoot,
+		Plane:     normalizedPlane,
+		declared:  true,
+	}, nil
 }
 
 // DefaultBundleFolder 返回 bundle 在 Bitwarden 上的默认 folder 名。
@@ -219,10 +283,16 @@ func ResolveTarget(kind SyncKind, name string, binding BundleBinding, explicit S
 		folder = explicitFolder
 	}
 	resolvedKind := kind
-	if explicit.Kind == SyncKindProject || explicit.Kind == SyncKindBundle {
+	if explicit.Kind == SyncKindProject || explicit.Kind == SyncKindBundle || explicit.Kind == SyncKindP {
 		resolvedKind = explicit.Kind
 	}
 	switch resolvedKind {
+	case SyncKindP:
+		pName := strings.TrimSpace(explicit.Name)
+		if pName == "" {
+			pName = strings.TrimSpace(name)
+		}
+		return NewPSyncTarget(pName, explicit.Plane)
 	case SyncKindProject:
 		projectName := strings.TrimSpace(explicit.Name)
 		if projectName == "" {

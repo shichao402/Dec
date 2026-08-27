@@ -26,6 +26,9 @@ type Item struct {
 	NoteContent string // SourceNote 时为正文
 	ProjectRoot string
 	BundleName  string
+	// ProjectScoped 仅用于 ADR 0016 private/project：副作用必须绑定当前工作区。
+	// false 保持历史 bundle/user 的机器级行为。
+	ProjectScoped bool
 }
 
 // Handler 按 SourceKind + 名字约定处理机器平面副作用。

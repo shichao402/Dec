@@ -10,10 +10,9 @@ alwaysApply: false
 
 ## 适用 proto 的字段
 
-- `Project`、`ProjectConfig`、`GlobalConfig`、`Bundle`、`VarsConfig`
-- 资产引用（`AssetRef`、bundle `members`）
-- vault `Project.bundles`、本地 `ProjectConfig.project_name` / `enabled_bundles`、`Bundle`（`bundles/<name>/bundle.yaml`，含 `skills/`、`rules/`、`mcp/`、`commands/`）
-- `BundleBinding`（Dec bundle ↔ Bitwarden secrets bundle 同构绑定）
+- 顶层 P（`<p>/dec.yaml`）、`ProjectConfig`、`GlobalConfig`、`VarsConfig`
+- `requires` 与四象限资产视图
+- 本地 `ProjectConfig.project_name` / `GlobalConfig.enabled_projects`
 
 ## 不适用 proto（保持原格式）
 
@@ -25,9 +24,10 @@ alwaysApply: false
 ## 实现约定
 
 - 修改 schema 时先改 `schema/**/*.proto`，再同步 `internal/types/` 手写 struct 与 adapter（生成物见 `schema/gen/go/`）。
-- 统一使用 **bundle** 命名；资产正文不进 proto，只声明引用与元数据。
-- Pull 时 Dec bundle（→ `.dec/`）与 **同名** secrets bundle（→ 项目根）成对拉取；`.dec/` 与敏感路径冲突必须报错（见 `Documents/BUNDLE-SECRETS-MODEL.md`）。
-- secrets bundle 名默认与 Dec bundle 名一致；显式绑定见 `BundleBinding`。
+- P 名强制小写 kebab-case；资产正文不进 proto。
+- Git 使用 `<p>/{public,private}/{user,project}`；四支都只能保存非敏感资产。
+- `requires` 只直接引用目标 P 的 `public/project`，不递归，private 永不被引用。
+- Bitwarden 后续只保存 `<p>/private/{user,project}` 的敏感正文，不建立 public folder。
 
 ## 示例
 
@@ -35,20 +35,18 @@ alwaysApply: false
 # .dec/config.yaml — wire format 仍是 YAML
 version: v2
 project_name: my-app
-enabled_bundles:
-  - helloworld
 ```
 
 ```yaml
-# projects/my-app.yaml — vault project 声明
+# my-app/dec.yaml — 顶层 P 声明
 name: my-app
-bundles:
-  - helloworld
+requires:
+  - shared-tools
 ```
 
 ```protobuf
 // schema/dec/v1/projects.proto — vault project 真相源
 message Project {
-  repeated string bundles = 3;
+  repeated string requires = 4;
 }
 ```

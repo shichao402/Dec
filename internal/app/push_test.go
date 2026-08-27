@@ -43,12 +43,8 @@ func TestPushProjectAssets_PushesDecCacheChanges(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/combo/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\nold\n",
-		"bundles/combo/bundle.yaml": `name: combo
-description: bundle-integration test
-members:
-  - skill/bundle-skill
-`,
+		"combo/dec.yaml": "name: combo\n",
+		"combo/public/project/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\nold\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -57,12 +53,13 @@ members:
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "combo",
 		EnabledBundles: []string{"combo"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	cacheSkill := filepath.Join(projectRoot, ".dec", "cache", "combo", "skills", "bundle-skill", "SKILL.md")
+	cacheSkill := filepath.Join(projectRoot, ".dec", "cache", "combo", "public", "project", "skills", "bundle-skill", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(cacheSkill), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +89,7 @@ members:
 		t.Fatalf("NewReadTransaction() 失败: %v", err)
 	}
 	defer tx.Close()
-	data, err := os.ReadFile(filepath.Join(tx.WorkDir(), "bundles/combo/skills/bundle-skill/SKILL.md"))
+	data, err := os.ReadFile(filepath.Join(tx.WorkDir(), "combo/public/project/skills/bundle-skill/SKILL.md"))
 	if err != nil {
 		t.Fatalf("读取远端资产失败: %v", err)
 	}
@@ -106,11 +103,8 @@ func TestPushProjectAssets_SkipsDecWhenCacheMatchesRemote(t *testing.T) {
 	useStubSecretsSession(t)
 	content := "---\nname: bundle-skill\n---\nunchanged\n"
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/combo/skills/bundle-skill/SKILL.md": content,
-		"bundles/combo/bundle.yaml": `name: combo
-members:
-  - skill/bundle-skill
-`,
+		"combo/dec.yaml": "name: combo\n",
+		"combo/public/project/skills/bundle-skill/SKILL.md": content,
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
@@ -119,12 +113,13 @@ members:
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "combo",
 		EnabledBundles: []string{"combo"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	cacheSkill := filepath.Join(projectRoot, ".dec", "cache", "combo", "skills", "bundle-skill", "SKILL.md")
+	cacheSkill := filepath.Join(projectRoot, ".dec", "cache", "combo", "public", "project", "skills", "bundle-skill", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(cacheSkill), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -141,5 +136,26 @@ members:
 	}
 	if result.DecSkippedReason != "无本地变更" {
 		t.Fatalf("DecSkippedReason = %q, want 无本地变更", result.DecSkippedReason)
+	}
+}
+
+func TestPushProjectAssets_RejectsLegacyRepositoryAndGuidesMigration(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	useStubSecretsSession(t)
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"bundles/combo/bundle.yaml": "name: combo\nscope: project\nmembers: []\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := t.TempDir()
+	if err := config.NewProjectConfigManager(projectRoot).SaveProjectConfig(&types.ProjectConfig{
+		EnabledBundles: []string{"combo"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := PushProjectAssets(context.Background(), projectRoot, nil)
+	if err == nil || !strings.Contains(err.Error(), "普通 Push 已拒绝") || !strings.Contains(err.Error(), "Run 页") {
+		t.Fatalf("err = %v", err)
 	}
 }

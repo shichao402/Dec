@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/secrets/handler"
 )
 
 // OrphanCleanupReport 汇总 pull 时确认「远端已无」后的本地孤儿清理结果。
@@ -37,6 +39,7 @@ func (r OrphanCleanupReport) totalRemoved() int {
 //   - SSH 只删 ~/.ssh/dec_<owner>_* 命名约定的 Dec 托管密钥
 //   - 调用方必须已成功取回远端列表；取回失败时不得调用
 func pruneOrphanSecretsForTarget(
+	ctx context.Context,
 	projectRoot string,
 	target secrets.SyncTarget,
 	remoteNotes []secrets.SecureNote,
@@ -65,6 +68,31 @@ func pruneOrphanSecretsForTarget(
 		if _, ok := keepNotes[note.RelativePath]; ok {
 			continue
 		}
+		if handler.Default().Find(handler.SourceNote, note.RelativePath) != nil {
+			abs, absErr := secrets.AbsolutePath(projectRoot, target, note.RelativePath)
+			if absErr != nil {
+				report.ReportedOnly = append(report.ReportedOnly, note.RelativePath+"（解析 revoke 路径失败）")
+				continue
+			}
+			content, readErr := os.ReadFile(abs)
+			if readErr != nil {
+				report.ReportedOnly = append(report.ReportedOnly, note.RelativePath+"（读取 revoke 正文失败）")
+				continue
+			}
+			if _, revokeErr := handler.RevokeNotes(ctx, nil, []handler.Item{{
+				Source:        handler.SourceNote,
+				Name:          note.RelativePath,
+				NoteContent:   string(content),
+				ProjectRoot:   projectRoot,
+				BundleName:    target.Name,
+				ProjectScoped: target.Kind == secrets.SyncKindP && !secrets.IsMachinePlane(target.Plane),
+			}}); revokeErr != nil {
+				emit(reporter, EventWarn, "pull.reconcile",
+					fmt.Sprintf("撤销孤儿 handler %s 失败: %v", note.RelativePath, revokeErr), nil)
+				report.ReportedOnly = append(report.ReportedOnly, note.RelativePath+"（revoke 失败）")
+				continue
+			}
+		}
 		display, err := removeLocalSecureNoteFile(projectRoot, target, note.RelativePath)
 		if err != nil {
 			emit(reporter, EventWarn, "pull.reconcile",
@@ -89,11 +117,27 @@ func pruneOrphanSecretsForTarget(
 		}
 		keepKeys[name] = struct{}{}
 	}
-	for _, keyName := range listLocalSSHKeyNamesForBundle(owner) {
+	localKeyNames := listLocalSSHKeyNamesForBundle(owner)
+	if target.Kind == secrets.SyncKindP && !secrets.IsMachinePlane(target.Plane) {
+		var listErr error
+		localKeyNames, listErr = secrets.ListProjectSSHKeyNames(projectRoot, owner)
+		if listErr != nil {
+			emit(reporter, EventWarn, "pull.reconcile",
+				fmt.Sprintf("列出 project SSH Key 失败: %v", listErr), nil)
+			return report
+		}
+	}
+	for _, keyName := range localKeyNames {
 		if _, ok := keepKeys[keyName]; ok {
 			continue
 		}
-		if err := secrets.RemoveSSHKeyLanding(owner, keyName); err != nil {
+		var err error
+		if target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+			err = secrets.RemoveSSHKeyLanding(owner, keyName)
+		} else {
+			err = secrets.RemoveProjectSSHKeyLanding(projectRoot, owner, keyName)
+		}
+		if err != nil {
 			emit(reporter, EventWarn, "pull.reconcile",
 				fmt.Sprintf("删除孤儿 SSH Key %s 失败: %v", keyName, err), nil)
 			report.ReportedOnly = append(report.ReportedOnly, "~/.ssh/dec_"+owner+"_"+keyName+"（删除失败）")
@@ -267,16 +311,23 @@ func localSecretBundleDirsForPlane(workspace Workspace, bundleName string) []str
 	if bundleName == "" {
 		return nil
 	}
+	usesP, _ := connectedRepositoryUsesPModel()
 	if workspace.EffectivePlane() == WorkspaceUser {
 		machineRoot, err := secrets.MachineSecretsRoot()
 		if err != nil {
 			return nil
+		}
+		if usesP {
+			return []string{filepath.Join(machineRoot, bundleName)}
 		}
 		return []string{filepath.Join(machineRoot, filepath.FromSlash(secrets.MachineBundleSecretsRelPrefix), bundleName)}
 	}
 	projectRoot := strings.TrimSpace(workspace.Root)
 	if projectRoot == "" {
 		return nil
+	}
+	if usesP {
+		return []string{filepath.Join(projectRoot, secrets.SecretsRootDir, bundleName)}
 	}
 	return []string{filepath.Join(projectRoot, filepath.FromSlash(secrets.BundleSecretsLocalRelPrefix), bundleName)}
 }

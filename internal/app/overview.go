@@ -37,6 +37,12 @@ type ProjectOverview struct {
 	IDEs        []string
 	IDEWarnings []string
 	Editor      string
+	// ADR 0016 结构化语义。旧 bundle 字段保留给兼容客户端。
+	Model            string
+	HomeProject      string
+	EnabledProjects  []string
+	RequiredProjects []string
+	Quadrants        map[string]int
 }
 
 func LoadProjectOverview(projectRoot string) (*ProjectOverview, error) {
@@ -112,6 +118,31 @@ func LoadWorkspaceOverviewOpts(workspace Workspace, opts OverviewLoadOpts) (*Pro
 			if resolveErr == nil {
 				overview.Bundles = resolved.Bundles
 				overview.AvailableBundleCount = len(resolved.Bundles)
+				for _, item := range resolved.Bundles {
+					if item.Model != "p" {
+						continue
+					}
+					overview.Model = "p"
+					if item.Home {
+						overview.HomeProject = item.Name
+					}
+					if item.Enabled {
+						overview.EnabledProjects = append(overview.EnabledProjects, item.Name)
+					}
+					if item.Required {
+						overview.RequiredProjects = append(overview.RequiredProjects, item.Name)
+					}
+				}
+				if overview.Model == "p" {
+					overview.EnabledBundleCount = len(overview.EnabledProjects)
+					overview.Quadrants = map[string]int{
+						"public/user": 0, "private/user": 0,
+						"public/project": 0, "private/project": 0,
+					}
+					for _, asset := range resolved.Assets {
+						overview.Quadrants[string(asset.Visibility)+"/"+string(asset.Plane)]++
+					}
+				}
 				names := make([]string, 0, len(resolved.Bundles))
 				for _, bo := range resolved.Bundles {
 					names = append(names, bo.Name)

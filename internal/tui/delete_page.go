@@ -149,6 +149,8 @@ func selectionFromCandidate(c app.DeleteCandidate) app.DeleteSelectionItem {
 		Members:       append([]app.AssetSelectionItem(nil), c.Members...),
 		Partition:     c.Partition,
 		ScopeTag:      c.ScopeTag,
+		Visibility:    c.Visibility,
+		AssetPlane:    c.AssetPlane,
 		Unmanaged:     c.Unmanaged,
 	}
 }
@@ -388,6 +390,9 @@ func (m model) remoteHeadLines() []string {
 		head += " · 筛选 " + filter
 	}
 	lines := []string{head}
+	if m.overview != nil && m.overview.Model == "p" {
+		lines = append(lines, shellMutedStyle.Render("仅 Bitwarden private/user · private/project · legacy；Git 四象限请到 Bundles"))
+	}
 	if m.deleteLoad.busy() {
 		lines = append(lines, shellWarnStyle.Render("刷新中…"))
 	} else {

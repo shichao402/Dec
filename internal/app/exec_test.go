@@ -28,7 +28,7 @@ func TestWrapMCPServerWithExec_WrapsCommandAndStripsPlaceholders(t *testing.T) {
 		t.Fatalf("command = %q", cmd)
 	}
 	joined := strings.Join(args, " ")
-	if cmd != "dec-exec" || !strings.Contains(joined, "--bundle") || !strings.Contains(joined, "vikunja") {
+	if cmd != "dec-exec" || !strings.Contains(joined, "--p") || !strings.Contains(joined, "vikunja") {
 		t.Fatalf("args = %#v", args)
 	}
 	if !strings.Contains(joined, "-- npx") {
@@ -86,7 +86,7 @@ func TestWrapMCPServerWithExecForPlane_UserPlaneResolvesWorkspacePlaceholder(t *
 
 func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 	root := t.TempDir()
-	bundleTarget, err := secrets.NewBundleSyncTarget("vikunja", "")
+	bundleTarget, err := secrets.NewPSyncTarget("vikunja", secrets.SyncPlaneProject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 
 func TestRunExecWithSecrets_InjectsEnvIntoChild(t *testing.T) {
 	root := t.TempDir()
-	bundleTarget, err := secrets.NewBundleSyncTarget("vikunja", "")
+	bundleTarget, err := secrets.NewPSyncTarget("vikunja", secrets.SyncPlaneProject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestRunExecWithSecrets_InjectsEnvIntoChild(t *testing.T) {
 
 func TestAbsolutePath_WindowsSeparators(t *testing.T) {
 	root := `D:\workspace\proj`
-	target, err := secrets.NewBundleSyncTarget("tencent-cloud", "")
+	target, err := secrets.NewPSyncTarget("tencent-cloud", secrets.SyncPlaneProject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestAbsolutePath_WindowsSeparators(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSuffix := filepath.Join(".secrets", "bundles", "tencent-cloud", ".env", "tencent-cloud.env")
+	wantSuffix := filepath.Join(".secrets", "tencent-cloud", ".env", "tencent-cloud.env")
 	if !strings.HasSuffix(abs, wantSuffix) {
 		t.Fatalf("abs = %q, 应归一化 Windows 路径并落到 %q", abs, wantSuffix)
 	}

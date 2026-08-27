@@ -241,6 +241,13 @@ func (c *APIClient) ListSecretBundleNames(ctx context.Context) ([]string, error)
 	seen := make(map[string]struct{})
 	names := make([]string, 0)
 	for _, name := range all {
+		if pName, _, ok := ParsePFolder(name); ok {
+			if _, exists := seen[pName]; !exists {
+				seen[pName] = struct{}{}
+				names = append(names, pName)
+			}
+			continue
+		}
 		if !strings.HasPrefix(name, BundleFolderPrefix) {
 			continue
 		}
@@ -378,6 +385,9 @@ func (c *StubClient) ListAllFolderNames(_ context.Context) ([]string, error) {
 
 func stubSecretBundleName(folder string) (string, bool) {
 	folder = strings.TrimSpace(folder)
+	if name, _, ok := ParsePFolder(folder); ok {
+		return name, true
+	}
 	if !strings.HasPrefix(folder, BundleFolderPrefix) {
 		return "", false
 	}

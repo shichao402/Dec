@@ -488,6 +488,21 @@ func (c *Config) ResolveSyncTargets(plane SyncPlane, enabled []string, projectNa
 	return targets, nil
 }
 
+// ResolvePSyncTargets 按 ADR 0016 生成固定 P + plane 目标。
+// project 平面调用方只能传家 P；requires 不得加入。user 平面传本机显式启用的 P。
+func ResolvePSyncTargets(plane SyncPlane, pNames []string) ([]SyncTarget, error) {
+	pNames = NormalizeBundleNames(pNames)
+	targets := make([]SyncTarget, 0, len(pNames))
+	for _, name := range pNames {
+		target, err := NewPSyncTarget(name, plane)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, target)
+	}
+	return targets, nil
+}
+
 func applyConfigDefaults(cfg *Config) {
 	if cfg == nil {
 		return

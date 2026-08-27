@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/secrets/handler"
@@ -63,6 +64,7 @@ type DeleteCandidate struct {
 	SSHKeyName    string            // ssh：逻辑名
 	DecBundleName string            // ssh：用于本地 ~/.ssh/dec_<bundle>_<name>
 	BundleName    string
+	ProjectName   string
 	Members       []AssetSelectionItem
 	Orphan        bool
 	TreeRoot      string // ".dec" / secretsTreeRoot / local-*
@@ -71,8 +73,10 @@ type DeleteCandidate struct {
 	GroupTitle    string
 	Partition     RemotePartition // remote | local
 	ScopeTag      string          // bundle.yaml scope 元数据（user|project），非可见性开关
-	Unmanaged     bool            // 裸 folder 等非 Dec 管理节点
-	ReadOnly      bool            // 只读展示（如无文件夹）
+	Visibility    types.AssetVisibility
+	AssetPlane    types.AssetPlane
+	Unmanaged     bool // 裸 folder 等非 Dec 管理节点
+	ReadOnly      bool // 只读展示（如无文件夹）
 }
 
 // DeleteSelectionItem 为一次删除操作选中的候选项。
@@ -88,9 +92,12 @@ type DeleteSelectionItem struct {
 	SSHKeyName    string
 	DecBundleName string
 	BundleName    string
+	ProjectName   string
 	Members       []AssetSelectionItem
 	Partition     RemotePartition
 	ScopeTag      string
+	Visibility    types.AssetVisibility
+	AssetPlane    types.AssetPlane
 	Unmanaged     bool
 }
 
@@ -406,7 +413,13 @@ func appendRemoteSecretCandidates(
 			continue
 		}
 		for _, key := range keys {
-			localExists, existsErr := secrets.LocalSSHKeyExists(owner, key.Name)
+			var localExists bool
+			var existsErr error
+			if target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+				localExists, existsErr = secrets.LocalSSHKeyExists(owner, key.Name)
+			} else {
+				localExists, existsErr = secrets.InspectProjectSSHKeyLanding(projectRoot, owner, key.Name)
+			}
 			if existsErr != nil {
 				emit(reporter, EventWarn, "delete.secrets", existsErr.Error(), nil)
 				continue
@@ -445,6 +458,11 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if item.Kind == DeleteKindDecAsset && (item.Visibility != "" || item.AssetPlane != "") {
+			if err := validatePAssetDeleteIdentity(item); err != nil {
+				return nil, err
+			}
+		}
 		switch item.Kind {
 		case DeleteKindBundle:
 			bundleName := strings.TrimSpace(item.BundleName)
@@ -470,13 +488,13 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 		case DeleteKindDecAsset:
 			if mode == DeleteModeLocal {
 				emit(reporter, EventInfo, "delete.dec", fmt.Sprintf("只清本机 [%s] %s", item.Type, item.Name), nil)
-				if localErr := deleteLocalDecAssetOnly(workspace, item.Type, item.Name, item.Vault, reporter); localErr != nil {
+				if localErr := deleteLocalDecAssetOnly(workspace, item.Type, item.Name, item.Vault, item.Visibility, item.AssetPlane, reporter); localErr != nil {
 					return nil, localErr
 				}
 				pruneEmptyDecCacheBundle(workspace, item.Vault, reporter)
 			} else {
 				emit(reporter, EventInfo, "delete.dec", fmt.Sprintf("只删远端 [%s] %s", item.Type, item.Name), nil)
-				assetResult, remErr := deleteRemoteDecAssetOnly(input.ProjectRoot, input.Plane, item.Type, item.Name, item.Vault, reporter)
+				assetResult, remErr := deleteRemoteDecAssetOnly(input.ProjectRoot, input.Plane, item.Type, item.Name, item.Vault, item.Visibility, item.AssetPlane, reporter)
 				if remErr != nil {
 					return nil, remErr
 				}
@@ -501,7 +519,7 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 		case DeleteKindSSHKey:
 			if mode == DeleteModeLocal {
 				emit(reporter, EventInfo, "delete.ssh", fmt.Sprintf("只清本机 SSH Key %s", item.SSHKeyName), nil)
-				if err := deleteSSHKeyItemLocalOnly(item.DecBundleName, item.SSHKeyName, reporter); err != nil {
+				if err := deleteSSHKeyItemLocalOnly(workspace, item.SecretsBundle, item.DecBundleName, item.SSHKeyName, reporter); err != nil {
 					return nil, err
 				}
 			} else {
@@ -526,6 +544,27 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 		modeLabel, result.DecDeleted, result.SecretsDeleted, result.SSHKeysDeleted, result.BundlesDeleted)
 	emit(reporter, EventInfo, "delete.finish", summary, nil)
 	return result, nil
+}
+
+func validatePAssetDeleteIdentity(item DeleteSelectionItem) error {
+	if !types.IsValidPName(strings.TrimSpace(item.Vault)) {
+		return fmt.Errorf("P 名 %q 非法", item.Vault)
+	}
+	if item.Visibility != types.AssetVisibilityPublic && item.Visibility != types.AssetVisibilityPrivate {
+		return fmt.Errorf("P 资产 visibility %q 非法", item.Visibility)
+	}
+	if item.AssetPlane != types.AssetPlaneUser && item.AssetPlane != types.AssetPlaneProject {
+		return fmt.Errorf("P 资产 plane %q 非法", item.AssetPlane)
+	}
+	if !bundle.IsKnownType(item.Type) {
+		return fmt.Errorf("P 资产类型 %q 非法", item.Type)
+	}
+	name := strings.TrimSpace(item.Name)
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name ||
+		strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("P 资产名 %q 非法：必须是单个路径段", item.Name)
+	}
+	return nil
 }
 
 func deleteSecretItem(ctx context.Context, workspace Workspace, secretsBundleName, localRoot string, plane secrets.SyncPlane, notePath string, reporter Reporter) error {
@@ -555,9 +594,11 @@ func deleteSecretItem(ctx context.Context, workspace Workspace, secretsBundleNam
 	if handler.Default().Find(handler.SourceNote, notePath) != nil {
 		if content, ok := readSecretNoteContent(ctx, projectRoot, secretsBundleName, localRoot, plane, notePath, localPath, reporter); ok {
 			if _, revErr := handler.RevokeNotes(ctx, nil, []handler.Item{{
-				Source:      handler.SourceNote,
-				Name:        notePath,
-				NoteContent: content,
+				Source:        handler.SourceNote,
+				Name:          notePath,
+				NoteContent:   content,
+				ProjectRoot:   projectRoot,
+				ProjectScoped: isProjectScopedPFolder(secretsBundleName),
 			}}); revErr != nil {
 				emit(reporter, EventWarn, "delete.secrets", fmt.Sprintf("  撤销机器平面副作用失败（继续删除）: %v", revErr), nil)
 			} else {
@@ -710,7 +751,7 @@ func isVaultMissingErr(err error) bool {
 	return strings.Contains(msg, "未找到")
 }
 
-func deleteLocalDecAssetOnly(workspace Workspace, itemType, name, vault string, reporter Reporter) error {
+func deleteLocalDecAssetOnly(workspace Workspace, itemType, name, vault string, visibility types.AssetVisibility, assetPlane types.AssetPlane, reporter Reporter) error {
 	projectIDEs := resolveWorkspaceIDEs(workspace, reporter)
 	for _, ideImpl := range projectIDEs {
 		if _, err := removeAssetFromIDE(itemType, name, workspace, ideImpl); err != nil {
@@ -718,6 +759,12 @@ func deleteLocalDecAssetOnly(workspace Workspace, itemType, name, vault string, 
 		}
 	}
 	cachePath := getWorkspaceCachePath(workspace, vault, itemType, name)
+	if visibility != "" && assetPlane != "" {
+		cachePath = getWorkspaceTypedCachePath(workspace, types.TypedAssetRef{
+			Type: itemType, Visibility: visibility, Plane: assetPlane,
+			AssetRef: types.AssetRef{Name: name, Vault: vault},
+		})
+	}
 	if cachePath == "" {
 		return nil
 	}
@@ -872,7 +919,7 @@ func deleteRemoteBundleOnly(projectRoot string, plane WorkspacePlane, bundleName
 }
 
 // deleteRemoteDecAssetOnly 只删 vault 中的单个 Dec 资产，不碰本机 IDE/cache。
-func deleteRemoteDecAssetOnly(projectRoot string, plane WorkspacePlane, itemType, name, vault string, reporter Reporter) (*RemoveAssetResult, error) {
+func deleteRemoteDecAssetOnly(projectRoot string, plane WorkspacePlane, itemType, name, vault string, visibility types.AssetVisibility, assetPlane types.AssetPlane, reporter Reporter) (*RemoveAssetResult, error) {
 	reporter = defaultReporter(reporter)
 	result := &RemoveAssetResult{
 		ProjectRoot: projectRoot,
@@ -882,19 +929,38 @@ func deleteRemoteDecAssetOnly(projectRoot string, plane WorkspacePlane, itemType
 	}
 	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
 		repoDir := tx.WorkDir()
-		foundVault, fullPath, err := locateAssetInRepo(repoDir, itemType, name, vault)
-		if err != nil {
-			return err
+		foundVault := vault
+		var fullPath string
+		if visibility != "" && assetPlane != "" {
+			asset := types.TypedAssetRef{
+				Type: itemType, Visibility: visibility, Plane: assetPlane,
+				AssetRef: types.AssetRef{Name: name, Vault: vault},
+			}
+			fullPath = resolveTypedAssetFile(repoDir, asset)
+			if fullPath == "" {
+				return fmt.Errorf("无法解析 P 资产 %s/%s", itemType, name)
+			}
+			if _, statErr := os.Stat(fullPath); statErr != nil {
+				return fmt.Errorf("未找到 P %q 的 %s/%s/%s/%s", vault, visibility, assetPlane, itemType, name)
+			}
+		} else {
+			var err error
+			foundVault, fullPath, err = locateAssetInRepo(repoDir, itemType, name, vault)
+			if err != nil {
+				return err
+			}
 		}
 		result.Vault = foundVault
 		if err := os.RemoveAll(fullPath); err != nil {
 			return fmt.Errorf("删除远端资产失败: %w", err)
 		}
-		if emptied, emptyErr := removeVaultBundleIfEmpty(repoDir, foundVault); emptyErr != nil {
-			return emptyErr
-		} else if emptied {
-			if _, pruneErr := pruneBundleFromVaultProjects(repoDir, foundVault); pruneErr != nil {
-				return fmt.Errorf("从 projects 声明摘除空 bundle 失败: %w", pruneErr)
+		if visibility == "" || assetPlane == "" {
+			if emptied, emptyErr := removeVaultBundleIfEmpty(repoDir, foundVault); emptyErr != nil {
+				return emptyErr
+			} else if emptied {
+				if _, pruneErr := pruneBundleFromVaultProjects(repoDir, foundVault); pruneErr != nil {
+					return fmt.Errorf("从 projects 声明摘除空 bundle 失败: %w", pruneErr)
+				}
 			}
 		}
 		if _, err := tx.CommitAndPush(fmt.Sprintf("remove: %s/%s", foundVault, name)); err != nil {
@@ -953,9 +1019,11 @@ func deleteSecretItemRemoteOnly(ctx context.Context, workspace Workspace, secret
 	if handler.Default().Find(handler.SourceNote, notePath) != nil {
 		if content, ok := readSecretNoteContent(ctx, projectRoot, secretsBundleName, localRoot, plane, notePath, localPath, reporter); ok {
 			if _, revErr := handler.RevokeNotes(ctx, nil, []handler.Item{{
-				Source:      handler.SourceNote,
-				Name:        notePath,
-				NoteContent: content,
+				Source:        handler.SourceNote,
+				Name:          notePath,
+				NoteContent:   content,
+				ProjectRoot:   projectRoot,
+				ProjectScoped: isProjectScopedPFolder(secretsBundleName),
 			}}); revErr != nil {
 				emit(reporter, EventWarn, "delete.secrets", fmt.Sprintf("  撤销机器平面副作用失败（继续删除）: %v", revErr), nil)
 			} else {
@@ -992,7 +1060,7 @@ func deleteSecretItemRemoteOnly(ctx context.Context, workspace Workspace, secret
 	return nil
 }
 
-func deleteSSHKeyItemLocalOnly(decBundleName, keyName string, reporter Reporter) error {
+func deleteSSHKeyItemLocalOnly(workspace Workspace, secretsBundleName, decBundleName, keyName string, reporter Reporter) error {
 	keyName = strings.TrimSpace(keyName)
 	if keyName == "" {
 		return fmt.Errorf("SSH Key 名称不能为空")
@@ -1001,11 +1069,22 @@ func deleteSSHKeyItemLocalOnly(decBundleName, keyName string, reporter Reporter)
 	if decBundleName == "" {
 		return fmt.Errorf("Dec bundle 名称不能为空")
 	}
-	if err := secrets.RemoveSSHKeyLanding(decBundleName, keyName); err != nil {
+	var err error
+	if workspace.EffectivePlane() == WorkspaceUser || !isProjectScopedPFolder(secretsBundleName) {
+		err = secrets.RemoveSSHKeyLanding(decBundleName, keyName)
+	} else {
+		err = secrets.RemoveProjectSSHKeyLanding(workspace.Root, decBundleName, keyName)
+	}
+	if err != nil {
 		return err
 	}
 	emit(reporter, EventInfo, "delete.ssh", fmt.Sprintf("  已删本地 SSH Key %s", keyName), nil)
 	return nil
+}
+
+func isProjectScopedPFolder(folder string) bool {
+	_, plane, ok := secrets.ParsePFolder(folder)
+	return ok && !secrets.IsMachinePlane(plane)
 }
 
 func deleteSSHKeyItemRemoteOnly(ctx context.Context, secretsBundleName, keyName string, reporter Reporter) error {

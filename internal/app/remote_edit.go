@@ -233,7 +233,7 @@ func CommitRemoteSSHHostsEdit(ctx context.Context, session RemoteSSHHostsEditSes
 	if decName == "" {
 		decName = strings.TrimPrefix(target.Folder, secrets.BundleFolderPrefix)
 	}
-	if err := refreshLocalSSHHosts(ctx, client, target.Folder, decName, session.KeyName); err != nil {
+	if err := refreshLocalSSHHosts(ctx, client, session.ProjectRoot, target, decName, session.KeyName); err != nil {
 		return fmt.Errorf("Bitwarden 已更新，但本地 ~/.ssh 未刷新；请重新 Pull: %w", err)
 	}
 	return nil
@@ -256,6 +256,9 @@ func syncTargetFromRemoteItem(item DeleteSelectionItem) (secrets.SyncTarget, err
 	folder := strings.TrimSpace(item.SecretsBundle)
 	if folder == "" {
 		return secrets.SyncTarget{}, fmt.Errorf("缺少 secrets folder")
+	}
+	if pName, plane, ok := secrets.ParsePFolder(folder); ok {
+		return secrets.NewPSyncTarget(pName, plane)
 	}
 	if !strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
 		// ADR 0014：裸 folder 一律按浏览（非声明）处理；写入由 RequireDeclared 拒绝。
@@ -474,21 +477,24 @@ func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRe
 	}, nil
 }
 
-func refreshLocalSSHHosts(ctx context.Context, client secrets.Client, folder, decBundleName, keyName string) error {
-	exists, err := secrets.LocalSSHKeyExists(decBundleName, keyName)
+func refreshLocalSSHHosts(ctx context.Context, client secrets.Client, projectRoot string, target secrets.SyncTarget, decBundleName, keyName string) error {
+	var exists bool
+	var err error
+	if target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+		exists, err = secrets.LocalSSHKeyExists(decBundleName, keyName)
+	} else {
+		exists, err = secrets.InspectProjectSSHKeyLanding(projectRoot, decBundleName, keyName)
+	}
 	if err != nil || !exists {
 		return err
 	}
-	target, err := secrets.NewBrowseFolder(folder)
-	if err != nil {
-		return err
-	}
 	result, err := client.PullBundle(ctx, secrets.PullBundleRequest{
-		Target:        target,
+		ProjectRoot:   projectRoot,
+		Target:        target.Clone(),
 		DecBundleName: decBundleName,
 		Binding: secrets.BundleBinding{
 			DecBundleName:     decBundleName,
-			SecretsBundleName: folder,
+			SecretsBundleName: target.Folder,
 		},
 	})
 	if err != nil {
@@ -524,5 +530,8 @@ func refreshLocalSSHHosts(ctx context.Context, client secrets.Client, folder, de
 	if len(one) == 0 {
 		return fmt.Errorf("无法为 SSH Key %q 生成本地 ~/.ssh 条目", keyName)
 	}
-	return secrets.WriteSSHKeyLandings(one)
+	if target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+		return secrets.WriteSSHKeyLandings(one)
+	}
+	return secrets.WriteProjectSSHKeyLandings(projectRoot, one)
 }

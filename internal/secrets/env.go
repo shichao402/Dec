@@ -96,6 +96,48 @@ func LoadEnvForBundle(projectRoot, bundleName string, plane SyncPlane) (map[stri
 	return out, nil
 }
 
+// LoadEnvForP 精确读取一个 P 在一个 plane 的单层 .env；不合并 requires、
+// 不跨 user/project，也不回退旧 bundles 布局。
+func LoadEnvForP(projectRoot, pName string, plane SyncPlane) (map[string]string, error) {
+	target, err := NewPSyncTarget(pName, plane)
+	if err != nil {
+		return nil, err
+	}
+	abs, err := ResolveAbsDir(projectRoot, target)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string)
+	envDir := filepath.Join(abs, TypeDirEnv)
+	entries, err := os.ReadDir(envDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return out, nil
+		}
+		return nil, err
+	}
+	owned := make(map[string]string)
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasSuffix(strings.ToLower(ent.Name()), ".env") {
+			continue
+		}
+		file := filepath.Join(envDir, ent.Name())
+		vars, err := parseDotEnvFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path.Join(target.LocalRoot, TypeDirEnv, ent.Name()), err)
+		}
+		for key, value := range vars {
+			display := path.Join(target.LocalRoot, TypeDirEnv, ent.Name())
+			if previous, ok := owned[key]; ok {
+				return nil, fmt.Errorf("环境变量 %s 在 %s 与 %s 中重复定义", key, previous, display)
+			}
+			owned[key] = display
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
 func parseDotEnvFile(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {

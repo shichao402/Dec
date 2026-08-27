@@ -11,8 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/shichao402/Dec/internal/bundle"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -28,6 +30,13 @@ type BundleOverview struct {
 	Members []string
 	// Enabled 表示该 bundle 是否出现在当前平面的 enabled_bundles 中。
 	Enabled bool
+	// Model 在 ADR 0016 仓库中为 "p"；空值表示 legacy bundle。
+	Model string
+	// Home / Required 描述 project 平面的家 P 与直接 requires 关系。
+	Home     bool
+	Required bool
+	// Quadrants 是四象限资产计数，key 为 public/user 等稳定路径。
+	Quadrants map[string]int
 }
 
 // ResolvedAssets 是解析后的目标资产集合及来源追踪信息。
@@ -39,6 +48,8 @@ type ResolvedAssets struct {
 	Sources map[string][]string
 	// Bundles 是本轮扫描发现的 bundle 全集，包含启用与未启用的。
 	Bundles []BundleOverview
+	// MissingProjects records direct P references that could not be resolved.
+	MissingProjects []string
 }
 
 // resolveDesiredAssets 把 ProjectConfig.EnabledBundles 展开成目标资产集。
@@ -69,6 +80,13 @@ func resolveDesiredAssets(projectConfig *types.ProjectConfig, repoDir string, re
 // scope 为空在 bundle.LoadBundle 中已规范化为 project。
 func resolveDesiredAssetsForPlane(projectConfig *types.ProjectConfig, repoDir string, plane WorkspacePlane, reporter Reporter) (*ResolvedAssets, error) {
 	reporter = defaultReporter(reporter)
+	projects, err := pmodel.Scan(repoDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(projects) > 0 {
+		return resolvePAssets(projectConfig, projects, plane, reporter)
+	}
 	result := &ResolvedAssets{
 		Sources: make(map[string][]string),
 	}
@@ -166,6 +184,146 @@ func resolveDesiredAssetsForPlane(projectConfig *types.ProjectConfig, repoDir st
 	return result, nil
 }
 
+// resolvePAssets implements ADR 0016. User context installs the selected P's
+// user quadrants. Project context installs the home P's project quadrants and
+// only the public/project quadrant of its direct requires.
+func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmodel.Loaded, plane WorkspacePlane, reporter Reporter) (*ResolvedAssets, error) {
+	result := &ResolvedAssets{Sources: make(map[string][]string)}
+	enabled := make(map[string]struct{})
+	selected := make([]types.TypedAssetRef, 0)
+
+	addProjectAssets := func(name string, visibility *types.AssetVisibility, source string) error {
+		p, ok := projects[name]
+		if !ok {
+			emit(reporter, EventWarn, "pull.project", fmt.Sprintf("引用的 P %q 不存在，已忽略", name), nil)
+			result.MissingProjects = appendUniqueSource(result.MissingProjects, name)
+			return nil
+		}
+		enabled[name] = struct{}{}
+		for _, asset := range p.Assets {
+			wantPlane := types.AssetPlaneProject
+			if plane == WorkspaceUser {
+				wantPlane = types.AssetPlaneUser
+			}
+			if asset.Plane != wantPlane || (visibility != nil && asset.Visibility != *visibility) {
+				continue
+			}
+			selected = append(selected, asset)
+			result.Sources[assetKey(asset)] = appendUniqueSource(result.Sources[assetKey(asset)], source)
+		}
+		return nil
+	}
+
+	if projectConfig != nil {
+		if plane == WorkspaceUser {
+			for _, name := range configEnabledPNames(projectConfig) {
+				if err := addProjectAssets(name, nil, "p/"+name); err != nil {
+					return nil, err
+				}
+			}
+		} else {
+			home := strings.TrimSpace(projectConfig.ProjectName)
+			if home == "" {
+				return nil, fmt.Errorf("P 模型下项目配置必须声明 project_name")
+			}
+			if err := addProjectAssets(home, nil, "p/"+home); err != nil {
+				return nil, err
+			}
+			if p, ok := projects[home]; ok {
+				public := types.AssetVisibilityPublic
+				for _, required := range p.Manifest.Requires {
+					if err := addProjectAssets(required, &public, "p/"+home+" requires "+required); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+	}
+
+	seenTarget := make(map[string]types.TypedAssetRef)
+	for _, asset := range selected {
+		target := asset.Type + ":" + asset.Name
+		if previous, ok := seenTarget[target]; ok {
+			if previous.Vault != asset.Vault {
+				return nil, fmt.Errorf("P %q 与 %q 在 %s 平面竞争同一安装目标 %s/%s",
+					previous.Vault, asset.Vault, asset.Plane, asset.Type, asset.Name)
+			}
+			return nil, fmt.Errorf("P %q 的 %s/%s 与 %s/%s 包含同名资产 %s/%s，安装目标冲突",
+				asset.Vault, previous.Visibility, previous.Plane, asset.Visibility, asset.Plane, asset.Type, asset.Name)
+		}
+		seenTarget[target] = asset
+		result.Assets = append(result.Assets, asset)
+	}
+
+	names := make([]string, 0, len(projects))
+	for name := range projects {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		p := projects[name]
+		members := make([]string, 0, len(p.Assets))
+		for _, asset := range p.Assets {
+			members = append(members, fmt.Sprintf("%s/%s/%s/%s", asset.Visibility, asset.Plane, typeSubDir(asset.Type), asset.Name))
+		}
+		_, isEnabled := enabled[name]
+		result.Bundles = append(result.Bundles, BundleOverview{
+			Name: name, Description: p.Manifest.Description, VaultName: name, Members: members, Enabled: isEnabled,
+			Model: "p", Quadrants: countPQuadrants(p.Assets),
+		})
+	}
+	if plane == WorkspaceProject && projectConfig != nil {
+		home := strings.TrimSpace(projectConfig.ProjectName)
+		for i := range result.Bundles {
+			result.Bundles[i].Home = result.Bundles[i].Name == home
+			if p, ok := projects[home]; ok {
+				result.Bundles[i].Required = containsName(p.Manifest.Requires, result.Bundles[i].Name)
+			}
+		}
+	}
+	return result, nil
+}
+
+func countPQuadrants(assets []types.TypedAssetRef) map[string]int {
+	out := map[string]int{
+		"public/user": 0, "private/user": 0,
+		"public/project": 0, "private/project": 0,
+	}
+	for _, asset := range assets {
+		out[string(asset.Visibility)+"/"+string(asset.Plane)]++
+	}
+	return out
+}
+
+func containsName(names []string, name string) bool {
+	for _, candidate := range names {
+		if candidate == name {
+			return true
+		}
+	}
+	return false
+}
+
+func configEnabledPNames(cfg *types.ProjectConfig) []string {
+	if cfg == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(cfg.EnabledBundles))
+	out := make([]string, 0, len(cfg.EnabledBundles))
+	for _, raw := range cfg.EnabledBundles {
+		name := strings.TrimSpace(strings.TrimPrefix(raw, "bundle/"))
+		if !types.IsValidPName(name) {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
 // vaultBundle 跟踪 bundle 所在的 vault。
 type vaultBundle struct {
 	vaultName string
@@ -246,7 +404,7 @@ func assetFileExists(repoDir, vault, itemType, name string) bool {
 }
 
 func assetKey(asset types.TypedAssetRef) string {
-	return asset.Type + ":" + asset.Vault + ":" + asset.Name
+	return asset.Type + ":" + asset.Vault + ":" + string(asset.Visibility) + ":" + string(asset.Plane) + ":" + asset.Name
 }
 
 func appendUniqueSource(sources []string, candidate string) []string {

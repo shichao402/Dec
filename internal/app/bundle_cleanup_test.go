@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/internal/config"
@@ -256,11 +257,10 @@ bundles:
 	secretsClientFactory = func() secrets.Client { return stub }
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
-	result, err := PushProjectAssets(context.Background(), projectRoot, nil)
-	if err != nil {
-		t.Fatalf("PushProjectAssets() = %v", err)
+	_, err = PushProjectAssets(context.Background(), projectRoot, nil)
+	if err == nil || !strings.Contains(err.Error(), "普通 Push 已拒绝") {
+		t.Fatalf("旧结构 Push 应拒绝并引导迁移，err=%v", err)
 	}
-	_ = result
 
 	// Dec：vault 已无 pkv 声明 → resolve 忽略 enabled 中的 pkv，不应把 cache 写回 vault。
 	if err := withAppReadRepo(func(tx *repo.Transaction) error {

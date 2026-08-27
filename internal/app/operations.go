@@ -14,6 +14,7 @@ import (
 	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/ide"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/types"
@@ -48,6 +49,13 @@ type PullProjectAssetsResult struct {
 	OrphanSSHKeys        []string
 	OrphanClearedBundles []string
 	OrphanReportedOnly   []string
+	// ADR 0016 structured result. Bundle fields remain for compatible clients.
+	Model            string
+	HomeProject      string
+	SelectedProjects []string
+	RequiredProjects []string
+	MissingProjects  []string
+	Quadrants        map[string]int
 }
 
 func PullProjectAssets(ctx context.Context, projectRoot, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
@@ -98,10 +106,16 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	pullConfig.EnabledBundles = projectEnabled
 
 	if len(projectEnabled) == 0 {
-		result.SkippedReason = "未启用 bundle"
-		emit(reporter, EventInfo, "pull.prepare", "请先在 Bundles 页勾选并保存", nil)
-		applyAssetCleanup(result, workspace, nil, projectIDEs, reporter)
-		return result, nil
+		usesP := false
+		if workspace.EffectivePlane() == WorkspaceProject && strings.TrimSpace(projectConfig.ProjectName) != "" {
+			usesP, _ = connectedRepositoryUsesPModel()
+		}
+		if !usesP {
+			result.SkippedReason = "未启用 bundle"
+			emit(reporter, EventInfo, "pull.prepare", "请先在 Bundles 页勾选并保存", nil)
+			applyAssetCleanup(result, workspace, nil, projectIDEs, reporter)
+			return result, nil
+		}
 	}
 
 	createTx := func() (*repo.Transaction, error) {
@@ -124,14 +138,56 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 		return nil, err
 	}
 	result.BundleOverviews = resolved.Bundles
+	pRepository := repositoryUsesPModel(repoDir)
+	if pRepository {
+		result.Model = "p"
+		result.Quadrants = map[string]int{
+			"public/user": 0, "private/user": 0,
+			"public/project": 0, "private/project": 0,
+		}
+		for _, overview := range resolved.Bundles {
+			if overview.Home {
+				result.HomeProject = overview.Name
+			}
+			if overview.Enabled {
+				result.SelectedProjects = append(result.SelectedProjects, overview.Name)
+			}
+			if overview.Required {
+				result.RequiredProjects = append(result.RequiredProjects, overview.Name)
+			}
+		}
+		for _, asset := range resolved.Assets {
+			result.Quadrants[string(asset.Visibility)+"/"+string(asset.Plane)]++
+		}
+		result.MissingProjects = append([]string(nil), resolved.MissingProjects...)
+		if len(result.MissingProjects) > 0 {
+			result.NonFatalWarnings = append(result.NonFatalWarnings,
+				fmt.Sprintf("直接 requires 中有 %d 个 P 不存在：%s",
+					len(result.MissingProjects), strings.Join(result.MissingProjects, ", ")))
+		}
+	}
+	effectiveEnabled := projectEnabled
+	if pRepository && workspace.EffectivePlane() == WorkspaceProject {
+		effectiveEnabled = []string{strings.TrimSpace(projectConfig.ProjectName)}
+	}
 
 	// 只发 reporter 事件不够：事件区只留最近几条，「引用的 bundle 已不在仓库」这类
 	// 开头就发出的告警会被后续 secrets 事件挤掉，用户只看到一排 0 却不知道为什么。
-	if missing := missingEnabledBundleNames(projectEnabled, resolved.Bundles); len(missing) > 0 {
+	if missing := missingEnabledBundleNames(effectiveEnabled, resolved.Bundles); len(missing) > 0 {
 		result.MissingBundles = missing
+		if pRepository {
+			for _, name := range missing {
+				result.MissingProjects = appendUniqueSource(result.MissingProjects, name)
+			}
+		}
 		result.NonFatalWarnings = append(result.NonFatalWarnings, fmt.Sprintf(
-			"enabled_bundles 里有 %d 个 bundle 在仓库中已不存在：%s（本次忽略；到 Bundles 页重新保存即可清掉）",
-			len(missing), strings.Join(missing, ", ")))
+			"%s里有 %d 个 P 在仓库中已不存在：%s（本次忽略；到 Bundles 页重新保存即可清掉）",
+			func() string {
+				if pRepository {
+					return "P 选择"
+				}
+				return "enabled_bundles "
+			}(), len(missing), strings.Join(missing, ", ")))
 	}
 
 	// bundle 解析阶段已校验过成员文件存在性，这里无需再做一次白名单过滤。
@@ -147,7 +203,7 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 
 	applyAssetCleanup(result, workspace, validAssets, projectIDEs, reporter)
 
-	enabledBundleNames := append([]string(nil), projectEnabled...)
+	enabledBundleNames := append([]string(nil), effectiveEnabled...)
 	if len(validAssets) == 0 {
 		result.SkippedReason = "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
@@ -165,14 +221,14 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	// 阶段 1：Dec Git 资产写入 .dec/cache/
 	for idx, asset := range validAssets {
 		progress := &Progress{Phase: "pull", Current: idx + 1, Total: len(validAssets)}
-		fullPath := resolveAssetFile(repoDir, asset.Vault, asset.Type, asset.Name)
+		fullPath := resolveTypedAssetFile(repoDir, asset)
 		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
 			result.FailedCount++
 			emit(reporter, EventWarn, "pull.asset", fmt.Sprintf("⚠️  [%-5s] %s (vault: %s) — 远程不存在", asset.Type, asset.Name, asset.Vault), progress)
 			continue
 		}
 
-		cachePath := getWorkspaceCachePath(workspace, asset.Vault, asset.Type, asset.Name)
+		cachePath := getWorkspaceTypedCachePath(workspace, asset)
 		switch asset.Type {
 		case "skill", "command":
 			if err := copyDir(fullPath, cachePath); err != nil {
@@ -199,11 +255,11 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 			return nil, err
 		}
 		progress := &Progress{Phase: "install", Current: idx + 1, Total: len(validAssets)}
-		fullPath := resolveAssetFile(repoDir, asset.Vault, asset.Type, asset.Name)
+		fullPath := resolveTypedAssetFile(repoDir, asset)
 		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
 			continue
 		}
-		cachePath := getWorkspaceCachePath(workspace, asset.Vault, asset.Type, asset.Name)
+		cachePath := getWorkspaceTypedCachePath(workspace, asset)
 		if _, err := os.Stat(cachePath); err != nil {
 			continue
 		}
@@ -257,6 +313,11 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	emit(reporter, EventInfo, "pull.finish", summary, &Progress{Phase: "done", Current: len(validAssets), Total: len(validAssets)})
 
 	return result, nil
+}
+
+func repositoryUsesPModel(repoDir string) bool {
+	projects, err := pmodel.Scan(repoDir)
+	return err == nil && len(projects) > 0
 }
 
 // missingEnabledBundleNames 返回启用列表里在本平面 vault 中找不到声明的 bundle 名（保序）。
@@ -382,6 +443,9 @@ func cleanupRemovedAssets(workspace Workspace, enabledAssets []types.TypedAssetR
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
 		return nil
 	}
+	if hasPAssets(enabledAssets) || cacheUsesPLayout(cacheDir) {
+		return cleanupRemovedPAssets(workspace, cacheDir, enabledAssets, projectIDEs)
+	}
 
 	enabledSet := make(map[string]bool)
 	for _, asset := range enabledAssets {
@@ -427,6 +491,63 @@ func cleanupRemovedAssets(workspace Workspace, enabledAssets []types.TypedAssetR
 	return removed
 }
 
+func cacheUsesPLayout(cacheDir string) bool {
+	projects, _ := os.ReadDir(cacheDir)
+	for _, project := range projects {
+		if !project.IsDir() {
+			continue
+		}
+		for _, visibility := range []types.AssetVisibility{types.AssetVisibilityPublic, types.AssetVisibilityPrivate} {
+			if info, err := os.Stat(filepath.Join(cacheDir, project.Name(), string(visibility))); err == nil && info.IsDir() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func cleanupRemovedPAssets(workspace Workspace, cacheDir string, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE) []string {
+	enabled := make(map[string]struct{}, len(enabledAssets))
+	for _, asset := range enabledAssets {
+		enabled[assetKey(asset)] = struct{}{}
+	}
+	var removed []string
+	projects, _ := os.ReadDir(cacheDir)
+	for _, project := range projects {
+		if !project.IsDir() {
+			continue
+		}
+		for _, visibility := range []types.AssetVisibility{types.AssetVisibilityPublic, types.AssetVisibilityPrivate} {
+			for _, plane := range []types.AssetPlane{types.AssetPlaneUser, types.AssetPlaneProject} {
+				for _, kind := range bundle.VaultAssetKinds {
+					dir := filepath.Join(cacheDir, project.Name(), string(visibility), string(plane), kind.Dir)
+					entries, err := os.ReadDir(dir)
+					if err != nil {
+						continue
+					}
+					for _, entry := range entries {
+						name := bundle.AssetEntryName(kind, entry.Name())
+						asset := types.TypedAssetRef{
+							Type: kind.Type, Visibility: visibility, Plane: plane,
+							AssetRef: types.AssetRef{Name: name, Vault: project.Name()},
+						}
+						if _, ok := enabled[assetKey(asset)]; ok {
+							continue
+						}
+						for _, ideImpl := range projectIDEs {
+							_, _ = removeAssetFromIDE(kind.Type, name, workspace, ideImpl)
+						}
+						_ = os.RemoveAll(filepath.Join(dir, entry.Name()))
+						removed = append(removed, fmt.Sprintf("[%-5s] %s (P: %s, %s/%s)", kind.Type, name, project.Name(), visibility, plane))
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(removed)
+	return removed
+}
+
 func removeDirIfEmpty(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -449,6 +570,18 @@ func resolveAssetFile(repoDir, vault, itemType, assetName string) string {
 	}
 	base := filepath.Join(repoDir, types.VaultBundlesDir, vault, kind.Dir)
 	return filepath.Join(base, bundle.AssetFileName(kind, assetName))
+}
+
+func resolveTypedAssetFile(repoDir string, asset types.TypedAssetRef) string {
+	if asset.Visibility == "" || asset.Plane == "" {
+		return resolveAssetFile(repoDir, asset.Vault, asset.Type, asset.Name)
+	}
+	kind, ok := bundle.KindByType(asset.Type)
+	if !ok {
+		return ""
+	}
+	base := filepath.Join(repoDir, types.PQuadrantDir(asset.Vault, asset.Visibility, asset.Plane), kind.Dir)
+	return filepath.Join(base, bundle.AssetFileName(kind, asset.Name))
 }
 
 func getCachePath(projectRoot, vault, itemType, assetName string) string {
@@ -490,6 +623,18 @@ func getWorkspaceCachePath(workspace Workspace, vault, itemType, assetName strin
 	}
 	base := filepath.Join(workspaceCacheDir(workspace), vault, kind.Dir)
 	return filepath.Join(base, bundle.AssetFileName(kind, assetName))
+}
+
+func getWorkspaceTypedCachePath(workspace Workspace, asset types.TypedAssetRef) string {
+	if asset.Visibility == "" || asset.Plane == "" {
+		return getWorkspaceCachePath(workspace, asset.Vault, asset.Type, asset.Name)
+	}
+	kind, ok := bundle.KindByType(asset.Type)
+	if !ok {
+		return ""
+	}
+	base := filepath.Join(workspaceCacheDir(workspace), asset.Vault, string(asset.Visibility), string(asset.Plane), kind.Dir)
+	return filepath.Join(base, bundle.AssetFileName(kind, asset.Name))
 }
 
 func managedName(name string) string {
@@ -883,7 +1028,7 @@ func renderedHeader(vaultName string) string {
 		vault = "<vault>"
 	}
 	return fmt.Sprintf("<!-- 本文件由 `dec pull` 从 .dec/cache/%s/ 渲染生成，请勿直接编辑。\n"+
-		"     修改流程：编辑 .dec/cache/%s/... → dec push → dec pull 验证 -->\n\n",
+		"     修改流程：编辑 .dec/cache/%s/... → 在 Run 页 push → pull 验证 -->\n\n",
 		vault, vault)
 }
 

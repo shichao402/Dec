@@ -38,7 +38,7 @@ func (s *Server) Invoke(ctx context.Context, req *servicev1.InvokeRequest) (*ser
 	collector := &eventCollector{}
 	s.ensureProjectRepaired(req.ProjectRoot, collector)
 	workspace := app.NewWorkspace(app.WorkspacePlane(req.WorkspacePlane), req.ProjectRoot)
-	writer := app.DefaultBundleWriter()
+	writer := app.DefaultPWriter()
 	result, err := dispatchInvokeWorkspace(ctx, req.Method, workspace, req.PayloadJson, collector, writer)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
@@ -74,10 +74,10 @@ func isMachineMutation(method string) bool {
 }
 
 func dispatchInvoke(ctx context.Context, method, projectRoot string, payload []byte, reporter app.Reporter) (any, error) {
-	return dispatchInvokeWorkspace(ctx, method, app.NewWorkspace(app.WorkspaceProject, projectRoot), payload, reporter, app.DefaultBundleWriter())
+	return dispatchInvokeWorkspace(ctx, method, app.NewWorkspace(app.WorkspaceProject, projectRoot), payload, reporter, app.DefaultPWriter())
 }
 
-func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.Workspace, payload []byte, reporter app.Reporter, writer app.BundleWriter) (any, error) {
+func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.Workspace, payload []byte, reporter app.Reporter, writer app.PWriter) (any, error) {
 	projectRoot := workspace.Root
 	switch method {
 	case "load_project_overview":
@@ -88,12 +88,21 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.LoadWorkspaceOverviewOpts(workspace, app.OverviewLoadOpts{IncludeVaultBundles: in.IncludeVaultBundles})
 	case "load_asset_selection":
 		return app.LoadWorkspaceAssetSelection(workspace, reporter)
+	case "preview_p_migration":
+		return app.PreviewPMigration(ctx, workspace, reporter)
 	case "save_enabled_bundles":
-		var in struct{ EnabledBundles []string }
+		var in struct {
+			EnabledProjects []string
+			EnabledBundles  []string
+		}
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return writer.SaveEnabledBundles(workspace, in.EnabledBundles, reporter)
+		names := in.EnabledProjects
+		if names == nil {
+			names = in.EnabledBundles
+		}
+		return writer.SaveProjects(workspace, names, reporter)
 	case "connect_repo":
 		var in struct{ RepoURL string }
 		if err := decode(payload, &in); err != nil {
@@ -104,6 +113,8 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.PrepareProjectConfigInit(projectRoot, reporter)
 	case "ensure_local_project_config":
 		return app.EnsureLocalProjectConfig(projectRoot, reporter)
+	case "ensure_home_p":
+		return writer.BindHomeP(projectRoot, reporter)
 	case "infer_vault_project":
 		return app.InferVaultProject(projectRoot, reporter)
 	case "apply_vault_project":
@@ -248,7 +259,7 @@ func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.Se
 		operationCtx = app.WithUnlockConfig(operationCtx, app.UnlockConfig{Timeout: time.Duration(req.UnlockTimeoutMs) * time.Millisecond})
 	}
 	workspace := app.NewWorkspace(app.WorkspacePlane(req.WorkspacePlane), req.ProjectRoot)
-	writer := app.DefaultBundleWriter()
+	writer := app.DefaultPWriter()
 	result, runErr := dispatchOperationWorkspace(operationCtx, req.Operation, workspace, req.PayloadJson, reporter, writer)
 	var resultJSON []byte
 	if runErr == nil {
@@ -276,18 +287,26 @@ func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.Se
 }
 
 func dispatchOperation(ctx context.Context, operation, projectRoot string, payload []byte, reporter app.Reporter) (any, error) {
-	return dispatchOperationWorkspace(ctx, operation, app.NewWorkspace(app.WorkspaceProject, projectRoot), payload, reporter, app.DefaultBundleWriter())
+	return dispatchOperationWorkspace(ctx, operation, app.NewWorkspace(app.WorkspaceProject, projectRoot), payload, reporter, app.DefaultPWriter())
 }
 
-func dispatchOperationWorkspace(ctx context.Context, operation string, workspace app.Workspace, payload []byte, reporter app.Reporter, writer app.BundleWriter) (any, error) {
+func dispatchOperationWorkspace(ctx context.Context, operation string, workspace app.Workspace, payload []byte, reporter app.Reporter, writer app.PWriter) (any, error) {
 	projectRoot := workspace.Root
 	switch operation {
 	case "pull":
 		return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
+	case "preview_p_migration":
+		return app.PreviewPMigration(ctx, workspace, reporter)
 	case "push":
-		return app.PushWorkspaceAssets(ctx, workspace, reporter)
+		return writer.PushWorkspace(ctx, workspace, reporter)
 	case "preview_push":
 		return app.PreviewPushWorkspaceAssets(workspace)
+	case "migrate_p":
+		var in struct{ Fingerprint string }
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.RunPMigration(ctx, workspace, in.Fingerprint, reporter)
 	case "prepare_repo_gcm_bootstrap":
 		var in struct {
 			RepoURL string

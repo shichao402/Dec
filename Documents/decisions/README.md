@@ -29,10 +29,11 @@
 | [0006](0006-retire-pkg-for-internal.md) | 源码布局：废除 `pkg/`，统一到 `internal/` | 已接受（已实现） |
 | [0007](0007-machine-secrets-root.md) | 机器级 bundle secrets 根 + 项目覆盖层 | 已接受；覆盖层被 0009 取代 |
 | [0008](0008-service-facade-split.md) | Dec 服务 / 门面拆分 | 已接受（规划中） |
-| [0009](0009-bundle-binary-scope.md) | Bundle 二元 scope（user \| project） | 已接受（实施中） |
+| [0009](0009-bundle-binary-scope.md) | Bundle 二元 scope（user \| project） | 已被 0016 取代 |
 | [0010](0010-pull-orphan-and-ops.md) | Pull 孤儿收敛、删除收敛与运维面修订 | 已接受（已实现） |
 | [0011](0011-private-repo-gcm-bootstrap.md) | 私仓 GCM Bootstrap：Bitwarden 作为启动信任根 | 已接受（已实现）；0013 补候选归属提示 |
 | [0012](0012-user-bundle-single-entry.md) | 用户平面 bundle 启用收拢到 Bundles 页 | 已接受（已实现）；「仅 secrets」文案被 0013 修订 |
-| [0013](0013-secrets-belong-to-declared-target.md) | Secrets 必须归属已声明 SyncTarget：写入接口类型级收口 | 已接受；可写归属被 0014 收成仅 bundle |
-| [0014](0014-bundle-sole-writable-aggregate.md) | Bundle 是唯一可写聚合根 | 已接受（已实现） |
+| [0013](0013-secrets-belong-to-declared-target.md) | Secrets 必须归属已声明 SyncTarget：写入接口类型级收口 | 已被 0016 取代 |
+| [0014](0014-bundle-sole-writable-aggregate.md) | Bundle 是唯一可写聚合根 | 已被 0016 取代 |
 | [0015](0015-project-config-boundary.md) | 项目配置的边界：用户平面没有 project，`.dec/` 不得落在 Dec 根目录 | 已接受（已实现） |
+| [0016](0016-p-four-quadrant-model.md) | 顶层 P 与公开/私有 × 用户/项目四象限 | 已接受（阶段 1–7 已实施）；取代 0009、0013、0014 |

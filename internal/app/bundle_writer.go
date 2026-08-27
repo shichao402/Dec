@@ -2,85 +2,135 @@ package app
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/shichao402/Dec/internal/pmodel"
+	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/types"
 )
 
-// BundleWriter 是 ADR 0014 规定的权威写入门面。
-// TUI / MCP / servicehost 对 Bundle 状态的变更只应经此类型；内部委托现有 app 实现。
-// SyncTarget / 裸 project folder 不是可写主语。
-type BundleWriter struct{}
+// PWriter 是 ADR 0016 规定的唯一权威写入口。P 是所有新写路径的主语；
+// SyncTarget、旧 bundle scope 和裸 project folder 只能用于兼容读取/迁移。
+type PWriter struct{}
 
-// DefaultBundleWriter 返回默认门面实例。
-func DefaultBundleWriter() BundleWriter { return BundleWriter{} }
+func DefaultPWriter() PWriter { return PWriter{} }
 
-// SaveEnabledBundles 在当前工作平面启用/禁用 Bundle（先校验 vault manifest/scope，再写 enabled_bundles）。
-func (BundleWriter) SaveEnabledBundles(workspace Workspace, bundles []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
-	return SaveWorkspaceEnabledBundles(workspace, bundles, reporter)
+// BundleWriter / DefaultBundleWriter 保留源码兼容；实际语义和实现均由 PWriter 提供。
+type BundleWriter = PWriter
+
+func DefaultBundleWriter() PWriter { return DefaultPWriter() }
+
+// SaveProjects 保存 P 选择：user 平面写 enabled_projects；project 平面写家 P 的 requires。
+func (PWriter) SaveProjects(workspace Workspace, names []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
+	return saveWorkspacePSelection(workspace, names, reporter)
+}
+
+// SaveEnabledBundles 是 wire/source 兼容名，新仓库中按 P 语义执行。
+func (w PWriter) SaveEnabledBundles(workspace Workspace, names []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
+	return w.SaveProjects(workspace, names, reporter)
+}
+
+func (PWriter) PushWorkspace(ctx context.Context, workspace Workspace, reporter Reporter) (*PushProjectAssetsResult, error) {
+	return PushWorkspaceAssets(ctx, workspace, reporter)
+}
+
+// BindHomeP 初始化本地配置并确保仓库中存在家 P。
+func (PWriter) BindHomeP(projectRoot string, reporter Reporter) (*ConfigInitPreparation, error) {
+	prepared, err := EnsureLocalProjectConfig(projectRoot, reporter)
+	if err != nil || prepared == nil || prepared.ProjectConfig == nil {
+		return prepared, err
+	}
+	name := prepared.ProjectConfig.ProjectName
+	if !types.IsValidPName(name) {
+		return nil, fmt.Errorf("目录名 %q 不能绑定为家 P：必须为小写 kebab-case", name)
+	}
+	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
+		projects, scanErr := pmodel.Scan(tx.WorkDir())
+		if scanErr != nil {
+			return scanErr
+		}
+		if _, exists := projects[name]; exists {
+			return nil
+		}
+		if err := pmodel.SaveManifest(tx.WorkDir(), types.P{Name: name, Title: name}); err != nil {
+			return err
+		}
+		_, err := tx.CommitAndPush("p: initialize " + name)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	prepared.Model = "p"
+	prepared.HomeProject = name
+	return prepared, nil
 }
 
 // ValidateRemoteRegisterFolder 校验 Remote 登记 folder（仅 bundle/<名>）。
-func (BundleWriter) ValidateRemoteRegisterFolder(workspace Workspace, folder string) error {
+func (PWriter) ValidateRemoteRegisterFolder(workspace Workspace, folder string) error {
 	return ValidateRemoteRegisterFolder(workspace, folder)
 }
 
 // PrepareRemoteRegister 准备私密半边登记会话。
-func (BundleWriter) PrepareRemoteRegister(ctx context.Context, in RemoteRegisterInput, reporter Reporter) (*RemoteRegisterSession, error) {
+func (PWriter) PrepareRemoteRegister(ctx context.Context, in RemoteRegisterInput, reporter Reporter) (*RemoteRegisterSession, error) {
 	return PrepareRemoteRegister(ctx, in, reporter)
 }
 
 // CommitRemoteRegister 提交私密半边登记。
-func (BundleWriter) CommitRemoteRegister(ctx context.Context, session RemoteRegisterSession, reporter Reporter) (*AddSecretResult, error) {
+func (PWriter) CommitRemoteRegister(ctx context.Context, session RemoteRegisterSession, reporter Reporter) (*AddSecretResult, error) {
 	return CommitRemoteRegister(ctx, session, reporter)
 }
 
 // CommitRemoteNoteEdit 提交 Note 编辑。
-func (BundleWriter) CommitRemoteNoteEdit(ctx context.Context, session RemoteNoteEditSession, reporter Reporter) error {
+func (PWriter) CommitRemoteNoteEdit(ctx context.Context, session RemoteNoteEditSession, reporter Reporter) error {
 	return CommitRemoteNoteEdit(ctx, session, reporter)
 }
 
 // CommitRemoteNoteRegister 提交 Note 登记（旧路径）。
-func (BundleWriter) CommitRemoteNoteRegister(ctx context.Context, session RemoteNoteEditSession, reporter Reporter) error {
+func (PWriter) CommitRemoteNoteRegister(ctx context.Context, session RemoteNoteEditSession, reporter Reporter) error {
 	return CommitRemoteNoteRegister(ctx, session, reporter)
 }
 
 // CommitRemoteSSHHostsEdit 提交 SSH Hosts 编辑。
-func (BundleWriter) CommitRemoteSSHHostsEdit(ctx context.Context, session RemoteSSHHostsEditSession, reporter Reporter) error {
+func (PWriter) CommitRemoteSSHHostsEdit(ctx context.Context, session RemoteSSHHostsEditSession, reporter Reporter) error {
 	return CommitRemoteSSHHostsEdit(ctx, session, reporter)
 }
 
 // RegisterRemoteNoteFromPath 从本地路径登记 Note。
-func (BundleWriter) RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRel, localPath string, reporter Reporter) (*AddSecretResult, error) {
+func (PWriter) RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRel, localPath string, reporter Reporter) (*AddSecretResult, error) {
 	return RegisterRemoteNoteFromPath(ctx, projectRoot, folder, noteRel, localPath, reporter)
 }
 
 // AddSecretToTarget 把本地文件登记为 Bundle 私密半边 Note（target 必须为已声明 bundle）。
-func (BundleWriter) AddSecretToTarget(ctx context.Context, projectRoot string, target secrets.SyncTarget, noteRel string, reporter Reporter) (*AddSecretResult, error) {
+func (PWriter) AddSecretToTarget(ctx context.Context, projectRoot string, target secrets.SyncTarget, noteRel string, reporter Reporter) (*AddSecretResult, error) {
 	return AddSecretToTarget(ctx, projectRoot, target, noteRel, reporter)
 }
 
 // RemoveBundle 移除公开半边本地落地（不删 vault / BW，除非实现另有约定）。
-func (BundleWriter) RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, error) {
+func (PWriter) RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, error) {
+	if usesP, _ := connectedRepositoryUsesPModel(); usesP {
+		return removeP(input, reporter)
+	}
 	return RemoveBundle(input, reporter)
 }
 
 // DeleteItems 删除公开/私密选中项（Remote 页）。
-func (BundleWriter) DeleteItems(ctx context.Context, input DeleteProjectInput, reporter Reporter) (*DeleteProjectResult, error) {
+func (PWriter) DeleteItems(ctx context.Context, input DeleteProjectInput, reporter Reporter) (*DeleteProjectResult, error) {
 	return DeleteProjectItems(ctx, input, reporter)
 }
 
 // MigrateUnmanagedNote 将非托管裸 folder Note 迁入 Bundle（标准迁移动作）。
-func (BundleWriter) MigrateUnmanagedNote(ctx context.Context, input MigrateUnmanagedNoteInput, reporter Reporter) (*MigrateUnmanagedNoteResult, error) {
+func (PWriter) MigrateUnmanagedNote(ctx context.Context, input MigrateUnmanagedNoteInput, reporter Reporter) (*MigrateUnmanagedNoteResult, error) {
 	return MigrateUnmanagedNoteToBundle(ctx, input, reporter)
 }
 
 // MigrateProjectSecrets 将存量裸 project folder / .secrets/project 迁入 scope:project 的 Bundle。
-func (BundleWriter) MigrateProjectSecrets(ctx context.Context, input MigrateProjectSecretsInput, reporter Reporter) (*MigrateProjectSecretsResult, error) {
+func (PWriter) MigrateProjectSecrets(ctx context.Context, input MigrateProjectSecretsInput, reporter Reporter) (*MigrateProjectSecretsResult, error) {
 	return MigrateProjectSecretsToBundle(ctx, input, reporter)
 }
 
 // CleanupUnmanaged 删除非托管裸 folder 内容（只删 BW，不创建 Bundle）。文案钉死「非模型内写入」。
-func (BundleWriter) CleanupUnmanaged(ctx context.Context, input DeleteProjectInput, reporter Reporter) (*DeleteProjectResult, error) {
+func (PWriter) CleanupUnmanaged(ctx context.Context, input DeleteProjectInput, reporter Reporter) (*DeleteProjectResult, error) {
 	input.Mode = "remote"
 	return DeleteRemoteOnly(ctx, input, reporter)
 }

@@ -1,6 +1,6 @@
 # 0009 — Bundle 二元 scope（user | project）
 
-- **状态**：已接受
+- **状态**：已被 [0016](0016-p-four-quadrant-model.md) 取代
 - **日期**：2026-08-14
 - **关联**：[0002](0002-secrets-synctarget-root.md)、[0003](0003-user-enabled-secret-bundles.md)、[0005](0005-secrets-machine-handlers.md)、[0007](0007-machine-secrets-root.md)、[0008](0008-service-facade-split.md)
 - **影响范围**：`bundle.yaml`、`GlobalConfig`、`internal/secrets` SyncTarget / env、`internal/ide`、`internal/app` pull/push/delete、`internal/tui`、`dec --user`、`Documents/BUNDLE-SECRETS-MODEL.md`

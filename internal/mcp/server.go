@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/serviceapi"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 // Config 配置 Dec MCP Server。
@@ -34,7 +35,7 @@ func New(cfg Config) *Server {
 func (s *Server) Register(mcpServer *mcp.Server) {
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_status",
-		Description: "查看某平面的 Dec 状态（仓库连接、配置、bundle 概览；plane=project|user）。plane=user 看个人跨项目平面。",
+		Description: "查看某平面的 Dec 状态（仓库连接、家 P、requires 与 public/private × user/project 四象限；plane=project|user）。",
 	}, s.handleStatus)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_connect_repo",
@@ -42,19 +43,19 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handleConnectRepo)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_init_project",
-		Description: "初始化当前项目的 .dec/config.yaml（需已连接仓库）；可选从 vault project 自动应用 bundle",
+		Description: "初始化当前项目并绑定家 P（需已连接仓库）",
 	}, s.handleInitProject)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_assets",
-		Description: "列出某平面已启用的 bundle 及成员（plane=project|user|both）。想知道「当前项目/我个人装了什么、能改什么」先调它。",
+		Description: "列出某平面启用的 P、直接 requires 与四象限成员（plane=project|user|both）。",
 	}, s.handleListAssets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_set_assets",
-		Description: "设置某平面的 bundle 启用列表（写 enabled_bundles）。plane=project 写 <project>/.dec/config.yaml；plane=user 写 ~/.dec/config.yaml（个人跨项目复用）。改完通常再 dec_pull 同一平面落地。",
+		Description: "设置 P 选择。project 更新家 P 的直接 requires；user 写 enabled_projects。工具名保持兼容。",
 	}, s.handleSetAssets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_pull",
-		Description: "拉取并安装某平面已启用的 Dec bundle 与 secrets（plane=project|user|both）。project 装进 <project> 内 IDE 目录，user 装进 ~ 用户级 IDE 目录。secrets 失败不阻断公开资产，走部分成功 + 警告。",
+		Description: "拉取并安装某平面的 P 四象限资产与 private secrets（plane=project|user|both）。",
 	}, s.handlePull)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_push",
@@ -70,11 +71,11 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handleListSecrets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_delete_candidates",
-		Description: "列出某平面可删除的 Dec 资产、secrets 与 bundle（plane=project|user|both）。删除前先用它拿候选。",
+		Description: "列出某平面可删除的 P 四象限资产与 private secrets；legacy bundle 仍以兼容节点出现。",
 	}, s.handleListDeleteCandidates)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_delete",
-		Description: "删除选中的 Dec 资产、secrets 或 bundle（需 confirmed=true）。plane=project|user，一次只作用一个平面，不支持 both。",
+		Description: "删除选中的 P 资产、private secrets 或 legacy bundle（需 confirmed=true）。",
 	}, s.handleDelete)
 }
 
@@ -199,8 +200,9 @@ func (s *Server) handleListAssets(ctx context.Context, _ *mcp.CallToolRequest, i
 }
 
 type setAssetsParams struct {
-	EnabledBundles []string `json:"enabled_bundles" jsonschema:"启用的 bundle 名称列表；传空数组表示全部取消"`
-	Plane          string   `json:"plane,omitempty" jsonschema:"作用平面：project（写项目 enabled_bundles）、user（写用户 enabled_bundles）。留空默认 project；不支持 both。"`
+	EnabledProjects []string `json:"enabled_projects,omitempty" jsonschema:"P 名称列表；project 中表示家 P 及直接 requires，user 中表示启用 P"`
+	EnabledBundles  []string `json:"enabled_bundles,omitempty" jsonschema:"兼容字段；enabled_projects 未提供时使用"`
+	Plane           string   `json:"plane,omitempty" jsonschema:"作用平面：project|user。留空默认 project；不支持 both。"`
 }
 
 func (s *Server) handleSetAssets(ctx context.Context, _ *mcp.CallToolRequest, in setAssetsParams) (*mcp.CallToolResult, any, error) {
@@ -209,7 +211,11 @@ func (s *Server) handleSetAssets(ctx context.Context, _ *mcp.CallToolRequest, in
 		return toolFail(err, nil)
 	}
 	reporter, logs := newCollector()
-	result, err := serviceapi.SaveWorkspaceEnabledBundles(app.NewWorkspace(plane, s.projectRoot()), in.EnabledBundles, reporter)
+	names := in.EnabledProjects
+	if names == nil {
+		names = in.EnabledBundles
+	}
+	result, err := serviceapi.SaveWorkspaceProjects(app.NewWorkspace(plane, s.projectRoot()), names, reporter)
 	if err != nil {
 		return toolFail(err, logs())
 	}
@@ -279,6 +285,9 @@ type deleteItemInput struct {
 	SecretPath    string `json:"secret_path,omitempty" jsonschema:"secret：项目根相对落地路径，同时就是 Bitwarden Note 名"`
 	SecretsBundle string `json:"secrets_bundle,omitempty" jsonschema:"secret：Bitwarden folder"`
 	BundleName    string `json:"bundle_name,omitempty"`
+	ProjectName   string `json:"project_name,omitempty" jsonschema:"P 名；bundle_name 为兼容字段"`
+	Visibility    string `json:"visibility,omitempty" jsonschema:"P 资产象限：public|private"`
+	AssetPlane    string `json:"asset_plane,omitempty" jsonschema:"P 资产象限：user|project"`
 }
 
 type deleteParams struct {
@@ -303,6 +312,9 @@ func (s *Server) handleDelete(ctx context.Context, _ *mcp.CallToolRequest, in de
 			SecretPath:    item.SecretPath,
 			SecretsBundle: item.SecretsBundle,
 			BundleName:    item.BundleName,
+			ProjectName:   item.ProjectName,
+			Visibility:    types.AssetVisibility(item.Visibility),
+			AssetPlane:    types.AssetPlane(item.AssetPlane),
 		})
 	}
 	result, err := serviceapi.DeleteProjectItems(ctx, app.DeleteProjectInput{

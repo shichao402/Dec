@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/types"
@@ -206,7 +207,7 @@ func CommitRemoteRegister(ctx context.Context, sess RemoteRegisterSession, repor
 		}); err != nil {
 			return nil, err
 		}
-		landed, landErr := landRegisteredSSHKey(decName, *key)
+		landed, landErr := landRegisteredSSHKey(workspace, target, decName, *key)
 		msg := fmt.Sprintf("已登记 SSH Key %s → folder %q", name, folder)
 		if landed {
 			msg += "；已写入 ~/.ssh"
@@ -264,14 +265,29 @@ func ValidateRemoteRegisterFolder(workspace Workspace, folder string) error {
 	return err
 }
 
-// resolveRemoteRegisterTarget 只允许 bundle/<名>（ADR 0014）。
-// bundle 在真正提交时补齐缺失的 manifest，使 Bitwarden 写入立即有声明归属。
+// resolveRemoteRegisterTarget 只允许已声明 P 的固定 private plane folder。
+// 不允许通过 Remote 临时创建 P，也不接受 public 或自定义别名。
 func resolveRemoteRegisterTarget(workspace Workspace, folder string, ensureBundle bool, reporter Reporter) (secrets.SyncTarget, error) {
 	folder = strings.Trim(strings.TrimSpace(strings.ReplaceAll(folder, "\\", "/")), "/")
 	if folder == "" {
 		return secrets.SyncTarget{}, fmt.Errorf("必须指定远端 folder")
 	}
-	if strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
+	var projects map[string]*pmodel.Loaded
+	readErr := withAppReadRepo(func(tx *repo.Transaction) error {
+		var err error
+		projects, err = pmodel.Scan(tx.WorkDir())
+		return err
+	})
+	if readErr != nil && !strings.Contains(readErr.Error(), "仓库未连接") {
+		return secrets.SyncTarget{}, readErr
+	}
+	// 旧仓库保留 bundle/<name> 行为；P 仓库禁止回退。
+	if len(projects) == 0 {
+		if !strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
+			return secrets.SyncTarget{}, fmt.Errorf(
+				"folder %q 不是合法写入归属；Remote 登记只接受 %q",
+				folder, secrets.DefaultBundleFolder(folder))
+		}
 		name := strings.TrimSpace(strings.TrimPrefix(folder, secrets.BundleFolderPrefix))
 		if err := validateRemoteOwnerName("bundle", name); err != nil {
 			return secrets.SyncTarget{}, err
@@ -289,10 +305,24 @@ func resolveRemoteRegisterTarget(workspace Workspace, folder string, ensureBundl
 		}
 		return secrets.NewBundleSyncTarget(name, folder)
 	}
-
-	return secrets.SyncTarget{}, fmt.Errorf(
-		"folder %q 不是合法写入归属；Remote 登记只接受 %q（ADR 0014）",
-		folder, secrets.DefaultBundleFolder(folder))
+	name, plane, ok := secrets.ParsePFolder(folder)
+	if !ok {
+		return secrets.SyncTarget{}, fmt.Errorf(
+			"folder %q 不是合法写入归属；只接受 <p>/private/user 或 <p>/private/project", folder)
+	}
+	if workspace.EffectivePlane() == WorkspaceUser && !secrets.IsMachinePlane(plane) {
+		return secrets.SyncTarget{}, fmt.Errorf("用户平面不能登记 project secrets folder %q", folder)
+	}
+	if workspace.EffectivePlane() == WorkspaceProject && secrets.IsMachinePlane(plane) {
+		return secrets.SyncTarget{}, fmt.Errorf("项目平面不能登记 user secrets folder %q", folder)
+	}
+	_, declared := projects[name]
+	if !declared {
+		return secrets.SyncTarget{}, fmt.Errorf("P %q 未声明；禁止为包外 folder 手工创建 SyncTarget", name)
+	}
+	_ = ensureBundle
+	_ = reporter
+	return secrets.NewPSyncTarget(name, plane)
 }
 
 func validateRemoteOwnerName(kind, name string) error {
@@ -412,8 +442,14 @@ func readLocalSecretFile(localPath string) (string, error) {
 }
 
 // landRegisteredSSHKey 尝试把新 Key 落到 ~/.ssh；已存在同名文件则跳过（不覆盖）。
-func landRegisteredSSHKey(decBundleName string, key secrets.SSHKeyItem) (bool, error) {
-	exists, err := secrets.LocalSSHKeyExists(decBundleName, key.Name)
+func landRegisteredSSHKey(workspace Workspace, target secrets.SyncTarget, decBundleName string, key secrets.SSHKeyItem) (bool, error) {
+	var exists bool
+	var err error
+	if workspace.EffectivePlane() == WorkspaceUser || target.Kind != secrets.SyncKindP {
+		exists, err = secrets.LocalSSHKeyExists(decBundleName, key.Name)
+	} else {
+		exists, err = secrets.InspectProjectSSHKeyLanding(workspace.Root, decBundleName, key.Name)
+	}
 	if err != nil {
 		return false, err
 	}
@@ -424,7 +460,12 @@ func landRegisteredSSHKey(decBundleName string, key secrets.SSHKeyItem) (bool, e
 	if err != nil {
 		return false, err
 	}
-	if err := secrets.WriteSSHKeyLandings(landings); err != nil {
+	if workspace.EffectivePlane() == WorkspaceUser || target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+		err = secrets.WriteSSHKeyLandings(landings)
+	} else {
+		err = secrets.WriteProjectSSHKeyLandings(workspace.Root, landings)
+	}
+	if err != nil {
 		return false, err
 	}
 	return true, nil

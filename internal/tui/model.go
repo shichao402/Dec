@@ -161,6 +161,16 @@ type runCompletedMsg struct {
 	err        error
 }
 
+type migrationPreviewMsg struct {
+	plan *app.PMigrationPlan
+	err  error
+}
+
+type migrationCompletedMsg struct {
+	journal *app.PMigrationJournal
+	err     error
+}
+
 type activeOperationPolledMsg struct {
 	active      bool
 	operationID string
@@ -210,6 +220,14 @@ var runRemoveOperation = func(input app.RemoveBundleInput, reporter app.Reporter
 
 var previewPushOperation = func(workspace app.Workspace) (*app.PushProjectAssetsPreview, error) {
 	return serviceapi.PreviewPushWorkspaceAssets(context.Background(), workspace, nil)
+}
+
+var previewPMigrationOperation = func(ctx context.Context, workspace app.Workspace) (*app.PMigrationPlan, error) {
+	return serviceapi.PreviewPMigration(ctx, workspace, nil)
+}
+
+var runPMigrationOperation = func(ctx context.Context, workspace app.Workspace, fingerprint string, reporter app.Reporter) (*app.PMigrationJournal, error) {
+	return serviceapi.RunPMigration(ctx, workspace, fingerprint, reporter)
 }
 
 var loadGlobalSettingsOperation = func(reporter app.Reporter) (*app.GlobalSettingsState, error) {
@@ -367,6 +385,10 @@ type model struct {
 	pushPreview                 *app.PushProjectAssetsPreview
 	pushPreviewErr              error
 	pushPreviewLoad             asyncLoad
+	migrationStage              string // "", "loading", "preview", "confirm", "running", "done"
+	migrationPlan               *app.PMigrationPlan
+	migrationJournal            *app.PMigrationJournal
+	migrationErr                error
 	updateStage                 string // "", "checking", "result", "confirm", "running", "done"
 	updateResult                *update.CheckResult
 	updateErr                   error
@@ -677,6 +699,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.overview.Bundles = msg.bundles
 		m.overview.AvailableBundleCount = msg.availableBundleCount
+		m.overview.EnabledProjects = nil
+		m.overview.RequiredProjects = nil
+		for _, item := range msg.bundles {
+			if item.Model != "p" {
+				continue
+			}
+			m.overview.Model = "p"
+			if item.Home {
+				m.overview.HomeProject = item.Name
+			}
+			if item.Enabled {
+				m.overview.EnabledProjects = append(m.overview.EnabledProjects, item.Name)
+			}
+			if item.Required {
+				m.overview.RequiredProjects = append(m.overview.RequiredProjects, item.Name)
+			}
+		}
+		if m.overview.Model == "p" {
+			m.overview.EnabledBundleCount = len(m.overview.EnabledProjects)
+		}
 		diag.StartupLog("overviewVaultEnrichedMsg applied available=%d", msg.availableBundleCount)
 		m.pushLog(fmt.Sprintf("Overview vault bundles ready: %d available", msg.availableBundleCount))
 		return m, nil
@@ -1027,6 +1069,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Push 确认页已打开：%d 个 enabled bundle", msg.preview.EnabledBundleCount))
 		}
 		return m, nil
+	case migrationPreviewMsg:
+		m.migrationPlan = msg.plan
+		m.migrationErr = msg.err
+		m.migrationJournal = nil
+		m.migrationStage = "preview"
+		if msg.err != nil {
+			m.pushLog("P 迁移预览失败: " + msg.err.Error())
+		} else if msg.plan != nil {
+			m.pushLog(fmt.Sprintf("P 迁移只读预览：%d Git · %d BW · %d issues",
+				len(msg.plan.GitMoves), len(msg.plan.BWMoves), len(msg.plan.Issues)))
+		}
+		return m, nil
+	case migrationCompletedMsg:
+		m.migrationJournal = msg.journal
+		m.migrationErr = msg.err
+		m.migrationStage = "done"
+		if msg.err != nil {
+			m.pushLog("P 迁移暂停，可按 m 从恢复日志继续: " + msg.err.Error())
+		} else {
+			m.pushLog("P 四象限迁移完成")
+		}
+		return m, m.refreshCmd()
 	case addSecretTargetsMsg:
 		m.applyAddSecretTargets(msg)
 		return m, nil
@@ -1193,6 +1257,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.addSecretStage != "" && (m.isProjectPage() || m.isRemotePage()) {
 			return m.handleAddSecretKey(msg)
+		}
+		if m.isRunPage() && m.migrationStage != "" {
+			return m.handlePMigrationKey(msg)
 		}
 		if m.isRunPage() && m.pushStage != "" && !m.runningPull {
 			return m.handlePushStageKey(msg)
@@ -1409,8 +1476,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "P":
-			if m.isRunPage() && !m.runningPull && !m.runningRemove && m.pushStage == "" && !m.updatingBinary && m.updateStage == "" {
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && m.pushStage == "" && m.migrationStage == "" && !m.updatingBinary && m.updateStage == "" {
 				return m, m.beginPushConfirmation()
+			}
+			return m, nil
+		case "m":
+			if m.isRunPage() && !m.runningPull && !m.runningRemove && m.pushStage == "" && m.migrationStage == "" && !m.updatingBinary {
+				m.migrationStage = "loading"
+				m.migrationErr = nil
+				return m, previewPMigrationCmd(m.workspace())
 			}
 			return m, nil
 		case "u":
@@ -1842,6 +1916,57 @@ func startPushRunCmd(ctx context.Context, workspace app.Workspace, stream chan<-
 		}()
 		return nil
 	}
+}
+
+func previewPMigrationCmd(workspace app.Workspace) tea.Cmd {
+	return func() tea.Msg {
+		plan, err := previewPMigrationOperation(context.Background(), workspace)
+		return migrationPreviewMsg{plan: plan, err: err}
+	}
+}
+
+func runPMigrationCmd(workspace app.Workspace, fingerprint string) tea.Cmd {
+	return func() tea.Msg {
+		journal, err := runPMigrationOperation(context.Background(), workspace, fingerprint, nil)
+		return migrationCompletedMsg{journal: journal, err: err}
+	}
+}
+
+func (m model) handlePMigrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.migrationStage {
+	case "loading", "running":
+		return m, nil
+	case "preview":
+		switch msg.String() {
+		case "y", "enter":
+			if m.migrationErr == nil && m.migrationPlan != nil && m.migrationPlan.LegacyDetected && !m.migrationPlan.HasBlockers() {
+				m.migrationStage = "confirm"
+			}
+		case "n", "esc":
+			m.migrationStage = ""
+		}
+	case "confirm":
+		switch msg.String() {
+		case "y":
+			m.migrationStage = "running"
+			return m, runPMigrationCmd(m.workspace(), m.migrationPlan.Fingerprint)
+		case "n", "esc":
+			m.migrationStage = "preview"
+		}
+	case "done":
+		switch msg.String() {
+		case "m":
+			if m.migrationErr != nil && m.migrationPlan != nil {
+				m.migrationStage = "running"
+				return m, runPMigrationCmd(m.workspace(), m.migrationPlan.Fingerprint)
+			}
+			m.migrationStage = "loading"
+			return m, previewPMigrationCmd(m.workspace())
+		case "esc", "n", "enter":
+			m.migrationStage = ""
+		}
+	}
+	return m, nil
 }
 
 func waitRunMsg(stream <-chan tea.Msg) tea.Cmd {
@@ -2578,10 +2703,16 @@ func (m model) renderHomePage(width int) string {
 		lines = append(lines, shellMutedStyle.Render("正在从 vault 应用 project..."))
 	} else if m.hasVaultInferencePrompt() {
 		inf := m.vaultInference
+		subject := fmt.Sprintf("Bundles (%d): %s", len(inf.EnabledBundles), formatInferenceBundleNames(inf.EnabledBundles))
+		title := "检测到项目配置，是否应用？"
+		if inf.Model == "p" {
+			title = "检测到同名家 P，是否绑定？"
+			subject = fmt.Sprintf("家 P: %s · requires (%d): %s", inf.HomeProject, len(inf.RequiredProjects), formatInferenceBundleNames(inf.RequiredProjects))
+		}
 		lines = append(lines,
-			shellWarnStyle.Render("检测到项目配置，是否应用？"),
+			shellWarnStyle.Render(title),
 			fmt.Sprintf("项目: %s", inf.ProjectName),
-			fmt.Sprintf("Bundles (%d): %s", len(inf.EnabledBundles), formatInferenceBundleNames(inf.EnabledBundles)),
+			subject,
 			shellMutedStyle.Render("y/Enter 应用 · n 跳过"),
 			"",
 		)
@@ -2604,7 +2735,15 @@ func (m model) renderHomePage(width int) string {
 		fmt.Sprintf("项目名: %s", formatProjectNameDisplay(m.overview)),
 		fmt.Sprintf("仓库: %s · %s", formatReady(m.overview.RepoConnected, "已连接", "未连接"), fallbackValue(m.overview.RepoRemoteURL, "未连接")),
 		fmt.Sprintf("配置: %s · 变量: %s", formatReady(m.overview.ProjectConfigReady, "已初始化", "未初始化"), formatReady(m.overview.VarsFileReady, "已存在", "未生成")),
-		fmt.Sprintf("Bundle: 可选 %d 个 · 已启用 %d 个", countOverviewAvailableBundles(m.overview), countOverviewEnabledBundles(m.overview)),
+		func() string {
+			if m.overview.Model == "p" {
+				if m.plane == app.WorkspaceUser {
+					return fmt.Sprintf("P: 可选 %d 个 · 用户已启用 %d 个", countOverviewAvailableBundles(m.overview), countOverviewEnabledBundles(m.overview))
+				}
+				return fmt.Sprintf("家 P: %s · requires %d 个", fallbackValue(m.overview.HomeProject, "<未绑定>"), len(m.overview.RequiredProjects))
+			}
+			return fmt.Sprintf("Bundle: 可选 %d 个 · 已启用 %d 个", countOverviewAvailableBundles(m.overview), countOverviewEnabledBundles(m.overview))
+		}(),
 		fmt.Sprintf("IDE: %s · 编辑器: %s", fallbackValue(strings.Join(m.overview.IDEs, ", "), "<none>"), fallbackValue(m.overview.Editor, "未配置")),
 	)
 	if warn := formatWarnings(m.overview.IDEWarnings); !strings.HasSuffix(warn, "无") {
@@ -2623,11 +2762,14 @@ func (m model) renderBundlesPage(width, height int) string {
 
 	summary := []string{}
 	if m.configInitMode {
-		summary = append(summary, shellTitleStyle.Render("项目配置初始化 — 勾选要启用的 bundle"))
+		summary = append(summary, shellTitleStyle.Render("项目初始化 — 绑定家 P 并选择直接 requires"))
 	}
 	status := fmt.Sprintf("%d/%d 项目已启用", len(m.bundleSelection), len(m.assets.Bundles))
+	if m.assets.Model == "p" {
+		status = fmt.Sprintf("%d/%d P 已选择（H=家 P，其余为直接 requires）", len(m.bundleSelection), len(m.assets.Bundles))
+	}
 	if m.plane == app.WorkspaceUser {
-		status = fmt.Sprintf("%d/%d 用户平面已启用", len(m.bundleSelection), len(m.assets.Bundles))
+		status = fmt.Sprintf("%d/%d 用户 P 已启用", len(m.bundleSelection), len(m.assets.Bundles))
 	}
 	if filter := m.currentAssetFilterLabel(); filter != "<none>" {
 		status += " · 筛选: " + filter
@@ -2645,7 +2787,7 @@ func (m model) renderBundlesPage(width, height int) string {
 
 	rows := m.assetTreeVisibleCount()
 	if len(m.assets.Bundles) == 0 {
-		return wrapLines(width, append(summary, "仓库 bundles/ 下还没有可选 bundle。"))
+		return wrapLines(width, append(summary, "仓库中还没有可选 P。"))
 	}
 	if rows == 0 {
 		return wrapLines(width, append(summary, "当前筛选没有结果。"))
@@ -2900,6 +3042,9 @@ func (m model) renderRunPage(width int) string {
 		}
 		return wrapLines(width, sections)
 	}
+	if m.migrationStage != "" {
+		return m.renderPMigrationPage(width)
+	}
 	if m.pushStage == "loading" || m.pushStage == "summary" || m.pushStage == "confirm" {
 		return m.renderRunPushPage(width)
 	}
@@ -2977,7 +3122,7 @@ func (m model) renderRunActionBar() string {
 	case m.runningRemove, m.updatingBinary:
 		return shellMutedStyle.Render("? 帮助")
 	default:
-		return shellMutedStyle.Render("p Pull  ·  P Push  ·  u Update  ·  ? 帮助")
+		return shellMutedStyle.Render("p Pull  ·  P Push  ·  m Migrate  ·  u Update  ·  ? 帮助")
 	}
 }
 
@@ -3013,9 +3158,17 @@ func (m model) renderPullPlanLines() []string {
 
 	lines := []string{shellTitleStyle.Render("本次 Pull 计划")}
 	if len(names) == 0 {
-		lines = append(lines, shellWarnStyle.Render("⚠ 当前无启用 bundle，请先到 Bundles 页勾选并按 s 保存"))
+		emptyLabel := "⚠ 当前无启用 bundle，请先到 Bundles 页勾选并按 s 保存"
+		if m.assets.Model == "p" {
+			emptyLabel = "⚠ 当前无可用 P，请先到 Bundles 页选择并按 s 保存"
+		}
+		lines = append(lines, shellWarnStyle.Render(emptyLabel))
 	} else {
-		lines = append(lines, fmt.Sprintf("Dec  bundle: %s（→ .dec/cache/）",
+		label := "P"
+		if m.assets.Model != "p" {
+			label = "bundle"
+		}
+		lines = append(lines, fmt.Sprintf("Dec  %s: %s（→ .dec/cache/）", label,
 			strings.Join(names, ", ")))
 	}
 	if secretsPlan := m.renderSecretsSyncPlanLines(); len(secretsPlan) > 0 {
@@ -3104,6 +3257,16 @@ func (m model) renderRunLastResult() []string {
 	if m.runResult != nil {
 		lines = append(lines, fmt.Sprintf("Pull  请求 %d · 成功 %d · 失败 %d",
 			m.runResult.RequestedCount, m.runResult.PulledCount, m.runResult.FailedCount))
+		if m.runResult.Model == "p" {
+			lines = append(lines,
+				fmt.Sprintf("P     家 %s · requires %s", fallbackValue(m.runResult.HomeProject, "<user>"), fallbackValue(strings.Join(m.runResult.RequiredProjects, ", "), "<none>")),
+				fmt.Sprintf("象限  public/user %d · private/user %d · public/project %d · private/project %d",
+					m.runResult.Quadrants["public/user"], m.runResult.Quadrants["private/user"],
+					m.runResult.Quadrants["public/project"], m.runResult.Quadrants["private/project"]))
+			if len(m.runResult.MissingProjects) > 0 {
+				lines = append(lines, shellWarnStyle.Render("缺失 P: "+strings.Join(m.runResult.MissingProjects, ", ")))
+			}
+		}
 		// 一排 0 本身不解释任何事情；跳过原因是唯一能说明「为什么没拉」的那句话。
 		if reason := strings.TrimSpace(m.runResult.SkippedReason); reason != "" && m.runResult.PulledCount == 0 {
 			lines = append(lines, shellWarnStyle.Render("Dec   "+reason))
@@ -3183,12 +3346,65 @@ func (m model) renderRunHelpPanel() []string {
 		shellTitleStyle.Render("快捷键"),
 		shellMutedStyle.Render("p / s  执行 pull"),
 		shellMutedStyle.Render("P      推送到远端（两次确认）"),
+		shellMutedStyle.Render("m      只读预览旧结构迁移；确认后执行/恢复"),
 		shellMutedStyle.Render("删除 / 编辑远端请切到 Remote 页（侧栏 Run 之后）"),
 		shellMutedStyle.Render("u      检查并自更新 dec"),
 		shellMutedStyle.Render("r      刷新项目概览"),
 		shellMutedStyle.Render("Esc    取消进行中的 pull / push"),
 		shellMutedStyle.Render("?      开关此帮助"),
 	}
+}
+
+func (m model) renderPMigrationPage(width int) string {
+	lines := []string{shellTitleStyle.Render("Run · P 四象限迁移")}
+	switch m.migrationStage {
+	case "loading":
+		lines = append(lines, shellMutedStyle.Render("正在只读扫描 Git 与 Bitwarden 元数据…"))
+	case "preview":
+		if m.migrationErr != nil {
+			lines = append(lines, shellWarnStyle.Render("预览失败: "+m.migrationErr.Error()), shellMutedStyle.Render("Esc 返回"))
+			break
+		}
+		plan := m.migrationPlan
+		if plan == nil || !plan.LegacyDetected {
+			lines = append(lines, "未检测到旧 projects/、bundles/ 或旧 BW folder。", shellMutedStyle.Render("Esc 返回"))
+			break
+		}
+		lines = append(lines,
+			"此页仅展示预览，尚未写入任何远端。",
+			fmt.Sprintf("P %d · Git 文件 %d · BW 项 %d · 问题 %d", len(plan.Manifests), len(plan.GitMoves), len(plan.BWMoves), len(plan.Issues)))
+		for _, issue := range plan.Issues {
+			line := fmt.Sprintf("[%s] %s", issue.Code, issue.Message)
+			if issue.Severity == "error" {
+				lines = append(lines, shellWarnStyle.Render("阻断  "+line))
+			} else {
+				lines = append(lines, shellMutedStyle.Render("提示  "+line))
+			}
+		}
+		if plan.HasBlockers() {
+			lines = append(lines, shellWarnStyle.Render("存在阻断问题，不能执行 · Esc 返回"))
+		} else {
+			lines = append(lines, shellMutedStyle.Render("y/Enter 继续 · n/Esc 取消"))
+		}
+	case "confirm":
+		lines = append(lines,
+			shellWarnStyle.Render("最终确认：将先备份本地，再分阶段写 Git/BW；旧节点最后删除。"),
+			"任何失败都会保留恢复日志；再次按 m 可继续。",
+			shellMutedStyle.Render("y 执行 · n/Esc 返回预览"))
+	case "running":
+		lines = append(lines, shellMutedStyle.Render("迁移执行中，请勿关闭服务…"))
+	case "done":
+		if m.migrationErr != nil {
+			lines = append(lines, shellWarnStyle.Render("迁移暂停: "+m.migrationErr.Error()))
+			if m.migrationJournal != nil {
+				lines = append(lines, "恢复阶段: "+string(m.migrationJournal.Phase))
+			}
+			lines = append(lines, shellMutedStyle.Render("m 重新预览并恢复 · Esc 返回"))
+		} else {
+			lines = append(lines, "迁移完成；运行时将只读 P 模型。", shellMutedStyle.Render("Enter/Esc 返回"))
+		}
+	}
+	return wrapLines(width, lines)
 }
 
 func (m model) renderRunPushPage(width int) string {
@@ -3747,11 +3963,17 @@ func (m model) renderAssetRowLine(row assetRow, marker string) string {
 	bo := m.assets.Bundles[row.bundleIndex]
 	if row.kind == assetRowBundleMember {
 		mb := bo.Members[row.memberIndex]
+		if bo.Model == "p" {
+			return fmt.Sprintf("%s   ↳ %s/%s · %s / %s", marker, mb.Visibility, mb.Plane, mb.Type, mb.Name)
+		}
 		return fmt.Sprintf("%s   ↳ %s / %s / %s", marker, mb.Type, mb.Vault, mb.Name)
 	}
 	checked := " "
 	if row.bundleEnabled {
 		checked = "x"
+	}
+	if bo.Home {
+		checked = "H"
 	}
 	if bo.OtherPlane {
 		return fmt.Sprintf("%s [-]   %s · 属于项目平面", marker, bo.Name)
@@ -3780,6 +4002,25 @@ func (m model) renderAssetDetails() string {
 			switch p.kind {
 			case assetRowBundle:
 				bo := m.assets.Bundles[p.bundleIndex]
+				if bo.Model == "p" {
+					role := "可引用 P"
+					if bo.Home {
+						role = "家 P（固定）"
+					} else if bo.Required {
+						role = "直接 requires"
+					} else if m.plane == app.WorkspaceUser && bo.Enabled {
+						role = "用户已启用"
+					}
+					lines = append(lines,
+						fmt.Sprintf("P: %s", bo.Name),
+						fmt.Sprintf("角色: %s", role),
+						fmt.Sprintf("public/user: %d", bo.Quadrants["public/user"]),
+						fmt.Sprintf("private/user: %d", bo.Quadrants["private/user"]),
+						fmt.Sprintf("public/project: %d", bo.Quadrants["public/project"]),
+						fmt.Sprintf("private/project: %d", bo.Quadrants["private/project"]),
+					)
+					return strings.Join(lines, "\n")
+				}
 				lines = append(lines,
 					fmt.Sprintf("Bundle: %s", bo.Name),
 				)
@@ -4241,6 +4482,10 @@ func (m *model) toggleCurrentAsset() {
 	switch p.kind {
 	case assetRowBundle:
 		bo := m.assets.Bundles[p.bundleIndex]
+		if bo.Home {
+			m.pushLog(fmt.Sprintf("%s 是当前工作区家 P，不能在 Bundles 页取消；请在 Home 重新绑定", bo.Name))
+			return
+		}
 		if bo.OtherPlane {
 			m.pushLog(fmt.Sprintf("%s 属于项目平面，不能在此启用：需先在仓库显式改 bundle.yaml 的 scope", bo.Name))
 			return

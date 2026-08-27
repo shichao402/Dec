@@ -11,14 +11,12 @@ message GlobalConfig {
   string editor = 3;
   // dec-server 在无门面连接后退出前的等待时长（Go duration，如 "30m"）。
   string server_idle_timeout = 4 [json_name = "server_idle_timeout"];
-  // 用户平面启用的 bundle 短名（仅 scope: user；ADR 0009）。
-  // 自 ~/.dec/secrets/config.yaml 的 user_enabled_bundles 迁入。
-  repeated string enabled_bundles = 5 [json_name = "enabled_bundles"];
+  // 用户平面启用的 P 名；每项安装该 P 的 public/user 与 private/user。
+  repeated string enabled_projects = 5 [json_name = "enabled_projects"];
 }
 
 // ProjectConfig 对应 <workspace>/.dec/config.yaml（version v2）。
-// 本地配置以 project_name 引用 Git Vault 中的 projects/<name>.yaml；
-// enabled_bundles 为从 vault Project 同步或 Bundles 页调整后的本地副本，供 pull 解析。
+// 本地配置以 project_name 绑定 Git Vault 顶层 <p>/dec.yaml。
 message ProjectConfig {
   string version = 1;
   // 引用的 vault Project 名，对应 projects/<project_name>.yaml。
@@ -27,10 +25,6 @@ message ProjectConfig {
   repeated string ides = 3;
   // 机器级 editor 覆盖（可选）。
   string editor = 4;
-  // 5、6 曾是 available / enabled 单资产清单，已随「bundle 是唯一启用入口」移除，不要复用。
-  reserved 5, 6;
-  reserved "available", "enabled";
-  // 从 vault Project.bundles 同步或 Bundles 页保存的 bundle 列表；
-  // 这是唯一的资产启用入口，pull 时据此拉 Dec + secrets bundle。
-  repeated string enabled_bundles = 7 [json_name = "enabled_bundles"];
+  reserved 5, 6, 7;
+  reserved "available", "enabled", "enabled_bundles";
 }

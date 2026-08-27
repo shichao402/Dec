@@ -10,6 +10,7 @@ import (
 
 	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/types"
@@ -20,9 +21,11 @@ const AssetMemberTypeSecret = "secret"
 
 // AssetSelectionItem 描述 bundle 内的一个成员资产，仅供展示定位使用。
 type AssetSelectionItem struct {
-	Name  string
-	Type  string
-	Vault string
+	Name       string
+	Type       string
+	Vault      string
+	Visibility types.AssetVisibility
+	Plane      types.AssetPlane
 }
 
 // AssetBundleOption 描述 Bundles 页可勾选的 bundle 节点。
@@ -52,6 +55,11 @@ type AssetBundleOption struct {
 	// RemoteUnverified 表示本次没能核对远端（无 session、枚举失败，或该 bundle 配了别名 folder），
 	// 因此既不能声称远端已有、也不能断言远端没有。仅在 SecretsOnly 为 true 时有意义。
 	RemoteUnverified bool
+	// Model="p" 表示顶层 P；Home/Required 分别表示家 P 与直接 requires。
+	Model     string
+	Home      bool
+	Required  bool
+	Quadrants map[string]int
 }
 
 // AssetSelectionState 是 Bundles 页的数据源：仓库里全部 bundle + 当前启用态。
@@ -64,6 +72,9 @@ type AssetSelectionState struct {
 	// Bundles 是当前仓库扫描得到的全部 bundle 选项，含未启用的。
 	// 仓库未连接或扫描失败时为 nil（调用方应当作"没有 bundle"处理）。
 	Bundles []AssetBundleOption
+	// Model 在新仓库为 "p"，用于外部兼容工具区分 P 与 legacy bundle。
+	Model string
+	Plane WorkspacePlane
 }
 
 // SaveBundleSelectionResult 汇报一次 bundle 勾选保存的结果。
@@ -75,6 +86,12 @@ type SaveBundleSelectionResult struct {
 	// RejectedBundles 是本次勾选中未能启用的条目（含原因），已从 enabled_bundles 排除。
 	// 两平面都会出现：跨平面启用需先显式改 vault manifest 的 scope（ADR 0013 §7 / §7a）。
 	RejectedBundles []string
+	// 新语义字段；旧字段保留 wire 兼容。
+	Model            string
+	EnabledProjects  []string
+	HomeProject      string
+	RequiredProjects []string
+	RejectedProjects []string
 }
 
 func LoadAssetSelection(projectRoot string, reporter Reporter) (*AssetSelectionState, error) {
@@ -98,6 +115,7 @@ func LoadWorkspaceAssetSelection(workspace Workspace, reporter Reporter) (*Asset
 		ProjectRoot: projectRoot,
 		ConfigPath:  filepath.Join(mgr.GetDecDir(), "config.yaml"),
 		VarsPath:    mgr.GetVarsPath(),
+		Plane:       workspace.EffectivePlane(),
 	}
 
 	var existingConfig *types.ProjectConfig
@@ -125,6 +143,12 @@ func LoadWorkspaceAssetSelection(workspace Workspace, reporter Reporter) (*Asset
 	}
 
 	state.Bundles = loadBundleSelectionForPlane(existingConfig, workspace.EffectivePlane(), reporter)
+	for _, option := range state.Bundles {
+		if option.Model == "p" {
+			state.Model = "p"
+			break
+		}
+	}
 	if workspace.EffectivePlane() == WorkspaceUser {
 		state.Bundles = appendSecretsOnlyBundleOptions(state.Bundles, workspace, existingConfig, reporter)
 	}
@@ -150,6 +174,13 @@ func SaveEnabledBundles(projectRoot string, bundles []string, reporter Reporter)
 
 // SaveWorkspaceEnabledBundles 将选择写入所属平面的唯一配置源。
 func SaveWorkspaceEnabledBundles(workspace Workspace, bundles []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
+	if usesP, _ := connectedRepositoryUsesPModel(); usesP {
+		return saveWorkspacePSelection(workspace, bundles, reporter)
+	}
+	return saveWorkspaceLegacyBundleSelection(workspace, bundles, reporter)
+}
+
+func saveWorkspaceLegacyBundleSelection(workspace Workspace, bundles []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
 	reporter = defaultReporter(reporter)
 	if workspace.EffectivePlane() == WorkspaceUser {
 		globalConfig, err := config.LoadGlobalConfig()
@@ -236,6 +267,90 @@ func SaveWorkspaceEnabledBundles(workspace Workspace, bundles []string, reporter
 	return result, nil
 }
 
+func saveWorkspacePSelection(workspace Workspace, names []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
+	reporter = defaultReporter(reporter)
+	requested := normalizeEnabledBundles(names)
+	result := &SaveBundleSelectionResult{Model: "p"}
+	var available map[string]*pmodel.Loaded
+	if err := withLocalReadRepoDir(func(repoDir string) error {
+		var err error
+		available, err = pmodel.Scan(repoDir)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	valid := make([]string, 0, len(requested))
+	for _, name := range requested {
+		if _, ok := available[name]; !ok {
+			result.RejectedProjects = append(result.RejectedProjects, name+"（P 不存在）")
+			result.RejectedBundles = append(result.RejectedBundles, name+"（P 不存在）")
+			continue
+		}
+		valid = append(valid, name)
+	}
+	if workspace.EffectivePlane() == WorkspaceUser {
+		cfg, err := config.LoadGlobalConfig()
+		if err != nil {
+			return nil, err
+		}
+		cfg.EnabledProjects = append([]string(nil), valid...)
+		cfg.EnabledBundles = append([]string(nil), valid...)
+		if err := config.SaveGlobalConfig(cfg); err != nil {
+			return nil, err
+		}
+		result.ConfigPath, _ = config.GetGlobalConfigPath()
+		result.VarsPath, _ = config.GetGlobalVarsPath()
+		result.EnabledProjects = append([]string(nil), valid...)
+		result.EnabledBundleCount = len(valid)
+		emit(reporter, EventInfo, "p.save", fmt.Sprintf("已保存 %d 个用户启用 P", len(valid)), nil)
+		return result, nil
+	}
+
+	mgr := config.NewProjectConfigManager(workspace.Root)
+	cfg, err := mgr.LoadProjectConfig()
+	if err != nil {
+		return nil, err
+	}
+	home := strings.TrimSpace(cfg.ProjectName)
+	if !types.IsValidPName(home) {
+		return nil, fmt.Errorf("项目尚未绑定合法家 P")
+	}
+	requires := make([]string, 0, len(valid))
+	for _, name := range valid {
+		if name != home {
+			requires = append(requires, name)
+		}
+	}
+	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
+		loaded, err := pmodel.Load(tx.WorkDir(), home)
+		if err != nil {
+			return fmt.Errorf("加载家 P %q 失败: %w", home, err)
+		}
+		manifest := loaded.Manifest
+		manifest.Requires = requires
+		if err := pmodel.SaveManifest(tx.WorkDir(), manifest); err != nil {
+			return err
+		}
+		_, err = tx.CommitAndPush("p: update " + home + " requires")
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	// P 模型下本地配置只绑定家 P；requires 的 SSOT 是 <home>/dec.yaml。
+	cfg.EnabledBundles = nil
+	if err := mgr.SaveProjectConfig(cfg); err != nil {
+		return nil, err
+	}
+	result.ConfigPath = filepath.Join(mgr.GetDecDir(), "config.yaml")
+	result.VarsPath = mgr.GetVarsPath()
+	result.HomeProject = home
+	result.RequiredProjects = append([]string(nil), requires...)
+	result.EnabledProjects = append([]string{home}, requires...)
+	result.EnabledBundleCount = len(result.EnabledProjects)
+	emit(reporter, EventInfo, "p.save", fmt.Sprintf("家 P %s requires 已保存：%s", home, strings.Join(requires, ", ")), nil)
+	return result, nil
+}
+
 // loadBundleSelection 扫描仓库内 bundle 声明，返回全部 bundle 选项（含未启用的）。
 //
 // 本函数只为 Bundles 页展示服务，任何错误都降级为 reporter warning，不向上传播；
@@ -277,6 +392,10 @@ func loadBundleSelectionForPlane(projectConfig *types.ProjectConfig, plane Works
 			Description: bo.Description,
 			Vault:       bo.VaultName,
 			Enabled:     bo.Enabled,
+			Model:       bo.Model,
+			Home:        bo.Home,
+			Required:    bo.Required,
+			Quadrants:   bo.Quadrants,
 		}
 		if _, ok := enabledSet[bo.Name]; ok {
 			opt.Enabled = true
@@ -527,6 +646,30 @@ func forgetStaleKnownSecretBundles(names []string, reporter Reporter) {
 func buildBundleMemberItems(bo BundleOverview, repoDir string) []AssetSelectionItem {
 	items := make([]AssetSelectionItem, 0, len(bo.Members))
 	for _, raw := range bo.Members {
+		if bo.Model == "p" {
+			parts := strings.SplitN(strings.TrimSpace(raw), "/", 4)
+			if len(parts) != 4 {
+				continue
+			}
+			visibility := types.AssetVisibility(parts[0])
+			plane := types.AssetPlane(parts[1])
+			itemType := bundle.DirToType(parts[2])
+			asset := types.TypedAssetRef{
+				Type: itemType, Visibility: visibility, Plane: plane,
+				AssetRef: types.AssetRef{Name: parts[3], Vault: bo.Name},
+			}
+			if itemType == "" {
+				continue
+			}
+			if _, err := os.Stat(resolveTypedAssetFile(repoDir, asset)); err != nil {
+				continue
+			}
+			items = append(items, AssetSelectionItem{
+				Name: parts[3], Type: itemType, Vault: bo.Name,
+				Visibility: visibility, Plane: plane,
+			})
+			continue
+		}
 		parsed, err := bundle.ParseMember(raw)
 		if err != nil {
 			continue
@@ -630,16 +773,53 @@ func ListEffectiveEnabledGroups(state *AssetSelectionState) []EffectiveEnabledGr
 	}
 	var groups []EffectiveEnabledGroup
 	for _, bo := range ListEnabledBundles(state) {
-		items := vaultMemberItems(bo.Members)
+		items := effectivePItems(state, bo)
 		if len(items) == 0 {
 			continue
 		}
 		groups = append(groups, EffectiveEnabledGroup{
-			Label: "bundle/" + bo.Name,
+			Label: func() string {
+				if bo.Model == "p" {
+					if bo.Home {
+						return "p/" + bo.Name + " (home)"
+					}
+					if bo.Required {
+						return "p/" + bo.Name + " (requires public/project)"
+					}
+					return "p/" + bo.Name
+				}
+				return "bundle/" + bo.Name
+			}(),
 			Items: items,
 		})
 	}
 	return groups
+}
+
+func effectivePItems(state *AssetSelectionState, option AssetBundleOption) []AssetSelectionItem {
+	if option.Model != "p" {
+		return vaultMemberItems(option.Members)
+	}
+	out := make([]AssetSelectionItem, 0, len(option.Members))
+	for _, item := range option.Members {
+		if item.Type == AssetMemberTypeSecret {
+			continue
+		}
+		if state.Plane == WorkspaceUser {
+			if item.Plane == types.AssetPlaneUser {
+				out = append(out, item)
+			}
+			continue
+		}
+		if item.Plane != types.AssetPlaneProject {
+			continue
+		}
+		if option.Required && item.Visibility != types.AssetVisibilityPublic {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func vaultMemberItems(members []AssetSelectionItem) []AssetSelectionItem {

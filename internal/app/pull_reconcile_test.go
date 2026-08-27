@@ -11,8 +11,46 @@ import (
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/secrets/handler"
 	"github.com/shichao402/Dec/internal/types"
 )
+
+func TestPruneOrphanProjectGCMRevokesBeforeDeletingNote(t *testing.T) {
+	useTempHomeForSSH(t)
+	projectRoot := t.TempDir()
+	target, err := secrets.NewPSyncTarget("my-app", secrets.SyncPlaneProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notePath := filepath.Join(projectRoot, ".secrets", "my-app", ".gcm", "repo.yaml")
+	if err := os.MkdirAll(filepath.Dir(notePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(notePath, []byte(
+		"host: git.example.com\nusername: bot\npassword: token\npath: team/repo\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls [][]string
+	reg := handler.NewRegistry()
+	reg.Register(handler.NewGCMHandler(func(_ context.Context, _ string, args ...string) error {
+		calls = append(calls, append([]string(nil), args...))
+		return nil
+	}))
+	restore := handler.SetDefault(reg)
+	t.Cleanup(restore)
+
+	report := pruneOrphanSecretsForTarget(context.Background(), projectRoot, target, nil, nil, nil)
+	if len(report.RemovedSecretPaths) != 1 || len(report.ReportedOnly) != 0 {
+		t.Fatalf("report = %#v", report)
+	}
+	if len(calls) != 1 || strings.Join(calls[0], " ") != "-C "+projectRoot+" credential reject" {
+		t.Fatalf("应在删文件前 scoped revoke: %#v", calls)
+	}
+	if _, err := os.Stat(notePath); !os.IsNotExist(err) {
+		t.Fatalf("revoke 成功后应删除孤儿 note: %v", err)
+	}
+}
 
 // 远端 vault 删了成员 + Bitwarden 删了 Note：pull 后本地 cache/IDE/secrets 孤儿被清。
 func TestPullReconcile_CleansRemoteDeletedOrphans(t *testing.T) {

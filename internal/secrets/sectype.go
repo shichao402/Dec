@@ -36,6 +36,7 @@ username: user
 password: "token"
 # protocol: https
 # provider: generic
+# path: owner/repository  # project 可省略并从 origin 推导
 `
 
 // RegisteredSecretTypes 返回点类型表（不含普通 note；识别/迁移用）。

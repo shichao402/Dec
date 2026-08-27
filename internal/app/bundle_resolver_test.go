@@ -301,3 +301,96 @@ func TestAppendUniqueSource(t *testing.T) {
 		t.Fatalf("新来源未追加: %#v", got)
 	}
 }
+
+func TestResolvePAssetsProjectUsesHomeAndDirectPublicRequires(t *testing.T) {
+	repoDir := setupRepoWithVault(t, map[string]string{
+		"my-app/dec.yaml": "name: my-app\nrequires: [shared]\n",
+		"my-app/public/project/rules/home-public.mdc":        "home",
+		"my-app/private/project/rules/home-private.mdc":      "private",
+		"my-app/public/user/rules/home-user.mdc":             "user",
+		"shared/dec.yaml":                                    "name: shared\nrequires: [transitive]\n",
+		"shared/public/project/skills/shared/SKILL.md":       "shared",
+		"shared/private/project/rules/not-visible.mdc":       "private",
+		"transitive/dec.yaml":                                "name: transitive\n",
+		"transitive/public/project/rules/not-transitive.mdc": "no",
+	})
+	cfg := &types.ProjectConfig{ProjectName: "my-app"}
+
+	got, err := resolveDesiredAssetsForPlane(cfg, repoDir, WorkspaceProject, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, asset := range got.Assets {
+		names[asset.Name] = true
+	}
+	for _, want := range []string{"home-public", "home-private", "shared"} {
+		if !names[want] {
+			t.Fatalf("缺少 %s: %#v", want, got.Assets)
+		}
+	}
+	for _, forbidden := range []string{"home-user", "not-visible", "not-transitive"} {
+		if names[forbidden] {
+			t.Fatalf("不应解析 %s: %#v", forbidden, got.Assets)
+		}
+	}
+}
+
+func TestResolvePAssetsUserUsesBothUserQuadrants(t *testing.T) {
+	repoDir := setupRepoWithVault(t, map[string]string{
+		"tools/dec.yaml":                         "name: tools\n",
+		"tools/public/user/rules/public.mdc":     "public",
+		"tools/private/user/rules/private.mdc":   "private",
+		"tools/public/project/rules/project.mdc": "project",
+	})
+	cfg := &types.ProjectConfig{EnabledBundles: []string{"tools"}}
+	got, err := resolveDesiredAssetsForPlane(cfg, repoDir, WorkspaceUser, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Assets) != 2 {
+		t.Fatalf("Assets = %#v", got.Assets)
+	}
+}
+
+func TestResolvePAssetsRejectsCrossProjectTargetCollision(t *testing.T) {
+	repoDir := setupRepoWithVault(t, map[string]string{
+		"my-app/dec.yaml":                   "name: my-app\nrequires: [a, b]\n",
+		"a/dec.yaml":                        "name: a\n",
+		"a/public/project/rules/shared.mdc": "a",
+		"b/dec.yaml":                        "name: b\n",
+		"b/public/project/rules/shared.mdc": "b",
+	})
+	_, err := resolveDesiredAssetsForPlane(&types.ProjectConfig{ProjectName: "my-app"}, repoDir, WorkspaceProject, nil)
+	if err == nil || !strings.Contains(err.Error(), "竞争同一安装目标") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPAssetPathsIncludeQuadrantAndRequiresAreReadOnlyOnPush(t *testing.T) {
+	workspace := NewWorkspace(WorkspaceProject, t.TempDir())
+	home := types.TypedAssetRef{
+		Type:       "rule",
+		Visibility: types.AssetVisibilityPrivate,
+		Plane:      types.AssetPlaneProject,
+		AssetRef:   types.AssetRef{Name: "home", Vault: "my-app"},
+	}
+	required := types.TypedAssetRef{
+		Type:       "rule",
+		Visibility: types.AssetVisibilityPublic,
+		Plane:      types.AssetPlaneProject,
+		AssetRef:   types.AssetRef{Name: "shared", Vault: "shared-tools"},
+	}
+	source := filepath.ToSlash(resolveTypedAssetFile("repo", home))
+	if !strings.HasSuffix(source, "my-app/private/project/rules/home.mdc") {
+		t.Fatalf("source = %q", source)
+	}
+	cache := filepath.ToSlash(getWorkspaceTypedCachePath(workspace, home))
+	if !strings.Contains(cache, ".dec/cache/my-app/private/project/rules/home.mdc") {
+		t.Fatalf("cache = %q", cache)
+	}
+	writable := writableResolvedAssets(workspace, &types.ProjectConfig{ProjectName: "my-app"}, []types.TypedAssetRef{home, required})
+	if len(writable) != 1 || writable[0].Vault != "my-app" {
+		t.Fatalf("writable = %#v", writable)
+	}
+}

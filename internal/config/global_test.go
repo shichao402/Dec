@@ -172,8 +172,8 @@ func TestSaveGlobalConfig_ClearsLegacySecretsEnabledBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取全局配置失败: %v", err)
 	}
-	if !strings.Contains(string(globalData), "enabled_bundles:") {
-		t.Fatalf("全局配置应写入 enabled_bundles, 实际:\n%s", globalData)
+	if !strings.Contains(string(globalData), "enabled_projects:") {
+		t.Fatalf("全局配置应写入 enabled_projects, 实际:\n%s", globalData)
 	}
 
 	// 迁移后重新加载不应再依赖旧位置。

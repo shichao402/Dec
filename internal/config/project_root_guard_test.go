@@ -64,7 +64,7 @@ func TestProjectConfigRefusesToWriteOverDecHome(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatalf("全局配置被改写:\n--- 之前 ---\n%s\n--- 之后 ---\n%s", before, after)
 	}
-	if !strings.Contains(string(after), "enabled_bundles") {
-		t.Fatalf("全局配置丢了 enabled_bundles:\n%s", after)
+	if !strings.Contains(string(after), "enabled_projects") {
+		t.Fatalf("全局配置丢了 enabled_projects:\n%s", after)
 	}
 }

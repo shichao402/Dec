@@ -1,5 +1,11 @@
 package types
 
+import (
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
 // IDEsConfig 表示 IDE 配置
 type IDEsConfig struct {
 	IDEs []string `yaml:"ides,omitempty" json:"ides,omitempty"`
@@ -41,12 +47,59 @@ type GlobalConfig struct {
 	IDEs              []string `yaml:"ides,omitempty"`
 	Editor            string   `yaml:"editor,omitempty"`
 	ServerIdleTimeout string   `yaml:"server_idle_timeout,omitempty"`
-	// EnabledBundles 是用户平面启用的 bundle 短名列表（ADR 0009）。
-	// 仅应包含 scope: user 的包；与 ProjectConfig.EnabledBundles 字段同名同语义。
+	// EnabledProjects 是 ADR 0016 的用户平面 P 启用列表。
+	EnabledProjects []string `yaml:"enabled_projects,omitempty"`
+	// EnabledBundles 仅用于读取旧配置；运行时会归一到当前启用列表。
 	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
 }
 
 const ProjectConfigVersionV2 = "v2"
+
+// ProjectManifestFileName 是顶层 P 的声明文件。
+const ProjectManifestFileName = "dec.yaml"
+
+// PNamePattern 是 P 名的唯一命名契约：小写 kebab-case。
+const PNamePattern = `^[a-z0-9]+(?:-[a-z0-9]+)*$`
+
+var pNameRegexp = regexp.MustCompile(PNamePattern)
+
+// AssetVisibility 表示资产能否被其他 P 引用。
+type AssetVisibility string
+
+const (
+	AssetVisibilityPublic  AssetVisibility = "public"
+	AssetVisibilityPrivate AssetVisibility = "private"
+)
+
+// AssetPlane 表示资产安装到用户级还是项目级。
+type AssetPlane string
+
+const (
+	AssetPlaneUser    AssetPlane = "user"
+	AssetPlaneProject AssetPlane = "project"
+)
+
+// P 是 Git 仓库顶层唯一可写单元，对应 <p>/dec.yaml。
+type P struct {
+	Name        string   `yaml:"name"`
+	Title       string   `yaml:"title,omitempty"`
+	Description string   `yaml:"description,omitempty"`
+	Requires    []string `yaml:"requires,omitempty"`
+	IDEs        []string `yaml:"ides,omitempty"`
+	Editor      string   `yaml:"editor,omitempty"`
+}
+
+func IsValidPName(name string) bool {
+	return pNameRegexp.MatchString(strings.TrimSpace(name))
+}
+
+func PManifestPath(name string) string {
+	return filepath.Join(name, ProjectManifestFileName)
+}
+
+func PQuadrantDir(name string, visibility AssetVisibility, plane AssetPlane) string {
+	return filepath.Join(name, string(visibility), string(plane))
+}
 
 // VaultProjectsDir 是 Git Vault 中 project 声明目录。
 const VaultProjectsDir = "projects"
@@ -160,7 +213,9 @@ type AssetRef struct {
 
 // TypedAssetRef 带类型信息的资产引用
 type TypedAssetRef struct {
-	Type string
+	Type       string
+	Visibility AssetVisibility
+	Plane      AssetPlane
 	AssetRef
 }
 

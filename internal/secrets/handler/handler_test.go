@@ -3,8 +3,13 @@ package handler
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shichao402/Dec/internal/secrets"
 )
 
 func TestParseProcessorNoteName(t *testing.T) {
@@ -176,5 +181,94 @@ func TestMatchGCMPath(t *testing.T) {
 	}
 	if MatchGCMPath("cnb_gitgcm.yaml") {
 		t.Fatal("旧名不应再 Match")
+	}
+}
+
+func TestGCMHandler_ProjectApplyInspectRevokeUsesRepoPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(projectRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", projectRoot, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+
+	var calls []struct {
+		stdin string
+		args  []string
+	}
+	h := NewGCMHandler(func(_ context.Context, stdin string, args ...string) error {
+		calls = append(calls, struct {
+			stdin string
+			args  []string
+		}{stdin: stdin, args: append([]string(nil), args...)})
+		return nil
+	})
+	h.Output = func(context.Context, ...string) (string, error) {
+		return "https://git.example.com/team/repo.git", nil
+	}
+	item := Item{
+		Name:          ".gcm/repo.yaml",
+		NoteContent:   "host: git.example.com\nusername: bot\npassword: token\n",
+		ProjectRoot:   projectRoot,
+		ProjectScoped: true,
+	}
+	if err := h.Apply(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || strings.Join(calls[0].args, " ") != "-C "+projectRoot+" credential approve" {
+		t.Fatalf("project apply calls = %#v", calls)
+	}
+	if !strings.Contains(calls[0].stdin, "path=team/repo") {
+		t.Fatalf("approve 必须携带 repo path: %q", calls[0].stdin)
+	}
+	paths, err := secrets.ProjectCredentialScopePaths(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(paths.GitFragment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "useHttpPath = true") ||
+		!strings.Contains(string(raw), `credential "https://git.example.com/team/repo"`) {
+		t.Fatalf("project GCM fragment 不完整:\n%s", raw)
+	}
+	got, err := exec.Command("git", "-C", projectRoot, "config", "--get", "credential.useHttpPath").Output()
+	if err != nil || strings.TrimSpace(string(got)) != "true" {
+		t.Fatalf("工作区未命中 useHttpPath: err=%v out=%q", err, got)
+	}
+
+	if err := h.Revoke(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 2 || strings.Join(calls[1].args, " ") != "-C "+projectRoot+" credential reject" {
+		t.Fatalf("project revoke calls = %#v", calls)
+	}
+	if strings.Contains(calls[1].stdin, "password=") || !strings.Contains(calls[1].stdin, "path=team/repo") {
+		t.Fatalf("reject 输入错误: %q", calls[1].stdin)
+	}
+	if _, err := os.Stat(paths.GitFragment); !os.IsNotExist(err) {
+		t.Fatalf("最后一个 project handler revoke 后应移除 fragment: %v", err)
+	}
+}
+
+func TestGCMHandler_ProjectRejectsOriginHostMismatch(t *testing.T) {
+	h := NewGCMHandler(func(context.Context, string, ...string) error { return nil })
+	h.Output = func(context.Context, ...string) (string, error) {
+		return "https://other.example.com/team/repo.git", nil
+	}
+	err := h.Apply(context.Background(), Item{
+		Name:          ".gcm/repo.yaml",
+		NoteContent:   "host: git.example.com\nusername: bot\npassword: token\n",
+		ProjectRoot:   t.TempDir(),
+		ProjectScoped: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "不匹配") {
+		t.Fatalf("origin host 冲突应失败: %v", err)
 	}
 }

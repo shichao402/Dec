@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/secrets/handler"
 	"github.com/shichao402/Dec/internal/types"
 	"gopkg.in/yaml.v3"
 )
@@ -404,5 +406,173 @@ func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
 	}
 	if projectBundle != 1 {
 		t.Fatalf("projectBundle = %d, targets=%+v", projectBundle, plan.Targets)
+	}
+}
+
+func TestPlanWorkspaceSecretsSync_PUsesHomeOnlyAndFixedPlane(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"my-app/dec.yaml":                        "name: my-app\nrequires: [shared]\n",
+		"shared/dec.yaml":                        "name: shared\n",
+		"shared/public/project/rules/shared.mdc": "shared",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "my-app"}); err != nil {
+		t.Fatal(err)
+	}
+
+	projectPlan, err := planWorkspaceSecretsSync(
+		NewWorkspace(WorkspaceProject, projectRoot),
+		[]string{"my-app", "shared"},
+		&secrets.Config{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projectPlan.Targets) != 1 {
+		t.Fatalf("requires/private 不应加入 project secrets plan: %#v", projectPlan.Targets)
+	}
+	target := projectPlan.Targets[0]
+	if target.Kind != secrets.SyncKindP || target.Name != "my-app" ||
+		target.Folder != "my-app/private/project" || target.LocalRoot != ".secrets/my-app" {
+		t.Fatalf("project P target = %#v", target)
+	}
+
+	userPlan, err := planWorkspaceSecretsSync(
+		NewWorkspace(WorkspaceUser, ""),
+		[]string{"shared"},
+		&secrets.Config{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(userPlan.Targets) != 1 || userPlan.Targets[0].Folder != "shared/private/user" ||
+		userPlan.Targets[0].LocalRoot != "shared" {
+		t.Fatalf("user P target = %#v", userPlan.Targets)
+	}
+}
+
+func TestValidateNoPPrivateGitOverlapRejectsSameLogicalPath(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"my-app/dec.yaml":                          "name: my-app\n",
+		"my-app/private/project/rules/private.mdc": "non-secret",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	target, err := secrets.NewPSyncTarget("my-app", secrets.SyncPlaneProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = validateNoPPrivateGitOverlap(
+		[]secrets.SyncTarget{target},
+		[][]secrets.SecureNote{{{RelativePath: "rules/private.mdc", Content: "secret"}}},
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "同时由 Git 与 Bitwarden") {
+		t.Fatalf("同一 P/plane/相对路径应冲突，got %v", err)
+	}
+}
+
+func TestAddGCMConflictRejectsSameProjectCredentialScope(t *testing.T) {
+	seen := map[string]string{}
+	first := secrets.SecureNote{
+		RelativePath: ".gcm/first.yaml",
+		Content:      "host: git.example.com\nusername: first\npassword: one\npath: team/repo\n",
+	}
+	second := secrets.SecureNote{
+		RelativePath: ".gcm/second.yaml",
+		Content:      "host: git.example.com\nusername: second\npassword: two\npath: team/repo\n",
+	}
+	if err := addGCMConflict(seen, "P one", first); err != nil {
+		t.Fatal(err)
+	}
+	err := addGCMConflict(seen, "P two", second)
+	if err == nil || !strings.Contains(err.Error(), "冲突") {
+		t.Fatalf("同 protocol/host/path 的 GCM 应硬冲突: %v", err)
+	}
+}
+
+func TestPullPPrivateProjectCredentialsAreWorkspaceScoped(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+	home := useTempHomeForSSH(t)
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"my-app/dec.yaml": "name: my-app\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := t.TempDir()
+	if out, err := exec.Command("git", "-C", projectRoot, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", projectRoot, "remote", "add", "origin", "https://git.example.com/team/repo.git").CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v: %s", err, out)
+	}
+	if err := config.NewProjectConfigManager(projectRoot).SaveProjectConfig(&types.ProjectConfig{ProjectName: "my-app"}); err != nil {
+		t.Fatal(err)
+	}
+
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{
+			NotesByFolder: map[string][]secrets.SecureNote{
+				"my-app/private/project": {{
+					RelativePath: ".gcm/repo.yaml",
+					Content:      "host: git.example.com\nusername: bot\npassword: token\n",
+				}},
+			},
+			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
+				"my-app/private/project": {{
+					Name: ".sshkey/deploy", Hosts: []string{"ssh.example.com"},
+					PrivateKey: "private\n", PublicKey: "public\n",
+				}},
+			},
+		}
+	}
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	var gcmCalls [][]string
+	reg := handler.NewRegistry()
+	gcm := handler.NewGCMHandler(func(_ context.Context, _ string, args ...string) error {
+		gcmCalls = append(gcmCalls, append([]string(nil), args...))
+		return nil
+	})
+	reg.Register(gcm)
+	restore := handler.SetDefault(reg)
+	t.Cleanup(restore)
+
+	summary, err := pullEnabledSecretsBundles(context.Background(), projectRoot, []string{"my-app"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.SSHKeyCount != 1 || summary.HandlerCount != 1 {
+		t.Fatalf("summary = %#v", summary)
+	}
+	if len(gcmCalls) != 1 || strings.Join(gcmCalls[0], " ") != "-C "+projectRoot+" credential approve" {
+		t.Fatalf("GCM 未按工作区 Apply: %#v", gcmCalls)
+	}
+	if ok, err := secrets.InspectProjectSSHKeyLanding(projectRoot, "my-app", "deploy"); err != nil || !ok {
+		t.Fatalf("project SSH Inspect = %v, %v", ok, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".ssh", "dec_my-app_deploy")); !os.IsNotExist(err) {
+		t.Fatal("private/project 不得复用 user 平面 SSH 文件名")
+	}
+	paths, err := secrets.ProjectCredentialScopePaths(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshRaw, err := os.ReadFile(paths.SSHFragment)
+	if err != nil || !strings.Contains(string(sshRaw), "Host ssh.example.com") {
+		t.Fatalf("project SSH fragment: err=%v content=%s", err, sshRaw)
+	}
+	if raw, readErr := os.ReadFile(filepath.Join(home, ".ssh", "config.d", "dec.conf")); readErr == nil &&
+		strings.Contains(string(raw), "ssh.example.com") {
+		t.Fatalf("project Host 污染了 user config: %s", raw)
 	}
 }

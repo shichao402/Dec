@@ -100,3 +100,26 @@ func TestResolveTargetRebuildsUndeclaredExplicitTarget(t *testing.T) {
 		t.Fatalf("ResolveTarget 必须丢弃手搓 LocalRoot, got %q", target.LocalRoot)
 	}
 }
+
+func TestNewPSyncTargetUsesFixedFolderAndRoots(t *testing.T) {
+	project, err := NewPSyncTarget("my-app", SyncPlaneProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.Folder != "my-app/private/project" || project.LocalRoot != ".secrets/my-app" || !project.Declared() {
+		t.Fatalf("project target = %#v", project)
+	}
+	user, err := NewPSyncTarget("my-app", SyncPlaneUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Folder != "my-app/private/user" || user.LocalRoot != "my-app" || !IsMachinePlane(user.Plane) {
+		t.Fatalf("user target = %#v", user)
+	}
+	if _, _, ok := ParsePFolder("my-app/public/project"); ok {
+		t.Fatal("public folder 不得成为 secrets target")
+	}
+	if name, plane, ok := ParsePFolder("my-app/private/user"); !ok || name != "my-app" || !IsMachinePlane(plane) {
+		t.Fatalf("ParsePFolder = %q %q %v", name, plane, ok)
+	}
+}

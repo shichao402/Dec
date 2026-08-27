@@ -6,7 +6,7 @@ Dec 以 **TUI**（`internal/tui/`）为第一交互入口。无参运行 `dec` �
 
 - [README.md](../README.md) — 概览与快速开始
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — 模块划分与运行机制
-- [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md) — Project / bundle 与 secrets bundle 同构模型
+- [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md) — P 四象限与 Bitwarden private secrets
 - [.cursor/rules/tui-first.mdc](../.cursor/rules/tui-first.mdc) — TUI 优先约束
 
 ## 1. 设计目标
@@ -15,6 +15,8 @@ Dec 以 **TUI**（`internal/tui/`）为第一交互入口。无参运行 `dec` �
 - **单二进制**：Bubble Tea 生态（`bubbletea`、`bubbles`、`lipgloss`），无 Node.js 或前端运行时。
 - **服务 / 门面**：TUI 与 Agent MCP 都通过本机 gRPC 调 `dec-server`；只有服务进程调用 `internal/app/`。TUI 禁止内嵌 app 降级或 shell out 调业务子命令。
 - **结构化事件**：长任务通过 `Reporter` / `OperationEvent` 暴露进度，TUI Run 页渲染日志与阶段状态。
+- **P 是唯一新写对象**：Bundles 页名称为兼容 UI 标签；P 仓库中它展示/选择 P，
+  项目平面保存家 P 的 direct `requires`，用户平面保存 `enabled_projects`。
 
 ## 2. 入口路由
 
@@ -36,15 +38,19 @@ dec --version / dec --help / dec __freshness-check
 | 页面 | 职责 |
 |------|------|
 | **Home** | 项目概览、建议下一步、**project 初始化**（自动匹配 vault 同名 project、选择或新建） |
-| **Bundles** | 扫描 vault bundle、浏览/搜索资产、调整 `enabled_bundles` 并保存（保存按平面校验 vault 声明，被拒条目在事件区列明） |
+| **Bundles** | P 仓库中浏览四象限并选择 P：project 更新家 P direct `requires`，user 更新 `enabled_projects`；legacy 仓库保留 bundle 兼容展示 |
 | **Project** | 项目级 IDE / editor 覆盖、**项目变量**（`.dec/vars.yaml` 只读预览，按 `e` 挂起外部编辑器） |
-| **Run** | pull / push / remove；按 `u` 自更新（检查 → 确认 → 下载替换）；一次 pull 解析 project bundle 列表 → Dec Git bundle + Bitwarden secrets bundle；成功对照远端的启用集自动 prune 本地孤儿（无法确认只报告） |
+| **Run** | pull / push / remove；`m` 做 P 迁移只读预览与双重确认；`u` 自更新；P pull 解析家 P/direct requires 或用户启用 P，再拉 Git 四象限与 BW private |
 | **Remote** | 上下文无关的完整远端浏览器/编辑器（Dec Git vault 全量 + Bitwarden 全部 folder + 无文件夹只读区）；`e` temp 编辑、`n` 登记到光标所在 folder / `N` 登记到新 folder、`a`/`A` 全选/全不选、远端/本地删除拆分、跨上下文 typed confirm（ADR 0004） |
 | **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、**本机 vars** 外部编辑、服务版本 mismatch 提示与重启 `dec-server`；用户级 bundle 启用只做只读计数展示 |
 
 侧栏导航：`Home` → `Bundles` → `Project` → `Run` → `Remote` → `Settings`（`tab` / `shift+tab` 切换）。
 
-`dec --user` 进入用户平面，页列为 `Home` → `Bundles` → `Run` → `Remote` → `Settings`。Bundles / Run 的读写落点按平面解析（`~/.dec/cache`、`~/.dec/secrets`、`~/.cursor` 等），只暴露 `scope: user` 的 bundle；**Remote 页可见性不按平面过滤**（全量远端库存 + 本机清理分区）。Project 页不开放（项目变量在用户平面无对应概念）。见 [0009](decisions/0009-bundle-binary-scope.md) §4 与 [0004](decisions/0004-remote-page.md)。
+`dec --user` 进入用户平面，页列为 `Home` → `Bundles` → `Run` → `Remote` → `Settings`。
+P 模型下 Bundles / Run 只安装显式启用 P 的 user 两象限，落点为
+`~/.dec/cache/<p>/...`、`~/.dec/secrets/<p>/` 与用户 IDE；**Remote 页可见性不按平面过滤**。
+Project 页不开放。破坏性 P 迁移不能从 user 平面执行，因为它会删除全局旧远端结构却无法
+备份一个项目工作区；须进入普通项目 TUI 的 Run 页执行。
 
 用户平面的 `Workspace.Root` 是空串，**不得**发起任何项目配置读写：Home 加载完 overview 后的 vault project 推断只在项目平面发起。空项目根会让 `.dec/` 退化成相对 `dec-server` cwd 的路径，进而覆盖全局配置；`ProjectConfigManager` 已在实现侧直接拒绝，TUI 这层不发起是为了不去撞那道墙。见 [0015](decisions/0015-project-config-boundary.md)。
 
@@ -62,7 +68,7 @@ cmd/
 internal/serviceapi/        # TUI / MCP 共用的服务客户端
 internal/servicehost/       # dec-server gRPC 与 project 操作协调
 internal/app/               # 服务端用例层
-  bundle_writer.go     # ADR 0014：Bundle 唯一写入门面
+  bundle_writer.go     # ADR 0016：PWriter 唯一新写门面（BundleWriter 仅兼容名）
   project.go           # project init、配置写入
   assets.go            # Assets 页选择与持久化
   operations.go        # pull / push / remove 编排
@@ -96,9 +102,10 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 
 ### 5.3 Run 页 pull
 
-1. 解析 `project_name` → vault `projects/<name>.yaml` → bundles 列表（或本地 `enabled_bundles`）
-2. 逐 bundle 拉 Dec Git → `.dec/cache/<bundle>/`
-3. 自动拉 Bitwarden secrets bundle → Secure Note 项目根相对路径；SSH Key → `~/.ssh/`
+1. project：解析家 P → 家 P project 两象限 + direct requires 的 `public/project`；
+   user：解析 `enabled_projects` → 各 P user 两象限
+2. 拉 Git → `.dec/cache/<p>/<visibility>/<plane>/`
+3. 自动拉 BW `<p>/private/<plane>` → `.secrets/<p>/` 或 `~/.dec/secrets/<p>/`
 4. 零重叠校验 → 从 cache 渲染 IDE + 非敏感 vars 占位符替换
 5. **孤儿 reconcile**：仅对本次启用且远端对照成功的 SyncTarget / vault 目标集清理本地孤儿；无法确认则只报告（见 [0010](decisions/0010-pull-orphan-and-ops.md)）
 
@@ -161,6 +168,17 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 - Push 预览：`pushPreviewLoad`（`pushStage=loading`）
 
 用户主动的 pull/push/remove/delete **执行**仍可用 Esc 取消（与「切页不打断加载」不同）。
+
+### 5.6 P 一次性迁移
+
+- Run 页 `m` 通过 `dec-server` 的流式 operation 做 Git/BW 元数据只读 preview；
+  按需 web unlock URL 与进度必须实时回传，不能用 unary 调用在结束后补事件。
+- preview 展示名称规范化、缺失引用、目标冲突、非法 BW 路径和 Git/BW 同路径冲突；
+  任一 blocker 都不能进入确认。
+- 用户需经过预览确认和最终确认两步，启动、普通 pull/push 均不会自动执行迁移。
+- 执行阶段为本地备份 → Git 写入并校验 → BW 写入并校验 → 本地切换 →
+  旧 BW 删除 → 旧 Git 删除；每阶段后原子写恢复日志，失败后再次 `m` 从日志继续。
+- 迁移从项目平面执行，同时备份/切换当前项目和本机用户平面；user TUI 只提示转到项目工作区。
 
 ## 6. 测试策略
 

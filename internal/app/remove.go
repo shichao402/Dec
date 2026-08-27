@@ -10,7 +10,9 @@ import (
 	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/ide"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
+	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -46,6 +48,8 @@ type RemoveBundleInput struct {
 	ProjectRoot string
 	Plane       WorkspacePlane
 	BundleName  string
+	// ProjectName 是 ADR 0016 主字段；BundleName 保留 wire 兼容。
+	ProjectName string
 	// Members 为 bundle 成员（用于 IDE/cache 清理）；为空时在远端删除前从 repo 扫描。
 	Members   []AssetSelectionItem
 	Confirmed bool
@@ -63,6 +67,90 @@ type RemoveBundleResult struct {
 	PrunedProjects    []string
 	RemovedSecretDirs []string
 	Remnants          []string
+	Model             string
+	ProjectName       string
+}
+
+func removeP(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, error) {
+	reporter = defaultReporter(reporter)
+	name := strings.TrimSpace(input.ProjectName)
+	if name == "" {
+		name = strings.TrimSpace(input.BundleName)
+	}
+	workspace := NewWorkspace(input.Plane, input.ProjectRoot)
+	if !input.Confirmed {
+		return nil, ErrRemoveNotConfirmed
+	}
+	if !types.IsValidPName(name) {
+		return nil, fmt.Errorf("P 名 %q 非法", name)
+	}
+	result := &RemoveBundleResult{
+		ProjectRoot: workspace.Root, BundleName: name, ProjectName: name, Model: "p",
+	}
+	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
+		projects, err := pmodel.Scan(tx.WorkDir())
+		if err != nil {
+			return err
+		}
+		target, ok := projects[name]
+		if !ok {
+			return fmt.Errorf("未找到 P %q", name)
+		}
+		result.MemberCount = len(target.Assets)
+		if err := os.RemoveAll(filepath.Join(tx.WorkDir(), name)); err != nil {
+			return err
+		}
+		for otherName, project := range projects {
+			if otherName == name || !containsName(project.Manifest.Requires, name) {
+				continue
+			}
+			manifest := project.Manifest
+			manifest.Requires, _ = removeEnabledBundle(manifest.Requires, name)
+			if err := pmodel.SaveManifest(tx.WorkDir(), manifest); err != nil {
+				return err
+			}
+			result.PrunedProjects = append(result.PrunedProjects, otherName)
+		}
+		_, err = tx.CommitAndPush("p: remove " + name)
+		if err == nil {
+			result.VersionCommit = tx.CommitHash()
+		}
+		return err
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := os.RemoveAll(filepath.Join(workspaceCacheDir(workspace), name)); err == nil {
+		result.RemovedFromCache = true
+	}
+	if global, err := config.LoadGlobalConfig(); err == nil {
+		global.EnabledProjects, _ = removeEnabledBundle(global.EnabledProjects, name)
+		global.EnabledBundles, _ = removeEnabledBundle(global.EnabledBundles, name)
+		_ = config.SaveGlobalConfig(global)
+	}
+	if workspace.EffectivePlane() == WorkspaceProject {
+		mgr := config.NewProjectConfigManager(workspace.Root)
+		if cfg, err := mgr.LoadProjectConfig(); err == nil && cfg != nil && cfg.ProjectName == name {
+			cfg.ProjectName = ""
+			cfg.EnabledBundles = nil
+			if err := mgr.SaveProjectConfig(cfg); err == nil {
+				result.ConfigUpdated = true
+			}
+		}
+		secretDir := filepath.Join(workspace.Root, secrets.SecretsRootDir, name)
+		if _, err := os.Stat(secretDir); err == nil {
+			_ = os.RemoveAll(secretDir)
+			result.RemovedSecretDirs = append(result.RemovedSecretDirs, filepath.ToSlash(filepath.Join(secrets.SecretsRootDir, name)))
+		}
+	}
+	if machineRoot, err := secrets.MachineSecretsRoot(); err == nil {
+		_ = os.RemoveAll(filepath.Join(machineRoot, name))
+	}
+	result.Remnants = append(result.Remnants,
+		secrets.PFolder(name, secrets.SyncPlaneMachine),
+		secrets.PFolder(name, secrets.SyncPlaneProject))
+	emit(reporter, EventInfo, "remove.finish", fmt.Sprintf("已删除 P %s；Bitwarden private folders 保留供 Remote 显式处理", name), nil)
+	return result, nil
 }
 
 // RemoveBundle 执行 bundle 级删除：远端删除 bundles/<name>/、清理 IDE / cache / 启用与登记。

@@ -7,6 +7,8 @@ type SyncKind string
 const (
 	SyncKindProject SyncKind = "project"
 	SyncKindBundle  SyncKind = "bundle"
+	// SyncKindP 是 ADR 0016 下唯一的新协议同步单位。
+	SyncKindP SyncKind = "p"
 )
 
 // SyncPlane 区分本地同步根落在项目内还是机器级 ~/.dec/secrets。

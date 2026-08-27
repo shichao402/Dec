@@ -10,8 +10,10 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 // ListRemoteInventory 列出 Remote 页完整库存（ADR 0004 修订）：
@@ -34,6 +36,7 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 	groupCtx := newDeleteGroupContext(workspace, projectConfig)
 	scopeByBundle := resolveVaultScopeTags(reporter)
 	enabledBundles := config.NormalizeBundleNames(projectConfig.EnabledBundles)
+	usesPModel, _ := connectedRepositoryUsesPModel()
 
 	addDec := func(kind DeleteItemKind, itemType, name, vault string, orphan bool, partition RemotePartition, scopeTag string) {
 		key := itemType + ":" + vault + ":" + name
@@ -75,6 +78,38 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 			ScopeTag:   scopeTag,
 		})
 	}
+	addPDec := func(asset types.TypedAssetRef, localExists bool, partition RemotePartition) {
+		key := strings.Join([]string{asset.Type, asset.Vault, string(asset.Visibility), string(asset.Plane), asset.Name}, ":")
+		seen := seenDecRemote
+		if partition == PartitionLocal {
+			seen = seenDecLocal
+		}
+		if _, dup := seen[key]; dup {
+			return
+		}
+		seen[key] = struct{}{}
+		tag := fmt.Sprintf(" · %s/%s", asset.Visibility, asset.Plane)
+		if partition == PartitionRemote && !localExists {
+			tag += " · 仅远端"
+		}
+		if partition == PartitionLocal {
+			tag += " · 只清本机"
+		}
+		treeRoot := ".dec"
+		if partition == PartitionLocal {
+			treeRoot = localTreeRootDec
+		}
+		candidates = append(candidates, DeleteCandidate{
+			Kind: DeleteKindDecAsset, Type: asset.Type, Name: asset.Name, Vault: asset.Vault,
+			Label:    fmt.Sprintf("[dec/%s] %s / %s%s", asset.Type, asset.Name, asset.Vault, tag),
+			Orphan:   partition == PartitionRemote && !localExists,
+			TreeRoot: treeRoot, TreeBranch: asset.Vault, GroupOrder: 1000,
+			GroupTitle: fmt.Sprintf("%s (P · %s/%s)", asset.Vault, asset.Visibility, asset.Plane),
+			Partition:  partition, ScopeTag: string(asset.Plane),
+			Visibility: asset.Visibility, AssetPlane: asset.Plane,
+		})
+	}
+	_ = addPDec // legacy tests may still exercise the shared candidate shape
 
 	walkCacheDecLocal := func(vault, itemType, name, scopeTag string) {
 		cachePath := getWorkspaceCachePath(workspace, vault, itemType, name)
@@ -89,39 +124,41 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 
 	// 本地分区：当前工作区 cache 里实际存在的残留（含已停用 bundle 留下的目录），只清本机。
 	localCacheBundles := listLocalCacheBundleNames(workspace)
-	for _, spec := range []struct {
-		dir   string
-		typ   string
-		trim  func(string) string
-		isDir bool
-	}{
-		{"skills", "skill", func(s string) string { return s }, true},
-		{"commands", "command", func(s string) string { return s }, true},
-		{"rules", "rule", func(s string) string { return strings.TrimSuffix(s, ".mdc") }, false},
-		{"mcp", "mcp", func(s string) string { return strings.TrimSuffix(s, ".json") }, false},
-	} {
-		for _, bundleName := range localCacheBundles {
-			dir := filepath.Join(workspaceCacheDir(workspace), bundleName, spec.dir)
-			entries, readErr := os.ReadDir(dir)
-			if readErr != nil {
-				continue
-			}
-			for _, entry := range entries {
-				if entry.Name() == ".gitkeep" {
+	if !usesPModel {
+		for _, spec := range []struct {
+			dir   string
+			typ   string
+			trim  func(string) string
+			isDir bool
+		}{
+			{"skills", "skill", func(s string) string { return s }, true},
+			{"commands", "command", func(s string) string { return s }, true},
+			{"rules", "rule", func(s string) string { return strings.TrimSuffix(s, ".mdc") }, false},
+			{"mcp", "mcp", func(s string) string { return strings.TrimSuffix(s, ".json") }, false},
+		} {
+			for _, bundleName := range localCacheBundles {
+				dir := filepath.Join(workspaceCacheDir(workspace), bundleName, spec.dir)
+				entries, readErr := os.ReadDir(dir)
+				if readErr != nil {
 					continue
 				}
-				scopeTag := scopeByBundle[bundleName]
-				if spec.isDir {
-					if !entry.IsDir() {
+				for _, entry := range entries {
+					if entry.Name() == ".gitkeep" {
 						continue
 					}
-					walkCacheDecLocal(bundleName, spec.typ, entry.Name(), scopeTag)
-					continue
+					scopeTag := scopeByBundle[bundleName]
+					if spec.isDir {
+						if !entry.IsDir() {
+							continue
+						}
+						walkCacheDecLocal(bundleName, spec.typ, entry.Name(), scopeTag)
+						continue
+					}
+					if entry.IsDir() {
+						continue
+					}
+					walkCacheDecLocal(bundleName, spec.typ, spec.trim(entry.Name()), scopeTag)
 				}
-				if entry.IsDir() {
-					continue
-				}
-				walkCacheDecLocal(bundleName, spec.typ, spec.trim(entry.Name()), scopeTag)
 			}
 		}
 	}
@@ -129,6 +166,16 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 	// 远端分区：Git vault 全量 bundles（scope 仅作分组标签，enabled 与否都展示）。
 	_ = withAppReadRepo(func(tx *repo.Transaction) error {
 		repoDir := tx.WorkDir()
+		projects, pErr := pmodel.Scan(repoDir)
+		if pErr != nil {
+			emit(reporter, EventWarn, "delete.list", "扫描 P 失败："+pErr.Error(), nil)
+			return nil
+		}
+		if len(projects) > 0 {
+			// P 仓库的 Git 四象限在 Bundles 页管理；Remote 只展示
+			// Bitwarden private/user、private/project 与 legacy folder。
+			return nil
+		}
 		vaultBundles, _, scanErr := scanVaultBundles(repoDir, reporter)
 		if scanErr != nil {
 			emit(reporter, EventWarn, "delete.list", "扫描 vault bundles 失败（仅展示本地 cache）："+scanErr.Error(), nil)
@@ -314,7 +361,8 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 
 	if includeRemote {
 		if err := appendRemoteSecretCandidates(ctx, workspace, projectConfig, func(secretsBundle, localRoot string, plane secrets.SyncPlane, notePath string, localExists bool) {
-			unmanaged := !strings.HasPrefix(secretsBundle, secrets.BundleFolderPrefix) && strings.TrimSpace(localRoot) == ""
+			_, _, isPFolder := secrets.ParsePFolder(secretsBundle)
+			unmanaged := !isPFolder && !strings.HasPrefix(secretsBundle, secrets.BundleFolderPrefix) && strings.TrimSpace(localRoot) == ""
 			scopeTag := ""
 			if strings.HasPrefix(secretsBundle, secrets.BundleFolderPrefix) {
 				name := strings.TrimPrefix(secretsBundle, secrets.BundleFolderPrefix)
@@ -322,9 +370,13 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 			}
 			addSecret(secretsBundle, localRoot, plane, notePath, localExists, PartitionRemote, unmanaged, scopeTag)
 		}, func(secretsBundle, decBundleName, keyName string, localExists bool) {
-			unmanaged := !strings.HasPrefix(secretsBundle, secrets.BundleFolderPrefix)
+			_, pPlane, isPFolder := secrets.ParsePFolder(secretsBundle)
+			unmanaged := !isPFolder && !strings.HasPrefix(secretsBundle, secrets.BundleFolderPrefix)
 			scopeTag := ""
 			plane := secrets.SyncPlane("")
+			if isPFolder {
+				plane = pPlane
+			}
 			if strings.HasPrefix(secretsBundle, secrets.BundleFolderPrefix) {
 				name := strings.TrimPrefix(secretsBundle, secrets.BundleFolderPrefix)
 				scopeTag = scopeByBundle[name]

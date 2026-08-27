@@ -16,17 +16,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestValidatePAssetDeleteIdentityRejectsTraversal(t *testing.T) {
+	err := validatePAssetDeleteIdentity(DeleteSelectionItem{
+		Kind: DeleteKindDecAsset, Type: "rule", Name: "../../outside",
+		Vault: "my-app", Visibility: types.AssetVisibilityPrivate, AssetPlane: types.AssetPlaneProject,
+	})
+	if err == nil {
+		t.Fatal("P 删除资产名路径穿越应被拒绝")
+	}
+}
+
 func TestPushProjectAssets_PruneDecOrphansWhenCacheRemoved(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/combo/skills/keep-skill/SKILL.md":   "---\nname: keep-skill\n---\nkeep\n",
-		"bundles/combo/skills/remove-skill/SKILL.md": "---\nname: remove-skill\n---\nold\n",
-		"bundles/combo/bundle.yaml": `name: combo
-members:
-  - skill/keep-skill
-  - skill/remove-skill
-`,
+		"combo/dec.yaml": "name: combo\n",
+		"combo/public/project/skills/keep-skill/SKILL.md":   "---\nname: keep-skill\n---\nkeep\n",
+		"combo/public/project/skills/remove-skill/SKILL.md": "---\nname: remove-skill\n---\nold\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -35,12 +41,13 @@ members:
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "combo",
 		EnabledBundles: []string{"combo"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	keepSkill := filepath.Join(projectRoot, ".dec", "cache", "combo", "skills", "keep-skill", "SKILL.md")
+	keepSkill := filepath.Join(projectRoot, ".dec", "cache", "combo", "public", "project", "skills", "keep-skill", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(keepSkill), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -61,11 +68,11 @@ members:
 		t.Fatal(err)
 	}
 	defer tx.Close()
-	removedPath := filepath.Join(tx.WorkDir(), "bundles/combo/skills/remove-skill/SKILL.md")
+	removedPath := filepath.Join(tx.WorkDir(), "combo/public/project/skills/remove-skill/SKILL.md")
 	if _, err := os.Stat(removedPath); !os.IsNotExist(err) {
 		t.Fatalf("远端 remove-skill 应被删除, stat err = %v", err)
 	}
-	keepPath := filepath.Join(tx.WorkDir(), "bundles/combo/skills/keep-skill/SKILL.md")
+	keepPath := filepath.Join(tx.WorkDir(), "combo/public/project/skills/keep-skill/SKILL.md")
 	if _, err := os.Stat(keepPath); err != nil {
 		t.Fatalf("远端 keep-skill 应保留: %v", err)
 	}
@@ -789,7 +796,7 @@ func TestDeleteProjectItems_RevokesGitGCMNote(t *testing.T) {
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/vikunja": {{RelativePath: ".gcm/cnb.yaml", Content: "\nhost: cnb.cool\nusername: cnb\npassword: tok\n"}},
+			"bundle/vikunja": {{RelativePath: ".gcm/cnb.yaml", Content: "\nhost: cnb.cool\nusername: cnb\npassword: tok\npath: team/repo\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -805,7 +812,7 @@ func TestDeleteProjectItems_RevokesGitGCMNote(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.gcm/cnb.yaml",
-		"\nhost: cnb.cool\nusername: cnb\npassword: tok\n")
+		"\nhost: cnb.cool\nusername: cnb\npassword: tok\npath: team/repo\n")
 
 	result, err := DeleteProjectItems(context.Background(), DeleteProjectInput{
 		ProjectRoot: projectRoot,
@@ -1064,6 +1071,31 @@ func TestDeleteProjectItems_UserPlaneEmptyRootDeletesSSHKey(t *testing.T) {
 	}
 	if len(stub.SSHKeysByFolder["bundle/woa"]) != 0 {
 		t.Fatalf("远端 SSH Key 应已删除: %#v", stub.SSHKeysByFolder["bundle/woa"])
+	}
+}
+
+func TestListRemoteInventory_PGitQuadrantsBelongOnBundlesPage(t *testing.T) {
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"my-app/dec.yaml":                          "name: my-app\n",
+		"my-app/private/project/rules/private.mdc": "private",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "my-app"}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := ListRemoteInventory(context.Background(), NewWorkspace(WorkspaceProject, projectRoot), false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.Kind == DeleteKindDecAsset {
+			t.Fatalf("Remote 只展示 BW private 与 legacy，不应列出 P Git 四象限: %#v", item)
+		}
 	}
 }
 

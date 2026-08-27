@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/types"
 	"gopkg.in/yaml.v3"
@@ -14,25 +15,31 @@ import (
 
 // VaultProjectAutoApplyResult 描述从 vault 应用 project 的结果。
 type VaultProjectAutoApplyResult struct {
-	ProjectRoot    string
-	ConfigPath     string
-	VarsPath       string
-	ProjectName    string
-	EnabledBundles []string
-	Applied        bool
-	VarsCreated    bool
-	AssetCount     int
-	BundleCount    int
+	ProjectRoot      string
+	ConfigPath       string
+	VarsPath         string
+	ProjectName      string
+	EnabledBundles   []string
+	Applied          bool
+	VarsCreated      bool
+	AssetCount       int
+	BundleCount      int
+	Model            string
+	HomeProject      string
+	RequiredProjects []string
 }
 
 // VaultProjectInference 描述从目录名推断出的 vault project（尚未写入本地配置）。
 type VaultProjectInference struct {
-	ProjectRoot    string
-	ProjectName    string
-	VaultPath      string
-	EnabledBundles []string
-	IDEs           []string
-	Editor         string
+	ProjectRoot      string
+	ProjectName      string
+	VaultPath        string
+	EnabledBundles   []string
+	IDEs             []string
+	Editor           string
+	Model            string
+	HomeProject      string
+	RequiredProjects []string
 }
 
 // NeedsVaultProjectAutoApply 判断当前项目是否应尝试从 vault 匹配 project。
@@ -107,7 +114,23 @@ func InferVaultProject(projectRoot string, reporter Reporter) (*VaultProjectInfe
 	}
 
 	var vaultProject *types.Project
+	var inferredP *types.P
 	if err := withLocalReadRepoDir(func(repoDir string) error {
+		projects, scanErr := pmodel.Scan(repoDir)
+		if scanErr != nil {
+			return scanErr
+		}
+		if len(projects) > 0 {
+			candidate := strings.ToLower(projectName)
+			if !types.IsValidPName(candidate) {
+				return nil
+			}
+			if loaded, ok := projects[candidate]; ok {
+				manifest := loaded.Manifest
+				inferredP = &manifest
+			}
+			return nil
+		}
 		loaded, found, loadErr := LoadVaultProject(repoDir, projectName)
 		if loadErr != nil {
 			return loadErr
@@ -122,6 +145,16 @@ func InferVaultProject(projectRoot string, reporter Reporter) (*VaultProjectInfe
 		return nil, err
 	}
 	if vaultProject == nil {
+		if inferredP != nil {
+			return &VaultProjectInference{
+				ProjectRoot: projectRoot, ProjectName: inferredP.Name,
+				VaultPath:      types.PManifestPath(inferredP.Name),
+				EnabledBundles: append([]string(nil), inferredP.Requires...),
+				IDEs:           append([]string(nil), inferredP.IDEs...), Editor: inferredP.Editor,
+				Model: "p", HomeProject: inferredP.Name,
+				RequiredProjects: append([]string(nil), inferredP.Requires...),
+			}, nil
+		}
 		return nil, nil
 	}
 
@@ -178,6 +211,9 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 
 	projectName := inference.ProjectName
 	result.ProjectName = projectName
+	result.Model = inference.Model
+	result.HomeProject = inference.HomeProject
+	result.RequiredProjects = append([]string(nil), inference.RequiredProjects...)
 
 	mgr := config.NewProjectConfigManager(projectRoot)
 	result.ConfigPath = filepath.Join(mgr.GetDecDir(), "config.yaml")
@@ -191,6 +227,27 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 		} else {
 			existingConfig = loaded
 		}
+	}
+	if inference.Model == "p" {
+		projectConfig := &types.ProjectConfig{ProjectName: inference.HomeProject}
+		if existingConfig != nil {
+			projectConfig.IDEs = append([]string(nil), existingConfig.IDEs...)
+			projectConfig.Editor = existingConfig.Editor
+		}
+		if len(projectConfig.IDEs) == 0 {
+			projectConfig.IDEs = append([]string(nil), inference.IDEs...)
+		}
+		if projectConfig.Editor == "" {
+			projectConfig.Editor = inference.Editor
+		}
+		if err := mgr.SaveProjectConfig(projectConfig); err != nil {
+			return nil, err
+		}
+		result.Applied = true
+		result.BundleCount = 1 + len(inference.RequiredProjects)
+		result.EnabledBundles = append([]string(nil), inference.RequiredProjects...)
+		result.VarsCreated, _ = mgr.EnsureVarsConfigTemplate()
+		return result, nil
 	}
 
 	var vaultProject *types.Project

@@ -18,28 +18,27 @@ message AssetRef {
   AssetType type = 3;
 }
 
-// BundleScope 是 bundle 的二元作用域（ADR 0009）。
-enum BundleScope {
-  BUNDLE_SCOPE_UNSPECIFIED = 0;
-  BUNDLE_SCOPE_USER = 1;
-  BUNDLE_SCOPE_PROJECT = 2;
+// AssetVisibility 决定资产能否被其他 P 引用。
+enum AssetVisibility {
+  ASSET_VISIBILITY_UNSPECIFIED = 0;
+  ASSET_VISIBILITY_PUBLIC = 1;
+  ASSET_VISIBILITY_PRIVATE = 2;
 }
 
-// Bundle 描述 vault 内声明的一组资产启用单位。
-// Wire format：Git Vault 中 bundles/<name>/bundle.yaml（YAML）。
-// Project.bundles 引用的是 bundle 短名，与 bundles/<name>/ 目录名一致。
-message Bundle {
-  string name = 1;
-  string description = 2;
-  repeated string members = 3; // 格式 "<type>/<name>"，如 skills/foo、mcp/bar
-  // scope: user | project（YAML 字段名 scope）；决定启用平面与落地平面（ADR 0009）。
-  BundleScope scope = 4;
+enum AssetPlane {
+  ASSET_PLANE_UNSPECIFIED = 0;
+  ASSET_PLANE_USER = 1;
+  ASSET_PLANE_PROJECT = 2;
 }
 
-// BundleMember 是解析后的 bundle 成员引用（内存视图，通常不单独落盘）。
-message BundleMember {
-  AssetType type = 1;
+// QuadrantAsset 是从 <p>/<visibility>/<plane>/ 扫描出的内存视图。
+// 资产正文保持原格式，不序列化为 protobuf。
+message QuadrantAsset {
+  string project = 1;
   string name = 2;
+  AssetType type = 3;
+  AssetVisibility visibility = 4;
+  AssetPlane plane = 5;
 }
 
 message VarsConfig {
