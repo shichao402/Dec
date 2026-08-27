@@ -55,7 +55,9 @@ func Run(ctx context.Context, opts Options) error {
 	// 测试环境下直接拒绝，避免弹窗打断无人值守的测试。
 	opener := opts.OpenBrowser
 	if opener == nil {
-		if !WebUnlockAllowed() {
+		allowed := WebUnlockAllowed()
+		logWebUnlockDecision(allowed, "缺少进程内 Bitwarden session，需人工输入主密码")
+		if !allowed {
 			return ErrWebUnlockBlocked
 		}
 		opener = defaultBrowserOpener

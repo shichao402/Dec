@@ -2,7 +2,7 @@
 //
 // 用法（会打开浏览器做 Bitwarden web unlock）：
 //
-//	DEC_ALLOW_WEB_UNLOCK=1 go run ./tools/migrate-cnb-gcm
+//	go run ./tools/migrate-cnb-gcm
 package main
 
 import (
@@ -15,7 +15,6 @@ import (
 )
 
 func main() {
-	_ = os.Setenv("DEC_ALLOW_WEB_UNLOCK", "1")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 

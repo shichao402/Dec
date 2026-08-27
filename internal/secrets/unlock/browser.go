@@ -17,6 +17,7 @@ var defaultBrowserOpener BrowserOpener = openSystemBrowser
 func openSystemBrowser(url string) error {
 	// 兜底：即便有调用方绕过 Run 的检查，也不允许测试进程弹出浏览器。
 	if !WebUnlockAllowed() {
+		logWebUnlockDecision(false, "有调用方绕过 Run 直接请求打开系统浏览器")
 		return ErrWebUnlockBlocked
 	}
 

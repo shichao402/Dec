@@ -13,19 +13,24 @@ func TestWebUnlockBlockedUnderGoTest(t *testing.T) {
 	}
 }
 
-func TestWebUnlockAllowedRespectsEnvOverrides(t *testing.T) {
-	t.Setenv(EnvAllowWebUnlock, "1")
-	if !WebUnlockAllowed() {
-		t.Fatalf("%s=1 时应允许 web unlock", EnvAllowWebUnlock)
+// 测试二进制内的禁止必须是无条件的：任何「强制允许」开关都会随 shell 环境
+// 继承进 go test，把弹窗保护静默关掉（曾因此让整包测试卡在等人输密码）。
+func TestWebUnlockCannotBeReEnabledByEnvInTests(t *testing.T) {
+	for _, name := range []string{
+		"DEC_ALLOW_WEB_UNLOCK",
+		"DEC_WEB_UNLOCK",
+		"DEC_FORCE_WEB_UNLOCK",
+		EnvNoWebUnlock,
+	} {
+		t.Setenv(name, "1")
 	}
+	if WebUnlockAllowed() {
+		t.Fatal("测试二进制内不得被任何环境变量放行 web unlock")
+	}
+}
 
-	// 显式允许优先于显式禁止，便于真机手工验证。
+func TestWebUnlockAllowedHonorsNoWebUnlockForSubprocesses(t *testing.T) {
 	t.Setenv(EnvNoWebUnlock, "1")
-	if !WebUnlockAllowed() {
-		t.Fatalf("%s=1 应优先于 %s=1", EnvAllowWebUnlock, EnvNoWebUnlock)
-	}
-
-	t.Setenv(EnvAllowWebUnlock, "")
 	if WebUnlockAllowed() {
 		t.Fatalf("%s=1 时应禁止 web unlock", EnvNoWebUnlock)
 	}

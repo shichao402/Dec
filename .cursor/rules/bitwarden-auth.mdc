@@ -29,7 +29,8 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 - **测试绝不能弹出浏览器要求人工输入主密码**。`go test` 构建的二进制中 `unlock.WebUnlockAllowed()` 返回 false，`unlock.Run`（未注入 `OpenBrowser` 时）与 `openSystemBrowser` 直接返回 `ErrWebUnlockBlocked`。
 - 测试拉起 `dec` 子进程时必须传 `DEC_NO_WEB_UNLOCK=1`（子进程不是 test 二进制，检测不到测试环境）。
 - 单测若要覆盖 web unlock 流程，**必须**注入 `Options.OpenBrowser` 桩；漏注入会被 guard 拦下并报错，不要靠改 guard 绕过。
-- 只有真机手工验证才用 `DEC_ALLOW_WEB_UNLOCK=1` 显式放行。
+- **不存在**「强制允许 web unlock」的环境变量开关，也不要新增：这类开关会随 shell 环境继承进 `go test` 及其子进程，把上面这条硬约束静默关掉。真机手工验证直接运行 `dec` 或一次性工具即可，非测试二进制默认允许。
+- 真要拉起解锁页时，`internal/secrets/unlock` 会无条件往 stderr 打一条 `[dec:auth] WEB UNLOCK ...`（含 pid / exe / 是否测试二进制）。排查「为什么卡住了」先 grep 这条。
 
 ## 设备信任（允许落盘）
 
