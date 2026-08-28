@@ -224,7 +224,7 @@ func (m model) handleDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		return m, m.beginRemoteRegisterAtCursor()
 	case "N":
-		return m, m.beginRemoteRegisterNewFolder()
+		return m, m.beginRemoteRegisterNewP()
 	case "e":
 		cmd := m.startRemoteEditAtCursor()
 		return m, cmd
@@ -396,7 +396,7 @@ func (m model) remoteHeadLines() []string {
 	if m.deleteLoad.busy() {
 		lines = append(lines, shellWarnStyle.Render("刷新中…"))
 	} else {
-		lines = append(lines, shellMutedStyle.Render("a 全选 · A 全不选 · n 登记到光标 folder · N 登记到新 folder · / 筛选"))
+		lines = append(lines, shellMutedStyle.Render("a 全选 · A 全不选 · n 登记到光标 P · N 新建 P 登记 · / 筛选"))
 	}
 	if m.deleteFilterInput {
 		lines = append(lines, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))

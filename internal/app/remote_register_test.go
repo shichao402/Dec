@@ -21,10 +21,17 @@ func setupRemoteRegisterRepo(t *testing.T, files map[string]string) {
 	}
 }
 
+// declaredDemoP 是 vault 里声明了 demo 这个 P 的仓库内容。
+func declaredDemoP() map[string]string {
+	return map[string]string{"demo/dec.yaml": "name: demo\ntitle: Demo\n"}
+}
+
+func demoProjectScope() secrets.RemoteScope {
+	return secrets.RemoteScope{P: "demo", Plane: secrets.SyncPlaneProject}
+}
+
 func TestPrepareAndCommitRemoteRegister_NotePath(t *testing.T) {
-	setupRemoteRegisterRepo(t, map[string]string{
-		"bundles/demo/bundle.yaml": "name: demo\nscope: project\nmembers: []\n",
-	})
+	setupRemoteRegisterRepo(t, declaredDemoP())
 	secrets.SetSession("test-session")
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{}}
 	orig := secretsClientFactory
@@ -36,14 +43,14 @@ func TestPrepareAndCommitRemoteRegister_NotePath(t *testing.T) {
 	if err := os.WriteFile(src, []byte("A=1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	scope := demoProjectScope()
 	sess, err := PrepareRemoteRegister(context.Background(), RemoteRegisterInput{
-		ProjectRoot:  projectRoot,
-		Folder:       "bundle/demo",
-		TypeID:       secrets.SecretTypeEnv,
-		Name:         "app",
-		SourceMode:   secrets.SourcePath,
-		LocalPath:    src,
-		CreateFolder: true,
+		ProjectRoot: projectRoot,
+		Scope:       scope,
+		TypeID:      secrets.SecretTypeEnv,
+		Name:        "app",
+		SourceMode:  secrets.SourcePath,
+		LocalPath:   src,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -55,10 +62,10 @@ func TestPrepareAndCommitRemoteRegister_NotePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.NoteRelPath != ".env/app.env" {
+	if result.NoteRelPath != ".env/app.env" || result.Address != scope.String() {
 		t.Fatalf("result = %#v", result)
 	}
-	notes := stub.NotesByFolder["bundle/demo"]
+	notes := stub.NotesByFolder[scope.String()]
 	if len(notes) != 1 || notes[0].RelativePath != ".env/app.env" {
 		t.Fatalf("notes = %#v", notes)
 	}
@@ -72,9 +79,7 @@ func TestPrepareAndCommitRemoteRegister_SSHGenerate(t *testing.T) {
 	// os.UserHomeDir 在 Unix 读取 HOME、Windows 读取 USERPROFILE。
 	// 使用统一 helper 同时隔离两者，避免测试把生成的私钥写进开发者真实 ~/.ssh。
 	setEnvForProjectTest(t, "HOME", home)
-	setupRemoteRegisterRepo(t, map[string]string{
-		"bundles/demo/bundle.yaml": "name: demo\nscope: project\nmembers: []\n",
-	})
+	setupRemoteRegisterRepo(t, declaredDemoP())
 
 	secrets.SetSession("test-session")
 	stub := &secrets.StubClient{SSHKeysByFolder: map[string][]secrets.SSHKeyItem{}}
@@ -82,13 +87,13 @@ func TestPrepareAndCommitRemoteRegister_SSHGenerate(t *testing.T) {
 	secretsClientFactory = func() secrets.Client { return stub }
 	t.Cleanup(func() { secretsClientFactory = orig })
 
+	scope := demoProjectScope()
 	sess, err := PrepareRemoteRegister(context.Background(), RemoteRegisterInput{
-		ProjectRoot:  t.TempDir(),
-		Folder:       "bundle/demo",
-		TypeID:       secrets.SecretTypeSSHKey,
-		Name:         "deploy",
-		SourceMode:   secrets.SourceGenerate,
-		CreateFolder: true,
+		ProjectRoot: t.TempDir(),
+		Scope:       scope,
+		TypeID:      secrets.SecretTypeSSHKey,
+		Name:        "deploy",
+		SourceMode:  secrets.SourceGenerate,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -106,126 +111,65 @@ func TestPrepareAndCommitRemoteRegister_SSHGenerate(t *testing.T) {
 	if result.NoteRelPath != ".sshkey/deploy" {
 		t.Fatalf("result = %#v", result)
 	}
-	keys := stub.SSHKeysByFolder["bundle/demo"]
+	keys := stub.SSHKeysByFolder[scope.String()]
 	if len(keys) != 1 || keys[0].Name != ".sshkey/deploy" {
 		t.Fatalf("keys = %#v", keys)
 	}
 	if !strings.Contains(keys[0].PrivateKey, "PRIVATE KEY") {
 		t.Fatal("private key should be stored")
 	}
-	priv := filepath.Join(home, ".ssh", "dec_demo_deploy")
-	if _, err := os.Stat(priv); err != nil {
-		t.Fatalf("expected local landing %s: %v", priv, err)
+	// 项目平面私钥按工作区 scope 命名，避免与本机 key 撞名。
+	privs, err := filepath.Glob(filepath.Join(home, ".ssh", "dec_project_*_demo_deploy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(privs) != 1 {
+		t.Fatalf("项目平面私钥应落地一份, got %v", privs)
 	}
 }
 
-func TestCommitRemoteRegister_RejectsUndeclaredBareFolder(t *testing.T) {
-	setupRemoteRegisterRepo(t, map[string]string{
-		"projects/Dec.yaml": "name: Dec\nbundles: []\n",
-	})
+// 未在 vault 声明的 P 不能登记：Remote 页不是创建 P 的入口。
+func TestCommitRemoteRegister_RejectsUndeclaredP(t *testing.T) {
+	setupRemoteRegisterRepo(t, declaredDemoP())
 	secrets.SetSession("test-session")
 	t.Cleanup(secrets.ClearSession)
 
 	_, err := CommitRemoteRegister(t.Context(), RemoteRegisterSession{
 		ProjectRoot: t.TempDir(),
-		Folder:      "relkit",
+		Scope:       secrets.RemoteScope{P: "relkit", Plane: secrets.SyncPlaneProject},
 		TypeID:      secrets.SecretTypePlain,
 		Name:        "token.txt",
 		NoteContent: "secret",
 	}, nil)
-	if err == nil || !strings.Contains(err.Error(), "bundle/relkit") {
-		t.Fatalf("裸名应拒绝并提示 bundle/<名>, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "relkit") {
+		t.Fatalf("未声明的 P 应被拒绝, got %v", err)
 	}
 }
 
-func TestCommitRemoteRegister_AcceptsBundleFolderAndCreatesPlaceholder(t *testing.T) {
-	setupRemoteRegisterRepo(t, map[string]string{"README.md": "fixture\n"})
-	secrets.SetSession("test-session")
-	t.Cleanup(secrets.ClearSession)
-	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{}}
-	orig := secretsClientFactory
-	secretsClientFactory = func() secrets.Client { return stub }
-	t.Cleanup(func() { secretsClientFactory = orig })
+// 项目平面的工作区不能往 private/user 写，反之亦然：平面串台会让 note 落错同步根。
+func TestValidateRemoteRegisterScope_RejectsCrossPlane(t *testing.T) {
+	setupRemoteRegisterRepo(t, declaredDemoP())
 
-	result, err := CommitRemoteRegister(t.Context(), RemoteRegisterSession{
-		ProjectRoot:  t.TempDir(),
-		Folder:       "bundle/foo",
-		TypeID:       secrets.SecretTypePlain,
-		Name:         "token.txt",
-		NoteContent:  "secret",
-		CreateFolder: true,
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
+	projectWS := NewWorkspace(WorkspaceProject, t.TempDir())
+	if err := ValidateRemoteRegisterScope(projectWS, secrets.RemoteScope{P: "demo", Plane: secrets.SyncPlaneMachine}); err == nil ||
+		!strings.Contains(err.Error(), "user secrets") {
+		t.Fatalf("项目平面不应允许 user 归属, got %v", err)
 	}
-	if result.Folder != "bundle/foo" || result.Kind != secrets.SyncKindBundle {
-		t.Fatalf("result = %#v", result)
+	if err := ValidateRemoteRegisterScope(projectWS, demoProjectScope()); err != nil {
+		t.Fatalf("同平面的已声明 P 应通过: %v", err)
 	}
-	tx, err := repo.NewReadTransaction()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Close()
-	data, err := os.ReadFile(filepath.Join(tx.WorkDir(), "bundles", "foo", "bundle.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "name: foo") {
-		t.Fatalf("placeholder = %s", data)
+
+	userWS := NewWorkspace(WorkspaceUser, "")
+	if err := ValidateRemoteRegisterScope(userWS, demoProjectScope()); err == nil ||
+		!strings.Contains(err.Error(), "project secrets") {
+		t.Fatalf("用户平面不应允许 project 归属, got %v", err)
 	}
 }
 
-func TestCommitRemoteRegister_RejectsBareProjectFolder(t *testing.T) {
-	setupRemoteRegisterRepo(t, map[string]string{
-		"projects/Dec.yaml": "name: Dec\nbundles: []\n",
-	})
-	secrets.SetSession("test-session")
-	t.Cleanup(secrets.ClearSession)
-	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{}}
-	orig := secretsClientFactory
-	secretsClientFactory = func() secrets.Client { return stub }
-	t.Cleanup(func() { secretsClientFactory = orig })
-
-	_, err := CommitRemoteRegister(t.Context(), RemoteRegisterSession{
-		ProjectRoot:  t.TempDir(),
-		Folder:       "Dec",
-		TypeID:       secrets.SecretTypePlain,
-		Name:         "token.txt",
-		NoteContent:  "secret",
-		CreateFolder: true,
-	}, nil)
-	if err == nil {
-		t.Fatal("expected reject bare project folder")
-	}
-	if !strings.Contains(err.Error(), "bundle/") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-// 裸 folder 名在两种仓库形态下都非法，但引导语不同：旧仓库指向 bundle/<name>，
-// P 仓库指向 <p>/private/<plane>。必须自建仓库状态，否则会继承上个测试的仓库。
-func TestValidateRemoteRegisterFolder_RejectsBareProjectOnPRepository(t *testing.T) {
-	setupRemoteRegisterRepo(t, map[string]string{
-		"dec/dec.yaml": "name: dec\ntitle: Dec\n",
-	})
-	err := ValidateRemoteRegisterFolder(NewWorkspace(WorkspaceProject, t.TempDir()), "Dec")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "private/project") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestValidateRemoteRegisterFolder_RejectsBareProjectOnLegacyRepository(t *testing.T) {
-	setupRemoteRegisterRepo(t, map[string]string{
-		"projects/Dec.yaml": "name: Dec\nbundles: []\n",
-	})
-	err := ValidateRemoteRegisterFolder(NewWorkspace(WorkspaceProject, t.TempDir()), "Dec")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "bundle/") {
-		t.Fatalf("err = %v", err)
+func TestValidateRemoteRegisterScope_RejectsInvalidPName(t *testing.T) {
+	setupRemoteRegisterRepo(t, declaredDemoP())
+	ws := NewWorkspace(WorkspaceProject, t.TempDir())
+	if err := ValidateRemoteRegisterScope(ws, secrets.RemoteScope{P: "Dec", Plane: secrets.SyncPlaneProject}); err == nil {
+		t.Fatal("大写 P 名应被拒绝")
 	}
 }

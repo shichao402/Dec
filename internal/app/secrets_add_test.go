@@ -12,7 +12,20 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
-func TestAddProjectSecret_CreatesNoteNamedBySyncRelPath(t *testing.T) {
+func tencentProjectScope() secrets.RemoteScope {
+	return secrets.RemoteScope{P: "tencent-cloud", Plane: secrets.SyncPlaneProject}
+}
+
+// enableBundlesForAddTest 让 tencent-cloud 成为当前平面已启用的 P。
+func enableBundlesForAddTest(t *testing.T, projectRoot string, names ...string) {
+	t.Helper()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: names}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAddProjectSecretForScope_CreatesNoteNamedBySyncRelPath(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	stub := &secrets.StubClient{}
 	origFactory := secretsClientFactory
@@ -20,20 +33,22 @@ func TestAddProjectSecret_CreatesNoteNamedBySyncRelPath(t *testing.T) {
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	projectRoot := t.TempDir()
-	mgr := config.NewProjectConfigManager(projectRoot)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"tencent-cloud"}}); err != nil {
+	enableBundlesForAddTest(t, projectRoot, "tencent-cloud")
+	scope := tencentProjectScope()
+	target, err := secrets.NewPSyncTarget(scope.P, scope.Plane)
+	if err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/tencent-cloud/.env/tencent.env", "SECRET_ID=abc\n")
+	writeProjectFileForPushTest(t, projectRoot, target.LocalRoot+"/.env/tencent.env", "SECRET_ID=abc\n")
 
-	result, err := AddProjectSecret(context.Background(), projectRoot, "tencent-cloud", ".env/tencent.env", nil)
+	result, err := AddProjectSecretForScope(context.Background(), projectRoot, scope, ".env/tencent.env", nil)
 	if err != nil {
-		t.Fatalf("AddProjectSecret() = %v", err)
+		t.Fatalf("AddProjectSecretForScope() = %v", err)
 	}
-	if result.Folder != "bundle/tencent-cloud" || result.LandingPath != ".secrets/bundles/tencent-cloud/.env/tencent.env" {
+	if result.Address != scope.String() || result.LandingPath != target.LocalRoot+"/.env/tencent.env" {
 		t.Fatalf("result = %#v", result)
 	}
-	notes := stub.NotesByFolder["bundle/tencent-cloud"]
+	notes := stub.NotesByFolder[scope.String()]
 	if len(notes) != 1 || notes[0].RelativePath != ".env/tencent.env" {
 		t.Fatalf("notes = %#v, note 名应相对同步根", notes)
 	}
@@ -42,20 +57,44 @@ func TestAddProjectSecret_CreatesNoteNamedBySyncRelPath(t *testing.T) {
 	}
 }
 
+// 相对路径带上同步根前缀时也应被剥掉，而不是登记成 .secrets/... 的 note 名。
+func TestAddProjectSecretForScope_StripsSyncRootPrefix(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+	stub := &secrets.StubClient{}
+	origFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = origFactory })
+
+	projectRoot := t.TempDir()
+	enableBundlesForAddTest(t, projectRoot, "tencent-cloud")
+	scope := tencentProjectScope()
+	target, err := secrets.NewPSyncTarget(scope.P, scope.Plane)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeProjectFileForPushTest(t, projectRoot, target.LocalRoot+"/.env/tencent.env", "SECRET_ID=abc\n")
+
+	result, err := AddProjectSecretForScope(context.Background(), projectRoot, scope,
+		target.LocalRoot+"/.env/tencent.env", nil)
+	if err != nil {
+		t.Fatalf("AddProjectSecretForScope() = %v", err)
+	}
+	if result.NoteRelPath != ".env/tencent.env" {
+		t.Fatalf("note 名应剥掉同步根前缀: %#v", result)
+	}
+}
+
 // 先有文件、再登记：反过来会在 Bitwarden 里留一条指向不存在路径的 Note。
-func TestAddProjectSecret_RejectsMissingFile(t *testing.T) {
+func TestAddProjectSecretForScope_RejectsMissingFile(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return &secrets.StubClient{} }
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	projectRoot := t.TempDir()
-	mgr := config.NewProjectConfigManager(projectRoot)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"tencent-cloud"}}); err != nil {
-		t.Fatal(err)
-	}
+	enableBundlesForAddTest(t, projectRoot, "tencent-cloud")
 
-	_, err := AddProjectSecret(context.Background(), projectRoot, "tencent-cloud", ".env/absent.env", nil)
+	_, err := AddProjectSecretForScope(context.Background(), projectRoot, tencentProjectScope(), ".env/absent.env", nil)
 	if err == nil {
 		t.Fatal("文件不存在时应报错")
 	}
@@ -64,57 +103,67 @@ func TestAddProjectSecret_RejectsMissingFile(t *testing.T) {
 	}
 }
 
-func TestAddProjectSecret_RejectsDirectory(t *testing.T) {
+func TestAddProjectSecretForScope_RejectsDirectory(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return &secrets.StubClient{} }
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	projectRoot := t.TempDir()
-	mgr := config.NewProjectConfigManager(projectRoot)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"tencent-cloud"}}); err != nil {
+	enableBundlesForAddTest(t, projectRoot, "tencent-cloud")
+	scope := tencentProjectScope()
+	target, err := secrets.NewPSyncTarget(scope.P, scope.Plane)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(projectRoot, ".secrets", "bundles", "tencent-cloud", "config"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(projectRoot, filepath.FromSlash(target.LocalRoot), "config"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := AddProjectSecret(context.Background(), projectRoot, "tencent-cloud", "config", nil)
+	_, err = AddProjectSecretForScope(context.Background(), projectRoot, scope, "config", nil)
 	if err == nil || !strings.Contains(err.Error(), "目录") {
 		t.Fatalf("目录应被拒绝: %v", err)
 	}
 }
 
-func TestAddProjectSecret_RejectsPathEscapingProjectRoot(t *testing.T) {
+func TestAddProjectSecretForScope_RejectsPathEscapingProjectRoot(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return &secrets.StubClient{} }
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
-	if _, err := AddProjectSecret(context.Background(), t.TempDir(), "bundle/evil", "../outside.yaml", nil); err == nil {
+	if _, err := AddProjectSecretForScope(context.Background(), t.TempDir(),
+		secrets.RemoteScope{P: "evil", Plane: secrets.SyncPlaneProject}, "../outside.yaml", nil); err == nil {
 		t.Fatal("逃逸项目根的路径应被拒绝")
 	}
 }
 
-func TestSuggestSecretFolders_OnlyEnabledBundles(t *testing.T) {
+// 非法 P 名不能通过 scope 进入写入路径。
+func TestAddProjectSecretForScope_RejectsInvalidPName(t *testing.T) {
+	setupSecretsConfigForPushTest(t)
+	if _, err := AddProjectSecretForScope(context.Background(), t.TempDir(),
+		secrets.RemoteScope{P: "Bad Name", Plane: secrets.SyncPlaneProject}, ".env/x.env", nil); err == nil {
+		t.Fatal("非法 P 名应被拒绝")
+	}
+}
+
+// 项目平面只有本项目 P 的 private/project 可写：启用的其它 P 只带 Git 资产。
+func TestSuggestSecretAddresses_OnlyHomeProjectOnProjectPlane(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Demo",
+		ProjectName:    "demo",
 		EnabledBundles: []string{"vikunja", "combo"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	folders, err := SuggestSecretFolders(projectRoot)
+	addresses, err := SuggestSecretAddresses(projectRoot)
 	if err != nil {
-		t.Fatalf("SuggestSecretFolders() = %v", err)
+		t.Fatalf("SuggestSecretAddresses() = %v", err)
 	}
-	if len(folders) != 2 {
-		t.Fatalf("folders = %#v, 期望仅 2 个 bundle folder（ADR 0014）", folders)
-	}
-	if folders[0] != "bundle/combo" || folders[1] != "bundle/vikunja" {
-		t.Fatalf("folders = %#v, 期望按名排序的 bundle/*", folders)
+	if len(addresses) != 1 || addresses[0] != "demo/private/project" {
+		t.Fatalf("addresses = %#v, 期望只有本项目 P", addresses)
 	}
 }

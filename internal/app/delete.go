@@ -143,15 +143,11 @@ func ListWorkspaceDeleteCandidates(ctx context.Context, workspace Workspace, inc
 }
 
 type deleteGroupContext struct {
-	bundleOrder    map[string]int
-	secretsToDec   map[string]string
-	projectSecrets string
-	projectName    string
+	bundleOrder  map[string]int
+	secretsToDec map[string]string
 }
 
 func newDeleteGroupContext(workspace Workspace, projectConfig *types.ProjectConfig) *deleteGroupContext {
-	projectRoot := workspace.Root
-	userPlane := workspace.EffectivePlane() == WorkspaceUser
 	ctx := &deleteGroupContext{
 		bundleOrder:  make(map[string]int),
 		secretsToDec: make(map[string]string),
@@ -159,40 +155,18 @@ func newDeleteGroupContext(workspace Workspace, projectConfig *types.ProjectConf
 	for i, name := range projectConfig.EnabledBundles {
 		ctx.bundleOrder[name] = i
 	}
-	if configured, err := secrets.IsConfigured(); err == nil && configured {
-		if cfg, loadErr := secrets.LoadConfig(); loadErr == nil && cfg != nil {
-			for _, decBundle := range projectConfig.EnabledBundles {
-				binding := cfg.ResolveBinding(decBundle)
-				secretsName := strings.TrimSpace(binding.SecretsBundleName)
-				if secretsName == "" {
-					secretsName = decBundle
-				}
-				ctx.secretsToDec[secretsName] = decBundle
+	// 远端地址 <p>/private/<plane> 直接指回 P 名，没有别名可解析。
+	for _, pName := range projectConfig.EnabledBundles {
+		for _, plane := range []secrets.SyncPlane{secrets.SyncPlaneMachine, secrets.SyncPlaneProject} {
+			if target, err := secrets.NewPSyncTarget(pName, plane); err == nil {
+				ctx.secretsToDec[target.Address] = pName
 			}
-			for _, binding := range cfg.Bundles {
-				decBundle := strings.TrimSpace(binding.DecBundleName)
-				secretsName := strings.TrimSpace(binding.SecretsBundleName)
-				if decBundle == "" || secretsName == "" {
-					continue
-				}
-				ctx.secretsToDec[secretsName] = decBundle
-				if _, ok := ctx.bundleOrder[decBundle]; !ok {
-					ctx.bundleOrder[decBundle] = len(ctx.bundleOrder) + 100
-				}
-			}
-			// ADR 0014：用户/项目平面都不再注入裸 project secrets 归属。
 		}
-	}
-	if ctx.projectName == "" && !userPlane {
-		ctx.projectName, _ = ResolveProjectName(projectRoot, projectConfig)
 	}
 	return ctx
 }
 
 func (g *deleteGroupContext) orderFor(bundleName string) int {
-	if bundleName == secrets.ProjectSecretsDecBundleName {
-		return -1
-	}
 	if order, ok := g.bundleOrder[bundleName]; ok {
 		return order
 	}
@@ -217,34 +191,18 @@ func (g *deleteGroupContext) forDecBundle(bundleName string) (string, int) {
 
 func (g *deleteGroupContext) forSecretsBundle(secretsBundle string) (string, int) {
 	secretsBundle = strings.TrimSpace(secretsBundle)
-	if secretsBundle == g.projectSecrets {
-		return secretsBundle, g.orderFor(secrets.ProjectSecretsDecBundleName)
-	}
 	if decBundle, ok := g.secretsToDec[secretsBundle]; ok {
 		return secretsBundle, g.orderFor(decBundle)
 	}
 	return secretsBundle, g.orderFor(secretsBundle)
 }
 
-func (g *deleteGroupContext) secretsGroupTitle(secretsBundle string) string {
-	if secretsBundle == g.projectSecrets {
-		name := strings.TrimSpace(g.projectName)
-		if name == "" {
-			name = "?"
-		}
-		return fmt.Sprintf("%s (project)", name)
-	}
-	return secretsBundle
+// secretsGroupTitle 直接用远端地址做标题：<p>/private/<plane> 已经自解释。
+func (g *deleteGroupContext) secretsGroupTitle(address string) string {
+	return address
 }
 
 func (g *deleteGroupContext) groupTitle(groupBundle string) string {
-	if groupBundle == secrets.ProjectSecretsDecBundleName {
-		name := strings.TrimSpace(g.projectName)
-		if name == "" {
-			name = "?"
-		}
-		return fmt.Sprintf("%s (project)", name)
-	}
 	return fmt.Sprintf("%s (bundle)", groupBundle)
 }
 
@@ -320,7 +278,7 @@ func appendLocalSecretCandidates(
 			continue
 		}
 		for _, note := range notes {
-			addSecret(target.Folder, target.LocalRoot, target.Plane, note.RelativePath, true)
+			addSecret(target.Address, target.LocalRoot, target.Plane, note.RelativePath, true)
 		}
 	}
 }
@@ -380,8 +338,8 @@ func appendRemoteSecretCandidates(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		folder := target.Folder
-		notes, listErr := client.ListFolderNotes(ctx, folder)
+		address := target.Address
+		notes, listErr := client.ListNotes(ctx, target)
 		if listErr != nil {
 			emit(reporter, EventWarn, "delete.secrets",
 				fmt.Sprintf("列出远端 %s 失败: %v", formatSyncTargetLabel(target), listErr), nil)
@@ -397,16 +355,11 @@ func appendRemoteSecretCandidates(
 					}
 				}
 			}
-			addSecret(folder, target.LocalRoot, target.Plane, note.Name, localExists)
+			addSecret(address, target.LocalRoot, target.Plane, note.Name, localExists)
 		}
-		owner := target.Name
-		if target.Kind == secrets.SyncKindProject {
-			owner = "project"
-		}
-		if strings.TrimSpace(owner) == "" {
-			owner = strings.TrimPrefix(folder, secrets.BundleFolderPrefix)
-		}
-		keys, listKeysErr := client.ListFolderSSHKeys(ctx, folder)
+		// SSH Key 落地文件名按 P 名区分，两个平面各自独立。
+		owner := strings.TrimSpace(target.Name)
+		keys, listKeysErr := client.ListSSHKeys(ctx, target)
 		if listKeysErr != nil {
 			emit(reporter, EventWarn, "delete.secrets",
 				fmt.Sprintf("列出远端 %s SSH Key 失败: %v", formatSyncTargetLabel(target), listKeysErr), nil)
@@ -415,7 +368,7 @@ func appendRemoteSecretCandidates(
 		for _, key := range keys {
 			var localExists bool
 			var existsErr error
-			if target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+			if secrets.IsMachinePlane(target.Plane) {
 				localExists, existsErr = secrets.LocalSSHKeyExists(owner, key.Name)
 			} else {
 				localExists, existsErr = secrets.InspectProjectSSHKeyLanding(projectRoot, owner, key.Name)
@@ -424,7 +377,7 @@ func appendRemoteSecretCandidates(
 				emit(reporter, EventWarn, "delete.secrets", existsErr.Error(), nil)
 				continue
 			}
-			addSSHKey(folder, owner, key.Name, localExists)
+			addSSHKey(address, owner, key.Name, localExists)
 		}
 	}
 	return nil
@@ -629,12 +582,11 @@ func deleteSecretItem(ctx context.Context, workspace Workspace, secretsBundleNam
 	}
 
 	client := secretsClientFactory()
-	target, err := secrets.NewBrowseFolder(secretsBundleName)
+	target, err := secrets.NewBrowseAddress(secretsBundleName)
 	if err != nil {
 		return err
 	}
 	if err := client.DeleteSecureNote(ctx, secrets.DeleteSecureNoteRequest{
-		Binding:  secrets.BundleBinding{SecretsBundleName: secretsBundleName},
 		NotePath: notePath,
 		Target:   target,
 	}); err != nil {
@@ -666,14 +618,13 @@ func readSecretNoteContent(
 		return "", false
 	}
 	client := secretsClientFactory()
-	target, targetErr := secrets.NewBrowseFolder(secretsBundleName)
+	target, targetErr := secrets.NewBrowseAddress(secretsBundleName)
 	if targetErr != nil {
 		return "", false
 	}
 	result, err := client.PullBundle(ctx, secrets.PullBundleRequest{
 		ProjectRoot: projectRoot,
 		Target:      target,
-		Binding:     secrets.BundleBinding{SecretsBundleName: secretsBundleName},
 	})
 	if err != nil || result == nil {
 		if err != nil {
@@ -719,12 +670,11 @@ func deleteSSHKeyItem(ctx context.Context, decBundleName, secretsBundleName, key
 	}
 
 	client := secretsClientFactory()
-	target, err := secrets.NewBrowseFolder(secretsBundleName)
+	target, err := secrets.NewBrowseAddress(secretsBundleName)
 	if err != nil {
 		return err
 	}
 	if err := client.DeleteSSHKey(ctx, secrets.DeleteSSHKeyRequest{
-		Binding: secrets.BundleBinding{SecretsBundleName: secretsBundleName},
 		KeyName: keyName,
 		Target:  target,
 	}); err != nil {
@@ -1045,12 +995,11 @@ func deleteSecretItemRemoteOnly(ctx context.Context, workspace Workspace, secret
 		}
 	}
 	client := secretsClientFactory()
-	target, err := secrets.NewBrowseFolder(secretsBundleName)
+	target, err := secrets.NewBrowseAddress(secretsBundleName)
 	if err != nil {
 		return err
 	}
 	if err := client.DeleteSecureNote(ctx, secrets.DeleteSecureNoteRequest{
-		Binding:  secrets.BundleBinding{SecretsBundleName: secretsBundleName},
 		NotePath: notePath,
 		Target:   target,
 	}); err != nil {
@@ -1082,9 +1031,9 @@ func deleteSSHKeyItemLocalOnly(workspace Workspace, secretsBundleName, decBundle
 	return nil
 }
 
-func isProjectScopedPFolder(folder string) bool {
-	_, plane, ok := secrets.ParsePFolder(folder)
-	return ok && !secrets.IsMachinePlane(plane)
+func isProjectScopedPFolder(address string) bool {
+	scope, err := secrets.ParseRemoteScope(address)
+	return err == nil && !secrets.IsMachinePlane(scope.Plane)
 }
 
 func deleteSSHKeyItemRemoteOnly(ctx context.Context, secretsBundleName, keyName string, reporter Reporter) error {
@@ -1106,12 +1055,11 @@ func deleteSSHKeyItemRemoteOnly(ctx context.Context, secretsBundleName, keyName 
 		}
 	}
 	client := secretsClientFactory()
-	target, err := secrets.NewBrowseFolder(secretsBundleName)
+	target, err := secrets.NewBrowseAddress(secretsBundleName)
 	if err != nil {
 		return err
 	}
 	if err := client.DeleteSSHKey(ctx, secrets.DeleteSSHKeyRequest{
-		Binding: secrets.BundleBinding{SecretsBundleName: secretsBundleName},
 		KeyName: keyName,
 		Target:  target,
 	}); err != nil {

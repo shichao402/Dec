@@ -123,10 +123,10 @@ func mergeRemoteSecretMetadataForWorkspace(ctx context.Context, workspace Worksp
 	targets = append(targets, discoverRemoteSecretTargets(
 		ctx, client, workspace, loadVaultBundleScopes(workspace, reporter), targets, reporter)...)
 
-	// ListFolderNotes 只回 note 名（相对同步根），不回正文——元数据接口绝不能碰到密钥内容。
+	// ListNotes 只回 note 名（相对同步根），不回正文——元数据接口绝不能碰到密钥内容。
 	for _, target := range targets {
 		label := formatSyncTargetLabel(target)
-		notes, listErr := client.ListFolderNotes(ctx, target.Folder)
+		notes, listErr := client.ListNotes(ctx, target)
 		if listErr != nil {
 			emit(reporter, EventWarn, "secrets.list", fmt.Sprintf("列出远端 %s 元数据失败: %v", label, listErr), nil)
 			continue
@@ -141,10 +141,10 @@ func mergeRemoteSecretMetadataForWorkspace(ctx context.Context, workspace Worksp
 				emit(reporter, EventWarn, "secrets.list", fmt.Sprintf("跳过非法 note 名 %q: %v", noteRel, relErr), nil)
 				continue
 			}
-			key := target.Folder + "\x00" + projectRel
+			key := target.Address + "\x00" + projectRel
 			meta, ok := byKey[key]
 			if !ok {
-				meta = &SecretFileMetadata{SecretsBundle: target.Folder, ProjectRelPath: projectRel}
+				meta = &SecretFileMetadata{SecretsBundle: target.Address, ProjectRelPath: projectRel}
 				byKey[key] = meta
 			}
 			exists := true

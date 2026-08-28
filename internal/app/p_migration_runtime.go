@@ -30,18 +30,22 @@ func PreviewPMigration(ctx context.Context, workspace Workspace, reporter Report
 			return nil, err
 		}
 		client := secretsClientFactory()
-		folders, err := client.ListAllFolderNames(ctx)
+		addresses, err := client.ListAddresses(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("读取 Bitwarden folder 元数据: %w", err)
+			return nil, fmt.Errorf("读取 Bitwarden 远端地址: %w", err)
 		}
-		for _, folder := range folders {
-			notes, err := client.ListFolderNotes(ctx, folder)
+		for _, folder := range addresses {
+			target, err := secrets.NewBrowseAddress(folder)
 			if err != nil {
-				return nil, fmt.Errorf("读取 Bitwarden folder %q: %w", folder, err)
+				return nil, err
 			}
-			keys, err := client.ListFolderSSHKeys(ctx, folder)
+			notes, err := client.ListNotes(ctx, target)
 			if err != nil {
-				return nil, fmt.Errorf("读取 Bitwarden SSH folder %q: %w", folder, err)
+				return nil, fmt.Errorf("读取 Bitwarden %q: %w", folder, err)
+			}
+			keys, err := client.ListSSHKeys(ctx, target)
+			if err != nil {
+				return nil, fmt.Errorf("读取 Bitwarden SSH %q: %w", folder, err)
 			}
 			item := PMigrationBWFolder{}
 			for _, note := range notes {
@@ -72,15 +76,14 @@ func SyncPManifestsFromBitwarden(ctx context.Context, reporter Reporter) error {
 		return err
 	}
 	client := secretsClientFactory()
-	folders, err := client.ListAllFolderNames(ctx)
+	folders, err := client.ListAddresses(ctx)
 	if err != nil {
 		return err
 	}
 	names := map[string]struct{}{}
 	for _, folder := range folders {
-		pName, _, ok := secrets.ParsePFolder(folder)
-		if ok {
-			names[pName] = struct{}{}
+		if scope, err := secrets.ParseRemoteScope(folder); err == nil {
+			names[scope.P] = struct{}{}
 		}
 	}
 	return withAppWriteRepo(func(tx *repo.Transaction) error {
@@ -209,7 +212,7 @@ func (b *livePMigrationBackend) VerifyGit(_ context.Context, plan *PMigrationPla
 func (b *livePMigrationBackend) WriteBitwarden(ctx context.Context, plan *PMigrationPlan) error {
 	grouped := migrationBWMovesBySource(plan)
 	for sourceFolder, moves := range grouped {
-		source, err := secrets.NewBrowseFolder(sourceFolder)
+		source, err := secrets.NewBrowseAddress(sourceFolder)
 		if err != nil {
 			return err
 		}
@@ -226,11 +229,7 @@ func (b *livePMigrationBackend) WriteBitwarden(ctx context.Context, plan *PMigra
 			keysByPath[cleanLogicalPath(key.Name)] = key
 		}
 		for _, move := range moves {
-			pName, plane, ok := secrets.ParsePFolder(move.TargetFolder)
-			if !ok {
-				return fmt.Errorf("无效 P folder %q", move.TargetFolder)
-			}
-			target, err := secrets.NewPSyncTarget(pName, plane)
+			target, err := pTargetForAddress(move.TargetFolder)
 			if err != nil {
 				return err
 			}
@@ -240,7 +239,7 @@ func (b *livePMigrationBackend) WriteBitwarden(ctx context.Context, plan *PMigra
 				if !ok {
 					return fmt.Errorf("旧 BW Note 已缺失: %s/%s", sourceFolder, move.Path)
 				}
-				if _, err := b.client.GetSecureNote(ctx, move.TargetFolder, move.Path); err == nil {
+				if _, err := b.client.GetNote(ctx, target, move.Path); err == nil {
 					continue
 				}
 				if _, err := b.client.PushBundle(ctx, secrets.PushBundleRequest{Target: target, CreateFolderIfMissing: true}, []secrets.SecureNote{note}); err != nil {
@@ -251,7 +250,7 @@ func (b *livePMigrationBackend) WriteBitwarden(ctx context.Context, plan *PMigra
 				if !ok {
 					return fmt.Errorf("旧 BW SSH Key 已缺失: %s/%s", sourceFolder, move.Path)
 				}
-				if sshKeyExists(ctx, b.client, move.TargetFolder, move.Path) {
+				if sshKeyExists(ctx, b.client, target, move.Path) {
 					continue
 				}
 				if err := b.client.CreateSSHKey(ctx, secrets.CreateSSHKeyRequest{Target: target, Key: key, CreateFolderIfMissing: true}); err != nil &&
@@ -266,13 +265,17 @@ func (b *livePMigrationBackend) WriteBitwarden(ctx context.Context, plan *PMigra
 
 func (b *livePMigrationBackend) VerifyBitwarden(ctx context.Context, plan *PMigrationPlan) error {
 	for _, move := range plan.BWMoves {
+		target, err := pTargetForAddress(move.TargetFolder)
+		if err != nil {
+			return err
+		}
 		switch move.Kind {
 		case "note":
-			if _, err := b.client.GetSecureNote(ctx, move.TargetFolder, move.Path); err != nil {
+			if _, err := b.client.GetNote(ctx, target, move.Path); err != nil {
 				return fmt.Errorf("校验 BW Note %s/%s: %w", move.TargetFolder, move.Path, err)
 			}
 		case "sshkey":
-			keys, err := b.client.ListFolderSSHKeys(ctx, move.TargetFolder)
+			keys, err := b.client.ListSSHKeys(ctx, target)
 			if err != nil {
 				return err
 			}
@@ -292,7 +295,7 @@ func (b *livePMigrationBackend) VerifyBitwarden(ctx context.Context, plan *PMigr
 
 func (b *livePMigrationBackend) DeleteLegacyBitwarden(ctx context.Context, plan *PMigrationPlan) error {
 	for _, move := range plan.BWMoves {
-		source, err := secrets.NewBrowseFolder(move.SourceFolder)
+		source, err := secrets.NewBrowseAddress(move.SourceFolder)
 		if err != nil {
 			return err
 		}
@@ -306,10 +309,10 @@ func (b *livePMigrationBackend) DeleteLegacyBitwarden(ctx context.Context, plan 
 		}
 	}
 	for _, folder := range plan.LegacyBWFolders {
-		if _, _, isP := secrets.ParsePFolder(folder); isP {
+		if _, err := secrets.ParseRemoteScope(folder); err == nil {
 			continue
 		}
-		if err := b.client.DeleteFolder(ctx, folder); err != nil {
+		if err := b.client.DeleteAddress(ctx, folder); err != nil {
 			return fmt.Errorf("删除旧 BW folder %q: %w", folder, err)
 		}
 	}
@@ -336,8 +339,17 @@ func migrationBWMovesBySource(plan *PMigrationPlan) map[string][]PMigrationBWMov
 	return out
 }
 
-func sshKeyExists(ctx context.Context, client secrets.Client, folder, path string) bool {
-	keys, err := client.ListFolderSSHKeys(ctx, folder)
+// pTargetForAddress 把迁移计划里的 P 地址还原成声明型写入目标。
+func pTargetForAddress(address string) (secrets.SyncTarget, error) {
+	scope, err := secrets.ParseRemoteScope(address)
+	if err != nil {
+		return secrets.SyncTarget{}, fmt.Errorf("无效 P 地址 %q: %w", address, err)
+	}
+	return secrets.NewPSyncTarget(scope.P, scope.Plane)
+}
+
+func sshKeyExists(ctx context.Context, client secrets.Client, target secrets.SyncTarget, path string) bool {
+	keys, err := client.ListSSHKeys(ctx, target)
 	if err != nil {
 		return false
 	}

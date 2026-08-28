@@ -146,9 +146,9 @@ func buildDeleteTree(candidates []app.DeleteCandidate) []*TreeNode {
 	return roots
 }
 
-// secretsFolderRef 挂在 folder 分组节点上，供 Remote 登记从光标就近反推归属。
+// secretsFolderRef 挂在远端地址分组节点上，供 Remote 登记从光标就近反推归属。
 type secretsFolderRef struct {
-	Folder    string
+	Address   string
 	Title     string
 	Partition app.RemotePartition
 }
@@ -184,7 +184,7 @@ func (g *secretsGroupNode) absorb(c app.DeleteCandidate) {
 }
 
 func (g *secretsGroupNode) ref() secretsFolderRef {
-	return secretsFolderRef{Folder: g.folder, Title: g.title, Partition: g.partition}
+	return secretsFolderRef{Address: g.folder, Title: g.title, Partition: g.partition}
 }
 
 func (g *secretsGroupNode) label() string {

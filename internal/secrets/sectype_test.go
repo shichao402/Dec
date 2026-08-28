@@ -59,20 +59,20 @@ func TestIsEnvNote_DotEnv(t *testing.T) {
 }
 
 func TestMigrateTypeDirNames(t *testing.T) {
+	target, err := NewPSyncTarget("cnb", SyncPlaneMachine)
+	if err != nil {
+		t.Fatal(err)
+	}
 	stub := &StubClient{
 		NotesByFolder: map[string][]SecureNote{
-			"bundle/cnb": {
+			target.Address: {
 				{RelativePath: "cnb_gitgcm.yaml", Content: "host: cnb.cool\nusername: cnb\npassword: x\n"},
 				{RelativePath: "env/app.env", Content: "A=1\n"},
 			},
 		},
 		SSHKeysByFolder: map[string][]SSHKeyItem{
-			"bundle/cnb": {{Name: "deploy", PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----\n"}},
+			target.Address: {{Name: "deploy", PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----\n"}},
 		},
-	}
-	target, err := NewMachineBundleSyncTarget("cnb", "bundle/cnb")
-	if err != nil {
-		t.Fatal(err)
 	}
 	res, err := MigrateTypeDirNames(context.Background(), stub, "", target)
 	if err != nil {
@@ -81,7 +81,7 @@ func TestMigrateTypeDirNames(t *testing.T) {
 	if len(res.RenamedNotes) != 2 || len(res.RenamedSSH) != 1 {
 		t.Fatalf("migrate result = %#v", res)
 	}
-	notes := stub.NotesByFolder["bundle/cnb"]
+	notes := stub.NotesByFolder[target.Address]
 	paths := map[string]bool{}
 	for _, n := range notes {
 		paths[n.RelativePath] = true
@@ -89,7 +89,7 @@ func TestMigrateTypeDirNames(t *testing.T) {
 	if !paths[".gcm/cnb.yaml"] || !paths[".env/app.env"] {
 		t.Fatalf("notes after migrate = %#v", notes)
 	}
-	if stub.SSHKeysByFolder["bundle/cnb"][0].Name != ".sshkey/deploy" {
-		t.Fatalf("ssh name = %q", stub.SSHKeysByFolder["bundle/cnb"][0].Name)
+	if stub.SSHKeysByFolder[target.Address][0].Name != ".sshkey/deploy" {
+		t.Fatalf("ssh name = %q", stub.SSHKeysByFolder[target.Address][0].Name)
 	}
 }

@@ -111,60 +111,6 @@ func TestSaveConfig_WritesDefaultAndComments(t *testing.T) {
 	}
 }
 
-func TestResolveBinding_DefaultSameName(t *testing.T) {
-	cfg := &Config{}
-	binding := cfg.ResolveBinding("vikunja")
-	if binding.SecretsBundleName != "bundle/vikunja" {
-		t.Fatalf("SecretsBundleName = %q, 期望 bundle/vikunja", binding.SecretsBundleName)
-	}
-	if binding.DecBundleName != "vikunja" {
-		t.Fatalf("DecBundleName = %q", binding.DecBundleName)
-	}
-}
-
-func TestResolveBinding_ExplicitBindingWins(t *testing.T) {
-	cfg := &Config{
-		Bundles: []BundleBinding{{
-			DecBundleName:     "vikunja",
-			SecretsBundleName: "custom_vault",
-		}},
-	}
-	binding := cfg.ResolveBinding("vikunja")
-	if binding.SecretsBundleName != "custom_vault" {
-		t.Fatalf("SecretsBundleName = %q", binding.SecretsBundleName)
-	}
-}
-
-func TestMigrateConfigIfNeeded_MigratesLegacyFolderField(t *testing.T) {
-	decHome := t.TempDir()
-	t.Setenv("DEC_HOME", decHome)
-	secretsDir := filepath.Join(decHome, "secrets")
-	if err := os.MkdirAll(secretsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), []byte("server_url: https://vault.example.com\nemail: user@example.com\nbundles:\n  - dec_bundle: vikunja\n    folder: custom_vault\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	changed, err := MigrateConfigIfNeeded()
-	if err != nil {
-		t.Fatalf("MigrateConfigIfNeeded() = %v", err)
-	}
-	if !changed {
-		t.Fatal("应迁移废弃的 folder 字段")
-	}
-	cfg, err := LoadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.Bundles) != 1 || cfg.Bundles[0].SecretsBundleName != "custom_vault" {
-		t.Fatalf("cfg.Bundles = %#v", cfg.Bundles)
-	}
-	if cfg.Bundles[0].Folder != "" {
-		t.Fatalf("folder 字段应已清空: %#v", cfg.Bundles[0])
-	}
-}
-
 func TestSaveEmail_PreservesOtherFields(t *testing.T) {
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)

@@ -218,7 +218,7 @@ func listRemoteSecretBundleInventory(sessionReady bool, stage string, reporter R
 	if !sessionReady || client == nil {
 		return remoteSecretBundleInventory{}
 	}
-	names, listErr := client.ListSecretBundleNames(context.Background())
+	names, listErr := client.ListPNames(context.Background())
 	if listErr != nil {
 		emit(reporter, EventWarn, stage,
 			fmt.Sprintf("枚举 Bitwarden secret bundles 失败（仍展示本机与 vault 候选）: %v", listErr), nil)

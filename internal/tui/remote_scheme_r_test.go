@@ -111,26 +111,26 @@ func TestDeleteTypedConfirm_RequiresInput(t *testing.T) {
 	}
 }
 
-func TestRemoteAddSecret_TakesFolderFromCursor(t *testing.T) {
+func TestRemoteAddSecret_TakesScopeFromCursor(t *testing.T) {
 	m := remotePageModelWithCandidates(t)
-	focusTreeRow(t, &m, "Dec")
+	focusTreeRow(t, &m, remoteTestAddress)
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	after := updated.(model)
 	if !after.addSecretRemoteMode || after.addSecretStage != addSecretStageType {
 		t.Fatalf("Remote n 应直接进类型阶段: mode=%v stage=%q", after.addSecretRemoteMode, after.addSecretStage)
 	}
-	if after.addSecretFolder != "Dec" {
-		t.Fatalf("归属应来自光标所在 folder, got %q", after.addSecretFolder)
+	if after.addSecretPName != "dec" || after.addSecretPlane != secrets.SyncPlaneProject {
+		t.Fatalf("归属应来自光标所在 P 地址, got p=%q plane=%q", after.addSecretPName, after.addSecretPlane)
 	}
-	if after.addSecretFolderNew {
-		t.Fatal("光标反推的 folder 不是新建")
+	if after.addSecretScopeNew {
+		t.Fatal("光标反推的归属不是新建 P")
 	}
 	if cmd != nil {
 		t.Fatal("归属来自光标，不应再触发候选枚举")
 	}
 	view := after.View()
-	if !strings.Contains(view, "Remote · 登记 Secret") || !strings.Contains(view, "folder Dec") {
+	if !strings.Contains(view, "Remote · 登记 Secret") || !strings.Contains(view, remoteTestAddress) {
 		t.Fatalf("表单应展示光标解析出的归属:\n%s", view)
 	}
 
@@ -187,7 +187,7 @@ func TestRemoteAddSecret_TypeCycleIncludesAllProcessors(t *testing.T) {
 	}
 
 	m := remotePageModelWithCandidates(t)
-	focusTreeRow(t, &m, "Dec")
+	focusTreeRow(t, &m, remoteTestAddress)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 
 	for i := 0; i < len(procs); i++ {
@@ -203,8 +203,8 @@ func TestRemoteAddSecret_TypeCycleIncludesAllProcessors(t *testing.T) {
 func TestRemoteAddSecret_SSHKeyDirEntersSSHSources(t *testing.T) {
 	m := remotePageModelWithCandidates(t)
 	m.deleteCandidates = append(m.deleteCandidates, app.DeleteCandidate{
-		Kind: app.DeleteKindSSHKey, SSHKeyName: ".sshkey/deploy", SecretsBundle: "Dec",
-		Partition: app.PartitionRemote, GroupTitle: "Dec",
+		Kind: app.DeleteKindSSHKey, SSHKeyName: ".sshkey/deploy", SecretsBundle: remoteTestAddress,
+		Partition: app.PartitionRemote, GroupTitle: remoteTestAddress,
 	})
 	m.rebuildDeleteTree()
 	expandDeleteTreeAll(&m)
@@ -261,81 +261,110 @@ func TestRemoteAddSecret_NoFolderUnderCursorKeepsFormClosed(t *testing.T) {
 		t.Fatal("解析不出归属时不应触发命令")
 	}
 	if !strings.Contains(strings.Join(after.logs, "\n"), "按 N") {
-		t.Fatalf("应提示移动光标或按 N 新建 folder:\n%s", strings.Join(after.logs, "\n"))
+		t.Fatalf("应提示移动光标或按 N 新建 P:\n%s", strings.Join(after.logs, "\n"))
 	}
 }
 
-func TestRemoteAddSecret_NewFolderTypedByHand(t *testing.T) {
+func TestRemoteAddSecret_NewPTypedByHand(t *testing.T) {
+	oldValidate := validateRemoteRegisterScopeOperation
+	validateRemoteRegisterScopeOperation = func(context.Context, app.Workspace, secrets.RemoteScope) error { return nil }
+	t.Cleanup(func() { validateRemoteRegisterScopeOperation = oldValidate })
+
 	m := remotePageModelWithCandidates(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
 	after := updated.(model)
-	if after.addSecretStage != addSecretStageFolder || !after.addSecretFolderNew {
-		t.Fatalf("N 应进入新 folder 输入: stage=%q new=%v", after.addSecretStage, after.addSecretFolderNew)
+	if after.addSecretStage != addSecretStageP || !after.addSecretScopeNew {
+		t.Fatalf("N 应进入新 P 输入: stage=%q new=%v", after.addSecretStage, after.addSecretScopeNew)
 	}
-	if view := after.View(); !strings.Contains(view, "新 folder") {
-		t.Fatalf("表单应标明这是新 folder:\n%s", view)
-	}
-
-	updated = typeRunes(after, "bundle/newpkg")
-	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	after = updated.(model)
-	if after.addSecretStage != addSecretStageType || after.addSecretFolder != "bundle/newpkg" {
-		t.Fatalf("folder=%q stage=%q", after.addSecretFolder, after.addSecretStage)
+	if view := after.View(); !strings.Contains(view, "新 P") {
+		t.Fatalf("表单应标明这是新 P:\n%s", view)
 	}
 
-	updated, _ = after.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	updated = typeRunes(updated, "x.txt")
+	updated = typeRunes(after, "newpkg")
 	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	after = updated.(model)
-	if after.addSecretStage != addSecretStageSource {
-		t.Fatalf("stage=%q want source", after.addSecretStage)
+	if after.addSecretStage != addSecretStagePlane || after.addSecretPName != "newpkg" {
+		t.Fatalf("P=%q stage=%q，期望进入选平面", after.addSecretPName, after.addSecretStage)
+	}
+
+	// tab 轮转到本机平面，再 Enter 触发声明校验。
+	updated, _ = after.Update(tea.KeyMsg{Type: tea.KeyTab})
+	after = updated.(model)
+	if !secrets.IsMachinePlane(after.addSecretPlane) {
+		t.Fatalf("tab 应轮到本机平面, got %q", after.addSecretPlane)
+	}
+	updated, cmd := after.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	after = updated.(model)
+	if after.addSecretStage != addSecretStageScopeCheck || cmd == nil {
+		t.Fatalf("选完平面应异步校验: stage=%q cmd=%v", after.addSecretStage, cmd)
+	}
+	updated, _ = after.Update(cmd())
+	after = updated.(model)
+	if after.addSecretStage != addSecretStageType {
+		t.Fatalf("校验通过应进入类型阶段, stage=%q notice=%q", after.addSecretStage, after.addSecretNotice)
 	}
 }
 
-func TestRemoteAddSecret_EmptyNewFolderDoesNotAdvance(t *testing.T) {
+func TestRemoteAddSecret_EmptyNewPDoesNotAdvance(t *testing.T) {
 	m := remotePageModelWithCandidates(t)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
 	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	after := updated.(model)
-	if after.addSecretStage != addSecretStageFolder {
-		t.Fatalf("空 folder 名不应推进, stage=%q", after.addSecretStage)
+	if after.addSecretStage != addSecretStageP {
+		t.Fatalf("空 P 名不应推进, stage=%q", after.addSecretStage)
 	}
 	if cmd != nil {
-		t.Fatal("空 folder 名不应触发命令")
+		t.Fatal("空 P 名不应触发命令")
 	}
 }
 
-func TestRemoteAddSecret_NewBareFolderRequiresDeclaredProject(t *testing.T) {
-	oldValidate := validateRemoteRegisterFolderOperation
-	validateRemoteRegisterFolderOperation = func(context.Context, app.Workspace, string) error {
-		return fmt.Errorf("folder %q 不是 vault 已声明的 project；新建归属请改用 %q", "relkit", "bundle/relkit")
+// P 名里带斜杠说明用户还在按老的 folder 路径思维输入，必须当场拦下。
+func TestRemoteAddSecret_RejectsSlashInPName(t *testing.T) {
+	m := remotePageModelWithCandidates(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	updated = typeRunes(updated, "bundle/newpkg")
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	after := updated.(model)
+	if after.addSecretStage != addSecretStageP || cmd != nil {
+		t.Fatalf("带斜杠的输入不应推进: stage=%q cmd=%v", after.addSecretStage, cmd)
 	}
-	t.Cleanup(func() { validateRemoteRegisterFolderOperation = oldValidate })
+	if !strings.Contains(after.addSecretNotice, "只输入 P 名") {
+		t.Fatalf("应提示只输入 P 名, notice=%q", after.addSecretNotice)
+	}
+}
+
+func TestRemoteAddSecret_UndeclaredPStaysInPStage(t *testing.T) {
+	oldValidate := validateRemoteRegisterScopeOperation
+	validateRemoteRegisterScopeOperation = func(context.Context, app.Workspace, secrets.RemoteScope) error {
+		return fmt.Errorf("P %q 不是 vault 已声明的 project", "relkit")
+	}
+	t.Cleanup(func() { validateRemoteRegisterScopeOperation = oldValidate })
 
 	m := remotePageModelWithCandidates(t)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
 	updated = typeRunes(updated, "relkit")
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	after := updated.(model)
-	if after.addSecretStage != addSecretStageFolderCheck || cmd == nil {
-		t.Fatalf("裸名应先异步校验 vault 声明: stage=%q cmd=%v", after.addSecretStage, cmd)
+	if after.addSecretStage != addSecretStageScopeCheck || cmd == nil {
+		t.Fatalf("应先异步校验 vault 声明: stage=%q cmd=%v", after.addSecretStage, cmd)
 	}
 	updated, _ = after.Update(cmd())
 	after = updated.(model)
-	if after.addSecretStage != addSecretStageFolder || !strings.Contains(after.addSecretNotice, "bundle/relkit") {
-		t.Fatalf("非法裸名应留在 folder 阶段并提示 bundle/<名>: stage=%q notice=%q", after.addSecretStage, after.addSecretNotice)
+	if after.addSecretStage != addSecretStageP || !strings.Contains(after.addSecretNotice, "relkit") {
+		t.Fatalf("未声明的 P 应留在 P 阶段并给出原因: stage=%q notice=%q", after.addSecretStage, after.addSecretNotice)
 	}
 }
 
-// focusTreeRow 把光标停在指定 folder 的分组节点上。
+// focusTreeRow 把光标停在指定远端地址的分组节点上。
 func focusTreeRow(t *testing.T, m *model, folder string) {
 	t.Helper()
 	for i, row := range m.deleteTree.VisibleRows() {
 		if row.Node == nil {
 			continue
 		}
-		if ref, ok := row.Node.Payload.(secretsFolderRef); ok && ref.Folder == folder {
+		if ref, ok := row.Node.Payload.(secretsFolderRef); ok && ref.Address == folder {
 			m.deleteTree.Cursor = i
 			return
 		}
@@ -372,13 +401,13 @@ func TestRemoteAddSecret_EscLeavesRunningStage(t *testing.T) {
 
 func TestRemoteAddSecret_StaleResultKeepsNewForm(t *testing.T) {
 	m := remotePageModelWithCandidates(t)
-	focusTreeRow(t, &m, "Dec")
+	focusTreeRow(t, &m, remoteTestAddress)
 	m.addSecretRemoteMode = true
 	m.addSecretStage = addSecretStageRunning
 
 	abandoned, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	reopened, _ := abandoned.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	late, _ := reopened.Update(addSecretDoneMsg{result: &app.AddSecretResult{Folder: "relkit", NoteRelPath: ".env/x.env"}})
+	late, _ := reopened.Update(addSecretDoneMsg{result: &app.AddSecretResult{Address: "relkit/private/project", NoteRelPath: ".env/x.env"}})
 
 	after := late.(model)
 	if after.addSecretStage != addSecretStageType {
@@ -412,12 +441,15 @@ func TestRemoteSelection_ToggleAllAndClear(t *testing.T) {
 func TestRemoteHeadLines_ShowsNewKeyHints(t *testing.T) {
 	m := remotePageModelWithCandidates(t)
 	head := strings.Join(m.remoteHeadLines(), "\n")
-	for _, want := range []string{"a 全选", "A 全不选", "n 登记到光标 folder", "N 登记到新 folder"} {
+	for _, want := range []string{"a 全选", "A 全不选", "n 登记到光标 P", "N 新建 P 登记"} {
 		if !strings.Contains(head, want) {
 			t.Fatalf("帮助行缺少 %q:\n%s", want, head)
 		}
 	}
 }
+
+// remoteTestAddress 是测试树里的远端地址，必须是 <p>/private/<plane> 才能反推出 scope。
+const remoteTestAddress = "dec/private/project"
 
 func remotePageModelWithCandidates(t *testing.T) model {
 	t.Helper()
@@ -426,8 +458,8 @@ func remotePageModelWithCandidates(t *testing.T) model {
 	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
-		{Kind: app.DeleteKindSecret, SecretPath: ".env/a.env", SecretsBundle: "Dec", LocalRoot: ".secrets/project", Partition: app.PartitionRemote, GroupTitle: "Dec"},
-		{Kind: app.DeleteKindSecret, SecretPath: ".env/b.env", SecretsBundle: "Dec", LocalRoot: ".secrets/project", Partition: app.PartitionRemote, GroupTitle: "Dec"},
+		{Kind: app.DeleteKindSecret, SecretPath: ".env/a.env", SecretsBundle: remoteTestAddress, LocalRoot: ".secrets/dec", Partition: app.PartitionRemote, GroupTitle: remoteTestAddress},
+		{Kind: app.DeleteKindSecret, SecretPath: ".env/b.env", SecretsBundle: remoteTestAddress, LocalRoot: ".secrets/dec", Partition: app.PartitionRemote, GroupTitle: remoteTestAddress},
 	}
 	m.deleteCandidatesLoaded = true
 	m.rebuildDeleteTree()

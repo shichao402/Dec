@@ -12,11 +12,11 @@ func TestPrepareRepoGCMBootstrapFindsMatchingHostWithoutExposingPassword(t *test
 	secrets.SetSession("test-session")
 	t.Cleanup(secrets.ClearSession)
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"bundle/cnb": {
+		"cnb/private/user": {
 			{RelativePath: ".gcm/cnb.yaml", Content: "host: cnb.cool\nusername: firo\npassword: top-secret\n"},
 			{RelativePath: ".env/app.env", Content: "TOKEN=also-secret\n"},
 		},
-		"bundle/github": {
+		"github/private/user": {
 			{RelativePath: ".gcm/github.yaml", Content: "host: github.com\nusername: firo\npassword: gh-secret\n"},
 		},
 	}}
@@ -32,8 +32,11 @@ func TestPrepareRepoGCMBootstrapFindsMatchingHostWithoutExposingPassword(t *test
 		t.Fatalf("Candidates = %#v", result.Candidates)
 	}
 	got := result.Candidates[0]
-	if got.Folder != "bundle/cnb" || got.NotePath != ".gcm/cnb.yaml" || got.Host != "cnb.cool" || got.Username != "firo" {
+	if got.Address != "cnb/private/user" || got.NotePath != ".gcm/cnb.yaml" || got.Host != "cnb.cool" || got.Username != "firo" {
 		t.Fatalf("candidate = %#v", got)
+	}
+	if got.Unmanaged {
+		t.Fatalf("P 地址不应标 Unmanaged: %#v", got)
 	}
 }
 
@@ -75,7 +78,7 @@ func TestApplyRepoGCMBootstrapReusesGCMHandlerAndProbesRepo(t *testing.T) {
 	secrets.SetSession("test-session")
 	t.Cleanup(secrets.ClearSession)
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"bundle/cnb": {
+		"cnb/private/user": {
 			{RelativePath: ".gcm/cnb.yaml", Content: "host: cnb.cool\nusername: firo\npassword: top-secret\n"},
 		},
 	}}
@@ -98,7 +101,7 @@ func TestApplyRepoGCMBootstrapReusesGCMHandlerAndProbesRepo(t *testing.T) {
 	t.Cleanup(func() { probeRepoForBootstrap = oldProbe })
 
 	input := ApplyRepoGCMBootstrapInput{
-		RepoURL: "https://cnb.cool/shichao402/private.git", Folder: "bundle/cnb", NotePath: ".gcm/cnb.yaml",
+		RepoURL: "https://cnb.cool/shichao402/private.git", Address: "cnb/private/user", NotePath: ".gcm/cnb.yaml",
 	}
 	result, err := ApplyRepoGCMBootstrap(context.Background(), input, nil)
 	if err != nil {
@@ -119,7 +122,7 @@ func TestApplyRepoGCMBootstrapRejectsHostMismatchBeforeApply(t *testing.T) {
 	secrets.SetSession("test-session")
 	t.Cleanup(secrets.ClearSession)
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"bundle/github": {
+		"github/private/user": {
 			{RelativePath: ".gcm/github.yaml", Content: "host: github.com\nusername: firo\npassword: secret\n"},
 		},
 	}}
@@ -128,7 +131,7 @@ func TestApplyRepoGCMBootstrapRejectsHostMismatchBeforeApply(t *testing.T) {
 	t.Cleanup(func() { secretsClientFactory = oldFactory })
 
 	_, err := ApplyRepoGCMBootstrap(context.Background(), ApplyRepoGCMBootstrapInput{
-		RepoURL: "https://cnb.cool/shichao402/private.git", Folder: "bundle/github", NotePath: ".gcm/github.yaml",
+		RepoURL: "https://cnb.cool/shichao402/private.git", Address: "github/private/user", NotePath: ".gcm/github.yaml",
 	}, nil)
 	if err == nil {
 		t.Fatal("host 不匹配应失败")

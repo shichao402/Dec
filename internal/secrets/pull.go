@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // WriteSecureNotes 将 Secure Note 写入 SyncTarget.LocalRoot，返回展示用相对路径。
@@ -57,12 +56,10 @@ func ResolveBundle(ctx context.Context, client Client, req PullBundleRequest) ([
 	mapped := make([]SecureNote, 0, len(result.Notes))
 	seen := make(map[string]struct{}, len(result.Notes))
 	for _, note := range result.Notes {
-		rel, ok, mapErr := LocalNoteRelFromRemote(target, note.RelativePath)
-		if mapErr != nil {
-			return nil, nil, mapErr
-		}
-		if !ok {
-			continue
+		// Client 已按远端寻址域解码过条目名，这里只做同步根内的路径校验。
+		rel, relErr := normalizeSyncRelPath(note.RelativePath)
+		if relErr != nil {
+			return nil, nil, relErr
 		}
 		if _, dup := seen[rel]; dup {
 			continue
@@ -91,7 +88,7 @@ func PullBundle(ctx context.Context, client Client, req PullBundleRequest) ([]st
 	candidates := make([]LandingCandidate, 0, len(notes))
 	for _, note := range notes {
 		candidates = append(candidates, LandingCandidate{
-			Folder:       target.Folder,
+			Address:      target.Address,
 			LocalRoot:    target.LocalRoot,
 			RelativePath: note.RelativePath,
 			Plane:        planeOf(target),
@@ -103,16 +100,16 @@ func PullBundle(ctx context.Context, client Client, req PullBundleRequest) ([]st
 	return WriteSecureNotes(req.ProjectRoot, target, notes)
 }
 
+// requestTarget 校验请求携带的 SyncTarget：P 模型下没有可推断的默认目标，
+// 调用方必须给出声明型 target。
 func requestTarget(req PullBundleRequest) (SyncTarget, error) {
-	name := strings.TrimSpace(req.DecBundleName)
-	if name == "" {
-		name = strings.TrimSpace(req.Binding.DecBundleName)
+	target := req.Target
+	if target.Declared() {
+		return target, nil
 	}
-	kind := req.Target.Kind
-	if name == ProjectSecretsDecBundleName || kind == SyncKindProject {
-		kind = SyncKindProject
-	} else if kind == "" {
-		kind = SyncKindBundle
+	scope, err := target.Scope()
+	if err != nil {
+		return SyncTarget{}, err
 	}
-	return ResolveTarget(kind, name, req.Binding, req.Target)
+	return NewPSyncTarget(scope.P, scope.Plane)
 }

@@ -72,7 +72,7 @@ func TestAnalyzeDeleteTypedConfirm_MultiFolderExpectsDELETE(t *testing.T) {
 
 func TestRegisterRemoteNoteFromPath_PushesWithoutLocalRoot(t *testing.T) {
 	setupRemoteRegisterRepo(t, map[string]string{
-		"bundles/relkit/bundle.yaml": "name: relkit\nscope: project\nmembers: []\n",
+		"relkit/dec.yaml": "name: relkit\n",
 	})
 	secrets.SetSession("test-session")
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{}}
@@ -85,14 +85,15 @@ func TestRegisterRemoteNoteFromPath_PushesWithoutLocalRoot(t *testing.T) {
 	if err := os.WriteFile(src, []byte("TOKEN=1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := RegisterRemoteNoteFromPath(context.Background(), projectRoot, "bundle/relkit", ".env/token.env", src, nil)
+	scope := secrets.RemoteScope{P: "relkit", Plane: secrets.SyncPlaneProject}
+	result, err := RegisterRemoteNoteFromPath(context.Background(), projectRoot, scope, ".env/token.env", src, nil)
 	if err != nil {
 		t.Fatalf("RegisterRemoteNoteFromPath: %v", err)
 	}
-	if result.Folder != "bundle/relkit" || result.NoteRelPath != ".env/token.env" {
+	if result.Address != scope.String() || result.NoteRelPath != ".env/token.env" {
 		t.Fatalf("result = %#v", result)
 	}
-	notes := stub.NotesByFolder["bundle/relkit"]
+	notes := stub.NotesByFolder[scope.String()]
 	if len(notes) != 1 || notes[0].Content != "TOKEN=1\n" {
 		t.Fatalf("notes = %#v", notes)
 	}
@@ -100,7 +101,7 @@ func TestRegisterRemoteNoteFromPath_PushesWithoutLocalRoot(t *testing.T) {
 
 func TestPrepareRemoteNoteRegister_UsesTemp(t *testing.T) {
 	setupRemoteRegisterRepo(t, map[string]string{
-		"bundles/vikunja/bundle.yaml": "name: vikunja\nscope: project\nmembers: []\n",
+		"vikunja/dec.yaml": "name: vikunja\n",
 	})
 	secrets.SetSession("test-session")
 	stub := &secrets.StubClient{}
@@ -108,7 +109,8 @@ func TestPrepareRemoteNoteRegister_UsesTemp(t *testing.T) {
 	secretsClientFactory = func() secrets.Client { return stub }
 	t.Cleanup(func() { secretsClientFactory = orig })
 
-	sess, err := PrepareRemoteNoteRegister(context.Background(), t.TempDir(), "bundle/vikunja", ".env/new.env", "", nil)
+	scope := secrets.RemoteScope{P: "vikunja", Plane: secrets.SyncPlaneProject}
+	sess, err := PrepareRemoteNoteRegister(context.Background(), t.TempDir(), scope, ".env/new.env", "", nil)
 	if err != nil {
 		t.Fatalf("PrepareRemoteNoteRegister: %v", err)
 	}
@@ -121,7 +123,7 @@ func TestPrepareRemoteNoteRegister_UsesTemp(t *testing.T) {
 	if err := CommitRemoteNoteRegister(context.Background(), *sess, nil); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	got := stub.NotesByFolder["bundle/vikunja"]
+	got := stub.NotesByFolder[scope.String()]
 	if len(got) != 1 || got[0].Content != "NEW=1\n" {
 		t.Fatalf("notes = %#v", got)
 	}

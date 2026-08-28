@@ -25,7 +25,6 @@ type RemoteSSHHostsEditSession struct {
 	Path          string // 临时文件绝对路径
 	ProjectRoot   string
 	Target        secrets.SyncTarget
-	Folder        string
 	KeyName       string
 	DecBundleName string
 	TempFile      bool
@@ -42,9 +41,8 @@ func PrepareRemoteNoteEdit(ctx context.Context, projectRoot string, item DeleteS
 	if noteRel == "" {
 		return nil, fmt.Errorf("缺少 note 路径")
 	}
-	folder := strings.TrimSpace(item.SecretsBundle)
-	if folder == "" {
-		return nil, fmt.Errorf("缺少 secrets folder")
+	if strings.TrimSpace(item.SecretsBundle) == "" {
+		return nil, fmt.Errorf("缺少远端地址")
 	}
 	if err := ensureBitwardenSession(ctx, reporter, "remote.edit"); err != nil {
 		return nil, err
@@ -91,9 +89,8 @@ func CommitRemoteNoteEdit(ctx context.Context, session RemoteNoteEditSession, re
 	if strings.TrimSpace(session.Path) == "" || strings.TrimSpace(session.NoteRel) == "" {
 		return fmt.Errorf("编辑会话无效")
 	}
-	folder := strings.TrimSpace(session.Target.Folder)
-	if folder == "" {
-		return fmt.Errorf("缺少 secrets folder")
+	if strings.TrimSpace(session.Target.Address) == "" {
+		return fmt.Errorf("缺少远端地址")
 	}
 	if err := requireRemoteEditableTarget(session.Target); err != nil {
 		return err
@@ -106,18 +103,9 @@ func CommitRemoteNoteEdit(ctx context.Context, session RemoteNoteEditSession, re
 		return fmt.Errorf("读取编辑结果失败: %w", err)
 	}
 	client := secretsClientFactory()
-	target := session.Target.Clone()
-	bindingName := target.Name
-	if target.Kind == secrets.SyncKindProject {
-		bindingName = secrets.ProjectSecretsDecBundleName
-	}
 	req := secrets.PushBundleRequest{
-		ProjectRoot: session.ProjectRoot,
-		Target:      target,
-		Binding: secrets.BundleBinding{
-			DecBundleName:     bindingName,
-			SecretsBundleName: folder,
-		},
+		ProjectRoot:           session.ProjectRoot,
+		Target:                session.Target.Clone(),
 		CreateFolderIfMissing: session.CreateFolder,
 	}
 	result, err := client.PushBundle(ctx, req, []secrets.SecureNote{{
@@ -142,18 +130,17 @@ func PrepareRemoteSSHHostsEdit(ctx context.Context, projectRoot string, item Del
 		return nil, fmt.Errorf("只能编辑 SSH Key 的 Hosts")
 	}
 	keyName := strings.TrimSpace(item.SSHKeyName)
-	folder := strings.TrimSpace(item.SecretsBundle)
-	if keyName == "" || folder == "" {
-		return nil, fmt.Errorf("缺少 SSH Key 或 folder")
+	if keyName == "" || strings.TrimSpace(item.SecretsBundle) == "" {
+		return nil, fmt.Errorf("缺少 SSH Key 或远端地址")
 	}
 	if err := ensureBitwardenSession(ctx, reporter, "remote.edit"); err != nil {
 		return nil, err
 	}
-	hosts, err := fetchRemoteSSHHosts(ctx, folder, keyName)
+	target, err := syncTargetFromRemoteItem(item)
 	if err != nil {
 		return nil, err
 	}
-	target, err := syncTargetFromRemoteItem(item)
+	hosts, err := fetchRemoteSSHHosts(ctx, target, keyName)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +167,6 @@ func PrepareRemoteSSHHostsEdit(ctx context.Context, projectRoot string, item Del
 		Path:          tmp.Name(),
 		ProjectRoot:   projectRoot,
 		Target:        target.Clone(),
-		Folder:        target.Folder,
 		KeyName:       keyName,
 		DecBundleName: target.Name,
 		TempFile:      true,
@@ -204,12 +190,6 @@ func CommitRemoteSSHHostsEdit(ctx context.Context, session RemoteSSHHostsEditSes
 		return err
 	}
 	target := session.Target.Clone()
-	if strings.TrimSpace(target.Folder) == "" && strings.TrimSpace(session.Folder) != "" {
-		target, err = secrets.NewBrowseFolder(session.Folder)
-		if err != nil {
-			return err
-		}
-	}
 	if err := requireRemoteEditableTarget(target); err != nil {
 		return err
 	}
@@ -218,7 +198,6 @@ func CommitRemoteSSHHostsEdit(ctx context.Context, session RemoteSSHHostsEditSes
 	}
 	client := secretsClientFactory()
 	req := secrets.UpdateSSHKeyHostsRequest{
-		Binding: secrets.BundleBinding{SecretsBundleName: target.Folder, DecBundleName: target.Name},
 		Target:  target.Clone(),
 		KeyName: session.KeyName,
 		Hosts:   hosts,
@@ -229,11 +208,7 @@ func CommitRemoteSSHHostsEdit(ctx context.Context, session RemoteSSHHostsEditSes
 	emit(reporter, EventInfo, "remote.edit",
 		fmt.Sprintf("已更新 SSH %q Hosts（%d）", session.KeyName, len(hosts)), nil)
 
-	decName := target.Name
-	if decName == "" {
-		decName = strings.TrimPrefix(target.Folder, secrets.BundleFolderPrefix)
-	}
-	if err := refreshLocalSSHHosts(ctx, client, session.ProjectRoot, target, decName, session.KeyName); err != nil {
+	if err := refreshLocalSSHHosts(ctx, client, session.ProjectRoot, target, target.Name, session.KeyName); err != nil {
 		return fmt.Errorf("Bitwarden 已更新，但本地 ~/.ssh 未刷新；请重新 Pull: %w", err)
 	}
 	return nil
@@ -241,49 +216,29 @@ func CommitRemoteSSHHostsEdit(ctx context.Context, session RemoteSSHHostsEditSes
 
 func requireRemoteEditableTarget(target secrets.SyncTarget) error {
 	if err := secrets.RequireDeclared(target); err != nil {
-		folder := strings.TrimSpace(target.Folder)
 		return fmt.Errorf(
-			"不能编辑非托管 folder %q：它不属于任何已声明归属，pull 不维护；请先迁移到 bundle/<名>: %w",
-			folder, err)
+			"不能编辑非托管地址 %q：它不属于任何 P，pull 不维护；请先迁移到 <p>/private/<plane>: %w",
+			strings.TrimSpace(target.Address), err)
 	}
 	return nil
 }
 
 // syncTargetFromRemoteItem 还原候选项对应的 SyncTarget。
-// 必须带上 item.Plane：machine 平面的 LocalRoot 是 bundles/<name>（相对 ~/.dec/secrets），
-// 丢了平面会让 AbsolutePath 误落到 <project>/bundles/...。
+// P 地址走声明型构造；存量非 P 地址只能浏览，写入会被 RequireDeclared 拒绝。
 func syncTargetFromRemoteItem(item DeleteSelectionItem) (secrets.SyncTarget, error) {
-	folder := strings.TrimSpace(item.SecretsBundle)
-	if folder == "" {
-		return secrets.SyncTarget{}, fmt.Errorf("缺少 secrets folder")
+	address := strings.TrimSpace(item.SecretsBundle)
+	if address == "" {
+		return secrets.SyncTarget{}, fmt.Errorf("缺少远端地址")
 	}
-	if pName, plane, ok := secrets.ParsePFolder(folder); ok {
-		return secrets.NewPSyncTarget(pName, plane)
+	if scope, err := secrets.ParseRemoteScope(address); err == nil {
+		return secrets.NewPSyncTarget(scope.P, scope.Plane)
 	}
-	if !strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
-		// ADR 0014：裸 folder 一律按浏览（非声明）处理；写入由 RequireDeclared 拒绝。
-		return secrets.NewBrowseFolder(folder)
-	}
-	bundleName := strings.TrimSpace(item.DecBundleName)
-	if bundleName == "" {
-		bundleName = strings.TrimPrefix(folder, secrets.BundleFolderPrefix)
-	}
-	if secrets.IsMachinePlane(item.Plane) {
-		return secrets.NewMachineBundleSyncTarget(bundleName, folder)
-	}
-	return secrets.NewBundleSyncTarget(bundleName, folder)
+	return secrets.NewBrowseAddress(address)
 }
 
 func fetchRemoteNoteContent(ctx context.Context, target secrets.SyncTarget, noteRel string) (string, error) {
 	client := secretsClientFactory()
-	result, err := client.PullBundle(ctx, secrets.PullBundleRequest{
-		Target:        target,
-		DecBundleName: target.Name,
-		Binding: secrets.BundleBinding{
-			DecBundleName:     target.Name,
-			SecretsBundleName: target.Folder,
-		},
-	})
+	result, err := client.PullBundle(ctx, secrets.PullBundleRequest{Target: target})
 	if err != nil {
 		return "", err
 	}
@@ -292,21 +247,12 @@ func fetchRemoteNoteContent(ctx context.Context, target secrets.SyncTarget, note
 			return note.Content, nil
 		}
 	}
-	return "", fmt.Errorf("远端未找到 note %q（folder %s）", noteRel, target.Folder)
+	return "", fmt.Errorf("远端未找到 note %q（%s）", noteRel, target.Address)
 }
 
-func fetchRemoteSSHHosts(ctx context.Context, folder, keyName string) ([]string, error) {
+func fetchRemoteSSHHosts(ctx context.Context, target secrets.SyncTarget, keyName string) ([]string, error) {
 	client := secretsClientFactory()
-	target, err := secrets.NewBrowseFolder(folder)
-	if err != nil {
-		return nil, err
-	}
-	result, err := client.PullBundle(ctx, secrets.PullBundleRequest{
-		Target: target,
-		Binding: secrets.BundleBinding{
-			SecretsBundleName: folder,
-		},
-	})
+	result, err := client.PullBundle(ctx, secrets.PullBundleRequest{Target: target})
 	if err != nil {
 		return nil, err
 	}
@@ -330,22 +276,19 @@ func parseHostsEditFile(raw string) ([]string, error) {
 	return secrets.NormalizeSSHHosts(lines)
 }
 
-// PrepareRemoteNoteRegister 为「向任意 folder 新建 Secure Note」准备临时文件（不种本地同步根）。
+// PrepareRemoteNoteRegister 为「向某个 P 平面新建 Secure Note」准备临时文件（不种本地同步根）。
 // initialBody 为可选预填正文（不含注释头）。
-func PrepareRemoteNoteRegister(ctx context.Context, projectRoot, folder, noteRel, initialBody string, reporter Reporter) (*RemoteNoteEditSession, error) {
+func PrepareRemoteNoteRegister(ctx context.Context, projectRoot string, scope secrets.RemoteScope, noteRel, initialBody string, reporter Reporter) (*RemoteNoteEditSession, error) {
 	reporter = defaultReporter(reporter)
-	folder = strings.TrimSpace(folder)
-	if folder == "" {
-		return nil, fmt.Errorf("必须指定远端 folder")
-	}
-	target, err := resolveRemoteRegisterTarget(NewWorkspace(WorkspaceProject, projectRoot), folder, false, reporter)
+	target, err := resolveRemoteRegisterTarget(NewWorkspace(WorkspaceProject, projectRoot), scope, false, reporter)
 	if err != nil {
 		return nil, err
 	}
-	rel, err := secrets.RemoteNoteName(target, noteRel)
+	rel, err := secrets.NormalizeNoteRel(noteRel)
 	if err != nil {
 		return nil, err
 	}
+	address := target.Address
 	if err := ensureBitwardenSession(ctx, reporter, "remote.register"); err != nil {
 		return nil, err
 	}
@@ -353,7 +296,7 @@ func PrepareRemoteNoteRegister(ctx context.Context, projectRoot, folder, noteRel
 	if err != nil {
 		return nil, err
 	}
-	header := fmt.Sprintf("# Dec Remote 登记 → folder %s / note %s\n# 保存后写回 Bitwarden；不落本地同步根\n", folder, rel)
+	header := fmt.Sprintf("# Dec Remote 登记 → %s / note %s\n# 保存后写回 Bitwarden；不落本地同步根\n", address, rel)
 	body := header
 	if strings.TrimSpace(initialBody) != "" {
 		body = header + "\n" + initialBody
@@ -371,7 +314,7 @@ func PrepareRemoteNoteRegister(ctx context.Context, projectRoot, folder, noteRel
 		return nil, err
 	}
 	emit(reporter, EventInfo, "remote.register",
-		fmt.Sprintf("已准备临时文件登记 %s → %s（不写本地同步根）", rel, folder), nil)
+		fmt.Sprintf("已准备临时文件登记 %s → %s（不写本地同步根）", rel, address), nil)
 	return &RemoteNoteEditSession{
 		Path:         tmp.Name(),
 		ProjectRoot:  projectRoot,
@@ -382,11 +325,15 @@ func PrepareRemoteNoteRegister(ctx context.Context, projectRoot, folder, noteRel
 	}, nil
 }
 
-// CommitRemoteNoteRegister 与 CommitRemoteNoteEdit 相同：把临时文件推回远端 folder。
+// CommitRemoteNoteRegister 与 CommitRemoteNoteEdit 相同：把临时文件推回远端。
 func CommitRemoteNoteRegister(ctx context.Context, session RemoteNoteEditSession, reporter Reporter) error {
+	scope, err := session.Target.Scope()
+	if err != nil {
+		return err
+	}
 	target, err := resolveRemoteRegisterTarget(
 		NewWorkspace(WorkspaceProject, session.ProjectRoot),
-		session.Target.Folder,
+		scope,
 		true,
 		reporter,
 	)
@@ -397,22 +344,18 @@ func CommitRemoteNoteRegister(ctx context.Context, session RemoteNoteEditSession
 	return CommitRemoteNoteEdit(ctx, session, reporter)
 }
 
-// RegisterRemoteNoteFromPath 从显式本地路径读内容并写到任意远端 folder（不要求落在 SyncTarget.LocalRoot）。
-func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRel, localPath string, reporter Reporter) (*AddSecretResult, error) {
+// RegisterRemoteNoteFromPath 从显式本地路径读内容并写到远端（不要求落在 SyncTarget.LocalRoot）。
+func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot string, scope secrets.RemoteScope, noteRel, localPath string, reporter Reporter) (*AddSecretResult, error) {
 	reporter = defaultReporter(reporter)
-	folder = strings.TrimSpace(folder)
 	localPath = strings.TrimSpace(localPath)
-	if folder == "" {
-		return nil, fmt.Errorf("必须指定远端 folder")
-	}
 	if localPath == "" {
 		return nil, fmt.Errorf("必须指定本地文件路径")
 	}
-	target, err := resolveRemoteRegisterTarget(NewWorkspace(WorkspaceProject, projectRoot), folder, false, reporter)
+	target, err := resolveRemoteRegisterTarget(NewWorkspace(WorkspaceProject, projectRoot), scope, false, reporter)
 	if err != nil {
 		return nil, err
 	}
-	rel, err := secrets.RemoteNoteName(target, noteRel)
+	rel, err := secrets.NormalizeNoteRel(noteRel)
 	if err != nil {
 		return nil, err
 	}
@@ -440,18 +383,14 @@ func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRe
 	if err := ensureBitwardenSession(ctx, reporter, "remote.register"); err != nil {
 		return nil, err
 	}
-	target, err = resolveRemoteRegisterTarget(NewWorkspace(WorkspaceProject, projectRoot), folder, true, reporter)
+	target, err = resolveRemoteRegisterTarget(NewWorkspace(WorkspaceProject, projectRoot), scope, true, reporter)
 	if err != nil {
 		return nil, err
 	}
 	client := secretsClientFactory()
 	req := secrets.PushBundleRequest{
-		ProjectRoot: projectRoot,
-		Target:      target.Clone(),
-		Binding: secrets.BundleBinding{
-			DecBundleName:     target.Name,
-			SecretsBundleName: target.Folder,
-		},
+		ProjectRoot:           projectRoot,
+		Target:                target.Clone(),
 		CreateFolderIfMissing: true,
 	}
 	result, err := client.PushBundle(ctx, req, []secrets.SecureNote{{
@@ -461,16 +400,15 @@ func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRe
 	if err != nil {
 		return nil, err
 	}
-	msg := fmt.Sprintf("已登记 %s → folder %q（不写本地同步根）", rel, folder)
+	msg := fmt.Sprintf("已登记 %s → %s（不写本地同步根）", rel, target.Address)
 	if result != nil {
-		msg = fmt.Sprintf("已登记 %s → folder %q（created=%d updated=%d；不写本地同步根）",
-			rel, folder, result.Created, result.Updated)
+		msg = fmt.Sprintf("已登记 %s → %s（created=%d updated=%d；不写本地同步根）",
+			rel, target.Address, result.Created, result.Updated)
 	}
 	emit(reporter, EventInfo, "remote.register", msg, nil)
 	return &AddSecretResult{
-		Kind:           target.Kind,
 		TargetName:     target.Name,
-		Folder:         target.Folder,
+		Address:        target.Address,
 		NoteRelPath:    rel,
 		ProjectRelPath: localPath,
 		LandingPath:    localPath,
@@ -480,7 +418,7 @@ func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRe
 func refreshLocalSSHHosts(ctx context.Context, client secrets.Client, projectRoot string, target secrets.SyncTarget, decBundleName, keyName string) error {
 	var exists bool
 	var err error
-	if target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+	if secrets.IsMachinePlane(target.Plane) {
 		exists, err = secrets.LocalSSHKeyExists(decBundleName, keyName)
 	} else {
 		exists, err = secrets.InspectProjectSSHKeyLanding(projectRoot, decBundleName, keyName)
@@ -489,18 +427,13 @@ func refreshLocalSSHHosts(ctx context.Context, client secrets.Client, projectRoo
 		return err
 	}
 	result, err := client.PullBundle(ctx, secrets.PullBundleRequest{
-		ProjectRoot:   projectRoot,
-		Target:        target.Clone(),
-		DecBundleName: decBundleName,
-		Binding: secrets.BundleBinding{
-			DecBundleName:     decBundleName,
-			SecretsBundleName: target.Folder,
-		},
+		ProjectRoot: projectRoot,
+		Target:      target.Clone(),
 	})
 	if err != nil {
 		return err
 	}
-	// 用 folder 内全部 Key 做冲突检测，避免 Remote 编辑绕过跨 Key Host 冲突。
+	// 用同一归属下全部 Key 做冲突检测，避免 Remote 编辑绕过跨 Key Host 冲突。
 	all := append([]secrets.SSHKeyItem(nil), result.SSHKeys...)
 	if len(all) == 0 {
 		return fmt.Errorf("Bitwarden 中该 bundle 没有 SSH Key")
@@ -530,7 +463,7 @@ func refreshLocalSSHHosts(ctx context.Context, client secrets.Client, projectRoo
 	if len(one) == 0 {
 		return fmt.Errorf("无法为 SSH Key %q 生成本地 ~/.ssh 条目", keyName)
 	}
-	if target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+	if secrets.IsMachinePlane(target.Plane) {
 		return secrets.WriteSSHKeyLandings(one)
 	}
 	return secrets.WriteProjectSSHKeyLandings(projectRoot, one)

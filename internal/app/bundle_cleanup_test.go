@@ -51,14 +51,14 @@ bundles:
 	}); err != nil {
 		t.Fatal(err)
 	}
-	secretDir := filepath.Join(projectRoot, ".secrets", "bundles", "pkv", "env")
+	secretDir := filepath.Join(projectRoot, ".secrets", "pkv", "env")
 	if err := os.MkdirAll(secretDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(secretDir, "x.env"), []byte("A=1\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	machineSecret := filepath.Join(decHome, "secrets", "bundles", "pkv", "env")
+	machineSecret := filepath.Join(decHome, "secrets", "pkv", "env")
 	if err := os.MkdirAll(machineSecret, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -105,10 +105,10 @@ bundles:
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "pkv")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "pkv")); !os.IsNotExist(err) {
 		t.Fatalf("项目 secrets 同步根应已删, err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(decHome, "secrets", "bundles", "pkv")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(decHome, "secrets", "pkv")); !os.IsNotExist(err) {
 		t.Fatalf("机器 secrets 同步根应已删, err=%v", err)
 	}
 
@@ -160,7 +160,7 @@ bundles:
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/pkv/.env/left.env", "X=1\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/pkv/.env/left.env", "X=1\n")
 
 	_, err := RemoveAsset(RemoveAssetInput{
 		ProjectRoot: projectRoot,
@@ -180,7 +180,7 @@ bundles:
 	if len(cfg.KnownSecretBundleNames()) != 0 {
 		t.Fatalf("删空 bundle 后 known 应无 pkv: %#v", cfg.KnownSecretBundleNames())
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "pkv")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "pkv")); !os.IsNotExist(err) {
 		t.Fatalf("本地 secrets 应已清")
 	}
 	if err := withAppReadRepo(func(tx *repo.Transaction) error {
@@ -208,7 +208,7 @@ func TestPushAfterRemoveBundle_DoesNotResurrectFromLocalRemnants(t *testing.T) {
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/pkv/commands/pkv/note.md":      "# pkv\n",
 		"bundles/default/skills/hello/SKILL.md": "---\nname: hello\n---\n",
-		"projects/Dec.yaml": `name: Dec
+		"projects/dec.yaml": `name: dec
 bundles:
   - pkv
   - default
@@ -221,7 +221,7 @@ bundles:
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Dec",
+		ProjectName:    "dec",
 		EnabledBundles: []string{"pkv", "default"},
 	}); err != nil {
 		t.Fatal(err)
@@ -237,7 +237,7 @@ bundles:
 	}
 
 	// 模拟「旧 bug」残留：本地又出现 secrets / cache，且误把 pkv 写回 enabled。
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/pkv/.env/ghost.env", "GHOST=1\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/pkv/.env/ghost.env", "GHOST=1\n")
 	cacheCmd := filepath.Join(projectRoot, ".dec", "cache", "pkv", "commands", "pkv", "note.md")
 	if err := os.MkdirAll(filepath.Dir(cacheCmd), 0755); err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ bundles:
 		t.Fatal(err)
 	}
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Dec",
+		ProjectName:    "dec",
 		EnabledBundles: []string{"pkv", "default"},
 	}); err != nil {
 		t.Fatal(err)
@@ -276,7 +276,7 @@ bundles:
 	// 这里故意种回本地根以验证 Dec 侧不复活；secrets 侧若仍启用则会推 — 收敛删除的关键是清 enabled+本地根。
 	// 再跑一次：去掉 enabled 后 secrets 不应再建 folder。
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Dec",
+		ProjectName:    "dec",
 		EnabledBundles: []string{"default"},
 	}); err != nil {
 		t.Fatal(err)
@@ -286,8 +286,8 @@ bundles:
 	if err != nil {
 		t.Fatalf("PushSecretsBundles() = %v", err)
 	}
-	if _, ok := stub.NotesByFolder["bundle/pkv"]; ok {
-		t.Fatalf("未启用时不应 push 出 bundle/pkv: %#v", stub.NotesByFolder)
+	if _, ok := stub.NotesByFolder["pkv/private/project"]; ok {
+		t.Fatalf("未启用时不应 push 出 pkv: %#v", stub.NotesByFolder)
 	}
 	if secResult.CreatedCount != 0 {
 		t.Fatalf("未启用 pkv 时不应新建 secrets: %#v", secResult)

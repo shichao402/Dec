@@ -256,17 +256,17 @@ func AddSecretToTarget(ctx context.Context, projectRoot string, target secrets.S
 	}{target, noteRel}, reporter)
 }
 
-func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRel, localPath string, reporter app.Reporter) (*app.AddSecretResult, error) {
+func RegisterRemoteNoteFromPath(ctx context.Context, projectRoot string, scope secrets.RemoteScope, noteRel, localPath string, reporter app.Reporter) (*app.AddSecretResult, error) {
 	return run[app.AddSecretResult](ctx, "register_remote_note_from_path", projectRoot, struct {
-		Folder    string
+		Scope     secrets.RemoteScope
 		NoteRel   string
 		LocalPath string
-	}{folder, noteRel, localPath}, reporter)
+	}{scope, noteRel, localPath}, reporter)
 }
 
-func ValidateRemoteRegisterFolder(ctx context.Context, workspace app.Workspace, folder string) error {
-	_, err := invokeWorkspace[struct{}](ctx, "validate_remote_register_folder", workspace,
-		struct{ Folder string }{folder}, nil)
+func ValidateRemoteRegisterScope(ctx context.Context, workspace app.Workspace, scope secrets.RemoteScope) error {
+	_, err := invokeWorkspace[struct{}](ctx, "validate_remote_register_scope", workspace,
+		struct{ Scope secrets.RemoteScope }{scope}, nil)
 	return err
 }
 
@@ -284,12 +284,12 @@ func PrepareRemoteNoteEdit(ctx context.Context, projectRoot string, item app.Del
 	return invoke[app.RemoteNoteEditSession](ctx, "prepare_remote_note_edit", projectRoot, item, reporter)
 }
 
-func PrepareRemoteNoteRegister(ctx context.Context, projectRoot, folder, noteRel, initialBody string, reporter app.Reporter) (*app.RemoteNoteEditSession, error) {
+func PrepareRemoteNoteRegister(ctx context.Context, projectRoot string, scope secrets.RemoteScope, noteRel, initialBody string, reporter app.Reporter) (*app.RemoteNoteEditSession, error) {
 	return invoke[app.RemoteNoteEditSession](ctx, "prepare_remote_note_register", projectRoot, struct {
-		Folder      string
+		Scope       secrets.RemoteScope
 		NoteRel     string
 		InitialBody string
-	}{folder, noteRel, initialBody}, reporter)
+	}{scope, noteRel, initialBody}, reporter)
 }
 
 func PrepareRemoteSSHHostsEdit(ctx context.Context, projectRoot string, item app.DeleteSelectionItem, reporter app.Reporter) (*app.RemoteSSHHostsEditSession, error) {

@@ -342,10 +342,10 @@ func TestLoadAssetSelection_IncludesRemoteSecretMembersAndCaches(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"bundle/agents-board": {{RelativePath: ".env/foo.env"}},
+				"agents-board/private/project": {{RelativePath: ".env/foo.env"}},
 			},
 			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-				"bundle/agents-board": {{Name: ".sshkey/deploy"}},
+				"agents-board/private/project": {{Name: ".sshkey/deploy"}},
 			},
 		}
 	}
@@ -411,7 +411,7 @@ func TestLoadWorkspaceAssetSelection_SecretsOnlyShowsCachedMembers(t *testing.T)
 		return &secrets.StubClient{
 			SecretBundleFolders: []string{"pkv"},
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"bundle/pkv": {{RelativePath: ".env/pkv.env"}},
+				"pkv/private/user": {{RelativePath: ".env/pkv.env"}},
 			},
 		}
 	}

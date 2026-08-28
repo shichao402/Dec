@@ -15,12 +15,12 @@ import (
 // RepoGCMCandidate 是可用于私仓 bootstrap 的 Bitwarden GCM Note 元数据。
 // 只包含可展示字段；token/正文绝不离开 dec-server。
 type RepoGCMCandidate struct {
-	Folder    string
+	Address   string // 远端逻辑地址；存量非 P 条目用其 folder 名
 	NotePath  string
 	Host      string
 	Username  string
 	Protocol  string
-	Unmanaged bool // 非 bundle/* folder；Apply 允许，但正常 pull 不维护
+	Unmanaged bool // 不属于任何 P；Apply 允许，但正常 pull 不维护
 }
 
 type PrepareRepoGCMBootstrapResult struct {
@@ -31,7 +31,7 @@ type PrepareRepoGCMBootstrapResult struct {
 
 type ApplyRepoGCMBootstrapInput struct {
 	RepoURL  string
-	Folder   string
+	Address  string
 	NotePath string
 }
 
@@ -92,18 +92,22 @@ func PrepareRepoGCMBootstrap(ctx context.Context, repoURL string, reporter Repor
 	}
 
 	client := secretsClientFactory()
-	folders, err := client.ListAllFolderNames(ctx)
+	addresses, err := client.ListAddresses(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("枚举 Bitwarden folder: %w", err)
+		return nil, fmt.Errorf("枚举 Bitwarden 远端地址: %w", err)
 	}
-	sort.Strings(folders)
+	sort.Strings(addresses)
 
 	result := &PrepareRepoGCMBootstrapResult{RepoURL: repoURL, RepoHost: host}
-	for _, folder := range folders {
-		notes, listErr := client.ListFolderNotes(ctx, folder)
+	for _, address := range addresses {
+		target, targetErr := secrets.NewBrowseAddress(address)
+		if targetErr != nil {
+			continue
+		}
+		notes, listErr := client.ListNotes(ctx, target)
 		if listErr != nil {
 			emit(reporter, EventWarn, "settings.repo.bootstrap",
-				fmt.Sprintf("跳过 folder %q：%v", folder, listErr), nil)
+				fmt.Sprintf("跳过 %q：%v", address, listErr), nil)
 			continue
 		}
 		for _, noteMeta := range notes {
@@ -111,35 +115,36 @@ func PrepareRepoGCMBootstrap(ctx context.Context, repoURL string, reporter Repor
 			if !handler.MatchGCMPath(notePath) {
 				continue
 			}
-			note, getErr := client.GetSecureNote(ctx, folder, noteMeta.Name)
+			note, getErr := client.GetNote(ctx, target, noteMeta.Name)
 			if getErr != nil {
 				emit(reporter, EventWarn, "settings.repo.bootstrap",
-					fmt.Sprintf("跳过 %s/%s：%v", folder, noteMeta.Name, getErr), nil)
+					fmt.Sprintf("跳过 %s/%s：%v", address, noteMeta.Name, getErr), nil)
 				continue
 			}
 			identity, inspectErr := handler.InspectGCM(notePath, note.Content)
 			if inspectErr != nil {
 				emit(reporter, EventWarn, "settings.repo.bootstrap",
-					fmt.Sprintf("跳过无效 GCM Note %s/%s：%v", folder, noteMeta.Name, inspectErr), nil)
+					fmt.Sprintf("跳过无效 GCM Note %s/%s：%v", address, noteMeta.Name, inspectErr), nil)
 				continue
 			}
 			if !strings.EqualFold(stripHostPort(identity.Host), host) {
 				continue
 			}
-			unmanaged := !strings.HasPrefix(folder, secrets.BundleFolderPrefix)
+			_, scopeErr := secrets.ParseRemoteScope(address)
+			unmanaged := scopeErr != nil
 			result.Candidates = append(result.Candidates, RepoGCMCandidate{
-				Folder: folder, NotePath: notePath, Host: identity.Host,
+				Address: address, NotePath: notePath, Host: identity.Host,
 				Username: identity.Username, Protocol: identity.Protocol, Unmanaged: unmanaged,
 			})
 			if unmanaged {
 				emit(reporter, EventWarn, "settings.repo.bootstrap",
-					fmt.Sprintf("%s/%s 不属于任何 bundle，pull 不维护；建议迁移到 bundle/<名>", folder, notePath), nil)
+					fmt.Sprintf("%s/%s 不属于任何 P，pull 不维护；建议迁移到 <p>/private/<plane>", address, notePath), nil)
 			}
 		}
 	}
 	sort.Slice(result.Candidates, func(i, j int) bool {
-		if result.Candidates[i].Folder != result.Candidates[j].Folder {
-			return result.Candidates[i].Folder < result.Candidates[j].Folder
+		if result.Candidates[i].Address != result.Candidates[j].Address {
+			return result.Candidates[i].Address < result.Candidates[j].Address
 		}
 		return result.Candidates[i].NotePath < result.Candidates[j].NotePath
 	})
@@ -157,20 +162,24 @@ func ApplyRepoGCMBootstrap(ctx context.Context, input ApplyRepoGCMBootstrapInput
 		return nil, err
 	}
 	input.RepoURL = resolvedURL
-	input.Folder = strings.TrimSpace(input.Folder)
+	input.Address = strings.TrimSpace(input.Address)
 	input.NotePath = handler.NormalizeNotePath(input.NotePath)
 	host, err := repo.RepoHost(input.RepoURL)
 	if err != nil {
 		return nil, err
 	}
-	if input.Folder == "" || !handler.MatchGCMPath(input.NotePath) {
+	if input.Address == "" || !handler.MatchGCMPath(input.NotePath) {
 		return nil, fmt.Errorf("无效的 GCM bootstrap 候选")
 	}
 	if err := ensureBitwardenSession(ctx, reporter, "settings.repo.bootstrap"); err != nil {
 		return nil, err
 	}
 
-	note, err := secretsClientFactory().GetSecureNote(ctx, input.Folder, input.NotePath)
+	target, err := secrets.NewBrowseAddress(input.Address)
+	if err != nil {
+		return nil, err
+	}
+	note, err := secretsClientFactory().GetNote(ctx, target, input.NotePath)
 	if err != nil {
 		return nil, err
 	}
@@ -184,24 +193,25 @@ func ApplyRepoGCMBootstrap(ctx context.Context, input ApplyRepoGCMBootstrapInput
 
 	item := handler.Item{
 		Source: handler.SourceNote, Name: input.NotePath, NoteContent: note.Content,
-		BundleName: input.Folder,
+		BundleName: input.Address,
 	}
 	h := handler.Default().Find(handler.SourceNote, input.NotePath)
 	if h == nil || h.Kind() != "gcm" {
 		return nil, fmt.Errorf("未注册 GCM Processor")
 	}
 	emit(reporter, EventInfo, "settings.repo.bootstrap",
-		fmt.Sprintf("正在应用 %s/%s 到 Git Credential Manager", input.Folder, input.NotePath), nil)
+		fmt.Sprintf("正在应用 %s/%s 到 Git Credential Manager", input.Address, input.NotePath), nil)
 	if err := h.Apply(ctx, item); err != nil {
 		return nil, err
 	}
 	if err := probeRepoForBootstrap(input.RepoURL); err != nil {
 		return nil, fmt.Errorf("GCM 已应用，但仓库仍不可访问: %w", err)
 	}
+	_, scopeErr := secrets.ParseRemoteScope(input.Address)
 	candidate := RepoGCMCandidate{
-		Folder: input.Folder, NotePath: input.NotePath, Host: identity.Host,
+		Address: input.Address, NotePath: input.NotePath, Host: identity.Host,
 		Username: identity.Username, Protocol: identity.Protocol,
-		Unmanaged: !strings.HasPrefix(input.Folder, secrets.BundleFolderPrefix),
+		Unmanaged: scopeErr != nil,
 	}
 	emit(reporter, EventInfo, "settings.repo.bootstrap", "GCM 已应用，仓库认证验证通过", nil)
 	return &ApplyRepoGCMBootstrapResult{RepoURL: input.RepoURL, RepoHost: host, Candidate: candidate}, nil

@@ -85,7 +85,7 @@ func pruneOrphanSecretsForTarget(
 				NoteContent:   string(content),
 				ProjectRoot:   projectRoot,
 				BundleName:    target.Name,
-				ProjectScoped: target.Kind == secrets.SyncKindP && !secrets.IsMachinePlane(target.Plane),
+				ProjectScoped: !secrets.IsMachinePlane(target.Plane),
 			}}); revokeErr != nil {
 				emit(reporter, EventWarn, "pull.reconcile",
 					fmt.Sprintf("撤销孤儿 handler %s 失败: %v", note.RelativePath, revokeErr), nil)
@@ -118,7 +118,7 @@ func pruneOrphanSecretsForTarget(
 		keepKeys[name] = struct{}{}
 	}
 	localKeyNames := listLocalSSHKeyNamesForBundle(owner)
-	if target.Kind == secrets.SyncKindP && !secrets.IsMachinePlane(target.Plane) {
+	if !secrets.IsMachinePlane(target.Plane) {
 		var listErr error
 		localKeyNames, listErr = secrets.ListProjectSSHKeyNames(projectRoot, owner)
 		if listErr != nil {
@@ -132,7 +132,7 @@ func pruneOrphanSecretsForTarget(
 			continue
 		}
 		var err error
-		if target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+		if secrets.IsMachinePlane(target.Plane) {
 			err = secrets.RemoveSSHKeyLanding(owner, keyName)
 		} else {
 			err = secrets.RemoveProjectSSHKeyLanding(projectRoot, owner, keyName)
@@ -154,10 +154,8 @@ func pruneOrphanSecretsForTarget(
 	return report
 }
 
+// secretsOwnerForTarget 返回 SSH Key 落地文件名里的归属段：P 名。
 func secretsOwnerForTarget(target secrets.SyncTarget) string {
-	if target.Kind == secrets.SyncKindProject {
-		return "project"
-	}
 	return target.Name
 }
 
@@ -311,25 +309,18 @@ func localSecretBundleDirsForPlane(workspace Workspace, bundleName string) []str
 	if bundleName == "" {
 		return nil
 	}
-	usesP, _ := connectedRepositoryUsesPModel()
 	if workspace.EffectivePlane() == WorkspaceUser {
 		machineRoot, err := secrets.MachineSecretsRoot()
 		if err != nil {
 			return nil
 		}
-		if usesP {
-			return []string{filepath.Join(machineRoot, bundleName)}
-		}
-		return []string{filepath.Join(machineRoot, filepath.FromSlash(secrets.MachineBundleSecretsRelPrefix), bundleName)}
+		return []string{filepath.Join(machineRoot, bundleName)}
 	}
 	projectRoot := strings.TrimSpace(workspace.Root)
 	if projectRoot == "" {
 		return nil
 	}
-	if usesP {
-		return []string{filepath.Join(projectRoot, secrets.SecretsRootDir, bundleName)}
-	}
-	return []string{filepath.Join(projectRoot, filepath.FromSlash(secrets.BundleSecretsLocalRelPrefix), bundleName)}
+	return []string{filepath.Join(projectRoot, secrets.SecretsRootDir, bundleName)}
 }
 
 func configNormalize(names []string) []string {

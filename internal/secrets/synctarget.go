@@ -6,16 +6,10 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-
-	"github.com/shichao402/Dec/internal/types"
 )
 
-// BundleFolderPrefix 是 Bitwarden 中 bundle 级 folder 的统一前缀，
-// 用于与 project 级 folder（裸实体名）区分。
-const BundleFolderPrefix = "bundle/"
-
 const (
-	PPrivateFolderSegment = "private"
+	PPrivateFolderSegment = bwPrivateSegment
 )
 
 // Declared 报告 target 是否由声明型构造函数产生。
@@ -29,49 +23,56 @@ func (t SyncTarget) Clone() SyncTarget {
 	return t
 }
 
+// Scope 返回远端寻址域。只有声明型 P target 能读写远端；浏览节点会失败。
+func (t SyncTarget) Scope() (RemoteScope, error) {
+	if scope, err := ParseRemoteScope(t.Address); err == nil {
+		return scope, nil
+	}
+	return NewRemoteScope(t.Name, t.Plane)
+}
+
 // RequireDeclared 拒绝把浏览节点或手工拼装的 SyncTarget 用于写入。
 func RequireDeclared(t SyncTarget) error {
 	if t.Declared() {
 		return nil
 	}
-	label := strings.TrimSpace(t.Folder)
+	label := strings.TrimSpace(t.Address)
 	if label == "" {
 		label = strings.TrimSpace(t.Name)
 	}
 	if label == "" {
 		label = "<empty>"
 	}
-	return fmt.Errorf("SyncTarget %q 未声明：ADR 0013 要求写入目标通过声明型构造函数创建", label)
+	return fmt.Errorf("SyncTarget %q 未声明：写入目标必须通过声明型构造函数创建", label)
 }
 
-// NewBrowseFolder 构造只读远端 folder 节点。它故意保持未声明，
-// 可用于 Remote 浏览与删除，但不能传给写入方法。
-func NewBrowseFolder(folder string) (SyncTarget, error) {
-	folder = strings.TrimSpace(folder)
-	if folder == "" {
-		return SyncTarget{}, fmt.Errorf("浏览 folder 不能为空")
+// NewBrowseAddress 构造只读远端节点。它故意保持未声明，可用于 Remote 浏览与
+// 删除存量条目，但不能传给写入方法。
+func NewBrowseAddress(address string) (SyncTarget, error) {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return SyncTarget{}, fmt.Errorf("浏览地址不能为空")
 	}
-	return SyncTarget{
-		Kind:   SyncKindProject,
-		Name:   folder,
-		Folder: folder,
-	}, nil
+	target := SyncTarget{Name: address, Address: address}
+	if scope, err := ParseRemoteScope(address); err == nil {
+		target.Name = scope.P
+		target.Plane = scope.Plane
+	}
+	return target, nil
 }
 
 // MarshalJSON 显式携带声明标记，使 dec TUI 与 dec-server 之间的短生命周期
 // SyncTarget 不会因未导出字段被 JSON 丢失。
 func (t SyncTarget) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind      SyncKind
 		Name      string
-		Folder    string
+		Address   string
 		LocalRoot string
 		Plane     SyncPlane
 		Declared  bool
 	}{
-		Kind:      t.Kind,
 		Name:      t.Name,
-		Folder:    t.Folder,
+		Address:   t.Address,
 		LocalRoot: t.LocalRoot,
 		Plane:     t.Plane,
 		Declared:  t.Declared(),
@@ -81,9 +82,8 @@ func (t SyncTarget) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON 仅通过声明型构造函数恢复 declared=true，再复制原有展示字段。
 func (t *SyncTarget) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Kind      SyncKind
 		Name      string
-		Folder    string
+		Address   string
 		LocalRoot string
 		Plane     SyncPlane
 		Declared  bool
@@ -93,33 +93,15 @@ func (t *SyncTarget) UnmarshalJSON(data []byte) error {
 	}
 	if !raw.Declared {
 		*t = SyncTarget{
-			Kind:      raw.Kind,
 			Name:      raw.Name,
-			Folder:    raw.Folder,
+			Address:   raw.Address,
 			LocalRoot: raw.LocalRoot,
 			Plane:     raw.Plane,
 		}
 		return nil
 	}
 
-	var (
-		rebuilt SyncTarget
-		err     error
-	)
-	switch raw.Kind {
-	case SyncKindP:
-		rebuilt, err = NewPSyncTarget(raw.Name, raw.Plane)
-	case SyncKindProject:
-		rebuilt, err = NewProjectSyncTarget(raw.Name, raw.Folder)
-	case SyncKindBundle:
-		if IsMachinePlane(raw.Plane) {
-			rebuilt, err = NewMachineBundleSyncTarget(raw.Name, raw.Folder)
-		} else {
-			rebuilt, err = NewBundleSyncTarget(raw.Name, raw.Folder)
-		}
-	default:
-		err = fmt.Errorf("未知 SyncKind %q", raw.Kind)
-	}
+	rebuilt, err := NewPSyncTarget(raw.Name, raw.Plane)
 	if err != nil {
 		return fmt.Errorf("恢复已声明 SyncTarget 失败: %w", err)
 	}
@@ -127,199 +109,53 @@ func (t *SyncTarget) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// PFolder 返回 ADR 0016 固定 Bitwarden folder 名。Bitwarden 的斜杠只是
-// folder 名的一部分，不表示层级。
+// PFolder 返回 P + 平面的逻辑地址 <p>/private/<plane>。
+//
+// Deprecated: 用 RemoteScope.String()。保留给存量调用点，返回值不是 Bitwarden
+// folder 名——BW 上的 folder 只有 P 名一级。
 func PFolder(pName string, plane SyncPlane) string {
-	if IsMachinePlane(plane) {
-		return path.Join(strings.TrimSpace(pName), PPrivateFolderSegment, string(SyncPlaneUser))
+	scope, err := NewRemoteScope(pName, plane)
+	if err != nil {
+		return ""
 	}
-	return path.Join(strings.TrimSpace(pName), PPrivateFolderSegment, string(SyncPlaneProject))
+	return scope.String()
 }
 
-// ParsePFolder 只识别 <p>/private/user 与 <p>/private/project。
-func ParsePFolder(folder string) (pName string, plane SyncPlane, ok bool) {
-	clean := strings.Trim(strings.TrimSpace(strings.ReplaceAll(folder, "\\", "/")), "/")
-	parts := strings.Split(clean, "/")
-	if len(parts) != 3 || parts[1] != PPrivateFolderSegment || !types.IsValidPName(parts[0]) {
+// ParsePFolder 解析逻辑地址 <p>/private/<plane>。
+//
+// Deprecated: 用 ParseRemoteScope。
+func ParsePFolder(address string) (pName string, plane SyncPlane, ok bool) {
+	scope, err := ParseRemoteScope(address)
+	if err != nil {
 		return "", "", false
 	}
-	switch parts[2] {
-	case string(SyncPlaneUser), string(SyncPlaneMachine):
-		return parts[0], SyncPlaneMachine, true
-	case string(SyncPlaneProject):
-		return parts[0], SyncPlaneProject, true
-	default:
-		return "", "", false
-	}
+	return scope.P, scope.Plane, true
 }
 
-// NewPSyncTarget 构造 ADR 0016 P + plane 声明目标。folder 与本地根均不可自定义：
+// NewPSyncTarget 构造 ADR 0016 P + plane 声明目标。地址与本地根均不可自定义：
 // user: <p>/private/user ↔ ~/.dec/secrets/<p>/
 // project: <p>/private/project ↔ <workspace>/.secrets/<p>/
 func NewPSyncTarget(pName string, plane SyncPlane) (SyncTarget, error) {
-	name := strings.TrimSpace(pName)
-	if !types.IsValidPName(name) {
-		return SyncTarget{}, fmt.Errorf("P 名 %q 非法，必须为小写 kebab-case", pName)
+	scope, err := NewRemoteScope(pName, plane)
+	if err != nil {
+		return SyncTarget{}, err
 	}
-	if plane == "" {
-		plane = SyncPlaneProject
-	}
-	if plane != SyncPlaneProject && !IsMachinePlane(plane) {
-		return SyncTarget{}, fmt.Errorf("未知 SyncPlane %q", plane)
-	}
-	normalizedPlane := SyncPlaneProject
-	localRoot := path.Join(SecretsRootDir, name)
-	if IsMachinePlane(plane) {
-		normalizedPlane = SyncPlaneMachine
-		localRoot = name
+	localRoot := path.Join(SecretsRootDir, scope.P)
+	if IsMachinePlane(scope.Plane) {
+		localRoot = scope.P
 	}
 	return SyncTarget{
-		Kind:      SyncKindP,
-		Name:      name,
-		Folder:    PFolder(name, normalizedPlane),
+		Name:      scope.P,
+		Address:   scope.String(),
 		LocalRoot: localRoot,
-		Plane:     normalizedPlane,
+		Plane:     scope.Plane,
 		declared:  true,
 	}, nil
-}
-
-// DefaultBundleFolder 返回 bundle 在 Bitwarden 上的默认 folder 名。
-func DefaultBundleFolder(bundleName string) string {
-	name := strings.TrimSpace(bundleName)
-	if name == "" {
-		return ""
-	}
-	if strings.HasPrefix(name, BundleFolderPrefix) {
-		return name
-	}
-	return BundleFolderPrefix + name
 }
 
 // MachineSecretsRoot 返回 ~/.dec/secrets（与 config.yaml 同树）。
 func MachineSecretsRoot() (string, error) {
 	return secretsDir()
-}
-
-// NewBundleSyncTarget 构造项目平面 bundle SyncTarget；folder 默认 bundle/<name>。
-func NewBundleSyncTarget(bundleName, folder string) (SyncTarget, error) {
-	name := strings.TrimSpace(bundleName)
-	if name == "" {
-		return SyncTarget{}, fmt.Errorf("bundle 名不能为空")
-	}
-	if name == ProjectSecretsDecBundleName {
-		return SyncTarget{}, fmt.Errorf("保留名 %q 不能用作 bundle", ProjectSecretsDecBundleName)
-	}
-	folder = strings.TrimSpace(folder)
-	if folder == "" {
-		folder = DefaultBundleFolder(name)
-	}
-	return SyncTarget{
-		Kind:      SyncKindBundle,
-		Name:      name,
-		Folder:    folder,
-		LocalRoot: path.Join(BundleSecretsLocalRelPrefix, name),
-		Plane:     SyncPlaneProject,
-		declared:  true,
-	}, nil
-}
-
-// NewMachineBundleSyncTarget 构造机器平面 bundle SyncTarget（~/.dec/secrets/bundles/<name>）。
-func NewMachineBundleSyncTarget(bundleName, folder string) (SyncTarget, error) {
-	name := strings.TrimSpace(bundleName)
-	if name == "" {
-		return SyncTarget{}, fmt.Errorf("bundle 名不能为空")
-	}
-	if name == ProjectSecretsDecBundleName {
-		return SyncTarget{}, fmt.Errorf("保留名 %q 不能用作 bundle", ProjectSecretsDecBundleName)
-	}
-	folder = strings.TrimSpace(folder)
-	if folder == "" {
-		folder = DefaultBundleFolder(name)
-	}
-	return SyncTarget{
-		Kind:      SyncKindBundle,
-		Name:      name,
-		Folder:    folder,
-		LocalRoot: path.Join(MachineBundleSecretsRelPrefix, name),
-		Plane:     SyncPlaneMachine,
-		declared:  true,
-	}, nil
-}
-
-// NewProjectSyncTarget 构造历史 project 级 SyncTarget（落地 `.secrets/project`）。
-//
-// Deprecated: ADR 0014 取消 project 级可写归属。写入路径禁止使用；仅保留给存量迁移/
-// 只读兼容与旧测试。新代码请用 NewBundleSyncTarget / NewMachineBundleSyncTarget。
-func NewProjectSyncTarget(projectName, folder string) (SyncTarget, error) {
-	name := strings.TrimSpace(projectName)
-	if name == "" || name == "unknown" {
-		return SyncTarget{}, fmt.Errorf("project 名不能为空")
-	}
-	folder = strings.TrimSpace(folder)
-	if folder == "" {
-		folder = name
-	}
-	return SyncTarget{
-		Kind:      SyncKindProject,
-		Name:      name,
-		Folder:    folder,
-		LocalRoot: ProjectSecretsLocalRel,
-		Plane:     SyncPlaneProject,
-		declared:  true,
-	}, nil
-}
-
-// ResolveTarget 优先返回 req.Target；否则从旧字段推导。
-func ResolveTarget(kind SyncKind, name string, binding BundleBinding, explicit SyncTarget) (SyncTarget, error) {
-	if explicit.Declared() {
-		return explicit.Clone(), nil
-	}
-
-	folder := strings.TrimSpace(binding.SecretsBundleName)
-	if folder == "" {
-		folder = strings.TrimSpace(binding.Folder)
-	}
-	if explicitFolder := strings.TrimSpace(explicit.Folder); explicitFolder != "" {
-		folder = explicitFolder
-	}
-	resolvedKind := kind
-	if explicit.Kind == SyncKindProject || explicit.Kind == SyncKindBundle || explicit.Kind == SyncKindP {
-		resolvedKind = explicit.Kind
-	}
-	switch resolvedKind {
-	case SyncKindP:
-		pName := strings.TrimSpace(explicit.Name)
-		if pName == "" {
-			pName = strings.TrimSpace(name)
-		}
-		return NewPSyncTarget(pName, explicit.Plane)
-	case SyncKindProject:
-		projectName := strings.TrimSpace(explicit.Name)
-		if projectName == "" {
-			projectName = strings.TrimSpace(name)
-		}
-		if projectName == ProjectSecretsDecBundleName {
-			projectName = ""
-		}
-		if projectName == "" {
-			projectName = folder
-		}
-		return NewProjectSyncTarget(projectName, folder)
-	case SyncKindBundle:
-		decName := strings.TrimSpace(explicit.Name)
-		if decName == "" {
-			decName = strings.TrimSpace(binding.DecBundleName)
-		}
-		if decName == "" {
-			decName = strings.TrimSpace(name)
-		}
-		if IsMachinePlane(explicit.Plane) {
-			return NewMachineBundleSyncTarget(decName, folder)
-		}
-		return NewBundleSyncTarget(decName, folder)
-	default:
-		return SyncTarget{}, fmt.Errorf("未知 SyncKind %q", resolvedKind)
-	}
 }
 
 // planeOf 返回有效平面（空视为 project）。
@@ -350,7 +186,7 @@ func ResolveAbsDir(projectRoot string, target SyncTarget) (string, error) {
 }
 
 // RootRelPath 把同步根相对路径转为「展示/校验用」相对路径。
-// project 平面：相对项目根；machine 平面：~/.dec/secrets/bundles/... 风格（以 .dec/secrets 为逻辑前缀）。
+// project 平面：相对项目根；machine 平面：以 .dec/secrets 为逻辑前缀。
 func RootRelPath(target SyncTarget, noteRel string) (string, error) {
 	rel, err := normalizeSyncRelPath(noteRel)
 	if err != nil {
@@ -386,23 +222,13 @@ func AbsolutePath(projectRoot string, target SyncTarget, noteRel string) (string
 	return filepath.Join(dir, filepath.FromSlash(rel)), nil
 }
 
-// RemoteNoteName 返回写入 Bitwarden 的 Note 名（= 相对 LocalRoot 的路径）。
-func RemoteNoteName(target SyncTarget, noteRel string) (string, error) {
-	_ = target
-	return normalizeSyncRelPath(noteRel)
+// NormalizeNoteRel 规范化同步根相对路径。远端条目名的编码由 BW 实现负责，
+// 包外只需要这一层校验（拒绝绝对路径、盘符、~ 与 .. 逃逸）。
+func NormalizeNoteRel(raw string) (string, error) {
+	return normalizeSyncRelPath(raw)
 }
 
-// LocalNoteRelFromRemote 把 BW Note 名转为相对 LocalRoot 的路径。
-func LocalNoteRelFromRemote(target SyncTarget, remoteName string) (rel string, ok bool, err error) {
-	_ = target
-	rel, err = normalizeSyncRelPath(remoteName)
-	if err != nil {
-		return "", false, err
-	}
-	return rel, true, nil
-}
-
-// normalizeSyncRelPath 规范化相对 SyncTarget.LocalRoot 的 Note 名。
+// normalizeSyncRelPath 规范化相对 SyncTarget.LocalRoot 的路径。
 func normalizeSyncRelPath(raw string) (string, error) {
 	trimmed := strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
 	if trimmed == "" {

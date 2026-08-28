@@ -8,6 +8,16 @@ import (
 	"testing"
 )
 
+// liveTarget 返回 live 测试用的项目平面 P target（folder 为 P 名，条目名带 private/project 前缀）。
+func liveTarget(t *testing.T) SyncTarget {
+	t.Helper()
+	target, err := NewPSyncTarget("vikunja", SyncPlaneProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return target
+}
+
 // programmaticUnlock 使用 ~/.dec/secrets/device.json 中的持久化 deviceIdentifier
 // 与 two_factor_remember 令牌登录；勿传入自定义 deviceID，否则 remember token 失效且可能被清除。
 func programmaticUnlock(t *testing.T, cfg *Config, password string) (token string, need2FA bool, err error) {
@@ -50,10 +60,7 @@ func TestLive_ProgrammaticUnlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = client.PullBundle(context.Background(), PullBundleRequest{
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja"},
-	})
+	_, err = client.PullBundle(context.Background(), PullBundleRequest{Target: liveTarget(t)})
 	if err != nil {
 		t.Fatalf("PullBundle() = %v", err)
 	}
@@ -86,9 +93,8 @@ func TestLive_PushBundle(t *testing.T) {
 		t.Skip("设置 DEC_PROJECT_ROOT 或在含 .secrets/dec/integration/bitwarden.yaml 的项目根运行")
 	}
 	result, err := PushBundle(context.Background(), client, PushBundleRequest{
-		ProjectRoot:   projectRoot,
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja"},
+		ProjectRoot: projectRoot,
+		Target:      liveTarget(t),
 	})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
@@ -121,10 +127,10 @@ func TestLive_PushThenPull(t *testing.T) {
 	if projectRoot == "" {
 		t.Skip("设置 DEC_PROJECT_ROOT 或在含 .secrets/dec/integration/bitwarden.yaml 的项目根运行")
 	}
+	target := liveTarget(t)
 	req := PushBundleRequest{
-		ProjectRoot:   projectRoot,
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja"},
+		ProjectRoot: projectRoot,
+		Target:      target,
 	}
 	pushResult, err := PushBundle(context.Background(), client, req)
 	if err != nil {
@@ -133,9 +139,8 @@ func TestLive_PushThenPull(t *testing.T) {
 	t.Logf("PushBundle: created=%d updated=%d paths=%v", pushResult.Created, pushResult.Updated, pushResult.Paths)
 
 	pullReq := PullBundleRequest{
-		ProjectRoot:   projectRoot,
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{DecBundleName: "vikunja", SecretsBundleName: "vikunja"},
+		ProjectRoot: projectRoot,
+		Target:      target,
 	}
 	paths, err := PullBundle(context.Background(), client, pullReq)
 	if err != nil {

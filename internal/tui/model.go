@@ -12,6 +12,7 @@ import (
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/diag"
 	"github.com/shichao402/Dec/internal/editor"
+	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/serviceapi"
 	"github.com/shichao402/Dec/internal/update"
 )
@@ -420,10 +421,11 @@ type model struct {
 	addSecretTargetIdx      int
 	addSecretResult         *app.AddSecretResult
 	addSecretErr            error
-	addSecretRemoteMode     bool   // true = Remote 登记（归属为 Bitwarden folder）
-	addSecretFolder         string // Remote：光标反推出的 folder，或 N 手输的新 folder
-	addSecretFolderNew      bool   // Remote：folder 由用户手输（可能尚不存在）
-	addSecretFolderCheckGen uint64
+	addSecretRemoteMode     bool              // true = Remote 登记（归属为远端 P 地址）
+	addSecretPName          string            // Remote：光标反推出的 P 名，或 N 手输的新 P
+	addSecretPlane          secrets.SyncPlane // Remote：归属平面（N 时可切换）
+	addSecretScopeNew       bool              // Remote：P 由用户手输（可能尚不存在）
+	addSecretScopeCheckGen  uint64
 	addSecretTypeIdx        int    // Remote：Processor 表索引
 	addSecretInitialBody    string // Remote temp 预填正文
 	// addSecretNotice 是表单内可见的校验/说明行。登记表单整页渲染，日志区不可见，
@@ -1027,8 +1029,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleRemoteRegisterPrepared(msg)
 	case remoteRegisterEditorClosedMsg:
 		return m, m.handleRemoteRegisterEditorClosed(msg)
-	case remoteFolderValidatedMsg:
-		m.applyRemoteFolderValidation(msg)
+	case remoteScopeValidatedMsg:
+		m.applyRemoteScopeValidation(msg)
 		return m, nil
 	case filePickedMsg:
 		return m, m.handleFilePicked(msg)
@@ -1966,7 +1968,7 @@ func (m model) handleRepoBootstrapKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.repoBootstrapCancel = cancel
 			m.repoBootstrapStream = stream
 			input := app.ApplyRepoGCMBootstrapInput{
-				RepoURL: m.bootstrapRepoURL(), Folder: candidate.Folder, NotePath: candidate.NotePath,
+				RepoURL: m.bootstrapRepoURL(), Address: candidate.Address, NotePath: candidate.NotePath,
 			}
 			return m, tea.Batch(startApplyRepoBootstrapCmd(ctx, input, stream), waitRunMsg(stream))
 		case "n", "esc":
@@ -3610,7 +3612,7 @@ func (m model) renderRepoBootstrapBlock() string {
 			if i == m.repoBootstrapCursor {
 				marker = "> "
 			}
-			line := fmt.Sprintf("%s%s/%s · user=%s", marker, candidate.Folder, candidate.NotePath, candidate.Username)
+			line := fmt.Sprintf("%s%s/%s · user=%s", marker, candidate.Address, candidate.NotePath, candidate.Username)
 			if candidate.Unmanaged {
 				line += " · 不属于任何 bundle，pull 不维护；请迁移到 bundle/<名>"
 			}

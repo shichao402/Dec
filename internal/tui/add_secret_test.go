@@ -31,7 +31,7 @@ func TestAddSecret_TwoStagePromptRunsCommand(t *testing.T) {
 	opened, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
 	withTargets := opened.(model)
 	withTargets.addSecretTargets = []app.SecretTargetOption{
-		{Kind: secrets.SyncKindBundle, Name: "vikunja", Folder: "bundle/vikunja", LocalRoot: ".secrets/bundles/vikunja", Label: "secrets bundle \"vikunja\" → .secrets/bundles/vikunja"},
+		{Name: "vikunja", Plane: secrets.SyncPlaneProject, Address: "vikunja/private/project", LocalRoot: ".secrets/vikunja", Label: "vikunja/private/project → .secrets/vikunja"},
 	}
 
 	updated, _ := withTargets.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -128,10 +128,10 @@ func TestAddSecret_RendersPromptAndOutcome(t *testing.T) {
 	running := updated.(model)
 	running.addSecretStage = addSecretStageRunning
 	done, _ := running.Update(addSecretDoneMsg{result: &app.AddSecretResult{
-		Folder:         "bundle/demo",
+		Address:        "demo/private/project",
 		NoteRelPath:    "env/vikunja.env",
-		ProjectRelPath: ".secrets/bundles/demo/env/vikunja.env",
-		LandingPath:    ".secrets/bundles/demo/env/vikunja.env",
+		ProjectRelPath: ".secrets/demo/env/vikunja.env",
+		LandingPath:    ".secrets/demo/env/vikunja.env",
 	}})
 	after := done.(model)
 	if after.addSecretStage != "" {

@@ -11,21 +11,34 @@
 
 **可写对象只有 P**。Git 的 `public/private × user/project` 四象限全部只能放非敏感资产；
 `private` 表示不可被其它 P 引用，并不表示可以把明文密钥提交到 Git。敏感正文只在
-Bitwarden 的 `<p>/private/user` 或 `<p>/private/project`，分别落到
+Bitwarden folder `<p>` 的 `private/user/*` 或 `private/project/*` 条目，分别落到
 `~/.dec/secrets/<p>/` 与 `<project>/.secrets/<p>/`。
 
 ## 当前 P 模型（0016）
 
 ```text
 Git Vault                         Bitwarden                     本地
-<p>/                              folder <p>/private/user       user:
-  dec.yaml                                                    ~/.dec/cache/<p>/...
-  public/user/                                               ~/.dec/secrets/<p>/...
+<p>/                              folder <p>                    user:
+  dec.yaml                          private/user/<rel>        ~/.dec/cache/<p>/...
+  public/user/                      private/project/<rel>     ~/.dec/secrets/<p>/...
   public/project/
-  private/user/                  folder <p>/private/project    project:
-  private/project/                                           .dec/cache/<p>/...
-                                                             .secrets/<p>/...
+  private/user/                                               project:
+  private/project/                                            .dec/cache/<p>/...
+                                                              .secrets/<p>/...
 ```
+
+### Bitwarden 只有一层 folder
+
+Bitwarden 的 folder 名里的斜杠不建立层级。Dec 因此只用 P 名做 folder，把平面与
+同步根相对路径一起编码进条目名：
+
+- folder：`<p>`
+- Secure Note / SSH Key 条目名：`private/user/<rel>` 或 `private/project/<rel>`
+
+`<p>/private/<plane>` 只是日志、配置与界面上的**逻辑地址**写法（`RemoteScope.String()`），
+不是 folder 名。folder 与条目名的切分只在 `internal/secrets/bwaddr.go` 定义，
+其余代码只见 (P, 平面, 相对路径)。SSH Key 条目同样带平面前缀——folder 合并到 P
+之后，平面只能靠条目名区分。
 
 - P 名严格匹配 `^[a-z0-9]+(?:-[a-z0-9]+)*$`。
 - 用户平面安装显式 `enabled_projects` 的 `public/user` 与 `private/user`。

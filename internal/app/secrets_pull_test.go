@@ -83,7 +83,7 @@ func TestPullProjectAssets_RejectsSecretsOverlap(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"bundle/combo": {{
+				"combo/private/project": {{
 					RelativePath: ".dec/cache/combo/skills/bundle-skill/SKILL.md",
 					Content:      "secret",
 				}},
@@ -107,6 +107,7 @@ members:
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
+		ProjectName:    "combo",
 		EnabledBundles: []string{"combo"},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
@@ -192,7 +193,7 @@ func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T)
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/Demo": {{RelativePath: "config/server.yaml", Content: "keep: true\n"}},
+			"demo/private/project": {{RelativePath: "config/server.yaml", Content: "keep: true\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -200,13 +201,13 @@ func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T)
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Demo",
-		EnabledBundles: []string{"Demo"},
+		ProjectName:    "demo",
+		EnabledBundles: []string{"demo"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	keep := filepath.Join(projectRoot, ".secrets", "bundles", "Demo", "config", "server.yaml")
-	gone := filepath.Join(projectRoot, ".secrets", "bundles", "Demo", "config", "orphan.yaml")
+	keep := filepath.Join(projectRoot, ".secrets", "demo", "config", "server.yaml")
+	gone := filepath.Join(projectRoot, ".secrets", "demo", "config", "orphan.yaml")
 	if err := os.MkdirAll(filepath.Dir(keep), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -216,8 +217,8 @@ func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T)
 	if err := os.WriteFile(gone, []byte("orphan: 1\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	// 停用包本地残留：不在 pull 范围，不得误删。
-	disabled := filepath.Join(projectRoot, ".secrets", "bundles", "disabled", ".env", "x.env")
+	// 别的 P 的本地残留：不在 pull 范围，不得误删。
+	disabled := filepath.Join(projectRoot, ".secrets", "disabled", ".env", "x.env")
 	if err := os.MkdirAll(filepath.Dir(disabled), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +226,7 @@ func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T)
 		t.Fatal(err)
 	}
 
-	summary, err := pullEnabledSecretsBundles(context.Background(), projectRoot, []string{"Demo"}, nil)
+	summary, err := pullEnabledSecretsBundles(context.Background(), projectRoot, []string{"demo"}, nil)
 	if err != nil {
 		t.Fatalf("pullEnabledSecretsBundles() 失败: %v", err)
 	}
@@ -236,7 +237,7 @@ func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T)
 		t.Fatalf("远端已删的 Note 应被 prune, err=%v", err)
 	}
 	if _, err := os.Stat(disabled); err != nil {
-		t.Fatalf("未启用 bundle 的本地 secrets 不应被清: %v", err)
+		t.Fatalf("不在本次 SyncTarget 内的本地 secrets 不应被清: %v", err)
 	}
 	if len(summary.Orphans.RemovedSecretPaths) == 0 {
 		t.Fatalf("应报告清理了孤儿 Note: %#v", summary.Orphans)
@@ -249,7 +250,7 @@ func TestPullEnabledSecretsBundles_RejectsSecretsDecOverlap(t *testing.T) {
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/combo": {{RelativePath: ".dec/embedded/secret.env", Content: "secret"}},
+			"combo/private/project": {{RelativePath: ".dec/embedded/secret.env", Content: "secret"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -257,6 +258,7 @@ func TestPullEnabledSecretsBundles_RejectsSecretsDecOverlap(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "combo",
 		EnabledBundles: []string{"combo"},
 	}); err != nil {
 		t.Fatal(err)
@@ -287,10 +289,10 @@ func TestPullEnabledSecretsBundles_MixedNotesAndSSHKeys(t *testing.T) {
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"bundle/vikunja": {{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
+				"vikunja/private/project": {{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
 			},
 			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-				"bundle/vikunja": {{
+				"vikunja/private/project": {{
 					Name: ".sshkey/deploy", Hosts: []string{"vikunja.example.com"},
 					PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nPRIV\n-----END OPENSSH PRIVATE KEY-----\n",
 					PublicKey:  "ssh-ed25519 AAAA deploy\n",
@@ -302,7 +304,10 @@ func TestPullEnabledSecretsBundles_MixedNotesAndSSHKeys(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"vikunja"}}); err != nil {
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "vikunja",
+		EnabledBundles: []string{"vikunja"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -313,27 +318,33 @@ func TestPullEnabledSecretsBundles_MixedNotesAndSSHKeys(t *testing.T) {
 	if summary.NoteCount != 1 || summary.SSHKeyCount != 1 {
 		t.Fatalf("summary = %#v", summary)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", ".env", "vikunja.env")); err != nil {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "vikunja", ".env", "vikunja.env")); err != nil {
 		t.Fatalf("Secure Note 应落地: %v", err)
 	}
-	priv := filepath.Join(home, ".ssh", "dec_vikunja_deploy")
-	if _, err := os.Stat(priv); err != nil {
-		t.Fatalf("SSH 私钥应落地: %v", err)
-	}
-	// managed Host 落在 ~/.ssh/config.d/dec.conf，主 config 只置顶 Include。
-	cfgRaw, err := os.ReadFile(filepath.Join(home, ".ssh", "config"))
+	// 项目平面的私钥按工作区 scope 命名（dec_project_<scope>_<p>_<key>），避免与本机 key 撞名。
+	privs, err := filepath.Glob(filepath.Join(home, ".ssh", "dec_project_*_vikunja_deploy"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(cfgRaw), "Include config.d/dec.conf") {
-		t.Fatalf("主 SSH config 应 Include managed 文件:\n%s", cfgRaw)
+	if len(privs) != 1 {
+		entries, _ := os.ReadDir(filepath.Join(home, ".ssh"))
+		t.Fatalf("项目平面 SSH 私钥应落地一份, got %v (dir=%v)", privs, entries)
 	}
-	managedRaw, err := os.ReadFile(filepath.Join(home, ".ssh", "config.d", "dec.conf"))
+	// 项目平面的 Host 只写工作区专属 fragment，不进全局 config.d/dec.conf。
+	paths, err := secrets.ProjectCredentialScopePaths(projectRoot)
 	if err != nil {
-		t.Fatalf("managed SSH config 应落地: %v", err)
+		t.Fatal(err)
 	}
-	if !strings.Contains(string(managedRaw), "vikunja.example.com") {
-		t.Fatalf("managed SSH config 应含 host:\n%s", managedRaw)
+	fragment, err := os.ReadFile(paths.SSHFragment)
+	if err != nil {
+		t.Fatalf("项目 SSH fragment 应落地: %v", err)
+	}
+	if !strings.Contains(string(fragment), "vikunja.example.com") {
+		t.Fatalf("项目 fragment 应含 host:\n%s", fragment)
+	}
+	if raw, readErr := os.ReadFile(filepath.Join(home, ".ssh", "config.d", "dec.conf")); readErr == nil &&
+		strings.Contains(string(raw), "vikunja.example.com") {
+		t.Fatalf("项目平面 Host 不得写入全局 managed config:\n%s", raw)
 	}
 }
 
@@ -345,10 +356,10 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"bundle/vikunja": {{RelativePath: ".env/vikunja.env", Content: "TOKEN=1\n"}},
+				"vikunja/private/project": {{RelativePath: ".env/vikunja.env", Content: "TOKEN=1\n"}},
 			},
 			SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-				"bundle/vikunja": {{
+				"vikunja/private/project": {{
 					Name: ".sshkey/../evil", Hosts: []string{"host.example.com"},
 					PrivateKey: "priv\n",
 				}},
@@ -359,7 +370,10 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"vikunja"}}); err != nil {
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:    "vikunja",
+		EnabledBundles: []string{"vikunja"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -367,7 +381,7 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 	if err == nil {
 		t.Fatal("非法 SSH Key 名应导致 pull 失败")
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", ".env", "vikunja.env")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "vikunja", ".env", "vikunja.env")); !os.IsNotExist(err) {
 		t.Fatal("SSH 校验失败时不应写入 Secure Note")
 	}
 	if entries, _ := os.ReadDir(filepath.Join(home, ".ssh")); len(entries) != 0 {
@@ -375,7 +389,8 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 	}
 }
 
-// 平面隔离（ADR 0009）：project 上下文的 plan 只含项目平面 target，不含机器平面。
+// 平面隔离（ADR 0009）：project 上下文只解析本项目 P 的项目平面 target；
+// 启用的其它 P 只贡献 Git 资产，不带来项目平面 secrets。
 func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	if err := config.SaveGlobalConfig(&types.GlobalConfig{EnabledBundles: []string{"woa", "vikunja"}}); err != nil {
@@ -395,17 +410,15 @@ func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planSecretsSync() = %v", err)
 	}
-	var projectBundle int
-	for _, target := range plan.Targets {
-		if secrets.IsMachinePlane(target.Plane) {
-			t.Fatalf("project 上下文不应产生机器平面 target: %+v", target)
-		}
-		if target.Kind == secrets.SyncKindBundle && target.Name == "vikunja" {
-			projectBundle++
-		}
+	if len(plan.Targets) != 1 {
+		t.Fatalf("project 平面应只有本项目 P 一个 target: %+v", plan.Targets)
 	}
-	if projectBundle != 1 {
-		t.Fatalf("projectBundle = %d, targets=%+v", projectBundle, plan.Targets)
+	target := plan.Targets[0]
+	if secrets.IsMachinePlane(target.Plane) {
+		t.Fatalf("project 上下文不应产生机器平面 target: %+v", target)
+	}
+	if target.Name != "demo" || target.Address != "demo/private/project" {
+		t.Fatalf("target = %+v，期望本项目 P demo", target)
 	}
 }
 
@@ -437,8 +450,8 @@ func TestPlanWorkspaceSecretsSync_PUsesHomeOnlyAndFixedPlane(t *testing.T) {
 		t.Fatalf("requires/private 不应加入 project secrets plan: %#v", projectPlan.Targets)
 	}
 	target := projectPlan.Targets[0]
-	if target.Kind != secrets.SyncKindP || target.Name != "my-app" ||
-		target.Folder != "my-app/private/project" || target.LocalRoot != ".secrets/my-app" {
+	if target.Name != "my-app" ||
+		target.Address != "my-app/private/project" || target.LocalRoot != ".secrets/my-app" {
 		t.Fatalf("project P target = %#v", target)
 	}
 
@@ -450,7 +463,7 @@ func TestPlanWorkspaceSecretsSync_PUsesHomeOnlyAndFixedPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(userPlan.Targets) != 1 || userPlan.Targets[0].Folder != "shared/private/user" ||
+	if len(userPlan.Targets) != 1 || userPlan.Targets[0].Address != "shared/private/user" ||
 		userPlan.Targets[0].LocalRoot != "shared" {
 		t.Fatalf("user P target = %#v", userPlan.Targets)
 	}

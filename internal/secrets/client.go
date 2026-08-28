@@ -16,19 +16,21 @@ type Client interface {
 	UpdateSSHKeyHosts(ctx context.Context, req UpdateSSHKeyHostsRequest) error
 	RenameSecureNote(ctx context.Context, req RenameSecureNoteRequest) error
 	RenameSSHKey(ctx context.Context, req RenameSSHKeyRequest) error
-	// ListFolderNotes 枚举 folder 下的 note 名（相对 SyncTarget.LocalRoot）。
-	ListFolderNotes(ctx context.Context, folderName string) ([]RemoteNote, error)
-	// GetSecureNote 读取 folder 下指定 Secure Note 的正文。
+	// ListNotes 枚举目标下的 note 相对路径（相对 SyncTarget.LocalRoot）。
+	ListNotes(ctx context.Context, target SyncTarget) ([]RemoteNote, error)
+	// GetNote 读取目标下指定 Secure Note 的正文。
 	// 仅在调用方已经通过元数据筛选出目标 Note 后使用，避免为发现候选解密整个 folder。
-	GetSecureNote(ctx context.Context, folderName, noteName string) (*SecureNote, error)
-	// ListFolderSSHKeys 枚举 folder 下的 SSH Key 逻辑名。
-	ListFolderSSHKeys(ctx context.Context, folderName string) ([]RemoteSSHKey, error)
-	// ListSecretBundleNames 枚举 Bitwarden 上带 bundle/ 前缀的 folder，返回逻辑名（去前缀）。
-	ListSecretBundleNames(ctx context.Context) ([]string, error)
-	// ListAllFolderNames 枚举 vault 中全部可解密 folder 全名（含 bundle/* 与裸名）。
-	ListAllFolderNames(ctx context.Context) ([]string, error)
-	// DeleteFolder 删除指定 folder。folder 不存在视为成功；仍含条目时由调用方先清空。
-	DeleteFolder(ctx context.Context, folderName string) error
+	GetNote(ctx context.Context, target SyncTarget, noteRel string) (*SecureNote, error)
+	// ListSSHKeys 枚举目标下的 SSH Key 逻辑名。
+	ListSSHKeys(ctx context.Context, target SyncTarget) ([]RemoteSSHKey, error)
+	// ListPNames 枚举远端存在的 P 名。
+	ListPNames(ctx context.Context) ([]string, error)
+	// ListAddresses 枚举远端全部可读地址：P 展开为 <p>/private/<plane>，存量
+	// 非 P folder 用其名字。
+	ListAddresses(ctx context.Context) ([]string, error)
+	// DeleteAddress 删除存量非 P folder。地址不存在视为成功；仍含条目时由调用方
+	// 先清空。P 地址一律拒绝。
+	DeleteAddress(ctx context.Context, address string) error
 	// ListUnfiledItems 枚举无 folder（FolderID 为空）的条目元数据，不含正文。
 	ListUnfiledItems(ctx context.Context) ([]UnfiledItem, error)
 }
@@ -48,32 +50,25 @@ type StubClient struct {
 	UnfiledItems        []UnfiledItem
 }
 
-func stubFolder(reqFolder, bindingFolder, decBundleName string) string {
-	if name := strings.TrimSpace(reqFolder); name != "" {
-		return name
+// stubAddress 是 StubClient 的索引键：远端逻辑地址。
+func stubAddress(target SyncTarget) string {
+	if addr := strings.TrimSpace(target.Address); addr != "" {
+		return addr
 	}
-	if name := strings.TrimSpace(bindingFolder); name != "" {
-		return name
-	}
-	return DefaultBundleFolder(decBundleName)
+	return strings.TrimSpace(target.Name)
 }
 
-func requireDeleteFolder(target SyncTarget, binding BundleBinding) (string, error) {
-	folder := strings.TrimSpace(target.Folder)
-	if folder == "" {
-		folder = strings.TrimSpace(binding.SecretsBundleName)
+// requireDeleteScope 校验删除目标并解析出远端落点。
+// 删除允许只读浏览节点，因此不要求 declared。
+func requireDeleteScope(target SyncTarget) (bwScope, error) {
+	if stubAddress(target) == "" {
+		return bwScope{}, fmt.Errorf("删除目标地址不能为空")
 	}
-	if folder == "" {
-		folder = strings.TrimSpace(binding.Folder)
-	}
-	if folder == "" {
-		return "", fmt.Errorf("删除目标 Folder 不能为空")
-	}
-	return folder, nil
+	return bwScopeForTarget(target)
 }
 
 func (c *StubClient) PullBundle(_ context.Context, req PullBundleRequest) (*PullBundleResult, error) {
-	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, req.DecBundleName)
+	folder := stubAddress(req.Target)
 	notes := c.NotesByFolder[folder]
 	keys := c.SSHKeysByFolder[folder]
 	result := &PullBundleResult{}
@@ -90,21 +85,22 @@ func (c *StubClient) PullBundle(_ context.Context, req PullBundleRequest) (*Pull
 	return result, nil
 }
 
-func (c *StubClient) GetSecureNote(_ context.Context, folderName, noteName string) (*SecureNote, error) {
-	for _, note := range c.NotesByFolder[folderName] {
-		if note.RelativePath == noteName {
+func (c *StubClient) GetNote(_ context.Context, target SyncTarget, noteRel string) (*SecureNote, error) {
+	address := stubAddress(target)
+	for _, note := range c.NotesByFolder[address] {
+		if note.RelativePath == noteRel {
 			copied := note
 			return &copied, nil
 		}
 	}
-	return nil, fmt.Errorf("Secure Note %q 不在 folder %q", noteName, folderName)
+	return nil, fmt.Errorf("Secure Note %q 不在 %s", noteRel, address)
 }
 
 func (c *StubClient) PushBundle(_ context.Context, req PushBundleRequest, notes []SecureNote) (*PushBundleResult, error) {
 	if err := RequireDeclared(req.Target); err != nil {
 		return nil, err
 	}
-	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, req.DecBundleName)
+	folder := stubAddress(req.Target)
 	if c.NotesByFolder == nil {
 		c.NotesByFolder = make(map[string][]SecureNote)
 	}
@@ -134,7 +130,7 @@ func (c *StubClient) CreateSSHKey(_ context.Context, req CreateSSHKeyRequest) er
 	if err := RequireDeclared(req.Target); err != nil {
 		return err
 	}
-	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, "")
+	folder := stubAddress(req.Target)
 	if c.SSHKeysByFolder == nil {
 		c.SSHKeysByFolder = make(map[string][]SSHKeyItem)
 	}
@@ -154,10 +150,10 @@ func (c *StubClient) CreateSSHKey(_ context.Context, req CreateSSHKeyRequest) er
 }
 
 func (c *StubClient) DeleteSecureNote(_ context.Context, req DeleteSecureNoteRequest) error {
-	folder, err := requireDeleteFolder(req.Target, req.Binding)
-	if err != nil {
+	if _, err := requireDeleteScope(req.Target); err != nil {
 		return err
 	}
+	folder := stubAddress(req.Target)
 	notes := c.NotesByFolder[folder]
 	if len(notes) == 0 {
 		return nil
@@ -173,10 +169,10 @@ func (c *StubClient) DeleteSecureNote(_ context.Context, req DeleteSecureNoteReq
 }
 
 func (c *StubClient) DeleteSSHKey(_ context.Context, req DeleteSSHKeyRequest) error {
-	folder, err := requireDeleteFolder(req.Target, req.Binding)
-	if err != nil {
+	if _, err := requireDeleteScope(req.Target); err != nil {
 		return err
 	}
+	folder := stubAddress(req.Target)
 	keys := c.SSHKeysByFolder[folder]
 	if len(keys) == 0 {
 		return nil
@@ -195,7 +191,7 @@ func (c *StubClient) UpdateSSHKeyHosts(_ context.Context, req UpdateSSHKeyHostsR
 	if err := RequireDeclared(req.Target); err != nil {
 		return err
 	}
-	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, "")
+	folder := stubAddress(req.Target)
 	keys := c.SSHKeysByFolder[folder]
 	for i, key := range keys {
 		if key.Name != req.KeyName {
@@ -220,7 +216,7 @@ func (c *StubClient) RenameSecureNote(_ context.Context, req RenameSecureNoteReq
 	if err := RequireDeclared(req.Target); err != nil {
 		return err
 	}
-	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, "")
+	folder := stubAddress(req.Target)
 	oldPath := strings.TrimSpace(req.OldPath)
 	newPath := strings.TrimSpace(req.NewPath)
 	if oldPath == "" || newPath == "" {
@@ -247,7 +243,7 @@ func (c *StubClient) RenameSSHKey(_ context.Context, req RenameSSHKeyRequest) er
 	if err := RequireDeclared(req.Target); err != nil {
 		return err
 	}
-	folder := stubFolder(req.Target.Folder, req.Binding.SecretsBundleName, "")
+	folder := stubAddress(req.Target)
 	oldName := strings.TrimSpace(req.OldName)
 	newName := strings.TrimSpace(req.NewName)
 	if oldName == "" || newName == "" {
@@ -277,8 +273,8 @@ func (NoopClient) PullBundle(_ context.Context, _ PullBundleRequest) (*PullBundl
 	return &PullBundleResult{}, nil
 }
 
-func (NoopClient) GetSecureNote(_ context.Context, folderName, noteName string) (*SecureNote, error) {
-	return nil, fmt.Errorf("Bitwarden 未解锁，无法读取 folder %q 下的 %q", folderName, noteName)
+func (NoopClient) GetNote(_ context.Context, target SyncTarget, noteRel string) (*SecureNote, error) {
+	return nil, fmt.Errorf("Bitwarden 未解锁，无法读取 %s 下的 %q", target.Address, noteRel)
 }
 
 func (NoopClient) PushBundle(_ context.Context, req PushBundleRequest, _ []SecureNote) (*PushBundleResult, error) {
@@ -293,12 +289,12 @@ func (NoopClient) CreateSSHKey(_ context.Context, req CreateSSHKeyRequest) error
 }
 
 func (NoopClient) DeleteSecureNote(_ context.Context, req DeleteSecureNoteRequest) error {
-	_, err := requireDeleteFolder(req.Target, req.Binding)
+	_, err := requireDeleteScope(req.Target)
 	return err
 }
 
 func (NoopClient) DeleteSSHKey(_ context.Context, req DeleteSSHKeyRequest) error {
-	_, err := requireDeleteFolder(req.Target, req.Binding)
+	_, err := requireDeleteScope(req.Target)
 	return err
 }
 
@@ -314,7 +310,7 @@ func (NoopClient) RenameSSHKey(_ context.Context, req RenameSSHKeyRequest) error
 	return RequireDeclared(req.Target)
 }
 
-func (NoopClient) DeleteFolder(_ context.Context, _ string) error {
+func (NoopClient) DeleteAddress(_ context.Context, _ string) error {
 	return nil
 }
 

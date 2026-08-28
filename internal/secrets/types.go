@@ -1,16 +1,5 @@
 package secrets
 
-// SyncKind 区分历史 project 级与 bundle 级 secrets 目标。
-// ADR 0014 后写入路径只承认 SyncKindBundle；SyncKindProject 仅迁移/只读兼容。
-type SyncKind string
-
-const (
-	SyncKindProject SyncKind = "project"
-	SyncKindBundle  SyncKind = "bundle"
-	// SyncKindP 是 ADR 0016 下唯一的新协议同步单位。
-	SyncKindP SyncKind = "p"
-)
-
 // SyncPlane 区分本地同步根落在项目内还是机器级 ~/.dec/secrets。
 type SyncPlane string
 
@@ -26,32 +15,14 @@ const (
 // SecretsRootDir 是项目内唯一普通 secret 明文边界。
 const SecretsRootDir = ".secrets"
 
-const (
-	// ProjectSecretsLocalRel 是 project 级 secrets 相对项目根的同步根。
-	ProjectSecretsLocalRel = ".secrets/project"
-	// BundleSecretsLocalRelPrefix 是项目内 bundle 级 secrets 同步根前缀：.secrets/bundles/<name>。
-	BundleSecretsLocalRelPrefix = ".secrets/bundles"
-	// MachineBundleSecretsRelPrefix 是机器级 bundle secrets 相对 ~/.dec/secrets 的前缀：bundles/<name>。
-	MachineBundleSecretsRelPrefix = "bundles"
-)
-
-// ProjectSecretsDecBundleName 是 project 级 secrets 在内部 API 中使用的占位 Dec bundle 名。
-const ProjectSecretsDecBundleName = "_project"
-
-// BundleBinding 描述 Dec bundle 与 Bitwarden folder 的可选别名绑定。
-// secrets_bundle 即 Bitwarden folder；未配置时 bundle 默认为 bundle/<dec_bundle>。
-type BundleBinding struct {
-	DecBundleName     string `yaml:"dec_bundle" json:"dec_bundle"`
-	SecretsBundleName string `yaml:"secrets_bundle" json:"secrets_bundle"`
-	Folder            string `yaml:"folder,omitempty" json:"folder,omitempty"` // 已废弃，加载时迁移到 secrets_bundle
-}
-
-// SyncTarget 是一次 secrets 同步的单位：Bitwarden folder ↔ 本地同步根。
+// SyncTarget 是一次 secrets 同步的单位：远端寻址域 ↔ 本地同步根。
+//
+// Address 是逻辑地址（P 为 <p>/private/<plane>），只用于展示、持久化与跨进程
+// 传输。要读写远端必须经 Scope()，由 BW 实现决定真实 folder 名与条目名。
 type SyncTarget struct {
-	Kind      SyncKind
-	Name      string // project_name 或 Dec bundle 名
-	Folder    string // Bitwarden folder；bundle 默认 bundle/<name>，project 默认 Name
-	LocalRoot string // project 平面：.secrets/...；machine 平面：bundles/<name>（相对 ~/.dec/secrets）
+	Name      string // P 名；只读浏览节点可为任意远端名字
+	Address   string
+	LocalRoot string // project 平面：.secrets/<p>；machine 平面：<p>（相对 ~/.dec/secrets）
 	Plane     SyncPlane
 	declared  bool // 仅声明型构造函数可置 true；包外字面量只能得到只读/待重建 target
 }
@@ -83,9 +54,6 @@ type SSHKeyItem struct {
 type PullBundleRequest struct {
 	ProjectRoot string
 	Target      SyncTarget
-	// DecBundleName / Binding 保留兼容旧调用点；优先使用 Target。
-	DecBundleName string
-	Binding       BundleBinding
 }
 
 // PullBundleResult 拉取结果：Secure Notes + SSH Keys。
@@ -96,12 +64,10 @@ type PullBundleResult struct {
 
 // PushBundleRequest 推送单个 SyncTarget 的输入。
 type PushBundleRequest struct {
-	ProjectRoot   string
-	Target        SyncTarget
-	DecBundleName string
-	Binding       BundleBinding
-	// CreateFolderIfMissing 仅用于 Remote 登记新 folder：push 时 folder 不存在则先建。
-	// 常规 push / 编辑已有 folder 不设，folder 缺失仍按错误处理。
+	ProjectRoot string
+	Target      SyncTarget
+	// CreateFolderIfMissing 仅用于 Remote 登记新 P：push 时 folder 不存在则先建。
+	// 常规 push / 编辑已有 P 不设，folder 缺失仍按错误处理。
 	CreateFolderIfMissing bool
 }
 
@@ -116,9 +82,8 @@ type PushBundleResult struct {
 }
 
 // CreateSSHKeyRequest 创建一条 Bitwarden SSH Key Item。
-// Key.Name 必须是 `.sshkey/<实例>`；CreateFolderIfMissing 仅供 Remote 新 folder 登记。
+// Key.Name 必须是 `.sshkey/<实例>`；CreateFolderIfMissing 仅供 Remote 新 P 登记。
 type CreateSSHKeyRequest struct {
-	Binding               BundleBinding
 	Target                SyncTarget
 	Key                   SSHKeyItem
 	CreateFolderIfMissing bool
@@ -126,21 +91,18 @@ type CreateSSHKeyRequest struct {
 
 // DeleteSecureNoteRequest 删除单条 Secure Note 的输入。
 type DeleteSecureNoteRequest struct {
-	Binding  BundleBinding
-	NotePath string // 同步根相对路径（= Note 名）
+	NotePath string // 同步根相对路径
 	Target   SyncTarget
 }
 
 // DeleteSSHKeyRequest 删除单条远端 SSH Key 的输入（按逻辑名）。
 type DeleteSSHKeyRequest struct {
-	Binding BundleBinding
 	KeyName string
 	Target  SyncTarget
 }
 
 // UpdateSSHKeyHostsRequest 更新远端 SSH Key Item Notes（一行一个 Host）。
 type UpdateSSHKeyHostsRequest struct {
-	Binding BundleBinding
 	KeyName string
 	Target  SyncTarget
 	Hosts   []string // 规范化后写入 Notes；空切片清空 Notes
@@ -148,7 +110,6 @@ type UpdateSSHKeyHostsRequest struct {
 
 // RenameSecureNoteRequest 将远端 Secure Note 改名（= 改相对同步根路径）。
 type RenameSecureNoteRequest struct {
-	Binding BundleBinding
 	OldPath string
 	NewPath string
 	Target  SyncTarget
@@ -156,7 +117,6 @@ type RenameSecureNoteRequest struct {
 
 // RenameSSHKeyRequest 将远端 SSH Key Item 改名。
 type RenameSSHKeyRequest struct {
-	Binding BundleBinding
 	OldName string
 	NewName string
 	Target  SyncTarget

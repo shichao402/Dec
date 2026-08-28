@@ -57,7 +57,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	orig := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/vikunja": {{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
+			"vikunja/private/project": {{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = orig })
@@ -69,7 +69,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	landed := filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", ".env", "vikunja.env")
+	landed := filepath.Join(projectRoot, ".secrets", "vikunja", ".env", "vikunja.env")
 	if err := os.MkdirAll(filepath.Dir(landed), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 		t.Fatalf("files = %#v, 期望 1 条", result.Files)
 	}
 	file := result.Files[0]
-	if file.SecretsBundle != "bundle/vikunja" || file.ProjectRelPath != ".secrets/bundles/vikunja/.env/vikunja.env" {
+	if file.SecretsBundle != "vikunja/private/project" || file.ProjectRelPath != ".secrets/vikunja/.env/vikunja.env" {
 		t.Fatalf("元数据 = %#v", file)
 	}
 	if file.RemoteExists == nil || !*file.RemoteExists {

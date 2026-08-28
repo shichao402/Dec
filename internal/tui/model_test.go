@@ -968,8 +968,8 @@ func TestModelSettingsRepoBootstrapCandidateSelection(t *testing.T) {
 	updated, _ := m.Update(repoBootstrapPreparedMsg{result: &app.PrepareRepoGCMBootstrapResult{
 		RepoHost: "cnb.cool",
 		Candidates: []app.RepoGCMCandidate{
-			{Folder: "bundle/a", NotePath: ".gcm/a.yaml", Username: "alice"},
-			{Folder: "legacy", NotePath: ".gcm/b.yaml", Username: "bob", Unmanaged: true},
+			{Address: "a/private/project", NotePath: ".gcm/a.yaml", Username: "alice"},
+			{Address: "legacy", NotePath: ".gcm/b.yaml", Username: "bob", Unmanaged: true},
 		},
 	}})
 	m = updated.(model)

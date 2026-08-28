@@ -66,9 +66,9 @@ password: integration-pass
 	}
 }
 
-// 集成凭据不再需要「扫描时跳过」的特判：push 只推远端 folder 里有 note 的路径，
-// 本地文件不会被自动发现，`.secrets/dec/integration/` 因此天然不参与同步。
-func TestIntegrationAuthPath_StaysOutOfSyncScope(t *testing.T) {
+// 集成凭据落在 dec/private/project 同步根内（commit e96cd86），因此会随该 P
+// 的 push 同步到远端——这是刻意的：已有 vault 访问能力的开发机据此恢复测试账号。
+func TestIntegrationAuthPath_SyncsWithDecPScope(t *testing.T) {
 	projectRoot := t.TempDir()
 	authPath := IntegrationAuthPath(projectRoot)
 	if err := os.MkdirAll(filepath.Dir(authPath), 0755); err != nil {
@@ -78,15 +78,18 @@ func TestIntegrationAuthPath_StaysOutOfSyncScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	target, err := NewPSyncTarget("dec", SyncPlaneProject)
+	if err != nil {
+		t.Fatal(err)
+	}
 	result, err := PushBundle(t.Context(), &StubClient{}, PushBundleRequest{
-		ProjectRoot:   projectRoot,
-		DecBundleName: "dec",
-		Binding:       BundleBinding{SecretsBundleName: "dec"},
+		ProjectRoot: projectRoot,
+		Target:      target,
 	})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
 	}
-	if len(result.Paths) != 0 {
-		t.Fatalf("Paths = %#v, 集成凭据不应被推送", result.Paths)
+	if len(result.Paths) != 1 || result.Paths[0] != "integration/bitwarden.yaml" {
+		t.Fatalf("Paths = %#v, 期望集成凭据随 dec/private/project 推送", result.Paths)
 	}
 }

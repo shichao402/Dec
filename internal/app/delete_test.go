@@ -201,7 +201,7 @@ func TestListDeleteCandidates_IncludesLocalSecretsWithoutRemote(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.env/vikunja.env", "TOKEN=1\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/vikunja/.env/vikunja.env", "TOKEN=1\n")
 
 	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
 	if err != nil {
@@ -222,7 +222,7 @@ func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T)
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/vikunja": {{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
+			"vikunja/private/project": {{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=abc\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -234,7 +234,7 @@ func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/vikunja/.env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
 
 	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, true, nil)
 	if err != nil {
@@ -250,8 +250,8 @@ func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T)
 		if c.Orphan {
 			t.Fatalf("本地存在的 secret 不应标 Orphan: %#v", c)
 		}
-		if c.TreeRoot != secretsTreeRoot || c.TreeBranch != "bundle/vikunja" {
-			t.Fatalf("分组 = %q/%q, 期望按 Bitwarden folder 分组", c.TreeRoot, c.TreeBranch)
+		if c.TreeRoot != secretsTreeRoot || c.TreeBranch != "vikunja/private/project" {
+			t.Fatalf("分组 = %q/%q, 期望按远端地址分组", c.TreeRoot, c.TreeBranch)
 		}
 		return
 	}
@@ -382,7 +382,7 @@ func TestListDeleteCandidates_ListsRemoteSecretsOutsideEnabled(t *testing.T) {
 	t.Fatalf("未启用包的远端 secret 也应出现在 Remote: %#v", candidates)
 }
 
-// 本地停用后残留的 .secrets/bundles/<name> 仍应出现在 Remote（删除入口）。
+// 本地停用后残留的 .secrets/<p> 仍应出现在 Remote（删除入口）。
 func TestListDeleteCandidates_ListsLocalSecretsForDisabledBundle(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
@@ -393,7 +393,7 @@ func TestListDeleteCandidates_ListsLocalSecretsForDisabledBundle(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.env/left.env", "TOKEN=1\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/vikunja/.env/left.env", "TOKEN=1\n")
 
 	candidates, err := ListDeleteCandidates(context.Background(), projectRoot, false, nil)
 	if err != nil {
@@ -567,7 +567,7 @@ func TestPlanWorkspaceSecretsBrowse_IncludesKnownSecretBundles(t *testing.T) {
 		t.Fatalf("planWorkspaceSecretsBrowse() = %v", err)
 	}
 	for _, target := range plan.Targets {
-		if target.Folder == "bundle/remembered" {
+		if target.Address == "remembered/private/project" {
 			return
 		}
 	}
@@ -648,24 +648,25 @@ func TestListDeleteCandidates_GroupsDecAssetsUnderBundle(t *testing.T) {
 }
 
 func TestDeleteGroupContext_GroupTitle(t *testing.T) {
-	ctx := &deleteGroupContext{projectName: "Dec"}
-	if got := ctx.groupTitle(secrets.ProjectSecretsDecBundleName); got != "Dec (project)" {
-		t.Fatalf("groupTitle(project) = %q, want Dec (project)", got)
-	}
+	ctx := &deleteGroupContext{}
 	if got := ctx.groupTitle("vikunja"); got != "vikunja (bundle)" {
 		t.Fatalf("groupTitle(bundle) = %q, want vikunja (bundle)", got)
 	}
+	// secrets 分组标题就是远端地址本身，不再有 project 伪包。
+	if got := ctx.secretsGroupTitle("dec/private/project"); got != "dec/private/project" {
+		t.Fatalf("secretsGroupTitle = %q", got)
+	}
 }
 
-func TestDeleteGroupContext_ProjectOrderFirst(t *testing.T) {
+func TestDeleteGroupContext_OrderFollowsEnabledBundles(t *testing.T) {
 	ctx := &deleteGroupContext{
 		bundleOrder: map[string]int{"vikunja": 0, "default": 1},
 	}
-	if order := ctx.orderFor(secrets.ProjectSecretsDecBundleName); order != -1 {
-		t.Fatalf("project order = %d, want -1", order)
-	}
 	if order := ctx.orderFor("vikunja"); order != 0 {
 		t.Fatalf("vikunja order = %d, want 0", order)
+	}
+	if order := ctx.orderFor("unknown"); order != 1000 {
+		t.Fatalf("未启用的 P 应排在最后, got %d", order)
 	}
 }
 
@@ -675,27 +676,28 @@ func TestListDeleteCandidates_IncludesSSHKeys(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
+	const address = "vikunja/private/project"
 	stub := &secrets.StubClient{
 		SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-			"bundle/vikunja": {{Name: ".sshkey/deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n"}},
+			address: {{Name: ".sshkey/deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n"}},
 		},
 	}
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
-	// 先落地本地 key，验证非 Orphan。
-	landings, err := secrets.PrepareSSHKeyLandings("vikunja", stub.SSHKeysByFolder["bundle/vikunja"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := secrets.WriteSSHKeyLandings(landings); err != nil {
-		t.Fatal(err)
-	}
-
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: []string{"vikunja"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 先落地项目平面的本地 key，验证非 Orphan。
+	landings, err := secrets.PrepareSSHKeyLandings("vikunja", stub.SSHKeysByFolder[address])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.WriteProjectSSHKeyLandings(projectRoot, landings); err != nil {
 		t.Fatal(err)
 	}
 
@@ -708,7 +710,7 @@ func TestListDeleteCandidates_IncludesSSHKeys(t *testing.T) {
 			if c.Orphan {
 				t.Fatalf("本地存在的 SSH Key 不应标 Orphan: %#v", c)
 			}
-			if c.DecBundleName != "vikunja" || c.SecretsBundle != "bundle/vikunja" {
+			if c.DecBundleName != "vikunja" || c.SecretsBundle != address {
 				t.Fatalf("SSH candidate = %#v", c)
 			}
 			if !strings.Contains(c.Label, "[ssh] deploy") {

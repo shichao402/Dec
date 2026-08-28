@@ -66,9 +66,9 @@ func (PWriter) BindHomeP(projectRoot string, reporter Reporter) (*ConfigInitPrep
 	return prepared, nil
 }
 
-// ValidateRemoteRegisterFolder 校验 Remote 登记 folder（仅 bundle/<名>）。
-func (PWriter) ValidateRemoteRegisterFolder(workspace Workspace, folder string) error {
-	return ValidateRemoteRegisterFolder(workspace, folder)
+// ValidateRemoteRegisterScope 校验 Remote 登记归属（已声明 P + 平面）。
+func (PWriter) ValidateRemoteRegisterScope(workspace Workspace, scope secrets.RemoteScope) error {
+	return ValidateRemoteRegisterScope(workspace, scope)
 }
 
 // PrepareRemoteRegister 准备私密半边登记会话。
@@ -97,8 +97,8 @@ func (PWriter) CommitRemoteSSHHostsEdit(ctx context.Context, session RemoteSSHHo
 }
 
 // RegisterRemoteNoteFromPath 从本地路径登记 Note。
-func (PWriter) RegisterRemoteNoteFromPath(ctx context.Context, projectRoot, folder, noteRel, localPath string, reporter Reporter) (*AddSecretResult, error) {
-	return RegisterRemoteNoteFromPath(ctx, projectRoot, folder, noteRel, localPath, reporter)
+func (PWriter) RegisterRemoteNoteFromPath(ctx context.Context, projectRoot string, scope secrets.RemoteScope, noteRel, localPath string, reporter Reporter) (*AddSecretResult, error) {
+	return RegisterRemoteNoteFromPath(ctx, projectRoot, scope, noteRel, localPath, reporter)
 }
 
 // AddSecretToTarget 把本地文件登记为 Bundle 私密半边 Note（target 必须为已声明 bundle）。
@@ -117,16 +117,6 @@ func (PWriter) RemoveBundle(input RemoveBundleInput, reporter Reporter) (*Remove
 // DeleteItems 删除公开/私密选中项（Remote 页）。
 func (PWriter) DeleteItems(ctx context.Context, input DeleteProjectInput, reporter Reporter) (*DeleteProjectResult, error) {
 	return DeleteProjectItems(ctx, input, reporter)
-}
-
-// MigrateUnmanagedNote 将非托管裸 folder Note 迁入 Bundle（标准迁移动作）。
-func (PWriter) MigrateUnmanagedNote(ctx context.Context, input MigrateUnmanagedNoteInput, reporter Reporter) (*MigrateUnmanagedNoteResult, error) {
-	return MigrateUnmanagedNoteToBundle(ctx, input, reporter)
-}
-
-// MigrateProjectSecrets 将存量裸 project folder / .secrets/project 迁入 scope:project 的 Bundle。
-func (PWriter) MigrateProjectSecrets(ctx context.Context, input MigrateProjectSecretsInput, reporter Reporter) (*MigrateProjectSecretsResult, error) {
-	return MigrateProjectSecretsToBundle(ctx, input, reporter)
 }
 
 // CleanupUnmanaged 删除非托管裸 folder 内容（只删 BW，不创建 Bundle）。文案钉死「非模型内写入」。

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -191,20 +190,20 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.PrepareRemoteNoteEdit(ctx, projectRoot, in, reporter)
 	case "prepare_remote_note_register":
 		var in struct {
-			Folder      string
+			Scope       secrets.RemoteScope
 			NoteRel     string
 			InitialBody string
 		}
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return app.PrepareRemoteNoteRegister(ctx, projectRoot, in.Folder, in.NoteRel, in.InitialBody, reporter)
-	case "validate_remote_register_folder":
-		var in struct{ Folder string }
+		return app.PrepareRemoteNoteRegister(ctx, projectRoot, in.Scope, in.NoteRel, in.InitialBody, reporter)
+	case "validate_remote_register_scope":
+		var in struct{ Scope secrets.RemoteScope }
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		if err := writer.ValidateRemoteRegisterFolder(workspace, in.Folder); err != nil {
+		if err := writer.ValidateRemoteRegisterScope(workspace, in.Scope); err != nil {
 			return nil, err
 		}
 		return struct{}{}, nil
@@ -363,14 +362,14 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		return writer.AddSecretToTarget(ctx, projectRoot, in.Target, in.NoteRel, reporter)
 	case "register_remote_note_from_path":
 		var in struct {
-			Folder    string
+			Scope     secrets.RemoteScope
 			NoteRel   string
 			LocalPath string
 		}
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		return writer.RegisterRemoteNoteFromPath(ctx, projectRoot, in.Folder, in.NoteRel, in.LocalPath, reporter)
+		return writer.RegisterRemoteNoteFromPath(ctx, projectRoot, in.Scope, in.NoteRel, in.LocalPath, reporter)
 	case "commit_remote_register":
 		var in app.RemoteRegisterSession
 		if err := decode(payload, &in); err != nil {
@@ -397,21 +396,6 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 			return nil, err
 		}
 		return struct{}{}, writer.CommitRemoteSSHHostsEdit(ctx, in, reporter)
-	case "migrate_unmanaged_note":
-		var in app.MigrateUnmanagedNoteInput
-		if err := decode(payload, &in); err != nil {
-			return nil, err
-		}
-		return writer.MigrateUnmanagedNote(ctx, in, reporter)
-	case "migrate_project_secrets":
-		var in app.MigrateProjectSecretsInput
-		if err := decode(payload, &in); err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(in.ProjectRoot) == "" {
-			in.ProjectRoot = projectRoot
-		}
-		return writer.MigrateProjectSecrets(ctx, in, reporter)
 	default:
 		return nil, fmt.Errorf("未知写操作 %q", operation)
 	}

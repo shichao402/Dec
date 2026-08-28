@@ -149,7 +149,7 @@ func (p Processor) NormalizeName(raw string) (string, error) {
 				return "", fmt.Errorf("普通 note 不要用点类型路径 %q；请改选对应类型", tp.Full)
 			}
 		}
-		return RemoteNoteName(SyncTarget{}, raw)
+		return NormalizeNoteRel(raw)
 	case SecretTypeGCM, SecretTypeEnv:
 		tp, ok, err := ParseTypePath(raw)
 		if err != nil {
@@ -199,19 +199,4 @@ func (p Processor) AsSecretType() SecretType {
 		Source:   src,
 		Template: p.Template,
 	}
-}
-
-// DecBundleNameFromFolder 从 Bitwarden folder 推导落地用的 Dec bundle 名。
-func DecBundleNameFromFolder(folder string) string {
-	folder = strings.TrimSpace(folder)
-	if strings.HasPrefix(folder, BundleFolderPrefix) {
-		name := strings.TrimSpace(strings.TrimPrefix(folder, BundleFolderPrefix))
-		if name != "" {
-			return name
-		}
-	}
-	if folder == "" {
-		return ProjectSecretsDecBundleName
-	}
-	return folder
 }

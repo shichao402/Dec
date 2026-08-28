@@ -545,7 +545,7 @@ func cleanLogicalPath(path string) string {
 }
 
 func migrationLogicalPath(raw string) (string, error) {
-	clean, err := secrets.RemoteNoteName(secrets.SyncTarget{}, raw)
+	clean, err := secrets.NormalizeNoteRel(raw)
 	if err != nil {
 		return "", fmt.Errorf("Bitwarden 路径 %q 非法，拒绝迁移: %w", raw, err)
 	}

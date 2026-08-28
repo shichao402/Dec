@@ -48,7 +48,7 @@ func TestValidateNoOverlap_AllowsSeparateRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := ValidateNoOverlap(projectRoot, []string{".secrets/bundles/vikunja/env/vikunja.env"})
+	err := ValidateNoOverlap(projectRoot, []string{".secrets/vikunja/env/vikunja.env"})
 	if err != nil {
 		t.Fatalf("期望 .secrets/ 与 .dec/ 独立根路径通过校验: %v", err)
 	}
@@ -56,23 +56,21 @@ func TestValidateNoOverlap_AllowsSeparateRoots(t *testing.T) {
 
 func TestPullBundle_WritesNotes(t *testing.T) {
 	projectRoot := t.TempDir()
-	target, err := NewBundleSyncTarget("vikunja", "")
+	target, err := NewPSyncTarget("vikunja", SyncPlaneProject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	client := &StubClient{
 		NotesByFolder: map[string][]SecureNote{
-			target.Folder: {{
+			target.Address: {{
 				RelativePath: "env/vikunja.env",
 				Content:      "VIKUNJA_API_TOKEN=abc\n",
 			}},
 		},
 	}
 	paths, err := PullBundle(t.Context(), client, PullBundleRequest{
-		ProjectRoot:   projectRoot,
-		Target:        target,
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{DecBundleName: "vikunja"},
+		ProjectRoot: projectRoot,
+		Target:      target,
 	})
 	if err != nil {
 		t.Fatalf("PullBundle() 失败: %v", err)
@@ -80,11 +78,11 @@ func TestPullBundle_WritesNotes(t *testing.T) {
 	if len(paths) != 1 {
 		t.Fatalf("paths = %#v, 期望 1 条", paths)
 	}
-	dest := filepath.Join(projectRoot, ".secrets", "bundles", "vikunja", "env", "vikunja.env")
+	dest := filepath.Join(projectRoot, ".secrets", "vikunja", "env", "vikunja.env")
 	if _, err := os.Stat(dest); err != nil {
 		t.Fatalf("落地文件应存在: %v", err)
 	}
-	if paths[0] != ".secrets/bundles/vikunja/env/vikunja.env" {
+	if paths[0] != ".secrets/vikunja/env/vikunja.env" {
 		t.Fatalf("paths[0] = %q, 期望项目根相对路径", paths[0])
 	}
 }

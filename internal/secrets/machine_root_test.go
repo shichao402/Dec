@@ -6,37 +6,29 @@ import (
 	"testing"
 )
 
-func TestResolveSyncTargets_MachinePlane(t *testing.T) {
-	cfg := &Config{}
-	targets, err := cfg.ResolveSyncTargets(SyncPlaneMachine, []string{"cnb"}, "Dec")
+func TestResolvePSyncTargets_MachinePlane(t *testing.T) {
+	targets, err := ResolvePSyncTargets(SyncPlaneMachine, []string{"cnb"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var machine, projectBundle, projectSecrets int
-	for _, tg := range targets {
-		switch {
-		case tg.Name == "cnb" && tg.Plane == SyncPlaneMachine:
-			machine++
-			if tg.LocalRoot != "bundles/cnb" {
-				t.Fatalf("LocalRoot = %q", tg.LocalRoot)
-			}
-			if tg.Folder != "bundle/cnb" {
-				t.Fatalf("Folder = %q", tg.Folder)
-			}
-		case tg.Name == "cnb" && tg.Plane == SyncPlaneProject:
-			projectBundle++
-		case tg.Kind == SyncKindProject:
-			projectSecrets++
-		}
+	if len(targets) != 1 {
+		t.Fatalf("targets = %+v", targets)
 	}
-	if machine != 1 || projectBundle != 0 || projectSecrets != 0 {
-		t.Fatalf("machine=%d projectBundle=%d projectSecrets=%d targets=%+v", machine, projectBundle, projectSecrets, targets)
+	tg := targets[0]
+	if tg.Name != "cnb" || tg.Plane != SyncPlaneMachine {
+		t.Fatalf("target = %+v", tg)
+	}
+	// 机器平面同步根相对 ~/.dec/secrets，只有 P 名一级。
+	if tg.LocalRoot != "cnb" {
+		t.Fatalf("LocalRoot = %q", tg.LocalRoot)
+	}
+	if tg.Address != "cnb/private/user" {
+		t.Fatalf("Address = %q", tg.Address)
 	}
 }
 
-func TestResolveSyncTargets_UserPlaneAlias(t *testing.T) {
-	cfg := &Config{}
-	targets, err := cfg.ResolveSyncTargets(SyncPlaneUser, []string{"woa"}, "")
+func TestResolvePSyncTargets_UserPlaneAlias(t *testing.T) {
+	targets, err := ResolvePSyncTargets(SyncPlaneUser, []string{"woa"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,54 +37,44 @@ func TestResolveSyncTargets_UserPlaneAlias(t *testing.T) {
 	}
 }
 
-func TestResolveSyncTargets_ProjectPlane(t *testing.T) {
-	cfg := &Config{}
-	targets, err := cfg.ResolveSyncTargets(SyncPlaneProject, []string{"tencent-cloud"}, "my-app")
+func TestResolvePSyncTargets_ProjectPlane(t *testing.T) {
+	targets, err := ResolvePSyncTargets(SyncPlaneProject, []string{"tencent-cloud"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var projectBundle, projectSecrets, machine int
-	for _, tg := range targets {
-		switch {
-		case tg.Plane == SyncPlaneMachine:
-			machine++
-		case tg.Kind == SyncKindBundle && tg.Plane == SyncPlaneProject && tg.Name == "tencent-cloud":
-			projectBundle++
-			if tg.LocalRoot != ".secrets/bundles/tencent-cloud" {
-				t.Fatalf("LocalRoot = %q", tg.LocalRoot)
-			}
-			if tg.Folder != "bundle/tencent-cloud" {
-				t.Fatalf("Folder = %q", tg.Folder)
-			}
-		case tg.Kind == SyncKindProject:
-			projectSecrets++
+	if len(targets) != 1 {
+		t.Fatalf("targets = %+v", targets)
+	}
+	tg := targets[0]
+	if tg.Plane != SyncPlaneProject || tg.Name != "tencent-cloud" {
+		t.Fatalf("target = %+v", tg)
+	}
+	if tg.LocalRoot != ".secrets/tencent-cloud" {
+		t.Fatalf("LocalRoot = %q", tg.LocalRoot)
+	}
+	if tg.Address != "tencent-cloud/private/project" {
+		t.Fatalf("Address = %q", tg.Address)
+	}
+}
+
+// 同步根相对路径是唯一的本地/远端映射键；BW 条目名前缀由 secrets 内部加。
+func TestNormalizeNoteRel_KeepsFullPath(t *testing.T) {
+	for raw, want := range map[string]string{
+		"config/private.yaml":     "config/private.yaml",
+		"./.env/a.env":            ".env/a.env",
+		"nested//dir/./file.yaml": "nested/dir/file.yaml",
+	} {
+		got, err := NormalizeNoteRel(raw)
+		if err != nil {
+			t.Fatalf("NormalizeNoteRel(%q) = %v", raw, err)
+		}
+		if got != want {
+			t.Fatalf("NormalizeNoteRel(%q) = %q, want %q", raw, got, want)
 		}
 	}
-	if machine != 0 || projectBundle != 1 || projectSecrets != 0 {
-		t.Fatalf("machine=%d projectBundle=%d projectSecrets=%d (ADR 0014: no project target)", machine, projectBundle, projectSecrets)
-	}
 }
 
-func TestLocalNoteRelFromRemote_PlainPath(t *testing.T) {
-	proj, err := NewProjectSyncTarget("Dec", "Dec")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rel, ok, err := LocalNoteRelFromRemote(proj, "config/private.yaml")
-	if err != nil || !ok || rel != "config/private.yaml" {
-		t.Fatalf("got %q ok=%v err=%v", rel, ok, err)
-	}
-	rel, ok, err = LocalNoteRelFromRemote(proj, "bundles/cnb/cnb_gitgcm.yaml")
-	if err != nil || !ok || rel != "bundles/cnb/cnb_gitgcm.yaml" {
-		t.Fatalf("plain mapping should keep full path, got %q ok=%v err=%v", rel, ok, err)
-	}
-	remote, err := RemoteNoteName(proj, "env/a.env")
-	if err != nil || remote != "env/a.env" {
-		t.Fatalf("RemoteNoteName = %q err=%v", remote, err)
-	}
-}
-
-func TestLoadEnvForBundle_MachineOnly(t *testing.T) {
+func TestLoadEnvForP_MachinePlaneOnly(t *testing.T) {
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
 
@@ -101,14 +83,14 @@ func TestLoadEnvForBundle_MachineOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	machineEnv := filepath.Join(machineRoot, "bundles", "demo", ".env")
+	machineEnv := filepath.Join(machineRoot, "demo", ".env")
 	if err := os.MkdirAll(machineEnv, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(machineEnv, "a.env"), []byte("A=machine\nB=machine\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	projEnv := filepath.Join(projectRoot, ".secrets", "bundles", "demo", ".env")
+	projEnv := filepath.Join(projectRoot, ".secrets", "demo", ".env")
 	if err := os.MkdirAll(projEnv, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +98,7 @@ func TestLoadEnvForBundle_MachineOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	vars, err := LoadEnvForBundle(projectRoot, "demo", SyncPlaneMachine)
+	vars, err := LoadEnvForP(projectRoot, "demo", SyncPlaneMachine)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +110,7 @@ func TestLoadEnvForBundle_MachineOnly(t *testing.T) {
 	}
 }
 
-func TestLoadEnvForBundle_ProjectOnly(t *testing.T) {
+func TestLoadEnvForP_ProjectPlaneOnly(t *testing.T) {
 	decHome := t.TempDir()
 	t.Setenv("DEC_HOME", decHome)
 
@@ -137,30 +119,22 @@ func TestLoadEnvForBundle_ProjectOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	machineEnv := filepath.Join(machineRoot, "bundles", "demo", ".env")
+	machineEnv := filepath.Join(machineRoot, "demo", ".env")
 	if err := os.MkdirAll(machineEnv, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(machineEnv, "a.env"), []byte("A=machine\nB=machine\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	projEnv := filepath.Join(projectRoot, ".secrets", "bundles", "demo", ".env")
+	projEnv := filepath.Join(projectRoot, ".secrets", "demo", ".env")
 	if err := os.MkdirAll(projEnv, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projEnv, "b.env"), []byte("B=project\nC=project\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	// 第三层不应再参与合并
-	projectLayer := filepath.Join(projectRoot, ".secrets", "project", ".env")
-	if err := os.MkdirAll(projectLayer, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectLayer, "p.env"), []byte("C=from-project-secrets\nD=only\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
 
-	vars, err := LoadEnvForBundle(projectRoot, "demo", SyncPlaneProject)
+	vars, err := LoadEnvForP(projectRoot, "demo", SyncPlaneProject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,8 +143,5 @@ func TestLoadEnvForBundle_ProjectOnly(t *testing.T) {
 	}
 	if _, ok := vars["A"]; ok {
 		t.Fatalf("project plane 不应读到 machine 层: %#v", vars)
-	}
-	if _, ok := vars["D"]; ok {
-		t.Fatalf("不应再合并 .secrets/project/.env: %#v", vars)
 	}
 }

@@ -14,15 +14,17 @@ import (
 
 // 登记新 secret 的分阶段状态。
 // Project 页：先选归属（本地同步根），再输入相对路径。
-// Remote 页：归属来自光标所在 folder（n）或手输新 folder（N），再选 Processor、名称、来源。
+// Remote 页：归属来自光标所在 P 地址（n）或手输新 P + 选平面（N），
+// 再选 Processor、名称、来源。
 const (
-	addSecretStageTarget      = "target" // Project only：轮转本地同步根
-	addSecretStageFolder      = "folder" // Remote only：手输新 folder
-	addSecretStageFolderCheck = "folder-check"
-	addSecretStageType        = "type" // Remote only：Processor
-	addSecretStagePath        = "path"
-	addSecretStageSource      = "source" // Remote only
-	addSecretStageRunning     = "running"
+	addSecretStageTarget     = "target" // Project only：轮转本地同步根
+	addSecretStageP          = "p"      // Remote only：手输新 P 名
+	addSecretStagePlane      = "plane"  // Remote only：选 private/user 或 private/project
+	addSecretStageScopeCheck = "scope-check"
+	addSecretStageType       = "type" // Remote only：Processor
+	addSecretStagePath       = "path"
+	addSecretStageSource     = "source" // Remote only
+	addSecretStageRunning    = "running"
 )
 
 type addSecretDoneMsg struct {
@@ -46,13 +48,13 @@ type remoteRegisterPreparedMsg struct {
 	logs      []string
 }
 
-type remoteFolderValidatedMsg struct {
-	folder string
-	err    error
-	gen    uint64
+type remoteScopeValidatedMsg struct {
+	scope secrets.RemoteScope
+	err   error
+	gen   uint64
 }
 
-var validateRemoteRegisterFolderOperation = serviceapi.ValidateRemoteRegisterFolder
+var validateRemoteRegisterScopeOperation = serviceapi.ValidateRemoteRegisterScope
 
 // suggestSecretTargetsCmd 走服务 RPC 枚举候选归属，耗时不可预期，
 // 必须放在 tea.Cmd 里跑，不能在 Update 中同步调用。
@@ -89,10 +91,10 @@ func prepareRemoteRegisterCmd(in app.RemoteRegisterInput, editorCmd string) tea.
 	}
 }
 
-func validateRemoteRegisterFolderCmd(workspace app.Workspace, folder string, gen uint64) tea.Cmd {
+func validateRemoteRegisterScopeCmd(workspace app.Workspace, scope secrets.RemoteScope, gen uint64) tea.Cmd {
 	return func() tea.Msg {
-		err := validateRemoteRegisterFolderOperation(context.Background(), workspace, folder)
-		return remoteFolderValidatedMsg{folder: folder, err: err, gen: gen}
+		err := validateRemoteRegisterScopeOperation(context.Background(), workspace, scope)
+		return remoteScopeValidatedMsg{scope: scope, err: err, gen: gen}
 	}
 }
 
@@ -134,12 +136,12 @@ func currentRemoteProcessor(m model) (secrets.Processor, bool) {
 
 // remoteRegisterAnchor 是从 Remote 光标就近反推出的登记落点。
 type remoteRegisterAnchor struct {
-	Folder string // Bitwarden folder
-	Dir    string // folder 内相对目录（光标停在 .env/ 之下时为 ".env"）
-	Local  bool   // 光标停在本地分区（folder 身份一致，登记仍写远端）
+	Scope secrets.RemoteScope // 远端归属：P + 平面
+	Dir   string              // 同步根内相对目录（光标停在 .env/ 之下时为 ".env"）
+	Local bool                // 光标停在本地分区（归属一致，登记仍写远端）
 }
 
-// cursorRegisterAnchor 反查光标所在的 folder 分组节点。
+// cursorRegisterAnchor 反查光标所在的远端地址分组节点。
 // 分组节点 ID 是其所有子孙 ID 的前缀，直接按前缀归属即可，无需回溯父链。
 func (m model) cursorRegisterAnchor() (remoteRegisterAnchor, bool) {
 	rows := m.deleteTree.VisibleRows()
@@ -151,13 +153,17 @@ func (m model) cursorRegisterAnchor() (remoteRegisterAnchor, bool) {
 		return remoteRegisterAnchor{}, false
 	}
 	group, ref, ok := findSecretsFolderGroup(m.deleteTree.Roots, node.ID)
-	if !ok || strings.TrimSpace(ref.Folder) == "" {
+	if !ok {
+		return remoteRegisterAnchor{}, false
+	}
+	scope, err := secrets.ParseRemoteScope(ref.Address)
+	if err != nil {
 		return remoteRegisterAnchor{}, false
 	}
 	return remoteRegisterAnchor{
-		Folder: strings.TrimSpace(ref.Folder),
-		Dir:    treeDirUnderGroup(group.ID, node.ID),
-		Local:  ref.Partition == app.PartitionLocal,
+		Scope: scope,
+		Dir:   treeDirUnderGroup(group.ID, node.ID),
+		Local: ref.Partition == app.PartitionLocal,
 	}, true
 }
 
@@ -194,23 +200,32 @@ func treeDirUnderGroup(groupID, nodeID string) string {
 	return strings.Join(segs, "/")
 }
 
-func normalizeRemoteFolderInput(raw string) string {
-	folder := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
-	return strings.Trim(folder, "/")
+// normalizeRemotePNameInput 只取用户输入的裸 P 名：远端地址由 secrets 内部拼装。
+func normalizeRemotePNameInput(raw string) string {
+	return strings.Trim(strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/")), "/")
 }
 
-func validateRemoteFolderInputShape(folder string) error {
-	if strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
-		name := strings.TrimSpace(strings.TrimPrefix(folder, secrets.BundleFolderPrefix))
-		if name == "" || name == "." || name == ".." || strings.Contains(name, "/") {
-			return fmt.Errorf("bundle folder 必须是 bundle/<名>")
+// remoteRegisterPlanes 是 N 可选的平面，顺序即 tab 轮转顺序。
+func remoteRegisterPlanes() []secrets.SyncPlane {
+	return []secrets.SyncPlane{secrets.SyncPlaneProject, secrets.SyncPlaneMachine}
+}
+
+func remotePlaneLabel(plane secrets.SyncPlane) string {
+	if secrets.IsMachinePlane(plane) {
+		return "private/user（本机 ~/.dec/secrets）"
+	}
+	return "private/project（工作区 .secrets）"
+}
+
+// nextRemoteRegisterPlane 轮转平面选择。
+func nextRemoteRegisterPlane(plane secrets.SyncPlane) secrets.SyncPlane {
+	planes := remoteRegisterPlanes()
+	for i, p := range planes {
+		if p == plane || (secrets.IsMachinePlane(p) && secrets.IsMachinePlane(plane)) {
+			return planes[(i+1)%len(planes)]
 		}
-		return nil
 	}
-	if strings.Contains(folder, "/") {
-		return fmt.Errorf("folder 只接受 bundle/<名> 或 vault 已声明的 project 名")
-	}
-	return nil
+	return planes[0]
 }
 
 // remoteTypeIdxForDir 让光标所在的点目录直接决定默认 Processor。
@@ -232,7 +247,7 @@ func remoteTypeIdxForDir(dir string) int {
 }
 
 func (m *model) resetAddSecretForm(remoteMode bool) {
-	m.addSecretFolderCheckGen++
+	m.addSecretScopeCheckGen++
 	m.addSecretPathInput = ""
 	m.addSecretContentPath = ""
 	m.addSecretSourceMode = string(secrets.SourceTemp)
@@ -240,8 +255,9 @@ func (m *model) resetAddSecretForm(remoteMode bool) {
 	m.addSecretTypeIdx = 0
 	m.addSecretInitialBody = ""
 	m.addSecretTargets = nil
-	m.addSecretFolder = ""
-	m.addSecretFolderNew = false
+	m.addSecretPName = ""
+	m.addSecretPlane = ""
+	m.addSecretScopeNew = false
 	m.addSecretNotice = ""
 	m.addSecretResult = nil
 	m.addSecretErr = nil
@@ -265,21 +281,22 @@ func (m *model) beginAddSecret() tea.Cmd {
 	return suggestSecretTargetsCmd(m.projectRoot, gen)
 }
 
-// beginRemoteRegisterAtCursor 是 Remote 页 n：归属直接取光标所在 folder，表单内不再选归属。
+// beginRemoteRegisterAtCursor 是 Remote 页 n：归属直接取光标所在 P 地址，表单内不再选归属。
 func (m *model) beginRemoteRegisterAtCursor() tea.Cmd {
 	anchor, ok := m.cursorRegisterAnchor()
 	if !ok {
-		m.pushLog("Remote 登记：把光标移到某个 folder（或其目录 / 条目）上再按 n；新建 folder 按 N")
+		m.pushLog("Remote 登记：把光标移到某个 P 地址（或其目录 / 条目）上再按 n；新建 P 按 N")
 		return nil
 	}
 	m.resetAddSecretForm(true)
-	m.addSecretFolder = anchor.Folder
+	m.addSecretPName = anchor.Scope.P
+	m.addSecretPlane = anchor.Scope.Plane
 	m.addSecretTypeIdx = remoteTypeIdxForDir(anchor.Dir)
 	if p, ok := currentRemoteProcessor(*m); ok {
 		m.addSecretSourceMode = string(p.DefaultSource)
 	}
 	m.addSecretStage = addSecretStageType
-	where := anchor.Folder
+	where := anchor.Scope.String()
 	if anchor.Dir != "" {
 		where += "/" + anchor.Dir
 	}
@@ -287,13 +304,28 @@ func (m *model) beginRemoteRegisterAtCursor() tea.Cmd {
 	return nil
 }
 
-// beginRemoteRegisterNewFolder 是 Remote 页 N：folder 尚未出现在树上时手输。
-func (m *model) beginRemoteRegisterNewFolder() tea.Cmd {
+// beginRemoteRegisterNewP 是 Remote 页 N：P 尚未出现在树上时手输，并选平面。
+func (m *model) beginRemoteRegisterNewP() tea.Cmd {
 	m.resetAddSecretForm(true)
-	m.addSecretFolderNew = true
-	m.addSecretStage = addSecretStageFolder
-	m.pushLog("Remote 登记：输入 bundle/<名>，或 vault 已声明的 project 名")
+	m.addSecretScopeNew = true
+	m.addSecretPlane = secrets.SyncPlaneProject
+	m.addSecretStage = addSecretStageP
+	m.pushLog("Remote 登记：输入新 P 名（小写 kebab-case），下一步选平面")
 	return nil
+}
+
+// addSecretScope 汇总当前表单的远端归属。
+func (m model) addSecretScope() (secrets.RemoteScope, error) {
+	return secrets.NewRemoteScope(m.addSecretPName, m.addSecretPlane)
+}
+
+// addSecretScopeLabel 渲染当前归属的逻辑地址；未成形时返回空串。
+func (m model) addSecretScopeLabel() string {
+	scope, err := m.addSecretScope()
+	if err != nil {
+		return ""
+	}
+	return scope.String()
 }
 
 func (m *model) applyAddSecretTargets(msg addSecretTargetsMsg) {
@@ -316,14 +348,15 @@ func (m *model) applyAddSecretTargets(msg addSecretTargetsMsg) {
 }
 
 func (m *model) cancelAddSecret() {
-	m.addSecretFolderCheckGen++
+	m.addSecretScopeCheckGen++
 	m.addSecretTargetsLoad.clear()
 	m.addSecretStage = ""
 	m.addSecretPathInput = ""
 	m.addSecretContentPath = ""
 	m.addSecretTargets = nil
-	m.addSecretFolder = ""
-	m.addSecretFolderNew = false
+	m.addSecretPName = ""
+	m.addSecretPlane = ""
+	m.addSecretScopeNew = false
 	m.addSecretRemoteMode = false
 	m.remoteRegisterPending = false
 	m.remoteRegisterSess = nil
@@ -339,9 +372,9 @@ func (m *model) abandonAddSecretRun() {
 }
 
 func (m model) handleAddSecretKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.addSecretStage == addSecretStageRunning || m.addSecretStage == addSecretStageFolderCheck {
+	if m.addSecretStage == addSecretStageRunning || m.addSecretStage == addSecretStageScopeCheck {
 		if msg.Type == tea.KeyEsc {
-			if m.addSecretStage == addSecretStageFolderCheck {
+			if m.addSecretStage == addSecretStageScopeCheck {
 				m.cancelAddSecret()
 			} else {
 				m.abandonAddSecretRun()
@@ -358,6 +391,9 @@ func (m model) handleAddSecretKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.addSecretStage == addSecretStageTarget && len(m.addSecretTargets) > 0 {
 			m.addSecretTargetIdx = (m.addSecretTargetIdx + 1) % len(m.addSecretTargets)
 		}
+		if m.addSecretStage == addSecretStagePlane && m.addSecretRemoteMode {
+			m.addSecretPlane = nextRemoteRegisterPlane(m.addSecretPlane)
+		}
 		if m.addSecretStage == addSecretStageType && m.addSecretRemoteMode {
 			procs := remoteAddSecretProcessors()
 			if len(procs) > 0 {
@@ -372,8 +408,8 @@ func (m model) handleAddSecretKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyBackspace, tea.KeyCtrlH:
 		m.addSecretNotice = ""
-		if m.addSecretStage == addSecretStageFolder {
-			m.addSecretFolder = trimLastRune(m.addSecretFolder)
+		if m.addSecretStage == addSecretStageP {
+			m.addSecretPName = trimLastRune(m.addSecretPName)
 		}
 		if m.addSecretStage == addSecretStagePath {
 			m.addSecretPathInput = trimLastRune(m.addSecretPathInput)
@@ -389,8 +425,8 @@ func (m model) handleAddSecretKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if len(msg.Runes) > 0 && !msg.Alt {
 		m.addSecretNotice = ""
 		switch m.addSecretStage {
-		case addSecretStageFolder:
-			m.addSecretFolder += string(msg.Runes)
+		case addSecretStageP:
+			m.addSecretPName += string(msg.Runes)
 		case addSecretStagePath:
 			m.addSecretPathInput += string(msg.Runes)
 		case addSecretStageSource:
@@ -420,27 +456,34 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.addSecretStage == addSecretStageFolder {
-		folder := normalizeRemoteFolderInput(m.addSecretFolder)
-		if folder == "" {
-			m.noteAddSecret("folder 名不能为空（须为 bundle/<名>）")
+	if m.addSecretStage == addSecretStageP {
+		name := normalizeRemotePNameInput(m.addSecretPName)
+		if name == "" {
+			m.noteAddSecret("P 名不能为空")
 			return m, nil
 		}
-		if err := validateRemoteFolderInputShape(folder); err != nil {
+		if strings.Contains(name, "/") {
+			m.noteAddSecret("只输入 P 名：平面在下一步选，远端地址由 Dec 拼装")
+			return m, nil
+		}
+		m.addSecretPName = name
+		m.addSecretStage = addSecretStagePlane
+		m.pushLog(fmt.Sprintf("Remote 登记 → P %s；选择平面（tab 轮转）", name))
+		return m, nil
+	}
+
+	if m.addSecretStage == addSecretStagePlane {
+		scope, err := m.addSecretScope()
+		if err != nil {
+			m.addSecretStage = addSecretStageP
 			m.noteAddSecret(err.Error())
 			return m, nil
 		}
-		m.addSecretFolder = folder
-		if !strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
-			m.addSecretFolderCheckGen++
-			gen := m.addSecretFolderCheckGen
-			m.addSecretStage = addSecretStageFolderCheck
-			m.noteAddSecret("正在校验 vault project 声明…（Esc 取消）")
-			return m, validateRemoteRegisterFolderCmd(m.workspace(), folder, gen)
-		}
-		m.addSecretStage = addSecretStageType
-		m.pushLog(fmt.Sprintf("Remote 登记 → folder %s；选择类型（tab 轮转）", folder))
-		return m, nil
+		m.addSecretScopeCheckGen++
+		gen := m.addSecretScopeCheckGen
+		m.addSecretStage = addSecretStageScopeCheck
+		m.noteAddSecret("正在校验 P 声明…（Esc 取消）")
+		return m, validateRemoteRegisterScopeCmd(m.workspace(), scope, gen)
 	}
 
 	if m.addSecretStage == addSecretStageType {
@@ -452,7 +495,7 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 		m.addSecretPathInput = p.SuggestName()
 		m.addSecretSourceMode = string(p.DefaultSource)
 		m.addSecretStage = addSecretStagePath
-		m.pushLog(fmt.Sprintf("输入名称（相对 folder %s）；已按类型预填建议路径", m.addSecretFolder))
+		m.pushLog(fmt.Sprintf("输入名称（相对同步根 %s）；已按类型预填建议路径", m.addSecretScopeLabel()))
 		return m, nil
 	}
 
@@ -463,9 +506,9 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 	}
 
 	if m.addSecretRemoteMode {
-		folder := strings.TrimSpace(m.addSecretFolder)
-		if folder == "" {
-			m.noteAddSecret("没有解析到归属 folder，请 Esc 后重新按 n / N")
+		scope, scopeErr := m.addSecretScope()
+		if scopeErr != nil {
+			m.noteAddSecret("没有解析到归属 P，请 Esc 后重新按 n / N")
 			return m, nil
 		}
 		p, ok := currentRemoteProcessor(m)
@@ -497,7 +540,7 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 			in := app.RemoteRegisterInput{
 				ProjectRoot:  m.projectRoot,
 				Plane:        m.plane,
-				Folder:       folder,
+				Scope:        scope,
 				TypeID:       p.ID,
 				Name:         name,
 				SourceMode:   mode,
@@ -511,7 +554,7 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 			}
 			m.addSecretStage = addSecretStageRunning
 			m.remoteRegisterPending = true
-			m.pushLog(fmt.Sprintf("登记 %s → %s（%s）", name, folder, mode))
+			m.pushLog(fmt.Sprintf("登记 %s → %s（%s）", name, scope.String(), mode))
 			return m, prepareRemoteRegisterCmd(in, m.effectiveEditor())
 		}
 	}
@@ -521,16 +564,7 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	opt := m.addSecretTargets[m.addSecretTargetIdx]
-	var (
-		target secrets.SyncTarget
-		err    error
-	)
-	switch opt.Kind {
-	case secrets.SyncKindBundle:
-		target, err = secrets.NewBundleSyncTarget(opt.Name, opt.Folder)
-	default:
-		err = fmt.Errorf("未知 secrets 归属类型 %q（ADR 0014 仅支持 bundle）", opt.Kind)
-	}
+	target, err := secrets.NewPSyncTarget(opt.Name, opt.Plane)
 	if err != nil {
 		m.noteAddSecret(err.Error())
 		return m, nil
@@ -540,19 +574,20 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 	return m, addSecretCmd(m.projectRoot, target, rel)
 }
 
-func (m *model) applyRemoteFolderValidation(msg remoteFolderValidatedMsg) {
-	if m.addSecretStage != addSecretStageFolderCheck ||
-		msg.gen != m.addSecretFolderCheckGen ||
-		msg.folder != strings.TrimSpace(m.addSecretFolder) {
+func (m *model) applyRemoteScopeValidation(msg remoteScopeValidatedMsg) {
+	current, err := m.addSecretScope()
+	if m.addSecretStage != addSecretStageScopeCheck ||
+		msg.gen != m.addSecretScopeCheckGen ||
+		err != nil || msg.scope != current {
 		return
 	}
 	if msg.err != nil {
-		m.addSecretStage = addSecretStageFolder
+		m.addSecretStage = addSecretStageP
 		m.noteAddSecret(msg.err.Error())
 		return
 	}
 	m.addSecretStage = addSecretStageType
-	m.pushLog(fmt.Sprintf("Remote 登记 → folder %s；选择类型（tab 轮转）", msg.folder))
+	m.pushLog(fmt.Sprintf("Remote 登记 → %s；选择类型（tab 轮转）", msg.scope.String()))
 }
 
 func sourceModesHint(p secrets.Processor) string {
@@ -666,10 +701,17 @@ func (m *model) handleFilePicked(msg filePickedMsg) tea.Cmd {
 		m.remoteRegisterPending = false
 		return nil
 	}
+	scope, scopeErr := m.addSecretScope()
+	if scopeErr != nil {
+		m.addSecretStage = ""
+		m.remoteRegisterPending = false
+		m.noteAddSecret(scopeErr.Error())
+		return nil
+	}
 	in := app.RemoteRegisterInput{
 		ProjectRoot:  m.projectRoot,
 		Plane:        m.plane,
-		Folder:       strings.TrimSpace(m.addSecretFolder),
+		Scope:        scope,
 		TypeID:       p.ID,
 		Name:         strings.TrimSpace(m.addSecretPathInput),
 		SourceMode:   secrets.SourcePath,
@@ -692,7 +734,7 @@ func (m model) addSecretBlockLines() []string {
 	}
 	lines := []string{shellTitleStyle.Render(title)}
 	if m.addSecretRemoteMode {
-		lines = append(lines, shellMutedStyle.Render("归属来自光标所在 folder；类型同级；写入器由类型决定。"))
+		lines = append(lines, shellMutedStyle.Render("归属是 P + 平面；类型同级；写入器由类型决定。"))
 	} else {
 		lines = append(lines, shellMutedStyle.Render("Note 名 = 相对同步根路径；文件须先写到对应 .secrets/ 目录。"))
 	}
@@ -700,10 +742,10 @@ func (m model) addSecretBlockLines() []string {
 	loadingTargets := m.addSecretTargetsLoad.busy() && len(m.addSecretTargets) == 0
 	targetLine := "归属: <待选择>"
 	switch {
-	case m.addSecretRemoteMode && m.addSecretFolderNew:
-		targetLine = fmt.Sprintf("归属: 新 folder %s", fallbackValue(m.addSecretFolder, "<待输入>"))
+	case m.addSecretRemoteMode && m.addSecretScopeNew:
+		targetLine = fmt.Sprintf("归属: 新 P %s", fallbackValue(m.addSecretPName, "<待输入>"))
 	case m.addSecretRemoteMode:
-		targetLine = fmt.Sprintf("归属: folder %s（光标所在）", fallbackValue(m.addSecretFolder, "<未解析>"))
+		targetLine = fmt.Sprintf("归属: %s（光标所在）", fallbackValue(m.addSecretScopeLabel(), "<未解析>"))
 	case loadingTargets:
 		targetLine = "归属: <读取中…>"
 	case len(m.addSecretTargets) > 0:
@@ -719,6 +761,7 @@ func (m model) addSecretBlockLines() []string {
 	if m.addSecretSourceMode == string(secrets.SourcePath) {
 		sourceLine = fmt.Sprintf("内容: 本地路径 %s", fallbackValue(m.addSecretContentPath, "<待输入>"))
 	}
+	planeLine := "平面: " + remotePlaneLabel(m.addSecretPlane)
 
 	switch m.addSecretStage {
 	case addSecretStageTarget:
@@ -729,7 +772,7 @@ func (m model) addSecretBlockLines() []string {
 		if len(m.addSecretTargets) > 0 {
 			labels := make([]string, 0, len(m.addSecretTargets))
 			for _, opt := range m.addSecretTargets {
-				labels = append(labels, opt.Folder)
+				labels = append(labels, opt.Address)
 			}
 			if len(labels) > 8 {
 				labels = append(labels[:8], "…")
@@ -737,11 +780,14 @@ func (m model) addSecretBlockLines() []string {
 			lines = append(lines, shellMutedStyle.Render("候选归属: "+strings.Join(labels, " · ")+"（tab 轮转）"))
 		}
 		lines = append(lines, shellMutedStyle.Render("Enter 下一步 · Esc 取消"))
-	case addSecretStageFolder:
-		lines = append(lines, shellSelectedRow.Render(targetLine+"▌"), shellLogStyle.Render(typeLine), shellLogStyle.Render(pathLine))
+	case addSecretStageP:
+		lines = append(lines, shellSelectedRow.Render(targetLine+"▌"), shellLogStyle.Render(planeLine), shellLogStyle.Render(typeLine))
 		lines = append(lines,
-			shellMutedStyle.Render("新 secrets bundle 用 bundle/<名>；新 project folder 用裸名；已存在的 folder 也可直接写。"),
+			shellMutedStyle.Render("只输入 P 名（小写 kebab-case）；平面下一步选，远端地址由 Dec 拼装。"),
 			shellMutedStyle.Render("Enter 下一步 · Esc 取消"))
+	case addSecretStagePlane:
+		lines = append(lines, shellLogStyle.Render(targetLine), shellSelectedRow.Render(planeLine+"▌"))
+		lines = append(lines, shellMutedStyle.Render("tab 轮转平面 · Enter 下一步 · Esc 取消"))
 	case addSecretStageType:
 		lines = append(lines, shellLogStyle.Render(targetLine), shellSelectedRow.Render(typeLine+"▌"), shellLogStyle.Render(pathLine))
 		lines = append(lines, shellMutedStyle.Render("tab 轮转类型 · Enter 下一步 · Esc 取消"))
@@ -788,7 +834,7 @@ func (m model) renderAddSecretOutcome() string {
 			extra = "远端已写入"
 		}
 		return shellMutedStyle.Render(fmt.Sprintf("已登记 %s → %s（%s）",
-			m.addSecretResult.NoteRelPath, m.addSecretResult.Folder, extra))
+			m.addSecretResult.NoteRelPath, m.addSecretResult.Address, extra))
 	}
 	return ""
 }

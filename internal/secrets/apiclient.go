@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/shichao402/Dec/internal/types"
 )
 
 const (
@@ -96,7 +98,11 @@ func (c *APIClient) PullBundle(ctx context.Context, req PullBundleRequest) (*Pul
 		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
 
-	folderID, err := c.findFolderID(ctx, folderNameForRequest(req.Target.Folder, req.Binding, req.DecBundleName), userKey)
+	sc, err := bwScopeForTarget(req.Target)
+	if err != nil {
+		return nil, err
+	}
+	folderID, err := c.findFolderID(ctx, sc.folder, userKey)
 	if err != nil {
 		return nil, err
 	}
@@ -104,13 +110,13 @@ func (c *APIClient) PullBundle(ctx context.Context, req PullBundleRequest) (*Pul
 		return &PullBundleResult{}, nil
 	}
 
-	existing, err := c.folderCiphers(ctx, folderID, userKey)
+	existing, err := c.folderCiphers(ctx, folderID, userKey, sc)
 	if err != nil {
 		return nil, err
 	}
 
 	notes := make([]SecureNote, 0, len(existing))
-	for name, cipher := range existing {
+	for rel, cipher := range existing {
 		itemKey, err := itemDecryptionKey(cipher.Key, userKey)
 		if err != nil {
 			continue
@@ -119,10 +125,10 @@ func (c *APIClient) PullBundle(ctx context.Context, req PullBundleRequest) (*Pul
 		if err != nil {
 			continue
 		}
-		notes = append(notes, SecureNote{RelativePath: name, Content: content})
+		notes = append(notes, SecureNote{RelativePath: rel, Content: content})
 	}
 
-	sshKeys, err := c.folderSSHKeys(ctx, folderID, userKey)
+	sshKeys, err := c.folderSSHKeys(ctx, folderID, userKey, sc)
 	if err != nil {
 		return nil, err
 	}
@@ -138,22 +144,25 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
 
-	folderName := folderNameForRequest(req.Target.Folder, req.Binding, req.DecBundleName)
-	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	sc, err := bwScopeForTarget(req.Target)
+	if err != nil {
+		return nil, err
+	}
+	folderID, err := c.findFolderID(ctx, sc.folder, userKey)
 	if err != nil {
 		return nil, err
 	}
 	if folderID == "" {
 		if !req.CreateFolderIfMissing {
-			return nil, fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+			return nil, fmt.Errorf("Bitwarden folder %q 不存在", sc.folder)
 		}
-		folderID, err = c.createFolder(ctx, folderName, userKey)
+		folderID, err = c.createFolder(ctx, sc.folder, userKey)
 		if err != nil {
-			return nil, fmt.Errorf("创建 Bitwarden folder %q 失败: %w", folderName, err)
+			return nil, fmt.Errorf("创建 Bitwarden folder %q 失败: %w", sc.folder, err)
 		}
 	}
 
-	existing, err := c.folderCiphers(ctx, folderID, userKey)
+	existing, err := c.folderCiphers(ctx, folderID, userKey, sc)
 	if err != nil {
 		return nil, err
 	}
@@ -163,23 +172,27 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 	// 会在枚举漏一个文件时静默删掉一条真密钥。
 	result := &PushBundleResult{}
 	for _, note := range notes {
-		noteName := strings.TrimSpace(note.RelativePath)
-		if noteName == "" {
+		noteRel := strings.TrimSpace(note.RelativePath)
+		if noteRel == "" {
 			continue
 		}
-		cipher, ok := findExistingCipher(existing, noteName)
+		cipher, ok := findExistingCipher(existing, noteRel)
 		if ok {
 			if err := c.updateSecureNote(ctx, cipher, userKey, note.Content); err != nil {
-				return nil, fmt.Errorf("更新 Secure Note %q 失败: %w", noteName, err)
+				return nil, fmt.Errorf("更新 Secure Note %q 失败: %w", noteRel, err)
 			}
 			result.Updated++
 		} else {
-			if err := c.createSecureNote(ctx, folderID, userKey, noteName, note.Content); err != nil {
-				return nil, fmt.Errorf("创建 Secure Note %q 失败: %w", noteName, err)
+			itemName, encErr := sc.encode(noteRel)
+			if encErr != nil {
+				return nil, encErr
+			}
+			if err := c.createSecureNote(ctx, folderID, userKey, itemName, note.Content); err != nil {
+				return nil, fmt.Errorf("创建 Secure Note %q 失败: %w", noteRel, err)
 			}
 			result.Created++
 		}
-		result.Paths = append(result.Paths, noteName)
+		result.Paths = append(result.Paths, noteRel)
 	}
 	return result, nil
 }
@@ -192,18 +205,21 @@ func (c *APIClient) CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) e
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
-	folderName := folderNameForRequest(req.Target.Folder, req.Binding, "")
-	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	sc, err := bwScopeForTarget(req.Target)
+	if err != nil {
+		return err
+	}
+	folderID, err := c.findFolderID(ctx, sc.folder, userKey)
 	if err != nil {
 		return err
 	}
 	if folderID == "" {
 		if !req.CreateFolderIfMissing {
-			return fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+			return fmt.Errorf("Bitwarden folder %q 不存在", sc.folder)
 		}
-		folderID, err = c.createFolder(ctx, folderName, userKey)
+		folderID, err = c.createFolder(ctx, sc.folder, userKey)
 		if err != nil {
-			return fmt.Errorf("创建 Bitwarden folder %q 失败: %w", folderName, err)
+			return fmt.Errorf("创建 Bitwarden folder %q 失败: %w", sc.folder, err)
 		}
 	}
 
@@ -226,18 +242,22 @@ func (c *APIClient) CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) e
 		return err
 	}
 
-	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey)
+	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey, sc)
 	if err != nil {
 		return err
 	}
 	if _, exists := existing[key.Name]; exists {
 		return fmt.Errorf("SSH Key 已存在: %q", key.Name)
 	}
-	return c.createSSHKey(ctx, folderID, userKey, key)
+	itemName, err := sc.encode(key.Name)
+	if err != nil {
+		return err
+	}
+	return c.createSSHKey(ctx, folderID, userKey, key, itemName)
 }
 
 func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRequest) error {
-	folderName, err := requireDeleteFolder(req.Target, req.Binding)
+	sc, err := requireDeleteScope(req.Target)
 	if err != nil {
 		return err
 	}
@@ -250,7 +270,7 @@ func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRe
 		return fmt.Errorf("Secure Note 路径不能为空")
 	}
 
-	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	folderID, err := c.findFolderID(ctx, sc.folder, userKey)
 	if err != nil {
 		return err
 	}
@@ -258,7 +278,7 @@ func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRe
 		return nil
 	}
 
-	existing, err := c.folderCiphers(ctx, folderID, userKey)
+	existing, err := c.folderCiphers(ctx, folderID, userKey, sc)
 	if err != nil {
 		return err
 	}
@@ -270,12 +290,17 @@ func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRe
 	return c.deleteCipher(ctx, cipher.ID)
 }
 
-func (c *APIClient) DeleteFolder(ctx context.Context, folderName string) error {
-	folderName = strings.TrimSpace(folderName)
+// DeleteAddress 删除存量非 P folder。P 地址一律拒绝：扁平布局下 P 的 folder 名
+// 就是裸 P 名，删掉它会同时清掉两个平面。
+func (c *APIClient) DeleteAddress(ctx context.Context, address string) error {
+	folderName := strings.TrimSpace(address)
 	if folderName == "" {
-		return fmt.Errorf("folder 名不能为空")
+		return fmt.Errorf("远端地址不能为空")
 	}
-	if _, _, ok := ParsePFolder(folderName); ok {
+	if _, err := ParseRemoteScope(folderName); err == nil {
+		return fmt.Errorf("拒绝删除 P 地址 %q", folderName)
+	}
+	if types.IsValidPName(folderName) {
 		return fmt.Errorf("拒绝删除 P folder %q", folderName)
 	}
 	userKey := UserKey()
@@ -294,7 +319,9 @@ func (c *APIClient) DeleteFolder(ctx context.Context, folderName string) error {
 	return c.doAuthenticatedJSON(ctx, http.MethodDelete, reqURL, nil, nil)
 }
 
-func (c *APIClient) createSSHKey(ctx context.Context, folderID string, userKey []byte, key SSHKeyItem) error {
+// createSSHKey 写入一条 SSH Key Item。itemName 是编码后的条目名（含平面前缀），
+// key.Name 只用于校验与错误信息。
+func (c *APIClient) createSSHKey(ctx context.Context, folderID string, userKey []byte, key SSHKeyItem, itemName string) error {
 	itemKey, err := generateCipherKey()
 	if err != nil {
 		return err
@@ -306,7 +333,7 @@ func (c *APIClient) createSSHKey(ctx context.Context, folderID string, userKey [
 		}
 		return enc, nil
 	}
-	encName, err := encrypt("名称", key.Name)
+	encName, err := encrypt("名称", itemName)
 	if err != nil {
 		return err
 	}
@@ -346,7 +373,7 @@ func (c *APIClient) createSSHKey(ctx context.Context, folderID string, userKey [
 }
 
 func (c *APIClient) DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) error {
-	folderName, err := requireDeleteFolder(req.Target, req.Binding)
+	sc, err := requireDeleteScope(req.Target)
 	if err != nil {
 		return err
 	}
@@ -359,7 +386,7 @@ func (c *APIClient) DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) e
 		return fmt.Errorf("SSH Key 名称不能为空")
 	}
 
-	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	folderID, err := c.findFolderID(ctx, sc.folder, userKey)
 	if err != nil {
 		return err
 	}
@@ -367,7 +394,7 @@ func (c *APIClient) DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) e
 		return nil
 	}
 
-	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey)
+	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey, sc)
 	if err != nil {
 		return err
 	}
@@ -386,33 +413,30 @@ func (c *APIClient) UpdateSSHKeyHosts(ctx context.Context, req UpdateSSHKeyHosts
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
-	folderName := strings.TrimSpace(req.Binding.SecretsBundleName)
-	if folderName == "" {
-		folderName = strings.TrimSpace(req.Target.Folder)
-	}
-	if folderName == "" {
-		return fmt.Errorf("secrets bundle 名称不能为空")
+	sc, err := bwScopeForTarget(req.Target)
+	if err != nil {
+		return err
 	}
 	keyName := strings.TrimSpace(req.KeyName)
 	if keyName == "" {
 		return fmt.Errorf("SSH Key 名称不能为空")
 	}
 
-	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	folderID, err := c.findFolderID(ctx, sc.folder, userKey)
 	if err != nil {
 		return err
 	}
 	if folderID == "" {
-		return fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+		return fmt.Errorf("Bitwarden folder %q 不存在", sc.folder)
 	}
 
-	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey)
+	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey, sc)
 	if err != nil {
 		return err
 	}
 	cipher, ok := existing[keyName]
 	if !ok {
-		return fmt.Errorf("SSH Key %q 不在 folder %q", keyName, folderName)
+		return fmt.Errorf("SSH Key %q 不在 %s", keyName, req.Target.Address)
 	}
 	return c.updateSSHKeyNotes(ctx, cipher, userKey, formatSSHHostsNotes(req.Hosts))
 }
@@ -425,12 +449,9 @@ func (c *APIClient) RenameSecureNote(ctx context.Context, req RenameSecureNoteRe
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
-	folderName := strings.TrimSpace(req.Binding.SecretsBundleName)
-	if folderName == "" {
-		folderName = strings.TrimSpace(req.Target.Folder)
-	}
-	if folderName == "" {
-		return fmt.Errorf("secrets bundle 名称不能为空")
+	sc, err := bwScopeForTarget(req.Target)
+	if err != nil {
+		return err
 	}
 	oldPath := strings.TrimSpace(req.OldPath)
 	newPath := strings.TrimSpace(req.NewPath)
@@ -441,25 +462,29 @@ func (c *APIClient) RenameSecureNote(ctx context.Context, req RenameSecureNoteRe
 		return err
 	}
 
-	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	folderID, err := c.findFolderID(ctx, sc.folder, userKey)
 	if err != nil {
 		return err
 	}
 	if folderID == "" {
-		return fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+		return fmt.Errorf("Bitwarden folder %q 不存在", sc.folder)
 	}
-	existing, err := c.folderCiphers(ctx, folderID, userKey)
+	existing, err := c.folderCiphers(ctx, folderID, userKey, sc)
 	if err != nil {
 		return err
 	}
 	cipher, ok := findExistingCipher(existing, oldPath)
 	if !ok {
-		return fmt.Errorf("Secure Note %q 不在 folder %q", oldPath, folderName)
+		return fmt.Errorf("Secure Note %q 不在 %s", oldPath, req.Target.Address)
 	}
 	if _, conflict := findExistingCipher(existing, newPath); conflict {
 		return fmt.Errorf("目标 Note 已存在: %q", newPath)
 	}
-	return c.renameCipherName(ctx, cipher, userKey, newPath, cipherTypeSecureNote)
+	newItemName, err := sc.encode(newPath)
+	if err != nil {
+		return err
+	}
+	return c.renameCipherName(ctx, cipher, userKey, newItemName, cipherTypeSecureNote, "")
 }
 
 func (c *APIClient) RenameSSHKey(ctx context.Context, req RenameSSHKeyRequest) error {
@@ -470,12 +495,9 @@ func (c *APIClient) RenameSSHKey(ctx context.Context, req RenameSSHKeyRequest) e
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
-	folderName := strings.TrimSpace(req.Binding.SecretsBundleName)
-	if folderName == "" {
-		folderName = strings.TrimSpace(req.Target.Folder)
-	}
-	if folderName == "" {
-		return fmt.Errorf("secrets bundle 名称不能为空")
+	sc, err := bwScopeForTarget(req.Target)
+	if err != nil {
+		return err
 	}
 	oldName := strings.TrimSpace(req.OldName)
 	newName := strings.TrimSpace(req.NewName)
@@ -483,29 +505,34 @@ func (c *APIClient) RenameSSHKey(ctx context.Context, req RenameSSHKeyRequest) e
 		return fmt.Errorf("RenameSSHKey 需要 OldName 与 NewName")
 	}
 
-	folderID, err := c.findFolderID(ctx, folderName, userKey)
+	folderID, err := c.findFolderID(ctx, sc.folder, userKey)
 	if err != nil {
 		return err
 	}
 	if folderID == "" {
-		return fmt.Errorf("Bitwarden folder %q 不存在", folderName)
+		return fmt.Errorf("Bitwarden folder %q 不存在", sc.folder)
 	}
-	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey)
+	existing, err := c.folderSSHKeyCiphers(ctx, folderID, userKey, sc)
 	if err != nil {
 		return err
 	}
 	cipher, ok := existing[oldName]
 	if !ok {
-		return fmt.Errorf("SSH Key %q 不在 folder %q", oldName, folderName)
+		return fmt.Errorf("SSH Key %q 不在 %s", oldName, req.Target.Address)
 	}
 	if _, conflict := existing[newName]; conflict {
 		return fmt.Errorf("目标 SSH Key 已存在: %q", newName)
 	}
-	return c.renameCipherName(ctx, cipher, userKey, newName, cipherTypeSSHKey)
+	newItemName, err := sc.encode(newName)
+	if err != nil {
+		return err
+	}
+	return c.renameCipherName(ctx, cipher, userKey, newItemName, cipherTypeSSHKey, "")
 }
 
 // renameCipherName 用新明文名重新加密 name 字段，其余字段原样回传。
-func (c *APIClient) renameCipherName(ctx context.Context, cipher bwCipher, userKey []byte, newName string, cipherType int) error {
+// newFolderID 非空时同时移动 folder，供扁平化迁移一次请求完成搬移。
+func (c *APIClient) renameCipherName(ctx context.Context, cipher bwCipher, userKey []byte, newName string, cipherType int, newFolderID string) error {
 	itemKey, err := itemDecryptionKey(cipher.Key, userKey)
 	if err != nil {
 		return err
@@ -514,11 +541,15 @@ func (c *APIClient) renameCipherName(ctx context.Context, cipher bwCipher, userK
 	if err != nil {
 		return err
 	}
+	folderID := cipher.FolderID
+	if strings.TrimSpace(newFolderID) != "" {
+		folderID = strings.TrimSpace(newFolderID)
+	}
 	body := map[string]any{
 		"type":     cipherType,
 		"name":     encName,
 		"notes":    optionalCipherField(cipher.Notes),
-		"folderId": cipher.FolderID,
+		"folderId": folderID,
 		"favorite": false,
 	}
 	if cipherType == cipherTypeSecureNote {

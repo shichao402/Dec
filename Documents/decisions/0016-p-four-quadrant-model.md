@@ -46,9 +46,14 @@ Git 仓库每个合法顶层目录都是一个 P；P 可以对应代码项目，
 
 ### 3. Git 与 Bitwarden 分工
 
-Git 的四象限均为非敏感资产。后续 Bitwarden 协议只在
-`<p>/private/user`、`<p>/private/project` 保存敏感正文，不建立多余的 public folder。
-同一 P/plane/相对路径不得同时由 Git 与 BW 持有。
+Git 的四象限均为非敏感资产。Bitwarden 只保存 `private/user`、`private/project`
+两个平面的敏感正文，不建立多余的 public folder。同一 P/plane/相对路径不得同时由
+Git 与 BW 持有。
+
+Bitwarden 的 folder 只有一层，名字里的斜杠不表示层级。因此 folder 名就是 P 名，
+平面与同步根相对路径一起编码进条目名（`private/<plane>/<rel>`，SSH Key 条目也不
+例外）。`<p>/private/<plane>` 只是逻辑地址写法；这套切分只在 BW 实现内部定义，
+`internal/app` 与 `internal/tui` 只传 (P, 平面, 相对路径)。
 
 `private/user` 中的 `.gcm` / `.sshkey` 保持机器级安装语义。`private/project`
 允许相同类型，但副作用必须定向到家工作区：

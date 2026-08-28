@@ -15,7 +15,7 @@ import (
 
 // LandingCandidate 是一条待落地的 secrets 文件及其 SyncTarget 归属。
 type LandingCandidate struct {
-	Folder       string // Bitwarden folder
+	Address      string // 远端逻辑地址 <p>/private/<plane>
 	LocalRoot    string // SyncTarget.LocalRoot
 	RelativePath string // 相对 LocalRoot
 	Plane        SyncPlane
@@ -51,16 +51,16 @@ func ValidateLandingPaths(projectRoot string, candidates []LandingCandidate) err
 				return fmt.Errorf("LandingCandidate.LocalRoot 不能为空")
 			}
 			projectRel := path.Join(root, noteRel)
-			folder := strings.TrimSpace(candidate.Folder)
+			address := strings.TrimSpace(candidate.Address)
 			if prev, ok := owners[projectRel]; ok {
-				if prev != folder {
+				if prev != address {
 					return fmt.Errorf(
-						"secrets 落地路径冲突: %s 同时由 Bitwarden folder %q 与 %q 管理，请在 Bitwarden 中改掉其中一个 Note 名",
-						projectRel, prev, folder)
+						"secrets 落地路径冲突: %s 同时由远端 %q 与 %q 管理，请在 Bitwarden 中改掉其中一个 Note 名",
+						projectRel, prev, address)
 				}
 				continue
 			}
-			owners[projectRel] = folder
+			owners[projectRel] = address
 			projectRels = append(projectRels, projectRel)
 
 			if !strings.HasPrefix(projectRel, SecretsRootDir+"/") && projectRel != SecretsRootDir {
@@ -93,22 +93,20 @@ func ValidateLandingPaths(projectRoot string, candidates []LandingCandidate) err
 			if root == "" {
 				return fmt.Errorf("LandingCandidate.LocalRoot 不能为空")
 			}
-			legacyBundleRoot := strings.HasPrefix(root, MachineBundleSecretsRelPrefix+"/") && root != MachineBundleSecretsRelPrefix
-			pRoot := !strings.Contains(root, "/") && types.IsValidPName(root)
-			if !legacyBundleRoot && !pRoot {
-				return fmt.Errorf("机器级 secrets 落地路径必须是 P 根或位于旧 %s/ 下: %s", MachineBundleSecretsRelPrefix, root)
+			if strings.Contains(root, "/") || !types.IsValidPName(root) {
+				return fmt.Errorf("机器级 secrets 落地路径必须是 P 根: %s", root)
 			}
 			display := path.Join(".dec/secrets", root, noteRel)
-			folder := strings.TrimSpace(candidate.Folder)
+			address := strings.TrimSpace(candidate.Address)
 			if prev, ok := owners[display]; ok {
-				if prev != folder {
+				if prev != address {
 					return fmt.Errorf(
-						"secrets 落地路径冲突: %s 同时由 Bitwarden folder %q 与 %q 管理",
-						display, prev, folder)
+						"secrets 落地路径冲突: %s 同时由远端 %q 与 %q 管理",
+						display, prev, address)
 				}
 				continue
 			}
-			owners[display] = folder
+			owners[display] = address
 
 			abs := filepath.Join(machineRoot, filepath.FromSlash(root), filepath.FromSlash(noteRel))
 			ancestor, err := existingAncestor(filepath.Dir(abs))

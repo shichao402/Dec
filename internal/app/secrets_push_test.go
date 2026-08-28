@@ -50,9 +50,12 @@ func TestPushSecretsBundles_UsesDefaultServerWithoutConfigFile(t *testing.T) {
 func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 
+	// 项目平面只推项目自己那个 P（<p>/private/project）。
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"bundle/vikunja": {{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=old\n"}},
-		"bundle/Dec":     {{RelativePath: "config/private.yaml", Content: "old"}},
+		"dec/private/project": {
+			{RelativePath: ".env/vikunja.env", Content: "VIKUNJA_API_TOKEN=old\n"},
+			{RelativePath: "config/private.yaml", Content: "old"},
+		},
 	}}
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
@@ -61,13 +64,13 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Dec",
-		EnabledBundles: []string{"vikunja", "Dec"},
+		ProjectName:    "dec",
+		EnabledBundles: []string{"vikunja", "dec"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/vikunja/.env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/Dec/config/private.yaml", "token: abc\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/dec/.env/vikunja.env", "VIKUNJA_API_TOKEN=abc\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/dec/config/private.yaml", "token: abc\n")
 
 	result, err := PushSecretsBundles(context.Background(), projectRoot, nil)
 	if err != nil {
@@ -76,11 +79,12 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	if result.CreatedCount != 0 || result.UpdatedCount != 2 {
 		t.Fatalf("result = %#v, 期望 2 条更新", result)
 	}
-	if got := stub.NotesByFolder["bundle/vikunja"][0].Content; got != "VIKUNJA_API_TOKEN=abc\n" {
-		t.Fatalf("bundle secret 未被本地覆盖: %q", got)
+	notes := map[string]string{}
+	for _, note := range stub.NotesByFolder["dec/private/project"] {
+		notes[note.RelativePath] = note.Content
 	}
-	if got := stub.NotesByFolder["bundle/Dec"][0].Content; got != "token: abc\n" {
-		t.Fatalf("project-scope bundle secret 未被本地覆盖: %q", got)
+	if notes[".env/vikunja.env"] != "VIKUNJA_API_TOKEN=abc\n" || notes["config/private.yaml"] != "token: abc\n" {
+		t.Fatalf("远端未被同步根覆盖: %#v", notes)
 	}
 }
 
@@ -88,7 +92,7 @@ func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"bundle/Dec": {{RelativePath: "config/private.yaml", Content: "只在远端存在"}},
+		"dec/private/project": {{RelativePath: "config/private.yaml", Content: "只在远端存在"}},
 	}}
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
@@ -97,8 +101,8 @@ func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Dec",
-		EnabledBundles: []string{"Dec"},
+		ProjectName:    "dec",
+		EnabledBundles: []string{"dec"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +117,7 @@ func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
 	if len(result.MissingLocal) != 1 || result.MissingLocal[0] != "config/private.yaml" {
 		t.Fatalf("MissingLocal = %#v", result.MissingLocal)
 	}
-	if len(stub.NotesByFolder["bundle/Dec"]) != 1 {
+	if len(stub.NotesByFolder["dec/private/project"]) != 1 {
 		t.Fatal("本地缺文件不应导致远端 note 被删")
 	}
 	if !containsScopeMessage(events, "push.secrets", "Remote 页") {
@@ -126,8 +130,8 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	decHome := setupSecretsConfigForPushTest(t)
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"bundle/tencent-cloud": {{RelativePath: ".env/tencent.env", Content: "TOKEN=old\n"}},
-		"bundle/Dec":           {{RelativePath: "config/private.yaml", Content: "old"}},
+		"tencent-cloud/private/user": {{RelativePath: ".env/tencent.env", Content: "TOKEN=old\n"}},
+		"dec/private/project":        {{RelativePath: "config/private.yaml", Content: "old"}},
 	}}
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
@@ -142,15 +146,15 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Dec",
-		EnabledBundles: []string{"Dec"},
+		ProjectName:    "dec",
+		EnabledBundles: []string{"dec"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	// 项目平面的落地文件：本轮 push 必须完全无视它们。
-	writeProjectFileForPushTest(t, projectRoot, ".secrets/bundles/Dec/config/private.yaml", "token: from-project\n")
+	writeProjectFileForPushTest(t, projectRoot, ".secrets/dec/config/private.yaml", "token: from-project\n")
 
-	machineEnv := filepath.Join(decHome, "secrets", "bundles", "tencent-cloud", ".env", "tencent.env")
+	machineEnv := filepath.Join(decHome, "secrets", "tencent-cloud", ".env", "tencent.env")
 	if err := os.MkdirAll(filepath.Dir(machineEnv), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -166,11 +170,11 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	if result.UpdatedCount != 1 {
 		t.Fatalf("UpdatedCount = %d, 期望只推用户平面那 1 条: %#v", result.UpdatedCount, result)
 	}
-	if got := stub.NotesByFolder["bundle/tencent-cloud"][0].Content; got != "TOKEN=new\n" {
+	if got := stub.NotesByFolder["tencent-cloud/private/user"][0].Content; got != "TOKEN=new\n" {
 		t.Fatalf("用户平面 secret 未被推送: %q", got)
 	}
-	if got := stub.NotesByFolder["bundle/Dec"][0].Content; got != "old" {
-		t.Fatalf("项目平面 folder 被用户平面 push 改写了: %q", got)
+	if got := stub.NotesByFolder["dec/private/project"][0].Content; got != "old" {
+		t.Fatalf("项目平面地址被用户平面 push 改写了: %q", got)
 	}
 }
 

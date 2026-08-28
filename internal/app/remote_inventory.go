@@ -361,30 +361,21 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 
 	if includeRemote {
 		if err := appendRemoteSecretCandidates(ctx, workspace, projectConfig, func(secretsBundle, localRoot string, plane secrets.SyncPlane, notePath string, localExists bool) {
-			_, _, isPFolder := secrets.ParsePFolder(secretsBundle)
-			unmanaged := !isPFolder && !strings.HasPrefix(secretsBundle, secrets.BundleFolderPrefix) && strings.TrimSpace(localRoot) == ""
+			scope, scopeErr := secrets.ParseRemoteScope(secretsBundle)
+			unmanaged := scopeErr != nil && strings.TrimSpace(localRoot) == ""
 			scopeTag := ""
-			if strings.HasPrefix(secretsBundle, secrets.BundleFolderPrefix) {
-				name := strings.TrimPrefix(secretsBundle, secrets.BundleFolderPrefix)
-				scopeTag = scopeByBundle[name]
+			if scopeErr == nil {
+				scopeTag = string(scope.Plane)
 			}
 			addSecret(secretsBundle, localRoot, plane, notePath, localExists, PartitionRemote, unmanaged, scopeTag)
 		}, func(secretsBundle, decBundleName, keyName string, localExists bool) {
-			_, pPlane, isPFolder := secrets.ParsePFolder(secretsBundle)
-			unmanaged := !isPFolder && !strings.HasPrefix(secretsBundle, secrets.BundleFolderPrefix)
+			scope, scopeErr := secrets.ParseRemoteScope(secretsBundle)
+			unmanaged := scopeErr != nil
 			scopeTag := ""
 			plane := secrets.SyncPlane("")
-			if isPFolder {
-				plane = pPlane
-			}
-			if strings.HasPrefix(secretsBundle, secrets.BundleFolderPrefix) {
-				name := strings.TrimPrefix(secretsBundle, secrets.BundleFolderPrefix)
-				scopeTag = scopeByBundle[name]
-				if secrets.IsMachinePlane(secrets.SyncPlane(scopeTag)) || scopeTag == "user" {
-					plane = secrets.SyncPlaneMachine
-				} else if scopeTag == "project" {
-					plane = secrets.SyncPlaneProject
-				}
+			if scopeErr == nil {
+				plane = scope.Plane
+				scopeTag = string(scope.Plane)
 			}
 			addSSHKey(secretsBundle, decBundleName, keyName, localExists, PartitionRemote, unmanaged, scopeTag, plane)
 		}, reporter); err != nil {

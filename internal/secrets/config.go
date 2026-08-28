@@ -36,7 +36,6 @@ type Config struct {
 	UserEnabledBundles       []string            `yaml:"user_enabled_bundles,omitempty"` // 遗留：仅 Load 读取；Save 前清空（ADR 0009）
 	KnownSecretBundles       []string            `yaml:"known_secret_bundles,omitempty"`
 	KnownSecretBundleMembers map[string][]string `yaml:"known_secret_bundle_members,omitempty"`
-	Bundles                  []BundleBinding     `yaml:"bundles,omitempty"`
 }
 
 func secretsDir() (string, error) {
@@ -73,9 +72,6 @@ func LoadConfig() (*Config, error) {
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("解析 secrets 配置失败: %w", err)
-	}
-	for i := range cfg.Bundles {
-		cfg.Bundles[i] = normalizeBinding(cfg.Bundles[i].DecBundleName, cfg.Bundles[i])
 	}
 	cfg.UserEnabledBundles = NormalizeBundleNames(cfg.UserEnabledBundles)
 	cfg.KnownSecretBundles = NormalizeBundleNames(cfg.KnownSecretBundles)
@@ -142,22 +138,6 @@ func SaveEmail(email string) error {
 	return SaveConfig(cfg)
 }
 
-// defaultSecretsBundleName 返回未显式配置时的默认 Bitwarden folder 名。
-// bundle 级协议为 bundle/<decBundleName>（与 project 裸名文件夹区分，见 SyncTarget / ADR 0002）。
-func defaultSecretsBundleName(decBundleName string) string {
-	return DefaultBundleFolder(decBundleName)
-}
-
-// ResolveBinding 解析 Dec bundle 对应的 secrets 绑定；未显式配置时同名。
-func (c *Config) ResolveBinding(decBundleName string) BundleBinding {
-	for _, b := range c.Bundles {
-		if b.DecBundleName == decBundleName {
-			return normalizeBinding(decBundleName, b)
-		}
-	}
-	return normalizeBinding(decBundleName, BundleBinding{DecBundleName: decBundleName})
-}
-
 // ProjectSecretsName 返回显式配置的 project secrets folder 名。
 func (c *Config) ProjectSecretsName() string {
 	if c == nil {
@@ -180,24 +160,19 @@ func (c *Config) ResolveProjectSecrets(projectName string) (name string, enabled
 	return name, true
 }
 
-// ProjectSecretsBinding 构造 project 级 secrets 的 BundleBinding。
-func ProjectSecretsBinding(secretsName string) BundleBinding {
-	return BundleBinding{
-		DecBundleName:     ProjectSecretsDecBundleName,
-		SecretsBundleName: strings.TrimSpace(secretsName),
-	}
-}
+// legacyBundleFolderPrefix 是已删除的 bundle 写入路径留下的 folder 前缀。
+const legacyBundleFolderPrefix = "bundle/"
 
 // NormalizeBundleNames 去空白、去重，保序。
+// 存量配置里可能残留 `bundle/<名>` 写法（写入路径已删除），读入时剥掉前缀。
 func NormalizeBundleNames(names []string) []string {
 	if len(names) == 0 {
 		return nil
 	}
 	seen := make(map[string]struct{}, len(names))
 	out := make([]string, 0, len(names))
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		name = strings.TrimPrefix(name, BundleFolderPrefix)
+	for _, raw := range names {
+		name := strings.TrimPrefix(strings.TrimSpace(raw), legacyBundleFolderPrefix)
 		if name == "" {
 			continue
 		}
@@ -435,59 +410,6 @@ func equalStringSlices(left, right []string) bool {
 	return true
 }
 
-// ResolveSyncTargets 按当前工作平面解析 SyncTarget。
-//
-//	plane=project：仅用 enabled 生成项目平面 bundle target（ADR 0014：不再追加裸 project target）
-//	plane=machine|user：仅用 enabled 生成机器平面 bundle target
-func (c *Config) ResolveSyncTargets(plane SyncPlane, enabled []string, projectName string) ([]SyncTarget, error) {
-	_ = projectName // 保留参数兼容旧调用方；project 级可写归属已取消
-	enabled = NormalizeBundleNames(enabled)
-	targets := make([]SyncTarget, 0, len(enabled))
-	seenFolder := make(map[string]string) // folder -> label
-
-	add := func(t SyncTarget, label string) error {
-		if t.Plane == "" {
-			t.Plane = SyncPlaneProject
-		}
-		prev, ok := seenFolder[t.Folder]
-		if ok && prev != label {
-			return fmt.Errorf("Bitwarden folder %q 同时绑定 %s 与 %s", t.Folder, prev, label)
-		}
-		seenFolder[t.Folder] = label
-		targets = append(targets, t)
-		return nil
-	}
-
-	switch {
-	case IsMachinePlane(plane):
-		for _, bundleName := range enabled {
-			binding := c.ResolveBinding(bundleName)
-			target, err := NewMachineBundleSyncTarget(bundleName, binding.SecretsBundleName)
-			if err != nil {
-				return nil, err
-			}
-			if err := add(target, fmt.Sprintf("machine bundle %q", bundleName)); err != nil {
-				return nil, err
-			}
-		}
-	case plane == SyncPlaneProject || plane == "":
-		for _, bundleName := range enabled {
-			binding := c.ResolveBinding(bundleName)
-			target, err := NewBundleSyncTarget(bundleName, binding.SecretsBundleName)
-			if err != nil {
-				return nil, err
-			}
-			if err := add(target, fmt.Sprintf("bundle %q", bundleName)); err != nil {
-				return nil, err
-			}
-		}
-	default:
-		return nil, fmt.Errorf("未知 SyncPlane %q", plane)
-	}
-
-	return targets, nil
-}
-
 // ResolvePSyncTargets 按 ADR 0016 生成固定 P + plane 目标。
 // project 平面调用方只能传家 P；requires 不得加入。user 平面传本机显式启用的 P。
 func ResolvePSyncTargets(plane SyncPlane, pNames []string) ([]SyncTarget, error) {
@@ -512,42 +434,3 @@ func applyConfigDefaults(cfg *Config) {
 	}
 }
 
-func normalizeBinding(decBundleName string, b BundleBinding) BundleBinding {
-	if b.DecBundleName == "" {
-		b.DecBundleName = decBundleName
-	}
-	if b.SecretsBundleName == "" && strings.TrimSpace(b.Folder) != "" {
-		b.SecretsBundleName = strings.TrimSpace(b.Folder)
-	}
-	if b.SecretsBundleName == "" {
-		b.SecretsBundleName = defaultSecretsBundleName(b.DecBundleName)
-	}
-	return b
-}
-
-// MigrateConfigIfNeeded 将废弃的 folder 字段迁移为 secrets_bundle 并回写配置（幂等）。
-func MigrateConfigIfNeeded() (bool, error) {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return false, err
-	}
-	changed := false
-	for i := range cfg.Bundles {
-		b := &cfg.Bundles[i]
-		if strings.TrimSpace(b.Folder) == "" {
-			continue
-		}
-		if b.SecretsBundleName == "" {
-			b.SecretsBundleName = strings.TrimSpace(b.Folder)
-		}
-		b.Folder = ""
-		changed = true
-	}
-	if !changed {
-		return false, nil
-	}
-	if err := SaveConfig(cfg); err != nil {
-		return false, err
-	}
-	return true, nil
-}

@@ -84,29 +84,22 @@ func PushWorkspaceSecretsBundles(ctx context.Context, workspace Workspace, repor
 		progress := &Progress{Phase: "secrets", Current: i + 1, Total: total}
 		label := formatSyncTargetLabel(target)
 		emit(reporter, EventInfo, "push.secrets",
-			fmt.Sprintf("推送 %s (folder: %s ← %s)", label, target.Folder, target.LocalRoot), progress)
+			fmt.Sprintf("推送 %s (folder: %s ← %s)", label, target.Address, target.LocalRoot), progress)
 
-		if target.Kind == secrets.SyncKindP {
-			localNotes, scanErr := secrets.ScanSyncRoot(projectRoot, target)
-			if scanErr != nil {
-				return nil, scanErr
-			}
-			if overlapErr := validateNoPPrivateGitOverlap(
-				[]secrets.SyncTarget{target},
-				[][]secrets.SecureNote{localNotes},
-				nil,
-			); overlapErr != nil {
-				return nil, overlapErr
-			}
+		localNotes, scanErr := secrets.ScanSyncRoot(projectRoot, target)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		if overlapErr := validateNoPPrivateGitOverlap(
+			[]secrets.SyncTarget{target},
+			[][]secrets.SecureNote{localNotes},
+			nil,
+		); overlapErr != nil {
+			return nil, overlapErr
 		}
 		pushResult, pushErr := secrets.PushBundle(ctx, client, secrets.PushBundleRequest{
-			ProjectRoot:   projectRoot,
-			Target:        target,
-			DecBundleName: decBundleNameForTarget(target),
-			Binding: secrets.BundleBinding{
-				DecBundleName:     decBundleNameForTarget(target),
-				SecretsBundleName: target.Folder,
-			},
+			ProjectRoot: projectRoot,
+			Target:      target,
 		})
 		if pushErr != nil {
 			return nil, fmt.Errorf("推送 %s 失败: %w", label, pushErr)

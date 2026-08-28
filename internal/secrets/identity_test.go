@@ -333,9 +333,8 @@ func TestBWAuthenticator_2FAFlow(t *testing.T) {
 	}
 }
 
-func TestAPIClient_PullBundleByFolder(t *testing.T) {
-	t.Parallel()
-
+// 设置全局 UserKey 的用例不能并行。
+func TestAPIClient_PullBundleByScope(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assertBitwardenHeaders(t, r)
 		switch r.URL.Path {
@@ -351,7 +350,9 @@ func TestAPIClient_PullBundleByFolder(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{
 				Data: []bwCipher{
 					{Type: 1, Name: "login", FolderID: "f1"},
-					{Type: cipherTypeSecureNote, Name: "env/vikunja.env", Notes: "VIKUNJA_API_TOKEN=abc\n", FolderID: "f1"},
+					{Type: cipherTypeSecureNote, Name: projectItemName(t, "env/vikunja.env"), Notes: "VIKUNJA_API_TOKEN=abc\n", FolderID: "f1"},
+					// 另一平面的条目：同一 folder 内靠条目名前缀区分，不该被拉进来。
+					{Type: cipherTypeSecureNote, Name: "private/user/env/vikunja.env", Notes: "skip", FolderID: "f1"},
 					{Type: cipherTypeSecureNote, Name: "other.toml", Notes: "skip", FolderID: "f2"},
 				},
 			})
@@ -369,8 +370,7 @@ func TestAPIClient_PullBundleByFolder(t *testing.T) {
 	SetUserKey(bytes.Repeat([]byte{0x01}, 64))
 	t.Cleanup(ClearSession)
 	result, err := client.PullBundle(context.Background(), PullBundleRequest{
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
+		Target: declaredPTarget(t, "vikunja", SyncPlaneProject),
 	})
 	if err != nil {
 		t.Fatalf("PullBundle() = %v", err)
@@ -420,7 +420,9 @@ func TestDefaultClient_UsesAPIWhenSessionPresent(t *testing.T) {
 	if _, ok := client.(NoopClient); ok {
 		t.Fatal("有 session 且已配置时应返回 APIClient")
 	}
-	result, err := client.PullBundle(context.Background(), PullBundleRequest{DecBundleName: "x"})
+	result, err := client.PullBundle(context.Background(), PullBundleRequest{
+		Target: declaredPTarget(t, "missing-p", SyncPlaneProject),
+	})
 	if err != nil {
 		t.Fatalf("PullBundle() = %v, 期望 folder 不存在时返回空结果", err)
 	}

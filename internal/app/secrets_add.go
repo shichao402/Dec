@@ -14,9 +14,8 @@ import (
 
 // AddSecretResult 是一次「登记新 secret」的结果。
 type AddSecretResult struct {
-	Kind           secrets.SyncKind
 	TargetName     string
-	Folder         string
+	Address        string // 远端逻辑地址（展示用）
 	NoteRelPath    string // 相对同步根
 	ProjectRelPath string // 项目根相对
 	// LandingPath 兼容旧 TUI/测试，等于 ProjectRelPath。
@@ -25,67 +24,33 @@ type AddSecretResult struct {
 
 // SecretTargetOption 是 TUI 可选的登记归属。
 type SecretTargetOption struct {
-	Kind      secrets.SyncKind
 	Name      string
-	Folder    string
+	Plane     secrets.SyncPlane
+	Address   string
 	LocalRoot string
 	Label     string
 }
 
-// AddProjectSecret 兼容旧签名：folder + 路径。
-// folder 可为 `bundle/<名>` 或短名；若 relPath 以同步根为前缀则剥成 note 相对路径。
-func AddProjectSecret(ctx context.Context, projectRoot, folder, relPath string, reporter Reporter) (*AddSecretResult, error) {
-	opts, err := SuggestSecretTargets(projectRoot)
+// AddProjectSecretForScope 按 (P, 平面) 登记同步根下已存在的文件。
+// relPath 允许带同步根前缀，会被剥成 note 相对路径。
+func AddProjectSecretForScope(ctx context.Context, projectRoot string, scope secrets.RemoteScope, relPath string, reporter Reporter) (*AddSecretResult, error) {
+	target, err := secrets.NewPSyncTarget(scope.P, scope.Plane)
 	if err != nil {
 		return nil, err
 	}
-	folder = strings.Trim(strings.TrimSpace(strings.ReplaceAll(folder, "\\", "/")), "/")
-	var target secrets.SyncTarget
-	found := false
-	for _, opt := range opts {
-		if opt.Kind != secrets.SyncKindBundle {
-			continue
-		}
-		if opt.Folder == folder || opt.Name == folder ||
-			strings.TrimPrefix(opt.Folder, secrets.BundleFolderPrefix) == folder {
-			target, err = secrets.NewBundleSyncTarget(opt.Name, opt.Folder)
-			if err != nil {
-				return nil, err
-			}
-			found = true
-			break
-		}
-	}
-	if !found {
-		name := strings.TrimPrefix(folder, secrets.BundleFolderPrefix)
-		if !strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
-			return nil, fmt.Errorf("未知 secrets 归属 folder %q；请使用 bundle/<名>", folder)
-		}
-		t, err := secrets.NewBundleSyncTarget(name, folder)
-		if err != nil {
-			return nil, fmt.Errorf("未知 secrets 归属 folder %q", folder)
-		}
-		target = t
-	}
-
 	rel := filepath.ToSlash(strings.TrimSpace(relPath))
 	prefix := strings.Trim(target.LocalRoot, "/") + "/"
-	if strings.HasPrefix(rel, prefix) {
-		rel = strings.TrimPrefix(rel, prefix)
-	}
+	rel = strings.TrimPrefix(rel, prefix)
 	return AddSecretToTarget(ctx, projectRoot, target, rel, reporter)
 }
 
 // AddSecretToTarget 把 SyncTarget 同步根下已存在的文件登记为 Secure Note。
 func AddSecretToTarget(ctx context.Context, projectRoot string, target secrets.SyncTarget, noteRel string, reporter Reporter) (*AddSecretResult, error) {
 	reporter = defaultReporter(reporter)
-	if target.Kind == secrets.SyncKindProject {
-		return nil, fmt.Errorf("ADR 0014：project 级 secrets 已取消；请写入 bundle/<名>")
-	}
 	if err := secrets.RequireDeclared(target); err != nil {
 		return nil, err
 	}
-	if target.Folder == "" || target.LocalRoot == "" {
+	if target.Address == "" || target.LocalRoot == "" {
 		return nil, fmt.Errorf("必须指定 secrets 归属 SyncTarget")
 	}
 	noteRel = filepath.ToSlash(strings.TrimSpace(noteRel))
@@ -127,18 +92,17 @@ func AddSecretToTarget(ctx context.Context, projectRoot string, target secrets.S
 	}
 	projectRel, _ := secrets.ProjectRelPath(target, noteRel)
 	emit(reporter, EventInfo, "secrets.add",
-		fmt.Sprintf("已登记 %s → Bitwarden folder %q（本地 %s）", noteRel, target.Folder, projectRel), nil)
+		fmt.Sprintf("已登记 %s → %s（本地 %s）", noteRel, target.Address, projectRel), nil)
 	return &AddSecretResult{
-		Kind:           target.Kind,
 		TargetName:     target.Name,
-		Folder:         target.Folder,
+		Address:        target.Address,
 		NoteRelPath:    noteRel,
 		ProjectRelPath: projectRel,
 		LandingPath:    projectRel,
 	}, nil
 }
 
-// SuggestSecretTargets 列出可选登记归属（仅已启用的 bundle SyncTarget，ADR 0014）。
+// SuggestSecretTargets 列出可选登记归属（当前平面已启用 P 的 SyncTarget）。
 func SuggestSecretTargets(projectRoot string) ([]SecretTargetOption, error) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	projectConfig, err := mgr.LoadProjectConfig()
@@ -156,13 +120,10 @@ func SuggestSecretTargets(projectRoot string) ([]SecretTargetOption, error) {
 
 	opts := make([]SecretTargetOption, 0, len(plan.Targets))
 	for _, t := range plan.Targets {
-		if t.Kind != secrets.SyncKindBundle {
-			continue
-		}
 		opts = append(opts, SecretTargetOption{
-			Kind:      t.Kind,
 			Name:      t.Name,
-			Folder:    t.Folder,
+			Plane:     t.Plane,
+			Address:   t.Address,
 			LocalRoot: t.LocalRoot,
 			Label:     formatSyncTargetLabel(t) + " → " + t.LocalRoot,
 		})
@@ -176,15 +137,15 @@ func ListSecretSyncTargets(projectRoot string) ([]SecretTargetOption, error) {
 	return SuggestSecretTargets(projectRoot)
 }
 
-// SuggestSecretFolders 兼容旧 API，返回 folder 名列表（仅 enabled bundles）。
-func SuggestSecretFolders(projectRoot string) ([]string, error) {
+// SuggestSecretAddresses 返回可登记的远端逻辑地址列表（仅展示用）。
+func SuggestSecretAddresses(projectRoot string) ([]string, error) {
 	opts, err := SuggestSecretTargets(projectRoot)
 	if err != nil {
 		return nil, err
 	}
-	folders := make([]string, 0, len(opts))
+	addresses := make([]string, 0, len(opts))
 	for _, opt := range opts {
-		folders = append(folders, opt.Folder)
+		addresses = append(addresses, opt.Address)
 	}
-	return folders, nil
+	return addresses, nil
 }

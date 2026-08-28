@@ -134,23 +134,29 @@ func cleanupDeletedBundleLocalState(workspace Workspace, bundleName string, repo
 		emit(reporter, EventInfo, "remove.cleanup", fmt.Sprintf("已删本地 SSH Key %s", keyName), nil)
 	}
 
-	folder := secrets.DefaultBundleFolder(bundleName)
 	report.Remnants = append(report.Remnants,
-		fmt.Sprintf("Bitwarden folder %s 可能仍在（push 不会据此重建；请到 Remote 删 secrets）", folder))
+		fmt.Sprintf("Bitwarden 上 P %s 的条目可能仍在（push 不会据此重建；请到 Remote 删 secrets）", bundleName))
 	emit(reporter, EventInfo, "remove.cleanup",
-		fmt.Sprintf("若远端仍有 %s，请到 Remote 页删除其中的 Secure Note / SSH Key", folder), nil)
+		fmt.Sprintf("若远端仍有 %s，请到 Remote 页删除其中的 Secure Note / SSH Key", bundleName), nil)
 
 	return report
 }
 
+// localSecretBundleDirs 返回一个 P 在两个平面上的本地同步根。
 func localSecretBundleDirs(workspace Workspace, bundleName string) []string {
 	var dirs []string
 	projectRoot := strings.TrimSpace(workspace.Root)
 	if projectRoot != "" {
-		dirs = append(dirs, filepath.Join(projectRoot, filepath.FromSlash(secrets.BundleSecretsLocalRelPrefix), bundleName))
+		if target, err := secrets.NewPSyncTarget(bundleName, secrets.SyncPlaneProject); err == nil {
+			if abs, absErr := secrets.ResolveAbsDir(projectRoot, target); absErr == nil {
+				dirs = append(dirs, abs)
+			}
+		}
 	}
-	if machineRoot, err := secrets.MachineSecretsRoot(); err == nil {
-		dirs = append(dirs, filepath.Join(machineRoot, filepath.FromSlash(secrets.MachineBundleSecretsRelPrefix), bundleName))
+	if target, err := secrets.NewPSyncTarget(bundleName, secrets.SyncPlaneMachine); err == nil {
+		if abs, absErr := secrets.ResolveAbsDir("", target); absErr == nil {
+			dirs = append(dirs, abs)
+		}
 	}
 	return dirs
 }

@@ -49,15 +49,15 @@ func TestNormalizeSyncRelPath_KeepsBarePathWithoutDotSlash(t *testing.T) {
 	}
 }
 
-func TestValidateLandingPaths_RejectsCrossFolderCollision(t *testing.T) {
+func TestValidateLandingPaths_RejectsCrossAddressCollision(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateLandingPaths(t.TempDir(), []LandingCandidate{
-		{Folder: "tencent-cloud", LocalRoot: ".secrets/bundles/shared", RelativePath: "env/app.env"},
-		{Folder: "my-project", LocalRoot: ".secrets/bundles/shared", RelativePath: "env/app.env"},
+		{Address: "tencent-cloud/private/project", LocalRoot: ".secrets/shared", RelativePath: "env/app.env"},
+		{Address: "my-project/private/project", LocalRoot: ".secrets/shared", RelativePath: "env/app.env"},
 	})
 	if err == nil {
-		t.Fatal("两个 folder 撞同一落地路径时应报错")
+		t.Fatal("两个远端地址撞同一落地路径时应报错")
 	}
 	for _, want := range []string{"env/app.env", "tencent-cloud", "my-project"} {
 		if !strings.Contains(err.Error(), want) {
@@ -66,15 +66,15 @@ func TestValidateLandingPaths_RejectsCrossFolderCollision(t *testing.T) {
 	}
 }
 
-func TestValidateLandingPaths_AllowsSameFolderDuplicate(t *testing.T) {
+func TestValidateLandingPaths_AllowsSameAddressDuplicate(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateLandingPaths(t.TempDir(), []LandingCandidate{
-		{Folder: "vikunja", LocalRoot: ".secrets/bundles/vikunja", RelativePath: "env/vikunja.env"},
-		{Folder: "vikunja", LocalRoot: ".secrets/bundles/vikunja", RelativePath: "env/vikunja.env"},
+		{Address: "vikunja/private/project", LocalRoot: ".secrets/vikunja", RelativePath: "env/vikunja.env"},
+		{Address: "vikunja/private/project", LocalRoot: ".secrets/vikunja", RelativePath: "env/vikunja.env"},
 	})
 	if err != nil {
-		t.Fatalf("同 folder 内重复路径应视为去重而非冲突: %v", err)
+		t.Fatalf("同一地址内重复路径应视为去重而非冲突: %v", err)
 	}
 }
 
@@ -82,7 +82,7 @@ func TestValidateLandingPaths_RejectsDecOverlap(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateLandingPaths(t.TempDir(), []LandingCandidate{
-		{Folder: "evil", LocalRoot: ".secrets/bundles/evil", RelativePath: ".dec/config.yaml"},
+		{Address: "evil/private/project", LocalRoot: ".secrets/evil", RelativePath: ".dec/config.yaml"},
 	})
 	if err == nil {
 		t.Fatal("落地路径指向 .dec/ 时应报错")
@@ -94,7 +94,7 @@ func TestValidateLandingPaths_RejectsSymlinkEscape(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	outside := t.TempDir()
-	secretsRoot := filepath.Join(projectRoot, ".secrets", "bundles", "evil")
+	secretsRoot := filepath.Join(projectRoot, ".secrets", "evil")
 	if err := os.MkdirAll(secretsRoot, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestValidateLandingPaths_RejectsSymlinkEscape(t *testing.T) {
 	}
 
 	err := ValidateLandingPaths(projectRoot, []LandingCandidate{
-		{Folder: "evil", LocalRoot: ".secrets/bundles/evil", RelativePath: "escape/stolen.env"},
+		{Address: "evil/private/project", LocalRoot: ".secrets/evil", RelativePath: "escape/stolen.env"},
 	})
 	if err == nil {
 		t.Fatal("落地路径经符号链接指向项目外时应报错")
@@ -129,7 +129,7 @@ func TestValidateLandingPaths_RejectsGitTrackedPath(t *testing.T) {
 	runGitOrSkip(t, projectRoot, "add", ".secrets/project/config/private.yaml")
 
 	err := ValidateLandingPaths(projectRoot, []LandingCandidate{
-		{Folder: "my-project", LocalRoot: ".secrets/project", RelativePath: "config/private.yaml"},
+		{Address: "my-project/private/project", LocalRoot: ".secrets/project", RelativePath: "config/private.yaml"},
 	})
 	if err == nil {
 		t.Fatal("落地路径已被 git 跟踪时应硬失败")
@@ -146,7 +146,7 @@ func TestValidateLandingPaths_AllowsUntrackedPathInGitRepo(t *testing.T) {
 	initGitRepo(t, projectRoot)
 
 	if err := ValidateLandingPaths(projectRoot, []LandingCandidate{
-		{Folder: "my-project", LocalRoot: ".secrets/project", RelativePath: "config/private.yaml"},
+		{Address: "my-project/private/project", LocalRoot: ".secrets/project", RelativePath: "config/private.yaml"},
 	}); err != nil {
 		t.Fatalf("未被跟踪的路径应通过校验: %v", err)
 	}

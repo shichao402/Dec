@@ -23,17 +23,12 @@ func MigrateTypeDirNames(ctx context.Context, client Client, projectRoot string,
 	if err := RequireDeclared(target); err != nil {
 		return nil, err
 	}
-	folder := strings.TrimSpace(target.Folder)
-	if folder == "" {
-		return nil, fmt.Errorf("MigrateTypeDirNames 需要 Target.Folder")
-	}
-	binding := BundleBinding{
-		DecBundleName:     target.Name,
-		SecretsBundleName: folder,
+	if strings.TrimSpace(target.Address) == "" {
+		return nil, fmt.Errorf("MigrateTypeDirNames 需要 Target.Address")
 	}
 	result := &TypeDirMigrateResult{}
 
-	notes, err := client.ListFolderNotes(ctx, folder)
+	notes, err := client.ListNotes(ctx, target)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +48,6 @@ func MigrateTypeDirNames(ctx context.Context, client Client, projectRoot string,
 			continue
 		}
 		if err := client.RenameSecureNote(ctx, RenameSecureNoteRequest{
-			Binding: binding,
 			OldPath: oldPath,
 			NewPath: newPath,
 			Target:  target,
@@ -73,7 +67,7 @@ func MigrateTypeDirNames(ctx context.Context, client Client, projectRoot string,
 		}
 	}
 
-	keys, err := client.ListFolderSSHKeys(ctx, folder)
+	keys, err := client.ListSSHKeys(ctx, target)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +84,6 @@ func MigrateTypeDirNames(ctx context.Context, client Client, projectRoot string,
 		}
 		newName := CanonicalSSHKeyName(oldName)
 		if err := client.RenameSSHKey(ctx, RenameSSHKeyRequest{
-			Binding: binding,
 			OldName: oldName,
 			NewName: newName,
 			Target:  target,

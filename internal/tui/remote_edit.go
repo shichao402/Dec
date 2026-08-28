@@ -202,9 +202,8 @@ func commitRemoteNoteRegisterCmd(sess app.RemoteNoteEditSession) tea.Cmd {
 		})
 		err := serviceapi.CommitRemoteNoteRegister(context.Background(), sess, reporter)
 		result := &app.AddSecretResult{
-			Kind:        sess.Target.Kind,
 			TargetName:  sess.Target.Name,
-			Folder:      sess.Target.Folder,
+			Address:     sess.Target.Address,
 			NoteRelPath: sess.NoteRel,
 		}
 		return addSecretDoneMsg{result: result, err: err, logs: logs}

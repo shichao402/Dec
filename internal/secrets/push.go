@@ -6,23 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
-
-// FolderNameFor 解析一次操作对应的 Bitwarden folder 名。
-func FolderNameFor(binding BundleBinding, decBundleName string) string {
-	if name := strings.TrimSpace(binding.SecretsBundleName); name != "" {
-		return name
-	}
-	return DefaultBundleFolder(decBundleName)
-}
-
-func folderNameForRequest(targetFolder string, binding BundleBinding, decBundleName string) string {
-	if name := strings.TrimSpace(targetFolder); name != "" {
-		return name
-	}
-	return FolderNameFor(binding, decBundleName)
-}
 
 // ScanSyncRoot 递归扫描 SyncTarget.LocalRoot，返回相对 LocalRoot 的 SecureNote 列表。
 func ScanSyncRoot(projectRoot string, target SyncTarget) ([]SecureNote, error) {
@@ -74,20 +58,9 @@ func PushBundle(ctx context.Context, client Client, req PushBundleRequest) (*Pus
 	if client == nil {
 		client = DefaultClient()
 	}
-	target, err := pushRequestTarget(req)
-	if err != nil {
+	target := req.Target
+	if err := RequireDeclared(target); err != nil {
 		return nil, err
-	}
-	req.Target = target
-	req.Binding = BundleBinding{
-		DecBundleName:     target.Name,
-		SecretsBundleName: target.Folder,
-	}
-	if target.Kind == SyncKindProject {
-		req.DecBundleName = ProjectSecretsDecBundleName
-		req.Binding.DecBundleName = ProjectSecretsDecBundleName
-	} else {
-		req.DecBundleName = target.Name
 	}
 
 	localNotes, err := ScanSyncRoot(req.ProjectRoot, target)
@@ -95,43 +68,24 @@ func PushBundle(ctx context.Context, client Client, req PushBundleRequest) (*Pus
 		return nil, err
 	}
 	localSet := localSetFromNotes(localNotes)
-	remoteLocal := make(map[string]struct{}, len(localSet))
-	for rel := range localSet {
-		remoteName, nameErr := RemoteNoteName(target, rel)
-		if nameErr != nil {
-			return nil, nameErr
-		}
-		remoteLocal[remoteName] = struct{}{}
-	}
 
-	remote, err := client.ListFolderNotes(ctx, target.Folder)
+	remote, err := client.ListNotes(ctx, target)
 	if err != nil {
-		return nil, fmt.Errorf("列出 Bitwarden folder %q 的 Secure Note 失败: %w", target.Folder, err)
+		return nil, fmt.Errorf("列出 %s 的 Secure Note 失败: %w", target.Address, err)
 	}
 	var missing []string
 	for _, note := range remote {
-		rel, ok, mapErr := LocalNoteRelFromRemote(target, note.Name)
-		if mapErr != nil {
+		rel, relErr := normalizeSyncRelPath(note.Name)
+		if relErr != nil {
 			missing = append(missing, note.Name)
 			continue
 		}
-		if !ok {
-			continue
-		}
-		remoteName, _ := RemoteNoteName(target, rel)
-		if _, has := remoteLocal[remoteName]; !has {
+		if _, has := localSet[rel]; !has {
 			missing = append(missing, rel)
 		}
 	}
 
-	notes := make([]SecureNote, 0, len(localNotes))
-	for _, note := range localNotes {
-		remoteName, nameErr := RemoteNoteName(target, note.RelativePath)
-		if nameErr != nil {
-			return nil, nameErr
-		}
-		notes = append(notes, SecureNote{RelativePath: remoteName, Content: note.Content})
-	}
+	notes := append([]SecureNote(nil), localNotes...)
 	if len(notes) == 0 {
 		return &PushBundleResult{MissingLocal: missing}, nil
 	}
@@ -139,7 +93,7 @@ func PushBundle(ctx context.Context, client Client, req PushBundleRequest) (*Pus
 	candidates := make([]LandingCandidate, 0, len(localNotes))
 	for _, note := range localNotes {
 		candidates = append(candidates, LandingCandidate{
-			Folder:       target.Folder,
+			Address:      target.Address,
 			LocalRoot:    target.LocalRoot,
 			RelativePath: note.RelativePath,
 			Plane:        planeOf(target),
@@ -173,7 +127,7 @@ func AddSecureNote(ctx context.Context, client Client, projectRoot string, targe
 	if err := RequireDeclared(target); err != nil {
 		return err
 	}
-	if target.Folder == "" || target.LocalRoot == "" {
+	if target.Address == "" || target.LocalRoot == "" {
 		return fmt.Errorf("SyncTarget 不完整")
 	}
 	rel, err := normalizeSyncRelPath(noteRel)
@@ -181,7 +135,7 @@ func AddSecureNote(ctx context.Context, client Client, projectRoot string, targe
 		return err
 	}
 	if err := ValidateLandingPaths(projectRoot, []LandingCandidate{{
-		Folder:       target.Folder,
+		Address:      target.Address,
 		LocalRoot:    target.LocalRoot,
 		RelativePath: rel,
 		Plane:        planeOf(target),
@@ -197,26 +151,11 @@ func AddSecureNote(ctx context.Context, client Client, projectRoot string, targe
 		return fmt.Errorf("读取 %s 失败: %w", rel, err)
 	}
 
-	remoteName, err := RemoteNoteName(target, rel)
-	if err != nil {
-		return err
-	}
-
 	req := PushBundleRequest{
 		ProjectRoot: projectRoot,
 		Target:      target,
-		Binding: BundleBinding{
-			DecBundleName:     target.Name,
-			SecretsBundleName: target.Folder,
-		},
 	}
-	if target.Kind == SyncKindProject {
-		req.DecBundleName = ProjectSecretsDecBundleName
-		req.Binding.DecBundleName = ProjectSecretsDecBundleName
-	} else {
-		req.DecBundleName = target.Name
-	}
-	_, err = client.PushBundle(ctx, req, []SecureNote{{RelativePath: remoteName, Content: string(content)}})
+	_, err = client.PushBundle(ctx, req, []SecureNote{{RelativePath: rel, Content: string(content)}})
 	return err
 }
 
@@ -228,16 +167,3 @@ func localSetFromNotes(notes []SecureNote) map[string]SecureNote {
 	return m
 }
 
-func pushRequestTarget(req PushBundleRequest) (SyncTarget, error) {
-	name := strings.TrimSpace(req.DecBundleName)
-	if name == "" {
-		name = strings.TrimSpace(req.Binding.DecBundleName)
-	}
-	kind := req.Target.Kind
-	if name == ProjectSecretsDecBundleName || kind == SyncKindProject {
-		kind = SyncKindProject
-	} else if kind == "" {
-		kind = SyncKindBundle
-	}
-	return ResolveTarget(kind, name, req.Binding, req.Target)
-}

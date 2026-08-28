@@ -4,21 +4,19 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
-	"github.com/shichao402/Dec/internal/types"
-	"gopkg.in/yaml.v3"
 )
 
 // RemoteRegisterInput 是 Processor 驱动的远端登记输入。
+// Scope 是结构化的远端归属（P + 平面）；调用方不拼 Bitwarden folder 名。
 type RemoteRegisterInput struct {
 	ProjectRoot  string
 	Plane        WorkspacePlane
-	Folder       string
+	Scope        secrets.RemoteScope
 	TypeID       secrets.SecretTypeID
 	Name         string
 	SourceMode   secrets.SourceMode
@@ -36,7 +34,7 @@ type RemoteRegisterSession struct {
 	TempFile     bool
 	ProjectRoot  string
 	Plane        WorkspacePlane
-	Folder       string
+	Scope        secrets.RemoteScope
 	Target       secrets.SyncTarget
 	TypeID       secrets.SecretTypeID
 	Name         string
@@ -56,15 +54,12 @@ func PrepareRemoteRegister(ctx context.Context, in RemoteRegisterInput, reporter
 	if err != nil {
 		return nil, err
 	}
-	folder := strings.TrimSpace(in.Folder)
-	if folder == "" {
-		return nil, fmt.Errorf("必须指定远端 folder")
-	}
 	workspace := NewWorkspace(in.Plane, in.ProjectRoot)
-	target, err := resolveRemoteRegisterTarget(workspace, folder, false, reporter)
+	target, err := resolveRemoteRegisterTarget(workspace, in.Scope, false, reporter)
 	if err != nil {
 		return nil, err
 	}
+	address := target.Address
 	mode := in.SourceMode
 	if mode == "" {
 		mode = proc.DefaultSource
@@ -83,7 +78,7 @@ func PrepareRemoteRegister(ctx context.Context, in RemoteRegisterInput, reporter
 	sess := &RemoteRegisterSession{
 		ProjectRoot:  in.ProjectRoot,
 		Plane:        workspace.EffectivePlane(),
-		Folder:       folder,
+		Scope:        in.Scope,
 		Target:       target.Clone(),
 		TypeID:       proc.ID,
 		Name:         name,
@@ -103,7 +98,7 @@ func PrepareRemoteRegister(ctx context.Context, in RemoteRegisterInput, reporter
 			KeyFingerprint: mat.KeyFingerprint,
 		}
 		emit(reporter, EventInfo, "remote.register",
-			fmt.Sprintf("已准备 SSH Key %s → %s（来源 %s）", name, folder, mode), nil)
+			fmt.Sprintf("已准备 SSH Key %s → %s（来源 %s）", name, address, mode), nil)
 		return sess, nil
 
 	case proc.WritesSecureNote():
@@ -117,8 +112,8 @@ func PrepareRemoteRegister(ctx context.Context, in RemoteRegisterInput, reporter
 			if tmpErr != nil {
 				return nil, tmpErr
 			}
-			header := fmt.Sprintf("# Dec Remote 登记 → folder %s / %s %s\n# 保存后写回 Bitwarden；不落本地同步根\n",
-				folder, proc.ID, name)
+			header := fmt.Sprintf("# Dec Remote 登记 → %s / %s %s\n# 保存后写回 Bitwarden；不落本地同步根\n",
+				address, proc.ID, name)
 			content := header
 			if body != "" {
 				content = header + "\n" + body
@@ -139,7 +134,7 @@ func PrepareRemoteRegister(ctx context.Context, in RemoteRegisterInput, reporter
 			sess.EditorPath = tmp.Name()
 			sess.TempFile = true
 			emit(reporter, EventInfo, "remote.register",
-				fmt.Sprintf("已准备临时文件登记 %s → %s（不写本地同步根）", name, folder), nil)
+				fmt.Sprintf("已准备临时文件登记 %s → %s（不写本地同步根）", name, address), nil)
 			return sess, nil
 		case secrets.SourcePath:
 			content, readErr := readLocalSecretFile(in.LocalPath)
@@ -148,7 +143,7 @@ func PrepareRemoteRegister(ctx context.Context, in RemoteRegisterInput, reporter
 			}
 			sess.NoteContent = content
 			emit(reporter, EventInfo, "remote.register",
-				fmt.Sprintf("已读取本地文件登记 %s → %s", name, folder), nil)
+				fmt.Sprintf("已读取本地文件登记 %s → %s", name, address), nil)
 			return sess, nil
 		default:
 			return nil, fmt.Errorf("未知来源模式 %s", mode)
@@ -171,13 +166,12 @@ func CommitRemoteRegister(ctx context.Context, sess RemoteRegisterSession, repor
 	if !ok {
 		return nil, fmt.Errorf("未知类型 %q", sess.TypeID)
 	}
-	folder := strings.TrimSpace(sess.Folder)
 	name := strings.TrimSpace(sess.Name)
-	if folder == "" || name == "" {
+	if name == "" {
 		return nil, fmt.Errorf("登记会话无效")
 	}
 	workspace := NewWorkspace(sess.Plane, sess.ProjectRoot)
-	target, err := resolveRemoteRegisterTarget(workspace, folder, true, reporter)
+	target, err := resolveRemoteRegisterTarget(workspace, sess.Scope, true, reporter)
 	if err != nil {
 		return nil, err
 	}
@@ -186,11 +180,7 @@ func CommitRemoteRegister(ctx context.Context, sess RemoteRegisterSession, repor
 	}
 	client := secretsClientFactory()
 	decName := target.Name
-	bindingName := target.Name
-	if target.Kind == secrets.SyncKindProject {
-		bindingName = secrets.ProjectSecretsDecBundleName
-	}
-	binding := secrets.BundleBinding{DecBundleName: bindingName, SecretsBundleName: target.Folder}
+	address := target.Address
 
 	switch {
 	case proc.WritesSSHItem():
@@ -200,7 +190,6 @@ func CommitRemoteRegister(ctx context.Context, sess RemoteRegisterSession, repor
 		}
 		key.Name = name
 		if err := client.CreateSSHKey(ctx, secrets.CreateSSHKeyRequest{
-			Binding:               binding,
 			Target:                target,
 			Key:                   *key,
 			CreateFolderIfMissing: sess.CreateFolder,
@@ -208,7 +197,7 @@ func CommitRemoteRegister(ctx context.Context, sess RemoteRegisterSession, repor
 			return nil, err
 		}
 		landed, landErr := landRegisteredSSHKey(workspace, target, decName, *key)
-		msg := fmt.Sprintf("已登记 SSH Key %s → folder %q", name, folder)
+		msg := fmt.Sprintf("已登记 SSH Key %s → %s", name, address)
 		if landed {
 			msg += "；已写入 ~/.ssh"
 		} else if landErr != nil {
@@ -216,9 +205,8 @@ func CommitRemoteRegister(ctx context.Context, sess RemoteRegisterSession, repor
 		}
 		emit(reporter, EventInfo, "remote.register", msg, nil)
 		return &AddSecretResult{
-			Kind:           target.Kind,
 			TargetName:     target.Name,
-			Folder:         target.Folder,
+			Address:        address,
 			NoteRelPath:    name,
 			ProjectRelPath: "",
 			LandingPath:    "",
@@ -236,22 +224,20 @@ func CommitRemoteRegister(ctx context.Context, sess RemoteRegisterSession, repor
 		result, err := client.PushBundle(ctx, secrets.PushBundleRequest{
 			ProjectRoot:           sess.ProjectRoot,
 			Target:                target,
-			Binding:               binding,
 			CreateFolderIfMissing: sess.CreateFolder,
 		}, []secrets.SecureNote{{RelativePath: name, Content: content}})
 		if err != nil {
 			return nil, err
 		}
-		msg := fmt.Sprintf("已登记 %s → folder %q（不写本地同步根）", name, folder)
+		msg := fmt.Sprintf("已登记 %s → %s（不写本地同步根）", name, address)
 		if result != nil {
-			msg = fmt.Sprintf("已登记 %s → folder %q（created=%d updated=%d；不写本地同步根）",
-				name, folder, result.Created, result.Updated)
+			msg = fmt.Sprintf("已登记 %s → %s（created=%d updated=%d；不写本地同步根）",
+				name, address, result.Created, result.Updated)
 		}
 		emit(reporter, EventInfo, "remote.register", msg, nil)
 		return &AddSecretResult{
-			Kind:        target.Kind,
 			TargetName:  target.Name,
-			Folder:      target.Folder,
+			Address:     address,
 			NoteRelPath: name,
 		}, nil
 	default:
@@ -259,18 +245,19 @@ func CommitRemoteRegister(ctx context.Context, sess RemoteRegisterSession, repor
 	}
 }
 
-// ValidateRemoteRegisterFolder 校验 Remote 登记 folder 是否有合法声明来源，但不写 vault。
-func ValidateRemoteRegisterFolder(workspace Workspace, folder string) error {
-	_, err := resolveRemoteRegisterTarget(workspace, folder, false, nil)
+// ValidateRemoteRegisterScope 校验 Remote 登记归属是否有合法声明来源，但不写 vault。
+func ValidateRemoteRegisterScope(workspace Workspace, scope secrets.RemoteScope) error {
+	_, err := resolveRemoteRegisterTarget(workspace, scope, false, nil)
 	return err
 }
 
-// resolveRemoteRegisterTarget 只允许已声明 P 的固定 private plane folder。
+// resolveRemoteRegisterTarget 只允许已声明 P 的固定平面归属。
 // 不允许通过 Remote 临时创建 P，也不接受 public 或自定义别名。
-func resolveRemoteRegisterTarget(workspace Workspace, folder string, ensureBundle bool, reporter Reporter) (secrets.SyncTarget, error) {
-	folder = strings.Trim(strings.TrimSpace(strings.ReplaceAll(folder, "\\", "/")), "/")
-	if folder == "" {
-		return secrets.SyncTarget{}, fmt.Errorf("必须指定远端 folder")
+func resolveRemoteRegisterTarget(workspace Workspace, scope secrets.RemoteScope, ensureBundle bool, reporter Reporter) (secrets.SyncTarget, error) {
+	_ = ensureBundle
+	_ = reporter
+	if !scope.Valid() {
+		return secrets.SyncTarget{}, fmt.Errorf("必须指定 P 与平面")
 	}
 	var projects map[string]*pmodel.Loaded
 	readErr := withAppReadRepo(func(tx *repo.Transaction) error {
@@ -281,123 +268,16 @@ func resolveRemoteRegisterTarget(workspace Workspace, folder string, ensureBundl
 	if readErr != nil && !strings.Contains(readErr.Error(), "仓库未连接") {
 		return secrets.SyncTarget{}, readErr
 	}
-	// 旧仓库保留 bundle/<name> 行为；P 仓库禁止回退。
-	if len(projects) == 0 {
-		if !strings.HasPrefix(folder, secrets.BundleFolderPrefix) {
-			return secrets.SyncTarget{}, fmt.Errorf(
-				"folder %q 不是合法写入归属；Remote 登记只接受 %q",
-				folder, secrets.DefaultBundleFolder(folder))
-		}
-		name := strings.TrimSpace(strings.TrimPrefix(folder, secrets.BundleFolderPrefix))
-		if err := validateRemoteOwnerName("bundle", name); err != nil {
-			return secrets.SyncTarget{}, err
-		}
-		plane := workspace.EffectivePlane()
-		if ensureBundle {
-			resolvedPlane, err := ensureRemoteBundleManifest(name, plane, reporter)
-			if err != nil {
-				return secrets.SyncTarget{}, err
-			}
-			plane = resolvedPlane
-		}
-		if plane == WorkspaceUser {
-			return secrets.NewMachineBundleSyncTarget(name, folder)
-		}
-		return secrets.NewBundleSyncTarget(name, folder)
+	if workspace.EffectivePlane() == WorkspaceUser && !secrets.IsMachinePlane(scope.Plane) {
+		return secrets.SyncTarget{}, fmt.Errorf("用户平面不能登记 project secrets: %s", scope)
 	}
-	name, plane, ok := secrets.ParsePFolder(folder)
-	if !ok {
-		return secrets.SyncTarget{}, fmt.Errorf(
-			"folder %q 不是合法写入归属；只接受 <p>/private/user 或 <p>/private/project", folder)
+	if workspace.EffectivePlane() == WorkspaceProject && secrets.IsMachinePlane(scope.Plane) {
+		return secrets.SyncTarget{}, fmt.Errorf("项目平面不能登记 user secrets: %s", scope)
 	}
-	if workspace.EffectivePlane() == WorkspaceUser && !secrets.IsMachinePlane(plane) {
-		return secrets.SyncTarget{}, fmt.Errorf("用户平面不能登记 project secrets folder %q", folder)
+	if _, declared := projects[scope.P]; !declared {
+		return secrets.SyncTarget{}, fmt.Errorf("P %q 未声明；禁止为包外地址手工创建 SyncTarget", scope.P)
 	}
-	if workspace.EffectivePlane() == WorkspaceProject && secrets.IsMachinePlane(plane) {
-		return secrets.SyncTarget{}, fmt.Errorf("项目平面不能登记 user secrets folder %q", folder)
-	}
-	_, declared := projects[name]
-	if !declared {
-		return secrets.SyncTarget{}, fmt.Errorf("P %q 未声明；禁止为包外 folder 手工创建 SyncTarget", name)
-	}
-	_ = ensureBundle
-	_ = reporter
-	return secrets.NewPSyncTarget(name, plane)
-}
-
-func validateRemoteOwnerName(kind, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("%s 名不能为空", kind)
-	}
-	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
-		return fmt.Errorf("非法 %s 名 %q", kind, name)
-	}
-	return nil
-}
-
-func ensureRemoteBundleManifest(name string, fallbackPlane WorkspacePlane, reporter Reporter) (WorkspacePlane, error) {
-	reporter = defaultReporter(reporter)
-	resolvedPlane := fallbackPlane
-	if resolvedPlane != WorkspaceUser {
-		resolvedPlane = WorkspaceProject
-	}
-	created := false
-	err := withAppWriteRepo(func(tx *repo.Transaction) error {
-		manifestRel := types.VaultBundleManifestPath(name)
-		manifestAbs := filepath.Join(tx.WorkDir(), filepath.FromSlash(manifestRel))
-		data, readErr := os.ReadFile(manifestAbs)
-		switch {
-		case readErr == nil:
-			b, _, parseErr := yamlBundleNameScope(data)
-			if parseErr != nil {
-				return fmt.Errorf("解析 vault bundle %q 失败: %w", name, parseErr)
-			}
-			if b.Scope == types.BundleScopeUser {
-				resolvedPlane = WorkspaceUser
-			} else {
-				resolvedPlane = WorkspaceProject
-			}
-			return nil
-		case !os.IsNotExist(readErr):
-			return fmt.Errorf("检查 vault bundle %q 失败: %w", name, readErr)
-		}
-
-		if err := os.MkdirAll(filepath.Dir(manifestAbs), 0o755); err != nil {
-			return err
-		}
-		scope := types.BundleScopeProject
-		if resolvedPlane == WorkspaceUser {
-			scope = types.BundleScopeUser
-		}
-		body, err := yaml.Marshal(types.Bundle{
-			Name:        name,
-			Scope:       scope,
-			Description: "Remote 登记自动创建的占位（ADR 0013）",
-			Members:     []string{},
-		})
-		if err != nil {
-			return err
-		}
-		header := "# Dec bundle（Remote 登记时自动创建的占位；可后续补充 members）\n"
-		if err := os.WriteFile(manifestAbs, append([]byte(header), body...), 0o644); err != nil {
-			return fmt.Errorf("写入 %s 失败: %w", manifestRel, err)
-		}
-		if _, err := tx.CommitAndPush("chore(bundles): add remote registration placeholder " + name); err != nil {
-			return fmt.Errorf("推送 bundle %q 占位失败: %w", name, err)
-		}
-		created = true
-		return nil
-	})
-	if err != nil {
-		return WorkspaceProject, err
-	}
-	if created {
-		emit(reporter, EventInfo, "remote.register",
-			fmt.Sprintf("已在 vault 创建 bundle %q 占位声明", name), nil)
-	}
-	_ = secrets.RememberSecretBundles([]string{name})
-	return resolvedPlane, nil
+	return secrets.NewPSyncTarget(scope.P, scope.Plane)
 }
 
 func resolveRegisterProcessor(in RemoteRegisterInput) (secrets.Processor, error) {
@@ -445,7 +325,7 @@ func readLocalSecretFile(localPath string) (string, error) {
 func landRegisteredSSHKey(workspace Workspace, target secrets.SyncTarget, decBundleName string, key secrets.SSHKeyItem) (bool, error) {
 	var exists bool
 	var err error
-	if workspace.EffectivePlane() == WorkspaceUser || target.Kind != secrets.SyncKindP {
+	if workspace.EffectivePlane() == WorkspaceUser || secrets.IsMachinePlane(target.Plane) {
 		exists, err = secrets.LocalSSHKeyExists(decBundleName, key.Name)
 	} else {
 		exists, err = secrets.InspectProjectSSHKeyLanding(workspace.Root, decBundleName, key.Name)
@@ -460,7 +340,7 @@ func landRegisteredSSHKey(workspace Workspace, target secrets.SyncTarget, decBun
 	if err != nil {
 		return false, err
 	}
-	if workspace.EffectivePlane() == WorkspaceUser || target.Kind != secrets.SyncKindP || secrets.IsMachinePlane(target.Plane) {
+	if workspace.EffectivePlane() == WorkspaceUser || secrets.IsMachinePlane(target.Plane) {
 		err = secrets.WriteSSHKeyLandings(landings)
 	} else {
 		err = secrets.WriteProjectSSHKeyLandings(workspace.Root, landings)

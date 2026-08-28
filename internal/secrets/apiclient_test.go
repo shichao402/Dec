@@ -11,13 +11,28 @@ import (
 	"testing"
 )
 
-func declaredBundleTarget(t testing.TB, name, folder string) SyncTarget {
+// declaredPTarget 构造声明型 P 目标：Bitwarden folder 只有 P 名一级。
+func declaredPTarget(t testing.TB, pName string, plane SyncPlane) SyncTarget {
 	t.Helper()
-	target, err := NewBundleSyncTarget(name, folder)
+	target, err := NewPSyncTarget(pName, plane)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return target
+}
+
+// projectItemName 返回 project 平面下 rel 对应的 Bitwarden 条目名。
+func projectItemName(t testing.TB, rel string) string {
+	t.Helper()
+	scope, err := NewRemoteScope("p", SyncPlaneProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := scope.encodeItemName(rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return name
 }
 
 func TestAPIClient_ReauthenticatesOnceAfterUnauthorized(t *testing.T) {
@@ -99,9 +114,8 @@ func TestAPIClient_DoesNotLoopWhenFreshSessionIsUnauthorized(t *testing.T) {
 	}
 }
 
+// 全局 UserKey 是进程级状态，设置它的用例不能并行。
 func TestAPIClient_PushBundle_CreateSecureNotePayload(t *testing.T) {
-	t.Parallel()
-
 	var createBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assertBitwardenHeaders(t, r)
@@ -143,13 +157,11 @@ func TestAPIClient_PushBundle_CreateSecureNotePayload(t *testing.T) {
 	SetUserKey(userKey)
 	t.Cleanup(ClearSession)
 
-	noteName := "env/vikunja.env"
+	noteRel := "env/vikunja.env"
 	content := "VIKUNJA_API_TOKEN=abc\n"
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
-		Target:        declaredBundleTarget(t, "vikunja", "vikunja"),
-	}, []SecureNote{{RelativePath: noteName, Content: content}})
+		Target: declaredPTarget(t, "vikunja", SyncPlaneProject),
+	}, []SecureNote{{RelativePath: noteRel, Content: content}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
 	}
@@ -183,8 +195,10 @@ func TestAPIClient_PushBundle_CreateSecureNotePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotName != noteName {
-		t.Fatalf("解密 name = %q, want %q", gotName, noteName)
+	// folder 只有 P 名一级，平面与相对路径都编码进条目名。
+	wantName := projectItemName(t, noteRel)
+	if gotName != wantName {
+		t.Fatalf("解密 name = %q, want %q", gotName, wantName)
 	}
 	gotNotes, err := decryptVaultString(notes, itemKey)
 	if err != nil {
@@ -207,8 +221,8 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacyName := "env/vikunja.env"
-	encName, err := encryptVaultString(legacyName, itemKey)
+	noteRel := "env/vikunja.env"
+	encName, err := encryptVaultString(projectItemName(t, noteRel), itemKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,12 +285,11 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 	SetUserKey(userKey)
 	t.Cleanup(ClearSession)
 
+	target := declaredPTarget(t, "vikunja", SyncPlaneProject)
 	newContent := "VIKUNJA_API_TOKEN=new\n"
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
-		Target:        declaredBundleTarget(t, "vikunja", "vikunja"),
-	}, []SecureNote{{RelativePath: legacyName, Content: newContent}})
+		Target: target,
+	}, []SecureNote{{RelativePath: noteRel, Content: newContent}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
 	}
@@ -288,19 +301,16 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 		t.Fatalf("update 应回传原有 cipher key: got %q want %q", key, encItemKey)
 	}
 
-	pullResult, err := client.PullBundle(context.Background(), PullBundleRequest{
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
-	})
+	pullResult, err := client.PullBundle(context.Background(), PullBundleRequest{Target: target})
 	if err != nil {
 		t.Fatalf("PullBundle() after update = %v", err)
 	}
 	if len(pullResult.Notes) != 1 {
 		t.Fatalf("Notes = %#v", pullResult.Notes)
 	}
-	// push 只改正文，远端 note 名保持原样——否则迁移期间会把改好的消费者路径名改回去。
-	if pullResult.Notes[0].RelativePath != legacyName {
-		t.Fatalf("RelativePath = %q, want %q（push 不应改远端 note 名）", pullResult.Notes[0].RelativePath, legacyName)
+	// push 只改正文，远端条目名保持原样——否则迁移期间会把改好的消费者路径名改回去。
+	if pullResult.Notes[0].RelativePath != noteRel {
+		t.Fatalf("RelativePath = %q, want %q（push 不应改远端条目名）", pullResult.Notes[0].RelativePath, noteRel)
 	}
 	if gotName, _ := updateBody["name"].(string); gotName != encName {
 		t.Fatalf("update 应原样回传远端 name 密文: got %q want %q", gotName, encName)
@@ -312,8 +322,6 @@ func TestAPIClient_PushBundle_UpdatePreservesCipherKey(t *testing.T) {
 
 // 缺 folder 且未开 CreateFolderIfMissing：push 必须报错，不静默建 folder。
 func TestAPIClient_PushBundle_MissingFolderErrorsWithoutFlag(t *testing.T) {
-	t.Parallel()
-
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assertBitwardenHeaders(t, r)
 		switch r.URL.Path {
@@ -338,8 +346,7 @@ func TestAPIClient_PushBundle_MissingFolderErrorsWithoutFlag(t *testing.T) {
 	t.Cleanup(ClearSession)
 
 	_, err = client.PushBundle(context.Background(), PushBundleRequest{
-		Target:  declaredBundleTarget(t, "cnb", "cnb"),
-		Binding: BundleBinding{SecretsBundleName: "cnb"},
+		Target: declaredPTarget(t, "cnb", SyncPlaneProject),
 	}, []SecureNote{{RelativePath: ".gcm/cnb.yaml", Content: "x"}})
 	if err == nil || !strings.Contains(err.Error(), "不存在") {
 		t.Fatalf("缺 folder 且未开 flag 应报 folder 不存在, got %v", err)
@@ -348,8 +355,6 @@ func TestAPIClient_PushBundle_MissingFolderErrorsWithoutFlag(t *testing.T) {
 
 // 开 CreateFolderIfMissing：folder 不存在时先 POST /folders 建 folder，再落 note。
 func TestAPIClient_PushBundle_CreatesFolderWhenMissing(t *testing.T) {
-	t.Parallel()
-
 	userKey := bytes.Repeat([]byte{0x06}, 64)
 	var (
 		folderPosts int
@@ -405,13 +410,13 @@ func TestAPIClient_PushBundle_CreatesFolderWhenMissing(t *testing.T) {
 	t.Cleanup(ClearSession)
 
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
-		Target:                declaredBundleTarget(t, "cnb", "cnb"),
-		Binding:               BundleBinding{SecretsBundleName: "cnb"},
+		Target:                declaredPTarget(t, "cnb", SyncPlaneProject),
 		CreateFolderIfMissing: true,
 	}, []SecureNote{{RelativePath: ".gcm/cnb.yaml", Content: "host: cnb.cool\n"}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
 	}
+	// 新建的 folder 名只有 P 名一级，不含 private/<plane>。
 	if folderPosts != 1 || folderName != "cnb" {
 		t.Fatalf("应恰好建一次 folder cnb, posts=%d name=%q", folderPosts, folderName)
 	}
@@ -430,10 +435,8 @@ func enc(t *testing.T, plain string, key []byte) string {
 	return s
 }
 
-// note 名只有一种合法形态（项目根相对落地路径），匹配按精确名走。
+// 条目名只有一种合法形态（private/<plane>/<同步根相对路径>），匹配按精确名走。
 func TestAPIClient_PushBundle_UpdateMatchesNameExactly(t *testing.T) {
-	t.Parallel()
-
 	var updatedID string
 	var updateBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -448,7 +451,7 @@ func TestAPIClient_PushBundle_UpdateMatchesNameExactly(t *testing.T) {
 				Data: []bwCipher{{
 					ID:       "cipher-legacy",
 					Type:     cipherTypeSecureNote,
-					Name:     "env/vikunja.env",
+					Name:     projectItemName(t, "env/vikunja.env"),
 					Notes:    "[env]\nOLD=1",
 					FolderID: "f1",
 				}},
@@ -480,9 +483,7 @@ func TestAPIClient_PushBundle_UpdateMatchesNameExactly(t *testing.T) {
 	t.Cleanup(ClearSession)
 
 	result, err := client.PushBundle(context.Background(), PushBundleRequest{
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
-		Target:        declaredBundleTarget(t, "vikunja", "vikunja"),
+		Target: declaredPTarget(t, "vikunja", SyncPlaneProject),
 	}, []SecureNote{{RelativePath: "env/vikunja.env", Content: "VIKUNJA_API_TOKEN=new\n"}})
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
@@ -543,11 +544,13 @@ func TestAPIClient_PullBundle_DecryptsSSHKey(t *testing.T) {
 				Data: []bwCipher{
 					{
 						ID: "note-1", Type: cipherTypeSecureNote, FolderID: "f1", Key: encItemKey,
-						Name: mustEncItem("env/vikunja.env"), Notes: mustEncItem("VIKUNJA_API_TOKEN=abc\n"),
+						Name:  mustEncItem(projectItemName(t, "env/vikunja.env")),
+						Notes: mustEncItem("VIKUNJA_API_TOKEN=abc\n"),
 					},
 					{
 						ID: "ssh-1", Type: cipherTypeSSHKey, FolderID: "f1", Key: encItemKey,
-						Name: mustEncItem("deploy"), Notes: mustEncItem("vikunja.example.com\n"),
+						Name:  mustEncItem(projectItemName(t, "deploy")),
+						Notes: mustEncItem("vikunja.example.com\n"),
 						SSHKey: &bwSSHKey{
 							PrivateKey:     mustEncItem("-----BEGIN OPENSSH PRIVATE KEY-----\nSECRET\n-----END OPENSSH PRIVATE KEY-----\n"),
 							PublicKey:      mustEncItem("ssh-ed25519 AAAA deploy\n"),
@@ -570,10 +573,8 @@ func TestAPIClient_PullBundle_DecryptsSSHKey(t *testing.T) {
 	SetUserKey(userKey)
 	t.Cleanup(ClearSession)
 
-	result, err := client.PullBundle(context.Background(), PullBundleRequest{
-		DecBundleName: "vikunja",
-		Binding:       BundleBinding{SecretsBundleName: "vikunja"},
-	})
+	target := declaredPTarget(t, "vikunja", SyncPlaneProject)
+	result, err := client.PullBundle(context.Background(), PullBundleRequest{Target: target})
 	if err != nil {
 		t.Fatalf("PullBundle() = %v", err)
 	}
@@ -594,12 +595,12 @@ func TestAPIClient_PullBundle_DecryptsSSHKey(t *testing.T) {
 		t.Fatalf("fingerprint = %q", key.KeyFingerprint)
 	}
 
-	listed, err := client.ListFolderSSHKeys(context.Background(), "vikunja")
+	listed, err := client.ListSSHKeys(context.Background(), target)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(listed) != 1 || listed[0].Name != "deploy" {
-		t.Fatalf("ListFolderSSHKeys = %#v", listed)
+		t.Fatalf("ListSSHKeys = %#v", listed)
 	}
 }
 
@@ -615,11 +616,11 @@ func TestAPIClient_RenameSSHKey_EmptyNotesStaysNull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encName, err := encryptVaultString("tencent_cvm", itemKey)
+	encName, err := encryptVaultString(projectItemName(t, "tencent_cvm"), itemKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	encFolder, err := encryptVaultString("bundle/tencent-cloud", userKey)
+	encFolder, err := encryptVaultString("tencent-cloud", userKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -662,12 +663,10 @@ func TestAPIClient_RenameSSHKey_EmptyNotesStaysNull(t *testing.T) {
 	SetUserKey(userKey)
 	t.Cleanup(ClearSession)
 
-	target := declaredBundleTarget(t, "tencent-cloud", "bundle/tencent-cloud")
 	if err := client.RenameSSHKey(context.Background(), RenameSSHKeyRequest{
-		Binding: BundleBinding{DecBundleName: "tencent-cloud", SecretsBundleName: "bundle/tencent-cloud"},
 		OldName: "tencent_cvm",
 		NewName: ".sshkey/tencent_cvm",
-		Target:  target,
+		Target:  declaredPTarget(t, "tencent-cloud", SyncPlaneProject),
 	}); err != nil {
 		t.Fatalf("RenameSSHKey() = %v", err)
 	}
@@ -679,8 +678,8 @@ func TestAPIClient_RenameSSHKey_EmptyNotesStaysNull(t *testing.T) {
 	}
 }
 
-// Bitwarden 只有整库 /folders 与 /ciphers 列表接口，浏览 N 个 folder 不能变成 2N 次全库下载。
-func TestAPIClient_ListFolderNotes_ReusesVaultSnapshot(t *testing.T) {
+// Bitwarden 只有整库 /folders 与 /ciphers 列表接口，浏览 N 个地址不能变成 2N 次全库下载。
+func TestAPIClient_ListNotes_ReusesVaultSnapshot(t *testing.T) {
 	userKey := bytes.Repeat([]byte{0x09}, 64)
 	itemKey, err := generateCipherKey()
 	if err != nil {
@@ -715,8 +714,8 @@ func TestAPIClient_ListFolderNotes_ReusesVaultSnapshot(t *testing.T) {
 			folderCalls++
 			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{
 				Data: []bwFolder{
-					{ID: "f1", Name: mustEncUser("bundle/one")},
-					{ID: "f2", Name: mustEncUser("bundle/two")},
+					{ID: "f1", Name: mustEncUser("one")},
+					{ID: "f2", Name: mustEncUser("two")},
 				},
 			})
 		case r.URL.Path == "/api/ciphers" && r.Method == http.MethodGet:
@@ -724,9 +723,9 @@ func TestAPIClient_ListFolderNotes_ReusesVaultSnapshot(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{
 				Data: []bwCipher{
 					{ID: "n1", Type: cipherTypeSecureNote, FolderID: "f1", Key: encItemKey,
-						Name: mustEncItem("env/one.env"), Notes: mustEncItem("A=1\n")},
+						Name: mustEncItem(projectItemName(t, "env/one.env")), Notes: mustEncItem("A=1\n")},
 					{ID: "n2", Type: cipherTypeSecureNote, FolderID: "f2", Key: encItemKey,
-						Name: mustEncItem("env/two.env"), Notes: mustEncItem("B=2\n")},
+						Name: mustEncItem(projectItemName(t, "env/two.env")), Notes: mustEncItem("B=2\n")},
 				},
 			})
 		case strings.HasPrefix(r.URL.Path, "/api/ciphers/") && r.Method == http.MethodDelete:
@@ -746,20 +745,24 @@ func TestAPIClient_ListFolderNotes_ReusesVaultSnapshot(t *testing.T) {
 	t.Cleanup(ClearSession)
 
 	ctx := context.Background()
-	for _, folder := range []string{"bundle/one", "bundle/two"} {
-		notes, listErr := client.ListFolderNotes(ctx, folder)
+	targets := []SyncTarget{
+		declaredPTarget(t, "one", SyncPlaneProject),
+		declaredPTarget(t, "two", SyncPlaneProject),
+	}
+	for _, target := range targets {
+		notes, listErr := client.ListNotes(ctx, target)
 		if listErr != nil {
-			t.Fatalf("ListFolderNotes(%s) = %v", folder, listErr)
+			t.Fatalf("ListNotes(%s) = %v", target.Address, listErr)
 		}
 		if len(notes) != 1 {
-			t.Fatalf("ListFolderNotes(%s) = %#v", folder, notes)
+			t.Fatalf("ListNotes(%s) = %#v", target.Address, notes)
 		}
-		if _, listErr = client.ListFolderSSHKeys(ctx, folder); listErr != nil {
-			t.Fatalf("ListFolderSSHKeys(%s) = %v", folder, listErr)
+		if _, listErr = client.ListSSHKeys(ctx, target); listErr != nil {
+			t.Fatalf("ListSSHKeys(%s) = %v", target.Address, listErr)
 		}
 	}
-	if _, err = client.ListSecretBundleNames(ctx); err != nil {
-		t.Fatalf("ListSecretBundleNames() = %v", err)
+	if _, err = client.ListPNames(ctx); err != nil {
+		t.Fatalf("ListPNames() = %v", err)
 	}
 	if folderCalls != 1 || cipherCalls != 1 {
 		t.Fatalf("folders=%d ciphers=%d, 期望各 1 次全库下载", folderCalls, cipherCalls)
@@ -767,7 +770,7 @@ func TestAPIClient_ListFolderNotes_ReusesVaultSnapshot(t *testing.T) {
 
 	// 写操作后必须重新取快照，否则删除完还会读到旧 cipher。
 	if err = client.DeleteSecureNote(ctx, DeleteSecureNoteRequest{
-		Binding:  BundleBinding{SecretsBundleName: "bundle/one"},
+		Target:   targets[0],
 		NotePath: "env/one.env",
 	}); err != nil {
 		t.Fatalf("DeleteSecureNote() = %v", err)
@@ -775,8 +778,8 @@ func TestAPIClient_ListFolderNotes_ReusesVaultSnapshot(t *testing.T) {
 	if deleteCalls != 1 {
 		t.Fatalf("deleteCalls = %d, want 1", deleteCalls)
 	}
-	if _, err = client.ListFolderNotes(ctx, "bundle/one"); err != nil {
-		t.Fatalf("ListFolderNotes() = %v", err)
+	if _, err = client.ListNotes(ctx, targets[0]); err != nil {
+		t.Fatalf("ListNotes() = %v", err)
 	}
 	if folderCalls != 2 || cipherCalls != 2 {
 		t.Fatalf("写操作后 folders=%d ciphers=%d, 期望快照失效后各重取 1 次", folderCalls, cipherCalls)

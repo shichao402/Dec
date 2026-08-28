@@ -70,8 +70,10 @@ members:
 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
+	// 项目平面只同步项目自己的 P（ADR 0016）：P 名与 bundle 名同为 pkv，
+	// 才能同时覆盖 vault 成员孤儿与 secrets 孤儿。
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Demo",
+		ProjectName:    "pkv",
 		IDEs:           []string{"cursor"},
 		EnabledBundles: []string{"pkv"},
 	}); err != nil {
@@ -92,8 +94,8 @@ members:
 	if err := os.WriteFile(orphanIDE, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	keepNote := filepath.Join(projectRoot, ".secrets", "bundles", "pkv", ".env", "keep.env")
-	goneNote := filepath.Join(projectRoot, ".secrets", "bundles", "pkv", ".env", "gone.env")
+	keepNote := filepath.Join(projectRoot, ".secrets", "pkv", ".env", "keep.env")
+	goneNote := filepath.Join(projectRoot, ".secrets", "pkv", ".env", "gone.env")
 	if err := os.MkdirAll(filepath.Dir(keepNote), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -109,10 +111,14 @@ members:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := secrets.WriteSSHKeyLandings(landings); err != nil {
+	if err := secrets.WriteProjectSSHKeyLandings(projectRoot, landings); err != nil {
 		t.Fatal(err)
 	}
-	orphanSSH := filepath.Join(home, ".ssh", "dec_pkv_orphan")
+	scopePaths, err := secrets.ProjectCredentialScopePaths(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphanSSH := filepath.Join(home, ".ssh", "dec_project_"+scopePaths.ID+"_pkv_orphan")
 	if _, err := os.Stat(orphanSSH); err != nil {
 		t.Fatalf("预置 SSH 失败: %v", err)
 	}
@@ -121,8 +127,7 @@ members:
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
-				"bundle/pkv": {{RelativePath: ".env/keep.env", Content: "K=1\n"}},
-				"Demo":       {},
+				"pkv/private/project": {{RelativePath: ".env/keep.env", Content: "K=1\n"}},
 			},
 		}
 	}
@@ -181,7 +186,7 @@ members:
 		t.Fatal(err)
 	}
 
-	parkedSecret := filepath.Join(projectRoot, ".secrets", "bundles", "parked", "env", "x.env")
+	parkedSecret := filepath.Join(projectRoot, ".secrets", "parked", "env", "x.env")
 	if err := os.MkdirAll(filepath.Dir(parkedSecret), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +197,7 @@ members:
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/active": {{RelativePath: ".env/a.env", Content: "A=1\n"}},
+			"active/private/project": {{RelativePath: ".env/a.env", Content: "A=1\n"}},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -231,7 +236,7 @@ func TestPullReconcile_ReportsSecretsWhenBWUnconfirmed(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	secretPath := filepath.Join(projectRoot, ".secrets", "bundles", "pkv", "env", "x.env")
+	secretPath := filepath.Join(projectRoot, ".secrets", "pkv", "env", "x.env")
 	if err := os.MkdirAll(filepath.Dir(secretPath), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -278,14 +283,14 @@ func TestPullReconcile_UserPlaneOnlyCleansMachineSecrets(t *testing.T) {
 	}
 
 	projectRoot := t.TempDir()
-	projectSecret := filepath.Join(projectRoot, ".secrets", "bundles", "woa", "env", "proj.env")
+	projectSecret := filepath.Join(projectRoot, ".secrets", "woa", "env", "proj.env")
 	if err := os.MkdirAll(filepath.Dir(projectSecret), 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(projectSecret, []byte("P=1\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	machineSecret := filepath.Join(decHome, "secrets", "bundles", "woa", "env", "m.env")
+	machineSecret := filepath.Join(decHome, "secrets", "woa", "env", "m.env")
 	if err := os.MkdirAll(filepath.Dir(machineSecret), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +301,7 @@ func TestPullReconcile_UserPlaneOnlyCleansMachineSecrets(t *testing.T) {
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/woa": {},
+			"woa/private/user": {},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -326,13 +331,13 @@ func TestPullReconcile_MissingVaultBundleFullCleanup(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Demo",
+		ProjectName:    "pkv",
 		IDEs:           []string{"cursor"},
 		EnabledBundles: []string{"pkv"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	secretDir := filepath.Join(projectRoot, ".secrets", "bundles", "pkv", "env")
+	secretDir := filepath.Join(projectRoot, ".secrets", "pkv", "env")
 	if err := os.MkdirAll(secretDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -346,8 +351,7 @@ func TestPullReconcile_MissingVaultBundleFullCleanup(t *testing.T) {
 	origFactory := secretsClientFactory
 	secretsClientFactory = func() secrets.Client {
 		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-			"bundle/pkv": {},
-			"Demo":       {},
+			"pkv/private/project": {},
 		}}
 	}
 	t.Cleanup(func() { secretsClientFactory = origFactory })
@@ -360,7 +364,7 @@ func TestPullReconcile_MissingVaultBundleFullCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullProjectAssets() = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "bundles", "pkv")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "pkv")); !os.IsNotExist(err) {
 		t.Fatalf("vault+BW 均确认后应删 secrets 同步根, err=%v", err)
 	}
 	updated, err := mgr.LoadProjectConfig()

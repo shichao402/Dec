@@ -14,9 +14,12 @@ func TestPrepareAndCommitRemoteNoteEdit_UsesTempFile(t *testing.T) {
 	secrets.SetSession("test-session")
 	projectRoot := t.TempDir()
 	noteRel := ".env/vikunja.env"
+	target, err := secrets.NewPSyncTarget("vikunja", secrets.SyncPlaneProject)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// 本地同步根已有旧内容：编辑不得覆盖它。
-	localRoot := ".secrets/bundles/vikunja"
-	localAbs := filepath.Join(projectRoot, filepath.FromSlash(localRoot), filepath.FromSlash(noteRel))
+	localAbs := filepath.Join(projectRoot, filepath.FromSlash(target.LocalRoot), filepath.FromSlash(noteRel))
 	if err := os.MkdirAll(filepath.Dir(localAbs), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +28,7 @@ func TestPrepareAndCommitRemoteNoteEdit_UsesTempFile(t *testing.T) {
 	}
 
 	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
-		"bundle/vikunja": {{RelativePath: noteRel, Content: "OLD=1\n"}},
+		target.Address: {{RelativePath: noteRel, Content: "OLD=1\n"}},
 	}}
 	orig := secretsClientFactory
 	secretsClientFactory = func() secrets.Client { return stub }
@@ -34,9 +37,9 @@ func TestPrepareAndCommitRemoteNoteEdit_UsesTempFile(t *testing.T) {
 	item := DeleteSelectionItem{
 		Kind:          DeleteKindSecret,
 		SecretPath:    noteRel,
-		LocalRoot:     localRoot,
-		SecretsBundle: "bundle/vikunja",
-		DecBundleName: "vikunja",
+		LocalRoot:     target.LocalRoot,
+		SecretsBundle: target.Address,
+		DecBundleName: target.Name,
 	}
 	sess, err := PrepareRemoteNoteEdit(t.Context(), projectRoot, item, nil)
 	if err != nil {
@@ -54,7 +57,7 @@ func TestPrepareAndCommitRemoteNoteEdit_UsesTempFile(t *testing.T) {
 	if err := CommitRemoteNoteEdit(t.Context(), *sess, nil); err != nil {
 		t.Fatalf("CommitRemoteNoteEdit: %v", err)
 	}
-	notes := stub.NotesByFolder["bundle/vikunja"]
+	notes := stub.NotesByFolder[target.Address]
 	if len(notes) != 1 || notes[0].Content != "NEW=2\n" {
 		t.Fatalf("notes = %#v", notes)
 	}
@@ -92,18 +95,18 @@ func TestPrepareRemoteNoteEdit_BareFolderWithoutLocalRoot(t *testing.T) {
 		t.Fatalf("temp content = %q", raw)
 	}
 	_ = os.WriteFile(sess.Path, []byte("X=2\n"), 0o600)
-	if err := CommitRemoteNoteEdit(t.Context(), *sess, nil); err == nil || !strings.Contains(err.Error(), "bundle/<名>") {
-		t.Fatalf("未声明裸 folder 的编辑提交应拒绝并提示迁移, got %v", err)
+	if err := CommitRemoteNoteEdit(t.Context(), *sess, nil); err == nil || !strings.Contains(err.Error(), "未声明") {
+		t.Fatalf("未声明裸 folder 的编辑提交应拒绝, got %v", err)
 	}
 	if stub.NotesByFolder["relkit"][0].Content != "X=1\n" {
 		t.Fatalf("bare folder note = %#v", stub.NotesByFolder["relkit"])
 	}
 }
 
-// 机器平面候选项的 LocalRoot 是 bundles/<name>（相对 ~/.dec/secrets）。
-// 还原 SyncTarget 时若丢掉 Plane，编辑路径会误落到 <project>/bundles/...。
+// 机器平面候选项的 LocalRoot 相对 ~/.dec/secrets。
+// 还原 SyncTarget 时若丢掉 Plane，编辑路径会误落到项目根内。
 func TestSyncTargetFromRemoteItem_PreservesMachinePlane(t *testing.T) {
-	target, err := secrets.NewMachineBundleSyncTarget("tencent-cloud", "bundle/tencent-cloud")
+	target, err := secrets.NewPSyncTarget("tencent-cloud", secrets.SyncPlaneMachine)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +115,7 @@ func TestSyncTargetFromRemoteItem_PreservesMachinePlane(t *testing.T) {
 		SecretPath:    ".env/tencent.env",
 		LocalRoot:     target.LocalRoot,
 		Plane:         target.Plane,
-		SecretsBundle: target.Folder,
+		SecretsBundle: target.Address,
 		DecBundleName: target.Name,
 	})
 	if err != nil {
@@ -134,8 +137,12 @@ func TestSyncTargetFromRemoteItem_PreservesMachinePlane(t *testing.T) {
 
 func TestCommitRemoteSSHHostsEdit(t *testing.T) {
 	secrets.SetSession("test-session")
+	target, err := secrets.NewPSyncTarget("vikunja", secrets.SyncPlaneProject)
+	if err != nil {
+		t.Fatal(err)
+	}
 	stub := &secrets.StubClient{SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
-		"bundle/vikunja": {{
+		target.Address: {{
 			Name:       ".sshkey/deploy",
 			PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----\n",
 			PublicKey:  "ssh-ed25519 AAAA deploy",
@@ -150,22 +157,18 @@ func TestCommitRemoteSSHHostsEdit(t *testing.T) {
 	if err := os.WriteFile(tmp, []byte("new.example.com\n# comment\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	target, err := secrets.NewBundleSyncTarget("vikunja", "bundle/vikunja")
-	if err != nil {
-		t.Fatal(err)
-	}
 	err = CommitRemoteSSHHostsEdit(t.Context(), RemoteSSHHostsEditSession{
 		Path:          tmp,
+		ProjectRoot:   t.TempDir(),
 		Target:        target,
-		Folder:        "bundle/vikunja",
 		KeyName:       ".sshkey/deploy",
-		DecBundleName: "vikunja",
+		DecBundleName: target.Name,
 		TempFile:      false,
 	}, nil)
 	if err != nil {
 		t.Fatalf("CommitRemoteSSHHostsEdit: %v", err)
 	}
-	got := stub.SSHKeysByFolder["bundle/vikunja"][0].Hosts
+	got := stub.SSHKeysByFolder[target.Address][0].Hosts
 	if len(got) != 1 || got[0] != "new.example.com" {
 		t.Fatalf("hosts = %#v", got)
 	}

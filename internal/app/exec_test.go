@@ -90,7 +90,8 @@ func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projectTarget, err := secrets.NewProjectSyncTarget("Demo", "")
+	// 另一个 P 的同步根：不在请求范围内，不该被合并。
+	otherTarget, err := secrets.NewPSyncTarget("demo", secrets.SyncPlaneProject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +106,7 @@ func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 		}
 	}
 	mustWrite(filepath.ToSlash(filepath.Join(bundleTarget.LocalRoot, ".env", "vikunja.env")), "TOKEN=from-bundle\nSHARED=bundle\n")
-	mustWrite(filepath.ToSlash(filepath.Join(projectTarget.LocalRoot, ".env", "app.env")), "SHARED=project\nPROJECT_ONLY=1\n")
+	mustWrite(filepath.ToSlash(filepath.Join(otherTarget.LocalRoot, ".env", "app.env")), "SHARED=other\nPROJECT_ONLY=1\n")
 
 	env, err := BuildExecEnviron(root, "vikunja", secrets.SyncPlaneProject, []string{"PATH=/bin", "SHARED=base"})
 	if err != nil {
@@ -122,10 +123,10 @@ func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 		t.Fatalf("TOKEN = %q", got["TOKEN"])
 	}
 	if _, ok := got["PROJECT_ONLY"]; ok {
-		t.Fatalf("不应再合并 .secrets/project/env: %#v", got)
+		t.Fatalf("不应合并其他 P 的同步根: %#v", got)
 	}
 	if got["SHARED"] != "bundle" {
-		t.Fatalf("SHARED = %q, 期望仅 bundle 层", got["SHARED"])
+		t.Fatalf("SHARED = %q, 期望仅目标 P 的值", got["SHARED"])
 	}
 	if got["PATH"] != "/bin" {
 		t.Fatalf("PATH 应保留基环境: %q", got["PATH"])

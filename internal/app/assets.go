@@ -440,10 +440,8 @@ func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Works
 	sessionReady := secrets.HasSession() && secrets.HasUserKey()
 	inventory := listRemoteSecretBundleInventory(sessionReady, "assets.bundle", reporter)
 	known := []string(nil)
-	aliased := map[string]struct{}{}
 	if cfg, err := secrets.LoadConfig(); err == nil {
 		known = cfg.KnownSecretBundleNames()
-		aliased = aliasedSecretBundleNames(cfg)
 	}
 
 	enabledSet := make(map[string]struct{}, len(enabled))
@@ -457,7 +455,6 @@ func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Works
 			continue
 		}
 		_, isEnabled := enabledSet[name]
-		_, hasAlias := aliased[name]
 		opt := AssetBundleOption{Name: name, Enabled: isEnabled}
 		switch {
 		case scopes.belongsToOtherPlane(name):
@@ -466,8 +463,8 @@ func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Works
 		case inventory.has(name):
 			opt.SecretsOnly = true
 			opt.Description = "仓库未登记（Bitwarden 已有，vault 尚无 manifest）"
-		case !inventory.Checked || hasAlias:
-			// 没问过远端，或该 bundle 绑了别名 folder（远端枚举只覆盖 bundle/*），不下结论。
+		case !inventory.Checked:
+			// 没问过远端，不下结论。
 			opt.SecretsOnly = true
 			opt.RemoteUnverified = true
 			opt.Description = "仓库未登记（本机记录，本次未核对 Bitwarden）"
@@ -507,17 +504,12 @@ func enrichBundleOptionsWithSecretMembers(options []AssetBundleOption, reporter 
 		live = false
 	}
 
-	var cfg *secrets.Config
-	if loaded, err := secrets.LoadConfig(); err == nil {
-		cfg = loaded
-	}
-
 	updates := make(map[string][]string, len(options))
 	for i := range options {
 		name := options[i].Name
 		var paths []string
 		if live {
-			listed, listErr := listRemoteSecretMemberPaths(client, secretFolderForBundle(cfg, name))
+			listed, listErr := listRemoteSecretMemberPaths(client, name)
 			if listErr != nil {
 				emit(reporter, EventWarn, "assets.bundle",
 					fmt.Sprintf("枚举 bundle %q 的 secrets 成员失败（回退本机缓存）: %v", name, listErr), nil)
@@ -540,28 +532,29 @@ func enrichBundleOptionsWithSecretMembers(options []AssetBundleOption, reporter 
 	}
 }
 
-func secretFolderForBundle(cfg *secrets.Config, bundleName string) string {
-	if cfg != nil {
-		return cfg.ResolveBinding(bundleName).SecretsBundleName
-	}
-	return secrets.DefaultBundleFolder(bundleName)
-}
-
-func listRemoteSecretMemberPaths(client secrets.Client, folder string) ([]string, error) {
-	notes, err := client.ListFolderNotes(context.Background(), folder)
-	if err != nil {
-		return nil, err
-	}
-	keys, err := client.ListFolderSSHKeys(context.Background(), folder)
-	if err != nil {
-		return nil, err
-	}
-	paths := make([]string, 0, len(notes)+len(keys))
-	for _, note := range notes {
-		paths = append(paths, note.Name)
-	}
-	for _, key := range keys {
-		paths = append(paths, key.Name)
+// listRemoteSecretMemberPaths 枚举一个 P 在两个平面上的远端条目名。
+// Bundles 页只做成员展示，不区分平面，两侧合并即可。
+func listRemoteSecretMemberPaths(client secrets.Client, pName string) ([]string, error) {
+	var paths []string
+	for _, plane := range []secrets.SyncPlane{secrets.SyncPlaneMachine, secrets.SyncPlaneProject} {
+		target, err := secrets.NewPSyncTarget(pName, plane)
+		if err != nil {
+			return nil, err
+		}
+		notes, err := client.ListNotes(context.Background(), target)
+		if err != nil {
+			return nil, err
+		}
+		keys, err := client.ListSSHKeys(context.Background(), target)
+		if err != nil {
+			return nil, err
+		}
+		for _, note := range notes {
+			paths = append(paths, note.Name)
+		}
+		for _, key := range keys {
+			paths = append(paths, key.Name)
+		}
 	}
 	return paths, nil
 }
@@ -599,27 +592,6 @@ func appendSecretMemberItems(opt AssetBundleOption, paths []string) []AssetSelec
 			Type:  AssetMemberTypeSecret,
 			Vault: vault,
 		})
-	}
-	return out
-}
-
-// aliasedSecretBundleNames 返回配了显式 secrets folder 别名的 bundle 名。
-// 远端 bundle 枚举只覆盖 bundle/* folder，别名 bundle 不在其中，
-// 不能因为「不在名单里」就判它远端无 secrets。
-func aliasedSecretBundleNames(cfg *secrets.Config) map[string]struct{} {
-	out := map[string]struct{}{}
-	if cfg == nil {
-		return out
-	}
-	for _, b := range cfg.Bundles {
-		name := strings.TrimSpace(b.DecBundleName)
-		if name == "" {
-			continue
-		}
-		if strings.TrimSpace(b.SecretsBundleName) == secrets.DefaultBundleFolder(name) {
-			continue
-		}
-		out[name] = struct{}{}
 	}
 	return out
 }
