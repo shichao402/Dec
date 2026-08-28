@@ -21,7 +21,7 @@ import (
 )
 
 func testNewServer(auth Authenticator, initialEmail string, onUnlock func(string), onEmailSaved func(string) error) *server {
-	return newServer(auth, initialEmail, onUnlock, onEmailSaved)
+	return newServer(auth, initialEmail, RequestDetails{ID: "auth-test"}, onUnlock, onEmailSaved)
 }
 
 func inputTag(html, id string) string {
@@ -216,6 +216,45 @@ func TestUnlockPage_PrefillsInitialEmail(t *testing.T) {
 	html := string(body)
 	if !strings.Contains(html, `value="saved@example.com"`) {
 		t.Fatalf("期望预填 email: %s", html)
+	}
+}
+
+func TestUnlockPage_ShowsRequestDiagnosticsAndCallStack(t *testing.T) {
+	t.Parallel()
+
+	details := RequestDetails{
+		ID: "auth-123-abcdef", Source: "push.secrets", Facade: "mcp",
+		ClientID: "mcp-456", Operation: "push", OperationID: "op-789",
+		ProjectRoot: `D:\workspace\GitHub\Dec`, WorkspacePlane: "project",
+		RequestedAt: "2026-08-27T22:35:00+08:00",
+		Executable:  `C:\Users\me\.dec\bin\dec-server.exe`,
+		PID:         123, PPID: 45, ParentProcess: `C:\Program Files\Cursor\Cursor.exe`,
+		WorkingDir: `D:\workspace\GitHub\Dec`, GoVersion: "go1.26.3",
+		CallStack: "github.com/example/app.push\n    D:/src/push.go:42",
+	}
+	srv := newServer(NewStubAuthenticator("secret", "", "token"), "", details, func(string) {}, nil)
+	ts := httptest.NewServer(srv.routes())
+	t.Cleanup(ts.Close)
+
+	resp, err := ts.Client().Get(ts.URL + "/unlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(body)
+	for _, want := range []string{
+		details.ID, details.Source, details.Facade, details.ClientID,
+		details.Operation, details.OperationID, details.ProjectRoot,
+		details.Executable, details.ParentProcess, details.CallStack,
+		`<details class="request-panel" open>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("认证页缺少诊断信息 %q", want)
+		}
 	}
 }
 

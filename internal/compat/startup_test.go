@@ -249,3 +249,29 @@ func TestRepairOnStartup_KeepsIntegrationAuthWhilePurgingSecrets(t *testing.T) {
 		t.Fatalf("其它 P 落地内容应删除, err=%v", err)
 	}
 }
+
+func TestRepairOnStartup_UserPlaneMarkerDoesNotSkipProjectCleanup(t *testing.T) {
+	home := isolateHome(t)
+	t.Setenv("DEC_HOME", home)
+	project := t.TempDir()
+
+	// 用户平面先启动并写机器 marker。
+	RepairOnStartup("")
+
+	stale := filepath.Join(project, ".secrets", "bundles", "dec", "old.env")
+	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("OLD=1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	notes := RepairOnStartup(project)
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("机器 marker 不得跳过项目清理, err=%v notes=%#v", err, notes)
+	}
+	projectMarker := filepath.Join(project, ".dec", "state", pLayoutPurgeMarker)
+	if _, err := os.Stat(projectMarker); err != nil {
+		t.Fatalf("项目应有独立 marker: %v", err)
+	}
+}

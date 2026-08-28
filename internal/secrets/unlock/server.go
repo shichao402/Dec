@@ -18,6 +18,7 @@ type server struct {
 	onEmailSaved func(email string) error
 	initialEmail string
 	pendingEmail string
+	request      RequestDetails
 	done         chan error
 
 	mu          sync.Mutex
@@ -26,10 +27,11 @@ type server struct {
 	httpServer  *http.Server
 }
 
-func newServer(auth Authenticator, initialEmail string, onUnlock func(session string), onEmailSaved func(email string) error) *server {
+func newServer(auth Authenticator, initialEmail string, request RequestDetails, onUnlock func(session string), onEmailSaved func(email string) error) *server {
 	return &server{
 		auth:         auth,
 		initialEmail: strings.TrimSpace(initialEmail),
+		request:      request,
 		onUnlock:     onUnlock,
 		onEmailSaved: onEmailSaved,
 		done:         make(chan error, 1),
@@ -175,6 +177,7 @@ func (s *server) shutdown() {
 
 func (s *server) render(w http.ResponseWriter, name string, data pageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data.Request = s.request
 	if err := pageTemplates.ExecuteTemplate(w, name, data); err != nil {
 		http.Error(w, "页面渲染失败", http.StatusInternalServerError)
 	}

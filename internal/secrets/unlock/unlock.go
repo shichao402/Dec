@@ -34,6 +34,7 @@ type Options struct {
 	OpenBrowser   BrowserOpener
 	ListenAddr    string
 	InitialEmail  string
+	Request       RequestContext
 	OnEmailSaved  func(email string) error
 	OnSession     func(session string)
 	// OnStatus 报告 web unlock 进度（带 [auth] 前缀由调用方或本包补齐）。
@@ -50,13 +51,14 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("unlock: 缺少 Authenticator")
 	}
 	status := unlockStatusFunc(opts.OnStatus)
+	request := captureRequestDetails(opts.Request)
 
 	// 未显式注入 opener 意味着会打开真实浏览器并等待人工输入，
 	// 测试环境下直接拒绝，避免弹窗打断无人值守的测试。
 	opener := opts.OpenBrowser
 	if opener == nil {
 		allowed := WebUnlockAllowed()
-		logWebUnlockDecision(allowed, "缺少进程内 Bitwarden session，需人工输入主密码")
+		logWebUnlockDecision(allowed, "缺少进程内 Bitwarden session，需人工输入主密码", request)
 		if !allowed {
 			return ErrWebUnlockBlocked
 		}
@@ -64,7 +66,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	onSession := opts.OnSession
-	srv := newServer(opts.Authenticator, opts.InitialEmail, func(session string) {
+	srv := newServer(opts.Authenticator, opts.InitialEmail, request, func(session string) {
 		if onSession != nil {
 			onSession(session)
 		}
@@ -78,6 +80,9 @@ func Run(ctx context.Context, opts Options) error {
 
 	if err := srv.waitReady(ctx, baseURL); err != nil {
 		srv.shutdown()
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			unlockStatus(status, "web unlock: timeout - no user input (server not ready)")
+		}
 		return err
 	}
 	unlockStatus(status, "web unlock: server ready")

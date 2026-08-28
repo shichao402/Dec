@@ -39,6 +39,14 @@ func defaultAuthenticator() unlock.Authenticator {
 
 // EnsureSessionOpts 可选 unlock 回调。
 type EnsureSessionOpts struct {
+	// 以下字段只用于标识是谁触发了认证，不参与授权决策。
+	RequestSource  string
+	Facade         string
+	ClientID       string
+	Operation      string
+	OperationID    string
+	ProjectRoot    string
+	WorkspacePlane string
 	// OnStatus 报告解锁进度（程序化 / web unlock 分支切换等）。
 	OnStatus func(message string)
 	// OnUnlockURL 在本地 HTTP 服务就绪后回调，供 TUI 展示手动打开链接。
@@ -92,9 +100,18 @@ func EnsureSession(ctx context.Context, opts *EnsureSessionOpts) error {
 	unlockCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	request := unlock.RequestContext{}
+	if opts != nil {
+		request = unlock.RequestContext{
+			Source: opts.RequestSource, Facade: opts.Facade, ClientID: opts.ClientID,
+			Operation: opts.Operation, OperationID: opts.OperationID,
+			ProjectRoot: opts.ProjectRoot, WorkspacePlane: opts.WorkspacePlane,
+		}
+	}
 	unlockOpts := unlock.Options{
 		Authenticator: authenticatorFactory(),
 		InitialEmail:  KnownEmail(),
+		Request:       request,
 		OnSession:     SetSession,
 		OnEmailSaved:  SaveEmail,
 		OnStatus:      onStatus,

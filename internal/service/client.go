@@ -18,7 +18,11 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-const TokenHeader = "x-dec-token"
+const (
+	TokenHeader    = "x-dec-token"
+	FacadeHeader   = "x-dec-facade"
+	ClientIDHeader = "x-dec-client-id"
+)
 
 type Client struct {
 	conn          *grpc.ClientConn
@@ -31,7 +35,7 @@ type Client struct {
 }
 
 func Connect(ctx context.Context, facade, clientID, clientVersion string) (*Client, error) {
-	client, err := connectExisting(ctx, clientVersion)
+	client, err := connectExisting(ctx, facade, clientID, clientVersion)
 	if err == nil {
 		client.maybeStartPresence(facade, clientID)
 		return client, nil
@@ -48,7 +52,7 @@ func Connect(ctx context.Context, facade, clientID, clientVersion string) (*Clie
 			return nil, ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 		}
-		client, lastErr = connectExisting(ctx, clientVersion)
+		client, lastErr = connectExisting(ctx, facade, clientID, clientVersion)
 		if lastErr == nil {
 			client.maybeStartPresence(facade, clientID)
 			return client, nil
@@ -72,15 +76,15 @@ func (c *Client) maybeStartPresence(facade, clientID string) {
 	c.startPresence(facade, clientID)
 }
 
-func connectExisting(ctx context.Context, clientVersion string) (*Client, error) {
+func connectExisting(ctx context.Context, facade, clientID, clientVersion string) (*Client, error) {
 	meta, err := ReadMetadata()
 	if err != nil {
 		return nil, err
 	}
 	conn, err := grpc.NewClient(meta.Endpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithUnaryInterceptor(clientUnaryToken(meta.Token)),
-		grpc.WithStreamInterceptor(clientStreamToken(meta.Token)),
+		grpc.WithUnaryInterceptor(clientUnaryMetadata(meta.Token, facade, clientID)),
+		grpc.WithStreamInterceptor(clientStreamMetadata(meta.Token, facade, clientID)),
 	)
 	if err != nil {
 		return nil, err
@@ -192,16 +196,18 @@ func (c *Client) runKeepAliveOnce(ctx context.Context, facade, clientID string) 
 	return true
 }
 
-func clientUnaryToken(token string) grpc.UnaryClientInterceptor {
+func clientUnaryMetadata(token, facade, clientID string) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		ctx = metadata.AppendToOutgoingContext(ctx, TokenHeader, token)
+		ctx = metadata.AppendToOutgoingContext(ctx,
+			TokenHeader, token, FacadeHeader, facade, ClientIDHeader, clientID)
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
 }
 
-func clientStreamToken(token string) grpc.StreamClientInterceptor {
+func clientStreamMetadata(token, facade, clientID string) grpc.StreamClientInterceptor {
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-		ctx = metadata.AppendToOutgoingContext(ctx, TokenHeader, token)
+		ctx = metadata.AppendToOutgoingContext(ctx,
+			TokenHeader, token, FacadeHeader, facade, ClientIDHeader, clientID)
 		return streamer(ctx, desc, cc, method, opts...)
 	}
 }

@@ -111,14 +111,26 @@ func Run(ctx context.Context, cfg Config) error {
 	}, nil)
 	s := New(cfg)
 	s.Register(mcpServer)
-	return mcpServer.Run(ctx, &mcp.StdioTransport{})
+	stdin := newIdleReader(os.Stdin)
+	ctx, stopIdle := watchStdinIdle(ctx, stdin, stdinIdleTimeout)
+	defer stopIdle()
+	return mcpServer.Run(ctx, &mcp.IOTransport{
+		Reader: stdin,
+		Writer: nopWriteCloser{os.Stdout},
+	})
 }
 
 func resolveProjectRoot(flagValue string) string {
-	if root := strings.TrimSpace(flagValue); root != "" {
-		return root
+	root := strings.TrimSpace(flagValue)
+	if root == "" {
+		root = strings.TrimSpace(os.Getenv("DEC_PROJECT_ROOT"))
 	}
-	if root := strings.TrimSpace(os.Getenv("DEC_PROJECT_ROOT")); root != "" {
+	if isUnexpandedPlaceholder(root) {
+		fmt.Fprintf(os.Stderr, "[dec:mcp] --project-root %q 未被宿主展开（Cursor Agent ACP 不会替换 ${workspaceFolder}），改用进程 cwd pid=%d\n",
+			root, os.Getpid())
+		root = ""
+	}
+	if root != "" {
 		return root
 	}
 	cwd, err := os.Getwd()
@@ -126,6 +138,10 @@ func resolveProjectRoot(flagValue string) string {
 		return ""
 	}
 	return cwd
+}
+
+func isUnexpandedPlaceholder(s string) bool {
+	return strings.Contains(s, "${")
 }
 
 func (s *Server) projectRoot() string {

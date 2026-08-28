@@ -155,13 +155,6 @@ func purgeLegacyPLayout(projectRoot string) []string {
 	if err != nil {
 		return []string{fmt.Sprintf("跳过旧版本地清理：%v", err)}
 	}
-	marker := filepath.Join(home, "state", pLayoutPurgeMarker)
-	if _, err := os.Lstat(marker); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return []string{fmt.Sprintf("跳过旧版本地清理：%v", err)}
-	}
-
 	var notes []string
 	changed := false
 	remove := func(path, label string) {
@@ -172,28 +165,45 @@ func purgeLegacyPLayout(projectRoot string) []string {
 		}
 		_ = label
 	}
-	remove(filepath.Join(home, "cache"), "用户 cache")
-	remove(filepath.Join(home, "secrets", "bundles"), "用户 secrets/bundles")
-	remove(filepath.Join(home, "migrations"), "迁移日志")
+
+	// 机器平面和项目平面必须各自标记。旧实现只有一个全机 marker：
+	// dec --user 先启动后，所有项目的旧 .secrets/ 都会被永久跳过。
+	machineMarker := filepath.Join(home, "state", pLayoutPurgeMarker)
+	if exists, markerErr := purgeMarkerExists(machineMarker); markerErr != nil {
+		notes = append(notes, fmt.Sprintf("跳过机器平面旧版清理：%v", markerErr))
+	} else if !exists {
+		remove(filepath.Join(home, "cache"), "用户 cache")
+		remove(filepath.Join(home, "secrets", "bundles"), "用户 secrets/bundles")
+		remove(filepath.Join(home, "migrations"), "迁移日志")
+		if cfg, err := config.LoadGlobalConfig(); err == nil && (len(cfg.EnabledBundles) > 0 || len(cfg.EnabledProjects) > 0) {
+			cfg.EnabledBundles = nil
+			cfg.EnabledProjects = nil
+			if err := config.SaveGlobalConfig(cfg); err != nil {
+				notes = append(notes, fmt.Sprintf("清空用户启用列表失败：%v", err))
+			} else {
+				notes = append(notes, "已清空用户平面启用列表")
+				changed = true
+			}
+		}
+		if err := writePurgeMarker(machineMarker); err != nil {
+			notes = append(notes, fmt.Sprintf("写入机器平面清理标记失败：%v", err))
+		}
+	}
+
 	if projectRoot != "" {
+		projectMarker := filepath.Join(projectRoot, ".dec", "state", pLayoutPurgeMarker)
+		exists, markerErr := purgeMarkerExists(projectMarker)
+		if markerErr != nil {
+			return append(notes, fmt.Sprintf("跳过项目平面旧版清理：%v", markerErr))
+		}
+		if exists {
+			return notes
+		}
 		remove(filepath.Join(projectRoot, ".dec", "cache"), "项目 cache")
 		if note := purgeSecretsRoot(projectRoot); note != "" {
 			notes = append(notes, note)
 			changed = true
 		}
-	}
-
-	if cfg, err := config.LoadGlobalConfig(); err == nil && (len(cfg.EnabledBundles) > 0 || len(cfg.EnabledProjects) > 0) {
-		cfg.EnabledBundles = nil
-		cfg.EnabledProjects = nil
-		if err := config.SaveGlobalConfig(cfg); err != nil {
-			notes = append(notes, fmt.Sprintf("清空用户启用列表失败：%v", err))
-		} else {
-			notes = append(notes, "已清空用户平面启用列表")
-			changed = true
-		}
-	}
-	if projectRoot != "" {
 		mgr := config.NewProjectConfigManager(projectRoot)
 		if cfg, err := mgr.LoadProjectConfig(); err == nil && len(cfg.EnabledBundles) > 0 {
 			cfg.EnabledBundles = nil
@@ -204,13 +214,9 @@ func purgeLegacyPLayout(projectRoot string) []string {
 				changed = true
 			}
 		}
-	}
-
-	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
-		return append(notes, fmt.Sprintf("写入清理标记失败：%v", err))
-	}
-	if err := os.WriteFile(marker, []byte("1\n"), 0o600); err != nil {
-		return append(notes, fmt.Sprintf("写入清理标记失败：%v", err))
+		if err := writePurgeMarker(projectMarker); err != nil {
+			notes = append(notes, fmt.Sprintf("写入项目平面清理标记失败：%v", err))
+		}
 	}
 	if changed {
 		notes = append(notes, "已清理旧版本地资产；请在 Bundles 页重新选择 P，并在 Run 页 Pull")
@@ -218,63 +224,85 @@ func purgeLegacyPLayout(projectRoot string) []string {
 	return notes
 }
 
-// purgeSecretsRoot 清空项目 .secrets/ 下的旧落地内容，但保留集成测试凭据目录。
-// 后者不是任何 P 的落地内容，删掉会让 live 测试重新要人工解锁。
+func purgeMarkerExists(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+func writePurgeMarker(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte("1\n"), 0o600)
+}
+
+// purgeSecretsRoot 清空项目 .secrets/ 下的旧落地内容，但保留：
+//   - 可同步的集成测试账号文件；
+//   - 不可同步的本机隔离 DEC_HOME（含 device remember token）。
 func purgeSecretsRoot(projectRoot string) string {
 	root := filepath.Join(projectRoot, secrets.SecretsRootDir)
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return ""
-		}
-		return fmt.Sprintf("跳过清理 %s：%v", root, err)
+	keeps := []string{
+		filepath.Join(projectRoot, filepath.FromSlash(secrets.IntegrationAuthRel)),
+		filepath.Join(projectRoot, filepath.FromSlash(secrets.IntegrationDecHomeRel)),
 	}
-	keep := filepath.Join(projectRoot, filepath.FromSlash(secrets.IntegrationDirRel))
-	removed := false
-	for _, entry := range entries {
-		path := filepath.Join(root, entry.Name())
-		if path == keep || strings.HasPrefix(keep, path+string(filepath.Separator)) {
-			if note := purgeExcept(path, keep); note != "" {
-				return note
-			}
-			removed = true
-			continue
-		}
-		if err := os.RemoveAll(path); err != nil {
-			return fmt.Sprintf("清理 %s 失败：%v", path, err)
-		}
-		removed = true
+	removed, note := purgeExcept(root, keeps)
+	if note != "" {
+		return note
 	}
 	if !removed {
 		return ""
 	}
-	return fmt.Sprintf("已清理 %s（保留 %s）", root, secrets.IntegrationDirRel)
+	return fmt.Sprintf("已清理 %s（保留集成凭据与本机设备状态）", root)
 }
 
-// purgeExcept 删除 dir 下所有内容，但保留通往 keep 的那条路径。
-func purgeExcept(dir, keep string) string {
+// purgeExcept 删除 dir 下所有内容，但保留通往 keeps 的路径。
+func purgeExcept(dir string, keeps []string) (bool, string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ""
+			return false, ""
 		}
-		return fmt.Sprintf("跳过清理 %s：%v", dir, err)
+		return false, fmt.Sprintf("跳过清理 %s：%v", dir, err)
 	}
+	removed := false
 	for _, entry := range entries {
 		path := filepath.Join(dir, entry.Name())
-		if path == keep || strings.HasPrefix(keep, path+string(filepath.Separator)) {
-			if path != keep {
-				if note := purgeExcept(path, keep); note != "" {
-					return note
-				}
+		exactKeep := false
+		var childKeeps []string
+		for _, keep := range keeps {
+			if path == keep {
+				exactKeep = true
+				break
+			}
+			if strings.HasPrefix(keep, path+string(filepath.Separator)) {
+				childKeeps = append(childKeeps, keep)
+			}
+		}
+		if exactKeep {
+			continue
+		}
+		if len(childKeeps) > 0 {
+			childRemoved, note := purgeExcept(path, childKeeps)
+			if note != "" {
+				return removed, note
+			}
+			if childRemoved {
+				removed = true
 			}
 			continue
 		}
 		if err := os.RemoveAll(path); err != nil {
-			return fmt.Sprintf("清理 %s 失败：%v", path, err)
+			return removed, fmt.Sprintf("清理 %s 失败：%v", path, err)
 		}
+		removed = true
 	}
-	return ""
+	return removed, ""
 }
 
 func removeTreeIfExistsSilent(path string) string {

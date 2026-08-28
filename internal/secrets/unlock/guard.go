@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -44,17 +43,18 @@ func envFlagEnabled(name string) bool {
 //
 // 不走调用方注入的 reporter/OnStatus：那些在测试和子进程里通常为 nil，
 // 结果就是进程默默卡在等人输密码，而日志里看不出任何认证痕迹。
-func logWebUnlockDecision(allowed bool, detail string) {
-	exe := "unknown"
-	if path, err := os.Executable(); err == nil {
-		exe = filepath.Base(path)
-	}
+func logWebUnlockDecision(allowed bool, detail string, request RequestDetails) {
 	verdict := "已拦下"
 	if allowed {
 		verdict = "即将弹出浏览器"
 	}
 	fmt.Fprintf(os.Stderr,
-		"[dec:auth] WEB UNLOCK %s：%s pid=%d exe=%s test_binary=%t %s=%s\n",
-		verdict, detail, os.Getpid(), exe, testing.Testing(),
+		"[dec:auth] WEB UNLOCK %s：%s request_id=%s source=%s facade=%s operation=%s operation_id=%s pid=%d ppid=%d exe=%s parent=%s cwd=%s project=%s plane=%s test_binary=%t %s=%s\n",
+		verdict, detail, request.ID, request.Source, request.Facade, request.Operation,
+		request.OperationID, request.PID, request.PPID, request.Executable,
+		request.ParentProcess, request.WorkingDir, request.ProjectRoot,
+		request.WorkspacePlane, testing.Testing(),
 		EnvNoWebUnlock, os.Getenv(EnvNoWebUnlock))
+	fmt.Fprintf(os.Stderr, "[dec:auth] WEB UNLOCK call stack request_id=%s\n%s\n",
+		request.ID, request.CallStack)
 }

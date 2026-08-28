@@ -10,7 +10,13 @@ type unlockConfigKey struct{}
 // UnlockConfig 控制 app 操作链中的 Bitwarden web unlock 超时。
 type UnlockConfig struct {
 	// Timeout 为 web unlock 等待时长；零值使用 secrets/unlock 默认（5 分钟）。
-	Timeout time.Duration
+	Timeout        time.Duration
+	Facade         string
+	ClientID       string
+	Operation      string
+	OperationID    string
+	ProjectRoot    string
+	WorkspacePlane string
 }
 
 // MCPSessionUnlockTimeout 是 MCP tool 调用的 web unlock 超时。

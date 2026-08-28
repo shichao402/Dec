@@ -39,7 +39,7 @@ body {
 }
 .page {
   width: 100%;
-  max-width: 400px;
+  max-width: 780px;
 }
 .card {
   background: var(--card);
@@ -256,6 +256,93 @@ h1 {
   font-size: 0.875rem;
   color: var(--text-muted);
 }
+.request-warning {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #f4c86a;
+  border-radius: var(--radius);
+  background: #fffbeb;
+  color: #7c5200;
+  font-size: 0.875rem;
+}
+.request-panel {
+  margin: 0 0 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #f8fafc;
+  overflow: hidden;
+}
+.request-panel summary {
+  padding: 12px 14px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.request-details {
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--border);
+}
+.request-grid {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  margin: 0;
+  font-size: 0.8125rem;
+}
+.request-grid dt,
+.request-grid dd {
+  margin: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+.request-grid dt { color: var(--text-muted); }
+.request-grid dd {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+}
+.stack-title {
+  margin: 14px 0 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.call-stack {
+  max-height: 360px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: 7px;
+  background: #111827;
+  color: #e5e7eb;
+  font: 0.75rem/1.55 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+{{end}}
+
+{{define "request-details"}}
+<p class="request-warning"><strong>先确认来源：</strong>只有当下面的程序和操作是你刚刚发起的，才输入主密码。来源不明时直接关闭本页。</p>
+<details class="request-panel" open>
+  <summary>认证请求 {{.Request.ID}} · {{.Request.Source}}</summary>
+  <div class="request-details">
+    <dl class="request-grid">
+      <dt>请求 ID</dt><dd>{{.Request.ID}}</dd>
+      <dt>业务标识</dt><dd>{{.Request.Source}}</dd>
+      <dt>门面 / 客户端</dt><dd>{{.Request.Facade}} / {{.Request.ClientID}}</dd>
+      <dt>服务操作</dt><dd>{{.Request.Operation}}</dd>
+      <dt>Operation ID</dt><dd>{{.Request.OperationID}}</dd>
+      <dt>工作区平面</dt><dd>{{.Request.WorkspacePlane}}</dd>
+      <dt>项目根</dt><dd>{{.Request.ProjectRoot}}</dd>
+      <dt>发起时间</dt><dd>{{.Request.RequestedAt}}</dd>
+      <dt>程序</dt><dd>{{.Request.Executable}}</dd>
+      <dt>进程</dt><dd>PID {{.Request.PID}} · PPID {{.Request.PPID}}</dd>
+      <dt>父进程</dt><dd>{{.Request.ParentProcess}}</dd>
+      <dt>工作目录</dt><dd>{{.Request.WorkingDir}}</dd>
+      <dt>运行时</dt><dd>{{.Request.GoVersion}}</dd>
+    </dl>
+    <div class="stack-title">调用栈（触发 web unlock 的当前 goroutine）</div>
+    <pre class="call-stack">{{.Request.CallStack}}</pre>
+  </div>
+</details>
 {{end}}
 
 {{define "unlock"}}<!DOCTYPE html>
@@ -275,6 +362,7 @@ h1 {
     </div>
     <h1>Bitwarden 解锁</h1>
     <p class="lead">输入 Bitwarden 邮箱与主密码以继续 secrets bundle 同步。Session 仅保存在当前 Dec 进程内存中。</p>
+    {{template "request-details" .}}
     {{if .Error}}<div class="alert alert-error error" role="alert">
       <svg class="alert-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
       <span>{{.Error}}</span>
@@ -338,6 +426,7 @@ h1 {
     </div>
     <h1>二次验证</h1>
     <p class="lead">账户已启用 2FA，请输入 TOTP 验证码。</p>
+    {{template "request-details" .}}
     {{if .Error}}<div class="alert alert-error error" role="alert">
       <svg class="alert-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
       <span>{{.Error}}</span>
@@ -401,6 +490,7 @@ h1 {
     </div>
     <h1>解锁成功</h1>
     <p class="lead">Bitwarden session 已写入当前进程内存，Dec 将继续同步 secrets bundle。</p>
+    <p class="lead">请求 ID：<code>{{.Request.ID}}</code> · 来源：<code>{{.Request.Source}}</code></p>
     <p class="countdown" id="countdown">窗口将在 <strong><span id="seconds">10</span></strong> 秒后自动关闭…</p>
     <p class="manual-close" id="manual-close" hidden>可手动关闭此标签页。</p>
   </div>
@@ -434,6 +524,7 @@ h1 {
 `))
 
 type pageData struct {
-	Error string
-	Email string
+	Error   string
+	Email   string
+	Request RequestDetails
 }

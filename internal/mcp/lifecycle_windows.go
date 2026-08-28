@@ -15,17 +15,19 @@ func exitSignals() []os.Signal {
 	return []os.Signal{os.Interrupt}
 }
 
-// processAlive 通过 OpenProcess + GetExitCodeProcess 判断目标进程是否仍在运行。
-// PID 已不存在时 OpenProcess 失败，视为已退出。
-func processAlive(pid int) bool {
+func processIdentity(pid int) (uint64, bool) {
 	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return false
+		return 0, false
 	}
 	defer windows.CloseHandle(handle)
 	var code uint32
-	if err := windows.GetExitCodeProcess(handle, &code); err != nil {
-		return false
+	if err := windows.GetExitCodeProcess(handle, &code); err != nil || code != stillActive {
+		return 0, false
 	}
-	return code == stillActive
+	var creation, exit, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
+		return 0, false
+	}
+	return uint64(creation.HighDateTime)<<32 | uint64(creation.LowDateTime), true
 }

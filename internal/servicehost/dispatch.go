@@ -10,9 +10,11 @@ import (
 
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/service"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -25,9 +27,15 @@ func (c *eventCollector) Emit(event app.OperationEvent) {
 }
 
 func (s *Server) Invoke(ctx context.Context, req *servicev1.InvokeRequest) (*servicev1.InvokeResponse, error) {
-	if req.UnlockTimeoutMs > 0 {
-		ctx = app.WithUnlockConfig(ctx, app.UnlockConfig{Timeout: time.Duration(req.UnlockTimeoutMs) * time.Millisecond})
-	}
+	facade, clientID := callerFromMetadata(ctx)
+	ctx = app.WithUnlockConfig(ctx, app.UnlockConfig{
+		Timeout:        time.Duration(req.UnlockTimeoutMs) * time.Millisecond,
+		Facade:         facade,
+		ClientID:       clientID,
+		Operation:      req.Method,
+		ProjectRoot:    req.ProjectRoot,
+		WorkspacePlane: req.WorkspacePlane,
+	})
 	if isProjectMutation(req.Method) && s.broker.active(req.ProjectRoot).Active {
 		return nil, status.Error(codes.AlreadyExists, "project busy: 当前有写操作进行中")
 	}
@@ -51,6 +59,17 @@ func (s *Server) Invoke(ctx context.Context, req *servicev1.InvokeRequest) (*ser
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	return &servicev1.InvokeResponse{ResultJson: data, Events: collector.events}, nil
+}
+
+func callerFromMetadata(ctx context.Context) (facade, clientID string) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	if values := md.Get(service.FacadeHeader); len(values) > 0 {
+		facade = values[0]
+	}
+	if values := md.Get(service.ClientIDHeader); len(values) > 0 {
+		clientID = values[0]
+	}
+	return facade, clientID
 }
 
 func isProjectMutation(method string) bool {
@@ -253,9 +272,15 @@ func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.Se
 	s.ensureProjectRepaired(req.ProjectRoot, reporter)
 
 	operationCtx := stream.Context()
-	if req.UnlockTimeoutMs > 0 {
-		operationCtx = app.WithUnlockConfig(operationCtx, app.UnlockConfig{Timeout: time.Duration(req.UnlockTimeoutMs) * time.Millisecond})
-	}
+	operationCtx = app.WithUnlockConfig(operationCtx, app.UnlockConfig{
+		Timeout:        time.Duration(req.UnlockTimeoutMs) * time.Millisecond,
+		Facade:         req.Facade,
+		ClientID:       req.ClientId,
+		Operation:      req.Operation,
+		OperationID:    state.meta.OperationId,
+		ProjectRoot:    req.ProjectRoot,
+		WorkspacePlane: req.WorkspacePlane,
+	})
 	workspace := app.NewWorkspace(app.WorkspacePlane(req.WorkspacePlane), req.ProjectRoot)
 	writer := app.DefaultPWriter()
 	result, runErr := dispatchOperationWorkspace(operationCtx, req.Operation, workspace, req.PayloadJson, reporter, writer)

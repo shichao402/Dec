@@ -9,13 +9,12 @@ import (
 
 const parentWatchInterval = 3 * time.Second
 
-// withExitWatchers 在传入 ctx 之上叠加两个退出触发器：
+// withExitWatchers 在传入 ctx 之上叠加退出触发器：
 //  1. 系统中断信号（Ctrl-C / SIGTERM 等）。
-//  2. 父进程存活看门狗：当拉起本进程的父进程（IDE / Agent / dec-exec 链）消失时取消 ctx。
+//  2. 父进程看门狗：父进程消失，或同一 PID 被后来的无关进程占用时取消 ctx。
 //
-// dec-mcp 是薄门面：正常退出依赖 MCP SDK 读到 stdin EOF。但在部分平台（尤其 Windows）
-// 父进程异常退出后 stdin 可能收不到 EOF，SDK 的 Run 不自行返回，进程会变孤儿常驻并
-// 持续占用内存 / 拖住 dec-server 空闲退出。父进程看门狗是这一情形的兜底。
+// 这只覆盖「父进程真的没了」。Cursor Agent ACP 会留下活着的 node.exe 父进程
+// 和不再读写的 stdin；那种堆积由 stdin 空闲超时处理（见 idle.go）。
 func withExitWatchers(parent context.Context) (context.Context, func()) {
 	ctx, cancelSignal := signal.NotifyContext(parent, exitSignals()...)
 	ctx, cancelWatch := context.WithCancel(ctx)
@@ -27,6 +26,11 @@ func withExitWatchers(parent context.Context) (context.Context, func()) {
 		if ppid <= 1 {
 			return
 		}
+		ident, ok := processIdentity(ppid)
+		if !ok {
+			cancelWatch()
+			return
+		}
 		ticker := time.NewTicker(parentWatchInterval)
 		defer ticker.Stop()
 		for {
@@ -36,7 +40,8 @@ func withExitWatchers(parent context.Context) (context.Context, func()) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if !processAlive(ppid) {
+				got, still := processIdentity(ppid)
+				if !still || got != ident {
 					cancelWatch()
 					return
 				}
