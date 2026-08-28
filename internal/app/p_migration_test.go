@@ -280,8 +280,8 @@ func TestLivePMigrationBackend_BitwardenUsesStubAndVerifiesBeforeDelete(t *testi
 		},
 	}
 	plan := &PMigrationPlan{BWMoves: []PMigrationBWMove{
-		{SourceFolder: "bundle/My_App", TargetFolder: "my-app/private/project", Path: ".env/app.env", Kind: "note"},
-		{SourceFolder: "bundle/My_App", TargetFolder: "my-app/private/project", Path: ".sshkey/deploy", Kind: "sshkey"},
+		{SourceFolder: "bundle/My_App", TargetFolder: "my-app/private/local", Path: ".env/app.env", Kind: "note"},
+		{SourceFolder: "bundle/My_App", TargetFolder: "my-app/private/local", Path: ".sshkey/deploy", Kind: "sshkey"},
 	}}
 	backend := &livePMigrationBackend{workspace: NewWorkspace(WorkspaceProject, t.TempDir()), client: client}
 	if err := backend.WriteBitwarden(context.Background(), plan); err != nil {
@@ -296,7 +296,7 @@ func TestLivePMigrationBackend_BitwardenUsesStubAndVerifiesBeforeDelete(t *testi
 	if len(client.NotesByFolder["bundle/My_App"]) != 0 || len(client.SSHKeysByFolder["bundle/My_App"]) != 0 {
 		t.Fatalf("legacy source not deleted: notes=%#v keys=%#v", client.NotesByFolder, client.SSHKeysByFolder)
 	}
-	if len(client.NotesByFolder["my-app/private/project"]) != 1 || len(client.SSHKeysByFolder["my-app/private/project"]) != 1 {
+	if len(client.NotesByFolder["my-app/private/local"]) != 1 || len(client.SSHKeysByFolder["my-app/private/local"]) != 1 {
 		t.Fatalf("target missing: notes=%#v keys=%#v", client.NotesByFolder, client.SSHKeysByFolder)
 	}
 }

@@ -163,7 +163,7 @@ func TestSuggestSecretAddresses_OnlyHomeProjectOnProjectPlane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SuggestSecretAddresses() = %v", err)
 	}
-	if len(addresses) != 1 || addresses[0] != "demo/private/project" {
+	if len(addresses) != 1 || addresses[0] != "demo/private/local" {
 		t.Fatalf("addresses = %#v, 期望只有本项目 P", addresses)
 	}
 }

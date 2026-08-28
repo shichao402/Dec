@@ -417,17 +417,17 @@ func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
 	if secrets.IsMachinePlane(target.Plane) {
 		t.Fatalf("project 上下文不应产生机器平面 target: %+v", target)
 	}
-	if target.Name != "demo" || target.Address != "demo/private/project" {
-		t.Fatalf("target = %+v，期望本项目 P demo", target)
+	if target.Name != "demo" || target.Address != "demo/private/local" {
+		t.Fatalf("target = %+v，期望本项目 Project demo", target)
 	}
 }
 
 func TestPlanWorkspaceSecretsSync_PUsesHomeOnlyAndFixedPlane(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"my-app/dec.yaml":                        "name: my-app\nrequires: [shared]\n",
-		"shared/dec.yaml":                        "name: shared\n",
-		"shared/public/project/rules/shared.mdc": "shared",
+		"my-app/dec.yaml":                      "name: my-app\nrequires: [shared]\n",
+		"shared/dec.yaml":                      "name: shared\n",
+		"shared/public/local/rules/shared.mdc": "shared",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
@@ -451,8 +451,8 @@ func TestPlanWorkspaceSecretsSync_PUsesHomeOnlyAndFixedPlane(t *testing.T) {
 	}
 	target := projectPlan.Targets[0]
 	if target.Name != "my-app" ||
-		target.Address != "my-app/private/project" || target.LocalRoot != ".secrets/my-app" {
-		t.Fatalf("project P target = %#v", target)
+		target.Address != "my-app/private/local" || target.LocalRoot != ".secrets/my-app" {
+		t.Fatalf("project target = %#v", target)
 	}
 
 	userPlan, err := planWorkspaceSecretsSync(
@@ -463,22 +463,22 @@ func TestPlanWorkspaceSecretsSync_PUsesHomeOnlyAndFixedPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(userPlan.Targets) != 1 || userPlan.Targets[0].Address != "shared/private/user" ||
+	if len(userPlan.Targets) != 1 || userPlan.Targets[0].Address != "shared/private/global" ||
 		userPlan.Targets[0].LocalRoot != "shared" {
-		t.Fatalf("user P target = %#v", userPlan.Targets)
+		t.Fatalf("global target = %#v", userPlan.Targets)
 	}
 }
 
 func TestValidateNoPPrivateGitOverlapRejectsSameLogicalPath(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"my-app/dec.yaml":                          "name: my-app\n",
-		"my-app/private/project/rules/private.mdc": "non-secret",
+		"my-app/dec.yaml":                        "name: my-app\n",
+		"my-app/private/local/rules/private.mdc": "non-secret",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
-	target, err := secrets.NewPSyncTarget("my-app", secrets.SyncPlaneProject)
+	target, err := secrets.NewPSyncTarget("my-app", secrets.SyncPlaneLocal)
 	if err != nil {
 		t.Fatal(err)
 	}
