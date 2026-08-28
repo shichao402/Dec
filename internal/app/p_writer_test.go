@@ -85,10 +85,11 @@ func TestPWriterUserSelectionWritesEnabledProjects(t *testing.T) {
 
 func TestPushAfterRemovePDoesNotResurrectLocalRemnants(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"my-app/dec.yaml":                        "name: my-app\n",
-		"my-app/private/project/rules/local.mdc": "remote\n",
-		"shared/dec.yaml":                        "name: shared\n",
+		"my-app/dec.yaml":                      "name: my-app\n",
+		"my-app/private/local/rules/local.mdc": "remote\n",
+		"shared/dec.yaml":                      "name: shared\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
@@ -104,14 +105,15 @@ func TestPushAfterRemovePDoesNotResurrectLocalRemnants(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ghost := filepath.Join(root, ".dec", "cache", "my-app", "private", "project", "rules", "local.mdc")
+	ghost := filepath.Join(root, ".dec", "cache", "my-app", "private", "local", "rules", "local.mdc")
 	if err := os.MkdirAll(filepath.Dir(ghost), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(ghost, []byte("ghost\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "my-app"}); err != nil {
+	// 改绑到仍存在的 shared：已删除项目的 cache 残留不可写，push 不得把它复活。
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "shared"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := PushProjectAssets(context.Background(), root, nil); err != nil {
@@ -119,7 +121,7 @@ func TestPushAfterRemovePDoesNotResurrectLocalRemnants(t *testing.T) {
 	}
 	if err := withAppReadRepo(func(tx *repo.Transaction) error {
 		if _, err := os.Stat(filepath.Join(tx.WorkDir(), "my-app")); !os.IsNotExist(err) {
-			t.Fatalf("push 不应从本地残留复活 P: %v", err)
+			t.Fatalf("push 不应从非绑定项目的本地残留复活: %v", err)
 		}
 		return nil
 	}); err != nil {
