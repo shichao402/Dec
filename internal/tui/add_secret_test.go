@@ -12,7 +12,7 @@ import (
 func projectPageModelForAddSecret(t *testing.T) model {
 	t.Helper()
 	m := newModel(t.TempDir(), "v1.0.0")
-	m.pageIndex = 2 // Project
+	m.pageIndex = 3 // 设置（IDE / 登记 secret）
 	m.focus = focusContent
 	m.projectSettings = &app.ProjectSettingsState{ProjectConfigReady: true}
 	return m
@@ -105,7 +105,7 @@ func TestAddSecret_EmptyPathDoesNotAdvance(t *testing.T) {
 
 func TestAddSecret_RequiresProjectConfig(t *testing.T) {
 	m := newModel(t.TempDir(), "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.focus = focusContent
 	m.projectSettings = &app.ProjectSettingsState{ProjectConfigReady: false}
 

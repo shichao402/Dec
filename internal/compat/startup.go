@@ -14,6 +14,7 @@ import (
 	"github.com/shichao402/Dec/internal/ide"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 // RepairOnStartup 对 projectRoot 做启动修复，返回人类可读说明（可空）。
@@ -23,7 +24,7 @@ func RepairOnStartup(projectRoot string) []string {
 	root := strings.TrimSpace(projectRoot)
 	var notes []string
 	notes = append(notes, removeRetiredIDESkillCopies(root)...)
-	notes = append(notes, purgeLegacyPLayout(root)...)
+	notes = append(notes, applyLayoutVersion(root)...)
 	if root == "" {
 		return notes
 	}
@@ -104,98 +105,80 @@ func removeLegacyDecConfigDir(projectRoot string) []string {
 	return []string{"已删除早期目录 .dec/config/"}
 }
 
-const pLayoutPurgeMarker = "p-layout-local-purged-v1"
-
-func purgeLegacyPLayout(projectRoot string) []string {
+func applyLayoutVersion(projectRoot string) []string {
 	home, err := repo.GetRootDir()
 	if err != nil {
-		return []string{fmt.Sprintf("跳过旧版本地清理：%v", err)}
+		return []string{fmt.Sprintf("跳过布局版本检查：%v", err)}
 	}
 	var notes []string
-	changed := false
-	remove := func(path, label string) {
-		if note := removeTreeIfExistsSilent(path); note != "" {
-			notes = append(notes, note)
-			changed = true
-			return
-		}
-		_ = label
-	}
-
-	// 机器平面和项目平面必须各自标记。旧实现只有一个全机 marker：
-	// dec --user 先启动后，所有项目的旧 .secrets/ 都会被永久跳过。
-	machineMarker := filepath.Join(home, "state", pLayoutPurgeMarker)
-	if exists, markerErr := purgeMarkerExists(machineMarker); markerErr != nil {
-		notes = append(notes, fmt.Sprintf("跳过机器平面旧版清理：%v", markerErr))
-	} else if !exists {
-		remove(filepath.Join(home, "cache"), "用户 cache")
-		remove(filepath.Join(home, "secrets", "bundles"), "用户 secrets/bundles")
-		remove(filepath.Join(home, "migrations"), "迁移日志")
-		if cfg, err := config.LoadGlobalConfig(); err == nil && (len(cfg.EnabledBundles) > 0 || len(cfg.EnabledProjects) > 0) {
-			cfg.EnabledBundles = nil
-			cfg.EnabledProjects = nil
+	if cfg, err := config.LoadGlobalConfig(); err == nil {
+		if cfg.LayoutVersion > types.LocalLayoutVersion {
+			notes = append(notes, fmt.Sprintf("本机 layout_version %d 新于当前 Dec，请升级", cfg.LayoutVersion))
+		} else if cfg.LayoutVersion < types.LocalLayoutVersion {
+			notes = append(notes, purgeMachineDerived(home)...)
+			cfg.LayoutVersion = types.LocalLayoutVersion
 			if err := config.SaveGlobalConfig(cfg); err != nil {
-				notes = append(notes, fmt.Sprintf("清空用户启用列表失败：%v", err))
-			} else {
-				notes = append(notes, "已清空用户平面启用列表")
-				changed = true
+				notes = append(notes, fmt.Sprintf("写入本机 layout_version 失败：%v", err))
 			}
 		}
-		if err := writePurgeMarker(machineMarker); err != nil {
-			notes = append(notes, fmt.Sprintf("写入机器平面清理标记失败：%v", err))
-		}
+	} else {
+		notes = append(notes, fmt.Sprintf("跳过本机布局检查：%v", err))
 	}
-
-	if projectRoot != "" {
-		projectMarker := filepath.Join(projectRoot, ".dec", "state", pLayoutPurgeMarker)
-		exists, markerErr := purgeMarkerExists(projectMarker)
-		if markerErr != nil {
-			return append(notes, fmt.Sprintf("跳过项目平面旧版清理：%v", markerErr))
-		}
-		if exists {
-			return notes
-		}
-		remove(filepath.Join(projectRoot, ".dec", "cache"), "项目 cache")
-		if note := purgeSecretsRoot(projectRoot); note != "" {
-			notes = append(notes, note)
-			changed = true
-		}
-		mgr := config.NewProjectConfigManager(projectRoot)
-		if cfg, err := mgr.LoadProjectConfig(); err == nil && len(cfg.EnabledBundles) > 0 {
-			cfg.EnabledBundles = nil
-			if err := mgr.SaveProjectConfig(cfg); err != nil {
-				notes = append(notes, fmt.Sprintf("清空项目启用列表失败：%v", err))
-			} else {
-				notes = append(notes, "已清空项目平面启用列表")
-				changed = true
-			}
-		}
-		if err := writePurgeMarker(projectMarker); err != nil {
-			notes = append(notes, fmt.Sprintf("写入项目平面清理标记失败：%v", err))
-		}
+	if strings.TrimSpace(projectRoot) == "" {
+		return notes
 	}
-	if changed {
-		notes = append(notes, "已清理旧版本地资产；请在 Bundles 页重新选择 P，并在 Run 页 Pull")
+	mgr := config.NewProjectConfigManager(projectRoot)
+	cfg, err := mgr.LoadProjectConfig()
+	if err != nil {
+		return append(notes, fmt.Sprintf("跳过工作区布局检查：%v", err))
+	}
+	if cfg.LayoutVersion > types.LocalLayoutVersion {
+		return append(notes, fmt.Sprintf("工作区 layout_version %d 新于当前 Dec，请升级", cfg.LayoutVersion))
+	}
+	if cfg.LayoutVersion < types.LocalLayoutVersion {
+		purged := purgeProjectDerived(projectRoot)
+		notes = append(notes, purged...)
+		cfg.LayoutVersion = types.LocalLayoutVersion
+		if err := mgr.SaveProjectConfig(cfg); err != nil {
+			notes = append(notes, fmt.Sprintf("写入工作区 layout_version 失败：%v", err))
+		} else if len(purged) > 0 {
+			notes = append(notes, "工作区布局已更新，请到同步页 Pull")
+		}
 	}
 	return notes
 }
 
-func purgeMarkerExists(path string) (bool, error) {
-	_, err := os.Lstat(path)
-	if err == nil {
-		return true, nil
+func purgeMachineDerived(home string) []string {
+	var notes []string
+	for _, p := range []string{filepath.Join(home, "cache"), filepath.Join(home, "secrets")} {
+		if p == filepath.Join(home, "secrets") {
+			if note := purgeExceptKeepDevice(p); note != "" {
+				notes = append(notes, note)
+			}
+			continue
+		}
+		if note := removeTreeIfExistsSilent(p); note != "" {
+			notes = append(notes, note)
+		}
 	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
+	return notes
 }
 
-func writePurgeMarker(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+func purgeExceptKeepDevice(secretsDir string) string {
+	device := filepath.Join(secretsDir, "device.json")
+	_, note := purgeExcept(secretsDir, []string{device})
+	return note
+}
+
+func purgeProjectDerived(projectRoot string) []string {
+	var notes []string
+	if note := removeTreeIfExistsSilent(filepath.Join(projectRoot, ".dec", "cache")); note != "" {
+		notes = append(notes, note)
 	}
-	return os.WriteFile(path, []byte("1\n"), 0o600)
+	if note := purgeSecretsRoot(projectRoot); note != "" {
+		notes = append(notes, note)
+	}
+	return notes
 }
 
 // purgeSecretsRoot 清空项目 .secrets/ 下的旧落地内容，但保留：

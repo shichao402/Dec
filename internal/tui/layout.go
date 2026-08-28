@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/shichao402/Dec/internal/app"
 )
 
 // layoutMetrics 统一终端尺寸预算，保证横向合计不超过 width。
@@ -29,16 +30,8 @@ func computeLayoutMetrics(width, height, statusHeight int) layoutMetrics {
 		statusHeight = 1
 	}
 
-	sidebarWidth := 16
-	switch {
-	case width < 80:
-		sidebarWidth = 12
-	case width >= 110:
-		sidebarWidth = 18
-	}
-
-	// 侧栏卡与主列卡各贡献左右边框；两卡并排时相邻边共 4 列外框。
-	mainWidth := width - sidebarWidth - 4
+	sidebarWidth := 0
+	mainWidth := width
 	if mainWidth < 1 {
 		mainWidth = 1
 	}
@@ -85,48 +78,45 @@ func (m model) View() string {
 	}
 
 	statusBar := m.renderStatusBar(width)
-	lm := computeLayoutMetrics(width, height, lipgloss.Height(statusBar))
-
-	sidebar := m.renderSidebar(lm.sidebarWidth, lm.contentHeight)
+	lm := computeLayoutMetrics(width, height, lipgloss.Height(statusBar)+1)
+	tabs := m.renderTabs(width)
 	main := m.renderMain(lm.mainWidth, lm.contentHeight, lm.innerWidth)
-
-	sideH := lipgloss.Height(sidebar)
-	mainH := lipgloss.Height(main)
-	if sideH > lm.contentHeight {
-		sidebar = clipBlockHeight(sidebar, lm.contentHeight)
-	}
-	if mainH > lm.contentHeight {
-		main = clipBlockHeight(main, lm.contentHeight)
-	}
-
-	content := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
+	content := lipgloss.JoinVertical(lipgloss.Left, tabs, main)
 	available := height - lipgloss.Height(statusBar)
 	if available < 1 {
 		available = 1
 	}
 	content = clipBlockHeight(content, available)
-	return lipgloss.JoinVertical(lipgloss.Left, content, statusBar)
+	out := lipgloss.JoinVertical(lipgloss.Left, content, statusBar)
+	return clipBlockWidth(out, width)
 }
 
-func (m model) renderSidebar(width, height int) string {
-	items := make([]string, 0, len(m.pages)+1)
-	items = append(items, shellTitleStyle.Render("Dec Shell"))
+func (m model) renderTabs(width int) string {
+	var b strings.Builder
+	plane := "本仓库"
+	if m.plane == app.WorkspaceGlobal || m.plane == app.WorkspaceUser {
+		plane = "本机"
+	}
+	b.WriteString(shellTitleStyle.Render("Dec"))
+	b.WriteString("  ")
 	for idx, page := range m.pages {
-		style := shellNavStyle
-		if idx == m.pageIndex {
-			style = shellActiveNav
-			if m.focus == focusSidebar {
-				style = shellSelectedRow
-			}
+		label := page
+		if idx == m.pageIndex && !m.remoteOpen {
+			label = "[" + page + "]"
+			b.WriteString(shellActiveNav.Render(label))
+		} else {
+			b.WriteString(shellNavStyle.Render(label))
 		}
-		items = append(items, style.Render(page))
+		b.WriteString("  ")
 	}
-
-	innerH := height - cardChromeVertical
-	if innerH < 1 {
-		innerH = 1
+	if m.remoteOpen {
+		b.WriteString(shellActiveNav.Render("[远端]"))
+	} else {
+		b.WriteString(shellMutedStyle.Render("远端 ^R"))
 	}
-	return shellCardStyle.Width(width).Render(padLines(clipLines(strings.Join(items, "\n"), innerH), innerH))
+	b.WriteString("  ")
+	b.WriteString(shellMutedStyle.Render(plane))
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(fitLine(b.String(), width))
 }
 
 func (m model) renderMain(width, height, innerWidth int) string {
@@ -143,7 +133,7 @@ func (m model) renderMain(width, height, innerWidth int) string {
 		innerBodyH = 1
 	}
 
-	pageBody := padLines(clipLines(m.renderPageBody(innerWidth, innerBodyH), innerBodyH), innerBodyH)
+	pageBody := clipLines(m.renderPageBody(innerWidth, innerBodyH), innerBodyH)
 	body := shellCardStyle.Width(width).Render(pageBody)
 	main := lipgloss.JoinVertical(lipgloss.Left, headerBlock, body)
 	return clipBlockHeight(main, height)
@@ -153,7 +143,7 @@ func (m model) renderPageHeader(innerWidth int) string {
 	page := m.pages[m.pageIndex]
 	summary := m.currentSummary()
 	line := fmt.Sprintf("%s · %s", page, summary)
-	if m.isHomePage() || m.isProjectPage() {
+	if m.isHomePage() || m.isProjectSettings() {
 		root := compactPath(m.projectRoot, max(8, innerWidth/3))
 		line = fmt.Sprintf("%s · %s · %s", page, root, summary)
 	}
@@ -161,19 +151,22 @@ func (m model) renderPageHeader(innerWidth int) string {
 }
 
 func (m model) renderPageBody(width, height int) string {
-	switch m.pages[m.pageIndex] {
-	case "Home":
-		return m.renderHomePage(width)
-	case "Bundles":
-		return m.renderBundlesPage(width, height)
-	case "Project":
-		return m.renderProjectPage(width)
-	case "Run":
-		return m.renderRunPage(width)
-	case "Remote":
+	if m.remoteOpen {
 		return m.renderDeletePage(width, height)
+	}
+	switch m.currentShellPage() {
+	case pageProject:
+		return m.renderHomePage(width)
+	case pageImport:
+		return m.renderBundlesPage(width, height)
+	case pageSync:
+		return m.renderRunPage(width)
 	default:
-		return m.renderSettingsPage(width)
+		body := m.renderSettingsPage(width)
+		if m.plane != app.WorkspaceUser && m.plane != app.WorkspaceGlobal {
+			body += "\n" + m.renderProjectPage(width)
+		}
+		return body
 	}
 }
 
@@ -239,26 +232,12 @@ func (m model) bundlesListChromeLines() int {
 	return n
 }
 
-func padLines(content string, height int) string {
-	if height <= 0 {
-		return ""
-	}
-	lines := strings.Split(content, "\n")
-	if content == "" {
-		lines = nil
-	}
-	for len(lines) < height {
-		lines = append(lines, "")
-	}
-	if len(lines) > height {
-		lines = lines[:height]
-	}
-	return strings.Join(lines, "\n")
-}
-
 func (m model) renderStatusBar(width int) string {
 	left := m.statusBarLeftHints()
 	right := fmt.Sprintf("page %s", m.pages[m.pageIndex])
+	if m.remoteOpen {
+		right = "page Remote"
+	}
 	if busy := m.ioBusyLabel(); busy != "" {
 		// IO 忙碌时右侧也标 busy，窄宽度丢掉 left 时仍能看到状态。
 		right = fmt.Sprintf("%s | %s", right, busy)
@@ -290,7 +269,7 @@ func (m model) renderStatusBar(width int) string {
 		if m.savingSettings {
 			right += " | saving"
 		}
-	} else if m.isProjectPage() && m.projectSettings != nil {
+	} else if m.isProjectSettings() && m.projectSettings != nil {
 		modeTag := "inherit"
 		if m.projectSettingsOverride {
 			modeTag = "override"
@@ -361,6 +340,19 @@ func clipBlockHeight(content string, maxHeight int) string {
 	}
 	for lipgloss.Height(strings.Join(lines, "\n")) > maxHeight && len(lines) > 0 {
 		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func clipBlockWidth(content string, width int) string {
+	if width <= 0 {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if lipgloss.Width(line) > width {
+			lines[i] = lipgloss.NewStyle().MaxWidth(width).Render(line)
+		}
 	}
 	return strings.Join(lines, "\n")
 }

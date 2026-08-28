@@ -49,7 +49,8 @@ func TestBuildDeleteTree_UnfiledReadOnlyCollapsed(t *testing.T) {
 	}
 
 	m := newModel(t.TempDir(), "v1")
-	m.pages = []string{"Remote"}
+	m.pages = []string{"项目", "引入", "同步", "设置"}
+	m.remoteOpen = true
 	m.pageIndex = 0
 	m.deleteCandidates = []app.DeleteCandidate{
 		{Kind: app.DeleteKindSecret, SecretPath: "env/a.env", SecretsBundle: "Dec", LocalRoot: ".secrets/project", Partition: app.PartitionRemote, GroupTitle: "Dec"},
@@ -63,7 +64,8 @@ func TestBuildDeleteTree_UnfiledReadOnlyCollapsed(t *testing.T) {
 
 func TestDeleteTypedConfirm_RequiresInput(t *testing.T) {
 	m := newModel(t.TempDir(), "v1")
-	m.pages = []string{"Remote"}
+	m.pages = []string{"项目", "引入", "同步", "设置"}
+	m.remoteOpen = true
 	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{{
@@ -120,7 +122,7 @@ func TestRemoteAddSecret_TakesScopeFromCursor(t *testing.T) {
 	if !after.addSecretRemoteMode || after.addSecretStage != addSecretStageType {
 		t.Fatalf("Remote n 应直接进类型阶段: mode=%v stage=%q", after.addSecretRemoteMode, after.addSecretStage)
 	}
-	if after.addSecretPName != "dec" || after.addSecretPlane != secrets.SyncPlaneProject {
+	if after.addSecretPName != "dec" || (after.addSecretPlane != secrets.SyncPlaneProject && after.addSecretPlane != secrets.SyncPlaneLocal) {
 		t.Fatalf("归属应来自光标所在 P 地址, got p=%q plane=%q", after.addSecretPName, after.addSecretPlane)
 	}
 	if after.addSecretScopeNew {
@@ -449,12 +451,13 @@ func TestRemoteHeadLines_ShowsNewKeyHints(t *testing.T) {
 }
 
 // remoteTestAddress 是测试树里的远端地址，必须是 <p>/private/<plane> 才能反推出 scope。
-const remoteTestAddress = "dec/private/project"
+const remoteTestAddress = "dec/private/local"
 
 func remotePageModelWithCandidates(t *testing.T) model {
 	t.Helper()
 	m := newModel(t.TempDir(), "v1")
-	m.pages = []string{"Remote"}
+	m.pages = []string{"项目", "引入", "同步", "设置"}
+	m.remoteOpen = true
 	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{

@@ -110,7 +110,7 @@ func TestAPIClient_PushP_UsesFlatFolderAndPrefixedItemName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotName != "private/project/.env/dec.env" {
+	if gotName != "private/local/.env/dec.env" {
 		t.Fatalf("条目名 = %q，平面必须编码进条目名", gotName)
 	}
 }
@@ -176,7 +176,7 @@ func TestAPIClient_ListP_SeparatesPlanesInSameFolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAddresses() = %v", err)
 	}
-	want := map[string]bool{"dec/private/project": false, "dec/private/user": false}
+	want := map[string]bool{"dec/private/local": false, "dec/private/global": false}
 	for _, addr := range addresses {
 		if _, ok := want[addr]; !ok {
 			t.Fatalf("多出地址 %q（addresses=%v）", addr, addresses)

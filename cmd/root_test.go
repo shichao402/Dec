@@ -69,6 +69,29 @@ func TestExecuteRoutesUserFlagToUserTUI(t *testing.T) {
 	}
 }
 
+func TestExecuteRoutesGlobalFlagToGlobalTUI(t *testing.T) {
+	stubEntryExecutionForRootTest(t)
+	setEnvForRootTest(t, "TERM", "xterm-256color")
+	setEnvForRootTest(t, "DEC_NO_TUI", "")
+	detectTTY = func(*os.File) bool { return true }
+	getWorkingDir = func() (string, error) { return t.TempDir(), nil }
+	runTUIMode = func(string, io.Reader, io.Writer) error {
+		t.Fatal("--global 不应启动本仓库 TUI")
+		return nil
+	}
+	var gotPlane app.WorkspacePlane
+	runTUIWorkspaceMode = func(workspace app.Workspace, _ io.Reader, _ io.Writer) error {
+		gotPlane = workspace.EffectivePlane()
+		return nil
+	}
+	if err := Execute([]string{"--global"}, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		t.Fatal(err)
+	}
+	if gotPlane != app.WorkspaceGlobal {
+		t.Fatalf("workspace plane = %q", gotPlane)
+	}
+}
+
 func TestRootVersionString(t *testing.T) {
 	oldVersion := appVersion
 	oldBuildTime := appBuildTime

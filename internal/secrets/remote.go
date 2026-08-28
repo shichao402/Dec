@@ -350,8 +350,9 @@ func (c *APIClient) ListAddresses(ctx context.Context) ([]string, error) {
 
 func (c *StubClient) ListNotes(_ context.Context, target SyncTarget) ([]RemoteNote, error) {
 	address := stubAddress(target)
-	notes := make([]RemoteNote, 0, len(c.NotesByFolder[address]))
-	for _, note := range c.NotesByFolder[address] {
+	src := stubNotes(c, target)
+	notes := make([]RemoteNote, 0, len(src))
+	for _, note := range src {
 		notes = append(notes, RemoteNote{ID: address + "/" + note.RelativePath, Name: note.RelativePath})
 	}
 	sort.Slice(notes, func(i, j int) bool { return notes[i].Name < notes[j].Name })
@@ -360,8 +361,9 @@ func (c *StubClient) ListNotes(_ context.Context, target SyncTarget) ([]RemoteNo
 
 func (c *StubClient) ListSSHKeys(_ context.Context, target SyncTarget) ([]RemoteSSHKey, error) {
 	address := stubAddress(target)
-	keys := make([]RemoteSSHKey, 0, len(c.SSHKeysByFolder[address]))
-	for _, key := range c.SSHKeysByFolder[address] {
+	src := stubSSHKeys(c, target)
+	keys := make([]RemoteSSHKey, 0, len(src))
+	for _, key := range src {
 		id := key.ID
 		if id == "" {
 			id = address + "/ssh/" + key.Name

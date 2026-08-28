@@ -1,54 +1,42 @@
-# P 四象限与 Secrets 模型
+# Project 四象限与 Secrets 模型
 
-> 当前权威决策是 [ADR 0016](decisions/0016-p-four-quadrant-model.md)。它取代
-> 0009、0013、0014 的 Project + Bundle 写模型；这些旧概念只保留在一次性迁移和 wire
-> 兼容层中，不是新写入口。
+> 当前权威决策是 [ADR 0016](decisions/0016-p-four-quadrant-model.md) 与 [0017](decisions/0017-local-layout-version.md)。
 
-本文档描述顶层 P、Git 四象限与 Bitwarden private secrets 的边界。实现细节见
-`Documents/ARCHITECTURE.md`；schema 声明见 `schema/dec/v1/` 与 `schema/secrets/v1/`。
+本文档描述顶层 Project、Git 四象限与 Bitwarden private secrets 的边界。
 
 ## 一句话
 
-**可写对象只有 P**。Git 的 `public/private × user/project` 四象限全部只能放非敏感资产；
-`private` 表示不可被其它 P 引用，并不表示可以把明文密钥提交到 Git。敏感正文只在
-Bitwarden folder `<p>` 的 `private/user/*` 或 `private/project/*` 条目，分别落到
-`~/.dec/secrets/<p>/` 与 `<project>/.secrets/<p>/`。
+**可写对象只有 Project**。Git 的 `public/private × global/local` 四象限全部只能放非敏感资产；
+`private` 表示不可被其它项目引用。敏感正文只在 Bitwarden folder `<name>` 的
+`private/global/*` 或 `private/local/*` 条目，分别落到 `~/.dec/secrets/<name>/` 与
+`<工作区>/.secrets/<name>/`。
 
-## 当前 P 模型（0016）
+## 当前模型（0016 + 0017）
 
 ```text
 Git Vault                         Bitwarden                     本地
-<p>/                              folder <p>                    user:
-  dec.yaml                          private/user/<rel>        ~/.dec/cache/<p>/...
-  public/user/                      private/project/<rel>     ~/.dec/secrets/<p>/...
-  public/project/
-  private/user/                                               project:
-  private/project/                                            .dec/cache/<p>/...
-                                                              .secrets/<p>/...
+<name>/                           folder <name>                 本机:
+  dec.yaml                          private/global/<rel>      ~/.dec/cache/<name>/...
+  public/global/                    private/local/<rel>       ~/.dec/secrets/<name>/...
+  public/local/
+  private/global/                                             本仓库:
+  private/local/                                              .dec/cache/<name>/...
+                                                              .secrets/<name>/...
 ```
 
 ### Bitwarden 只有一层 folder
 
-Bitwarden 的 folder 名里的斜杠不建立层级。Dec 因此只用 P 名做 folder，把平面与
-同步根相对路径一起编码进条目名：
+- folder：`<name>`
+- Secure Note / SSH Key 条目名：`private/global/<rel>` 或 `private/local/<rel>`（旧 `user`/`project` 前缀仍可读）
 
-- folder：`<p>`
-- Secure Note / SSH Key 条目名：`private/user/<rel>` 或 `private/project/<rel>`
-
-`<p>/private/<plane>` 只是日志、配置与界面上的**逻辑地址**写法（`RemoteScope.String()`），
-不是 folder 名。folder 与条目名的切分只在 `internal/secrets/bwaddr.go` 定义，
-其余代码只见 (P, 平面, 相对路径)。SSH Key 条目同样带平面前缀——folder 合并到 P
-之后，平面只能靠条目名区分。
-
-- P 名严格匹配 `^[a-z0-9]+(?:-[a-z0-9]+)*$`。
-- 用户平面安装显式 `enabled_projects` 的 `public/user` 与 `private/user`。
-- 项目平面安装家 P 的 `public/project` 与 `private/project`，再安装家 P
-  `requires` 直接指向的 `public/project`。
-- `requires` 不递归、不传递，不可引用 `public/user` 或任何 `private/*`。
-- 同一平面多个 P 竞争同一个 IDE 目标路径时硬失败。
-- 同一 P / plane / 相对路径不得同时由 Git private 象限和 Bitwarden 持有。
-- Bitwarden Note 名是不可信的同步根相对路径；绝对路径、盘符、`~`、`..` 逃逸均拒绝。
-- `private/project` 的 GCM 与 SSH 副作用定向到家工作区；`private/user` 保持机器级语义。
+- 项目名严格匹配 `^[a-z0-9]+(?:-[a-z0-9]+)*$`。
+- 本机平面安装显式 `enabled_projects` 的 `public/global` 与 `private/global`。
+- 本仓库安装绑定项目的 `public/local` 与 `private/local`，再安装其
+  `requires` 直接指向的 `public/local`。
+- `requires` 不递归、不传递，不可引用 `public/global` 或任何 `private/*`。
+- 同一平面多个项目竞争同一个 IDE 目标路径时硬失败。
+- 同一项目 / plane / 相对路径不得同时由 Git private 象限和 Bitwarden 持有。
+- `private/local` 的 GCM 与 SSH 副作用定向到绑定工作区；`private/global` 保持机器级语义。
 
 ## 旧 Bundle 模型（仅迁移背景）
 
@@ -65,7 +53,7 @@ Bitwarden 的 folder 名里的斜杠不建立层级。Dec 因此只用 P 名做 
 | MCP | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
 | secrets | `~/.dec/secrets/bundles/<name>/` | `<project>/.secrets/bundles/<name>/` |
 | 启用列表 | `~/.dec/config.yaml` 的 `enabled_bundles` | `<project>/.dec/config.yaml` 的 `enabled_bundles` |
-| 管理入口 | `dec --user` | 普通 `dec`（项目工作区） |
+| 管理入口 | `dec --global` | 普通 `dec`（本仓库） |
 
 平面隔离：user 上下文只看 user scope；project 上下文只看 project scope。Bitwarden session 与 `device.json` 共享。
 
@@ -134,7 +122,7 @@ Pull（project 上下文）：
   1. 解析 enabled_bundles（仅 scope: project）
   2. Dec Git → 项目 .dec/cache + IDE；Bitwarden → .secrets/bundles/<bundle>/
 
-Pull（dec --user）：
+Pull（dec --global）：
   1. 解析 ~/.dec/config.yaml 的 enabled_bundles（仅 scope: user）
   2. Dec Git → 用户 IDE 目录；Bitwarden → ~/.dec/secrets/bundles/<bundle>/
 ```
@@ -292,7 +280,7 @@ sequenceDiagram
 
 | 场景 | 用户操作 | 系统行为 |
 |------|----------|----------|
-| 用户平面 | `dec --user` | 工作空间切到用户平面；Bundles/Run 只见 user-scope bundle |
+| 本机平面 | `dec --global` | 工作空间切到本机；引入/同步只见 global 象限 |
 | 项目平面 | `dec`（项目工作区） | Bundles/Run 只见 project-scope bundle |
 | 首次启用 | Bundles 页调整 → Run 页 pull | 按当前平面完成 Dec + secrets |
 | Secrets 管理 | Settings / Remote | Bitwarden 连接；Remote **全量**浏览（folder + 无文件夹只读）；`n` 登记到光标所在 folder、`N` 登记到新 folder，类型为同级 Processor（`note` / `.env` / `.gcm` / `.sshkey`）；跨上下文删除 typed confirm |

@@ -1,9 +1,13 @@
-# 0016 — 顶层 P 与公开/私有 × 用户/项目四象限
+# 0016 — 顶层 Project 与公开/私有 × 本机/本仓库四象限
 
-- **状态**：已接受（阶段 1–7 已实施）
+- **状态**：已接受（阶段 1–7 已实施）；平面第二段改名为 `global`/`local`，见 [0017](0017-local-layout-version.md)
 - **日期**：2026-08-27
 - **取代**：[0009](0009-bundle-binary-scope.md)、[0013](0013-secrets-belong-to-declared-target.md)、[0014](0014-bundle-sole-writable-aggregate.md)
-- **保留边界**：[0015](0015-project-config-boundary.md)；用户平面仍没有项目配置
+- **保留边界**：[0015](0015-project-config-boundary.md)；本机平面（`dec --global`）仍没有项目配置
+
+## 术语修订（0017）
+
+界面与新代码称 **Project（项目）**，不再称 P。磁盘第二段 `user`/`project` 改为 `global`/`local`（安装落点，对齐 `git --global`）。`requires` 目标为 `public/local`。四象限是仓库布局，不是 TUI 导航。
 
 ## 问题
 
@@ -19,30 +23,30 @@ Git 仓库每个合法顶层目录都是一个 P；P 可以对应代码项目，
 名称必须匹配 `^[a-z0-9]+(?:-[a-z0-9]+)*$`，展示名写入 `<p>/dec.yaml`。
 
 ```text
-<p>/
+<name>/
 ├─ dec.yaml
 ├─ public/
-│  ├─ user/
-│  └─ project/
+│  ├─ global/
+│  └─ local/
 └─ private/
-   ├─ user/
-   └─ project/
+   ├─ global/
+   └─ local/
 ```
 
-四个 Git 象限都只保存非敏感资产。`public/private` 表示能否被其他 P 引用，不表示
-明文/密文；`user/project` 表示安装与运行平面。
+四个 Git 象限都只保存非敏感资产。`public/private` 表示能否被其他项目引用，不表示
+明文/密文；`global/local` 表示安装落点（本机 / 本仓库）。
 
 ### 2. 引用是直接且单向的
 
-`<p>/dec.yaml` 的 `requires` 只允许引用其他 P 的 `public/project`：
+`<name>/dec.yaml` 的 `requires` 只允许引用其他项目的 `public/local`：
 
-- 不递归展开被引用 P 自己的 `requires`；
-- 不引用 `public/user`；
+- 不递归展开被引用项目自己的 `requires`；
+- 不引用 `public/global`；
 - 任何 `private/*` 都不得通过引用进入其他 P；
 - 缺失引用产生结构化告警，不猜测或回退到旧 bundle。
 
-本机启用列表控制 P 的 user 两支；项目工作区绑定家 P，安装家 P 的 project 两支及
-直接 requires 的 `public/project`。
+本机启用列表控制项目的 global 两支；工作区绑定项目，安装其 local 两支及
+直接 requires 的 `public/local`。
 
 ### 3. Git 与 Bitwarden 分工
 

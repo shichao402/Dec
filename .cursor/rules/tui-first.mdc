@@ -12,30 +12,26 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 - 新功能先设计 TUI 页面/快捷键/消息流，再实现 `internal/app/` 业务逻辑。
 - **不要新增**独立 Cobra 子命令（pull、config、push 等用户面能力均在 TUI）。
 - 保留最小 CLI 面：`dec --version`、内部 hidden 命令（如 `__freshness-check`）、非 TTY 时的简短提示。Agent MCP 与 env 注入分别是独立程序 `dec-mcp`、`dec-exec`。
-- Secrets / Bitwarden / SSH / env 部署等操作通过 TUI 触达（Settings、Run、**Bundles** 等页）。
-- **Run** 页 pull：解析 project bundle 列表 → 拉 Dec Git bundle（→ `.dec/cache/`）+ 自动拉 Bitwarden **secrets bundle**（→ **`.secrets/`** 同步根，零路径重叠）；见 `Documents/BUNDLE-SECRETS-MODEL.md`。
+- Secrets / Bitwarden / SSH / env 部署等操作通过 TUI 触达（设置、同步、**项目**、Remote 二级页）。
+- **同步** 页 pull：解析绑定项目与引入 → 拉 Dec Git（→ `.dec/cache/`）+ 自动拉 Bitwarden **secrets**（→ **`.secrets/`** 同步根，零路径重叠）；见 `Documents/BUNDLE-SECRETS-MODEL.md`。
 - **`dec-exec`**（独立程序）：按 bundle 作用域读取 `.secrets/**/.env/*.env` 并启动子进程，供 MCP / Agent 运行时注入；不经过 `dec-server`、不碰 session，也不是用户面 secrets 管理入口。
 - **服务 / 门面**：`dec-server` 是一机单例业务服务；`dec` TUI 与 `dec-mcp` 是薄门面，连不上时自动拉起服务，禁止回退到门面内嵌 `internal/app`。
 - **跨页异步 IO**：慢 IO（尤其远端）跟 Shell 生命周期走，不跟当前页；切页禁止打断在飞请求；独立 busy 信号 + 防重复 + gen 丢弃过期结果（`internal/tui/async_io.go`，见 `Documents/TUI_ARCHITECTURE.md` §5.5）。
-- **按平面分流**：`dec --user` 的 `Workspace.Root` 为空，用户平面**没有**项目配置 / `project_name` / vault project 推断。空 projectRoot 会让 `.dec/` 退化成相对服务 cwd 的路径并覆盖 `~/.dec/config.yaml`（ADR 0015）。
+- **按平面分流**：`dec --global` 的 `Workspace.Root` 为空（`--user` 为隐藏别名），本机平面**没有**项目配置 / `project_name` / vault project 推断。空 projectRoot 会让 `.dec/` 退化成相对服务 cwd 的路径并覆盖 `~/.dec/config.yaml`（ADR 0015）。
 - **结构化结果优先于事件区**：结果里已有结论（跳过原因、被拒 bundle、缺失 bundle）必须渲染在结果区；事件区只留最近十余条，靠它承载告警等于不告警。
 
 ## TUI 页与能力映射
 
 | 用户操作 | TUI 入口 |
 |----------|----------|
-| 连接仓库 / 全局 IDE 配置 | Settings 页 |
-| project 初始化 / 选择 | Home 页（首次进入引导） |
-| 扫描资产 / bundle 选择 | **Bundles** 页 |
-| pull / push / remove / 自更新（`u`） | Run 页 |
-| 浏览 / 删 / 改远端（Note · SSH Hosts）；按光标 folder 登记（`n`）/ 新 folder 登记（`N`，仅 `bundle/<名>`）；类型为同级 Processor（`note` / `.env` / `.gcm` / `.sshkey`）；无文件夹只读 | **Remote** 页 |
-| 浏览 / 筛选资产 | Bundles 页 |
-| 项目概览 / project 初始化 | Home 页 |
-| 项目变量编辑 | Project 页 |
-| 全局 / Bitwarden / 本机 vars / 重启服务 | Settings 页 |
-| 用户平面 bundle 启用（含仅 secrets 的 bundle） | `dec --user` 的 **Bundles** 页（Settings 只读展示计数） |
+| 绑定项目资产树、新建本地资产 | **项目** 页 |
+| 本仓库 `requires` / 本机 `enabled_projects` | **引入** 页 |
+| pull / push / 自更新（`u`） | **同步** 页 |
+| 仓库、Bitwarden、IDE、vars、重启服务 | **设置** 页（含旧 Project 页的 IDE/vars） |
+| 未初始化 | 全屏引导（无独立 Home 页签） |
+| 浏览 / 删 / 改远端 | **Remote** 二级页（`Ctrl+R`） |
 
-若 TUI 尚未覆盖某能力，在代码中留 `TODO(tui)` 并在 Home 建议下一步中指向对应页面，而不是恢复 CLI 子命令。
+若 TUI 尚未覆盖某能力，在代码中留 `TODO(tui)` 并在项目页引导中指向对应页面，而不是恢复 CLI 子命令。
 
 ## 非交互环境
 
@@ -48,6 +44,6 @@ Dec 的用户交互以 **TUI**（`internal/tui/`）为第一入口。无参运�
 // ❌ 新增用户-facing 子命令
 RootCmd.AddCommand(&cobra.Command{Use: "sync", ...})
 
-// ✅ 在 TUI Run 页绑定快捷键，调用 internal/app
+// ✅ 在 TUI 同步页绑定快捷键，调用 internal/app
 result, err := app.PullProjectAssets(projectRoot, opts, reporter)
 ```

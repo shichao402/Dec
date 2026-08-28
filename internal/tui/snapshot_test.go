@@ -129,7 +129,7 @@ func snapshotBundlesModel(width int) model {
 
 func snapshotRunModel(width int) model {
 	m := snapshotBundlesModel(width)
-	m.pageIndex = 3
+	m.pageIndex = 2
 	m.runProgress = &app.Progress{Phase: "pull", Current: 1, Total: 2}
 	m.runResult = &app.PullProjectAssetsResult{
 		RequestedCount: 2,
@@ -144,7 +144,7 @@ func snapshotRunModel(width int) model {
 
 func snapshotSettingsModel(width int) model {
 	m := snapshotHomeModel(width)
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.settings = &app.GlobalSettingsState{
 		ConfigPath:             "/tmp/.dec/config.yaml",
 		VarsPath:               "/tmp/.dec/local/vars.yaml",
@@ -167,7 +167,7 @@ func snapshotSettingsModel(width int) model {
 
 func snapshotProjectModel(width int) model {
 	m := snapshotHomeModel(width)
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.focus = focusContent
 	m.projectSettings = &app.ProjectSettingsState{
 		ProjectRoot:        "/tmp/dec-project",
@@ -251,7 +251,8 @@ func TestSnapshotSettings(t *testing.T) {
 
 func snapshotDeleteModel(width int) model {
 	m := snapshotHomeModel(width)
-	m.pageIndex = 4
+	m.pageIndex = 0
+	m.remoteOpen = true
 	m.focus = focusContent
 	m.deleteCandidatesLoaded = true
 	m.deleteCandidates = []app.DeleteCandidate{

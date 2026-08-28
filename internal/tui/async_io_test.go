@@ -57,7 +57,8 @@ func TestDeleteLoad_SurvivesPageLeaveAndDedups(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4 // Remote
+	m.pageIndex = 0
+	m.remoteOpen = true
 	cmd := m.startDeleteCandidatesLoad(true, false)
 	if cmd == nil {
 		t.Fatal("首次加载应返回 cmd")

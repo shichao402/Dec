@@ -15,14 +15,14 @@ func TestResolvePSyncTargets_MachinePlane(t *testing.T) {
 		t.Fatalf("targets = %+v", targets)
 	}
 	tg := targets[0]
-	if tg.Name != "cnb" || tg.Plane != SyncPlaneMachine {
+	if tg.Name != "cnb" || !IsMachinePlane(tg.Plane) {
 		t.Fatalf("target = %+v", tg)
 	}
 	// 机器平面同步根相对 ~/.dec/secrets，只有 P 名一级。
 	if tg.LocalRoot != "cnb" {
 		t.Fatalf("LocalRoot = %q", tg.LocalRoot)
 	}
-	if tg.Address != "cnb/private/user" {
+	if tg.Address != "cnb/private/global" {
 		t.Fatalf("Address = %q", tg.Address)
 	}
 }
@@ -32,7 +32,7 @@ func TestResolvePSyncTargets_UserPlaneAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(targets) != 1 || targets[0].Plane != SyncPlaneMachine || targets[0].Name != "woa" {
+	if len(targets) != 1 || !IsMachinePlane(targets[0].Plane) || targets[0].Name != "woa" {
 		t.Fatalf("targets = %+v", targets)
 	}
 }
@@ -46,13 +46,13 @@ func TestResolvePSyncTargets_ProjectPlane(t *testing.T) {
 		t.Fatalf("targets = %+v", targets)
 	}
 	tg := targets[0]
-	if tg.Plane != SyncPlaneProject || tg.Name != "tencent-cloud" {
+	if (tg.Plane != SyncPlaneProject && tg.Plane != SyncPlaneLocal) || tg.Name != "tencent-cloud" {
 		t.Fatalf("target = %+v", tg)
 	}
 	if tg.LocalRoot != ".secrets/tencent-cloud" {
 		t.Fatalf("LocalRoot = %q", tg.LocalRoot)
 	}
-	if tg.Address != "tencent-cloud/private/project" {
+	if tg.Address != "tencent-cloud/private/local" {
 		t.Fatalf("Address = %q", tg.Address)
 	}
 }

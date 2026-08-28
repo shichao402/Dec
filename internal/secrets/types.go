@@ -4,12 +4,12 @@ package secrets
 type SyncPlane string
 
 const (
-	// SyncPlaneProject 相对当前项目根（默认）。
+	SyncPlaneLocal  SyncPlane = "local"
+	SyncPlaneGlobal SyncPlane = "global"
+	// 旧平面名，仅解析存量地址。
 	SyncPlaneProject SyncPlane = "project"
-	// SyncPlaneMachine 相对 ~/.dec/secrets（用户平面）。
 	SyncPlaneMachine SyncPlane = "machine"
-	// SyncPlaneUser 与 SyncPlaneMachine 同义（ADR 0009 用户平面别名）。
-	SyncPlaneUser SyncPlane = "user"
+	SyncPlaneUser    SyncPlane = "user"
 )
 
 // SecretsRootDir 是项目内唯一普通 secret 明文边界。
@@ -29,7 +29,14 @@ type SyncTarget struct {
 
 // IsMachinePlane 判断是否为用户/机器平面（machine 与 user 同义）。
 func IsMachinePlane(plane SyncPlane) bool {
-	return plane == SyncPlaneMachine || plane == SyncPlaneUser
+	return plane == SyncPlaneMachine || plane == SyncPlaneUser || plane == SyncPlaneGlobal
+}
+
+func CanonicalSyncPlane(plane SyncPlane) SyncPlane {
+	if IsMachinePlane(plane) {
+		return SyncPlaneGlobal
+	}
+	return SyncPlaneLocal
 }
 
 // SecureNote 表示一条待落地到 SyncTarget.LocalRoot 的 Secure Note。

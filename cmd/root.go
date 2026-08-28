@@ -66,11 +66,11 @@ var RootCmd = &cobra.Command{
 在交互式终端中直接运行 dec 即可进入 TUI Shell。
 
 示例:
-  dec                # 启动 TUI（默认）
-  dec --user         # 启动用户平面 TUI
+  dec                # 启动 TUI（本仓库）
+  dec --global       # 启动本机平面 TUI
   dec --version      # 显示版本号
 
-自更新：打开 TUI → Run 页按 u`,
+自更新：打开 TUI → 同步页按 u`,
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	Version:       getVersionString(),
@@ -80,7 +80,9 @@ var RootCmd = &cobra.Command{
 }
 
 func init() {
-	RootCmd.PersistentFlags().Bool("user", false, "启动用户平面 TUI（只管理 scope: user bundles）")
+	RootCmd.PersistentFlags().Bool("global", false, "启动本机平面 TUI")
+	RootCmd.PersistentFlags().Bool("user", false, "启动本机平面 TUI（--global 的别名）")
+	_ = RootCmd.PersistentFlags().MarkHidden("user")
 }
 
 // SetVersion 设置版本信息（从编译参数注入）
@@ -176,7 +178,10 @@ func decideEntryMode(ctx entryContext) entryMode {
 }
 
 func isUserTUIArgs(args []string) bool {
-	return len(args) == 1 && args[0] == "--user"
+	if len(args) != 1 {
+		return false
+	}
+	return args[0] == "--user" || args[0] == "--global"
 }
 
 func executeCLI(args []string, stdout, stderr io.Writer) error {

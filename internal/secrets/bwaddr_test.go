@@ -10,7 +10,7 @@ func TestRemoteScopeFolderIsOnlyPName(t *testing.T) {
 	if got := scope.folderName(); got != "dec" {
 		t.Fatalf("folderName = %q，Bitwarden folder 只能是 P 名这一级", got)
 	}
-	if got := scope.String(); got != "dec/private/project" {
+	if got := scope.String(); got != "dec/private/local" {
 		t.Fatalf("String = %q", got)
 	}
 }
@@ -29,14 +29,14 @@ func TestRemoteScopeItemNameCarriesPlane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encodeItemName: %v", err)
 	}
-	if projectName != "private/project/integration/bitwarden.yaml" {
+	if projectName != "private/local/integration/bitwarden.yaml" {
 		t.Fatalf("project 条目名 = %q", projectName)
 	}
 	userName, err := user.encodeItemName(CanonicalSSHKeyName("deploy"))
 	if err != nil {
 		t.Fatalf("encodeItemName: %v", err)
 	}
-	if userName != "private/user/.sshkey/deploy" {
+	if userName != "private/global/.sshkey/deploy" {
 		t.Fatalf("user 条目名 = %q", userName)
 	}
 
@@ -75,7 +75,7 @@ func TestRemoteScopeOfSyncTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RemoteScopeOf: %v", err)
 	}
-	if scope.folderName() != "dec" || scope.itemPrefix() != "private/user/" {
+	if scope.folderName() != "dec" || scope.itemPrefix() != "private/global/" {
 		t.Fatalf("scope = %+v prefix=%q", scope, scope.itemPrefix())
 	}
 
@@ -90,7 +90,7 @@ func TestRemoteScopeOfSyncTarget(t *testing.T) {
 }
 
 func TestBWPlaneSegmentOfItemName(t *testing.T) {
-	if plane, ok := bwPlaneSegmentOfItemName("private/project/.env/a.env"); !ok || plane != SyncPlaneProject {
+	if plane, ok := bwPlaneSegmentOfItemName("private/project/.env/a.env"); !ok || plane != SyncPlaneLocal {
 		t.Fatalf("plane = %q %v", plane, ok)
 	}
 	if plane, ok := bwPlaneSegmentOfItemName("private/user/.gcm/cnb.yaml"); !ok || !IsMachinePlane(plane) {

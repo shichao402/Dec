@@ -1,10 +1,12 @@
 package repo
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/shichao402/Dec/internal/sysproc"
 )
@@ -99,7 +101,9 @@ func FetchBare() error {
 		return fmt.Errorf("仓库未连接\n\n请先到 Settings 页配置 Repo URL")
 	}
 
-	cmd := sysproc.Command("git", "--git-dir", bareDir, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := sysproc.CommandContext(ctx, "git", "--git-dir", bareDir, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
 	// 禁止交互：凭证过期时不能让 git/GCM 弹窗阻塞 dec-server，失败后由门面显式确认走 bootstrap。
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
 	output, err := cmd.CombinedOutput()
@@ -330,10 +334,73 @@ func getRemoteHeadBranch(bareDir string) (string, error) {
 }
 
 func gitCloneBare(url, targetDir string) error {
-	cmd := sysproc.Command("git", "clone", "--bare", url, targetDir)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := sysproc.CommandContext(ctx, "git", "clone", "--bare", url, targetDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git clone --bare 失败: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+const bareReadTimeout = 8 * time.Second
+
+func listBareHEADPaths() ([]string, error) {
+	bareDir, err := GetBareRepoDir()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(filepath.Join(bareDir, "HEAD")); err != nil {
+		return nil, err
+	}
+	bareOpMu.Lock()
+	defer bareOpMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), bareReadTimeout)
+	defer cancel()
+	cmd := sysproc.CommandContext(ctx, "git", "--git-dir", bareDir, "ls-tree", "-r", "--name-only", "HEAD")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, line := range strings.Split(string(out), "\n") {
+		p := strings.TrimSpace(strings.ReplaceAll(line, "\\", "/"))
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
+// BareHEADHasPModel 用 ls-tree 判断 HEAD 是否已是 Project 四象限布局（存在 <name>/dec.yaml）。
+// 不创建 worktree，避免 Remote 列表等热路径在 Windows 上反复 worktree add 卡死。
+func BareHEADHasPModel() bool {
+	paths, err := listBareHEADPaths()
+	if err != nil {
+		return false
+	}
+	for _, p := range paths {
+		if strings.Count(p, "/") == 1 && strings.HasSuffix(p, "/dec.yaml") {
+			return true
+		}
+	}
+	return false
+}
+
+// BareHEADHasLegacyQuadrants 报告 HEAD 是否仍有 public|private / user|project 目录。
+func BareHEADHasLegacyQuadrants() bool {
+	paths, err := listBareHEADPaths()
+	if err != nil {
+		return false
+	}
+	for _, p := range paths {
+		parts := strings.Split(p, "/")
+		if len(parts) >= 3 &&
+			(parts[1] == "public" || parts[1] == "private") &&
+			(parts[2] == "user" || parts[2] == "project") {
+			return true
+		}
+	}
+	return false
 }

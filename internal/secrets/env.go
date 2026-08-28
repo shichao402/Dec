@@ -52,6 +52,10 @@ func LoadEnvForP(projectRoot, pName string, plane SyncPlane) (map[string]string,
 	return out, nil
 }
 
+func ParseDotEnvFile(path string) (map[string]string, error) {
+	return parseDotEnvFile(path)
+}
+
 func parseDotEnvFile(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {

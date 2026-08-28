@@ -350,7 +350,7 @@ func readLegacyProjects(repoDir string) ([]legacyProject, error) {
 		if err != nil {
 			return nil, err
 		}
-		var value types.Project
+		var value types.LegacyVaultProject
 		if err := yaml.Unmarshal(data, &value); err != nil {
 			return nil, fmt.Errorf("解析旧 project %s: %w", entry.Name(), err)
 		}

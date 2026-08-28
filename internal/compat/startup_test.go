@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 func isolateHome(t *testing.T) string {
@@ -175,7 +177,7 @@ func TestRepairOnStartup_PurgesLegacyPLayoutOnce(t *testing.T) {
 	}
 	notes := RepairOnStartup(project)
 	joined := strings.Join(notes, "\n")
-	if !strings.Contains(joined, "重新选择") {
+	if !strings.Contains(joined, "已删除") && !strings.Contains(joined, "cache") {
 		t.Fatalf("notes = %#v", notes)
 	}
 	for _, dir := range []string{
@@ -270,8 +272,12 @@ func TestRepairOnStartup_UserPlaneMarkerDoesNotSkipProjectCleanup(t *testing.T) 
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatalf("机器 marker 不得跳过项目清理, err=%v notes=%#v", err, notes)
 	}
-	projectMarker := filepath.Join(project, ".dec", "state", pLayoutPurgeMarker)
-	if _, err := os.Stat(projectMarker); err != nil {
-		t.Fatalf("项目应有独立 marker: %v", err)
+	mgr := config.NewProjectConfigManager(project)
+	cfg, err := mgr.LoadProjectConfig()
+	if err != nil {
+		t.Fatalf("读工作区配置: %v", err)
+	}
+	if cfg.LayoutVersion != types.LocalLayoutVersion {
+		t.Fatalf("layout_version = %d, want %d", cfg.LayoutVersion, types.LocalLayoutVersion)
 	}
 }

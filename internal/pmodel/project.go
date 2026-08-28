@@ -49,8 +49,8 @@ func Load(repoDir, name string) (*Loaded, error) {
 
 	loaded := &Loaded{Manifest: manifest}
 	for _, visibility := range []types.AssetVisibility{types.AssetVisibilityPublic, types.AssetVisibilityPrivate} {
-		for _, plane := range []types.AssetPlane{types.AssetPlaneUser, types.AssetPlaneProject} {
-			assets, err := scanQuadrant(repoDir, name, visibility, plane)
+		for _, plane := range []types.AssetPlane{types.AssetPlaneGlobal, types.AssetPlaneLocal} {
+			assets, err := ScanQuadrant(repoDir, name, visibility, plane)
 			if err != nil {
 				return nil, err
 			}
@@ -85,9 +85,9 @@ func SaveManifest(repoDir string, manifest types.P) error {
 		return fmt.Errorf("写入 P 声明 %s 失败: %w", manifestPath, err)
 	}
 	for _, visibility := range []types.AssetVisibility{types.AssetVisibilityPublic, types.AssetVisibilityPrivate} {
-		for _, plane := range []types.AssetPlane{types.AssetPlaneUser, types.AssetPlaneProject} {
-			if err := os.MkdirAll(filepath.Join(repoDir, types.PQuadrantDir(manifest.Name, visibility, plane)), 0o755); err != nil {
-				return fmt.Errorf("创建 P %q 象限 %s/%s 失败: %w", manifest.Name, visibility, plane, err)
+		for _, plane := range []types.AssetPlane{types.AssetPlaneGlobal, types.AssetPlaneLocal} {
+			if err := os.MkdirAll(filepath.Join(repoDir, types.ProjectQuadrantDir(manifest.Name, visibility, plane)), 0o755); err != nil {
+				return fmt.Errorf("创建 Project %q 象限 %s/%s 失败: %w", manifest.Name, visibility, plane, err)
 			}
 		}
 	}
@@ -155,53 +155,76 @@ func normalizeRequires(values []string, self string) ([]string, error) {
 	return out, nil
 }
 
+func quadrantDiskNames(plane types.AssetPlane) []string {
+	switch types.CanonicalAssetPlane(plane) {
+	case types.AssetPlaneGlobal:
+		return []string{string(types.AssetPlaneGlobal), string(types.AssetPlaneUser)}
+	default:
+		return []string{string(types.AssetPlaneLocal), string(types.AssetPlaneProject)}
+	}
+}
+
+// ScanQuadrant enumerates Git or cache assets in one visibility/plane, including legacy directory names.
+func ScanQuadrant(root, pName string, visibility types.AssetVisibility, plane types.AssetPlane) ([]types.TypedAssetRef, error) {
+	return scanQuadrant(root, pName, visibility, plane)
+}
+
 func scanQuadrant(repoDir, pName string, visibility types.AssetVisibility, plane types.AssetPlane) ([]types.TypedAssetRef, error) {
-	root := filepath.Join(repoDir, types.PQuadrantDir(pName, visibility, plane))
+	canonical := types.CanonicalAssetPlane(plane)
+	seen := map[string]struct{}{}
 	var out []types.TypedAssetRef
-	for _, kind := range bundle.VaultAssetKinds {
-		dir := filepath.Join(root, kind.Dir)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, fmt.Errorf("读取 P %q 象限 %s/%s/%s 失败: %w", pName, visibility, plane, kind.Dir, err)
-		}
-		for _, entry := range entries {
-			if strings.HasPrefix(entry.Name(), ".") {
-				continue
-			}
-			if entry.Type()&os.ModeSymlink != 0 {
-				return nil, fmt.Errorf("P %q 象限 %s/%s/%s 中不允许符号链接 %q",
-					pName, visibility, plane, kind.Dir, entry.Name())
-			}
-			if kind.DirEntries != entry.IsDir() {
-				continue
-			}
-			if !kind.DirEntries && !strings.HasSuffix(entry.Name(), kind.Suffix) {
-				continue
-			}
-			if entry.IsDir() {
-				assetRoot := filepath.Join(dir, entry.Name())
-				if err := filepath.WalkDir(assetRoot, func(path string, child os.DirEntry, walkErr error) error {
-					if walkErr != nil {
-						return walkErr
-					}
-					if child.Type()&os.ModeSymlink != 0 {
-						return fmt.Errorf("P %q 资产 %s 中不允许符号链接 %s", pName, entry.Name(), path)
-					}
-					return nil
-				}); err != nil {
-					return nil, err
+	for _, disk := range quadrantDiskNames(plane) {
+		base := filepath.Join(repoDir, pName, string(visibility), disk)
+		for _, kind := range bundle.VaultAssetKinds {
+			dir := filepath.Join(base, kind.Dir)
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
 				}
+				return nil, fmt.Errorf("读取 Project %q 象限 %s/%s/%s 失败: %w", pName, visibility, disk, kind.Dir, err)
 			}
-			name := bundle.AssetEntryName(kind, entry.Name())
-			out = append(out, types.TypedAssetRef{
-				Type:       kind.Type,
-				Visibility: visibility,
-				Plane:      plane,
-				AssetRef:   types.AssetRef{Name: name, Vault: pName},
-			})
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), ".") {
+					continue
+				}
+				if entry.Type()&os.ModeSymlink != 0 {
+					return nil, fmt.Errorf("Project %q 象限 %s/%s/%s 中不允许符号链接 %q",
+						pName, visibility, disk, kind.Dir, entry.Name())
+				}
+				if kind.DirEntries != entry.IsDir() {
+					continue
+				}
+				if !kind.DirEntries && !strings.HasSuffix(entry.Name(), kind.Suffix) {
+					continue
+				}
+				if entry.IsDir() {
+					assetRoot := filepath.Join(dir, entry.Name())
+					if err := filepath.WalkDir(assetRoot, func(path string, child os.DirEntry, walkErr error) error {
+						if walkErr != nil {
+							return walkErr
+						}
+						if child.Type()&os.ModeSymlink != 0 {
+							return fmt.Errorf("Project %q 资产 %s 中不允许符号链接 %s", pName, entry.Name(), path)
+						}
+						return nil
+					}); err != nil {
+						return nil, err
+					}
+				}
+				name := bundle.AssetEntryName(kind, entry.Name())
+				key := kind.Type + "/" + name
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				out = append(out, types.TypedAssetRef{
+					Type:       kind.Type,
+					Visibility: visibility,
+					Plane:      canonical,
+					AssetRef:   types.AssetRef{Name: name, Vault: pName},
+				})
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

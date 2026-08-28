@@ -10,11 +10,13 @@ import (
 
 func TestParsePlanes(t *testing.T) {
 	cases := map[string][]app.WorkspacePlane{
-		"":        {app.WorkspaceProject},
-		"project": {app.WorkspaceProject},
-		"user":    {app.WorkspaceUser},
-		"USER":    {app.WorkspaceUser},
-		"both":    {app.WorkspaceProject, app.WorkspaceUser},
+		"":        {app.WorkspaceLocal},
+		"project": {app.WorkspaceLocal},
+		"local":   {app.WorkspaceLocal},
+		"user":    {app.WorkspaceGlobal},
+		"global":  {app.WorkspaceGlobal},
+		"USER":    {app.WorkspaceGlobal},
+		"both":    {app.WorkspaceLocal, app.WorkspaceGlobal},
 	}
 	for raw, want := range cases {
 		got, err := parsePlanes(raw)
@@ -36,11 +38,11 @@ func TestParsePlanes(t *testing.T) {
 }
 
 func TestParseSinglePlane(t *testing.T) {
-	if p, err := parseSinglePlane(""); err != nil || p != app.WorkspaceProject {
+	if p, err := parseSinglePlane(""); err != nil || p != app.WorkspaceLocal {
 		t.Fatalf("parseSinglePlane(\"\") = %v, %v", p, err)
 	}
-	if p, err := parseSinglePlane("user"); err != nil || p != app.WorkspaceUser {
-		t.Fatalf("parseSinglePlane(user) = %v, %v", p, err)
+	if p, err := parseSinglePlane("global"); err != nil || p != app.WorkspaceGlobal {
+		t.Fatalf("parseSinglePlane(global) = %v, %v", p, err)
 	}
 	if _, err := parseSinglePlane("both"); err == nil {
 		t.Fatal("parseSinglePlane(both) 应报错")
@@ -93,7 +95,7 @@ func TestHandleListAssets_BothPlanes(t *testing.T) {
 	if len(outcomes) != 2 {
 		t.Fatalf("planes len = %d, want 2", len(outcomes))
 	}
-	if outcomes[0].Plane != string(app.WorkspaceProject) || outcomes[1].Plane != string(app.WorkspaceUser) {
+	if outcomes[0].Plane != string(app.WorkspaceLocal) || outcomes[1].Plane != string(app.WorkspaceGlobal) {
 		t.Fatalf("planes order = %q,%q", outcomes[0].Plane, outcomes[1].Plane)
 	}
 	for _, oc := range outcomes {

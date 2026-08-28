@@ -12,39 +12,38 @@ import (
 // planeParamDoc 解释支持 both 的工具的 plane 参数（ADR 0009 二元 scope / 平面隔离）。
 // 注意：若写入 jsonschema 标签，描述不得匹配 google/jsonschema-go 的 ^[^\s]*= 前缀禁令
 // （例如整段以「作用平面：project=」开头会 panic）。
-const planeParamDoc = "作用平面：project（项目平面，<project>/.dec 与 <project>/.secrets，只含 scope=project 的 bundle）；" +
-	"user（用户平面，~/.dec 与 ~/.dec/secrets，只含 scope=user 的 bundle，等价 dec --user）；" +
-	"both（先 project 再 user 各执行一次并分别回报）。留空默认 project。"
+const planeParamDoc = "作用平面：local（本仓库，工作区 .dec / .secrets）；" +
+	"global（本机，~/.dec 与 ~/.dec/secrets，等价 dec --global）；" +
+	"both（先 local 再 global 各执行一次并分别回报）。留空默认 local。project/user 为旧别名。"
 
-// planeParamDocSingle 解释仅支持单平面的写操作的 plane 参数。
-const planeParamDocSingle = "作用平面：project（项目平面）、user（用户平面，等价 dec --user）。" +
-	"留空默认 project；此操作一次只作用一个平面，不支持 both，请显式二选一。"
+const planeParamDocSingle = "作用平面：local（本仓库）、global（本机，等价 dec --global）。" +
+	"留空默认 local；此操作一次只作用一个平面，不支持 both。project/user 为旧别名。"
 
 // parsePlanes 解析 plane 参数为待执行平面列表；both 展开成 [project, user]。
 func parsePlanes(raw string) ([]app.WorkspacePlane, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "project":
-		return []app.WorkspacePlane{app.WorkspaceProject}, nil
-	case "user":
-		return []app.WorkspacePlane{app.WorkspaceUser}, nil
+	case "", "project", "local":
+		return []app.WorkspacePlane{app.WorkspaceLocal}, nil
+	case "user", "global":
+		return []app.WorkspacePlane{app.WorkspaceGlobal}, nil
 	case "both":
-		return []app.WorkspacePlane{app.WorkspaceProject, app.WorkspaceUser}, nil
+		return []app.WorkspacePlane{app.WorkspaceLocal, app.WorkspaceGlobal}, nil
 	default:
-		return nil, fmt.Errorf("plane 非法 %q（允许 project|user|both）", raw)
+		return nil, fmt.Errorf("plane 非法 %q（允许 local|global|both，以及旧名 project|user）", raw)
 	}
 }
 
 // parseSinglePlane 解析仅允许单平面的 plane 参数；both 显式报错。
 func parseSinglePlane(raw string) (app.WorkspacePlane, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "project":
-		return app.WorkspaceProject, nil
-	case "user":
-		return app.WorkspaceUser, nil
+	case "", "project", "local":
+		return app.WorkspaceLocal, nil
+	case "user", "global":
+		return app.WorkspaceGlobal, nil
 	case "both":
-		return "", fmt.Errorf("该操作不支持 plane=both，请显式指定 project 或 user")
+		return "", fmt.Errorf("该操作不支持 plane=both，请显式指定 local 或 global")
 	default:
-		return "", fmt.Errorf("plane 非法 %q（允许 project|user）", raw)
+		return "", fmt.Errorf("plane 非法 %q（允许 local|global，以及旧名 project|user）", raw)
 	}
 }
 

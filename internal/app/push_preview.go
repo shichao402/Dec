@@ -26,6 +26,13 @@ type PushProjectAssetsPreview struct {
 	Model               string
 	HomeProject         string
 	WritableProjects    []string
+	Changes             []PushChange
+}
+
+type PushChange struct {
+	Op       string
+	Path     string
+	Quadrant string
 }
 
 // PreviewPushProjectAssets 轻量检测 Push 将涉及的内容，供 TUI 确认页展示。
@@ -73,12 +80,13 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 		preview.ProjectSecretsName = plan.Targets[0].Address
 	}
 
-	candidate, hasChanges, skipped, decErr := previewDecPushChanges(context.Background(), workspace, projectConfig, nil)
+	candidate, hasChanges, skipped, changes, decErr := previewDecPushChanges(context.Background(), workspace, projectConfig, nil)
 	if decErr != nil {
 		preview.DecSkippedReason = decErr.Error()
 	} else {
 		preview.DecCandidateCount = candidate
 		preview.DecHasChanges = hasChanges
+		preview.Changes = changes
 		if skipped != "" {
 			preview.DecSkippedReason = skipped
 		}
@@ -86,10 +94,10 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 	return preview, nil
 }
 
-func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConfig *types.ProjectConfig, reporter Reporter) (candidateCount int, hasChanges bool, skippedReason string, err error) {
+func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConfig *types.ProjectConfig, reporter Reporter) (candidateCount int, hasChanges bool, skippedReason string, changes []PushChange, err error) {
 	if len(projectConfig.EnabledBundles) == 0 &&
 		(workspace.EffectivePlane() == WorkspaceUser || strings.TrimSpace(projectConfig.ProjectName) == "") {
-		return 0, false, "无已启用 bundle", nil
+		return 0, false, "无已启用 bundle", nil, nil
 	}
 
 	err = withAppWriteRepo(func(tx *repo.Transaction) error {
@@ -108,6 +116,11 @@ func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConf
 		// 与真正 push 使用同一可写边界：项目平面只能回推家 P，
 		// direct requires 的 public/project 副本只读，不能计入预览或被临时镜像。
 		assets := writableResolvedAssets(workspace, projectConfig, resolved.Assets)
+		if extra, extraErr := scanWritableCacheAssets(workspace, projectConfig); extraErr != nil {
+			return extraErr
+		} else {
+			assets = unionTypedAssets(assets, extra)
+		}
 		resolvedForPreview := *resolved
 		resolvedForPreview.Assets = assets
 		if len(assets) == 0 && len(projectConfig.EnabledBundles) == 0 {
@@ -136,17 +149,44 @@ func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConf
 		}
 
 		git := repo.NewGitOps(repoDir)
-		clean, cleanErr := git.IsClean()
-		if cleanErr != nil {
-			return cleanErr
+		entries, statusErr := git.Status()
+		if statusErr != nil {
+			return statusErr
 		}
-		if clean {
+		if len(entries) == 0 {
 			skippedReason = "无本地变更"
 			return nil
 		}
 		candidateCount = synced + pruned
 		hasChanges = true
+		for _, e := range entries {
+			changes = append(changes, PushChange{
+				Op:       porcelainOp(e.Code),
+				Path:     e.Path,
+				Quadrant: quadrantFromGitPath(e.Path),
+			})
+		}
 		return nil
 	})
-	return candidateCount, hasChanges, skippedReason, err
+	return candidateCount, hasChanges, skippedReason, changes, err
+}
+
+func porcelainOp(code string) string {
+	c := strings.TrimSpace(code)
+	switch {
+	case strings.Contains(c, "D"):
+		return "删除"
+	case strings.Contains(c, "?") || strings.Contains(c, "A"):
+		return "新建"
+	default:
+		return "修改"
+	}
+}
+
+func quadrantFromGitPath(p string) string {
+	parts := strings.Split(strings.ReplaceAll(p, "\\", "/"), "/")
+	if len(parts) >= 3 {
+		return parts[1] + "/" + parts[2]
+	}
+	return ""
 }

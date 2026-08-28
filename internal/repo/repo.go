@@ -432,13 +432,37 @@ func (g *GitOps) getRemoteURL(remote string) (string, error) {
 	return url, nil
 }
 
-// IsClean 检查工作区是否干净
+// StatusEntry 是 git status --porcelain 的一行。
+type StatusEntry struct {
+	Code string
+	Path string
+}
+
+// IsClean 检查工作区是否干净。
 func (g *GitOps) IsClean() (bool, error) {
-	output, err := g.run("status", "--porcelain")
+	entries, err := g.Status()
 	if err != nil {
 		return false, err
 	}
-	return output == "", nil
+	return len(entries) == 0, nil
+}
+
+func (g *GitOps) Status() ([]StatusEntry, error) {
+	output, err := g.run("status", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(output) == "" {
+		return nil, nil
+	}
+	var out []StatusEntry
+	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		out = append(out, StatusEntry{Code: strings.TrimSpace(line[:2]), Path: strings.TrimSpace(line[3:])})
+	}
+	return out, nil
 }
 
 // HasCachedDiff 检查暂存区是否相对 HEAD 有实质差异。

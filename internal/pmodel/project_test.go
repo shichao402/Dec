@@ -39,7 +39,7 @@ func TestLoadFourQuadrants(t *testing.T) {
 	}
 	seenPrivateProject := false
 	for _, asset := range got.Assets {
-		if asset.Visibility == types.AssetVisibilityPrivate && asset.Plane == types.AssetPlaneProject {
+		if asset.Visibility == types.AssetVisibilityPrivate && types.CanonicalAssetPlane(asset.Plane) == types.AssetPlaneLocal {
 			seenPrivateProject = true
 		}
 	}

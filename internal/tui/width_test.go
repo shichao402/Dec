@@ -109,7 +109,7 @@ func TestViewAtBaselineWidths_RunNoOverflow(t *testing.T) {
 		width := width
 		t.Run(widthLabel(width), func(t *testing.T) {
 			m := homeModelAtWidth(width)
-			m.pageIndex = 3 // Run
+			m.pageIndex = 2 // 同步
 			m.runProgress = &app.Progress{Phase: "pull", Current: 1, Total: 2}
 			m.runResult = &app.PullProjectAssetsResult{
 				RequestedCount: 2,
@@ -130,7 +130,7 @@ func TestViewAtBaselineWidths_SettingsNoOverflow(t *testing.T) {
 		width := width
 		t.Run(widthLabel(width), func(t *testing.T) {
 			m := homeModelAtWidth(width)
-			m.pageIndex = 5 // Settings
+			m.pageIndex = 3 // 设置
 			m.settings = &app.GlobalSettingsState{
 				ConfigPath:       "/tmp/.dec/config.yaml",
 				VarsPath:         "/tmp/.dec/local/vars.yaml",
@@ -155,7 +155,7 @@ func TestViewAtBaselineWidths_ProjectNoOverflow(t *testing.T) {
 		width := width
 		t.Run(widthLabel(width), func(t *testing.T) {
 			m := homeModelAtWidth(width)
-			m.pageIndex = 2
+			m.pageIndex = 3
 			m.focus = focusContent
 			m.projectSettings = &app.ProjectSettingsState{
 				ProjectRoot:        "/tmp/dec-project",
@@ -213,7 +213,7 @@ func TestViewAtBaselineHeights_NoVerticalOverflow(t *testing.T) {
 		}},
 		{"Project", func(width int) model {
 			m := homeModelAtWidth(width)
-			m.pageIndex = 2
+			m.pageIndex = 3
 			m.projectSettings = &app.ProjectSettingsState{
 				ProjectRoot: "/tmp/dec-project", ConfigPath: "/tmp/dec-project/.dec/config.yaml",
 				VarsPath: "/tmp/dec-project/.dec/vars.yaml", ProjectConfigReady: true,
@@ -225,14 +225,14 @@ func TestViewAtBaselineHeights_NoVerticalOverflow(t *testing.T) {
 		}},
 		{"Run", func(width int) model {
 			m := homeModelAtWidth(width)
-			m.pageIndex = 3
+			m.pageIndex = 2
 			m.runResult = &app.PullProjectAssetsResult{RequestedCount: 2, PulledCount: 1, FailedCount: 1, EffectiveIDEs: []string{"cursor"}}
 			m.runEvents = []string{"a", "b", "c", "d", "e", "f", "g", "h"}
 			return m
 		}},
 		{"Settings", func(width int) model {
 			m := homeModelAtWidth(width)
-			m.pageIndex = 5
+			m.pageIndex = 3
 			m.settings = &app.GlobalSettingsState{
 				ConfigPath: "/tmp/.dec/config.yaml", VarsPath: "/tmp/.dec/local/vars.yaml",
 				RepoConnected: true, RepoURL: "git@github.com:demo/dec.git", ConnectedRepoURL: "git@github.com:demo/dec.git",
@@ -272,7 +272,7 @@ func assertNoViewExceedsHeight(t *testing.T, label string, view string, expected
 // 会丢掉左侧快捷键提示以保留右侧承载的页面状态，而不是静默截断。
 func TestStatusBarDropsLeftHintOnOverflow(t *testing.T) {
 	m := homeModelAtWidth(60)
-	m.pageIndex = 3 // Run：右侧会携带 pull 阶段状态
+	m.pageIndex = 2 // 同步：右侧会携带 pull 阶段状态
 	m.runningPull = true
 	m.runProgress = &app.Progress{Phase: "pull", Current: 1, Total: 2}
 
@@ -294,7 +294,7 @@ func TestStatusBarKeepsBothSidesWhenFits(t *testing.T) {
 	if !strings.Contains(bar, "q quit") {
 		t.Fatalf("常规宽度下状态栏左侧快捷键提示应保留：%q", bar)
 	}
-	if !strings.Contains(bar, "page Home") {
+	if !strings.Contains(bar, "page 项目") {
 		t.Fatalf("常规宽度下状态栏右侧页面状态应保留：%q", bar)
 	}
 }

@@ -35,7 +35,7 @@ func New(cfg Config) *Server {
 func (s *Server) Register(mcpServer *mcp.Server) {
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_status",
-		Description: "查看某平面的 Dec 状态（仓库连接、家 P、requires 与 public/private × user/project 四象限；plane=project|user）。",
+		Description: "查看某平面的 Dec 状态（仓库连接、绑定项目、requires 与 public/private × global/local 四象限；plane=local|global）。",
 	}, s.handleStatus)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_connect_repo",
@@ -47,7 +47,7 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handleInitProject)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_assets",
-		Description: "列出某平面启用的 P、直接 requires 与四象限成员（plane=project|user|both）。",
+		Description: "列出某平面启用的项目、直接 requires 与四象限成员（plane=local|global|both）。",
 	}, s.handleListAssets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_set_assets",
@@ -55,19 +55,19 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handleSetAssets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_pull",
-		Description: "拉取并安装某平面的 P 四象限资产与 private secrets（plane=project|user|both）。",
+		Description: "拉取并安装某平面的项目四象限资产与 private secrets（plane=local|global|both）。",
 	}, s.handlePull)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_push",
-		Description: "把某平面的本地改动推回远端（plane=project|user|both）：Dec 资产推 Git，secrets 推 Bitwarden。改了项目内 token 用 plane=project；改了个人凭据/SSH 用 plane=user；两边都改过用 both。",
+		Description: "把某平面的本地改动推回远端（plane=local|global|both）：Dec 资产推 Git，secrets 推 Bitwarden。本仓库用 plane=local；本机凭据/SSH 用 plane=global；两边都改过用 both。",
 	}, s.handlePush)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_preview_push",
-		Description: "预览某平面 push 将涉及的 Dec 与 secrets 变更（plane=project|user|both，不写远端）。推之前先 preview 确认范围。",
+		Description: "预览某平面 push 将涉及的 Dec 与 secrets 变更（plane=local|global|both，不写远端）。推之前先 preview 确认范围。",
 	}, s.handlePreviewPush)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_secrets",
-		Description: "列出某平面私密资产元数据（路径、本地/远端存在性；plane=project|user|both）。绝不返回 token/密钥/正文。",
+		Description: "列出某平面私密资产元数据（路径、本地/远端存在性；plane=local|global|both）。绝不返回 token/密钥/正文。",
 	}, s.handleListSecrets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_delete_candidates",
@@ -149,7 +149,7 @@ func (s *Server) projectRoot() string {
 }
 
 type statusParams struct {
-	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project（项目平面）、user（用户平面，等价 dec --user）。留空默认 project；不支持 both。"`
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：local（本仓库）、global（本机，等价 dec --global）。留空默认 local；不支持 both。project/user 为旧别名。"`
 }
 
 func (s *Server) handleStatus(ctx context.Context, _ *mcp.CallToolRequest, in statusParams) (*mcp.CallToolResult, any, error) {
@@ -206,7 +206,7 @@ func (s *Server) handleInitProject(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 type listAssetsParams struct {
-	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
 func (s *Server) handleListAssets(ctx context.Context, _ *mcp.CallToolRequest, in listAssetsParams) (*mcp.CallToolResult, any, error) {
@@ -218,7 +218,7 @@ func (s *Server) handleListAssets(ctx context.Context, _ *mcp.CallToolRequest, i
 type setAssetsParams struct {
 	EnabledProjects []string `json:"enabled_projects,omitempty" jsonschema:"P 名称列表；project 中表示家 P 及直接 requires，user 中表示启用 P"`
 	EnabledBundles  []string `json:"enabled_bundles,omitempty" jsonschema:"兼容字段；enabled_projects 未提供时使用"`
-	Plane           string   `json:"plane,omitempty" jsonschema:"作用平面：project|user。留空默认 project；不支持 both。"`
+	Plane           string   `json:"plane,omitempty" jsonschema:"作用平面：local|global（旧名 project|user）。留空默认 local；不支持 both。"`
 }
 
 func (s *Server) handleSetAssets(ctx context.Context, _ *mcp.CallToolRequest, in setAssetsParams) (*mcp.CallToolResult, any, error) {
@@ -239,7 +239,7 @@ func (s *Server) handleSetAssets(ctx context.Context, _ *mcp.CallToolRequest, in
 }
 
 type pullParams struct {
-	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
 func (s *Server) handlePull(ctx context.Context, _ *mcp.CallToolRequest, in pullParams) (*mcp.CallToolResult, any, error) {
@@ -249,7 +249,7 @@ func (s *Server) handlePull(ctx context.Context, _ *mcp.CallToolRequest, in pull
 }
 
 type pushParams struct {
-	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
 func (s *Server) handlePush(ctx context.Context, _ *mcp.CallToolRequest, in pushParams) (*mcp.CallToolResult, any, error) {
@@ -259,7 +259,7 @@ func (s *Server) handlePush(ctx context.Context, _ *mcp.CallToolRequest, in push
 }
 
 type previewPushParams struct {
-	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
 func (s *Server) handlePreviewPush(ctx context.Context, _ *mcp.CallToolRequest, in previewPushParams) (*mcp.CallToolResult, any, error) {
@@ -270,7 +270,7 @@ func (s *Server) handlePreviewPush(ctx context.Context, _ *mcp.CallToolRequest, 
 
 type listSecretsParams struct {
 	IncludeRemote *bool  `json:"include_remote,omitempty" jsonschema:"是否检查 Bitwarden 远端存在性（默认 true，可能触发 web unlock）"`
-	Plane         string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+	Plane         string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
 func (s *Server) handleListSecrets(ctx context.Context, _ *mcp.CallToolRequest, in listSecretsParams) (*mcp.CallToolResult, any, error) {
@@ -284,7 +284,7 @@ func (s *Server) handleListSecrets(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 type listDeleteCandidatesParams struct {
-	Plane string `json:"plane,omitempty" jsonschema:"作用平面：project|user|both。留空默认 project。"`
+	Plane string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
 func (s *Server) handleListDeleteCandidates(ctx context.Context, _ *mcp.CallToolRequest, in listDeleteCandidatesParams) (*mcp.CallToolResult, any, error) {
@@ -309,7 +309,7 @@ type deleteItemInput struct {
 type deleteParams struct {
 	Items     []deleteItemInput `json:"items" jsonschema:"要删除的条目"`
 	Confirmed bool              `json:"confirmed" jsonschema:"必须为 true 才会执行删除"`
-	Plane     string            `json:"plane,omitempty" jsonschema:"作用平面：project|user。留空默认 project；不支持 both。候选项须来自同平面的 dec_list_delete_candidates。"`
+	Plane     string            `json:"plane,omitempty" jsonschema:"作用平面：local|global（旧名 project|user）。留空默认 local；不支持 both。候选项须来自同平面的 dec_list_delete_candidates。"`
 }
 
 func (s *Server) handleDelete(ctx context.Context, _ *mcp.CallToolRequest, in deleteParams) (*mcp.CallToolResult, any, error) {

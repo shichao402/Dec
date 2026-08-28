@@ -34,7 +34,7 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 	seenDecRemote := make(map[string]struct{})
 	seenDecLocal := make(map[string]struct{})
 	groupCtx := newDeleteGroupContext(workspace, projectConfig)
-	scopeByBundle := resolveVaultScopeTags(reporter)
+	scopeByBundle := map[string]string{}
 	enabledBundles := config.NormalizeBundleNames(projectConfig.EnabledBundles)
 	usesPModel, _ := connectedRepositoryUsesPModel()
 
@@ -122,50 +122,12 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 		addDec(DeleteKindDecAsset, itemType, name, vault, false, PartitionLocal, scopeTag)
 	}
 
-	// 本地分区：当前工作区 cache 里实际存在的残留（含已停用 bundle 留下的目录），只清本机。
-	localCacheBundles := listLocalCacheBundleNames(workspace)
-	if !usesPModel {
-		for _, spec := range []struct {
-			dir   string
-			typ   string
-			trim  func(string) string
-			isDir bool
-		}{
-			{"skills", "skill", func(s string) string { return s }, true},
-			{"commands", "command", func(s string) string { return s }, true},
-			{"rules", "rule", func(s string) string { return strings.TrimSuffix(s, ".mdc") }, false},
-			{"mcp", "mcp", func(s string) string { return strings.TrimSuffix(s, ".json") }, false},
-		} {
-			for _, bundleName := range localCacheBundles {
-				dir := filepath.Join(workspaceCacheDir(workspace), bundleName, spec.dir)
-				entries, readErr := os.ReadDir(dir)
-				if readErr != nil {
-					continue
-				}
-				for _, entry := range entries {
-					if entry.Name() == ".gitkeep" {
-						continue
-					}
-					scopeTag := scopeByBundle[bundleName]
-					if spec.isDir {
-						if !entry.IsDir() {
-							continue
-						}
-						walkCacheDecLocal(bundleName, spec.typ, entry.Name(), scopeTag)
-						continue
-					}
-					if entry.IsDir() {
-						continue
-					}
-					walkCacheDecLocal(bundleName, spec.typ, spec.trim(entry.Name()), scopeTag)
-				}
-			}
-		}
-	}
-
 	// 远端分区：Git vault 全量 bundles（scope 仅作分组标签，enabled 与否都展示）。
 	_ = withAppReadRepo(func(tx *repo.Transaction) error {
 		repoDir := tx.WorkDir()
+		for name, tag := range vaultScopeTagsFromDir(repoDir, reporter) {
+			scopeByBundle[name] = tag
+		}
 		projects, pErr := pmodel.Scan(repoDir)
 		if pErr != nil {
 			emit(reporter, EventWarn, "delete.list", "扫描 P 失败："+pErr.Error(), nil)
@@ -251,6 +213,47 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 		}
 		return nil
 	})
+
+	// 本地分区：当前工作区 cache 里实际存在的残留（含已停用 bundle 留下的目录），只清本机。
+	localCacheBundles := listLocalCacheBundleNames(workspace)
+	if !usesPModel {
+		for _, spec := range []struct {
+			dir   string
+			typ   string
+			trim  func(string) string
+			isDir bool
+		}{
+			{"skills", "skill", func(s string) string { return s }, true},
+			{"commands", "command", func(s string) string { return s }, true},
+			{"rules", "rule", func(s string) string { return strings.TrimSuffix(s, ".mdc") }, false},
+			{"mcp", "mcp", func(s string) string { return strings.TrimSuffix(s, ".json") }, false},
+		} {
+			for _, bundleName := range localCacheBundles {
+				dir := filepath.Join(workspaceCacheDir(workspace), bundleName, spec.dir)
+				entries, readErr := os.ReadDir(dir)
+				if readErr != nil {
+					continue
+				}
+				for _, entry := range entries {
+					if entry.Name() == ".gitkeep" {
+						continue
+					}
+					scopeTag := scopeByBundle[bundleName]
+					if spec.isDir {
+						if !entry.IsDir() {
+							continue
+						}
+						walkCacheDecLocal(bundleName, spec.typ, entry.Name(), scopeTag)
+						continue
+					}
+					if entry.IsDir() {
+						continue
+					}
+					walkCacheDecLocal(bundleName, spec.typ, spec.trim(entry.Name()), scopeTag)
+				}
+			}
+		}
+	}
 
 	seenSecretRemote := make(map[string]struct{})
 	seenSecretLocal := make(map[string]struct{})
@@ -428,24 +431,21 @@ func (g *deleteGroupContext) groupTitleWithScope(groupBundle, scopeTag string) s
 	return fmt.Sprintf("%s · scope:%s", base, scopeTag)
 }
 
-// resolveVaultScopeTags 返回 vault 内全部 bundle 的 scope 标签（不按平面过滤）。
-func resolveVaultScopeTags(reporter Reporter) map[string]string {
+// vaultScopeTagsFromDir 返回 vault 内全部 bundle 的 scope 标签（不按平面过滤）。
+func vaultScopeTagsFromDir(repoDir string, reporter Reporter) map[string]string {
 	out := make(map[string]string)
-	_ = withAppReadRepo(func(tx *repo.Transaction) error {
-		vaultBundles, _, scanErr := scanVaultBundles(tx.WorkDir(), reporter)
-		if scanErr != nil {
-			return nil
-		}
-		for name, matches := range vaultBundles {
-			for _, match := range matches {
-				if match.bundle.Scope != "" {
-					out[name] = string(match.bundle.Scope)
-					break
-				}
+	vaultBundles, _, scanErr := scanVaultBundles(repoDir, reporter)
+	if scanErr != nil {
+		return out
+	}
+	for name, matches := range vaultBundles {
+		for _, match := range matches {
+			if match.bundle.Scope != "" {
+				out[name] = string(match.bundle.Scope)
+				break
 			}
 		}
-		return nil
-	})
+	}
 	return out
 }
 

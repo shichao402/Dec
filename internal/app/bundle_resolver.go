@@ -201,11 +201,11 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 		}
 		enabled[name] = struct{}{}
 		for _, asset := range p.Assets {
-			wantPlane := types.AssetPlaneProject
-			if plane == WorkspaceUser {
-				wantPlane = types.AssetPlaneUser
+			wantPlane := types.AssetPlaneLocal
+			if plane == WorkspaceUser || plane == WorkspaceGlobal {
+				wantPlane = types.AssetPlaneGlobal
 			}
-			if asset.Plane != wantPlane || (visibility != nil && asset.Visibility != *visibility) {
+			if types.CanonicalAssetPlane(asset.Plane) != wantPlane || (visibility != nil && asset.Visibility != *visibility) {
 				continue
 			}
 			selected = append(selected, asset)
@@ -286,11 +286,11 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 
 func countPQuadrants(assets []types.TypedAssetRef) map[string]int {
 	out := map[string]int{
-		"public/user": 0, "private/user": 0,
-		"public/project": 0, "private/project": 0,
+		"public/global": 0, "private/global": 0,
+		"public/local":  0, "private/local":  0,
 	}
 	for _, asset := range assets {
-		out[string(asset.Visibility)+"/"+string(asset.Plane)]++
+		out[string(asset.Visibility)+"/"+string(types.CanonicalAssetPlane(asset.Plane))]++
 	}
 	return out
 }

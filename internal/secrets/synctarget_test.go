@@ -51,7 +51,7 @@ func TestSyncTargetJSONPreservesDeclaredMarker(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Declared() || got.Plane != SyncPlaneMachine || got.LocalRoot != target.LocalRoot {
+	if !got.Declared() || !IsMachinePlane(got.Plane) || got.LocalRoot != target.LocalRoot {
 		t.Fatalf("JSON round-trip 丢失声明或平面: %#v", got)
 	}
 	if got.Address != target.Address {
@@ -76,14 +76,14 @@ func TestNewPSyncTargetUsesFixedAddressAndRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if project.Address != "my-app/private/project" || project.LocalRoot != ".secrets/my-app" || !project.Declared() {
+	if project.Address != "my-app/private/local" || project.LocalRoot != ".secrets/my-app" || !project.Declared() {
 		t.Fatalf("project target = %#v", project)
 	}
 	user, err := NewPSyncTarget("my-app", SyncPlaneUser)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if user.Address != "my-app/private/user" || user.LocalRoot != "my-app" || !IsMachinePlane(user.Plane) {
+	if user.Address != "my-app/private/global" || user.LocalRoot != "my-app" || !IsMachinePlane(user.Plane) {
 		t.Fatalf("user target = %#v", user)
 	}
 	if _, err := ParseRemoteScope("my-app/public/project"); err == nil {

@@ -295,6 +295,7 @@ type model struct {
 	currentVersion string
 	pages          []string
 	pageIndex      int
+	remoteOpen     bool
 	width          int
 	height         int
 	overview       *app.ProjectOverview
@@ -412,25 +413,29 @@ type model struct {
 	// focus 是当前键盘交互上下文（侧栏 / 内容 / bundle 成员）。
 	focus focusContext
 	// addSecretStage 是 Project/Remote 页「登记新 secret」的阶段；空串表示流程未开启。
-	addSecretStage          string
-	addSecretPathInput      string
-	addSecretContentPath    string // Remote：显式本地路径
-	addSecretSourceMode     string // Remote：Processor 声明的来源模式
-	addSecretTargets        []app.SecretTargetOption
-	addSecretTargetsLoad    asyncLoad // Project 页候选归属枚举（禁止同步调用）
-	addSecretTargetIdx      int
-	addSecretResult         *app.AddSecretResult
-	addSecretErr            error
-	addSecretRemoteMode     bool              // true = Remote 登记（归属为远端 P 地址）
-	addSecretPName          string            // Remote：光标反推出的 P 名，或 N 手输的新 P
-	addSecretPlane          secrets.SyncPlane // Remote：归属平面（N 时可切换）
-	addSecretScopeNew       bool              // Remote：P 由用户手输（可能尚不存在）
-	addSecretScopeCheckGen  uint64
-	addSecretTypeIdx        int    // Remote：Processor 表索引
-	addSecretInitialBody    string // Remote temp 预填正文
+	addSecretStage         string
+	addSecretPathInput     string
+	addSecretContentPath   string // Remote：显式本地路径
+	addSecretSourceMode    string // Remote：Processor 声明的来源模式
+	addSecretTargets       []app.SecretTargetOption
+	addSecretTargetsLoad   asyncLoad // Project 页候选归属枚举（禁止同步调用）
+	addSecretTargetIdx     int
+	addSecretResult        *app.AddSecretResult
+	addSecretErr           error
+	addSecretRemoteMode    bool              // true = Remote 登记（归属为远端 P 地址）
+	addSecretPName         string            // Remote：光标反推出的 P 名，或 N 手输的新 P
+	addSecretPlane         secrets.SyncPlane // Remote：归属平面（N 时可切换）
+	addSecretScopeNew      bool              // Remote：P 由用户手输（可能尚不存在）
+	addSecretScopeCheckGen uint64
+	addSecretTypeIdx       int    // Remote：Processor 表索引
+	addSecretInitialBody   string // Remote temp 预填正文
 	// addSecretNotice 是表单内可见的校验/说明行。登记表单整页渲染，日志区不可见，
 	// 校验失败只 pushLog 会让用户以为按键无效。
 	addSecretNotice string
+	createStage     string // "", "kind", "name"
+	createKindIdx   int
+	createName      string
+	createShared    bool
 
 	serverVersion                  string
 	serverVersionMismatch          bool
@@ -463,17 +468,13 @@ func newModelWithOptions(projectRoot, currentVersion string, opts RunOptions) mo
 		projectRoot:    projectRoot,
 		plane:          app.NewWorkspace(opts.Plane, projectRoot).EffectivePlane(),
 		currentVersion: currentVersion,
-		pages:          []string{"Home", "Bundles", "Project", "Run", "Remote", "Settings"},
+		pages:          defaultPages(),
 		configInitMode: opts.ConfigInitMode,
-		focus:          focusSidebar,
+		focus:          focusContent,
 		logs:           logs,
 	}
-	if m.plane == app.WorkspaceUser {
-		// 用户平面没有 project vars，Project 页无对应概念；Remote 按平面过滤后可用。
-		m.pages = []string{"Home", "Bundles", "Run", "Remote", "Settings"}
-	}
 	if opts.ConfigInitMode {
-		m.pageIndex = 1 // Bundles
+		m.pageIndex = int(pageImport)
 		m.focus = focusContent
 	}
 	return m
@@ -1049,6 +1050,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog(fmt.Sprintf("Push 确认页已打开：%d 个 enabled bundle", msg.preview.EnabledBundleCount))
 		}
 		return m, nil
+	case createLocalAssetDoneMsg:
+		if msg.err != nil {
+			m.pushLog("新建失败: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.result != nil {
+			m.pushLog("已写入 " + msg.result.Path)
+		}
+		return m, m.refreshCmd()
 	case addSecretTargetsMsg:
 		m.applyAddSecretTargets(msg)
 		return m, nil
@@ -1213,7 +1223,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.removeFilterInput && m.isRunPage() {
 			return m.handleRemoveFilterInput(msg)
 		}
-		if m.addSecretStage != "" && (m.isProjectPage() || m.isRemotePage()) {
+		if m.createStage != "" && m.isProjectPage() {
+			return m.handleCreateLocalAssetKey(msg)
+		}
+		if m.addSecretStage != "" && (m.isProjectSettings() || m.isRemotePage()) {
 			return m.handleAddSecretKey(msg)
 		}
 		if m.isRunPage() && m.pushStage != "" && !m.runningPull {
@@ -1228,7 +1241,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.isHomePage() && m.hasVaultInferencePrompt() {
 			return m.handleVaultInferenceKey(msg)
 		}
-		if (m.isHomePage() || m.isProjectPage()) && m.localProjectInitConfirm {
+		if (m.isHomePage() || m.isProjectSettings()) && m.localProjectInitConfirm {
 			return m.handleLocalProjectInitConfirmKey(msg)
 		}
 		if m.isHomePage() && m.vaultApplyLoad.busy() {
@@ -1249,13 +1262,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			fromPage := m.pages[m.pageIndex]
 			m.pageIndex = (m.pageIndex + 1) % len(m.pages)
-			m.focus = focusSidebar
+			m.focus = focusContent
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
 			return m, m.onPageChanged(fromPage)
 		case "shift+tab":
 			fromPage := m.pages[m.pageIndex]
 			m.pageIndex = (m.pageIndex - 1 + len(m.pages)) % len(m.pages)
-			m.focus = focusSidebar
+			m.focus = focusContent
 			m.pushLog("Switched to " + m.pages[m.pageIndex])
 			return m, m.onPageChanged(fromPage)
 		case "l", "right":
@@ -1270,6 +1283,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleTreePageNav(1)
 		case "pgup", "ctrl+u":
 			return m.handleTreePageNav(-1)
+		case "ctrl+r":
+			if !m.remoteOpen {
+				m.remoteOpen = true
+				m.focus = focusContent
+				m.pushLog("Open remote")
+				return m, m.startDeleteCandidatesLoad(true, false)
+			}
+			return m, nil
 		case "r":
 			m.pushLog("Refreshing project overview, assets, and global settings")
 			return m, m.refreshCmd()
@@ -1286,7 +1307,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pushLog("Asset filter cleared")
 				return m, nil
 			}
-			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
+			if m.isProjectSettings() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
 				m.clearProjectOverride()
 				return m, nil
 			}
@@ -1302,6 +1323,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.toggleCurrentAsset()
+				return m, nil
+			}
+			if m.isProjectSettings() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil && m.focus != focusSidebar {
+				if m.projectSettingsCursor == 0 {
+					m.toggleProjectOverride()
+				} else {
+					m.toggleCurrentProjectIDE()
+				}
 				return m, nil
 			}
 			if m.isSettingsPage() && !m.savingSettings && m.focus != focusSidebar {
@@ -1325,16 +1354,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil && m.focus != focusSidebar {
-				if m.projectSettingsCursor == 0 {
-					m.toggleProjectOverride()
-				} else {
-					m.toggleCurrentProjectIDE()
-				}
-			}
 			return m, nil
 		case "e":
-			if m.isSettingsPage() && !m.savingSettings {
+			if m.isSettingsPage() && !m.savingSettings && m.settings != nil {
 				switch m.settingsCursor {
 				case settingsRowRepo:
 					m.beginSettingsRepoEdit()
@@ -1345,7 +1367,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.isProjectPage() && !m.savingProjectSettings && !m.projectInitLoad.busy() {
+			if m.isProjectSettings() && !m.savingProjectSettings && !m.projectInitLoad.busy() {
 				editorCmd := ""
 				if m.projectVars != nil {
 					editorCmd = m.projectVars.EditorCommand
@@ -1367,7 +1389,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pushLog("Saving global settings")
 				return m, saveSettingsCmd(strings.TrimSpace(m.settingsRepoInput), strings.TrimSpace(m.settingsIdleTimeoutInput), cloneStrings(m.settingsSelectedIDEs))
 			}
-			if m.isProjectPage() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
+			if m.isProjectSettings() && !m.savingProjectSettings && m.projectSettings != nil && m.projectSettingsErr == nil {
 				if m.projectSettingsOverride && len(normalizedStringList(m.projectSettingsSelectedIDEs)) == 0 {
 					m.pushLog("覆盖模式下至少选择一个 IDE，或按 c 切回继承模式")
 					return m, nil
@@ -1386,7 +1408,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "i":
-			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil && !m.projectSettings.ProjectConfigReady {
+			if m.isProjectSettings() && m.projectSettings != nil && m.projectSettingsErr == nil && !m.projectSettings.ProjectConfigReady {
 				if m.projectInitLoad.busy() || m.savingProjectSettings || m.localProjectLoad.busy() {
 					return m, nil
 				}
@@ -1396,7 +1418,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "A":
-			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil {
+			if m.isProjectSettings() && m.projectSettings != nil && m.projectSettingsErr == nil {
 				if !m.projectSettings.ProjectConfigReady {
 					m.pushLog("登记 secret 需要先有 .dec/config.yaml，按 i 在 Project 页生成本地 project")
 					return m, nil
@@ -1408,9 +1430,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.isRemotePage() {
 				return m, m.beginRemoteRegisterAtCursor()
 			}
+			if m.isProjectPage() {
+				return m.beginCreateLocalAsset()
+			}
 			return m, nil
 		case "R":
-			if m.isProjectPage() && m.projectSettings != nil && m.projectSettingsErr == nil && m.projectSettings.ProjectConfigReady {
+			if m.isProjectSettings() && m.projectSettings != nil && m.projectSettingsErr == nil && m.projectSettings.ProjectConfigReady {
 				if m.projectInitLoad.busy() || m.savingProjectSettings {
 					return m, nil
 				}
@@ -1470,8 +1495,6 @@ func (m model) handleHorizontalNav(direction int) (tea.Model, tea.Cmd) {
 				m.pushLog("Remote 折叠目录")
 				return m, nil
 			}
-			m.focus = focusSidebar
-			m.pushLog("返回导航")
 			return m, nil
 		}
 		if m.isRemotePage() && direction > 0 {
@@ -1511,13 +1534,13 @@ func (m model) handleVerticalNav(delta int) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.isSettingsPage() {
+		if m.isSettingsPage() && m.settings != nil {
 			if m.canNavigateSettings() {
 				m.moveSettingsCursor(delta)
 			}
 			return m, nil
 		}
-		if m.isProjectPage() {
+		if m.isProjectSettings() {
 			if m.canNavigateProjectSettings() {
 				m.moveProjectSettingsCursor(delta)
 			}
@@ -2624,6 +2647,9 @@ func (m model) renderHomePage(width int) string {
 	}
 
 	next := suggestNextAction(m.overview, m.hasVaultInferencePrompt(), m.localProjectInitConfirm)
+	if m.createStage != "" {
+		return m.renderCreateLocalAsset(width)
+	}
 	lines = append(lines,
 		shellAccentStyle.Render("下一步"),
 		next,
@@ -3153,10 +3179,10 @@ func (m model) renderRunLastResult() []string {
 			m.runResult.RequestedCount, m.runResult.PulledCount, m.runResult.FailedCount))
 		if m.runResult.Model == "p" {
 			lines = append(lines,
-				fmt.Sprintf("P     家 %s · requires %s", fallbackValue(m.runResult.HomeProject, "<user>"), fallbackValue(strings.Join(m.runResult.RequiredProjects, ", "), "<none>")),
-				fmt.Sprintf("象限  public/user %d · private/user %d · public/project %d · private/project %d",
-					m.runResult.Quadrants["public/user"], m.runResult.Quadrants["private/user"],
-					m.runResult.Quadrants["public/project"], m.runResult.Quadrants["private/project"]))
+				fmt.Sprintf("项目  绑定 %s · 引入 %s", fallbackValue(m.runResult.HomeProject, "<本机>"), fallbackValue(strings.Join(m.runResult.RequiredProjects, ", "), "<none>")),
+				fmt.Sprintf("象限  public/global %d · private/global %d · public/local %d · private/local %d",
+					m.runResult.Quadrants["public/global"], m.runResult.Quadrants["private/global"],
+					m.runResult.Quadrants["public/local"], m.runResult.Quadrants["private/local"]))
 			if len(m.runResult.MissingProjects) > 0 {
 				lines = append(lines, shellWarnStyle.Render("缺失 P: "+strings.Join(m.runResult.MissingProjects, ", ")))
 			}
@@ -3294,6 +3320,9 @@ func (m model) renderPushSummary() []string {
 	lines = append(lines, secretsLine)
 	if p.DecHasChanges {
 		lines = append(lines, fmt.Sprintf("Dec cache  有变更（约 %d 项待推送）", p.DecCandidateCount))
+		for _, ch := range p.Changes {
+			lines = append(lines, fmt.Sprintf("  %s  %s  %s", ch.Op, ch.Path, ch.Quadrant))
+		}
 	} else if p.DecSkippedReason != "" {
 		lines = append(lines, fmt.Sprintf("Dec cache  %s", p.DecSkippedReason))
 	} else {
@@ -3687,10 +3716,10 @@ func (m model) renderSettingsList() string {
 			lines = append(lines, shellLogStyle.Render(line))
 		}
 	}
-	// 用户平面 bundle 启用只在 `dec --user` 的 Bundles 页管理：
+	// 本机项目启用只在 `dec --global` 的引入页管理：
 	// 两处写同一份 GlobalConfig.EnabledBundles 会互相覆盖（各自基于加载时快照）。
 	lines = append(lines, "", shellMutedStyle.Render(
-		fmt.Sprintf("用户 bundles：已启用 %d 个 · 在 dec --user 的 Bundles 页管理", len(normalizedStringList(m.settings.EnabledBundles)))))
+		fmt.Sprintf("本机项目：已启用 %d 个 · 在 dec --global 的引入页管理", len(normalizedStringList(m.settings.EnabledBundles)))))
 	return strings.Join(lines, "\n")
 }
 
@@ -3747,7 +3776,7 @@ func (m model) renderSettingsDetails() string {
 			fmt.Sprintf("用户 bundles: 已启用 %d 个", m.settingsUserBundleCount()),
 			fmt.Sprintf("Bitwarden: %s", formatReady(m.settings.BitwardenSessionReady, "已解锁", "未解锁")),
 			"启用列表由用户平面维护，与项目 bundles 隔离。",
-			shellMutedStyle.Render("在 dec --user 的 Bundles 页勾选并保存。"),
+			shellMutedStyle.Render("在 dec --global 的引入页勾选并保存。"),
 		)
 	}
 	return strings.Join(lines, "\n")
@@ -3853,12 +3882,12 @@ func (m model) renderAssetDetails() string {
 						role = "用户已启用"
 					}
 					lines = append(lines,
-						fmt.Sprintf("P: %s", bo.Name),
+						fmt.Sprintf("项目: %s", bo.Name),
 						fmt.Sprintf("角色: %s", role),
-						fmt.Sprintf("public/user: %d", bo.Quadrants["public/user"]),
-						fmt.Sprintf("private/user: %d", bo.Quadrants["private/user"]),
-						fmt.Sprintf("public/project: %d", bo.Quadrants["public/project"]),
-						fmt.Sprintf("private/project: %d", bo.Quadrants["private/project"]),
+						fmt.Sprintf("public/global: %d", bo.Quadrants["public/global"]),
+						fmt.Sprintf("private/global: %d", bo.Quadrants["private/global"]),
+						fmt.Sprintf("public/local: %d", bo.Quadrants["public/local"]),
+						fmt.Sprintf("private/local: %d", bo.Quadrants["private/local"]),
 					)
 					return strings.Join(lines, "\n")
 				}
@@ -4443,28 +4472,19 @@ func (m model) currentAssetFilterLabel() string {
 	return filter
 }
 
-func (m model) isHomePage() bool {
-	return m.pages[m.pageIndex] == "Home"
-}
-
 func (m model) hasVaultInferencePrompt() bool {
 	return m.vaultInference != nil && !m.vaultInferenceDismissed && !m.vaultApplyLoad.busy()
 }
 
-func (m model) isBundlesPage() bool {
-	return m.pages[m.pageIndex] == "Bundles"
+func (m model) currentPage() string {
+	if m.pageIndex < 0 || m.pageIndex >= len(m.pages) {
+		return ""
+	}
+	return m.pages[m.pageIndex]
 }
 
-func (m model) isSettingsPage() bool {
-	return m.pages[m.pageIndex] == "Settings"
-}
-
-func (m model) isProjectPage() bool {
-	return m.pages[m.pageIndex] == "Project"
-}
-
-func (m model) isRunPage() bool {
-	return m.pages[m.pageIndex] == "Run"
+func (m model) isProjectSettings() bool {
+	return m.isSettingsPage() && m.plane != app.WorkspaceUser && m.plane != app.WorkspaceGlobal
 }
 
 func (m model) currentSummary() string {
@@ -4589,7 +4609,7 @@ func (m model) currentSummary() string {
 		}
 		return "Run page ready"
 	}
-	if m.isProjectPage() {
+	if m.isProjectSettings() {
 		if m.projectSettingsErr != nil {
 			return "Project settings unavailable"
 		}
@@ -4695,7 +4715,7 @@ func suggestNextAction(overview *app.ProjectOverview, vaultInferencePending, loc
 		return "正在加载项目概览…"
 	}
 	if !overview.RepoConnected {
-		return "到 Settings 配置 Repo URL"
+		return "到设置页配置 Repo URL"
 	}
 	if vaultInferencePending {
 		return "确认检测到的项目配置：y 应用 · n 跳过"
@@ -4704,12 +4724,12 @@ func suggestNextAction(overview *app.ProjectOverview, vaultInferencePending, loc
 		return "确认当前目录是否正确：y 初始化 · n 保持不变"
 	}
 	if !overview.ProjectConfigReady {
-		return "到 Project 页按 i 发起初始化确认"
+		return "在项目页确认后初始化绑定项目"
 	}
 	if countOverviewEnabledBundles(overview) == 0 {
-		return "到 Bundles 勾选并保存"
+		return "到引入页勾选并保存"
 	}
-	return "到 Run 页按 p 拉取"
+	return "到同步页按 p 拉取"
 }
 
 func formatInferenceBundleNames(bundles []string) string {

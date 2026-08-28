@@ -28,7 +28,7 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 		t.Fatalf("读取保存后的配置失败: %v", err)
 	}
 	content := string(raw)
-	if !strings.Contains(content, "#   ides:") || !strings.Contains(content, "#   editor: code --wait") {
+	if !strings.Contains(content, "kind: project") || !strings.Contains(content, "version: v2") {
 		t.Fatalf("项目配置头注释应包含 ides/editor 示例, 实际内容:\n%s", content)
 	}
 	if !strings.Contains(content, "version: v2") {
@@ -519,5 +519,20 @@ func TestLoadVarsConfig_NoVarsDDir(t *testing.T) {
 	}
 	if len(cfg.Vars) != 1 {
 		t.Fatalf("vars 长度 = %d, 期望 1", len(cfg.Vars))
+	}
+}
+
+func TestLoadProjectConfig_RejectsGlobalKind(t *testing.T) {
+	projectRoot := t.TempDir()
+	decDir := filepath.Join(projectRoot, ".dec")
+	if err := os.MkdirAll(decDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(decDir, "config.yaml"), []byte("kind: global\nversion: v2\nrepo_url: https://example.com/x.git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewProjectConfigManager(projectRoot).LoadProjectConfig()
+	if err == nil || !strings.Contains(err.Error(), "全局配置") {
+		t.Fatalf("应拒绝 kind: global, err=%v", err)
 	}
 }

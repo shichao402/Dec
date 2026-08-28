@@ -41,13 +41,33 @@ type MCPServer struct {
 	Extra             map[string]any    `json:"-"`
 }
 
+// ConfigKind 区分本机全局配置与工作区项目配置，避免互相误升级。
+type ConfigKind string
+
+const (
+	ConfigKindGlobal  ConfigKind = "global"
+	ConfigKindProject ConfigKind = "project"
+)
+
+const (
+	// GlobalConfigVersion 是 ~/.dec/config.yaml 字段 schema。
+	GlobalConfigVersion = 1
+	// ProjectConfigSchemaVersion 是工作区 .dec/config.yaml 字段 schema（沿用 v2 字符串）。
+	ProjectConfigSchemaVersion = 2
+	// LocalLayoutVersion 是 cache / secrets 派生目录布局。
+	LocalLayoutVersion = 1
+)
+
 // GlobalConfig 全局配置结构 (~/.dec/config.yaml)
 type GlobalConfig struct {
-	RepoURL           string   `yaml:"repo_url,omitempty"`
-	IDEs              []string `yaml:"ides,omitempty"`
-	Editor            string   `yaml:"editor,omitempty"`
-	ServerIdleTimeout string   `yaml:"server_idle_timeout,omitempty"`
-	// EnabledProjects 是 ADR 0016 的用户平面 P 启用列表。
+	Kind              ConfigKind `yaml:"kind,omitempty"`
+	Version           int        `yaml:"version,omitempty"`
+	LayoutVersion     int        `yaml:"layout_version,omitempty"`
+	RepoURL           string     `yaml:"repo_url,omitempty"`
+	IDEs              []string   `yaml:"ides,omitempty"`
+	Editor            string     `yaml:"editor,omitempty"`
+	ServerIdleTimeout string     `yaml:"server_idle_timeout,omitempty"`
+	// EnabledProjects 是本机启用的 Project 列表。
 	EnabledProjects []string `yaml:"enabled_projects,omitempty"`
 	// EnabledBundles 仅用于读取旧配置；运行时会归一到当前启用列表。
 	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
@@ -55,15 +75,18 @@ type GlobalConfig struct {
 
 const ProjectConfigVersionV2 = "v2"
 
-// ProjectManifestFileName 是顶层 P 的声明文件。
+// ProjectManifestFileName 是顶层 Project 的声明文件。
 const ProjectManifestFileName = "dec.yaml"
 
-// PNamePattern 是 P 名的唯一命名契约：小写 kebab-case。
-const PNamePattern = `^[a-z0-9]+(?:-[a-z0-9]+)*$`
+// ProjectNamePattern 是 Project 名的唯一命名契约：小写 kebab-case。
+const ProjectNamePattern = `^[a-z0-9]+(?:-[a-z0-9]+)*$`
 
-var pNameRegexp = regexp.MustCompile(PNamePattern)
+// PNamePattern 是 ProjectNamePattern 的旧名。
+const PNamePattern = ProjectNamePattern
 
-// AssetVisibility 表示资产能否被其他 P 引用。
+var projectNameRegexp = regexp.MustCompile(ProjectNamePattern)
+
+// AssetVisibility 表示资产能否被其他项目引用。
 type AssetVisibility string
 
 const (
@@ -71,16 +94,31 @@ const (
 	AssetVisibilityPrivate AssetVisibility = "private"
 )
 
-// AssetPlane 表示资产安装到用户级还是项目级。
+// AssetPlane 表示资产安装到本机还是本仓库。
 type AssetPlane string
 
 const (
+	AssetPlaneGlobal AssetPlane = "global"
+	AssetPlaneLocal  AssetPlane = "local"
+	// 旧象限目录名，仅扫描/迁移识别。
 	AssetPlaneUser    AssetPlane = "user"
 	AssetPlaneProject AssetPlane = "project"
 )
 
-// P 是 Git 仓库顶层唯一可写单元，对应 <p>/dec.yaml。
-type P struct {
+// CanonicalAssetPlane 把旧象限名归一到 global/local。
+func CanonicalAssetPlane(plane AssetPlane) AssetPlane {
+	switch plane {
+	case AssetPlaneUser, AssetPlaneGlobal:
+		return AssetPlaneGlobal
+	case AssetPlaneProject, AssetPlaneLocal, "":
+		return AssetPlaneLocal
+	default:
+		return plane
+	}
+}
+
+// Project 是 Git 仓库顶层唯一可写单元，对应 <name>/dec.yaml。
+type Project struct {
 	Name        string   `yaml:"name"`
 	Title       string   `yaml:"title,omitempty"`
 	Description string   `yaml:"description,omitempty"`
@@ -89,16 +127,31 @@ type P struct {
 	Editor      string   `yaml:"editor,omitempty"`
 }
 
-func IsValidPName(name string) bool {
-	return pNameRegexp.MatchString(strings.TrimSpace(name))
+// P 是 Project 的旧类型名。
+type P = Project
+
+func IsValidProjectName(name string) bool {
+	return projectNameRegexp.MatchString(strings.TrimSpace(name))
 }
 
-func PManifestPath(name string) string {
+func IsValidPName(name string) bool {
+	return IsValidProjectName(name)
+}
+
+func ProjectManifestPath(name string) string {
 	return filepath.Join(name, ProjectManifestFileName)
 }
 
+func PManifestPath(name string) string {
+	return ProjectManifestPath(name)
+}
+
+func ProjectQuadrantDir(name string, visibility AssetVisibility, plane AssetPlane) string {
+	return filepath.Join(name, string(visibility), string(CanonicalAssetPlane(plane)))
+}
+
 func PQuadrantDir(name string, visibility AssetVisibility, plane AssetPlane) string {
-	return filepath.Join(name, string(visibility), string(plane))
+	return ProjectQuadrantDir(name, visibility, plane)
 }
 
 // VaultProjectsDir 是 Git Vault 中 project 声明目录。
@@ -113,28 +166,13 @@ const BundleManifestFileName = "bundle.yaml"
 // VaultProjectFileExt 是 project 声明文件扩展名。
 const VaultProjectFileExt = ".yaml"
 
-// Project 描述 vault 中 projects/<name>.yaml 的项目声明。
-//
-// Wire format 示例（projects/my-app.yaml）：
-//
-//	name: my-app
-//	description: 我的应用项目
-//	bundles:
-//	  - vikunja
-//	  - helloworld
-//	ides:
-//	  - cursor
-type Project struct {
-	// Name 为 project 短名，与文件名 projects/<name>.yaml 一致。
-	Name string `yaml:"name"`
-	// Description 是 TUI 展示用的一句话描述。
-	Description string `yaml:"description,omitempty"`
-	// Bundles 列出该项目启用的 Dec bundle 短名（对应 bundles/<name>/）。
-	Bundles []string `yaml:"bundles"`
-	// IDEs 为该项目默认 IDE 列表；本地 .dec/config.yaml 可覆盖。
-	IDEs []string `yaml:"ides,omitempty"`
-	// Editor 为该项目默认交互式编辑器；本地可覆盖。
-	Editor string `yaml:"editor,omitempty"`
+// LegacyVaultProject 描述旧模型 vault 中 projects/<name>.yaml。
+type LegacyVaultProject struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description,omitempty"`
+	Bundles     []string `yaml:"bundles"`
+	IDEs        []string `yaml:"ides,omitempty"`
+	Editor      string   `yaml:"editor,omitempty"`
 }
 
 // VaultProjectPath 返回 vault 内 project 声明的相对路径。
@@ -152,16 +190,16 @@ func VaultBundleManifestPath(name string) string {
 	return VaultBundleDir(name) + "/" + BundleManifestFileName
 }
 
-// ProjectConfig 项目配置 (<project>/.dec/config.yaml)
+// ProjectConfig 工作区配置 (<workspace>/.dec/config.yaml)
 type ProjectConfig struct {
-	Version string `yaml:"version,omitempty"`
-	// ProjectName 引用 vault projects/<project_name>.yaml。
-	// 未显式设置时，调用方应 fallback 到 filepath.Base(projectRoot)，但不会自动写回 yaml。
+	Kind          ConfigKind `yaml:"kind,omitempty"`
+	Version       string     `yaml:"version,omitempty"`
+	LayoutVersion int        `yaml:"layout_version,omitempty"`
+	// ProjectName 是绑定项目名，对应 vault <name>/dec.yaml。
 	ProjectName string   `yaml:"project_name,omitempty"`
 	IDEs        []string `yaml:"ides,omitempty"`
 	Editor      string   `yaml:"editor,omitempty"`
-	// EnabledBundles 是本项目启用的 bundle 短名列表，也是唯一的资产启用入口。
-	// 早期版本支持的单资产粒度（available / enabled）已移除，加载旧配置时会折叠成 bundle 引用。
+	// EnabledBundles 是旧启用列表；P 模型下 requires 才是 SSOT。
 	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
 }
 

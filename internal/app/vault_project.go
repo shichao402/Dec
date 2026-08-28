@@ -61,7 +61,7 @@ func NeedsVaultProjectAutoApply(projectRoot string) (bool, error) {
 
 // LoadVaultProject 从 vault mirror 读取 projects/<name>.yaml。
 // 第二个返回值表示文件是否存在。
-func LoadVaultProject(repoDir, name string) (*types.Project, bool, error) {
+func LoadVaultProject(repoDir, name string) (*types.LegacyVaultProject, bool, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || repoDir == "" {
 		return nil, false, nil
@@ -74,7 +74,7 @@ func LoadVaultProject(repoDir, name string) (*types.Project, bool, error) {
 		}
 		return nil, false, fmt.Errorf("读取 vault project %q 失败: %w", name, err)
 	}
-	var project types.Project
+	var project types.LegacyVaultProject
 	if err := yaml.Unmarshal(data, &project); err != nil {
 		return nil, true, fmt.Errorf("解析 vault project %q 失败: %w", name, err)
 	}
@@ -113,7 +113,7 @@ func InferVaultProject(projectRoot string, reporter Reporter) (*VaultProjectInfe
 		return nil, nil
 	}
 
-	var vaultProject *types.Project
+	var vaultProject *types.LegacyVaultProject
 	var inferredP *types.P
 	if err := withLocalReadRepoDir(func(repoDir string) error {
 		projects, scanErr := pmodel.Scan(repoDir)
@@ -250,7 +250,7 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 		return result, nil
 	}
 
-	var vaultProject *types.Project
+	var vaultProject *types.LegacyVaultProject
 	if err := withLocalReadRepoDir(func(repoDir string) error {
 		loaded, found, loadErr := LoadVaultProject(repoDir, projectName)
 		if loadErr != nil {

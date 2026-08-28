@@ -29,9 +29,9 @@ func NewRemoteScope(pName string, plane SyncPlane) (RemoteScope, error) {
 	}
 	switch {
 	case IsMachinePlane(plane):
-		return RemoteScope{P: name, Plane: SyncPlaneMachine}, nil
-	case plane == SyncPlaneProject || plane == "":
-		return RemoteScope{P: name, Plane: SyncPlaneProject}, nil
+		return RemoteScope{P: name, Plane: SyncPlaneGlobal}, nil
+	case plane == SyncPlaneProject || plane == SyncPlaneLocal || plane == "":
+		return RemoteScope{P: name, Plane: SyncPlaneLocal}, nil
 	default:
 		return RemoteScope{}, fmt.Errorf("未知 SyncPlane %q", plane)
 	}
@@ -68,10 +68,10 @@ func ParseRemoteScope(label string) (RemoteScope, error) {
 		return RemoteScope{}, fmt.Errorf("远端地址 %q 不是 <p>/%s/<plane>", label, bwPrivateSegment)
 	}
 	switch parts[2] {
-	case string(SyncPlaneUser), string(SyncPlaneMachine):
-		return NewRemoteScope(parts[0], SyncPlaneMachine)
-	case string(SyncPlaneProject):
-		return NewRemoteScope(parts[0], SyncPlaneProject)
+	case string(SyncPlaneUser), string(SyncPlaneMachine), string(SyncPlaneGlobal):
+		return NewRemoteScope(parts[0], SyncPlaneGlobal)
+	case string(SyncPlaneProject), string(SyncPlaneLocal):
+		return NewRemoteScope(parts[0], SyncPlaneLocal)
 	default:
 		return RemoteScope{}, fmt.Errorf("远端地址 %q 的平面段非法", label)
 	}
@@ -80,10 +80,10 @@ func ParseRemoteScope(label string) (RemoteScope, error) {
 // planeSegment 返回条目名里的平面段：user 或 project。
 func (s RemoteScope) planeSegment() string {
 	if IsMachinePlane(s.Plane) {
-		return string(SyncPlaneUser)
+		return string(SyncPlaneGlobal)
 	}
-	if s.Plane == SyncPlaneProject || s.Plane == "" {
-		return string(SyncPlaneProject)
+	if s.Plane == SyncPlaneProject || s.Plane == SyncPlaneLocal || s.Plane == "" {
+		return string(SyncPlaneLocal)
 	}
 	return ""
 }
@@ -120,15 +120,36 @@ func (s RemoteScope) decodeItemName(itemName string) (string, bool) {
 		return "", false
 	}
 	trimmed := strings.TrimSpace(strings.ReplaceAll(itemName, "\\", "/"))
-	prefix := s.itemPrefix()
-	if !strings.HasPrefix(trimmed, prefix) {
-		return "", false
+	for _, prefix := range s.itemPrefixes() {
+		if !strings.HasPrefix(trimmed, prefix) {
+			continue
+		}
+		rel, err := normalizeSyncRelPath(strings.TrimPrefix(trimmed, prefix))
+		if err != nil {
+			return "", false
+		}
+		return rel, true
 	}
-	rel, err := normalizeSyncRelPath(strings.TrimPrefix(trimmed, prefix))
-	if err != nil {
-		return "", false
+	return "", false
+}
+
+func (s RemoteScope) itemPrefixes() []string {
+	current := s.itemPrefix()
+	out := []string{current}
+	if IsMachinePlane(s.Plane) {
+		for _, legacy := range []string{string(SyncPlaneUser), string(SyncPlaneMachine)} {
+			seg := bwPrivateSegment + "/" + legacy + "/"
+			if seg != current {
+				out = append(out, seg)
+			}
+		}
+	} else {
+		legacy := bwPrivateSegment + "/" + string(SyncPlaneProject) + "/"
+		if legacy != current {
+			out = append(out, legacy)
+		}
 	}
-	return rel, true
+	return out
 }
 
 // bwScope 是一次远端读写的实际落点：Bitwarden folder 名 + 条目名编解码规则。
@@ -198,10 +219,10 @@ func bwPlaneSegmentOfItemName(itemName string) (SyncPlane, bool) {
 		return "", false
 	}
 	switch parts[1] {
-	case string(SyncPlaneUser):
-		return SyncPlaneMachine, true
-	case string(SyncPlaneProject):
-		return SyncPlaneProject, true
+	case string(SyncPlaneUser), string(SyncPlaneMachine), string(SyncPlaneGlobal):
+		return SyncPlaneGlobal, true
+	case string(SyncPlaneProject), string(SyncPlaneLocal):
+		return SyncPlaneLocal, true
 	default:
 		return "", false
 	}

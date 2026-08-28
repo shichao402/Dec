@@ -11,12 +11,11 @@ Dec 以 **TUI**（`internal/tui/`）为第一交互入口。无参运行 `dec` �
 
 ## 1. 设计目标
 
-- **TUI-first**：日常操作（连接仓库、初始化 project、选择 bundle、pull/push/remove、自更新）均在 TUI 完成，不暴露 `dec pull`、`dec config`、`dec update` 等用户面 CLI 子命令。
+- **TUI-first**：日常操作（连接仓库、绑定项目、引入、pull/push、自更新）均在 TUI 完成，不暴露 `dec pull`、`dec config`、`dec update` 等用户面 CLI 子命令。
 - **单二进制**：Bubble Tea 生态（`bubbletea`、`bubbles`、`lipgloss`），无 Node.js 或前端运行时。
 - **服务 / 门面**：TUI 与 Agent MCP 都通过本机 gRPC 调 `dec-server`；只有服务进程调用 `internal/app/`。TUI 禁止内嵌 app 降级或 shell out 调业务子命令。
-- **结构化事件**：长任务通过 `Reporter` / `OperationEvent` 暴露进度，TUI Run 页渲染日志与阶段状态。
-- **P 是唯一新写对象**：Bundles 页名称为兼容 UI 标签；P 仓库中它展示/选择 P，
-  项目平面保存家 P 的 direct `requires`，用户平面保存 `enabled_projects`。
+- **结构化事件**：长任务通过 `Reporter` / `OperationEvent` 暴露进度，TUI **同步**页渲染日志与阶段状态。
+- **Project 是唯一新写对象**：引入页勾选其他项目；本仓库写绑定项目的 `requires`，本机写 `enabled_projects`。四象限是磁盘布局，不当导航。
 
 ## 2. 入口路由
 
@@ -37,23 +36,17 @@ dec --version / dec --help / dec __freshness-check
 
 | 页面 | 职责 |
 |------|------|
-| **Home** | 项目概览、建议下一步、**project 初始化**（自动匹配 vault 同名 project、选择或新建） |
-| **Bundles** | P 仓库中浏览四象限并选择 P：project 更新家 P direct `requires`，user 更新 `enabled_projects`；legacy 仓库保留 bundle 兼容展示 |
-| **Project** | 项目级 IDE / editor 覆盖、**项目变量**（`.dec/vars.yaml` 只读预览，按 `e` 挂起外部编辑器） |
-| **Run** | pull / push / remove；`u` 自更新；P pull 解析家 P/direct requires 或用户启用 P，再拉 Git 四象限与 BW private |
-| **Remote** | 上下文无关的完整远端浏览器/编辑器（Dec Git vault 全量 + Bitwarden 全部 folder + 无文件夹只读区）；`e` temp 编辑、`n` 登记到光标所在 folder / `N` 登记到新 folder、`a`/`A` 全选/全不选、远端/本地删除拆分、跨上下文 typed confirm（ADR 0004） |
-| **Settings** | 连接 Git 仓库、Bitwarden 配置、全局 IDE / editor、**本机 vars** 外部编辑、服务版本 mismatch 提示与重启 `dec-server`；用户级 bundle 启用只做只读计数展示 |
+| **项目** | 绑定项目资产、未初始化引导、`n` 新建本地资产 |
+| **引入** | 本仓库 `requires` / 本机 `enabled_projects` |
+| **同步** | pull / push / `u` 自更新 |
+| **设置** | 仓库、Bitwarden、IDE、vars、重启服务（含原 Project 页的 IDE/vars） |
+| **Remote**（`Ctrl+R` 二级页） | 远端浏览、登记、删除 |
 
-侧栏导航：`Home` → `Bundles` → `Project` → `Run` → `Remote` → `Settings`（`tab` / `shift+tab` 切换）。
+顶栏页签：`项目` → `引入` → `同步` → `设置`（`tab` / `shift+tab`）。Remote 不进页签。
 
-`dec --user` 进入用户平面，页列为 `Home` → `Bundles` → `Run` → `Remote` → `Settings`。
-P 模型下 Bundles / Run 只安装显式启用 P 的 user 两象限，落点为
-`~/.dec/cache/<p>/...`、`~/.dec/secrets/<p>/` 与用户 IDE；**Remote 页可见性不按平面过滤**。
-Project 页不开放。旧 Git/BW 布局由一次性远端迁移处理；新版本启动只清理本机遗留 cache / secrets，不在 TUI 提供迁移页。
+`dec --global`（`--user` 隐藏别名）进入本机平面。`Workspace.Root` 为空，**不得**读写项目配置。见 [0015](decisions/0015-project-config-boundary.md)、[0017](decisions/0017-local-layout-version.md)。
 
-用户平面的 `Workspace.Root` 是空串，**不得**发起任何项目配置读写：Home 加载完 overview 后的 vault project 推断只在项目平面发起。空项目根会让 `.dec/` 退化成相对 `dec-server` cwd 的路径，进而覆盖全局配置；`ProjectConfigManager` 已在实现侧直接拒绝，TUI 这层不发起是为了不去撞那道墙。见 [0015](decisions/0015-project-config-boundary.md)。
-
-用户平面的 Bundles 页是 `GlobalConfig.EnabledBundles` 的**唯一写入口**（Settings 只读展示计数，避免两处基于各自快照互相覆盖）。候选除 vault 扫描结果外，还合入 `known_secret_bundles` 与 Bitwarden folder 枚举。补进来的候选按 vault scope 分流（ADR 0013）：vault 尚无 manifest 的标 `SecretsOnly`，展示「仓库未登记」，勾选保存时由 `ensureVaultBundlesForUserEnable` 补一份 `scope: user` 声明，标记随之消失；vault 已有 manifest 但 scope 属于另一平面的标 `OtherPlane`，展示「属于项目平面」、复选框为 `[-]` 且不可勾选——跨平面要先显式改 manifest 的 scope，绝不由一次勾选静默改写。保存时先校验/修复共享 vault 再写本机启用列表，被拒条目不进 `enabled_bundles`。无 Bitwarden session 时候选退化为 known ∪ 已启用，不为列候选触发 web unlock。
+本机平面的**引入**页是 `GlobalConfig.EnabledBundles` / `enabled_projects` 的**唯一写入口**（设置页只读展示计数）。
 
 `SecretsOnly` 还要再按**远端核对结果**分流：`known_secret_bundles` 是只增不减的本机缓存（只有 pull reconcile / 删除 bundle 才摘），远端删掉 folder 后名字会一直留着。远端枚举成功且名单里没有该名字时，未启用的直接 `ForgetSecretBundles` 摘掉本机残留（不进候选），已启用的标 `RemoteMissing`，展示「远端无内容 · 本机残留」——它已启用，得留着让用户能取消勾选。无 session / 枚举失败 / 该 bundle 绑了别名 folder（远端枚举只覆盖 `bundle/*`）时标 `RemoteUnverified`，展示「未核对远端」。「远端确实没有」与「这次没问过远端」必须分开：混同会让候选谎报「Bitwarden 已有同名 secrets」，并诱导用户勾出一个拉不到内容的空 user bundle。
 
@@ -90,21 +83,21 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 ### 5.1 首次使用
 
 1. 运行 `dec` → TUI 启动
-2. **Settings** → 连接个人 Git 仓库 URL、配置本机 IDE
-3. **Home** → 初始化 project（推断目录 basename → 自动匹配 vault `projects/<name>.yaml`，或选择/新建）
-4. **Assets** → 确认 bundle / 资产启用
-5. **Run** → pull（Dec bundle → `.dec/cache/` + secrets bundle → 项目根 / `~/.ssh/` → 渲染 IDE）
+2. **设置** → 连接个人 Git 仓库 URL、配置本机 IDE
+3. **项目** → 初始化绑定项目（目录 basename 或选择/新建）
+4. **引入** → 勾选其他项目（本仓库 `requires` / 本机 `enabled_projects`）
+5. **同步** → pull（Git → `.dec/cache/` + secrets → `.secrets/` / `~/.dec/secrets/` → 渲染 IDE）
 
 ### 5.2 新机器同名 project 自动匹配
 
-工作区目录 basename 与 vault 中 `projects/<basename>.yaml` 同名时，Home 初始化 **自动应用** vault project，写入本地 `project_name` 与 `enabled_bundles`，无需手工复制 bundle 列表。详见 [ARCHITECTURE.md — Project 初始化](./ARCHITECTURE.md#project-初始化tuifirst)。**仅项目平面**：`dec --user` 没有工作区目录，不做这一步（[0015](decisions/0015-project-config-boundary.md)）。
+工作区目录 basename 可自动绑定同名 Project。**仅本仓库平面**：`dec --global` 没有工作区目录，不做这一步（[0015](decisions/0015-project-config-boundary.md)）。
 
-### 5.3 Run 页 pull
+### 5.3 同步页 pull
 
-1. project：解析家 P → 家 P project 两象限 + direct requires 的 `public/project`；
-   user：解析 `enabled_projects` → 各 P user 两象限
-2. 拉 Git → `.dec/cache/<p>/<visibility>/<plane>/`
-3. 自动拉 BW `<p>/private/<plane>` → `.secrets/<p>/` 或 `~/.dec/secrets/<p>/`
+1. 本仓库：解析绑定项目 → local 两象限 + direct requires 的 `public/local`；
+   本机：解析 `enabled_projects` → 各项目的 global 两象限
+2. 拉 Git → `.dec/cache/<name>/<visibility>/<plane>/`
+3. 自动拉 BW `<name>/private/<plane>` → `.secrets/<name>/` 或 `~/.dec/secrets/<name>/`
 4. 零重叠校验 → 从 cache 渲染 IDE + 非敏感 vars 占位符替换
 5. **孤儿 reconcile**：仅对本次启用且远端对照成功的 SyncTarget / vault 目标集清理本地孤儿；无法确认则只报告（见 [0010](decisions/0010-pull-orphan-and-ops.md)）
 
@@ -117,7 +110,7 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 
 同理，Bundles 页保存后 `RejectedBundles` 逐条显示（[0013](decisions/0013-secrets-belong-to-declared-target.md) §7a）。凡是「结构化结果里已有结论」的信息，都不靠会滚走的事件区承载。
 
-### 5.4 Project 页变量编辑
+### 5.4 设置页变量编辑
 
 - 按 `e` 通过 `tea.ExecProcess` 挂起 TUI、拉起外部编辑器编辑 `.dec/vars.yaml`
 - **禁止**在 TUI 内直接调用 `editor.Open`（会与 Bubble Tea 持有的 TTY 冲突）

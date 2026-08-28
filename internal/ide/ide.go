@@ -14,8 +14,10 @@ import (
 type Plane string
 
 const (
-	PlaneProject Plane = "project"
-	PlaneUser    Plane = "user"
+	PlaneLocal  Plane = "local"
+	PlaneGlobal Plane = "global"
+	PlaneProject      = PlaneLocal
+	PlaneUser         = PlaneGlobal
 )
 
 // IDE 接口定义了不同 IDE 的目录结构和文件操作

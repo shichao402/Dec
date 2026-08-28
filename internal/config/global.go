@@ -66,6 +66,18 @@ func LoadGlobalConfig() (*types.GlobalConfig, error) {
 		if err := yaml.Unmarshal(data, config); err != nil {
 			return nil, fmt.Errorf("解析全局配置失败: %w", err)
 		}
+		if config.Kind == types.ConfigKindProject {
+			return nil, fmt.Errorf("%s 是项目配置，不能当全局配置读取", configPath)
+		}
+		if config.Kind == "" {
+			config.Kind = types.ConfigKindGlobal
+		}
+		if config.Version > types.GlobalConfigVersion {
+			return nil, fmt.Errorf("全局配置版本 %d 新于当前 Dec（%d），请升级", config.Version, types.GlobalConfigVersion)
+		}
+		if config.Version == 0 {
+			config.Version = types.GlobalConfigVersion
+		}
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("读取全局配置失败: %w", err)
 	}
@@ -116,12 +128,24 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 		toWrite = &normalized
 	}
 
+	if toWrite != nil {
+		if toWrite.Kind == "" {
+			toWrite.Kind = types.ConfigKindGlobal
+		}
+		if toWrite.Version == 0 {
+			toWrite.Version = types.GlobalConfigVersion
+		}
+		if toWrite.LayoutVersion == 0 {
+			toWrite.LayoutVersion = types.LocalLayoutVersion
+		}
+	}
+
 	data, err := yaml.Marshal(toWrite)
 	if err != nil {
 		return fmt.Errorf("序列化配置失败: %w", err)
 	}
 
-	header := "# Dec 全局配置\n# repo_url: 个人资产仓库地址\n# ides: 默认 IDE 列表，例如：\n#   ides:\n#     - cursor\n# editor: 交互式编辑器命令，例如：\n#   editor: code --wait\n# enabled_projects: 用户平面启用的 P（安装 public/user 与 private/user）\n# P 名必须为小写 kebab-case。\n\n"
+	header := "# Dec 全局配置\n# kind: global\n# version: 配置字段版本\n# layout_version: cache/secrets 布局版本\n# enabled_projects: 本机启用的项目\n\n"
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入全局配置失败: %w", err)
 	}

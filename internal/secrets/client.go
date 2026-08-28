@@ -52,10 +52,52 @@ type StubClient struct {
 
 // stubAddress 是 StubClient 的索引键：远端逻辑地址。
 func stubAddress(target SyncTarget) string {
-	if addr := strings.TrimSpace(target.Address); addr != "" {
-		return addr
+	raw := strings.TrimSpace(target.Address)
+	if raw == "" {
+		raw = strings.TrimSpace(target.Name)
 	}
-	return strings.TrimSpace(target.Name)
+	if scope, err := ParseRemoteScope(raw); err == nil {
+		return scope.String()
+	}
+	return raw
+}
+
+func stubNotes(c *StubClient, target SyncTarget) []SecureNote {
+	return stubMapLookup(c.NotesByFolder, stubAddress(target))
+}
+
+func stubSSHKeys(c *StubClient, target SyncTarget) []SSHKeyItem {
+	return stubMapLookup(c.SSHKeysByFolder, stubAddress(target))
+}
+
+func stubMapLookup[T any](m map[string][]T, canonical string) []T {
+	if m == nil {
+		return nil
+	}
+	if v, ok := m[canonical]; ok {
+		return v
+	}
+	for k, v := range m {
+		if scope, err := ParseRemoteScope(k); err == nil && scope.String() == canonical {
+			return v
+		}
+	}
+	return nil
+}
+
+func stubMapStore[T any](m map[string][]T, canonical string, val []T) {
+	if m == nil {
+		return
+	}
+	m[canonical] = val
+	for k := range m {
+		if k == canonical {
+			continue
+		}
+		if scope, err := ParseRemoteScope(k); err == nil && scope.String() == canonical {
+			delete(m, k)
+		}
+	}
 }
 
 // requireDeleteScope 校验删除目标并解析出远端落点。
@@ -68,9 +110,8 @@ func requireDeleteScope(target SyncTarget) (bwScope, error) {
 }
 
 func (c *StubClient) PullBundle(_ context.Context, req PullBundleRequest) (*PullBundleResult, error) {
-	folder := stubAddress(req.Target)
-	notes := c.NotesByFolder[folder]
-	keys := c.SSHKeysByFolder[folder]
+	notes := stubNotes(c, req.Target)
+	keys := stubSSHKeys(c, req.Target)
 	result := &PullBundleResult{}
 	if notes != nil {
 		copied := make([]SecureNote, len(notes))
@@ -87,7 +128,7 @@ func (c *StubClient) PullBundle(_ context.Context, req PullBundleRequest) (*Pull
 
 func (c *StubClient) GetNote(_ context.Context, target SyncTarget, noteRel string) (*SecureNote, error) {
 	address := stubAddress(target)
-	for _, note := range c.NotesByFolder[address] {
+	for _, note := range stubNotes(c, target) {
 		if note.RelativePath == noteRel {
 			copied := note
 			return &copied, nil
@@ -104,7 +145,7 @@ func (c *StubClient) PushBundle(_ context.Context, req PushBundleRequest, notes 
 	if c.NotesByFolder == nil {
 		c.NotesByFolder = make(map[string][]SecureNote)
 	}
-	merged := append([]SecureNote(nil), c.NotesByFolder[folder]...)
+	merged := append([]SecureNote(nil), stubNotes(c, req.Target)...)
 	indexOf := make(map[string]int, len(merged))
 	for i, note := range merged {
 		indexOf[note.RelativePath] = i
@@ -122,7 +163,7 @@ func (c *StubClient) PushBundle(_ context.Context, req PushBundleRequest, notes 
 		}
 		result.Paths = append(result.Paths, note.RelativePath)
 	}
-	c.NotesByFolder[folder] = merged
+	stubMapStore(c.NotesByFolder, folder, merged)
 	return result, nil
 }
 

@@ -74,6 +74,7 @@ func callerFromMetadata(ctx context.Context) (facade, clientID string) {
 func isProjectMutation(method string) bool {
 	switch method {
 	case "save_enabled_bundles", "prepare_project_config_init", "ensure_local_project_config",
+		"ensure_home_p", "create_local_asset",
 		"apply_vault_project", "save_project_settings", "ensure_project_vars",
 		"prepare_remote_note_edit", "prepare_remote_ssh_hosts_edit":
 		return true
@@ -128,9 +129,9 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 	case "prepare_project_config_init":
 		return app.PrepareProjectConfigInit(projectRoot, reporter)
 	case "ensure_local_project_config":
-		return app.EnsureLocalProjectConfig(projectRoot, reporter)
+		return writer.BindHomeProject(projectRoot, reporter)
 	case "ensure_home_p":
-		return writer.BindHomeP(projectRoot, reporter)
+		return writer.BindHomeProject(projectRoot, reporter)
 	case "infer_vault_project":
 		return app.InferVaultProject(projectRoot, reporter)
 	case "apply_vault_project":
@@ -351,6 +352,13 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		in.ProjectRoot = projectRoot
 		in.Plane = workspace.EffectivePlane()
 		return writer.DeleteItems(ctx, in, reporter)
+	case "create_local_asset":
+		var in app.CreateLocalAssetInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		in.Workspace = workspace
+		return app.CreateLocalAsset(in)
 	case "add_secret":
 		var in struct {
 			Target  secrets.SyncTarget

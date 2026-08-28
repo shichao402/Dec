@@ -27,9 +27,17 @@ func TestPreviewPushProjectAssets_CountsSecretsTargetsNotFiles(t *testing.T) {
 	if preview.EnabledBundleCount != 1 {
 		t.Fatalf("EnabledBundleCount = %d, want 1", preview.EnabledBundleCount)
 	}
-	// 项目平面 secrets 只有本项目 P 的 private/project 一个落点。
-	if preview.SecretsTargetCount != 1 || preview.ProjectSecretsName != "demo/private/project" {
+	if preview.SecretsTargetCount != 1 || preview.ProjectSecretsName != "demo/private/local" {
 		t.Fatalf("SecretsTargetCount = %d, ProjectSecretsName = %q",
 			preview.SecretsTargetCount, preview.ProjectSecretsName)
+	}
+}
+
+func TestPorcelainOpAndQuadrantFromGitPath(t *testing.T) {
+	if porcelainOp("A") != "新建" || porcelainOp("??") != "新建" || porcelainOp("M") != "修改" || porcelainOp("D") != "删除" {
+		t.Fatalf("porcelainOp mapping")
+	}
+	if got := quadrantFromGitPath("demo/public/local/skills/x/SKILL.md"); got != "public/local" {
+		t.Fatalf("quadrant=%q", got)
 	}
 }

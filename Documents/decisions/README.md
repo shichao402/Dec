@@ -35,5 +35,6 @@
 | [0012](0012-user-bundle-single-entry.md) | 用户平面 bundle 启用收拢到 Bundles 页 | 已接受（已实现）；「仅 secrets」文案被 0013 修订 |
 | [0013](0013-secrets-belong-to-declared-target.md) | Secrets 必须归属已声明 SyncTarget：写入接口类型级收口 | 已被 0016 取代 |
 | [0014](0014-bundle-sole-writable-aggregate.md) | Bundle 是唯一可写聚合根 | 已被 0016 取代 |
-| [0015](0015-project-config-boundary.md) | 项目配置的边界：用户平面没有 project，`.dec/` 不得落在 Dec 根目录 | 已接受（已实现） |
-| [0016](0016-p-four-quadrant-model.md) | 顶层 P 与公开/私有 × 用户/项目四象限 | 已接受（阶段 1–7 已实施）；取代 0009、0013、0014 |
+| [0015](0015-project-config-boundary.md) | 项目配置的边界：用户平面没有 project，`.dec/` 不得落在 Dec 根目录 | 已接受（已实现）；全局配置可带 version，见 0017 |
+| [0016](0016-p-four-quadrant-model.md) | 顶层 P 与公开/私有 × 用户/项目四象限 | 已接受；平面名改为 global/local，见 0017 |
+| [0017](0017-local-layout-version.md) | 本机配置 kind/version 与 layout_version | 已接受 |

@@ -19,7 +19,13 @@ func DefaultPWriter() PWriter { return PWriter{} }
 // BundleWriter / DefaultBundleWriter 保留源码兼容；实际语义和实现均由 PWriter 提供。
 type BundleWriter = PWriter
 
-func DefaultBundleWriter() PWriter { return DefaultPWriter() }
+type ProjectWriter = PWriter
+
+func DefaultProjectWriter() ProjectWriter { return DefaultPWriter() }
+
+func (w PWriter) BindHomeProject(projectRoot string, reporter Reporter) (*ConfigInitPreparation, error) {
+	return w.BindHomeP(projectRoot, reporter)
+}
 
 // SaveProjects 保存 P 选择：user 平面写 enabled_projects；project 平面写家 P 的 requires。
 func (PWriter) SaveProjects(workspace Workspace, names []string, reporter Reporter) (*SaveBundleSelectionResult, error) {

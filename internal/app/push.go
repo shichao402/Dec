@@ -98,12 +98,7 @@ func connectedPExists(name string) bool {
 }
 
 func connectedRepositoryUsesPModel() (bool, error) {
-	tx, err := repo.NewLocalReadTransaction()
-	if err != nil {
-		return false, err
-	}
-	defer tx.Close()
-	return repositoryUsesPModel(tx.WorkDir()), nil
+	return repo.BareHEADHasPModel(), nil
 }
 
 func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter) (pushedCount int, skippedReason, versionCommit string, err error) {
@@ -134,6 +129,11 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 		}
 
 		assets := writableResolvedAssets(workspace, projectConfig, resolved.Assets)
+		if extra, extraErr := scanWritableCacheAssets(workspace, projectConfig); extraErr != nil {
+			return extraErr
+		} else {
+			assets = unionTypedAssets(assets, extra)
+		}
 		resolvedForPush := *resolved
 		resolvedForPush.Assets = assets
 		if len(assets) == 0 && len(projectConfig.EnabledBundles) == 0 {

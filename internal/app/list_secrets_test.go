@@ -88,7 +88,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 		t.Fatalf("files = %#v, 期望 1 条", result.Files)
 	}
 	file := result.Files[0]
-	if file.SecretsBundle != "vikunja/private/project" || file.ProjectRelPath != ".secrets/vikunja/.env/vikunja.env" {
+	if file.SecretsBundle != "vikunja/private/local" || file.ProjectRelPath != ".secrets/vikunja/.env/vikunja.env" {
 		t.Fatalf("元数据 = %#v", file)
 	}
 	if file.RemoteExists == nil || !*file.RemoteExists {

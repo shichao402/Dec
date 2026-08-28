@@ -14,11 +14,11 @@ Protobuf 是本目录的 **schema 真相源**；运行时 wire format 仍是 YAM
 
 ## 顶层 P 与四象限
 
-- **P**（`projects.proto`）：vault 顶层 `<p>/dec.yaml`；P 名强制小写 kebab-case。
-- Git 资产位于 `<p>/{public,private}/{user,project}/`，四支均为非敏感内容。
-- `requires` 只直接引用其他 P 的 `public/project`，不递归，private 永不被引用。
-- 用户平面由 `enabled_projects` 选择 P；项目平面由 `.dec/config.yaml` 的 `project_name` 绑定家 P。
-- Bitwarden 后续只保存 `<p>/private/{user,project}` 的敏感正文，不创建 public folder。
+- **Project**（`projects.proto`）：vault 顶层 `<name>/dec.yaml`；名称强制小写 kebab-case。
+- Git 资产位于 `<name>/{public,private}/{global,local}/`，四支均为非敏感内容。
+- `requires` 只直接引用其他项目的 `public/local`，不递归，private 永不被引用。
+- 本机由 `enabled_projects` 选择项目；本仓库由 `.dec/config.yaml` 的 `project_name` 绑定。
+- Bitwarden 只保存 `<name>/private/{global,local}` 的敏感正文。
 
 ## 生成 Go 类型（可选）
 

@@ -53,7 +53,7 @@ func (m model) isDeletePage() bool {
 }
 
 func (m model) isRemotePage() bool {
-	return m.pages[m.pageIndex] == "Remote"
+	return m.remoteOpen
 }
 
 func (m *model) startDeleteCandidatesLoad(includeRemote, force bool) tea.Cmd {
@@ -85,7 +85,7 @@ func (m model) routeDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	if m.addSecretStage != "" {
 		return m, nil, false
 	}
-	if m.focus == focusSidebar && msg.String() != "r" {
+	if msg.String() == "tab" || msg.String() == "shift+tab" {
 		return m, nil, false
 	}
 	if m.deleteFilterInput {
@@ -178,8 +178,9 @@ func (m model) handleDeletePageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pushLog("Remote 折叠目录")
 			return m, nil
 		}
-		m.focus = focusSidebar
-		m.pushLog("返回导航")
+		m.remoteOpen = false
+		m.focus = focusContent
+		m.pushLog("关闭远端")
 		return m, nil
 	case "l", "right":
 		m.syncTreeViewports()
@@ -391,7 +392,7 @@ func (m model) remoteHeadLines() []string {
 	}
 	lines := []string{head}
 	if m.overview != nil && m.overview.Model == "p" {
-		lines = append(lines, shellMutedStyle.Render("仅 Bitwarden private/user · private/project · legacy；Git 四象限请到 Bundles"))
+		lines = append(lines, shellMutedStyle.Render("仅 Bitwarden private/global · private/local · 旧条目；Git 资产请到项目页"))
 	}
 	if m.deleteLoad.busy() {
 		lines = append(lines, shellWarnStyle.Render("刷新中…"))

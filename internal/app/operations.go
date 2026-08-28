@@ -118,6 +118,10 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 		}
 	}
 
+	if err := migrateRemotePlanes(ctx, reporter); err != nil {
+		return nil, fmt.Errorf("迁移远端平面目录失败: %w", err)
+	}
+
 	createTx := func() (*repo.Transaction, error) {
 		if strings.TrimSpace(version) != "" {
 			return repo.NewReadTransactionAt(version)
@@ -142,8 +146,8 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	if pRepository {
 		result.Model = "p"
 		result.Quadrants = map[string]int{
-			"public/user": 0, "private/user": 0,
-			"public/project": 0, "private/project": 0,
+			"public/global": 0, "private/global": 0,
+			"public/local": 0, "private/local": 0,
 		}
 		for _, overview := range resolved.Bundles {
 			if overview.Home {
@@ -157,7 +161,7 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 			}
 		}
 		for _, asset := range resolved.Assets {
-			result.Quadrants[string(asset.Visibility)+"/"+string(asset.Plane)]++
+			result.Quadrants[string(asset.Visibility)+"/"+string(types.CanonicalAssetPlane(asset.Plane))]++
 		}
 		result.MissingProjects = append([]string(nil), resolved.MissingProjects...)
 		if len(result.MissingProjects) > 0 {
@@ -572,6 +576,30 @@ func resolveAssetFile(repoDir, vault, itemType, assetName string) string {
 	return filepath.Join(base, bundle.AssetFileName(kind, assetName))
 }
 
+func planeDiskNames(plane types.AssetPlane) []string {
+	switch types.CanonicalAssetPlane(plane) {
+	case types.AssetPlaneGlobal:
+		return []string{string(types.AssetPlaneGlobal), string(types.AssetPlaneUser)}
+	default:
+		return []string{string(types.AssetPlaneLocal), string(types.AssetPlaneProject)}
+	}
+}
+
+func firstExistingPath(paths ...string) string {
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if len(paths) > 0 {
+		return paths[0]
+	}
+	return ""
+}
+
 func resolveTypedAssetFile(repoDir string, asset types.TypedAssetRef) string {
 	if asset.Visibility == "" || asset.Plane == "" {
 		return resolveAssetFile(repoDir, asset.Vault, asset.Type, asset.Name)
@@ -580,8 +608,12 @@ func resolveTypedAssetFile(repoDir string, asset types.TypedAssetRef) string {
 	if !ok {
 		return ""
 	}
-	base := filepath.Join(repoDir, types.PQuadrantDir(asset.Vault, asset.Visibility, asset.Plane), kind.Dir)
-	return filepath.Join(base, bundle.AssetFileName(kind, asset.Name))
+	var candidates []string
+	for _, disk := range planeDiskNames(asset.Plane) {
+		base := filepath.Join(repoDir, asset.Vault, string(asset.Visibility), disk, kind.Dir)
+		candidates = append(candidates, filepath.Join(base, bundle.AssetFileName(kind, asset.Name)))
+	}
+	return firstExistingPath(candidates...)
 }
 
 func getCachePath(projectRoot, vault, itemType, assetName string) string {
@@ -633,8 +665,12 @@ func getWorkspaceTypedCachePath(workspace Workspace, asset types.TypedAssetRef) 
 	if !ok {
 		return ""
 	}
-	base := filepath.Join(workspaceCacheDir(workspace), asset.Vault, string(asset.Visibility), string(asset.Plane), kind.Dir)
-	return filepath.Join(base, bundle.AssetFileName(kind, asset.Name))
+	var candidates []string
+	for _, disk := range planeDiskNames(asset.Plane) {
+		base := filepath.Join(workspaceCacheDir(workspace), asset.Vault, string(asset.Visibility), disk, kind.Dir)
+		candidates = append(candidates, filepath.Join(base, bundle.AssetFileName(kind, asset.Name)))
+	}
+	return firstExistingPath(candidates...)
 }
 
 func managedName(name string) string {

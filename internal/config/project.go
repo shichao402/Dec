@@ -185,14 +185,18 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 	}
 
 	normalized := *config
+	normalized.Kind = types.ConfigKindProject
 	normalized.Version = types.ProjectConfigVersionV2
+	if normalized.LayoutVersion == 0 {
+		normalized.LayoutVersion = types.LocalLayoutVersion
+	}
 
 	data, err := yaml.Marshal(&normalized)
 	if err != nil {
 		return fmt.Errorf("序列化项目配置失败: %w", err)
 	}
 
-	header := "# Dec 项目配置\n# version: 配置结构版本；当前固定为 v2\n# ides: 项目级 IDE 覆盖（可选），例如：\n#   ides:\n#     - cursor\n#     - codex\n# editor: 项目级交互式编辑器，覆盖全局配置（可选），例如：\n#   editor: code --wait\n#   editor: vim\n# enabled_bundles: 启用的 bundle 列表（唯一的资产启用入口）；bundle 名与 vault 目录同名\n#   enabled_bundles:\n#     - vikunja\n#     - cli\n# 提示：请在 TUI Bundles 页勾选后按 s 保存，不要手工维护本文件。\n\n"
+	header := "# Dec 项目配置\n# kind: project\n# version: 配置字段版本\n# layout_version: cache/secrets 布局版本\n# project_name: 绑定项目名\n\n"
 	configPath := filepath.Join(decDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入项目配置失败: %w", err)
@@ -361,6 +365,10 @@ func loadProjectConfigV2(data []byte, configPath string) (*types.ProjectConfig, 
 		return nil, fmt.Errorf("解析项目配置失败: %w\n\n请检查 %s 的 YAML 格式是否正确", err, configPath)
 	}
 	config := raw.ProjectConfig
+	if config.Kind == types.ConfigKindGlobal {
+		return nil, fmt.Errorf("%s 是全局配置，不能当项目配置读取", configPath)
+	}
+	config.Kind = types.ConfigKindProject
 	config.Version = types.ProjectConfigVersionV2
 	return &config, nil
 }

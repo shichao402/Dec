@@ -310,3 +310,8 @@ func CommitRemoteSSHHostsEdit(ctx context.Context, session app.RemoteSSHHostsEdi
 	_, err := run[struct{}](ctx, "commit_remote_ssh_hosts_edit", session.ProjectRoot, session, reporter)
 	return err
 }
+
+func CreateLocalAsset(ctx context.Context, workspace app.Workspace, in app.CreateLocalAssetInput, reporter app.Reporter) (*app.CreateLocalAssetResult, error) {
+	in.Workspace = workspace
+	return invokeWorkspace[app.CreateLocalAssetResult](ctx, "create_local_asset", workspace, in, reporter)
+}

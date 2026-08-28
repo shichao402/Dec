@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -161,7 +162,9 @@ func randomBranchName(prefix string) (string, error) {
 }
 
 func addDetachedWorktree(bareDir, worktreeDir, startPoint string) error {
-	cmd := sysproc.Command("git", "--git-dir", bareDir, "worktree", "add", "--detach", worktreeDir, startPoint)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := sysproc.CommandContext(ctx, "git", "--git-dir", bareDir, "worktree", "add", "--detach", worktreeDir, startPoint)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree add 失败: %s", strings.TrimSpace(string(output)))
@@ -170,7 +173,9 @@ func addDetachedWorktree(bareDir, worktreeDir, startPoint string) error {
 }
 
 func removeWorktree(bareDir, worktreeDir string) error {
-	cmd := sysproc.Command("git", "--git-dir", bareDir, "worktree", "remove", "--force", worktreeDir)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := sysproc.CommandContext(ctx, "git", "--git-dir", bareDir, "worktree", "remove", "--force", worktreeDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree remove 失败: %s", strings.TrimSpace(string(output)))

@@ -52,8 +52,8 @@ func TestMain(m *testing.M) {
 // TestPTYStartupAndQuit 构建 dec 可执行文件，在伪终端中启动 TUI，
 // 等待首屏渲染，完成 5 页 tab 循环和一次 shift+tab 回退，
 // 然后按 `q` 退出，断言：
-//   - 首屏输出包含 TUI 首页锚点字符串（"Dec Shell"）
-//   - 页面导航日志覆盖 Home / Bundles / Project / Run / Delete / Settings
+//   - 首屏输出包含 TUI 首页锚点字符串（"page 项目"）
+//   - 页面导航日志覆盖 项目 / 引入 / 同步 / 设置
 //   - 子进程以退出码 0 结束
 //   - pty 在子进程退出后进入 EOF
 func TestPTYStartupAndQuit(t *testing.T) {
@@ -161,7 +161,7 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 	// 等待首屏锚点出现。Lip Gloss 会在单元之间插入 ANSI 样式码，
 	// 为此搜索时先剥掉 ANSI 序列。状态栏里稳定的 "q quit | j/k nav"
 	// 比侧边栏标题更容易命中（后者可能被 lipgloss 拆成多段）。
-	anchor := "q quit | j/k nav"
+	anchor := "page 项目"
 	if err := waitForContains(&mu, &buf, anchor, ptyStartupTimeout); err != nil {
 		snapshot := snapshotOutput(&mu, &buf)
 		// 尽量不阻塞，让后台 goroutine 能继续消费后续输出。
@@ -172,7 +172,7 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 
 	// 以状态栏右侧的 "page X" 作为导航锚点：它每帧重绘，是当前页唯一稳定的屏上证据。
 	// 页面停留期间同一锚点会重复出现，因此按键前先取基线，再等计数增长。
-	tabTargets := []string{"Bundles", "Project", "Run", "Remote", "Settings", "Home"}
+	tabTargets := []string{"引入", "同步", "设置", "项目"}
 	for _, target := range tabTargets {
 		anchor := "page " + target
 		baseline := countOccurrences(&mu, &buf, anchor)
@@ -188,16 +188,16 @@ func runPTYScenario(t *testing.T, bin, term string, rows, cols uint16, lang stri
 		}
 	}
 
-	// Bubble Tea 将 Shift+Tab 识别为 ESC [ Z；从 Home 回退应回到 Settings。
-	settingsBaseline := countOccurrences(&mu, &buf, "page Settings")
+	// Bubble Tea 将 Shift+Tab 识别为 ESC [ Z；从 项目 回退应回到 设置。
+	settingsBaseline := countOccurrences(&mu, &buf, "page 设置")
 	if _, err := ptmx.Write([]byte("\x1b[Z")); err != nil {
 		_ = cmd.Process.Kill()
 		t.Fatalf("向 pty 写入 shift+tab 失败: %v", err)
 	}
-	if err := waitForOccurrenceCount(&mu, &buf, "page Settings", settingsBaseline+1, ptyStartupTimeout); err != nil {
+	if err := waitForOccurrenceCount(&mu, &buf, "page 设置", settingsBaseline+1, ptyStartupTimeout); err != nil {
 		snapshot := snapshotOutput(&mu, &buf)
 		_ = cmd.Process.Kill()
-		t.Fatalf("TUI 未在 %s 内通过 shift+tab 回到 Settings: %v\n当前输出:\n%s",
+		t.Fatalf("TUI 未在 %s 内通过 shift+tab 回到 设置: %v\n当前输出:\n%s",
 			ptyStartupTimeout, err, snapshot)
 	}
 

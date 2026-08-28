@@ -48,7 +48,7 @@ func pruneBundleFromVaultProjects(repoDir, bundleName string) ([]string, error) 
 		if readErr != nil {
 			return pruned, fmt.Errorf("读取 %s 失败: %w", path, readErr)
 		}
-		var project types.Project
+		var project types.LegacyVaultProject
 		if unmarshalErr := yaml.Unmarshal(data, &project); unmarshalErr != nil {
 			return pruned, fmt.Errorf("解析 %s 失败: %w", path, unmarshalErr)
 		}

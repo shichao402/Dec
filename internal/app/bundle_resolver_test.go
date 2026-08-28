@@ -382,11 +382,11 @@ func TestPAssetPathsIncludeQuadrantAndRequiresAreReadOnlyOnPush(t *testing.T) {
 		AssetRef:   types.AssetRef{Name: "shared", Vault: "shared-tools"},
 	}
 	source := filepath.ToSlash(resolveTypedAssetFile("repo", home))
-	if !strings.HasSuffix(source, "my-app/private/project/rules/home.mdc") {
+	if !strings.HasSuffix(source, "my-app/private/local/rules/home.mdc") {
 		t.Fatalf("source = %q", source)
 	}
 	cache := filepath.ToSlash(getWorkspaceTypedCachePath(workspace, home))
-	if !strings.Contains(cache, ".dec/cache/my-app/private/project/rules/home.mdc") {
+	if !strings.Contains(cache, ".dec/cache/my-app/private/local/rules/home.mdc") {
 		t.Fatalf("cache = %q", cache)
 	}
 	writable := writableResolvedAssets(workspace, &types.ProjectConfig{ProjectName: "my-app"}, []types.TypedAssetRef{home, required})

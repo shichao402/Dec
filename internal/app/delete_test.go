@@ -250,7 +250,7 @@ func TestListDeleteCandidates_MarksLocallyPresentSecretAsNotOrphan(t *testing.T)
 		if c.Orphan {
 			t.Fatalf("本地存在的 secret 不应标 Orphan: %#v", c)
 		}
-		if c.TreeRoot != secretsTreeRoot || c.TreeBranch != "vikunja/private/project" {
+		if c.TreeRoot != secretsTreeRoot || c.TreeBranch != "vikunja/private/local" {
 			t.Fatalf("分组 = %q/%q, 期望按远端地址分组", c.TreeRoot, c.TreeBranch)
 		}
 		return
@@ -567,7 +567,7 @@ func TestPlanWorkspaceSecretsBrowse_IncludesKnownSecretBundles(t *testing.T) {
 		t.Fatalf("planWorkspaceSecretsBrowse() = %v", err)
 	}
 	for _, target := range plan.Targets {
-		if target.Address == "remembered/private/project" {
+		if target.Address == "remembered/private/local" {
 			return
 		}
 	}
@@ -676,7 +676,7 @@ func TestListDeleteCandidates_IncludesSSHKeys(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	const address = "vikunja/private/project"
+	const address = "vikunja/private/local"
 	stub := &secrets.StubClient{
 		SSHKeysByFolder: map[string][]secrets.SSHKeyItem{
 			address: {{Name: ".sshkey/deploy", Hosts: []string{"vikunja.example.com"}, PrivateKey: "priv\n"}},

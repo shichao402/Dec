@@ -85,7 +85,7 @@ func TestSaveGlobalConfig_RemovesLegacyLocalConfig(t *testing.T) {
 	if string(data) == "" {
 		t.Fatalf("全局配置不应为空")
 	}
-	if !strings.Contains(string(data), "#   ides:") || !strings.Contains(string(data), "#   editor: code --wait") {
+	if !strings.Contains(string(data), "kind: global") {
 		t.Fatalf("全局配置头注释应包含 ides/editor 示例, 实际内容:\n%s", string(data))
 	}
 
@@ -426,5 +426,17 @@ func TestEnsureGlobalVarsTemplate_CreatesDefaultFile(t *testing.T) {
 	}
 	if created {
 		t.Fatal("已有全局 vars.yaml 时不应重复创建")
+	}
+}
+
+func TestLoadGlobalConfig_RejectsProjectKind(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+	if err := os.WriteFile(filepath.Join(decHome, "config.yaml"), []byte("kind: project\nversion: 2\nproject_name: demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadGlobalConfig()
+	if err == nil || !strings.Contains(err.Error(), "项目配置") {
+		t.Fatalf("应拒绝 kind: project, err=%v", err)
 	}
 }

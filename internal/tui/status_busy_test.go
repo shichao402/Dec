@@ -9,7 +9,7 @@ import (
 
 func TestIOBusyLabelPriority(t *testing.T) {
 	m := model{
-		pages:     []string{"Home", "Bundles", "Project", "Run", "Remote", "Settings"},
+		pages:     []string{"项目", "引入", "同步", "设置"},
 		pageIndex: 0,
 		overview:  &app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true},
 	}
@@ -41,8 +41,9 @@ func TestIOBusyLabelPriority(t *testing.T) {
 
 func TestStatusBarShowsBusyAndDeleteHints(t *testing.T) {
 	m := model{
-		pages:     []string{"Home", "Bundles", "Project", "Run", "Remote", "Settings"},
-		pageIndex: 4, // Remote
+		pages:     []string{"项目", "引入", "同步", "设置"},
+		remoteOpen: true,
+		pageIndex: 0,
 		overview:  &app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true, EnabledBundleCount: 1},
 		width:     120,
 	}
@@ -64,7 +65,7 @@ func TestStatusBarShowsBusyAndDeleteHints(t *testing.T) {
 }
 
 func TestShellRefreshBatchAccounting(t *testing.T) {
-	m := model{pages: []string{"Home"}, pageIndex: 0}
+	m := model{pages: []string{"项目"}, pageIndex: 0}
 	_ = m.refreshCmd()
 	if !m.shellRefresh.busy() || m.shellRefresh.pending != refreshPartCount {
 		t.Fatalf("refresh busy=%v pending=%d, want busy pending=%d", m.shellRefresh.busy(), m.shellRefresh.pending, refreshPartCount)

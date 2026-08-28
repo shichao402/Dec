@@ -39,9 +39,10 @@ func TestModelViewRendersHomeOverview(t *testing.T) {
 
 	view := m.View()
 	checks := []string{
-		"Dec Shell",
-		"Home",
-		"Bundles",
+		"项目",
+		"引入",
+		"同步",
+		"设置",
 		"项目名:",
 		"git@github.com:demo/dec.git",
 		"Bundle: 可选 2 个 · 已启用 1 个",
@@ -319,7 +320,7 @@ func TestModelAssetsPageRendersSelectionState(t *testing.T) {
 
 func TestModelRunPageRendersExecutionState(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 	m.width = 120
 	m.height = 32
 	m.runProgress = &app.Progress{Phase: "pull", Current: 1, Total: 2}
@@ -450,7 +451,7 @@ func TestModelRunPageHotkeysStartPull(t *testing.T) {
 	for _, tc := range keys {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newModel("/tmp/dec-project", "v1.0.0")
-			m.pageIndex = 3
+			m.pageIndex = 2
 
 			updated, cmd := m.Update(tc.msg)
 			m = updated.(model)
@@ -484,7 +485,7 @@ func TestModelRunPageHotkeysStartPush(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
 	m = updated.(model)
@@ -518,7 +519,7 @@ func TestModelRunPagePushFlowDoubleConfirmAndCancel(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
 	m = updated.(model)
@@ -571,7 +572,7 @@ func TestModelRunPagePushConfirmTriggersRunPushOperation(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
 	m = updated.(model)
@@ -634,7 +635,7 @@ func TestModelRunPagePushConfirmTriggersRunPushOperation(t *testing.T) {
 
 func TestModelRunPageProcessesStreamedEventsAndSchedulesRefresh(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 	m.runningPull = true
 	stream := make(chan tea.Msg, 1)
 	m.runStream = stream
@@ -685,7 +686,7 @@ func TestModelRunPageProcessesStreamedEventsAndSchedulesRefresh(t *testing.T) {
 
 func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.focus = focusContent
 	m.width = 120
 	m.height = 32
@@ -715,8 +716,8 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 		"本机变量 · e 外部编辑",
 		"[x] cursor",
 		"[ ] codex",
-		"用户 bundles：已启用 1 个",
-		"dec --user",
+		"本机项目：已启用 1 个",
+		"dec --global",
 	}
 	for _, check := range checks {
 		if !strings.Contains(view, check) {
@@ -732,7 +733,7 @@ func TestModelSettingsPageRendersGlobalSettings(t *testing.T) {
 
 func TestModelSettingsHotkeysToggleIDEAndStartEdit(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.focus = focusContent
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:       "git@github.com:demo/dec.git",
@@ -764,7 +765,7 @@ func TestModelSettingsHotkeysToggleIDEAndStartEdit(t *testing.T) {
 // 光标也不该越过 IDE 区，避免第二个写入口覆盖 GlobalConfig.EnabledBundles。
 func TestModelSettingsHasNoUserBundleRows(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.focus = focusContent
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:                "git@github.com:demo/dec.git",
@@ -795,7 +796,7 @@ func TestModelSettingsHasNoUserBundleRows(t *testing.T) {
 
 func TestModelObservesOtherFacadeProjectOperation(t *testing.T) {
 	m := newModel(t.TempDir(), "v1.0.0")
-	m.pageIndex = 3 // Run
+	m.pageIndex = 2 // Run
 
 	updated, cmd := m.Update(activeOperationPolledMsg{
 		active:      true,
@@ -845,7 +846,7 @@ func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:        "git@github.com:demo/dec.git",
 		AvailableIDEs:  []string{"cursor"},
@@ -878,7 +879,7 @@ func TestModelSettingsSaveUsesAppOperation(t *testing.T) {
 
 func TestModelSettingsRepoAuthRequiredEntersExplicitBootstrapConfirm(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.width = 120
 	m.height = 36
 	m.settings = &app.GlobalSettingsState{AvailableIDEs: []string{"cursor"}}
@@ -912,7 +913,7 @@ func TestModelSettingsRepoAuthRequiredEntersExplicitBootstrapConfirm(t *testing.
 
 func TestModelRunPullAuthRequiredEntersBootstrapConfirm(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3 // Run
+	m.pageIndex = 2 // Run
 	m.width = 120
 	m.height = 36
 	m.runningPull = true
@@ -941,7 +942,7 @@ func TestModelRunPullAuthRequiredEntersBootstrapConfirm(t *testing.T) {
 
 func TestModelRunBootstrapApplyRetriesPull(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3 // Run
+	m.pageIndex = 2 // Run
 	m.repoBootstrapStage = "applying"
 	m.repoBootstrapSource = "run"
 	m.overview = &app.ProjectOverview{RepoRemoteURL: "https://cnb.cool/example/private.git"}
@@ -960,7 +961,7 @@ func TestModelRunBootstrapApplyRetriesPull(t *testing.T) {
 
 func TestModelSettingsRepoBootstrapCandidateSelection(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.settings = &app.GlobalSettingsState{AvailableIDEs: []string{"cursor"}}
 	m.settingsRepoInput = "https://cnb.cool/example/private.git"
 	m.repoBootstrapStage = "loading"
@@ -1006,7 +1007,7 @@ func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.settings = &app.GlobalSettingsState{
 		RepoURL:       "git@github.com:demo/dec.git",
 		AvailableIDEs: []string{"cursor"},
@@ -1037,16 +1038,16 @@ func TestModelSettingsSavePreservesExplicitEmptyIDESelection(t *testing.T) {
 }
 
 func TestSuggestNextAction(t *testing.T) {
-	if got := suggestNextAction(&app.ProjectOverview{}, false, false); got != "到 Settings 配置 Repo URL" {
+	if got := suggestNextAction(&app.ProjectOverview{}, false, false); got != "到设置页配置 Repo URL" {
 		t.Fatalf("未连接仓库时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, false, false); got != "到 Project 页按 i 发起初始化确认" {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, false, false); got != "在项目页确认后初始化绑定项目" {
 		t.Fatalf("未初始化项目时建议动作错误: %q", got)
 	}
 	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true}, true, false); !strings.Contains(got, "确认检测到的项目配置") {
 		t.Fatalf("推断待确认时建议动作错误: %q", got)
 	}
-	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true}, false, false); !strings.Contains(got, "Bundles") {
+	if got := suggestNextAction(&app.ProjectOverview{RepoConnected: true, ProjectConfigReady: true}, false, false); !strings.Contains(got, "引入") {
 		t.Fatalf("无已启用 bundle 时建议动作错误: %q", got)
 	}
 	ready := &app.ProjectOverview{
@@ -1055,7 +1056,7 @@ func TestSuggestNextAction(t *testing.T) {
 		EnabledBundleCount: 1,
 		Bundles:            []app.BundleOverview{{Name: "default", VaultName: "default", Enabled: true}},
 	}
-	if got := suggestNextAction(ready, false, false); !strings.Contains(got, "Run") {
+	if got := suggestNextAction(ready, false, false); !strings.Contains(got, "同步") {
 		t.Fatalf("enabled_bundles 非空时应建议 Run 页: %q", got)
 	}
 }
@@ -1105,7 +1106,8 @@ func TestRenderPullPlanWarnsUnsavedSelection(t *testing.T) {
 
 func TestModelDeletePageGroupsByBundle(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.remoteOpen = true
+	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
 		{
@@ -1152,7 +1154,8 @@ func TestModelDeletePageGroupsByBundle(t *testing.T) {
 
 func TestModelDeletePageKeepsLastRowVisible(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.remoteOpen = true
+	m.pageIndex = 0
 	m.focus = focusContent
 	m.width = 100
 	m.height = 30
@@ -1180,7 +1183,8 @@ func TestModelDeletePageKeepsLastRowVisible(t *testing.T) {
 
 func TestModelDeletePageShowsBundleCandidates(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.remoteOpen = true
+	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
 		{Kind: app.DeleteKindBundle, BundleName: "vikunja", Label: "[bundle] vikunja / vikunja · 2 成员"},
@@ -1208,11 +1212,11 @@ func TestModelDeletePageTabSwitchDoesNotReloadCandidates(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3 // Run
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m.pageIndex = 0
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
 	m = updated.(model)
 	if cmd == nil {
-		t.Fatal("首次进入 Delete 应触发加载")
+		t.Fatal("首次进入 Remote 应触发加载")
 	}
 	updated, _ = m.Update(cmd())
 	m = updated.(model)
@@ -1220,25 +1224,16 @@ func TestModelDeletePageTabSwitchDoesNotReloadCandidates(t *testing.T) {
 		t.Fatalf("loaded=%v calls=%d", m.deleteCandidatesLoaded, calls)
 	}
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Delete -> Settings
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(model)
 	if cmd != nil {
-		t.Fatalf("离开 Delete 不应触发加载, cmd = %T", cmd)
+		t.Fatalf("切页不应打断已加载的 Remote, cmd = %T", cmd)
 	}
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Settings -> Home
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(model)
 	if cmd != nil {
-		t.Fatalf("Home 不应触发 Delete 加载, cmd = %T", cmd)
-	}
-
-	// Home -> Bundles -> Project -> Run -> Delete
-	for i := 0; i < 4; i++ {
-		updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-		m = updated.(model)
-	}
-	if cmd != nil {
-		t.Fatalf("再次进入 Delete 且已加载时不应重复加载, cmd = %T", cmd)
+		t.Fatalf("再次切页不应重复加载, cmd = %T", cmd)
 	}
 	if calls != 1 {
 		t.Fatalf("ListDeleteCandidates 调用次数 = %d, 期望 1", calls)
@@ -1247,7 +1242,8 @@ func TestModelDeletePageTabSwitchDoesNotReloadCandidates(t *testing.T) {
 
 func TestModelDeletePageHCollapsesBeforeSidebar(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.remoteOpen = true
+	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
 		{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli", TreeRoot: ".dec", TreeBranch: "cli"},
@@ -1264,22 +1260,20 @@ func TestModelDeletePageHCollapsesBeforeSidebar(t *testing.T) {
 		t.Fatalf("h 后应减少可见行, rows=%d", len(m.deleteTree.VisibleRows()))
 	}
 
-	// 折叠到根且无法再折叠时，h 才返回侧栏
+	// 无侧栏：折叠到根后 h 仍留在内容区
 	for tries := 0; tries < 8; tries++ {
 		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
 		m = updated.(model)
-		if m.focus == focusSidebar {
-			break
-		}
 	}
-	if m.focus != focusSidebar {
-		t.Fatalf("全部折叠后 h 应返回 sidebar, focus = %q", m.focus)
+	if m.focus != focusContent {
+		t.Fatalf("全部折叠后 h 应留在 content, focus = %q", m.focus)
 	}
 }
 
 func TestModelDeletePageEnterTogglesDirectory(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.remoteOpen = true
+	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
 		{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli", TreeRoot: ".dec", TreeBranch: "cli"},
@@ -1304,7 +1298,8 @@ func TestModelDeletePageEnterTogglesDirectory(t *testing.T) {
 
 func TestModelDeletePageEscReturnsToSidebar(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.remoteOpen = true
+	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
 		{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli"},
@@ -1313,30 +1308,15 @@ func TestModelDeletePageEscReturnsToSidebar(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(model)
-	if m.focus != focusSidebar {
-		t.Fatalf("Esc 后 focus = %q, 期望 sidebar", m.focus)
-	}
-
-	m.focus = focusContent
-	m.rebuildDeleteTree()
-	// 先折叠到只剩根节点，此时 h 才返回侧栏
-	for tries := 0; tries < 8; tries++ {
-		if len(m.deleteTree.VisibleRows()) <= 1 {
-			break
-		}
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-		m = updated.(model)
-	}
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	m = updated.(model)
-	if m.focus != focusSidebar {
-		t.Fatalf("根节点折叠后 h 应返回 sidebar, focus = %q", m.focus)
+	if m.remoteOpen {
+		t.Fatal("Esc 应关闭远端")
 	}
 }
 
 func TestModelDeletePageSelectConfirmAndCancel(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.remoteOpen = true
+	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
 		{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli", TreeRoot: ".dec", TreeBranch: "cli"},
@@ -1410,7 +1390,8 @@ func TestModelDeletePageConfirmTriggersDeleteOperation(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.remoteOpen = true
+	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
 		{Kind: app.DeleteKindBundle, BundleName: "vikunja", Label: "[bundle] vikunja", TreeRoot: ".dec", TreeBranch: "vikunja", Members: []app.AssetSelectionItem{{Name: "vikunja-workflow", Type: "skill", Vault: "vikunja"}}},
@@ -1468,7 +1449,8 @@ func TestModelDeletePageConfirmTriggersDeleteOperation(t *testing.T) {
 
 func TestModelDeletePageFilter(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 4
+	m.remoteOpen = true
+	m.pageIndex = 0
 	m.focus = focusContent
 	m.deleteCandidates = []app.DeleteCandidate{
 		{Kind: app.DeleteKindBundle, BundleName: "cli", Label: "[bundle] cli"},
@@ -1493,7 +1475,7 @@ func TestModelDeletePageFilter(t *testing.T) {
 
 func TestModelRunPageNoLongerHasRemoveHotkey(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	m = updated.(model)
 	if m.removeStage != "" {
@@ -1514,7 +1496,7 @@ func TestModelRunPageUpdateEntersCheckingAndConfirmOnNewVersion(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
 	m = updated.(model)
@@ -1551,7 +1533,7 @@ func TestModelRunPageUpdateAlreadyLatestSkipsConfirm(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.2.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
 	m = updated.(model)
@@ -1582,7 +1564,7 @@ func TestModelRunPageUpdateCheckFailureEntersDone(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
 	m = updated.(model)
@@ -1627,7 +1609,7 @@ func TestModelRunPageUpdateConfirmYTriggersDoUpdate(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 	m.updateStage = "confirm"
 	m.updateResult = &update.CheckResult{CurrentVersion: "v1.0.0", LatestVersion: "v1.2.0", NeedUpdate: true}
 
@@ -1691,7 +1673,7 @@ func TestModelRunPageUpdateConfirmYTriggersDoUpdate(t *testing.T) {
 
 func TestModelRunPageUpdateConfirmNCancelsFlow(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 	m.updateStage = "confirm"
 	m.updateResult = &update.CheckResult{CurrentVersion: "v1.0.0", LatestVersion: "v1.2.0", NeedUpdate: true}
 
@@ -1713,7 +1695,7 @@ func TestModelRunPageUpdateFailurePath(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 	m.updateStage = "confirm"
 	m.updateResult = &update.CheckResult{CurrentVersion: "v1.0.0", LatestVersion: "v1.2.0", NeedUpdate: true}
 
@@ -1735,7 +1717,7 @@ func TestModelRunPageUpdateFailurePath(t *testing.T) {
 
 func TestModelRunPageUpdateRenderingShowsConfirmPanel(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 	m.width = 120
 	m.height = 32
 	m.updateStage = "confirm"
@@ -1758,7 +1740,7 @@ func TestModelRunPageUpdateDoneRenderingShowsNetworkHelpOnFailure(t *testing.T) 
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 3
+	m.pageIndex = 2
 	m.width = 120
 	m.height = 32
 	m.updateStage = "done"
@@ -1782,7 +1764,7 @@ func TestModelRunPageUpdateDoneRenderingShowsNetworkHelpOnFailure(t *testing.T) 
 
 func TestModelProjectPageRendersInheritMode(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2 // Project
+	m.pageIndex = 3 // Project
 	m.focus = focusContent
 	m.width = 120
 	m.height = 32
@@ -1813,7 +1795,7 @@ func TestModelProjectPageRendersInheritMode(t *testing.T) {
 
 func TestModelProjectPageRendersOverrideMode(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.width = 120
 	m.height = 32
 	m.projectSettings = &app.ProjectSettingsState{
@@ -1845,7 +1827,7 @@ func TestModelProjectPageRendersOverrideMode(t *testing.T) {
 
 func TestModelProjectPageToggleOverrideSwitchesMode(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.focus = focusContent
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs: []string{"cursor"},
@@ -1870,7 +1852,7 @@ func TestModelProjectPageToggleOverrideSwitchesMode(t *testing.T) {
 
 func TestModelProjectPageToggleIDEInOverrideMode(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.focus = focusContent
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs:  []string{"cursor", "codex"},
@@ -1893,7 +1875,7 @@ func TestModelProjectPageToggleIDEInOverrideMode(t *testing.T) {
 
 func TestModelProjectPageToggleIDEInInheritModeIsNoop(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.focus = focusContent
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs: []string{"cursor", "codex"},
@@ -1913,7 +1895,7 @@ func TestModelProjectPageToggleIDEInInheritModeIsNoop(t *testing.T) {
 
 func TestModelProjectPageClearOverrideWithC(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs:  []string{"cursor", "codex"},
 		SelectedIDEs:   []string{"codex"},
@@ -1955,7 +1937,7 @@ func TestModelProjectPageSaveCallsOperation_Override(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs: []string{"cursor"},
 	}
@@ -1997,7 +1979,7 @@ func TestModelProjectPageSaveCallsOperation_ClearOverride(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs:  []string{"cursor"},
 		SelectedIDEs:   []string{"cursor"},
@@ -2032,7 +2014,7 @@ func TestModelProjectPageSaveRejectsEmptyOverride(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs: []string{"cursor"},
 	}
@@ -2070,7 +2052,7 @@ func TestModelProjectPageInitKeyTriggersCmd(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.overview = &app.ProjectOverview{RepoConnected: true}
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs:      []string{"cursor"},
@@ -2121,7 +2103,7 @@ func TestModelProjectPageRefreshKeyTriggersCmd(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.overview = &app.ProjectOverview{RepoConnected: true}
 	m.projectSettings = &app.ProjectSettingsState{
 		AvailableIDEs:      []string{"cursor"},
@@ -2152,7 +2134,7 @@ func TestModelProjectPageInitWorksWithoutRepoConnected(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.width = 120
 	m.height = 32
 	m.overview = &app.ProjectOverview{RepoConnected: false}
@@ -2185,7 +2167,7 @@ func TestModelProjectPageInitWorksWithoutRepoConnected(t *testing.T) {
 
 func TestModelProjectPageInitSuccessRendersSummary(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.width = 120
 	m.height = 32
 	m.overview = &app.ProjectOverview{RepoConnected: true}
@@ -2222,7 +2204,7 @@ func TestModelProjectPageInitSuccessRendersSummary(t *testing.T) {
 
 func TestModelProjectPageInitEmptyRepoRendersHint(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.width = 120
 	m.height = 32
 	m.overview = &app.ProjectOverview{RepoConnected: true}
@@ -2252,7 +2234,7 @@ func TestModelProjectPageInitEmptyRepoRendersHint(t *testing.T) {
 
 func TestModelProjectVarsBlockRendersUsedPlaceholders(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.width = 120
 	m.height = 32
 	m.overview = &app.ProjectOverview{RepoConnected: true}
@@ -2285,7 +2267,7 @@ func TestModelProjectVarsBlockRendersUsedPlaceholders(t *testing.T) {
 
 func TestModelProjectVarsBlockNoCacheHint(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.width = 120
 	m.height = 32
 	m.overview = &app.ProjectOverview{RepoConnected: true}
@@ -2322,7 +2304,7 @@ func TestModelProjectEditKeyInvokesCmd(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.overview = &app.ProjectOverview{RepoConnected: true}
 	m.projectSettings = &app.ProjectSettingsState{AvailableIDEs: []string{"cursor"}, ProjectConfigReady: true}
 	m.projectVars = &app.ProjectVarsView{VarsPath: "/tmp/dec-project/.dec/vars.yaml", EditorCommand: "vim"}
@@ -2347,7 +2329,7 @@ func TestModelProjectVarsEditedMsgRefreshesView(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 
 	updated, cmd := m.Update(projectVarsEditedMsg{err: nil})
 	m = updated.(model)
@@ -2366,7 +2348,7 @@ func TestModelProjectVarsEditedMsgRefreshesView(t *testing.T) {
 
 func TestModelProjectVarsEditedMsgSurfacesError(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 2
+	m.pageIndex = 3
 	m.width = 120
 	m.height = 32
 	m.overview = &app.ProjectOverview{RepoConnected: true}
@@ -2398,7 +2380,7 @@ func TestModelSettingsGlobalVarsEditKeyInvokesCmd(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.focus = focusContent
 	m.settings = &app.GlobalSettingsState{
 		VarsPath:         "/tmp/.dec/local/vars.yaml",
@@ -2432,7 +2414,7 @@ func TestModelGlobalVarsEditedMsgRefreshesSettings(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.settings = &app.GlobalSettingsState{
 		VarsPath:      "/tmp/.dec/local/vars.yaml",
 		VarsFileReady: false,
@@ -2607,23 +2589,15 @@ func TestModelAssetsBundleRightExpandsAndLeftCollapses(t *testing.T) {
 	}
 }
 
-func TestModelSpatialNavigationSidebarEnterExit(t *testing.T) {
+func TestModelDefaultFocusIsContent(t *testing.T) {
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 1
-	if m.focus != focusSidebar {
-		t.Fatalf("默认 focus = %q, 期望 sidebar", m.focus)
+	if m.focus != focusContent {
+		t.Fatalf("默认 focus = %q, 期望 content（无侧栏）", m.focus)
 	}
-
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
 	m = updated.(model)
 	if m.focus != focusContent {
-		t.Fatalf("侧栏按 l 后 focus = %q, 期望 content", m.focus)
-	}
-
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	m = updated.(model)
-	if m.focus != focusSidebar {
-		t.Fatalf("内容区按 h 后 focus = %q, 期望 sidebar", m.focus)
+		t.Fatalf("无侧栏时 h 不应切走内容区, focus = %q", m.focus)
 	}
 }
 
@@ -2712,7 +2686,7 @@ func TestModelSettingsRestartServerConfirmAndRefuseBusy(t *testing.T) {
 	}
 
 	m := newModel("/tmp/dec-project", "v1.0.0")
-	m.pageIndex = 5
+	m.pageIndex = 3
 	m.focus = focusContent
 	m.serverVersion = "v1.0.0"
 	m.settings = &app.GlobalSettingsState{AvailableIDEs: []string{"cursor"}}

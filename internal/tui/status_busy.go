@@ -52,32 +52,3 @@ func (m model) ioBusyLabel() string {
 	}
 	return ""
 }
-
-// statusBarLeftHints 空闲时的左侧快捷键提示；忙碌时改为 IO 状态。
-func (m model) statusBarLeftHints() string {
-	if busy := m.ioBusyLabel(); busy != "" {
-		return busy
-	}
-	if m.isHomePage() && m.hasVaultInferencePrompt() {
-		return "y/Enter apply · n skip | q quit | r refresh"
-	}
-	if m.isRemotePage() {
-		if m.deleteStage == "summary" {
-			return "y/Enter continue · n/Esc cancel"
-		}
-		if m.deleteStage == "typed" {
-			return "type folder or DELETE · Enter confirm · Esc back"
-		}
-		if m.deleteStage == "confirm" {
-			return "y confirm delete · n/Esc back"
-		}
-		if m.deleteFilterInput {
-			return "filter · Enter apply · Esc cancel"
-		}
-		if m.addSecretStage != "" {
-			return "register · tab switch · Enter next · Esc cancel"
-		}
-		return "q quit | j/k | space | a all | A none | n/N add | e edit | d delete | r refresh"
-	}
-	return "q quit | j/k nav | l/h in-out | r refresh"
-}
