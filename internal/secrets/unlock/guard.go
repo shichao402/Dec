@@ -49,11 +49,11 @@ func logWebUnlockDecision(allowed bool, detail string, request RequestDetails) {
 		verdict = "即将弹出浏览器"
 	}
 	fmt.Fprintf(os.Stderr,
-		"[dec:auth] WEB UNLOCK %s：%s request_id=%s source=%s facade=%s operation=%s operation_id=%s pid=%d ppid=%d exe=%s parent=%s cwd=%s project=%s plane=%s test_binary=%t %s=%s\n",
+		"[dec:auth] WEB UNLOCK %s：%s request_id=%s source=%s facade=%s operation=%s operation_id=%s pid=%d ppid=%d exe=%s parent=%s cwd=%s host=%s ips=%s macs=%s project=%s plane=%s test_binary=%t %s=%s\n",
 		verdict, detail, request.ID, request.Source, request.Facade, request.Operation,
 		request.OperationID, request.PID, request.PPID, request.Executable,
-		request.ParentProcess, request.WorkingDir, request.ProjectRoot,
-		request.WorkspacePlane, testing.Testing(),
+		request.ParentProcess, request.WorkingDir, request.Hostname, request.IPs, request.MACs,
+		request.ProjectRoot, request.WorkspacePlane, testing.Testing(),
 		EnvNoWebUnlock, os.Getenv(EnvNoWebUnlock))
 	fmt.Fprintf(os.Stderr, "[dec:auth] WEB UNLOCK call stack request_id=%s\n%s\n",
 		request.ID, request.CallStack)

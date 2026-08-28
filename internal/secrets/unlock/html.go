@@ -337,6 +337,9 @@ h1 {
       <dt>进程</dt><dd>PID {{.Request.PID}} · PPID {{.Request.PPID}}</dd>
       <dt>父进程</dt><dd>{{.Request.ParentProcess}}</dd>
       <dt>工作目录</dt><dd>{{.Request.WorkingDir}}</dd>
+      <dt>主机名</dt><dd>{{.Request.Hostname}}</dd>
+      <dt>本机 IP</dt><dd>{{.Request.IPs}}</dd>
+      <dt>本机 MAC</dt><dd>{{.Request.MACs}}</dd>
       <dt>运行时</dt><dd>{{.Request.GoVersion}}</dd>
     </dl>
     <div class="stack-title">调用栈（触发 web unlock 的当前 goroutine）</div>

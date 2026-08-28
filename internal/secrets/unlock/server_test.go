@@ -229,7 +229,9 @@ func TestUnlockPage_ShowsRequestDiagnosticsAndCallStack(t *testing.T) {
 		RequestedAt: "2026-08-27T22:35:00+08:00",
 		Executable:  `C:\Users\me\.dec\bin\dec-server.exe`,
 		PID:         123, PPID: 45, ParentProcess: `C:\Program Files\Cursor\Cursor.exe`,
-		WorkingDir: `D:\workspace\GitHub\Dec`, GoVersion: "go1.26.3",
+		WorkingDir: `D:\workspace\GitHub\Dec`, Hostname: "dev-box",
+		IPs: "192.168.1.8 (以太网)", MACs: "AA:BB:CC:DD:EE:FF (以太网)",
+		GoVersion: "go1.26.3",
 		CallStack: "github.com/example/app.push\n    D:/src/push.go:42",
 	}
 	srv := newServer(NewStubAuthenticator("secret", "", "token"), "", details, func(string) {}, nil)
@@ -249,8 +251,9 @@ func TestUnlockPage_ShowsRequestDiagnosticsAndCallStack(t *testing.T) {
 	for _, want := range []string{
 		details.ID, details.Source, details.Facade, details.ClientID,
 		details.Operation, details.OperationID, details.ProjectRoot,
-		details.Executable, details.ParentProcess, details.CallStack,
-		`<details class="request-panel" open>`,
+		details.Executable, details.ParentProcess, details.Hostname,
+		details.IPs, details.MACs, details.CallStack,
+		`<details class="request-panel" open>`, "本机 IP", "本机 MAC",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("认证页缺少诊断信息 %q", want)
