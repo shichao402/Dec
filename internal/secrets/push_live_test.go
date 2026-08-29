@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// liveTarget 返回 live 测试用的项目平面 P target（folder 为 P 名，条目名带 private/project 前缀）。
+// liveTarget 返回 live 测试用的项目平面 target（folder 为项目名，条目名带 private/project 前缀）。
 func liveTarget(t *testing.T) SyncTarget {
 	t.Helper()
 	target, err := NewPSyncTarget("vikunja", SyncPlaneProject)

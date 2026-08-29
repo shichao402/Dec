@@ -53,7 +53,7 @@ func TestPWriterProjectSelectionWritesHomeRequires(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(cfg.EnabledBundles) != 0 {
-		t.Fatalf("P 模型不得继续把 project requires 写入 enabled_bundles: %#v", cfg.EnabledBundles)
+		t.Fatalf("项目模型不得继续把 project requires 写入 enabled_bundles: %#v", cfg.EnabledBundles)
 	}
 }
 
@@ -151,7 +151,7 @@ func TestRemotePModelDoesNotExposeGitQuadrants(t *testing.T) {
 	}
 	for _, item := range items {
 		if item.Kind == DeleteKindDecAsset {
-			t.Fatalf("Remote 不应展示 P 的 Git 四象限资产: %#v", item)
+			t.Fatalf("Remote 不应展示项目的 Git 四象限资产: %#v", item)
 		}
 	}
 }

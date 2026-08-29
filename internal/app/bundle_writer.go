@@ -10,7 +10,7 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
-// PWriter 是 ADR 0016 规定的唯一权威写入口。P 是所有新写路径的主语；
+// PWriter 是 ADR 0016 规定的唯一权威写入口。项目是所有新写路径的主语；
 // SyncTarget、旧 bundle scope 和裸 project folder 只能用于兼容读取/迁移。
 type PWriter struct{}
 
@@ -27,12 +27,12 @@ func (w PWriter) BindHomeProject(projectRoot string, reporter Reporter) (*Config
 	return w.BindHomeP(projectRoot, reporter)
 }
 
-// SaveProjects 保存 P 选择：user 平面写 enabled_projects；project 平面写家 P 的 requires。
+// SaveProjects 保存项目选择：user 平面写 enabled_projects；project 平面写家项目的 requires。
 func (PWriter) SaveProjects(workspace Workspace, names []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
 	return saveWorkspacePSelection(workspace, names, reporter)
 }
 
-// SaveEnabledBundles 是 wire/source 兼容名，新仓库中按 P 语义执行。
+// SaveEnabledBundles 是 wire/source 兼容名，新仓库中按项目语义执行。
 func (w PWriter) SaveEnabledBundles(workspace Workspace, names []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
 	return w.SaveProjects(workspace, names, reporter)
 }
@@ -41,7 +41,7 @@ func (PWriter) PushWorkspace(ctx context.Context, workspace Workspace, reporter 
 	return PushWorkspaceAssets(ctx, workspace, reporter)
 }
 
-// BindHomeP 初始化本地配置并确保仓库中存在家 P。
+// BindHomeP 初始化本地配置并确保仓库中存在家项目。
 func (PWriter) BindHomeP(projectRoot string, reporter Reporter) (*ConfigInitPreparation, error) {
 	prepared, err := EnsureLocalProjectConfig(projectRoot, reporter)
 	if err != nil || prepared == nil || prepared.ProjectConfig == nil {
@@ -49,7 +49,7 @@ func (PWriter) BindHomeP(projectRoot string, reporter Reporter) (*ConfigInitPrep
 	}
 	name := prepared.ProjectConfig.ProjectName
 	if !types.IsValidPName(name) {
-		return nil, fmt.Errorf("目录名 %q 不能绑定为家 P：必须为小写 kebab-case", name)
+		return nil, fmt.Errorf("目录名 %q 不能绑定为家项目：必须为小写 kebab-case", name)
 	}
 	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
 		projects, scanErr := pmodel.Scan(tx.WorkDir())
@@ -72,7 +72,7 @@ func (PWriter) BindHomeP(projectRoot string, reporter Reporter) (*ConfigInitPrep
 	return prepared, nil
 }
 
-// ValidateRemoteRegisterScope 校验 Remote 登记归属（已声明 P + 平面）。
+// ValidateRemoteRegisterScope 校验 Remote 登记归属（已声明项目 + 平面）。
 func (PWriter) ValidateRemoteRegisterScope(workspace Workspace, scope secrets.RemoteScope) error {
 	return ValidateRemoteRegisterScope(workspace, scope)
 }

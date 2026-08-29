@@ -10,7 +10,7 @@ import (
 	"unicode"
 )
 
-// LoadEnvForP 精确读取一个 P 在一个 plane 的单层 .env；不合并 requires、
+// LoadEnvForP 精确读取一个项目在一个 plane 的单层 .env；不合并 requires、
 // 不跨 user/project，也不回退旧 bundles 布局。
 func LoadEnvForP(projectRoot, pName string, plane SyncPlane) (map[string]string, error) {
 	target, err := NewPSyncTarget(pName, plane)

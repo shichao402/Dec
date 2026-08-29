@@ -8,24 +8,24 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
-// Bitwarden 的 folder 只有一层：名字里的斜杠不建立层级。Dec 因此只用 P 名做
+// Bitwarden 的 folder 只有一层：名字里的斜杠不建立层级。Dec 因此只用项目名做
 // folder，把平面与同步根相对路径一起编码进条目名（private/<plane>/<rel>）。
 //
-// 这套切分是本文件的唯一定义处：APIClient 之外的代码只见 (P, 平面, 相对路径)，
+// 这套切分是本文件的唯一定义处：APIClient 之外的代码只见 (项目, 平面, 相对路径)，
 // 不得自行拼装 folder 名或条目名。
 const bwPrivateSegment = "private"
 
-// RemoteScope 是远端一个可寻址域：某个 P 的某个平面。零值非法。
+// RemoteScope 是远端一个可寻址域：某个项目的某个平面。零值非法。
 type RemoteScope struct {
 	P     string
 	Plane SyncPlane
 }
 
-// NewRemoteScope 校验 P 名并归一化平面（user 与 machine 同义）。
+// NewRemoteScope 校验项目名并归一化平面（user 与 machine 同义）。
 func NewRemoteScope(pName string, plane SyncPlane) (RemoteScope, error) {
 	name := strings.TrimSpace(pName)
 	if !types.IsValidPName(name) {
-		return RemoteScope{}, fmt.Errorf("P 名 %q 非法，必须为小写 kebab-case", pName)
+		return RemoteScope{}, fmt.Errorf("项目名 %q 非法，必须为小写 kebab-case", pName)
 	}
 	switch {
 	case IsMachinePlane(plane):
@@ -88,7 +88,7 @@ func (s RemoteScope) planeSegment() string {
 	return ""
 }
 
-// folderName 返回 Bitwarden 上真实的 folder 名：只有 P 名这一级。
+// folderName 返回 Bitwarden 上真实的 folder 名：只有项目名这一级。
 func (s RemoteScope) folderName() string {
 	return strings.TrimSpace(s.P)
 }
@@ -99,11 +99,11 @@ func (s RemoteScope) itemPrefix() string {
 }
 
 // encodeItemName 把同步根相对路径转成 Bitwarden 条目名。
-// Secure Note 与 SSH Key Item 共用同一编码：folder 合并到 P 之后，平面只能靠
+// Secure Note 与 SSH Key Item 共用同一编码：folder 合并到项目之后，平面只能靠
 // 条目名区分，SSH Key 也不能例外。
 func (s RemoteScope) encodeItemName(rel string) (string, error) {
 	if !s.Valid() {
-		return "", fmt.Errorf("远端寻址域非法: P=%q plane=%q", s.P, s.Plane)
+		return "", fmt.Errorf("远端寻址域非法: 项目=%q plane=%q", s.P, s.Plane)
 	}
 	clean, err := normalizeSyncRelPath(rel)
 	if err != nil {
@@ -153,7 +153,7 @@ func (s RemoteScope) itemPrefixes() []string {
 }
 
 // bwScope 是一次远端读写的实际落点：Bitwarden folder 名 + 条目名编解码规则。
-// P 布局按 private/<plane>/ 前缀编解码；存量非 P folder 的条目名保持原样。
+// 项目布局按 private/<plane>/ 前缀编解码；存量非项目 folder 的条目名保持原样。
 type bwScope struct {
 	folder string
 	scope  RemoteScope
@@ -161,7 +161,7 @@ type bwScope struct {
 }
 
 // bwScopeFromFolderName 解析调用方给出的 folder 名。
-// 逻辑地址 <p>/private/<plane> 与裸 P 名都落到 P 布局；其余按存量 folder 处理。
+// 逻辑地址 <p>/private/<plane> 与裸项目名都落到项目布局；其余按存量 folder 处理。
 func bwScopeFromFolderName(name string) bwScope {
 	trimmed := strings.TrimSpace(name)
 	if scope, err := ParseRemoteScope(trimmed); err == nil {
@@ -174,8 +174,8 @@ func bwScopeOf(scope RemoteScope) bwScope {
 	return bwScope{folder: scope.folderName(), scope: scope, isP: true}
 }
 
-// bwScopeForTarget 返回 target 的远端落点。声明型 P target 走扁平映射；只读浏览
-// 节点按存量 folder 名直连，让 Remote 页仍能看见并清理非 P 遗留。
+// bwScopeForTarget 返回 target 的远端落点。声明型项目 target 走扁平映射；只读浏览
+// 节点按存量 folder 名直连，让 Remote 页仍能看见并清理非项目遗留。
 func bwScopeForTarget(t SyncTarget) (bwScope, error) {
 	if addr := strings.TrimSpace(t.Address); addr != "" {
 		return bwScopeFromFolderName(addr), nil
@@ -204,7 +204,7 @@ func (s bwScope) decode(itemName string) (string, bool) {
 	if trimmed == "" {
 		return "", false
 	}
-	// 存量 folder 的条目名不带平面前缀；带前缀的说明已迁到 P 布局，不属于这里。
+	// 存量 folder 的条目名不带平面前缀；带前缀的说明已迁到项目布局，不属于这里。
 	if _, isP := bwPlaneSegmentOfItemName(trimmed); isP {
 		return "", false
 	}

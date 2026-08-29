@@ -123,7 +123,7 @@ func BuildPMigrationPlan(repoDir string, bw PMigrationBWSnapshot) (*PMigrationPl
 		if normalized == "" || !types.IsValidPName(normalized) {
 			plan.Issues = append(plan.Issues, PMigrationIssue{
 				Code: "invalid_name", Severity: "error", Source: kind + "/" + raw,
-				Message: fmt.Sprintf("%q 无法规范为合法 P 名", raw),
+				Message: fmt.Sprintf("%q 无法规范为合法项目名", raw),
 			})
 			return ""
 		}
@@ -211,19 +211,19 @@ func BuildPMigrationPlan(repoDir string, bw PMigrationBWSnapshot) (*PMigrationPl
 			plan.Issues = append(plan.Issues, PMigrationIssue{
 				Code: "case_normalization_collision", Severity: "error",
 				Source: strings.Join(sources, ", "), Target: normalized,
-				Message: fmt.Sprintf("多个旧名称规范到同一 P %q", normalized),
+				Message: fmt.Sprintf("多个旧名称规范到同一项目 %q", normalized),
 			})
 		} else if len(sources) > 1 {
 			plan.Issues = append(plan.Issues, PMigrationIssue{
 				Code: "name_merged", Severity: "info",
 				Source: strings.Join(sources, ", "), Target: normalized,
-				Message: fmt.Sprintf("大小写不同的旧名称将合并为 P %q", normalized),
+				Message: fmt.Sprintf("大小写不同的旧名称将合并为项目 %q", normalized),
 			})
 		}
 	}
 
 	legacyBWFolders := map[string]struct{}{}
-	// 按 folder 名排序迭代：同一 P 可能同时来自 bundle/<name> 与裸 folder，
+	// 按 folder 名排序迭代：同一项目可能同时来自 bundle/<name> 与裸 folder，
 	// map 随机顺序会让 manifest Title 与去重结果漂移，指纹自校验永远失败。
 	bwFolderNames := make([]string, 0, len(bw.Folders))
 	for folder := range bw.Folders {
@@ -502,7 +502,7 @@ func checkMigrationTargetConflicts(repoDir string, bw PMigrationBWSnapshot, plan
 			})
 			continue
 		}
-		// BW 目标映射到 P/private/<plane>/<path>，不得与 Git 已有或待迁文件重叠。
+		// BW 目标映射到 <项目>/private/<plane>/<path>，不得与 Git 已有或待迁文件重叠。
 		logical := strings.ToLower(move.TargetFolder + "/" + move.Path)
 		exactLogical := move.TargetFolder + "/" + move.Path
 		if sourceGit, ok := targets[logical]; ok || existingPathExists(repoDir, exactLogical) {
@@ -512,7 +512,7 @@ func checkMigrationTargetConflicts(repoDir string, bw PMigrationBWSnapshot, plan
 			plan.Issues = append(plan.Issues, PMigrationIssue{
 				Code: "git_bw_path_conflict", Severity: "error", Source: sourceGit + " ↔ " + source,
 				Target:  move.TargetFolder + "/" + move.Path,
-				Message: "Git 与 Bitwarden 将持有同一 P/plane/相对路径",
+				Message: "Git 与 Bitwarden 将持有同一 项目/plane/相对路径",
 			})
 		}
 	}

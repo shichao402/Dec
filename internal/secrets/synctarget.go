@@ -23,7 +23,7 @@ func (t SyncTarget) Clone() SyncTarget {
 	return t
 }
 
-// Scope 返回远端寻址域。只有声明型 P target 能读写远端；浏览节点会失败。
+// Scope 返回远端寻址域。只有声明型项目 target 能读写远端；浏览节点会失败。
 func (t SyncTarget) Scope() (RemoteScope, error) {
 	if scope, err := ParseRemoteScope(t.Address); err == nil {
 		return scope, nil
@@ -109,10 +109,10 @@ func (t *SyncTarget) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// PFolder 返回 P + 平面的逻辑地址 <p>/private/<plane>。
+// PFolder 返回项目 + 平面的逻辑地址 <p>/private/<plane>。
 //
 // Deprecated: 用 RemoteScope.String()。保留给存量调用点，返回值不是 Bitwarden
-// folder 名——BW 上的 folder 只有 P 名一级。
+// folder 名——BW 上的 folder 只有项目名一级。
 func PFolder(pName string, plane SyncPlane) string {
 	scope, err := NewRemoteScope(pName, plane)
 	if err != nil {
@@ -132,7 +132,7 @@ func ParsePFolder(address string) (pName string, plane SyncPlane, ok bool) {
 	return scope.P, scope.Plane, true
 }
 
-// NewPSyncTarget 构造 ADR 0016 P + plane 声明目标。地址与本地根均不可自定义：
+// NewPSyncTarget 构造 ADR 0016 项目 + plane 声明目标。地址与本地根均不可自定义：
 // user: <p>/private/user ↔ ~/.dec/secrets/<p>/
 // project: <p>/private/project ↔ <workspace>/.secrets/<p>/
 func NewPSyncTarget(pName string, plane SyncPlane) (SyncTarget, error) {

@@ -67,7 +67,7 @@ func PushWorkspaceAssets(ctx context.Context, workspace Workspace, reporter Repo
 
 	if result.Model == "p" && workspace.EffectivePlane() == WorkspaceProject &&
 		result.HomeProject != "" && !connectedPExists(result.HomeProject) {
-		result.SecretsSkippedReason = fmt.Sprintf("家 P %q 已不存在，跳过 private/project 推送", result.HomeProject)
+		result.SecretsSkippedReason = fmt.Sprintf("家项目 %q 已不存在，跳过 private/project 推送", result.HomeProject)
 		emit(reporter, EventWarn, "push.secrets", result.SecretsSkippedReason, nil)
 		return result, nil
 	}
@@ -121,7 +121,7 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 		}
 		repoDir := tx.WorkDir()
 		if repositoryHasLegacyLayout(repoDir) {
-			return fmt.Errorf("检测到旧 projects/ 或 bundles/ 结构，Push 已拒绝；远端尚未完成一次性 P 迁移")
+			return fmt.Errorf("检测到旧 projects/ 或 bundles/ 结构，Push 已拒绝；远端尚未完成一次性项目迁移")
 		}
 		resolved, resolveErr := resolveDesiredAssetsForPlane(projectConfig, repoDir, workspace.EffectivePlane(), reporter)
 		if resolveErr != nil {

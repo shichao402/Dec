@@ -104,7 +104,7 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 			Label:    fmt.Sprintf("[dec/%s] %s / %s%s", asset.Type, asset.Name, asset.Vault, tag),
 			Orphan:   partition == PartitionRemote && !localExists,
 			TreeRoot: treeRoot, TreeBranch: asset.Vault, GroupOrder: 1000,
-			GroupTitle: fmt.Sprintf("%s (P · %s/%s)", asset.Vault, asset.Visibility, asset.Plane),
+			GroupTitle: fmt.Sprintf("%s (项目 · %s/%s)", asset.Vault, asset.Visibility, asset.Plane),
 			Partition:  partition, ScopeTag: string(asset.Plane),
 			Visibility: asset.Visibility, AssetPlane: asset.Plane,
 		})
@@ -130,11 +130,11 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 		}
 		projects, pErr := pmodel.Scan(repoDir)
 		if pErr != nil {
-			emit(reporter, EventWarn, "delete.list", "扫描 P 失败："+pErr.Error(), nil)
+			emit(reporter, EventWarn, "delete.list", "扫描项目失败："+pErr.Error(), nil)
 			return nil
 		}
 		if len(projects) > 0 {
-			// P 仓库的 Git 四象限在 Bundles 页管理；Remote 只展示
+			// 项目仓库的 Git 四象限在 Bundles 页管理；Remote 只展示
 			// Bitwarden private/user、private/project 与 legacy folder。
 			return nil
 		}

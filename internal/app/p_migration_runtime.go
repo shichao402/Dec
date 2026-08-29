@@ -65,12 +65,12 @@ func PreviewPMigration(ctx context.Context, workspace Workspace, reporter Report
 		return nil, err
 	}
 	emit(reporter, EventInfo, "p.migrate.preview",
-		fmt.Sprintf("只读预览：%d 个 P · %d 个 Git 文件 · %d 个 BW 项 · %d 个问题",
+		fmt.Sprintf("只读预览：%d 个项目 · %d 个 Git 文件 · %d 个 BW 项 · %d 个问题",
 			len(plan.Manifests), len(plan.GitMoves), len(plan.BWMoves), len(plan.Issues)), nil)
 	return plan, nil
 }
 
-// SyncPManifestsFromBitwarden 为已经是 P folder 的 BW 项补齐缺失的 Git dec.yaml。
+// SyncPManifestsFromBitwarden 为已经是项目 folder 的 BW 项补齐缺失的 Git dec.yaml。
 func SyncPManifestsFromBitwarden(ctx context.Context, reporter Reporter) error {
 	if err := ensureBitwardenSession(ctx, reporter, "p.migrate.manifests"); err != nil {
 		return err
@@ -96,12 +96,12 @@ func SyncPManifestsFromBitwarden(ctx context.Context, reporter Reporter) error {
 				return err
 			}
 			added++
-			emit(reporter, EventInfo, "p.migrate.manifests", "补齐 P 声明："+name, nil)
+			emit(reporter, EventInfo, "p.migrate.manifests", "补齐项目声明："+name, nil)
 		}
 		if added == 0 {
 			return nil
 		}
-		_, err := tx.CommitAndPush("migrate: add missing P manifests from Bitwarden")
+		_, err := tx.CommitAndPush("migrate: add missing project manifests from Bitwarden")
 		return err
 	})
 }
@@ -186,7 +186,7 @@ func (b *livePMigrationBackend) PrepareGit(ctx context.Context, plan *PMigration
 				return err
 			}
 		}
-		_, err := tx.CommitAndPush("migrate: prepare P four-quadrant tree")
+		_, err := tx.CommitAndPush("migrate: prepare project four-quadrant tree")
 		return err
 	})
 }
@@ -195,7 +195,7 @@ func (b *livePMigrationBackend) VerifyGit(_ context.Context, plan *PMigrationPla
 	return withAppReadRepo(func(tx *repo.Transaction) error {
 		for _, manifest := range plan.Manifests {
 			if _, err := pmodel.Load(tx.WorkDir(), manifest.Name); err != nil {
-				return fmt.Errorf("校验 P %q: %w", manifest.Name, err)
+				return fmt.Errorf("校验项目 %q: %w", manifest.Name, err)
 			}
 		}
 		for _, move := range plan.GitMoves {
@@ -339,11 +339,11 @@ func migrationBWMovesBySource(plan *PMigrationPlan) map[string][]PMigrationBWMov
 	return out
 }
 
-// pTargetForAddress 把迁移计划里的 P 地址还原成声明型写入目标。
+// pTargetForAddress 把迁移计划里的项目地址还原成声明型写入目标。
 func pTargetForAddress(address string) (secrets.SyncTarget, error) {
 	scope, err := secrets.ParseRemoteScope(address)
 	if err != nil {
-		return secrets.SyncTarget{}, fmt.Errorf("无效 P 地址 %q: %w", address, err)
+		return secrets.SyncTarget{}, fmt.Errorf("无效项目地址 %q: %w", address, err)
 	}
 	return secrets.NewPSyncTarget(scope.P, scope.Plane)
 }

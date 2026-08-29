@@ -1,5 +1,5 @@
 // Command migrate-bw-flat 一次性把 Bitwarden 从「folder 名含整串 <p>/private/<plane>」
-// 改写成「folder 只有 P 名，平面进条目名」。搬完删除旧 folder。
+// 改写成「folder 只有项目名，平面进条目名」。搬完删除旧 folder。
 //
 //	go run ./tools/migrate-bw-flat                      # 只读预览
 //	go run ./tools/migrate-bw-flat --apply              # 执行搬移

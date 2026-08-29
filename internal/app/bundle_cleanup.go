@@ -135,14 +135,14 @@ func cleanupDeletedBundleLocalState(workspace Workspace, bundleName string, repo
 	}
 
 	report.Remnants = append(report.Remnants,
-		fmt.Sprintf("Bitwarden 上 P %s 的条目可能仍在（push 不会据此重建；请到 Remote 删 secrets）", bundleName))
+		fmt.Sprintf("Bitwarden 上项目 %s 的条目可能仍在（push 不会据此重建；请到 Remote 删 secrets）", bundleName))
 	emit(reporter, EventInfo, "remove.cleanup",
 		fmt.Sprintf("若远端仍有 %s，请到 Remote 页删除其中的 Secure Note / SSH Key", bundleName), nil)
 
 	return report
 }
 
-// localSecretBundleDirs 返回一个 P 在两个平面上的本地同步根。
+// localSecretBundleDirs 返回一个项目在两个平面上的本地同步根。
 func localSecretBundleDirs(workspace Workspace, bundleName string) []string {
 	var dirs []string
 	projectRoot := strings.TrimSpace(workspace.Root)

@@ -17,10 +17,10 @@ const SecretsRootDir = ".secrets"
 
 // SyncTarget 是一次 secrets 同步的单位：远端寻址域 ↔ 本地同步根。
 //
-// Address 是逻辑地址（P 为 <p>/private/<plane>），只用于展示、持久化与跨进程
+// Address 是逻辑地址（项目为 <p>/private/<plane>），只用于展示、持久化与跨进程
 // 传输。要读写远端必须经 Scope()，由 BW 实现决定真实 folder 名与条目名。
 type SyncTarget struct {
-	Name      string // P 名；只读浏览节点可为任意远端名字
+	Name      string // 项目名；只读浏览节点可为任意远端名字
 	Address   string
 	LocalRoot string // project 平面：.secrets/<p>；machine 平面：<p>（相对 ~/.dec/secrets）
 	Plane     SyncPlane
@@ -73,8 +73,8 @@ type PullBundleResult struct {
 type PushBundleRequest struct {
 	ProjectRoot string
 	Target      SyncTarget
-	// CreateFolderIfMissing 仅用于 Remote 登记新 P：push 时 folder 不存在则先建。
-	// 常规 push / 编辑已有 P 不设，folder 缺失仍按错误处理。
+	// CreateFolderIfMissing 仅用于 Remote 登记新项目：push 时 folder 不存在则先建。
+	// 常规 push / 编辑已有项目不设，folder 缺失仍按错误处理。
 	CreateFolderIfMissing bool
 }
 
@@ -89,7 +89,7 @@ type PushBundleResult struct {
 }
 
 // CreateSSHKeyRequest 创建一条 Bitwarden SSH Key Item。
-// Key.Name 必须是 `.sshkey/<实例>`；CreateFolderIfMissing 仅供 Remote 新 P 登记。
+// Key.Name 必须是 `.sshkey/<实例>`；CreateFolderIfMissing 仅供 Remote 新项目登记。
 type CreateSSHKeyRequest struct {
 	Target                SyncTarget
 	Key                   SSHKeyItem

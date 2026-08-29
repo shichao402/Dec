@@ -397,7 +397,7 @@ func (m model) remoteHeadLines() []string {
 	if m.deleteLoad.busy() {
 		lines = append(lines, shellWarnStyle.Render("刷新中…"))
 	} else {
-		lines = append(lines, shellMutedStyle.Render("a 全选 · A 全不选 · n 登记到光标 P · N 新建 P 登记 · / 筛选"))
+		lines = append(lines, shellMutedStyle.Render("a 全选 · A 全不选 · n 登记到光标项目 · N 新建项目登记 · / 筛选"))
 	}
 	if m.deleteFilterInput {
 		lines = append(lines, shellMutedStyle.Render("筛选输入中：Enter 应用 · Esc 退出"))

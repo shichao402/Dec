@@ -422,10 +422,10 @@ type model struct {
 	addSecretTargetIdx     int
 	addSecretResult        *app.AddSecretResult
 	addSecretErr           error
-	addSecretRemoteMode    bool              // true = Remote 登记（归属为远端 P 地址）
-	addSecretPName         string            // Remote：光标反推出的 P 名，或 N 手输的新 P
+	addSecretRemoteMode    bool              // true = Remote 登记（归属为远端项目地址）
+	addSecretPName         string            // Remote：光标反推出的项目名，或 N 手输的新项目
 	addSecretPlane         secrets.SyncPlane // Remote：归属平面（N 时可切换）
-	addSecretScopeNew      bool              // Remote：P 由用户手输（可能尚不存在）
+	addSecretScopeNew      bool              // Remote：项目由用户手输（可能尚不存在）
 	addSecretScopeCheckGen uint64
 	addSecretTypeIdx       int    // Remote：Processor 表索引
 	addSecretInitialBody   string // Remote temp 预填正文
@@ -2626,8 +2626,8 @@ func (m model) renderHomePage(width int) string {
 		subject := fmt.Sprintf("Bundles (%d): %s", len(inf.EnabledBundles), formatInferenceBundleNames(inf.EnabledBundles))
 		title := "检测到项目配置，是否应用？"
 		if inf.Model == "p" {
-			title = "检测到同名家 P，是否绑定？"
-			subject = fmt.Sprintf("家 P: %s · requires (%d): %s", inf.HomeProject, len(inf.RequiredProjects), formatInferenceBundleNames(inf.RequiredProjects))
+			title = "检测到同名家项目，是否绑定？"
+			subject = fmt.Sprintf("家项目: %s · requires (%d): %s", inf.HomeProject, len(inf.RequiredProjects), formatInferenceBundleNames(inf.RequiredProjects))
 		}
 		lines = append(lines,
 			shellWarnStyle.Render(title),
@@ -2661,9 +2661,9 @@ func (m model) renderHomePage(width int) string {
 		func() string {
 			if m.overview.Model == "p" {
 				if m.plane == app.WorkspaceUser {
-					return fmt.Sprintf("P: 可选 %d 个 · 用户已启用 %d 个", countOverviewAvailableBundles(m.overview), countOverviewEnabledBundles(m.overview))
+					return fmt.Sprintf("项目: 可选 %d 个 · 用户已启用 %d 个", countOverviewAvailableBundles(m.overview), countOverviewEnabledBundles(m.overview))
 				}
-				return fmt.Sprintf("家 P: %s · requires %d 个", fallbackValue(m.overview.HomeProject, "<未绑定>"), len(m.overview.RequiredProjects))
+				return fmt.Sprintf("家项目: %s · requires %d 个", fallbackValue(m.overview.HomeProject, "<未绑定>"), len(m.overview.RequiredProjects))
 			}
 			return fmt.Sprintf("Bundle: 可选 %d 个 · 已启用 %d 个", countOverviewAvailableBundles(m.overview), countOverviewEnabledBundles(m.overview))
 		}(),
@@ -2685,14 +2685,14 @@ func (m model) renderBundlesPage(width, height int) string {
 
 	summary := []string{}
 	if m.configInitMode {
-		summary = append(summary, shellTitleStyle.Render("项目初始化 — 绑定家 P 并选择直接 requires"))
+		summary = append(summary, shellTitleStyle.Render("项目初始化 — 绑定家项目并选择直接 requires"))
 	}
 	status := fmt.Sprintf("%d/%d 项目已启用", len(m.bundleSelection), len(m.assets.Bundles))
 	if m.assets.Model == "p" {
-		status = fmt.Sprintf("%d/%d P 已选择（H=家 P，其余为直接 requires）", len(m.bundleSelection), len(m.assets.Bundles))
+		status = fmt.Sprintf("%d/%d 项目已选择（H=家项目，其余为直接 requires）", len(m.bundleSelection), len(m.assets.Bundles))
 	}
 	if m.plane == app.WorkspaceUser {
-		status = fmt.Sprintf("%d/%d 用户 P 已启用", len(m.bundleSelection), len(m.assets.Bundles))
+		status = fmt.Sprintf("%d/%d 用户项目已启用", len(m.bundleSelection), len(m.assets.Bundles))
 	}
 	if filter := m.currentAssetFilterLabel(); filter != "<none>" {
 		status += " · 筛选: " + filter
@@ -2710,7 +2710,7 @@ func (m model) renderBundlesPage(width, height int) string {
 
 	rows := m.assetTreeVisibleCount()
 	if len(m.assets.Bundles) == 0 {
-		return wrapLines(width, append(summary, "仓库中还没有可选 P。"))
+		return wrapLines(width, append(summary, "仓库中还没有可选项目。"))
 	}
 	if rows == 0 {
 		return wrapLines(width, append(summary, "当前筛选没有结果。"))
@@ -3080,11 +3080,11 @@ func (m model) renderPullPlanLines() []string {
 	if len(names) == 0 {
 		emptyLabel := "⚠ 当前无启用 bundle，请先到 Bundles 页勾选并按 s 保存"
 		if m.assets.Model == "p" {
-			emptyLabel = "⚠ 当前无可用 P，请先到 Bundles 页选择并按 s 保存"
+			emptyLabel = "⚠ 当前无可用项目，请先到 Bundles 页选择并按 s 保存"
 		}
 		lines = append(lines, shellWarnStyle.Render(emptyLabel))
 	} else {
-		label := "P"
+		label := "项目"
 		if m.assets.Model != "p" {
 			label = "bundle"
 		}
@@ -3184,7 +3184,7 @@ func (m model) renderRunLastResult() []string {
 					m.runResult.Quadrants["public/global"], m.runResult.Quadrants["private/global"],
 					m.runResult.Quadrants["public/local"], m.runResult.Quadrants["private/local"]))
 			if len(m.runResult.MissingProjects) > 0 {
-				lines = append(lines, shellWarnStyle.Render("缺失 P: "+strings.Join(m.runResult.MissingProjects, ", ")))
+				lines = append(lines, shellWarnStyle.Render("缺失项目: "+strings.Join(m.runResult.MissingProjects, ", ")))
 			}
 		}
 		// 一排 0 本身不解释任何事情；跳过原因是唯一能说明「为什么没拉」的那句话。
@@ -3873,13 +3873,9 @@ func (m model) renderAssetDetails() string {
 			case assetRowBundle:
 				bo := m.assets.Bundles[p.bundleIndex]
 				if bo.Model == "p" {
-					role := "可引用 P"
+					role := assetBundleRoleLabel(bo)
 					if bo.Home {
-						role = "家 P（固定）"
-					} else if bo.Required {
-						role = "直接 requires"
-					} else if m.plane == app.WorkspaceUser && bo.Enabled {
-						role = "用户已启用"
+						role += "（固定）"
 					}
 					lines = append(lines,
 						fmt.Sprintf("项目: %s", bo.Name),
@@ -4353,7 +4349,7 @@ func (m *model) toggleCurrentAsset() {
 	case assetRowBundle:
 		bo := m.assets.Bundles[p.bundleIndex]
 		if bo.Home {
-			m.pushLog(fmt.Sprintf("%s 是当前工作区家 P，不能在 Bundles 页取消；请在 Home 重新绑定", bo.Name))
+			m.pushLog(fmt.Sprintf("%s 是当前工作区家项目，不能在 Bundles 页取消；请在 Home 重新绑定", bo.Name))
 			return
 		}
 		if bo.OtherPlane {

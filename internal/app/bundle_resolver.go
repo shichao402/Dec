@@ -32,7 +32,7 @@ type BundleOverview struct {
 	Enabled bool
 	// Model 在 ADR 0016 仓库中为 "p"；空值表示 legacy bundle。
 	Model string
-	// Home / Required 描述 project 平面的家 P 与直接 requires 关系。
+	// Home / Required 描述 project 平面的家项目与直接 requires 关系。
 	Home     bool
 	Required bool
 	// Quadrants 是四象限资产计数，key 为 public/user 等稳定路径。
@@ -48,7 +48,7 @@ type ResolvedAssets struct {
 	Sources map[string][]string
 	// Bundles 是本轮扫描发现的 bundle 全集，包含启用与未启用的。
 	Bundles []BundleOverview
-	// MissingProjects records direct P references that could not be resolved.
+	// MissingProjects records direct project references that could not be resolved.
 	MissingProjects []string
 }
 
@@ -184,8 +184,8 @@ func resolveDesiredAssetsForPlane(projectConfig *types.ProjectConfig, repoDir st
 	return result, nil
 }
 
-// resolvePAssets implements ADR 0016. User context installs the selected P's
-// user quadrants. Project context installs the home P's project quadrants and
+// resolvePAssets implements ADR 0016. User context installs the selected projects'
+// user quadrants. Project context installs the home project's project quadrants and
 // only the public/project quadrant of its direct requires.
 func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmodel.Loaded, plane WorkspacePlane, reporter Reporter) (*ResolvedAssets, error) {
 	result := &ResolvedAssets{Sources: make(map[string][]string)}
@@ -195,7 +195,7 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 	addProjectAssets := func(name string, visibility *types.AssetVisibility, source string) error {
 		p, ok := projects[name]
 		if !ok {
-			emit(reporter, EventWarn, "pull.project", fmt.Sprintf("引用的 P %q 不存在，已忽略", name), nil)
+			emit(reporter, EventWarn, "pull.project", fmt.Sprintf("引用的项目 %q 不存在，已忽略", name), nil)
 			result.MissingProjects = appendUniqueSource(result.MissingProjects, name)
 			return nil
 		}
@@ -224,7 +224,7 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 		} else {
 			home := strings.TrimSpace(projectConfig.ProjectName)
 			if home == "" {
-				return nil, fmt.Errorf("P 模型下项目配置必须声明 project_name")
+				return nil, fmt.Errorf("项目模型下项目配置必须声明 project_name")
 			}
 			if err := addProjectAssets(home, nil, "p/"+home); err != nil {
 				return nil, err
@@ -245,10 +245,10 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 		target := asset.Type + ":" + asset.Name
 		if previous, ok := seenTarget[target]; ok {
 			if previous.Vault != asset.Vault {
-				return nil, fmt.Errorf("P %q 与 %q 在 %s 平面竞争同一安装目标 %s/%s",
+				return nil, fmt.Errorf("项目 %q 与 %q 在 %s 平面竞争同一安装目标 %s/%s",
 					previous.Vault, asset.Vault, asset.Plane, asset.Type, asset.Name)
 			}
-			return nil, fmt.Errorf("P %q 的 %s/%s 与 %s/%s 包含同名资产 %s/%s，安装目标冲突",
+			return nil, fmt.Errorf("项目 %q 的 %s/%s 与 %s/%s 包含同名资产 %s/%s，安装目标冲突",
 				asset.Vault, previous.Visibility, previous.Plane, asset.Visibility, asset.Plane, asset.Type, asset.Name)
 		}
 		seenTarget[target] = asset

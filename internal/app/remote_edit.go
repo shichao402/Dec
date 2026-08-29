@@ -217,14 +217,14 @@ func CommitRemoteSSHHostsEdit(ctx context.Context, session RemoteSSHHostsEditSes
 func requireRemoteEditableTarget(target secrets.SyncTarget) error {
 	if err := secrets.RequireDeclared(target); err != nil {
 		return fmt.Errorf(
-			"不能编辑非托管地址 %q：它不属于任何 P，pull 不维护；请先迁移到 <p>/private/<plane>: %w",
+			"不能编辑非托管地址 %q：它不属于任何项目，pull 不维护；请先迁移到 <p>/private/<plane>: %w",
 			strings.TrimSpace(target.Address), err)
 	}
 	return nil
 }
 
 // syncTargetFromRemoteItem 还原候选项对应的 SyncTarget。
-// P 地址走声明型构造；存量非 P 地址只能浏览，写入会被 RequireDeclared 拒绝。
+// 项目地址走声明型构造；存量非项目地址只能浏览，写入会被 RequireDeclared 拒绝。
 func syncTargetFromRemoteItem(item DeleteSelectionItem) (secrets.SyncTarget, error) {
 	address := strings.TrimSpace(item.SecretsBundle)
 	if address == "" {
@@ -276,7 +276,7 @@ func parseHostsEditFile(raw string) ([]string, error) {
 	return secrets.NormalizeSSHHosts(lines)
 }
 
-// PrepareRemoteNoteRegister 为「向某个 P 平面新建 Secure Note」准备临时文件（不种本地同步根）。
+// PrepareRemoteNoteRegister 为「向某个项目平面新建 Secure Note」准备临时文件（不种本地同步根）。
 // initialBody 为可选预填正文（不含注释头）。
 func PrepareRemoteNoteRegister(ctx context.Context, projectRoot string, scope secrets.RemoteScope, noteRel, initialBody string, reporter Reporter) (*RemoteNoteEditSession, error) {
 	reporter = defaultReporter(reporter)

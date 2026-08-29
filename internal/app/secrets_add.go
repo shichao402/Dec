@@ -31,7 +31,7 @@ type SecretTargetOption struct {
 	Label     string
 }
 
-// AddProjectSecretForScope 按 (P, 平面) 登记同步根下已存在的文件。
+// AddProjectSecretForScope 按 (项目, 平面) 登记同步根下已存在的文件。
 // relPath 允许带同步根前缀，会被剥成 note 相对路径。
 func AddProjectSecretForScope(ctx context.Context, projectRoot string, scope secrets.RemoteScope, relPath string, reporter Reporter) (*AddSecretResult, error) {
 	target, err := secrets.NewPSyncTarget(scope.P, scope.Plane)
@@ -102,7 +102,7 @@ func AddSecretToTarget(ctx context.Context, projectRoot string, target secrets.S
 	}, nil
 }
 
-// SuggestSecretTargets 列出可选登记归属（当前平面已启用 P 的 SyncTarget）。
+// SuggestSecretTargets 列出可选登记归属（当前平面已启用项目的 SyncTarget）。
 func SuggestSecretTargets(projectRoot string) ([]SecretTargetOption, error) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	projectConfig, err := mgr.LoadProjectConfig()

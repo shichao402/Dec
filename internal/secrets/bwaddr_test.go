@@ -8,7 +8,7 @@ func TestRemoteScopeFolderIsOnlyPName(t *testing.T) {
 		t.Fatalf("NewRemoteScope: %v", err)
 	}
 	if got := scope.folderName(); got != "dec" {
-		t.Fatalf("folderName = %q，Bitwarden folder 只能是 P 名这一级", got)
+		t.Fatalf("folderName = %q，Bitwarden folder 只能是项目名这一级", got)
 	}
 	if got := scope.String(); got != "dec/private/local" {
 		t.Fatalf("String = %q", got)
@@ -79,13 +79,13 @@ func TestRemoteScopeOfSyncTarget(t *testing.T) {
 		t.Fatalf("scope = %+v prefix=%q", scope, scope.itemPrefix())
 	}
 
-	// 存量非 P 地址的浏览节点没有远端寻址域：P 名校验会拦下它。
+	// 存量非项目地址的浏览节点没有远端寻址域：项目名校验会拦下它。
 	browse, err := NewBrowseAddress("bundle/tencent-cloud")
 	if err != nil {
 		t.Fatalf("NewBrowseAddress: %v", err)
 	}
 	if _, err := RemoteScopeOf(browse); err == nil {
-		t.Fatal("非 P 地址不应产生远端寻址域")
+		t.Fatal("非项目地址不应产生远端寻址域")
 	}
 }
 

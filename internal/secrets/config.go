@@ -410,8 +410,8 @@ func equalStringSlices(left, right []string) bool {
 	return true
 }
 
-// ResolvePSyncTargets 按 ADR 0016 生成固定 P + plane 目标。
-// project 平面调用方只能传家 P；requires 不得加入。user 平面传本机显式启用的 P。
+// ResolvePSyncTargets 按 ADR 0016 生成固定项目 + plane 目标。
+// project 平面调用方只能传家项目；requires 不得加入。user 平面传本机显式启用的项目。
 func ResolvePSyncTargets(plane SyncPlane, pNames []string) ([]SyncTarget, error) {
 	pNames = NormalizeBundleNames(pNames)
 	targets := make([]SyncTarget, 0, len(pNames))

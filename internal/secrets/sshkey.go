@@ -354,7 +354,7 @@ func WriteProjectSSHKeyLandings(projectRoot string, landings []SSHKeyLanding) er
 	if err := ensureSSHDir(sshDir); err != nil {
 		return err
 	}
-	// project 与 user 即使 P/key 同名也必须是不同落点；否则 project revoke 会删掉
+	// project 与 user 即使 项目/key 同名也必须是不同落点；否则 project revoke 会删掉
 	// user 平面的机器级密钥。
 	scoped := make([]SSHKeyLanding, len(landings))
 	for i, landing := range landings {
@@ -567,7 +567,7 @@ func projectSSHKeyFileName(scopeID, decBundleName, keyName string) (string, erro
 	return "dec_project_" + scopeID + "_" + bundle + "_" + name, nil
 }
 
-// ListProjectSSHKeyNames 列出指定工作区/P 的 project 专属密钥实例。
+// ListProjectSSHKeyNames 列出指定工作区 / 项目的 project 专属密钥实例。
 func ListProjectSSHKeyNames(projectRoot, decBundleName string) ([]string, error) {
 	paths, err := ProjectCredentialScopePaths(projectRoot)
 	if err != nil {

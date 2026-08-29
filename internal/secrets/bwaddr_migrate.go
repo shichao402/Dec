@@ -11,7 +11,7 @@ import (
 )
 
 // BWFlatMove 是一条待搬移的远端条目：从旧的「整串 folder 名」布局搬到
-// 「folder 只有 P 名 + 平面进条目名」的布局。
+// 「folder 只有项目名 + 平面进条目名」的布局。
 type BWFlatMove struct {
 	Scope     RemoteScope
 	Kind      string // note | sshkey
@@ -37,7 +37,7 @@ type BWFlatMigrationPlan struct {
 	LegacyFolders []string
 	// Blockers 是必须人工处理的冲突；非空时拒绝执行。
 	Blockers []string
-	// Untouched 是既非旧布局也非 P folder 的 folder 名，迁移不动它们。
+	// Untouched 是既非旧布局也非项目 folder 的 folder 名，迁移不动它们。
 	Untouched []string
 }
 
@@ -73,7 +73,7 @@ func (c *APIClient) PlanFlatMigration(ctx context.Context) (*BWFlatMigrationPlan
 
 	legacy := make(map[string]RemoteScope) // folderID → 旧布局 scope
 	folderNameByID := make(map[string]string)
-	targetFolderID := make(map[string]string) // P 名 → 已存在的裸 folder ID
+	targetFolderID := make(map[string]string) // 项目名 → 已存在的裸 folder ID
 	plan := &BWFlatMigrationPlan{}
 	for _, folder := range folders {
 		name, decErr := decryptVaultString(folder.Name, userKey)

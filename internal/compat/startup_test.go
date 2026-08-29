@@ -199,7 +199,7 @@ func TestRepairOnStartup_PurgesLegacyPLayoutOnce(t *testing.T) {
 	}
 }
 
-// 集成测试凭据放在 .secrets/dec/integration/ 下，但它不是 P 落地内容。
+// 集成测试凭据放在 .secrets/dec/integration/ 下，但它不是项目落地内容。
 // 启动清理误删会让 live 测试退回人工 web unlock。
 func TestRepairOnStartup_KeepsIntegrationAuthWhilePurgingSecrets(t *testing.T) {
 	home := isolateHome(t)
@@ -220,7 +220,7 @@ func TestRepairOnStartup_KeepsIntegrationAuthWhilePurgingSecrets(t *testing.T) {
 	if err := os.WriteFile(devicePath, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// 同一个 P 名下的真实落地内容仍必须被清掉。
+	// 同一个项目名下的真实落地内容仍必须被清掉。
 	stale := filepath.Join(project, ".secrets", "dec", ".env", "app.env")
 	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
 		t.Fatal(err)
@@ -245,10 +245,10 @@ func TestRepairOnStartup_KeepsIntegrationAuthWhilePurgingSecrets(t *testing.T) {
 		t.Fatalf("隔离 DEC_HOME 必须保留: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(project, ".secrets", "dec", ".env")); !os.IsNotExist(err) {
-		t.Fatalf("同 P 下的旧落地内容应删除, err=%v", err)
+		t.Fatalf("同项目下的旧落地内容应删除, err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(project, ".secrets", "relkit")); !os.IsNotExist(err) {
-		t.Fatalf("其它 P 落地内容应删除, err=%v", err)
+		t.Fatalf("其它项目落地内容应删除, err=%v", err)
 	}
 }
 

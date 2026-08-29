@@ -43,7 +43,7 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handleConnectRepo)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_init_project",
-		Description: "初始化当前项目并绑定家 P（需已连接仓库）",
+		Description: "初始化当前项目并绑定家项目（需已连接仓库）",
 	}, s.handleInitProject)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_assets",
@@ -51,7 +51,7 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handleListAssets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_set_assets",
-		Description: "设置 P 选择。project 更新家 P 的直接 requires；user 写 enabled_projects。工具名保持兼容。",
+		Description: "设置项目选择。project 更新家项目的直接 requires；user 写 enabled_projects。工具名保持兼容。",
 	}, s.handleSetAssets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_pull",
@@ -71,11 +71,11 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handleListSecrets)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_delete_candidates",
-		Description: "列出某平面可删除的 P 四象限资产与 private secrets；legacy bundle 仍以兼容节点出现。",
+		Description: "列出某平面可删除的项目四象限资产与 private secrets；legacy bundle 仍以兼容节点出现。",
 	}, s.handleListDeleteCandidates)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_delete",
-		Description: "删除选中的 P 资产、private secrets 或 legacy bundle（需 confirmed=true）。",
+		Description: "删除选中的项目资产、private secrets 或 legacy bundle（需 confirmed=true）。",
 	}, s.handleDelete)
 }
 
@@ -216,7 +216,7 @@ func (s *Server) handleListAssets(ctx context.Context, _ *mcp.CallToolRequest, i
 }
 
 type setAssetsParams struct {
-	EnabledProjects []string `json:"enabled_projects,omitempty" jsonschema:"P 名称列表；project 中表示家 P 及直接 requires，user 中表示启用 P"`
+	EnabledProjects []string `json:"enabled_projects,omitempty" jsonschema:"项目名称列表；project 中表示家项目及直接 requires，user 中表示启用项目"`
 	EnabledBundles  []string `json:"enabled_bundles,omitempty" jsonschema:"兼容字段；enabled_projects 未提供时使用"`
 	Plane           string   `json:"plane,omitempty" jsonschema:"作用平面：local|global（旧名 project|user）。留空默认 local；不支持 both。"`
 }
@@ -301,9 +301,9 @@ type deleteItemInput struct {
 	SecretPath    string `json:"secret_path,omitempty" jsonschema:"secret：项目根相对落地路径，同时就是 Bitwarden Note 名"`
 	SecretsBundle string `json:"secrets_bundle,omitempty" jsonschema:"secret：Bitwarden folder"`
 	BundleName    string `json:"bundle_name,omitempty"`
-	ProjectName   string `json:"project_name,omitempty" jsonschema:"P 名；bundle_name 为兼容字段"`
-	Visibility    string `json:"visibility,omitempty" jsonschema:"P 资产象限：public|private"`
-	AssetPlane    string `json:"asset_plane,omitempty" jsonschema:"P 资产象限：user|project"`
+	ProjectName   string `json:"project_name,omitempty" jsonschema:"项目名；bundle_name 为兼容字段"`
+	Visibility    string `json:"visibility,omitempty" jsonschema:"项目资产象限：public|private"`
+	AssetPlane    string `json:"asset_plane,omitempty" jsonschema:"项目资产象限：user|project"`
 }
 
 type deleteParams struct {

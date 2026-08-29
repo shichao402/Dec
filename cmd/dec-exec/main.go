@@ -51,7 +51,7 @@ func main() {
 		},
 	}
 	root.Flags().StringVar(&projectRoot, "project-root", "", "项目根目录（默认当前目录）")
-	root.Flags().StringVar(&pName, "p", "", "只注入该 P 在指定 plane 的 env")
+	root.Flags().StringVar(&pName, "p", "", "只注入该项目在指定 plane 的 env")
 	root.Flags().StringVar(&legacyBundle, "bundle", "", "兼容别名：等同 --p")
 	root.Flags().StringVar(&plane, "plane", "project", "secrets 平面：project 或 user")
 	if err := root.Execute(); err != nil {

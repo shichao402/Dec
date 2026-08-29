@@ -12,7 +12,7 @@ import (
 )
 
 // RemoteRegisterInput 是 Processor 驱动的远端登记输入。
-// Scope 是结构化的远端归属（P + 平面）；调用方不拼 Bitwarden folder 名。
+// Scope 是结构化的远端归属（项目 + 平面）；调用方不拼 Bitwarden folder 名。
 type RemoteRegisterInput struct {
 	ProjectRoot  string
 	Plane        WorkspacePlane
@@ -251,13 +251,13 @@ func ValidateRemoteRegisterScope(workspace Workspace, scope secrets.RemoteScope)
 	return err
 }
 
-// resolveRemoteRegisterTarget 只允许已声明 P 的固定平面归属。
-// 不允许通过 Remote 临时创建 P，也不接受 public 或自定义别名。
+// resolveRemoteRegisterTarget 只允许已声明项目的固定平面归属。
+// 不允许通过 Remote 临时创建项目，也不接受 public 或自定义别名。
 func resolveRemoteRegisterTarget(workspace Workspace, scope secrets.RemoteScope, ensureBundle bool, reporter Reporter) (secrets.SyncTarget, error) {
 	_ = ensureBundle
 	_ = reporter
 	if !scope.Valid() {
-		return secrets.SyncTarget{}, fmt.Errorf("必须指定 P 与平面")
+		return secrets.SyncTarget{}, fmt.Errorf("必须指定项目与平面")
 	}
 	var projects map[string]*pmodel.Loaded
 	readErr := withAppReadRepo(func(tx *repo.Transaction) error {
@@ -275,7 +275,7 @@ func resolveRemoteRegisterTarget(workspace Workspace, scope secrets.RemoteScope,
 		return secrets.SyncTarget{}, fmt.Errorf("项目平面不能登记 user secrets: %s", scope)
 	}
 	if _, declared := projects[scope.P]; !declared {
-		return secrets.SyncTarget{}, fmt.Errorf("P %q 未声明；禁止为包外地址手工创建 SyncTarget", scope.P)
+		return secrets.SyncTarget{}, fmt.Errorf("项目 %q 未声明；禁止为包外地址手工创建 SyncTarget", scope.P)
 	}
 	return secrets.NewPSyncTarget(scope.P, scope.Plane)
 }

@@ -90,7 +90,7 @@ func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 另一个 P 的同步根：不在请求范围内，不该被合并。
+	// 另一个项目的同步根：不在请求范围内，不该被合并。
 	otherTarget, err := secrets.NewPSyncTarget("demo", secrets.SyncPlaneProject)
 	if err != nil {
 		t.Fatal(err)
@@ -123,10 +123,10 @@ func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 		t.Fatalf("TOKEN = %q", got["TOKEN"])
 	}
 	if _, ok := got["PROJECT_ONLY"]; ok {
-		t.Fatalf("不应合并其他 P 的同步根: %#v", got)
+		t.Fatalf("不应合并其他项目的同步根: %#v", got)
 	}
 	if got["SHARED"] != "bundle" {
-		t.Fatalf("SHARED = %q, 期望仅目标 P 的值", got["SHARED"])
+		t.Fatalf("SHARED = %q, 期望仅目标项目的值", got["SHARED"])
 	}
 	if got["PATH"] != "/bin" {
 		t.Fatalf("PATH 应保留基环境: %q", got["PATH"])

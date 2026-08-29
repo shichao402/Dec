@@ -16,7 +16,7 @@ func tencentProjectScope() secrets.RemoteScope {
 	return secrets.RemoteScope{P: "tencent-cloud", Plane: secrets.SyncPlaneProject}
 }
 
-// enableBundlesForAddTest 让 tencent-cloud 成为当前平面已启用的 P。
+// enableBundlesForAddTest 让 tencent-cloud 成为当前平面已启用的项目。
 func enableBundlesForAddTest(t *testing.T, projectRoot string, names ...string) {
 	t.Helper()
 	mgr := config.NewProjectConfigManager(projectRoot)
@@ -138,16 +138,16 @@ func TestAddProjectSecretForScope_RejectsPathEscapingProjectRoot(t *testing.T) {
 	}
 }
 
-// 非法 P 名不能通过 scope 进入写入路径。
+// 非法项目名不能通过 scope 进入写入路径。
 func TestAddProjectSecretForScope_RejectsInvalidPName(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	if _, err := AddProjectSecretForScope(context.Background(), t.TempDir(),
 		secrets.RemoteScope{P: "Bad Name", Plane: secrets.SyncPlaneProject}, ".env/x.env", nil); err == nil {
-		t.Fatal("非法 P 名应被拒绝")
+		t.Fatal("非法项目名应被拒绝")
 	}
 }
 
-// 项目平面只有本项目 P 的 private/project 可写：启用的其它 P 只带 Git 资产。
+// 项目平面只有本项目的 private/project 可写：启用的其它项目只带 Git 资产。
 func TestSuggestSecretAddresses_OnlyHomeProjectOnProjectPlane(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	projectRoot := t.TempDir()
@@ -164,6 +164,6 @@ func TestSuggestSecretAddresses_OnlyHomeProjectOnProjectPlane(t *testing.T) {
 		t.Fatalf("SuggestSecretAddresses() = %v", err)
 	}
 	if len(addresses) != 1 || addresses[0] != "demo/private/local" {
-		t.Fatalf("addresses = %#v, 期望只有本项目 P", addresses)
+		t.Fatalf("addresses = %#v, 期望只有本项目", addresses)
 	}
 }

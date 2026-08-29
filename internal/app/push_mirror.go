@@ -55,7 +55,7 @@ func syncDecVaultFromCache(workspace Workspace, repoDir string, projectConfig *t
 		emit(reporter, EventInfo, "push.dec", fmt.Sprintf("  [%s] %s → %s", asset.Type, asset.Name, asset.Vault), progress)
 	}
 
-	// 新 P 模型没有 manifest 成员清单；resolved.Assets 已是该平面的完整可写集合。
+	// 新项目模型没有 manifest 成员清单；resolved.Assets 已是该平面的完整可写集合。
 	// 旧 bundle 模型仍需用 manifest 找出 cache 删除项。
 	if hasPAssets(assets) {
 		return synced, pruned, nil

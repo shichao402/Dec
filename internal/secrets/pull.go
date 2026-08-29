@@ -100,7 +100,7 @@ func PullBundle(ctx context.Context, client Client, req PullBundleRequest) ([]st
 	return WriteSecureNotes(req.ProjectRoot, target, notes)
 }
 
-// requestTarget 校验请求携带的 SyncTarget：P 模型下没有可推断的默认目标，
+// requestTarget 校验请求携带的 SyncTarget：项目模型下没有可推断的默认目标，
 // 调用方必须给出声明型 target。
 func requestTarget(req PullBundleRequest) (SyncTarget, error) {
 	target := req.Target

@@ -236,7 +236,7 @@ func decryptSSHKeyCipher(cipher bwCipher, userKey []byte, sc bwScope) (SSHKeyIte
 	return item, nil
 }
 
-// ListPNames 枚举远端存在的 P 名（已排序去重）。
+// ListPNames 枚举远端存在的项目名（已排序去重）。
 func (c *APIClient) ListPNames(ctx context.Context) ([]string, error) {
 	all, err := c.ListAddresses(ctx)
 	if err != nil {
@@ -261,9 +261,9 @@ func (c *APIClient) ListPNames(ctx context.Context) ([]string, error) {
 
 // ListAddresses 枚举 vault 中全部可读的远端地址。
 //
-// P folder 在 Bitwarden 上只有 P 名一级，两个平面靠条目名前缀区分，因此这里按
+// 项目 folder 在 Bitwarden 上只有项目名一级，两个平面靠条目名前缀区分，因此这里按
 // 实际存在的前缀展开成逻辑地址 <p>/private/<plane>，让调用方继续只看到「一个
-// 地址 = 一个同步单位」。存量非 P folder 原样返回。
+// 地址 = 一个同步单位」。存量非项目 folder 原样返回。
 func (c *APIClient) ListAddresses(ctx context.Context) ([]string, error) {
 	userKey := UserKey()
 	if len(userKey) == 0 {
@@ -330,7 +330,7 @@ func (c *APIClient) ListAddresses(ctx context.Context) ([]string, error) {
 		}
 		planes := planesByFolderID[folder.ID]
 		if len(planes) == 0 {
-			// 空 P folder：两个平面都列出，Remote 页仍能看见并登记第一条。
+			// 空项目 folder：两个平面都列出，Remote 页仍能看见并登记第一条。
 			for _, plane := range []SyncPlane{SyncPlaneProject, SyncPlaneMachine} {
 				if scope, scopeErr := NewRemoteScope(name, plane); scopeErr == nil {
 					add(scope.String())

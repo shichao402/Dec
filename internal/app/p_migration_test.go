@@ -387,6 +387,6 @@ func TestLivePMigrationBackend_DeletesEmptyLegacyFolders(t *testing.T) {
 		t.Fatalf("empty legacy folder not deleted: %#v", client.NotesByFolder)
 	}
 	if _, ok := client.NotesByFolder["dec/private/user"]; !ok {
-		t.Fatal("P folder must stay")
+		t.Fatal("project folder must stay")
 	}
 }

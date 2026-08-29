@@ -66,7 +66,7 @@ func planWorkspaceSecretsSync(workspace Workspace, enabledBundles []string, cfg 
 	if len(projects) > 0 {
 		for _, name := range names {
 			if _, ok := projects[name]; !ok {
-				return nil, fmt.Errorf("P %q 不存在，不能声明 secrets target", name)
+				return nil, fmt.Errorf("项目 %q 不存在，不能声明 secrets target", name)
 			}
 		}
 	}
@@ -115,14 +115,14 @@ func planWorkspaceSecretsBrowse(workspace Workspace, enabledBundles []string, cf
 	}
 	sort.Strings(browse)
 
-	// 浏览不走 pull 的「项目平面只认家 P」收窄：Remote 要能看见并清理别的 P
+	// 浏览不走 pull 的「项目平面只认家项目」收窄：Remote 要能看见并清理别的项目
 	// 在本平面留下的同步根与远端条目。名字不合法只跳过，不能整页失败。
 	targets := make([]secrets.SyncTarget, 0, len(browse))
 	for _, name := range browse {
 		target, err := secrets.NewPSyncTarget(name, workspace.SecretsPlane())
 		if err != nil {
 			emit(reporter, EventWarn, "delete.secrets",
-				fmt.Sprintf("跳过非法 P 名 %q: %v", name, err), nil)
+				fmt.Sprintf("跳过非法项目名 %q: %v", name, err), nil)
 			continue
 		}
 		targets = append(targets, target)
@@ -269,7 +269,7 @@ func discoverRemoteSecretTargets(
 }
 
 // remoteInventoryTarget 为 Remote 全量库存构造 SyncTarget。
-// 能解析成 P 地址的走声明型 target（有 LocalRoot）；其余按只读浏览节点处理。
+// 能解析成项目地址的走声明型 target（有 LocalRoot）；其余按只读浏览节点处理。
 func remoteInventoryTarget(address string, workspace Workspace, scopes vaultBundleScopes) (secrets.SyncTarget, error) {
 	address = strings.TrimSpace(address)
 	if address == "" {
@@ -599,7 +599,7 @@ func addGCMConflict(seen map[string]string, label string, note secrets.SecureNot
 	return nil
 }
 
-// validateNoPPrivateGitOverlap 拒绝同一 P/plane/相对路径同时由 Git private
+// validateNoPPrivateGitOverlap 拒绝同一 项目/plane/相对路径 同时由 Git private
 // 象限与 Bitwarden 持有。两者含义不同，但逻辑命名空间相同。
 func validateNoPPrivateGitOverlap(targets []secrets.SyncTarget, notes [][]secrets.SecureNote, keys [][]secrets.SSHKeyLanding) error {
 	if len(targets) == 0 {
@@ -622,7 +622,7 @@ func validateNoPPrivateGitOverlap(targets []secrets.SyncTarget, notes [][]secret
 					return nil
 				}
 				if _, err := os.Stat(filepath.Join(root, clean)); err == nil {
-					return fmt.Errorf("P %q 的 private/%s/%s 同时由 Git 与 Bitwarden folder %q 持有，已拒绝同步",
+					return fmt.Errorf("项目 %q 的 private/%s/%s 同时由 Git 与 Bitwarden folder %q 持有，已拒绝同步",
 						target.Name, plane, filepath.ToSlash(clean), target.Address)
 				} else if !os.IsNotExist(err) {
 					return err
@@ -706,7 +706,7 @@ func formatSyncTargetLabel(t secrets.SyncTarget) string {
 	if secrets.IsMachinePlane(t.Plane) {
 		plane = "user"
 	}
-	return fmt.Sprintf("P %q private/%s secrets", t.Name, plane)
+	return fmt.Sprintf("项目 %q private/%s secrets", t.Name, plane)
 }
 
 func decBundleNameForTarget(t secrets.SyncTarget) string {

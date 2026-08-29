@@ -21,7 +21,7 @@ func setupRemoteRegisterRepo(t *testing.T, files map[string]string) {
 	}
 }
 
-// declaredDemoP 是 vault 里声明了 demo 这个 P 的仓库内容。
+// declaredDemoP 是 vault 里声明了 demo 这个项目的仓库内容。
 func declaredDemoP() map[string]string {
 	return map[string]string{"demo/dec.yaml": "name: demo\ntitle: Demo\n"}
 }
@@ -128,7 +128,7 @@ func TestPrepareAndCommitRemoteRegister_SSHGenerate(t *testing.T) {
 	}
 }
 
-// 未在 vault 声明的 P 不能登记：Remote 页不是创建 P 的入口。
+// 未在 vault 声明的项目不能登记：Remote 页不是创建项目的入口。
 func TestCommitRemoteRegister_RejectsUndeclaredP(t *testing.T) {
 	setupRemoteRegisterRepo(t, declaredDemoP())
 	secrets.SetSession("test-session")
@@ -142,7 +142,7 @@ func TestCommitRemoteRegister_RejectsUndeclaredP(t *testing.T) {
 		NoteContent: "secret",
 	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "relkit") {
-		t.Fatalf("未声明的 P 应被拒绝, got %v", err)
+		t.Fatalf("未声明的项目应被拒绝, got %v", err)
 	}
 }
 
@@ -156,7 +156,7 @@ func TestValidateRemoteRegisterScope_RejectsCrossPlane(t *testing.T) {
 		t.Fatalf("项目平面不应允许 user 归属, got %v", err)
 	}
 	if err := ValidateRemoteRegisterScope(projectWS, demoProjectScope()); err != nil {
-		t.Fatalf("同平面的已声明 P 应通过: %v", err)
+		t.Fatalf("同平面的已声明项目应通过: %v", err)
 	}
 
 	userWS := NewWorkspace(WorkspaceUser, "")
@@ -170,6 +170,6 @@ func TestValidateRemoteRegisterScope_RejectsInvalidPName(t *testing.T) {
 	setupRemoteRegisterRepo(t, declaredDemoP())
 	ws := NewWorkspace(WorkspaceProject, t.TempDir())
 	if err := ValidateRemoteRegisterScope(ws, secrets.RemoteScope{P: "Dec", Plane: secrets.SyncPlaneProject}); err == nil {
-		t.Fatal("大写 P 名应被拒绝")
+		t.Fatal("大写项目名应被拒绝")
 	}
 }

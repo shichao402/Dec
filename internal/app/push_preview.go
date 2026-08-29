@@ -106,14 +106,14 @@ func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConf
 		}
 		repoDir := tx.WorkDir()
 		if repositoryHasLegacyLayout(repoDir) {
-			return fmt.Errorf("检测到旧 projects/ 或 bundles/ 结构；远端尚未完成一次性 P 迁移")
+			return fmt.Errorf("检测到旧 projects/ 或 bundles/ 结构；远端尚未完成一次性项目迁移")
 		}
 		resolved, resolveErr := resolveDesiredAssetsForPlane(projectConfig, repoDir, workspace.EffectivePlane(), reporter)
 		if resolveErr != nil {
 			return resolveErr
 		}
 
-		// 与真正 push 使用同一可写边界：项目平面只能回推家 P，
+		// 与真正 push 使用同一可写边界：项目平面只能回推家项目，
 		// direct requires 的 public/project 副本只读，不能计入预览或被临时镜像。
 		assets := writableResolvedAssets(workspace, projectConfig, resolved.Assets)
 		if extra, extraErr := scanWritableCacheAssets(workspace, projectConfig); extraErr != nil {

@@ -36,7 +36,7 @@ func TestPrepareRepoGCMBootstrapFindsMatchingHostWithoutExposingPassword(t *test
 		t.Fatalf("candidate = %#v", got)
 	}
 	if got.Unmanaged {
-		t.Fatalf("P 地址不应标 Unmanaged: %#v", got)
+		t.Fatalf("项目地址不应标 Unmanaged: %#v", got)
 	}
 }
 

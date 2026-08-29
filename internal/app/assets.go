@@ -55,7 +55,7 @@ type AssetBundleOption struct {
 	// RemoteUnverified 表示本次没能核对远端（无 session、枚举失败，或该 bundle 配了别名 folder），
 	// 因此既不能声称远端已有、也不能断言远端没有。仅在 SecretsOnly 为 true 时有意义。
 	RemoteUnverified bool
-	// Model="p" 表示顶层 P；Home/Required 分别表示家 P 与直接 requires。
+	// Model="p" 表示顶层项目；Home/Required 分别表示家项目与直接 requires。
 	Model     string
 	Home      bool
 	Required  bool
@@ -72,7 +72,7 @@ type AssetSelectionState struct {
 	// Bundles 是当前仓库扫描得到的全部 bundle 选项，含未启用的。
 	// 仓库未连接或扫描失败时为 nil（调用方应当作"没有 bundle"处理）。
 	Bundles []AssetBundleOption
-	// Model 在新仓库为 "p"，用于外部兼容工具区分 P 与 legacy bundle。
+	// Model 在新仓库为 "p"，用于外部兼容工具区分项目与 legacy bundle。
 	Model string
 	Plane WorkspacePlane
 }
@@ -282,8 +282,8 @@ func saveWorkspacePSelection(workspace Workspace, names []string, reporter Repor
 	valid := make([]string, 0, len(requested))
 	for _, name := range requested {
 		if _, ok := available[name]; !ok {
-			result.RejectedProjects = append(result.RejectedProjects, name+"（P 不存在）")
-			result.RejectedBundles = append(result.RejectedBundles, name+"（P 不存在）")
+			result.RejectedProjects = append(result.RejectedProjects, name+"（项目不存在）")
+			result.RejectedBundles = append(result.RejectedBundles, name+"（项目不存在）")
 			continue
 		}
 		valid = append(valid, name)
@@ -302,7 +302,7 @@ func saveWorkspacePSelection(workspace Workspace, names []string, reporter Repor
 		result.VarsPath, _ = config.GetGlobalVarsPath()
 		result.EnabledProjects = append([]string(nil), valid...)
 		result.EnabledBundleCount = len(valid)
-		emit(reporter, EventInfo, "p.save", fmt.Sprintf("已保存 %d 个用户启用 P", len(valid)), nil)
+		emit(reporter, EventInfo, "p.save", fmt.Sprintf("已保存 %d 个用户启用项目", len(valid)), nil)
 		return result, nil
 	}
 
@@ -313,7 +313,7 @@ func saveWorkspacePSelection(workspace Workspace, names []string, reporter Repor
 	}
 	home := strings.TrimSpace(cfg.ProjectName)
 	if !types.IsValidPName(home) {
-		return nil, fmt.Errorf("项目尚未绑定合法家 P")
+		return nil, fmt.Errorf("项目尚未绑定合法家项目")
 	}
 	requires := make([]string, 0, len(valid))
 	for _, name := range valid {
@@ -324,7 +324,7 @@ func saveWorkspacePSelection(workspace Workspace, names []string, reporter Repor
 	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
 		loaded, err := pmodel.Load(tx.WorkDir(), home)
 		if err != nil {
-			return fmt.Errorf("加载家 P %q 失败: %w", home, err)
+			return fmt.Errorf("加载家项目 %q 失败: %w", home, err)
 		}
 		manifest := loaded.Manifest
 		manifest.Requires = requires
@@ -336,7 +336,7 @@ func saveWorkspacePSelection(workspace Workspace, names []string, reporter Repor
 	}); err != nil {
 		return nil, err
 	}
-	// P 模型下本地配置只绑定家 P；requires 的 SSOT 是 <home>/dec.yaml。
+	// 项目模型下本地配置只绑定家项目；requires 的 SSOT 是 <home>/dec.yaml。
 	cfg.EnabledBundles = nil
 	if err := mgr.SaveProjectConfig(cfg); err != nil {
 		return nil, err
@@ -347,7 +347,7 @@ func saveWorkspacePSelection(workspace Workspace, names []string, reporter Repor
 	result.RequiredProjects = append([]string(nil), requires...)
 	result.EnabledProjects = append([]string{home}, requires...)
 	result.EnabledBundleCount = len(result.EnabledProjects)
-	emit(reporter, EventInfo, "p.save", fmt.Sprintf("家 P %s requires 已保存：%s", home, strings.Join(requires, ", ")), nil)
+	emit(reporter, EventInfo, "p.save", fmt.Sprintf("家项目 %s requires 已保存：%s", home, strings.Join(requires, ", ")), nil)
 	return result, nil
 }
 
@@ -532,7 +532,7 @@ func enrichBundleOptionsWithSecretMembers(options []AssetBundleOption, reporter 
 	}
 }
 
-// listRemoteSecretMemberPaths 枚举一个 P 在两个平面上的远端条目名。
+// listRemoteSecretMemberPaths 枚举一个项目在两个平面上的远端条目名。
 // Bundles 页只做成员展示，不区分平面，两侧合并即可。
 func listRemoteSecretMemberPaths(client secrets.Client, pName string) ([]string, error) {
 	var paths []string

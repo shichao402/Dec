@@ -154,7 +154,7 @@ func pruneOrphanSecretsForTarget(
 	return report
 }
 
-// secretsOwnerForTarget 返回 SSH Key 落地文件名里的归属段：P 名。
+// secretsOwnerForTarget 返回 SSH Key 落地文件名里的归属段：项目名。
 func secretsOwnerForTarget(target secrets.SyncTarget) string {
 	return target.Name
 }

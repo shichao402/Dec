@@ -11,7 +11,7 @@ import (
 )
 
 // TestAPIClient_PushP_UsesFlatFolderAndPrefixedItemName 锁死扁平布局：folder 只有
-// P 名，平面进条目名。
+// 项目名，平面进条目名。
 func TestAPIClient_PushP_UsesFlatFolderAndPrefixedItemName(t *testing.T) {
 	userKey := bytes.Repeat([]byte{0x07}, 64)
 	SetUserKey(userKey)
@@ -94,7 +94,7 @@ func TestAPIClient_PushP_UsesFlatFolderAndPrefixedItemName(t *testing.T) {
 		t.Fatal(err)
 	}
 	if gotFolder != "dec" {
-		t.Fatalf("folder 名 = %q，Bitwarden folder 只能是 P 名这一级", gotFolder)
+		t.Fatalf("folder 名 = %q，Bitwarden folder 只能是项目名这一级", gotFolder)
 	}
 
 	if createdCipher == nil {
@@ -115,7 +115,7 @@ func TestAPIClient_PushP_UsesFlatFolderAndPrefixedItemName(t *testing.T) {
 	}
 }
 
-// TestAPIClient_ListP_SeparatesPlanesInSameFolder 确认同一个 P folder 里两个平面
+// TestAPIClient_ListP_SeparatesPlanesInSameFolder 确认同一个项目 folder 里两个平面
 // 的条目互不串台，且列出的地址是逻辑地址。
 func TestAPIClient_ListP_SeparatesPlanesInSameFolder(t *testing.T) {
 	userKey := bytes.Repeat([]byte{0x09}, 64)

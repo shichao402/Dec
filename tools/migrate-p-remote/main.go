@@ -1,5 +1,5 @@
 // Command migrate-p-remote 一次性把 Git vault 与 Bitwarden 从 bundles/projects
-// 改写成 P 四象限。不改本机落地；新版本启动会清理本地旧目录。
+// 改写成项目四象限。不改本机落地；新版本启动会清理本地旧目录。
 //
 //	go run ./tools/migrate-p-remote           # 只读预览
 //	go run ./tools/migrate-p-remote --apply   # 写入远端
@@ -30,7 +30,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "预览失败: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("legacy=%v P=%d git=%d bw=%d issues=%d fingerprint=%s\n",
+	fmt.Printf("legacy=%v projects=%d git=%d bw=%d issues=%d fingerprint=%s\n",
 		plan.LegacyDetected, len(plan.Manifests), len(plan.GitMoves), len(plan.BWMoves), len(plan.Issues), plan.Fingerprint)
 	for _, issue := range plan.Issues {
 		fmt.Printf("  [%s/%s] %s\n", issue.Severity, issue.Code, issue.Message)
@@ -51,7 +51,7 @@ func main() {
 		fmt.Printf("OK phase=%s\n", journal.Phase)
 	}
 	if err := app.SyncPManifestsFromBitwarden(ctx, reporter); err != nil {
-		fmt.Fprintf(os.Stderr, "补齐 P 声明失败: %v\n", err)
+		fmt.Fprintf(os.Stderr, "补齐项目声明失败: %v\n", err)
 		os.Exit(1)
 	}
 }

@@ -155,7 +155,7 @@ func TestPushProjectAssets_RejectsLegacyRepositoryAndGuidesMigration(t *testing.
 		t.Fatal(err)
 	}
 	_, err := PushProjectAssets(context.Background(), projectRoot, nil)
-	if err == nil || !strings.Contains(err.Error(), "Push 已拒绝") || !strings.Contains(err.Error(), "P 迁移") {
+	if err == nil || !strings.Contains(err.Error(), "Push 已拒绝") || !strings.Contains(err.Error(), "项目迁移") {
 		t.Fatalf("err = %v", err)
 	}
 }

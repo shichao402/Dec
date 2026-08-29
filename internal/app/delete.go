@@ -155,7 +155,7 @@ func newDeleteGroupContext(workspace Workspace, projectConfig *types.ProjectConf
 	for i, name := range projectConfig.EnabledBundles {
 		ctx.bundleOrder[name] = i
 	}
-	// 远端地址 <p>/private/<plane> 直接指回 P 名，没有别名可解析。
+	// 远端地址 <p>/private/<plane> 直接指回项目名，没有别名可解析。
 	for _, pName := range projectConfig.EnabledBundles {
 		for _, plane := range []secrets.SyncPlane{secrets.SyncPlaneMachine, secrets.SyncPlaneProject} {
 			if target, err := secrets.NewPSyncTarget(pName, plane); err == nil {
@@ -357,7 +357,7 @@ func appendRemoteSecretCandidates(
 			}
 			addSecret(address, target.LocalRoot, target.Plane, note.Name, localExists)
 		}
-		// SSH Key 落地文件名按 P 名区分，两个平面各自独立。
+		// SSH Key 落地文件名按项目名区分，两个平面各自独立。
 		owner := strings.TrimSpace(target.Name)
 		keys, listKeysErr := client.ListSSHKeys(ctx, target)
 		if listKeysErr != nil {
@@ -501,21 +501,21 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 
 func validatePAssetDeleteIdentity(item DeleteSelectionItem) error {
 	if !types.IsValidPName(strings.TrimSpace(item.Vault)) {
-		return fmt.Errorf("P 名 %q 非法", item.Vault)
+		return fmt.Errorf("项目名 %q 非法", item.Vault)
 	}
 	if item.Visibility != types.AssetVisibilityPublic && item.Visibility != types.AssetVisibilityPrivate {
-		return fmt.Errorf("P 资产 visibility %q 非法", item.Visibility)
+		return fmt.Errorf("项目资产 visibility %q 非法", item.Visibility)
 	}
 	if item.AssetPlane != types.AssetPlaneUser && item.AssetPlane != types.AssetPlaneProject {
-		return fmt.Errorf("P 资产 plane %q 非法", item.AssetPlane)
+		return fmt.Errorf("项目资产 plane %q 非法", item.AssetPlane)
 	}
 	if !bundle.IsKnownType(item.Type) {
-		return fmt.Errorf("P 资产类型 %q 非法", item.Type)
+		return fmt.Errorf("项目资产类型 %q 非法", item.Type)
 	}
 	name := strings.TrimSpace(item.Name)
 	if name == "" || name == "." || name == ".." || filepath.Base(name) != name ||
 		strings.ContainsAny(name, `/\`) {
-		return fmt.Errorf("P 资产名 %q 非法：必须是单个路径段", item.Name)
+		return fmt.Errorf("项目资产名 %q 非法：必须是单个路径段", item.Name)
 	}
 	return nil
 }
@@ -888,10 +888,10 @@ func deleteRemoteDecAssetOnly(projectRoot string, plane WorkspacePlane, itemType
 			}
 			fullPath = resolveTypedAssetFile(repoDir, asset)
 			if fullPath == "" {
-				return fmt.Errorf("无法解析 P 资产 %s/%s", itemType, name)
+				return fmt.Errorf("无法解析项目资产 %s/%s", itemType, name)
 			}
 			if _, statErr := os.Stat(fullPath); statErr != nil {
-				return fmt.Errorf("未找到 P %q 的 %s/%s/%s/%s", vault, visibility, assetPlane, itemType, name)
+				return fmt.Errorf("未找到项目 %q 的 %s/%s/%s/%s", vault, visibility, assetPlane, itemType, name)
 			}
 		} else {
 			var err error

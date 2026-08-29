@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// declaredPTarget 构造声明型 P 目标：Bitwarden folder 只有 P 名一级。
+// declaredPTarget 构造声明型项目目标：Bitwarden folder 只有项目名一级。
 func declaredPTarget(t testing.TB, pName string, plane SyncPlane) SyncTarget {
 	t.Helper()
 	target, err := NewPSyncTarget(pName, plane)
@@ -195,7 +195,7 @@ func TestAPIClient_PushBundle_CreateSecureNotePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// folder 只有 P 名一级，平面与相对路径都编码进条目名。
+	// folder 只有项目名一级，平面与相对路径都编码进条目名。
 	wantName := projectItemName(t, noteRel)
 	if gotName != wantName {
 		t.Fatalf("解密 name = %q, want %q", gotName, wantName)
@@ -416,7 +416,7 @@ func TestAPIClient_PushBundle_CreatesFolderWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PushBundle() = %v", err)
 	}
-	// 新建的 folder 名只有 P 名一级，不含 private/<plane>。
+	// 新建的 folder 名只有项目名一级，不含 private/<plane>。
 	if folderPosts != 1 || folderName != "cnb" {
 		t.Fatalf("应恰好建一次 folder cnb, posts=%d name=%q", folderPosts, folderName)
 	}

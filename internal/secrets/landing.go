@@ -94,7 +94,7 @@ func ValidateLandingPaths(projectRoot string, candidates []LandingCandidate) err
 				return fmt.Errorf("LandingCandidate.LocalRoot 不能为空")
 			}
 			if strings.Contains(root, "/") || !types.IsValidPName(root) {
-				return fmt.Errorf("机器级 secrets 落地路径必须是 P 根: %s", root)
+				return fmt.Errorf("机器级 secrets 落地路径必须是项目根: %s", root)
 			}
 			display := path.Join(".dec/secrets", root, noteRel)
 			address := strings.TrimSpace(candidate.Address)

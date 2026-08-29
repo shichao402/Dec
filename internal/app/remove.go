@@ -82,7 +82,7 @@ func removeP(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, e
 		return nil, ErrRemoveNotConfirmed
 	}
 	if !types.IsValidPName(name) {
-		return nil, fmt.Errorf("P 名 %q 非法", name)
+		return nil, fmt.Errorf("项目名 %q 非法", name)
 	}
 	result := &RemoveBundleResult{
 		ProjectRoot: workspace.Root, BundleName: name, ProjectName: name, Model: "p",
@@ -94,7 +94,7 @@ func removeP(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, e
 		}
 		target, ok := projects[name]
 		if !ok {
-			return fmt.Errorf("未找到 P %q", name)
+			return fmt.Errorf("未找到项目 %q", name)
 		}
 		result.MemberCount = len(target.Assets)
 		if err := os.RemoveAll(filepath.Join(tx.WorkDir(), name)); err != nil {
@@ -149,7 +149,7 @@ func removeP(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, e
 	result.Remnants = append(result.Remnants,
 		secrets.PFolder(name, secrets.SyncPlaneMachine),
 		secrets.PFolder(name, secrets.SyncPlaneProject))
-	emit(reporter, EventInfo, "remove.finish", fmt.Sprintf("已删除 P %s；Bitwarden private folders 保留供 Remote 显式处理", name), nil)
+	emit(reporter, EventInfo, "remove.finish", fmt.Sprintf("已删除项目 %s；Bitwarden private folders 保留供 Remote 显式处理", name), nil)
 	return result, nil
 }
 

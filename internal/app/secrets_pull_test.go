@@ -217,7 +217,7 @@ func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T)
 	if err := os.WriteFile(gone, []byte("orphan: 1\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	// 别的 P 的本地残留：不在 pull 范围，不得误删。
+	// 别的项目的本地残留：不在 pull 范围，不得误删。
 	disabled := filepath.Join(projectRoot, ".secrets", "disabled", ".env", "x.env")
 	if err := os.MkdirAll(filepath.Dir(disabled), 0755); err != nil {
 		t.Fatal(err)
@@ -389,8 +389,8 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 	}
 }
 
-// 平面隔离（ADR 0009）：project 上下文只解析本项目 P 的项目平面 target；
-// 启用的其它 P 只贡献 Git 资产，不带来项目平面 secrets。
+// 平面隔离（ADR 0009）：project 上下文只解析本项目的项目平面 target；
+// 启用的其它项目只贡献 Git 资产，不带来项目平面 secrets。
 func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	if err := config.SaveGlobalConfig(&types.GlobalConfig{EnabledBundles: []string{"woa", "vikunja"}}); err != nil {
@@ -411,7 +411,7 @@ func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
 		t.Fatalf("planSecretsSync() = %v", err)
 	}
 	if len(plan.Targets) != 1 {
-		t.Fatalf("project 平面应只有本项目 P 一个 target: %+v", plan.Targets)
+		t.Fatalf("project 平面应只有本项目一个 target: %+v", plan.Targets)
 	}
 	target := plan.Targets[0]
 	if secrets.IsMachinePlane(target.Plane) {
@@ -488,7 +488,7 @@ func TestValidateNoPPrivateGitOverlapRejectsSameLogicalPath(t *testing.T) {
 		nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "同时由 Git 与 Bitwarden") {
-		t.Fatalf("同一 P/plane/相对路径应冲突，got %v", err)
+		t.Fatalf("同一 项目/plane/相对路径 应冲突，got %v", err)
 	}
 }
 

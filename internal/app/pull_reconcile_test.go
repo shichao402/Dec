@@ -70,7 +70,7 @@ members:
 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
-	// 项目平面只同步项目自己的 P（ADR 0016）：P 名与 bundle 名同为 pkv，
+	// 项目平面只同步本项目自己（ADR 0016）：项目名与 bundle 名同为 pkv，
 	// 才能同时覆盖 vault 成员孤儿与 secrets 孤儿。
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "pkv",

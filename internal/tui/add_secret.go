@@ -14,11 +14,11 @@ import (
 
 // 登记新 secret 的分阶段状态。
 // Project 页：先选归属（本地同步根），再输入相对路径。
-// Remote 页：归属来自光标所在 P 地址（n）或手输新 P + 选平面（N），
+// Remote 页：归属来自光标所在项目地址（n）或手输新项目 + 选平面（N），
 // 再选 Processor、名称、来源。
 const (
 	addSecretStageTarget     = "target" // Project only：轮转本地同步根
-	addSecretStageP          = "p"      // Remote only：手输新 P 名
+	addSecretStageP          = "p"      // Remote only：手输新项目名
 	addSecretStagePlane      = "plane"  // Remote only：选 private/user 或 private/project
 	addSecretStageScopeCheck = "scope-check"
 	addSecretStageType       = "type" // Remote only：Processor
@@ -136,7 +136,7 @@ func currentRemoteProcessor(m model) (secrets.Processor, bool) {
 
 // remoteRegisterAnchor 是从 Remote 光标就近反推出的登记落点。
 type remoteRegisterAnchor struct {
-	Scope secrets.RemoteScope // 远端归属：P + 平面
+	Scope secrets.RemoteScope // 远端归属：项目 + 平面
 	Dir   string              // 同步根内相对目录（光标停在 .env/ 之下时为 ".env"）
 	Local bool                // 光标停在本地分区（归属一致，登记仍写远端）
 }
@@ -200,7 +200,7 @@ func treeDirUnderGroup(groupID, nodeID string) string {
 	return strings.Join(segs, "/")
 }
 
-// normalizeRemotePNameInput 只取用户输入的裸 P 名：远端地址由 secrets 内部拼装。
+// normalizeRemotePNameInput 只取用户输入的裸项目名：远端地址由 secrets 内部拼装。
 func normalizeRemotePNameInput(raw string) string {
 	return strings.Trim(strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/")), "/")
 }
@@ -281,11 +281,11 @@ func (m *model) beginAddSecret() tea.Cmd {
 	return suggestSecretTargetsCmd(m.projectRoot, gen)
 }
 
-// beginRemoteRegisterAtCursor 是 Remote 页 n：归属直接取光标所在 P 地址，表单内不再选归属。
+// beginRemoteRegisterAtCursor 是 Remote 页 n：归属直接取光标所在项目地址，表单内不再选归属。
 func (m *model) beginRemoteRegisterAtCursor() tea.Cmd {
 	anchor, ok := m.cursorRegisterAnchor()
 	if !ok {
-		m.pushLog("Remote 登记：把光标移到某个 P 地址（或其目录 / 条目）上再按 n；新建 P 按 N")
+		m.pushLog("Remote 登记：把光标移到某个项目地址（或其目录 / 条目）上再按 n；新建项目按 N")
 		return nil
 	}
 	m.resetAddSecretForm(true)
@@ -304,13 +304,13 @@ func (m *model) beginRemoteRegisterAtCursor() tea.Cmd {
 	return nil
 }
 
-// beginRemoteRegisterNewP 是 Remote 页 N：P 尚未出现在树上时手输，并选平面。
+// beginRemoteRegisterNewP 是 Remote 页 N：项目尚未出现在树上时手输，并选平面。
 func (m *model) beginRemoteRegisterNewP() tea.Cmd {
 	m.resetAddSecretForm(true)
 	m.addSecretScopeNew = true
 	m.addSecretPlane = secrets.SyncPlaneProject
 	m.addSecretStage = addSecretStageP
-	m.pushLog("Remote 登记：输入新 P 名（小写 kebab-case），下一步选平面")
+	m.pushLog("Remote 登记：输入新项目名（小写 kebab-case），下一步选平面")
 	return nil
 }
 
@@ -459,16 +459,16 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 	if m.addSecretStage == addSecretStageP {
 		name := normalizeRemotePNameInput(m.addSecretPName)
 		if name == "" {
-			m.noteAddSecret("P 名不能为空")
+			m.noteAddSecret("项目名不能为空")
 			return m, nil
 		}
 		if strings.Contains(name, "/") {
-			m.noteAddSecret("只输入 P 名：平面在下一步选，远端地址由 Dec 拼装")
+			m.noteAddSecret("只输入项目名：平面在下一步选，远端地址由 Dec 拼装")
 			return m, nil
 		}
 		m.addSecretPName = name
 		m.addSecretStage = addSecretStagePlane
-		m.pushLog(fmt.Sprintf("Remote 登记 → P %s；选择平面（tab 轮转）", name))
+		m.pushLog(fmt.Sprintf("Remote 登记 → 项目 %s；选择平面（tab 轮转）", name))
 		return m, nil
 	}
 
@@ -482,7 +482,7 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 		m.addSecretScopeCheckGen++
 		gen := m.addSecretScopeCheckGen
 		m.addSecretStage = addSecretStageScopeCheck
-		m.noteAddSecret("正在校验 P 声明…（Esc 取消）")
+		m.noteAddSecret("正在校验项目声明…（Esc 取消）")
 		return m, validateRemoteRegisterScopeCmd(m.workspace(), scope, gen)
 	}
 
@@ -508,7 +508,7 @@ func (m model) advanceAddSecret() (tea.Model, tea.Cmd) {
 	if m.addSecretRemoteMode {
 		scope, scopeErr := m.addSecretScope()
 		if scopeErr != nil {
-			m.noteAddSecret("没有解析到归属 P，请 Esc 后重新按 n / N")
+			m.noteAddSecret("没有解析到归属项目，请 Esc 后重新按 n / N")
 			return m, nil
 		}
 		p, ok := currentRemoteProcessor(m)
@@ -734,7 +734,7 @@ func (m model) addSecretBlockLines() []string {
 	}
 	lines := []string{shellTitleStyle.Render(title)}
 	if m.addSecretRemoteMode {
-		lines = append(lines, shellMutedStyle.Render("归属是 P + 平面；类型同级；写入器由类型决定。"))
+		lines = append(lines, shellMutedStyle.Render("归属是项目 + 平面；类型同级；写入器由类型决定。"))
 	} else {
 		lines = append(lines, shellMutedStyle.Render("Note 名 = 相对同步根路径；文件须先写到对应 .secrets/ 目录。"))
 	}
@@ -743,7 +743,7 @@ func (m model) addSecretBlockLines() []string {
 	targetLine := "归属: <待选择>"
 	switch {
 	case m.addSecretRemoteMode && m.addSecretScopeNew:
-		targetLine = fmt.Sprintf("归属: 新 P %s", fallbackValue(m.addSecretPName, "<待输入>"))
+		targetLine = fmt.Sprintf("归属: 新项目 %s", fallbackValue(m.addSecretPName, "<待输入>"))
 	case m.addSecretRemoteMode:
 		targetLine = fmt.Sprintf("归属: %s（光标所在）", fallbackValue(m.addSecretScopeLabel(), "<未解析>"))
 	case loadingTargets:
@@ -783,7 +783,7 @@ func (m model) addSecretBlockLines() []string {
 	case addSecretStageP:
 		lines = append(lines, shellSelectedRow.Render(targetLine+"▌"), shellLogStyle.Render(planeLine), shellLogStyle.Render(typeLine))
 		lines = append(lines,
-			shellMutedStyle.Render("只输入 P 名（小写 kebab-case）；平面下一步选，远端地址由 Dec 拼装。"),
+			shellMutedStyle.Render("只输入项目名（小写 kebab-case）；平面下一步选，远端地址由 Dec 拼装。"),
 			shellMutedStyle.Render("Enter 下一步 · Esc 取消"))
 	case addSecretStagePlane:
 		lines = append(lines, shellLogStyle.Render(targetLine), shellSelectedRow.Render(planeLine+"▌"))

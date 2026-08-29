@@ -18,7 +18,7 @@ func TestResolvePSyncTargets_MachinePlane(t *testing.T) {
 	if tg.Name != "cnb" || !IsMachinePlane(tg.Plane) {
 		t.Fatalf("target = %+v", tg)
 	}
-	// 机器平面同步根相对 ~/.dec/secrets，只有 P 名一级。
+	// 机器平面同步根相对 ~/.dec/secrets，只有项目名一级。
 	if tg.LocalRoot != "cnb" {
 		t.Fatalf("LocalRoot = %q", tg.LocalRoot)
 	}

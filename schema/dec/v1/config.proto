@@ -11,8 +11,15 @@ message GlobalConfig {
   string editor = 3;
   // dec-server 在无门面连接后退出前的等待时长（Go duration，如 "30m"）。
   string server_idle_timeout = 4 [json_name = "server_idle_timeout"];
-  // 用户平面启用的 P 名；每项安装该 P 的 public/user 与 private/user。
+  // 用户平面启用的项目名；每项安装该项目的 public/user 与 private/user。
   repeated string enabled_projects = 5 [json_name = "enabled_projects"];
+  // Console 显式接管或扫描导入的目标设备项目目录。
+  repeated ManagedProject managed_projects = 6 [json_name = "managed_projects"];
+}
+
+message ManagedProject {
+  string root = 1;
+  string label = 2;
 }
 
 // ProjectConfig 对应 <workspace>/.dec/config.yaml（version v2）。

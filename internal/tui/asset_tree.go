@@ -148,23 +148,27 @@ func secretsOnlyBundleHint(bo app.AssetBundleOption) string {
 	}
 }
 
+// assetBundleRoleLabel 说明该项目为什么出现在列表里：四象限明细留给详情区。
+func assetBundleRoleLabel(bo app.AssetBundleOption) string {
+	switch {
+	case bo.Home:
+		return "家项目"
+	case bo.Required:
+		return "直接 requires"
+	case bo.Enabled:
+		return "已启用"
+	default:
+		return "可引用"
+	}
+}
+
 func formatAssetBundleLabel(bo app.AssetBundleOption) string {
 	if bo.OtherPlane {
 		return fmt.Sprintf("%s · 属于项目平面", bo.Name)
 	}
 	count := len(bo.Members)
 	if bo.Model == "p" {
-		role := "可引用 P"
-		if bo.Home {
-			role = "家 P"
-		} else if bo.Required {
-			role = "直接 requires"
-		} else if bo.Enabled {
-			role = "用户已启用"
-		}
-		return fmt.Sprintf("%s · %s · public/user %d · private/user %d · public/project %d · private/project %d",
-			bo.Name, role, bo.Quadrants["public/user"], bo.Quadrants["private/user"],
-			bo.Quadrants["public/project"], bo.Quadrants["private/project"])
+		return fmt.Sprintf("%s · %s · %d 个资产", bo.Name, assetBundleRoleLabel(bo), count)
 	}
 	if bo.SecretsOnly {
 		if count > 0 {

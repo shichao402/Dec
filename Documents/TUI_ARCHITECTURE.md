@@ -6,7 +6,7 @@ Dec 以 **TUI**（`internal/tui/`）为第一交互入口。无参运行 `dec` �
 
 - [README.md](../README.md) — 概览与快速开始
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — 模块划分与运行机制
-- [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md) — P 四象限与 Bitwarden private secrets
+- [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md) — 项目四象限与 Bitwarden private secrets
 - [.cursor/rules/tui-first.mdc](../.cursor/rules/tui-first.mdc) — TUI 优先约束
 
 ## 1. 设计目标
@@ -165,7 +165,7 @@ TUI **不得**直接调用 `cmd/*`、`internal/app` 或 `fmt.Printf` 式业务�
 
 - 远端一次性迁移改写 Git vault 与 Bitwarden；不提供 TUI 迁移入口。
 - 新版本首次启动清理本机旧 cache、`.secrets/bundles`、`.secrets/project` 并清空启用列表。
-- 用户重新在 Bundles 选择 P 后 Pull。
+- 用户重新在 Bundles 选择项目后 Pull。
 
 ## 6. 测试策略
 

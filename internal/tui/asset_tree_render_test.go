@@ -59,6 +59,18 @@ func TestFormatAssetBundleLabel_IncludesSecretMembers(t *testing.T) {
 		t.Fatalf("label = %q", got)
 	}
 
+	// 项目模型的行只说角色与资产数；四象限计数留给详情区，避免行内出现读不出含义的四个数字。
+	project := formatAssetBundleLabel(app.AssetBundleOption{
+		Name:      "agents-board",
+		Vault:     "agents-board",
+		Model:     "p",
+		Quadrants: map[string]int{"public/global": 2},
+		Members:   []app.AssetSelectionItem{{Name: "board", Type: "skill", Vault: "agents-board"}},
+	})
+	if project != "agents-board · 可引用 · 1 个资产" {
+		t.Fatalf("project label = %q", project)
+	}
+
 	secretsOnly := formatAssetBundleLabel(app.AssetBundleOption{
 		Name:        "pkv",
 		SecretsOnly: true,

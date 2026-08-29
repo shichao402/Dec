@@ -22,7 +22,7 @@ func TestValidatePAssetDeleteIdentityRejectsTraversal(t *testing.T) {
 		Vault: "my-app", Visibility: types.AssetVisibilityPrivate, AssetPlane: types.AssetPlaneProject,
 	})
 	if err == nil {
-		t.Fatal("P 删除资产名路径穿越应被拒绝")
+		t.Fatal("项目删除资产名路径穿越应被拒绝")
 	}
 }
 
@@ -666,7 +666,7 @@ func TestDeleteGroupContext_OrderFollowsEnabledBundles(t *testing.T) {
 		t.Fatalf("vikunja order = %d, want 0", order)
 	}
 	if order := ctx.orderFor("unknown"); order != 1000 {
-		t.Fatalf("未启用的 P 应排在最后, got %d", order)
+		t.Fatalf("未启用的项目应排在最后, got %d", order)
 	}
 }
 
@@ -1096,7 +1096,7 @@ func TestListRemoteInventory_PGitQuadrantsBelongOnBundlesPage(t *testing.T) {
 	}
 	for _, item := range items {
 		if item.Kind == DeleteKindDecAsset {
-			t.Fatalf("Remote 只展示 BW private 与 legacy，不应列出 P Git 四象限: %#v", item)
+			t.Fatalf("Remote 只展示 BW private 与 legacy，不应列出项目 Git 四象限: %#v", item)
 		}
 	}
 }

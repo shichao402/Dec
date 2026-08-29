@@ -23,13 +23,13 @@ type Client interface {
 	GetNote(ctx context.Context, target SyncTarget, noteRel string) (*SecureNote, error)
 	// ListSSHKeys 枚举目标下的 SSH Key 逻辑名。
 	ListSSHKeys(ctx context.Context, target SyncTarget) ([]RemoteSSHKey, error)
-	// ListPNames 枚举远端存在的 P 名。
+	// ListPNames 枚举远端存在的项目名。
 	ListPNames(ctx context.Context) ([]string, error)
-	// ListAddresses 枚举远端全部可读地址：P 展开为 <p>/private/<plane>，存量
-	// 非 P folder 用其名字。
+	// ListAddresses 枚举远端全部可读地址：项目展开为 <p>/private/<plane>，存量
+	// 非项目 folder 用其名字。
 	ListAddresses(ctx context.Context) ([]string, error)
-	// DeleteAddress 删除存量非 P folder。地址不存在视为成功；仍含条目时由调用方
-	// 先清空。P 地址一律拒绝。
+	// DeleteAddress 删除存量非项目 folder。地址不存在视为成功；仍含条目时由调用方
+	// 先清空。项目地址一律拒绝。
 	DeleteAddress(ctx context.Context, address string) error
 	// ListUnfiledItems 枚举无 folder（FolderID 为空）的条目元数据，不含正文。
 	ListUnfiledItems(ctx context.Context) ([]UnfiledItem, error)

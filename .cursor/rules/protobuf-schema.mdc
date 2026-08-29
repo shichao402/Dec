@@ -10,7 +10,7 @@ alwaysApply: false
 
 ## 适用 proto 的字段
 
-- 顶层 P（`<p>/dec.yaml`）、`ProjectConfig`、`GlobalConfig`、`VarsConfig`
+- 顶层项目（`<p>/dec.yaml`）、`ProjectConfig`、`GlobalConfig`、`VarsConfig`
 - `requires` 与四象限资产视图
 - 本地 `ProjectConfig.project_name` / `GlobalConfig.enabled_projects`
 
@@ -24,9 +24,9 @@ alwaysApply: false
 ## 实现约定
 
 - 修改 schema 时先改 `schema/**/*.proto`，再同步 `internal/types/` 手写 struct 与 adapter（生成物见 `schema/gen/go/`）。
-- P 名强制小写 kebab-case；资产正文不进 proto。
+- 项目名强制小写 kebab-case；资产正文不进 proto。
 - Git 使用 `<p>/{public,private}/{user,project}`；四支都只能保存非敏感资产。
-- `requires` 只直接引用目标 P 的 `public/project`，不递归，private 永不被引用。
+- `requires` 只直接引用目标项目的 `public/project`，不递归，private 永不被引用。
 - Bitwarden 后续只保存 `<p>/private/{user,project}` 的敏感正文，不建立 public folder。
 
 ## 示例
@@ -38,7 +38,7 @@ project_name: my-app
 ```
 
 ```yaml
-# my-app/dec.yaml — 顶层 P 声明
+# my-app/dec.yaml — 顶层项目声明
 name: my-app
 requires:
   - shared-tools

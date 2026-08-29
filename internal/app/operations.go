@@ -166,7 +166,7 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 		result.MissingProjects = append([]string(nil), resolved.MissingProjects...)
 		if len(result.MissingProjects) > 0 {
 			result.NonFatalWarnings = append(result.NonFatalWarnings,
-				fmt.Sprintf("直接 requires 中有 %d 个 P 不存在：%s",
+				fmt.Sprintf("直接 requires 中有 %d 个项目不存在：%s",
 					len(result.MissingProjects), strings.Join(result.MissingProjects, ", ")))
 		}
 	}
@@ -185,10 +185,10 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 			}
 		}
 		result.NonFatalWarnings = append(result.NonFatalWarnings, fmt.Sprintf(
-			"%s里有 %d 个 P 在仓库中已不存在：%s（本次忽略；到 Bundles 页重新保存即可清掉）",
+			"%s里有 %d 个项目在仓库中已不存在：%s（本次忽略；到 Bundles 页重新保存即可清掉）",
 			func() string {
 				if pRepository {
-					return "P 选择"
+					return "项目选择"
 				}
 				return "enabled_bundles "
 			}(), len(missing), strings.Join(missing, ", ")))
@@ -542,7 +542,7 @@ func cleanupRemovedPAssets(workspace Workspace, cacheDir string, enabledAssets [
 							_, _ = removeAssetFromIDE(kind.Type, name, workspace, ideImpl)
 						}
 						_ = os.RemoveAll(filepath.Join(dir, entry.Name()))
-						removed = append(removed, fmt.Sprintf("[%-5s] %s (P: %s, %s/%s)", kind.Type, name, project.Name(), visibility, plane))
+						removed = append(removed, fmt.Sprintf("[%-5s] %s (项目: %s, %s/%s)", kind.Type, name, project.Name(), visibility, plane))
 					}
 				}
 			}

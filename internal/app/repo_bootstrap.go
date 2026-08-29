@@ -15,12 +15,12 @@ import (
 // RepoGCMCandidate 是可用于私仓 bootstrap 的 Bitwarden GCM Note 元数据。
 // 只包含可展示字段；token/正文绝不离开 dec-server。
 type RepoGCMCandidate struct {
-	Address   string // 远端逻辑地址；存量非 P 条目用其 folder 名
+	Address   string // 远端逻辑地址；存量非项目条目用其 folder 名
 	NotePath  string
 	Host      string
 	Username  string
 	Protocol  string
-	Unmanaged bool // 不属于任何 P；Apply 允许，但正常 pull 不维护
+	Unmanaged bool // 不属于任何项目；Apply 允许，但正常 pull 不维护
 }
 
 type PrepareRepoGCMBootstrapResult struct {
@@ -138,7 +138,7 @@ func PrepareRepoGCMBootstrap(ctx context.Context, repoURL string, reporter Repor
 			})
 			if unmanaged {
 				emit(reporter, EventWarn, "settings.repo.bootstrap",
-					fmt.Sprintf("%s/%s 不属于任何 P，pull 不维护；建议迁移到 <p>/private/<plane>", address, notePath), nil)
+					fmt.Sprintf("%s/%s 不属于任何项目，pull 不维护；建议迁移到 <p>/private/<plane>", address, notePath), nil)
 			}
 		}
 	}

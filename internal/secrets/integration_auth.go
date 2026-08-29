@@ -10,7 +10,7 @@ import (
 )
 
 // IntegrationAuthRel 是项目内集成测试 Bitwarden 凭据的相对路径（勿提交 git）。
-// 它属于 dec/private/project，随 P secrets 同步到远端，方便已有 Bitwarden
+// 它属于 dec/private/project，随项目 secrets 同步到远端，方便已有 Bitwarden
 // 访问能力的开发机恢复测试账号配置。
 const IntegrationAuthRel = ".secrets/dec/integration/bitwarden.yaml"
 
@@ -18,7 +18,7 @@ const IntegrationAuthRel = ".secrets/dec/integration/bitwarden.yaml"
 // 复用同一目录可以保留 device.json 的 remember token，避免每次重跑都触发 2FA。
 //
 // 必须放在所有 .secrets/<p>/ 同步根之外：device.json 的 remember token 是本机
-// 设备状态，不是 P secret，不能被 push 到 Bitwarden。
+// 设备状态，不是项目 secret，不能被 push 到 Bitwarden。
 const IntegrationDecHomeRel = ".secrets/.integration/dec-home"
 
 // IntegrationAuth 描述集成 / live 测试用的 Bitwarden 账号（专用测试账户，2FA 关闭）。

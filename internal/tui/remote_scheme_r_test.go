@@ -123,10 +123,10 @@ func TestRemoteAddSecret_TakesScopeFromCursor(t *testing.T) {
 		t.Fatalf("Remote n 应直接进类型阶段: mode=%v stage=%q", after.addSecretRemoteMode, after.addSecretStage)
 	}
 	if after.addSecretPName != "dec" || (after.addSecretPlane != secrets.SyncPlaneProject && after.addSecretPlane != secrets.SyncPlaneLocal) {
-		t.Fatalf("归属应来自光标所在 P 地址, got p=%q plane=%q", after.addSecretPName, after.addSecretPlane)
+		t.Fatalf("归属应来自光标所在项目地址, got p=%q plane=%q", after.addSecretPName, after.addSecretPlane)
 	}
 	if after.addSecretScopeNew {
-		t.Fatal("光标反推的归属不是新建 P")
+		t.Fatal("光标反推的归属不是新建项目")
 	}
 	if cmd != nil {
 		t.Fatal("归属来自光标，不应再触发候选枚举")
@@ -263,7 +263,7 @@ func TestRemoteAddSecret_NoFolderUnderCursorKeepsFormClosed(t *testing.T) {
 		t.Fatal("解析不出归属时不应触发命令")
 	}
 	if !strings.Contains(strings.Join(after.logs, "\n"), "按 N") {
-		t.Fatalf("应提示移动光标或按 N 新建 P:\n%s", strings.Join(after.logs, "\n"))
+		t.Fatalf("应提示移动光标或按 N 新建项目:\n%s", strings.Join(after.logs, "\n"))
 	}
 }
 
@@ -277,17 +277,17 @@ func TestRemoteAddSecret_NewPTypedByHand(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
 	after := updated.(model)
 	if after.addSecretStage != addSecretStageP || !after.addSecretScopeNew {
-		t.Fatalf("N 应进入新 P 输入: stage=%q new=%v", after.addSecretStage, after.addSecretScopeNew)
+		t.Fatalf("N 应进入新项目输入: stage=%q new=%v", after.addSecretStage, after.addSecretScopeNew)
 	}
-	if view := after.View(); !strings.Contains(view, "新 P") {
-		t.Fatalf("表单应标明这是新 P:\n%s", view)
+	if view := after.View(); !strings.Contains(view, "新项目") {
+		t.Fatalf("表单应标明这是新项目:\n%s", view)
 	}
 
 	updated = typeRunes(after, "newpkg")
 	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	after = updated.(model)
 	if after.addSecretStage != addSecretStagePlane || after.addSecretPName != "newpkg" {
-		t.Fatalf("P=%q stage=%q，期望进入选平面", after.addSecretPName, after.addSecretStage)
+		t.Fatalf("项目=%q stage=%q，期望进入选平面", after.addSecretPName, after.addSecretStage)
 	}
 
 	// tab 轮转到本机平面，再 Enter 触发声明校验。
@@ -314,14 +314,14 @@ func TestRemoteAddSecret_EmptyNewPDoesNotAdvance(t *testing.T) {
 	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	after := updated.(model)
 	if after.addSecretStage != addSecretStageP {
-		t.Fatalf("空 P 名不应推进, stage=%q", after.addSecretStage)
+		t.Fatalf("空项目名不应推进, stage=%q", after.addSecretStage)
 	}
 	if cmd != nil {
-		t.Fatal("空 P 名不应触发命令")
+		t.Fatal("空项目名不应触发命令")
 	}
 }
 
-// P 名里带斜杠说明用户还在按老的 folder 路径思维输入，必须当场拦下。
+// 项目名里带斜杠说明用户还在按老的 folder 路径思维输入，必须当场拦下。
 func TestRemoteAddSecret_RejectsSlashInPName(t *testing.T) {
 	m := remotePageModelWithCandidates(t)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
@@ -331,15 +331,15 @@ func TestRemoteAddSecret_RejectsSlashInPName(t *testing.T) {
 	if after.addSecretStage != addSecretStageP || cmd != nil {
 		t.Fatalf("带斜杠的输入不应推进: stage=%q cmd=%v", after.addSecretStage, cmd)
 	}
-	if !strings.Contains(after.addSecretNotice, "只输入 P 名") {
-		t.Fatalf("应提示只输入 P 名, notice=%q", after.addSecretNotice)
+	if !strings.Contains(after.addSecretNotice, "只输入项目名") {
+		t.Fatalf("应提示只输入项目名, notice=%q", after.addSecretNotice)
 	}
 }
 
 func TestRemoteAddSecret_UndeclaredPStaysInPStage(t *testing.T) {
 	oldValidate := validateRemoteRegisterScopeOperation
 	validateRemoteRegisterScopeOperation = func(context.Context, app.Workspace, secrets.RemoteScope) error {
-		return fmt.Errorf("P %q 不是 vault 已声明的 project", "relkit")
+		return fmt.Errorf("项目 %q 不是 vault 已声明的 project", "relkit")
 	}
 	t.Cleanup(func() { validateRemoteRegisterScopeOperation = oldValidate })
 
@@ -355,7 +355,7 @@ func TestRemoteAddSecret_UndeclaredPStaysInPStage(t *testing.T) {
 	updated, _ = after.Update(cmd())
 	after = updated.(model)
 	if after.addSecretStage != addSecretStageP || !strings.Contains(after.addSecretNotice, "relkit") {
-		t.Fatalf("未声明的 P 应留在 P 阶段并给出原因: stage=%q notice=%q", after.addSecretStage, after.addSecretNotice)
+		t.Fatalf("未声明的项目应留在项目阶段并给出原因: stage=%q notice=%q", after.addSecretStage, after.addSecretNotice)
 	}
 }
 
@@ -443,7 +443,7 @@ func TestRemoteSelection_ToggleAllAndClear(t *testing.T) {
 func TestRemoteHeadLines_ShowsNewKeyHints(t *testing.T) {
 	m := remotePageModelWithCandidates(t)
 	head := strings.Join(m.remoteHeadLines(), "\n")
-	for _, want := range []string{"a 全选", "A 全不选", "n 登记到光标 P", "N 新建 P 登记"} {
+	for _, want := range []string{"a 全选", "A 全不选", "n 登记到光标项目", "N 新建项目登记"} {
 		if !strings.Contains(head, want) {
 			t.Fatalf("帮助行缺少 %q:\n%s", want, head)
 		}

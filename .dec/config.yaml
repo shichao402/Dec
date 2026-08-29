@@ -1,18 +1,12 @@
 # Dec 项目配置
-# version: 配置结构版本；当前固定为 v2
-# ides: 项目级 IDE 覆盖（可选），例如：
-#   ides:
-#     - cursor
-#     - codex
-# editor: 项目级交互式编辑器，覆盖全局配置（可选），例如：
-#   editor: code --wait
-#   editor: vim
-# enabled_bundles: 启用的 bundle 列表（唯一的资产启用入口）；bundle 名与 vault 目录同名
-#   enabled_bundles:
-#     - vikunja
-#     - cli
-# 提示：请在 TUI Bundles 页勾选后按 s 保存，不要手工维护本文件。
+# kind: project
+# version: 配置字段版本
+# layout_version: cache/secrets 布局版本
+# project_name: 绑定项目名
 
+kind: project
 version: v2
-project_name: Dec
-enabled_bundles: []
+layout_version: 1
+project_name: dec
+enabled_bundles:
+    - dec

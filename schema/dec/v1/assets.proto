@@ -18,7 +18,7 @@ message AssetRef {
   AssetType type = 3;
 }
 
-// AssetVisibility 决定资产能否被其他 P 引用。
+// AssetVisibility 决定资产能否被其他项目引用。
 enum AssetVisibility {
   ASSET_VISIBILITY_UNSPECIFIED = 0;
   ASSET_VISIBILITY_PUBLIC = 1;

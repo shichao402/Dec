@@ -66,7 +66,7 @@ password: integration-pass
 	}
 }
 
-// 集成凭据落在 dec/private/project 同步根内（commit e96cd86），因此会随该 P
+// 集成凭据落在 dec/private/project 同步根内（commit e96cd86），因此会随该项目
 // 的 push 同步到远端——这是刻意的：已有 vault 访问能力的开发机据此恢复测试账号。
 func TestIntegrationAuthPath_SyncsWithDecPScope(t *testing.T) {
 	projectRoot := t.TempDir()

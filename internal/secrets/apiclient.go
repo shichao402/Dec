@@ -290,18 +290,18 @@ func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRe
 	return c.deleteCipher(ctx, cipher.ID)
 }
 
-// DeleteAddress 删除存量非 P folder。P 地址一律拒绝：扁平布局下 P 的 folder 名
-// 就是裸 P 名，删掉它会同时清掉两个平面。
+// DeleteAddress 删除存量非项目 folder。项目地址一律拒绝：扁平布局下项目的 folder 名
+// 就是裸项目名，删掉它会同时清掉两个平面。
 func (c *APIClient) DeleteAddress(ctx context.Context, address string) error {
 	folderName := strings.TrimSpace(address)
 	if folderName == "" {
 		return fmt.Errorf("远端地址不能为空")
 	}
 	if _, err := ParseRemoteScope(folderName); err == nil {
-		return fmt.Errorf("拒绝删除 P 地址 %q", folderName)
+		return fmt.Errorf("拒绝删除项目地址 %q", folderName)
 	}
 	if types.IsValidPName(folderName) {
-		return fmt.Errorf("拒绝删除 P folder %q", folderName)
+		return fmt.Errorf("拒绝删除项目 folder %q", folderName)
 	}
 	userKey := UserKey()
 	if len(userKey) == 0 {

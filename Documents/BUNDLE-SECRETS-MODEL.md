@@ -40,7 +40,7 @@ Git Vault                         Bitwarden                     本地
 
 ## 旧 Bundle 模型（仅迁移背景）
 
-以下章节记录迁移输入及兼容协议。P 迁移完成后，普通 pull/push 不再双读旧
+以下章节记录迁移输入及兼容协议。项目迁移完成后，普通 pull/push 不再双读旧
 `projects/`、`bundles/` 或 `bundle/<name>` 结构。
 
 ## Bundle 二元 scope（0009）

@@ -52,7 +52,7 @@ func TestScanRejectsNonKebabPName(t *testing.T) {
 	root := t.TempDir()
 	put(t, root, "Bad_Name/dec.yaml", "name: Bad_Name\n")
 	if _, err := Scan(root); err == nil {
-		t.Fatal("非法 P 名应失败")
+		t.Fatal("非法项目名应失败")
 	}
 }
 
@@ -73,7 +73,7 @@ func TestScanIgnoresLegacyReservedDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(projects) != 0 {
-		t.Fatalf("reserved directories 不应识别为 P: %#v", projects)
+		t.Fatalf("reserved directories 不应识别为项目: %#v", projects)
 	}
 }
 
@@ -100,6 +100,6 @@ func TestLoadRejectsAssetSymlink(t *testing.T) {
 		t.Skipf("当前平台无法创建符号链接: %v", err)
 	}
 	if _, err := Load(root, "my-app"); err == nil {
-		t.Fatal("P 资产符号链接应失败")
+		t.Fatal("项目资产符号链接应失败")
 	}
 }
