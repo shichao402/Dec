@@ -5,10 +5,11 @@
 用户侧说明以以下文档为准：
 
 - [README.md](../README.md)：项目概览与快速开始
-- [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md)：P 四象限与 Bitwarden private secrets
+- [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md)：项目四象限与 Bitwarden private secrets
 - [ROADMAP.md](./ROADMAP.md)：尚未排期的意向（含本机 Login with Device）
 - [research/secrets-ci-centralization.md](./research/secrets-ci-centralization.md)：密钥源唯一与 CI 下放调研（2026-08）
 - [TUI_ARCHITECTURE.md](./TUI_ARCHITECTURE.md)：TUI 页面、测试策略与入口路由
+- [client/README.md](../client/README.md)：独立 Tauri 管理客户端
 - [schema/dec/v1/README.md](../schema/dec/v1/README.md)：Dec 配置 Protobuf schema
 - [schema/secrets/v1/README.md](../schema/secrets/v1/README.md)：Secrets bundle Protobuf schema
 - `internal/assets/dec/SKILL.md`：Dec Skill 的完整使用说明
@@ -21,22 +22,23 @@ Dec 是一个以 **TUI** 为第一人机入口、以 **MCP** 为 Agent 入口的
 
 | 程序 | 职责 |
 |------|------|
-| `dec-server` | 本机单例；持有 `internal/app` 业务、Bitwarden 内存 session、project 写操作锁与进度广播 |
-| `dec` | TUI 门面；无服务时自动拉起 `dec-server` |
+| `dec-server` | 本机单例；启动即锁定，Authenticate 成功后持有 BW session 与 1h 控制权 |
+| `dec` | TUI 门面；无服务时自动拉起 `dec-server`（锁定期间业务 RPC 拒绝） |
 | `dec-mcp` | Agent stdio MCP 门面；无服务时自动拉起 `dec-server` |
 | `dec-exec` | 独立 env 注入程序；只读已落地 `.secrets/**/.env/*.env`，不经过服务、不碰 session |
+| Dec Console | 独立 Tauri 客户端（`client/`）；本机/远程连接与主密码解锁，不嵌入 `dec-server` |
 
-门面与服务通过仅绑定 `127.0.0.1` 的 gRPC 通信，端点与本机随机 token 写在 `~/.dec/run/server.json`。同一 project 的 pull/push 等写操作互斥；未发起操作的门面可旁观该 project 当前操作的实时进度。详见 [0008](decisions/0008-service-facade-split.md)。
+门面与服务默认绑定 `127.0.0.1` 的 gRPC；可用 `management_listen` + TLS 做远程直连。端点与本机随机 token 写在 `~/.dec/run/server.json`。进程启动后锁定，见 [0018](decisions/0018-instance-lock-and-console.md)。同一 project 的 pull/push 等写操作互斥；未发起操作的门面可旁观该 project 当前操作的实时进度。详见 [0008](decisions/0008-service-facade-split.md)。
 
-资产按 [ADR 0016](decisions/0016-p-four-quadrant-model.md) 的顶层 **P** 组织：
+资产按 [ADR 0016](decisions/0016-p-four-quadrant-model.md) 的顶层 **项目** 组织：
 
 | 层级 | 存储位置 | 职责 |
 |------|----------|------|
-| **P 声明** | Git Vault `<p>/dec.yaml` | 展示信息、IDE 默认值、direct `requires` |
-| **Git 四象限** | `<p>/{public,private}/{user,project}/` | 全部为非敏感资产；private 仅表示不可被其它 P 引用 |
-| **BW private** | `<p>/private/{user,project}` folder | 敏感正文；与 Git 同 P/plane/相对路径零冲突 |
+| **项目声明** | Git Vault `<p>/dec.yaml` | 展示信息、IDE 默认值、direct `requires` |
+| **Git 四象限** | `<p>/{public,private}/{user,project}/` | 全部为非敏感资产；private 仅表示不可被其它项目引用 |
+| **BW private** | `<p>/private/{user,project}` folder | 敏感正文；与 Git 同 项目/plane/相对路径 零冲突 |
 
-用户平面显式启用 P；项目工作区绑定家 P。家 P 的 project 两象限可见，且只展开其
+用户平面显式启用项目；项目工作区绑定家项目。家项目的 project 两象限可见，且只展开其
 direct requires 的 `public/project`，不递归、不引入 user/private。Git 资产落到
 `.dec/cache/<p>/<visibility>/<plane>/` 后渲染 IDE；BW 内容独立落到
 `.secrets/<p>/` 或 `~/.dec/secrets/<p>/`。项目级 SSH/GCM 定向到家工作区，
@@ -46,7 +48,7 @@ direct requires 的 `public/project`，不递归、不引入 user/private。Git 
 
 - 仓库连接 / 本机 vars / 服务版本与重启：TUI **Settings** 页
 - 项目初始化 / project 选择：TUI **Home**
-- P 启用、家 P requires 与四象限浏览：TUI **Bundles** 页
+- 项目启用、家项目 requires 与四象限浏览：TUI **Bundles** 页
 - pull / push / remove（含成功对照后的孤儿 reconcile）：TUI **Run** 页
 - 全量远端浏览 / temp 编辑 / 按光标 folder 登记（`n`，新 folder 用 `N`；`note`、`.env`、`.gcm`、`.sshkey` 为同级 Processor）/ 远端与本地删除拆分：TUI **Remote** 页（ADR 0004）
 - 版本信息：`dec --version`
@@ -55,17 +57,17 @@ direct requires 的 `public/project`，不递归、不引入 user/private。Git 
 为共用真相源。`PWriter` 是新写路径唯一门面；`BundleWriter`、`enabled_bundles`
 等名字只为源码/wire 兼容，不能据此回退到旧存储模型。
 
-## P 解析与写边界
+## 项目解析与写边界
 
-- `internal/pmodel` 严格加载 `<p>/dec.yaml` 及四象限；P 名、manifest 名称一致性、
+- `internal/pmodel` 严格加载 `<p>/dec.yaml` 及四象限；项目名、manifest 名称一致性、
   自引用、未声明顶层目录和资产符号链接均硬失败。
-- `internal/app/bundle_resolver.go` 在 P 仓库中走 P resolver：用户平面取已启用 P
-  的 user 两象限；项目平面取家 P 的 project 两象限和 direct requires 的
+- `internal/app/bundle_resolver.go` 在项目仓库中走项目 resolver：用户平面取已启用项目
+  的 user 两象限；项目平面取家项目的 project 两象限和 direct requires 的
   `public/project`。
-- 项目 push 只允许家 P；requires 副本不进入实际 push，也不进入 push 预览。
-- `internal/app/bundle_writer.go` 的 `PWriter` 统一承接 P 选择、push、Remote
+- 项目 push 只允许家项目；requires 副本不进入实际 push，也不进入 push 预览。
+- `internal/app/bundle_writer.go` 的 `PWriter` 统一承接项目选择、push、Remote
   private 写入、delete/remove；服务端 dispatch 注入 writer，TUI/MCP 不内嵌 app。
-- 普通 push 发现非空 `projects/` 或 `bundles/` 会拒绝，提示远端尚未完成一次性 P 迁移。
+- 普通 push 发现非空 `projects/` 或 `bundles/` 会拒绝，提示远端尚未完成一次性项目迁移。
 - 旧 Git/BW 结构由一次性远端迁移改写；新版本启动只清理本机旧 cache / `.secrets` 遗留并清空启用列表，由用户重新选择后 Pull。
 
 ## 文档边界
@@ -552,9 +554,9 @@ IDE 抽象层，区分项目级输出目录与用户级内置资产安装目录�
 - **Bundle**（`bundles/<name>/` + Bitwarden secrets bundle）：公开与私密资产的组织单位
 - 本地 `.dec/config.yaml` 引用 project，同步 `enabled_bundles` 供 pull 解析
 
-### 多 P 支持
+### 多项目支持
 
-一个仓库可含多个顶层 P；项目绑定一个家 P，家 P 的 `requires` 只直接引用其它 P 的
+一个仓库可含多个顶层项目；项目绑定一个家项目，家项目的 `requires` 只直接引用其它项目的
 `public/project`。
 
 ### 托管范围有限
@@ -565,13 +567,13 @@ Dec 只管理 `dec-*` 产物，不修改用户手工维护的非托管内容。
 
 Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真实目录发现状态。
 
-### P private secrets 同构
+### 项目 private secrets 同构
 
-- 存储根分离：Git P → `.dec/cache/<p>/`；Secure Note → `.secrets/<p>/`；SSH Key
+- 存储根分离：Git 项目 → `.dec/cache/<p>/`；Secure Note → `.secrets/<p>/`；SSH Key
   按 user/project 副作用域分别落地
-- SyncTarget：Bitwarden `<p>/private/<plane>` ↔ 对应 P 本地 secrets 根；Note 名 =
+- SyncTarget：Bitwarden `<p>/private/<plane>` ↔ 对应项目本地 secrets 根；Note 名 =
   相对同步根路径
-- Pull：按家 P/direct requires 或用户启用 P → Git 四象限 → Bitwarden private →
+- Pull：按家项目 / direct requires 或用户启用项目 → Git 四象限 → Bitwarden private →
   Git/BW 同路径与落地边界校验 → 独立落地 + IDE 渲染
 - MCP 经独立 `dec-exec` 注入 `.env/*.env`；不再依赖 mise 落地路径
 - Schema：`Project`（`schema/dec/v1/projects.proto`）、`BundleBinding`、`SecretsConfig`（`schema/secrets/v1/`）

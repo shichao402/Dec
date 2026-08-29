@@ -4,9 +4,11 @@ package service.v1;
 
 option go_package = "github.com/shichao402/Dec/schema/gen/go/service/v1;servicev1";
 
-// DecService 是本机唯一 dec-server 暴露给 TUI / MCP 门面的接口。
+// DecService 是本机唯一 dec-server 暴露给 TUI / MCP / 管理客户端的接口。
+// 进程启动后全局锁定：仅 Ping 与 Authenticate 可在未解锁时调用。
 service DecService {
   rpc Ping(PingRequest) returns (PingResponse);
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
   rpc KeepAlive(stream KeepAliveRequest) returns (stream KeepAliveResponse);
   rpc Invoke(InvokeRequest) returns (InvokeResponse);
@@ -20,6 +22,22 @@ message PingRequest {}
 message PingResponse {
   string version = 1;
   string instance_id = 2;
+  bool unlocked = 3;
+}
+
+message AuthenticateRequest {
+  string password = 1;
+  string totp = 2;
+  bool remember_device = 3;
+  string email = 4;
+}
+
+message AuthenticateResponse {
+  bool unlocked = 1;
+  bool need_2fa = 2;
+  string control_token = 3;
+  int64 expires_in_ms = 4;
+  string error = 5;
 }
 
 message ShutdownRequest {

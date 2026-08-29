@@ -10,6 +10,7 @@ import (
 
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/repo"
+	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/service"
 	"github.com/shichao402/Dec/internal/serviceapi"
 	"github.com/shichao402/Dec/internal/servicehost"
@@ -89,6 +90,8 @@ func startTestService(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	secrets.UnlockForTest()
+	t.Cleanup(secrets.ClearSession)
 	api, err := serviceapi.Connect(context.Background(), "mcp-test", "mcp-test", "test")
 	if err != nil {
 		cancel()

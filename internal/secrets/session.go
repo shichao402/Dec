@@ -119,6 +119,7 @@ func InvalidateSession(rejectedToken string) bool {
 
 // ClearSession 清除进程内 session 与 vault key（测试用）。
 func ClearSession() {
+	lockBypassForTest = false
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
 	expireSessionLocked()

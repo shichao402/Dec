@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	DecService_Ping_FullMethodName               = "/service.v1.DecService/Ping"
+	DecService_Authenticate_FullMethodName       = "/service.v1.DecService/Authenticate"
 	DecService_Shutdown_FullMethodName           = "/service.v1.DecService/Shutdown"
 	DecService_KeepAlive_FullMethodName          = "/service.v1.DecService/KeepAlive"
 	DecService_Invoke_FullMethodName             = "/service.v1.DecService/Invoke"
@@ -32,9 +33,11 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// DecService 是本机唯一 dec-server 暴露给 TUI / MCP 门面的接口。
+// DecService 是本机唯一 dec-server 暴露给 TUI / MCP / 管理客户端的接口。
+// 进程启动后全局锁定：仅 Ping 与 Authenticate 可在未解锁时调用。
 type DecServiceClient interface {
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
+	Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateResponse, error)
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
 	KeepAlive(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[KeepAliveRequest, KeepAliveResponse], error)
 	Invoke(ctx context.Context, in *InvokeRequest, opts ...grpc.CallOption) (*InvokeResponse, error)
@@ -55,6 +58,16 @@ func (c *decServiceClient) Ping(ctx context.Context, in *PingRequest, opts ...gr
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PingResponse)
 	err := c.cc.Invoke(ctx, DecService_Ping_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *decServiceClient) Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthenticateResponse)
+	err := c.cc.Invoke(ctx, DecService_Authenticate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -146,9 +159,11 @@ type DecService_WatchOperationClient = grpc.ServerStreamingClient[WatchOperation
 // All implementations must embed UnimplementedDecServiceServer
 // for forward compatibility.
 //
-// DecService 是本机唯一 dec-server 暴露给 TUI / MCP 门面的接口。
+// DecService 是本机唯一 dec-server 暴露给 TUI / MCP / 管理客户端的接口。
+// 进程启动后全局锁定：仅 Ping 与 Authenticate 可在未解锁时调用。
 type DecServiceServer interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
+	Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error)
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
 	KeepAlive(grpc.BidiStreamingServer[KeepAliveRequest, KeepAliveResponse]) error
 	Invoke(context.Context, *InvokeRequest) (*InvokeResponse, error)
@@ -167,6 +182,9 @@ type UnimplementedDecServiceServer struct{}
 
 func (UnimplementedDecServiceServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Ping not implemented")
+}
+func (UnimplementedDecServiceServer) Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Authenticate not implemented")
 }
 func (UnimplementedDecServiceServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Shutdown not implemented")
@@ -221,6 +239,24 @@ func _DecService_Ping_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DecServiceServer).Ping(ctx, req.(*PingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DecService_Authenticate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthenticateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DecServiceServer).Authenticate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DecService_Authenticate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DecServiceServer).Authenticate(ctx, req.(*AuthenticateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -318,6 +354,10 @@ var DecService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Ping",
 			Handler:    _DecService_Ping_Handler,
+		},
+		{
+			MethodName: "Authenticate",
+			Handler:    _DecService_Authenticate_Handler,
 		},
 		{
 			MethodName: "Shutdown",

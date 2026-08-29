@@ -61,6 +61,7 @@ type PingResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Version       string                 `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
 	InstanceId    string                 `protobuf:"bytes,2,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	Unlocked      bool                   `protobuf:"varint,3,opt,name=unlocked,proto3" json:"unlocked,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -109,6 +110,157 @@ func (x *PingResponse) GetInstanceId() string {
 	return ""
 }
 
+func (x *PingResponse) GetUnlocked() bool {
+	if x != nil {
+		return x.Unlocked
+	}
+	return false
+}
+
+type AuthenticateRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Password       string                 `protobuf:"bytes,1,opt,name=password,proto3" json:"password,omitempty"`
+	Totp           string                 `protobuf:"bytes,2,opt,name=totp,proto3" json:"totp,omitempty"`
+	RememberDevice bool                   `protobuf:"varint,3,opt,name=remember_device,json=rememberDevice,proto3" json:"remember_device,omitempty"`
+	Email          string                 `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *AuthenticateRequest) Reset() {
+	*x = AuthenticateRequest{}
+	mi := &file_service_v1_service_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuthenticateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthenticateRequest) ProtoMessage() {}
+
+func (x *AuthenticateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_service_v1_service_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthenticateRequest.ProtoReflect.Descriptor instead.
+func (*AuthenticateRequest) Descriptor() ([]byte, []int) {
+	return file_service_v1_service_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *AuthenticateRequest) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+func (x *AuthenticateRequest) GetTotp() string {
+	if x != nil {
+		return x.Totp
+	}
+	return ""
+}
+
+func (x *AuthenticateRequest) GetRememberDevice() bool {
+	if x != nil {
+		return x.RememberDevice
+	}
+	return false
+}
+
+func (x *AuthenticateRequest) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+type AuthenticateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Unlocked      bool                   `protobuf:"varint,1,opt,name=unlocked,proto3" json:"unlocked,omitempty"`
+	Need_2Fa      bool                   `protobuf:"varint,2,opt,name=need_2fa,json=need2fa,proto3" json:"need_2fa,omitempty"`
+	ControlToken  string                 `protobuf:"bytes,3,opt,name=control_token,json=controlToken,proto3" json:"control_token,omitempty"`
+	ExpiresInMs   int64                  `protobuf:"varint,4,opt,name=expires_in_ms,json=expiresInMs,proto3" json:"expires_in_ms,omitempty"`
+	Error         string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuthenticateResponse) Reset() {
+	*x = AuthenticateResponse{}
+	mi := &file_service_v1_service_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuthenticateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthenticateResponse) ProtoMessage() {}
+
+func (x *AuthenticateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_service_v1_service_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthenticateResponse.ProtoReflect.Descriptor instead.
+func (*AuthenticateResponse) Descriptor() ([]byte, []int) {
+	return file_service_v1_service_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AuthenticateResponse) GetUnlocked() bool {
+	if x != nil {
+		return x.Unlocked
+	}
+	return false
+}
+
+func (x *AuthenticateResponse) GetNeed_2Fa() bool {
+	if x != nil {
+		return x.Need_2Fa
+	}
+	return false
+}
+
+func (x *AuthenticateResponse) GetControlToken() string {
+	if x != nil {
+		return x.ControlToken
+	}
+	return ""
+}
+
+func (x *AuthenticateResponse) GetExpiresInMs() int64 {
+	if x != nil {
+		return x.ExpiresInMs
+	}
+	return 0
+}
+
+func (x *AuthenticateResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 type ShutdownRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Reason        string                 `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
@@ -118,7 +270,7 @@ type ShutdownRequest struct {
 
 func (x *ShutdownRequest) Reset() {
 	*x = ShutdownRequest{}
-	mi := &file_service_v1_service_proto_msgTypes[2]
+	mi := &file_service_v1_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -130,7 +282,7 @@ func (x *ShutdownRequest) String() string {
 func (*ShutdownRequest) ProtoMessage() {}
 
 func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[2]
+	mi := &file_service_v1_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -143,7 +295,7 @@ func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
 func (*ShutdownRequest) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{2}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ShutdownRequest) GetReason() string {
@@ -162,7 +314,7 @@ type ShutdownResponse struct {
 
 func (x *ShutdownResponse) Reset() {
 	*x = ShutdownResponse{}
-	mi := &file_service_v1_service_proto_msgTypes[3]
+	mi := &file_service_v1_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -174,7 +326,7 @@ func (x *ShutdownResponse) String() string {
 func (*ShutdownResponse) ProtoMessage() {}
 
 func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[3]
+	mi := &file_service_v1_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -187,7 +339,7 @@ func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownResponse.ProtoReflect.Descriptor instead.
 func (*ShutdownResponse) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{3}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ShutdownResponse) GetAccepted() bool {
@@ -207,7 +359,7 @@ type KeepAliveRequest struct {
 
 func (x *KeepAliveRequest) Reset() {
 	*x = KeepAliveRequest{}
-	mi := &file_service_v1_service_proto_msgTypes[4]
+	mi := &file_service_v1_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -219,7 +371,7 @@ func (x *KeepAliveRequest) String() string {
 func (*KeepAliveRequest) ProtoMessage() {}
 
 func (x *KeepAliveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[4]
+	mi := &file_service_v1_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -232,7 +384,7 @@ func (x *KeepAliveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeepAliveRequest.ProtoReflect.Descriptor instead.
 func (*KeepAliveRequest) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{4}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *KeepAliveRequest) GetClientId() string {
@@ -258,7 +410,7 @@ type KeepAliveResponse struct {
 
 func (x *KeepAliveResponse) Reset() {
 	*x = KeepAliveResponse{}
-	mi := &file_service_v1_service_proto_msgTypes[5]
+	mi := &file_service_v1_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -270,7 +422,7 @@ func (x *KeepAliveResponse) String() string {
 func (*KeepAliveResponse) ProtoMessage() {}
 
 func (x *KeepAliveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[5]
+	mi := &file_service_v1_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -283,7 +435,7 @@ func (x *KeepAliveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeepAliveResponse.ProtoReflect.Descriptor instead.
 func (*KeepAliveResponse) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{5}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *KeepAliveResponse) GetServerTimeUnixMs() int64 {
@@ -308,7 +460,7 @@ type InvokeRequest struct {
 
 func (x *InvokeRequest) Reset() {
 	*x = InvokeRequest{}
-	mi := &file_service_v1_service_proto_msgTypes[6]
+	mi := &file_service_v1_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -320,7 +472,7 @@ func (x *InvokeRequest) String() string {
 func (*InvokeRequest) ProtoMessage() {}
 
 func (x *InvokeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[6]
+	mi := &file_service_v1_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -333,7 +485,7 @@ func (x *InvokeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeRequest.ProtoReflect.Descriptor instead.
 func (*InvokeRequest) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{6}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *InvokeRequest) GetMethod() string {
@@ -381,7 +533,7 @@ type InvokeResponse struct {
 
 func (x *InvokeResponse) Reset() {
 	*x = InvokeResponse{}
-	mi := &file_service_v1_service_proto_msgTypes[7]
+	mi := &file_service_v1_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -393,7 +545,7 @@ func (x *InvokeResponse) String() string {
 func (*InvokeResponse) ProtoMessage() {}
 
 func (x *InvokeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[7]
+	mi := &file_service_v1_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,7 +558,7 @@ func (x *InvokeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeResponse.ProtoReflect.Descriptor instead.
 func (*InvokeResponse) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{7}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *InvokeResponse) GetResultJson() []byte {
@@ -438,7 +590,7 @@ type RunOperationRequest struct {
 
 func (x *RunOperationRequest) Reset() {
 	*x = RunOperationRequest{}
-	mi := &file_service_v1_service_proto_msgTypes[8]
+	mi := &file_service_v1_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -450,7 +602,7 @@ func (x *RunOperationRequest) String() string {
 func (*RunOperationRequest) ProtoMessage() {}
 
 func (x *RunOperationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[8]
+	mi := &file_service_v1_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -463,7 +615,7 @@ func (x *RunOperationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunOperationRequest.ProtoReflect.Descriptor instead.
 func (*RunOperationRequest) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{8}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RunOperationRequest) GetOperation() string {
@@ -524,7 +676,7 @@ type GetActiveOperationRequest struct {
 
 func (x *GetActiveOperationRequest) Reset() {
 	*x = GetActiveOperationRequest{}
-	mi := &file_service_v1_service_proto_msgTypes[9]
+	mi := &file_service_v1_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -536,7 +688,7 @@ func (x *GetActiveOperationRequest) String() string {
 func (*GetActiveOperationRequest) ProtoMessage() {}
 
 func (x *GetActiveOperationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[9]
+	mi := &file_service_v1_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -549,7 +701,7 @@ func (x *GetActiveOperationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetActiveOperationRequest.ProtoReflect.Descriptor instead.
 func (*GetActiveOperationRequest) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{9}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetActiveOperationRequest) GetProjectRoot() string {
@@ -569,7 +721,7 @@ type WatchOperationRequest struct {
 
 func (x *WatchOperationRequest) Reset() {
 	*x = WatchOperationRequest{}
-	mi := &file_service_v1_service_proto_msgTypes[10]
+	mi := &file_service_v1_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -581,7 +733,7 @@ func (x *WatchOperationRequest) String() string {
 func (*WatchOperationRequest) ProtoMessage() {}
 
 func (x *WatchOperationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[10]
+	mi := &file_service_v1_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -594,7 +746,7 @@ func (x *WatchOperationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchOperationRequest.ProtoReflect.Descriptor instead.
 func (*WatchOperationRequest) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{10}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *WatchOperationRequest) GetProjectRoot() string {
@@ -625,7 +777,7 @@ type ActiveOperation struct {
 
 func (x *ActiveOperation) Reset() {
 	*x = ActiveOperation{}
-	mi := &file_service_v1_service_proto_msgTypes[11]
+	mi := &file_service_v1_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -637,7 +789,7 @@ func (x *ActiveOperation) String() string {
 func (*ActiveOperation) ProtoMessage() {}
 
 func (x *ActiveOperation) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[11]
+	mi := &file_service_v1_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -650,7 +802,7 @@ func (x *ActiveOperation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActiveOperation.ProtoReflect.Descriptor instead.
 func (*ActiveOperation) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{11}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ActiveOperation) GetActive() bool {
@@ -706,7 +858,7 @@ type Progress struct {
 
 func (x *Progress) Reset() {
 	*x = Progress{}
-	mi := &file_service_v1_service_proto_msgTypes[12]
+	mi := &file_service_v1_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -718,7 +870,7 @@ func (x *Progress) String() string {
 func (*Progress) ProtoMessage() {}
 
 func (x *Progress) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[12]
+	mi := &file_service_v1_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -731,7 +883,7 @@ func (x *Progress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Progress.ProtoReflect.Descriptor instead.
 func (*Progress) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{12}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Progress) GetPhase() string {
@@ -768,7 +920,7 @@ type OperationEvent struct {
 
 func (x *OperationEvent) Reset() {
 	*x = OperationEvent{}
-	mi := &file_service_v1_service_proto_msgTypes[13]
+	mi := &file_service_v1_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -780,7 +932,7 @@ func (x *OperationEvent) String() string {
 func (*OperationEvent) ProtoMessage() {}
 
 func (x *OperationEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[13]
+	mi := &file_service_v1_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -793,7 +945,7 @@ func (x *OperationEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationEvent.ProtoReflect.Descriptor instead.
 func (*OperationEvent) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{13}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *OperationEvent) GetTimeUnixMs() int64 {
@@ -845,7 +997,7 @@ type RunOperationResponse struct {
 
 func (x *RunOperationResponse) Reset() {
 	*x = RunOperationResponse{}
-	mi := &file_service_v1_service_proto_msgTypes[14]
+	mi := &file_service_v1_service_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -857,7 +1009,7 @@ func (x *RunOperationResponse) String() string {
 func (*RunOperationResponse) ProtoMessage() {}
 
 func (x *RunOperationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[14]
+	mi := &file_service_v1_service_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -870,7 +1022,7 @@ func (x *RunOperationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunOperationResponse.ProtoReflect.Descriptor instead.
 func (*RunOperationResponse) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{14}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RunOperationResponse) GetOperationId() string {
@@ -924,7 +1076,7 @@ type GetActiveOperationResponse struct {
 
 func (x *GetActiveOperationResponse) Reset() {
 	*x = GetActiveOperationResponse{}
-	mi := &file_service_v1_service_proto_msgTypes[15]
+	mi := &file_service_v1_service_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -936,7 +1088,7 @@ func (x *GetActiveOperationResponse) String() string {
 func (*GetActiveOperationResponse) ProtoMessage() {}
 
 func (x *GetActiveOperationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[15]
+	mi := &file_service_v1_service_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -949,7 +1101,7 @@ func (x *GetActiveOperationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetActiveOperationResponse.ProtoReflect.Descriptor instead.
 func (*GetActiveOperationResponse) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{15}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetActiveOperationResponse) GetOperation() *ActiveOperation {
@@ -973,7 +1125,7 @@ type WatchOperationResponse struct {
 
 func (x *WatchOperationResponse) Reset() {
 	*x = WatchOperationResponse{}
-	mi := &file_service_v1_service_proto_msgTypes[16]
+	mi := &file_service_v1_service_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -985,7 +1137,7 @@ func (x *WatchOperationResponse) String() string {
 func (*WatchOperationResponse) ProtoMessage() {}
 
 func (x *WatchOperationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_service_v1_service_proto_msgTypes[16]
+	mi := &file_service_v1_service_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -998,7 +1150,7 @@ func (x *WatchOperationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchOperationResponse.ProtoReflect.Descriptor instead.
 func (*WatchOperationResponse) Descriptor() ([]byte, []int) {
-	return file_service_v1_service_proto_rawDescGZIP(), []int{16}
+	return file_service_v1_service_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *WatchOperationResponse) GetOperationId() string {
@@ -1049,11 +1201,23 @@ const file_service_v1_service_proto_rawDesc = "" +
 	"\n" +
 	"\x18service/v1/service.proto\x12\n" +
 	"service.v1\"\r\n" +
-	"\vPingRequest\"I\n" +
+	"\vPingRequest\"e\n" +
 	"\fPingResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x1f\n" +
 	"\vinstance_id\x18\x02 \x01(\tR\n" +
-	"instanceId\")\n" +
+	"instanceId\x12\x1a\n" +
+	"\bunlocked\x18\x03 \x01(\bR\bunlocked\"\x84\x01\n" +
+	"\x13AuthenticateRequest\x12\x1a\n" +
+	"\bpassword\x18\x01 \x01(\tR\bpassword\x12\x12\n" +
+	"\x04totp\x18\x02 \x01(\tR\x04totp\x12'\n" +
+	"\x0fremember_device\x18\x03 \x01(\bR\x0erememberDevice\x12\x14\n" +
+	"\x05email\x18\x04 \x01(\tR\x05email\"\xac\x01\n" +
+	"\x14AuthenticateResponse\x12\x1a\n" +
+	"\bunlocked\x18\x01 \x01(\bR\bunlocked\x12\x19\n" +
+	"\bneed_2fa\x18\x02 \x01(\bR\aneed2fa\x12#\n" +
+	"\rcontrol_token\x18\x03 \x01(\tR\fcontrolToken\x12\"\n" +
+	"\rexpires_in_ms\x18\x04 \x01(\x03R\vexpiresInMs\x12\x14\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\")\n" +
 	"\x0fShutdownRequest\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\".\n" +
 	"\x10ShutdownResponse\x12\x1a\n" +
@@ -1121,10 +1285,11 @@ const file_service_v1_service_proto_rawDesc = "" +
 	"\vresult_json\x18\x04 \x01(\fR\n" +
 	"resultJson\x12\x14\n" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x12\x12\n" +
-	"\x04done\x18\x06 \x01(\bR\x04done2\xb2\x04\n" +
+	"\x04done\x18\x06 \x01(\bR\x04done2\x85\x05\n" +
 	"\n" +
 	"DecService\x129\n" +
-	"\x04Ping\x12\x17.service.v1.PingRequest\x1a\x18.service.v1.PingResponse\x12E\n" +
+	"\x04Ping\x12\x17.service.v1.PingRequest\x1a\x18.service.v1.PingResponse\x12Q\n" +
+	"\fAuthenticate\x12\x1f.service.v1.AuthenticateRequest\x1a .service.v1.AuthenticateResponse\x12E\n" +
 	"\bShutdown\x12\x1b.service.v1.ShutdownRequest\x1a\x1c.service.v1.ShutdownResponse\x12L\n" +
 	"\tKeepAlive\x12\x1c.service.v1.KeepAliveRequest\x1a\x1d.service.v1.KeepAliveResponse(\x010\x01\x12?\n" +
 	"\x06Invoke\x12\x19.service.v1.InvokeRequest\x1a\x1a.service.v1.InvokeResponse\x12S\n" +
@@ -1144,50 +1309,54 @@ func file_service_v1_service_proto_rawDescGZIP() []byte {
 	return file_service_v1_service_proto_rawDescData
 }
 
-var file_service_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_service_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_service_v1_service_proto_goTypes = []any{
 	(*PingRequest)(nil),                // 0: service.v1.PingRequest
 	(*PingResponse)(nil),               // 1: service.v1.PingResponse
-	(*ShutdownRequest)(nil),            // 2: service.v1.ShutdownRequest
-	(*ShutdownResponse)(nil),           // 3: service.v1.ShutdownResponse
-	(*KeepAliveRequest)(nil),           // 4: service.v1.KeepAliveRequest
-	(*KeepAliveResponse)(nil),          // 5: service.v1.KeepAliveResponse
-	(*InvokeRequest)(nil),              // 6: service.v1.InvokeRequest
-	(*InvokeResponse)(nil),             // 7: service.v1.InvokeResponse
-	(*RunOperationRequest)(nil),        // 8: service.v1.RunOperationRequest
-	(*GetActiveOperationRequest)(nil),  // 9: service.v1.GetActiveOperationRequest
-	(*WatchOperationRequest)(nil),      // 10: service.v1.WatchOperationRequest
-	(*ActiveOperation)(nil),            // 11: service.v1.ActiveOperation
-	(*Progress)(nil),                   // 12: service.v1.Progress
-	(*OperationEvent)(nil),             // 13: service.v1.OperationEvent
-	(*RunOperationResponse)(nil),       // 14: service.v1.RunOperationResponse
-	(*GetActiveOperationResponse)(nil), // 15: service.v1.GetActiveOperationResponse
-	(*WatchOperationResponse)(nil),     // 16: service.v1.WatchOperationResponse
+	(*AuthenticateRequest)(nil),        // 2: service.v1.AuthenticateRequest
+	(*AuthenticateResponse)(nil),       // 3: service.v1.AuthenticateResponse
+	(*ShutdownRequest)(nil),            // 4: service.v1.ShutdownRequest
+	(*ShutdownResponse)(nil),           // 5: service.v1.ShutdownResponse
+	(*KeepAliveRequest)(nil),           // 6: service.v1.KeepAliveRequest
+	(*KeepAliveResponse)(nil),          // 7: service.v1.KeepAliveResponse
+	(*InvokeRequest)(nil),              // 8: service.v1.InvokeRequest
+	(*InvokeResponse)(nil),             // 9: service.v1.InvokeResponse
+	(*RunOperationRequest)(nil),        // 10: service.v1.RunOperationRequest
+	(*GetActiveOperationRequest)(nil),  // 11: service.v1.GetActiveOperationRequest
+	(*WatchOperationRequest)(nil),      // 12: service.v1.WatchOperationRequest
+	(*ActiveOperation)(nil),            // 13: service.v1.ActiveOperation
+	(*Progress)(nil),                   // 14: service.v1.Progress
+	(*OperationEvent)(nil),             // 15: service.v1.OperationEvent
+	(*RunOperationResponse)(nil),       // 16: service.v1.RunOperationResponse
+	(*GetActiveOperationResponse)(nil), // 17: service.v1.GetActiveOperationResponse
+	(*WatchOperationResponse)(nil),     // 18: service.v1.WatchOperationResponse
 }
 var file_service_v1_service_proto_depIdxs = []int32{
-	13, // 0: service.v1.InvokeResponse.events:type_name -> service.v1.OperationEvent
-	12, // 1: service.v1.OperationEvent.progress:type_name -> service.v1.Progress
-	11, // 2: service.v1.RunOperationResponse.active:type_name -> service.v1.ActiveOperation
-	13, // 3: service.v1.RunOperationResponse.event:type_name -> service.v1.OperationEvent
-	11, // 4: service.v1.GetActiveOperationResponse.operation:type_name -> service.v1.ActiveOperation
-	11, // 5: service.v1.WatchOperationResponse.active:type_name -> service.v1.ActiveOperation
-	13, // 6: service.v1.WatchOperationResponse.event:type_name -> service.v1.OperationEvent
+	15, // 0: service.v1.InvokeResponse.events:type_name -> service.v1.OperationEvent
+	14, // 1: service.v1.OperationEvent.progress:type_name -> service.v1.Progress
+	13, // 2: service.v1.RunOperationResponse.active:type_name -> service.v1.ActiveOperation
+	15, // 3: service.v1.RunOperationResponse.event:type_name -> service.v1.OperationEvent
+	13, // 4: service.v1.GetActiveOperationResponse.operation:type_name -> service.v1.ActiveOperation
+	13, // 5: service.v1.WatchOperationResponse.active:type_name -> service.v1.ActiveOperation
+	15, // 6: service.v1.WatchOperationResponse.event:type_name -> service.v1.OperationEvent
 	0,  // 7: service.v1.DecService.Ping:input_type -> service.v1.PingRequest
-	2,  // 8: service.v1.DecService.Shutdown:input_type -> service.v1.ShutdownRequest
-	4,  // 9: service.v1.DecService.KeepAlive:input_type -> service.v1.KeepAliveRequest
-	6,  // 10: service.v1.DecService.Invoke:input_type -> service.v1.InvokeRequest
-	8,  // 11: service.v1.DecService.RunOperation:input_type -> service.v1.RunOperationRequest
-	9,  // 12: service.v1.DecService.GetActiveOperation:input_type -> service.v1.GetActiveOperationRequest
-	10, // 13: service.v1.DecService.WatchOperation:input_type -> service.v1.WatchOperationRequest
-	1,  // 14: service.v1.DecService.Ping:output_type -> service.v1.PingResponse
-	3,  // 15: service.v1.DecService.Shutdown:output_type -> service.v1.ShutdownResponse
-	5,  // 16: service.v1.DecService.KeepAlive:output_type -> service.v1.KeepAliveResponse
-	7,  // 17: service.v1.DecService.Invoke:output_type -> service.v1.InvokeResponse
-	14, // 18: service.v1.DecService.RunOperation:output_type -> service.v1.RunOperationResponse
-	15, // 19: service.v1.DecService.GetActiveOperation:output_type -> service.v1.GetActiveOperationResponse
-	16, // 20: service.v1.DecService.WatchOperation:output_type -> service.v1.WatchOperationResponse
-	14, // [14:21] is the sub-list for method output_type
-	7,  // [7:14] is the sub-list for method input_type
+	2,  // 8: service.v1.DecService.Authenticate:input_type -> service.v1.AuthenticateRequest
+	4,  // 9: service.v1.DecService.Shutdown:input_type -> service.v1.ShutdownRequest
+	6,  // 10: service.v1.DecService.KeepAlive:input_type -> service.v1.KeepAliveRequest
+	8,  // 11: service.v1.DecService.Invoke:input_type -> service.v1.InvokeRequest
+	10, // 12: service.v1.DecService.RunOperation:input_type -> service.v1.RunOperationRequest
+	11, // 13: service.v1.DecService.GetActiveOperation:input_type -> service.v1.GetActiveOperationRequest
+	12, // 14: service.v1.DecService.WatchOperation:input_type -> service.v1.WatchOperationRequest
+	1,  // 15: service.v1.DecService.Ping:output_type -> service.v1.PingResponse
+	3,  // 16: service.v1.DecService.Authenticate:output_type -> service.v1.AuthenticateResponse
+	5,  // 17: service.v1.DecService.Shutdown:output_type -> service.v1.ShutdownResponse
+	7,  // 18: service.v1.DecService.KeepAlive:output_type -> service.v1.KeepAliveResponse
+	9,  // 19: service.v1.DecService.Invoke:output_type -> service.v1.InvokeResponse
+	16, // 20: service.v1.DecService.RunOperation:output_type -> service.v1.RunOperationResponse
+	17, // 21: service.v1.DecService.GetActiveOperation:output_type -> service.v1.GetActiveOperationResponse
+	18, // 22: service.v1.DecService.WatchOperation:output_type -> service.v1.WatchOperationResponse
+	15, // [15:23] is the sub-list for method output_type
+	7,  // [7:15] is the sub-list for method input_type
 	7,  // [7:7] is the sub-list for extension type_name
 	7,  // [7:7] is the sub-list for extension extendee
 	0,  // [0:7] is the sub-list for field type_name
@@ -1204,7 +1373,7 @@ func file_service_v1_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_service_v1_service_proto_rawDesc), len(file_service_v1_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

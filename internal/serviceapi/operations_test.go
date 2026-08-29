@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/service"
 	"github.com/shichao402/Dec/internal/servicehost"
 )
@@ -36,6 +37,9 @@ func startServer(t *testing.T) *API {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+
+	secrets.UnlockForTest()
+	t.Cleanup(secrets.ClearSession)
 
 	api, err := Connect(ctx, "tui", "test-client", "test")
 	if err != nil {

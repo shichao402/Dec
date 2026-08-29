@@ -67,6 +67,10 @@ type GlobalConfig struct {
 	IDEs              []string   `yaml:"ides,omitempty"`
 	Editor            string     `yaml:"editor,omitempty"`
 	ServerIdleTimeout string     `yaml:"server_idle_timeout,omitempty"`
+	// ManagementListen 为 gRPC 绑定地址；空则 127.0.0.1:0。非 loopback 必须同时配置 TLS。
+	ManagementListen  string `yaml:"management_listen,omitempty"`
+	ManagementTLSCert string `yaml:"management_tls_cert,omitempty"`
+	ManagementTLSKey  string `yaml:"management_tls_key,omitempty"`
 	// EnabledProjects 是本机启用的 Project 列表。
 	EnabledProjects []string `yaml:"enabled_projects,omitempty"`
 	// EnabledBundles 仅用于读取旧配置；运行时会归一到当前启用列表。
@@ -199,7 +203,7 @@ type ProjectConfig struct {
 	ProjectName string   `yaml:"project_name,omitempty"`
 	IDEs        []string `yaml:"ides,omitempty"`
 	Editor      string   `yaml:"editor,omitempty"`
-	// EnabledBundles 是旧启用列表；P 模型下 requires 才是 SSOT。
+	// EnabledBundles 是旧启用列表；项目模型下 requires 才是 SSOT。
 	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
 }
 

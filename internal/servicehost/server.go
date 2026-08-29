@@ -14,6 +14,7 @@ import (
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/diag"
 	"github.com/shichao402/Dec/internal/repo"
+	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/service"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
 	"google.golang.org/grpc"
@@ -29,6 +30,9 @@ type Server struct {
 
 	version          string
 	instanceID       string
+	listenToken      string
+	controlMu        sync.Mutex
+	controlTokens    map[string]time.Time
 	broker           *operationBroker
 	presence         *presenceTracker
 	requestStop      func()
@@ -63,22 +67,28 @@ func Run(ctx context.Context, version string) error {
 	}
 	defer lock.Unlock()
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	token, err := service.NewToken()
+	if err != nil {
+		return err
+	}
+	listen, err := loadListenSettings()
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp", listen.Addr)
 	if err != nil {
 		return fmt.Errorf("监听本机服务端口失败: %w", err)
 	}
 	defer listener.Close()
 
-	token, err := service.NewToken()
-	if err != nil {
-		return err
-	}
 	idleTimeout := loadIdleTimeout()
 	stopRequested := make(chan struct{}, 1)
 	host := &Server{
-		version:    version,
-		instanceID: fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().UnixMilli()),
-		broker:     newOperationBroker(),
+		version:       version,
+		instanceID:    fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().UnixMilli()),
+		broker:        newOperationBroker(),
+		listenToken:   token,
+		controlTokens: map[string]time.Time{},
 	}
 	host.requestStop = func() {
 		select {
@@ -90,10 +100,12 @@ func Run(ctx context.Context, version string) error {
 		host.requestStop()
 	})
 
-	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(unaryAuth(token, host.presence)),
-		grpc.StreamInterceptor(streamAuth(token, host.presence)),
-	)
+	serverOpts := []grpc.ServerOption{
+		grpc.UnaryInterceptor(host.unaryAuth()),
+		grpc.StreamInterceptor(host.streamAuth()),
+	}
+	serverOpts = append(serverOpts, listen.Opts...)
+	grpcServer := grpc.NewServer(serverOpts...)
 	servicev1.RegisterDecServiceServer(grpcServer, host)
 	if err := service.WriteMetadata(listener.Addr().String(), token); err != nil {
 		return err
@@ -157,7 +169,27 @@ func loadIdleTimeout() time.Duration {
 }
 
 func (s *Server) Ping(context.Context, *servicev1.PingRequest) (*servicev1.PingResponse, error) {
-	return &servicev1.PingResponse{Version: s.version, InstanceId: s.instanceID}, nil
+	return &servicev1.PingResponse{
+		Version:    s.version,
+		InstanceId: s.instanceID,
+		Unlocked:   secrets.InstanceUnlocked(),
+	}, nil
+}
+
+func (s *Server) Authenticate(ctx context.Context, req *servicev1.AuthenticateRequest) (*servicev1.AuthenticateResponse, error) {
+	result, err := secrets.UnlockWithPassword(ctx, req.GetEmail(), req.GetPassword(), req.GetTotp(), req.GetRememberDevice())
+	if err != nil {
+		return &servicev1.AuthenticateResponse{Error: err.Error()}, nil
+	}
+	if result != nil && result.Need2FA {
+		return &servicev1.AuthenticateResponse{Need_2Fa: true}, nil
+	}
+	token, expires := s.issueControlToken()
+	return &servicev1.AuthenticateResponse{
+		Unlocked:     true,
+		ControlToken: token,
+		ExpiresInMs:  expires,
+	}, nil
 }
 
 func (s *Server) Shutdown(context.Context, *servicev1.ShutdownRequest) (*servicev1.ShutdownResponse, error) {
@@ -220,35 +252,88 @@ func (s *Server) WatchOperation(req *servicev1.WatchOperationRequest, stream grp
 	}
 }
 
-// unaryAuth 校验 token，并在 RPC 执行期间把它计入 presence：
-// 任何在飞调用都视为活跃，避免无 TUI、仅 MCP 时长操作被空闲计时器误杀。
-func unaryAuth(token string, presence *presenceTracker) grpc.UnaryServerInterceptor {
+const lockedRPCMessage = "dec-server 已锁定，请先通过 Authenticate 使用主密码解锁"
+
+func methodAllowedWhenLocked(fullMethod string) bool {
+	switch fullMethod {
+	case servicev1.DecService_Ping_FullMethodName, servicev1.DecService_Authenticate_FullMethodName:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) unaryAuth() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if !validToken(ctx, token) {
-			return nil, status.Error(codes.Unauthenticated, "invalid dec-server token")
+		if err := s.authorizeRPC(ctx, info.FullMethod); err != nil {
+			return nil, err
 		}
-		presence.connected()
-		defer presence.disconnected()
+		s.presence.connected()
+		defer s.presence.disconnected()
 		return handler(ctx, req)
 	}
 }
 
-// streamAuth 校验 token，并在流存活期间计入 presence。
-// TUI 的 KeepAlive 长连流、以及各门面的 RunOperation / WatchOperation 流都由此占用 presence。
-func streamAuth(token string, presence *presenceTracker) grpc.StreamServerInterceptor {
+func (s *Server) streamAuth() grpc.StreamServerInterceptor {
 	return func(srv any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if !validToken(stream.Context(), token) {
-			return status.Error(codes.Unauthenticated, "invalid dec-server token")
+		if err := s.authorizeRPC(stream.Context(), info.FullMethod); err != nil {
+			return err
 		}
-		presence.connected()
-		defer presence.disconnected()
+		s.presence.connected()
+		defer s.presence.disconnected()
 		return handler(srv, stream)
 	}
 }
 
-func validToken(ctx context.Context, want string) bool {
+func (s *Server) authorizeRPC(ctx context.Context, fullMethod string) error {
+	if methodAllowedWhenLocked(fullMethod) {
+		return nil
+	}
+	if !s.validTransportToken(ctx) {
+		return status.Error(codes.Unauthenticated, "invalid dec-server token")
+	}
+	if !secrets.InstanceUnlocked() {
+		return status.Error(codes.FailedPrecondition, lockedRPCMessage)
+	}
+	return nil
+}
+
+func (s *Server) validTransportToken(ctx context.Context) bool {
 	values := metadata.ValueFromIncomingContext(ctx, service.TokenHeader)
-	return len(values) == 1 && values[0] == want
+	if len(values) != 1 {
+		return false
+	}
+	got := values[0]
+	if got != "" && got == s.listenToken {
+		return true
+	}
+	now := time.Now()
+	s.controlMu.Lock()
+	defer s.controlMu.Unlock()
+	exp, ok := s.controlTokens[got]
+	if !ok {
+		return false
+	}
+	if !now.Before(exp) {
+		delete(s.controlTokens, got)
+		return false
+	}
+	return true
+}
+
+func (s *Server) issueControlToken() (string, int64) {
+	token, err := service.NewToken()
+	if err != nil {
+		token = fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	ttl := secrets.DefaultSessionTTL
+	s.controlMu.Lock()
+	if s.controlTokens == nil {
+		s.controlTokens = map[string]time.Time{}
+	}
+	s.controlTokens[token] = time.Now().Add(ttl)
+	s.controlMu.Unlock()
+	return token, ttl.Milliseconds()
 }
 
 type presenceTracker struct {
