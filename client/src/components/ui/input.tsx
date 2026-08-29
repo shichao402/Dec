@@ -1,27 +1,45 @@
 import * as React from 'react'
+import { ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
+const control =
+  'h-9 w-full rounded-lg border border-line-hi bg-canvas px-3 text-[13px] text-ink transition-colors placeholder:text-faint hover:border-line-hi focus:border-accent focus-visible:outline-none disabled:opacity-45'
+
 export function Input({ className, ...props }: React.ComponentProps<'input'>) {
+  return <input className={cn(control, className)} {...props} />
+}
+
+export function Select({ className, children, ...props }: React.ComponentProps<'select'>) {
   return (
-    <input
-      className={cn(
-        'flex h-9 w-full rounded-md border border-zinc-300 bg-white px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-950',
-        className,
-      )}
-      {...props}
-    />
+    <div className="relative">
+      <select className={cn(control, 'appearance-none pr-8', className)} {...props}>
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-faint" />
+    </div>
   )
 }
 
 export function Label({ className, ...props }: React.ComponentProps<'label'>) {
-  return <label className={cn('text-sm font-medium text-zinc-700 dark:text-zinc-300', className)} {...props} />
+  return <label className={cn('text-[13px] font-medium text-muted', className)} {...props} />
 }
 
-export function Card({ className, ...props }: React.ComponentProps<'div'>) {
+export function Field({
+  label,
+  hint,
+  children,
+  className,
+}: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+  className?: string
+}) {
   return (
-    <div
-      className={cn('rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950', className)}
-      {...props}
-    />
+    <div className={cn('min-w-0', className)}>
+      <Label className="mb-1.5 block">{label}</Label>
+      {children}
+      {hint && <p className="mt-1.5 text-xs text-faint">{hint}</p>}
+    </div>
   )
 }

@@ -4,20 +4,22 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg font-medium transition-[background-color,border-color,color] outline-none disabled:pointer-events-none disabled:opacity-45',
   {
     variants: {
       variant: {
-        default: 'bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900',
-        secondary: 'bg-zinc-100 text-zinc-900 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100',
-        outline: 'border border-zinc-300 bg-transparent hover:bg-zinc-100 dark:border-zinc-700',
-        ghost: 'hover:bg-zinc-100 dark:hover:bg-zinc-800',
-        destructive: 'bg-red-600 text-white hover:bg-red-500',
+        default: 'bg-ink text-canvas hover:bg-white',
+        accent: 'bg-accent text-white hover:bg-accent-hi',
+        secondary: 'bg-panel-hi text-ink hover:bg-line',
+        outline: 'border border-line-hi bg-transparent text-ink hover:border-line-hi hover:bg-panel-hi',
+        ghost: 'text-muted hover:bg-panel-hi hover:text-ink',
+        destructive: 'bg-bad/15 text-bad hover:bg-bad/25',
       },
       size: {
-        default: 'h-9 px-4 py-2',
+        default: 'h-9 px-3.5 text-[13px]',
         sm: 'h-8 px-3 text-xs',
-        lg: 'h-10 px-6',
+        lg: 'h-10 px-5 text-sm',
+        icon: 'size-8',
       },
     },
     defaultVariants: { variant: 'default', size: 'default' },

@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:layout": "playwright test"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",
@@ -26,6 +27,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^24.13.3",
