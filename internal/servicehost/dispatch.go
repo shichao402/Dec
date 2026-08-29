@@ -74,7 +74,7 @@ func callerFromMetadata(ctx context.Context) (facade, clientID string) {
 func isProjectMutation(method string) bool {
 	switch method {
 	case "save_enabled_bundles", "prepare_project_config_init", "ensure_local_project_config",
-		"ensure_home_p", "create_local_asset",
+		"ensure_home_p", "bind_managed_project", "create_local_asset",
 		"apply_vault_project", "save_project_settings", "ensure_project_vars",
 		"prepare_remote_note_edit", "prepare_remote_ssh_hosts_edit":
 		return true
@@ -85,7 +85,8 @@ func isProjectMutation(method string) bool {
 
 func isMachineMutation(method string) bool {
 	switch method {
-	case "connect_repo", "save_global_settings", "ensure_builtin_ide_assets", "ensure_global_vars":
+	case "connect_repo", "save_global_settings", "ensure_builtin_ide_assets", "ensure_global_vars",
+		"register_managed_project", "remove_managed_project", "create_remote_project":
 		return true
 	default:
 		return false
@@ -99,6 +100,37 @@ func dispatchInvoke(ctx context.Context, method, projectRoot string, payload []b
 func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.Workspace, payload []byte, reporter app.Reporter, writer app.PWriter) (any, error) {
 	projectRoot := workspace.Root
 	switch method {
+	case "load_device_summary":
+		return app.LoadDeviceSummary()
+	case "list_managed_projects":
+		return app.ListManagedProjectStates()
+	case "browse_directories":
+		var in struct{ Path string }
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.BrowseDirectories(in.Path)
+	case "register_managed_project":
+		var in struct {
+			Root  string
+			Label string
+		}
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.RegisterManagedProject(in.Root, in.Label)
+	case "remove_managed_project":
+		var in struct{ Root string }
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.RemoveManagedProject(in.Root)
+	case "create_remote_project":
+		var in app.CreateRemoteProjectInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.CreateRemoteProject(in, reporter)
 	case "load_project_overview":
 		var in struct{ IncludeVaultBundles bool }
 		if err := decode(payload, &in); err != nil {
@@ -128,6 +160,12 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.ConnectRepo(in.RepoURL, reporter)
 	case "prepare_project_config_init":
 		return app.PrepareProjectConfigInit(projectRoot, reporter)
+	case "bind_managed_project":
+		var in struct{ ProjectName string }
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.BindManagedProject(projectRoot, in.ProjectName)
 	case "ensure_local_project_config":
 		return writer.BindHomeProject(projectRoot, reporter)
 	case "ensure_home_p":
@@ -316,6 +354,15 @@ func dispatchOperation(ctx context.Context, operation, projectRoot string, paylo
 func dispatchOperationWorkspace(ctx context.Context, operation string, workspace app.Workspace, payload []byte, reporter app.Reporter, writer app.PWriter) (any, error) {
 	projectRoot := workspace.Root
 	switch operation {
+	case "scan_managed_projects":
+		var in struct {
+			ScanRoot string
+			MaxDepth int
+		}
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.ScanManagedProjects(ctx, in.ScanRoot, in.MaxDepth, reporter)
 	case "pull":
 		return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
 	case "push":

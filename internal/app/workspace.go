@@ -13,10 +13,10 @@ import (
 type WorkspacePlane string
 
 const (
-	WorkspaceLocal  WorkspacePlane = "local"
-	WorkspaceGlobal WorkspacePlane = "global"
-	WorkspaceProject               = WorkspaceLocal
-	WorkspaceUser                  = WorkspaceGlobal
+	WorkspaceLocal   WorkspacePlane = "local"
+	WorkspaceGlobal  WorkspacePlane = "global"
+	WorkspaceProject                = WorkspaceLocal
+	WorkspaceUser                   = WorkspaceGlobal
 )
 
 // Workspace 将平面与其可选项目根绑定。用户平面不把全局配置伪装成项目配置。
@@ -26,10 +26,11 @@ type Workspace struct {
 }
 
 func NewWorkspace(plane WorkspacePlane, root string) Workspace {
-	if plane != WorkspaceGlobal && plane != WorkspaceUser {
-		plane = WorkspaceLocal
-	} else {
+	switch strings.ToLower(strings.TrimSpace(string(plane))) {
+	case "global", "user":
 		plane = WorkspaceGlobal
+	default:
+		plane = WorkspaceLocal
 	}
 	return Workspace{Plane: plane, Root: strings.TrimSpace(root)}
 }

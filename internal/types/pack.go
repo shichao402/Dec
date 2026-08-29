@@ -75,6 +75,14 @@ type GlobalConfig struct {
 	EnabledProjects []string `yaml:"enabled_projects,omitempty"`
 	// EnabledBundles 仅用于读取旧配置；运行时会归一到当前启用列表。
 	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
+	// ManagedProjects 是 Console 显式接管或扫描导入的项目目录。
+	// 它只记录管理入口，不改变项目配置，也不参与 Global 平面资产解析。
+	ManagedProjects []ManagedProject `yaml:"managed_projects,omitempty"`
+}
+
+type ManagedProject struct {
+	Root  string `yaml:"root"`
+	Label string `yaml:"label,omitempty"`
 }
 
 const ProjectConfigVersionV2 = "v2"

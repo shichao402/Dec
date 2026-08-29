@@ -11,7 +11,7 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.6.3" }
+tauri-build = { version = "2.6.3", features = [] }
 tonic-build = "0.12"
 protoc-bin-vendored = "3"
 
@@ -19,10 +19,12 @@ protoc-bin-vendored = "3"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.3" }
+tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
-tonic = "0.12"
+tonic = { version = "0.12", features = ["tls-roots"] }
 prost = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "io-util"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+keyring = { version = "3.6.3", features = ["apple-native", "sync-secret-service", "vendored", "windows-native"] }

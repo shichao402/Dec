@@ -1,10 +1,41 @@
 package servicehost
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/shichao402/Dec/internal/app"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
 )
+
+func TestConsoleProjectManagementDispatch(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
+	project := filepath.Join(t.TempDir(), "web")
+	if err := os.MkdirAll(project, 0755); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]string{"Root": project})
+	got, err := dispatchInvokeWorkspace(context.Background(), "register_managed_project",
+		app.NewWorkspace(app.WorkspaceGlobal, ""), payload, nil, app.DefaultPWriter())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, ok := got.(*app.ManagedProjectState)
+	if !ok || state.Root == "" || state.Initialized {
+		t.Fatalf("unexpected state: %#v", got)
+	}
+	listed, err := dispatchInvokeWorkspace(context.Background(), "list_managed_projects",
+		app.NewWorkspace(app.WorkspaceGlobal, ""), nil, nil, app.DefaultPWriter())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.([]app.ManagedProjectState)) != 1 {
+		t.Fatalf("unexpected projects: %#v", listed)
+	}
+}
 
 func TestOperationBrokerProjectMutualExclusionAndWatch(t *testing.T) {
 	broker := newOperationBroker()
