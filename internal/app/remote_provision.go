@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/shichao402/Dec/internal/config"
 )
 
 // RemoteProvisionPort 是远端 dec-server 的固定 loopback 端口。
@@ -34,16 +36,59 @@ type RemoteTarget struct {
 	Port  int
 }
 
-// SSHDestination 返回 ssh 命令的目标参数。
+// SSHDestination 返回登记与展示用的规范目标（含 host:port）。
 func (t RemoteTarget) SSHDestination() string {
-	if alias := strings.TrimSpace(t.Alias); alias != "" {
-		return alias
+	ref, err := t.sshRef()
+	if err != nil {
+		if alias := strings.TrimSpace(t.Alias); alias != "" {
+			return alias
+		}
+		return strings.TrimSpace(t.Host)
 	}
-	host := strings.TrimSpace(t.Host)
-	if user := strings.TrimSpace(t.User); user != "" {
-		return user + "@" + host
+	return ref.Canonical()
+}
+
+func (t RemoteTarget) sshDialTarget() string {
+	ref, err := t.sshRef()
+	if err != nil {
+		return t.SSHDestination()
 	}
-	return host
+	return ref.DialHost()
+}
+
+func (t RemoteTarget) sshPort() int {
+	ref, err := t.sshRef()
+	if err != nil {
+		return t.Port
+	}
+	return ref.Port
+}
+
+func (t RemoteTarget) sshRef() (config.SSHTargetRef, error) {
+	if t.Port < 0 || t.Port > 65535 {
+		return config.SSHTargetRef{}, fmt.Errorf("SSH 端口 %d 无效", t.Port)
+	}
+	raw := strings.TrimSpace(t.Alias)
+	if raw == "" {
+		host := strings.TrimSpace(t.Host)
+		user := strings.TrimSpace(t.User)
+		if host == "" {
+			return config.SSHTargetRef{}, fmt.Errorf("必须提供 SSH 主机或 ssh_config 别名")
+		}
+		if user != "" {
+			raw = user + "@" + host
+		} else {
+			raw = host
+		}
+	}
+	ref, err := config.ParseSSHTarget(raw)
+	if err != nil {
+		return config.SSHTargetRef{}, err
+	}
+	if t.Port > 0 {
+		ref.Port = t.Port
+	}
+	return ref, nil
 }
 
 // DisplayName 是日志与 typed confirm 使用的稳定人类可读名。
@@ -52,13 +97,8 @@ func (t RemoteTarget) DisplayName() string {
 }
 
 func (t RemoteTarget) validate() error {
-	if strings.TrimSpace(t.Alias) == "" && strings.TrimSpace(t.Host) == "" {
-		return fmt.Errorf("必须提供 SSH 主机或 ssh_config 别名")
-	}
-	if t.Port < 0 || t.Port > 65535 {
-		return fmt.Errorf("SSH 端口 %d 无效", t.Port)
-	}
-	return nil
+	_, err := t.sshRef()
+	return err
 }
 
 // deviceOperationKeyPrefix 是设备级操作互斥键的前缀。
@@ -201,7 +241,8 @@ else
   echo "spawn=none"
 fi
 if [ -f "${dec_home}/config.yaml" ]; then
-  echo "listen=$(grep -E '^management_listen:' "${dec_home}/config.yaml" 2>/dev/null | head -1 | sed 's/^management_listen:[[:space:]]*//' | tr -d '\"'"'"')"
+  listen=$(awk '/^management_listen:/ { sub(/^management_listen:[[:space:]]*/, ""); print; exit }' "${dec_home}/config.yaml")
+  echo "listen=${listen}"
 fi
 if [ -f "${dec_home}/run/server.json" ]; then echo "server_running=1"; fi
 `
@@ -248,7 +289,7 @@ func parseRemoteProbeOutput(out string, probe *RemoteHostProbe) {
 		case "server_running":
 			probe.ServerRunning = value == "1"
 		case "listen":
-			probe.ManagementListen = value
+			probe.ManagementListen = strings.Trim(value, " \t\"'")
 		}
 	}
 	for _, name := range decSuiteBinaries {
@@ -383,10 +424,10 @@ func sshArgs(target RemoteTarget, command string) []string {
 		"-o", "ConnectTimeout=10",
 		"-o", "StrictHostKeyChecking=accept-new",
 	}
-	if target.Port > 0 {
-		args = append(args, "-p", strconv.Itoa(target.Port))
+	if port := target.sshPort(); port > 0 {
+		args = append(args, "-p", strconv.Itoa(port))
 	}
-	args = append(args, target.SSHDestination(), command)
+	args = append(args, target.sshDialTarget(), command)
 	return args
 }
 

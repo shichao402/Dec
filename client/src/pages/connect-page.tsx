@@ -55,7 +55,7 @@ export function ConnectPage(props: {
                   className="border-none"
                   icon={<Server className="size-5" />}
                   text="还没有保存的设备"
-                  hint="用右侧表单添加。本机会自动发现服务；远端填写 SSH Host 别名、主机名或 user@host 即可。"
+                  hint="用右侧表单添加。本机会自动发现服务；远端填写 SSH 别名、主机名、user@host 或 host:36000。"
                 />
               </PanelBody>
             ) : (
@@ -113,10 +113,10 @@ export function ConnectPage(props: {
 
               {draft.kind === 'ssh' && (
                 <>
-                  <Field label="SSH 主机" hint="支持 ~/.ssh/config 的 Host 别名、主机名或 user@host；密钥与端口继续由 SSH 配置管理。">
+                  <Field label="SSH 主机" hint="支持 Host 别名、主机名、user@host，或 host:36000。密钥仍由 SSH 配置管理。">
                     <Input
                       className="font-mono text-xs"
-                      placeholder="例如 build-box 或 dev@10.0.0.8"
+                      placeholder="例如 update.devcloud.woa.com:36000"
                       value={draft.ssh_host}
                       onChange={(e) => setDraft({ ...draft, ssh_host: e.target.value, ssh_user: '', host: '127.0.0.1', port: 47653 })}
                     />

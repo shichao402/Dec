@@ -97,7 +97,7 @@ SSH 凭据只存**引用**（`~/.ssh/config` 别名或 Dec 管理的 `.sshkey` �
 - **拉起用 `setsid nohup ... < /dev/null &`**：SSH 会话结束会向进程组发 SIGHUP，只靠 `&` 的进程会跟着死；`dec-server` 自身的 `detachedProcessAttributes` 只作用于它拉起的子进程，管不到它自己被谁拉起。stdin 必须切断，否则 SSH 会话不会返回。
 - **远端命令走绝对路径 `${DEC_HOME:-$HOME/.dec}/bin/dec`**：非交互 SSH 的 PATH 通常不含 `~/.dec/bin`。
 - **置备默认包含配置步骤**：`SkipConfigure` 零值为 false。装完二进制却没配固定端口的机器仍然连不上，置备只做一半没有意义。
-- **SSH 连接页只保留一个目标输入**：接受 `~/.ssh/config` Host 别名、主机名或 `user@host`；密钥、代理跳转、自定义 SSH 端口继续由系统 SSH 配置管理。gRPC 地址固定为 `127.0.0.1:47653`，不再让用户重复填写。
+- **SSH 连接页只保留一个目标输入**：接受 `~/.ssh/config` Host 别名、主机名、`user@host`，以及 `host:36000` 这种端口写法（变成 `ssh -p`，与 SSH 密钥落地约定一致）。密钥、代理跳转仍由系统 SSH 配置管理。gRPC 地址固定为 `127.0.0.1:47653`，不再让用户重复填写。
 - **设备清单与 Console 本地连接信息分层**：`GlobalConfig.managed_devices` 是 Console/MCP 共享的受管设备 SSOT；Tauri 的 `connections.json` 只保存 UI 偏好与系统凭据库引用。加载时合并，保存 SSH 连接时 upsert 登记，删除只移除两处本机记录，不触碰远端。
 - **连接前能力走精确 pre-auth 白名单**：Console 尚未连接目标机、也尚未输入 Bitwarden 主密码时，需要先通过本机 `dec-server` 探测/置备/拉起远端。通用 `Invoke` / `RunOperation` 只有在持有本机 `server.json` transport token 时才能进入，随后按业务名只放行设备生命周期方法；资产、secrets、仓库配置仍要求 `InstanceUnlocked`。
 

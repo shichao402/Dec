@@ -82,14 +82,18 @@ func TestManagedDevicePreservesOtherGlobalFields(t *testing.T) {
 }
 
 func TestNormalizeSSHTargetRejectsOptionsAndWhitespace(t *testing.T) {
-	for _, raw := range []string{"", "-oProxyCommand=bad", "host other", "host\nother"} {
+	for _, raw := range []string{"", "-oProxyCommand=bad", "host other", "host\nother", ":36000"} {
 		if _, err := NormalizeSSHTarget(raw); err == nil {
 			t.Fatalf("%q 应被拒绝", raw)
 		}
 	}
-	for _, raw := range []string{"builder", "ops@builder", "10.0.0.8"} {
+	for _, raw := range []string{"builder", "ops@builder", "10.0.0.8", "update.devcloud.woa.com:36000", "root@update.devcloud.woa.com:36000"} {
 		if _, err := NormalizeSSHTarget(raw); err != nil {
 			t.Fatalf("%q 应被接受: %v", raw, err)
 		}
+	}
+	got, err := NormalizeSSHTarget("update.devcloud.woa.com:36000")
+	if err != nil || got != "update.devcloud.woa.com:36000" {
+		t.Fatalf("应保留端口，实际 %q err=%v", got, err)
 	}
 }

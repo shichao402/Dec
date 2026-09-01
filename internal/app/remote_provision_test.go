@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,8 @@ func TestRemoteTargetDestination(t *testing.T) {
 		{"别名优先", RemoteTarget{Alias: "build-box", Host: "1.2.3.4", User: "root"}, "build-box"},
 		{"用户加主机", RemoteTarget{Host: "1.2.3.4", User: "dev"}, "dev@1.2.3.4"},
 		{"仅主机", RemoteTarget{Host: "1.2.3.4"}, "1.2.3.4"},
+		{"主机加端口", RemoteTarget{Alias: "update.devcloud.woa.com:36000"}, "update.devcloud.woa.com:36000"},
+		{"用户主机加端口", RemoteTarget{Alias: "root@update.devcloud.woa.com:36000"}, "root@update.devcloud.woa.com:36000"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -261,6 +264,22 @@ func TestProbeConflictingListenWarns(t *testing.T) {
 	}
 }
 
+func TestProbeListenValueStripsQuotes(t *testing.T) {
+	probe := parseProbe(t, strings.Join([]string{
+		"os=Linux",
+		"arch=x86_64",
+		"cmd=git",
+		"cmd=curl",
+		"cmd=bash",
+		"home_writable=1",
+		"spawn=both",
+		`listen="127.0.0.1:47653"`,
+	}, "\n"))
+	if !probe.ListenReady {
+		t.Fatalf("带引号的约定端口应视为就绪，实际 %q", probe.ManagementListen)
+	}
+}
+
 func TestExtractVersion(t *testing.T) {
 	cases := map[string]string{
 		"dec version v1.2.3":  "v1.2.3",
@@ -274,6 +293,20 @@ func TestExtractVersion(t *testing.T) {
 		if got := extractVersion(in); got != want {
 			t.Fatalf("extractVersion(%q) = %q，期望 %q", in, got, want)
 		}
+	}
+}
+
+func TestSSHArgsParsesHostPortInAlias(t *testing.T) {
+	args := sshArgs(RemoteTarget{Alias: "update.devcloud.woa.com:36000"}, "sh -s")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-p 36000") {
+		t.Fatalf("host:36000 应变成 ssh -p 36000: %v", args)
+	}
+	if strings.Contains(joined, "update.devcloud.woa.com:36000") {
+		t.Fatalf("ssh 目标不能带 :port，否则会把端口当成主机名: %v", args)
+	}
+	if !strings.HasSuffix(joined, "update.devcloud.woa.com sh -s") {
+		t.Fatalf("应以去端口后的主机结尾: %v", args)
 	}
 }
 
@@ -301,6 +334,18 @@ func TestSummarizeSSHError(t *testing.T) {
 	out := "OpenSSH_9.0\ndebug1: connecting\nPermission denied (publickey).\n"
 	if got := summarizeSSHError(out, nil); got != "Permission denied (publickey)." {
 		t.Fatalf("应提取关键原因，实际 %q", got)
+	}
+}
+
+func TestRemoteProbeScriptIsValidPOSIX(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("本机没有 sh，跳过探测脚本语法检查")
+	}
+	cmd := exec.Command(sh, "-n")
+	cmd.Stdin = strings.NewReader(remoteProbeScript)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("探测脚本不是合法 POSIX sh: %v\n%s", err, out)
 	}
 }
 

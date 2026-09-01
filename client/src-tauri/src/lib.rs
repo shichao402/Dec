@@ -373,6 +373,21 @@ fn ssh_destination(user: &str, host: &str) -> String {
     }
 }
 
+/// 把 `host:36000` / `user@host:36000` 拆成 ssh 目标与 `-p` 端口。
+fn ssh_dial_target(raw: &str) -> (String, Option<u16>) {
+    let raw = raw.trim();
+    if let Some((host, port_str)) = raw.rsplit_once(':') {
+        if !host.is_empty() {
+            if let Ok(port) = port_str.parse::<u16>() {
+                if port > 0 {
+                    return (host.to_string(), Some(port));
+                }
+            }
+        }
+    }
+    (raw.to_string(), None)
+}
+
 async fn ensure_remote_service_running(target: &str) -> Result<(), String> {
     if target.trim().is_empty() {
         return Err("请填写 SSH 主机".into());
@@ -400,19 +415,23 @@ async fn ensure_remote_service_running(target: &str) -> Result<(), String> {
 
 async fn connect_ssh(user: &str, host: &str, remote_port: u16) -> Result<Session, String> {
     let local_port = 37_000 + (std::process::id() % 1000) as u16;
-    let target = if user.is_empty() {
+    let combined = if user.is_empty() {
         host.to_string()
     } else {
         format!("{user}@{host}")
     };
+    let (dial, ssh_port) = ssh_dial_target(&combined);
     let spec = format!("{local_port}:127.0.0.1:{remote_port}");
-    let child = std::process::Command::new("ssh")
-        .args(["-N", "-L", &spec, &target])
+    let mut cmd = std::process::Command::new("ssh");
+    cmd.args(["-N", "-L", &spec]);
+    if let Some(port) = ssh_port {
+        cmd.args(["-p", &port.to_string()]);
+    }
+    cmd.arg(&dial)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("ssh 失败: {e}"))?;
+        .stderr(std::process::Stdio::null());
+    let child = cmd.spawn().map_err(|e| format!("ssh 失败: {e}"))?;
     tokio::time::sleep(Duration::from_millis(400)).await;
     let mut session =
         grpc::connect_channel(&format!("127.0.0.1:{local_port}"), "", false, "").await?;
@@ -621,7 +640,20 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_remote_transport, SavedConnection};
+    use super::{ssh_dial_target, validate_remote_transport, SavedConnection};
+
+    #[test]
+    fn ssh_dial_target_splits_devcloud_port() {
+        assert_eq!(
+            ssh_dial_target("update.devcloud.woa.com:36000"),
+            ("update.devcloud.woa.com".into(), Some(36000))
+        );
+        assert_eq!(
+            ssh_dial_target("root@update.devcloud.woa.com:36000"),
+            ("root@update.devcloud.woa.com".into(), Some(36000))
+        );
+        assert_eq!(ssh_dial_target("build-box"), ("build-box".into(), None));
+    }
 
     #[test]
     fn remote_non_loopback_requires_tls() {

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -27,17 +28,92 @@ func NormalizeManagedDeviceAlias(alias string) (string, error) {
 
 // NormalizeSSHTarget 只保存系统 ssh 可直接接受的目标引用。
 //
-// 目标可以是 ~/.ssh/config 的 Host 别名、主机名或 user@host；私钥内容和口令
-// 永远不进配置。自定义端口应放进 ssh_config，避免在多层配置中重复一套 SSH 语义。
+// 目标可以是 ~/.ssh/config 的 Host 别名、主机名、user@host，或带端口的
+// host:36000 / user@host:36000。私钥内容和口令永远不进配置。
 func NormalizeSSHTarget(target string) (string, error) {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return "", fmt.Errorf("SSH 目标不能为空")
+	ref, err := ParseSSHTarget(target)
+	if err != nil {
+		return "", err
 	}
-	if strings.HasPrefix(target, "-") || strings.ContainsAny(target, "\r\n\t ") {
-		return "", fmt.Errorf("SSH 目标 %q 无效；请填写 ssh_config 别名、主机名或 user@host", target)
+	return ref.Canonical(), nil
+}
+
+// SSHTargetRef 是解析后的 SSH 落点：DialHost 给 ssh 命令，Port 为 0 时不传 -p。
+type SSHTargetRef struct {
+	User string
+	Host string
+	Port int
+}
+
+func (r SSHTargetRef) DialHost() string {
+	if r.User != "" {
+		return r.User + "@" + r.Host
 	}
-	return target, nil
+	return r.Host
+}
+
+func (r SSHTargetRef) Canonical() string {
+	base := r.DialHost()
+	if r.Port > 0 {
+		return base + ":" + strconv.Itoa(r.Port)
+	}
+	return base
+}
+
+// ParseSSHTarget 解析别名、主机名、user@host 或 host:port。
+func ParseSSHTarget(raw string) (SSHTargetRef, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return SSHTargetRef{}, fmt.Errorf("SSH 目标不能为空")
+	}
+	if strings.HasPrefix(raw, "-") || strings.ContainsAny(raw, "\r\n\t ") {
+		return SSHTargetRef{}, fmt.Errorf("SSH 目标 %q 无效；请填写 ssh_config 别名、主机名、user@host 或 host:port", raw)
+	}
+
+	port := 0
+	hostPart := raw
+	if i := strings.LastIndex(raw, ":"); i >= 0 {
+		portPart := raw[i+1:]
+		if portPart == "" {
+			return SSHTargetRef{}, fmt.Errorf("SSH 目标 %q 无效；请填写 ssh_config 别名、主机名、user@host 或 host:port", raw)
+		}
+		if isSSHPort(portPart) {
+			p, err := strconv.Atoi(portPart)
+			if err != nil || p < 1 || p > 65535 {
+				return SSHTargetRef{}, fmt.Errorf("SSH 端口 %q 无效", portPart)
+			}
+			port = p
+			hostPart = raw[:i]
+		}
+	}
+	if hostPart == "" {
+		return SSHTargetRef{}, fmt.Errorf("SSH 目标 %q 无效；请填写 ssh_config 别名、主机名、user@host 或 host:port", raw)
+	}
+
+	user := ""
+	host := hostPart
+	if u, h, ok := strings.Cut(hostPart, "@"); ok {
+		if u == "" || h == "" || strings.Contains(h, "@") || strings.HasPrefix(h, "-") {
+			return SSHTargetRef{}, fmt.Errorf("SSH 目标 %q 无效；请填写 ssh_config 别名、主机名、user@host 或 host:port", raw)
+		}
+		user, host = u, h
+	}
+	if host == "" || strings.HasPrefix(host, "-") {
+		return SSHTargetRef{}, fmt.Errorf("SSH 目标 %q 无效；请填写 ssh_config 别名、主机名、user@host 或 host:port", raw)
+	}
+	return SSHTargetRef{User: user, Host: host, Port: port}, nil
+}
+
+func isSSHPort(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeDeviceTags(tags []string) []string {
