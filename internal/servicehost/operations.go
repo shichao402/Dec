@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shichao402/Dec/internal/app"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
 )
 
@@ -54,6 +55,11 @@ func appendHistory(history []*servicev1.WatchOperationResponse, message *service
 }
 
 func projectKey(root string) string {
+	// 设备级置备用合成键 device:<alias> 占位（ADR 0019），它不是路径：
+	// 若走下面的 Abs/EvalSymlinks 会被拼成本机路径，不同目标机可能撞成同一个键。
+	if app.IsDeviceOperationKey(root) {
+		return strings.ToLower(strings.TrimSpace(root))
+	}
 	abs, err := filepath.Abs(root)
 	if err == nil {
 		root = abs

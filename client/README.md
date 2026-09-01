@@ -16,6 +16,8 @@ npm install
 npm run tauri dev
 ```
 
+开发前端固定在 `127.0.0.1:59124`（避开 Vite 默认 5173）。debug 窗口在显示前会核对页面里的 `dec-console` 身份标记；对不上或端口上是别的项目，直接退出，避免把主密码框交给别人的前端。不要直接运行 `src-tauri/target/debug/app.exe`——那样不会启动本仓库的 Vite，只会去加载当时占着 `devUrl` 的任意页面。
+
 启动后先选连接（本机 / 远程 gRPC / SSH 隧道），再用 Bitwarden 主密码解锁。`dec-server` 启动后全局锁定，解锁成功后控制权与 BW session 同为 1 小时内存态。
 
 连接会保存 Bitwarden 邮箱。主密码默认不保存；用户明确勾选后才通过统一的系统凭据接口写入 Windows Credential Manager、macOS Keychain 或 Linux Secret Service，不会进入 `connections.json`。取消勾选或删除连接时会同时删除对应凭据。Linux 构建静态携带 D-Bus 客户端依赖，桌面会话仍需提供 Secret Service（如 GNOME Keyring 或 KWallet）。
@@ -29,7 +31,7 @@ npm run tauri dev
 
 受管项目列表保存在目标设备，移除管理不会删除项目文件。Global 请求始终使用空项目路径；项目请求始终携带目标服务器上的绝对路径。
 
-`dec-server` 是一机单例：换过二进制后仍在运行的旧实例不会加载新方法，调用会返回「未知服务方法」。控制台把这类错误翻译成重启提示，可在错误条或「设备设置 → 服务实例」重启服务并重连；本机连接会拉起新二进制，远端由该设备的服务管理器负责重启。
+`dec-server` 是一机单例：换过二进制后仍在运行的旧实例不会加载新方法，调用会返回「未知服务方法」。控制台把这类错误翻译成重启提示，可在错误条或「设备设置 → 服务实例」重启服务并重连；本机连接会拉起新二进制。远端与本机生命周期一致——空闲即退出，连接时由连接方经 SSH 按需拉起，因此远端进程不在运行是正常状态；远端只需固定 `management_listen`（隧道要靠约定端口找到它），**不需要**配成常驻服务。自动置备见 [ADR 0019](../Documents/decisions/0019-remote-provisioning.md)。
 
 ## 界面结构
 

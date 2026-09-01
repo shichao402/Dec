@@ -28,6 +28,15 @@
     }
   },
   "publishTo": ["cos"],
+  "site": {
+    "title": "Dec",
+    "description": "个人 AI 知识仓库代理。",
+    "homepage": "https://cnb.cool/shichao402/Dec",
+    "makers": {
+      "projectId": "makers-9qaqgz7dfhz8",
+      "tokenEnv": "EDGEONE_PAGES_API_TOKEN"
+    }
+  },
   "directory": {
     "publishTo": ["cos"],
     "entryUrls": [

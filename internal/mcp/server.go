@@ -77,6 +77,10 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 		Name:        "dec_delete",
 		Description: "删除选中的项目资产、private secrets 或 legacy bundle（需 confirmed=true）。",
 	}, s.handleDelete)
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "dec_provision_remote",
+		Description: "通过系统 SSH 向 Linux/macOS 远端置备 Dec、配置固定 loopback 监听并登记设备。首次置备是远程代码执行，必须 confirmed=true。",
+	}, s.handleProvisionRemote)
 }
 
 // Run 启动 stdio MCP Server。
@@ -338,6 +342,30 @@ func (s *Server) handleDelete(ctx context.Context, _ *mcp.CallToolRequest, in de
 		Plane:       plane,
 		Items:       items,
 		Confirmed:   in.Confirmed,
+	}, reporter)
+	if err != nil {
+		return toolFail(err, logs())
+	}
+	return toolOK(result, logs())
+}
+
+type provisionRemoteParams struct {
+	Alias     string   `json:"alias" jsonschema:"受管设备别名；留空时使用 ssh_target"`
+	SSHTarget string   `json:"ssh_target" jsonschema:"系统 ssh 可直接接受的 Host 别名、主机名或 user@host；凭据由 ~/.ssh/config / ssh-agent 提供"`
+	Tags      []string `json:"tags,omitempty" jsonschema:"设备标签，仅用于登记分类"`
+	Branch    string   `json:"branch,omitempty" jsonschema:"安装分支，留空默认 ReleaseLatest"`
+	Confirmed bool     `json:"confirmed" jsonschema:"首次置备会远程执行安装脚本，必须显式设为 true"`
+}
+
+func (s *Server) handleProvisionRemote(ctx context.Context, _ *mcp.CallToolRequest, in provisionRemoteParams) (*mcp.CallToolResult, any, error) {
+	target := app.RemoteTarget{Alias: strings.TrimSpace(in.SSHTarget)}
+	reporter, logs := newCollector()
+	result, err := serviceapi.ProvisionRemoteHost(ctx, app.ProvisionRemoteHostInput{
+		Alias:     in.Alias,
+		Target:    target,
+		Tags:      in.Tags,
+		Branch:    in.Branch,
+		Confirmed: in.Confirmed,
 	}, reporter)
 	if err != nil {
 		return toolFail(err, logs())

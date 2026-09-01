@@ -5,6 +5,7 @@ import (
 
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 // invoke 解出 **T，好让服务端的 null 结果如实变成 nil 指针。
@@ -314,4 +315,22 @@ func CommitRemoteSSHHostsEdit(ctx context.Context, session app.RemoteSSHHostsEdi
 func CreateLocalAsset(ctx context.Context, workspace app.Workspace, in app.CreateLocalAssetInput, reporter app.Reporter) (*app.CreateLocalAssetResult, error) {
 	in.Workspace = workspace
 	return invokeWorkspace[app.CreateLocalAssetResult](ctx, "create_local_asset", workspace, in, reporter)
+}
+
+func ListManagedDevices(ctx context.Context, reporter app.Reporter) ([]types.ManagedDevice, error) {
+	return invokeSlice[types.ManagedDevice](ctx, "list_managed_devices", "", nil, reporter)
+}
+
+func ProbeRemoteHost(ctx context.Context, target app.RemoteTarget, reporter app.Reporter) (*app.RemoteHostProbe, error) {
+	return invoke[app.RemoteHostProbe](ctx, "probe_remote_host", app.DeviceOperationKey(target), target, reporter)
+}
+
+func ProvisionRemoteHost(ctx context.Context, input app.ProvisionRemoteHostInput, reporter app.Reporter) (*app.ProvisionRemoteHostResult, error) {
+	return run[app.ProvisionRemoteHostResult](ctx, "provision_remote_host",
+		app.DeviceOperationKey(input.Target), input, reporter)
+}
+
+func EnsureRemoteServiceRunning(ctx context.Context, target app.RemoteTarget, reporter app.Reporter) (*app.RemoteServiceStatus, error) {
+	return invoke[app.RemoteServiceStatus](ctx, "ensure_remote_service",
+		app.DeviceOperationKey(target), target, reporter)
 }

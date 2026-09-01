@@ -44,6 +44,11 @@ func (s *Server) ensureProjectRepaired(projectRoot string, reporter app.Reporter
 	if strings.TrimSpace(projectRoot) == "" {
 		return
 	}
+	// 设备级置备的 project_root 是合成键（device:<alias>），不是项目路径，
+	// 不能拿它去跑项目兼容修复。
+	if app.IsDeviceOperationKey(projectRoot) {
+		return
+	}
 	key := projectKey(projectRoot)
 	if _, loaded := s.repairedProjects.LoadOrStore(key, struct{}{}); loaded {
 		return
@@ -293,7 +298,14 @@ func (s *Server) authorizeRPC(ctx context.Context, fullMethod string) error {
 		return status.Error(codes.Unauthenticated, "invalid dec-server token")
 	}
 	if !secrets.InstanceUnlocked() {
-		return status.Error(codes.FailedPrecondition, lockedRPCMessage)
+		// Invoke / RunOperation 是通用调度 RPC，是否允许在锁定态执行必须继续由
+		// handler 根据具体 method / operation 精确判断，不能在这里整条放开。
+		switch fullMethod {
+		case servicev1.DecService_Invoke_FullMethodName, servicev1.DecService_RunOperation_FullMethodName:
+			return nil
+		default:
+			return status.Error(codes.FailedPrecondition, lockedRPCMessage)
+		}
 	}
 	return nil
 }

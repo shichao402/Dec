@@ -5,14 +5,16 @@
   "identifier": "com.shichao402.dec.console",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://127.0.0.1:59124",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Dec Console",
+        "visible": false,
         "width": 1280,
         "height": 840,
         "minWidth": 960,

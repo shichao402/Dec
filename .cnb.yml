@@ -72,6 +72,13 @@
         export VERSION
         bash scripts/build.sh --all
 
+    - name: checksums
+      script: |
+        set -euo pipefail
+        # 产物摘要写进 version.json，供 install.sh 校验（ADR 0019）。
+        # 必须在 build 之后：摘要来自实际产物，不能预先写死。
+        python3 scripts/gen_checksums.py dist version.json
+
     - name: rup-publish
       script: |
         set -euo pipefail
@@ -125,6 +132,12 @@
         fi
         git config user.name "cnb-ci"
         git config user.email "cnb-ci@users.noreply.cnb.cool"
+        # install.sh 从 ReleaseLatest 取 version.json 校验摘要，故带 checksums 的
+        # version.json 必须先提交，否则该分支上的摘要永远缺失，校验被降级为警告。
+        if ! git diff --quiet -- version.json; then
+          git add version.json
+          git commit -m "chore: 发布 ${VERSION} 产物摘要"
+        fi
         # 安装脚本与 GitHub Release 仍用裸版本 tag vX.Y.Z
         if ! git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"; then
           git tag "${VERSION}"

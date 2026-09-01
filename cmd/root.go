@@ -156,6 +156,9 @@ func isInternalCLIArgs(args []string) bool {
 	switch args[0] {
 	case "__freshness-check":
 		return true
+	case "__service-setup":
+		// 置备经 SSH 调用它，非交互执行时没有 TTY；必须在 TUI 分流之前直达 CLI。
+		return true
 	default:
 		return false
 	}

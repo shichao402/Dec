@@ -26,6 +26,45 @@ export type PingInfo = {
   unlocked: boolean
 }
 
+export type RemoteHostProbe = {
+  Target: string
+  Reachable: boolean
+  SSHError: string
+  OS: string
+  Arch: string
+  Supported: boolean
+  DecInstalled: boolean
+  DecVersion: string
+  MissingBinaries: string[]
+  SpawnCapable: boolean
+  ManagementListen: string
+  ListenReady: boolean
+  ServerRunning: boolean
+  Blockers: string[]
+  Warnings: string[]
+  NextAction: string
+}
+
+export type ManagedDevice = {
+  Alias: string
+  SSHTarget: string
+  ManagementListen: string
+  Tags: string[]
+  ProvisionedVersion: string
+}
+
+export type ProvisionRemoteResult = {
+  Target: string
+  Probe: RemoteHostProbe
+  Verify: RemoteHostProbe
+  Skipped: boolean
+  InstalledVersion: string
+  ChecksumVerified: boolean
+  Warnings: string[]
+  NextAction: string
+  Device?: ManagedDevice
+}
+
 export type InvokeResult = {
   result_json: string
   error: string

@@ -20,6 +20,28 @@ export async function loadSavedPassword(id: string) {
   return invoke<string>('load_saved_password', { id })
 }
 
+export async function probeRemoteHost<T>(sshTarget: string) {
+  const result = await invoke<InvokeResult>('probe_remote_host', { sshTarget })
+  if (result.error) throw new Error(result.error)
+  return JSON.parse(result.result_json) as T
+}
+
+export async function provisionRemoteHost<T>(input: {
+  alias: string
+  sshTarget: string
+  confirm: string
+  actionKey: string
+}) {
+  const result = await invoke<InvokeResult>('provision_remote_host', {
+    alias: input.alias,
+    sshTarget: input.sshTarget,
+    confirm: input.confirm,
+    actionKey: input.actionKey,
+  })
+  if (result.error) throw new Error(result.error)
+  return JSON.parse(result.result_json) as T
+}
+
 export async function connectTarget(input: {
   kind: string
   host: string

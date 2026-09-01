@@ -9,6 +9,7 @@ export const resource = {
   global: 'workspace:global',
   workspace: (root: string) => (root ? `workspace:${root}` : 'workspace:global'),
   filesystem: 'device:filesystem',
+  device: (target: string) => `device:${target.trim().toLowerCase()}`,
 }
 
 export function actionSpec(
@@ -24,7 +25,7 @@ export function actionSpec(
 
 export function connectionAddress(conn: SavedConnection) {
   if (conn.kind === 'local') return '本机 dec-server'
-  if (conn.kind === 'ssh') return `${conn.ssh_user ? `${conn.ssh_user}@` : ''}${conn.ssh_host} → 127.0.0.1:${conn.port}`
+  if (conn.kind === 'ssh') return `${conn.ssh_host} → 127.0.0.1:47653`
   return `${conn.tls ? 'https' : 'http'}://${conn.host}:${conn.port}`
 }
 

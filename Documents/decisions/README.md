@@ -39,3 +39,4 @@
 | [0016](0016-p-four-quadrant-model.md) | 顶层项目与公开/私有 × 用户/项目四象限 | 已接受；平面名改为 global/local，见 0017 |
 | [0017](0017-local-layout-version.md) | 本机配置 kind/version 与 layout_version | 已接受 |
 | [0018](0018-instance-lock-and-console.md) | 实例锁定与管理客户端 | 已接受（已实现） |
+| [0019](0019-remote-provisioning.md) | 远端设备自动置备（SSH provisioning） | 已接受（规划中） |

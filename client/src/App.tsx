@@ -8,6 +8,8 @@ import {
   invokeTyped,
   listConnections,
   loadSavedPassword,
+  probeRemoteHost,
+  provisionRemoteHost,
   runOrWatchTyped,
   saveConnection,
   stopService,
@@ -34,6 +36,8 @@ import type {
   ManagedProject,
   PingInfo,
   PullResult,
+  RemoteHostProbe,
+  ProvisionRemoteResult,
   SavedConnection,
 } from '@/lib/utils'
 
@@ -53,7 +57,7 @@ const emptyConn = (): SavedConnection => ({
   label: '新设备',
   kind: 'ssh',
   host: '127.0.0.1',
-  port: 37820,
+  port: 47653,
   ssh_host: '',
   ssh_user: '',
   tls: false,
@@ -67,6 +71,8 @@ export default function App() {
   const [view, setView] = useState<View>('overview')
   const [saved, setSaved] = useState<SavedConnection[]>([])
   const [draft, setDraft] = useState<SavedConnection>(emptyConn())
+  const [remoteProbe, setRemoteProbe] = useState<RemoteHostProbe | null>(null)
+  const [provisionConfirm, setProvisionConfirm] = useState('')
   const [current, setCurrent] = useState<SavedConnection | null>(null)
   const [ping, setPing] = useState<PingInfo | null>(null)
   const [summary, setSummary] = useState<DeviceSummary | null>(null)
@@ -142,7 +148,58 @@ export default function App() {
     setScreen(info.unlocked ? 'console' : 'unlock')
   }
 
-  async function handleSaveAndConnect() {
+  function updateDraft(next: SavedConnection) {
+    const targetChanged = next.kind !== draft.kind || next.ssh_host !== draft.ssh_host
+    setDraft(next)
+    if (targetChanged) {
+      setRemoteProbe(null)
+      setProvisionConfirm('')
+    }
+  }
+
+  async function handleProbeRemote() {
+    const target = draft.ssh_host.trim()
+    if (!target) return
+    const spec = actionSpec(
+      `device:probe:${target}`,
+      `正在检测 ${target}`,
+      'console',
+      [resource.device(target), resource.connections],
+      'read',
+      '远端检测完成',
+    )
+    const outcome = await actions.run(spec, () => probeRemoteHost<RemoteHostProbe>(target), { force: true })
+    if (outcome.ok) setRemoteProbe(outcome.value)
+  }
+
+  async function handleProvisionRemote() {
+    const target = draft.ssh_host.trim()
+    if (!target) return
+    const spec = actionSpec(
+      `operation:provision:${target}`,
+      `正在置备 ${target}`,
+      'console',
+      [resource.device(target), resource.connections],
+      'operation',
+      '远端置备完成',
+    )
+    const outcome = await actions.run(spec, () => provisionRemoteHost<ProvisionRemoteResult>({
+      alias: draft.label.trim() || target,
+      sshTarget: target,
+      confirm: provisionConfirm,
+      actionKey: spec.key,
+    }))
+    if (!outcome.ok) return
+    setRemoteProbe(outcome.value.Verify)
+    setProvisionConfirm('')
+    await handleSaveAndConnect(true)
+  }
+
+  async function handleSaveAndConnect(remoteReady = false) {
+    if (draft.kind === 'ssh' && !remoteReady && !remoteProbe?.ListenReady) {
+      await handleProbeRemote()
+      return
+    }
     const spec = actionSpec(`connections:save:${draft.id || 'new'}`, '正在保存连接', 'console', [resource.connections], 'write', '连接已保存')
     const outcome = await actions.run(spec, async () => {
       const stored = await saveConnection(draft)
@@ -332,10 +389,19 @@ export default function App() {
             <ConnectPage
               saved={saved}
               draft={draft}
-              setDraft={setDraft}
+              setDraft={updateDraft}
               onConnect={handleConnect}
               onSaveConnect={handleSaveAndConnect}
-              onResetDraft={() => setDraft(emptyConn())}
+              remoteProbe={remoteProbe}
+              provisionConfirm={provisionConfirm}
+              setProvisionConfirm={setProvisionConfirm}
+              onProbeRemote={handleProbeRemote}
+              onProvisionRemote={handleProvisionRemote}
+              onResetDraft={() => {
+                setDraft(emptyConn())
+                setRemoteProbe(null)
+                setProvisionConfirm('')
+              }}
               busy={busy || connectionBusy}
               onDelete={handleDeleteConnection}
             />

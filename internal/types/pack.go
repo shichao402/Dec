@@ -78,11 +78,27 @@ type GlobalConfig struct {
 	// ManagedProjects 是 Console 显式接管或扫描导入的项目目录。
 	// 它只记录管理入口，不改变项目配置，也不参与 Global 平面资产解析。
 	ManagedProjects []ManagedProject `yaml:"managed_projects,omitempty"`
+	// ManagedDevices 是 Console / MCP 显式登记的远端设备入口。
+	// 只保存 SSH 目标引用，不保存私钥、口令或控制 token。
+	ManagedDevices []ManagedDevice `yaml:"managed_devices,omitempty"`
 }
 
 type ManagedProject struct {
 	Root  string `yaml:"root"`
 	Label string `yaml:"label,omitempty"`
+}
+
+// ManagedDevice 是一台受管远端设备的本机登记。
+//
+// Alias 是 Dec 内部稳定别名；SSHTarget 是系统 ssh 可直接接受的引用
+// （ssh_config Host、host 或 user@host）。ManagementListen 记录隧道远端落点，
+// 第一版固定为 127.0.0.1:47653。移除登记不触碰远端状态。
+type ManagedDevice struct {
+	Alias              string   `yaml:"alias"`
+	SSHTarget          string   `yaml:"ssh_target"`
+	ManagementListen   string   `yaml:"management_listen,omitempty"`
+	Tags               []string `yaml:"tags,omitempty"`
+	ProvisionedVersion string   `yaml:"provisioned_version,omitempty"`
 }
 
 const ProjectConfigVersionV2 = "v2"

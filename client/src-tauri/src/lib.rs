@@ -1,3 +1,4 @@
+mod frontend_guard;
 mod grpc;
 
 use grpc::{read_local_metadata, spawn_local_server, AuthResult, InvokeResult, PingInfo, Session};
@@ -5,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -33,7 +34,16 @@ struct SavedConnection {
     password_saved: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct ManagedDevice {
+    #[serde(rename = "Alias")]
+    alias: String,
+    #[serde(rename = "SSHTarget")]
+    ssh_target: String,
+}
+
 const CREDENTIAL_SERVICE: &str = "dev.dec.console";
+const REMOTE_PROVISION_PORT: u16 = 47_653;
 
 fn credential_entry(id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(CREDENTIAL_SERVICE, id).map_err(|e| format!("打开系统凭据库失败: {e}"))
@@ -47,22 +57,85 @@ fn data_file() -> Result<PathBuf, String> {
     Ok(dir.join("connections.json"))
 }
 
-#[tauri::command]
-fn list_connections() -> Result<Vec<SavedConnection>, String> {
+fn read_saved_connections() -> Result<Vec<SavedConnection>, String> {
     let path = data_file()?;
     if !path.exists() {
         return Ok(Vec::new());
     }
     let data = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&data).map_err(|e| e.to_string())
+    let mut list: Vec<SavedConnection> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    for conn in &mut list {
+        if conn.kind == "ssh" {
+            conn.ssh_host = ssh_destination(&conn.ssh_user, &conn.ssh_host);
+            conn.ssh_user.clear();
+            conn.host = "127.0.0.1".into();
+            conn.port = REMOTE_PROVISION_PORT;
+        }
+    }
+    Ok(list)
 }
 
 #[tauri::command]
-fn save_connection(
+async fn list_connections() -> Result<Vec<SavedConnection>, String> {
+    let mut list = read_saved_connections()?;
+    let mut control = connect_local().await?;
+    let result = control
+        .invoke(
+            "list_managed_devices".into(),
+            "".into(),
+            "global".into(),
+            b"{}".to_vec(),
+        )
+        .await?;
+    if !result.error.is_empty() {
+        return Err(result.error);
+    }
+    let devices: Vec<ManagedDevice> = serde_json::from_str(&result.result_json)
+        .map_err(|e| format!("解析受管设备清单失败: {e}"))?;
+    for device in devices {
+        if let Some(conn) = list.iter_mut().find(|conn| {
+            conn.kind == "ssh"
+                && (conn.label.eq_ignore_ascii_case(&device.alias)
+                    || conn.ssh_host.eq_ignore_ascii_case(&device.ssh_target))
+        }) {
+            conn.label = device.alias;
+            conn.ssh_host = device.ssh_target;
+            conn.ssh_user.clear();
+            conn.host = "127.0.0.1".into();
+            conn.port = REMOTE_PROVISION_PORT;
+            continue;
+        }
+        list.push(SavedConnection {
+            id: format!("managed:{}", device.alias.to_lowercase()),
+            label: device.alias,
+            kind: "ssh".into(),
+            host: "127.0.0.1".into(),
+            port: REMOTE_PROVISION_PORT,
+            ssh_host: device.ssh_target,
+            ssh_user: String::new(),
+            tls: false,
+            tls_server_name: String::new(),
+            auth_email: String::new(),
+            password_saved: false,
+        });
+    }
+    Ok(list)
+}
+
+#[tauri::command]
+async fn save_connection(
     mut conn: SavedConnection,
     password: Option<String>,
 ) -> Result<SavedConnection, String> {
-    if conn.id.is_empty() {
+    if conn.kind == "ssh" {
+        conn.host = "127.0.0.1".into();
+        conn.port = REMOTE_PROVISION_PORT;
+        conn.ssh_host = ssh_destination(&conn.ssh_user, &conn.ssh_host);
+        conn.ssh_user.clear();
+    }
+    if conn.id.is_empty() || conn.id.starts_with("managed:") {
+        // MCP 置备派生的 managed:<alias> 条目第一次保存时转成本地连接 ID，
+        // 避免把后端派生 ID 当作凭据库的长期主键。
         conn.id = Uuid::new_v4().to_string();
     }
     let entry = credential_entry(&conn.id)?;
@@ -77,7 +150,7 @@ fn save_connection(
             return Err(format!("从系统凭据库删除密码失败: {err}"));
         }
     }
-    let mut list = list_connections()?;
+    let mut list = read_saved_connections()?;
     if let Some(existing) = list.iter_mut().find(|c| c.id == conn.id) {
         *existing = conn.clone();
     } else {
@@ -89,15 +162,43 @@ fn save_connection(
         serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
+    if conn.kind == "ssh" {
+        register_managed_connection(&conn).await?;
+    }
     Ok(conn)
 }
 
+async fn register_managed_connection(conn: &SavedConnection) -> Result<(), String> {
+    let mut control = connect_local().await?;
+    let payload = serde_json::json!({
+        "Alias": conn.label.trim(),
+        "Target": { "Alias": conn.ssh_host.trim(), "Host": "", "User": "", "Port": 0 },
+        "Tags": null,
+        "ProvisionedVersion": "",
+    });
+    let result = control
+        .invoke(
+            "register_managed_device".into(),
+            "".into(),
+            "global".into(),
+            serde_json::to_vec(&payload).map_err(|e| e.to_string())?,
+        )
+        .await?;
+    if !result.error.is_empty() {
+        return Err(result.error);
+    }
+    Ok(())
+}
+
 #[tauri::command]
-fn delete_connection(id: String) -> Result<(), String> {
-    let list: Vec<_> = list_connections()?
-        .into_iter()
-        .filter(|c| c.id != id)
-        .collect();
+async fn delete_connection(id: String) -> Result<(), String> {
+    let local = read_saved_connections()?;
+    let alias = if let Some(conn) = local.iter().find(|c| c.id == id) {
+        (conn.kind == "ssh").then(|| conn.label.clone())
+    } else {
+        id.strip_prefix("managed:").map(str::to_string)
+    };
+    let list: Vec<_> = local.into_iter().filter(|c| c.id != id).collect();
     let path = data_file()?;
     fs::write(
         path,
@@ -107,6 +208,21 @@ fn delete_connection(id: String) -> Result<(), String> {
     if let Err(err) = credential_entry(&id)?.delete_credential() {
         if !matches!(err, keyring::Error::NoEntry) {
             return Err(format!("从系统凭据库删除密码失败: {err}"));
+        }
+    }
+    if let Some(alias) = alias {
+        let mut control = connect_local().await?;
+        let payload = serde_json::json!({ "Alias": alias });
+        let result = control
+            .invoke(
+                "remove_managed_device".into(),
+                "".into(),
+                "global".into(),
+                serde_json::to_vec(&payload).map_err(|e| e.to_string())?,
+            )
+            .await?;
+        if !result.error.is_empty() {
+            return Err(result.error);
         }
     }
     Ok(())
@@ -119,6 +235,69 @@ fn load_saved_password(id: String) -> Result<String, String> {
         Err(keyring::Error::NoEntry) => Ok(String::new()),
         Err(err) => Err(format!("读取系统凭据库失败: {err}")),
     }
+}
+
+#[tauri::command]
+async fn probe_remote_host(ssh_target: String) -> Result<InvokeResult, String> {
+    let target = ssh_target.trim();
+    if target.is_empty() {
+        return Err("请填写 SSH 主机".into());
+    }
+    let mut control = connect_local().await?;
+    let payload = serde_json::json!({
+        "Alias": target,
+        "Host": "",
+        "User": "",
+        "Port": 0,
+    });
+    control
+        .invoke(
+            "probe_remote_host".into(),
+            format!("device:{}", target.to_lowercase()),
+            "global".into(),
+            serde_json::to_vec(&payload).map_err(|e| e.to_string())?,
+        )
+        .await
+}
+
+#[tauri::command]
+async fn provision_remote_host(
+    app: AppHandle,
+    alias: String,
+    ssh_target: String,
+    confirm: String,
+    action_key: String,
+) -> Result<InvokeResult, String> {
+    let target = ssh_target.trim();
+    if target.is_empty() {
+        return Err("请填写 SSH 主机".into());
+    }
+    let control = connect_local().await?;
+    let project_root = format!("device:{}", target.to_lowercase());
+    let payload = serde_json::json!({
+        "Alias": alias.trim(),
+        "Target": { "Alias": target, "Host": "", "User": "", "Port": 0 },
+        "Confirm": confirm,
+        "Confirmed": false,
+    });
+    let event_root = project_root.clone();
+    grpc::run_operation(
+        control.client_clone(),
+        "provision_remote_host".into(),
+        project_root,
+        "global".into(),
+        serde_json::to_vec(&payload).map_err(|e| e.to_string())?,
+        |event| {
+            emit_action_event(
+                &app,
+                &action_key,
+                &event_root,
+                "provision_remote_host",
+                event,
+            )
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -136,7 +315,11 @@ async fn connect_target(
     validate_remote_transport(&kind, &host, tls)?;
     let mut session = match kind.as_str() {
         "local" => connect_local().await?,
-        "ssh" => connect_ssh(&ssh_user, &ssh_host, port).await?,
+        "ssh" => {
+            let target = ssh_destination(&ssh_user, &ssh_host);
+            ensure_remote_service_running(&target).await?;
+            connect_ssh("", &target, REMOTE_PROVISION_PORT).await?
+        }
         _ => {
             let endpoint = format!("{host}:{port}");
             grpc::connect_channel(&endpoint, "", tls, &tls_server_name).await?
@@ -180,6 +363,41 @@ async fn connect_local() -> Result<Session, String> {
     Err("本机 dec-server 未就绪".into())
 }
 
+fn ssh_destination(user: &str, host: &str) -> String {
+    let host = host.trim();
+    let user = user.trim();
+    if user.is_empty() || host.contains('@') {
+        host.to_string()
+    } else {
+        format!("{user}@{host}")
+    }
+}
+
+async fn ensure_remote_service_running(target: &str) -> Result<(), String> {
+    if target.trim().is_empty() {
+        return Err("请填写 SSH 主机".into());
+    }
+    let mut control = connect_local().await?;
+    let payload = serde_json::json!({
+        "Alias": target.trim(),
+        "Host": "",
+        "User": "",
+        "Port": 0,
+    });
+    let result = control
+        .invoke(
+            "ensure_remote_service".into(),
+            format!("device:{}", target.trim().to_lowercase()),
+            "global".into(),
+            serde_json::to_vec(&payload).map_err(|e| e.to_string())?,
+        )
+        .await?;
+    if !result.error.is_empty() {
+        return Err(result.error);
+    }
+    Ok(())
+}
+
 async fn connect_ssh(user: &str, host: &str, remote_port: u16) -> Result<Session, String> {
     let local_port = 37_000 + (std::process::id() % 1000) as u16;
     let target = if user.is_empty() {
@@ -220,8 +438,8 @@ async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-// 停止目标设备上的 dec-server 并断开会话；前端随后用已保存的连接重连，
-// 本机连接会拉起新版本二进制，远端由该设备的服务管理器负责重启。
+// 停止目标设备上的 dec-server 并断开会话；前端随后用已保存的连接重连。
+// 本机由门面拉起，远端由连接方经 SSH 按需拉起（ADR 0019）。
 #[tauri::command]
 async fn stop_service(state: State<'_, AppState>) -> Result<(), String> {
     {
@@ -365,11 +583,18 @@ pub fn run() {
         .manage(AppState::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
+                if let Err(err) = frontend_guard::probe_dev_frontend() {
+                    eprintln!("[dec-console] {err}");
+                    std::process::exit(1);
+                }
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                window.show()?;
             }
             Ok(())
         })
@@ -378,6 +603,8 @@ pub fn run() {
             save_connection,
             delete_connection,
             load_saved_password,
+            probe_remote_host,
+            provision_remote_host,
             connect_target,
             disconnect,
             stop_service,

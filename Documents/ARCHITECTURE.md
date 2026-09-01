@@ -454,6 +454,49 @@ TUI **Settings** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 - 无 `dec update` CLI；启动 TUI 前的 `CheckBackground` hint 引导到 Run 页 `u`
 - 实现见 `internal/update/` 与 [UPDATE_ARCHITECTURE.md](./UPDATE_ARCHITECTURE.md)
 
+#### 远端设备置备与按需拉起（Console / MCP）
+
+置备是**服务端能力**：由发起端 `dec-server` 作为 SSH 客户端执行，Console 与 `dec-mcp`
+共用同一条路径，客户端不内嵌 `internal/app`。实现见 `internal/app/remote_provision*.go`
+与 `internal/app/remote_service.go`，决策见 [0019](decisions/0019-remote-provisioning.md)。
+
+置备四段（`provision_remote_host`，走 `RunOperation` 进度流）：
+
+1. **探测**（`probe_remote_host`，只读）：SSH 连通性、os/arch、四件套与版本、
+   `git`/`bash`/`curl`/`ssh-keygen`、`~/.dec` 可写、能否拉起脱离会话的后台进程
+2. **注入安装**：`go:embed` 的 `install.sh` 经 stdin 喂给远端 `bash -s`，脚本不落远端磁盘；
+   下载产物按 `version.json` 的 `checksums` 校验 sha256
+3. **配置**：远端执行自己的 `dec __service-setup`，用 config 包幂等写入
+   `management_listen: 127.0.0.1:47653`。固定端口是隧道能自动找到远端的前提
+4. **复探验证**：确认四件套齐全且监听地址已生效
+
+远端**不安装常驻服务**，与本机同一套生命周期：空闲即退出。连接前经
+`ensure_remote_service` 按需拉起，与本机门面的 `startServerProcess` 同构——
+先读远端 `run/server.json`，不在运行则 `setsid nohup dec-server` 拉起，
+再轮询至就绪。会话期间由 Console 的 `KeepAlive` 长连经 presence 压住空闲定时器。
+**远端进程不在运行是正常状态，不是故障。**
+
+安全边界：首次置备要求 typed confirm（真实键入目标主机名）；SSH 凭据只存引用，
+复用 `~/.ssh/config` / ssh-agent / known_hosts；置备完成后远端服务仍是锁定态，
+需 `Authenticate` 解锁，置备不携带主密码。设备级操作以合成键 `device:<alias>`
+参与 broker 互斥，该键不是路径、不落盘、不参与项目解析。
+
+受管设备登记保存在发起端 `GlobalConfig.managed_devices`，记录别名、SSH 目标引用、
+固定监听地址、标签与最近置备版本，是 Console 与 MCP 共享的设备 SSOT。Tauri 的
+`connections.json` 只保存 UI 偏好与系统凭据库引用：加载连接页时两者合并，MCP
+置备出的设备因而会自动出现；删除设备只移除本机登记与连接元数据，不 SSH 到远端
+卸载或删除 `~/.dec`。
+
+Console 的 SSH 添加表单只要求一个目标（ssh_config Host、主机名或 `user@host`）：
+先通过本机 `dec-server` 探测；未安装时要求用户真实键入目标进行首次置备确认；成功后
+保存并自动连接。连接时先调用本机 `ensure_remote_service`，就绪后再建立到固定端口
+`47653` 的隧道。连接前尚未进行 Bitwarden 解锁，因此 servicehost 对持有效本机
+transport token 的请求设有精确 pre-auth 白名单，只放行设备探测、置备、拉起与清单；
+资产、secrets 和仓库配置仍要求 `InstanceUnlocked`。
+
+MCP 对外提供 `dec_provision_remote`，参数以 `ssh_target` 为核心并要求
+`confirmed=true`；其内部仍走同一个 `provision_remote_host` operation，而非复制安装逻辑。
+
 ### 5. MCP 合并策略
 
 MCP 采用非覆盖式合并：

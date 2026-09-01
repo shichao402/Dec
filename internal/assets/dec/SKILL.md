@@ -67,6 +67,7 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 | 推回远端 | `dec_push`；先可用 `dec_preview_push` |
 | 私密资产元数据 | `dec_list_secrets`（绝不返回正文/密钥） |
 | 删除候选 / 删除 | `dec_list_delete_candidates` / `dec_delete` |
+| 置备远端设备 | `dec_provision_remote`（Linux/macOS；首次置备必须 `confirmed=true`） |
 | 连仓库 | `dec_connect_repo` |
 | 初始化项目 | `dec_init_project` |
 

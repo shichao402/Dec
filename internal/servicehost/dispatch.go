@@ -26,6 +26,9 @@ func (c *eventCollector) Emit(event app.OperationEvent) {
 }
 
 func (s *Server) Invoke(ctx context.Context, req *servicev1.InvokeRequest) (*servicev1.InvokeResponse, error) {
+	if !secrets.InstanceUnlocked() && !invokeAllowedWhenLocked(req.Method) {
+		return nil, status.Error(codes.FailedPrecondition, lockedRPCMessage)
+	}
 	facade, clientID := callerFromMetadata(ctx)
 	ctx = app.WithUnlockConfig(ctx, app.UnlockConfig{
 		Timeout:        time.Duration(req.UnlockTimeoutMs) * time.Millisecond,
@@ -86,11 +89,28 @@ func isProjectMutation(method string) bool {
 func isMachineMutation(method string) bool {
 	switch method {
 	case "connect_repo", "save_global_settings", "ensure_builtin_ide_assets", "ensure_global_vars",
-		"register_managed_project", "remove_managed_project", "create_remote_project":
+		"register_managed_project", "remove_managed_project", "create_remote_project",
+		"register_managed_device", "remove_managed_device":
 		return true
 	default:
 		return false
 	}
+}
+
+// invokeAllowedWhenLocked 只包含连接远端前必须执行、且不读取 Bitwarden / 资产正文的
+// 设备生命周期方法。设备清单仍要求解锁，避免通用 Invoke 在锁定态变成配置读取旁路。
+func invokeAllowedWhenLocked(method string) bool {
+	switch method {
+	case "probe_remote_host", "ensure_remote_service", "configure_remote_service",
+		"list_managed_devices", "register_managed_device", "remove_managed_device":
+		return true
+	default:
+		return false
+	}
+}
+
+func operationAllowedWhenLocked(operation string) bool {
+	return operation == "provision_remote_host"
 }
 
 func dispatchInvoke(ctx context.Context, method, projectRoot string, payload []byte, reporter app.Reporter) (any, error) {
@@ -104,12 +124,49 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.LoadDeviceSummary()
 	case "list_managed_projects":
 		return app.ListManagedProjectStates()
+	case "list_managed_devices":
+		return app.ListManagedDevices()
+	case "register_managed_device":
+		var in app.ManagedDeviceInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.RegisterManagedDevice(in)
+	case "remove_managed_device":
+		var in struct{ Alias string }
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.RemoveManagedDevice(in.Alias)
 	case "browse_directories":
 		var in struct{ Path string }
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
 		return app.BrowseDirectories(in.Path)
+	case "probe_remote_host":
+		var in app.RemoteTarget
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		if ok, reason := app.LocalPlatformSupportsProvisioning(); !ok {
+			return nil, fmt.Errorf("%s", reason)
+		}
+		return app.ProbeRemoteHost(ctx, in, reporter)
+	case "ensure_remote_service":
+		// 连接远端前的按需拉起（ADR 0019）：与本机门面 startServerProcess 同构。
+		// 远端进程不在运行是正常状态，这里负责把它拉起来并等到就绪。
+		var in app.RemoteTarget
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.EnsureRemoteServiceRunning(ctx, in, reporter)
+	case "configure_remote_service":
+		var in app.RemoteTarget
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.ConfigureRemoteService(ctx, in, reporter)
 	case "register_managed_project":
 		var in struct {
 			Root  string
@@ -270,6 +327,9 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 }
 
 func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.ServerStreamingServer[servicev1.RunOperationResponse]) (retErr error) {
+	if !secrets.InstanceUnlocked() && !operationAllowedWhenLocked(req.Operation) {
+		return status.Error(codes.FailedPrecondition, lockedRPCMessage)
+	}
 	state, err := s.broker.start(req.ProjectRoot, req.Operation, req.ClientId, req.Facade)
 	if err != nil {
 		return status.Error(codes.AlreadyExists, err.Error())
@@ -363,6 +423,14 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 			return nil, err
 		}
 		return app.ScanManagedProjects(ctx, in.ScanRoot, in.MaxDepth, reporter)
+	case "provision_remote_host":
+		// 设备级操作：不使用 workspace / projectRoot，互斥键由调用方传
+		// device:<alias>（app.DeviceOperationKey）作为 project_root。
+		var in app.ProvisionRemoteHostInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.ProvisionRemoteHost(ctx, in, reporter)
 	case "pull":
 		return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
 	case "push":

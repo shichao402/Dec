@@ -11,7 +11,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    host: '127.0.0.1',
+    // 避开 Vite 默认 5173；与 tauri.conf.json devUrl、src-tauri frontend_guard 同步。
+    port: 59124,
     strictPort: true,
     watch: {
       ignored: ['**/src-tauri/**'],
