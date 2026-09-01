@@ -1,6 +1,6 @@
 # 0019 — 远端设备自动置备（SSH provisioning）
 
-- **状态**：已接受（规划中）
+- **状态**：已接受（已实现；真机与发布验收未完）
 - **日期**：2026-08-31
 - **关联**：[0008](0008-service-facade-split.md)、[0017](0017-local-layout-version.md)、[0018](0018-instance-lock-and-console.md)
 - **影响范围**：`dec-server` 新增设备级 provisioning 能力、`dec` 新增 `__service-setup` 内部命令、`internal/config` 暴露 `management_listen` 幂等写入与校验、Console 连接页、`dec-mcp` 工具面、`scripts/install.sh`
