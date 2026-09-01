@@ -112,10 +112,11 @@ func Run(ctx context.Context, version string) error {
 	serverOpts = append(serverOpts, listen.Opts...)
 	grpcServer := grpc.NewServer(serverOpts...)
 	servicev1.RegisterDecServiceServer(grpcServer, host)
-	if err := service.WriteMetadata(listener.Addr().String(), token); err != nil {
+	metadataPath, err := service.WriteMetadata(listener.Addr().String(), token)
+	if err != nil {
 		return err
 	}
-	defer service.RemoveMetadata()
+	defer service.RemoveMetadataAt(metadataPath)
 
 	go func() {
 		for _, note := range compat.RepairOnStartup("") {

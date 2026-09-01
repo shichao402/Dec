@@ -45,10 +45,7 @@ func TestLockedRejectsInvoke(t *testing.T) {
 	secrets.ClearSession()
 	t.Cleanup(secrets.ClearSession)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = Run(ctx, "test") }()
-	waitMetadata(t)
+	ctx := startTestServer(t)
 
 	api, err := connectRaw(ctx)
 	if err != nil {
@@ -81,10 +78,7 @@ func TestAuthenticateUnlocksInstance(t *testing.T) {
 	secrets.SetAuthenticatorForTest(unlock.NewStubAuthenticator("pw", "", "sess"))
 	t.Cleanup(secrets.ResetAuthenticatorForTest)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = Run(ctx, "test") }()
-	waitMetadata(t)
+	ctx := startTestServer(t)
 
 	api, err := connectRaw(ctx)
 	if err != nil {
@@ -109,6 +103,31 @@ func TestAuthenticateUnlocksInstance(t *testing.T) {
 	if !pong.GetUnlocked() {
 		t.Fatal("解锁后 Ping.unlocked 应为 true")
 	}
+}
+
+// startTestServer 起一个服务并保证用例结束前它已完全退出。
+//
+// 必须等退出：Run 的收尾会删发现文件与释放 server.lock，而这两处路径都来自
+// DEC_HOME。若放任 goroutine 跨用例收尾，它会删掉下一个用例刚写的 server.json。
+// t.Cleanup 是 LIFO，本函数在 t.Setenv 之后调用，因此退出时 DEC_HOME 仍是本用例的值。
+func startTestServer(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = Run(ctx, "test")
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			t.Error("dec-server 未在超时内退出")
+		}
+	})
+	waitMetadata(t)
+	return ctx
 }
 
 func waitMetadata(t *testing.T) {

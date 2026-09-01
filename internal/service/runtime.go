@@ -73,13 +73,17 @@ func ReadMetadata() (*RuntimeMetadata, error) {
 	return &meta, nil
 }
 
-func WriteMetadata(endpoint, token string) error {
+// WriteMetadata 写出发现文件并返回其路径。
+//
+// 返回路径而不是让调用方稍后重新解析：MetadataPath 依赖 DEC_HOME，进程内该值
+// 变化后重新解析会指向别人的文件。服务退出时必须删掉自己写的那一个。
+func WriteMetadata(endpoint, token string) (string, error) {
 	dir, err := RuntimeDir()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("创建服务运行时目录失败: %w", err)
+		return "", fmt.Errorf("创建服务运行时目录失败: %w", err)
 	}
 	data, err := json.Marshal(RuntimeMetadata{
 		Version:  metadataVersion,
@@ -88,37 +92,48 @@ func WriteMetadata(endpoint, token string) error {
 		PID:      os.Getpid(),
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	tmp, err := os.CreateTemp(dir, "server-*.json")
 	if err != nil {
-		return err
+		return "", err
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
-		return err
+		return "", err
 	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
-		return err
+		return "", err
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return "", err
 	}
 	path, err := MetadataPath()
 	if err != nil {
-		return err
+		return "", err
 	}
 	_ = os.Remove(path) // Windows 不允许 Rename 覆盖已存在文件。
-	return os.Rename(tmpPath, path)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func RemoveMetadata() {
 	if path, err := MetadataPath(); err == nil {
-		_ = os.Remove(path)
+		RemoveMetadataAt(path)
 	}
+}
+
+// RemoveMetadataAt 删除指定发现文件，不再经 DEC_HOME 重新解析路径。
+func RemoveMetadataAt(path string) {
+	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
 }
 
 // AcquireServerLock 保证同一 DEC_HOME 只有一个 dec-server。
