@@ -7,7 +7,8 @@ Upstream: https://cnb.cool/shichao402/relkit
 Cone paths cover the Go SDK (Dec import) plus sources needed to build cmd/relkit
 for release staging. Root files (go.mod / go.sum / …) come with cone mode.
 
-Pinned by default to verified relkit commit 6c78d29 (relkit main).
+Pinned by default to verified full commit SHA on relkit main. Short SHAs are
+rejected by most remotes as fetch refs, so the pin must be the full object id.
 Override with --ref / RELKIT_REF.
 Override clone URL with --url / RELKIT_URL. If CNB_TOKEN is set and the URL is
 plain cnb.cool HTTPS, inject token auth automatically.
@@ -24,7 +25,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 DEFAULT_URL = "https://cnb.cool/shichao402/relkit.git"
-DEFAULT_REF = "6c78d29"
+DEFAULT_REF = "6c78d29fbd54efa87e6adf189fb9b7b277accd7c"
 
 # Cone paths: Go SDK + CLI sources Dec needs.
 SPARSE_CONE_DIRS = (
@@ -136,12 +137,29 @@ def ensure_sparse_clone(
         )
 
     try:
-        run(
-            ["git", "fetch", "--filter=blob:none", "--tags", "origin", ref],
-            cwd=dest,
-            timeout_seconds=600,
-        )
-        run(["git", "checkout", "--force", "FETCH_HEAD"], cwd=dest)
+        if looks_like_commit(ref):
+            # Remotes usually reject `git fetch origin <sha>`. Fetch reachable
+            # heads/tags, then check out the exact object id.
+            run(
+                [
+                    "git",
+                    "fetch",
+                    "--filter=blob:none",
+                    "--tags",
+                    "origin",
+                    "+refs/heads/*:refs/remotes/origin/*",
+                ],
+                cwd=dest,
+                timeout_seconds=600,
+            )
+            run(["git", "checkout", "--force", ref], cwd=dest)
+        else:
+            run(
+                ["git", "fetch", "--filter=blob:none", "--tags", "origin", ref],
+                cwd=dest,
+                timeout_seconds=600,
+            )
+            run(["git", "checkout", "--force", "FETCH_HEAD"], cwd=dest)
     except RuntimeError as error:
         if not (allow_stale and can_reuse):
             raise
@@ -153,6 +171,8 @@ def ensure_sparse_clone(
         text=True,
         encoding="utf-8",
     ).strip()
+    if looks_like_commit(ref) and not head.lower().startswith(ref.lower()):
+        raise RuntimeError(f"checked out {head}, expected pin {ref}")
     log(f"relkit HEAD = {head} (requested {ref})")
 
     sdk_go = dest / "sdk" / "updater.go"

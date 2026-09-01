@@ -58,7 +58,7 @@
         echo "version=$VERSION channel=$CHANNEL tag=$TAG"
 
         # 钉住已验证的 relkit commit，勿漂到 main HEAD。
-        python3 scripts/ensure_relkit_sparse.py --sdk-only --ref 6c78d29
+        python3 scripts/ensure_relkit_sparse.py --sdk-only --ref 6c78d29fbd54efa87e6adf189fb9b7b277accd7c
 
     - name: test
       script: |
