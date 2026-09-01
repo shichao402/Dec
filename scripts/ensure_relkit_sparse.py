@@ -7,7 +7,8 @@ Upstream: https://cnb.cool/shichao402/relkit
 Cone paths cover the Go SDK (Dec import) plus sources needed to build cmd/relkit
 for release staging. Root files (go.mod / go.sum / …) come with cone mode.
 
-Pinned by default to branch main. Override with --ref / RELKIT_REF.
+Pinned by default to verified relkit commit 6c78d29 (relkit main).
+Override with --ref / RELKIT_REF.
 Override clone URL with --url / RELKIT_URL. If CNB_TOKEN is set and the URL is
 plain cnb.cool HTTPS, inject token auth automatically.
 """
@@ -23,7 +24,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 DEFAULT_URL = "https://cnb.cool/shichao402/relkit.git"
-DEFAULT_REF = "main"
+DEFAULT_REF = "6c78d29"
 
 # Cone paths: Go SDK + CLI sources Dec needs.
 SPARSE_CONE_DIRS = (
