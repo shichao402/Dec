@@ -270,6 +270,46 @@ else
 fi
 `
 
+// stopRemoteServiceForUpgrade 只在已建立信任的设备升级时使用。
+// 先停旧进程，避免 Unix 上虽然能替换可执行文件，但旧进程继续用旧协议接收连接。
+func stopRemoteServiceForUpgrade(ctx context.Context, target RemoteTarget) error {
+	stopCtx, cancel := context.WithTimeout(ctx, remoteSpawnTimeout)
+	defer cancel()
+	out, err := runSSH(stopCtx, target, remoteStopForUpgradeScript)
+	if err != nil {
+		return fmt.Errorf("停止远端旧服务失败: %s", summarizeSSHError(out, err))
+	}
+	if !strings.Contains(out, "stopped=1") {
+		return fmt.Errorf("远端旧服务未确认停止: %s", lastMeaningfulLine(out))
+	}
+	return nil
+}
+
+const remoteStopForUpgradeScript = `
+set -e
+dec_home="${DEC_HOME:-$HOME/.dec}"
+meta="${dec_home}/run/server.json"
+if [ ! -f "${meta}" ]; then
+  echo "stopped=1"
+  exit 0
+fi
+pid=$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "${meta}" | head -1)
+if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+  kill "${pid}"
+  i=0
+  while kill -0 "${pid}" 2>/dev/null && [ "${i}" -lt 50 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if kill -0 "${pid}" 2>/dev/null; then
+    echo "stopped=0"
+    exit 1
+  fi
+fi
+rm -f "${meta}"
+echo "stopped=1"
+`
+
 func parsePositiveInt(raw string) int {
 	value := 0
 	for _, r := range strings.TrimSpace(raw) {

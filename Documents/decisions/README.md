@@ -40,3 +40,5 @@
 | [0017](0017-local-layout-version.md) | 本机配置 kind/version 与 layout_version | 已接受 |
 | [0018](0018-instance-lock-and-console.md) | 实例锁定与管理客户端 | 已接受（已实现） |
 | [0019](0019-remote-provisioning.md) | 远端设备自动置备（SSH provisioning） | 已接受（已实现；真机与发布验收未完） |
+| [0020](0020-retire-tui.md) | 卸下 TUI，Console 为人机入口 | 已接受（已实现） |
+| [0021](0021-console-owned-runtime.md) | Console 独占用户分发与目标运行时 | 已接受（连接与发布协议已实现；发布基础设施待接入） |

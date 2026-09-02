@@ -36,7 +36,7 @@ provisioning 落在 `internal/app`（新增 provisioning 包），经 `internal/
 
 **配置**：不在 Go 侧手写远端 YAML。新增 `dec __service-setup` **内部命令**在目标机本地执行，用现成的 config 包幂等写入 `management_listen`（保留其余字段）。**「装二进制」由脚本负责，「写配置」由远端 `dec` 自己负责**——这样配置合并逻辑只有一份实现，不会因远端 schema 升级（0017）而漂移。
 
-命令形态统一到既有的内部命令惯例（`__freshness-check`），**不新建 `service` 子命令族**：`.cursor/rules/tui-first.mdc` 明确要求不新增用户面 Cobra 子命令，而这一步的调用方只有发起端的置备流程，人不会手敲它，与 `__freshness-check` 由主进程 fork 自己调用同理。它经 `isInternalCLIArgs` 白名单在 TUI 分流之前直达 CLI，不受 TTY 判定影响——SSH 非交互执行时没有 TTY。
+命令形态统一到既有的内部命令惯例（`__freshness-check`），**不新建 `service` 子命令族**：console-first 明确要求不新增用户面 Cobra 子命令，而这一步的调用方只有发起端的置备流程，人不会手敲它，与 `__freshness-check` 同类。SSH 非交互执行时没有 TTY，hidden 命令仍可直接调用。
 
 固定 loopback 端口常量（可显式覆盖）。因为只监听 loopback，端口冲突风险低，而固定端口是隧道能自动找到它的前提。
 
@@ -111,7 +111,7 @@ SSH 凭据只存**引用**（`~/.ssh/config` 别名或 Dec 管理的 `.sshkey` �
 | 自动执行 `loginctl enable-linger` / 装 root 级 unit | 随常驻方案一并废弃；不再需要修改系统状态 |
 | 第一版含 Windows 远端 | SSH 服务端与服务注册是另一套实现，会拖慢闭环 |
 | 在 Go 侧直接改写远端 `config.yaml` | 绕过 config 包的 kind/version 合并（0017），远端 schema 升级后必然漂移 |
-| 新建 `dec service` 用户面命令族（`service setup` / `service status`） | 违反 `tui-first.mdc`「不新增独立 Cobra 子命令」；该步只有置备流程调用，人不手敲，与 `__freshness-check` 同类，故统一为内部 hidden 命令 |
+| 新建 `dec service` 用户面命令族（`service setup` / `service status`） | 违反 console-first「不新增独立 Cobra 子命令」；该步只有置备流程调用，人不手敲，与 `__freshness-check` 同类，故统一为内部 hidden 命令 |
 | 把 `install.sh` 逻辑在 Go 里重写一份 | 安装逻辑分裂成两份，版本比对与幂等规则必然不一致 |
 
 ### 一处已修正的误判

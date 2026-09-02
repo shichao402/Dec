@@ -60,16 +60,29 @@ function Install-Dec {
     $binaryPath = Join-Path $binDir "dec.exe"
     $binaries = @("dec", "dec-server", "dec-mcp", "dec-exec")
     $updateBranch = if ($env:DEC_BRANCH) { $env:DEC_BRANCH } else { "ReleaseLatest" }
+    $requestedVersion = $env:DEC_VERSION
 
     Write-ColorOutput "检测到平台: $platform" -Type "Info"
     Write-ColorOutput "安装目录: $installDir" -Type "Info"
     Write-ColorOutput "更新分支: $updateBranch" -Type "Info"
 
-    # 版本信息：CNB 主路径，GitHub 仅作安装脚本内镜像备份
-    $versionSources = @(
-        "https://cnb.cool/shichao402/Dec/-/git/raw/$updateBranch/version.json",
-        "https://raw.githubusercontent.com/shichao402/Dec/$updateBranch/version.json"
-    )
+    # Console 会钉死自身版本，避免 ReleaseLatest 在构建/传播窗口里与面板错位。
+    if ($requestedVersion) {
+        if ($requestedVersion -notmatch '^v\d+\.\d+\.\d+$') {
+            Write-ColorOutput "DEC_VERSION 无效: $requestedVersion" -Type "Error"
+            exit 1
+        }
+        $requestedNover = $requestedVersion -replace '^v', ''
+        $versionSources = @(
+            "https://updates.firoyang.com/rup/artifact/dec/$requestedNover/dec-runtime-manifest.json",
+            "https://github.com/shichao402/Dec/releases/download/$requestedVersion/version.json"
+        )
+    } else {
+        $versionSources = @(
+            "https://cnb.cool/shichao402/Dec/-/git/raw/$updateBranch/version.json",
+            "https://raw.githubusercontent.com/shichao402/Dec/$updateBranch/version.json"
+        )
+    }
     $latestVersion = $null
     for ($i = 0; $i -lt $versionSources.Count; $i++) {
         try {
@@ -85,6 +98,10 @@ function Install-Dec {
     if (-not $latestVersion) {
         Write-ColorOutput "无法从 $updateBranch 获取版本信息" -Type "Error"
         Write-ColorOutput "若使用代理客户端，请先设置 `$env:HTTPS_PROXY 后重试" -Type "Error"
+        exit 1
+    }
+    if ($requestedVersion -and $latestVersion -ne $requestedVersion) {
+        Write-ColorOutput "版本清单不匹配: 请求 $requestedVersion，得到 $latestVersion" -Type "Error"
         exit 1
     }
 
@@ -106,28 +123,36 @@ function Install-Dec {
                     }
                     Write-ColorOutput "主程序已是最新版本，但服务/门面程序不完整，将修复安装" -Type "Warning"
                 }
-                # 版本较旧，提示用户选择
-                $answer = Read-Host "检测到旧版本 $currentVersion，最新版本为 $latestVersion，是否覆盖安装？[Y/n]"
-                if ($answer -eq 'n' -or $answer -eq 'N') {
-                    Write-ColorOutput "已跳过安装" -Type "Info"
-                    exit 0
+                # Console 初始化为非交互模式，直接把整套运行时升级到同一发布版本。
+                if ($env:DEC_NONINTERACTIVE -ne "1") {
+                    $answer = Read-Host "检测到旧版本 $currentVersion，最新版本为 $latestVersion，是否覆盖安装？[Y/n]"
+                    if ($answer -eq 'n' -or $answer -eq 'N') {
+                        Write-ColorOutput "已跳过安装" -Type "Info"
+                        exit 0
+                    }
+                } else {
+                    Write-ColorOutput "检测到旧版本 $currentVersion，将自动覆盖安装为 $latestVersion" -Type "Info"
                 }
             } else {
                 # 版本解析失败，提示用户选择
                 Write-ColorOutput "检测到已安装的 Dec，但无法获取版本号" -Type "Warning"
-                $answer = Read-Host "是否覆盖安装？[Y/n]"
-                if ($answer -eq 'n' -or $answer -eq 'N') {
-                    Write-ColorOutput "已跳过安装" -Type "Info"
-                    exit 0
+                if ($env:DEC_NONINTERACTIVE -ne "1") {
+                    $answer = Read-Host "是否覆盖安装？[Y/n]"
+                    if ($answer -eq 'n' -or $answer -eq 'N') {
+                        Write-ColorOutput "已跳过安装" -Type "Info"
+                        exit 0
+                    }
                 }
             }
         } catch {
             # 执行失败，提示用户选择
             Write-ColorOutput "检测到已安装的 Dec，但无法获取版本号" -Type "Warning"
-            $answer = Read-Host "是否覆盖安装？[Y/n]"
-            if ($answer -eq 'n' -or $answer -eq 'N') {
-                Write-ColorOutput "已跳过安装" -Type "Info"
-                exit 0
+            if ($env:DEC_NONINTERACTIVE -ne "1") {
+                $answer = Read-Host "是否覆盖安装？[Y/n]"
+                if ($answer -eq 'n' -or $answer -eq 'N') {
+                    Write-ColorOutput "已跳过安装" -Type "Info"
+                    exit 0
+                }
             }
         }
     }
@@ -189,7 +214,7 @@ function Install-Dec {
     Write-Host ""
     Write-ColorOutput "之后可以运行：" -Type "Info"
     Write-Host "  dec --help"
-    Write-Host "  dec            # 打开 TUI；Settings 中连接仓库"
+    Write-Host "  # 人机入口是 Dec Console（桌面客户端），不是终端 TUI"
     Write-Host ""
 }
 

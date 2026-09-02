@@ -84,11 +84,11 @@ INSTALLED_VERSION=$("${BINARY_PATH}" --version 2>&1 || echo "unknown")
 print_success "安装版本: ${INSTALLED_VERSION}"
 
 echo ""
-print_warning "已装新二进制；若 dec-server 在跑请重启（TUI Settings → 重启 dec-server）"
+print_warning "已装新二进制；若 dec-server 在跑请重启（Console 设置 → 重启服务）"
 print_info "version=dev 时无法靠版本号检测新旧进程，开发安装后务必手动重启服务"
 echo ""
 print_info "后续可执行："
 echo "  dec --help"
-echo "  dec            # 打开 TUI；Settings 中连接仓库"
+echo "  # 人机入口是 Dec Console，不是终端 TUI"
 echo ""
 print_warning "这是开发安装，适合本地调试，不会自动发布任何版本"

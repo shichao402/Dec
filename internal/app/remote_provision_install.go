@@ -43,6 +43,9 @@ type ProvisionRemoteHostInput struct {
 
 	// Branch 覆盖 DEC_BRANCH，默认 ReleaseLatest。
 	Branch string
+	// Version 钉死由 Console 管理的运行时版本（vMAJOR.MINOR.PATCH）。
+	// 留空时保持人工安装语义：安装所选分支的最新版本。
+	Version string
 
 	// SkipConfigure 跳过写入固定监听端口这一步。
 	//
@@ -162,6 +165,12 @@ func ProvisionRemoteHost(ctx context.Context, in ProvisionRemoteHostInput, repor
 		return nil, fmt.Errorf("%s；请键入主机名 %q 以确认", spec.Reason, spec.Expect)
 	}
 	result.Warnings = append(result.Warnings, probe.Warnings...)
+	if probe.ServerRunning {
+		emit(reporter, EventInfo, "provision.install", "停止远端旧服务以原子替换运行时", nil)
+		if err := stopRemoteServiceForUpgrade(ctx, in.Target); err != nil {
+			return nil, err
+		}
+	}
 
 	script, err := installScript()
 	if err != nil {
@@ -173,7 +182,7 @@ func ProvisionRemoteHost(ctx context.Context, in ProvisionRemoteHostInput, repor
 	})
 	installCtx, cancel := context.WithTimeout(ctx, remoteInstallTimeout)
 	defer cancel()
-	out, runErr := runRemoteBash(installCtx, in.Target, script, in.Branch)
+	out, runErr := runRemoteBash(installCtx, in.Target, script, in.Branch, in.Version)
 	forwardRemoteOutput(reporter, "provision.install", out)
 	if runErr != nil {
 		return nil, fmt.Errorf("远端安装失败: %s", summarizeSSHError(out, runErr))
@@ -258,15 +267,42 @@ func normalizeScriptNewlines(script string) string {
 }
 
 // runRemoteBash 经 stdin 注入脚本并用 bash 执行，脚本不落地到目标机磁盘。
-func runRemoteBash(ctx context.Context, target RemoteTarget, script, branch string) (string, error) {
-	command := "bash -s"
+func runRemoteBash(ctx context.Context, target RemoteTarget, script, branch, version string) (string, error) {
+	env := make([]string, 0, 2)
 	if b := strings.TrimSpace(branch); b != "" {
 		if !validBranchName(b) {
 			return "", fmt.Errorf("非法分支名 %q", b)
 		}
-		command = "DEC_BRANCH=" + b + " bash -s"
+		env = append(env, "DEC_BRANCH="+b)
 	}
+	if v := strings.TrimSpace(version); v != "" {
+		if !validReleaseVersion(v) {
+			return "", fmt.Errorf("非法版本号 %q", v)
+		}
+		env = append(env, "DEC_VERSION="+v)
+	}
+	env = append(env, "DEC_NONINTERACTIVE=1")
+	command := strings.Join(env, " ") + " bash -s"
 	return runSSHCommand(ctx, target, command, script)
+}
+
+func validReleaseVersion(value string) bool {
+	value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // validBranchName 限制可注入远端命令行的分支名字符集，防止命令注入。

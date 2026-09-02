@@ -11,7 +11,7 @@
 
 `server.json` 的 token 只是本机 gRPC 传输密钥，不是所有权证明。远程会话使用 `Authenticate` 下发的 control token。非 loopback 监听必须配置 TLS。
 
-管理 UI 是独立 Tauri 2 客户端（`client/`），不改 `dec` / TUI / MCP 交互。Node 工具一律子进程，不嵌入 Rust 运行时。
+管理 UI 是独立 Tauri 2 客户端（`client/`），为人机入口（[0020](0020-retire-tui.md) 卸下 TUI）。Node 工具一律子进程，不嵌入 Rust 运行时。
 
 生产启动不因 `DEC_BW_PASSWORD` 自动进入已解锁；该变量仍可用于 `EnsureSession` 的程序化路径与测试。
 
@@ -42,7 +42,7 @@ Console 的异步状态由 Shell 级 action registry 统一管理，页面不得
 - 连接成功及受管项目变化后，Console 轮询 Global 与项目根的活跃操作，自动旁观本 Console 或 MCP 发起的任务；
 - 运行状态全局可见，成功反馈短暂保留，错误保留到用户关闭；结构化业务结论仍由结果区渲染。
 
-该约定与 `Documents/TUI_ARCHITECTURE.md` §5.5 一致：任务跟 Shell，不跟当前页面。
+该约定与 Console action registry 一致：任务跟 Shell，不跟当前页面。原 TUI §5.5 对照实现已随 [0020](0020-retire-tui.md) 删除。
 
 ## 被否方案
 

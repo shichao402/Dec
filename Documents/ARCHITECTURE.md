@@ -8,25 +8,25 @@
 - [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md)：项目四象限与 Bitwarden private secrets
 - [ROADMAP.md](./ROADMAP.md)：尚未排期的意向（含本机 Login with Device）
 - [research/secrets-ci-centralization.md](./research/secrets-ci-centralization.md)：密钥源唯一与 CI 下放调研（2026-08）
-- [TUI_ARCHITECTURE.md](./TUI_ARCHITECTURE.md)：TUI 页面、测试策略与入口路由
-- [client/README.md](../client/README.md)：独立 Tauri 管理客户端
+- [TUI_ARCHITECTURE.md](./TUI_ARCHITECTURE.md)：TUI 已卸下（ADR 0020）
+- [client/README.md](../client/README.md)：桌面 Console（人机入口）
 - [schema/dec/v1/README.md](../schema/dec/v1/README.md)：Dec 配置 Protobuf schema
 - [schema/secrets/v1/README.md](../schema/secrets/v1/README.md)：Secrets bundle Protobuf schema
 - `internal/assets/dec/SKILL.md`：Dec Skill 的完整使用说明
 
 ## 概览
 
-Dec 是一个以 **TUI** 为第一人机入口、以 **MCP** 为 Agent 入口的个人 AI 资产管理工具，用于把 Skills、Rules、MCP 配置保存在个人 Vault 中，并在不同项目、不同 IDE 间复用。
+Dec 是一个以 **Console** 为第一人机入口、以 **MCP** 为 Agent 入口的个人 AI 资产管理工具，用于把 Skills、Rules、MCP 配置保存在个人 Vault 中，并在不同项目、不同 IDE 间复用。
 
 运行时采用「一机一服务、多门面」：
 
 | 程序 | 职责 |
 |------|------|
 | `dec-server` | 本机单例；启动即锁定，Authenticate 成功后持有 BW session 与 1h 控制权 |
-| `dec` | TUI 门面；无服务时自动拉起 `dec-server`（锁定期间业务 RPC 拒绝） |
+| `dec` | 最小 CLI（`--version`、内部 hidden 命令）；无参提示改用 Console |
 | `dec-mcp` | Agent stdio MCP 门面；无服务时自动拉起 `dec-server` |
 | `dec-exec` | 独立 env 注入程序；只读已落地 `.secrets/**/.env/*.env`，不经过服务、不碰 session |
-| Dec Console | 独立 Tauri 客户端（`client/`）；本机/远程连接与主密码解锁，不嵌入 `dec-server` |
+| Dec Console | 独立 Tauri 客户端（`client/`）；本机/远程连接、解锁与日常管理 |
 
 门面与服务默认绑定 `127.0.0.1` 的 gRPC；可用 `management_listen` + TLS 做远程直连。端点与本机随机 token 写在 `~/.dec/run/server.json`。进程启动后锁定，见 [0018](decisions/0018-instance-lock-and-console.md)。同一 project 的 pull/push 等写操作互斥；未发起操作的门面可旁观该 project 当前操作的实时进度。详见 [0008](decisions/0008-service-facade-split.md)。
 
@@ -44,13 +44,13 @@ direct requires 的 `public/project`，不递归、不引入 user/private。Git 
 `.secrets/<p>/` 或 `~/.dec/secrets/<p>/`。项目级 SSH/GCM 定向到家工作区，
 机器级 SSH/GCM 保持用户范围。
 
-用户操作通过 TUI Shell（`internal/tui/`）完成，业务逻辑在 `internal/app/`（仅 `dec-server` 内执行）：
+用户操作通过 Console（`client/`）完成，业务逻辑在 `internal/app/`（仅 `dec-server` 内执行）：
 
-- 仓库连接 / 本机 vars / 服务版本与重启：TUI **Settings** 页
-- 项目初始化 / project 选择：TUI **Home**
-- 项目启用、家项目 requires 与四象限浏览：TUI **Bundles** 页
-- pull / push / remove（含成功对照后的孤儿 reconcile）：TUI **Run** 页
-- 全量远端浏览 / temp 编辑 / 按光标 folder 登记（`n`，新 folder 用 `N`；`note`、`.env`、`.gcm`、`.sshkey` 为同级 Processor）/ 远端与本地删除拆分：TUI **Remote** 页（ADR 0004）
+- 仓库连接 / 本机 vars / 服务版本与重启：Console **设置**
+- 项目初始化 / project 选择：Console **引导 / 项目**
+- 项目启用、家项目 requires 与四象限浏览：Console **项目 / 资产**
+- pull / push / remove（含成功对照后的孤儿 reconcile）：Console **同步**
+- 远端设备探测与置备：Console **连接**（ADR 0019）
 - 版本信息：`dec --version`
 
 资产目录类型（skill / command / rule / mcp）以 `internal/bundle.VaultAssetKinds`
@@ -66,7 +66,7 @@ direct requires 的 `public/project`，不递归、不引入 user/private。Git 
   `public/project`。
 - 项目 push 只允许家项目；requires 副本不进入实际 push，也不进入 push 预览。
 - `internal/app/bundle_writer.go` 的 `PWriter` 统一承接项目选择、push、Remote
-  private 写入、delete/remove；服务端 dispatch 注入 writer，TUI/MCP 不内嵌 app。
+  private 写入、delete/remove；服务端 dispatch 注入 writer，Console/MCP 不内嵌 app。
 - 普通 push 发现非空 `projects/` 或 `bundles/` 会拒绝，提示远端尚未完成一次性项目迁移。
 - 旧 Git/BW 结构由一次性远端迁移改写；新版本启动只清理本机旧 cache / `.secrets` 遗留并清空启用列表，由用户重新选择后 Pull。
 
@@ -156,7 +156,7 @@ enabled_bundles:    # 从 projects/my-app.yaml 同步；Bundles 页可调整
 ```
 
 `enabled_bundles` 是唯一的资产启用入口：成员资产随 bundle 一并解析下发，不能单独启用或排除。
-保存时按平面校验 vault 声明：本平面看不见的名字（仓库里已删除、或 `scope: user`）不写入 `enabled_bundles`，被拒条目连同理由回传给 TUI；仓库未连接时放行以免离线存不了。项目平面只校验、不创建占位也不改写 scope（见 [0013](decisions/0013-secrets-belong-to-declared-target.md) §7a）。
+保存时按平面校验 vault 声明：本平面看不见的名字（仓库里已删除、或 `scope: user`）不写入 `enabled_bundles`，被拒条目连同理由回传给 Console；仓库未连接时放行以免离线存不了。项目平面只校验、不创建占位也不改写 scope（见 [0013](decisions/0013-secrets-belong-to-declared-target.md) §7a）。
 早期版本的 `available` / `enabled` 字段已移除，`LoadProjectConfig` 读到旧配置时会把 `enabled` 涉及的 vault 折叠成 bundle 引用并立即回写，`available` 作为扫描缓存直接丢弃。
 
 **职责划分**：
@@ -168,33 +168,33 @@ enabled_bundles:    # 从 projects/my-app.yaml 同步；Bundles 页可调整
 | `enabled_bundles` | 本地 | 从 vault 同步或 Bundles 页保存；pull 解析用 |
 | `ides` / `editor` | vault project + 本地覆盖 | 本地优先 |
 
-### Project 初始化（TUI-first）
+### Project 初始化（Console-first）
 
-首次进入工作区或 Home 页 **初始化 project** 时，TUI 引导完成以下之一：
+首次进入工作区或引导 **初始化 project** 时，Console 引导完成以下之一：
 
 ```mermaid
 flowchart TD
-  A[进入工作区 / dec] --> B{本地 .dec/config.yaml 存在?}
+  A[打开 Console / 连接设备] --> B{本地 .dec/config.yaml 存在?}
   B -->|否| C[推断 project 名]
   C --> D{vault 存在 projects/同名.yaml?}
   D -->|是| E[自动匹配并应用]
-  D -->|否| F[TUI：选择已有 project 或新建]
+  D -->|否| F[Console：选择已有 project 或新建]
   B -->|是| G[加载 project_name]
   E --> H[写入 .dec/config.yaml]
   F -->|选择已有| I[从 vault 拉 project → 同步 enabled_bundles]
   F -->|新建| J[填名 + 选 bundles → push projects/名.yaml]
   I --> H
   J --> H
-  G --> K[正常使用 Assets / Run]
+  G --> K[正常使用资产 / 同步]
   H --> K
 ```
 
-1. **推断 project 名**：工作区目录 basename（如 `my-app`），或用户在 TUI 中指定
+1. **推断 project 名**：工作区目录 basename（如 `my-app`），或用户在 Console 中指定
 2. **自动匹配（新机器）**：vault 存在 `projects/<basename>.yaml` → 自动应用，写入本地 `project_name` 与 `enabled_bundles`
 3. **选择已有 project**：从 vault 列出 `projects/*.yaml`，用户选择 → 同步 bundle 列表到本地
 4. **新建 project**：填 project 名、勾选 bundles → **push 到 vault** `projects/<name>.yaml` → 写入本地引用
 
-不在 TUI 外暴露 `dec init` 等 CLI 子命令；与 [TUI 优先](../.cursor/rules/tui-first.mdc) 一致。
+不在 Console 外暴露 `dec init` 等 CLI 子命令；与 [Console 优先](../.cursor/rules/console-first.mdc) 一致。
 
 ## 目录结构
 
@@ -383,7 +383,7 @@ Dec 托管产物统一使用 `dec-` 前缀。`claude-internal` / `codex-internal
 
 ### 1. 仓库连接与事务
 
-TUI **Settings** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
+Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 - 读操作基于 bare repo 的最新远端引用
 - 写操作通过短生命周期临时 worktree 完成，结束后自动清理
@@ -402,17 +402,17 @@ TUI **Settings** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 3. 全局 `~/.dec/config.yaml`
 4. 默认值 `cursor`
 
-交互式编辑器优先级相同。TUI **Settings** 页安装 Dec 内置资产并写入全局 IDE 列表。
+交互式编辑器优先级相同。Console **设置** 页安装 Dec 内置资产并写入全局 IDE 列表。
 
 ### 3. 内置资产与 Vault 资产的边界
 
 三套内容平面：
 
 - **Dec 产品源码**：`internal/`、`cmd/`、`Documents/` 等，通过构建进入二进制
-- **项目级落地产物**：`.dec/`、`.cursor/`、`.claude/` 等，由 TUI pull 写入
+- **项目级落地产物**：`.dec/`、`.cursor/`、`.claude/` 等，由 Console pull 写入
 - **Vault 资产源**：远端 `projects/`、`projects/<name>.yaml` 与各 `bundles/<name>/` 目录与项目 `.dec/cache/`
 
-修改 `internal/assets/` 走源码 commit + release；`.dec/cache/` 变更走 TUI **Run** 页 push；project 声明变更走 vault `projects/` push。
+修改 `internal/assets/` 走源码 commit + release；`.dec/cache/` 变更走 Console **同步** 页 push；project 声明变更走 vault `projects/` push。
 
 ### 4. 资产生命周期
 
@@ -450,8 +450,8 @@ TUI **Settings** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 #### 自更新（Run 页 `u`）
 
-- 唯一用户面入口：TUI Run 页按 `u`（检查 → 确认 → 下载替换）
-- 无 `dec update` CLI；启动 TUI 前的 `CheckBackground` hint 引导到 Run 页 `u`
+- 唯一用户面入口：Console **同步** 页（检查 → 确认 → 下载替换）
+- 无 `dec update` CLI
 - 实现见 `internal/update/` 与 [UPDATE_ARCHITECTURE.md](./UPDATE_ARCHITECTURE.md)
 
 #### 远端设备置备与按需拉起（Console / MCP）
@@ -509,7 +509,7 @@ MCP 采用非覆盖式合并：
 
 `internal/freshness/` 在后台检查远端 Vault 是否有新提交。实现位于 `internal/freshness/` 与 hidden 子命令 `__freshness-check`：
 
-- 分离子进程执行 fetch，不阻塞 TUI 主流程
+- 分离子进程执行 fetch，不阻塞 Console 主流程
 - cache：`~/.dec/local/freshness-result.<sha1>.json`，24h TTL
 - lock：`~/.dec/local/freshness.lock`，busy 时静默 skip
 - pull 成功后清 cache，避免误报
@@ -531,7 +531,7 @@ pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感
 
 命令行入口层：
 
-- `root.go`：根命令、TUI/CLI 分流、`dec --version`
+- `root.go`：根命令、最小 CLI、`dec --version`
 - `freshness_check.go`：hidden 子命令，供 freshness 后台 worker 使用
 - `output.go`：输出辅助
 
@@ -540,19 +540,12 @@ pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感
 用例层，编排 repo/config/ide 为可复用操作：
 
 - `project.go`：project init、项目配置写入
-- `overview.go`：TUI 首页概览
+- `overview.go`：概览数据（供 Console）
 - `assets.go`：Bundles 页资产选择与持久化
 - `operations.go`：pull/push/remove 编排
 - `settings.go`：Settings 页仓库连接与全局配置
 - `vault_bundle.go`：bundle 解析与合成
 - `events.go`：`Reporter` / `OperationEvent` 事件模型
-
-### `internal/tui/`
-
-Bubble Tea 交互层：
-
-- `app.go`：程序启动与 IO 绑定
-- `model.go`：Shell model，Home / Assets / Project / Run / Settings 页
 
 ### `internal/config/`
 
@@ -587,9 +580,9 @@ IDE 抽象层，区分项目级输出目录与用户级内置资产安装目录�
 
 ## 关键设计点
 
-### TUI 驱动
+### Console 驱动
 
-日常交互通过 TUI 页面完成；Agent / CI 调用 `internal/app/` API。
+日常交互通过 Console 完成；Agent / CI 经 `dec-mcp` 或服务 API 调用 `internal/app/`。
 
 ### 旧 Project > Bundle（仅迁移背景）
 
@@ -620,7 +613,7 @@ Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真�
   Git/BW 同路径与落地边界校验 → 独立落地 + IDE 渲染
 - MCP 经独立 `dec-exec` 注入 `.env/*.env`；不再依赖 mise 落地路径
 - Schema：`Project`（`schema/dec/v1/projects.proto`）、`BundleBinding`、`SecretsConfig`（`schema/secrets/v1/`）
-- TUI：Run 页一次 pull；Bundles 页选 bundle；Settings 页配置 Bitwarden
+- Console：同步页一次 pull；资产页选 bundle；设置页配置 Bitwarden
 
 ## 已知限制
 
@@ -638,4 +631,4 @@ CodeBuddy MCP 位于项目根 `.mcp.json`。Codex 位于 `.codex/config.toml`。
 
 ### 测试覆盖
 
-repo/ide 抽象与变量处理已有测试；部分 TUI 组合场景待补充。
+repo/ide 抽象与变量处理已有测试；Console 布局由 `client/tests` 守住。

@@ -118,16 +118,30 @@ main() {
     local binary_path="${bin_dir}/dec"
     local binaries=("dec" "dec-server" "dec-mcp" "dec-exec")
     local update_branch="${DEC_BRANCH:-ReleaseLatest}"
+    local requested_version="${DEC_VERSION:-}"
 
     print_info "检测到平台: ${platform}"
     print_info "安装目录: ${install_dir}"
     print_info "更新分支: ${update_branch}"
 
-    # 版本信息：CNB 主路径，GitHub 仅作安装脚本内镜像备份
-    local version_sources=(
-        "https://cnb.cool/shichao402/Dec/-/git/raw/${update_branch}/version.json"
-        "https://raw.githubusercontent.com/shichao402/Dec/${update_branch}/version.json"
-    )
+    # Console 会钉死自身版本，避免 ReleaseLatest 在构建/传播窗口里与面板错位。
+    local version_sources=()
+    if [ -n "${requested_version}" ]; then
+        if ! echo "${requested_version}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            print_error "DEC_VERSION 无效: ${requested_version}"
+            exit 1
+        fi
+        local requested_nover="${requested_version#v}"
+        version_sources=(
+            "https://updates.firoyang.com/rup/artifact/dec/${requested_nover}/dec-runtime-manifest.json"
+            "https://github.com/shichao402/Dec/releases/download/${requested_version}/version.json"
+        )
+    else
+        version_sources=(
+            "https://cnb.cool/shichao402/Dec/-/git/raw/${update_branch}/version.json"
+            "https://raw.githubusercontent.com/shichao402/Dec/${update_branch}/version.json"
+        )
+    fi
     local version_json=""
     local i
     for i in "${!version_sources[@]}"; do
@@ -147,6 +161,10 @@ main() {
     latest_version=$(echo "${version_json}" | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
     if [ -z "${latest_version}" ]; then
         print_error "无法解析版本号"
+        exit 1
+    fi
+    if [ -n "${requested_version}" ] && [ "${latest_version}" != "${requested_version}" ]; then
+        print_error "版本清单不匹配: 请求 ${requested_version}，得到 ${latest_version}"
         exit 1
     fi
     print_info "最新版本: ${latest_version}"
@@ -175,7 +193,7 @@ main() {
                 print_warning "主程序已是最新版本，但服务/门面程序不完整，将修复安装"
             fi
             # 版本较旧，提示用户选择
-            if [ -t 0 ]; then
+            if [ -t 0 ] && [ "${DEC_NONINTERACTIVE:-}" != "1" ]; then
                 # 终端模式，交互式提示
                 printf "${YELLOW}?${NC}  检测到旧版本 ${current_version}，最新版本为 ${latest_version}，是否覆盖安装？[Y/n] "
                 read -r answer
@@ -190,7 +208,7 @@ main() {
         else
             # 版本解析失败，提示用户选择
             print_warning "检测到已安装的 Dec，但无法获取版本号"
-            if [ -t 0 ]; then
+            if [ -t 0 ] && [ "${DEC_NONINTERACTIVE:-}" != "1" ]; then
                 printf "${YELLOW}?${NC}  是否覆盖安装？[Y/n] "
                 read -r answer
                 if [ "${answer}" = "n" ] || [ "${answer}" = "N" ]; then
@@ -316,7 +334,7 @@ main() {
     echo ""
     print_info "之后可以运行："
     echo "  dec --help"
-    echo "  dec            # 打开 TUI；Settings 中连接仓库"
+    echo "  # 人机入口是 Dec Console（桌面客户端），不是终端 TUI"
     echo ""
 }
 

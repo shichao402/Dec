@@ -21,7 +21,7 @@ import (
 // 合并规则就只有一份实现。
 //
 // 之所以是 hidden 内部命令而非 `dec service setup` 用户面命令族：
-// .cursor/rules/tui-first.mdc 要求不新增独立 Cobra 子命令，用户面能力一律走 TUI。
+// console-first 要求不新增独立 Cobra 用户面子命令。
 // 这一步没有用户面语义，人不会手敲它，与 __freshness-check 同类。
 var serviceSetupCmd = &cobra.Command{
 	Use:           "__service-setup",

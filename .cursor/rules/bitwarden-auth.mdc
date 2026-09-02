@@ -1,6 +1,6 @@
 ---
 description: Bitwarden 认证约束 — 进程内存 session、web unlock 唯一入口、禁止 session 落盘
-globs: schema/secrets/**, internal/secrets/**, internal/app/**/*.go, internal/tui/**/*.go, Documents/**
+globs: schema/secrets/**, internal/secrets/**, internal/app/**/*.go, client/**/*.tsx, Documents/**
 alwaysApply: true
 ---
 
@@ -10,7 +10,7 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 
 ## Session 存储（硬约束）
 
-- Bitwarden session **仅在本机单例 `dec-server` 进程内存**中保存；服务进程退出即失效。TUI / MCP 门面共享服务 session，但拿不到 session 明文。
+- Bitwarden session **仅在本机单例 `dec-server` 进程内存**中保存；服务进程退出即失效。Console / MCP 门面共享服务 session，但拿不到 session 明文。
 - **禁止**将 session 持久化到磁盘：`~/.dec/secrets/session`、`BW_SESSION` 文件、或任何 env/配置文件形式的 session 缓存均不允许。
 - 不存在 `~/.dec/secrets/state.json` 之类的本地同步状态文件（已删除，见 `Documents/decisions/0001-secrets-landing-path.md`），不要为了缓存 session 而重新引入。
 - `dec-server` 内已有**未过期** session → 直接复用；无 session 或已过期 → 先尝试程序化解锁（见下），失败再阻塞等待 web unlock。
@@ -47,15 +47,15 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 3. 网页收集主密码；若需 2FA/TOTP，同一页继续输入验证码
 4. 成功后 session 写入进程内存，关闭 HTTP 服务，继续 secrets bundle pull 等操作
 
-**不要**新增 `dec unlock`、`dec secrets login` 等 CLI 子命令；**不要**在 TUI 终端内提示输入主密码替代网页流程。
+**不要**新增 `dec unlock`、`dec secrets login` 等 CLI 子命令；**不要**在终端内提示输入主密码替代网页流程。
 
-## TUI-first
+## Console-first
 
-- 认证由 `dec-server` 中的 `internal/app` 调用链在 pull secrets bundle 等操作时 **自动触发**；TUI / MCP 只展示服务回传的进度。
-- Settings 页配置 Bitwarden 连接信息；解锁仅在缺 session 时按需弹出。
+- 认证由 `dec-server` 中的 `internal/app` 调用链在 pull secrets bundle 等操作时 **自动触发**；Console / MCP 只展示服务回传的进度。
+- 设置页配置 Bitwarden 连接信息；解锁仅在缺 session 时按需弹出。
 
 ## 实现落点（规划）
 
 - `internal/secrets/unlock/`：本地 HTTP 服务、浏览器打开、unlock 回调
 - `internal/secrets/`：`dec-server` 进程内 session 缓存与 Bitwarden API 客户端
-- `internal/tui/` Run 页：pull 流程在 secrets 步骤前检查/等待 session；Note 内容落地到 **`.secrets/` SyncTarget 根**（不进 `.dec/cache/`）
+- Console 同步：pull 流程在 secrets 步骤前检查/等待 session；Note 内容落地到 **`.secrets/` SyncTarget 根**（不进 `.dec/cache/`）

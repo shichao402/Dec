@@ -17,6 +17,14 @@ func TestRemoteServerStatusScriptChecksProcessLiveness(t *testing.T) {
 	}
 }
 
+func TestRemoteUpgradeStopsOldServerBeforeReplacement(t *testing.T) {
+	for _, want := range []string{"server.json", "kill \"${pid}\"", "stopped=1"} {
+		if !strings.Contains(remoteStopForUpgradeScript, want) {
+			t.Fatalf("升级停服脚本缺少 %q", want)
+		}
+	}
+}
+
 // SSH 会话结束时会向进程组发 SIGHUP，只靠 & 放后台的进程会跟着死。
 func TestRemoteSpawnScriptDetachesFromSession(t *testing.T) {
 	if !strings.Contains(remoteSpawnScript, "setsid") {

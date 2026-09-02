@@ -1,0 +1,51 @@
+---
+description: Dec 以桌面 Console 为第一人机入口；不要恢复 TUI 或用户面 CLI 子命令
+alwaysApply: true
+---
+
+# Console 优先
+
+Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）为第一入口。终端 TUI（`internal/tui/`）已移除。无参运行 `dec` 只提示改用 Console。
+
+## 设计原则
+
+- 新功能先设计 Console 页面 / 连接与初始化流，再实现 `internal/app/` 业务逻辑。
+- **不要新增**独立 Cobra 用户面子命令（pull、config、push 等均在 Console）。
+- **不要恢复** Bubble Tea TUI 或 `dec --global` / `dec --user` 终端平面入口。本机 / 项目平面由 Console 连接后在目标 `dec-server` 上操作。
+- 保留最小 CLI 面：`dec --version`、内部 hidden 命令（如 `__freshness-check`、`__service-setup`）。Agent MCP 与 env 注入分别是独立程序 `dec-mcp`、`dec-exec`。
+- Secrets / Bitwarden / SSH / env 部署等操作通过 Console 触达（设置、同步、项目、远端设备）。
+- **同步** pull：解析绑定项目与引入 → 拉 Dec Git（→ `.dec/cache/`）+ 自动拉 Bitwarden **secrets**（→ **`.secrets/`** 同步根，零路径重叠）；见 `Documents/BUNDLE-SECRETS-MODEL.md`。
+- **`dec-exec`**（独立程序）：按 bundle 作用域读取 `.secrets/**/.env/*.env` 并启动子进程，供 MCP / Agent 运行时注入；不经过 `dec-server`、不碰 session，也不是用户面 secrets 管理入口。
+- **服务 / 门面**：`dec-server` 是一机单例业务服务；Console 与 `dec-mcp` 是薄门面，连不上时由目标侧检查并初始化 / 拉起服务，禁止回退到门面内嵌 `internal/app`。
+- **跨页异步 IO**：慢 IO 跟 Shell 生命周期走，不跟当前页；切页禁止打断在飞请求；独立 busy 信号 + 防重复 + gen 丢弃过期结果（见 `client/README.md` 与 ADR 0018）。
+- **按平面分流**：本机平面的 `Workspace.Root` 为空，**没有**项目配置 / `project_name` / vault project 推断。空 projectRoot 会让 `.dec/` 退化成相对服务 cwd 的路径并覆盖 `~/.dec/config.yaml`（ADR 0015）。
+- **结构化结果优先于事件区**：结果里已有结论（跳过原因、被拒 bundle、缺失 bundle）必须渲染在结果区；事件区只留最近十余条，靠它承载告警等于不告警。
+
+## Console 页与能力映射
+
+| 用户操作 | Console 入口 |
+|----|----|
+| 本机 / SSH 远端 / 置备 | **连接** 页 |
+| 绑定项目资产树、新建本地资产 | **项目** 页 |
+| Global 资产 | **Global 资产** 页 |
+| pull / push / 自更新 | **同步** 页 |
+| 仓库、Bitwarden、IDE、vars、重启服务 | **设置** 页 |
+| 未初始化 | 引导 |
+
+若 Console 尚未覆盖某能力，在代码中留 `TODO(console)` 并在对应页面引导，而不是恢复 CLI 子命令或 TUI。
+
+## 非交互环境
+
+- Agent 通过 `dec-mcp` → `dec-server` 调用业务；CI 内部代码连接服务 API；env 注入用 `dec-exec`。**不要**假设存在 `dec pull` 等用户面子命令。
+
+## 反例
+
+```go
+// ❌ 新增用户-facing 子命令
+RootCmd.AddCommand(&cobra.Command{Use: "sync", ...})
+
+// ❌ 再加一套终端 TUI
+tui.Run(...)
+
+// ✅ 在 Console 绑定动作，经 gRPC 调 dec-server → internal/app
+```

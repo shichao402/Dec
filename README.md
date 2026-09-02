@@ -15,18 +15,18 @@ Dec 是一个个人 AI 知识仓库工具。
 
 Dec 的解决方案：
 
-- 个人维度：在 TUI **Settings** 页连接你的资产仓库
-- 项目维度：TUI **Home** 初始化 project；**Bundles** 页调整 bundle；**Run** 页拉取到项目
+- 个人维度：在 Console **设置** 页连接你的资产仓库
+- 项目维度：Console **引导 / 项目** 初始化 project；资产页调整 bundle；**同步** 页拉取到项目
 - IDE 维度：Dec 自动将资产部署到配置的 IDE 目录
 - 私密维度：Bitwarden folder ↔ 项目 **`.secrets/`** 同步根（project / bundle 同构）；env 经独立 `dec-exec` 注入；SSH Key 落地机器级 `~/.ssh/`，均不进 `.dec/`
 
-> **交互入口**：在交互式终端运行 `dec` 启动 TUI。CLI 仅保留 `dec --version` 与内部 hidden 命令。
+> **交互入口**：打开 Dec Console（`client/`）。`dec` CLI 仅保留 `--version` 与内部 hidden 命令。
 
 ## 核心概念
 
 ### 1. Project、Bundle 与资产仓库
 
-在 TUI **Settings** 页连接你的资产仓库，底层是一个 Git 仓库。
+在 Console **设置** 页连接你的资产仓库，底层是一个 Git 仓库。
 
 配置按 **Project > Bundle** 两层组织：
 
@@ -82,13 +82,13 @@ enabled_bundles:           # 唯一的资产启用入口；从 vault project 同
 
 资产只能按 bundle 启用，成员随 bundle 一并下发；早期的单资产字段（`available` / `enabled`）已移除，加载旧配置时会折叠成 `enabled_bundles` 并回写。
 
-- TUI **Home** 页初始化 project（自动匹配、选择或新建）
-- TUI **Bundles** 页扫描仓库、勾选 bundle
-- **Run** 页按 project 的 bundle 列表拉取 Dec + secrets bundle
+- Console **引导 / 项目** 初始化 project（自动匹配、选择或新建）
+- Console 资产页扫描仓库、勾选 bundle
+- **同步** 页按 project 的 bundle 列表拉取 Dec + secrets bundle
 
 ### 3. 资产部署
 
-TUI **Run** 页将资产部署到当前项目的配置 IDE。
+Console **同步** 页将资产部署到当前项目的配置 IDE。
 
 Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 
@@ -117,46 +117,41 @@ Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 
 ### 1. 安装
 
-#### Linux / macOS
+从 [Dec 发布页](https://update.firoyang.com/dec.html) 下载当前平台的 **Dec Console**。
+用户只安装 Console；首次连接本机或 SSH 设备时，Console 会按自身版本检查并初始化目标端
+`dec` / `dec-server` / `dec-mcp` / `dec-exec`，无需手工选择这些运行时文件。
+
+`scripts/install.sh` / `install.ps1` 仅作为 Console 和远端置备内部使用的运行时安装器，
+不是终端用户主入口。
+
+### 2. 打开 Console
+
+构建并运行桌面客户端（`client/`）：
 
 ```bash
-curl -fsSL https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.sh | bash
+cd client
+npm install
+npm run tauri dev
 ```
 
-#### Windows PowerShell
+发布安装后直接打开 Dec Console。连接本机或远端 `dec-server`；未安装时由连接流程检查并初始化。
 
-```powershell
-iwr -useb https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.ps1 | iex
-```
-
-镜像备份（GitHub）：`raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.{sh,ps1}`。
-
-安装脚本会优先从 `https://updates.firoyang.com/rup/artifact/...` 拉二进制，必要时再回退 GitHub Release。日常自更新只走 RUP/COS，失败时不必重装。
-
-### 2. 启动 TUI
-
-在项目目录或任意目录打开终端，运行：
-
-```bash
-dec
-```
-
-TUI 侧栏页面：
+Console 主要页面：
 
 | 页面 | 用途 |
 |------|------|
-| Home | 项目概览、建议下一步、project 初始化 |
-| Assets | 浏览/搜索资产、选择 bundle、保存 enabled |
-| Project | 项目 IDE / editor 覆盖、编辑 `.dec/vars.yaml` |
-| Run | 拉取、推送、移除资产 |
-| Settings | 连接仓库、Bitwarden、全局 IDE 与 editor |
+| 连接 | 本机 / SSH 远端、探测与置备 |
+| 概览 / 引导 | 项目概览、建议下一步、project 初始化 |
+| 项目 / 资产 | 浏览资产、选择 bundle、保存 enabled |
+| 同步 | 拉取、推送、移除资产、自更新 |
+| 设置 | 连接仓库、Bitwarden、全局 IDE 与 editor |
 
 ### 3. 首次使用流程
 
-1. **Settings** → 连接个人 Git 仓库 URL
-2. **Settings** → 配置本机 IDE（安装 Dec 内置 Skills）
-3. **Home** → 初始化 project（**自动匹配** vault 中同名 `projects/<目录名>.yaml`，或选择/新建）
-4. **Run** → 拉取 project 内 bundle 到当前项目 IDE 目录
+1. **设置** → 连接个人 Git 仓库 URL
+2. **设置** → 配置本机 IDE（安装 Dec 内置 Skills）
+3. **引导 / 项目** → 初始化 project（**自动匹配** vault 中同名 `projects/<目录名>.yaml`，或选择/新建）
+4. **同步** → 拉取 project 内 bundle 到当前项目 IDE 目录
 
 ### 4. 变量与占位符
 
@@ -167,17 +162,17 @@ TUI 侧栏页面：
 3. `.dec/vars.d/*.yaml` 中的 `vars`（按文件名字典序合并，主文件覆盖同名键）
 4. `~/.dec/local/vars.yaml` 中的机器级变量
 
-私密 env 从 `.secrets/**/.env/*.env` 读取，经独立 `dec-exec` 注入子进程（MCP 安装时自动包装），不通过模板占位符注入。未定义的公开占位符会保留原样，并在拉取时提示。可在 TUI **Project** 页按 `e` 编辑 `.dec/vars.yaml`。
+私密 env 从 `.secrets/**/.env/*.env` 读取，经独立 `dec-exec` 注入子进程（MCP 安装时自动包装），不通过模板占位符注入。未定义的公开占位符会保留原样，并在拉取时提示。可在 Console 项目设置里编辑 `.dec/vars.yaml`。
 
 ### 5. 推送与新增资产
 
-在 TUI **Run** 页推送 `.dec/cache/` 中的修改到远程仓库。secrets bundle 走 Bitwarden API，不进 Git。
+在 Console **同步** 页推送 `.dec/cache/` 中的修改到远程仓库。secrets bundle 走 Bitwarden API，不进 Git。
 
 新增资产流程：
 
-1. 在 TUI **Bundles** 页或 `.dec/config.yaml` 中启用 bundle / 资产
+1. 在 Console 资产页或 `.dec/config.yaml` 中启用 bundle / 资产
 2. 在 `.dec/cache/<bundle>/` 下创建对应文件（skills / rules / mcp）
-3. 在 **Run** 页执行推送
+3. 在 **同步** 页执行推送
 
 推送读取源是 `.dec/cache/`，不是 `.cursor/`、`.codex/` 等 IDE 目录。
 
@@ -185,55 +180,39 @@ TUI 侧栏页面：
 
 ### 工作流 A：第一次设置
 
-1. 运行 `dec` 进入 TUI
-2. **Settings** → 连接仓库、配置 IDE
-3. **Bundles** → 选择 bundle / 资产并保存
-4. **Run** → 拉取到项目
+1. 打开 Dec Console
+2. **设置** → 连接仓库、配置 IDE
+3. 资产页 → 选择 bundle / 资产并保存
+4. **同步** → 拉取到项目
 
 ### 工作流 B：在新项目中复用
 
-1. 在新项目目录运行 `dec`
-2. **Home** → 自动匹配或选择 vault 中同名 project
-3. **Run** → 拉取
+1. 打开 Console 并连接到该项目所在设备
+2. **引导 / 项目** → 自动匹配或选择 vault 中同名 project
+3. **同步** → 拉取
 
 ### 工作流 C：更新已有资产
 
 1. 修改 `.dec/cache/` 中的缓存文件
-2. **Run** 页推送
-3. 在其他项目的 **Run** 页拉取最新版本
+2. **同步** 页推送
+3. 在其他项目的 **同步** 页拉取最新版本
 
 ### 工作流 D：新增资产
 
-1. **Assets** 页刷新并启用新 bundle / 资产
+1. 资产页刷新并启用新 bundle / 资产
 2. 编辑 `.dec/cache/<bundle>/` 下文件
-3. **Run** 页推送
+3. **同步** 页推送
 
 ## 命令参考
 
-Dec 以 TUI 为主入口。CLI 仅保留：
+Dec 以 Console 为主入口。CLI 仅保留：
 
 | 命令 | 说明 |
 |------|------|
-| `dec` | 在 TTY 中启动 TUI Shell |
 | `dec --version` | 显示版本号 |
+| `dec`（无参） | 提示改用 Console，不启动 TUI |
 
-非交互环境（`DEC_NO_TUI=1`、stdout 非 TTY）会输出简短说明，不启动 TUI。
-
-## 交互模式
-
-### TUI 入口
-
-在交互式终端里直接运行 `dec`（不带参数），会进入内置 TUI Shell。下列情况不会启动 TUI：
-
-- 传了参数（`dec --version`、`dec --help`）
-- 内部命令 `dec __freshness-check`（hidden，供后台 worker 使用）
-- 环境变量 `DEC_NO_TUI=1`
-- `TERM=dumb`
-- stdin / stdout / stderr 任一不是 TTY
-
-### 远端资产新鲜度
-
-`internal/freshness/` 提供后台远端检查能力，待 TUI 启动与 Run 页集成。
+内部 hidden 命令（`__freshness-check`、`__service-setup`）供置备与后台 worker 使用，不是用户面。
 
 ## 资产格式要求
 
@@ -292,7 +271,7 @@ editor: code --wait
 
 ### 仓库未连接
 
-在 TUI **Settings** 页连接仓库 URL。
+在 Console **设置** 页连接仓库 URL。
 
 ### 配置校验警告
 
@@ -332,7 +311,8 @@ go test ./...
 
 - [Documents/ARCHITECTURE.md](Documents/ARCHITECTURE.md) — 架构设计、vault 结构与模块说明
 - [Documents/BUNDLE-SECRETS-MODEL.md](Documents/BUNDLE-SECRETS-MODEL.md) — Dec bundle 与 Bitwarden secrets bundle 同构模型
-- [Documents/TUI_ARCHITECTURE.md](Documents/TUI_ARCHITECTURE.md) — TUI 页面、入口路由与测试策略
+- [Documents/TUI_ARCHITECTURE.md](Documents/TUI_ARCHITECTURE.md) — TUI 已卸下；人机入口见 Console
+- [client/README.md](client/README.md) — 桌面管理客户端
 - [schema/dec/v1/README.md](schema/dec/v1/README.md) — Dec 配置 Protobuf schema
 - [schema/secrets/v1/README.md](schema/secrets/v1/README.md) — Secrets bundle Protobuf schema
 - `internal/assets/dec/SKILL.md` — Dec Skill 的完整使用说明

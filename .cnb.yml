@@ -64,14 +64,43 @@
       script: |
         set -euo pipefail
         go test ./... -v
-        go test -tags=integration ./internal/tui/... -v
 
     - name: build
       script: |
         set -euo pipefail
         VERSION=$(cat .release-version)
         export VERSION
+        CONSOLE_VERSION="${VERSION#v}"
+        export CONSOLE_VERSION
+        python3 - <<'PY'
+        import json, os, pathlib, re
+        version = os.environ["CONSOLE_VERSION"]
+        cargo = pathlib.Path("client/src-tauri/Cargo.toml")
+        cargo.write_text(re.sub(r'(?m)^(version = ")[^"]+(")$', rf'\g<1>{version}\2', cargo.read_text(), count=1))
+        conf = pathlib.Path("client/src-tauri/tauri.conf.json")
+        data = json.loads(conf.read_text())
+        data["version"] = version
+        conf.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+        PY
         bash scripts/build.sh --all
+
+    - name: build-linux-console
+      script: |
+        set -euo pipefail
+        # CNB 默认云节点是 Linux/amd64：这里原生构建用户可下载的 AppImage。
+        # Windows NSIS / macOS DMG 不能在 Linux Docker 中可靠交叉构建，后续需原生节点。
+        apt-get install -y --no-install-recommends \
+          build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
+          libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf wget
+        if ! command -v node >/dev/null || [ "$(node -p 'Number(process.versions.node.split(`.`)[0])')" -lt 20 ]; then
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get install -y --no-install-recommends nodejs
+        fi
+        if ! command -v cargo >/dev/null; then
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+        fi
+        . "$HOME/.cargo/env"
+        python3 scripts/build-console.py
 
     - name: checksums
       script: |
@@ -79,6 +108,7 @@
         # 产物摘要写进 version.json，供 install.sh 校验（ADR 0019）。
         # 必须在 build 之后：摘要来自实际产物，不能预先写死。
         python3 scripts/gen_checksums.py dist version.json
+        cp version.json dist/dec-runtime-manifest.json
 
     - name: rup-publish
       script: |
@@ -106,7 +136,24 @@
             *) continue ;;
           esac
           component="${base%-${os}-${arch}*}"
-          set -- "$@" --add "$f" "id=$base,kind=binary,os=$os,arch=$arch,component=$component"
+          set -- "$@" --add "$f" "id=$base,kind=binary,os=$os,arch=$arch,component=$component,audience=runtime"
+        done
+        set -- "$@" --add "dist/dec-runtime-manifest.json" \
+          "id=dec-runtime-manifest,filename=dec-runtime-manifest.json,kind=blob,component=manifest,audience=runtime"
+        # GUI 由对应原生构建节点产出并归一化到 dist/dec-console-<os>-<arch>.<ext>。
+        # 一旦存在 audience=user 产物，人类发布页只展示这些 GUI；四件套仍留在签名协议清单。
+        for f in dist/dec-console-*; do
+          [ -f "$f" ] || continue
+          base=$(basename "$f")
+          case "$base" in
+            dec-console-linux-amd64.*) os=linux; arch=amd64 ;;
+            dec-console-linux-arm64.*) os=linux; arch=arm64 ;;
+            dec-console-darwin-amd64.*) os=darwin; arch=amd64 ;;
+            dec-console-darwin-arm64.*) os=darwin; arch=arm64 ;;
+            dec-console-windows-amd64.*) os=windows; arch=amd64 ;;
+            *) continue ;;
+          esac
+          set -- "$@" --add "$f" "id=dec-console-${os}-${arch},os=$os,arch=$arch,component=console,audience=user"
         done
         ./relkit-bin "$@"
         tar -C ".relkit/staged/${VER}" -czf staged.tar.gz .
@@ -154,6 +201,7 @@
         export GH_TOKEN="$GITHUB_TOKEN"
         ./gh_${GH_VER}_linux_amd64/bin/gh release create "${VERSION}" \
           dist/dec-* \
+          version.json \
           --repo shichao402/Dec \
           --generate-notes \
           --target "$(git rev-parse HEAD)"

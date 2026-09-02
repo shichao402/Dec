@@ -171,6 +171,17 @@ func TestCheckBackgroundReturnsNilWhenCacheIsCurrent(t *testing.T) {
 	}
 }
 
+func TestUpdaterSelectsRuntimeAudience(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
+	updater, err := newUpdater("v1.13.48", "dec-server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updater.ClientSelectors["audience"]; got != "runtime" {
+		t.Fatalf("audience selector = %q, want runtime", got)
+	}
+}
+
 func TestEntryURLsPointAtUpdatesDomain(t *testing.T) {
 	urls := entryURLs()
 	if len(urls) == 0 || !strings.Contains(urls[0], "updates.firoyang.com") {

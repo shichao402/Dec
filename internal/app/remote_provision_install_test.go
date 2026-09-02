@@ -185,6 +185,19 @@ func TestProvisionRejectsInvalidTarget(t *testing.T) {
 	}
 }
 
+func TestProvisionVersionMustBeReleaseSemver(t *testing.T) {
+	for _, value := range []string{"v1.13.48", "1.13.48"} {
+		if !validReleaseVersion(value) {
+			t.Fatalf("expected valid version %q", value)
+		}
+	}
+	for _, value := range []string{"dev", "v1.2", "v1.2.x", "v1.2.3;rm"} {
+		if validReleaseVersion(value) {
+			t.Fatalf("expected invalid version %q", value)
+		}
+	}
+}
+
 // install.sh 必须真的带上摘要校验，且缺失摘要时是警告而非静默通过。
 func TestInstallScriptContainsChecksumVerification(t *testing.T) {
 	script, err := installScript()

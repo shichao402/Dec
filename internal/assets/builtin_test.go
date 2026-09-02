@@ -35,7 +35,7 @@ func TestGlobalAssetsIncludeBuiltinSkills(t *testing.T) {
 	}
 }
 
-func TestBuiltinDecSkillUsesTUIMCPSurface(t *testing.T) {
+func TestBuiltinDecSkillUsesConsoleMCPSurface(t *testing.T) {
 	bundle := GlobalAssets()
 	var body string
 	for _, skill := range bundle.Skills {
@@ -56,7 +56,7 @@ func TestBuiltinDecSkillUsesTUIMCPSurface(t *testing.T) {
 			t.Fatalf("内置 dec skill 仍含已下线 CLI %q", banned)
 		}
 	}
-	for _, want := range []string{"dec_pull", "dec_list_assets", "TUI"} {
+	for _, want := range []string{"dec_pull", "dec_list_assets", "Console"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("内置 dec skill 应包含 %q", want)
 		}

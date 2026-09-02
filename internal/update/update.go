@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"cnb.cool/shichao402/relkit/sdk"
+	"cnb.cool/shichao402/relkit/sdk/apply"
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/version"
-	"cnb.cool/shichao402/relkit/sdk"
-	"cnb.cool/shichao402/relkit/sdk/apply"
 )
 
 const (
@@ -74,6 +74,7 @@ func newUpdater(currentVersion, component string) (*sdk.Updater, error) {
 		"os":        runtime.GOOS,
 		"arch":      runtime.GOARCH,
 		"component": component,
+		"audience":  "runtime",
 	}
 	cfg := config.GetSystemConfig()
 	channel := cfg.Channel
@@ -348,11 +349,11 @@ func saveState(state *CheckState) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
-// FormatUpdateHint formats an update hint for stderr before TUI starts.
+// FormatUpdateHint formats an update hint for stderr.
 func FormatUpdateHint(result *CheckResult) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("新版本可用: %s -> %s\n", result.CurrentVersion, result.LatestVersion))
-	sb.WriteString("打开 TUI → Run 页按 u 更新到最新版本")
+	sb.WriteString("打开 Dec Console 的同步页更新到最新版本")
 	return sb.String()
 }
 

@@ -1,12 +1,12 @@
 # Dec 管理客户端
 
-独立 Tauri 2 桌面客户端，管理本机或远程 `dec-server`。不替代 `dec` TUI。
+独立 Tauri 2 桌面客户端，管理本机或远程 `dec-server`。这是 Dec 的人机入口；终端 TUI 已卸下（ADR 0020）。
 
 ## 要求
 
 - Node.js、Rust（stable）
 - Windows 需 WebView2
-- 本机连接会发现或拉起已安装的 `dec-server`
+- 本机连接会检查四件套；缺失或低于 Console 版本时自动安装/升级，再拉起 `dec-server`
 
 ## 开发
 
@@ -31,7 +31,11 @@ npm run tauri dev
 
 受管项目列表保存在目标设备，移除管理不会删除项目文件。Global 请求始终使用空项目路径；项目请求始终携带目标服务器上的绝对路径。
 
-`dec-server` 是一机单例：换过二进制后仍在运行的旧实例不会加载新方法，调用会返回「未知服务方法」。控制台把这类错误翻译成重启提示，可在错误条或「设备设置 → 服务实例」重启服务并重连；本机连接会拉起新二进制。远端与本机生命周期一致——空闲即退出，连接时由连接方经 SSH 按需拉起，因此远端进程不在运行是正常状态；远端只需固定 `management_listen`（隧道要靠约定端口找到它），**不需要**配成常驻服务。自动置备见 [ADR 0019](../Documents/decisions/0019-remote-provisioning.md)。
+`dec-server` 是一机单例。Console 与目标运行时必须版本相等：旧 Console 拒绝控制新服务；
+新 Console 连接本机或已置备 SSH 设备时，会先停旧服务、按自身版本升级完整四件套并重连。
+TLS 直连没有安装通道，版本不等时需改用 SSH。远端与本机生命周期一致——空闲即退出，
+连接时按需拉起，不需要配置常驻服务。见 [ADR 0019](../Documents/decisions/0019-remote-provisioning.md)
+和 [ADR 0021](../Documents/decisions/0021-console-owned-runtime.md)。
 
 ## 界面结构
 
@@ -73,7 +77,7 @@ SHOTS=1 npx playwright test tests/shots.spec.ts   # 输出 .shots/*.png 供人�
 - `tests/layout/probe.ts`：在页面里测量并给出结论——横向溢出、嵌套滚动、被裁掉点不到的控件、遮挡、实际被截断的文本、宽度利用率，以及「一边截断一边空着」的高度错配。纯粹的底部留白只记进 metrics，不判错：内容短时留白是常态。
 - `tests/cases.ts`：用例矩阵与导航步骤，两个 spec 共用。有意为之的布局（居中解锁卡）在用例里显式 `ignore`，不放宽全局阈值。
 
-视口基线取 `tauri.conf.json` 里声明的窗口下限（960×600）、默认尺寸与宽屏，思路与 `internal/tui` 的 golden 快照一致：先声明支持范围，再守住边界。改窗口下限时同步改 `tests/cases.ts` 的 `viewports`。
+视口基线取 `tauri.conf.json` 里声明的窗口下限（960×600）、默认尺寸与宽屏：先声明支持范围，再守住边界。改窗口下限时同步改 `tests/cases.ts` 的 `viewports`。
 
 失败信息里直接给出像素数与元素路径。批量排查时用聚合视图：
 

@@ -16,6 +16,7 @@ import (
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/service"
+	decversion "github.com/shichao402/Dec/internal/version"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -209,8 +210,8 @@ func (s *Server) Shutdown(context.Context, *servicev1.ShutdownRequest) (*service
 	return &servicev1.ShutdownResponse{Accepted: true}, nil
 }
 
-// KeepAlive 是 TUI 门面持有的长连流：其存活期由 streamAuth 拦截器计入 presence，
-// 因此服务在 TUI 打开期间不会空闲退出。MCP 门面不持有此流，只在具体 RPC 执行期间占用 presence。
+// KeepAlive 是 Console 持有的长连流：其存活期由 streamAuth 拦截器计入 presence，
+// 因此服务在 Console 打开期间不会空闲退出。MCP 门面不持有此流，只在具体 RPC 执行期间占用 presence。
 func (s *Server) KeepAlive(stream grpc.BidiStreamingServer[servicev1.KeepAliveRequest, servicev1.KeepAliveResponse]) error {
 	for {
 		if _, err := stream.Recv(); err != nil {
@@ -292,11 +293,28 @@ func (s *Server) streamAuth() grpc.StreamServerInterceptor {
 }
 
 func (s *Server) authorizeRPC(ctx context.Context, fullMethod string) error {
+	if fullMethod != servicev1.DecService_Ping_FullMethodName {
+		clientVersion := ""
+		if values := metadata.ValueFromIncomingContext(ctx, service.ClientVersionHeader); len(values) == 1 {
+			clientVersion = strings.TrimSpace(values[0])
+		}
+		if decversion.Compare(clientVersion, s.version) < 0 {
+			return status.Errorf(codes.FailedPrecondition,
+				"客户端版本 %q 低于 dec-server %q，拒绝控制；请先更新 Console / 门面",
+				clientVersion, s.version)
+		}
+	}
 	if methodAllowedWhenLocked(fullMethod) {
 		return nil
 	}
 	if !s.validTransportToken(ctx) {
 		return status.Error(codes.Unauthenticated, "invalid dec-server token")
+	}
+	// 本机 Console 持有 server.json 的随机 listen token 时，允许在锁定态停止旧服务，
+	// 以便先把四件套原子升级到 Console 版本再重新连接。远端连接拿不到 listen token，
+	// 仍必须 Authenticate 后取得 control token，不能借此关闭服务。
+	if fullMethod == servicev1.DecService_Shutdown_FullMethodName {
+		return nil
 	}
 	if !secrets.InstanceUnlocked() {
 		// Invoke / RunOperation 是通用调度 RPC，是否允许在锁定态执行必须继续由

@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	TokenHeader    = "x-dec-token"
-	FacadeHeader   = "x-dec-facade"
-	ClientIDHeader = "x-dec-client-id"
+	TokenHeader         = "x-dec-token"
+	FacadeHeader        = "x-dec-facade"
+	ClientIDHeader      = "x-dec-client-id"
+	ClientVersionHeader = "x-dec-client-version"
 )
 
 type Client struct {
@@ -62,11 +63,12 @@ func Connect(ctx context.Context, facade, clientID, clientVersion string) (*Clie
 }
 
 // facadeHoldsPresence 决定门面是否持有长连 KeepAlive。
-// 只有 TUI 这类「开着就应保活」的交互门面持有；MCP / CLI 是薄门面，
+// 只有 Console 这类「开着就应保活」的交互门面持有；MCP / CLI 是薄门面，
 // 只在具体 RPC 执行期间由服务端拦截器计入 presence，调用结束即释放，
 // 从而不会在进程变孤儿后长期拖住 dec-server 不空闲退出。
+// 桌面 Console 走 Tauri gRPC KeepAlive，不经过本函数；此处给同进程 Go 门面预留。
 func facadeHoldsPresence(facade string) bool {
-	return facade == "tui"
+	return facade == "console"
 }
 
 func (c *Client) maybeStartPresence(facade, clientID string) {
@@ -83,8 +85,8 @@ func connectExisting(ctx context.Context, facade, clientID, clientVersion string
 	}
 	conn, err := grpc.NewClient(meta.Endpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithUnaryInterceptor(clientUnaryMetadata(meta.Token, facade, clientID)),
-		grpc.WithStreamInterceptor(clientStreamMetadata(meta.Token, facade, clientID)),
+		grpc.WithUnaryInterceptor(clientUnaryMetadata(meta.Token, facade, clientID, clientVersion)),
+		grpc.WithStreamInterceptor(clientStreamMetadata(meta.Token, facade, clientID, clientVersion)),
 	)
 	if err != nil {
 		return nil, err
@@ -196,18 +198,20 @@ func (c *Client) runKeepAliveOnce(ctx context.Context, facade, clientID string) 
 	return true
 }
 
-func clientUnaryMetadata(token, facade, clientID string) grpc.UnaryClientInterceptor {
+func clientUnaryMetadata(token, facade, clientID, clientVersion string) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		ctx = metadata.AppendToOutgoingContext(ctx,
-			TokenHeader, token, FacadeHeader, facade, ClientIDHeader, clientID)
+			TokenHeader, token, FacadeHeader, facade, ClientIDHeader, clientID,
+			ClientVersionHeader, clientVersion)
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
 }
 
-func clientStreamMetadata(token, facade, clientID string) grpc.StreamClientInterceptor {
+func clientStreamMetadata(token, facade, clientID, clientVersion string) grpc.StreamClientInterceptor {
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		ctx = metadata.AppendToOutgoingContext(ctx,
-			TokenHeader, token, FacadeHeader, facade, ClientIDHeader, clientID)
+			TokenHeader, token, FacadeHeader, facade, ClientIDHeader, clientID,
+			ClientVersionHeader, clientVersion)
 		return streamer(ctx, desc, cc, method, opts...)
 	}
 }

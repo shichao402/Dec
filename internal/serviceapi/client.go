@@ -138,7 +138,7 @@ func (a *API) RestartServer(ctx context.Context, opts RestartOptions) error {
 }
 
 // ShutdownIfRunning 在有存活服务时连接并关闭；服务未运行则直接返回。
-// 用于自更新流程：替换二进制后停掉旧进程，不拉起新实例（下次由 TUI/MCP 门面自动拉起）。
+// 用于自更新流程：替换二进制后停掉旧进程，不拉起新实例（下次由 Console/MCP 门面自动拉起）。
 func ShutdownIfRunning(ctx context.Context, clientVersion, reason string) error {
 	if _, err := service.ReadMetadata(); err != nil {
 		return nil

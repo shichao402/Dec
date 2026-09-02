@@ -46,7 +46,7 @@ description: >
    - MCP 写到 `.dec/cache/<vault>/mcp/<name>.json`
 
 5. 同步维护项目配置
-   - 把所属 bundle 写进 `.dec/config.yaml` 的 `enabled_bundles`（TUI **Bundles** 或 `dec_set_assets`）
+   - 把所属 bundle 写进 `.dec/config.yaml` 的 `enabled_bundles`（Console 资产页或 `dec_set_assets`）
    - 并在该 bundle 的 `bundle.yaml` 里登记成员，否则 pull 不会下发
 
 6. 有变量就补变量说明
@@ -54,8 +54,8 @@ description: >
    - 机器级敏感信息放 `~/.dec/local/vars.yaml`
 
 7. 完成后推送
-   - TUI **Run** 页 push，或 Agent `dec_push`（`plane=project`）
-   - 其他项目：Home 初始化 + Bundles 勾选 + Run pull；Agent 用 `dec_init_project` / `dec_set_assets` / `dec_pull`
+   - Console **同步** 页 push，或 Agent `dec_push`（`plane=project`）
+   - 其他项目：引导初始化 + 资产勾选 + 同步 pull；Agent 用 `dec_init_project` / `dec_set_assets` / `dec_pull`
 
 ## 信息不全时的推荐提问模板
 
@@ -84,14 +84,14 @@ description: >
 2. 提炼出通用版本，替换项目特有内容
 3. 在 `.dec/cache/` 下写入目标资产
 4. 更新 `.dec/config.yaml`，必要时补 `.dec/vars.yaml`
-5. TUI **Run** 或 `dec_push`
+5. Console **同步** 或 `dec_push`
 
 ## 输出标准
 
 - 产物必须是可直接 push 的 Dec 资产，而不是停留在分析或建议
 - 如果你对 vault 名、资产名或变量名做了假设，要明确写出来
 - 如果信息不足且用户尚未确认，不要静默创建最终资产
-- 如果当前项目还没初始化 Dec，先走 TUI **Home** 或 `dec_init_project` 再继续
+- 如果当前项目还没初始化 Dec，先走 Console **引导 / 项目** 或 `dec_init_project` 再继续
 - 不要直接修改 `~/.dec/repo.git` 或手工维护的 IDE 托管副本
 - 不要使用已下线的用户面 CLI（`dec pull` / `dec config init` / `dec list` 等）
 

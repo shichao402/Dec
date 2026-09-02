@@ -41,6 +41,10 @@ impl Interceptor for TokenInterceptor {
         request
             .metadata_mut()
             .insert("x-dec-client-id", "dec-console".parse().unwrap());
+        request.metadata_mut().insert(
+            "x-dec-client-version",
+            env!("CARGO_PKG_VERSION").parse().unwrap(),
+        );
         Ok(request)
     }
 }
@@ -472,7 +476,18 @@ pub fn spawn_local_server() -> Result<(), String> {
     } else {
         "dec-server"
     };
-    let mut cmd = std::process::Command::new(exe);
+    let home = std::env::var("DEC_HOME").unwrap_or_else(|_| {
+        dirs::home_dir()
+            .map(|p| p.join(".dec").to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".dec".into())
+    });
+    let installed = std::path::Path::new(&home).join("bin").join(exe);
+    let program = if installed.is_file() {
+        installed
+    } else {
+        std::path::PathBuf::from(exe)
+    };
+    let mut cmd = std::process::Command::new(&program);
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -483,6 +498,7 @@ pub fn spawn_local_server() -> Result<(), String> {
         const DETACHED_PROCESS: u32 = 0x00000008;
         cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
     }
-    cmd.spawn().map_err(|e| format!("拉起 {exe} 失败: {e}"))?;
+    cmd.spawn()
+        .map_err(|e| format!("拉起 {} 失败: {e}", program.display()))?;
     Ok(())
 }

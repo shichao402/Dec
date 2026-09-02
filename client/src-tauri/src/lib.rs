@@ -3,10 +3,13 @@ mod grpc;
 
 use grpc::{read_local_metadata, spawn_local_server, AuthResult, InvokeResult, PingInfo, Session};
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -42,8 +45,187 @@ struct ManagedDevice {
     ssh_target: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ConnectProbe {
+    #[serde(rename = "DecInstalled")]
+    dec_installed: bool,
+    #[serde(rename = "DecVersion")]
+    dec_version: String,
+    #[serde(rename = "ListenReady")]
+    listen_ready: bool,
+}
+
 const CREDENTIAL_SERVICE: &str = "dev.dec.console";
 const REMOTE_PROVISION_PORT: u16 = 47_653;
+const CONSOLE_VERSION: &str = env!("CARGO_PKG_VERSION");
+const INSTALL_SH: &str = include_str!("../../../scripts/install.sh");
+const INSTALL_PS1: &str = include_str!("../../../scripts/install.ps1");
+
+fn dec_home() -> PathBuf {
+    std::env::var_os("DEC_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".dec")))
+        .unwrap_or_else(|| PathBuf::from(".dec"))
+}
+
+fn parse_release_version(value: &str) -> Option<(u64, u64, u64)> {
+    let value = value.trim().trim_start_matches('v');
+    let core = value.split(['-', '+']).next()?;
+    let mut parts = core.split('.');
+    let parsed = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(parsed)
+}
+
+fn compare_versions(left: &str, right: &str) -> Result<Ordering, String> {
+    match (parse_release_version(left), parse_release_version(right)) {
+        (Some(left), Some(right)) => Ok(left.cmp(&right)),
+        _ if left.trim() == right.trim() => Ok(Ordering::Equal),
+        _ => Err(format!("无法比较版本：Console {left} / dec-server {right}")),
+    }
+}
+
+fn reject_newer_server(server_version: &str) -> Result<(), String> {
+    if compare_versions(CONSOLE_VERSION, server_version)? == Ordering::Less {
+        return Err(format!(
+            "Dec Console {CONSOLE_VERSION} 低于目标服务 {server_version}，拒绝连接。请先更新 Console"
+        ));
+    }
+    Ok(())
+}
+
+fn suite_binary(name: &str) -> PathBuf {
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    dec_home().join("bin").join(format!("{name}{suffix}"))
+}
+
+fn installed_suite_version() -> Option<String> {
+    let output = std::process::Command::new(suite_binary("dec"))
+        .arg("--version")
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.split_whitespace()
+        .find(|word| parse_release_version(word).is_some())
+        .map(str::to_owned)
+}
+
+fn suite_complete() -> bool {
+    ["dec", "dec-server", "dec-mcp", "dec-exec"]
+        .iter()
+        .all(|name| suite_binary(name).is_file())
+}
+
+fn stop_legacy_local_server() -> Result<(), String> {
+    let path = dec_home().join("run").join("server.json");
+    let data = fs::read_to_string(&path).map_err(|e| format!("读取 {path:?} 失败: {e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&data).map_err(|e| format!("解析 {path:?} 失败: {e}"))?;
+    let pid = value
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|pid| *pid > 0)
+        .ok_or("旧服务发现文件缺少有效 pid")?;
+    let status = if cfg!(windows) {
+        std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T"])
+            .status()
+    } else {
+        std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status()
+    }
+    .map_err(|e| format!("停止旧 dec-server 失败: {e}"))?;
+    if !status.success() {
+        return Err(format!("停止旧 dec-server 失败（pid {pid}）"));
+    }
+    let _ = fs::remove_file(path);
+    Ok(())
+}
+
+async fn install_local_suite() -> Result<(), String> {
+    if let Some(installed) = installed_suite_version() {
+        match compare_versions(CONSOLE_VERSION, &installed)? {
+            Ordering::Less => {
+                return Err(format!(
+                    "Dec Console {CONSOLE_VERSION} 低于本机运行时 {installed}，拒绝降级。请先更新 Console"
+                ));
+            }
+            Ordering::Equal if suite_complete() => return Ok(()),
+            _ => {}
+        }
+    }
+
+    let mut command = if cfg!(windows) {
+        let mut command = tokio::process::Command::new("powershell.exe");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "-",
+        ]);
+        command
+    } else {
+        let mut command = tokio::process::Command::new("bash");
+        command.arg("-s");
+        command
+    };
+    let mut child = command
+        .env("DEC_NONINTERACTIVE", "1")
+        .env("DEC_VERSION", format!("v{CONSOLE_VERSION}"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("启动 Dec 运行时安装失败: {e}"))?;
+    let script = if cfg!(windows) {
+        INSTALL_PS1.as_bytes()
+    } else {
+        INSTALL_SH.as_bytes()
+    };
+    child
+        .stdin
+        .take()
+        .ok_or("无法打开运行时安装器 stdin")?
+        .write_all(script)
+        .await
+        .map_err(|e| format!("写入运行时安装脚本失败: {e}"))?;
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|e| format!("等待 Dec 运行时安装失败: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!(
+            "初始化本机 Dec 运行时失败：{}",
+            if stderr.trim().is_empty() {
+                stdout.trim()
+            } else {
+                stderr.trim()
+            }
+        ));
+    }
+    let installed = installed_suite_version().ok_or("安装后无法读取 Dec 运行时版本")?;
+    if compare_versions(CONSOLE_VERSION, &installed)? != Ordering::Equal {
+        return Err(format!(
+            "Console 与运行时版本未对齐：Console {CONSOLE_VERSION} / 运行时 {installed}"
+        ));
+    }
+    if !suite_complete() {
+        return Err("安装后 Dec 四件套仍不完整".into());
+    }
+    Ok(())
+}
 
 fn credential_entry(id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(CREDENTIAL_SERVICE, id).map_err(|e| format!("打开系统凭据库失败: {e}"))
@@ -279,6 +461,7 @@ async fn provision_remote_host(
         "Target": { "Alias": target, "Host": "", "User": "", "Port": 0 },
         "Confirm": confirm,
         "Confirmed": false,
+        "Version": format!("v{CONSOLE_VERSION}"),
     });
     let event_root = project_root.clone();
     grpc::run_operation(
@@ -326,6 +509,18 @@ async fn connect_target(
         }
     };
     let mut ping = session.ping().await?;
+    reject_newer_server(&ping.version)?;
+    if compare_versions(CONSOLE_VERSION, &ping.version)? != Ordering::Equal {
+        let hint = if kind == "remote" {
+            "远程直连没有安装通道，请改用 SSH 连接完成运行时升级"
+        } else {
+            "目标运行时初始化后仍未与 Console 对齐"
+        };
+        return Err(format!(
+            "{hint}：Console {CONSOLE_VERSION} / 服务 {}",
+            ping.version
+        ));
+    }
     // 远程/SSH 客户端拿不到 server.json 的 listen token；即使实例已被别的门面
     // 解锁，也必须 Authenticate 取得属于本会话的 control token。
     if kind != "local" {
@@ -347,15 +542,49 @@ fn validate_remote_transport(kind: &str, host: &str, tls: bool) -> Result<(), St
 
 async fn connect_local() -> Result<Session, String> {
     if let Ok((endpoint, token)) = read_local_metadata() {
-        if let Ok(session) = grpc::connect_channel(&endpoint, &token, false, "").await {
-            return Ok(session);
+        if let Ok(mut session) = grpc::connect_channel(&endpoint, &token, false, "").await {
+            if let Ok(ping) = session.ping().await {
+                reject_newer_server(&ping.version)?;
+                if compare_versions(CONSOLE_VERSION, &ping.version)? == Ordering::Equal {
+                    return Ok(session);
+                }
+                let graceful = session
+                    .shutdown(format!(
+                        "Console {CONSOLE_VERSION} 将本机运行时由 {} 升级并对齐",
+                        ping.version
+                    ))
+                    .await
+                    .is_ok();
+                let metadata = dec_home().join("run").join("server.json");
+                if graceful {
+                    for _ in 0..50 {
+                        if !metadata.exists() {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
+                if !graceful || metadata.exists() {
+                    // 兼容尚未支持「锁定态本机 Shutdown」的历史服务。
+                    stop_legacy_local_server()?;
+                }
+            }
         }
     }
+    install_local_suite().await?;
     spawn_local_server()?;
     for _ in 0..50 {
         tokio::time::sleep(Duration::from_millis(100)).await;
         if let Ok((endpoint, token)) = read_local_metadata() {
-            if let Ok(session) = grpc::connect_channel(&endpoint, &token, false, "").await {
+            if let Ok(mut session) = grpc::connect_channel(&endpoint, &token, false, "").await {
+                let ping = session.ping().await?;
+                reject_newer_server(&ping.version)?;
+                if compare_versions(CONSOLE_VERSION, &ping.version)? != Ordering::Equal {
+                    return Err(format!(
+                        "本机运行时初始化后版本仍未对齐：Console {CONSOLE_VERSION} / 服务 {}",
+                        ping.version
+                    ));
+                }
                 return Ok(session);
             }
         }
@@ -393,18 +622,58 @@ async fn ensure_remote_service_running(target: &str) -> Result<(), String> {
         return Err("请填写 SSH 主机".into());
     }
     let mut control = connect_local().await?;
-    let payload = serde_json::json!({
+    let target_payload = serde_json::json!({
         "Alias": target.trim(),
         "Host": "",
         "User": "",
         "Port": 0,
     });
+    let operation_key = format!("device:{}", target.trim().to_lowercase());
+    let probe_result = control
+        .invoke(
+            "probe_remote_host".into(),
+            operation_key.clone(),
+            "global".into(),
+            serde_json::to_vec(&target_payload).map_err(|e| e.to_string())?,
+        )
+        .await?;
+    if !probe_result.error.is_empty() {
+        return Err(probe_result.error);
+    }
+    let probe: ConnectProbe = serde_json::from_str(&probe_result.result_json)
+        .map_err(|e| format!("解析远端探测结果失败: {e}"))?;
+    if !probe.dec_installed || !probe.listen_ready {
+        return Err("目标端尚未初始化，请先在连接页完成一次“一键部署”".into());
+    }
+    reject_newer_server(&probe.dec_version)?;
+    if compare_versions(CONSOLE_VERSION, &probe.dec_version)? == Ordering::Greater {
+        let provision_payload = serde_json::json!({
+            "Alias": target.trim(),
+            "Target": target_payload.clone(),
+            "Confirm": "",
+            "Confirmed": false,
+            "Version": format!("v{CONSOLE_VERSION}"),
+        });
+        let upgraded = grpc::run_operation(
+            control.client_clone(),
+            "provision_remote_host".into(),
+            operation_key.clone(),
+            "global".into(),
+            serde_json::to_vec(&provision_payload).map_err(|e| e.to_string())?,
+            |_| {},
+        )
+        .await?;
+        if !upgraded.error.is_empty() {
+            return Err(format!("远端运行时自动升级失败: {}", upgraded.error));
+        }
+    }
+
     let result = control
         .invoke(
             "ensure_remote_service".into(),
-            format!("device:{}", target.trim().to_lowercase()),
+            operation_key,
             "global".into(),
-            serde_json::to_vec(&payload).map_err(|e| e.to_string())?,
+            serde_json::to_vec(&target_payload).map_err(|e| e.to_string())?,
         )
         .await?;
     if !result.error.is_empty() {
@@ -640,7 +909,25 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{ssh_dial_target, validate_remote_transport, SavedConnection};
+    use super::{
+        compare_versions, parse_release_version, ssh_dial_target, validate_remote_transport,
+        SavedConnection,
+    };
+    use std::cmp::Ordering;
+
+    #[test]
+    fn compares_console_and_runtime_versions() {
+        assert_eq!(parse_release_version("v1.13.48"), Some((1, 13, 48)));
+        assert_eq!(
+            compare_versions("1.14.0", "v1.13.48").unwrap(),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_versions("1.13.48", "v1.13.48").unwrap(),
+            Ordering::Equal
+        );
+        assert!(compare_versions("dev", "v1.13.48").is_err());
+    }
 
     #[test]
     fn ssh_dial_target_splits_devcloud_port() {

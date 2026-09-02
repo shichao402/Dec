@@ -4,7 +4,7 @@ Protobuf 是 Bitwarden **secrets bundle** 绑定声明的 schema 真相源；运
 
 相关文档：[BUNDLE-SECRETS-MODEL.md](../../Documents/BUNDLE-SECRETS-MODEL.md) · [0002 SyncTarget ADR](../../Documents/decisions/0002-secrets-synctarget-root.md) · [ARCHITECTURE.md](../../Documents/ARCHITECTURE.md)
 
-**Bitwarden session 不进 schema、不进磁盘**：session 仅在 Dec/TUI 进程内存中保存；认证通过 TUI 触发的本地 HTTP web unlock 完成。
+**Bitwarden session 不进 schema、不进磁盘**：session 仅在 `dec-server` 进程内存中保存；认证通过本地 HTTP web unlock 完成。
 
 ## 核心模型：SyncTarget + 存储根分离
 

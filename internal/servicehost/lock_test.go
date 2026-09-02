@@ -12,6 +12,7 @@ import (
 	"github.com/shichao402/Dec/internal/service"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -40,7 +41,7 @@ func TestLoopbackListenDefault(t *testing.T) {
 	}
 }
 
-func TestLockedRejectsInvoke(t *testing.T) {
+func TestLockedAllowsLocalShutdownForRuntimeUpgrade(t *testing.T) {
 	t.Setenv("DEC_HOME", t.TempDir())
 	secrets.ClearSession()
 	t.Cleanup(secrets.ClearSession)
@@ -53,17 +54,31 @@ func TestLockedRejectsInvoke(t *testing.T) {
 	}
 	defer api.Close()
 
-	_, err = api.RPC().Shutdown(ctx, &servicev1.ShutdownRequest{Reason: "probe"})
-	if status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("锁定时应拒绝 Shutdown: %v", err)
-	}
-
 	pong, err := api.RPC().Ping(ctx, &servicev1.PingRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if pong.GetUnlocked() {
 		t.Fatal("锁定时 Ping.unlocked 应为 false")
+	}
+
+	resp, err := api.RPC().Shutdown(ctx, &servicev1.ShutdownRequest{Reason: "runtime-upgrade"})
+	if err != nil || !resp.GetAccepted() {
+		t.Fatalf("持有本机 listen token 时锁定态应允许 Shutdown: resp=%v err=%v", resp, err)
+	}
+}
+
+func TestOlderClientCannotControlNewerServer(t *testing.T) {
+	server := &Server{version: "v2.0.0"}
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		service.ClientVersionHeader, "v1.9.9",
+	))
+	err := server.authorizeRPC(ctx, servicev1.DecService_Authenticate_FullMethodName)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("低版本门面应在 Authenticate 前被服务拒绝: %v", err)
+	}
+	if err := server.authorizeRPC(ctx, servicev1.DecService_Ping_FullMethodName); err != nil {
+		t.Fatalf("Ping 必须保持可用以读取服务版本: %v", err)
 	}
 }
 
