@@ -43,14 +43,14 @@ CNB（`.cnb.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json
 | 材料 | 位置 | 说明 |
 |------|------|------|
 | 公钥 | `relkit.json` → `signing.publicKeys[]`；编译内嵌于 `internal/update/embed/relkit.json` | **不要**放进 secrets / Bitwarden |
-| 私钥（本地 SSOT） | `.secrets/bundles/dec/keys/dec-2026.private.pb` | 相对 **含 `relkit.json` 的项目根**（relkit 用配置文件所在目录解析 `privateKeyPath`，与进程 cwd 无关） |
+| 私钥（本地 SSOT） | `.secrets/bundles/dec/keys/dec-2026.private.pb` | 相对 **含 `relkit.json` 的项目根**（relkit 用配置文件所在目录解析 `privateKeyPath`，与进程 cwd 无关）。仅本机应急 `relkit publish` 用 |
 | Bitwarden | folder `bundle/dec`，Note 名 `keys/dec-2026.private.pb` | pull 后落到上述本地路径 |
-| `privateKeyEnv`（`RELKIT_PRIVATE_KEY`） | 可选 / 次要 | 发布机可走环境变量；本机与文档约定以 **文件 path 为主** |
-| `.relkit-keys/*.private.pb` | **已废弃** | 不再作为发布路径；勿再写入 `privateKeyPath` |
+| 私钥（发布机） | `/srv/relkit/dec/.relkit-keys/dec-2026.private.pb` | 产品自己的文件；`relkit-agent` 只读这一份。**不要**用共享环境变量 |
 | `bundle/relkit` 里的产品私钥 | **已迁走** | 产品身份不进 relkit 工具 bundle |
 
 - `.secrets/` 已 gitignore；**禁止**把私钥内容 commit 进 git。
 - `.env` **不用于** relkit 私钥。
+- **不要**设置 `RELKIT_PRIVATE_KEY` / `signing.privateKeyEnv`。
 - `COS_SECRET_*` 只在发布机；CI 只有 `RELKIT_PUBLISH_TOKEN`（无私钥；可选 `RELKIT_PUBLISH_URL`，默认 `https://publish.firoyang.com`）。KeyStore 文件：`relkit_release.env.yml`。
 
 ## 与首次安装 / GitHub 的关系

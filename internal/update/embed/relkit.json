@@ -6,7 +6,6 @@
   "retainVersions": 20,
   "signing": {
     "keyId": "dec-2026",
-    "privateKeyEnv": "RELKIT_PRIVATE_KEY",
     "privateKeyPath": ".secrets/bundles/dec/keys/dec-2026.private.pb",
     "publicKeys": [
       {
