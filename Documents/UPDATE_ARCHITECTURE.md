@@ -21,7 +21,7 @@ Dec 运行时的检查/下载使用 `cnb.cool/shichao402/relkit/sdk`，发布走
 
 ## 发布
 
-CNB（`.cnb.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json` 推 main 自动发版：
+GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json` 推 main 自动发版：
 
 | Git tag | RUP channel | 额外动作 |
 |---------|-------------|---------|
@@ -32,7 +32,7 @@ CNB（`.cnb.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json
 
 1. 改 `version.json` 为 `vX.Y.Z`，提交并推 `main`
 2. 打渠道 tag 并推送（例：`git tag dev/vX.Y.Z && git push origin dev/vX.Y.Z`）
-3. CNB 构建四件套；原生 runner 构建 `dec-console-{os}-{arch}.<ext>`
+3. GitHub Actions 构建四件套；原生 runner 构建 `dec-console-{os}-{arch}.<ext>`
 4. `relkit stage --channel <dev|stable>` 固化 staged 树（无私钥）
 5. runtime 标 `audience=runtime`，Console 标 `audience=user`；同版写入一个 staged tree
 6. 打包 `staged.tar.gz` → `PUT` `https://publish.firoyang.com/v1/staged/dec/{version}`
@@ -51,7 +51,7 @@ CNB（`.cnb.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json
 - `.secrets/` 已 gitignore；**禁止**把私钥内容 commit 进 git。
 - `.env` **不用于** relkit 私钥。
 - **不要**设置 `RELKIT_PRIVATE_KEY` / `signing.privateKeyEnv`。
-- `COS_SECRET_*` 只在发布机；CI 只有 `RELKIT_PUBLISH_TOKEN`（无私钥；可选 `RELKIT_PUBLISH_URL`，默认 `https://publish.firoyang.com`）。KeyStore 文件：`relkit_release.env.yml`。
+- `COS_SECRET_*` 只在发布机；CI 只有 `RELKIT_PUBLISH_TOKEN`（无私钥；可选 `RELKIT_PUBLISH_URL`，默认 `https://publish.firoyang.com`）。放到 GitHub 仓库 Secrets。
 
 ## 与首次安装 / GitHub 的关系
 
@@ -78,4 +78,4 @@ scripts/ensure_relkit_sparse.py --sdk-only
 replace cnb.cool/shichao402/relkit => ./third_party/relkit
 ```
 
-上游 URL 默认 `https://cnb.cool/shichao402/relkit.git`。**ref 默认钉在已验证完整 commit `6c78d29fbd54efa87e6adf189fb9b7b277accd7c`**（relkit `main` 上已推送；短 SHA 不能直接 `git fetch`），发布流水线（`.cnb.yml`）显式传同一完整 SHA，不要跟 `main` HEAD 漂。升级时先在本机验证该 commit，再同步改 `scripts/ensure_relkit_sparse.py` 的 `DEFAULT_REF` 与 `.cnb.yml`。临时覆盖可用 `--ref` / `RELKIT_URL` / `RELKIT_REF`。
+上游 URL 默认 `https://cnb.cool/shichao402/relkit.git`。**ref 默认钉在已验证完整 commit `6c78d29fbd54efa87e6adf189fb9b7b277accd7c`**（relkit `main` 上已推送；短 SHA 不能直接 `git fetch`），发布流水线（`.github/workflows/release.yml`）显式传同一完整 SHA，不要跟 `main` HEAD 漂。升级时先在本机验证该 commit，再同步改 `scripts/ensure_relkit_sparse.py` 的 `DEFAULT_REF` 与 workflow。临时覆盖可用 `--ref` / `RELKIT_URL` / `RELKIT_REF`。
