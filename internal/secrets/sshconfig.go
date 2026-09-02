@@ -127,6 +127,35 @@ func writeSSHManagedState(configPath, managedPath, userBody string, entries []ss
 	return writeSecureFile(configPath, []byte(out), 0600)
 }
 
+// CleanupManagedSSHConfig 删除当前布局的 Dec SSH fragment，并从用户主配置移除 Include。
+// 项目专属 fragment 由 CleanupProjectCredentialScope 处理。
+func CleanupManagedSSHConfig() error {
+	sshDir, err := SSHDir()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(sshDir, "config")
+	raw, err := readFileOrEmpty(configPath)
+	if err != nil {
+		return err
+	}
+	userBody := stripDecIncludeLines(raw)
+	if raw != userBody {
+		if strings.TrimSpace(userBody) == "" {
+			if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		} else if err := writeSecureFile(configPath, []byte(userBody), 0600); err != nil {
+			return err
+		}
+	}
+	managedPath := sshManagedConfigPath(sshDir)
+	if err := os.Remove(managedPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

@@ -102,6 +102,23 @@ func removeProjectGitInclude(projectRoot string) error {
 	return nil
 }
 
+// CleanupProjectCredentialScope 撤销项目 Git includeIf，并删除 Dec 独占的 Git/SSH fragments。
+func CleanupProjectCredentialScope(projectRoot string) error {
+	paths, err := ProjectCredentialScopePaths(projectRoot)
+	if err != nil {
+		return err
+	}
+	if err := removeProjectGitInclude(projectRoot); err != nil {
+		return err
+	}
+	for _, path := range []string{paths.GitFragment, paths.SSHFragment} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 // UpsertProjectGitBlock 原子更新项目 Git fragment 中一个 Dec 管理块，并确保全局
 // includeIf.gitdir 精确指向该工作区。OpenSSH 不参与此条件判断。
 func UpsertProjectGitBlock(projectRoot, begin, end, body string) error {

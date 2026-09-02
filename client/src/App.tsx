@@ -488,6 +488,7 @@ export default function App() {
               {view === 'settings' && (
                 <SettingsPage
                   deviceId={deviceId}
+                  local={current?.kind === 'local'}
                   settings={settings}
                   summary={summary}
                   ping={ping}

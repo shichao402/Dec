@@ -89,6 +89,25 @@ export type DeviceSummary = {
   Projects: ManagedProject[]
 }
 
+export type LocalCleanupItem = {
+  Action: 'delete' | 'modify' | 'revoke'
+  Category: string
+  Path: string
+  Detail: string
+}
+
+export type LocalCleanupPreview = {
+  Items: LocalCleanupItem[]
+  Preserved: string[]
+}
+
+export type LocalCleanupResult = {
+  Deleted: string[]
+  Modified: string[]
+  Revoked: string[]
+  Warnings: string[]
+}
+
 export type DirectoryListing = {
   Current: string
   Parent: string

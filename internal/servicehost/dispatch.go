@@ -122,6 +122,8 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 	switch method {
 	case "load_device_summary":
 		return app.LoadDeviceSummary()
+	case "preview_local_cleanup":
+		return app.PreviewLocalCleanup()
 	case "list_managed_projects":
 		return app.ListManagedProjectStates()
 	case "list_managed_devices":
@@ -431,6 +433,12 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 			return nil, err
 		}
 		return app.ProvisionRemoteHost(ctx, in, reporter)
+	case "cleanup_local_installation":
+		var in app.LocalCleanupInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.CleanupLocalInstallation(ctx, in, reporter)
 	case "pull":
 		return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
 	case "push":
