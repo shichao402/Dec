@@ -3,7 +3,7 @@ param(
 )
 
 # Dec 卸载脚本 (Windows PowerShell)
-# 使用方法: iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/uninstall.ps1 | iex
+# 使用方法: iwr -useb https://raw.githubusercontent.com/shichao402/Dec/main/scripts/uninstall.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8

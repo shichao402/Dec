@@ -26,7 +26,7 @@ CNB（`.cnb.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json
 | Git tag | RUP channel | 额外动作 |
 |---------|-------------|---------|
 | `dev/vX.Y.Z` | `dev` | 仅 COS / RUP |
-| `stable/vX.Y.Z` | `stable` | 另推裸 tag `vX.Y.Z`、`ReleaseLatest`、GitHub Release |
+| `stable/vX.Y.Z` | `stable` | 另推裸 tag `vX.Y.Z`、GitHub Release |
 
 流程：
 
@@ -58,7 +58,7 @@ CNB（`.cnb.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json
 | 场景 | 路径 |
 |------|------|
 | 日常自更新（已装 RUP 客户端） | 只走 `https://updates.firoyang.com/`；失败时排查网络/代理，**不要**改跑 install 脚本 |
-| 全新安装 | **主路径 CNB raw**：`https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.sh`（Windows 换 `install.ps1`） |
+| 全新安装 | **主路径 CNB raw**：`https://cnb.cool/shichao402/Dec/-/git/raw/main/scripts/install.sh`（Windows 换 `install.ps1`） |
 | 安装脚本拉二进制 | 优先 COS RUP artifact：`https://updates.firoyang.com/rup/artifact/dec/{version}/{name}`；GitHub Release 仅脚本内 fallback |
 | GitHub | 文档里的**镜像备份**（脚本 URL / Release asset），不是自更新逃生梯 |
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Dec 一键安装脚本 (Linux/macOS)
-# 主路径: curl -fsSL https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.sh | bash
-# 镜像备份: curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash
+# 主路径: curl -fsSL https://cnb.cool/shichao402/Dec/-/git/raw/main/scripts/install.sh | bash
+# 镜像备份: curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/main/scripts/install.sh | bash
 
 set -e
 
@@ -117,14 +117,14 @@ main() {
     local bin_dir="${install_dir}/bin"
     local binary_path="${bin_dir}/dec"
     local binaries=("dec" "dec-server" "dec-mcp" "dec-exec")
-    local update_branch="${DEC_BRANCH:-ReleaseLatest}"
+    local update_branch="${DEC_BRANCH:-main}"
     local requested_version="${DEC_VERSION:-}"
 
     print_info "检测到平台: ${platform}"
     print_info "安装目录: ${install_dir}"
     print_info "更新分支: ${update_branch}"
 
-    # Console 会钉死自身版本，避免 ReleaseLatest 在构建/传播窗口里与面板错位。
+    # Console 会钉死自身版本，避免主干 version.json 在构建/传播窗口里与面板错位。
     local version_sources=()
     if [ -n "${requested_version}" ]; then
         if ! echo "${requested_version}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then

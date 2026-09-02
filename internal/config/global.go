@@ -491,7 +491,7 @@ func removeLegacyLocalConfig() error {
 const (
 	defaultRepoOwner    = "shichao402"
 	defaultRepoName     = "Dec"
-	defaultUpdateBranch = "ReleaseLatest"
+	defaultUpdateBranch = "main"
 	defaultEntryURL     = "https://updates.firoyang.com/rup/directory/dec.pb"
 )
 

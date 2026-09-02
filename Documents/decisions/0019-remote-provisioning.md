@@ -91,7 +91,7 @@ SSH 凭据只存**引用**（`~/.ssh/config` 别名或 Dec 管理的 `.sshkey` �
 - **SSH 参数**：固定 `BatchMode=yes`（禁交互，否则目标机要求口令时置备静默挂死）、`ConnectTimeout=10`、`StrictHostKeyChecking=accept-new`。
 - **探测用 `sh`、安装用 `bash`**：探测阶段不能假设目标机有 bash；而 `install.sh` 是 `#!/bin/bash` 且用了数组与 `<<<`，因此 **bash 是探测的一等阻断项**。
 - **脚本行尾强制规范化为 LF**：Windows 上 git 可能按 `core.autocrlf` 把脚本 checkout 成 CRLF，喂给远端 bash 会以 `$'\r': command not found` 失败。
-- **`version.json` 摘要结构**：新增 `checksums` 段，key 为产物文件名（与 `install.sh` 拼出的 `${binary}-${platform}` 一致）。摘要必须随 `ReleaseLatest` 提交，否则脚本取不到摘要、校验被降级为警告。
+- **`version.json` 摘要结构**：新增 `checksums` 段，key 为产物文件名（与 `install.sh` 拼出的 `${binary}-${platform}` 一致）。摘要必须随 `main` 提交，否则脚本取不到摘要、校验被降级为警告。
 - **分支名注入防护**：`DEC_BRANCH` 会拼进远端命令行，字符集限制为 `[A-Za-z0-9._/-]`。
 - **存活判定用 `kill -0`，不用「文件存在」**：`run/server.json` 只在正常退出时清理，进程被 `kill -9` 后会残留。仅看文件存在会误判为运行中，从而跳过拉起、去连一个没人监听的端口。
 - **拉起用 `setsid nohup ... < /dev/null &`**：SSH 会话结束会向进程组发 SIGHUP，只靠 `&` 的进程会跟着死；`dec-server` 自身的 `detachedProcessAttributes` 只作用于它拉起的子进程，管不到它自己被谁拉起。stdin 必须切断，否则 SSH 会话不会返回。

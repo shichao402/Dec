@@ -1,6 +1,6 @@
 #!/bin/bash
 # Dec 卸载脚本 (Linux/macOS)
-# 使用方法: curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/uninstall.sh | bash
+# 使用方法: curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/main/scripts/uninstall.sh | bash
 # 跳过确认: curl -fsSL ... | bash -s -- --yes
 
 set -e

@@ -2,7 +2,7 @@
 # Dec 发布准备脚本
 # 说明：版本号写入 version.json 并推 main 后，再打渠道 tag 触发 CNB：
 #   dev/vX.Y.Z     → RUP channel=dev
-#   stable/vX.Y.Z  → RUP channel=stable（另推 ReleaseLatest / GitHub Release）
+#   stable/vX.Y.Z  → RUP channel=stable（另推 GitHub Release）
 # 用法：./scripts/release-yolo.sh [版本号]
 #       不传版本号时，仅执行本地测试与构建检查。
 #       传入版本号时，会先更新 version.json。
@@ -104,7 +104,7 @@ PY
     echo "   说明："
     echo "   - 发版由 CNB 监听渠道 tag（见 .cnb.yml），不再靠改 version.json 推 main 自动发"
     echo "   - 开发渠道：dev/${target} → RUP channel=dev"
-    echo "   - 正式渠道：stable/${target} → RUP channel=stable + ReleaseLatest / GitHub Release"
+    echo "   - 正式渠道：stable/${target} → RUP channel=stable + GitHub Release"
     echo ""
     if [ -n "$1" ]; then
         echo "   推荐命令："

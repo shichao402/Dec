@@ -353,7 +353,7 @@ type provisionRemoteParams struct {
 	Alias     string   `json:"alias" jsonschema:"受管设备别名；留空时使用 ssh_target"`
 	SSHTarget string   `json:"ssh_target" jsonschema:"系统 ssh 目标：Host 别名、主机名、user@host，或 host:36000；凭据由 ~/.ssh/config / ssh-agent 提供"`
 	Tags      []string `json:"tags,omitempty" jsonschema:"设备标签，仅用于登记分类"`
-	Branch    string   `json:"branch,omitempty" jsonschema:"安装分支，留空默认 ReleaseLatest"`
+	Branch    string   `json:"branch,omitempty" jsonschema:"安装分支，留空默认 main"`
 	Confirmed bool     `json:"confirmed" jsonschema:"首次置备会远程执行安装脚本，必须显式设为 true"`
 }
 

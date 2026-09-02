@@ -16,24 +16,24 @@ import (
 
 func TestManualInstallCommand(t *testing.T) {
 	linuxCmd := manualInstallCommand("linux", false)
-	if linuxCmd != "curl -fsSL https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.sh | bash" {
+	if linuxCmd != "curl -fsSL https://cnb.cool/shichao402/Dec/-/git/raw/main/scripts/install.sh | bash" {
 		t.Fatalf("linux 安装命令错误: %s", linuxCmd)
 	}
 
 	windowsCmd := manualInstallCommand("windows", false)
-	if windowsCmd != "iwr -useb https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.ps1 | iex" {
+	if windowsCmd != "iwr -useb https://cnb.cool/shichao402/Dec/-/git/raw/main/scripts/install.ps1 | iex" {
 		t.Fatalf("windows 安装命令错误: %s", windowsCmd)
 	}
 }
 
 func TestMirrorInstallCommandUsesGitHubBackup(t *testing.T) {
 	linuxCmd := manualInstallCommand("linux", true)
-	if linuxCmd != "curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.sh | bash" {
+	if linuxCmd != "curl -fsSL https://raw.githubusercontent.com/shichao402/Dec/main/scripts/install.sh | bash" {
 		t.Fatalf("linux 镜像安装命令错误: %s", linuxCmd)
 	}
 
 	windowsCmd := manualInstallCommand("windows", true)
-	if windowsCmd != "iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex" {
+	if windowsCmd != "iwr -useb https://raw.githubusercontent.com/shichao402/Dec/main/scripts/install.ps1 | iex" {
 		t.Fatalf("windows 镜像安装命令错误: %s", windowsCmd)
 	}
 }

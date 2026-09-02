@@ -41,7 +41,7 @@ type ProvisionRemoteHostInput struct {
 	// Confirmed 供 MCP 沿用 dec_delete 的 confirmed=true 惯例。
 	Confirmed bool
 
-	// Branch 覆盖 DEC_BRANCH，默认 ReleaseLatest。
+	// Branch 覆盖 DEC_BRANCH，默认 main。
 	Branch string
 	// Version 钉死由 Console 管理的运行时版本（vMAJOR.MINOR.PATCH）。
 	// 留空时保持人工安装语义：安装所选分支的最新版本。

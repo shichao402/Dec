@@ -1,6 +1,6 @@
 # Dec 一键安装脚本 (Windows PowerShell)
-# 主路径: iwr -useb https://cnb.cool/shichao402/Dec/-/git/raw/ReleaseLatest/scripts/install.ps1 | iex
-# 镜像备份: iwr -useb https://raw.githubusercontent.com/shichao402/Dec/ReleaseLatest/scripts/install.ps1 | iex
+# 主路径: iwr -useb https://cnb.cool/shichao402/Dec/-/git/raw/main/scripts/install.ps1 | iex
+# 镜像备份: iwr -useb https://raw.githubusercontent.com/shichao402/Dec/main/scripts/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -59,14 +59,14 @@ function Install-Dec {
     $binDir = Join-Path $installDir "bin"
     $binaryPath = Join-Path $binDir "dec.exe"
     $binaries = @("dec", "dec-server", "dec-mcp", "dec-exec")
-    $updateBranch = if ($env:DEC_BRANCH) { $env:DEC_BRANCH } else { "ReleaseLatest" }
+    $updateBranch = if ($env:DEC_BRANCH) { $env:DEC_BRANCH } else { "main" }
     $requestedVersion = $env:DEC_VERSION
 
     Write-ColorOutput "检测到平台: $platform" -Type "Info"
     Write-ColorOutput "安装目录: $installDir" -Type "Info"
     Write-ColorOutput "更新分支: $updateBranch" -Type "Info"
 
-    # Console 会钉死自身版本，避免 ReleaseLatest 在构建/传播窗口里与面板错位。
+    # Console 会钉死自身版本，避免主干 version.json 在构建/传播窗口里与面板错位。
     if ($requestedVersion) {
         if ($requestedVersion -notmatch '^v\d+\.\d+\.\d+$') {
             Write-ColorOutput "DEC_VERSION 无效: $requestedVersion" -Type "Error"

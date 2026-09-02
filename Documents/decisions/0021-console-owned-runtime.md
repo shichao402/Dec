@@ -20,7 +20,7 @@
 
 ## 版本与完整性
 
-Console 调安装脚本时传 `DEC_VERSION=vMAJOR.MINOR.PATCH` 和 `DEC_NONINTERACTIVE=1`。发布为每个版本写出 `dec-runtime-manifest.json`，安装脚本据此取得该版本四件套及 sha256，不读取可能已前移的 `ReleaseLatest` 来猜版本。
+Console 调安装脚本时传 `DEC_VERSION=vMAJOR.MINOR.PATCH` 和 `DEC_NONINTERACTIVE=1`。发布为每个版本写出 `dec-runtime-manifest.json`，安装脚本据此取得该版本四件套及 sha256，不读取可能已前移的主干 `version.json` 来猜版本。
 
 运行时 artifact 使用 `audience=runtime`；Console 原生包使用 `audience=user`。签名协议保留两类 artifact。unsigned browse 的目标规则是：一旦存在 `audience=user`，只展示用户包；旧 release 没有 audience 时继续展示原清单，避免空页。该过滤须随 relkit-serve 发布端升级后才会在公网生效，不能靠 Dec 本地 stage 单方面完成。
 

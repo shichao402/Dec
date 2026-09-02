@@ -271,7 +271,7 @@ func manualInstallCommand(goos string, githubMirror bool) string {
 	cfg := config.GetSystemConfig()
 	branch := cfg.UpdateBranch
 	if branch == "" {
-		branch = "ReleaseLatest"
+		branch = "main"
 	}
 	owner := cfg.RepoOwner
 	if owner == "" {
