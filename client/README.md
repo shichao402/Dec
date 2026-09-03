@@ -11,10 +11,15 @@
 ## 开发
 
 ```bash
+python scripts/build-console.py --prepare-runtime-only
 cd client
 npm install
 npm run tauri dev
 ```
+
+以上命令从仓库根目录执行。`--prepare-runtime-only` 只生成并保留当前平台的
+`src-tauri/resources/runtime/<os>-<arch>/`，不会打完整 Console 包；首次开发或版本变化后需重新运行。
+release 构建仍严格要求内置资源，只有 debug 模式会在资源尚未准备且现有本机运行时可直接连接时跳过缓存预热。
 
 开发前端固定在 `127.0.0.1:59124`（避开 Vite 默认 5173）。debug 窗口在显示前会核对页面里的 `dec-console` 身份标记；对不上或端口上是别的项目，直接退出，避免把主密码框交给别人的前端。不要直接运行 `src-tauri/target/debug/app.exe`——那样不会启动本仓库的 Vite，只会去加载当时占着 `devUrl` 的任意页面。
 

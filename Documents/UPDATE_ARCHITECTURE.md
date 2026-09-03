@@ -11,6 +11,8 @@ Dec 运行时的检查/下载使用 `cnb.cool/shichao402/relkit/sdk`，发布走
 - 默认 channel：`dev`（目前仅个人使用；正式对外再切回 `stable`）
 - selectors：`os` / `arch` / `component` / `audience=runtime`，component 为 `dec`、`dec-server`、`dec-mcp`、`dec-exec`
 - Apply：先把同版本四个组件全部下载并校验，再用 `sdk/apply.ReplaceFile` 替换同一 `bin/` 下的程序（Windows rename-aside + 下次启动清理）
+- Console bundle：每个安装包只带同 `os/arch` 四件套和 `runtime-manifest.json`；首次连接/升级从 resources 校验后以临时文件 + rename 释放到 `~/.dec/bin`，同时缓存到 `~/.dec/runtime-cache/<version>/<os>-<arch>/`
+- SSH 置备：发起端按目标 `os/arch` 命中校验过的缓存则复用，否则请求签名 RUP；只有 RUP head 恰好等于 Console 钉死版本才下载。渠道已有更高版本时提示先更新 Console 或预置旧版本缓存
 
 入口：
 
@@ -32,11 +34,13 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 
 1. 改 `version.json` 为 `vX.Y.Z`，提交并推 `main`
 2. 打渠道 tag 并推送（例：`git tag dev/vX.Y.Z && git push origin dev/vX.Y.Z`）
-3. GitHub Actions 构建四件套；原生 runner 构建 `dec-console-{os}-{arch}.<ext>`
-4. `relkit stage --channel <dev|stable>` 固化 staged 树（无私钥）
-5. runtime 标 `audience=runtime`，Console 标 `audience=user`；同版写入一个 staged tree
+3. GitHub Actions：Ubuntu 交叉编全平台四件套；每个 Console 原生 runner 都准备 Go 与 relkit SDK，编译并内置同平台四件套
+4. `relkit stage --channel <dev|stable>` 把两类产物写入同一次 staged 树（无私钥）
+5. runtime 标 `audience=runtime`，Console 标 `audience=user`
 6. 打包 `staged.tar.gz` → `PUT` `https://publish.firoyang.com/v1/staged/dec/{version}`
-7. `POST /v1/publish` → 发布机签名并写 COS；升级后的 relkit-serve 人类 browse 页只展示 `audience=user`
+7. `POST /v1/publish` → 发布机签名并写 COS
+8. `stable` 的 GitHub Release **只挂** `dec-console-*`；四件套不进人面附件
+9. 人类 browse 页按 audience 过滤依赖 **relkit-serve 发布端**升级，不能靠 Dec 本地 stage 单方面完成
 
 ## 签名密钥
 
@@ -58,11 +62,16 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 | 场景 | 路径 |
 |------|------|
 | 日常自更新（已装 RUP 客户端） | 只走 `https://updates.firoyang.com/`；失败时排查网络/代理，**不要**改跑 install 脚本 |
-| 全新安装 | **主路径 CNB raw**：`https://cnb.cool/shichao402/Dec/-/git/raw/main/scripts/install.sh`（Windows 换 `install.ps1`） |
-| 安装脚本拉二进制 | 优先 COS RUP artifact：`https://updates.firoyang.com/rup/artifact/dec/{version}/{name}`；GitHub Release 仅脚本内 fallback |
-| GitHub | 文档里的**镜像备份**（脚本 URL / Release asset），不是自更新逃生梯 |
+| 全新安装 | [发布页](https://update.firoyang.com/dec.html) 下载当前平台 **Dec Console**（安装包内含同平台四件套） |
+| 本机首次连接/升级 | Console 从内置 resources 校验并原子释放四件套到 `~/.dec/bin/`，同时预热同平台缓存，不联网；较新运行时仍拒绝降级 |
+| SSH 置备 | 发起端按目标 os/arch 复用经摘要校验的 `runtime-cache`，缺则 RUP 下载到发起端缓存，再通过系统 SSH 推送；目标机不需要 curl、bash 或公网 |
+| GitHub Release | `stable` 上 Console 安装包的镜像备份，不挂四件套，也不是自更新逃生梯 |
 
 更老的、尚无 RUP 的 Dec：靠历史版本链跳到第一个含 RUP 的版本，而不是在失败提示里推销重装。
+
+离线边界：同平台套件由 Console 安装包保证；异平台在发起端无网且 `runtime-cache` 未命中时无法取得可信产物，置备会明确失败。缓存以 lock + 临时目录 + rename 防止并发读到半成品，并在每次命中时重验摘要。
+
+RUP 限制：当前 SDK 的 chain 选择最高可达版本，不支持任意历史版本直取。因此旧 Console 在缓存未命中且渠道已前移时不会下载 head 冒充旧版本，而是失败并要求更新 Console 或预先准备对应缓存。SSH 传输后优先在目标用 `sha256sum` / `shasum -a 256` 逐件复验；无 hash 工具时降级为四组件 `--version`，并在激活失败时 best-effort 回滚旧套件。
 
 ## 本地依赖
 

@@ -15,6 +15,10 @@ var (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(Version)
+		return
+	}
 	var projectRoot, pName, legacyBundle, plane string
 	root := &cobra.Command{
 		Use:          "dec-exec --p NAME --plane project|user -- <command> [args...]",

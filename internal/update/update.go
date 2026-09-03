@@ -209,7 +209,7 @@ func DoUpdate(currentVersion, latestVersion string) error {
 		name string
 		path string
 	}
-	components := []string{"dec-server", "dec-mcp", "dec-exec", "dec"}
+	components := SuiteComponents
 	downloads := make([]componentDownload, 0, len(components))
 	for _, component := range components {
 		componentUpdater, err := newUpdater(currentVersion, component)

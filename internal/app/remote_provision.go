@@ -141,9 +141,6 @@ type RemoteHostProbe struct {
 
 	HasGit       bool
 	HasSSHKeygen bool
-	HasCurl      bool
-	// HasBash 决定能否注入 scripts/install.sh——该脚本用了 bash 数组与 <<<，sh 跑不了。
-	HasBash bool
 
 	HomeWritable bool
 
@@ -172,7 +169,7 @@ type RemoteHostProbe struct {
 	NextAction string
 }
 
-// decSuiteBinaries 与 scripts/install.sh 的 binaries 数组保持一致。
+// decSuiteBinaries 与 Console 内置/RUP runtime suite 保持一致。
 var decSuiteBinaries = []string{"dec", "dec-server", "dec-mcp", "dec-exec"}
 
 // ProbeRemoteHost 只读探测目标机是否具备被置备的条件。
@@ -229,7 +226,7 @@ done
 if [ -x "${bin_dir}/dec" ]; then
   echo "dec_version=$("${bin_dir}/dec" --version 2>/dev/null | head -1)"
 fi
-for c in git ssh-keygen curl bash; do
+for c in git ssh-keygen; do
   if command -v "$c" >/dev/null 2>&1; then echo "cmd=$c"; fi
 done
 if mkdir -p "${dec_home}" 2>/dev/null && [ -w "${dec_home}" ]; then echo "home_writable=1"; fi
@@ -271,10 +268,6 @@ func parseRemoteProbeOutput(out string, probe *RemoteHostProbe) {
 				probe.HasGit = true
 			case "ssh-keygen":
 				probe.HasSSHKeygen = true
-			case "curl":
-				probe.HasCurl = true
-			case "bash":
-				probe.HasBash = true
 			}
 		case "home_writable":
 			probe.HomeWritable = value == "1"
@@ -320,12 +313,6 @@ func evaluateRemoteProbe(probe *RemoteHostProbe) {
 	if !probe.Supported {
 		probe.NextAction = "改用受支持的 Linux / macOS 目标机"
 		return
-	}
-	if !probe.HasCurl {
-		probe.Blockers = append(probe.Blockers, "目标机缺少 curl：安装脚本无法下载产物")
-	}
-	if !probe.HasBash {
-		probe.Blockers = append(probe.Blockers, "目标机缺少 bash：安装脚本依赖 bash 语法，无法执行")
 	}
 	if !probe.HomeWritable {
 		probe.Blockers = append(probe.Blockers, "目标机 ~/.dec 不可写")

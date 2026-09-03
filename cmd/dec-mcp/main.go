@@ -17,7 +17,12 @@ var (
 
 func main() {
 	projectRoot := flag.String("project-root", "", "项目根目录（默认 DEC_PROJECT_ROOT 或当前目录）")
+	showVersion := flag.Bool("version", false, "显示版本号")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(Version)
+		return
+	}
 	if err := decmcp.Run(context.Background(), decmcp.Config{
 		ProjectRoot:   *projectRoot,
 		ClientVersion: Version,

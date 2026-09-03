@@ -1,6 +1,9 @@
 package servicehost
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestLockedInvokeWhitelistIsNarrow(t *testing.T) {
 	allowed := []string{
@@ -39,5 +42,21 @@ func TestLockedOperationWhitelistOnlyAllowsProvision(t *testing.T) {
 		if operationAllowedWhenLocked(operation) {
 			t.Fatalf("操作 %q 不得在锁定态放行", operation)
 		}
+	}
+}
+
+func TestProvisionOperationDefaultsToServerVersion(t *testing.T) {
+	payload := pinProvisionVersion([]byte(`{"Target":{"Alias":"box"}}`), "v1.13.48")
+	var values map[string]any
+	if err := json.Unmarshal(payload, &values); err != nil {
+		t.Fatal(err)
+	}
+	if values["Version"] != "v1.13.48" {
+		t.Fatalf("Version = %#v", values["Version"])
+	}
+
+	explicit := []byte(`{"Version":"v1.12.0"}`)
+	if got := string(pinProvisionVersion(explicit, "v1.13.48")); got != string(explicit) {
+		t.Fatalf("显式版本不应被覆盖: %s", got)
 	}
 }

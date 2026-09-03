@@ -46,8 +46,6 @@ func TestProbeCleanLinuxHostIsProvisionable(t *testing.T) {
 		"arch=x86_64",
 		"cmd=git",
 		"cmd=ssh-keygen",
-		"cmd=curl",
-		"cmd=bash",
 		"home_writable=1",
 		"spawn=both",
 	}, "\n"))
@@ -91,8 +89,6 @@ func TestProbeMissingServiceManagerDoesNotBlock(t *testing.T) {
 		"arch=x86_64",
 		"cmd=git",
 		"cmd=ssh-keygen",
-		"cmd=curl",
-		"cmd=bash",
 		"home_writable=1",
 		"spawn=nohup",
 	}, "\n"))
@@ -115,8 +111,6 @@ func TestProbeMissingSpawnCapabilityBlocks(t *testing.T) {
 		"arch=x86_64",
 		"cmd=git",
 		"cmd=ssh-keygen",
-		"cmd=curl",
-		"cmd=bash",
 		"home_writable=1",
 		"spawn=none",
 	}, "\n"))
@@ -140,8 +134,6 @@ func TestProbeServerNotRunningIsNotABlocker(t *testing.T) {
 		"binary=dec-exec",
 		"cmd=git",
 		"cmd=ssh-keygen",
-		"cmd=curl",
-		"cmd=bash",
 		"home_writable=1",
 		"spawn=both",
 		"listen=" + RemoteProvisionListen,
@@ -158,12 +150,9 @@ func TestProbeServerNotRunningIsNotABlocker(t *testing.T) {
 	}
 }
 
-func TestProbeMissingCurlAndUnwritableHomeBlock(t *testing.T) {
+func TestProbeUnwritableHomeBlocks(t *testing.T) {
 	probe := parseProbe(t, "os=Linux\narch=x86_64\nspawn=both\n")
 
-	if !hasSubstring(probe.Blockers, "curl") {
-		t.Fatalf("缺 curl 应阻断: %v", probe.Blockers)
-	}
 	if !hasSubstring(probe.Blockers, "不可写") {
 		t.Fatalf("~/.dec 不可写应阻断: %v", probe.Blockers)
 	}
@@ -172,26 +161,6 @@ func TestProbeMissingCurlAndUnwritableHomeBlock(t *testing.T) {
 	}
 	if !strings.Contains(probe.NextAction, "阻断") {
 		t.Fatalf("建议动作应指向解决阻断，实际 %q", probe.NextAction)
-	}
-}
-
-// install.sh 是 #!/bin/bash 且用了数组与 <<<，目标机没有 bash 就注入不了。
-func TestProbeMissingBashBlocks(t *testing.T) {
-	probe := parseProbe(t, strings.Join([]string{
-		"os=Linux",
-		"arch=x86_64",
-		"cmd=git",
-		"cmd=ssh-keygen",
-		"cmd=curl",
-		"home_writable=1",
-		"spawn=both",
-	}, "\n"))
-
-	if probe.HasBash {
-		t.Fatal("未输出 cmd=bash 时应为 false")
-	}
-	if !hasSubstring(probe.Blockers, "bash") {
-		t.Fatalf("缺 bash 应阻断: %v", probe.Blockers)
 	}
 }
 
@@ -207,8 +176,6 @@ func TestProbeFullyProvisionedHost(t *testing.T) {
 		"dec_version=dec version v1.4.2",
 		"cmd=git",
 		"cmd=ssh-keygen",
-		"cmd=curl",
-		"cmd=bash",
 		"home_writable=1",
 		"spawn=both",
 		"listen=" + RemoteProvisionListen,
@@ -246,8 +213,6 @@ func TestProbeConflictingListenWarns(t *testing.T) {
 		"binary=dec-exec",
 		"cmd=git",
 		"cmd=ssh-keygen",
-		"cmd=curl",
-		"cmd=bash",
 		"home_writable=1",
 		"spawn=both",
 		"listen=127.0.0.1:59999",
@@ -269,8 +234,6 @@ func TestProbeListenValueStripsQuotes(t *testing.T) {
 		"os=Linux",
 		"arch=x86_64",
 		"cmd=git",
-		"cmd=curl",
-		"cmd=bash",
 		"home_writable=1",
 		"spawn=both",
 		`listen="127.0.0.1:47653"`,

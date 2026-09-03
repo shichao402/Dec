@@ -1,40 +1,9 @@
 package app
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
-
-// 内嵌脚本必须与仓库源文件一致，否则注入远端的会是过期副本。
-func TestEmbeddedInstallScriptMatchesRepoSSOT(t *testing.T) {
-	embedded, err := embeddedScripts.ReadFile("embed/install.sh")
-	if err != nil {
-		t.Fatalf("读取内嵌脚本失败: %v", err)
-	}
-	onDisk, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install.sh"))
-	if err != nil {
-		t.Fatalf("读取仓库脚本失败: %v", err)
-	}
-	if normalizeScriptNewlines(string(embedded)) != normalizeScriptNewlines(string(onDisk)) {
-		t.Fatal("internal/app/embed/install.sh 与 scripts/install.sh 不一致；请运行: go generate ./internal/app")
-	}
-}
-
-// 注入远端的脚本必须是 LF：CRLF 会让远端 bash 报 $'\r': command not found。
-func TestInstallScriptHasNoCarriageReturn(t *testing.T) {
-	script, err := installScript()
-	if err != nil {
-		t.Fatalf("installScript() 失败: %v", err)
-	}
-	if strings.Contains(script, "\r") {
-		t.Fatal("注入远端的脚本不得包含 CR，否则远端 bash 解析失败")
-	}
-	if !strings.Contains(script, "#!/bin/bash") {
-		t.Fatal("脚本内容不完整")
-	}
-}
 
 func TestNormalizeScriptNewlines(t *testing.T) {
 	if got := normalizeScriptNewlines("a\r\nb\rc\nd"); got != "a\nb\nc\nd" {
@@ -195,37 +164,5 @@ func TestProvisionVersionMustBeReleaseSemver(t *testing.T) {
 		if validReleaseVersion(value) {
 			t.Fatalf("expected invalid version %q", value)
 		}
-	}
-}
-
-// install.sh 必须真的带上摘要校验，且缺失摘要时是警告而非静默通过。
-func TestInstallScriptContainsChecksumVerification(t *testing.T) {
-	script, err := installScript()
-	if err != nil {
-		t.Fatalf("installScript() 失败: %v", err)
-	}
-	for _, want := range []string{
-		"extract_checksum",
-		"compute_sha256",
-		"产物校验失败",
-		"未提供产物摘要",
-		"产物校验通过",
-	} {
-		if !strings.Contains(script, want) {
-			t.Fatalf("安装脚本缺少 %q，摘要校验未落地", want)
-		}
-	}
-	// 校验失败必须删除产物并中止，不能留下一个未验证的二进制。
-	idx := strings.Index(script, "产物校验失败")
-	if idx < 0 {
-		t.Fatal("未找到校验失败分支")
-	}
-	tail := script[idx:]
-	window := len(tail)
-	if window > 400 {
-		window = 400
-	}
-	if !strings.Contains(tail[:window], "exit 1") {
-		t.Fatal("校验失败必须中止安装")
 	}
 }

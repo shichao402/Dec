@@ -47,6 +47,8 @@ logs/
 *.log
 relkit-bin
 relkit-bin.exe
+client/src-tauri/resources/runtime/*
+!client/src-tauri/resources/runtime/.gitkeep
 
 # 测试环境
 .test-install/

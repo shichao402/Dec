@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -383,7 +384,11 @@ func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.Se
 	})
 	workspace := app.NewWorkspace(app.WorkspacePlane(req.WorkspacePlane), req.ProjectRoot)
 	writer := app.DefaultPWriter()
-	result, runErr := dispatchOperationWorkspace(operationCtx, req.Operation, workspace, req.PayloadJson, reporter, writer)
+	payload := req.PayloadJson
+	if req.Operation == "provision_remote_host" {
+		payload = pinProvisionVersion(payload, s.version)
+	}
+	result, runErr := dispatchOperationWorkspace(operationCtx, req.Operation, workspace, payload, reporter, writer)
 	var resultJSON []byte
 	if runErr == nil {
 		resultJSON, runErr = json.Marshal(result)
@@ -407,6 +412,22 @@ func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.Se
 		return err
 	}
 	return nil
+}
+
+func pinProvisionVersion(payload []byte, serverVersion string) []byte {
+	var values map[string]any
+	if json.Unmarshal(payload, &values) != nil {
+		return payload
+	}
+	if version, _ := values["Version"].(string); strings.TrimSpace(version) != "" {
+		return payload
+	}
+	values["Version"] = strings.TrimSpace(serverVersion)
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return payload
+	}
+	return encoded
 }
 
 func dispatchOperation(ctx context.Context, operation, projectRoot string, payload []byte, reporter app.Reporter) (any, error) {

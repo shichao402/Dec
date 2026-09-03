@@ -3,7 +3,7 @@
 - **状态**：已接受（已实现；真机与发布验收未完）
 - **日期**：2026-08-31
 - **关联**：[0008](0008-service-facade-split.md)、[0017](0017-local-layout-version.md)、[0018](0018-instance-lock-and-console.md)
-- **影响范围**：`dec-server` 新增设备级 provisioning 能力、`dec` 新增 `__service-setup` 内部命令、`internal/config` 暴露 `management_listen` 幂等写入与校验、Console 连接页、`dec-mcp` 工具面、`scripts/install.sh`
+- **影响范围**：`dec-server` 设备级 provisioning、`dec` 的 `__service-setup` 内部命令、运行时缓存与 SSH 推送、Console 连接页、`dec-mcp` 工具面
 
 ## 问题
 
@@ -32,9 +32,9 @@ provisioning 落在 `internal/app`（新增 provisioning 包），经 `internal/
 
 探测**不再**关心 systemd user / launchd / linger 状态——远端不做常驻化，这些信息对置备决策已无影响。
 
-**安装**：`provision_remote_host` 走 `RunOperation`，把 `scripts/install.sh` 经 stdin 注入执行（`ssh 'bash -s'`）。脚本用 `go:embed` 嵌入 `dec-server`，保证注入的脚本与仓库同源、不产生第二份副本，也不依赖目标机先能取到脚本。管道模式下 `[ -t 0 ]` 为假，脚本既有的「自动覆盖安装」与「已是最新且四件套完整则退出 0」正好提供幂等。
+**安装**：`provision_remote_host` 走 `RunOperation`。发起端 `dec-server` 根据 probe 的 `os/arch` 解析 Console 钉死版本的四件套：先查 `~/.dec/runtime-cache/<version>/<os>-<arch>/`；缓存缺失时在发起端请求签名 RUP，并且只在 RUP 解析结果恰好等于 Console 版本时下载。同平台缓存由 Console bundle 预热。随后用系统 SSH 把四个文件流到目标临时目录，校验、chmod 后切换到 `~/.dec/bin`。目标机不执行联网安装脚本，不需要 curl、bash 或公网访问。
 
-**配置**：不在 Go 侧手写远端 YAML。新增 `dec __service-setup` **内部命令**在目标机本地执行，用现成的 config 包幂等写入 `management_listen`（保留其余字段）。**「装二进制」由脚本负责，「写配置」由远端 `dec` 自己负责**——这样配置合并逻辑只有一份实现，不会因远端 schema 升级（0017）而漂移。
+**配置**：不在 Go 侧手写远端 YAML。新增 `dec __service-setup` **内部命令**在目标机本地执行，用现成的 config 包幂等写入 `management_listen`（保留其余字段）。**「装二进制」由发起端缓存 + SSH 推送负责，「写配置」由远端 `dec` 自己负责**——这样配置合并逻辑只有一份实现，不会因远端 schema 升级（0017）而漂移。
 
 命令形态统一到既有的内部命令惯例（`__freshness-check`），**不新建 `service` 子命令族**：console-first 明确要求不新增用户面 Cobra 子命令，而这一步的调用方只有发起端的置备流程，人不会手敲它，与 `__freshness-check` 同类。SSH 非交互执行时没有 TTY，hidden 命令仍可直接调用。
 
@@ -62,9 +62,9 @@ provisioning 落在 `internal/app`（新增 provisioning 包），经 `internal/
 
 ### 5. 安全边界
 
-注入脚本执行本质是远程代码执行，两条硬要求：
+置备会修改远端可执行文件，遵守两条硬要求：
 
-- **产物完整性校验**。`install.sh` 当前只 `curl` 不校验，`version.json` 也只有 `version` 字段。需在发布侧为 `version.json` 增加各产物 `sha256`，`install.sh` 下载后校验；摘要缺失时降级为显式警告而非静默通过。
+- **产物完整性校验**。同平台 Console bundle 携带 `runtime-manifest.json`；跨平台下载由 RUP 签名 manifest 与 artifact sha256 校验。持久缓存每次命中都重验清单和四件套摘要，半成品只存在于临时目录。
 - **首次置备强制显式确认**。MCP 侧沿用 `dec_delete` 的 `confirmed=true` 惯例（`internal/mcp/server.go`），Console 侧对首次置备要求 typed confirm（真实键入目标主机名），不能只弹一个提示框。置备属于 0018 定义的 session 独占动作，不与其他写操作并行。
 
 SSH 凭据只存**引用**（`~/.ssh/config` 别名或 Dec 管理的 `.sshkey` 名，见 0005），私钥内容与口令不进全局配置、不进日志。远端 `dec-server` 仍只监听 loopback，不因置备而放开非 loopback 监听——0018 的「非 loopback 必须 TLS」不变。
@@ -78,7 +78,7 @@ SSH 凭据只存**引用**（`~/.ssh/config` 别名或 Dec 管理的 `.sshkey` �
 ## 实施阶段
 
 1. ~~探测（只读，无副作用）+ Windows 目标机拒绝~~ — **已实施**（`internal/app/remote_provision.go`）
-2. ~~注入安装（embed `install.sh`）+ 发布侧 sha256 与脚本校验~~ — **已实施**（`internal/app/remote_provision_install.go`、`scripts/gen_checksums.py`）
+2. ~~发起端缓存解析 + RUP 下载 + SSH 推送 + 摘要校验~~ — **已实施**（`internal/app/runtime_suite.go`、`internal/update/suite.go`）
 3. ~~`dec __service-setup` 内部命令（`management_listen` 幂等写入）+ SSH 按需拉起与就绪等待~~ — **已实施**（`cmd/service_setup.go`、`internal/config/management_listen.go`、`internal/app/remote_service.go`）
 4. ~~设备登记 + 连接页收口 + `dec_provision_remote` MCP 工具~~ — **已实施**（`internal/config/managed_devices.go`、`client/src/pages/connect-page.tsx`、`client/src-tauri/src/lib.rs`、`internal/mcp/server.go`）
 
@@ -89,10 +89,10 @@ SSH 凭据只存**引用**（`~/.ssh/config` 别名或 Dec 管理的 `.sshkey` �
 - **固定端口**：`RemoteProvisionPort = 47653`，即 `management_listen: 127.0.0.1:47653`。
 - **SSH 客户端**：走系统 `ssh` 命令（`exec.CommandContext`），**不引入** `golang.org/x/crypto/ssh`。与 Console 的 `connect_ssh` 复用同一条信任链（`~/.ssh/config`、ssh-agent、known_hosts），Dec 不接管主机校验与密钥管理，`go.mod` 无新增依赖。
 - **SSH 参数**：固定 `BatchMode=yes`（禁交互，否则目标机要求口令时置备静默挂死）、`ConnectTimeout=10`、`StrictHostKeyChecking=accept-new`。
-- **探测用 `sh`、安装用 `bash`**：探测阶段不能假设目标机有 bash；而 `install.sh` 是 `#!/bin/bash` 且用了数组与 `<<<`，因此 **bash 是探测的一等阻断项**。
-- **脚本行尾强制规范化为 LF**：Windows 上 git 可能按 `core.autocrlf` 把脚本 checkout 成 CRLF，喂给远端 bash 会以 `$'\r': command not found` 失败。
-- **`version.json` 摘要结构**：新增 `checksums` 段，key 为产物文件名（与 `install.sh` 拼出的 `${binary}-${platform}` 一致）。摘要必须随 `main` 提交，否则脚本取不到摘要、校验被降级为警告。
-- **分支名注入防护**：`DEC_BRANCH` 会拼进远端命令行，字符集限制为 `[A-Za-z0-9._/-]`。
+- **目标端依赖**：探测与文件激活均用 POSIX `sh` 和核心文件工具；不要求 bash、curl 或 tar，因此没有新增 tar blocker。`git` 仍是后续 Vault 同步的置备前置。
+- **RUP 历史版本限制**：当前 relkit chain 会选择最高可达版本，没有按任意历史版本直接解析的 SDK API。`CurrentCode=ConsoleCode-1` 只让 Console 版本成为候选，不能保证选中它；若渠道已有更高 head，发起端拒绝下载并提示先更新 Console，或预先准备该版本缓存。绝不以更高版本冒充钉死版本。
+- **传输后校验与回滚**：目标有 `sha256sum` 或 `shasum -a 256` 时逐件核对发起端摘要；两者都没有时降级为四组件 `--version` 校验并明确警告。全部 stage 校验通过后才备份旧四件套并激活；任一步失败按已安装/已备份清单 best-effort 回滚，避免留下混合版本。
+- **离线边界**：同平台缓存由 Console bundle 预热；异平台在发起端无网且缓存未命中时明确失败，目标机是否联网不影响置备。
 - **存活判定用 `kill -0`，不用「文件存在」**：`run/server.json` 只在正常退出时清理，进程被 `kill -9` 后会残留。仅看文件存在会误判为运行中，从而跳过拉起、去连一个没人监听的端口。
 - **拉起用 `setsid nohup ... < /dev/null &`**：SSH 会话结束会向进程组发 SIGHUP，只靠 `&` 的进程会跟着死；`dec-server` 自身的 `detachedProcessAttributes` 只作用于它拉起的子进程，管不到它自己被谁拉起。stdin 必须切断，否则 SSH 会话不会返回。
 - **远端命令走绝对路径 `${DEC_HOME:-$HOME/.dec}/bin/dec`**：非交互 SSH 的 PATH 通常不含 `~/.dec/bin`。
@@ -112,7 +112,7 @@ SSH 凭据只存**引用**（`~/.ssh/config` 别名或 Dec 管理的 `.sshkey` �
 | 第一版含 Windows 远端 | SSH 服务端与服务注册是另一套实现，会拖慢闭环 |
 | 在 Go 侧直接改写远端 `config.yaml` | 绕过 config 包的 kind/version 合并（0017），远端 schema 升级后必然漂移 |
 | 新建 `dec service` 用户面命令族（`service setup` / `service status`） | 违反 console-first「不新增独立 Cobra 子命令」；该步只有置备流程调用，人不手敲，与 `__freshness-check` 同类，故统一为内部 hidden 命令 |
-| 把 `install.sh` 逻辑在 Go 里重写一份 | 安装逻辑分裂成两份，版本比对与幂等规则必然不一致 |
+| 继续向目标注入 `install.sh` | 目标需要 bash 与公网下载，无法满足离线目标；改由发起端校验并 SSH 推送 |
 
 ### 一处已修正的误判
 
@@ -123,7 +123,7 @@ SSH 凭据只存**引用**（`~/.ssh/config` 别名或 Dec 管理的 `.sshkey` �
 ## 后果
 
 - 文档：`client/README.md` 中「服务管理器负责重启」应改为「由连接方经 SSH 按需拉起」；`Documents/ARCHITECTURE.md` 需补设备置备与远端按需拉起链路
-- 发布流程：`version.json` 增加产物摘要，属发布侧改动，需与自更新路径一起验证
-- 测试：探测结果解析、`install.sh` 管道幂等、`management_listen` 幂等写入、`device:<alias>` 互斥键不泄漏为路径、SSH 拉起后的就绪等待与超时
+- 发布流程：每个原生 Console job 生成同平台四件套及内置摘要清单；全平台 runtime artifact 继续发布给跨平台 RUP 缓存
+- 测试：探测结果解析、缓存摘要与篡改拒绝、`management_listen` 幂等写入、`device:<alias>` 互斥键不泄漏为路径、SSH 拉起后的就绪等待与超时
 - 远端空闲退出后进程消失属**预期行为**，不是故障；连接失败时应先尝试拉起再报错
 - 遗留：Windows 远端、批量置备多台设备、以及「希望远端常驻」的场景（如远端需被动接收任务）均留待后续决策

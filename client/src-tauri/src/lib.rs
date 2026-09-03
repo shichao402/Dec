@@ -1,5 +1,6 @@
 mod frontend_guard;
 mod grpc;
+mod runtime_bundle;
 
 use grpc::{read_local_metadata, spawn_local_server, AuthResult, InvokeResult, PingInfo, Session};
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,6 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -58,8 +58,6 @@ struct ConnectProbe {
 const CREDENTIAL_SERVICE: &str = "dev.dec.console";
 const REMOTE_PROVISION_PORT: u16 = 47_653;
 const CONSOLE_VERSION: &str = env!("CARGO_PKG_VERSION");
-const INSTALL_SH: &str = include_str!("../../../scripts/install.sh");
-const INSTALL_PS1: &str = include_str!("../../../scripts/install.ps1");
 
 fn dec_home() -> PathBuf {
     std::env::var_os("DEC_HOME")
@@ -150,7 +148,7 @@ fn stop_legacy_local_server() -> Result<(), String> {
     Ok(())
 }
 
-async fn install_local_suite() -> Result<(), String> {
+async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
     if let Some(installed) = installed_suite_version() {
         match compare_versions(CONSOLE_VERSION, &installed)? {
             Ordering::Less => {
@@ -163,58 +161,7 @@ async fn install_local_suite() -> Result<(), String> {
         }
     }
 
-    let mut command = if cfg!(windows) {
-        let mut command = tokio::process::Command::new("powershell.exe");
-        command.args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "-",
-        ]);
-        command
-    } else {
-        let mut command = tokio::process::Command::new("bash");
-        command.arg("-s");
-        command
-    };
-    let mut child = command
-        .env("DEC_NONINTERACTIVE", "1")
-        .env("DEC_VERSION", format!("v{CONSOLE_VERSION}"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("启动 Dec 运行时安装失败: {e}"))?;
-    let script = if cfg!(windows) {
-        INSTALL_PS1.as_bytes()
-    } else {
-        INSTALL_SH.as_bytes()
-    };
-    child
-        .stdin
-        .take()
-        .ok_or("无法打开运行时安装器 stdin")?
-        .write_all(script)
-        .await
-        .map_err(|e| format!("写入运行时安装脚本失败: {e}"))?;
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|e| format!("等待 Dec 运行时安装失败: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "初始化本机 Dec 运行时失败：{}",
-            if stderr.trim().is_empty() {
-                stdout.trim()
-            } else {
-                stderr.trim()
-            }
-        ));
-    }
+    runtime_bundle::install(app, &dec_home(), CONSOLE_VERSION)?;
     let installed = installed_suite_version().ok_or("安装后无法读取 Dec 运行时版本")?;
     if compare_versions(CONSOLE_VERSION, &installed)? != Ordering::Equal {
         return Err(format!(
@@ -258,9 +205,9 @@ fn read_saved_connections() -> Result<Vec<SavedConnection>, String> {
 }
 
 #[tauri::command]
-async fn list_connections() -> Result<Vec<SavedConnection>, String> {
+async fn list_connections(app: AppHandle) -> Result<Vec<SavedConnection>, String> {
     let mut list = read_saved_connections()?;
-    let mut control = connect_local().await?;
+    let mut control = connect_local(&app).await?;
     let result = control
         .invoke(
             "list_managed_devices".into(),
@@ -306,6 +253,7 @@ async fn list_connections() -> Result<Vec<SavedConnection>, String> {
 
 #[tauri::command]
 async fn save_connection(
+    app: AppHandle,
     mut conn: SavedConnection,
     password: Option<String>,
 ) -> Result<SavedConnection, String> {
@@ -345,13 +293,16 @@ async fn save_connection(
     )
     .map_err(|e| e.to_string())?;
     if conn.kind == "ssh" {
-        register_managed_connection(&conn).await?;
+        register_managed_connection(&app, &conn).await?;
     }
     Ok(conn)
 }
 
-async fn register_managed_connection(conn: &SavedConnection) -> Result<(), String> {
-    let mut control = connect_local().await?;
+async fn register_managed_connection(
+    app: &AppHandle,
+    conn: &SavedConnection,
+) -> Result<(), String> {
+    let mut control = connect_local(app).await?;
     let payload = serde_json::json!({
         "Alias": conn.label.trim(),
         "Target": { "Alias": conn.ssh_host.trim(), "Host": "", "User": "", "Port": 0 },
@@ -373,7 +324,7 @@ async fn register_managed_connection(conn: &SavedConnection) -> Result<(), Strin
 }
 
 #[tauri::command]
-async fn delete_connection(id: String) -> Result<(), String> {
+async fn delete_connection(app: AppHandle, id: String) -> Result<(), String> {
     let local = read_saved_connections()?;
     let alias = if let Some(conn) = local.iter().find(|c| c.id == id) {
         (conn.kind == "ssh").then(|| conn.label.clone())
@@ -393,7 +344,7 @@ async fn delete_connection(id: String) -> Result<(), String> {
         }
     }
     if let Some(alias) = alias {
-        let mut control = connect_local().await?;
+        let mut control = connect_local(&app).await?;
         let payload = serde_json::json!({ "Alias": alias });
         let result = control
             .invoke(
@@ -420,12 +371,12 @@ fn load_saved_password(id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn probe_remote_host(ssh_target: String) -> Result<InvokeResult, String> {
+async fn probe_remote_host(app: AppHandle, ssh_target: String) -> Result<InvokeResult, String> {
     let target = ssh_target.trim();
     if target.is_empty() {
         return Err("请填写 SSH 主机".into());
     }
-    let mut control = connect_local().await?;
+    let mut control = connect_local(&app).await?;
     let payload = serde_json::json!({
         "Alias": target,
         "Host": "",
@@ -454,7 +405,7 @@ async fn provision_remote_host(
     if target.is_empty() {
         return Err("请填写 SSH 主机".into());
     }
-    let control = connect_local().await?;
+    let control = connect_local(&app).await?;
     let project_root = format!("device:{}", target.to_lowercase());
     let payload = serde_json::json!({
         "Alias": alias.trim(),
@@ -485,6 +436,7 @@ async fn provision_remote_host(
 
 #[tauri::command]
 async fn connect_target(
+    app: AppHandle,
     kind: String,
     host: String,
     port: u16,
@@ -497,10 +449,10 @@ async fn connect_target(
     disconnect_inner(&state).await;
     validate_remote_transport(&kind, &host, tls)?;
     let mut session = match kind.as_str() {
-        "local" => connect_local().await?,
+        "local" => connect_local(&app).await?,
         "ssh" => {
             let target = ssh_destination(&ssh_user, &ssh_host);
-            ensure_remote_service_running(&target).await?;
+            ensure_remote_service_running(&app, &target).await?;
             connect_ssh("", &target, REMOTE_PROVISION_PORT).await?
         }
         _ => {
@@ -540,7 +492,8 @@ fn validate_remote_transport(kind: &str, host: &str, tls: bool) -> Result<(), St
     Ok(())
 }
 
-async fn connect_local() -> Result<Session, String> {
+async fn connect_local(app: &AppHandle) -> Result<Session, String> {
+    runtime_bundle::prewarm(app, &dec_home(), CONSOLE_VERSION)?;
     if let Ok((endpoint, token)) = read_local_metadata() {
         if let Ok(mut session) = grpc::connect_channel(&endpoint, &token, false, "").await {
             if let Ok(ping) = session.ping().await {
@@ -571,7 +524,7 @@ async fn connect_local() -> Result<Session, String> {
             }
         }
     }
-    install_local_suite().await?;
+    install_local_suite(app).await?;
     spawn_local_server()?;
     for _ in 0..50 {
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -617,11 +570,11 @@ fn ssh_dial_target(raw: &str) -> (String, Option<u16>) {
     (raw.to_string(), None)
 }
 
-async fn ensure_remote_service_running(target: &str) -> Result<(), String> {
+async fn ensure_remote_service_running(app: &AppHandle, target: &str) -> Result<(), String> {
     if target.trim().is_empty() {
         return Err("请填写 SSH 主机".into());
     }
-    let mut control = connect_local().await?;
+    let mut control = connect_local(app).await?;
     let target_payload = serde_json::json!({
         "Alias": target.trim(),
         "Host": "",

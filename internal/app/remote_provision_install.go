@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"strings"
 	"time"
@@ -10,20 +9,7 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
-//go:generate go run generate_install_script.go
-
-// embeddedScripts 内嵌与仓库同源的安装脚本。
-//
-// 不直接引用 ../../scripts/install.sh：go:embed 不允许跨出包目录。
-// 请勿手改 embed/install.sh —— 改 scripts/install.sh 后运行：
-//
-//	go generate ./internal/app
-//
-//go:embed embed/install.sh
-var embeddedScripts embed.FS
-
-// remoteInstallTimeout 覆盖下载四个产物的最坏耗时。
-// install.sh 内部单产物 --max-time 120，四个产物加版本探测，留足余量。
+// remoteInstallTimeout 覆盖发起端 RUP 下载和 SSH 推送四个产物的最坏耗时。
 const remoteInstallTimeout = 12 * time.Minute
 
 // ProvisionRemoteHostInput 是注入安装的入参。
@@ -41,7 +27,7 @@ type ProvisionRemoteHostInput struct {
 	// Confirmed 供 MCP 沿用 dec_delete 的 confirmed=true 惯例。
 	Confirmed bool
 
-	// Branch 覆盖 DEC_BRANCH，默认 main。
+	// Branch 为兼容既有 dec_provision_remote 输入保留；SSH 推送路径不使用它。
 	Branch string
 	// Version 钉死由 Console 管理的运行时版本（vMAJOR.MINOR.PATCH）。
 	// 留空时保持人工安装语义：安装所选分支的最新版本。
@@ -80,7 +66,7 @@ type ProvisionRemoteHostResult struct {
 	// Device 是置备成功后在本机 GlobalConfig 中登记的设备。
 	Device *types.ManagedDevice
 
-	// ChecksumVerified 表示产物摘要校验通过。
+	// ChecksumVerified 表示发起端已校验 bundle/RUP 产物摘要。
 	ChecksumVerified bool
 	// Warnings 汇总不阻断但需知晓的后果（含摘要缺失降级）。
 	Warnings []string
@@ -91,7 +77,7 @@ type ProvisionRemoteHostResult struct {
 
 // AnalyzeProvisionTypedConfirm 判断本次置备是否需要显式确认。
 //
-// 首次置备（目标机尚未装过 Dec）必须确认：注入脚本执行本质是远程代码执行。
+// 首次置备（目标机尚未装过 Dec）必须确认：SSH 推送会写入远端可执行文件。
 // 已装过 Dec 的机器视为已建立信任关系，升级不再反复确认。
 func AnalyzeProvisionTypedConfirm(target RemoteTarget, probe *RemoteHostProbe) ProvisionTypedConfirmSpec {
 	if probe != nil && probe.DecInstalled {
@@ -100,7 +86,7 @@ func AnalyzeProvisionTypedConfirm(target RemoteTarget, probe *RemoteHostProbe) P
 	return ProvisionTypedConfirmSpec{
 		Required: true,
 		Expect:   target.DisplayName(),
-		Reason:   "首次置备将向该主机注入并执行安装脚本（远程代码执行）",
+		Reason:   "首次置备将向该主机推送并安装 Dec 运行时（远程写入）",
 	}
 }
 
@@ -122,10 +108,10 @@ func MatchProvisionTypedConfirm(input string, confirmed bool, spec ProvisionType
 	return got == strings.TrimSpace(spec.Expect)
 }
 
-// ProvisionRemoteHost 向目标机注入 install.sh 并完成置备。
+// ProvisionRemoteHost 从发起端缓存经 SSH 推送四件套并完成置备。
 //
-// 四段流程：探测 → 注入安装 → 写入固定监听端口 → 复探验证。
-// 「装二进制」由注入脚本负责，「写配置」由远端自己的 `dec __service-setup` 负责
+// 四段流程：探测 → 解析并推送运行时 → 写入固定监听端口 → 复探验证。
+// 「写配置」仍由远端自己的 `dec __service-setup` 负责
 // （ADR 0019：避免在 Go 侧手写远端 YAML 而绕过 config 包的合并逻辑）。
 //
 // 置备**不**在远端安装常驻服务：远端与本机生命周期一致，空闲即退出，
@@ -164,35 +150,35 @@ func ProvisionRemoteHost(ctx context.Context, in ProvisionRemoteHostInput, repor
 	if !MatchProvisionTypedConfirm(in.Confirm, in.Confirmed, spec) {
 		return nil, fmt.Errorf("%s；请键入主机名 %q 以确认", spec.Reason, spec.Expect)
 	}
+	releaseVersion := normalizeReleaseVersion(in.Version)
+	if !validReleaseVersion(releaseVersion) {
+		return nil, fmt.Errorf("置备必须指定有效的 Console 运行时版本，实际 %q", in.Version)
+	}
 	result.Warnings = append(result.Warnings, probe.Warnings...)
-	if probe.ServerRunning {
-		emit(reporter, EventInfo, "provision.install", "停止远端旧服务以原子替换运行时", nil)
-		if err := stopRemoteServiceForUpgrade(ctx, in.Target); err != nil {
-			return nil, err
-		}
-	}
 
-	script, err := installScript()
-	if err != nil {
-		return nil, err
-	}
-
-	emit(reporter, EventInfo, "provision.install", "注入安装脚本并执行", &Progress{
+	emit(reporter, EventInfo, "provision.install", "准备并推送目标运行时", &Progress{
 		Phase: "install", Current: 2, Total: totalPhases,
 	})
-	installCtx, cancel := context.WithTimeout(ctx, remoteInstallTimeout)
-	defer cancel()
-	out, runErr := runRemoteBash(installCtx, in.Target, script, in.Branch, in.Version)
-	forwardRemoteOutput(reporter, "provision.install", out)
-	if runErr != nil {
-		return nil, fmt.Errorf("远端安装失败: %s", summarizeSSHError(out, runErr))
-	}
-
-	result.Skipped = strings.Contains(out, "已是最新版本，且四个程序完整")
-	result.ChecksumVerified = strings.Contains(out, "产物校验通过")
-	if strings.Contains(out, "未提供产物摘要") {
-		result.Warnings = append(result.Warnings,
-			"发布端未提供产物 sha256，本次安装未校验完整性（降级警告，见 ADR 0019）")
+	if probe.DecInstalled && normalizeReleaseVersion(probe.DecVersion) == releaseVersion {
+		result.Skipped = true
+		emit(reporter, EventInfo, "provision.install", "目标四件套已是 "+releaseVersion, nil)
+	} else {
+		if probe.ServerRunning {
+			emit(reporter, EventInfo, "provision.install", "停止远端旧服务以原子替换运行时", nil)
+			if err := stopRemoteServiceForUpgrade(ctx, in.Target); err != nil {
+				return nil, err
+			}
+		}
+		installCtx, cancel := context.WithTimeout(ctx, remoteInstallTimeout)
+		defer cancel()
+		suite, err := ResolveRuntimeSuite(installCtx, releaseVersion, probe.OS, probe.Arch, reporter)
+		if err != nil {
+			return nil, err
+		}
+		if err := PushRuntimeSuite(installCtx, in.Target, suite, reporter); err != nil {
+			return nil, err
+		}
+		result.ChecksumVerified = true
 	}
 
 	verifyPhase := 3
@@ -249,41 +235,9 @@ func ProvisionRemoteHost(ctx context.Context, in ProvisionRemoteHostInput, repor
 	return result, nil
 }
 
-// installScript 返回可安全注入远端的安装脚本。
-//
-// 强制规范化为 LF：Windows 上 git 可能按 core.autocrlf 把脚本 checkout 成 CRLF，
-// 而 CRLF 脚本喂给远端 bash 会以 $'\r': command not found 之类的错误失败。
-func installScript() (string, error) {
-	raw, err := embeddedScripts.ReadFile("embed/install.sh")
-	if err != nil {
-		return "", fmt.Errorf("读取内嵌安装脚本失败: %w", err)
-	}
-	return normalizeScriptNewlines(string(raw)), nil
-}
-
 func normalizeScriptNewlines(script string) string {
 	script = strings.ReplaceAll(script, "\r\n", "\n")
 	return strings.ReplaceAll(script, "\r", "\n")
-}
-
-// runRemoteBash 经 stdin 注入脚本并用 bash 执行，脚本不落地到目标机磁盘。
-func runRemoteBash(ctx context.Context, target RemoteTarget, script, branch, version string) (string, error) {
-	env := make([]string, 0, 2)
-	if b := strings.TrimSpace(branch); b != "" {
-		if !validBranchName(b) {
-			return "", fmt.Errorf("非法分支名 %q", b)
-		}
-		env = append(env, "DEC_BRANCH="+b)
-	}
-	if v := strings.TrimSpace(version); v != "" {
-		if !validReleaseVersion(v) {
-			return "", fmt.Errorf("非法版本号 %q", v)
-		}
-		env = append(env, "DEC_VERSION="+v)
-	}
-	env = append(env, "DEC_NONINTERACTIVE=1")
-	command := strings.Join(env, " ") + " bash -s"
-	return runSSHCommand(ctx, target, command, script)
 }
 
 func validReleaseVersion(value string) bool {

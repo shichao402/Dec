@@ -115,26 +115,17 @@ Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 
 ## 快速开始
 
-### 1. 安装
+### 1. 安装 Console
 
-从 [Dec 发布页](https://update.firoyang.com/dec.html) 下载当前平台的 **Dec Console**。
-用户只安装 Console；首次连接本机或 SSH 设备时，Console 会按自身版本检查并初始化目标端
-`dec` / `dec-server` / `dec-mcp` / `dec-exec`，无需手工选择这些运行时文件。
+从 [Dec 发布页](https://update.firoyang.com/dec.html) 下载当前平台的 **Dec Console** 并打开。
+用户只安装面板；首次连接本机或 SSH 设备时，Console 会按自身版本检查并初始化目标端运行时，
+无需另外下载二进制，也不用跑 `install.sh` / `install.ps1`。
 
-`scripts/install.sh` / `install.ps1` 仅作为 Console 和远端置备内部使用的运行时安装器，
-不是终端用户主入口。
+开发者若要从源码跑面板，见下方「从源码跑 Console」。
 
 ### 2. 打开 Console
 
-构建并运行桌面客户端（`client/`）：
-
-```bash
-cd client
-npm install
-npm run tauri dev
-```
-
-发布安装后直接打开 Dec Console。连接本机或远端 `dec-server`；未安装时由连接流程检查并初始化。
+连接本机或远端 `dec-server`；目标端未安装时由连接流程检查并初始化。
 
 Console 主要页面：
 
@@ -287,10 +278,22 @@ editor: code --wait
 
 ## 安装、构建与测试
 
-### 从源码构建
+### 从源码跑 Console
 
 ```bash
 git clone https://github.com/shichao402/Dec.git
+cd Dec
+python scripts/build-console.py --prepare-runtime-only
+cd client
+npm install
+npm run tauri dev
+```
+
+第一条命令只编译并保留当前平台的 Tauri runtime resources，不打完整安装包；源码 debug 需要先执行一次。要求 Node.js、Go、Rust stable；Windows 需要 WebView2。细节见 [client/README.md](client/README.md)。
+
+### 从源码构建运行时
+
+```bash
 cd Dec
 go build -o dec .
 ```
