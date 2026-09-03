@@ -337,15 +337,29 @@ jobs:
             *) AGENT_URL="${AGENT_URL}/v1" ;;
           esac
           SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
-          curl -fsS -X PUT \
-            -H "Authorization: Bearer ${RELKIT_UPLOAD_TOKEN}" \
-            --data-binary @staged.tar.gz \
-            "${AGENT_URL}/staged/dec/${VER}"
-          curl -fsS -X POST \
-            -H "Authorization: Bearer ${RELKIT_UPLOAD_TOKEN}" \
+          agent_curl() {
+            local method="$1" url="$2"
+            shift 2
+            local body
+            body="$(mktemp)"
+            local code
+            code="$(curl -sS -o "$body" -w "%{http_code}" -X "$method" \
+              -H "Authorization: Bearer ${RELKIT_UPLOAD_TOKEN}" \
+              "$@" \
+              "$url")"
+            if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+              echo "agent ${method} ${url} HTTP ${code}: $(head -c 800 "$body")"
+              rm -f "$body"
+              return 1
+            fi
+            cat "$body"
+            rm -f "$body"
+          }
+          agent_curl PUT "${AGENT_URL}/staged/dec/${VER}" \
+            --data-binary @staged.tar.gz
+          agent_curl POST "${AGENT_URL}/publish" \
             -H "Content-Type: application/json" \
-            -d "{\"product\":\"dec\",\"version\":\"${VER}\",\"stagedSha256\":\"${SHA}\",\"idempotencyKey\":\"dec/${CHANNEL}/${VER}/${SHA}\"}" \
-            "${AGENT_URL}/publish"
+            -d "{\"product\":\"dec\",\"version\":\"${VER}\",\"stagedSha256\":\"${SHA}\",\"idempotencyKey\":\"dec/${CHANNEL}/${VER}/${SHA}\"}"
 
       - name: GitHub Release
         shell: bash
