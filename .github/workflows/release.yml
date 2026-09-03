@@ -161,7 +161,7 @@ jobs:
           - name: darwin-arm64
             runner: macos-latest
           - name: darwin-amd64
-            runner: macos-13
+            runner: macos-15-intel
     steps:
       - name: Checkout
         uses: actions/checkout@v4

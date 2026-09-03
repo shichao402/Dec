@@ -40,7 +40,7 @@ SSH 置备由**发起端**解析目标 `os/arch`：
 2. 构建 Console 安装包，归一化为 `dist/dec-console-<os>-<arch>.<ext>`
 3. 构建结束清理生成资源；二进制不纳入仓库
 
-GitHub Actions（`.github/workflows/release.yml`）每个 Console job 都准备 Go 与 relkit SDK，并用 `ubuntu-latest` / `windows-latest` / `macos-latest` / `macos-13` 原生编四套 Console；另用 Ubuntu 交叉编全平台 runtime artifact，publish job 汇进同一次 `relkit stage`。
+GitHub Actions（`.github/workflows/release.yml`）每个 Console job 都准备 Go 与 relkit SDK，并用 `ubuntu-latest` / `windows-latest` / `macos-latest` / `macos-15-intel` 原生编四套 Console（Intel 那一列不能用 `macos-13`：该镜像 2025-12-04 已退役，job 只会一直排队；`macos-15-intel` 是最后一个 x86_64 macOS 镜像，2027-08 后需转 arm64）；另用 Ubuntu 交叉编全平台 runtime artifact，publish job 汇进同一次 `relkit stage`。
 
 Tauri 安装包不能从 Linux 交叉出 NSIS/DMG。relkit-serve 人页 audience 过滤仍是发布端前置条件。
 
