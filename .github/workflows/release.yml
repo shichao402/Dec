@@ -3,8 +3,8 @@
 #   git tag  stable/vX.Y.Z && git push origin  stable/vX.Y.Z  → RUP channel=stable
 # 推送前请先把 version.json 改成对应 vX.Y.Z 并推到 main。
 # 密钥（仓库 Secrets）：
-#   RELKIT_PUBLISH_TOKEN（必填才发 COS）
-#   RELKIT_PUBLISH_URL（可选，默认 https://publish.firoyang.com）
+#   RELKIT_AGENT_TOKEN（必填才发 COS）
+#   RELKIT_AGENT_URL（可选，可写站点根或 /v1，默认 https://publish.firoyang.com/v1）
 # 手动触发：Actions → Release → Run workflow（按 version.json，默认 channel=dev）
 #
 # Console 必须在对应 OS 的 GitHub-hosted runner 上原生构建（Tauri 不能从 Linux 交叉出 NSIS/DMG）。
@@ -215,8 +215,8 @@ jobs:
     needs: [prepare, runtime, console]
     runs-on: ubuntu-latest
     env:
-      RELKIT_PUBLISH_TOKEN: ${{ secrets.RELKIT_PUBLISH_TOKEN }}
-      RELKIT_PUBLISH_URL: ${{ secrets.RELKIT_PUBLISH_URL }}
+      RELKIT_AGENT_TOKEN: ${{ secrets.RELKIT_AGENT_TOKEN }}
+      RELKIT_AGENT_URL: ${{ secrets.RELKIT_AGENT_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -286,14 +286,14 @@ jobs:
         run: |
           set -euo pipefail
           VER="${VERSION#v}"
-          if [ -z "${RELKIT_PUBLISH_TOKEN:-}" ]; then
+          if [ -z "${RELKIT_AGENT_TOKEN:-}" ]; then
             # 渠道 tag 已经推出去了，产物却进不了 RUP：这一步必须红，
             # 否则「CI 全绿 + 什么都没发」只能靠翻日志才发现。
             if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-              echo "RELKIT_PUBLISH_TOKEN 未配置，${GITHUB_REF_NAME} 无法发到 RUP"
+              echo "RELKIT_AGENT_TOKEN 未配置，${GITHUB_REF_NAME} 无法发到 RUP"
               exit 1
             fi
-            echo "RELKIT_PUBLISH_TOKEN 未配置，非渠道 tag 触发，跳过 RUP 发布"
+            echo "RELKIT_AGENT_TOKEN 未配置，非渠道 tag 触发，跳过 RUP 发布"
             exit 0
           fi
           ( cd third_party/relkit && go build -o "$OLDPWD/relkit-bin" ./cmd/relkit )
@@ -330,17 +330,22 @@ jobs:
           done
           ./relkit-bin "$@"
           tar -C ".relkit/staged/${VER}" -czf staged.tar.gz .
-          PUBLISH_URL="${RELKIT_PUBLISH_URL:-https://publish.firoyang.com}"
+          AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com/v1}"
+          AGENT_URL="${AGENT_URL%/}"
+          case "$AGENT_URL" in
+            */v1) ;;
+            *) AGENT_URL="${AGENT_URL}/v1" ;;
+          esac
           SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
           curl -fsS -X PUT \
-            -H "Authorization: Bearer ${RELKIT_PUBLISH_TOKEN}" \
+            -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
             --data-binary @staged.tar.gz \
-            "${PUBLISH_URL}/v1/staged/dec/${VER}"
+            "${AGENT_URL}/staged/dec/${VER}"
           curl -fsS -X POST \
-            -H "Authorization: Bearer ${RELKIT_PUBLISH_TOKEN}" \
+            -H "Authorization: Bearer ${RELKIT_AGENT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{\"product\":\"dec\",\"version\":\"${VER}\",\"stagedSha256\":\"${SHA}\",\"idempotencyKey\":\"dec/${CHANNEL}/${VER}/${SHA}\"}" \
-            "${PUBLISH_URL}/v1/publish"
+            "${AGENT_URL}/publish"
 
       - name: GitHub Release
         shell: bash
