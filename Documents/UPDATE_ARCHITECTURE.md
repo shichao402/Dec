@@ -55,7 +55,7 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 - `.secrets/` 已 gitignore；**禁止**把私钥内容 commit 进 git。
 - `.env` **不用于** relkit 私钥。
 - **不要**设置 `RELKIT_PRIVATE_KEY` / `signing.privateKeyEnv`。
-- `COS_SECRET_*` 只在发布机；CI 只有实例级 `RELKIT_AGENT_TOKEN`（无私钥；可选 `RELKIT_AGENT_URL`，可写站点根或 `/v1`，默认 `https://publish.firoyang.com/v1`）。放到 GitHub 仓库 Secrets；同一 agent 上的产品共享这张实例凭据，不再为每个产品签 `relkit-serve` 上传 token。
+- `COS_SECRET_*` 只在发布机；CI 只有 **该产品** 的 `RELKIT_UPLOAD_TOKEN`（无私钥；可选 `RELKIT_AGENT_URL`，可写站点根或 `/v1`，默认 `https://publish.firoyang.com/v1`）。放到 GitHub 仓库 Secrets。同一 agent 上的每个产品各自一张 token；没有实例级 `RELKIT_AGENT_TOKEN`。
 
 ## 与首次安装 / GitHub 的关系
 
