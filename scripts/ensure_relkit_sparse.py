@@ -46,6 +46,22 @@ def relkit_dir(root: Path) -> Path:
     return root / "third_party" / "relkit"
 
 
+def force_utf8_stdio() -> None:
+    """GitHub Windows runner 的控制台编码是 cp1252，日志里的 `→` 与被转发的
+    子进程输出会让 print 抛 UnicodeEncodeError，进而整步失败。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
+force_utf8_stdio()
+
+
 def log(msg: str) -> None:
     print(msg, flush=True)
 
