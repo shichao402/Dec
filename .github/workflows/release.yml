@@ -287,7 +287,13 @@ jobs:
           set -euo pipefail
           VER="${VERSION#v}"
           if [ -z "${RELKIT_PUBLISH_TOKEN:-}" ]; then
-            echo "RELKIT_PUBLISH_TOKEN 未配置，跳过 RUP 发布"
+            # 渠道 tag 已经推出去了，产物却进不了 RUP：这一步必须红，
+            # 否则「CI 全绿 + 什么都没发」只能靠翻日志才发现。
+            if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+              echo "RELKIT_PUBLISH_TOKEN 未配置，${GITHUB_REF_NAME} 无法发到 RUP"
+              exit 1
+            fi
+            echo "RELKIT_PUBLISH_TOKEN 未配置，非渠道 tag 触发，跳过 RUP 发布"
             exit 0
           fi
           ( cd third_party/relkit && go build -o "$OLDPWD/relkit-bin" ./cmd/relkit )
