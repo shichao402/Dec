@@ -207,7 +207,7 @@ func (inv remoteSecretBundleInventory) has(name string) bool {
 }
 
 // listRemoteSecretBundleNames 枚举 Bitwarden 上的 secrets bundle 短名，并顺带记入 known。
-// 无 session 时返回 nil：候选退化为 known ∪ 已启用，绝不为了列候选去触发 web unlock。
+// 无 session 时返回 nil：候选退化为 known ∪ 已启用，绝不为了列候选去触发 Console 解锁。
 func listRemoteSecretBundleNames(sessionReady bool, stage string, reporter Reporter) []string {
 	return listRemoteSecretBundleInventory(sessionReady, stage, reporter).Names
 }

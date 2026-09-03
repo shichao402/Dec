@@ -27,17 +27,26 @@ func (c *eventCollector) Emit(event app.OperationEvent) {
 }
 
 func (s *Server) Invoke(ctx context.Context, req *servicev1.InvokeRequest) (*servicev1.InvokeResponse, error) {
-	if !secrets.InstanceUnlocked() && !invokeAllowedWhenLocked(req.Method) {
-		return nil, status.Error(codes.FailedPrecondition, lockedRPCMessage)
-	}
 	facade, clientID := callerFromMetadata(ctx)
+	unlockOpts := secrets.EnsureSessionOpts{
+		UnlockTimeout:    time.Duration(req.UnlockTimeoutMs) * time.Millisecond,
+		InteractiveLocal: s.allowsInteractiveUnlock(ctx, facade),
+		Facade:           facade,
+		ClientID:         clientID,
+		Operation:        req.Method,
+		ProjectRoot:      req.ProjectRoot,
+		WorkspacePlane:   req.WorkspacePlane,
+	}
+	if !secrets.InstanceUnlocked() && !invokeAllowedWhenLocked(req.Method) {
+		if err := secrets.EnsureSession(ctx, &unlockOpts); err != nil {
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		}
+	}
+	ctx = secrets.WithEnsureSessionOpts(ctx, unlockOpts)
 	ctx = app.WithUnlockConfig(ctx, app.UnlockConfig{
-		Timeout:        time.Duration(req.UnlockTimeoutMs) * time.Millisecond,
-		Facade:         facade,
-		ClientID:       clientID,
-		Operation:      req.Method,
-		ProjectRoot:    req.ProjectRoot,
-		WorkspacePlane: req.WorkspacePlane,
+		Timeout: unlockOpts.UnlockTimeout, InteractiveLocal: unlockOpts.InteractiveLocal,
+		Facade: facade, ClientID: clientID, Operation: req.Method,
+		ProjectRoot: req.ProjectRoot, WorkspacePlane: req.WorkspacePlane,
 	})
 	if isProjectMutation(req.Method) && s.broker.active(req.ProjectRoot).Active {
 		return nil, status.Error(codes.AlreadyExists, "project busy: 当前有写操作进行中")
@@ -330,8 +339,21 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 }
 
 func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.ServerStreamingServer[servicev1.RunOperationResponse]) (retErr error) {
+	operationCtx := stream.Context()
+	facade, clientID := callerFromMetadata(operationCtx)
+	unlockOpts := secrets.EnsureSessionOpts{
+		UnlockTimeout:    time.Duration(req.UnlockTimeoutMs) * time.Millisecond,
+		InteractiveLocal: s.allowsInteractiveUnlock(operationCtx, facade),
+		Facade:           facade,
+		ClientID:         clientID,
+		Operation:        req.Operation,
+		ProjectRoot:      req.ProjectRoot,
+		WorkspacePlane:   req.WorkspacePlane,
+	}
 	if !secrets.InstanceUnlocked() && !operationAllowedWhenLocked(req.Operation) {
-		return status.Error(codes.FailedPrecondition, lockedRPCMessage)
+		if err := secrets.EnsureSession(operationCtx, &unlockOpts); err != nil {
+			return status.Error(codes.FailedPrecondition, err.Error())
+		}
 	}
 	state, err := s.broker.start(req.ProjectRoot, req.Operation, req.ClientId, req.Facade)
 	if err != nil {
@@ -372,15 +394,17 @@ func (s *Server) RunOperation(req *servicev1.RunOperationRequest, stream grpc.Se
 	})
 	s.ensureProjectRepaired(req.ProjectRoot, reporter)
 
-	operationCtx := stream.Context()
+	unlockOpts.OperationID = state.meta.OperationId
+	operationCtx = secrets.WithEnsureSessionOpts(operationCtx, unlockOpts)
 	operationCtx = app.WithUnlockConfig(operationCtx, app.UnlockConfig{
-		Timeout:        time.Duration(req.UnlockTimeoutMs) * time.Millisecond,
-		Facade:         req.Facade,
-		ClientID:       req.ClientId,
-		Operation:      req.Operation,
-		OperationID:    state.meta.OperationId,
-		ProjectRoot:    req.ProjectRoot,
-		WorkspacePlane: req.WorkspacePlane,
+		Timeout:          unlockOpts.UnlockTimeout,
+		InteractiveLocal: unlockOpts.InteractiveLocal,
+		Facade:           facade,
+		ClientID:         clientID,
+		Operation:        req.Operation,
+		OperationID:      state.meta.OperationId,
+		ProjectRoot:      req.ProjectRoot,
+		WorkspacePlane:   req.WorkspacePlane,
 	})
 	workspace := app.NewWorkspace(app.WorkspacePlane(req.WorkspacePlane), req.ProjectRoot)
 	writer := app.DefaultPWriter()

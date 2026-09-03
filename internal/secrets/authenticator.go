@@ -1,4 +1,4 @@
-package unlock
+package secrets
 
 import (
 	"context"
@@ -7,13 +7,14 @@ import (
 	"sync"
 )
 
-// Authenticator 抽象 Bitwarden unlock API（真实实现可后续替换）。
+// Authenticator abstracts the Bitwarden Identity authentication flow.
+// Implementations must keep password and 2FA intermediate state in memory only.
 type Authenticator interface {
 	Unlock(ctx context.Context, email, password string) (session string, need2FA bool, err error)
 	Verify2FA(ctx context.Context, code string, rememberDevice bool) (session string, err error)
 }
 
-// StubAuthenticator 测试/开发用 unlock 实现。
+// StubAuthenticator is used by unit tests and unconfigured development setups.
 type StubAuthenticator struct {
 	Password string
 	TOTP     string
@@ -23,16 +24,11 @@ type StubAuthenticator struct {
 	state string
 }
 
-// NewStubAuthenticator 创建 stub；Password 为空时接受任意非空密码。
 func NewStubAuthenticator(password, totp, token string) *StubAuthenticator {
 	if token == "" {
 		token = "bw-stub-session"
 	}
-	return &StubAuthenticator{
-		Password: password,
-		TOTP:     totp,
-		Token:    token,
-	}
+	return &StubAuthenticator{Password: password, TOTP: totp, Token: token}
 }
 
 func (a *StubAuthenticator) Unlock(_ context.Context, email, password string) (string, bool, error) {

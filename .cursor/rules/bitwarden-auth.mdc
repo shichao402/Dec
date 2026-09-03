@@ -1,5 +1,5 @@
 ---
-description: Bitwarden 认证约束 — 进程内存 session、web unlock 唯一入口、禁止 session 落盘
+description: Bitwarden 认证约束 — Console 是唯一人工入口，敏感认证状态只在内存
 globs: schema/secrets/**, internal/secrets/**, internal/app/**/*.go, client/**/*.tsx, Documents/**
 alwaysApply: true
 ---
@@ -13,49 +13,50 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 - Bitwarden session **仅在本机单例 `dec-server` 进程内存**中保存；服务进程退出即失效。Console / MCP 门面共享服务 session，但拿不到 session 明文。
 - **禁止**将 session 持久化到磁盘：`~/.dec/secrets/session`、`BW_SESSION` 文件、或任何 env/配置文件形式的 session 缓存均不允许。
 - 不存在 `~/.dec/secrets/state.json` 之类的本地同步状态文件（已删除，见 `Documents/decisions/0001-secrets-landing-path.md`），不要为了缓存 session 而重新引入。
-- `dec-server` 内已有**未过期** session → 直接复用；无 session 或已过期 → 先尝试程序化解锁（见下），失败再阻塞等待 web unlock。
+- `dec-server` 内已有**未过期** session → 直接复用；无 session 或已过期 → 先尝试程序化认证（见下），交互环境再由 Console Authenticate 承载人工认证。
 - 客户端 session 默认寿命 **1 小时**（`DefaultSessionTTL`），对齐云端 Identity `access_token` 常见 `expires_in=3600`。到期后内存凭据作废，不依赖等 401。云端无法调该 TTL。个人账号的「保险库超时」只作用于官方 App，不管 Dec。
+- session、vault/user key、主密码、TOTP、临时密钥、challenge 与 2FA 中间态均不得落盘、写日志或进入 operation 结果；完成、取消、超时或进程退出后清除。
 
 ## 开发 / Agent 程序化解锁
 
 - 新进程需要 Bitwarden API 时，可设置环境变量 **`DEC_BW_PASSWORD`**（主密码，**仅当前进程**，禁止写入代码、配置或磁盘）。
-- 配合 `~/.dec/secrets/device.json` 中的 `two_factor_remember` 令牌，可在无浏览器、无 2FA 的情况下建立 session。
-- **未设置** `DEC_BW_PASSWORD` 或 remember token 失效 / 仍需 2FA 时，**回退 web unlock**（这是预期行为，不是 bug）。
+- 配合 `~/.dec/secrets/device.json` 中的 `two_factor_remember` 令牌，可在无人工输入、无 2FA 的情况下建立 session。
+- **未设置** `DEC_BW_PASSWORD` 或 remember token 失效 / 仍需 2FA 时，本机桌面交互上下文转由 Console；远端无桌面、CI 与其他非交互上下文返回结构化认证错误。
 - Agent / CI 若需程序化解锁，须在**首次拉起 `dec-server` 的门面环境**中设置 `DEC_BW_PASSWORD`；门面不会把密码经 RPC 传给已运行的服务。
 - 集成 / live 测试把凭据放在 `.secrets/dec/integration/bitwarden.yaml`（gitignored），由 `TestMain` 调 `secrets.ApplyIntegrationAuth` 注入进程环境。
 
-## 测试禁止弹窗（硬约束）
+## 测试禁止自动拉起 Console（硬约束）
 
-- **测试绝不能弹出浏览器要求人工输入主密码**。`go test` 构建的二进制中 `unlock.WebUnlockAllowed()` 返回 false，`unlock.Run`（未注入 `OpenBrowser` 时）与 `openSystemBrowser` 直接返回 `ErrWebUnlockBlocked`。
-- 测试拉起 `dec` 子进程时必须传 `DEC_NO_WEB_UNLOCK=1`（子进程不是 test 二进制，检测不到测试环境）。
-- 单测若要覆盖 web unlock 流程，**必须**注入 `Options.OpenBrowser` 桩；漏注入会被 guard 拦下并报错，不要靠改 guard 绕过。
-- **不存在**「强制允许 web unlock」的环境变量开关，也不要新增：这类开关会随 shell 环境继承进 `go test` 及其子进程，把上面这条硬约束静默关掉。真机手工验证直接运行 `dec` 或一次性工具即可，非测试二进制默认允许。
-- 真要拉起解锁页时，`internal/secrets/unlock` 会无条件往 stderr 打一条 `[dec:auth] WEB UNLOCK ...`（含 pid / exe / 是否测试二进制）。排查「为什么卡住了」先 grep 这条。
+- **测试绝不能自动启动或聚焦真实 Console，也不能等待人工输入**。
+- 单测覆盖认证协调时必须注入 Console 协调器桩，显式覆盖成功、取消、超时和不可交互分支。
+- 测试拉起的子进程必须传 `DEC_NO_CONSOLE_LAUNCH=1`；缺 session 时应返回结构化错误，不得用桌面检测猜测可交互。
+- 不得新增“测试中强制允许真实 Console”的环境变量开关；真机手工验证在非测试进程中进行。
 
 ## 设备信任（允许落盘）
 
 - `~/.dec/secrets/device.json` 可持久化 **deviceIdentifier**（UUID）与 **two_factor_remember** 令牌（按 email 索引）。
-- 上述内容用于「记住此设备」跳过 2FA，**不是** access token / session；重启 Dec 仍需 web unlock 输入主密码。
+- 上述内容用于「记住此设备」跳过 2FA，**不是** access token / session；重启 Dec 后仍需 Console 人工认证或 `DEC_BW_PASSWORD` 程序化认证。
 - 禁止在 device.json 或任何配置中存储主密码、access_token、refresh_token。
 
-## Web Unlock（唯一认证入口）
+## Console Authenticate（唯一人工入口）
 
 需要 Bitwarden API 且进程内无 session 时：
 
-1. 启动 `127.0.0.1` 本地 HTTP 服务（随机端口）
-2. 打开系统浏览器到解锁页
-3. 网页收集主密码；若需 2FA/TOTP，同一页继续输入验证码
-4. 成功后 session 写入进程内存，关闭 HTTP 服务，继续 secrets bundle pull 等操作
+1. 本机交互 MCP 拉起尚未运行的 Console，或聚焦已运行的 Console，并等待认证结果。
+2. Console 是主密码、TOTP 与设备登录确认的唯一人工 UI，通过 `Authenticate` 驱动目标服务认证。
+3. 同一目标的并发缺 session 请求共享一次认证协调；成功后唤醒并重试，取消/超时返回结构化错误。
+4. 远端无桌面、CI、测试及明确非交互上下文不得拉起 Console，直接返回以 `CONSOLE_UNLOCK_REQUIRED` / `CONSOLE_UNLOCK_UNAVAILABLE` 开头的结构化错误。
+5. 管理远端设备时由操作者当前 Console 收集输入并提交给远端服务；远端主机本身不需要桌面。
 
-**不要**新增 `dec unlock`、`dec secrets login` 等 CLI 子命令；**不要**在终端内提示输入主密码替代网页流程。
+**不要**新增 `dec unlock`、`dec secrets login` 等 CLI 子命令；**不要**在终端、MCP 参数或服务端临时页面中收集主密码。
 
 ## Console-first
 
-- 认证由 `dec-server` 中的 `internal/app` 调用链在 pull secrets bundle 等操作时 **自动触发**；Console / MCP 只展示服务回传的进度。
-- 设置页配置 Bitwarden 连接信息；解锁仅在缺 session 时按需弹出。
+- 认证由 `dec-server` 中的 `internal/app` 调用链在 pull secrets bundle 等操作时按需请求；Console 负责人工输入与状态呈现。
+- 设置页配置 Bitwarden 连接信息；认证页处理缺 session 的人工流程。
 
-## 实现落点（规划）
+## 实现落点
 
-- `internal/secrets/unlock/`：本地 HTTP 服务、浏览器打开、unlock 回调
+- Console / 门面认证协调器：拉起或聚焦 Console、等待认证结果、区分交互与非交互上下文
 - `internal/secrets/`：`dec-server` 进程内 session 缓存与 Bitwarden API 客户端
 - Console 同步：pull 流程在 secrets 步骤前检查/等待 session；Note 内容落地到 **`.secrets/` SyncTarget 根**（不进 `.dec/cache/`）

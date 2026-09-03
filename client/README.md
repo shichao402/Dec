@@ -23,9 +23,20 @@ release 构建仍严格要求内置资源，只有 debug 模式会在资源尚�
 
 开发前端固定在 `127.0.0.1:59124`（避开 Vite 默认 5173）。debug 窗口在显示前会核对页面里的 `dec-console` 身份标记；对不上或端口上是别的项目，直接退出，避免把主密码框交给别人的前端。不要直接运行 `src-tauri/target/debug/app.exe`——那样不会启动本仓库的 Vite，只会去加载当时占着 `devUrl` 的任意页面。
 
-启动后先选连接（本机 / 远程 gRPC / SSH 隧道），再用 Bitwarden 主密码解锁。`dec-server` 启动后全局锁定，解锁成功后控制权与 BW session 同为 1 小时内存态。
+启动后先选连接（本机 / 远程 gRPC / SSH 隧道）。实例控制权建立后，仅在操作需要
+Bitwarden 时进入 Authenticate 页面；实例控制与 vault session 是两种独立内存态。
+Console 是主密码、TOTP 与设备登录确认的唯一人工入口，服务端不再打开认证页面。
 
 连接会保存 Bitwarden 邮箱。主密码默认不保存；用户明确勾选后才通过统一的系统凭据接口写入 Windows Credential Manager、macOS Keychain 或 Linux Secret Service，不会进入 `connections.json`。取消勾选或删除连接时会同时删除对应凭据。Linux 构建静态携带 D-Bus 客户端依赖，桌面会话仍需提供 Secret Service（如 GNOME Keyring 或 KWallet）。
+
+本机交互 MCP 缺 session 时会拉起尚未运行的 Console，或聚焦现有窗口，并等待用户完成
+Authenticate；并发请求共享同一次认证。管理远端设备时，输入仍发生在操作者当前
+Console，由它提交给目标服务，远端主机无需桌面。远端无桌面/CI/测试等非交互上下文
+不得自动拉起 Console，应收到结构化认证错误。
+
+Bitwarden session、vault/user key、TOTP 与 2FA 中间态均不得落盘；用户明确保存的主密码
+只能进入上述系统凭据库。测试必须注入认证协调桩，禁止启动或聚焦真实 Console。详见
+[ADR 0022](../Documents/decisions/0022-console-bitwarden-unlock.md)。
 
 远程直连必须使用由系统信任根校验的 TLS；若服务只监听 loopback，使用 SSH 隧道。连接成功后的完整流程是：
 
@@ -50,7 +61,7 @@ src/
   App.tsx                  屏幕/视图状态机 + 动作编排，不含具体页面布局
   components/shell/        sidebar（设备 + 导航）、top-bar（面包屑 + 忙碌指示）、page（布局原语）
   components/ui/           button / input / panel / badge / checkbox / feedback 等基础件
-  pages/                   连接、解锁、引导、概览、Global 资产、项目、项目详情、同步、设置
+  pages/                   连接、认证、引导、概览、Global 资产、项目、项目详情、同步、设置
   lib/console.ts           视图枚举、资源锁常量、连接与路径展示的共享函数
 ```
 
@@ -80,7 +91,7 @@ SHOTS=1 npx playwright test tests/shots.spec.ts   # 输出 .shots/*.png 供人�
 - `tests/fixtures/data.ts`：五种数据形态（典型、全空、120 项、超长中文名与深路径、报错态）。只对着「中等数量 + 短名字」改布局，就会漏掉空列表留白与长文本溢出。
 - `tests/fixtures/tauri-mock.ts`：通过 `addInitScript` 注入 Tauri IPC。生产代码里没有 mock 分支，`main.tsx` 也不需要开关。
 - `tests/layout/probe.ts`：在页面里测量并给出结论——横向溢出、嵌套滚动、被裁掉点不到的控件、遮挡、实际被截断的文本、宽度利用率，以及「一边截断一边空着」的高度错配。纯粹的底部留白只记进 metrics，不判错：内容短时留白是常态。
-- `tests/cases.ts`：用例矩阵与导航步骤，两个 spec 共用。有意为之的布局（居中解锁卡）在用例里显式 `ignore`，不放宽全局阈值。
+- `tests/cases.ts`：用例矩阵与导航步骤，两个 spec 共用。有意为之的布局（居中认证卡）在用例里显式 `ignore`，不放宽全局阈值。
 
 视口基线取 `tauri.conf.json` 里声明的窗口下限（960×600）、默认尺寸与宽屏：先声明支持范围，再守住边界。改窗口下限时同步改 `tests/cases.ts` 的 `viewports`。
 

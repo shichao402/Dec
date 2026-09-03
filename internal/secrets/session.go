@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -15,6 +16,7 @@ var (
 	userKey         []byte
 	sessionDeadline time.Time
 	sessionNow      = time.Now
+	sessionChanged  = make(chan struct{})
 )
 
 // SetSession 写入进程内 Bitwarden session（禁止落盘），默认 DefaultSessionTTL 后失效。
@@ -22,6 +24,7 @@ func SetSession(token string) {
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
 	setSessionLocked(token, DefaultSessionTTL)
+	notifySessionChangedLocked()
 }
 
 func setSessionLocked(token string, ttl time.Duration) {
@@ -40,6 +43,7 @@ func expireSessionLocked() {
 	session = ""
 	userKey = nil
 	sessionDeadline = time.Time{}
+	notifySessionChangedLocked()
 }
 
 func dropIfSessionExpiredLocked() {
@@ -62,11 +66,13 @@ func SetUserKey(key []byte) {
 	defer sessionMu.Unlock()
 	if len(key) == 0 {
 		userKey = nil
+		notifySessionChangedLocked()
 		return
 	}
 	copied := make([]byte, len(key))
 	copy(copied, key)
 	userKey = copied
+	notifySessionChangedLocked()
 }
 
 // UserKey 返回当前进程内 vault symmetric key 副本。
@@ -123,4 +129,28 @@ func ClearSession() {
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
 	expireSessionLocked()
+}
+
+func notifySessionChangedLocked() {
+	close(sessionChanged)
+	sessionChanged = make(chan struct{})
+}
+
+// WaitForInstanceUnlock waits until both the Bitwarden session and vault key
+// are present. Every state mutation broadcasts so no Authenticate race is lost.
+func WaitForInstanceUnlock(ctx context.Context) error {
+	for {
+		sessionMu.Lock()
+		if sessionLiveLocked() && len(userKey) == 64 {
+			sessionMu.Unlock()
+			return nil
+		}
+		changed := sessionChanged
+		sessionMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+	}
 }

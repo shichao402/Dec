@@ -19,7 +19,7 @@ const secretsConfigHeader = `# Bitwarden secrets 连接配置
 #   美国公有云（默认）: https://vault.bitwarden.com
 #   欧盟公有云:         https://vault.bitwarden.eu
 #   自托管示例:         https://vault.example.com
-# email: 登录邮箱（web unlock 成功后自动写入）
+# email: 登录邮箱（Console Authenticate 成功后自动写入）
 # project_secrets: 可选；project 级 Bitwarden folder 名，默认 = project_name
 # known_secret_bundles: 本机已知的 secrets-related bundle 名（枚举/pull 后写入，供 Settings 候选；启用缺失 vault 包时再创建）
 # known_secret_bundle_members: bundle 短名 → secrets 条目路径（Note / SSH Key 名，无正文）。有 session 刷新时覆盖写入，无权限时供 Bundles 页回填成员数
@@ -119,7 +119,7 @@ func IsConfigured() (bool, error) {
 	return strings.TrimSpace(cfg.ServerURL) != "", nil
 }
 
-// CanAuthenticate 判定是否具备 web unlock / API 登录所需字段。
+// CanAuthenticate 判定是否具备 Console / API 登录所需字段。
 func (c *Config) CanAuthenticate() bool {
 	return c != nil && c.ServerURL != "" && c.Email != ""
 }
@@ -433,4 +433,3 @@ func applyConfigDefaults(cfg *Config) {
 		cfg.ServerURL = DefaultServerURL
 	}
 }
-

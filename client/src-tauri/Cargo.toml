@@ -29,3 +29,6 @@ dirs = "5"
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 keyring = { version = "3.6.3", features = ["apple-native", "sync-secret-service", "vendored", "windows-native"] }
 sha2 = "0.10"
+tauri-plugin-deep-link = "2.4.10"
+tauri-plugin-single-instance = { version = "2.4.4", features = ["deep-link"] }
+url = "2.5.8"

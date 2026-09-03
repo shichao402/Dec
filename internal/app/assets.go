@@ -492,7 +492,7 @@ func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Works
 // enrichBundleOptionsWithSecretMembers 把 Bitwarden secrets 条目并入 Bundles 页成员列表。
 //
 // 有 session 时枚举 folder 下 Note / SSH Key 名（无正文）并覆盖写入本机缓存；
-// 无 session / NoopClient / 单 bundle 枚举失败时读缓存回填，不为列成员触发 web unlock。
+// 无 session / NoopClient / 单 bundle 枚举失败时读缓存回填，不为列成员触发 Console 解锁。
 func enrichBundleOptionsWithSecretMembers(options []AssetBundleOption, reporter Reporter) {
 	if len(options) == 0 {
 		return

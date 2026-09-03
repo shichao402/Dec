@@ -7,9 +7,10 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/shichao402/Dec/internal/secrets/unlock"
+	"github.com/shichao402/Dec/internal/consoleopen"
 )
 
 // authenticatorFactory 供测试注入 mock Authenticator。
@@ -20,26 +21,37 @@ var httpClientFactory = func() *http.Client {
 	return http.DefaultClient
 }
 
-// unlockRun 供测试替换 web unlock 流程。
-var unlockRun = func(ctx context.Context, opts unlock.Options) error {
-	return unlock.Run(ctx, opts)
-}
+var (
+	openConsoleUnlock = consoleopen.OpenUnlockLocal
+	consoleAvailable  = consoleopen.Available
+)
 
-func defaultAuthenticator() unlock.Authenticator {
+func defaultAuthenticator() Authenticator {
 	cfg, err := LoadConfig()
 	if err != nil || cfg == nil || strings.TrimSpace(cfg.ServerURL) == "" {
-		return unlock.NewStubAuthenticator("", "", "")
+		return NewStubAuthenticator("", "", "")
 	}
 	auth, err := NewBWAuthenticator(cfg, "", httpClientFactory())
 	if err != nil {
-		return unlock.NewStubAuthenticator("", "", "")
+		return NewStubAuthenticator("", "", "")
 	}
 	return auth
 }
 
-// EnsureSessionOpts 可选 unlock 回调。
+const DefaultConsoleUnlockTimeout = 5 * time.Minute
+
+var (
+	ErrConsoleUnlockRequired    = errors.New("CONSOLE_UNLOCK_REQUIRED: 需要在 Dec Console 中解锁 Bitwarden")
+	ErrConsoleUnlockUnavailable = errors.New("CONSOLE_UNLOCK_UNAVAILABLE: 当前环境不能自动打开 Dec Console")
+	ErrConsoleUnlockTimeout     = errors.New("CONSOLE_UNLOCK_TIMEOUT: 等待 Dec Console 解锁超时")
+	ErrConsoleUnlockCanceled    = errors.New("CONSOLE_UNLOCK_CANCELED: 等待 Dec Console 解锁已取消")
+	ErrConsoleLaunchFailed      = errors.New("CONSOLE_LAUNCH_FAILED: 无法打开 Dec Console")
+)
+
+type ensureSessionOptsKey struct{}
+
+// EnsureSessionOpts describes the request that needs a Bitwarden session.
 type EnsureSessionOpts struct {
-	// 以下字段只用于标识是谁触发了认证，不参与授权决策。
 	RequestSource  string
 	Facade         string
 	ClientID       string
@@ -47,27 +59,37 @@ type EnsureSessionOpts struct {
 	OperationID    string
 	ProjectRoot    string
 	WorkspacePlane string
-	// OnStatus 报告解锁进度（程序化 / web unlock 分支切换等）。
-	OnStatus func(message string)
-	// OnUnlockURL 在本地 HTTP 服务就绪后回调，供 TUI 展示手动打开链接。
-	OnUnlockURL func(url string)
-	// OnBrowserError 在自动打开浏览器失败时回调。
-	OnBrowserError func(err error)
-	// UnlockTimeout 覆盖 web unlock 等待时长；零值时使用 unlock.WebUnlockTimeout()。
-	UnlockTimeout time.Duration
+	// InteractiveLocal permits opening the local Console. Remote/headless/CI
+	// callers must leave it false and receive ErrConsoleUnlockRequired.
+	InteractiveLocal bool
+	OnStatus         func(message string)
+	UnlockTimeout    time.Duration
 }
 
-// EnsureSession 若进程内无 session 则尝试程序化解锁，必要时触发 web unlock。
+func WithEnsureSessionOpts(ctx context.Context, opts EnsureSessionOpts) context.Context {
+	return context.WithValue(ctx, ensureSessionOptsKey{}, opts)
+}
+
+func ensureSessionOptsFromContext(ctx context.Context) *EnsureSessionOpts {
+	if opts, ok := ctx.Value(ensureSessionOptsKey{}).(EnsureSessionOpts); ok {
+		return &opts
+	}
+	return nil
+}
+
+// EnsureSession reuses an in-memory session, attempts DEC_BW_PASSWORD, or
+// opens the local Console and waits for Authenticate to complete.
 // 开发/agent 场景可设置环境变量 DEC_BW_PASSWORD（勿写入代码或配置）：
 // 配合 ~/.dec/secrets/device.json 中的 two_factor_remember 令牌，可在新进程内
-// 免 web unlock、免 2FA 建立 session。
-// 已设置 DEC_BW_PASSWORD 且程序化登录失败时不会回退 web unlock（避免 agent 无限等待）。
+// 免 Console、免 2FA 建立 session。
 func EnsureSession(ctx context.Context, opts *EnsureSessionOpts) error {
+	if opts == nil {
+		opts = ensureSessionOptsFromContext(ctx)
+	}
 	onStatus := authStatusFunc(opts)
 
-	hasSession := HasSession()
-	authStatus(onStatus, "session check: hasSession=%v", hasSession)
-	if hasSession {
+	if InstanceUnlocked() {
+		authStatus(onStatus, "session check: ready")
 		return nil
 	}
 
@@ -88,49 +110,54 @@ func EnsureSession(ctx context.Context, opts *EnsureSessionOpts) error {
 		return nil
 	}
 	if passwordSet {
-		return fmt.Errorf("程序化登录未成功，且已设置 DEC_BW_PASSWORD，不会启动 web unlock")
+		return fmt.Errorf("程序化登录未成功，且已设置 DEC_BW_PASSWORD，不会启动 Console")
 	}
 
-	timeout := unlock.WebUnlockTimeout()
+	if opts == nil || !opts.InteractiveLocal || !consoleAvailable() {
+		return fmt.Errorf("%w: %w；请在有桌面的机器上打开 Console 完成认证",
+			ErrConsoleUnlockRequired, ErrConsoleUnlockUnavailable)
+	}
+
+	timeout := DefaultConsoleUnlockTimeout
 	if opts != nil && opts.UnlockTimeout > 0 {
 		timeout = opts.UnlockTimeout
 	}
-	authStatus(onStatus, "web unlock: starting (timeout=%s)", timeout)
-
-	unlockCtx, cancel := context.WithTimeout(ctx, timeout)
+	authStatus(onStatus, "console unlock: requesting (timeout=%s)", timeout)
+	if err := requestConsoleUnlock(); err != nil {
+		return fmt.Errorf("%w: %w: %v", ErrConsoleUnlockRequired, ErrConsoleLaunchFailed, err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	request := unlock.RequestContext{}
-	if opts != nil {
-		request = unlock.RequestContext{
-			Source: opts.RequestSource, Facade: opts.Facade, ClientID: opts.ClientID,
-			Operation: opts.Operation, OperationID: opts.OperationID,
-			ProjectRoot: opts.ProjectRoot, WorkspacePlane: opts.WorkspacePlane,
-		}
-	}
-	unlockOpts := unlock.Options{
-		Authenticator: authenticatorFactory(),
-		InitialEmail:  KnownEmail(),
-		Request:       request,
-		OnSession:     SetSession,
-		OnEmailSaved:  SaveEmail,
-		OnStatus:      onStatus,
-	}
-	if opts != nil {
-		unlockOpts.OnReady = opts.OnUnlockURL
-		unlockOpts.OnBrowserError = opts.OnBrowserError
-	}
-
-	err = unlockRun(unlockCtx, unlockOpts)
-	if err != nil {
+	if err := WaitForInstanceUnlock(waitCtx); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			authStatus(onStatus, "web unlock: timeout - no user input")
-			return fmt.Errorf("web unlock 超时（%s）: 未收到用户输入", timeout)
+			authStatus(onStatus, "console unlock: timeout")
+			return fmt.Errorf("%w: %w（%s）", ErrConsoleUnlockRequired, ErrConsoleUnlockTimeout, timeout)
+		}
+		if errors.Is(err, context.Canceled) {
+			return fmt.Errorf("%w: %w: %w", ErrConsoleUnlockRequired, ErrConsoleUnlockCanceled, err)
 		}
 		return err
 	}
-	authStatus(onStatus, "web unlock: success")
+	authStatus(onStatus, "console unlock: success")
 	authStatus(onStatus, "session ready")
+	return nil
+}
+
+var consoleLaunchState struct {
+	sync.Mutex
+	last time.Time
+}
+
+func requestConsoleUnlock() error {
+	consoleLaunchState.Lock()
+	defer consoleLaunchState.Unlock()
+	if time.Since(consoleLaunchState.last) < 2*time.Second {
+		return nil
+	}
+	if err := openConsoleUnlock(); err != nil {
+		return err
+	}
+	consoleLaunchState.last = time.Now()
 	return nil
 }
 
@@ -155,7 +182,7 @@ func authStatus(onStatus func(string), format string, args ...any) {
 // tryProgrammaticUnlock 尝试用 DEC_BW_PASSWORD 程序化解锁。
 // 集成 / live 测试通过 ApplyIntegrationAuth 从 `.secrets/dec/integration/bitwarden.yaml`
 // 把密码注入进程环境，这里只读环境变量，保持单测不依赖仓库内是否存在凭据文件。
-// passwordSet=true 表示已提供密码；此情况下失败时不应回退 web unlock。
+// passwordSet=true 表示已提供密码；此情况下失败时不应打开 Console。
 func tryProgrammaticUnlock(ctx context.Context, onStatus func(string)) (unlocked bool, passwordSet bool, err error) {
 	password := strings.TrimSpace(os.Getenv("DEC_BW_PASSWORD"))
 	if password == "" {
@@ -189,11 +216,14 @@ func tryProgrammaticUnlock(ctx context.Context, onStatus func(string)) (unlocked
 		return false, true, fmt.Errorf("Bitwarden 程序化登录失败: %w", unlockErr)
 	}
 	if need2FA {
-		authStatus(onStatus, "programmatic unlock: failed: 2FA required (DEC_BW_PASSWORD set, web unlock disabled)")
-		return false, true, fmt.Errorf("程序化登录仍需 2FA；已设置 DEC_BW_PASSWORD，不会启动 web unlock")
+		authStatus(onStatus, "programmatic unlock: failed: 2FA required")
+		return false, true, fmt.Errorf("程序化登录仍需 2FA；已设置 DEC_BW_PASSWORD，不会启动 Console")
 	}
 
 	SetSession(token)
+	if !InstanceUnlocked() {
+		return false, true, fmt.Errorf("程序化登录未取得 vault key")
+	}
 	authStatus(onStatus, "programmatic unlock: success")
 	return true, true, nil
 }

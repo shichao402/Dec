@@ -160,7 +160,7 @@ members:
 		t.Fatal(err)
 	}
 
-	// 无 session：secrets 阶段会尝试 web unlock，测试环境下被 guard 拒绝。
+	// 无 session：secrets 阶段要求 Console 解锁；测试环境不会启动桌面程序。
 	secrets.ClearSession()
 
 	result, err := PullProjectAssets(context.Background(), projectRoot, "", nil)

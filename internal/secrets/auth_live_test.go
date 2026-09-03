@@ -4,11 +4,10 @@ package secrets
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/shichao402/Dec/internal/secrets/unlock"
 )
 
 func TestMain(m *testing.M) {
@@ -34,15 +33,6 @@ func TestLive_EnsureSession(t *testing.T) {
 	ClearSession()
 	t.Cleanup(ClearSession)
 
-	webUnlockCalled := false
-	origRun := unlockRun
-	unlockRun = func(ctx context.Context, opts unlock.Options) error {
-		webUnlockCalled = true
-		t.Fatal("DEC_BW_PASSWORD 已设置且 remember token 有效时不应触发 web unlock")
-		return nil
-	}
-	t.Cleanup(func() { unlockRun = origRun })
-
 	var statuses []string
 	if err := EnsureSession(context.Background(), &EnsureSessionOpts{
 		OnStatus: func(message string) {
@@ -51,9 +41,6 @@ func TestLive_EnsureSession(t *testing.T) {
 		},
 	}); err != nil {
 		t.Fatalf("EnsureSession() = %v", err)
-	}
-	if webUnlockCalled {
-		t.Fatal("web unlock 不应被调用")
 	}
 	if !HasSession() {
 		t.Fatal("应有 session")
@@ -81,14 +68,6 @@ func TestLive_EnsureSession_NoPassword(t *testing.T) {
 	ClearSession()
 	t.Cleanup(ClearSession)
 
-	webUnlockCalled := false
-	origRun := unlockRun
-	unlockRun = func(ctx context.Context, opts unlock.Options) error {
-		webUnlockCalled = true
-		return context.Canceled // 不阻塞 live 测试
-	}
-	t.Cleanup(func() { unlockRun = origRun })
-
 	var statuses []string
 	err := EnsureSession(context.Background(), &EnsureSessionOpts{
 		OnStatus: func(message string) {
@@ -96,10 +75,10 @@ func TestLive_EnsureSession_NoPassword(t *testing.T) {
 		},
 	})
 	if err == nil {
-		t.Fatal("无 DEC_BW_PASSWORD 时应进入 web unlock 并被取消")
+		t.Fatal("无 DEC_BW_PASSWORD 时应要求 Console 解锁")
 	}
-	if !webUnlockCalled {
-		t.Fatal("无 DEC_BW_PASSWORD 时应回退 web unlock")
+	if !errors.Is(err, ErrConsoleUnlockRequired) {
+		t.Fatalf("EnsureSession() = %v", err)
 	}
 	found := false
 	for _, s := range statuses {

@@ -118,7 +118,7 @@ func SetRememberToken(email, token string) error {
 	return SaveDeviceFile(f)
 }
 
-// KnownEmail 返回用于 web unlock 预填的邮箱：优先 config，其次 device.json 中记住设备的邮箱。
+// KnownEmail 返回用于 Console 解锁预填的邮箱：优先 config，其次 device.json 中记住设备的邮箱。
 func KnownEmail() string {
 	cfg, err := LoadConfig()
 	if err == nil && cfg != nil {

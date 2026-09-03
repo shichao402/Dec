@@ -3,15 +3,13 @@ package secrets
 import (
 	"context"
 	"testing"
-
-	"github.com/shichao402/Dec/internal/secrets/unlock"
 )
 
 func TestUnlockWithPasswordStubSuccess(t *testing.T) {
 	t.Cleanup(ClearSession)
 	ClearSession()
-	authenticatorFactory = func() unlock.Authenticator {
-		return unlock.NewStubAuthenticator("secret", "", "rpc-session")
+	authenticatorFactory = func() Authenticator {
+		return NewStubAuthenticator("secret", "", "rpc-session")
 	}
 	t.Cleanup(func() { authenticatorFactory = defaultAuthenticator })
 
@@ -39,8 +37,8 @@ func TestUnlockWithPasswordStubSuccess(t *testing.T) {
 func TestUnlockWithPasswordWrongSecret(t *testing.T) {
 	t.Cleanup(ClearSession)
 	ClearSession()
-	authenticatorFactory = func() unlock.Authenticator {
-		return unlock.NewStubAuthenticator("secret", "", "rpc-session")
+	authenticatorFactory = func() Authenticator {
+		return NewStubAuthenticator("secret", "", "rpc-session")
 	}
 	t.Cleanup(func() { authenticatorFactory = defaultAuthenticator })
 
@@ -61,8 +59,8 @@ func TestUnlockWithPasswordWrongSecret(t *testing.T) {
 func TestUnlockWithPasswordTwoFactor(t *testing.T) {
 	t.Cleanup(ClearSession)
 	ClearSession()
-	stub := unlock.NewStubAuthenticator("secret", "123456", "rpc-session")
-	authenticatorFactory = func() unlock.Authenticator { return stub }
+	stub := NewStubAuthenticator("secret", "123456", "rpc-session")
+	authenticatorFactory = func() Authenticator { return stub }
 	t.Cleanup(func() { authenticatorFactory = defaultAuthenticator })
 
 	t.Setenv("DEC_HOME", t.TempDir())

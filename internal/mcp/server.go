@@ -273,7 +273,7 @@ func (s *Server) handlePreviewPush(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 type listSecretsParams struct {
-	IncludeRemote *bool  `json:"include_remote,omitempty" jsonschema:"是否检查 Bitwarden 远端存在性（默认 true，可能触发 web unlock）"`
+	IncludeRemote *bool  `json:"include_remote,omitempty" jsonschema:"是否检查 Bitwarden 远端存在性（默认 true，可能要求在 Console 解锁）"`
 	Plane         string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 

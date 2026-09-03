@@ -25,7 +25,7 @@
 2. Settings 保存时 `SaveGlobalSettingsInput.EnabledBundles` 恒为 `nil`（= 不修改）。该字段保留 nil / 非 nil 的既有语义，非 nil（含空切片）仍表示按「写回」覆盖。
 3. 用户平面 Bundles 页的候选补齐 Settings 原有来源：已启用 ∪ `known_secret_bundles` ∪ Bitwarden folder 枚举。vault 中尚无 manifest 的条目标记为 `SecretsOnly`，展示为「仅 secrets」。
 4. 勾选保存后仍由 `ensureVaultBundlesForUserEnable` 补 `scope: user` 的 bundle 声明（0003 第 4 条不变），此后该条目变为普通 vault bundle，标记消失。
-5. 列候选不得为此触发 Bitwarden web unlock：无 session 时退化为 known ∪ 已启用。
+5. 列候选不得为此触发 Console Authenticate：无 session 时退化为 known ∪ 已启用。
 
 ## 理由
 

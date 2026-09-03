@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-
-	"github.com/shichao402/Dec/internal/secrets/unlock"
 )
 
 // BWAuthenticator 通过 Bitwarden Identity API 完成 unlock / 2FA。
@@ -155,4 +153,4 @@ func (a *BWAuthenticator) persistRememberToken(token string) error {
 	return SetRememberToken(a.email, token)
 }
 
-var _ unlock.Authenticator = (*BWAuthenticator)(nil)
+var _ Authenticator = (*BWAuthenticator)(nil)

@@ -3,6 +3,7 @@
 - **状态**：已接受（已实现）
 - **日期**：2026-08-13
 - **关联**：[0002](0002-secrets-synctarget-root.md)、[0003](0003-user-enabled-secret-bundles.md)、[0007](0007-machine-secrets-root.md)；[BUNDLE-SECRETS-MODEL.md](../BUNDLE-SECRETS-MODEL.md)；[TUI_ARCHITECTURE.md](../TUI_ARCHITECTURE.md)
+- **部分取代**：[0022](0022-console-bitwarden-unlock.md) 已取代服务自行打开认证页面的叙事；服务/session 归属与门面拆分仍有效
 - **影响范围**：进程模型、入口二进制、`internal/app` 调用方、Bitwarden session 归属、内置 MCP 启动命令、构建/安装/更新
 
 ## 问题
@@ -21,7 +22,7 @@
 
 | 程序 | 角色 | 用户面？ |
 |------|------|----------|
-| **`dec-server`** | 本机单例服务：session、unlock、pull/push、资产与 secrets 权威编排 | 否（由门面自动拉起） |
+| **`dec-server`** | 本机单例服务：session、程序化认证、pull/push、资产与 secrets 权威编排 | 否（由门面自动拉起） |
 | **`dec`** | TUI 门面（保持无参打开 TUI） | 是 |
 | **`dec-mcp`** | Agent MCP 门面（stdio MCP → 调服务） | 否（IDE 配置） |
 | **`dec-exec`** | 本地 env 注入 shim | 否（hidden / MCP `command`） |
@@ -42,8 +43,8 @@
   - 有任一 TUI / MCP 连接（即使无 RPC）都不算空闲。  
   - **默认 30 分钟**；用户可在 TUI **Settings** 配置，写入本机配置文件 `~/.dec/config.yaml`（字段 `server_idle_timeout`）。  
   - **不用环境变量覆盖**；测试通过改配置文件或注入配置，不引入 `DEC_SERVER_IDLE_TIMEOUT` 一类旁路。  
-  - 下次门面拉起服务后需重新解锁（web unlock 或 `DEC_BW_PASSWORD`）。
-- Web unlock 仍由**服务**发起（`127.0.0.1` HTTP → 系统浏览器）；门面不收集主密码。
+  - 下次门面拉起服务后需重新认证（Console 人工认证或 `DEC_BW_PASSWORD` 程序化认证）。
+- 人工认证由 **Console** 独占；服务不打开页面或收集终端输入。本机交互 MCP 缺 session 时拉起/聚焦 Console 并等待，非交互环境返回结构化错误（[0022](0022-console-bitwarden-unlock.md)）。
 
 ### `dec-exec`（本期边界）
 
@@ -63,7 +64,7 @@
 | 单例 | 同目录下进程锁 / pid；第二实例发现已有存活端点则退出并让门面改连已有实例 |
 | 协议 | 首版用 **gRPC**（unary + server-streaming）；三端同一 `.proto` |
 
-理由：loopback + token 在三平台是**同一代码路径**；与现有 web unlock 的 `127.0.0.1` 模型一致。Unix socket / named pipe 在 Windows 与 Unix 上 API 与路径约定分裂，首版不做。
+理由：loopback + token 在三平台是**同一代码路径**。Unix socket / named pipe 在 Windows 与 Unix 上 API 与路径约定分裂，首版不做。
 
 运行时文件**不得**写入 session / 主密码 / userKey。
 
@@ -88,7 +89,7 @@ TUI 切页仍不取消在飞的那次 `Pull`（延续 async_io）。旁观流的
 
 | 能力 | 归属 |
 |------|------|
-| Bitwarden EnsureSession / web unlock | 服务 |
+| Bitwarden session 与程序化认证 | 服务；人工认证 UI 归 Console |
 | pull / push / preview / delete / Remote 元数据 | 服务 |
 | project 概览、connect repo、init、bundles 启用 | 服务 |
 | 操作进度 / 日志 | **跟这次操作走的进度流** → 发起方门面展示 |
@@ -114,7 +115,7 @@ TUI 切页仍不取消在飞的那次 `Pull`（延续 async_io）。旁观流的
 | `WatchOperation` | **server-stream** | 旁观某 project 的活跃操作进度（TUI 显示「MCP 正在 pull…」） |
 | `ListSecrets` / `ListDeleteCandidates` | unary | 同名 MCP / Remote |
 | `Delete` | unary；若要逐步进度则同 Pull 用进度流 | 同名 MCP / Remote |
-| `EnsureSession` / `SessionStatus` | unary | 触发 unlock；**不**把门面回传 session 明文或主密码 |
+| `EnsureSession` / `SessionStatus` | unary | 请求 session；**不**向门面回传 session 明文或主密码；人工认证由 Console 协调 |
 | （配置）读写含 `server_idle_timeout` 的本机设置 | unary | Settings；与现有全局配置保存同一路径 |
 
 所有项目相关调用带 **`project_root`（或等价作用域）**；机器平面操作（如 user-enabled bundles）明确标为 machine scope。
@@ -146,13 +147,13 @@ TUI 切页仍不取消在飞的那次 `Pull`（延续 async_io）。旁观流的
 否决：增加拆分耦合；exec 当前不需要 session；暂维持本地 shim。
 
 **E. 新增用户面 `dec unlock` / `dec daemon` 子命令。**  
-否决：违反 TUI-first；解锁仍按需由服务弹浏览器，服务由门面自动拉起。
+否决：违反唯一人机入口；人工认证按需由 Console 承载，服务由门面自动拉起。
 
 **F. Session 落盘或写 `BW_SESSION` 文件以便跨进程。**  
 否决：硬约束禁止；改由服务进程内存承载即可跨门面共享。
 
 **G. Unix domain socket（macOS/Linux）+ Windows named pipe 双传输。**  
-否决：三平台要维护两套监听/拨号/路径/权限与测试矩阵；个人单机威胁模型下 loopback + token 足够，且与现有 unlock HTTP 同模式。
+否决：三平台要维护两套监听/拨号/路径/权限与测试矩阵；个人单机威胁模型下 loopback + token 足够。
 
 **H. 首版做「全局事件总线」（跨 project 把所有操作广播给所有门面）。**  
 否决：首版只需**按 project 旁观当前活跃操作**（`WatchOperation`），满足「TUI 看到 MCP 正在 pull」。全机广播的扇出/权限/生命周期复杂度无首版刚需，留待以后。

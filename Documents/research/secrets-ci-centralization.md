@@ -2,17 +2,17 @@
 
 - **状态**：调研记录（非正式 ADR）
 - **结论（当时）**：**接受现状**——人 / 本机继续 Bitwarden Password Manager + `dec-server` 内存 session；CI 继续把用到的变量放 GitHub / CNB 平台 Secrets。不为个人 CI 上 OpenBao、自研保险柜、或把 BW session 填进流水线。
-- **可跟进**：本机 [Login with Device](https://bitwarden.com/help/log-in-with-device/) 接入现有 web unlock，见 [ROADMAP.md](../ROADMAP.md)。
+- **认证边界更新**：人工认证统一由 Console Authenticate 承载；Login with Device 若实现也只能作为 Console 内的认证方式，见 [0022](../decisions/0022-console-bitwarden-unlock.md) 与 [ROADMAP.md](../ROADMAP.md)。
 
 本文给以后的自己看：问题怎么拆、哪些路走过、为什么停在现状。
 
 ## 1. 问题
 
-Bitwarden 被设计成私密正文的唯一源。对人、对本机（TUI / MCP / `dec-exec` 读落地文件）自洽。
+Bitwarden 被设计成私密正文的唯一源。对人、对本机（Console / MCP / `dec-exec` 读落地文件）自洽。
 
 GitHub Actions、CNB 等流水线：
 
-- 无浏览器、无常驻 `dec-server`、不能走 web unlock
+- 无桌面交互、无常驻 `dec-server`，不能走 Console Authenticate
 - 每次 job 是新机器、新 IP，身份不能绑设备指纹
 - 密钥不能进 Git 仓库
 
@@ -55,7 +55,7 @@ Dec 今天打的是 `/api/folders`、`/api/ciphers`，解密靠 `UserKey()`。�
 
 | | 人 / 本机 | CI |
 |--|-----------|-----|
-| 证明 | 主密码、web unlock、或 Login with Device | 窄票（若做）或平台里的业务变量（现状） |
+| 证明 | Console 中提交主密码或批准 Login with Device | 窄票（若做）或平台里的业务变量（现状） |
 | 得到 | 进程内存 session / user key | 不得拿到 user key |
 | 轮换 | session 短过期，续期要人 | 票与业务密钥解耦 |
 

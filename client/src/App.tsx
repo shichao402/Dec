@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import {
   authenticate,
@@ -21,6 +21,11 @@ import { Badge } from '@/components/ui/badge'
 import { useActionRegistry, useOperationObserver } from '@/lib/action-context'
 import { runningActions } from '@/lib/action-registry'
 import { actionSpec, resource, shortInstanceId, type View } from '@/lib/console'
+import {
+  onOpenIntent,
+  selectLocalConnection,
+  takeOpenIntent,
+} from '@/lib/open-intent'
 import { ConnectPage } from '@/pages/connect-page'
 import { GlobalAssetsPage } from '@/pages/global-assets-page'
 import { OnboardingPage } from '@/pages/onboarding-page'
@@ -84,6 +89,12 @@ export default function App() {
   const [rememberPassword, setRememberPassword] = useState(false)
   const [totp, setTotp] = useState('')
   const [need2fa, setNeed2fa] = useState(false)
+  const openIntentBusy = useRef(false)
+  const openIntentRerun = useRef(false)
+  const handledUnlockFailure = useRef('')
+  const handleConnectRef = useRef<(conn: SavedConnection, forceUnlock?: boolean) => Promise<void>>(
+    () => Promise.resolve(),
+  )
   const actions = useActionRegistry()
   const runAction = actions.run
   const activeActions = runningActions(actions.state)
@@ -104,6 +115,22 @@ export default function App() {
   useOperationObserver(deviceId, observedRoots, screen === 'console' && Boolean(current))
 
   useEffect(() => {
+    if (!current) return
+    const failure = Object.values(actions.state.records)
+      .filter((record) => record.deviceId === current.id
+        && record.status === 'failed'
+        && isUnlockRequiredError(record.error || ''))
+      .sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0))[0]
+    if (!failure) return
+    const id = `${failure.key}:${failure.generation}`
+    if (handledUnlockFailure.current === id) return
+    handledUnlockFailure.current = id
+    setNeed2fa(false)
+    setTotp('')
+    setScreen('unlock')
+  }, [actions.state.records, current])
+
+  useEffect(() => {
     const spec = actionSpec('connections:list', '加载设备连接', 'console', [resource.connections], 'read')
     void runAction(spec, listConnections).then((outcome) => {
       if (outcome.ok) setSaved(outcome.value)
@@ -118,10 +145,12 @@ export default function App() {
     return { device, globalSettings }
   }, [])
 
-  async function handleConnect(conn: SavedConnection) {
+  async function handleConnect(conn: SavedConnection, forceUnlock = false) {
     setEmail(conn.auth_email || '')
     setPassword('')
     setRememberPassword(conn.password_saved)
+    setNeed2fa(false)
+    setTotp('')
     const spec = actionSpec(`session:connect:${conn.id}`, `正在连接 ${conn.label}`, conn.id, [resource.session], 'session', `已连接 ${conn.label}`)
     const outcome = await actions.run(spec, async () => {
       const savedPassword = conn.password_saved && conn.id ? await loadSavedPassword(conn.id) : ''
@@ -145,8 +174,43 @@ export default function App() {
     setSummary(loaded?.device || null)
     setSettings(loaded?.globalSettings || null)
     setSelectedProject(null)
-    setScreen(info.unlocked ? 'console' : 'unlock')
+    setView('overview')
+    setScreen(forceUnlock ? 'unlock' : info.unlocked ? 'console' : 'unlock')
   }
+  handleConnectRef.current = handleConnect
+
+  useEffect(() => {
+    const drainOpenIntents = async () => {
+      if (openIntentBusy.current) {
+        openIntentRerun.current = true
+        return
+      }
+      openIntentBusy.current = true
+      try {
+        do {
+          openIntentRerun.current = false
+          let intent = await takeOpenIntent()
+          while (intent) {
+            if (intent === 'unlock-local') {
+              const connections = await listConnections()
+              setSaved(connections)
+              await handleConnectRef.current(selectLocalConnection(connections), true)
+            }
+            intent = await takeOpenIntent()
+          }
+        } while (openIntentRerun.current)
+      } finally {
+        openIntentBusy.current = false
+        if (openIntentRerun.current) void drainOpenIntents()
+      }
+    }
+
+    const unlisten = onOpenIntent(() => void drainOpenIntents())
+    void drainOpenIntents()
+    return () => {
+      void unlisten.then((dispose) => dispose())
+    }
+  }, [])
 
   function updateDraft(next: SavedConnection) {
     const targetChanged = next.kind !== draft.kind || next.ssh_host !== draft.ssh_host
@@ -309,7 +373,7 @@ export default function App() {
       workspacePlane: plane,
     }))
     if (!outcome.ok) {
-      if (outcome.error.includes('Unauthenticated') || outcome.error.includes('锁定')) setScreen('unlock')
+      if (isUnlockRequiredError(outcome.error)) setScreen('unlock')
       return
     }
     setHistory((items) => [{ title, result: outcome.value, at: new Date() }, ...items].slice(0, 20))
@@ -503,6 +567,10 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+function isUnlockRequiredError(error: string) {
+  return error.includes('CONSOLE_UNLOCK_') || error.includes('Unauthenticated') || error.includes('锁定')
 }
 
 function buildCrumbs(input: {

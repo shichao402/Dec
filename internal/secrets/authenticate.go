@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-
-	"github.com/shichao402/Dec/internal/secrets/unlock"
 )
 
 var (
 	pendingAuthMu     sync.Mutex
-	pendingAuth       unlock.Authenticator
+	pendingAuth       Authenticator
 	lockBypassForTest bool
 )
 
@@ -107,8 +105,8 @@ func ResetAuthenticatorForTest() {
 }
 
 // SetAuthenticatorForTest 注入 Authenticator，仅测试使用。
-func SetAuthenticatorForTest(auth unlock.Authenticator) {
-	authenticatorFactory = func() unlock.Authenticator { return auth }
+func SetAuthenticatorForTest(auth Authenticator) {
+	authenticatorFactory = func() Authenticator { return auth }
 }
 
 func clearPendingAuth() {

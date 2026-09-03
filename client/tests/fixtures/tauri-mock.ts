@@ -47,6 +47,7 @@ export function installTauriMock(scenario: Scenario) {
   const ok = (value: unknown) => ({ result_json: JSON.stringify(value ?? {}), error: '' })
 
   const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
+    take_open_intent: () => null,
     list_connections: () => state.connections,
     save_connection: (args) => {
       const conn = args.conn as Scenario['connections'][number]

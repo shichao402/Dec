@@ -4,7 +4,10 @@ Protobuf 是 Bitwarden **secrets bundle** 绑定声明的 schema 真相源；运
 
 相关文档：[BUNDLE-SECRETS-MODEL.md](../../Documents/BUNDLE-SECRETS-MODEL.md) · [0002 SyncTarget ADR](../../Documents/decisions/0002-secrets-synctarget-root.md) · [ARCHITECTURE.md](../../Documents/ARCHITECTURE.md)
 
-**Bitwarden session 不进 schema、不进磁盘**：session 仅在 `dec-server` 进程内存中保存；认证通过本地 HTTP web unlock 完成。
+**Bitwarden 认证状态不进 schema、不进磁盘**：session、vault/user key 与 2FA 中间态仅在
+相关进程内存中保存。Console Authenticate 是唯一人工入口；本机交互 MCP 可拉起/聚焦
+Console 并等待，远端无桌面与 CI 返回结构化错误。见
+[ADR 0022](../../Documents/decisions/0022-console-bitwarden-unlock.md)。
 
 ## 核心模型：SyncTarget + 存储根分离
 

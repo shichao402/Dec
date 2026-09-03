@@ -42,3 +42,4 @@
 | [0019](0019-remote-provisioning.md) | 远端设备自动置备（SSH provisioning） | 已接受（已实现；真机与发布验收未完） |
 | [0020](0020-retire-tui.md) | 卸下 TUI，Console 为人机入口 | 已接受（已实现） |
 | [0021](0021-console-owned-runtime.md) | Console 独占用户分发与目标运行时 | 已接受（连接与发布协议已实现；发布基础设施待接入） |
+| [0022](0022-console-bitwarden-unlock.md) | Console 统一承载 Bitwarden 人工解锁 | 已接受；部分取代 0008、0018 的旧解锁叙事 |

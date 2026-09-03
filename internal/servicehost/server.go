@@ -352,6 +352,16 @@ func (s *Server) validTransportToken(ctx context.Context) bool {
 	return true
 }
 
+func (s *Server) validListenToken(ctx context.Context) bool {
+	values := metadata.ValueFromIncomingContext(ctx, service.TokenHeader)
+	return len(values) == 1 && values[0] != "" && values[0] == s.listenToken
+}
+
+func (s *Server) allowsInteractiveUnlock(ctx context.Context, facade string) bool {
+	values := metadata.ValueFromIncomingContext(ctx, service.InteractiveAuthHeader)
+	return facade == "mcp" && len(values) == 1 && values[0] == "1" && s.validListenToken(ctx)
+}
+
 func (s *Server) issueControlToken() (string, int64) {
 	token, err := service.NewToken()
 	if err != nil {

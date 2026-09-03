@@ -5,17 +5,81 @@ mod runtime_bundle;
 use grpc::{read_local_metadata, spawn_local_server, AuthResult, InvokeResult, PingInfo, Session};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
+use url::Url;
 use uuid::Uuid;
 
 #[derive(Default)]
 struct AppState {
     session: Mutex<Option<Session>>,
+    pending_intents: StdMutex<VecDeque<OpenIntent>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum OpenIntent {
+    UnlockLocal,
+}
+
+const OPEN_INTENT_EVENT: &str = "open-intent";
+
+fn parse_open_intent(value: &str) -> Option<OpenIntent> {
+    let url = Url::parse(value).ok()?;
+    (url.scheme() == "dec"
+        && url.host_str() == Some("unlock")
+        && url.path() == "/local"
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none())
+    .then_some(OpenIntent::UnlockLocal)
+}
+
+fn focus_main_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.show();
+    if window.is_minimized().unwrap_or(false) {
+        let _ = window.unminimize();
+    }
+    let _ = window.set_focus();
+}
+
+fn enqueue_open_intents<'a>(app: &AppHandle, values: impl IntoIterator<Item = &'a str>) {
+    let intents: Vec<_> = values.into_iter().filter_map(parse_open_intent).collect();
+    if intents.is_empty() {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let mut pending = state
+        .pending_intents
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for intent in intents {
+        if pending.back() != Some(&intent) {
+            pending.push_back(intent);
+        }
+    }
+    drop(pending);
+    let _ = app.emit(OPEN_INTENT_EVENT, ());
+}
+
+#[tauri::command]
+fn take_open_intent(state: State<'_, AppState>) -> Option<OpenIntent> {
+    state
+        .pending_intents
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pop_front()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -821,6 +885,13 @@ fn emit_action_event(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 必须最先注册：Windows/Linux 会把 URI 交给第二个进程，再由这里转发给主实例。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // deep-link feature 已先触发 on_open_url；这里仅负责恢复主窗口，
+            // 避免同一个 URI 从 argv 和插件事件重复入队。
+            focus_main_window(app);
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .manage(AppState::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -834,12 +905,33 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            if let Some(window) = app.get_webview_window("main") {
-                window.show()?;
+
+            #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                app.deep_link().register_all()?;
             }
+
+            use tauri_plugin_deep_link::DeepLinkExt;
+            if let Some(urls) = app.deep_link().get_current()? {
+                let values: Vec<_> = urls.iter().map(Url::as_str).collect();
+                enqueue_open_intents(app.handle(), values);
+            }
+            let deep_link_app = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                let urls = event.urls();
+                let values: Vec<_> = urls.iter().map(Url::as_str).collect();
+                enqueue_open_intents(&deep_link_app, values);
+                focus_main_window(&deep_link_app);
+            });
+
+            let args: Vec<_> = std::env::args().collect();
+            enqueue_open_intents(app.handle(), args.iter().map(String::as_str));
+            focus_main_window(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            take_open_intent,
             list_connections,
             save_connection,
             delete_connection,
@@ -863,8 +955,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        compare_versions, parse_release_version, ssh_dial_target, validate_remote_transport,
-        SavedConnection,
+        compare_versions, parse_open_intent, parse_release_version, ssh_dial_target,
+        validate_remote_transport, OpenIntent, SavedConnection,
     };
     use std::cmp::Ordering;
 
@@ -901,6 +993,21 @@ mod tests {
         assert!(validate_remote_transport("remote", "server.example", true).is_ok());
         assert!(validate_remote_transport("ssh", "server.example", false).is_ok());
         assert!(validate_remote_transport("remote", "127.0.0.1", false).is_ok());
+    }
+
+    #[test]
+    fn only_accepts_unlock_local_deep_link() {
+        assert_eq!(
+            parse_open_intent("dec://unlock/local"),
+            Some(OpenIntent::UnlockLocal)
+        );
+        assert_eq!(
+            parse_open_intent("DEC://unlock/local"),
+            Some(OpenIntent::UnlockLocal)
+        );
+        assert_eq!(parse_open_intent("dec://unlock/remote"), None);
+        assert_eq!(parse_open_intent("dec://unlock/local?next=remote"), None);
+        assert_eq!(parse_open_intent("https://unlock/local"), None);
     }
 
     #[test]

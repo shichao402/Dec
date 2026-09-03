@@ -14,15 +14,13 @@ func ensureBitwardenSession(ctx context.Context, reporter Reporter, phase string
 	emit(reporter, EventInfo, phase, "Bitwarden 未解锁，正在解锁…", nil)
 	sessionOpts := &secrets.EnsureSessionOpts{
 		RequestSource: phase,
-		OnUnlockURL: func(url string) {
-			emit(reporter, EventInfo, phase, fmt.Sprintf("解锁页: %s", url), nil)
-		},
-		OnBrowserError: func(err error) {
-			emit(reporter, EventWarn, phase, fmt.Sprintf("无法自动打开浏览器，请手动访问解锁页: %v", err), nil)
+		OnStatus: func(message string) {
+			emit(reporter, EventInfo, phase, message, nil)
 		},
 	}
 	unlockCfg := unlockConfigFromContext(ctx)
 	sessionOpts.UnlockTimeout = unlockCfg.Timeout
+	sessionOpts.InteractiveLocal = unlockCfg.InteractiveLocal
 	sessionOpts.Facade = unlockCfg.Facade
 	sessionOpts.ClientID = unlockCfg.ClientID
 	sessionOpts.Operation = unlockCfg.Operation

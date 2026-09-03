@@ -40,7 +40,10 @@ provisioning 落在 `internal/app`（新增 provisioning 包），经 `internal/
 
 固定 loopback 端口常量（可显式覆盖）。因为只监听 loopback，端口冲突风险低，而固定端口是隧道能自动找到它的前提。
 
-**连接（按需拉起）**：建立 SSH 隧道 → `Authenticate` 换 control token → 登记设备。`connect_ssh`（`client/src-tauri/src/lib.rs`）的隧道链路已验证可用，连接页改为「填 SSH 主机即可」，端口由探测结果带出；检测到未安装时给「一键部署」入口。
+**连接（按需拉起）**：建立 SSH 隧道 → `Authenticate` 换 control token → 登记设备。
+这里的 `Authenticate` 建立实例控制权；Bitwarden session 按 [0022](0022-console-bitwarden-unlock.md)
+在访问 secrets 时由当前 Console 按需认证。`connect_ssh`（`client/src-tauri/src/lib.rs`）的
+隧道链路已验证可用，连接页改为「填 SSH 主机即可」，端口由探测结果带出；检测到未安装时给「一键部署」入口。
 
 ### 3. 远端不做常驻化，改为 SSH 按需拉起
 
@@ -49,7 +52,7 @@ provisioning 落在 `internal/app`（新增 provisioning 包），经 `internal/
 原因是 SSH 本身就是远端的「门面拉起通道」，与本机门面调用 `startServerProcess` 等价：
 
 - 建隧道前先 `ssh <target> 'dec-server'` 拉起（`Setsid` 已使其脱离 SSH 会话，见 `internal/service/process_unix.go`），轮询 `~/.dec/run/server.json` 就绪后再建隧道。这与 `connect_local` 的「读 metadata → 失败则 spawn → 轮询」完全同构。
-- 会话期间不会被空闲退出打断：Console 解锁后持有 `KeepAlive` 长连，服务端 `KeepAlive` 已 `presence.connected()`；`presenceTracker` 在有连接时不启动定时器。
+- 会话期间不会被空闲退出打断：Console 建立实例控制权后持有 `KeepAlive` 长连，服务端 `KeepAlive` 已 `presence.connected()`；`presenceTracker` 在有连接时不启动定时器。
 - 断开后远端自行退出，不留常驻进程。
 
 这样做同时消掉了常驻方案里的一串附带复杂度：**不需要**为「永不退出」新增 `server_idle_timeout: off` 语义、不需要改 `presenceTracker`、不需要生成与维护两套 service manager 单元、不需要处理 linger，也不会出现「空闲退出后被 service manager 立刻重启」的空转。
@@ -69,7 +72,9 @@ provisioning 落在 `internal/app`（新增 provisioning 包），经 `internal/
 
 SSH 凭据只存**引用**（`~/.ssh/config` 别名或 Dec 管理的 `.sshkey` 名，见 0005），私钥内容与口令不进全局配置、不进日志。远端 `dec-server` 仍只监听 loopback，不因置备而放开非 loopback 监听——0018 的「非 loopback 必须 TLS」不变。
 
-置备完成后远端服务仍是**锁定态**（0018），需 `Authenticate` 解锁；常驻服务重启后同样锁定。置备不携带、不缓存 Bitwarden 主密码。
+置备完成后远端服务仍需 `Authenticate` 建立实例控制权；Bitwarden session 不随置备建立，
+访问 secrets 时由操作者当前 Console 按需认证。服务重启会清空两种内存态。置备不携带、
+不缓存 Bitwarden 主密码。
 
 ### 6. 受管设备登记
 

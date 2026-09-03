@@ -166,4 +166,3 @@ func localSetFromNotes(notes []SecureNote) map[string]SecureNote {
 	}
 	return m
 }
-

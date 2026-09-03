@@ -597,7 +597,7 @@ func deleteSecretItem(ctx context.Context, workspace Workspace, secretsBundleNam
 }
 
 // readSecretNoteContent 读取待删 Secure Note 正文，供 Handler.Revoke 使用。
-// 优先读本地文件；本地缺失且已有 Bitwarden session 时尽力从远端拉正文（不触发 web unlock）。
+// 优先读本地文件；本地缺失且已有 Bitwarden session 时尽力从远端拉正文（不触发 Console 解锁）。
 func readSecretNoteContent(
 	ctx context.Context,
 	projectRoot, secretsBundleName, localRoot string,

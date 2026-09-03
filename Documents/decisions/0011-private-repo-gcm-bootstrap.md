@@ -4,7 +4,8 @@
 - **日期**：2026-08-17
 - **关联**：[0005](0005-secrets-machine-handlers.md)、[0008](0008-service-facade-split.md)、[0009](0009-bundle-binary-scope.md)
 - **补充约束**：[0013](0013-secrets-belong-to-declared-target.md) — 查找范围不变（仍扫全部 folder），但候选位于非托管裸 folder 时必须提示「不属于任何 bundle，pull 不维护，轮换需重新 bootstrap」
-- **影响范围**：Settings 仓库连接、Run 页 pull、Bitwarden web unlock、`.gcm` Processor、service progress stream
+- **认证补充**：[0022](0022-console-bitwarden-unlock.md) — 人工认证统一由 Console 承载
+- **影响范围**：Settings 仓库连接、同步页 pull、Bitwarden 认证、`.gcm` Processor、service progress stream
 
 ## 问题
 
@@ -36,17 +37,18 @@ Settings 不再 probe（URL 未变），若不在 Run 页 pull 失败路径补�
 
 1. 用禁交互的 `git ls-remote` / `git fetch` 探测仓库；网络、DNS、地址错误按原错误返回。
 2. 仅 HTTPS 认证失败时，错误携带稳定标记 `[dec:repo-auth-required]`（跨 RPC 后仍可判定），
-   TUI 明确询问用户是否从 Bitwarden 查找 GCM。
-3. 用户确认后，由 `dec-server` 复用现有 Bitwarden `EnsureSession` / web unlock。
+   Console 明确询问用户是否从 Bitwarden 查找 GCM。
+3. 用户确认后，由 `dec-server` 复用现有 Bitwarden session；缺 session 时按 0022 进入
+   Console Authenticate。
 4. 不读取 Git bundle manifest；直接枚举 Bitwarden folder 中名字匹配 `.gcm/*` 的
    Secure Note，逐条只在服务进程内解密，并按正文 `host` 匹配 repo host。
-5. TUI 仅收到 folder、Note 路径、host、username；**正文/password 永不经 RPC 返回**。
+5. Console 仅收到 folder、Note 路径、host、username；**正文/password 永不经 RPC 返回**。
 6. 用户选择候选后，服务重新读取 Note、复核 host，调用现有 `GCMHandler.Apply`，
    再次 `git ls-remote` 验证；成功后按来源重试 Settings 保存或 Run pull。
 
 若 Bitwarden 尚无匹配 Note，用户应先到 **Remote 页**登记 `.gcm/*`（登记不依赖私仓
-可达），再回到确认步骤。Bootstrap 查询与 Apply 使用现有流式 operation RPC，确保等待
-web unlock 时，解锁 URL 和进度可以实时到达 TUI。
+可达），再回到确认步骤。Bootstrap 查询与 Apply 使用现有流式 operation RPC；本机交互
+MCP 缺 session 时由认证协调器拉起/聚焦 Console 并等待，远端无桌面或 CI 返回结构化错误。
 
 ## 安全与生命周期约束
 

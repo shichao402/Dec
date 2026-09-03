@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
@@ -19,11 +20,14 @@ import (
 )
 
 const (
-	TokenHeader         = "x-dec-token"
-	FacadeHeader        = "x-dec-facade"
-	ClientIDHeader      = "x-dec-client-id"
-	ClientVersionHeader = "x-dec-client-version"
+	TokenHeader           = "x-dec-token"
+	FacadeHeader          = "x-dec-facade"
+	ClientIDHeader        = "x-dec-client-id"
+	ClientVersionHeader   = "x-dec-client-version"
+	InteractiveAuthHeader = "x-dec-interactive-auth"
 )
+
+var isTestProcess = testing.Testing
 
 type Client struct {
 	conn          *grpc.ClientConn
@@ -202,7 +206,8 @@ func clientUnaryMetadata(token, facade, clientID, clientVersion string) grpc.Una
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		ctx = metadata.AppendToOutgoingContext(ctx,
 			TokenHeader, token, FacadeHeader, facade, ClientIDHeader, clientID,
-			ClientVersionHeader, clientVersion)
+			ClientVersionHeader, clientVersion,
+			InteractiveAuthHeader, interactiveAuthValue(facade))
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
 }
@@ -211,9 +216,19 @@ func clientStreamMetadata(token, facade, clientID, clientVersion string) grpc.St
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		ctx = metadata.AppendToOutgoingContext(ctx,
 			TokenHeader, token, FacadeHeader, facade, ClientIDHeader, clientID,
-			ClientVersionHeader, clientVersion)
+			ClientVersionHeader, clientVersion,
+			InteractiveAuthHeader, interactiveAuthValue(facade))
 		return streamer(ctx, desc, cc, method, opts...)
 	}
+}
+
+func interactiveAuthValue(facade string) string {
+	if facade != "mcp" || isTestProcess() ||
+		strings.TrimSpace(os.Getenv("CI")) != "" ||
+		strings.TrimSpace(os.Getenv("DEC_NO_CONSOLE_LAUNCH")) == "1" {
+		return "0"
+	}
+	return "1"
 }
 
 func startServerProcess() error {

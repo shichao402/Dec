@@ -3,11 +3,12 @@
 - **状态**：已接受（已实现）
 - **日期**：2026-08-28
 - **关联**：[0008](0008-service-facade-split.md)
+- **补充**：[0022](0022-console-bitwarden-unlock.md) 取代浏览器解锁，并定义本机 MCP 自动唤起 Console
 - **影响范围**：`dec-server` 启动门闩、`Authenticate` RPC、独立 Tauri 管理客户端
 
 ## 决策
 
-`dec-server` 仍是一机单例。进程启动后 **全局锁定**：仅 `Ping` 与 `Authenticate` 可在未解锁时调用。人在管理客户端选择本机或远程实例，提交 Bitwarden 主密码（及可选 TOTP）；服务用该密码走 Identity 程序化解锁。成功则控制权与 BW session 同在进程内存、同为 1 小时 TTL；进程退出即失效。
+`dec-server` 仍是一机单例。进程启动后 **全局锁定**：仅 `Ping` 与 `Authenticate` 可在未解锁时调用。人在管理客户端选择本机或远程实例，提交 Bitwarden 主密码（及可选 TOTP）；服务用该密码走 Identity 程序化解锁。成功则控制权与 BW session 同在进程内存、同为 1 小时 TTL；进程退出即失效。本机 MCP 缺 session 时可按 [0022](0022-console-bitwarden-unlock.md) 自动唤起 Console 并等待同一门闩打开。
 
 `server.json` 的 token 只是本机 gRPC 传输密钥，不是所有权证明。远程会话使用 `Authenticate` 下发的 control token。非 loopback 监听必须配置 TLS。
 

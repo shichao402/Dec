@@ -47,7 +47,7 @@ Remote **浏览**库存**不得** `RememberSecretBundles`（与 pull 发现写�
 ### 5. 服务版本 mismatch + 重启
 
 - 门面探测 `dec-server` 版本；不一致时 Settings / 状态栏提示
-- Settings 可确认后重启本机 `dec-server`（普通停止后由下次门面拉起；**不**在 Agent/测试环境触发 web unlock）
+- Settings 可确认后重启本机 `dec-server`（普通停止后由下次门面拉起）；测试环境不得自动拉起 Console，非交互 Agent 缺认证时返回结构化错误（[0022](0022-console-bitwarden-unlock.md)）
 - 重启会清空进程内 Bitwarden session——属预期
 
 ### 6. secrets 全量可见口径

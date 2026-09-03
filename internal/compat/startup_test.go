@@ -200,7 +200,7 @@ func TestRepairOnStartup_PurgesLegacyPLayoutOnce(t *testing.T) {
 }
 
 // 集成测试凭据放在 .secrets/dec/integration/ 下，但它不是项目落地内容。
-// 启动清理误删会让 live 测试退回人工 web unlock。
+// 启动清理误删会让 live 测试退回 Console 人工解锁。
 func TestRepairOnStartup_KeepsIntegrationAuthWhilePurgingSecrets(t *testing.T) {
 	home := isolateHome(t)
 	t.Setenv("DEC_HOME", home)

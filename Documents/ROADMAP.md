@@ -2,15 +2,18 @@
 
 尚未排期的意向，不等于已接受的 ADR。落地前再写决策。
 
-## 本机认证：Bitwarden Login with Device
+## Console 认证体验后续
+
+人工认证入口已由 [ADR 0022](decisions/0022-console-bitwarden-unlock.md) 固定为 Console
+Authenticate。后续若接入 Bitwarden
+[Log in with device](https://bitwarden.com/help/log-in-with-device/)（auth request），
+也只能作为该页面中的认证方式，不得新增服务端页面、浏览器回退或 CLI/MCP 密码输入。
 
 - **状态**：意向
-- **背景**：缺 session 时 `dec-server` 走本地 HTTP web unlock，浏览器收集主密码。Bitwarden Password Manager 已有 [Log in with device](https://bitwarden.com/help/log-in-with-device/)（auth request）：发起端提交临时公钥，已登录的手机/桌面/网页核对指纹短语后批准，user key 加密回传。主密码不经过 Dec。
-- **目标**：把这条通道接到现有 `EnsureSession` / `internal/secrets/unlock/`，作为本机人类认证的主路径（或与 web unlock 并列，可回退）。
-- **不改**：session 仍只在 `dec-server` 进程内存；不落盘；测试仍禁止真实弹窗（注入桩或 `DEC_NO_WEB_UNLOCK`）。
-- **不做**：用 auth request 做自动续期 / 机器 token 轮换；不把整库 user key 交给 CI runner。
-- **体验注意**：批准端需开启「使用此设备批准来自其他设备的登录请求」；Android 推送依赖 Play 服务，失败时可在 App「待处理的登录请求」或网页 Vault 手动批。TUI 应展示指纹短语，并轮询请求结果（不依赖推送送达）。
-- **落点（规划）**：`internal/secrets/unlock/` 增加 auth-request 发起与轮询；TUI/进度流回传指纹短语（类比 0011 的 unlock URL 实时回传）。
+- **目标**：Console 展示指纹短语并轮询请求结果；主密码不经过 Dec。
+- **不改**：session、vault/user key、临时密钥与 2FA 中间态只在进程内存；测试不得自动拉起真实 Console。
+- **不做**：用 auth request 自动续期、做机器 token 轮换，或把整库 user key 交给 CI runner。
+- **体验注意**：批准端需开启「使用此设备批准来自其他设备的登录请求」；推送失败时可在 Bitwarden App 的待处理请求或网页 Vault 手动批准。
 
 ## CI 无人值守
 

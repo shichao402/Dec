@@ -290,7 +290,17 @@ sequenceDiagram
 
 ## Bitwarden 认证
 
-拉取 secrets 需要有效 session。认证由 **`dec-server` 进程内**触发；user / project 门面共享同一服务 session。详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)。本机用 Bitwarden Login with Device（auth request）替代/并列 web unlock 见 [ROADMAP.md](./ROADMAP.md)，尚未实现。
+拉取 secrets 需要有效 session。session 与 vault/user key 仅存于 **`dec-server` 进程内存**，
+Global / Local 门面共享同一服务 session，但拿不到明文。Console Authenticate 是唯一人工
+入口：本机交互 MCP 缺 session 时自动拉起或聚焦 Console 并等待；管理远端设备时也由
+操作者当前 Console 收集输入并提交给目标服务。远端无桌面、CI、测试和其他非交互上下文
+不得拉起 Console，须返回结构化认证错误。`DEC_BW_PASSWORD` 仍可用于首次拉起服务时的
+程序化认证。
+
+session、vault/user key、主密码、TOTP、临时密钥与 2FA 中间态均不得落盘；允许保存的
+设备信任材料仅为 `deviceIdentifier` 与 `two_factor_remember`。详见
+[0022](decisions/0022-console-bitwarden-unlock.md)、[ARCHITECTURE.md](./ARCHITECTURE.md)
+与 [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)。
 
 首次连接 HTTPS 私仓存在特殊自举路径（[0011](decisions/0011-private-repo-gcm-bootstrap.md)）：
 仅在 Git 明确认定认证失败且用户确认后，服务不依赖 bundle manifest，直接枚举 Bitwarden
@@ -317,6 +327,7 @@ sequenceDiagram
 - [decisions/0002-secrets-synctarget-root.md](decisions/0002-secrets-synctarget-root.md)
 - [decisions/0009-bundle-binary-scope.md](decisions/0009-bundle-binary-scope.md)
 - [decisions/0011-private-repo-gcm-bootstrap.md](decisions/0011-private-repo-gcm-bootstrap.md)
+- [decisions/0022-console-bitwarden-unlock.md](decisions/0022-console-bitwarden-unlock.md)
 - [research/secrets-ci-centralization.md](./research/secrets-ci-centralization.md)：CI / 机器身份 / PM vs SM（调研，非正式决策）
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)

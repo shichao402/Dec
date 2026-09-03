@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/shichao402/Dec/internal/secrets"
-	"github.com/shichao402/Dec/internal/secrets/unlock"
 	"github.com/shichao402/Dec/internal/service"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
 	"google.golang.org/grpc/codes"
@@ -82,6 +81,27 @@ func TestOlderClientCannotControlNewerServer(t *testing.T) {
 	}
 }
 
+func TestInteractiveUnlockRequiresLocalMCPListenToken(t *testing.T) {
+	server := &Server{listenToken: "local-token"}
+	localMCP := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		service.TokenHeader, "local-token",
+		service.InteractiveAuthHeader, "1",
+	))
+	if !server.allowsInteractiveUnlock(localMCP, "mcp") {
+		t.Fatal("local MCP with listen token should be interactive")
+	}
+	if server.allowsInteractiveUnlock(localMCP, "console") {
+		t.Fatal("Console must use Authenticate directly")
+	}
+	remoteMCP := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		service.TokenHeader, "control-token",
+		service.InteractiveAuthHeader, "1",
+	))
+	if server.allowsInteractiveUnlock(remoteMCP, "mcp") {
+		t.Fatal("remote/control-token MCP must not launch a desktop app")
+	}
+}
+
 func TestAuthenticateUnlocksInstance(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DEC_HOME", home)
@@ -90,7 +110,7 @@ func TestAuthenticateUnlocksInstance(t *testing.T) {
 	if err := secrets.SaveConfig(&secrets.Config{ServerURL: secrets.DefaultServerURL, Email: "alice@dec.test"}); err != nil {
 		t.Fatal(err)
 	}
-	secrets.SetAuthenticatorForTest(unlock.NewStubAuthenticator("pw", "", "sess"))
+	secrets.SetAuthenticatorForTest(secrets.NewStubAuthenticator("pw", "", "sess"))
 	t.Cleanup(secrets.ResetAuthenticatorForTest)
 
 	ctx := startTestServer(t)

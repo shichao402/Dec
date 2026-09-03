@@ -6,7 +6,7 @@
 
 - [README.md](../README.md)：项目概览与快速开始
 - [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md)：项目四象限与 Bitwarden private secrets
-- [ROADMAP.md](./ROADMAP.md)：尚未排期的意向（含本机 Login with Device）
+- [ROADMAP.md](./ROADMAP.md)：尚未排期的意向
 - [research/secrets-ci-centralization.md](./research/secrets-ci-centralization.md)：密钥源唯一与 CI 下放调研（2026-08）
 - [TUI_ARCHITECTURE.md](./TUI_ARCHITECTURE.md)：TUI 已卸下（ADR 0020）
 - [client/README.md](../client/README.md)：桌面 Console（人机入口）
@@ -22,13 +22,20 @@ Dec 是一个以 **Console** 为第一人机入口、以 **MCP** 为 Agent 入�
 
 | 程序 | 职责 |
 |------|------|
-| `dec-server` | 本机单例；启动即锁定，Authenticate 成功后持有 BW session 与 1h 控制权 |
+| `dec-server` | 本机单例；持有实例控制状态与进程内 BW session，不承载人工认证 UI |
 | `dec` | 最小 CLI（`--version`、内部 hidden 命令）；无参提示改用 Console |
 | `dec-mcp` | Agent stdio MCP 门面；无服务时自动拉起 `dec-server` |
 | `dec-exec` | 独立 env 注入程序；只读已落地 `.secrets/**/.env/*.env`，不经过服务、不碰 session |
-| Dec Console | 独立 Tauri 客户端（`client/`）；本机/远程连接、解锁与日常管理 |
+| Dec Console | 独立 Tauri 客户端（`client/`）；本机/远程连接、Authenticate 与日常管理 |
 
 门面与服务默认绑定 `127.0.0.1` 的 gRPC；可用 `management_listen` + TLS 做远程直连。端点与本机随机 token 写在 `~/.dec/run/server.json`。进程启动后锁定，见 [0018](decisions/0018-instance-lock-and-console.md)。同一 project 的 pull/push 等写操作互斥；未发起操作的门面可旁观该 project 当前操作的实时进度。详见 [0008](decisions/0008-service-facade-split.md)。
+
+Bitwarden session 按需建立。**Console Authenticate 是唯一人工入口**；服务、CLI 与 MCP
+均不收集主密码或 TOTP。本机桌面交互 MCP 缺 session 时拉起/聚焦 Console 并等待，成功
+后重试原操作；远端无桌面、CI、测试及明确非交互上下文直接返回结构化错误。管理远端时
+由操作者当前 Console 提交认证输入，目标主机无需桌面。`DEC_BW_PASSWORD` 保留为首次
+拉起服务时的程序化路径。session、vault/user key 与 2FA 中间态只在内存，详见
+[0022](decisions/0022-console-bitwarden-unlock.md)。
 
 资产按 [ADR 0016](decisions/0016-p-four-quadrant-model.md) 的顶层 **项目** 组织：
 
@@ -477,8 +484,8 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 **远端进程不在运行是正常状态，不是故障。**
 
 安全边界：首次置备要求 typed confirm（真实键入目标主机名）；SSH 凭据只存引用，
-复用 `~/.ssh/config` / ssh-agent / known_hosts；置备完成后远端服务仍是锁定态，
-需 `Authenticate` 解锁，置备不携带主密码。设备级操作以合成键 `device:<alias>`
+复用 `~/.ssh/config` / ssh-agent / known_hosts；置备完成后远端服务仍需 Console 通过
+`Authenticate` 同时建立实例控制权与 Bitwarden session，置备不携带主密码。设备级操作以合成键 `device:<alias>`
 参与 broker 互斥，该键不是路径、不落盘、不参与项目解析。
 
 受管设备登记保存在发起端 `GlobalConfig.managed_devices`，记录别名、SSH 目标引用、
@@ -490,7 +497,7 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 Console 的 SSH 添加表单只要求一个目标（ssh_config Host、主机名或 `user@host`）：
 先通过本机 `dec-server` 探测；未安装时要求用户真实键入目标进行首次置备确认；成功后
 保存并自动连接。连接时先调用本机 `ensure_remote_service`，就绪后再建立到固定端口
-`47653` 的隧道。连接前尚未进行 Bitwarden 解锁，因此 servicehost 对持有效本机
+`47653` 的隧道。连接前尚未建立 Bitwarden session，因此 servicehost 对持有效本机
 transport token 的请求设有精确 pre-auth 白名单，只放行设备探测、置备、拉起与清单；
 资产、secrets 和仓库配置仍要求 `InstanceUnlocked`。
 
