@@ -59,7 +59,7 @@ jobs:
 
       - name: Fetch relkit CLI
         shell: bash
-        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref fd4676ae0e7498a7b61bd20eca1034b7d8b3a42d
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref da59603ae4e9fa95272d4ed60315b66b79ea347f
 
       - name: Build payload and CLI
         shell: bash
@@ -119,9 +119,23 @@ jobs:
             local label="$1"
             shift
             echo "::group::${label}"
-            local start end elapsed kibps mibps
+            local start end elapsed kibps mibps out
+            out="$(mktemp)"
             start=$(date +%s)
-            "$@"
+            if ! "$@" >"$out" 2>&1; then
+              cat "$out"
+              rm -f "$out"
+              echo "::endgroup::"
+              return 1
+            fi
+            cat "$out"
+            if ! grep -q '^staged ' "$out" && ! grep -q '^upload ' "$out"; then
+              echo "relkit did not upload (first line: $(head -n 1 "$out"))"
+              rm -f "$out"
+              echo "::endgroup::"
+              return 1
+            fi
+            rm -f "$out"
             end=$(date +%s)
             elapsed=$((end - start))
             if [ "$elapsed" -lt 1 ]; then

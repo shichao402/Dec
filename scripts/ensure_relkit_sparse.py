@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 DEFAULT_URL = "https://cnb.cool/shichao402/relkit.git"
-DEFAULT_REF = "fd4676ae0e7498a7b61bd20eca1034b7d8b3a42d"
+DEFAULT_REF = "da59603ae4e9fa95272d4ed60315b66b79ea347f"
 
 # Cone paths: Go SDK + CLI sources Dec needs.
 SPARSE_CONE_DIRS = (
