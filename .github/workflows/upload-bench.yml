@@ -14,13 +14,13 @@ on:
     inputs:
       size_mib:
         description: Payload size in MiB (urandom, gzip 几乎不缩)
-        default: "48"
+        default: "8"
       concurrency:
         description: Multipart concurrency (RELKIT_UPLOAD_CONCURRENCY)
         default: "8"
       part_size:
         description: Part size (RELKIT_UPLOAD_PART_SIZE)
-        default: "8MiB"
+        default: "1MiB"
       mode:
         description: Which legs to run
         type: choice
