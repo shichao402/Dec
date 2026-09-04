@@ -115,7 +115,7 @@ jobs:
           set -e
           printf '%s\n' "$create_out"
           if [ "$create_rc" -ne 0 ]; then
-            if printf '%s' "$create_out" | grep -qiE 'already|exist|已存在'; then
+            if printf '%s' "$create_out" | grep -qiE 'already|exist|已存在|冲突|409'; then
               echo "release already exists, continue"
             else
               echo "release create failed"
