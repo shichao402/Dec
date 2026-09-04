@@ -184,14 +184,16 @@ func TestUpdaterSelectsRuntimeAudience(t *testing.T) {
 
 func TestEntryURLsPointAtRawDomains(t *testing.T) {
 	urls := entryURLs()
-	if len(urls) < 2 {
+	if len(urls) != 1 {
 		t.Fatalf("entryURLs = %v", urls)
 	}
 	if !strings.Contains(urls[0], "raw.firoyang.com") {
 		t.Fatalf("primary entry = %q", urls[0])
 	}
-	if !strings.Contains(urls[1], "raw2.firoyang.com") {
-		t.Fatalf("backup entry = %q", urls[1])
+	for _, u := range urls {
+		if strings.Contains(u, "raw2.firoyang.com") {
+			t.Fatalf("chengdu backup must be gone: %v", urls)
+		}
 	}
 }
 

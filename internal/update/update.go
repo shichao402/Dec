@@ -53,7 +53,6 @@ func entryURLs() []string {
 	}
 	return []string{
 		"https://raw.firoyang.com/rup/directory/dec.pb",
-		"https://raw2.firoyang.com/rup/directory/dec.pb",
 	}
 }
 
