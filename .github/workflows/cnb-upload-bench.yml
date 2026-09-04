@@ -1,0 +1,183 @@
+# 测 GitHub-hosted runner → CNB Release 附件这一跳：
+#   1) 安装 git-cnb（计时，不计入上传速度）
+#   2) 在 CNB 上确保 bench tag / Release（计时，不计入上传速度）
+#   3) git-cnb release asset-upload（只计这一步的秒数和 MiB/s）
+#
+# 不会推 tag 到 GitHub，也不会动正式 dev/stable 发版。
+# 产物覆盖 CNB 上的 tag `cnb-upload-bench`。
+#
+# 手动：Actions → CNB upload bench → Run workflow
+# 密钥：CNB_TOKEN（repo-code / repo-contents 写）
+
+name: CNB upload bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      size_mib:
+        description: Payload size in MiB (urandom, 几乎不缩)
+        default: "32"
+      cnb_repo:
+        description: CNB repo slug
+        default: "shichao402/Dec"
+  push:
+    paths:
+      - ".github/workflows/cnb-upload-bench.yml"
+
+concurrency:
+  group: cnb-upload-bench
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: git-cnb asset-upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+      CNB_REPO: ${{ github.event.inputs.cnb_repo || 'shichao402/Dec' }}
+      SIZE_MIB: ${{ github.event.inputs.size_mib || '32' }}
+      BENCH_TAG: cnb-upload-bench
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Prepare payload
+        id: payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CNB_TOKEN:-}" ]; then
+            echo "CNB_TOKEN 未配置"
+            exit 1
+          fi
+          if ! [[ "$SIZE_MIB" =~ ^[1-9][0-9]*$ ]]; then
+            echo "size_mib must be a positive integer, got ${SIZE_MIB}"
+            exit 1
+          fi
+          if [ "$SIZE_MIB" -gt 256 ]; then
+            echo "size_mib ${SIZE_MIB} is too large for a bench (max 256)"
+            exit 1
+          fi
+          mkdir -p dist
+          echo "writing ${SIZE_MIB}MiB incompressible blob"
+          dd if=/dev/urandom of=dist/cnb-upload-bench.bin bs=1M count="$SIZE_MIB" status=progress
+          BYTES=$(stat -c '%s' dist/cnb-upload-bench.bin)
+          echo "BYTES=${BYTES}" >> "$GITHUB_ENV"
+          echo "bytes=${BYTES}" >> "$GITHUB_OUTPUT"
+          echo "payload ${BYTES} bytes"
+
+      - name: Install git-cnb
+        id: install
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s.%N)
+          curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 180 \
+            -o /usr/local/bin/git-cnb \
+            "https://cnb.cool/looc/git-cnb/-/releases/latest/download/git-cnb_linux_amd64"
+          chmod +x /usr/local/bin/git-cnb
+          end=$(date +%s.%N)
+          git-cnb version
+          git-cnb release --help || true
+          git-cnb release asset-upload --help || true
+          git-cnb release create --help || true
+          python3 - "$start" "$end" <<'PY'
+          import os, sys
+          elapsed = float(sys.argv[2]) - float(sys.argv[1])
+          print(f"install_seconds={elapsed:.3f}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              f.write(f"INSTALL_SECONDS={elapsed:.3f}\n")
+          PY
+
+      - name: Ensure CNB bench release
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s.%N)
+          CNB_URL="https://cnb:${CNB_TOKEN}@cnb.cool/${CNB_REPO}.git"
+          git fetch --depth=1 "$CNB_URL" "refs/heads/main:refs/remotes/cnb/main"
+          git push --force "$CNB_URL" "refs/remotes/cnb/main:refs/tags/${BENCH_TAG}"
+          printf '%s\n' "git-cnb upload bench from GitHub Actions ${GITHUB_RUN_ID}" > /tmp/cnb-bench-body.md
+          git-cnb --repo="${CNB_REPO}" release create \
+            -t "${BENCH_TAG}" \
+            -n "cnb-upload-bench" \
+            -d /tmp/cnb-bench-body.md || true
+          end=$(date +%s.%N)
+          python3 - "$start" "$end" <<'PY'
+          import sys
+          elapsed = float(sys.argv[2]) - float(sys.argv[1])
+          print(f"ensure_release_seconds={elapsed:.3f}")
+          open(__import__("os").environ["GITHUB_ENV"], "a", encoding="utf-8").write(f"ENSURE_SECONDS={elapsed:.3f}\n")
+          PY
+
+      - name: git-cnb release asset-upload
+        id: upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          BYTES="${BYTES}"
+          start=$(date +%s.%N)
+          set +e
+          git-cnb --repo="${CNB_REPO}" release asset-upload \
+            -t "${BENCH_TAG}" \
+            -f dist/cnb-upload-bench.bin
+          rc=$?
+          set -e
+          end=$(date +%s.%N)
+          python3 - "$start" "$end" "$BYTES" "$rc" <<'PY'
+          import os, sys
+          start, end, raw_bytes, rc = sys.argv[1:5]
+          elapsed = max(float(end) - float(start), 0.001)
+          nbytes = int(raw_bytes)
+          kibps = nbytes / 1024 / elapsed
+          mibps = nbytes / 1024 / 1024 / elapsed
+          mbps = nbytes * 8 / 1_000_000 / elapsed
+          env = os.environ["GITHUB_ENV"]
+          with open(env, "a", encoding="utf-8") as f:
+              f.write(f"UPLOAD_SECONDS={elapsed:.3f}\n")
+              f.write(f"UPLOAD_KIBPS={kibps:.1f}\n")
+              f.write(f"UPLOAD_MIBPS={mibps:.3f}\n")
+              f.write(f"UPLOAD_MBPS={mbps:.3f}\n")
+              f.write(f"UPLOAD_RC={rc}\n")
+          print(f"upload_seconds={elapsed:.3f}")
+          print(f"upload_KiB/s={kibps:.1f}")
+          print(f"upload_MiB/s={mibps:.3f}")
+          print(f"upload_Mbps={mbps:.3f}")
+          print(f"upload_rc={rc}")
+          raise SystemExit(int(rc))
+          PY
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUMMARY="${GITHUB_STEP_SUMMARY}"
+          {
+            echo "## CNB git-cnb asset-upload bench"
+            echo
+            echo "- runner: GitHub ubuntu-latest → cnb.cool/${CNB_REPO}"
+            echo "- tag: \`${BENCH_TAG}\`"
+            echo "- file: \`dist/cnb-upload-bench.bin\` (${BYTES:-?} bytes, ${SIZE_MIB} MiB urandom)"
+            echo "- install git-cnb: ${INSTALL_SECONDS:-n/a} s"
+            echo "- ensure tag/release: ${ENSURE_SECONDS:-n/a} s"
+            echo "- **asset-upload: ${UPLOAD_SECONDS:-n/a} s**"
+            echo "- **speed: ${UPLOAD_MIBPS:-n/a} MiB/s  (${UPLOAD_MBPS:-n/a} Mbps, ${UPLOAD_KIBPS:-n/a} KiB/s)**"
+            echo "- git-cnb exit: ${UPLOAD_RC:-n/a}"
+            echo
+            echo "| step | seconds |"
+            echo "| --- | ---: |"
+            echo "| install git-cnb | ${INSTALL_SECONDS:-} |"
+            echo "| ensure tag/release | ${ENSURE_SECONDS:-} |"
+            echo "| asset-upload | ${UPLOAD_SECONDS:-} |"
+            echo
+            echo "Release: https://cnb.cool/${CNB_REPO}/-/releases/tag/${BENCH_TAG}"
+          } >> "$SUMMARY"
+          echo "asset-upload ${UPLOAD_SECONDS:-?}s  ${UPLOAD_MIBPS:-?} MiB/s  ${UPLOAD_MBPS:-?} Mbps"
