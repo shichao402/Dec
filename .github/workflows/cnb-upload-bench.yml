@@ -104,11 +104,25 @@ jobs:
           CNB_URL="https://cnb:${CNB_TOKEN}@cnb.cool/${CNB_REPO}.git"
           git fetch --depth=1 "$CNB_URL" "refs/heads/main:refs/remotes/cnb/main"
           git push --force "$CNB_URL" "refs/remotes/cnb/main:refs/tags/${BENCH_TAG}"
-          printf '%s\n' "git-cnb upload bench from GitHub Actions ${GITHUB_RUN_ID}" > /tmp/cnb-bench-body.md
-          git-cnb --repo="${CNB_REPO}" release create \
+          BODY="git-cnb upload bench from GitHub Actions ${GITHUB_RUN_ID}"
+          set +e
+          create_out="$(git-cnb --repo="${CNB_REPO}" release create \
             -t "${BENCH_TAG}" \
             -n "cnb-upload-bench" \
-            -d /tmp/cnb-bench-body.md || true
+            -b "${BODY}" \
+            --make-latest=false 2>&1)"
+          create_rc=$?
+          set -e
+          printf '%s\n' "$create_out"
+          if [ "$create_rc" -ne 0 ]; then
+            if printf '%s' "$create_out" | grep -qiE 'already|exist|已存在'; then
+              echo "release already exists, continue"
+            else
+              echo "release create failed"
+              exit "$create_rc"
+            fi
+          fi
+          git-cnb --repo="${CNB_REPO}" --json release get -t "${BENCH_TAG}" || git-cnb --repo="${CNB_REPO}" --json release get --tag "${BENCH_TAG}" || true
           end=$(date +%s.%N)
           python3 - "$start" "$end" <<'PY'
           import sys
