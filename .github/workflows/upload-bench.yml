@@ -2,7 +2,7 @@
 #   1) relkit staged-put --single   （旧路径：一条 TCP）
 #   2) relkit staged-put            （分片 + 可调并发）
 # 只 PUT/分片到 agent，绝不 POST /publish，不会改 COS 上的通道指针。
-# 落在 agent 上的 staged 树版本是 0.0.0-bench，可被下次对照覆盖。
+# 落在 agent 上的 staged 树版本是 0.0.999，可被下次对照覆盖。
 #
 # 手动：Actions → Upload bench → Run workflow
 # 不要和正式 Release 同时跑（同一 product 上传会 409）。
@@ -84,9 +84,9 @@ jobs:
           mkdir -p dist
           echo "writing ${SIZE_MIB}MiB incompressible blob"
           dd if=/dev/urandom of=dist/dec-upload-bench.bin bs=1M count="$SIZE_MIB" status=progress
-          ./relkit-bin stage 0.0.0-bench --code 1 --channel dev \
+          ./relkit-bin stage 0.0.999 --code 999 --channel dev \
             --add dist/dec-upload-bench.bin "id=dec-upload-bench,kind=blob,component=bench,audience=runtime"
-          tar -C .relkit/staged/0.0.0-bench -czf staged.tar.gz .
+          tar -C .relkit/staged/0.0.999 -czf staged.tar.gz .
           BYTES=$(stat -c '%s' staged.tar.gz)
           echo "STAGED_BYTES=${BYTES}" >> "$GITHUB_ENV"
           echo "staged.tar.gz ${BYTES} bytes (payload ${SIZE_MIB}MiB urandom)"
@@ -109,7 +109,7 @@ jobs:
             echo "- staged.tar.gz: ${BYTES} bytes"
             echo "- part-size: ${PART_SIZE}"
             echo "- concurrency: ${CONCURRENCY}"
-            echo "- version: 0.0.0-bench (not published)"
+            echo "- version: 0.0.999 (not published)"
             echo
             echo "| mode | seconds | KiB/s | MiB/s |"
             echo "| --- | ---: | ---: | ---: |"
@@ -137,17 +137,17 @@ jobs:
           case "$MODE" in
             multipart)
               run_leg "multipart x${CONCURRENCY}" ./relkit-bin staged-put staged.tar.gz \
-                --product dec --version 0.0.0-bench --url "$AGENT_URL"
+                --product dec --version 0.0.999 --url "$AGENT_URL"
               ;;
             single)
               run_leg "single PUT" ./relkit-bin staged-put staged.tar.gz \
-                --product dec --version 0.0.0-bench --url "$AGENT_URL" --single
+                --product dec --version 0.0.999 --url "$AGENT_URL" --single
               ;;
             both)
               run_leg "multipart x${CONCURRENCY}" ./relkit-bin staged-put staged.tar.gz \
-                --product dec --version 0.0.0-bench --url "$AGENT_URL"
+                --product dec --version 0.0.999 --url "$AGENT_URL"
               run_leg "single PUT" ./relkit-bin staged-put staged.tar.gz \
-                --product dec --version 0.0.0-bench --url "$AGENT_URL" --single
+                --product dec --version 0.0.999 --url "$AGENT_URL" --single
               ;;
             *)
               echo "unknown mode ${MODE}"
