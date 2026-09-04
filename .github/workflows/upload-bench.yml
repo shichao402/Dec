@@ -1,0 +1,156 @@
+# 跨境上传对照：同一份 incompressible staged tar，先后走
+#   1) relkit staged-put --single   （旧路径：一条 TCP）
+#   2) relkit staged-put            （分片 + 可调并发）
+# 只 PUT/分片到 agent，绝不 POST /publish，不会改 COS 上的通道指针。
+# 落在 agent 上的 staged 树版本是 0.0.0-bench，可被下次对照覆盖。
+#
+# 手动：Actions → Upload bench → Run workflow
+# 不要和正式 Release 同时跑（同一 product 上传会 409）。
+
+name: Upload bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      size_mib:
+        description: Payload size in MiB (urandom, gzip 几乎不缩)
+        default: "48"
+      concurrency:
+        description: Multipart concurrency (RELKIT_UPLOAD_CONCURRENCY)
+        default: "8"
+      part_size:
+        description: Part size (RELKIT_UPLOAD_PART_SIZE)
+        default: "8MiB"
+      mode:
+        description: Which legs to run
+        type: choice
+        options:
+          - both
+          - multipart
+          - single
+        default: both
+
+concurrency:
+  group: upload-bench
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: bench
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
+      RELKIT_AGENT_URL: ${{ secrets.RELKIT_AGENT_URL }}
+      RELKIT_UPLOAD_PART_SIZE: ${{ inputs.part_size }}
+      RELKIT_UPLOAD_CONCURRENCY: ${{ inputs.concurrency }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+          cache: false
+
+      - name: Fetch relkit CLI
+        shell: bash
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref fd4676ae0e7498a7b61bd20eca1034b7d8b3a42d
+
+      - name: Build payload and CLI
+        shell: bash
+        env:
+          SIZE_MIB: ${{ inputs.size_mib }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELKIT_UPLOAD_TOKEN:-}" ]; then
+            echo "RELKIT_UPLOAD_TOKEN 未配置"
+            exit 1
+          fi
+          SIZE_MIB="${SIZE_MIB:-48}"
+          if ! [[ "$SIZE_MIB" =~ ^[1-9][0-9]*$ ]]; then
+            echo "size_mib must be a positive integer, got ${SIZE_MIB}"
+            exit 1
+          fi
+          if [ "$SIZE_MIB" -gt 512 ]; then
+            echo "size_mib ${SIZE_MIB} is too large for a bench (max 512)"
+            exit 1
+          fi
+          ( cd third_party/relkit && go build -o "$OLDPWD/relkit-bin" ./cmd/relkit )
+          mkdir -p dist
+          echo "writing ${SIZE_MIB}MiB incompressible blob"
+          dd if=/dev/urandom of=dist/dec-upload-bench.bin bs=1M count="$SIZE_MIB" status=progress
+          ./relkit-bin stage 0.0.0-bench --code 1 --channel dev \
+            --add dist/dec-upload-bench.bin "id=dec-upload-bench,kind=blob,component=bench,audience=runtime"
+          tar -C .relkit/staged/0.0.0-bench -czf staged.tar.gz .
+          BYTES=$(stat -c '%s' staged.tar.gz)
+          echo "STAGED_BYTES=${BYTES}" >> "$GITHUB_ENV"
+          echo "staged.tar.gz ${BYTES} bytes (payload ${SIZE_MIB}MiB urandom)"
+
+      - name: Upload legs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          PART_SIZE: ${{ inputs.part_size }}
+        run: |
+          set -euo pipefail
+          AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com/v1}"
+          BYTES="${STAGED_BYTES}"
+          SUMMARY="$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Upload bench"
+            echo
+            echo "- runner: GitHub ubuntu-latest → publish.firoyang.com"
+            echo "- staged.tar.gz: ${BYTES} bytes"
+            echo "- part-size: ${PART_SIZE}"
+            echo "- concurrency: ${CONCURRENCY}"
+            echo "- version: 0.0.0-bench (not published)"
+            echo
+            echo "| mode | seconds | KiB/s | MiB/s |"
+            echo "| --- | ---: | ---: | ---: |"
+          } >> "$SUMMARY"
+
+          run_leg() {
+            local label="$1"
+            shift
+            echo "::group::${label}"
+            local start end elapsed kibps mibps
+            start=$(date +%s)
+            "$@"
+            end=$(date +%s)
+            elapsed=$((end - start))
+            if [ "$elapsed" -lt 1 ]; then
+              elapsed=1
+            fi
+            kibps=$(awk -v b="$BYTES" -v s="$elapsed" 'BEGIN { printf "%.1f", b / 1024 / s }')
+            mibps=$(awk -v b="$BYTES" -v s="$elapsed" 'BEGIN { printf "%.3f", b / 1024 / 1024 / s }')
+            echo "${label}: ${elapsed}s  ${kibps} KiB/s  ${mibps} MiB/s  (${BYTES} bytes)"
+            echo "| ${label} | ${elapsed} | ${kibps} | ${mibps} |" >> "$SUMMARY"
+            echo "::endgroup::"
+          }
+
+          case "$MODE" in
+            multipart)
+              run_leg "multipart x${CONCURRENCY}" ./relkit-bin staged-put staged.tar.gz \
+                --product dec --version 0.0.0-bench --url "$AGENT_URL"
+              ;;
+            single)
+              run_leg "single PUT" ./relkit-bin staged-put staged.tar.gz \
+                --product dec --version 0.0.0-bench --url "$AGENT_URL" --single
+              ;;
+            both)
+              run_leg "multipart x${CONCURRENCY}" ./relkit-bin staged-put staged.tar.gz \
+                --product dec --version 0.0.0-bench --url "$AGENT_URL"
+              run_leg "single PUT" ./relkit-bin staged-put staged.tar.gz \
+                --product dec --version 0.0.0-bench --url "$AGENT_URL" --single
+              ;;
+            *)
+              echo "unknown mode ${MODE}"
+              exit 1
+              ;;
+          esac
