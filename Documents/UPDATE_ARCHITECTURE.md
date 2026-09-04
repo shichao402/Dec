@@ -87,4 +87,4 @@ scripts/ensure_relkit_sparse.py --sdk-only
 replace cnb.cool/shichao402/relkit => ./third_party/relkit
 ```
 
-上游 URL 默认 `https://cnb.cool/shichao402/relkit.git`。**ref 默认钉在已验证完整 commit `da59603ae4e9fa95272d4ed60315b66b79ea347f`**（relkit `main` 上已推送；短 SHA 不能直接 `git fetch`），发布流水线（`.github/workflows/release.yml`）显式传同一完整 SHA，不要跟 `main` HEAD 漂。升级时先在本机验证该 commit，再同步改 `scripts/ensure_relkit_sparse.py` 的 `DEFAULT_REF` 与 workflow。临时覆盖可用 `--ref` / `RELKIT_URL` / `RELKIT_REF`。
+上游 URL 默认 `https://cnb.cool/shichao402/relkit.git`。**ref 默认钉在已验证完整 commit `3d706f9a27aa37ab3dd7471ec4f48dfe638b5ba5`**（relkit `main` 上已推送；短 SHA 不能直接 `git fetch`），发布流水线（`.github/workflows/release.yml`）显式传同一完整 SHA，不要跟 `main` HEAD 漂。升级时先在本机验证该 commit，再同步改 `scripts/ensure_relkit_sparse.py` 的 `DEFAULT_REF` 与 workflow。临时覆盖可用 `--ref` / `RELKIT_URL` / `RELKIT_REF`。

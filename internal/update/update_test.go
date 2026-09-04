@@ -182,10 +182,23 @@ func TestUpdaterSelectsRuntimeAudience(t *testing.T) {
 	}
 }
 
-func TestEntryURLsPointAtUpdatesDomain(t *testing.T) {
+func TestEntryURLsPointAtRawDomains(t *testing.T) {
 	urls := entryURLs()
-	if len(urls) == 0 || !strings.Contains(urls[0], "updates.firoyang.com") {
+	if len(urls) < 2 {
 		t.Fatalf("entryURLs = %v", urls)
+	}
+	if !strings.Contains(urls[0], "raw.firoyang.com") {
+		t.Fatalf("primary entry = %q", urls[0])
+	}
+	if !strings.Contains(urls[1], "raw2.firoyang.com") {
+		t.Fatalf("backup entry = %q", urls[1])
+	}
+}
+
+func TestEmbeddedRecoveryFromRelkitJSON(t *testing.T) {
+	help := embeddedRecovery()
+	if help == nil || help.Message == "" || len(help.Links) < 2 {
+		t.Fatalf("recovery: %+v", help)
 	}
 }
 

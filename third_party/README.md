@@ -3,7 +3,7 @@
 本目录不存放手拷贝的上游源码。
 
 `relkit/` 由 `scripts/ensure_relkit_sparse` sparse-checkout 自
-https://cnb.cool/shichao402/relkit（默认钉住已验证 commit `da59603ae4e9fa95272d4ed60315b66b79ea347f`，可用 `RELKIT_REF` 覆盖）。
+https://cnb.cool/shichao402/relkit（默认钉住已验证 commit `3d706f9a27aa37ab3dd7471ec4f48dfe638b5ba5`，可用 `RELKIT_REF` 覆盖）。
 
 `go.mod` 通过 replace 指向本目录：
 

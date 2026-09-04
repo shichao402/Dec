@@ -43,9 +43,38 @@ type CheckResult struct {
 }
 
 func entryURLs() []string {
-	return []string{
-		"https://updates.firoyang.com/rup/directory/dec.pb",
+	var cfg struct {
+		Directory struct {
+			EntryURLs []string `json:"entryUrls"`
+		} `json:"directory"`
 	}
+	if err := json.Unmarshal(embeddedRelkitJSON, &cfg); err == nil && len(cfg.Directory.EntryURLs) > 0 {
+		return append([]string(nil), cfg.Directory.EntryURLs...)
+	}
+	return []string{
+		"https://raw.firoyang.com/rup/directory/dec.pb",
+		"https://raw2.firoyang.com/rup/directory/dec.pb",
+	}
+}
+
+func embeddedRecovery() *sdk.RecoveryHelp {
+	var cfg struct {
+		Recovery *struct {
+			Message string `json:"message"`
+			Links   []struct {
+				Label string `json:"label"`
+				URL   string `json:"url"`
+			} `json:"links"`
+		} `json:"recovery"`
+	}
+	if err := json.Unmarshal(embeddedRelkitJSON, &cfg); err != nil || cfg.Recovery == nil {
+		return nil
+	}
+	help := &sdk.RecoveryHelp{Message: cfg.Recovery.Message}
+	for _, link := range cfg.Recovery.Links {
+		help.Links = append(help.Links, sdk.RecoveryLink{Label: link.Label, URL: link.URL})
+	}
+	return help
 }
 
 func stateDir() (string, error) {
@@ -90,6 +119,7 @@ func newUpdater(currentVersion, component string) (*sdk.Updater, error) {
 		ClientSelectors: selectors,
 		StateStore:      sdk.NewFileStateStore(dir, productName, channel),
 		Policy:          sdk.DefaultPolicy(),
+		Recovery:        embeddedRecovery(),
 	}, nil
 }
 

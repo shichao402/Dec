@@ -24,9 +24,26 @@
       "baseUrl": "https://raw.firoyang.com/rup/",
       "accessKeyEnv": "COS_SECRET_ID",
       "secretKeyEnv": "COS_SECRET_KEY"
+    },
+    "cos2": {
+      "type": "s3-compatible",
+      "endpoint": "https://cos.ap-chengdu.myqcloud.com",
+      "bucket": "relkit-updates-cd-1251882798",
+      "region": "ap-chengdu",
+      "prefix": "rup/",
+      "baseUrl": "https://raw2.firoyang.com/rup/",
+      "accessKeyEnv": "COS_SECRET_ID",
+      "secretKeyEnv": "COS_SECRET_KEY"
     }
   },
-  "publishTo": ["cos"],
+  "publishTo": ["cos", "cos2"],
+  "recovery": {
+    "message": "Automatic updates are unavailable (network or update service failure). Download an official Dec release and install it manually.",
+    "links": [
+      {"label": "GitHub Releases", "url": "https://github.com/shichao402/Dec/releases"},
+      {"label": "CNB Releases", "url": "https://cnb.cool/shichao402/Dec/-/releases"}
+    ]
+  },
   "site": {
     "title": "Dec",
     "description": "个人 AI 知识仓库代理。",
@@ -37,9 +54,10 @@
     }
   },
   "directory": {
-    "publishTo": ["cos"],
+    "publishTo": ["cos", "cos2"],
     "entryUrls": [
-      "https://raw.firoyang.com/rup/directory/dec.pb"
+      "https://raw.firoyang.com/rup/directory/dec.pb",
+      "https://raw2.firoyang.com/rup/directory/dec.pb"
     ],
     "services": [
       {
@@ -52,6 +70,18 @@
         "id": "cos-dev",
         "priority": 10,
         "indexUrl": "https://raw.firoyang.com/rup/index/dec/dev.pb",
+        "channel": "dev"
+      },
+      {
+        "id": "cos2-primary",
+        "priority": 20,
+        "indexUrl": "https://raw2.firoyang.com/rup/index/dec/stable.pb",
+        "channel": "stable"
+      },
+      {
+        "id": "cos2-dev",
+        "priority": 20,
+        "indexUrl": "https://raw2.firoyang.com/rup/index/dec/dev.pb",
         "channel": "dev"
       }
     ]

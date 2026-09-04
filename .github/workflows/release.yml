@@ -103,7 +103,7 @@ jobs:
 
       - name: Fetch relkit SDK
         shell: bash
-        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref da59603ae4e9fa95272d4ed60315b66b79ea347f
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref 3d706f9a27aa37ab3dd7471ec4f48dfe638b5ba5
 
       - name: go test
         shell: bash
@@ -124,7 +124,7 @@ jobs:
 
       - name: Fetch relkit SDK
         shell: bash
-        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref da59603ae4e9fa95272d4ed60315b66b79ea347f
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref 3d706f9a27aa37ab3dd7471ec4f48dfe638b5ba5
 
       - name: Build four-piece kit
         shell: bash
@@ -184,7 +184,7 @@ jobs:
           python-version: "3.12"
 
       - name: Fetch relkit SDK
-        run: python scripts/ensure_relkit_sparse.py --sdk-only --ref da59603ae4e9fa95272d4ed60315b66b79ea347f
+        run: python scripts/ensure_relkit_sparse.py --sdk-only --ref 3d706f9a27aa37ab3dd7471ec4f48dfe638b5ba5
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -276,7 +276,7 @@ jobs:
 
       - name: Fetch relkit
         shell: bash
-        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref da59603ae4e9fa95272d4ed60315b66b79ea347f
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref 3d706f9a27aa37ab3dd7471ec4f48dfe638b5ba5
 
       - name: RUP stage and publish
         shell: bash
