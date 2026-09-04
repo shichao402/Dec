@@ -103,7 +103,7 @@ jobs:
 
       - name: Fetch relkit SDK
         shell: bash
-        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref 6c78d29fbd54efa87e6adf189fb9b7b277accd7c
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref fd4676ae0e7498a7b61bd20eca1034b7d8b3a42d
 
       - name: go test
         shell: bash
@@ -124,7 +124,7 @@ jobs:
 
       - name: Fetch relkit SDK
         shell: bash
-        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref 6c78d29fbd54efa87e6adf189fb9b7b277accd7c
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref fd4676ae0e7498a7b61bd20eca1034b7d8b3a42d
 
       - name: Build four-piece kit
         shell: bash
@@ -184,7 +184,7 @@ jobs:
           python-version: "3.12"
 
       - name: Fetch relkit SDK
-        run: python scripts/ensure_relkit_sparse.py --sdk-only --ref 6c78d29fbd54efa87e6adf189fb9b7b277accd7c
+        run: python scripts/ensure_relkit_sparse.py --sdk-only --ref fd4676ae0e7498a7b61bd20eca1034b7d8b3a42d
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -276,13 +276,15 @@ jobs:
 
       - name: Fetch relkit
         shell: bash
-        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref 6c78d29fbd54efa87e6adf189fb9b7b277accd7c
+        run: python3 scripts/ensure_relkit_sparse.py --sdk-only --ref fd4676ae0e7498a7b61bd20eca1034b7d8b3a42d
 
       - name: RUP stage and publish
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
+          RELKIT_UPLOAD_PART_SIZE: ${{ vars.RELKIT_UPLOAD_PART_SIZE }}
+          RELKIT_UPLOAD_CONCURRENCY: ${{ vars.RELKIT_UPLOAD_CONCURRENCY }}
         run: |
           set -euo pipefail
           VER="${VERSION#v}"
@@ -331,12 +333,11 @@ jobs:
           ./relkit-bin "$@"
           tar -C ".relkit/staged/${VER}" -czf staged.tar.gz .
           AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com/v1}"
-          AGENT_URL="${AGENT_URL%/}"
-          case "$AGENT_URL" in
-            */v1) ;;
-            *) AGENT_URL="${AGENT_URL}/v1" ;;
-          esac
           SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
+          ./relkit-bin staged-put staged.tar.gz \
+            --product dec \
+            --version "$VER" \
+            --url "$AGENT_URL"
           agent_curl() {
             local method="$1" url="$2"
             shift 2
@@ -355,8 +356,11 @@ jobs:
             cat "$body"
             rm -f "$body"
           }
-          agent_curl PUT "${AGENT_URL}/staged/dec/${VER}" \
-            --data-binary @staged.tar.gz
+          AGENT_URL="${AGENT_URL%/}"
+          case "$AGENT_URL" in
+            */v1) ;;
+            *) AGENT_URL="${AGENT_URL}/v1" ;;
+          esac
           agent_curl POST "${AGENT_URL}/publish" \
             -H "Content-Type: application/json" \
             -d "{\"product\":\"dec\",\"version\":\"${VER}\",\"stagedSha256\":\"${SHA}\",\"idempotencyKey\":\"dec/${CHANNEL}/${VER}/${SHA}\"}"
