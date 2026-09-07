@@ -44,6 +44,29 @@ export function installTauriMock(scenario: Scenario) {
     },
   }
 
+  // 元数据接口按设计不返回 Note 正文，mock 也不该出现任何像密钥值的字段。
+  methods.list_secrets = {
+    bitwarden_configured: true,
+    session_active: true,
+    remote_checked: true,
+    files: [
+      {
+        secrets_bundle: 'relkit/private/project',
+        project_rel_path: '.secrets/relkit/.env/upload.env',
+        local_exists: true,
+        local_size_bytes: 148,
+        local_modified_unix: 1_757_000_000,
+        remote_exists: true,
+      },
+      {
+        secrets_bundle: 'relkit/private/project',
+        project_rel_path: '.secrets/relkit/.env/agent.env',
+        local_exists: false,
+        remote_exists: true,
+      },
+    ],
+  }
+
   // 推送预览按平面分流：Global 推 ~/.dec 下的 user 平面资产，项目推该项目资产。
   // mock 按 workspacePlane 返回不同结果，这样测试能抓到平面参数传错。
   const projectPushPreview = {

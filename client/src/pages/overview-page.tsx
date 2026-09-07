@@ -93,7 +93,7 @@ export function OverviewPage(props: {
                 />
                 <PanelBody>
                   {props.lastPull ? <LastPull entry={props.lastPull} /> : (
-                    <p className="text-xs leading-relaxed text-faint">这次连接还没有执行同步。拉取完成后，结论会显示在这里和同步记录页。</p>
+                    <p className="text-xs leading-relaxed text-faint">这次连接还没有执行同步。拉取完成后，结论会显示在这里和同步页。</p>
                   )}
                 </PanelBody>
               </Panel>

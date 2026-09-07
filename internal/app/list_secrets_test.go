@@ -99,6 +99,31 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	}
 }
 
+// 用户平面的 secrets 落在 ~/.dec/secrets 下，Root 必须为空（ADR 0015）；
+// 拿空 Root 当「缺项目根」报错会让 Console 的本机平面永远列不出 secrets。
+func TestListWorkspaceSecretsMetadata_UserPlaneAcceptsEmptyRoot(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForProjectTest(t, "DEC_HOME", decHome)
+
+	result, err := ListWorkspaceSecretsMetadata(
+		context.Background(), NewWorkspace(WorkspaceUser, ""), false, nil)
+	if err != nil {
+		t.Fatalf("ListWorkspaceSecretsMetadata(user, \"\") = %v", err)
+	}
+	if !strings.Contains(result.SkippedReason, "includeRemote") {
+		t.Fatalf("SkippedReason = %q, 应说明需要查远端", result.SkippedReason)
+	}
+}
+
+// 项目平面反过来必须拒绝空 Root：否则 .secrets/ 会落到服务 cwd 下。
+func TestListWorkspaceSecretsMetadata_ProjectPlaneRejectsEmptyRoot(t *testing.T) {
+	_, err := ListWorkspaceSecretsMetadata(
+		context.Background(), NewWorkspace(WorkspaceProject, ""), false, nil)
+	if err == nil {
+		t.Fatal("ListWorkspaceSecretsMetadata(project, \"\") 应报错")
+	}
+}
+
 func TestMCPSessionUnlockTimeout(t *testing.T) {
 	if MCPSessionUnlockTimeout != 3*time.Minute {
 		t.Fatalf("MCPSessionUnlockTimeout = %v", MCPSessionUnlockTimeout)

@@ -9,6 +9,7 @@ import { Field, Select } from '@/components/ui/input'
 import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel'
 import { runOrWatchTyped } from '@/lib/api'
 import { actionSpec, resource } from '@/lib/console'
+import { SecretsPanel, type SecretsMetadata } from '@/pages/secrets-panel'
 import { pullResultDiagnosis } from '@/lib/utils'
 import type { ManagedProject, OperationEvent, PullResult } from '@/lib/utils'
 
@@ -57,13 +58,14 @@ export function SyncPage(props: {
   const [targetKey, setTargetKey] = useState(GLOBAL_TARGET_KEY)
   const [preview, setPreview] = useState<PushPreview | null>(null)
   const [result, setResult] = useState<PushResult | null>(null)
+  const [secrets, setSecrets] = useState<SecretsMetadata | null>(null)
   const target = targets.find((item) => item.key === targetKey) || targets[0]
 
   return (
     <Page>
       <PageHeader
-        title="同步记录"
-        description="拉取记录、本机与项目推送都在这里；推送必须先预览影响范围。"
+        title="同步"
+        description="推送、密钥清单和拉取记录都在这里；推送必须先预览影响范围。"
       />
       <PageFill>
         <SplitPane
@@ -82,6 +84,7 @@ export function SyncPage(props: {
                 setTargetKey(value)
                 setPreview(null)
                 setResult(null)
+                setSecrets(null)
               }}
               onPreview={(value) => {
                 setPreview(value)
@@ -91,6 +94,14 @@ export function SyncPage(props: {
                 setResult(value)
                 setPreview(null)
               }}
+            />
+            <SecretsPanel
+              deviceId={props.deviceId}
+              root={target.root}
+              plane={target.plane}
+              scopeKey={target.key}
+              data={secrets}
+              onLoaded={setSecrets}
             />
             {props.history.map((item, index) => (
               <PullResultCard key={`${item.at.toISOString()}-${index}`} entry={item} />

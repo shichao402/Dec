@@ -248,7 +248,7 @@ export const cases: Case[] = [
     open: async (page) => {
       await connect(page)
       await page.getByRole('button', { name: /拉取 Global 资产/ }).click()
-      await expect(page.getByRole('heading', { name: '同步记录' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: '同步' })).toBeVisible()
       // 默认目标是 Global：预览必须走 global 平面，mock 才会回 private/user。
       await page.getByRole('button', { name: '预览推送' }).click()
       await expect(page.getByText('private/user', { exact: true })).toBeVisible()
@@ -256,6 +256,10 @@ export const cases: Case[] = [
       await page.getByLabel('推送目标').selectOption({ index: 1 })
       await page.getByRole('button', { name: '预览推送' }).click()
       await expect(page.getByText('private/project', { exact: true })).toBeVisible()
+      // 密钥清单只列路径与状态，未落地的条目也要能看见。
+      await page.getByRole('button', { name: '列出密钥' }).click()
+      await expect(page.getByText('.secrets/relkit/.env/upload.env')).toBeVisible()
+      await expect(page.getByText('未落地')).toBeVisible()
     },
   },
   {
@@ -263,8 +267,8 @@ export const cases: Case[] = [
     scenario: 'typical',
     open: async (page) => {
       await connect(page)
-      await nav(page, '同步记录')
-      await expect(page.getByRole('heading', { name: '同步记录' })).toBeVisible()
+      await nav(page, '同步')
+      await expect(page.getByRole('heading', { name: '同步' })).toBeVisible()
     },
   },
   {

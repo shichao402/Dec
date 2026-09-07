@@ -31,7 +31,7 @@ export function Sidebar(props: {
         { id: 'projects', label: '项目', icon: Folder, count: props.projectCount },
       ],
     },
-    { label: '运行', items: [{ id: 'sync', label: '同步记录', icon: RefreshCw }] },
+    { label: '运行', items: [{ id: 'sync', label: '同步', icon: RefreshCw }] },
     { label: '设备', items: [{ id: 'settings', label: '设备设置', icon: Settings }] },
   ]
 

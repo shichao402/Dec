@@ -41,8 +41,10 @@ func ListSecretsMetadata(ctx context.Context, projectRoot string, includeRemote 
 // 用户平面读机器根 secrets，项目平面读项目根 secrets；绝不返回正文。
 func ListWorkspaceSecretsMetadata(ctx context.Context, workspace Workspace, includeRemote bool, reporter Reporter) (*ListSecretsMetadataResult, error) {
 	reporter = defaultReporter(reporter)
-	if strings.TrimSpace(workspace.Root) == "" {
-		return nil, fmt.Errorf("项目根目录不能为空")
+	// 只有项目平面要相对项目根解析落地路径。用户平面落在 ~/.dec/secrets 下，
+	// Root 必须为空，否则 .dec/ 会退化成相对服务 cwd 的路径（ADR 0015）。
+	if workspace.EffectivePlane() == WorkspaceLocal && strings.TrimSpace(workspace.Root) == "" {
+		return nil, fmt.Errorf("项目平面需要项目根目录")
 	}
 
 	result := &ListSecretsMetadataResult{
