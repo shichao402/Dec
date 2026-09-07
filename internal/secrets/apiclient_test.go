@@ -728,7 +728,7 @@ func TestAPIClient_ListNotes_ReusesVaultSnapshot(t *testing.T) {
 						Name: mustEncItem(projectItemName(t, "env/two.env")), Notes: mustEncItem("B=2\n")},
 				},
 			})
-		case strings.HasPrefix(r.URL.Path, "/api/ciphers/") && r.Method == http.MethodDelete:
+		case strings.HasSuffix(r.URL.Path, "/delete") && r.Method == http.MethodPut:
 			deleteCalls++
 			w.WriteHeader(http.StatusOK)
 		default:
@@ -783,5 +783,138 @@ func TestAPIClient_ListNotes_ReusesVaultSnapshot(t *testing.T) {
 	}
 	if folderCalls != 2 || cipherCalls != 2 {
 		t.Fatalf("写操作后 folders=%d ciphers=%d, 期望快照失效后各重取 1 次", folderCalls, cipherCalls)
+	}
+}
+
+// 删除必须是可撤销的：走 Bitwarden 回收站（PUT /ciphers/{id}/delete），
+// 不能用不可恢复的硬删（DELETE /ciphers/{id}）。
+func TestAPIClient_DeleteSecureNote_MovesToTrash(t *testing.T) {
+	userKey := bytes.Repeat([]byte{0x0a}, 64)
+	itemKey, err := generateCipherKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encItemKey, err := encryptVaultBytes(itemKey, userKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var softDeletePath string
+	var hardDeletes int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBitwardenHeaders(t, r)
+		switch {
+		case r.URL.Path == "/api/folders":
+			name, encErr := encryptVaultString("one", userKey)
+			if encErr != nil {
+				t.Fatal(encErr)
+			}
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{
+				Data: []bwFolder{{ID: "f1", Name: name}},
+			})
+		case r.URL.Path == "/api/ciphers" && r.Method == http.MethodGet:
+			name, encErr := encryptVaultString(projectItemName(t, "env/one.env"), itemKey)
+			if encErr != nil {
+				t.Fatal(encErr)
+			}
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{
+				Data: []bwCipher{{
+					ID: "n1", Type: cipherTypeSecureNote, FolderID: "f1",
+					Key: encItemKey, Name: name,
+				}},
+			})
+		case r.Method == http.MethodDelete:
+			hardDeletes++
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/delete"):
+			softDeletePath = r.URL.Path
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewAPIClient(&Config{ServerURL: srv.URL}, "sess-trash", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetUserKey(userKey)
+	t.Cleanup(ClearSession)
+
+	if err = client.DeleteSecureNote(context.Background(), DeleteSecureNoteRequest{
+		Target:   declaredPTarget(t, "one", SyncPlaneProject),
+		NotePath: "env/one.env",
+	}); err != nil {
+		t.Fatalf("DeleteSecureNote() = %v", err)
+	}
+	if softDeletePath != "/api/ciphers/n1/delete" {
+		t.Fatalf("软删路径 = %q, want /api/ciphers/n1/delete", softDeletePath)
+	}
+	if hardDeletes != 0 {
+		t.Fatalf("hardDeletes = %d, 删除不得走不可恢复的硬删接口", hardDeletes)
+	}
+}
+
+// 回收站条目对 Dec 等于不存在，否则删完还列得出来、同名重建会撞「已存在」。
+func TestAPIClient_ListNotes_SkipsTrashedCiphers(t *testing.T) {
+	userKey := bytes.Repeat([]byte{0x0b}, 64)
+	itemKey, err := generateCipherKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encItemKey, err := encryptVaultBytes(itemKey, userKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustEncItem := func(plain string) string {
+		t.Helper()
+		out, encErr := encryptVaultString(plain, itemKey)
+		if encErr != nil {
+			t.Fatal(encErr)
+		}
+		return out
+	}
+	deletedAt := "2026-09-07T00:00:00.000Z"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBitwardenHeaders(t, r)
+		switch {
+		case r.URL.Path == "/api/folders":
+			name, encErr := encryptVaultString("one", userKey)
+			if encErr != nil {
+				t.Fatal(encErr)
+			}
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwFolder]{
+				Data: []bwFolder{{ID: "f1", Name: name}},
+			})
+		case r.URL.Path == "/api/ciphers" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(bwListResponse[bwCipher]{
+				Data: []bwCipher{
+					{ID: "live", Type: cipherTypeSecureNote, FolderID: "f1", Key: encItemKey,
+						Name: mustEncItem(projectItemName(t, "env/live.env"))},
+					{ID: "trashed", Type: cipherTypeSecureNote, FolderID: "f1", Key: encItemKey,
+						Name: mustEncItem(projectItemName(t, "env/trashed.env")), DeletedDate: &deletedAt},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewAPIClient(&Config{ServerURL: srv.URL}, "sess-skip-trash", srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetUserKey(userKey)
+	t.Cleanup(ClearSession)
+
+	notes, err := client.ListNotes(context.Background(), declaredPTarget(t, "one", SyncPlaneProject))
+	if err != nil {
+		t.Fatalf("ListNotes() = %v", err)
+	}
+	if len(notes) != 1 || notes[0].Name != "env/live.env" {
+		t.Fatalf("ListNotes() = %#v, 期望只剩未删除的 env/live.env", notes)
 	}
 }

@@ -45,6 +45,14 @@ type bwCipher struct {
 	FolderID string    `json:"folderId"`
 	Key      string    `json:"key"`
 	SSHKey   *bwSSHKey `json:"sshKey"`
+	// DeletedDate 非空表示条目在保险库回收站里。Bitwarden 的 /ciphers 列表照常
+	// 返回回收站条目，Dec 视其为已删除。
+	DeletedDate *string `json:"deletedDate"`
+}
+
+// trashed 判断 cipher 是否已在保险库回收站。
+func (c bwCipher) trashed() bool {
+	return c.DeletedDate != nil && strings.TrimSpace(*c.DeletedDate) != ""
 }
 
 type bwListResponse[T any] struct {
@@ -587,10 +595,12 @@ func (c *APIClient) updateSSHKeyNotes(ctx context.Context, cipher bwCipher, user
 	return c.putJSON(ctx, c.APIURL+"/ciphers/"+cipher.ID, body)
 }
 
+// deleteCipher 把条目移入保险库回收站（软删）而不是永久删除。误删可以在官方
+// Bitwarden 客户端里恢复；硬删接口 DELETE /ciphers/{id} 不可撤销，Dec 不使用。
 func (c *APIClient) deleteCipher(ctx context.Context, cipherID string) error {
 	c.invalidateSnapshot()
-	reqURL := strings.TrimRight(c.APIURL, "/") + "/ciphers/" + cipherID
-	return c.doAuthenticatedJSON(ctx, http.MethodDelete, reqURL, nil, nil)
+	reqURL := strings.TrimRight(c.APIURL, "/") + "/ciphers/" + cipherID + "/delete"
+	return c.doAuthenticatedJSON(ctx, http.MethodPut, reqURL, nil, nil)
 }
 
 // findExistingCipher 按 note 名精确匹配。
@@ -750,7 +760,16 @@ func (c *APIClient) listCiphers(ctx context.Context) ([]bwCipher, error) {
 	if err := c.getJSON(ctx, c.APIURL+"/ciphers", &out); err != nil {
 		return nil, fmt.Errorf("列出 Bitwarden cipher 失败: %w", err)
 	}
-	c.ciphers = out.Data
+	// 回收站条目对 Dec 等于不存在：删完不该还列得出来，同名重建也不该撞
+	// 「已存在」。所有 cipher 读取都经过这里，过滤放在这一层即可全覆盖。
+	live := make([]bwCipher, 0, len(out.Data))
+	for _, cipher := range out.Data {
+		if cipher.trashed() {
+			continue
+		}
+		live = append(live, cipher)
+	}
+	c.ciphers = live
 	c.ciphersOK = true
 	return c.ciphers, nil
 }
