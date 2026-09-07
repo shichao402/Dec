@@ -225,6 +225,16 @@ func DoUpdate(currentVersion, latestVersion string) error {
 		return fmt.Errorf("当前已是最新版本 %s", currentVersion)
 	}
 
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return err
+	}
+	binDir := filepath.Dir(executable)
+
 	tmpDir, err := os.MkdirTemp("", "dec-update-*")
 	if err != nil {
 		return err
@@ -234,13 +244,7 @@ func DoUpdate(currentVersion, latestVersion string) error {
 	if runtime.GOOS == "windows" {
 		ext = ".exe"
 	}
-	type componentDownload struct {
-		name string
-		path string
-	}
-	components := SuiteComponents
-	downloads := make([]componentDownload, 0, len(components))
-	for _, component := range components {
+	for _, component := range SuiteComponents {
 		componentUpdater, err := newUpdater(currentVersion, component)
 		if err != nil {
 			return err
@@ -252,36 +256,41 @@ func DoUpdate(currentVersion, latestVersion string) error {
 		if componentResult.Available == nil {
 			return fmt.Errorf("发布缺少 %s 组件", component)
 		}
-		dest := filepath.Join(tmpDir, component+ext)
-		if err := componentUpdater.Download(context.Background(), componentResult.Available, dest); err != nil {
-			return fmt.Errorf("下载 %s 失败: %w", component, err)
-		}
-		downloads = append(downloads, componentDownload{name: component, path: dest})
-	}
-
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		return err
-	}
-	binDir := filepath.Dir(executable)
-	for _, download := range downloads {
-		target := filepath.Join(binDir, download.name+ext)
-		if _, err := os.Stat(target); os.IsNotExist(err) {
-			if err := os.WriteFile(target, nil, 0o755); err != nil {
-				return fmt.Errorf("创建 %s 安装位失败: %w", download.name, err)
-			}
-		}
-		if err := apply.ReplaceFile(download.path, target); err != nil {
-			return fmt.Errorf("替换 %s 失败: %w", download.name, err)
+		target := filepath.Join(binDir, component+ext)
+		staging := filepath.Join(tmpDir, component+ext)
+		if err := applyDownloadedComponent(
+			func(dest string) error {
+				return componentUpdater.Download(context.Background(), componentResult.Available, dest)
+			},
+			target,
+			staging,
+		); err != nil {
+			return fmt.Errorf("更新 %s 失败: %w", component, err)
 		}
 	}
 	now := time.Now()
 	_ = saveState(&CheckState{LastCheck: now, LatestVersion: targetVer, LastAttempt: now})
 	return nil
+}
+
+// applyDownloadedComponent writes a component onto the installed destPath.
+//
+// destPath is the already-installed file so SDK fileMatches can skip GET when
+// size+sha256 already match. If in-place download fails (typical Windows lock
+// after os.Remove of a running exe), download to staging and ReplaceFile.
+func applyDownloadedComponent(download func(dest string) error, destPath, stagingPath string) error {
+	if err := download(destPath); err == nil {
+		return nil
+	}
+	if err := download(stagingPath); err != nil {
+		return err
+	}
+	if _, statErr := os.Stat(destPath); os.IsNotExist(statErr) {
+		if err := os.WriteFile(destPath, nil, 0o755); err != nil {
+			return fmt.Errorf("创建安装位: %w", err)
+		}
+	}
+	return apply.ReplaceFile(stagingPath, destPath)
 }
 
 // ManualInstallCommand returns the primary first-install command (CNB raw scripts).

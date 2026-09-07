@@ -11,7 +11,6 @@ import platform
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -98,7 +97,6 @@ def prepare_runtime_resources(version: str, os_id: str, arch: str) -> None:
     env = os.environ.copy()
     env.update({"GOOS": os_id, "GOARCH": arch, "CGO_ENABLED": "0"})
     release = f"v{version}"
-    build_time = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H:%M:%S")
     files: dict[str, str] = {}
     for component in RUNTIME_COMPONENTS:
         suffix = ".exe" if os_id == "windows" else ""
@@ -109,8 +107,9 @@ def prepare_runtime_resources(version: str, os_id: str, arch: str) -> None:
             [
                 "go",
                 "build",
+                "-trimpath",
                 "-ldflags",
-                f"-X main.Version={release} -X main.BuildTime={build_time}",
+                f"-X main.Version={release}",
                 "-o",
                 str(output),
                 package,

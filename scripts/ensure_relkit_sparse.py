@@ -2,16 +2,15 @@
 # -*- coding: utf-8 -*-
 """Sparse-checkout relkit into third_party/relkit.
 
-Upstream: https://cnb.cool/shichao402/relkit
+Upstream: https://github.com/shichao402/relkit
 
 Cone paths cover the Go SDK (Dec import) plus sources needed to build cmd/relkit
 for release staging. Root files (go.mod / go.sum / …) come with cone mode.
 
-Pinned by default to verified full commit SHA on relkit main. Short SHAs are
-rejected by most remotes as fetch refs, so the pin must be the full object id.
-Override with --ref / RELKIT_REF.
+Tracks relkit `main` by default. Override with --ref / RELKIT_REF (branch,
+tag, or full commit SHA; short SHAs are usually rejected by remotes).
 Override clone URL with --url / RELKIT_URL. If CNB_TOKEN is set and the URL is
-plain cnb.cool HTTPS, inject token auth automatically.
+still a plain cnb.cool HTTPS (override), inject token auth automatically.
 """
 
 from __future__ import annotations
@@ -24,8 +23,8 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-DEFAULT_URL = "https://cnb.cool/shichao402/relkit.git"
-DEFAULT_REF = "3d706f9a27aa37ab3dd7471ec4f48dfe638b5ba5"
+DEFAULT_URL = "https://github.com/shichao402/relkit.git"
+DEFAULT_REF = "main"
 
 # Cone paths: Go SDK + CLI sources Dec needs.
 SPARSE_CONE_DIRS = (

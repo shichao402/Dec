@@ -10,7 +10,7 @@ Dec 运行时的检查/下载使用 `cnb.cool/shichao402/relkit/sdk`，发布走
 - `CurrentCode` = `sdk.SemverCode(version)`（`v1.13.25` → `1013025`）
 - 默认 channel：`dev`（目前仅个人使用；正式对外再切回 `stable`）
 - selectors：`os` / `arch` / `component` / `audience=runtime`，component 为 `dec`、`dec-server`、`dec-mcp`、`dec-exec`
-- Apply：先把同版本四个组件全部下载并校验，再用 `sdk/apply.ReplaceFile` 替换同一 `bin/` 下的程序（Windows rename-aside + 下次启动清理）
+- Apply：`DoUpdate` 把每个组件的 `destPath` 对准已装的 `bin/<component>`，SDK 先 size 再 sha256，一致则跳过 GET；只有哈希变了或原地写入失败（Windows 锁文件）才下到临时文件再 `ReplaceFile`（rename-aside）
 - Console bundle：每个安装包只带同 `os/arch` 四件套和 `runtime-manifest.json`；首次连接/升级从 resources 校验后以临时文件 + rename 释放到 `~/.dec/bin`，同时缓存到 `~/.dec/runtime-cache/<version>/<os>-<arch>/`
 - SSH 置备：发起端按目标 `os/arch` 命中校验过的缓存则复用，否则请求签名 RUP；只有 RUP head 恰好等于 Console 钉死版本才下载。渠道已有更高版本时提示先更新 Console 或预置旧版本缓存
 
@@ -87,4 +87,4 @@ scripts/ensure_relkit_sparse.py --sdk-only
 replace cnb.cool/shichao402/relkit => ./third_party/relkit
 ```
 
-上游 URL 默认 `https://cnb.cool/shichao402/relkit.git`。**ref 默认钉在已验证完整 commit `3d706f9a27aa37ab3dd7471ec4f48dfe638b5ba5`**（relkit `main` 上已推送；短 SHA 不能直接 `git fetch`），发布流水线（`.github/workflows/release.yml`）显式传同一完整 SHA，不要跟 `main` HEAD 漂。升级时先在本机验证该 commit，再同步改 `scripts/ensure_relkit_sparse.py` 的 `DEFAULT_REF` 与 workflow。临时覆盖可用 `--ref` / `RELKIT_URL` / `RELKIT_REF`。
+上游 URL 默认 `https://github.com/shichao402/relkit.git`，**ref 默认 `main`**（每次 `ensure_relkit_sparse` / CI 拉当时的 HEAD）。需要冻结某次提交时用 `--ref` / `RELKIT_REF`（完整 SHA；短 SHA 不能直接 `git fetch`）。Go 模块路径仍是 `cnb.cool/shichao402/relkit`（replace 到 `third_party/relkit`），与 git 主仓无关。

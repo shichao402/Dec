@@ -137,18 +137,12 @@ else
     fi
 fi
 
-# 构建时间（优先使用环境变量）
-if [ -n "${BUILD_TIME}" ]; then
-    print_info "使用环境变量中的构建时间: ${BUILD_TIME}"
-else
-    BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
-fi
-
+# 构建时间不再注入二进制：同一 Version 重编应得到稳定哈希（CAS / 跳过下载依赖此点）。
+# 需要可追溯构建时刻时看 CI 日志或 git commit，不要用 -X main.BuildTime。
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
 print_info "版本: ${VERSION}"
-print_info "构建时间: ${BUILD_TIME}"
 print_info "提交哈希: ${COMMIT}"
 print_info "分支: ${BRANCH}"
 echo "" | tee -a "${LOG_FILE}"
@@ -188,7 +182,8 @@ build_platform() {
         if [ "${binary}" != "dec" ]; then package="./cmd/${binary}"; fi
         local output_path="${OUTPUT_DIR}/${binary}-${os}-${arch}${ext}"
         GOOS="${os}" GOARCH="${arch}" CGO_ENABLED=0 go build \
-            -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
+            -trimpath \
+            -ldflags "-X main.Version=${VERSION}" \
             -o "${output_path}" "${package}" 2>&1 | tee -a "${LOG_FILE}" || return 1
         echo "${output_path}" >> "${OUTPUT_DIR}/.build-manifest"
     done
@@ -227,7 +222,8 @@ build_current() {
             if [ "${binary}" != "dec" ]; then package="./cmd/${binary}"; fi
             local output_path="${OUTPUT_DIR}/${binary}${ext}"
             CGO_ENABLED=0 go build \
-                -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
+                -trimpath \
+                -ldflags "-X main.Version=${VERSION}" \
                 -o "${output_path}" "${package}" 2>&1 | tee -a "${LOG_FILE}" || exit 1
             echo "${output_path}" >> "${OUTPUT_DIR}/.build-manifest"
         done
@@ -294,7 +290,7 @@ Dec 构建信息
 ====================
 
 版本: ${VERSION}
-构建时间: ${BUILD_TIME}
+构建时刻（仅日志，未写入二进制）: $(date -u '+%Y-%m-%d_%H:%M:%S')
 提交哈希: ${COMMIT}
 分支: ${BRANCH}
 构建平台: ${platform_info}

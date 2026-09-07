@@ -31,8 +31,7 @@ fi
 
 cd "${PROJECT_DIR}"
 VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' version.json | cut -d'"' -f4 || echo "dev")
-BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
-LDFLAGS="-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}"
+LDFLAGS="-X main.Version=${VERSION}"
 
 echo ""
 echo "╔═══════════════════════════════════════╗"
@@ -54,7 +53,7 @@ mkdir -p dist
 for binary in "${BINARY_NAMES[@]}"; do
     package="."
     if [ "${binary}" != "dec" ]; then package="./cmd/${binary}"; fi
-    go build -ldflags "${LDFLAGS}" -o "dist/${binary}" "${package}" || {
+    go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${binary}" "${package}" || {
         print_error "${binary} 构建失败"
         exit 1
     }

@@ -7,9 +7,9 @@ import (
 )
 
 var (
-	// Version 版本号（编译时注入）
+	// Version 版本号（编译时用 -X main.Version 注入）
 	Version = "dev"
-	// BuildTime 构建时间（编译时注入）
+	// BuildTime 保留给旧二进制展示；发版不再 -X 注入，避免污染产物哈希。
 	BuildTime = "unknown"
 )
 
