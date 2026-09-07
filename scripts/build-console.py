@@ -90,7 +90,7 @@ def clean_runtime_resources() -> None:
             child.unlink()
 
 
-def prepare_runtime_resources(version: str, os_id: str, arch: str) -> None:
+def prepare_runtime_resources(version: str, os_id: str, arch: str) -> Path:
     clean_runtime_resources()
     platform_dir = RUNTIME_RESOURCES / f"{os_id}-{arch}"
     platform_dir.mkdir(parents=True)
@@ -129,6 +129,59 @@ def prepare_runtime_resources(version: str, os_id: str, arch: str) -> None:
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    return platform_dir
+
+
+def stop_console() -> None:
+    """Exit a running Console so the installer can replace its own files."""
+    system = platform.system().lower()
+    if system == "windows":
+        subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process "
+                "| Where-Object { $_.ExecutablePath -like '*dec-console*' } "
+                "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force }",
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    elif system == "darwin":
+        subprocess.run(
+            ["osascript", "-e", 'quit app "dec-console"'],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
+def install_package(package: Path) -> None:
+    """Overwrite this machine's Console with the freshly built package."""
+    system = platform.system().lower()
+    if system == "windows":
+        subprocess.run([str(package), "/S"], check=True)
+        return
+    if system == "darwin":
+        mount = Path("/Volumes/dec-console-build")
+        subprocess.run(
+            ["hdiutil", "attach", str(package), "-nobrowse", "-mountpoint", str(mount)],
+            check=True,
+        )
+        try:
+            app = next(mount.glob("*.app"))
+            target = Path("/Applications") / app.name
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(app, target, symlinks=True)
+        finally:
+            subprocess.run(["hdiutil", "detach", str(mount)], check=False)
+        return
+    raise SystemExit(
+        f"当前平台没有自动安装通道，请手动部署 {package}"
+    )
 
 
 def main() -> None:
@@ -143,7 +196,14 @@ def main() -> None:
         action="store_true",
         help="build native runtime resources for tauri dev and keep them in place",
     )
+    parser.add_argument(
+        "--deploy",
+        action="store_true",
+        help="local redeploy: reuse deps, then stop the running Console and install silently",
+    )
     args = parser.parse_args()
+    if args.deploy:
+        args.skip_deps = True
     version = release_version()
     sync_console_version(version)
     os_id, arch, pattern, extension = target()
@@ -166,6 +226,13 @@ def main() -> None:
     output = DIST / f"dec-console-{os_id}-{arch}.{extension}"
     shutil.copy2(matches[0], output)
     print(output)
+    if args.deploy:
+        stop_console()
+        install_package(output)
+        print(
+            f"已安装 Console v{version}。首次启动会把内置四件套释放到 ~/.dec/bin；"
+            "Cursor 里的 dec-mcp 需重载 MCP 才用上新二进制。"
+        )
 
 
 if __name__ == "__main__":

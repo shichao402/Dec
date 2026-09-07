@@ -298,12 +298,18 @@ npm run tauri dev
 
 第一条命令只编译并保留当前平台的 Tauri runtime resources，不打完整安装包；源码 debug 需要先执行一次。要求 Node.js、Go、Rust stable；Windows 需要 WebView2。细节见 [client/README.md](client/README.md)。
 
-### 从源码构建运行时
+### 本地构建并安装（绕过发布）
+
+不想等 GitHub 发布时，在本机打一份 Console 覆盖安装即可，机器上仍只有一份：
 
 ```bash
 cd Dec
-go build -o dec .
+python scripts/build-console.py --skip-deps
 ```
+
+产出 `dist/dec-console-<os>-<arch>.<ext>`，覆盖安装前先退出正在跑的 Console。增量构建约 3 分钟。安装包内置同版本四件套，Console 启动后会释放到 `~/.dec/bin`，因此**不需要**单独部署运行时——两者出自同一次构建，版本天然相等。Cursor 里的 `dec-mcp` 需重载 MCP 才用上新二进制。
+
+只改 Go、还要从源码跑 Console UI 时，用上一节的 `--prepare-runtime-only` + `npm run tauri dev`，不必再走发版。
 
 ### 运行测试
 

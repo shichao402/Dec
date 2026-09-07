@@ -6,7 +6,7 @@ VERSION=$(shell cat version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
-.PHONY: all build build-all test clean install-dev install-dev-test fmt lint help ensure-relkit
+.PHONY: all build build-all test clean fmt lint help ensure-relkit
 
 all: build
 
@@ -37,12 +37,6 @@ clean:
 	rm -rf $(DIST_DIR) logs/
 	@echo "✅ 清理完成"
 
-install-dev: ensure-relkit
-	@./scripts/install-dev.sh
-
-install-dev-test: ensure-relkit
-	@./scripts/install-dev.sh --test
-
 fmt:
 	@echo "📝 格式化代码..."
 	go fmt ./...
@@ -62,9 +56,8 @@ help:
 	@echo "测试目标："
 	@echo "  make test            - 运行 Go 单元测试"
 	@echo ""
-	@echo "安装目标："
-	@echo "  make install-dev     - 安装当前源码到本地"
-	@echo "  make install-dev-test - 安装前先运行单元测试"
+	@echo "本机部署（唯一入口，不经 make）："
+	@echo "  python scripts/build-console.py --skip-deps   # 打 Console 安装包并覆盖安装"
 	@echo ""
 	@echo "其他目标："
 	@echo "  make ensure-relkit   - sparse-checkout relkit → third_party/relkit"
