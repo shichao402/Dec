@@ -1,4 +1,4 @@
-import { Boxes, ChevronRight, Folder, Globe, LayoutDashboard, LogOut, RefreshCw, Settings } from 'lucide-react'
+import { Boxes, ChevronRight, Folder, Globe, LayoutDashboard, LogOut, RefreshCw, Settings, Trash2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/badge'
@@ -31,7 +31,13 @@ export function Sidebar(props: {
         { id: 'projects', label: '项目', icon: Folder, count: props.projectCount },
       ],
     },
-    { label: '运行', items: [{ id: 'sync', label: '同步', icon: RefreshCw }] },
+    {
+      label: '运行',
+      items: [
+        { id: 'sync', label: '同步', icon: RefreshCw },
+        { id: 'delete', label: '删除', icon: Trash2 },
+      ],
+    },
     { label: '设备', items: [{ id: 'settings', label: '设备设置', icon: Settings }] },
   ]
 

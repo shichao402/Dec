@@ -272,6 +272,34 @@ export const cases: Case[] = [
     },
   },
   {
+    name: 'delete',
+    scenario: 'typical',
+    open: async (page) => {
+      await connect(page)
+      await nav(page, '删除')
+      await page.getByRole('button', { name: '列出库存' }).click()
+      // 两个分区都要渲染出来，别把本机项混进远端区。
+      await expect(page.getByText('远端（改 Bitwarden 与私仓）')).toBeVisible()
+      await expect(page.getByText('本机（只清这台设备）')).toBeVisible()
+      // 勾一个远端项后，本机分区必须锁住：服务端拒绝混选，UI 不该等它报错。
+      await page.getByRole('checkbox', { name: '.secrets/relkit/.env/upload.env' }).check()
+      await expect(page.getByText('已锁定，先清空另一个分区')).toBeVisible()
+      // 没输确认词之前删除按钮保持禁用。
+      await expect(page.getByRole('button', { name: /删除选中项/ })).toBeDisabled()
+      await page.getByLabel('删除确认').fill('删除')
+      await expect(page.getByRole('button', { name: /删除选中项/ })).toBeEnabled()
+    },
+  },
+  {
+    name: 'delete-empty',
+    scenario: 'typical',
+    open: async (page) => {
+      await connect(page)
+      await nav(page, '删除')
+      await expect(page.getByRole('heading', { name: '删除' })).toBeVisible()
+    },
+  },
+  {
     name: 'settings',
     scenario: 'typical',
     open: async (page) => {

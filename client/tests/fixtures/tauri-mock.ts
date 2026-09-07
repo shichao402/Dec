@@ -67,6 +67,49 @@ export function installTauriMock(scenario: Scenario) {
     ],
   }
 
+  // 删除候选覆盖两个分区：Console 必须能分别渲染，并且不允许混选。
+  methods.list_delete_candidates = [
+    {
+      Kind: 'secret',
+      Label: '.secrets/relkit/.env/upload.env',
+      SecretPath: '.env/upload.env',
+      LocalRoot: 'relkit',
+      Plane: 'project',
+      SecretsBundle: 'relkit/private/project',
+      GroupTitle: 'relkit/private/project',
+      Partition: 'remote',
+      Orphan: false,
+      Unmanaged: false,
+      ReadOnly: false,
+    },
+    {
+      Kind: 'dec',
+      Label: 'skill/release',
+      Type: 'skill',
+      Name: 'release',
+      Vault: 'relkit',
+      GroupTitle: 'relkit (bundle)',
+      Visibility: 'public',
+      AssetPlane: 'project',
+      Partition: 'remote',
+      Orphan: false,
+      Unmanaged: false,
+      ReadOnly: false,
+    },
+    {
+      Kind: 'dec',
+      Label: 'skill/stale-local',
+      Type: 'skill',
+      Name: 'stale-local',
+      Vault: 'relkit',
+      GroupTitle: 'relkit (bundle)',
+      Partition: 'local',
+      Orphan: true,
+      Unmanaged: false,
+      ReadOnly: false,
+    },
+  ]
+
   // 推送预览按平面分流：Global 推 ~/.dec 下的 user 平面资产，项目推该项目资产。
   // mock 按 workspacePlane 返回不同结果，这样测试能抓到平面参数传错。
   const projectPushPreview = {
@@ -129,6 +172,18 @@ export function installTauriMock(scenario: Scenario) {
       const operation = String(args.operation || '')
       const global = String(args.workspacePlane || '') === 'global'
       if (operation === 'preview_push') return ok(global ? globalPushPreview : projectPushPreview)
+      if (operation === 'delete') {
+        return ok({
+          DecDeleted: 0,
+          SecretsDeleted: 1,
+          SSHKeysDeleted: 0,
+          BundlesDeleted: 0,
+          VersionCommit: '',
+          SkippedReason: '',
+          Remnants: [],
+          Mode: 'remote',
+        })
+      }
       if (operation === 'push') {
         return ok({
           DecPushedCount: 2,

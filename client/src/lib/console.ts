@@ -1,7 +1,7 @@
 import type { ActionSpec } from '@/lib/action-registry'
 import type { SavedConnection } from '@/lib/utils'
 
-export type View = 'overview' | 'global' | 'projects' | 'project' | 'sync' | 'settings'
+export type View = 'overview' | 'global' | 'projects' | 'project' | 'sync' | 'delete' | 'settings'
 
 export const resource = {
   connections: 'console:connections',

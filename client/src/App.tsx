@@ -27,6 +27,7 @@ import {
   takeOpenIntent,
 } from '@/lib/open-intent'
 import { ConnectPage } from '@/pages/connect-page'
+import { DeletePage } from '@/pages/delete-page'
 import { GlobalAssetsPage } from '@/pages/global-assets-page'
 import { OnboardingPage } from '@/pages/onboarding-page'
 import { OverviewPage } from '@/pages/overview-page'
@@ -54,6 +55,7 @@ const viewTitles: Record<View, string> = {
   projects: '项目',
   project: '项目',
   sync: '同步',
+  delete: '删除',
   settings: '设备设置',
 }
 
@@ -555,6 +557,9 @@ export default function App() {
                   events={events}
                   history={history}
                 />
+              )}
+              {view === 'delete' && (
+                <DeletePage deviceId={deviceId} projects={summary.Projects} />
               )}
               {view === 'settings' && (
                 <SettingsPage
