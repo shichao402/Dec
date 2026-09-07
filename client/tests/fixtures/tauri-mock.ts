@@ -42,18 +42,33 @@ export function installTauriMock(scenario: Scenario) {
       AvailableProjects: ['dec', 'relkit', 'investm', 'lyra'],
       HomeProject: 'dec',
     },
-    preview_push: {
-      SecretsTargetCount: 1,
-      DecCandidateCount: 2,
-      DecHasChanges: true,
-      DecSkippedReason: '',
-      BitwardenConfigured: true,
-      HomeProject: 'dec',
-      Changes: [
-        { Op: '修改', Path: 'p/dec/private/project/secrets/relkit.env', Quadrant: 'private/project' },
-        { Op: '修改', Path: 'p/dec/public/project/skills/release/SKILL.md', Quadrant: 'public/project' },
-      ],
-    },
+  }
+
+  // 推送预览按平面分流：Global 推 ~/.dec 下的 user 平面资产，项目推该项目资产。
+  // mock 按 workspacePlane 返回不同结果，这样测试能抓到平面参数传错。
+  const projectPushPreview = {
+    SecretsTargetCount: 1,
+    DecCandidateCount: 2,
+    DecHasChanges: true,
+    DecSkippedReason: '',
+    BitwardenConfigured: true,
+    HomeProject: 'dec',
+    Changes: [
+      { Op: '修改', Path: 'p/dec/private/project/secrets/relkit.env', Quadrant: 'private/project' },
+      { Op: '修改', Path: 'p/dec/public/project/skills/release/SKILL.md', Quadrant: 'public/project' },
+    ],
+  }
+
+  const globalPushPreview = {
+    SecretsTargetCount: 2,
+    DecCandidateCount: 1,
+    DecHasChanges: true,
+    DecSkippedReason: '',
+    BitwardenConfigured: true,
+    HomeProject: '',
+    Changes: [
+      { Op: '修改', Path: 'p/dec/private/user/env/machine.env', Quadrant: 'private/user' },
+    ],
   }
 
   const ok = (value: unknown) => ({ result_json: JSON.stringify(value ?? {}), error: '' })
@@ -89,7 +104,8 @@ export function installTauriMock(scenario: Scenario) {
     watch_operation: () => ok(pullResult),
     run_operation: (args) => {
       const operation = String(args.operation || '')
-      if (operation === 'preview_push') return ok(methods.preview_push)
+      const global = String(args.workspacePlane || '') === 'global'
+      if (operation === 'preview_push') return ok(global ? globalPushPreview : projectPushPreview)
       if (operation === 'push') {
         return ok({
           DecPushedCount: 2,

@@ -249,6 +249,11 @@ export const cases: Case[] = [
       await connect(page)
       await page.getByRole('button', { name: /拉取 Global 资产/ }).click()
       await expect(page.getByRole('heading', { name: '同步记录' })).toBeVisible()
+      // 默认目标是 Global：预览必须走 global 平面，mock 才会回 private/user。
+      await page.getByRole('button', { name: '预览推送' }).click()
+      await expect(page.getByText('private/user', { exact: true })).toBeVisible()
+      // 切到项目目标后预览必须改走 local 平面。
+      await page.getByLabel('推送目标').selectOption({ index: 1 })
       await page.getByRole('button', { name: '预览推送' }).click()
       await expect(page.getByText('private/project', { exact: true })).toBeVisible()
     },

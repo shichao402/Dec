@@ -32,6 +32,12 @@ type PushResult = {
   SecretsSkippedReason: string
 }
 
+// GLOBAL_TARGET_KEY 标识本机平面。本机平面的 projectRoot 必须为空，
+// 否则 .dec/ 会退化成相对服务 cwd 的路径并覆盖 ~/.dec/config.yaml（ADR 0015）。
+const GLOBAL_TARGET_KEY = 'global'
+
+type PushTarget = { key: string; label: string; root: string; plane: 'local' | 'global' }
+
 export function SyncPage(props: {
   deviceId: string
   projects: ManagedProject[]
@@ -39,17 +45,25 @@ export function SyncPage(props: {
   history: PullHistoryEntry[]
 }) {
   const projects = props.projects.filter((project) => project.Initialized)
-  const [root, setRoot] = useState(projects[0]?.Root || '')
+  const targets: PushTarget[] = [
+    { key: GLOBAL_TARGET_KEY, label: 'Global（本机）', root: '', plane: 'global' },
+    ...projects.map((item) => ({
+      key: item.Root,
+      label: item.Label || item.Name,
+      root: item.Root,
+      plane: 'local' as const,
+    })),
+  ]
+  const [targetKey, setTargetKey] = useState(GLOBAL_TARGET_KEY)
   const [preview, setPreview] = useState<PushPreview | null>(null)
   const [result, setResult] = useState<PushResult | null>(null)
-  const selectedRoot = projects.some((item) => item.Root === root) ? root : projects[0]?.Root || ''
-  const project = projects.find((item) => item.Root === selectedRoot)
+  const target = targets.find((item) => item.key === targetKey) || targets[0]
 
   return (
     <Page>
       <PageHeader
         title="同步记录"
-        description="拉取记录和项目推送都在这里；推送必须先预览影响范围。"
+        description="拉取记录、本机与项目推送都在这里；推送必须先预览影响范围。"
       />
       <PageFill>
         <SplitPane
@@ -59,13 +73,13 @@ export function SyncPage(props: {
           <ScrollArea splitOnly className="space-y-3 pr-0.5">
             <PushPanel
               deviceId={props.deviceId}
-              projects={projects}
-              project={project}
-              root={selectedRoot}
+              targets={targets}
+              target={target}
+              hasProjects={projects.length > 0}
               preview={preview}
               result={result}
-              onRoot={(value) => {
-                setRoot(value)
+              onTarget={(value) => {
+                setTargetKey(value)
                 setPreview(null)
                 setResult(null)
               }}
@@ -97,112 +111,114 @@ export function SyncPage(props: {
 
 function PushPanel(props: {
   deviceId: string
-  projects: ManagedProject[]
-  project?: ManagedProject
-  root: string
+  targets: PushTarget[]
+  target: PushTarget
+  hasProjects: boolean
   preview: PushPreview | null
   result: PushResult | null
-  onRoot: (root: string) => void
+  onTarget: (key: string) => void
   onPreview: (value: PushPreview) => void
   onPushed: (value: PushResult) => void
 }) {
-  const workspaceResource = resource.workspace(props.root)
-  const previewSpec = actionSpec(`sync:preview-push:${props.deviceId}:${props.root}`, '预览项目推送', props.deviceId, [workspaceResource], 'read')
-  const pushSpec = actionSpec(`operation:push:${props.deviceId}:${props.root}`, '推送项目改动', props.deviceId, [workspaceResource], 'operation', '项目改动已推送')
+  const { target } = props
+  const global = target.plane === 'global'
+  const scopeLabel = global ? 'Global' : '项目'
+  const workspaceResource = resource.workspace(target.root)
+  const previewSpec = actionSpec(`sync:preview-push:${props.deviceId}:${target.key}`, `预览 ${scopeLabel} 推送`, props.deviceId, [workspaceResource], 'read')
+  const pushSpec = actionSpec(`operation:push:${props.deviceId}:${target.key}`, `推送 ${scopeLabel} 改动`, props.deviceId, [workspaceResource], 'operation', `${scopeLabel} 改动已推送`)
   const canPush = Boolean(props.preview && (props.preview.DecHasChanges || props.preview.SecretsTargetCount > 0))
 
   return (
     <Panel>
       <PanelHeader
-        title="推送项目改动"
-        description="把选中项目的可写 Dec 资产推到 Git，并把本地 secrets 推到 Bitwarden。"
+        title="推送改动"
+        description="把可写 Dec 资产推到 Git，并把本地 secrets 推到 Bitwarden。Global 推本机资产，项目推该项目资产。"
       />
       <PanelBody className="space-y-3">
-        {props.projects.length === 0 ? (
-          <Notice tone="info" text="当前设备没有已初始化的受管项目。请先在项目页完成初始化。" />
-        ) : (
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="推送目标" className="min-w-64 flex-1">
+            <Select aria-label="推送目标" value={target.key} onChange={(event) => props.onTarget(event.target.value)}>
+              {props.targets.map((item) => (
+                <option key={item.key} value={item.key}>{item.label}</option>
+              ))}
+            </Select>
+          </Field>
+          <ActionButton
+            variant="outline"
+            spec={previewSpec}
+            action={() => runOrWatchTyped<PushPreview>({
+              actionKey: previewSpec.key,
+              operation: 'preview_push',
+              projectRoot: target.root,
+              workspacePlane: target.plane,
+            })}
+            runningLabel="预览中…"
+            onSuccess={props.onPreview}
+          >
+            预览推送
+          </ActionButton>
+        </div>
+        {target.root
+          ? <p className="break-all font-mono text-[11px] text-faint">{target.root}</p>
+          : <p className="text-[11px] text-faint">本机平面：~/.dec 下的 Global 资产与 machine 平面 secrets</p>}
+        {!props.hasProjects && (
+          <Notice tone="info" text="当前设备没有已初始化的受管项目，只能推送 Global。项目推送需先在项目页完成初始化。" />
+        )}
+        <ActionFeedback actionKey={previewSpec.key} />
+        <ActionFeedback actionKey={pushSpec.key} />
+        {!props.preview && !props.result && (
+          <p className="text-xs text-faint">不会显示或记录 token 明文；Bitwarden session 只保存在 dec-server 内存中。</p>
+        )}
+        {props.preview && (
           <>
-            <div className="flex flex-wrap items-end gap-2">
-              <Field label="项目" className="min-w-64 flex-1">
-                <Select value={props.root} onChange={(event) => props.onRoot(event.target.value)}>
-                  {props.projects.map((item) => (
-                    <option key={item.Root} value={item.Root}>{item.Label || item.Name}</option>
-                  ))}
-                </Select>
-              </Field>
-              <ActionButton
-                variant="outline"
-                spec={previewSpec}
-                action={() => runOrWatchTyped<PushPreview>({
-                  actionKey: previewSpec.key,
-                  operation: 'preview_push',
-                  projectRoot: props.root,
-                  workspacePlane: 'local',
-                })}
-                runningLabel="预览中…"
-                onSuccess={props.onPreview}
-              >
-                预览推送
-              </ActionButton>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <SyncMetric label="Dec 候选" value={props.preview.DecCandidateCount} />
+              <SyncMetric label="Secrets 目标" value={props.preview.SecretsTargetCount} />
+              <SyncMetric label="Bitwarden" value={props.preview.BitwardenConfigured ? '已配置' : '未配置'} />
             </div>
-            {props.project && <p className="break-all font-mono text-[11px] text-faint">{props.project.Root}</p>}
-            <ActionFeedback actionKey={previewSpec.key} />
-            <ActionFeedback actionKey={pushSpec.key} />
-            {!props.preview && !props.result && (
-              <p className="text-xs text-faint">不会显示或记录 token 明文；Bitwarden session 只保存在 dec-server 内存中。</p>
-            )}
-            {props.preview && (
-              <>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <SyncMetric label="Dec 候选" value={props.preview.DecCandidateCount} />
-                  <SyncMetric label="Secrets 目标" value={props.preview.SecretsTargetCount} />
-                  <SyncMetric label="Bitwarden" value={props.preview.BitwardenConfigured ? '已配置' : '未配置'} />
-                </div>
-                {props.preview.HomeProject && <p className="text-xs text-faint">可写家项目：{props.preview.HomeProject}</p>}
-                {props.preview.DecSkippedReason && <Notice tone="info" text={`Dec：${props.preview.DecSkippedReason}`} />}
-                {props.preview.Changes?.length > 0 && (
-                  <div className="max-h-40 overflow-auto rounded-lg border border-line bg-canvas/50">
-                    {props.preview.Changes.map((change, index) => (
-                      <div key={`${change.Path}-${index}`} className="flex gap-3 border-b border-line/70 px-3 py-2 text-xs last:border-b-0">
-                        <span className="w-8 shrink-0 text-muted">{change.Op}</span>
-                        <span className="min-w-0 flex-1 break-all font-mono text-faint">{change.Path}</span>
-                        {change.Quadrant && <Badge tone="quiet">{change.Quadrant}</Badge>}
-                      </div>
-                    ))}
+            {props.preview.HomeProject && <p className="text-xs text-faint">可写家项目：{props.preview.HomeProject}</p>}
+            {props.preview.DecSkippedReason && <Notice tone="info" text={`Dec：${props.preview.DecSkippedReason}`} />}
+            {props.preview.Changes?.length > 0 && (
+              <div className="max-h-40 overflow-auto rounded-lg border border-line bg-canvas/50">
+                {props.preview.Changes.map((change, index) => (
+                  <div key={`${change.Path}-${index}`} className="flex gap-3 border-b border-line/70 px-3 py-2 text-xs last:border-b-0">
+                    <span className="w-8 shrink-0 text-muted">{change.Op}</span>
+                    <span className="min-w-0 flex-1 break-all font-mono text-faint">{change.Path}</span>
+                    {change.Quadrant && <Badge tone="quiet">{change.Quadrant}</Badge>}
                   </div>
-                )}
-                <div className="flex flex-wrap items-center gap-2">
-                  <ActionButton
-                    spec={pushSpec}
-                    disabled={!canPush}
-                    action={() => runOrWatchTyped<PushResult>({
-                      actionKey: pushSpec.key,
-                      operation: 'push',
-                      projectRoot: props.root,
-                      workspacePlane: 'local',
-                    })}
-                    runningLabel="推送中…"
-                    onSuccess={props.onPushed}
-                  >
-                    <UploadCloud className="size-4" />
-                    确认推送
-                  </ActionButton>
-                  {!canPush && <span className="text-xs text-faint">当前没有可推送内容。</span>}
-                </div>
-              </>
+                ))}
+              </div>
             )}
-            {props.result && (
-              <>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <SyncMetric label="Dec 已推" value={props.result.DecPushedCount} />
-                  <SyncMetric label="Secrets 新建" value={props.result.SecretsCreatedCount} />
-                  <SyncMetric label="Secrets 更新" value={props.result.SecretsUpdatedCount} />
-                </div>
-                {props.result.VersionCommit && <p className="break-all font-mono text-xs text-faint">提交：{props.result.VersionCommit}</p>}
-                {props.result.DecSkippedReason && <Notice tone="info" text={`Dec：${props.result.DecSkippedReason}`} />}
-                {props.result.SecretsSkippedReason && <Notice tone="info" text={`Secrets：${props.result.SecretsSkippedReason}`} />}
-              </>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <ActionButton
+                spec={pushSpec}
+                disabled={!canPush}
+                action={() => runOrWatchTyped<PushResult>({
+                  actionKey: pushSpec.key,
+                  operation: 'push',
+                  projectRoot: target.root,
+                  workspacePlane: target.plane,
+                })}
+                runningLabel="推送中…"
+                onSuccess={props.onPushed}
+              >
+                <UploadCloud className="size-4" />
+                确认推送
+              </ActionButton>
+              {!canPush && <span className="text-xs text-faint">当前没有可推送内容。</span>}
+            </div>
+          </>
+        )}
+        {props.result && (
+          <>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <SyncMetric label="Dec 已推" value={props.result.DecPushedCount} />
+              <SyncMetric label="Secrets 新建" value={props.result.SecretsCreatedCount} />
+              <SyncMetric label="Secrets 更新" value={props.result.SecretsUpdatedCount} />
+            </div>
+            {props.result.VersionCommit && <p className="break-all font-mono text-xs text-faint">提交：{props.result.VersionCommit}</p>}
+            {props.result.DecSkippedReason && <Notice tone="info" text={`Dec：${props.result.DecSkippedReason}`} />}
+            {props.result.SecretsSkippedReason && <Notice tone="info" text={`Secrets：${props.result.SecretsSkippedReason}`} />}
           </>
         )}
       </PanelBody>
