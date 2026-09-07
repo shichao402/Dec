@@ -37,8 +37,8 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 3. GitHub Actions：Ubuntu 交叉编全平台四件套；每个 Console 原生 runner 都准备 Go 与 relkit SDK，编译并内置同平台四件套
 4. `relkit stage --channel <dev|stable>` 把两类产物写入同一次 staged 树（无私钥）
 5. runtime 标 `audience=runtime`，Console 标 `audience=user`
-6. 打包 `staged.tar.gz` → `PUT` `https://publish.firoyang.com/v1/staged/dec/{version}`
-7. `POST /v1/publish` → 发布机签名并写 COS
+6. `relkit cas-put` 向 agent 申请唯一 ingest 的上传 URL：COS 已有同 sha256 则跳过，否则 CI 直接 PUT；随后只上传 `staged.pb` + `release-policy.json`
+7. `POST /v1/publish` → 发布机从 CAS Promote、签名并写 COS
 8. `stable` 的 GitHub Release **只挂** `dec-console-*`；四件套不进人面附件
 9. 人类 browse 页按 audience 过滤依赖 **relkit-serve 发布端**升级，不能靠 Dec 本地 stage 单方面完成
 

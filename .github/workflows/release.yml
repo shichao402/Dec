@@ -331,13 +331,18 @@ jobs:
             set -- "$@" --add "$f" "id=dec-console-${os}-${arch},os=$os,arch=$arch,component=console,audience=user"
           done
           ./relkit-bin "$@"
-          tar -C ".relkit/staged/${VER}" -czf staged.tar.gz .
           AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com/v1}"
-          SHA=$(sha256sum staged.tar.gz | awk '{print $1}')
-          ./relkit-bin staged-put staged.tar.gz \
+          CAS_RESULT="$(./relkit-bin cas-put \
             --product dec \
             --version "$VER" \
-            --url "$AGENT_URL"
+            --url "$AGENT_URL")"
+          echo "$CAS_RESULT"
+          SHA="${CAS_RESULT##*sha256=}"
+          SHA="${SHA%% *}"
+          if [ "${#SHA}" -ne 64 ]; then
+            echo "could not parse thin staged sha256 from relkit cas-put output"
+            exit 1
+          fi
           agent_curl() {
             local method="$1" url="$2"
             shift 2
