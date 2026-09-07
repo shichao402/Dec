@@ -42,6 +42,18 @@ export function installTauriMock(scenario: Scenario) {
       AvailableProjects: ['dec', 'relkit', 'investm', 'lyra'],
       HomeProject: 'dec',
     },
+    preview_push: {
+      SecretsTargetCount: 1,
+      DecCandidateCount: 2,
+      DecHasChanges: true,
+      DecSkippedReason: '',
+      BitwardenConfigured: true,
+      HomeProject: 'dec',
+      Changes: [
+        { Op: '修改', Path: 'p/dec/private/project/secrets/relkit.env', Quadrant: 'private/project' },
+        { Op: '修改', Path: 'p/dec/public/project/skills/release/SKILL.md', Quadrant: 'public/project' },
+      ],
+    },
   }
 
   const ok = (value: unknown) => ({ result_json: JSON.stringify(value ?? {}), error: '' })

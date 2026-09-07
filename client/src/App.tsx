@@ -548,7 +548,14 @@ export default function App() {
                   }}
                 />
               )}
-              {view === 'sync' && <SyncPage events={events} history={history} />}
+              {view === 'sync' && (
+                <SyncPage
+                  deviceId={deviceId}
+                  projects={summary.Projects}
+                  events={events}
+                  history={history}
+                />
+              )}
               {view === 'settings' && (
                 <SettingsPage
                   deviceId={deviceId}
