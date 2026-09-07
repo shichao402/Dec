@@ -43,3 +43,5 @@
 | [0020](0020-retire-tui.md) | 卸下 TUI，Console 为人机入口 | 已接受（已实现） |
 | [0021](0021-console-owned-runtime.md) | Console 独占用户分发与目标运行时 | 已接受（连接与发布协议已实现；发布基础设施待接入） |
 | [0022](0022-console-bitwarden-unlock.md) | Console 统一承载 Bitwarden 人工解锁 | 已接受；部分取代 0008、0018 的旧解锁叙事 |
+| [0023](0023-facade-capability-parity.md) | 门面能力口径：Console 覆盖人面能力，MCP 扩展需登记 | 已接受（已实现） |
+| [0024](0024-vault-delete-to-trash.md) | 远端删除移入保险库回收站，不永久删除 | 已接受（已实现） |

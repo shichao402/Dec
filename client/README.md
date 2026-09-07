@@ -61,7 +61,7 @@ src/
   App.tsx                  屏幕/视图状态机 + 动作编排，不含具体页面布局
   components/shell/        sidebar（设备 + 导航）、top-bar（面包屑 + 忙碌指示）、page（布局原语）
   components/ui/           button / input / panel / badge / checkbox / feedback 等基础件
-  pages/                   连接、认证、引导、概览、Global 资产、项目、项目详情、同步、设置
+  pages/                   连接、认证、引导、概览、Global 资产、项目、项目详情、同步、删除、设置
   lib/console.ts           视图枚举、资源锁常量、连接与路径展示的共享函数
 ```
 

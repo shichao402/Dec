@@ -436,7 +436,7 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 - 勾选保存后只写 `.dec/config.yaml` 的 `enabled_bundles`
 - 保留已有 `project_name` / `ides` / `editor`
 
-#### pull（Run 页）
+#### pull（同步页）
 
 1. 解析 `project_name` → vault `projects/<name>.yaml`（或使用本地 `enabled_bundles`）
 2. 对每个 enabled bundle：拉 Dec Git bundle → `.dec/cache/<bundle>/`
@@ -445,17 +445,20 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 5. 从 cache 渲染安装到 IDE 目录 + 非敏感 vars 占位符替换
 6. 记录 commit 到 `.dec/.version`
 
-#### push（Run 页）
+#### push（同步页）
 
 - 从 `.dec/cache/` 读取已启用资产，写回 Git Vault
 - project 声明变更：更新 vault `projects/<name>.yaml`
 - secrets bundle 走 Bitwarden API，不进 Git
+- 推送目标含 Global（本机）与各项目；本机平面 `projectRoot` 为空（[0015](decisions/0015-project-config-boundary.md)）
 
-#### remove（Run 页）
+#### remove（删除页）
 
 - 删除远端匹配资产，同步清理 `.dec/config.yaml` 与 `.dec/cache/`
+- 远端与本机是两套事务，不能混选；远端密钥进 Bitwarden 回收站可恢复
+  （[0024](decisions/0024-vault-delete-to-trash.md)）
 
-#### 自更新（Run 页 `u`）
+#### 自更新（同步页）
 
 - 唯一用户面入口：Console **同步** 页（检查 → 确认 → 下载替换）
 - 无 `dec update` CLI
@@ -620,7 +623,8 @@ Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真�
   Git/BW 同路径与落地边界校验 → 独立落地 + IDE 渲染
 - MCP 经独立 `dec-exec` 注入 `.env/*.env`；不再依赖 mise 落地路径
 - Schema：`Project`（`schema/dec/v1/projects.proto`）、`BundleBinding`、`SecretsConfig`（`schema/secrets/v1/`）
-- Console：同步页一次 pull；资产页选 bundle；设置页配置 Bitwarden
+- Console：同步页一次 pull、推送两个平面、只读密钥清单；资产页选 bundle；删除页清远端与本机；
+  设置页配置 Bitwarden
 
 ## 已知限制
 

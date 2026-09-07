@@ -187,7 +187,10 @@ Bitwarden folder: bundle/vikunja
 - **Note 内容** = 该路径文件的完整正文。
 - Pull **不经过 `.dec/cache/`**。
 - Push **递归扫描** `LocalRoot`（create/update）；**不隐式删除**远端 note。
-- 删除只走 Remote 页。
+- 删除只走 Console 删除页，逐条勾选 + 确认词。
+- 删除远端 note / SSH Key 是**软删**：条目移入 Bitwarden 保险库回收站，可在官方客户端恢复。
+  Dec 视回收站条目为不存在（读取时按 `deletedDate` 过滤），也不提供 restore 入口。
+  详见 [0024](decisions/0024-vault-delete-to-trash.md)。
 
 Note 名来自远端，按不可信输入处理：绝对路径、`~` 展开、`..` 逃逸、盘符一律拒绝。
 

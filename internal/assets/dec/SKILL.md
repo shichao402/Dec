@@ -40,7 +40,8 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
    - 完成后 `dec_push` / Console **同步** push
 
 6. **删除远端或本机托管资产**
-   - Console **同步**；Agent 先 `dec_list_delete_candidates`，再 `dec_delete`（`confirmed=true`，一次一个平面）
+   - Console **删除** 页；Agent 先 `dec_list_delete_candidates`，再 `dec_delete`（`confirmed=true`，一次一个平面）
+   - 远端密钥删除是软删，进 Bitwarden 回收站，可在官方客户端恢复
 
 7. **刚 pull 完**
    - 检查 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 等项目级 IDE 输出
@@ -65,8 +66,8 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 | 改启用列表 | `dec_set_assets`（不支持 both；改完通常再 `dec_pull`） |
 | 拉取并渲染 | `dec_pull` |
 | 推回远端 | `dec_push`；先可用 `dec_preview_push` |
-| 私密资产元数据 | `dec_list_secrets`（绝不返回正文/密钥） |
-| 删除候选 / 删除 | `dec_list_delete_candidates` / `dec_delete` |
+| 私密资产元数据 | `dec_list_secrets`（绝不返回正文/密钥；Console 在同步页「密钥清单」） |
+| 删除候选 / 删除 | `dec_list_delete_candidates` / `dec_delete`（Console 在删除页） |
 | 置备远端设备 | `dec_provision_remote`（Linux/macOS；首次置备必须 `confirmed=true`） |
 | 连仓库 | `dec_connect_repo` |
 | 初始化项目 | `dec_init_project` |
