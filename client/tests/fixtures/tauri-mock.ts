@@ -87,7 +87,21 @@ export function installTauriMock(scenario: Scenario) {
     stop_service: () => null,
     get_active_operation: () => ({ active: false }),
     watch_operation: () => ok(pullResult),
-    run_operation: () => ok(pullResult),
+    run_operation: (args) => {
+      const operation = String(args.operation || '')
+      if (operation === 'preview_push') return ok(methods.preview_push)
+      if (operation === 'push') {
+        return ok({
+          DecPushedCount: 2,
+          DecSkippedReason: '',
+          VersionCommit: 'mock-commit',
+          SecretsCreatedCount: 0,
+          SecretsUpdatedCount: 1,
+          SecretsSkippedReason: '',
+        })
+      }
+      return ok(pullResult)
+    },
     invoke_method: (args) => {
       const method = String(args.method || '')
       if (!(method in methods)) return { result_json: '', error: `未知服务方法 "${method}"` }

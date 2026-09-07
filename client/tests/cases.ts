@@ -249,6 +249,8 @@ export const cases: Case[] = [
       await connect(page)
       await page.getByRole('button', { name: /拉取 Global 资产/ }).click()
       await expect(page.getByRole('heading', { name: '同步记录' })).toBeVisible()
+      await page.getByRole('button', { name: '预览推送' }).click()
+      await expect(page.getByText('private/project', { exact: true })).toBeVisible()
     },
   },
   {

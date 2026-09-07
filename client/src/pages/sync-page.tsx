@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { EmptyState, Notice, WarningList } from '@/components/ui/feedback'
 import { Field, Select } from '@/components/ui/input'
 import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel'
-import { invokeTyped, runOrWatchTyped } from '@/lib/api'
+import { runOrWatchTyped } from '@/lib/api'
 import { actionSpec, resource } from '@/lib/console'
 import { pullResultDiagnosis } from '@/lib/utils'
 import type { ManagedProject, OperationEvent, PullResult } from '@/lib/utils'
@@ -133,7 +133,12 @@ function PushPanel(props: {
               <ActionButton
                 variant="outline"
                 spec={previewSpec}
-                action={() => invokeTyped<PushPreview>('preview_push', props.root, 'local', {}, previewSpec.key)}
+                action={() => runOrWatchTyped<PushPreview>({
+                  actionKey: previewSpec.key,
+                  operation: 'preview_push',
+                  projectRoot: props.root,
+                  workspacePlane: 'local',
+                })}
                 runningLabel="预览中…"
                 onSuccess={props.onPreview}
               >
