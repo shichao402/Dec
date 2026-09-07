@@ -195,9 +195,15 @@ fn stop_legacy_local_server() -> Result<(), String> {
         .and_then(serde_json::Value::as_u64)
         .filter(|pid| *pid > 0)
         .ok_or("旧服务发现文件缺少有效 pid")?;
+    // 元数据可能指向已经退出的进程；无 /F 时 Windows 上 taskkill 也常因
+    // 进程不响应而失败，进而卡住 Console「保存连接」。
+    if !local_pid_running(pid) {
+        let _ = fs::remove_file(path);
+        return Ok(());
+    }
     let status = if cfg!(windows) {
         std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T"])
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
             .status()
     } else {
         std::process::Command::new("kill")
@@ -205,11 +211,31 @@ fn stop_legacy_local_server() -> Result<(), String> {
             .status()
     }
     .map_err(|e| format!("停止旧 dec-server 失败: {e}"))?;
-    if !status.success() {
+    if !status.success() && local_pid_running(pid) {
         return Err(format!("停止旧 dec-server 失败（pid {pid}）"));
     }
     let _ = fs::remove_file(path);
     Ok(())
+}
+
+fn local_pid_running(pid: u64) -> bool {
+    if cfg!(windows) {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .map(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .split_whitespace()
+                    .any(|col| col == pid.to_string())
+            })
+            .unwrap_or(true)
+    } else {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
 }
 
 async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
