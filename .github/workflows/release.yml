@@ -7,8 +7,9 @@
 #   RELKIT_AGENT_URL（可选，可写站点根或 /v1，默认 https://publish.firoyang.com/v1）
 # 手动触发：Actions → Release → Run workflow（按 version.json，默认 channel=dev）
 #
-# Console 必须在对应 OS 的 GitHub-hosted runner 上原生构建（Tauri 不能从 Linux 交叉出 NSIS/DMG）。
-# 四件套仍在 Ubuntu 上 Go 交叉编译。publish 把两类产物汇进同一次 relkit stage。
+# Console 只发两套人面安装包：Windows amd64、macOS Intel amd64（Apple Silicon 走 Rosetta）。
+# Tauri 必须在对应 OS 的 GitHub-hosted runner 上原生构建（不能从 Linux 交叉出 NSIS/DMG）。
+# 四件套仍在 Ubuntu 上 Go 交叉编译全平台，供 SSH 置备异平台目标。publish 把两类产物汇进同一次 relkit stage。
 
 name: Release
 
@@ -154,12 +155,8 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - name: linux-amd64
-            runner: ubuntu-latest
           - name: windows-amd64
             runner: windows-latest
-          - name: darwin-arm64
-            runner: macos-latest
           - name: darwin-amd64
             runner: macos-15-intel
     steps:
@@ -188,16 +185,6 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Linux GUI deps
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential file libayatana-appindicator3-dev librsvg2-dev \
-            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf wget
 
       - name: Build native Console
         shell: bash
@@ -260,9 +247,7 @@ jobs:
 
           missing=0
           for f in \
-            dist/dec-console-linux-amd64.AppImage \
             dist/dec-console-windows-amd64.exe \
-            dist/dec-console-darwin-arm64.dmg \
             dist/dec-console-darwin-amd64.dmg
           do
             if [ ! -f "$f" ]; then

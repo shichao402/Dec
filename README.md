@@ -319,9 +319,12 @@ go test ./...
 
 ## 平台支持
 
-- macOS `amd64` / `arm64`
-- Linux `amd64` / `arm64`
-- Windows `amd64`
+人面 Console 只发两套：
+
+- Windows `amd64`（x86_64）
+- macOS `amd64`（Intel；Apple Silicon 通过 Rosetta 2 运行）
+
+不再发布 Linux Console，也不再发布原生 Apple Silicon（`darwin-arm64`）安装包。SSH 置备仍可从 RUP 拉取对应目标的四件套。
 
 ## 项目文档
 

@@ -34,13 +34,13 @@ SSH 置备由**发起端**解析目标 `os/arch`：
 
 ## 构建边界
 
-`scripts/build-console.py` 在原生 Windows/macOS/Linux 节点：
+`scripts/build-console.py` 在原生 Windows / macOS 节点：
 
 1. 为当前平台编译同 os/arch 四件套并写入 Tauri resources，同时生成摘要清单
 2. 构建 Console 安装包，归一化为 `dist/dec-console-<os>-<arch>.<ext>`
 3. 构建结束清理生成资源；二进制不纳入仓库
 
-GitHub Actions（`.github/workflows/release.yml`）每个 Console job 都准备 Go 与 relkit SDK，并用 `ubuntu-latest` / `windows-latest` / `macos-latest` / `macos-15-intel` 原生编四套 Console（Intel 那一列不能用 `macos-13`：该镜像 2025-12-04 已退役，job 只会一直排队；`macos-15-intel` 是最后一个 x86_64 macOS 镜像，2027-08 后需转 arm64）；另用 Ubuntu 交叉编全平台 runtime artifact，publish job 汇进同一次 `relkit stage`。
+GitHub Actions（`.github/workflows/release.yml`）每个 Console job 都准备 Go 与 relkit SDK，人面只编两套：`windows-latest` → `windows-amd64`，`macos-15-intel` → `darwin-amd64`（Intel 不能用已退役的 `macos-13`；Apple Silicon 用这份 Intel 包走 Rosetta）。不编 Linux Console，也不编 `darwin-arm64`。另用 Ubuntu 交叉编全平台 runtime artifact（含 Linux / arm64），供 SSH 置备异平台目标；publish job 汇进同一次 `relkit stage`。
 
 Tauri 安装包不能从 Linux 交叉出 NSIS/DMG。relkit-serve 人页 audience 过滤仍是发布端前置条件。
 

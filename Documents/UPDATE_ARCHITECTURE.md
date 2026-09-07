@@ -34,7 +34,7 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 
 1. 改 `version.json` 为 `vX.Y.Z`，提交并推 `main`
 2. 打渠道 tag 并推送（例：`git tag dev/vX.Y.Z && git push origin dev/vX.Y.Z`）
-3. GitHub Actions：Ubuntu 交叉编全平台四件套；每个 Console 原生 runner 都准备 Go 与 relkit SDK，编译并内置同平台四件套
+3. GitHub Actions：Ubuntu 交叉编全平台四件套；Console 只在 `windows-latest` 与 `macos-15-intel` 上原生编两套人面安装包并内置同平台四件套（不发 Linux / darwin-arm64 Console）
 4. `relkit stage --channel <dev|stable>` 把两类产物写入同一次 staged 树（无私钥）
 5. runtime 标 `audience=runtime`，Console 标 `audience=user`
 6. `relkit cas-put` 向 agent 申请唯一 ingest 的上传 URL：COS 已有同 sha256 则跳过，否则 CI 直接 PUT；随后只上传 `staged.pb` + `release-policy.json`
