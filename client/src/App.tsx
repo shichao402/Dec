@@ -94,6 +94,7 @@ export default function App() {
   const openIntentBusy = useRef(false)
   const openIntentRerun = useRef(false)
   const handledUnlockFailure = useRef('')
+  const restoredPasswordFor = useRef('')
   const handleConnectRef = useRef<(conn: SavedConnection, forceUnlock?: boolean) => Promise<void>>(
     () => Promise.resolve(),
   )
@@ -132,6 +133,24 @@ export default function App() {
     setScreen('unlock')
   }, [actions.state.records, current])
 
+  // session 过期后 Console 直接跳回解锁页，不再走 handleConnect，
+  // 所以凭据库里的主密码要跟着解锁页出现回填，而不是跟着连接动作。
+  useEffect(() => {
+    if (screen !== 'unlock') {
+      restoredPasswordFor.current = ''
+      return
+    }
+    const conn = current
+    if (!conn?.id || !conn.password_saved) return
+    if (restoredPasswordFor.current === conn.id) return
+    restoredPasswordFor.current = conn.id
+    setRememberPassword(true)
+    const spec = actionSpec(`connections:password:${conn.id}`, '正在读取已保存的主密码', 'console', [resource.connections], 'read')
+    void runAction(spec, () => loadSavedPassword(conn.id)).then((outcome) => {
+      if (outcome.ok && outcome.value) setPassword(outcome.value)
+    })
+  }, [screen, current, runAction])
+
   useEffect(() => {
     const spec = actionSpec('connections:list', '加载设备连接', 'console', [resource.connections], 'read')
     void runAction(spec, listConnections).then((outcome) => {
@@ -155,7 +174,6 @@ export default function App() {
     setTotp('')
     const spec = actionSpec(`session:connect:${conn.id}`, `正在连接 ${conn.label}`, conn.id, [resource.session], 'session', `已连接 ${conn.label}`)
     const outcome = await actions.run(spec, async () => {
-      const savedPassword = conn.password_saved && conn.id ? await loadSavedPassword(conn.id) : ''
       const info = await connectTarget({
         kind: conn.kind,
         host: conn.host,
@@ -166,11 +184,10 @@ export default function App() {
         tlsServerName: conn.tls_server_name,
       })
       const loaded = info.unlocked ? await fetchDevice(spec.key) : null
-      return { info, loaded, savedPassword }
+      return { info, loaded }
     })
     if (!outcome.ok) return
-    const { info, loaded, savedPassword } = outcome.value
-    if (savedPassword) setPassword(savedPassword)
+    const { info, loaded } = outcome.value
     setCurrent(conn)
     setPing(info)
     setSummary(loaded?.device || null)
