@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "dec-console",
-  "version": "1.13.58",
+  "version": "1.13.59",
   "identifier": "com.shichao402.dec.console",
   "build": {
     "frontendDist": "../dist",
