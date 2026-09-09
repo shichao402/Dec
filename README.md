@@ -105,13 +105,11 @@ Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 | Cursor | `.cursor/skills/` | `.cursor/rules/` | `.cursor/mcp.json` |
 | CodeBuddy | `.codebuddy/skills/` | `.codebuddy/rules/` | `.mcp.json` |
 | Claude | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
-| Claude Internal | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
-| Codex Internal | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 
 更详细的使用语义见 `internal/assets/dec/SKILL.md`，实现与存储结构见 [Documents/ARCHITECTURE.md](Documents/ARCHITECTURE.md)。
 
-说明：`claude-internal` 的项目级部署复用 `.claude/`，用户级目录为 `~/.claude-internal/`。`codex-internal` 的项目级部署复用 `.codex/`，用户级目录为 `~/.codex-internal/`。Codex MCP 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
+Codex MCP 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
 
 ## 快速开始
 

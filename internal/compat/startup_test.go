@@ -132,6 +132,40 @@ func TestRepairOnStartup_EmptyRootStillClearsUserCopies(t *testing.T) {
 	}
 }
 
+func TestRepairOnStartup_PurgesRemovedInternalIDEHomes(t *testing.T) {
+	home := isolateHome(t)
+	t.Setenv("DEC_HOME", home)
+	root := t.TempDir()
+	legacyUser := filepath.Join(home, ".claude-internal", "mcp.json")
+	legacyProject := filepath.Join(root, ".codex-internal", "skills", "dec-x", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(legacyUser), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyUser, []byte(`{"mcpServers":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(legacyProject), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyProject, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	notes := RepairOnStartup(root)
+	if len(notes) == 0 {
+		t.Fatal("应报告已删除的 internal IDE 目录")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude-internal")); !os.IsNotExist(err) {
+		t.Fatalf("用户级 .claude-internal 应已删除, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".codex-internal")); !os.IsNotExist(err) {
+		t.Fatalf("项目级 .codex-internal 应已删除, err=%v", err)
+	}
+	if notes := RepairOnStartup(root); len(notes) != 0 {
+		t.Fatalf("幂等：第二次 notes 应为空, got %#v", notes)
+	}
+}
+
 func TestRepairOnStartup_LeavesNonDirConfigAlone(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()

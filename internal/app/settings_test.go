@@ -254,29 +254,33 @@ func TestEnsureBuiltinIDEAssetsInstallsDecMCP(t *testing.T) {
 	}
 }
 
-func TestEnsureBuiltinIDEAssetsUsesClaudeInternalUserMCPPath(t *testing.T) {
+func TestEnsureBuiltinIDEAssetsSkipsRemovedInternalIDEs(t *testing.T) {
 	homeDir := t.TempDir()
 	setEnvForProjectTest(t, "HOME", homeDir)
+	legacy := filepath.Join(homeDir, ".claude-internal")
+	if err := os.MkdirAll(filepath.Join(legacy, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	warnings := EnsureBuiltinIDEAssets([]string{"claude-internal"}, nil)
+	warnings := EnsureBuiltinIDEAssets([]string{"claude-internal", "codex-internal", "cursor"}, nil)
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v", warnings)
 	}
-	internalPath := filepath.Join(homeDir, ".claude-internal", "mcp.json")
-	data, err := os.ReadFile(internalPath)
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("已移除的 ~/.claude-internal 应被删除, err=%v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(homeDir, ".cursor", "mcp.json"))
 	if err != nil {
-		t.Fatalf("claude-internal MCP 应写入 %s: %v", internalPath, err)
+		t.Fatalf("read mcp.json: %v", err)
 	}
 	if !strings.Contains(string(data), `"dec"`) {
-		t.Fatalf("claude-internal mcp.json = %s", string(data))
-	}
-	if _, err := os.Stat(filepath.Join(homeDir, ".claude", "mcp.json")); !os.IsNotExist(err) {
-		t.Fatalf("不应误写入 ~/.claude/mcp.json，stat err = %v", err)
+		t.Fatalf("mcp.json = %s", string(data))
 	}
 }
 
 func TestSaveGlobalSettings_PersistsEnabledBundlesInGlobalConfig(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	setEnvForProjectTest(t, "HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
 	})

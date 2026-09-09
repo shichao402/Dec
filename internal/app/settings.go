@@ -482,6 +482,9 @@ func sanitizeIDESelection(ideNames []string) ([]string, error) {
 		if name == "" {
 			continue
 		}
+		if config.IsRemovedBuiltInIDE(name) {
+			continue
+		}
 		if err := ValidateIDEName(name); err != nil {
 			return nil, err
 		}
@@ -507,10 +510,15 @@ func ValidateIDEName(ideName string) error {
 // TUI 启动与 Settings 保存时调用，避免「IDE 已勾选但未按 s 保存」导致 MCP 缺失。
 func EnsureBuiltinIDEAssets(ideNames []string, reporter Reporter) []string {
 	reporter = defaultReporter(reporter)
+	if notes := purgeRemovedInternalIDEHomes(); len(notes) > 0 {
+		for _, note := range notes {
+			emit(reporter, EventInfo, "settings.install", note, nil)
+		}
+	}
 	var warnings []string
 	for _, ideName := range ideNames {
 		name := strings.TrimSpace(ideName)
-		if name == "" {
+		if name == "" || config.IsRemovedBuiltInIDE(name) || !ide.IsValid(name) {
 			continue
 		}
 		if err := InstallBuiltinAssetsForIDE(name); err != nil {
@@ -522,6 +530,17 @@ func EnsureBuiltinIDEAssets(ideNames []string, reporter Reporter) []string {
 		emit(reporter, EventInfo, "settings.install", fmt.Sprintf("已为 %s 同步内置资产", name), nil)
 	}
 	return warnings
+}
+
+func purgeRemovedInternalIDEHomes() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		if err != nil {
+			return []string{fmt.Sprintf("跳过清理已移除 IDE 目录：%v", err)}
+		}
+		return nil
+	}
+	return ide.PurgeRemovedInternalHomes(home)
 }
 
 // InstallBuiltinAssetsForIDE 为指定 IDE 安装 Dec 跟随分发的内置资产。
@@ -622,7 +641,7 @@ func installBuiltinMCPs(ideName, homeDir string, mcps []assets.MCPAsset) error {
 }
 
 func isCodexIDE(ideName string) bool {
-	return ideName == "codex" || ideName == "codex-internal"
+	return ideName == "codex"
 }
 
 func mergeCodexBuiltinMCPEntry(ideName, homeDir, serverName string, server types.MCPServer) error {

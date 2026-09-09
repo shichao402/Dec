@@ -101,7 +101,7 @@ enabled_bundles:
 - 早期 `available` / `enabled` 已移除；读到旧配置会迁移
 - `ides` 不写则继承 Settings 全局列表
 - pull 会清掉不在本次启用目标集里的 cache / IDE 托管副本（secrets/SSH 仅在远端对照成功时 prune）
-- Claude / Codex 项目级统一 `.claude/`、`.codex/`；用户级仍区分 `~/.claude-internal`、`~/.codex-internal`
+- Claude / Codex 分别使用 `.claude/`、`.codex/`（项目级与用户级同名目录）
 
 ## 占位符变量
 

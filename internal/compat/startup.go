@@ -24,10 +24,12 @@ func RepairOnStartup(projectRoot string) []string {
 	root := strings.TrimSpace(projectRoot)
 	var notes []string
 	notes = append(notes, removeRetiredIDESkillCopies(root)...)
+	notes = append(notes, purgeRemovedInternalIDEHomes()...)
 	notes = append(notes, applyLayoutVersion(root)...)
 	if root == "" {
 		return notes
 	}
+	notes = append(notes, migrateAndDropLegacyInternalProjectDirs(root)...)
 	notes = append(notes, removeLegacyDecConfigDir(root)...)
 	return notes
 }
@@ -82,6 +84,42 @@ func removeTreeIfExists(path string) string {
 		return fmt.Sprintf("清理 %s 失败：%v", path, err)
 	}
 	return fmt.Sprintf("已删除退役 IDE 副本 %s", path)
+}
+
+func purgeRemovedInternalIDEHomes() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		if err != nil {
+			return []string{fmt.Sprintf("跳过清理已移除 IDE 目录：%v", err)}
+		}
+		return nil
+	}
+	return ide.PurgeRemovedInternalHomes(home)
+}
+
+func migrateAndDropLegacyInternalProjectDirs(projectRoot string) []string {
+	var notes []string
+	for _, migrate := range []struct {
+		name string
+		fn   func(string) ([]string, error)
+	}{
+		{"Claude", ide.MigrateLegacyClaudeProject},
+		{"Codex", ide.MigrateLegacyCodexProject},
+	} {
+		migrated, err := migrate.fn(projectRoot)
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("迁移旧版 %s 项目布局失败：%v", migrate.name, err))
+			continue
+		}
+		notes = append(notes, migrated...)
+	}
+	for _, name := range ide.RemovedInternalHomeDirs() {
+		target := filepath.Join(projectRoot, name)
+		if note := removeTreeIfExists(target); note != "" {
+			notes = append(notes, strings.Replace(note, "已删除退役 IDE 副本", "已删除已移除 IDE 目录", 1))
+		}
+	}
+	return notes
 }
 
 // removeLegacyDecConfigDir 删除早期 .dec/config/ 目录（内含 project/technology/packs

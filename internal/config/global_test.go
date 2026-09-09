@@ -327,6 +327,14 @@ func TestResolveEffectiveIDEs_WarnsWhenGlobalFallsBackToDefault(t *testing.T) {
 		t.Fatalf("写入全局 IDE 配置失败: %v", err)
 	}
 
+	cfg, err := LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig() 返回错误: %v", err)
+	}
+	if len(cfg.IDEs) != 0 {
+		t.Fatalf("已移除 IDE 应从磁盘清除, 实际 %#v", cfg.IDEs)
+	}
+
 	selection, err := ResolveEffectiveIDEs(&types.ProjectConfig{})
 	if err != nil {
 		t.Fatalf("ResolveEffectiveIDEs() 返回错误: %v", err)
@@ -334,11 +342,32 @@ func TestResolveEffectiveIDEs_WarnsWhenGlobalFallsBackToDefault(t *testing.T) {
 	if !reflect.DeepEqual(selection.IDEs, []string{"cursor"}) {
 		t.Fatalf("默认 IDE = %#v, 期望 %#v", selection.IDEs, []string{"cursor"})
 	}
-	if len(selection.Warnings) != 1 {
-		t.Fatalf("应返回 1 条警告，得到 %#v", selection.Warnings)
+	if len(selection.Warnings) != 0 {
+		t.Fatalf("配置已清除后不应再警告, 实际: %v", selection.Warnings)
 	}
-	if !strings.Contains(selection.Warnings[0], "trae") || !strings.Contains(selection.Warnings[0], "将回退到默认 IDE cursor") {
-		t.Fatalf("警告应包含 trae 与默认回退说明, 实际: %v", selection.Warnings)
+}
+
+func TestLoadGlobalConfig_PersistsStrippedInternalIDEs(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+	if err := os.WriteFile(filepath.Join(decHome, "config.yaml"), []byte("ides:\n  - cursor\n  - claude-internal\n  - codex-internal\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.IDEs, []string{"cursor"}) {
+		t.Fatalf("IDEs = %#v", cfg.IDEs)
+	}
+	data, err := os.ReadFile(filepath.Join(decHome, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "claude-internal") || strings.Contains(text, "codex-internal") {
+		t.Fatalf("磁盘配置仍含已移除 IDE:\n%s", text)
 	}
 }
 

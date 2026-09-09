@@ -24,13 +24,12 @@ var (
 	codexBearerEnvRefRe = regexp.MustCompile(`^Bearer \$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
 )
 
-func newCodexIDE(name string) IDE {
+func newCodexIDE() IDE {
 	return &codexIDE{baseIDE: baseIDE{
-		name:          name,
+		name:          "codex",
 		dirKey:        ".codex",
-		userDirKey:    "." + name,
 		mcpConfigPath: filepath.Join(".codex", "config.toml"),
-		userMCPPath:   filepath.Join("."+name, "config.toml"),
+		userMCPPath:   filepath.Join(".codex", "config.toml"),
 	}}
 }
 
@@ -190,7 +189,7 @@ func migrateLegacyCodexMCPJSON(projectRoot, legacyPath string) (string, error) {
 		legacy.MCPServers = make(map[string]types.MCPServer)
 	}
 
-	target := newCodexIDE("codex")
+	target := newCodexIDE()
 	current, err := target.LoadMCPConfig(projectRoot)
 	if err != nil {
 		return "", err
@@ -272,7 +271,7 @@ func appendCodexMCPServers(projectRoot string, servers map[string]types.MCPServe
 		return nil
 	}
 
-	configPath := newCodexIDE("codex").MCPConfigPath(projectRoot)
+	configPath := newCodexIDE().MCPConfigPath(projectRoot)
 	data, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return err

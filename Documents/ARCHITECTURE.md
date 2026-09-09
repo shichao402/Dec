@@ -380,11 +380,9 @@ my-app/
 | Cursor | `.cursor/skills/` | `.cursor/rules/` | `.cursor/mcp.json` |
 | CodeBuddy | `.codebuddy/skills/` | `.codebuddy/rules/` | `.mcp.json` |
 | Claude | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
-| Claude Internal | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
-| Codex Internal | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 
-Dec 托管产物统一使用 `dec-` 前缀。`claude-internal` / `codex-internal` 在项目级复用 `.claude/` / `.codex/`；用户级目录分别为 `~/.claude-internal/` 与 `~/.codex-internal/`。
+Dec 托管产物统一使用 `dec-` 前缀。Codex MCP 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
 
 ## 关键运行机制
 

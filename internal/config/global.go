@@ -103,6 +103,15 @@ func LoadGlobalConfig() (*types.GlobalConfig, error) {
 		config.EnabledBundles = legacyBundles
 	}
 
+	if stripped, changed := stripRemovedBuiltInIDEs(config.IDEs); changed {
+		config.IDEs = stripped
+		if _, statErr := os.Stat(configPath); statErr == nil {
+			if err := SaveGlobalConfig(config); err != nil {
+				return nil, fmt.Errorf("清除已移除 IDE 配置失败: %w", err)
+			}
+		}
+	}
+
 	return config, nil
 }
 
@@ -121,6 +130,8 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 	toWrite := config
 	if config != nil {
 		normalized := *config
+		normalized.IDEs, _ = stripRemovedBuiltInIDEs(config.IDEs)
+		config.IDEs = append([]string(nil), normalized.IDEs...)
 		normalized.EnabledBundles = NormalizeBundleNames(config.EnabledBundles)
 		config.EnabledBundles = append([]string(nil), normalized.EnabledBundles...)
 		normalized.EnabledProjects = append([]string(nil), normalized.EnabledBundles...)
@@ -219,8 +230,24 @@ func GetEffectiveIDEs(projectConfig *types.ProjectConfig) ([]string, error) {
 }
 
 var removedBuiltInIDEs = map[string]struct{}{
-	"windsurf": {},
-	"trae":     {},
+	"windsurf":        {},
+	"trae":            {},
+	"claude-internal": {},
+	"codex-internal":  {},
+}
+
+// IsRemovedBuiltInIDE 报告该名称是否曾是内置 IDE、现已删除。
+func IsRemovedBuiltInIDE(name string) bool {
+	_, ok := removedBuiltInIDEs[strings.TrimSpace(name)]
+	return ok
+}
+
+func stripRemovedBuiltInIDEs(names []string) (kept []string, changed bool) {
+	filtered := filterConfiguredIDEs(names)
+	if len(filtered.Removed) == 0 {
+		return names, false
+	}
+	return filtered.IDEs, true
 }
 
 // ResolveEffectiveIDEs 获取有效 IDE 列表，并返回被忽略的已移除 IDE 警告。

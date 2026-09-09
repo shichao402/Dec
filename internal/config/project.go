@@ -159,7 +159,7 @@ func (m *ProjectConfigManager) LoadProjectConfig() (*types.ProjectConfig, error)
 		if err != nil {
 			return nil, fmt.Errorf("读取项目配置失败: %w", err)
 		}
-		return loadProjectConfigV2(data, configPath)
+		return m.persistStrippedProjectIDEs(loadProjectConfigV2(data, configPath))
 	case types.ProjectConfigVersionV2:
 		config, err := loadProjectConfigV2(data, configPath)
 		if err != nil {
@@ -168,7 +168,7 @@ func (m *ProjectConfigManager) LoadProjectConfig() (*types.ProjectConfig, error)
 		if err := m.dropLegacyAssetSections(config, data); err != nil {
 			return nil, err
 		}
-		return config, nil
+		return m.persistStrippedProjectIDEs(config, nil)
 	default:
 		return nil, fmt.Errorf("不支持的项目配置版本 %q\n\n请升级 Dec 或修正 %s", version, configPath)
 	}
@@ -190,6 +190,8 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 	if normalized.LayoutVersion == 0 {
 		normalized.LayoutVersion = types.LocalLayoutVersion
 	}
+	normalized.IDEs, _ = stripRemovedBuiltInIDEs(config.IDEs)
+	config.IDEs = append([]string(nil), normalized.IDEs...)
 
 	data, err := yaml.Marshal(&normalized)
 	if err != nil {
@@ -371,6 +373,21 @@ func loadProjectConfigV2(data []byte, configPath string) (*types.ProjectConfig, 
 	config.Kind = types.ConfigKindProject
 	config.Version = types.ProjectConfigVersionV2
 	return &config, nil
+}
+
+func (m *ProjectConfigManager) persistStrippedProjectIDEs(config *types.ProjectConfig, err error) (*types.ProjectConfig, error) {
+	if err != nil || config == nil {
+		return config, err
+	}
+	stripped, changed := stripRemovedBuiltInIDEs(config.IDEs)
+	if !changed {
+		return config, nil
+	}
+	config.IDEs = stripped
+	if saveErr := m.SaveProjectConfig(config); saveErr != nil {
+		return nil, fmt.Errorf("清除已移除 IDE 配置失败: %w", saveErr)
+	}
+	return config, nil
 }
 
 // dropLegacyAssetSections 清理 v2 配置里残留的 available / enabled 段。

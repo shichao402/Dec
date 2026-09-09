@@ -2,6 +2,7 @@ package ide
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -111,4 +112,39 @@ func removeEmptyParents(path, stop string) error {
 		path = filepath.Dir(path)
 	}
 	return nil
+}
+
+// RemovedInternalHomeDirs 是已删除内置 IDE 曾经占用的用户级目录名。
+func RemovedInternalHomeDirs() []string {
+	return []string{".claude-internal", ".codex-internal"}
+}
+
+// PurgeRemovedInternalHomes 删除 ~/.claude-internal 与 ~/.codex-internal。
+func PurgeRemovedInternalHomes(homeDir string) []string {
+	homeDir = strings.TrimSpace(homeDir)
+	if homeDir == "" {
+		return nil
+	}
+	var notes []string
+	for _, name := range RemovedInternalHomeDirs() {
+		target := filepath.Join(homeDir, name)
+		info, err := os.Lstat(target)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			notes = append(notes, fmt.Sprintf("跳过清理 %s：%v", target, err))
+			continue
+		}
+		if !info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			notes = append(notes, fmt.Sprintf("跳过清理 %s：不是目录", target))
+			continue
+		}
+		if err := os.RemoveAll(target); err != nil {
+			notes = append(notes, fmt.Sprintf("清理 %s 失败：%v", target, err))
+			continue
+		}
+		notes = append(notes, fmt.Sprintf("已删除已移除 IDE 目录 %s", target))
+	}
+	return notes
 }

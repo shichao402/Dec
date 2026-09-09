@@ -57,3 +57,39 @@ func TestProjectCleanupDoesNotRemoveBuiltinDecName(t *testing.T) {
 		t.Fatalf("unexpected project config: %s", data)
 	}
 }
+
+func TestPurgeRemovedInternalHomes(t *testing.T) {
+	home := t.TempDir()
+	for _, name := range []string{".claude-internal", ".codex-internal"} {
+		dir := filepath.Join(home, name, "skills")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "x.md"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep := filepath.Join(home, ".claude", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(keep), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keep, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	notes := PurgeRemovedInternalHomes(home)
+	if len(notes) != 2 {
+		t.Fatalf("notes = %#v", notes)
+	}
+	for _, name := range []string{".claude-internal", ".codex-internal"} {
+		if _, err := os.Stat(filepath.Join(home, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s 应已删除, err=%v", name, err)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("~/.claude 应保留: %v", err)
+	}
+	if notes := PurgeRemovedInternalHomes(home); len(notes) != 0 {
+		t.Fatalf("幂等 notes = %#v", notes)
+	}
+}

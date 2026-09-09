@@ -26,7 +26,7 @@ func TestGetUnregisteredIDEReturnsFallback(t *testing.T) {
 }
 
 func TestIsValidRegistered(t *testing.T) {
-	for _, name := range []string{"cursor", "codebuddy", "claude", "claude-internal", "codex", "codex-internal"} {
+	for _, name := range []string{"cursor", "codebuddy", "claude", "codex"} {
 		if !IsValid(name) {
 			t.Fatalf("已注册 IDE %s 应返回 IsValid=true", name)
 		}
@@ -43,6 +43,12 @@ func TestIsValidUnregistered(t *testing.T) {
 	if IsValid("trae") {
 		t.Fatalf("已移除的 IDE trae 应返回 IsValid=false")
 	}
+	if IsValid("claude-internal") {
+		t.Fatalf("已移除的 IDE claude-internal 应返回 IsValid=false")
+	}
+	if IsValid("codex-internal") {
+		t.Fatalf("已移除的 IDE codex-internal 应返回 IsValid=false")
+	}
 	if IsValid("") {
 		t.Fatalf("空字符串应返回 IsValid=false")
 	}
@@ -52,7 +58,7 @@ func TestListContainsAllRegistered(t *testing.T) {
 	names := List()
 	sort.Strings(names)
 
-	expected := []string{"claude", "claude-internal", "codebuddy", "codex", "codex-internal", "cursor"}
+	expected := []string{"claude", "codebuddy", "codex", "cursor"}
 	if len(names) != len(expected) {
 		t.Fatalf("期望 %d 个 IDE，得到 %d 个: %v", len(expected), len(names), names)
 	}
@@ -87,19 +93,6 @@ func TestCodexMCPConfigPath(t *testing.T) {
 	}
 }
 
-func TestCodexInternalProjectUsesCodexPath(t *testing.T) {
-	impl := Get("codex-internal")
-	if rulesDir := impl.RulesDir("/project"); rulesDir != filepath.Join("/project", ".codex", "rules") {
-		t.Fatalf("codex-internal 项目级 RulesDir 应复用 /project/.codex/rules，得到 %s", rulesDir)
-	}
-	if skillsDir := impl.SkillsDir("/project"); skillsDir != filepath.Join("/project", ".codex", "skills") {
-		t.Fatalf("codex-internal 项目级 SkillsDir 应复用 /project/.codex/skills，得到 %s", skillsDir)
-	}
-	if path := impl.MCPConfigPath("/project"); path != filepath.Join("/project", ".codex", "config.toml") {
-		t.Fatalf("codex-internal 项目级 MCP 配置应复用 /project/.codex/config.toml，得到 %s", path)
-	}
-}
-
 func TestIDEDirectoryStructure(t *testing.T) {
 	tests := []struct {
 		ide       string
@@ -109,9 +102,7 @@ func TestIDEDirectoryStructure(t *testing.T) {
 		{"cursor", filepath.Join("/project", ".cursor", "rules"), filepath.Join("/project", ".cursor", "skills")},
 		{"codebuddy", filepath.Join("/project", ".codebuddy", "rules"), filepath.Join("/project", ".codebuddy", "skills")},
 		{"claude", filepath.Join("/project", ".claude", "rules"), filepath.Join("/project", ".claude", "skills")},
-		{"claude-internal", filepath.Join("/project", ".claude", "rules"), filepath.Join("/project", ".claude", "skills")},
 		{"codex", filepath.Join("/project", ".codex", "rules"), filepath.Join("/project", ".codex", "skills")},
-		{"codex-internal", filepath.Join("/project", ".codex", "rules"), filepath.Join("/project", ".codex", "skills")},
 	}
 
 	for _, tt := range tests {
@@ -125,24 +116,6 @@ func TestIDEDirectoryStructure(t *testing.T) {
 	}
 }
 
-func TestInternalIDEUserRoots(t *testing.T) {
-	tests := []struct {
-		ide      string
-		homeDir  string
-		wantRoot string
-	}{
-		{"claude-internal", "/home/dev", filepath.Join("/home/dev", ".claude-internal")},
-		{"codex-internal", "/home/dev", filepath.Join("/home/dev", ".codex-internal")},
-	}
-
-	for _, tt := range tests {
-		impl := Get(tt.ide)
-		if root := impl.UserRootDir(tt.homeDir); root != tt.wantRoot {
-			t.Fatalf("%s UserRootDir: 期望 %s，得到 %s", tt.ide, tt.wantRoot, root)
-		}
-	}
-}
-
 func TestIDEPlanePaths(t *testing.T) {
 	tests := []struct {
 		ide       string
@@ -152,8 +125,8 @@ func TestIDEPlanePaths(t *testing.T) {
 	}{
 		{"cursor", filepath.Join("/home/dev", ".cursor"), filepath.Join("/home/dev", ".cursor", "mcp.json"), filepath.Join("/home/dev", ".cursor", "skills")},
 		{"codebuddy", filepath.Join("/home/dev", ".codebuddy"), filepath.Join("/home/dev", ".mcp.json"), filepath.Join("/home/dev", ".codebuddy", "skills")},
-		{"claude-internal", filepath.Join("/home/dev", ".claude-internal"), filepath.Join("/home/dev", ".claude-internal", "mcp.json"), filepath.Join("/home/dev", ".claude-internal", "skills")},
-		{"codex-internal", filepath.Join("/home/dev", ".codex-internal"), filepath.Join("/home/dev", ".codex-internal", "config.toml"), filepath.Join("/home/dev", ".codex-internal", "skills")},
+		{"claude", filepath.Join("/home/dev", ".claude"), filepath.Join("/home/dev", ".claude", "mcp.json"), filepath.Join("/home/dev", ".claude", "skills")},
+		{"codex", filepath.Join("/home/dev", ".codex"), filepath.Join("/home/dev", ".codex", "config.toml"), filepath.Join("/home/dev", ".codex", "skills")},
 	}
 
 	for _, tt := range tests {
@@ -167,15 +140,5 @@ func TestIDEPlanePaths(t *testing.T) {
 		if got := impl.SkillsDirForPlane(PlaneUser, "/project", "/home/dev"); got != tt.wantSkill {
 			t.Errorf("%s SkillsDirForPlane(user) = %s, 期望 %s", tt.ide, got, tt.wantSkill)
 		}
-	}
-}
-
-func TestInternalIDEProjectPlaneKeepsSharedDirectory(t *testing.T) {
-	impl := Get("claude-internal")
-	if got := impl.PlaneRoot(PlaneProject, "/project", "/home/dev"); got != filepath.Join("/project", ".claude") {
-		t.Fatalf("PlaneRoot(project) = %s", got)
-	}
-	if got := impl.MCPConfigPathForPlane(PlaneProject, "/project", "/home/dev"); got != filepath.Join("/project", ".claude", "mcp.json") {
-		t.Fatalf("MCPConfigPathForPlane(project) = %s", got)
 	}
 }

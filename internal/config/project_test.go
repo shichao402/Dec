@@ -54,6 +54,35 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 	}
 }
 
+func TestLoadProjectConfig_PersistsStrippedInternalIDEs(t *testing.T) {
+	projectRoot := t.TempDir()
+	mgr := NewProjectConfigManager(projectRoot)
+	decDir := filepath.Join(projectRoot, ".dec")
+	if err := os.MkdirAll(decDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(decDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("version: v2\nides:\n  - claude-internal\n  - cursor\n  - codex-internal\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := mgr.LoadProjectConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.IDEs) != 1 || loaded.IDEs[0] != "cursor" {
+		t.Fatalf("IDEs = %#v", loaded.IDEs)
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "claude-internal") || strings.Contains(text, "codex-internal") {
+		t.Fatalf("磁盘配置仍含已移除 IDE:\n%s", text)
+	}
+}
+
 func TestLoadProjectConfig_FoldsLegacyEnabledIntoBundles(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := NewProjectConfigManager(projectRoot)
