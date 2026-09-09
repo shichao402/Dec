@@ -1,5 +1,6 @@
-// Package consoleopen opens the installed Dec Console at a non-sensitive
-// application intent. It never transports credentials or service tokens.
+// Package consoleopen launches the installed Dec Console with a non-sensitive
+// flag. It never transports credentials or service tokens, and never opens a
+// browser or OS URL handler.
 package consoleopen
 
 import (
@@ -10,11 +11,11 @@ import (
 	"testing"
 )
 
-const UnlockLocalURI = "dec://unlock/local"
+const UnlockLocalFlag = "--unlock-local"
 
 var (
 	ErrNonInteractive = errors.New("当前环境不可启动 Dec Console")
-	openURI           = openSystemURI
+	launch            = launchInstalledConsole
 )
 
 // Available reports whether this process is allowed to open a desktop app.
@@ -37,12 +38,20 @@ func OpenUnlockLocal() error {
 	if !Available() {
 		return ErrNonInteractive
 	}
-	return openURI(UnlockLocalURI)
+	return launch()
 }
 
-// SetOpenURIForTest replaces the OS launcher and returns a restore function.
-func SetOpenURIForTest(fn func(string) error) func() {
-	old := openURI
-	openURI = fn
-	return func() { openURI = old }
+func launchInstalledConsole() error {
+	path, err := findConsoleExecutable()
+	if err != nil {
+		return err
+	}
+	return startDetached(path, UnlockLocalFlag)
+}
+
+// SetLaunchForTest replaces the Console launcher and returns a restore function.
+func SetLaunchForTest(fn func() error) func() {
+	old := launch
+	launch = fn
+	return func() { launch = old }
 }

@@ -13,7 +13,6 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
-use url::Url;
 use uuid::Uuid;
 
 #[derive(Default)]
@@ -31,16 +30,7 @@ enum OpenIntent {
 const OPEN_INTENT_EVENT: &str = "open-intent";
 
 fn parse_open_intent(value: &str) -> Option<OpenIntent> {
-    let url = Url::parse(value).ok()?;
-    (url.scheme() == "dec"
-        && url.host_str() == Some("unlock")
-        && url.path() == "/local"
-        && url.query().is_none()
-        && url.fragment().is_none()
-        && url.username().is_empty()
-        && url.password().is_none()
-        && url.port().is_none())
-    .then_some(OpenIntent::UnlockLocal)
+    (value == "--unlock-local").then_some(OpenIntent::UnlockLocal)
 }
 
 fn focus_main_window(app: &AppHandle) {
@@ -911,13 +901,11 @@ fn emit_action_event(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // 必须最先注册：Windows/Linux 会把 URI 交给第二个进程，再由这里转发给主实例。
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            // deep-link feature 已先触发 on_open_url；这里仅负责恢复主窗口，
-            // 避免同一个 URI 从 argv 和插件事件重复入队。
+        // 必须最先注册：第二次启动把 argv 转给主实例，再聚焦窗口。
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            enqueue_open_intents(app, argv.iter().map(String::as_str));
             focus_main_window(app);
         }))
-        .plugin(tauri_plugin_deep_link::init())
         .manage(AppState::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -931,25 +919,6 @@ pub fn run() {
                         .build(),
                 )?;
             }
-
-            #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
-            {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                app.deep_link().register_all()?;
-            }
-
-            use tauri_plugin_deep_link::DeepLinkExt;
-            if let Some(urls) = app.deep_link().get_current()? {
-                let values: Vec<_> = urls.iter().map(Url::as_str).collect();
-                enqueue_open_intents(app.handle(), values);
-            }
-            let deep_link_app = app.handle().clone();
-            app.deep_link().on_open_url(move |event| {
-                let urls = event.urls();
-                let values: Vec<_> = urls.iter().map(Url::as_str).collect();
-                enqueue_open_intents(&deep_link_app, values);
-                focus_main_window(&deep_link_app);
-            });
 
             let args: Vec<_> = std::env::args().collect();
             enqueue_open_intents(app.handle(), args.iter().map(String::as_str));
@@ -1022,17 +991,13 @@ mod tests {
     }
 
     #[test]
-    fn only_accepts_unlock_local_deep_link() {
+    fn only_accepts_unlock_local_flag() {
         assert_eq!(
-            parse_open_intent("dec://unlock/local"),
+            parse_open_intent("--unlock-local"),
             Some(OpenIntent::UnlockLocal)
         );
-        assert_eq!(
-            parse_open_intent("DEC://unlock/local"),
-            Some(OpenIntent::UnlockLocal)
-        );
-        assert_eq!(parse_open_intent("dec://unlock/remote"), None);
-        assert_eq!(parse_open_intent("dec://unlock/local?next=remote"), None);
+        assert_eq!(parse_open_intent("dec://unlock/local"), None);
+        assert_eq!(parse_open_intent("--unlock-remote"), None);
         assert_eq!(parse_open_intent("https://unlock/local"), None);
     }
 

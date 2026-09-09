@@ -1,6 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "dec-console",
+  "mainBinaryName": "dec-console",
   "version": "1.13.59",
   "identifier": "com.shichao402.dec.console",
   "build": {
@@ -25,15 +26,6 @@
     ],
     "security": {
       "csp": null
-    }
-  },
-  "plugins": {
-    "deep-link": {
-      "desktop": {
-        "schemes": [
-          "dec"
-        ]
-      }
     }
   },
   "bundle": {
