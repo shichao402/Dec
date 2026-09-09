@@ -24,9 +24,10 @@ func TestWorkspacePlaneAliases(t *testing.T) {
 	}
 }
 
-func TestScanManagedProjectsFindsInitializedAndSkipsNodeModules(t *testing.T) {
+func TestScanManagedProjectsFindsInitializedAndGitProjectsAndSkipsNodeModules(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "apps", "web")
+	gitProject := filepath.Join(root, "services", "api")
 	ignored := filepath.Join(root, "node_modules", "ignored")
 	for _, dir := range []string{filepath.Join(project, ".dec"), filepath.Join(ignored, ".dec")} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -36,11 +37,18 @@ func TestScanManagedProjectsFindsInitializedAndSkipsNodeModules(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := os.MkdirAll(filepath.Join(gitProject, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	result, err := ScanManagedProjects(context.Background(), root, 6, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Projects) != 1 || result.Projects[0].Root != project {
+	if len(result.Projects) != 2 ||
+		result.Projects[0].Root != project ||
+		result.Projects[1].Root != gitProject ||
+		!result.Projects[0].Initialized ||
+		result.Projects[1].Initialized {
 		t.Fatalf("unexpected scan result: %#v", result.Projects)
 	}
 }

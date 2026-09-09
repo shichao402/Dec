@@ -93,7 +93,7 @@ export function ProjectsPage(props: {
         )}
         {scan.length > 0 && (
           <Panel className="mb-4 shrink-0">
-            <PanelHeader title="扫描发现" description={`${scan.length} 个尚未接管的 Dec 项目`} />
+            <PanelHeader title="扫描发现" description={`${scan.length} 个尚未接管的项目`} />
             <div className="max-h-56 divide-y divide-line overflow-y-auto">
               {scan.map((project) => {
                 const spec = actionSpec(`projects:register:${props.deviceId}:${project.Root}`, `导入 ${project.Root}`, props.deviceId, [resource.global], 'write', '项目已导入')
@@ -101,6 +101,9 @@ export function ProjectsPage(props: {
                   <div key={project.Root} className="flex items-center gap-3 px-4 py-2.5">
                     <Folder className="size-4 shrink-0 text-faint" />
                     <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">{project.Root}</span>
+                    <Badge tone={project.Initialized ? 'good' : 'warn'}>
+                      {project.Initialized ? '已初始化' : '待初始化'}
+                    </Badge>
                     <ActionButton
                       size="sm"
                       variant="secondary"

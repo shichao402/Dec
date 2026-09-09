@@ -251,6 +251,15 @@ func ScanManagedProjects(ctx context.Context, scanRoot string, maxDepth int, rep
 			}
 			return filepath.SkipDir
 		}
+		if _, statErr := os.Stat(filepath.Join(path, ".git")); statErr == nil {
+			key := strings.ToLower(filepath.Clean(path))
+			if _, exists := seen[key]; !exists {
+				seen[key] = struct{}{}
+				result.Projects = append(result.Projects, inspectManagedProject(path, ""))
+				emit(reporter, EventInfo, "projects.scan", "发现待初始化 Git 项目 "+path, nil)
+			}
+			return filepath.SkipDir
+		}
 		return nil
 	})
 	if err != nil {
