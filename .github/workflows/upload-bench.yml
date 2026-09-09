@@ -59,7 +59,7 @@ jobs:
 
       - name: Fetch relkit CLI
         shell: bash
-        run: python3 scripts/ensure_relkit_sparse.py --sdk-only
+        run: python3 scripts/relkit_consume.py --sdk-only
 
       - name: Build payload and CLI
         shell: bash

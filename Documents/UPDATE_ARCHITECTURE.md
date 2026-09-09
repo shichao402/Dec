@@ -78,7 +78,7 @@ RUP 限制：当前 SDK 的 chain 选择最高可达版本，不支持任意历�
 开发 / CI 通过 sparse-checkout 拉取 relkit：
 
 ```
-scripts/ensure_relkit_sparse.py --sdk-only
+scripts/relkit_consume.py --sdk-only
 ```
 
 落到 `third_party/relkit/`，`go.mod` 使用：
@@ -87,4 +87,4 @@ scripts/ensure_relkit_sparse.py --sdk-only
 replace cnb.cool/shichao402/relkit => ./third_party/relkit
 ```
 
-上游 URL 默认 `https://github.com/shichao402/relkit.git`，**ref 默认 `main`**（每次 `ensure_relkit_sparse` / CI 拉当时的 HEAD）。需要冻结某次提交时用 `--ref` / `RELKIT_REF`（完整 SHA；短 SHA 不能直接 `git fetch`）。Go 模块路径仍是 `cnb.cool/shichao402/relkit`（replace 到 `third_party/relkit`），与 git 主仓无关。
+上游 URL 与 ref 来自 `scripts/relkit.lock.json`（schema `relkit.consume/1`）：默认 `channel: main`，即每次拉当时的 HEAD。冻结某次提交时把完整 SHA 写进 lock 的 `commit`（短 SHA 不能直接 `git fetch`），临时覆盖用 `--ref` / `RELKIT_REF`。`scripts/relkit_consume.py` 是上游 `scripts/host/relkit_consume.py` 的逐字节副本，只负责解析 lock 并转交该 SHA 的 `scripts/consume.py`；cone 与构建规则不在本仓。Go 模块路径仍是 `cnb.cool/shichao402/relkit`（replace 到 `third_party/relkit`），与 git 主仓无关。
