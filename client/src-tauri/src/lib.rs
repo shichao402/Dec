@@ -112,6 +112,7 @@ struct ConnectProbe {
 const CREDENTIAL_SERVICE: &str = "dev.dec.console";
 const REMOTE_PROVISION_PORT: u16 = 47_653;
 const CONSOLE_VERSION: &str = env!("CARGO_PKG_VERSION");
+const RUNTIME_COMPONENTS: [&str; 4] = ["dec-server", "dec-mcp", "dec-exec", "dec-host-setup"];
 
 fn dec_home() -> PathBuf {
     std::env::var_os("DEC_HOME")
@@ -157,22 +158,57 @@ fn suite_binary(name: &str) -> PathBuf {
     dec_home().join("bin").join(format!("{name}{suffix}"))
 }
 
-fn installed_suite_version() -> Option<String> {
-    let output = std::process::Command::new(suite_binary("dec"))
+fn component_version(component: &str) -> Option<String> {
+    let output = std::process::Command::new(suite_binary(component))
         .arg("--version")
         .stdin(Stdio::null())
         .output()
         .ok()?;
+    if !output.status.success() {
+        return None;
+    }
     let text = String::from_utf8_lossy(&output.stdout);
     text.split_whitespace()
         .find(|word| parse_release_version(word).is_some())
         .map(str::to_owned)
 }
 
+fn installed_component_versions() -> Vec<(&'static str, String)> {
+    RUNTIME_COMPONENTS
+        .iter()
+        .filter_map(|component| component_version(component).map(|version| (*component, version)))
+        .collect()
+}
+
+fn installed_suite_version() -> Option<String> {
+    let versions = installed_component_versions();
+    if versions.len() != RUNTIME_COMPONENTS.len() {
+        return None;
+    }
+    let expected = &versions[0].1;
+    if versions
+        .iter()
+        .all(|(_, version)| compare_versions(expected, version).ok() == Some(Ordering::Equal))
+    {
+        Some(expected.clone())
+    } else {
+        None
+    }
+}
+
 fn suite_complete() -> bool {
-    ["dec", "dec-server", "dec-mcp", "dec-exec"]
+    RUNTIME_COMPONENTS
         .iter()
         .all(|name| suite_binary(name).is_file())
+}
+
+fn remove_legacy_dec_cli() -> Result<(), String> {
+    let legacy = suite_binary("dec");
+    if legacy.is_file() {
+        std::fs::remove_file(&legacy)
+            .map_err(|e| format!("删除旧版 CLI {} 失败: {e}", legacy.display()))?;
+    }
+    Ok(())
 }
 
 fn stop_legacy_local_server() -> Result<(), String> {
@@ -229,6 +265,13 @@ fn local_pid_running(pid: u64) -> bool {
 }
 
 async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
+    for (component, installed) in installed_component_versions() {
+        if compare_versions(CONSOLE_VERSION, &installed)? == Ordering::Less {
+            return Err(format!(
+                "Dec Console {CONSOLE_VERSION} 低于本机组件 {component} {installed}，拒绝降级。请先更新 Console"
+            ));
+        }
+    }
     if let Some(installed) = installed_suite_version() {
         match compare_versions(CONSOLE_VERSION, &installed)? {
             Ordering::Less => {
@@ -236,7 +279,10 @@ async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
                     "Dec Console {CONSOLE_VERSION} 低于本机运行时 {installed}，拒绝降级。请先更新 Console"
                 ));
             }
-            Ordering::Equal if suite_complete() => return Ok(()),
+            Ordering::Equal if suite_complete() => {
+                remove_legacy_dec_cli()?;
+                return Ok(());
+            }
             _ => {}
         }
     }
@@ -249,8 +295,9 @@ async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
         ));
     }
     if !suite_complete() {
-        return Err("安装后 Dec 四件套仍不完整".into());
+        return Err("安装后 Dec 运行时套件仍不完整".into());
     }
+    remove_legacy_dec_cli()?;
     Ok(())
 }
 
@@ -579,12 +626,18 @@ async fn connect_local(app: &AppHandle) -> Result<Session, String> {
             if let Ok(ping) = session.ping().await {
                 reject_newer_server(&ping.version)?;
                 if compare_versions(CONSOLE_VERSION, &ping.version)? == Ordering::Equal {
-                    return Ok(session);
+                    if installed_suite_version().is_some_and(|version| {
+                        compare_versions(CONSOLE_VERSION, &version).ok() == Some(Ordering::Equal)
+                    }) && suite_complete()
+                    {
+                        remove_legacy_dec_cli()?;
+                        return Ok(session);
+                    }
                 }
                 let graceful = session
                     .shutdown(format!(
-                        "Console {CONSOLE_VERSION} 将本机运行时由 {} 升级并对齐",
-                        ping.version
+                        "Console {CONSOLE_VERSION} 将补齐或对齐本机运行时（当前服务 {}）",
+                        ping.version,
                     ))
                     .await
                     .is_ok();
@@ -785,12 +838,13 @@ async fn authenticate(
     password: String,
     totp: String,
     remember_device: bool,
+    retain_password: bool,
     state: State<'_, AppState>,
 ) -> Result<AuthResult, String> {
     let mut guard = state.session.lock().await;
     let session = guard.as_mut().ok_or("尚未连接")?;
     let result = session
-        .authenticate(email, password, totp, remember_device)
+        .authenticate(email, password, totp, remember_device, retain_password)
         .await?;
     if result.unlocked {
         session.start_keep_alive();

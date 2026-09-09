@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 func TestRemoteTargetDestination(t *testing.T) {
@@ -57,7 +59,7 @@ func TestProbeCleanLinuxHostIsProvisionable(t *testing.T) {
 		t.Fatalf("不应有阻断项: %v", probe.Blockers)
 	}
 	if probe.DecInstalled {
-		t.Fatal("四件套缺失时 DecInstalled 应为 false")
+		t.Fatal("运行时套件缺失时 DecInstalled 应为 false")
 	}
 	if len(probe.MissingBinaries) != 4 {
 		t.Fatalf("应缺 4 个二进制，实际 %v", probe.MissingBinaries)
@@ -128,10 +130,14 @@ func TestProbeServerNotRunningIsNotABlocker(t *testing.T) {
 	probe := parseProbe(t, strings.Join([]string{
 		"os=Linux",
 		"arch=x86_64",
-		"binary=dec",
 		"binary=dec-server",
 		"binary=dec-mcp",
 		"binary=dec-exec",
+		"binary=dec-host-setup",
+		"binary_version=dec-server|v1.4.2",
+		"binary_version=dec-mcp|v1.4.2",
+		"binary_version=dec-exec|v1.4.2",
+		"binary_version=dec-host-setup|v1.4.2",
 		"cmd=git",
 		"cmd=ssh-keygen",
 		"home_writable=1",
@@ -169,11 +175,14 @@ func TestProbeFullyProvisionedHost(t *testing.T) {
 	probe := parseProbe(t, strings.Join([]string{
 		"os=Darwin",
 		"arch=arm64",
-		"binary=dec",
 		"binary=dec-server",
 		"binary=dec-mcp",
 		"binary=dec-exec",
-		"dec_version=dec version v1.4.2",
+		"binary=dec-host-setup",
+		"binary_version=dec-server|v1.4.2",
+		"binary_version=dec-mcp|v1.4.2",
+		"binary_version=dec-exec|v1.4.2",
+		"binary_version=dec-host-setup|v1.4.2",
 		"cmd=git",
 		"cmd=ssh-keygen",
 		"home_writable=1",
@@ -183,7 +192,7 @@ func TestProbeFullyProvisionedHost(t *testing.T) {
 	}, "\n"))
 
 	if !probe.DecInstalled {
-		t.Fatalf("四件套齐全应为已安装，缺失 %v", probe.MissingBinaries)
+		t.Fatalf("运行时套件齐全应为已安装，缺失 %v", probe.MissingBinaries)
 	}
 	if probe.DecVersion != "v1.4.2" {
 		t.Fatalf("版本解析错误: %q", probe.DecVersion)
@@ -202,15 +211,47 @@ func TestProbeFullyProvisionedHost(t *testing.T) {
 	}
 }
 
+func TestProbeRejectsMixedRuntimeVersions(t *testing.T) {
+	probe := parseProbe(t, strings.Join([]string{
+		"os=Linux",
+		"arch=amd64",
+		"binary=dec-server",
+		"binary=dec-mcp",
+		"binary=dec-exec",
+		"binary=dec-host-setup",
+		"binary_version=dec-server|v1.4.2",
+		"binary_version=dec-mcp|v1.4.3",
+		"binary_version=dec-exec|v1.4.2",
+		"binary_version=dec-host-setup|v1.4.2",
+		"cmd=git",
+		"home_writable=1",
+		"spawn=both",
+	}, "\n"))
+
+	if probe.DecInstalled {
+		t.Fatal("混合版本不能视为完整运行时")
+	}
+	if !hasSubstring(probe.Warnings, "版本不一致") {
+		t.Fatalf("应说明逐组件版本冲突: %v", probe.Warnings)
+	}
+	if component, installed := newerRuntimeComponent(probe, "v1.4.2"); component != "dec-mcp" || installed != "v1.4.3" {
+		t.Fatalf("应识别较新组件，实际 %s=%s", component, installed)
+	}
+}
+
 // 已装但端口与约定不同：提示会被改写，不静默覆盖。
 func TestProbeConflictingListenWarns(t *testing.T) {
 	probe := parseProbe(t, strings.Join([]string{
 		"os=Linux",
 		"arch=x86_64",
-		"binary=dec",
 		"binary=dec-server",
 		"binary=dec-mcp",
 		"binary=dec-exec",
+		"binary=dec-host-setup",
+		"binary_version=dec-server|v1.4.2",
+		"binary_version=dec-mcp|v1.4.2",
+		"binary_version=dec-exec|v1.4.2",
+		"binary_version=dec-host-setup|v1.4.2",
 		"cmd=git",
 		"cmd=ssh-keygen",
 		"home_writable=1",
@@ -305,7 +346,7 @@ func TestRemoteProbeScriptIsValidPOSIX(t *testing.T) {
 	if err != nil {
 		t.Skip("本机没有 sh，跳过探测脚本语法检查")
 	}
-	cmd := exec.Command(sh, "-n")
+	cmd := sysproc.Command(sh, "-n")
 	cmd.Stdin = strings.NewReader(remoteProbeScript)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("探测脚本不是合法 POSIX sh: %v\n%s", err, out)

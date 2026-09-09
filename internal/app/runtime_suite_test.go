@@ -73,9 +73,10 @@ func TestRuntimeActivationScriptVerifiesAllComponentsAndRollsBack(t *testing.T) 
 	for _, want := range []string{
 		"sha256sum",
 		"shasum -a 256",
-		"降级为四组件 --version 校验",
+		"降级为逐组件 --version 校验",
 		"rollback_suite",
 		`mv "$bin/$b" "$backup/$b"`,
+		`rm -f "$bin/dec"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("激活脚本缺少 %q", want)

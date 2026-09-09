@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/gofrs/flock"
 	"github.com/shichao402/Dec/internal/repo"
+	"github.com/shichao402/Dec/internal/sysproc"
 	"github.com/shichao402/Dec/internal/update"
 )
 
@@ -163,12 +163,12 @@ func ResolveRuntimeSuite(ctx context.Context, releaseVersion, goos, goarch strin
 
 	if verifyCachedSuite(cacheDir, releaseVersion, goos, goarch) {
 		emit(reporter, EventInfo, "provision.suite",
-			fmt.Sprintf("复用缓存四件套 %s（%s/%s）", releaseVersion, goos, goarch), nil)
+			fmt.Sprintf("复用缓存运行时套件 %s（%s/%s）", releaseVersion, goos, goarch), nil)
 		return &ResolvedSuite{Version: releaseVersion, OS: goos, Arch: goarch, Dir: cacheDir, Source: "cache"}, nil
 	}
 
 	emit(reporter, EventInfo, "provision.suite",
-		fmt.Sprintf("通过 RUP 下载四件套 %s（%s/%s）到发起端缓存", releaseVersion, goos, goarch), nil)
+		fmt.Sprintf("通过 RUP 下载运行时套件 %s（%s/%s）到发起端缓存", releaseVersion, goos, goarch), nil)
 	tempDir, err := os.MkdirTemp(filepath.Dir(cacheDir), "."+filepath.Base(cacheDir)+".tmp-*")
 	if err != nil {
 		return nil, err
@@ -192,7 +192,7 @@ func ResolveRuntimeSuite(ctx context.Context, releaseVersion, goos, goarch strin
 	return &ResolvedSuite{Version: releaseVersion, OS: goos, Arch: goarch, Dir: cacheDir, Source: "download"}, nil
 }
 
-// PushRuntimeSuite streams four verified local files through system ssh. The
+// PushRuntimeSuite streams the verified runtime files through system ssh. The
 // target only needs POSIX sh/core utilities and never downloads from network.
 func PushRuntimeSuite(ctx context.Context, target RemoteTarget, suite *ResolvedSuite, reporter Reporter) error {
 	reporter = defaultReporter(reporter)
@@ -235,13 +235,13 @@ mkdir -p "$stage" "$dec_home/bin"
 	}
 	out, err := runSSHCommand(ctx, target, "sh -s", activate)
 	if err != nil {
-		return fmt.Errorf("激活远端四件套失败: %s", summarizeSSHError(out, err))
+		return fmt.Errorf("激活远端运行时套件失败: %s", summarizeSSHError(out, err))
 	}
-	if strings.Contains(out, "降级为四组件 --version 校验") {
+	if strings.Contains(out, "降级为逐组件 --version 校验") {
 		emit(reporter, EventWarn, "provision.suite",
-			"目标缺少 sha256sum/shasum，传输后完整性降级为四组件版本校验", nil)
+			"目标缺少 sha256sum/shasum，传输后完整性降级为逐组件版本校验", nil)
 	}
-	emit(reporter, EventInfo, "provision.suite", "远端四件套已就位 "+suite.Version, nil)
+	emit(reporter, EventInfo, "provision.suite", "远端运行时套件已就位 "+suite.Version, nil)
 	return nil
 }
 
@@ -291,7 +291,7 @@ if [ -n "$hash_tool" ]; then
     fi
   done
 else
-  echo "warning: 目标缺少 sha256sum/shasum，降级为四组件 --version 校验" >&2
+  echo "warning: 目标缺少 sha256sum/shasum，降级为逐组件 --version 校验" >&2
   for b in %s; do
     chmod 755 "$stage/$b"
     output=$("$stage/$b" --version 2>&1) || {
@@ -343,6 +343,7 @@ done
 if command -v xattr >/dev/null 2>&1; then
   xattr -cr "$bin" 2>/dev/null || true
 fi
+rm -f "$bin/dec"
 committed=1
 rm -rf "$backup" "$stage"
 echo "verified=$hash_tool version=%s"
@@ -363,7 +364,7 @@ func pushRuntimeFile(ctx context.Context, target RemoteTarget, localPath, versio
 		`dec_home="${DEC_HOME:-$HOME/.dec}"; cat > "$dec_home/tmp/suite-%s/%s"`,
 		versionDir, component,
 	)
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs(target, command)...)
+	cmd := sysproc.CommandContext(ctx, "ssh", sshArgs(target, command)...)
 	cmd.Stdin = file
 	out, err := cmd.CombinedOutput()
 	if err != nil {

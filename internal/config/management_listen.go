@@ -9,6 +9,9 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
+// ProvisionManagementListen is the loopback endpoint written by host provisioning.
+const ProvisionManagementListen = "127.0.0.1:47653"
+
 // ManagementListenResult 描述一次 management_listen 幂等写入的结果。
 type ManagementListenResult struct {
 	// Path 是被写入（或已符合预期而未写入）的配置文件路径。

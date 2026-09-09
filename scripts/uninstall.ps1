@@ -32,7 +32,7 @@ function Uninstall-Dec {
 
     $installDir = if ($env:DEC_HOME) { $env:DEC_HOME } else { Join-Path $env:USERPROFILE ".dec" }
     $binDir = Join-Path $installDir "bin"
-    $binaryPath = Join-Path $binDir "dec.exe"
+    $binaryPath = Join-Path $binDir "dec-server.exe"
     $globalConfigPath = Join-Path $installDir "config.yaml"
     $bareRepoPath = Join-Path $installDir "repo.git"
 
@@ -42,7 +42,7 @@ function Uninstall-Dec {
     }
 
     Write-ColorOutput "这将删除整个 Dec 根目录，包括：" -Type "Warning"
-    Write-Host "  - 可执行文件: $binaryPath"
+    Write-Host "  - 运行时套件: $binDir"
     Write-Host "  - 全局配置: $globalConfigPath"
     Write-Host "  - 本地 bare repo: $bareRepoPath"
     Write-Host ""

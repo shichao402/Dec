@@ -115,8 +115,8 @@ main() {
     platform=$(detect_platform)
     local install_dir="${DEC_HOME:-${HOME}/.dec}"
     local bin_dir="${install_dir}/bin"
-    local binary_path="${bin_dir}/dec"
-    local binaries=("dec" "dec-server" "dec-mcp" "dec-exec")
+    local binary_path="${bin_dir}/dec-server"
+    local binaries=("dec-server" "dec-mcp" "dec-exec" "dec-host-setup")
     local update_branch="${DEC_BRANCH:-main}"
     local requested_version="${DEC_VERSION:-}"
 
@@ -187,10 +187,11 @@ main() {
                     [ -x "${bin_dir}/${binary}" ] || suite_complete=false
                 done
                 if [ "${suite_complete}" = true ]; then
-                    print_success "已是最新版本，且四个程序完整"
+                    rm -f "${bin_dir}/dec"
+                    print_success "已是最新版本，且运行时套件完整"
                     exit 0
                 fi
-                print_warning "主程序已是最新版本，但服务/门面程序不完整，将修复安装"
+                print_warning "服务已是最新版本，但运行时套件不完整，将修复安装"
             fi
             # 版本较旧，提示用户选择
             if [ -t 0 ] && [ "${DEC_NONINTERACTIVE:-}" != "1" ]; then
@@ -288,7 +289,8 @@ main() {
             xattr -cr "${bin_dir}/${binary}" 2>/dev/null || true
         done
     fi
-    print_success "四个程序下载完成"
+    rm -f "${bin_dir}/dec"
+    print_success "运行时套件下载完成"
     if [ "${checksum_missing}" = true ]; then
         print_warning "未提供产物摘要或本机无摘要工具，本次安装未完整校验产物完整性"
     elif [ "${checksum_verified}" -gt 0 ]; then
@@ -332,9 +334,7 @@ main() {
     print_success "安装成功，版本: ${installed_version}"
 
     echo ""
-    print_info "之后可以运行："
-    echo "  dec --help"
-    echo "  # 人机入口是 Dec Console（桌面客户端），不是终端 TUI"
+    print_info "人机入口是 Dec Console（桌面客户端）。"
     echo ""
 }
 

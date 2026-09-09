@@ -46,8 +46,7 @@ else
     LOG_FILE="${LOG_DIR}/build-$(date +%Y%m%d-%H%M%S).log"
 fi
 
-BINARY_NAME="dec"
-BINARY_NAMES=("dec" "dec-server" "dec-mcp" "dec-exec")
+BINARY_NAMES=("dec-server" "dec-mcp" "dec-exec" "dec-host-setup")
 BUILD_ALL=false
 CLEAN_BEFORE=true
 CLEAN_AFTER=false
@@ -178,8 +177,7 @@ build_platform() {
     local ext=$3
     print_info "构建 ${os}-${arch} 程序组..."
     for binary in "${BINARY_NAMES[@]}"; do
-        local package="."
-        if [ "${binary}" != "dec" ]; then package="./cmd/${binary}"; fi
+        local package="./cmd/${binary}"
         local output_path="${OUTPUT_DIR}/${binary}-${os}-${arch}${ext}"
         GOOS="${os}" GOARCH="${arch}" CGO_ENABLED=0 go build \
             -trimpath \
@@ -218,8 +216,7 @@ build_current() {
         local ext=""
         if [ "${current_os}" = "windows" ]; then ext=".exe"; fi
         for binary in "${BINARY_NAMES[@]}"; do
-            local package="."
-            if [ "${binary}" != "dec" ]; then package="./cmd/${binary}"; fi
+            local package="./cmd/${binary}"
             local output_path="${OUTPUT_DIR}/${binary}${ext}"
             CGO_ENABLED=0 go build \
                 -trimpath \

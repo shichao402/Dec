@@ -1,7 +1,7 @@
 # Dec 自更新架构（RUP + COS）
 
-Dec 运行时的检查/下载使用 `firoyang.com/relkit/sdk`（`replace` 到 `third_party/relkit`），发布走腾讯云 COS 自有域名。
-终端用户只下载 Console；四件套是 Console 管理的目标端运行时。
+Dec 运行时的检查/下载使用 `go.firoyang.com/relkit/sdk`（`replace` 到 `third_party/relkit`），发布走腾讯云 COS 自有域名。
+终端用户只下载 Console；运行时套件是 Console 管理的目标端程序组。
 
 ## 客户端
 
@@ -9,9 +9,9 @@ Dec 运行时的检查/下载使用 `firoyang.com/relkit/sdk`（`replace` 到 `t
 - 公钥单 SSOT：人只改根目录 `relkit.json` → `signing.publicKeys`；`go generate ./internal/update` 复制到 `internal/update/embed/` 后由 `go:embed` 钉进二进制（运行时不读磁盘旁路文件）
 - `CurrentCode` = `sdk.SemverCode(version)`（`v1.13.25` → `1013025`）
 - 默认 channel：`dev`（目前仅个人使用；正式对外再切回 `stable`）
-- selectors：`os` / `arch` / `component` / `audience=runtime`，component 为 `dec`、`dec-server`、`dec-mcp`、`dec-exec`
+- selectors：`os` / `arch` / `component` / `audience=runtime`，component 为 `dec-server`、`dec-mcp`、`dec-exec`、`dec-host-setup`
 - Apply：`DoUpdate` 把每个组件的 `destPath` 对准已装的 `bin/<component>`，SDK 先 size 再 sha256，一致则跳过 GET；只有哈希变了或原地写入失败（Windows 锁文件）才下到临时文件再 `ReplaceFile`（rename-aside）
-- Console bundle：每个安装包只带同 `os/arch` 四件套和 `runtime-manifest.json`；首次连接/升级从 resources 校验后以临时文件 + rename 释放到 `~/.dec/bin`，同时缓存到 `~/.dec/runtime-cache/<version>/<os>-<arch>/`
+- Console bundle：每个安装包只带同 `os/arch` 运行时套件和 `runtime-manifest.json`；首次连接/升级从 resources 校验后以临时文件 + rename 释放到 `~/.dec/bin`，同时缓存到 `~/.dec/runtime-cache/<version>/<os>-<arch>/`
 - SSH 置备：发起端按目标 `os/arch` 命中校验过的缓存则复用，否则请求签名 RUP；只有 RUP head 恰好等于 Console 钉死版本才下载。渠道已有更高版本时提示先更新 Console 或预置旧版本缓存
 
 入口：
@@ -34,12 +34,12 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 
 1. 改 `version.json` 为 `vX.Y.Z`，提交并推 `main`
 2. 打渠道 tag 并推送（例：`git tag dev/vX.Y.Z && git push origin dev/vX.Y.Z`）
-3. GitHub Actions：Ubuntu 交叉编全平台四件套；Console 只在 `windows-latest` 与 `macos-15-intel` 上原生编两套人面安装包并内置同平台四件套（不发 Linux / darwin-arm64 Console）
+3. GitHub Actions：Ubuntu 交叉编全平台运行时套件；Console 只在 `windows-latest` 与 `macos-15-intel` 上原生编两套人面安装包并内置同平台套件（不发 Linux / darwin-arm64 Console）
 4. `relkit stage --channel <dev|stable>` 把两类产物写入同一次 staged 树（无私钥）
 5. runtime 标 `audience=runtime`，Console 标 `audience=user`
 6. `relkit cas-put` 向 agent 申请唯一 ingest 的上传 URL：COS 已有同 sha256 则跳过，否则 CI 直接 PUT；随后只上传 `staged.pb` + `release-policy.json`
 7. `POST /v1/publish` → 发布机从 CAS Promote、签名并写 COS
-8. `stable` 的 GitHub Release **只挂** `dec-console-*`；四件套不进人面附件
+8. `stable` 的 GitHub Release **只挂** `dec-console-*`；运行时组件不进人面附件
 9. 人类 browse 页按 audience 过滤依赖 **relkit-serve 发布端**升级，不能靠 Dec 本地 stage 单方面完成
 
 ## 签名密钥
@@ -62,10 +62,10 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 | 场景 | 路径 |
 |------|------|
 | 日常自更新（已装 RUP 客户端） | 只走 `https://updates.firoyang.com/`；失败时排查网络/代理，**不要**改跑 install 脚本 |
-| 全新安装 | [发布页](https://update.firoyang.com/dec.html) 下载当前平台 **Dec Console**（安装包内含同平台四件套） |
-| 本机首次连接/升级 | Console 从内置 resources 校验并原子释放四件套到 `~/.dec/bin/`，同时预热同平台缓存，不联网；较新运行时仍拒绝降级 |
+| 全新安装 | [发布页](https://update.firoyang.com/dec.html) 下载当前平台 **Dec Console**（安装包内含同平台运行时套件） |
+| 本机首次连接/升级 | Console 从内置 resources 校验并原子释放运行时套件到 `~/.dec/bin/`，同时预热同平台缓存，不联网；较新运行时仍拒绝降级 |
 | SSH 置备 | 发起端按目标 os/arch 复用经摘要校验的 `runtime-cache`，缺则 RUP 下载到发起端缓存，再通过系统 SSH 推送；目标机不需要 curl、bash 或公网 |
-| GitHub Release | `stable` 上 Console 安装包的镜像备份，不挂四件套，也不是自更新逃生梯 |
+| GitHub Release | `stable` 上 Console 安装包的镜像备份，不挂运行时组件，也不是自更新逃生梯 |
 
 更老的、尚无 RUP 的 Dec：靠历史版本链跳到第一个含 RUP 的版本，而不是在失败提示里推销重装。
 
@@ -84,7 +84,7 @@ scripts/relkit_consume.py --sdk-only
 落到 `third_party/relkit/`，`go.mod` 使用：
 
 ```
-replace firoyang.com/relkit => ./third_party/relkit
+replace go.firoyang.com/relkit => ./third_party/relkit
 ```
 
-上游 URL 与 ref 来自 `scripts/relkit.lock.json`（schema `relkit.consume/1`）：默认 `channel: main`，即每次拉当时的 HEAD。冻结某次提交时把完整 SHA 写进 lock 的 `commit`（短 SHA 不能直接 `git fetch`），临时覆盖用 `--ref` / `RELKIT_REF`。`scripts/relkit_consume.py` 是上游 `scripts/host/relkit_consume.py` 的逐字节副本，只负责解析 lock 并转交该 SHA 的 `scripts/consume.py`；cone 与构建规则不在本仓。Go 模块路径是 `firoyang.com/relkit`（replace 到 `third_party/relkit`），源码从 GitHub 检出，不要 `go get` 该模块。
+上游 URL 与 ref 来自 `scripts/relkit.lock.json`（schema `relkit.consume/1`）：默认 `channel: main`，即每次拉当时的 HEAD。冻结某次提交时把完整 SHA 写进 lock 的 `commit`（短 SHA 不能直接 `git fetch`），临时覆盖用 `--ref` / `RELKIT_REF`。`scripts/relkit_consume.py` 是上游 `scripts/host/relkit_consume.py` 的逐字节副本，只负责解析 lock 并转交该 SHA 的 `scripts/consume.py`；cone 与构建规则不在本仓。Go 模块路径是 `go.firoyang.com/relkit`（replace 到 `third_party/relkit`），源码从 GitHub 检出，不要 `go get` 该模块。

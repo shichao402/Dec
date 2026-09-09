@@ -13,21 +13,21 @@ python scripts/build-console.py --skip-deps
 
 产出 `dist/dec-console-<os>-<arch>.<ext>`，直接覆盖安装（Windows NSIS 静默装用 `/S`；装前退出正在跑的 Console）。增量构建约 3 分钟，比等 CI 发布快一个量级。
 
-Console 启动后从自身内置 resources 把四件套释放到 `~/.dec/bin`，**不需要**单独部署运行时：Console 与四件套出自同一次构建，版本天然相等。改前端要热重载时才用 `--prepare-runtime-only` + `cd client && npm run tauri dev`，其版本同样取 `version.json`，与刚装的 Console 一致。
+Console 启动后从自身内置 resources 把运行时套件（`dec-server`、`dec-mcp`、`dec-exec`、`dec-host-setup`）释放到 `~/.dec/bin`，**不需要**单独部署运行时：Console 与各组件出自同一次构建，版本天然相等。改前端要热重载时才用 `--prepare-runtime-only` + `cd client && npm run tauri dev`，其版本同样取 `version.json`，与刚装的 Console 一致。
 
 ## 禁止
 
 - 单独覆盖 `~/.dec/bin`，或引入任何「让运行时对齐已装 Console」的版本探测。**版本源只有 `version.json`**
 - 新增 `install-dev.sh`、`redeploy.ps1`、`make install-dev` 等第二入口
-- 用 `go build` / `go install` 把 `dec` 丢进 PATH 或 NSIS 目录当入口
+- 用 `go build` / `go install` 把任何运行时组件丢进 PATH 或 NSIS 目录当入口
 - 为发布慢就去打 tag、跑 GitHub Actions、改 RUP 渠道
 - 另开一套安装根；隔离实验才用 `DEC_HOME`，且 Console 与 `dec-mcp` 的 command 必须一起指向该沙箱
 
 ## 为什么必须一份
 
-- **目录**：NSIS 装 Console 程序；`~/.dec` 是这台机器上的 Dec（四件套、配置、secrets、服务锁）。四件套不进 NSIS 目录。
-- **版本**：Console 拥有 `~/.dec/bin`，要求与四件套严格相等（ADR 0021）。高于就停服改写，低于就拒绝控制。
-- **发现**：门面读 `${DEC_HOME}/run/server.json`（默认 `~/.dec`），一机一实例；`dec` / `dec-mcp` 拉起的是**自己同目录**的 `dec-server`，Console 拉起 `DEC_HOME/bin` 里的。
+- **目录**：NSIS 装 Console 程序；`~/.dec` 是这台机器上的 Dec（运行时套件、配置、secrets、服务锁）。运行时组件不进 NSIS 目录。
+- **版本**：Console 拥有 `~/.dec/bin`，要求每个组件都与 Console 严格相等（ADR 0021）。高于就停服改写，低于就拒绝控制。
+- **发现**：门面读 `${DEC_HOME}/run/server.json`（默认 `~/.dec`），一机一实例；`dec-mcp` 拉起的是**自己同目录**的 `dec-server`，Console 拉起 `DEC_HOME/bin` 里的。
 
 两份运行时或两个版本号，必然演化成互相改写与拒绝连接。
 

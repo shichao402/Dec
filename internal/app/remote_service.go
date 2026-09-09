@@ -34,7 +34,7 @@ type RemoteServiceSetupResult struct {
 
 // ConfigureRemoteService 在目标机上幂等写入固定管理监听端口。
 //
-// 实际写入由远端的 `dec __service-setup` 完成，本函数只负责调用与解析：
+// 实际写入由远端的 `dec-host-setup` 完成，本函数只负责调用与解析：
 // 配置合并规则必须只有一份实现，见 ADR 0019。
 func ConfigureRemoteService(ctx context.Context, target RemoteTarget, reporter Reporter) (*RemoteServiceSetupResult, error) {
 	reporter = defaultReporter(reporter)
@@ -73,7 +73,7 @@ func ConfigureRemoteService(ctx context.Context, target RemoteTarget, reporter R
 			result.PreviousListen = value
 		case "config":
 			result.ConfigPath = value
-		case "service-setup":
+		case "host-setup":
 			ok = value == "ok"
 		}
 	}
@@ -96,19 +96,19 @@ func ConfigureRemoteService(ctx context.Context, target RemoteTarget, reporter R
 	return result, nil
 }
 
-// remoteServiceSetupScript 调用远端自己的 dec 写配置。
+// remoteServiceSetupScript 调用远端自己的单用途 host setup 工具写配置。
 //
-// 不用 `dec`（PATH 里可能没有）而是显式走 ${DEC_HOME:-$HOME/.dec}/bin/dec：
+// 不走 PATH，而是显式使用刚刚置备到目标端的 dec-host-setup：
 // 置备后的产物就在那里，而非交互 SSH 的 PATH 往往不含它。
 const remoteServiceSetupScript = `
 set -e
 dec_home="${DEC_HOME:-$HOME/.dec}"
-dec_bin="${dec_home}/bin/dec"
-if [ ! -x "${dec_bin}" ]; then
-  echo "missing-dec=${dec_bin}"
+setup_bin="${dec_home}/bin/dec-host-setup"
+if [ ! -x "${setup_bin}" ]; then
+  echo "missing-dec-host-setup=${setup_bin}"
   exit 1
 fi
-"${dec_bin}" __service-setup
+"${setup_bin}"
 `
 
 // RemoteServiceStatus 描述远端 dec-server 此刻的运行状态。

@@ -20,7 +20,7 @@ Dec 的解决方案：
 - IDE 维度：Dec 自动将资产部署到配置的 IDE 目录
 - 私密维度：Bitwarden folder ↔ 项目 **`.secrets/`** 同步根（project / bundle 同构）；env 经独立 `dec-exec` 注入；SSH Key 落地机器级 `~/.ssh/`，均不进 `.dec/`
 
-> **交互入口**：打开 Dec Console（`client/`）。`dec` CLI 仅保留 `--version` 与内部 hidden 命令。
+> **交互入口**：打开 Dec Console（`client/`）。根 `dec` CLI 已移除。
 
 ## 核心概念
 
@@ -199,16 +199,10 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 2. 编辑 `.dec/cache/<bundle>/` 下文件
 3. **同步** 页推送
 
-## 命令参考
+## 程序边界
 
-Dec 以 Console 为主入口。CLI 仅保留：
-
-| 命令 | 说明 |
-|------|------|
-| `dec --version` | 显示版本号 |
-| `dec`（无参） | 提示改用 Console，不启动 TUI |
-
-内部 hidden 命令（`__freshness-check`、`__service-setup`）供置备与后台 worker 使用，不是用户面。
+Dec 没有用户面 CLI。人通过 Console 操作；`dec-server`、`dec-mcp`、`dec-exec` 和单用途
+`dec-host-setup` 只作为 Console/Agent 管理的运行时组件存在。每个组件都支持 `--version`。
 
 ## 资产格式要求
 
@@ -305,7 +299,7 @@ cd Dec
 python scripts/build-console.py --skip-deps
 ```
 
-产出 `dist/dec-console-<os>-<arch>.<ext>`，覆盖安装前先退出正在跑的 Console。增量构建约 3 分钟。安装包内置同版本四件套，Console 启动后会释放到 `~/.dec/bin`，因此**不需要**单独部署运行时——两者出自同一次构建，版本天然相等。Cursor 里的 `dec-mcp` 需重载 MCP 才用上新二进制。
+产出 `dist/dec-console-<os>-<arch>.<ext>`，覆盖安装前先退出正在跑的 Console。增量构建约 3 分钟。安装包内置同版本运行时套件，Console 启动后会释放到 `~/.dec/bin`，因此**不需要**单独部署运行时——两者出自同一次构建，版本天然相等。Cursor 里的 `dec-mcp` 需重载 MCP 才用上新二进制。
 
 只改 Go、还要从源码跑 Console UI 时，用上一节的 `--prepare-runtime-only` + `npm run tauri dev`，不必再走发版。
 
@@ -322,7 +316,7 @@ go test ./...
 - Windows `amd64`（x86_64）
 - macOS `amd64`（Intel；Apple Silicon 通过 Rosetta 2 运行）
 
-不再发布 Linux Console，也不再发布原生 Apple Silicon（`darwin-arm64`）安装包。SSH 置备仍可从 RUP 拉取对应目标的四件套。
+不再发布 Linux Console，也不再发布原生 Apple Silicon（`darwin-arm64`）安装包。SSH 置备仍可从 RUP 拉取对应目标的运行时套件。
 
 ## 项目文档
 

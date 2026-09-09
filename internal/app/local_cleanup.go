@@ -60,7 +60,7 @@ func PreviewLocalCleanup() (*LocalCleanupPreview, error) {
 	}
 	preview := &LocalCleanupPreview{
 		Preserved: []string{
-			filepath.Join(decHome, "bin") + "（运行时四件套）",
+			filepath.Join(decHome, "bin") + "（运行时套件）",
 			filepath.Join(decHome, "run") + "（当前服务实例）",
 			"Dec Console",
 		},

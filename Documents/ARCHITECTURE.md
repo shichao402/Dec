@@ -23,9 +23,9 @@ Dec 是一个以 **Console** 为第一人机入口、以 **MCP** 为 Agent 入�
 | 程序 | 职责 |
 |------|------|
 | `dec-server` | 本机单例；持有实例控制状态与进程内 BW session，不承载人工认证 UI |
-| `dec` | 最小 CLI（`--version`、内部 hidden 命令）；无参提示改用 Console |
 | `dec-mcp` | Agent stdio MCP 门面；无服务时自动拉起 `dec-server` |
 | `dec-exec` | 独立 env 注入程序；只读已落地 `.secrets/**/.env/*.env`，不经过服务、不碰 session |
+| `dec-host-setup` | 目标机置备期单用途脚手架；幂等写入 `dec-server` 管理监听配置 |
 | Dec Console | 独立 Tauri 客户端（`client/`）；本机/远程连接、Authenticate 与日常管理 |
 
 门面与服务默认绑定 `127.0.0.1` 的 gRPC；可用 `management_listen` + TLS 做远程直连。端点与本机随机 token 写在 `~/.dec/run/server.json`。进程启动后锁定，见 [0018](decisions/0018-instance-lock-and-console.md)。同一 project 的 pull/push 等写操作互斥；未发起操作的门面可旁观该 project 当前操作的实时进度。详见 [0008](decisions/0008-service-facade-split.md)。
@@ -58,7 +58,8 @@ direct requires 的 `public/project`，不递归、不引入 user/private。Git 
 - 项目启用、家项目 requires、标签（推荐 Global）与四象限浏览：Console **项目 / Global 资产**
 - pull / push / remove（含成功对照后的孤儿 reconcile）：Console **同步**
 - 远端设备探测与置备：Console **连接**（ADR 0019）
-- 版本信息：`dec --version`
+
+运行时每个程序自行支持 `--version`；不存在用一个通用 CLI 代表整套版本的探针。
 
 资产目录类型（skill / command / rule / mcp）以 `internal/bundle.VaultAssetKinds`
 为共用真相源。`PWriter` 是新写路径唯一门面；`BundleWriter`、`enabled_bundles`
@@ -470,13 +471,13 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 置备四段（`provision_remote_host`，走 `RunOperation` 进度流）：
 
-1. **探测**（`probe_remote_host`，只读）：SSH 连通性、os/arch、四件套与版本、
-   `git`/`bash`/`curl`/`ssh-keygen`、`~/.dec` 可写、能否拉起脱离会话的后台进程
-2. **注入安装**：`go:embed` 的 `install.sh` 经 stdin 喂给远端 `bash -s`，脚本不落远端磁盘；
-   下载产物按 `version.json` 的 `checksums` 校验 sha256
-3. **配置**：远端执行自己的 `dec __service-setup`，用 config 包幂等写入
+1. **探测**（`probe_remote_host`，只读）：SSH 连通性、os/arch、运行时套件与逐组件版本、
+   `git`/`ssh-keygen`、`~/.dec` 可写、能否拉起脱离会话的后台进程
+2. **注入安装**：发起端从已校验缓存或 RUP 取得目标套件，经系统 SSH 流式写入远端临时目录，
+   校验 sha256 后原子激活；目标端不联网
+3. **配置**：远端执行自己的 `dec-host-setup`，用 config 包幂等写入
    `management_listen: 127.0.0.1:47653`。固定端口是隧道能自动找到远端的前提
-4. **复探验证**：确认四件套齐全且监听地址已生效
+4. **复探验证**：确认运行时套件齐全、逐组件版本一致且监听地址已生效
 
 远端**不安装常驻服务**，与本机同一套生命周期：空闲即退出。连接前经
 `ensure_remote_service` 按需拉起，与本机门面的 `startServerProcess` 同构——
@@ -513,16 +514,7 @@ MCP 采用非覆盖式合并：
 - 用户非 `dec-*` 条目保持不变
 - 不再托管的 `dec-*` 条目会被清理
 
-### 6. freshness 被动检查
-
-`internal/freshness/` 在后台检查远端 Vault 是否有新提交。实现位于 `internal/freshness/` 与 hidden 子命令 `__freshness-check`：
-
-- 分离子进程执行 fetch，不阻塞 Console 主流程
-- cache：`~/.dec/local/freshness-result.<sha1>.json`，24h TTL
-- lock：`~/.dec/local/freshness.lock`，busy 时静默 skip
-- pull 成功后清 cache，避免误报
-
-### 7. 变量替换
+### 6. 变量替换
 
 pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感** 模板。优先级（由高到低）：
 
@@ -537,11 +529,12 @@ pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感
 
 ### `cmd/`
 
-命令行入口层：
+独立程序入口层：
 
-- `root.go`：根命令、最小 CLI、`dec --version`
-- `freshness_check.go`：hidden 子命令，供 freshness 后台 worker 使用
-- `output.go`：输出辅助
+- `dec-server/`：单例业务服务
+- `dec-mcp/`：Agent MCP 门面
+- `dec-exec/`：secrets env 注入执行器
+- `dec-host-setup/`：目标机置备脚手架
 
 ### `internal/app/`
 
@@ -582,9 +575,9 @@ IDE 抽象层，区分项目级输出目录与用户级内置资产安装目录�
 
 变量文件加载、占位符提取与替换。
 
-### `internal/version/`、`internal/update/`、`internal/freshness/`
+### `internal/version/`、`internal/update/`
 
-版本信息、自更新、远端新鲜度检查。
+版本比较与签名运行时套件下载。
 
 ## 关键设计点
 

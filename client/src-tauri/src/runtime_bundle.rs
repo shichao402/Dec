@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
-const COMPONENTS: [&str; 4] = ["dec", "dec-server", "dec-mcp", "dec-exec"];
+const COMPONENTS: [&str; 4] = ["dec-server", "dec-mcp", "dec-exec", "dec-host-setup"];
 
 #[derive(Debug, Deserialize)]
 struct RuntimeManifest {
@@ -148,6 +148,15 @@ fn replace_suite(files: &[SuiteFile], target_dir: &Path) -> Result<(), String> {
     result
 }
 
+fn remove_legacy_dec(target_dir: &Path) -> Result<(), String> {
+    let legacy = target_dir.join(binary_name("dec"));
+    if legacy.is_file() {
+        fs::remove_file(&legacy)
+            .map_err(|e| format!("删除旧版 CLI {} 失败: {e}", legacy.display()))?;
+    }
+    Ok(())
+}
+
 fn read_manifest(resource_platform: &Path) -> Result<RuntimeManifest, String> {
     let path = resource_platform.join("runtime-manifest.json");
     let data = fs::read(&path).map_err(|e| {
@@ -239,19 +248,24 @@ pub fn cache(app: &AppHandle, dec_home: &Path, console_version: &str) -> Result<
         source: manifest_source,
         expected: manifest_hash,
     });
-    replace_suite(&files, &cache_dir)
+    replace_suite(&files, &cache_dir)?;
+    remove_legacy_dec(&cache_dir)
 }
 
 pub fn install(app: &AppHandle, dec_home: &Path, console_version: &str) -> Result<(), String> {
     cache(app, dec_home, console_version)?;
     let (resource_platform, manifest, _) = bundle(app, console_version)?;
     let bin_dir = dec_home.join("bin");
-    replace_suite(&component_files(&resource_platform, &manifest), &bin_dir)
+    replace_suite(&component_files(&resource_platform, &manifest), &bin_dir)?;
+    remove_legacy_dec(&bin_dir)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{binary_name, platform, read_manifest, replace_suite, sha256_file, SuiteFile};
+    use super::{
+        binary_name, platform, read_manifest, remove_legacy_dec, replace_suite, sha256_file,
+        SuiteFile,
+    };
     use std::fs;
     use uuid::Uuid;
 
@@ -260,7 +274,10 @@ mod tests {
         let (os, arch) = platform();
         assert!(matches!(os, "windows" | "darwin" | "linux"));
         assert!(matches!(arch, "amd64" | "arm64"));
-        assert_eq!(binary_name("dec").ends_with(".exe"), cfg!(windows));
+        assert_eq!(
+            binary_name("dec-host-setup").ends_with(".exe"),
+            cfg!(windows)
+        );
     }
 
     #[test]
@@ -271,7 +288,7 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::create_dir_all(&target).unwrap();
         let mut files = Vec::new();
-        for (index, name) in ["dec", "dec-server", "dec-mcp", "dec-exec"]
+        for (index, name) in ["dec-server", "dec-mcp", "dec-exec", "dec-host-setup"]
             .iter()
             .enumerate()
         {
@@ -289,7 +306,7 @@ mod tests {
             });
         }
         assert!(replace_suite(&files, &target).is_err());
-        for name in ["dec", "dec-server", "dec-mcp", "dec-exec"] {
+        for name in ["dec-server", "dec-mcp", "dec-exec", "dec-host-setup"] {
             assert_eq!(
                 fs::read_to_string(target.join(name)).unwrap(),
                 format!("old-{name}")
@@ -304,6 +321,17 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let err = read_manifest(&root).unwrap_err();
         assert!(err.contains("--prepare-runtime-only"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn removes_legacy_dec_cli() {
+        let root = std::env::temp_dir().join(format!("dec-runtime-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let legacy = root.join(binary_name("dec"));
+        fs::write(&legacy, b"legacy").unwrap();
+        remove_legacy_dec(&root).unwrap();
+        assert!(!legacy.exists());
         let _ = fs::remove_dir_all(root);
     }
 }

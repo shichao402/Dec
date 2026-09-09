@@ -38,7 +38,7 @@ main() {
 
     INSTALL_DIR="${DEC_HOME:-${HOME}/.dec}"
     BIN_DIR="${INSTALL_DIR}/bin"
-    BINARY_PATH="${BIN_DIR}/dec"
+    BINARY_PATH="${BIN_DIR}/dec-server"
     GLOBAL_CONFIG_PATH="${INSTALL_DIR}/config.yaml"
     BARE_REPO_PATH="${INSTALL_DIR}/repo.git"
 
@@ -48,7 +48,7 @@ main() {
     fi
 
     print_warning "这将删除整个 Dec 根目录，包括："
-    echo "  - 可执行文件: ${BINARY_PATH}"
+    echo "  - 运行时套件: ${BIN_DIR}"
     echo "  - 全局配置: ${GLOBAL_CONFIG_PATH}"
     echo "  - 本地 bare repo: ${BARE_REPO_PATH}"
     echo ""

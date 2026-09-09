@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/sysproc"
+	"github.com/shichao402/Dec/internal/version"
 )
 
 // RemoteProvisionPort 是远端 dec-server 的固定 loopback 端口。
@@ -19,7 +21,7 @@ import (
 const RemoteProvisionPort = 47653
 
 // RemoteProvisionListen 是远端 management_listen 的目标值。
-const RemoteProvisionListen = "127.0.0.1:47653"
+const RemoteProvisionListen = config.ProvisionManagementListen
 
 // remoteProbeTimeout 限制单次探测总时长，避免 SSH 卡死拖住调用方。
 const remoteProbeTimeout = 25 * time.Second
@@ -136,8 +138,11 @@ type RemoteHostProbe struct {
 
 	DecInstalled bool
 	DecVersion   string
-	// MissingBinaries 列出四件套中缺失者。
+	// ComponentVersions 保留每个可执行程序自报的版本，供升级前拒绝降级。
+	ComponentVersions map[string]string
+	// MissingBinaries 列出运行时套件中缺失者。
 	MissingBinaries []string
+	versionError    string
 
 	HasGit       bool
 	HasSSHKeygen bool
@@ -170,7 +175,7 @@ type RemoteHostProbe struct {
 }
 
 // decSuiteBinaries 与 Console 内置/RUP runtime suite 保持一致。
-var decSuiteBinaries = []string{"dec", "dec-server", "dec-mcp", "dec-exec"}
+var decSuiteBinaries = []string{"dec-server", "dec-mcp", "dec-exec", "dec-host-setup"}
 
 // ProbeRemoteHost 只读探测目标机是否具备被置备的条件。
 //
@@ -220,12 +225,13 @@ echo "arch=$(uname -m 2>/dev/null)"
 dec_home="${DEC_HOME:-$HOME/.dec}"
 echo "dec_home=${dec_home}"
 bin_dir="${dec_home}/bin"
-for b in dec dec-server dec-mcp dec-exec; do
-  if [ -x "${bin_dir}/${b}" ]; then echo "binary=${b}"; fi
+for b in dec-server dec-mcp dec-exec dec-host-setup; do
+  if [ -x "${bin_dir}/${b}" ]; then
+    echo "binary=${b}"
+    version=$("${bin_dir}/${b}" --version 2>/dev/null || true)
+    echo "binary_version=${b}|${version}"
+  fi
 done
-if [ -x "${bin_dir}/dec" ]; then
-  echo "dec_version=$("${bin_dir}/dec" --version 2>/dev/null | head -1)"
-fi
 for c in git ssh-keygen; do
   if command -v "$c" >/dev/null 2>&1; then echo "cmd=$c"; fi
 done
@@ -246,6 +252,7 @@ if [ -f "${dec_home}/run/server.json" ]; then echo "server_running=1"; fi
 
 func parseRemoteProbeOutput(out string, probe *RemoteHostProbe) {
 	found := map[string]struct{}{}
+	versions := map[string]string{}
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		key, value, ok := strings.Cut(line, "=")
@@ -260,8 +267,11 @@ func parseRemoteProbeOutput(out string, probe *RemoteHostProbe) {
 			probe.Arch = normalizeRemoteArch(value)
 		case "binary":
 			found[value] = struct{}{}
-		case "dec_version":
-			probe.DecVersion = extractVersion(value)
+		case "binary_version":
+			name, raw, ok := strings.Cut(value, "|")
+			if ok {
+				versions[strings.TrimSpace(name)] = extractVersion(raw)
+			}
 		case "cmd":
 			switch value {
 			case "git":
@@ -291,7 +301,41 @@ func parseRemoteProbeOutput(out string, probe *RemoteHostProbe) {
 		}
 	}
 	probe.DecInstalled = len(probe.MissingBinaries) == 0
+	probe.ComponentVersions = versions
+	if probe.DecInstalled {
+		for _, name := range decSuiteBinaries {
+			version := versions[name]
+			if version == "" {
+				probe.versionError = name + " 无法输出有效版本"
+				break
+			}
+			if probe.DecVersion == "" {
+				probe.DecVersion = version
+			} else if probe.DecVersion != version {
+				probe.versionError = fmt.Sprintf(
+					"运行时组件版本不一致：%s=%s，期望 %s", name, version, probe.DecVersion)
+				probe.DecVersion = ""
+				break
+			}
+		}
+		if probe.versionError != "" {
+			probe.DecInstalled = false
+		}
+	}
 	probe.ListenReady = strings.TrimSpace(probe.ManagementListen) == RemoteProvisionListen
+}
+
+func newerRuntimeComponent(probe *RemoteHostProbe, targetVersion string) (string, string) {
+	if probe == nil {
+		return "", ""
+	}
+	for _, name := range decSuiteBinaries {
+		if componentVersion := probe.ComponentVersions[name]; componentVersion != "" &&
+			version.Compare(componentVersion, targetVersion) > 0 {
+			return name, componentVersion
+		}
+	}
+	return "", ""
 }
 
 // evaluateRemoteProbe 把原始事实翻译成阻断项、后果警告与建议动作。
@@ -329,6 +373,9 @@ func evaluateRemoteProbe(probe *RemoteHostProbe) {
 			reason = "目标机无法拉起脱离 SSH 会话的后台进程"
 		}
 		probe.Blockers = append(probe.Blockers, reason+"：按需拉起需要它（ADR 0019）")
+	}
+	if probe.versionError != "" {
+		probe.Warnings = append(probe.Warnings, probe.versionError+"；置备会重新安装完整套件")
 	}
 	if probe.DecInstalled && strings.TrimSpace(probe.ManagementListen) != "" && !probe.ListenReady {
 		probe.Warnings = append(probe.Warnings, fmt.Sprintf(
@@ -376,7 +423,7 @@ func normalizeRemoteArch(raw string) string {
 	}
 }
 
-// extractVersion 从 `dec --version` 输出里取出 vX.Y.Z。
+// extractVersion 从组件的 `--version` 输出里取出 vX.Y.Z。
 func extractVersion(raw string) string {
 	for _, field := range strings.Fields(raw) {
 		trimmed := strings.TrimSpace(field)
@@ -425,7 +472,7 @@ func runSSH(ctx context.Context, target RemoteTarget, script string) (string, er
 
 // runSSHCommand 在目标机执行指定命令，脚本内容经 stdin 注入。
 func runSSHCommand(ctx context.Context, target RemoteTarget, command, script string) (string, error) {
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs(target, command)...)
+	cmd := sysproc.CommandContext(ctx, "ssh", sshArgs(target, command)...)
 	cmd.Stdin = strings.NewReader(script)
 	out, err := cmd.CombinedOutput()
 	return string(out), err

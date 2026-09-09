@@ -5,14 +5,14 @@ alwaysApply: true
 
 # Console 优先
 
-Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）为第一入口。终端 TUI（`internal/tui/`）已移除。无参运行 `dec` 只提示改用 Console。
+Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）为第一入口。终端 TUI（`internal/tui/`）与 `dec` CLI 均已移除。
 
 ## 设计原则
 
 - 新功能先设计 Console 页面 / 连接与初始化流，再实现 `internal/app/` 业务逻辑。
 - **不要新增**独立 Cobra 用户面子命令（pull、config、push 等均在 Console）。
-- **不要恢复** Bubble Tea TUI 或 `dec --global` / `dec --user` 终端平面入口。本机 / 项目平面由 Console 连接后在目标 `dec-server` 上操作。
-- 保留最小 CLI 面：`dec --version`、内部 hidden 命令（如 `__freshness-check`、`__service-setup`）。Agent MCP 与 env 注入分别是独立程序 `dec-mcp`、`dec-exec`。
+- **不要恢复** Bubble Tea TUI、根 `dec` CLI 或 `dec --global` / `dec --user` 终端平面入口。本机 / 项目平面由 Console 连接后在目标 `dec-server` 上操作。
+- 每个运行时程序自行支持 `--version`。Agent MCP、env 注入与目标机置备分别使用 `dec-mcp`、`dec-exec`、`dec-host-setup`；后者是非用户面的单用途工具。
 - Secrets / Bitwarden / SSH / env 部署等操作通过 Console 触达（设置、同步、项目、远端设备）。
 - **同步** pull：解析绑定项目与引入 → 拉 Dec Git（→ `.dec/cache/`）+ 自动拉 Bitwarden **secrets**（→ **`.secrets/`** 同步根，零路径重叠）；见 `Documents/BUNDLE-SECRETS-MODEL.md`。
 - **`dec-exec`**（独立程序）：按 bundle 作用域读取 `.secrets/**/.env/*.env` 并启动子进程，供 MCP / Agent 运行时注入；不经过 `dec-server`、不碰 session，也不是用户面 secrets 管理入口。

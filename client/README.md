@@ -6,7 +6,7 @@
 
 - Node.js、Rust（stable）
 - Windows 需 WebView2
-- 本机连接会检查四件套；缺失或低于 Console 版本时自动安装/升级，再拉起 `dec-server`
+- 本机连接会逐一检查运行时组件版本；缺失、版本不一致或低于 Console 时自动安装/升级，再拉起 `dec-server`
 
 ## 开发
 
@@ -20,7 +20,7 @@ npm run tauri dev
 以上命令从仓库根目录执行。`--prepare-runtime-only` 只生成并保留当前平台的
 `src-tauri/resources/runtime/<os>-<arch>/`，不会打完整 Console 包；首次开发或版本变化后需重新运行。
 要把当前源码装成本机常驻 Console，在仓库根运行 `python scripts/build-console.py --skip-deps`
-并覆盖安装产物；安装包内置同版本四件套，不要单独部署运行时。
+并覆盖安装产物；安装包内置同版本运行时套件，不要单独部署运行时。
 release 构建仍严格要求内置资源，只有 debug 模式会在资源尚未准备且现有本机运行时可直接连接时跳过缓存预热。
 
 开发前端固定在 `127.0.0.1:59124`（避开 Vite 默认 5173）。debug 窗口在显示前会核对页面里的 `dec-console` 身份标记；对不上或端口上是别的项目，直接退出，避免把主密码框交给别人的前端。不要直接运行 `src-tauri/target/debug/app.exe`——那样不会启动本仓库的 Vite，只会去加载当时占着 `devUrl` 的任意页面。
@@ -50,7 +50,7 @@ Bitwarden session、vault/user key、TOTP 与 2FA 中间态均不得落盘；用
 受管项目列表保存在目标设备，移除管理不会删除项目文件。Global 请求始终使用空项目路径；项目请求始终携带目标服务器上的绝对路径。
 
 `dec-server` 是一机单例。Console 与目标运行时必须版本相等：旧 Console 拒绝控制新服务；
-新 Console 连接本机或已置备 SSH 设备时，会先停旧服务、按自身版本升级完整四件套并重连。
+新 Console 连接本机或已置备 SSH 设备时，会先停旧服务、按自身版本升级完整运行时套件并重连。
 TLS 直连没有安装通道，版本不等时需改用 SSH。远端与本机生命周期一致——空闲即退出，
 连接时按需拉起，不需要配置常驻服务。见 [ADR 0019](../Documents/decisions/0019-remote-provisioning.md)
 和 [ADR 0021](../Documents/decisions/0021-console-owned-runtime.md)。

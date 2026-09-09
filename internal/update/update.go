@@ -75,7 +75,7 @@ func newRuntime(currentVersion, component string) (*updaterv1.Runtime, error) {
 // Check checks whether a newer version is available via RUP.
 func Check(currentVersion string) (*CheckResult, error) {
 	ctx := context.Background()
-	rt, err := newRuntime(currentVersion, "dec")
+	rt, err := newRuntime(currentVersion, "dec-server")
 	if err != nil {
 		recordFailedAttempt()
 		return nil, err
@@ -160,7 +160,7 @@ func recordFailedAttempt() {
 func DoUpdate(currentVersion, latestVersion string) error {
 	_ = strings.TrimSpace(latestVersion)
 	ctx := context.Background()
-	rt, err := newRuntime(currentVersion, "dec")
+	rt, err := newRuntime(currentVersion, "dec-server")
 	if err != nil {
 		return err
 	}

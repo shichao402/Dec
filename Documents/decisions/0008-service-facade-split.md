@@ -27,7 +27,7 @@
 | **`dec-mcp`** | Agent MCP 门面（stdio MCP → 调服务） | 否（IDE 配置） |
 | **`dec-exec`** | 本地 env 注入 shim | 否（hidden / MCP `command`） |
 
-仍遵守 TUI-first：**不新增**用户面 Cobra 子命令（无 `dec unlock` / `dec pull` / `dec daemon` 等）。用户只接触 `dec`（TUI）与 `--version` 等最小 CLI。
+仍不新增用户面 Cobra 子命令（无 `dec unlock` / `dec pull` / `dec daemon` 等）。此处原先的 TUI 与最小 CLI 已由 [0020](0020-retire-tui.md) 后续决策整体移除，用户只接触 Console。
 
 ### 一机一服务 + 自动拉起
 

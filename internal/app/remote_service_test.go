@@ -53,9 +53,12 @@ func TestRemoteScriptsUseExplicitBinaryPath(t *testing.T) {
 	}
 }
 
-func TestRemoteServiceSetupScriptInvokesInternalCommand(t *testing.T) {
-	if !strings.Contains(remoteServiceSetupScript, "__service-setup") {
-		t.Fatalf("配置脚本必须调用远端自己的 __service-setup，不能在 Go 侧手写 YAML")
+func TestRemoteServiceSetupScriptInvokesDedicatedTool(t *testing.T) {
+	if !strings.Contains(remoteServiceSetupScript, "/bin/dec-host-setup") {
+		t.Fatalf("配置脚本必须调用远端自己的 dec-host-setup，不能在 Go 侧手写 YAML")
+	}
+	if strings.Contains(remoteServiceSetupScript, "__service-setup") {
+		t.Fatal("不应再依赖已删除的 dec hidden 命令")
 	}
 }
 

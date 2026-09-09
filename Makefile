@@ -1,6 +1,6 @@
 # Dec Makefile
 
-BINARY_NAMES=dec dec-server dec-mcp dec-exec
+BINARY_NAMES=dec-server dec-mcp dec-exec dec-host-setup
 DIST_DIR=dist
 VERSION=$(shell cat version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "dev")
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
@@ -18,11 +18,11 @@ build: ensure-relkit
 	@mkdir -p $(DIST_DIR)
 	@echo "🔨 构建 Dec 程序组..."
 	@echo "📌 版本: $(VERSION)"
-	go build $(LDFLAGS) -o $(DIST_DIR)/dec .
 	go build $(LDFLAGS) -o $(DIST_DIR)/dec-server ./cmd/dec-server
 	go build $(LDFLAGS) -o $(DIST_DIR)/dec-mcp ./cmd/dec-mcp
 	go build $(LDFLAGS) -o $(DIST_DIR)/dec-exec ./cmd/dec-exec
-	@echo "✅ 构建完成: $(DIST_DIR)/{dec,dec-server,dec-mcp,dec-exec}"
+	go build $(LDFLAGS) -o $(DIST_DIR)/dec-host-setup ./cmd/dec-host-setup
+	@echo "✅ 构建完成: $(DIST_DIR)/{dec-server,dec-mcp,dec-exec,dec-host-setup}"
 
 build-all: ensure-relkit
 	@./scripts/build.sh --all

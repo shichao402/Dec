@@ -9,7 +9,7 @@
 #
 # Console 只发两套人面安装包：Windows amd64、macOS Intel amd64（Apple Silicon 走 Rosetta）。
 # Tauri 必须在对应 OS 的 GitHub-hosted runner 上原生构建（不能从 Linux 交叉出 NSIS/DMG）。
-# 四件套仍在 Ubuntu 上 Go 交叉编译全平台，供 SSH 置备异平台目标。publish 把两类产物汇进同一次 relkit stage。
+# 运行时套件仍在 Ubuntu 上 Go 交叉编译全平台，供 SSH 置备异平台目标。publish 把两类产物汇进同一次 relkit stage。
 
 name: Release
 
@@ -127,7 +127,7 @@ jobs:
         shell: bash
         run: python3 scripts/relkit_consume.py --sdk-only
 
-      - name: Build four-piece kit
+      - name: Build runtime suite
         shell: bash
         run: bash scripts/build.sh --all
 
@@ -384,7 +384,7 @@ jobs:
             git tag "${VERSION}"
             git push origin "refs/tags/${VERSION}"
           fi
-          # 人面只挂 Console。四件套走 RUP，不进 GitHub Release。
+          # 人面只挂 Console。运行时组件走 RUP，不进 GitHub Release。
           shopt -s nullglob
           assets=(dist/dec-console-*)
           if [ "${#assets[@]}" -eq 0 ]; then

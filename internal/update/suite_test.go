@@ -1,11 +1,19 @@
 package update
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"go.firoyang.com/relkit/sdk"
 )
+
+func TestSuiteComponentsHaveExplicitRoles(t *testing.T) {
+	want := []string{"dec-server", "dec-mcp", "dec-exec", "dec-host-setup"}
+	if !slices.Equal(SuiteComponents, want) {
+		t.Fatalf("SuiteComponents = %v, want %v", SuiteComponents, want)
+	}
+}
 
 func TestSuiteRuntimeKeepsPinnedVersionEligible(t *testing.T) {
 	t.Setenv("DEC_HOME", t.TempDir())

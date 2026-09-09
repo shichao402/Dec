@@ -19,7 +19,7 @@ CLIENT = ROOT / "client"
 TAURI = CLIENT / "src-tauri"
 DIST = ROOT / "dist"
 RUNTIME_RESOURCES = TAURI / "resources" / "runtime"
-RUNTIME_COMPONENTS = ("dec", "dec-server", "dec-mcp", "dec-exec")
+RUNTIME_COMPONENTS = ("dec-server", "dec-mcp", "dec-exec", "dec-host-setup")
 
 
 def release_version() -> str:
@@ -101,7 +101,7 @@ def prepare_runtime_resources(version: str, os_id: str, arch: str) -> Path:
     for component in RUNTIME_COMPONENTS:
         suffix = ".exe" if os_id == "windows" else ""
         filename = f"{component}{suffix}"
-        package = "." if component == "dec" else f"./cmd/{component}"
+        package = f"./cmd/{component}"
         output = platform_dir / filename
         subprocess.run(
             [
@@ -230,7 +230,7 @@ def main() -> None:
         stop_console()
         install_package(output)
         print(
-            f"已安装 Console v{version}。首次启动会把内置四件套释放到 ~/.dec/bin；"
+            f"已安装 Console v{version}。首次启动会把内置运行时套件释放到 ~/.dec/bin；"
             "Cursor 里的 dec-mcp 需重载 MCP 才用上新二进制。"
         )
 

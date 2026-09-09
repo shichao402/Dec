@@ -57,8 +57,8 @@ function Install-Dec {
     $platform = Get-Platform
     $installDir = if ($env:DEC_HOME) { $env:DEC_HOME } else { Join-Path $env:USERPROFILE ".dec" }
     $binDir = Join-Path $installDir "bin"
-    $binaryPath = Join-Path $binDir "dec.exe"
-    $binaries = @("dec", "dec-server", "dec-mcp", "dec-exec")
+    $binaryPath = Join-Path $binDir "dec-server.exe"
+    $binaries = @("dec-server", "dec-mcp", "dec-exec", "dec-host-setup")
     $updateBranch = if ($env:DEC_BRANCH) { $env:DEC_BRANCH } else { "main" }
     $requestedVersion = $env:DEC_VERSION
 
@@ -118,10 +118,11 @@ function Install-Dec {
                         if (-not (Test-Path (Join-Path $binDir "$binary.exe"))) { $suiteComplete = $false }
                     }
                     if ($suiteComplete) {
-                        Write-ColorOutput "已是最新版本，且四个程序完整" -Type "Success"
+                        Remove-Item -Force (Join-Path $binDir "dec.exe") -ErrorAction SilentlyContinue
+                        Write-ColorOutput "已是最新版本，且运行时套件完整" -Type "Success"
                         exit 0
                     }
-                    Write-ColorOutput "主程序已是最新版本，但服务/门面程序不完整，将修复安装" -Type "Warning"
+                    Write-ColorOutput "服务已是最新版本，但运行时套件不完整，将修复安装" -Type "Warning"
                 }
                 # Console 初始化为非交互模式，直接把整套运行时升级到同一发布版本。
                 if ($env:DEC_NONINTERACTIVE -ne "1") {
@@ -186,7 +187,8 @@ function Install-Dec {
             exit 1
         }
     }
-    Write-ColorOutput "四个程序下载完成" -Type "Success"
+    Remove-Item -Force (Join-Path $binDir "dec.exe") -ErrorAction SilentlyContinue
+    Write-ColorOutput "运行时套件下载完成" -Type "Success"
 
     Write-ColorOutput "配置环境变量..." -Type "Info"
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -212,9 +214,7 @@ function Install-Dec {
     }
 
     Write-Host ""
-    Write-ColorOutput "之后可以运行：" -Type "Info"
-    Write-Host "  dec --help"
-    Write-Host "  # 人机入口是 Dec Console（桌面客户端），不是终端 TUI"
+    Write-ColorOutput "人机入口是 Dec Console（桌面客户端）。" -Type "Info"
     Write-Host ""
 }
 

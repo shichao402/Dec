@@ -56,7 +56,7 @@ type ProvisionRemoteHostResult struct {
 	// Verify 是安装后的复探结论。
 	Verify *RemoteHostProbe
 
-	// Skipped 表示已是最新且四件套完整，脚本自行退出，未做任何改动。
+	// Skipped 表示已是最新且运行时套件完整，未替换任何程序。
 	Skipped bool
 	// InstalledVersion 是安装后目标机上的版本。
 	InstalledVersion string
@@ -108,10 +108,10 @@ func MatchProvisionTypedConfirm(input string, confirmed bool, spec ProvisionType
 	return got == strings.TrimSpace(spec.Expect)
 }
 
-// ProvisionRemoteHost 从发起端缓存经 SSH 推送四件套并完成置备。
+// ProvisionRemoteHost 从发起端缓存经 SSH 推送运行时套件并完成置备。
 //
 // 四段流程：探测 → 解析并推送运行时 → 写入固定监听端口 → 复探验证。
-// 「写配置」仍由远端自己的 `dec __service-setup` 负责
+// 「写配置」由远端自己的单用途 `dec-host-setup` 负责
 // （ADR 0019：避免在 Go 侧手写远端 YAML 而绕过 config 包的合并逻辑）。
 //
 // 置备**不**在远端安装常驻服务：远端与本机生命周期一致，空闲即退出，
@@ -154,6 +154,11 @@ func ProvisionRemoteHost(ctx context.Context, in ProvisionRemoteHostInput, repor
 	if !validReleaseVersion(releaseVersion) {
 		return nil, fmt.Errorf("置备必须指定有效的 Console 运行时版本，实际 %q", in.Version)
 	}
+	if component, installed := newerRuntimeComponent(probe, releaseVersion); component != "" {
+		return nil, fmt.Errorf(
+			"Console 运行时 %s 低于目标组件 %s %s，拒绝降级；请先更新 Console",
+			releaseVersion, component, installed)
+	}
 	result.Warnings = append(result.Warnings, probe.Warnings...)
 
 	emit(reporter, EventInfo, "provision.install", "准备并推送目标运行时", &Progress{
@@ -161,7 +166,7 @@ func ProvisionRemoteHost(ctx context.Context, in ProvisionRemoteHostInput, repor
 	})
 	if probe.DecInstalled && normalizeReleaseVersion(probe.DecVersion) == releaseVersion {
 		result.Skipped = true
-		emit(reporter, EventInfo, "provision.install", "目标四件套已是 "+releaseVersion, nil)
+		emit(reporter, EventInfo, "provision.install", "目标运行时套件已是 "+releaseVersion, nil)
 	} else {
 		if probe.ServerRunning {
 			emit(reporter, EventInfo, "provision.install", "停止远端旧服务以原子替换运行时", nil)
