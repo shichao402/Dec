@@ -86,6 +86,8 @@ func isInternalCLIArgs(args []string) bool {
 	switch args[0] {
 	case "__freshness-check":
 		return true
+	case "__update-check":
+		return true
 	case "__service-setup":
 		// 置备经 SSH 调用它，非交互执行时没有 TTY。
 		return true

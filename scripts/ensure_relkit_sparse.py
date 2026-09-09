@@ -32,6 +32,7 @@ SPARSE_CONE_DIRS = (
     "api",
     "internal",
     "cmd/relkit",
+    "cmd/relkit-updater",
     "embed",
     "version",
 )

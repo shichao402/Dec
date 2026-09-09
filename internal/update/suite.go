@@ -12,7 +12,11 @@ import (
 )
 
 // SuiteComponents is the four-piece Dec runtime installed under ~/.dec/bin.
+// SuiteComponents is the four-piece Dec runtime installed under ~/.dec/bin.
+// relkit-updater is the fifth fileSet member once ADR 0010 sidecar is published.
 var SuiteComponents = []string{"dec", "dec-server", "dec-mcp", "dec-exec"}
+
+const UpdaterComponent = "relkit-updater"
 
 // DownloadSuite downloads the signed runtime suite for goos/goarch into destDir.
 //
