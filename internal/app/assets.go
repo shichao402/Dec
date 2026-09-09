@@ -60,6 +60,8 @@ type AssetBundleOption struct {
 	Home      bool
 	Required  bool
 	Quadrants map[string]int
+	// Tags 来自项目声明。global 表示推荐作为 Global 资产导入本机。
+	Tags []string
 }
 
 // AssetSelectionState 是 Bundles 页的数据源：仓库里全部 bundle + 当前启用态。
@@ -396,6 +398,7 @@ func loadBundleSelectionForPlane(projectConfig *types.ProjectConfig, plane Works
 			Home:        bo.Home,
 			Required:    bo.Required,
 			Quadrants:   bo.Quadrants,
+			Tags:        append([]string(nil), bo.Tags...),
 		}
 		if _, ok := enabledSet[bo.Name]; ok {
 			opt.Enabled = true
@@ -403,13 +406,7 @@ func loadBundleSelectionForPlane(projectConfig *types.ProjectConfig, plane Works
 		opt.Members = buildBundleMemberItems(bo, tx.WorkDir())
 		options = append(options, opt)
 	}
-	sort.SliceStable(options, func(i, j int) bool {
-		if options[i].Name != options[j].Name {
-			return options[i].Name < options[j].Name
-		}
-		return options[i].Vault < options[j].Vault
-	})
-
+	sortAssetOptions(options)
 	return options
 }
 
@@ -480,13 +477,22 @@ func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Works
 		options = append(options, opt)
 	}
 	forgetStaleKnownSecretBundles(stale, reporter)
+	sortAssetOptions(options)
+	return options
+}
+
+func sortAssetOptions(options []AssetBundleOption) {
 	sort.SliceStable(options, func(i, j int) bool {
+		iGlobal := pmodel.HasTag(options[i].Tags, types.ProjectTagGlobal)
+		jGlobal := pmodel.HasTag(options[j].Tags, types.ProjectTagGlobal)
+		if iGlobal != jGlobal {
+			return iGlobal
+		}
 		if options[i].Name != options[j].Name {
 			return options[i].Name < options[j].Name
 		}
 		return options[i].Vault < options[j].Vault
 	})
-	return options
 }
 
 // enrichBundleOptionsWithSecretMembers 把 Bitwarden secrets 条目并入 Bundles 页成员列表。

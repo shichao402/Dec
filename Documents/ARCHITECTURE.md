@@ -41,7 +41,7 @@ Bitwarden session 按需建立。**Console Authenticate 是唯一人工入口**�
 
 | 层级 | 存储位置 | 职责 |
 |------|----------|------|
-| **项目声明** | Git Vault `<p>/dec.yaml` | 展示信息、IDE 默认值、direct `requires` |
+| **项目声明** | Git Vault `<p>/dec.yaml` | 展示信息、标签（当前 `global` 表示推荐本机导入）、IDE 默认值、direct `requires` |
 | **Git 四象限** | `<p>/{public,private}/{user,project}/` | 全部为非敏感资产；private 仅表示不可被其它项目引用 |
 | **BW private** | `<p>/private/{user,project}` folder | 敏感正文；与 Git 同 项目/plane/相对路径 零冲突 |
 
@@ -55,7 +55,7 @@ direct requires 的 `public/project`，不递归、不引入 user/private。Git 
 
 - 仓库连接 / 本机 vars / 服务版本与重启：Console **设置**
 - 项目初始化 / project 选择：Console **引导 / 项目**
-- 项目启用、家项目 requires 与四象限浏览：Console **项目 / 资产**
+- 项目启用、家项目 requires、标签（推荐 Global）与四象限浏览：Console **项目 / Global 资产**
 - pull / push / remove（含成功对照后的孤儿 reconcile）：Console **同步**
 - 远端设备探测与置备：Console **连接**（ADR 0019）
 - 版本信息：`dec --version`

@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/ui/feedback'
 import { Field, Input } from '@/components/ui/input'
 import { Panel, PanelBody, PanelFooter, PanelHeader } from '@/components/ui/panel'
 import { invokeTyped } from '@/lib/api'
-import { actionSpec, resource, toggle } from '@/lib/console'
+import { actionSpec, PROJECT_TAG_GLOBAL, hasTag, resource, toggle } from '@/lib/console'
 import { AssetRow } from '@/pages/assets-panel'
 import { cn } from '@/lib/utils'
 import type { AssetSelection, GlobalSettings } from '@/lib/utils'
@@ -53,12 +53,24 @@ export function OnboardingPage(props: {
     return invokeTyped<AssetSelection>('load_asset_selection', '', 'global', {}, saveDeviceSpec.key)
   }
 
+  const initialSelection = (selection: AssetSelection) => {
+    const enabled = selection.Bundles.filter((item) => item.Enabled).map((item) => item.Name)
+    if (enabled.length) return enabled
+    return selection.Bundles.filter((item) => hasTag(item.Tags, PROJECT_TAG_GLOBAL)).map((item) => item.Name)
+  }
+
   const saveAssets = () => invokeTyped('save_enabled_bundles', '', 'global', { EnabledProjects: selected }, saveAssetsSpec.key)
   const bundles = assets?.Bundles || []
   const keyword = query.trim().toLowerCase()
-  const visible = keyword
-    ? bundles.filter((item) => `${item.Name} ${item.Description}`.toLowerCase().includes(keyword))
-    : bundles
+  const visible = (keyword
+    ? bundles.filter((item) => `${item.Name} ${item.Description} ${(item.Tags || []).join(' ')}`.toLowerCase().includes(keyword))
+    : bundles.slice()
+  ).sort((a, b) => {
+    const ag = hasTag(a.Tags, PROJECT_TAG_GLOBAL) ? 0 : 1
+    const bg = hasTag(b.Tags, PROJECT_TAG_GLOBAL) ? 0 : 1
+    if (ag !== bg) return ag - bg
+    return a.Name.localeCompare(b.Name)
+  })
 
   return (
     <Page>
@@ -127,7 +139,7 @@ export function OnboardingPage(props: {
                     runningLabel="验证并保存中…"
                     onSuccess={(selection) => {
                       setAssets(selection)
-                      setSelected(selection.Bundles.filter((item) => item.Enabled).map((item) => item.Name))
+                      setSelected(initialSelection(selection))
                       setStep(2)
                     }}
                   >
@@ -142,7 +154,7 @@ export function OnboardingPage(props: {
               <Panel className="overflow-hidden">
                 <PanelHeader
                   title="选择 Global 资产"
-                  description={`已选 ${selected.length} / ${bundles.length}，之后可在 Global 资产页调整。`}
+                  description={`已选 ${selected.length} / ${bundles.length}，带 global 标签的是推荐导入本机的资产。之后可在 Global 资产页调整选择和标签。`}
                 />
                 <div className="border-b border-line p-3">
                   <div className="relative">

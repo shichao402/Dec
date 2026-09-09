@@ -30,7 +30,7 @@ Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）�
 | 本机 / SSH 远端 / 置备 | **连接** 页 |
 | Bitwarden 人工认证 | **认证** 页（Console Authenticate） |
 | 绑定项目资产树、新建本地资产 | **项目** 页 |
-| Global 资产 | **Global 资产** 页 |
+| Global 资产 / 推荐 Global 标签 | **Global 资产** 页 |
 | pull / push（Global 与项目两个平面）/ 自更新 | **同步** 页 |
 | 查看有哪些密钥文件（只读元数据） | **同步** 页「密钥清单」 |
 | 删除远端资产 / 密钥、清理本机落地 | **删除** 页 |

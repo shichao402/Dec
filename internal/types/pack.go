@@ -145,14 +145,20 @@ func CanonicalAssetPlane(plane AssetPlane) AssetPlane {
 	}
 }
 
+// ProjectTagGlobal 表示该项目推荐作为 Global 资产导入本机。
+const ProjectTagGlobal = "global"
+
 // Project 是 Git 仓库顶层唯一可写单元，对应 <name>/dec.yaml。
 type Project struct {
-	Name        string   `yaml:"name"`
-	Title       string   `yaml:"title,omitempty"`
-	Description string   `yaml:"description,omitempty"`
-	Requires    []string `yaml:"requires,omitempty"`
-	IDEs        []string `yaml:"ides,omitempty"`
-	Editor      string   `yaml:"editor,omitempty"`
+	Name        string `yaml:"name"`
+	Title       string `yaml:"title,omitempty"`
+	Description string `yaml:"description,omitempty"`
+	// Tags 是展示与推荐用标签。当前 Console 可配置的只有 global（推荐本机导入）。
+	// 未知合法标签会原样保留，便于以后扩展。
+	Tags     []string `yaml:"tags,omitempty"`
+	Requires []string `yaml:"requires,omitempty"`
+	IDEs     []string `yaml:"ides,omitempty"`
+	Editor   string   `yaml:"editor,omitempty"`
 }
 
 // P 是 Project 的旧类型名。

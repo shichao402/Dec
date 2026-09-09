@@ -56,6 +56,40 @@ func TestScanRejectsNonKebabPName(t *testing.T) {
 	}
 }
 
+func TestLoadNormalizesTags(t *testing.T) {
+	root := t.TempDir()
+	put(t, root, "tencent-cloud/dec.yaml", "name: tencent-cloud\ntags: [global, global, GLOBAL]\n")
+	got, err := Load(root, "tencent-cloud")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Manifest.Tags) != 1 || got.Manifest.Tags[0] != types.ProjectTagGlobal {
+		t.Fatalf("tags = %#v", got.Manifest.Tags)
+	}
+}
+
+func TestLoadRejectsInvalidTag(t *testing.T) {
+	root := t.TempDir()
+	put(t, root, "my-app/dec.yaml", "name: my-app\ntags: [Not_Valid]\n")
+	if _, err := Load(root, "my-app"); err == nil {
+		t.Fatal("非法标签应失败")
+	}
+}
+
+func TestSaveManifestRoundTripsUnknownTags(t *testing.T) {
+	root := t.TempDir()
+	if err := SaveManifest(root, types.P{Name: "tools", Tags: []string{"ci", types.ProjectTagGlobal}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(root, "tools")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Manifest.Tags) != 2 || got.Manifest.Tags[0] != types.ProjectTagGlobal || got.Manifest.Tags[1] != "ci" {
+		t.Fatalf("tags = %#v", got.Manifest.Tags)
+	}
+}
+
 func TestLoadRejectsSelfRequire(t *testing.T) {
 	root := t.TempDir()
 	put(t, root, "my-app/dec.yaml", "name: my-app\nrequires: [my-app]\n")

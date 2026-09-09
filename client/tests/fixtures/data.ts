@@ -73,6 +73,7 @@ function bundle(overrides: Partial<AssetOption> = {}): AssetOption {
     Home: false,
     Required: false,
     Quadrants: {},
+    Tags: [],
     ...overrides,
   }
 }
@@ -130,7 +131,7 @@ function base(): Scenario {
       Plane: 'global',
       Bundles: [
         bundle({ Name: 'relkit', Vault: 'relkit', Description: '发布工具链', Enabled: false }),
-        bundle(),
+        bundle({ Tags: ['global'] }),
         bundle({ Name: 'vsx-publish', Vault: 'vsx-publish', Description: 'secrets-only / machine-enabled placeholder (ADR 0003)', SecretsOnly: true }),
         bundle({ Name: 'woa', Vault: 'woa', Description: 'secrets-only / machine-enabled placeholder (ADR 0003)', SecretsOnly: true }),
       ],

@@ -138,6 +138,7 @@ export type AssetOption = {
   Home: boolean
   Required: boolean
   Quadrants: Record<string, number>
+  Tags?: string[]
 }
 
 export type AssetSelection = {

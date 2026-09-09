@@ -28,7 +28,7 @@ export function GlobalAssetsPage(props: { deviceId: string; repoURL: string; onP
           deviceId={props.deviceId}
           root=""
           plane="global"
-          hint="Global 平面的资产装到用户环境（如 ~/.cursor、~/.claude）；secrets 落到 .secrets 同步根。"
+          hint="Global 平面的资产装到用户环境（如 ~/.cursor、~/.claude）；secrets 落到 .secrets 同步根。行上的 global 标签表示推荐导入本机，点击可写入私仓。"
         />
       </PageFill>
     </Page>

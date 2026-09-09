@@ -37,6 +37,8 @@ type BundleOverview struct {
 	Required bool
 	// Quadrants 是四象限资产计数，key 为 public/user 等稳定路径。
 	Quadrants map[string]int
+	// Tags 来自 <p>/dec.yaml，用于推荐与筛选；当前 Console 可配置的只有 global。
+	Tags []string
 }
 
 // ResolvedAssets 是解析后的目标资产集合及来源追踪信息。
@@ -269,7 +271,7 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 		_, isEnabled := enabled[name]
 		result.Bundles = append(result.Bundles, BundleOverview{
 			Name: name, Description: p.Manifest.Description, VaultName: name, Members: members, Enabled: isEnabled,
-			Model: "p", Quadrants: countPQuadrants(p.Assets),
+			Model: "p", Quadrants: countPQuadrants(p.Assets), Tags: append([]string(nil), p.Manifest.Tags...),
 		})
 	}
 	if plane == WorkspaceProject && projectConfig != nil {
@@ -287,7 +289,7 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 func countPQuadrants(assets []types.TypedAssetRef) map[string]int {
 	out := map[string]int{
 		"public/global": 0, "private/global": 0,
-		"public/local":  0, "private/local":  0,
+		"public/local": 0, "private/local": 0,
 	}
 	for _, asset := range assets {
 		out[string(asset.Visibility)+"/"+string(types.CanonicalAssetPlane(asset.Plane))]++

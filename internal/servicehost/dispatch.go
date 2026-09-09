@@ -100,7 +100,7 @@ func isMachineMutation(method string) bool {
 	switch method {
 	case "connect_repo", "save_global_settings", "ensure_builtin_ide_assets", "ensure_global_vars",
 		"register_managed_project", "remove_managed_project", "create_remote_project",
-		"register_managed_device", "remove_managed_device":
+		"register_managed_device", "remove_managed_device", "save_project_tags":
 		return true
 	default:
 		return false
@@ -200,6 +200,12 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 			return nil, err
 		}
 		return app.CreateRemoteProject(in, reporter)
+	case "save_project_tags":
+		var in app.SaveProjectTagsInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return writer.SaveProjectTags(in, reporter)
 	case "load_project_overview":
 		var in struct{ IncludeVaultBundles bool }
 		if err := decode(payload, &in); err != nil {

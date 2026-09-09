@@ -26,4 +26,6 @@ message Project {
   repeated string ides = 5;
   // 该项目默认交互式编辑器；本地可覆盖。
   string editor = 6;
+  // 展示与推荐标签。当前可配置的只有 global（推荐作为 Global 资产导入本机）。
+  repeated string tags = 7;
 }

@@ -11,11 +11,11 @@ import { Panel } from '@/components/ui/panel'
 import { ActionButton } from '@/components/ui/action-button'
 import { useActionRegistry, useDecAction } from '@/lib/action-context'
 import { invokeTyped } from '@/lib/api'
-import { actionSpec, resource, toggle } from '@/lib/console'
+import { actionSpec, PROJECT_TAG_GLOBAL, hasTag, resource, toggle, toggleTag } from '@/lib/console'
 import { cn } from '@/lib/utils'
 import type { AssetOption, AssetSelection } from '@/lib/utils'
 
-type Filter = 'all' | 'enabled' | 'required'
+type Filter = 'all' | 'enabled' | 'required' | 'tagged'
 
 // 行按列对齐：名称、说明、成员各占固定语义列，宽屏不会只在左侧堆一小块。
 const row = 'grid grid-cols-[auto_minmax(9rem,16rem)_minmax(0,1fr)_auto] items-center gap-x-3'
@@ -40,8 +40,10 @@ export function AssetsPanel(props: {
     [props.deviceId, scope, workspaceResource],
   )
   const saveSpec = actionSpec(`assets:save:${props.deviceId}:${scope}`, '保存资产选择', props.deviceId, [workspaceResource], 'write', '资产选择已保存')
+  const tagSpec = actionSpec(`assets:tags:${props.deviceId}:${scope}`, '保存资产标签', props.deviceId, [resource.global], 'write', '资产标签已保存')
   const loadState = useDecAction<AssetSelection>(loadSpec)
   const saveState = useDecAction<{ RejectedBundles?: string[]; RejectedProjects?: string[] }>(saveSpec)
+  const tagState = useDecAction(tagSpec)
 
   const applySelection = useCallback((result: AssetSelection) => {
     setData(result)
@@ -57,6 +59,30 @@ export function AssetsPanel(props: {
     if (outcome.ok) applySelection(outcome.value)
   }, [applySelection, loadSpec, props.plane, props.root, runAction])
 
+  const saveGlobalTag = async (item: AssetOption) => {
+    const nextTags = toggleTag(item.Tags, PROJECT_TAG_GLOBAL)
+    const outcome = await runAction(
+      tagSpec,
+      () => invokeTyped(
+        'save_project_tags',
+        '',
+        'global',
+        { Name: item.Name, Tags: nextTags },
+        tagSpec.key,
+      ),
+    )
+    if (!outcome.ok) return
+    setData((current) => {
+      if (!current) return current
+      return {
+        ...current,
+        Bundles: current.Bundles.map((bundle) =>
+          bundle.Name === item.Name ? { ...bundle, Tags: nextTags } : bundle,
+        ),
+      }
+    })
+  }
+
   // 远端工作区变化后需要重新同步服务端选择状态。
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { void load() }, [load])
@@ -70,9 +96,15 @@ export function AssetsPanel(props: {
   const visible = bundles.filter((item) => {
     if (filter === 'enabled' && !selected.includes(item.Name)) return false
     if (filter === 'required' && !(item.Home || item.Required)) return false
+    if (filter === 'tagged' && !hasTag(item.Tags, PROJECT_TAG_GLOBAL)) return false
     if (!query.trim()) return true
-    const haystack = `${item.Name} ${item.Description} ${(item.Members || []).map((m) => `${m.Type}/${m.Name}`).join(' ')}`
+    const haystack = `${item.Name} ${item.Description} ${(item.Tags || []).join(' ')} ${(item.Members || []).map((m) => `${m.Type}/${m.Name}`).join(' ')}`
     return haystack.toLowerCase().includes(query.trim().toLowerCase())
+  }).sort((a, b) => {
+    const ag = hasTag(a.Tags, PROJECT_TAG_GLOBAL) ? 0 : 1
+    const bg = hasTag(b.Tags, PROJECT_TAG_GLOBAL) ? 0 : 1
+    if (ag !== bg) return ag - bg
+    return a.Name.localeCompare(b.Name)
   })
   const selectable = visible.filter((item) => !item.OtherPlane)
   const rejected = saveState.record?.result
@@ -114,6 +146,7 @@ export function AssetsPanel(props: {
       <div className="shrink-0 px-3 pt-3 empty:hidden">
         <ActionFeedback actionKey={loadSpec.key} />
         <ActionFeedback actionKey={saveSpec.key} />
+        <ActionFeedback actionKey={tagSpec.key} />
         {rejected.length > 0 && <Notice text={`已保存，但设备未接受：${rejected.join('、')}`} />}
       </div>
 
@@ -134,7 +167,9 @@ export function AssetsPanel(props: {
                 item={item}
                 checked={selected.includes(item.Name)}
                 changed={added.includes(item.Name) || removed.includes(item.Name)}
+                tagging={tagState.running}
                 onToggle={() => setSelected(toggle(selected, item.Name))}
+                onToggleGlobalTag={() => void saveGlobalTag(item)}
               />
             ))}
             {visible.length === 0 && (
@@ -143,7 +178,9 @@ export function AssetsPanel(props: {
                 icon={<Boxes className="size-5" />}
                 text={query || filter !== 'all' ? '没有匹配的资产' : '这个范围里还没有可选资产'}
                 hint={query || filter !== 'all'
-                  ? '换个关键词，或把筛选切回「全部」。'
+                  ? filter === 'tagged'
+                    ? '当前没有打 global 标签的资产。可在行上把某项标为推荐 Global。'
+                    : '换个关键词，或把筛选切回「全部」。'
                   : '先确认私仓已连接，并且家项目绑定的是私仓里已存在的项目。'}
               />
             )}
@@ -190,16 +227,21 @@ export function AssetRow({
   checked,
   changed,
   compact,
+  tagging,
   onToggle,
+  onToggleGlobalTag,
 }: {
   item: AssetOption
   checked: boolean
   changed?: boolean
   compact?: boolean
+  tagging?: boolean
   onToggle: () => void
+  onToggleGlobalTag?: () => void
 }) {
   const members = item.Members || []
   const memberTypes = [...new Set(members.map((member) => member.Type))]
+  const recommended = hasTag(item.Tags, PROJECT_TAG_GLOBAL)
   return (
     <label
       className={cn(
@@ -215,6 +257,7 @@ export function AssetRow({
           <span className="truncate text-[13px] font-medium text-ink" title={item.Name}>{item.Name}</span>
           {item.Home && <Badge tone="accent">home</Badge>}
           {item.Required && <Badge>requires</Badge>}
+          <GlobalTagBadge recommended={recommended} disabled={item.OtherPlane || tagging} onToggle={onToggleGlobalTag} />
           {item.SecretsOnly && <Badge tone="quiet">secrets</Badge>}
           {item.OtherPlane && <Badge tone="warn">另一平面</Badge>}
           {item.RemoteMissing && <Badge tone="bad">私仓缺失</Badge>}
@@ -246,8 +289,42 @@ export function AssetRow({
   )
 }
 
+function GlobalTagBadge({
+  recommended,
+  disabled,
+  onToggle,
+}: {
+  recommended: boolean
+  disabled?: boolean
+  onToggle?: () => void
+}) {
+  if (!onToggle && !recommended) return null
+  if (!onToggle) {
+    return <Badge tone="accent" title="推荐作为 Global 资产导入本机">global</Badge>
+  }
+  return (
+    <button
+      type="button"
+      title={recommended ? '取消推荐作为 Global 资产' : '标为推荐 Global 资产，并写入私仓'}
+      disabled={disabled}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        onToggle()
+      }}
+      className={cn(
+        'inline-flex max-w-full items-center rounded-md border px-1.5 py-0.5 text-[11px] leading-4 font-medium',
+        recommended ? 'border-accent/40 bg-accent/12 text-accent-hi' : 'border-dashed border-line text-faint hover:border-line-hi hover:text-ink',
+        disabled && 'cursor-not-allowed opacity-45',
+      )}
+    >
+      {recommended ? 'global' : '标为 Global'}
+    </button>
+  )
+}
+
 function SegmentedFilter({ value, onChange }: { value: Filter; onChange: (next: Filter) => void }) {
-  const options: [Filter, string][] = [['all', '全部'], ['enabled', '已选'], ['required', '必需']]
+  const options: [Filter, string][] = [['all', '全部'], ['enabled', '已选'], ['required', '必需'], ['tagged', '推荐 Global']]
   return (
     <div className="flex rounded-lg border border-line p-0.5">
       {options.map(([id, label]) => (

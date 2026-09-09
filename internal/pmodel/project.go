@@ -46,6 +46,11 @@ func Load(repoDir, name string) (*Loaded, error) {
 		return nil, fmt.Errorf("项目声明 %s: %w", manifestPath, err)
 	}
 	manifest.Requires = requires
+	tags, err := normalizeTags(manifest.Tags)
+	if err != nil {
+		return nil, fmt.Errorf("项目声明 %s: %w", manifestPath, err)
+	}
+	manifest.Tags = tags
 
 	loaded := &Loaded{Manifest: manifest}
 	for _, visibility := range []types.AssetVisibility{types.AssetVisibilityPublic, types.AssetVisibilityPrivate} {
@@ -73,6 +78,11 @@ func SaveManifest(repoDir string, manifest types.P) error {
 		return err
 	}
 	manifest.Requires = requires
+	tags, err := normalizeTags(manifest.Tags)
+	if err != nil {
+		return err
+	}
+	manifest.Tags = tags
 	data, err := yaml.Marshal(&manifest)
 	if err != nil {
 		return fmt.Errorf("序列化项目 %q 声明失败: %w", manifest.Name, err)
@@ -133,6 +143,54 @@ func Scan(repoDir string) (map[string]*Loaded, error) {
 		out[name] = p
 	}
 	return out, nil
+}
+
+// NormalizeTags 规范化项目标签：去空、去重、kebab-case，known 标签（global）排在前面。
+func NormalizeTags(values []string) ([]string, error) {
+	return normalizeTags(values)
+}
+
+func normalizeTags(values []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, raw := range values {
+		tag := strings.ToLower(strings.TrimSpace(raw))
+		if tag == "" {
+			continue
+		}
+		if !types.IsValidProjectName(tag) {
+			return nil, fmt.Errorf("标签 %q 非法，必须为小写 kebab-case", raw)
+		}
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		out = append(out, tag)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		ir, jr := tagRank(out[i]), tagRank(out[j])
+		if ir != jr {
+			return ir < jr
+		}
+		return out[i] < out[j]
+	})
+	return out, nil
+}
+
+func tagRank(tag string) int {
+	if tag == types.ProjectTagGlobal {
+		return 0
+	}
+	return 1
+}
+
+func HasTag(tags []string, tag string) bool {
+	for _, candidate := range tags {
+		if candidate == tag {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeRequires(values []string, self string) ([]string, error) {

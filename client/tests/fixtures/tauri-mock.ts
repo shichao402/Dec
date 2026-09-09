@@ -198,6 +198,15 @@ export function installTauriMock(scenario: Scenario) {
     },
     invoke_method: (args) => {
       const method = String(args.method || '')
+      if (method === 'save_project_tags') {
+        const raw = String(args.payloadJson || args.payload_json || '{}')
+        const payload = JSON.parse(raw) as { Name?: string; Tags?: string[] }
+        const name = String(payload.Name || '')
+        const tags = Array.isArray(payload.Tags) ? payload.Tags : []
+        const item = scenario.assets.Bundles.find((bundle) => bundle.Name === name)
+        if (item) item.Tags = tags
+        return ok({ Name: name, Tags: tags, Committed: true })
+      }
       if (!(method in methods)) return { result_json: '', error: `未知服务方法 "${method}"` }
       return ok(methods[method])
     },

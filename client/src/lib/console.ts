@@ -54,3 +54,13 @@ export function suggestProjectName(root: string) {
 export function toggle(items: string[], value: string) {
   return items.includes(value) ? items.filter((item) => item !== value) : [...items, value]
 }
+
+export const PROJECT_TAG_GLOBAL = 'global'
+
+export function hasTag(tags: string[] | undefined, tag: string) {
+  return (tags || []).includes(tag)
+}
+
+export function toggleTag(tags: string[] | undefined, tag: string) {
+  return toggle(tags || [], tag)
+}
