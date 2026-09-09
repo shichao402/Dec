@@ -11,7 +11,7 @@ https://github.com/shichao402/relkit（版本由 `scripts/relkit.lock.json` 决�
 `go.mod` 通过 replace 指向本目录：
 
 ```
-replace firoyang.com/relkit => ./third_party/relkit
+replace go.firoyang.com/relkit => ./third_party/relkit
 ```
 
 构建 / CI 会自动确保稀疏树存在；日常也可手动：

@@ -2,7 +2,7 @@
   "schema": "relkit.consume/1",
   "url": "https://github.com/shichao402/relkit.git",
   "channel": "main",
-  "commit": "",
+  "commit": "6b59e29dac8a8e923cfba6f02bbbe36f4c9d1ad8",
   "protocol": {
     "min": 2,
     "max": 2

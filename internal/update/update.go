@@ -12,11 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"firoyang.com/relkit/sdk"
-	"firoyang.com/relkit/sdk/apply"
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/version"
+	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
 )
 
 const (
@@ -56,26 +55,6 @@ func entryURLs() []string {
 	}
 }
 
-func embeddedRecovery() *sdk.RecoveryHelp {
-	var cfg struct {
-		Recovery *struct {
-			Message string `json:"message"`
-			Links   []struct {
-				Label string `json:"label"`
-				URL   string `json:"url"`
-			} `json:"links"`
-		} `json:"recovery"`
-	}
-	if err := json.Unmarshal(embeddedRelkitJSON, &cfg); err != nil || cfg.Recovery == nil {
-		return nil
-	}
-	help := &sdk.RecoveryHelp{Message: cfg.Recovery.Message}
-	for _, link := range cfg.Recovery.Links {
-		help.Links = append(help.Links, sdk.RecoveryLink{Label: link.Label, URL: link.URL})
-	}
-	return help
-}
-
 func stateDir() (string, error) {
 	root, err := repo.GetRootDir()
 	if err != nil {
@@ -84,60 +63,37 @@ func stateDir() (string, error) {
 	return root, nil
 }
 
-func newUpdater(currentVersion, component string) (*sdk.Updater, error) {
-	keys, err := trustedKeys()
+func newRuntime(currentVersion, component string) (*updaterv1.Runtime, error) {
+	code := semverCodeOrZero(currentVersion)
+	root, err := binInstallRoot()
 	if err != nil {
 		return nil, err
 	}
-	code, err := sdk.SemverCode(currentVersion)
-	if err != nil {
-		// dev / unknown → treat as code 0 so any release is newer
-		code = 0
-	}
-	dir, err := stateDir()
-	if err != nil {
-		return nil, err
-	}
-	selectors := map[string]string{
-		"os":        runtime.GOOS,
-		"arch":      runtime.GOARCH,
-		"component": component,
-		"audience":  "runtime",
-	}
-	cfg := config.GetSystemConfig()
-	channel := cfg.Channel
-	if channel == "" {
-		channel = channelName
-	}
-	return &sdk.Updater{
-		Product:         productName,
-		Channel:         channel,
-		CurrentCode:     code,
-		EntryURLs:       entryURLs(),
-		TrustedKeys:     keys,
-		ClientSelectors: selectors,
-		StateStore:      sdk.NewFileStateStore(dir, productName, channel),
-		Policy:          sdk.DefaultPolicy(),
-		Recovery:        embeddedRecovery(),
-	}, nil
+	return fileSetRuntime(component, runtime.GOOS, runtime.GOARCH, code, root), nil
 }
 
 // Check checks whether a newer version is available via RUP.
 func Check(currentVersion string) (*CheckResult, error) {
-	u, err := newUpdater(currentVersion, "dec")
+	ctx := context.Background()
+	rt, err := newRuntime(currentVersion, "dec")
 	if err != nil {
 		recordFailedAttempt()
 		return nil, err
 	}
-	result := u.CheckForce(context.Background(), true)
-	if result.Err != nil {
+	u, err := openUpdater(ctx, rt)
+	if err != nil {
 		recordFailedAttempt()
-		return nil, result.Err
+		return nil, err
+	}
+	available, err := checkAvailable(ctx, u, true, 0)
+	if err != nil {
+		recordFailedAttempt()
+		return nil, err
 	}
 	latest := currentVersion
 	need := false
-	if result.Available != nil && result.Available.Target != nil {
-		latest = result.Available.Target.Version
+	if available != nil {
+		latest = available.GetVersion()
 		if !strings.HasPrefix(latest, "v") {
 			latest = "v" + latest
 		}
@@ -200,97 +156,57 @@ func recordFailedAttempt() {
 	_ = saveState(state)
 }
 
-// DoUpdate downloads and replaces the current binary via RUP + sdk/apply.
+// DoUpdate downloads and replaces the runtime suite via relkit-updater fileSet apply.
 func DoUpdate(currentVersion, latestVersion string) error {
-	latest := strings.TrimSpace(latestVersion)
-	u, err := newUpdater(currentVersion, "dec")
+	_ = strings.TrimSpace(latestVersion)
+	ctx := context.Background()
+	rt, err := newRuntime(currentVersion, "dec")
 	if err != nil {
 		return err
 	}
-	result := u.CheckForce(context.Background(), true)
-	if result.Err != nil {
-		return result.Err
+	u, err := openUpdater(ctx, rt)
+	if err != nil {
+		return err
 	}
-	if result.Available == nil {
+	available, err := checkAvailable(ctx, u, true, 0)
+	if err != nil {
+		return err
+	}
+	if available == nil {
 		return fmt.Errorf("当前已是最新版本 %s", currentVersion)
 	}
-	targetVer := result.Available.Target.Version
+	targetVer := available.GetVersion()
 	if !strings.HasPrefix(targetVer, "v") {
 		targetVer = "v" + targetVer
-	}
-	if latest != "" && !strings.EqualFold(strings.TrimPrefix(latest, "v"), strings.TrimPrefix(targetVer, "v")) {
-		// Prefer the version Check already resolved; mismatch is informational only.
 	}
 	if !version.NeedUpdate(currentVersion, targetVer) {
 		return fmt.Errorf("当前已是最新版本 %s", currentVersion)
 	}
 
-	executable, err := os.Executable()
+	root, err := binInstallRoot()
 	if err != nil {
 		return err
-	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		return err
-	}
-	binDir := filepath.Dir(executable)
-
-	tmpDir, err := os.MkdirTemp("", "dec-update-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmpDir)
-	ext := ""
-	if runtime.GOOS == "windows" {
-		ext = ".exe"
 	}
 	for _, component := range SuiteComponents {
-		componentUpdater, err := newUpdater(currentVersion, component)
+		crt := fileSetRuntime(component, runtime.GOOS, runtime.GOARCH, semverCodeOrZero(currentVersion), root)
+		cu, err := openUpdater(ctx, crt)
 		if err != nil {
 			return err
 		}
-		componentResult := componentUpdater.CheckForce(context.Background(), true)
-		if componentResult.Err != nil {
-			return componentResult.Err
+		got, err := checkAvailable(ctx, cu, true, 0)
+		if err != nil {
+			return err
 		}
-		if componentResult.Available == nil {
+		if got == nil {
 			return fmt.Errorf("发布缺少 %s 组件", component)
 		}
-		target := filepath.Join(binDir, component+ext)
-		staging := filepath.Join(tmpDir, component+ext)
-		if err := applyDownloadedComponent(
-			func(dest string) error {
-				return componentUpdater.Download(context.Background(), componentResult.Available, dest)
-			},
-			target,
-			staging,
-		); err != nil {
+		if err := downloadAndApply(ctx, cu, got.GetPlanId()); err != nil {
 			return fmt.Errorf("更新 %s 失败: %w", component, err)
 		}
 	}
 	now := time.Now()
 	_ = saveState(&CheckState{LastCheck: now, LatestVersion: targetVer, LastAttempt: now})
 	return nil
-}
-
-// applyDownloadedComponent writes a component onto the installed destPath.
-//
-// destPath is the already-installed file so SDK fileMatches can skip GET when
-// size+sha256 already match. If in-place download fails (typical Windows lock
-// after os.Remove of a running exe), download to staging and ReplaceFile.
-func applyDownloadedComponent(download func(dest string) error, destPath, stagingPath string) error {
-	if err := download(destPath); err == nil {
-		return nil
-	}
-	if err := download(stagingPath); err != nil {
-		return err
-	}
-	if _, statErr := os.Stat(destPath); os.IsNotExist(statErr) {
-		if err := os.WriteFile(destPath, nil, 0o755); err != nil {
-			return fmt.Errorf("创建安装位: %w", err)
-		}
-	}
-	return apply.ReplaceFile(stagingPath, destPath)
 }
 
 // ManualInstallCommand returns the primary first-install command (CNB raw scripts).

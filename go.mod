@@ -3,7 +3,7 @@ module github.com/shichao402/Dec
 go 1.26.3
 
 require (
-	firoyang.com/relkit v0.0.0-00010101000000-000000000000
+	go.firoyang.com/relkit v0.0.0-00010101000000-000000000000
 	github.com/gofrs/flock v0.13.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/spf13/cobra v1.8.0
@@ -28,4 +28,4 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 )
 
-replace firoyang.com/relkit => ./third_party/relkit
+replace go.firoyang.com/relkit => ./third_party/relkit

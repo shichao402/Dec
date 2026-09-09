@@ -4,27 +4,24 @@ import (
 	"strings"
 	"testing"
 
-	"firoyang.com/relkit/sdk"
+	"go.firoyang.com/relkit/sdk"
 )
 
-func TestSuiteUpdaterKeepsPinnedVersionEligible(t *testing.T) {
+func TestSuiteRuntimeKeepsPinnedVersionEligible(t *testing.T) {
 	t.Setenv("DEC_HOME", t.TempDir())
-	updater, err := newUpdaterFor("v1.13.48", "dec-server", "linux", "arm64")
-	if err != nil {
-		t.Fatal(err)
-	}
 	code, err := sdk.SemverCode("v1.13.48")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updater.CurrentCode != code-1 {
-		t.Fatalf("CurrentCode = %d, want %d", updater.CurrentCode, code-1)
+	rt := fileSetRuntime("dec-server", "linux", "arm64", int64(code-1), t.TempDir())
+	if rt.CurrentCode != int64(code-1) {
+		t.Fatalf("CurrentCode = %d, want %d", rt.CurrentCode, code-1)
 	}
-	if updater.ClientSelectors["component"] != "dec-server" ||
-		updater.ClientSelectors["os"] != "linux" ||
-		updater.ClientSelectors["arch"] != "arm64" ||
-		updater.ClientSelectors["audience"] != "runtime" {
-		t.Fatalf("selectors 不正确: %#v", updater.ClientSelectors)
+	if rt.ClientSelectors["component"] != "dec-server" ||
+		rt.ClientSelectors["os"] != "linux" ||
+		rt.ClientSelectors["arch"] != "arm64" ||
+		rt.ClientSelectors["audience"] != "runtime" {
+		t.Fatalf("selectors 不正确: %#v", rt.ClientSelectors)
 	}
 }
 

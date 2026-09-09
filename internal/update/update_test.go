@@ -173,11 +173,11 @@ func TestCheckBackgroundReturnsNilWhenCacheIsCurrent(t *testing.T) {
 
 func TestUpdaterSelectsRuntimeAudience(t *testing.T) {
 	t.Setenv("DEC_HOME", t.TempDir())
-	updater, err := newUpdater("v1.13.48", "dec-server")
+	rt, err := newRuntime("v1.13.48", "dec-server")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := updater.ClientSelectors["audience"]; got != "runtime" {
+	if got := rt.ClientSelectors["audience"]; got != "runtime" {
 		t.Fatalf("audience selector = %q, want runtime", got)
 	}
 }
@@ -248,76 +248,6 @@ func TestTrustedKeysFromEmbeddedRelkit(t *testing.T) {
 	gotB64 := base64.StdEncoding.EncodeToString(pk)
 	if gotB64 != wantB64 {
 		t.Fatalf("dec-2026 public key = %q, want %q from root relkit.json", gotB64, wantB64)
-	}
-}
-
-func TestApplyDownloadedComponentSkipsWhenDestMatches(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "dec-server")
-	staging := filepath.Join(dir, "staging")
-	if err := os.WriteFile(target, []byte("installed"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	var dests []string
-	err := applyDownloadedComponent(func(dest string) error {
-		dests = append(dests, dest)
-		if dest != target {
-			t.Fatalf("skip 路径不应落到 staging, dest=%q", dest)
-		}
-		return nil
-	}, target, staging)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(dests) != 1 || dests[0] != target {
-		t.Fatalf("dests = %v, want only installed path", dests)
-	}
-	got, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "installed" {
-		t.Fatalf("skip 不应改写已装文件, got %q", got)
-	}
-	if _, err := os.Stat(staging); !os.IsNotExist(err) {
-		t.Fatal("skip 不应创建 staging")
-	}
-}
-
-func TestApplyDownloadedComponentFallsBackToReplaceFile(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "dec-server")
-	staging := filepath.Join(dir, "staging")
-	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	err := applyDownloadedComponent(func(dest string) error {
-		if dest == target {
-			return errors.New("in-place locked")
-		}
-		return os.WriteFile(dest, []byte("new"), 0o755)
-	}, target, staging)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "new" {
-		t.Fatalf("target = %q, want new", got)
-	}
-}
-
-func TestApplyDownloadedComponentReportsStagingFailure(t *testing.T) {
-	dir := t.TempDir()
-	err := applyDownloadedComponent(func(string) error {
-		return errors.New("network down")
-	}, filepath.Join(dir, "dec"), filepath.Join(dir, "staging"))
-	if err == nil || !strings.Contains(err.Error(), "network down") {
-		t.Fatalf("err = %v", err)
 	}
 }
 
