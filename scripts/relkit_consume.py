@@ -219,12 +219,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     print(
         f"relkit consume: {CONSUME_REL} changed with the checkout; "
-        "re-running it against the synced tree",
+        "re-running it so the new cone and builds apply",
         flush=True,
     )
     env = {**os.environ, REEXEC_ENV: "1"}
     return subprocess.call(
-        [sys.executable, str(checkout), *forwarded, "--skip-update"],
+        [sys.executable, str(checkout), *forwarded],
         env=env,
     )
 

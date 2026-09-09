@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"cnb.cool/shichao402/relkit/sdk"
+	"firoyang.com/relkit/sdk"
 	"github.com/shichao402/Dec/internal/config"
 )
 

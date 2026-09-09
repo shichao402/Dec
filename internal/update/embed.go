@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"cnb.cool/shichao402/relkit/sdk"
+	"firoyang.com/relkit/sdk"
 )
 
 //go:generate go run generate_relkit.go

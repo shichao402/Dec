@@ -1,6 +1,6 @@
 # Dec 自更新架构（RUP + COS）
 
-Dec 运行时的检查/下载使用 `cnb.cool/shichao402/relkit/sdk`，发布走腾讯云 COS 自有域名。
+Dec 运行时的检查/下载使用 `firoyang.com/relkit/sdk`（`replace` 到 `third_party/relkit`），发布走腾讯云 COS 自有域名。
 终端用户只下载 Console；四件套是 Console 管理的目标端运行时。
 
 ## 客户端
@@ -84,7 +84,7 @@ scripts/relkit_consume.py --sdk-only
 落到 `third_party/relkit/`，`go.mod` 使用：
 
 ```
-replace cnb.cool/shichao402/relkit => ./third_party/relkit
+replace firoyang.com/relkit => ./third_party/relkit
 ```
 
-上游 URL 与 ref 来自 `scripts/relkit.lock.json`（schema `relkit.consume/1`）：默认 `channel: main`，即每次拉当时的 HEAD。冻结某次提交时把完整 SHA 写进 lock 的 `commit`（短 SHA 不能直接 `git fetch`），临时覆盖用 `--ref` / `RELKIT_REF`。`scripts/relkit_consume.py` 是上游 `scripts/host/relkit_consume.py` 的逐字节副本，只负责解析 lock 并转交该 SHA 的 `scripts/consume.py`；cone 与构建规则不在本仓。Go 模块路径仍是 `cnb.cool/shichao402/relkit`（replace 到 `third_party/relkit`），与 git 主仓无关。
+上游 URL 与 ref 来自 `scripts/relkit.lock.json`（schema `relkit.consume/1`）：默认 `channel: main`，即每次拉当时的 HEAD。冻结某次提交时把完整 SHA 写进 lock 的 `commit`（短 SHA 不能直接 `git fetch`），临时覆盖用 `--ref` / `RELKIT_REF`。`scripts/relkit_consume.py` 是上游 `scripts/host/relkit_consume.py` 的逐字节副本，只负责解析 lock 并转交该 SHA 的 `scripts/consume.py`；cone 与构建规则不在本仓。Go 模块路径是 `firoyang.com/relkit`（replace 到 `third_party/relkit`），源码从 GitHub 检出，不要 `go get` 该模块。

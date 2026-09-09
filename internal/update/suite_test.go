@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"cnb.cool/shichao402/relkit/sdk"
+	"firoyang.com/relkit/sdk"
 )
 
 func TestSuiteUpdaterKeepsPinnedVersionEligible(t *testing.T) {

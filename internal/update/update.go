@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"cnb.cool/shichao402/relkit/sdk"
-	"cnb.cool/shichao402/relkit/sdk/apply"
+	"firoyang.com/relkit/sdk"
+	"firoyang.com/relkit/sdk/apply"
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/version"
