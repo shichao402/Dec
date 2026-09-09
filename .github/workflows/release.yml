@@ -336,6 +336,10 @@ jobs:
             local code
             code="$(curl -sS -o "$body" -w "%{http_code}" -X "$method" \
               -H "Authorization: Bearer ${RELKIT_UPLOAD_TOKEN}" \
+              -H "X-Relkit-Publish-Protocol: 2" \
+              -H "X-Relkit-Publish-Protocol-Min: 2" \
+              -H "X-Relkit-Publish-Protocol-Max: 2" \
+              -H "X-Relkit-Version: dec-release/${VERSION}" \
               "$@" \
               "$url")"
             if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
