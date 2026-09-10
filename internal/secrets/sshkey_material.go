@@ -3,9 +3,10 @@ package secrets
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 // SSHKeyMaterial 是登记前已就绪的密钥素材（不含 Hosts）。
@@ -28,7 +29,7 @@ func GenerateSSHKeyMaterial(comment string) (SSHKeyMaterial, error) {
 	defer os.RemoveAll(dir)
 
 	privPath := filepath.Join(dir, "id_ed25519")
-	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", privPath)
+	cmd := sysproc.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", privPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return SSHKeyMaterial{}, fmt.Errorf("ssh-keygen 生成失败: %w (%s)", err, strings.TrimSpace(string(out)))
@@ -71,7 +72,7 @@ func LoadSSHKeyMaterialFromPrivatePath(privPath string) (SSHKeyMaterial, error) 
 	}
 	defer cleanup()
 
-	pubOut, err := exec.Command("ssh-keygen", "-y", "-f", securePath).CombinedOutput()
+	pubOut, err := sysproc.Command("ssh-keygen", "-y", "-f", securePath).CombinedOutput()
 	if err != nil {
 		return SSHKeyMaterial{}, fmt.Errorf("从私钥派生公钥失败: %w (%s)", err, strings.TrimSpace(string(pubOut)))
 	}
@@ -80,7 +81,7 @@ func LoadSSHKeyMaterialFromPrivatePath(privPath string) (SSHKeyMaterial, error) 
 		return SSHKeyMaterial{}, fmt.Errorf("派生公钥为空")
 	}
 
-	fpOut, err := exec.Command("ssh-keygen", "-lf", securePath).CombinedOutput()
+	fpOut, err := sysproc.Command("ssh-keygen", "-lf", securePath).CombinedOutput()
 	if err != nil {
 		return SSHKeyMaterial{}, fmt.Errorf("计算 fingerprint 失败: %w (%s)", err, strings.TrimSpace(string(fpOut)))
 	}

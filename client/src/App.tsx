@@ -98,6 +98,7 @@ export default function App() {
   const handleConnectRef = useRef<(conn: SavedConnection, forceUnlock?: boolean) => Promise<void>>(
     () => Promise.resolve(),
   )
+  const handleUnlockRef = useRef<(passwordOverride?: string) => Promise<void>>(() => Promise.resolve())
   const actions = useActionRegistry()
   const runAction = actions.run
   const activeActions = runningActions(actions.state)
@@ -135,6 +136,8 @@ export default function App() {
 
   // session 过期后 Console 直接跳回解锁页，不再走 handleConnect，
   // 所以凭据库里的主密码要跟着解锁页出现回填，而不是跟着连接动作。
+  // 策略允许时，存了密码就直接替用户解锁一次；关闭策略或服务重启后的首次连接只回填，
+  // 仍须人工确认。restoredPasswordFor 用于挡住失败重试循环。
   useEffect(() => {
     if (screen !== 'unlock') {
       restoredPasswordFor.current = ''
@@ -147,9 +150,11 @@ export default function App() {
     setRememberPassword(true)
     const spec = actionSpec(`connections:password:${conn.id}`, '正在读取已保存的主密码', 'console', [resource.connections], 'read')
     void runAction(spec, () => loadSavedPassword(conn.id)).then((outcome) => {
-      if (outcome.ok && outcome.value) setPassword(outcome.value)
+      if (!outcome.ok || !outcome.value) return
+      setPassword(outcome.value)
+      if (settings?.AutoReunlockOnTimeout) void handleUnlockRef.current(outcome.value)
     })
-  }, [screen, current, runAction])
+  }, [screen, current, settings?.AutoReunlockOnTimeout, runAction])
 
   useEffect(() => {
     const spec = actionSpec('connections:list', '加载设备连接', 'console', [resource.connections], 'read')
@@ -294,20 +299,23 @@ export default function App() {
     await handleConnect(outcome.value.stored)
   }
 
-  async function handleUnlock() {
+  async function handleUnlock(passwordOverride?: string) {
     if (!current) return
+    // 自动解锁在 password state 落定前就会调用，这里用传入的密码为准。
+    const secret = passwordOverride ?? password
+    const retain = passwordOverride !== undefined ? true : rememberPassword
     const spec = actionSpec(`session:unlock:${current.id}`, '正在解锁设备', current.id, [resource.session], 'session', '设备已解锁')
     const outcome = await actions.run(spec, async () => {
       let stored = current
       if (current.auth_email !== email.trim()) {
         stored = await saveConnection({ ...current, auth_email: email.trim() })
       }
-      const result = await authenticate(email, password, totp, true)
+      const result = await authenticate(email, secret, totp, true, retain)
       if (result.error) throw new Error(result.error)
       if (!result.unlocked) return { result, stored, loaded: null, all: await listConnections() }
       stored = await saveConnection(
-        { ...stored, auth_email: email.trim(), password_saved: rememberPassword },
-        rememberPassword ? password : undefined,
+        { ...stored, auth_email: email.trim(), password_saved: retain },
+        retain ? secret : undefined,
       )
       return {
         result,
@@ -332,6 +340,7 @@ export default function App() {
       setScreen('console')
     }
   }
+  handleUnlockRef.current = handleUnlock
 
   async function handleDisconnect() {
     const disconnecting = current

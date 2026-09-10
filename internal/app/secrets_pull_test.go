@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/secrets/handler"
+	"github.com/shichao402/Dec/internal/sysproc"
 	"github.com/shichao402/Dec/internal/types"
 	"gopkg.in/yaml.v3"
 )
@@ -521,10 +521,10 @@ func TestPullPPrivateProjectCredentialsAreWorkspaceScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectRoot := t.TempDir()
-	if out, err := exec.Command("git", "-C", projectRoot, "init").CombinedOutput(); err != nil {
+	if out, err := sysproc.Command("git", "-C", projectRoot, "init").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
-	if out, err := exec.Command("git", "-C", projectRoot, "remote", "add", "origin", "https://git.example.com/team/repo.git").CombinedOutput(); err != nil {
+	if out, err := sysproc.Command("git", "-C", projectRoot, "remote", "add", "origin", "https://git.example.com/team/repo.git").CombinedOutput(); err != nil {
 		t.Fatalf("git remote add: %v: %s", err, out)
 	}
 	if err := config.NewProjectConfigManager(projectRoot).SaveProjectConfig(&types.ProjectConfig{ProjectName: "my-app"}); err != nil {

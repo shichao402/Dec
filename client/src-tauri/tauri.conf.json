@@ -30,7 +30,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis",
+      "dmg",
+      "appimage"
+    ],
     "resources": [
       "resources/runtime/**/*"
     ],

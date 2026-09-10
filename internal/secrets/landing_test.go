@@ -2,11 +2,12 @@ package secrets
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 func TestNormalizeSyncRelPath_RejectsUntrustedNames(t *testing.T) {
@@ -176,7 +177,7 @@ func initGitRepo(t *testing.T, dir string) {
 
 func runGitOrSkip(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := sysproc.Command("git", args...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("git %v 失败（跳过依赖 git 的用例）: %v\n%s", args, err, out)

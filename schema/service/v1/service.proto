@@ -30,6 +30,9 @@ message AuthenticateRequest {
   string totp = 2;
   bool remember_device = 3;
   string email = 4;
+  // retain_password 由 Console「保存主密码」勾选驱动：允许 dec-server 在进程内存
+  // 保留主密码，会话超时或云端失效后自行静默重解锁。禁止落盘，进程退出即消失。
+  bool retain_password = 5;
 }
 
 message AuthenticateResponse {

@@ -2,11 +2,12 @@ package secrets
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 func useTempSSHHome(t *testing.T) string {
@@ -521,7 +522,7 @@ func TestProjectSSHKeyLandingIsScopedByGitDirAndRevocable(t *testing.T) {
 		if err := os.MkdirAll(root, 0755); err != nil {
 			t.Fatal(err)
 		}
-		if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
+		if out, err := sysproc.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
 			t.Fatalf("git init: %v: %s", err, out)
 		}
 	}
@@ -549,11 +550,11 @@ func TestProjectSSHKeyLandingIsScopedByGitDirAndRevocable(t *testing.T) {
 	if raw, readErr := os.ReadFile(mainPath); readErr == nil && strings.Contains(string(raw), "git.example.com") {
 		t.Fatalf("project Host 不得写入全局 SSH config:\n%s", raw)
 	}
-	scoped, err := exec.Command("git", "-C", projectRoot, "config", "--get", "core.sshCommand").Output()
+	scoped, err := sysproc.Command("git", "-C", projectRoot, "config", "--get", "core.sshCommand").Output()
 	if err != nil || !strings.Contains(string(scoped), filepath.ToSlash(paths.SSHFragment)) {
 		t.Fatalf("project 应命中 sshCommand, err=%v out=%q", err, scoped)
 	}
-	if out, err := exec.Command("git", "-C", otherRoot, "config", "--get", "core.sshCommand").CombinedOutput(); err == nil {
+	if out, err := sysproc.Command("git", "-C", otherRoot, "config", "--get", "core.sshCommand").CombinedOutput(); err == nil {
 		t.Fatalf("其它仓库不应命中 project sshCommand: %q", out)
 	}
 	if ok, err := InspectProjectSSHKeyLanding(projectRoot, "my-app", "deploy"); err != nil || !ok {
@@ -565,7 +566,7 @@ func TestProjectSSHKeyLandingIsScopedByGitDirAndRevocable(t *testing.T) {
 	if ok, err := InspectProjectSSHKeyLanding(projectRoot, "my-app", "deploy"); err != nil || ok {
 		t.Fatalf("revoke 后 Inspect = %v, %v", ok, err)
 	}
-	if out, err := exec.Command("git", "-C", projectRoot, "config", "--get", "core.sshCommand").CombinedOutput(); err == nil {
+	if out, err := sysproc.Command("git", "-C", projectRoot, "config", "--get", "core.sshCommand").CombinedOutput(); err == nil {
 		t.Fatalf("revoke 后不应残留 sshCommand: %q", out)
 	}
 }

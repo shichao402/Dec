@@ -8,7 +8,7 @@
 
 ## 决策
 
-`dec-server` 仍是一机单例。进程启动后 **全局锁定**：仅 `Ping` 与 `Authenticate` 可在未解锁时调用。人在管理客户端选择本机或远程实例，提交 Bitwarden 主密码（及可选 TOTP）；服务用该密码走 Identity 程序化解锁。成功则控制权与 BW session 同在进程内存、同为 1 小时 TTL；进程退出即失效。本机 MCP 缺 session 时可按 [0022](0022-console-bitwarden-unlock.md) 自动唤起 Console 并等待同一门闩打开。
+`dec-server` 仍是一机单例。进程启动后 **全局锁定**：仅 `Ping` 与 `Authenticate` 可在未解锁时调用。人在管理客户端选择本机或远程实例，提交 Bitwarden 主密码（及可选 TOTP）；服务用该密码走 Identity 程序化解锁。成功则控制权与 BW session 同在进程内存、同用 `session_timeout`（默认 4 小时）作为有效期；进程退出即失效。有效期到点一律作废，云端 access_token 是否还有效不作数；用户勾选保存主密码时，服务可用进程内存里的那份自行重登录，到期后是否自动进行由 `auto_reunlock_on_timeout`（默认开启）决定（见 [0022](0022-console-bitwarden-unlock.md)）。关闭时须回到 Console 人工确认，但不影响有效期内云端 401 的静默恢复。本机 MCP 缺 session 时可按 [0022](0022-console-bitwarden-unlock.md) 自动唤起 Console 并等待同一门闩打开。
 
 `server.json` 的 token 只是本机 gRPC 传输密钥，不是所有权证明。远程会话使用 `Authenticate` 下发的 control token。非 loopback 监听必须配置 TLS。
 

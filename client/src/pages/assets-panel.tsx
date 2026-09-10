@@ -18,8 +18,8 @@ import type { AssetOption, AssetSelection } from '@/lib/utils'
 type Filter = 'all' | 'enabled' | 'required' | 'tagged'
 
 // 行按列对齐：名称、说明、成员各占固定语义列，宽屏不会只在左侧堆一小块。
-const row = 'grid grid-cols-[auto_minmax(9rem,16rem)_minmax(0,1fr)_auto] items-center gap-x-3'
-const compactRow = 'grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3'
+const row = 'grid grid-cols-[auto_minmax(9rem,16rem)_minmax(0,1fr)_auto] items-start gap-x-3'
+const compactRow = 'grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3'
 
 export function AssetsPanel(props: {
   deviceId: string
@@ -205,7 +205,7 @@ export function AssetsPanel(props: {
         ) : (
           <span className="text-xs text-faint">与设备上的记录一致</span>
         )}
-        <span className="hidden min-w-0 flex-1 truncate text-xs text-faint xl:block">{props.hint}</span>
+        <span className="hidden min-w-0 flex-1 truncate text-xs text-faint 2xl:block" title={props.hint}>{props.hint}</span>
         <div className="ml-auto flex items-center gap-2">
           <ActionButton
             spec={saveSpec}
@@ -251,7 +251,7 @@ export function AssetRow({
         changed && 'bg-accent/6',
       )}
     >
-      <Checkbox aria-label={item.Name} checked={checked} disabled={item.OtherPlane} onChange={onToggle} />
+      <Checkbox className="mt-0.5" aria-label={item.Name} checked={checked} disabled={item.OtherPlane} onChange={onToggle} />
       <div className="flex min-w-0 flex-col">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-[13px] font-medium text-ink" title={item.Name}>{item.Name}</span>
@@ -275,7 +275,7 @@ export function AssetRow({
           <span className="hidden min-w-0 text-xs leading-4 text-faint lg:line-clamp-2">
             {item.Description || (memberTypes.length ? memberTypes.join(' · ') : '无描述')}
           </span>
-          <span className="hidden items-center justify-end gap-1 xl:flex">
+          <span className="hidden items-start justify-end gap-1 pt-0.5 xl:flex">
             {members.slice(0, 2).map((member) => (
               <Badge key={`${member.Type}-${member.Name}`} tone="quiet" className="font-mono">
                 {member.Type}/{member.Name}

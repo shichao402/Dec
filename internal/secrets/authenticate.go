@@ -35,7 +35,8 @@ func UnlockForTest() {
 
 // UnlockWithPassword 用调用方传入的主密码（及可选 TOTP）解锁实例。
 // 密码不落盘；2FA 中间态只留在进程内 Authenticator 上。
-func UnlockWithPassword(ctx context.Context, email, password, totp string, rememberDevice bool) (*UnlockResult, error) {
+// retainPassword 为真时把主密码留在进程内存，供 session 到期后静默重解锁。
+func UnlockWithPassword(ctx context.Context, email, password, totp string, rememberDevice, retainPassword bool) (*UnlockResult, error) {
 	password = strings.TrimSpace(password)
 	totp = strings.TrimSpace(totp)
 	email = strings.TrimSpace(email)
@@ -60,6 +61,10 @@ func UnlockWithPassword(ctx context.Context, email, password, totp string, remem
 		return nil, fmt.Errorf("未配置 Bitwarden 邮箱")
 	}
 
+	if !retainPassword {
+		ClearRetainedPassword()
+	}
+
 	auth := authenticatorFactory()
 	token, need2FA, err := auth.Unlock(ctx, email, password)
 	if err != nil {
@@ -70,9 +75,15 @@ func UnlockWithPassword(ctx context.Context, email, password, totp string, remem
 		pendingAuthMu.Lock()
 		pendingAuth = auth
 		pendingAuthMu.Unlock()
+		if retainPassword {
+			retainPending2FA(email, password)
+		}
 		return &UnlockResult{Need2FA: true}, nil
 	}
 	applyUnlockSession(token)
+	if retainPassword {
+		RetainUnlockPassword(email, password)
+	}
 	return &UnlockResult{}, nil
 }
 
@@ -88,6 +99,7 @@ func completePending2FA(ctx context.Context, totp string, rememberDevice bool) (
 		return nil, fmt.Errorf("二次验证失败: %w", err)
 	}
 	applyUnlockSession(token)
+	applyPending2FARetention()
 	return &UnlockResult{}, nil
 }
 

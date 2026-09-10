@@ -123,6 +123,9 @@ type AuthenticateRequest struct {
 	Totp           string                 `protobuf:"bytes,2,opt,name=totp,proto3" json:"totp,omitempty"`
 	RememberDevice bool                   `protobuf:"varint,3,opt,name=remember_device,json=rememberDevice,proto3" json:"remember_device,omitempty"`
 	Email          string                 `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
+	// retain_password 由 Console「保存主密码」勾选驱动：允许 dec-server 在进程内存
+	// 保留主密码，会话超时或云端失效后自行静默重解锁。禁止落盘，进程退出即消失。
+	RetainPassword bool `protobuf:"varint,5,opt,name=retain_password,json=retainPassword,proto3" json:"retain_password,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -183,6 +186,13 @@ func (x *AuthenticateRequest) GetEmail() string {
 		return x.Email
 	}
 	return ""
+}
+
+func (x *AuthenticateRequest) GetRetainPassword() bool {
+	if x != nil {
+		return x.RetainPassword
+	}
+	return false
 }
 
 type AuthenticateResponse struct {
@@ -452,8 +462,8 @@ type InvokeRequest struct {
 	Method          string                 `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
 	ProjectRoot     string                 `protobuf:"bytes,2,opt,name=project_root,json=projectRoot,proto3" json:"project_root,omitempty"`
 	PayloadJson     []byte                 `protobuf:"bytes,3,opt,name=payload_json,json=payloadJson,proto3" json:"payload_json,omitempty"`
-	UnlockTimeoutMs int64                  `protobuf:"varint,4,opt,name=unlock_timeout_ms,json=unlockTimeoutMs,proto3" json:"unlock_timeout_ms,omitempty"`
-	WorkspacePlane  string                 `protobuf:"bytes,5,opt,name=workspace_plane,json=workspacePlane,proto3" json:"workspace_plane,omitempty"` // "project" | "user"；空兼容为 project
+	UnlockTimeoutMs int64                  `protobuf:"varint,4,opt,name=unlock_timeout_ms,json=unlockTimeoutMs,proto3" json:"unlock_timeout_ms,omitempty"` // 等待 Console Authenticate；0 使用服务默认值
+	WorkspacePlane  string                 `protobuf:"bytes,5,opt,name=workspace_plane,json=workspacePlane,proto3" json:"workspace_plane,omitempty"`       // "local" | "global"；兼容 "project" | "user"
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -582,8 +592,8 @@ type RunOperationRequest struct {
 	ClientId        string                 `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	Facade          string                 `protobuf:"bytes,4,opt,name=facade,proto3" json:"facade,omitempty"`
 	PayloadJson     []byte                 `protobuf:"bytes,5,opt,name=payload_json,json=payloadJson,proto3" json:"payload_json,omitempty"`
-	UnlockTimeoutMs int64                  `protobuf:"varint,6,opt,name=unlock_timeout_ms,json=unlockTimeoutMs,proto3" json:"unlock_timeout_ms,omitempty"`
-	WorkspacePlane  string                 `protobuf:"bytes,7,opt,name=workspace_plane,json=workspacePlane,proto3" json:"workspace_plane,omitempty"` // "project" | "user"；空兼容为 project
+	UnlockTimeoutMs int64                  `protobuf:"varint,6,opt,name=unlock_timeout_ms,json=unlockTimeoutMs,proto3" json:"unlock_timeout_ms,omitempty"` // 等待 Console Authenticate；0 使用服务默认值
+	WorkspacePlane  string                 `protobuf:"bytes,7,opt,name=workspace_plane,json=workspacePlane,proto3" json:"workspace_plane,omitempty"`       // "local" | "global"；兼容 "project" | "user"
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1206,12 +1216,13 @@ const file_service_v1_service_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x1f\n" +
 	"\vinstance_id\x18\x02 \x01(\tR\n" +
 	"instanceId\x12\x1a\n" +
-	"\bunlocked\x18\x03 \x01(\bR\bunlocked\"\x84\x01\n" +
+	"\bunlocked\x18\x03 \x01(\bR\bunlocked\"\xad\x01\n" +
 	"\x13AuthenticateRequest\x12\x1a\n" +
 	"\bpassword\x18\x01 \x01(\tR\bpassword\x12\x12\n" +
 	"\x04totp\x18\x02 \x01(\tR\x04totp\x12'\n" +
 	"\x0fremember_device\x18\x03 \x01(\bR\x0erememberDevice\x12\x14\n" +
-	"\x05email\x18\x04 \x01(\tR\x05email\"\xac\x01\n" +
+	"\x05email\x18\x04 \x01(\tR\x05email\x12'\n" +
+	"\x0fretain_password\x18\x05 \x01(\bR\x0eretainPassword\"\xac\x01\n" +
 	"\x14AuthenticateResponse\x12\x1a\n" +
 	"\bunlocked\x18\x01 \x01(\bR\bunlocked\x12\x19\n" +
 	"\bneed_2fa\x18\x02 \x01(\bR\aneed2fa\x12#\n" +

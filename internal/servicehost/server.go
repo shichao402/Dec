@@ -34,6 +34,7 @@ type Server struct {
 	listenToken      string
 	controlMu        sync.Mutex
 	controlTokens    map[string]time.Time
+	controlTTL       time.Duration
 	broker           *operationBroker
 	presence         *presenceTracker
 	requestStop      func()
@@ -95,6 +96,7 @@ func Run(ctx context.Context, version string) error {
 		broker:        newOperationBroker(),
 		listenToken:   token,
 		controlTokens: map[string]time.Time{},
+		controlTTL:    secrets.SessionTTL(),
 	}
 	host.requestStop = func() {
 		select {
@@ -184,7 +186,8 @@ func (s *Server) Ping(context.Context, *servicev1.PingRequest) (*servicev1.PingR
 }
 
 func (s *Server) Authenticate(ctx context.Context, req *servicev1.AuthenticateRequest) (*servicev1.AuthenticateResponse, error) {
-	result, err := secrets.UnlockWithPassword(ctx, req.GetEmail(), req.GetPassword(), req.GetTotp(), req.GetRememberDevice())
+	result, err := secrets.UnlockWithPassword(ctx, req.GetEmail(), req.GetPassword(), req.GetTotp(),
+		req.GetRememberDevice(), req.GetRetainPassword())
 	if err != nil {
 		return &servicev1.AuthenticateResponse{Error: err.Error()}, nil
 	}
@@ -311,12 +314,12 @@ func (s *Server) authorizeRPC(ctx context.Context, fullMethod string) error {
 		return status.Error(codes.Unauthenticated, "invalid dec-server token")
 	}
 	// 本机 Console 持有 server.json 的随机 listen token 时，允许在锁定态停止旧服务，
-	// 以便先把四件套原子升级到 Console 版本再重新连接。远端连接拿不到 listen token，
+	// 以便先把运行时套件原子升级到 Console 版本再重新连接。远端连接拿不到 listen token，
 	// 仍必须 Authenticate 后取得 control token，不能借此关闭服务。
 	if fullMethod == servicev1.DecService_Shutdown_FullMethodName {
 		return nil
 	}
-	if !secrets.InstanceUnlocked() {
+	if !secrets.InstanceUnlocked() && !secrets.TryAutoUnlock(ctx) {
 		// Invoke / RunOperation 是通用调度 RPC，是否允许在锁定态执行必须继续由
 		// handler 根据具体 method / operation 精确判断，不能在这里整条放开。
 		switch fullMethod {
@@ -340,16 +343,45 @@ func (s *Server) validTransportToken(ctx context.Context) bool {
 	}
 	now := time.Now()
 	s.controlMu.Lock()
-	defer s.controlMu.Unlock()
 	exp, ok := s.controlTokens[got]
 	if !ok {
+		s.controlMu.Unlock()
 		return false
 	}
 	if !now.Before(exp) {
 		delete(s.controlTokens, got)
-		return false
+		s.controlMu.Unlock()
+		// control token 与解锁窗口同时到期。策略允许且服务仍保留主密码时，
+		// 先重新建立 BW session，再续用这枚已认证连接持有的 control token。
+		if !secrets.TryAutoUnlock(ctx) {
+			return false
+		}
+		s.controlMu.Lock()
+		s.controlTokens[got] = time.Now().Add(s.sessionTTLLocked())
+		s.controlMu.Unlock()
+		return true
 	}
+	// session 到期后可由保留的主密码静默续上，控制 token 跟着在用就续期，
+	// 免得还在操作的 Console 被 token 到期单独踢回解锁页。
+	s.controlTokens[got] = now.Add(s.sessionTTLLocked())
+	s.controlMu.Unlock()
 	return true
+}
+
+// sessionTTLLocked 要求调用方持有 controlMu。
+func (s *Server) sessionTTLLocked() time.Duration {
+	if s.controlTTL > 0 {
+		return s.controlTTL
+	}
+	return secrets.DefaultSessionTTL
+}
+
+// refreshSessionTTL 在设置保存后重新读取 session_timeout。
+func (s *Server) refreshSessionTTL() {
+	ttl := secrets.SessionTTL()
+	s.controlMu.Lock()
+	s.controlTTL = ttl
+	s.controlMu.Unlock()
 }
 
 func (s *Server) validListenToken(ctx context.Context) bool {
@@ -367,11 +399,11 @@ func (s *Server) issueControlToken() (string, int64) {
 	if err != nil {
 		token = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
-	ttl := secrets.DefaultSessionTTL
 	s.controlMu.Lock()
 	if s.controlTokens == nil {
 		s.controlTokens = map[string]time.Time{}
 	}
+	ttl := s.sessionTTLLocked()
 	s.controlTokens[token] = time.Now().Add(ttl)
 	s.controlMu.Unlock()
 	return token, ttl.Milliseconds()

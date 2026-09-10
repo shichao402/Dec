@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 func TestParseProcessorNoteName(t *testing.T) {
@@ -193,7 +193,7 @@ func TestGCMHandler_ProjectApplyInspectRevokeUsesRepoPath(t *testing.T) {
 	if err := os.MkdirAll(projectRoot, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("git", "-C", projectRoot, "init").CombinedOutput(); err != nil {
+	if out, err := sysproc.Command("git", "-C", projectRoot, "init").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 
@@ -238,7 +238,7 @@ func TestGCMHandler_ProjectApplyInspectRevokeUsesRepoPath(t *testing.T) {
 		!strings.Contains(string(raw), `credential "https://git.example.com/team/repo"`) {
 		t.Fatalf("project GCM fragment 不完整:\n%s", raw)
 	}
-	got, err := exec.Command("git", "-C", projectRoot, "config", "--get", "credential.useHttpPath").Output()
+	got, err := sysproc.Command("git", "-C", projectRoot, "config", "--get", "credential.useHttpPath").Output()
 	if err != nil || strings.TrimSpace(string(got)) != "true" {
 		t.Fatalf("工作区未命中 useHttpPath: err=%v out=%q", err, got)
 	}

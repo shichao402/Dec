@@ -220,6 +220,7 @@ impl Session {
         password: String,
         totp: String,
         remember_device: bool,
+        retain_password: bool,
     ) -> Result<AuthResult, String> {
         let resp = self
             .client
@@ -228,6 +229,7 @@ impl Session {
                 totp,
                 remember_device,
                 email,
+                retain_password,
             }))
             .await
             .map_err(|e| e.to_string())?

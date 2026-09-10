@@ -67,6 +67,12 @@ type GlobalConfig struct {
 	IDEs              []string   `yaml:"ides,omitempty"`
 	Editor            string     `yaml:"editor,omitempty"`
 	ServerIdleTimeout string     `yaml:"server_idle_timeout,omitempty"`
+	// SessionTimeout 是一次 Bitwarden 解锁在本机的有效期；到期即丢弃进程内 session 与
+	// vault key，无论云端 token 是否仍然有效。空值取默认 4h。
+	SessionTimeout string `yaml:"session_timeout,omitempty"`
+	// AutoReunlockOnTimeout 控制解锁有效期到点后是否使用进程内保留的主密码静默重登录。
+	// nil 兼容旧配置，按默认开启处理。
+	AutoReunlockOnTimeout *bool `yaml:"auto_reunlock_on_timeout,omitempty"`
 	// ManagementListen 为 gRPC 绑定地址；空则 127.0.0.1:0。非 loopback 必须同时配置 TLS。
 	ManagementListen  string `yaml:"management_listen,omitempty"`
 	ManagementTLSCert string `yaml:"management_tls_cert,omitempty"`

@@ -19,7 +19,7 @@ func TestUnlockWithPasswordStubSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := UnlockWithPassword(context.Background(), "alice@dec.test", "secret", "", false)
+	result, err := UnlockWithPassword(context.Background(), "alice@dec.test", "secret", "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestUnlockWithPasswordWrongSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := UnlockWithPassword(context.Background(), "alice@dec.test", "nope", "", false)
+	_, err := UnlockWithPassword(context.Background(), "alice@dec.test", "nope", "", false, false)
 	if err == nil {
 		t.Fatal("错误密码应失败")
 	}
@@ -68,7 +68,7 @@ func TestUnlockWithPasswordTwoFactor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := UnlockWithPassword(context.Background(), "alice@dec.test", "secret", "", false)
+	first, err := UnlockWithPassword(context.Background(), "alice@dec.test", "secret", "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestUnlockWithPasswordTwoFactor(t *testing.T) {
 		t.Fatal("仅密码阶段不应解锁")
 	}
 
-	second, err := UnlockWithPassword(context.Background(), "", "", "123456", false)
+	second, err := UnlockWithPassword(context.Background(), "", "", "123456", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

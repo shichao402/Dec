@@ -101,6 +101,14 @@ func EnsureSession(ctx context.Context, opts *EnsureSessionOpts) error {
 		return fmt.Errorf("Bitwarden 未配置")
 	}
 
+	// 保留的主密码优先：session 到期或云端失效后由服务自己重登录，不惊动用户。
+	if unlocked, retainErr := tryRetainedUnlock(ctx, onStatus); unlocked {
+		authStatus(onStatus, "session ready")
+		return nil
+	} else if retainErr != nil {
+		authStatus(onStatus, "auto unlock: falling back to interactive")
+	}
+
 	unlocked, passwordSet, err := tryProgrammaticUnlock(ctx, onStatus)
 	if err != nil {
 		return err

@@ -32,6 +32,8 @@ export function SettingsPage(props: {
 }) {
   const [repoURL, setRepoURL] = useState(props.settings.RepoURL)
   const [idle, setIdle] = useState(props.settings.ServerIdleTimeout)
+  const [sessionTimeout, setSessionTimeout] = useState(props.settings.SessionTimeout)
+  const [autoReunlockOnTimeout, setAutoReunlockOnTimeout] = useState(props.settings.AutoReunlockOnTimeout)
   const [ides, setIDEs] = useState(props.settings.SelectedIDEs)
   const [cleanupPreview, setCleanupPreview] = useState<LocalCleanupPreview | null>(null)
   const [cleanupConfirm, setCleanupConfirm] = useState('')
@@ -44,6 +46,8 @@ export function SettingsPage(props: {
   const dirty =
     repoURL !== props.settings.RepoURL ||
     idle !== props.settings.ServerIdleTimeout ||
+    sessionTimeout !== props.settings.SessionTimeout ||
+    autoReunlockOnTimeout !== props.settings.AutoReunlockOnTimeout ||
     ides.join(',') !== props.settings.SelectedIDEs.join(',')
 
   const save = async () => {
@@ -51,7 +55,13 @@ export function SettingsPage(props: {
       'save_global_settings',
       '',
       'global',
-      { RepoURL: repoURL, IDEs: ides, ServerIdleTimeout: idle },
+      {
+        RepoURL: repoURL,
+        IDEs: ides,
+        ServerIdleTimeout: idle,
+        SessionTimeout: sessionTimeout,
+        AutoReunlockOnTimeout: autoReunlockOnTimeout,
+      },
       saveSpec.key,
     )
     if (result.RepoAuthRequired || result.ConnectError) {
@@ -91,6 +101,21 @@ export function SettingsPage(props: {
             </SettingsSection>
 
             <SettingsSection
+              title="解锁有效期"
+              description="一次解锁在这台设备上的寿命，例如 4h、30m。到期即丢弃进程内 session，云端会话是否还在不作数。"
+            >
+              <Input className="max-w-40" value={sessionTimeout} onChange={(e) => setSessionTimeout(e.target.value)} />
+              <CheckOption
+                label="到期后使用已保存的主密码自动重新解锁"
+                checked={autoReunlockOnTimeout}
+                onChange={() => setAutoReunlockOnTimeout(!autoReunlockOnTimeout)}
+              />
+              <p className="text-xs leading-relaxed text-faint">
+                关闭后，到期必须在认证页人工确认；有效期内 Bitwarden 会话提前失效时仍会静默恢复。
+              </p>
+            </SettingsSection>
+
+            <SettingsSection
               title="目标 IDE"
               description="决定 rules / skills / MCP 配置写到哪些 IDE 目录。"
             >
@@ -110,6 +135,8 @@ export function SettingsPage(props: {
               props.setSettings(next)
               setRepoURL(next.RepoURL)
               setIdle(next.ServerIdleTimeout)
+              setSessionTimeout(next.SessionTimeout)
+              setAutoReunlockOnTimeout(next.AutoReunlockOnTimeout)
               setIDEs(next.SelectedIDEs)
               props.onSaved()
             }}>

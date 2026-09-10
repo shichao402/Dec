@@ -36,6 +36,8 @@ type GlobalSettingsState struct {
 	SecretsConfigPath      string
 	BitwardenSessionReady  bool
 	ServerIdleTimeout      string
+	SessionTimeout         string
+	AutoReunlockOnTimeout  bool
 }
 
 type ConnectRepoResult struct {
@@ -51,25 +53,29 @@ type SaveGlobalSettingsInput struct {
 	RepoURL string
 	IDEs    []string
 	// EnabledBundles nil = 不改用户平面启用列表；非 nil（含空切片）= 写回 GlobalConfig.EnabledBundles。
-	EnabledBundles    []string
-	ServerIdleTimeout string
+	EnabledBundles        []string
+	ServerIdleTimeout     string
+	SessionTimeout        string
+	AutoReunlockOnTimeout *bool
 }
 
 type SaveGlobalSettingsResult struct {
-	RepoURL             string
-	IDEs                []string
-	EnabledBundles      []string
-	ConfigPath          string
-	VarsPath            string
-	VarsCreated         bool
-	BareRepo            string
-	InstallWarnings     []string
-	SecretsConfigPath   string
-	CreatedVaultBundles []string // 本次为用户平面启用新建的 vault 占位
-	ServerIdleTimeout   string
-	RepoAuthRequired    bool
-	RepoHost            string
-	ConnectError        string
+	RepoURL               string
+	IDEs                  []string
+	EnabledBundles        []string
+	ConfigPath            string
+	VarsPath              string
+	VarsCreated           bool
+	BareRepo              string
+	InstallWarnings       []string
+	SecretsConfigPath     string
+	CreatedVaultBundles   []string // 本次为用户平面启用新建的 vault 占位
+	ServerIdleTimeout     string
+	SessionTimeout        string
+	AutoReunlockOnTimeout bool
+	RepoAuthRequired      bool
+	RepoHost              string
+	ConnectError          string
 }
 
 var probeRepoForSettings = repo.Probe
@@ -78,6 +84,14 @@ func normalizedServerIdleTimeout(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "30m"
+	}
+	return value
+}
+
+func normalizedSessionTimeout(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return secrets.DefaultSessionTTL.String()
 	}
 	return value
 }
@@ -99,11 +113,13 @@ func LoadGlobalSettings(reporter Reporter) (*GlobalSettingsState, error) {
 	}
 
 	state := &GlobalSettingsState{
-		ConfigPath:        configPath,
-		VarsPath:          varsPath,
-		ConfiguredEditor:  strings.TrimSpace(globalConfig.Editor),
-		ServerIdleTimeout: normalizedServerIdleTimeout(globalConfig.ServerIdleTimeout),
-		EnabledBundles:    config.NormalizeBundleNames(globalConfig.EnabledBundles),
+		ConfigPath:            configPath,
+		VarsPath:              varsPath,
+		ConfiguredEditor:      strings.TrimSpace(globalConfig.Editor),
+		ServerIdleTimeout:     normalizedServerIdleTimeout(globalConfig.ServerIdleTimeout),
+		SessionTimeout:        normalizedSessionTimeout(globalConfig.SessionTimeout),
+		AutoReunlockOnTimeout: globalConfig.AutoReunlockOnTimeout == nil || *globalConfig.AutoReunlockOnTimeout,
+		EnabledBundles:        config.NormalizeBundleNames(globalConfig.EnabledBundles),
 	}
 
 	availableIDEs := ide.List()
@@ -396,6 +412,24 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 		return nil, fmt.Errorf("服务空闲超时格式无效（例如 30m、1h）: %w", err)
 	}
 	result.ServerIdleTimeout = globalConfig.ServerIdleTimeout
+	// 引导页不收集解锁有效期，空值应保留设备上已配置的值而不是回落默认。
+	sessionTimeout := strings.TrimSpace(input.SessionTimeout)
+	if sessionTimeout == "" {
+		sessionTimeout = globalConfig.SessionTimeout
+	}
+	globalConfig.SessionTimeout = normalizedSessionTimeout(sessionTimeout)
+	if session, err := time.ParseDuration(globalConfig.SessionTimeout); err != nil || session <= 0 {
+		if err == nil {
+			err = fmt.Errorf("必须大于 0")
+		}
+		return nil, fmt.Errorf("解锁有效期格式无效（例如 4h、30m）: %w", err)
+	}
+	result.SessionTimeout = globalConfig.SessionTimeout
+	if input.AutoReunlockOnTimeout != nil {
+		value := *input.AutoReunlockOnTimeout
+		globalConfig.AutoReunlockOnTimeout = &value
+	}
+	result.AutoReunlockOnTimeout = globalConfig.AutoReunlockOnTimeout == nil || *globalConfig.AutoReunlockOnTimeout
 	if err := config.SaveGlobalConfig(globalConfig); err != nil {
 		return nil, fmt.Errorf("保存全局配置失败: %w", err)
 	}

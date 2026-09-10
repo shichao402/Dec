@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, CornerLeftUp, Folder, FolderSearch, RefreshCw, Search } from 'lucide-react'
+import { CheckCircle2, ChevronRight, CornerLeftUp, Folder, FolderSearch, LoaderCircle, RefreshCw, Search } from 'lucide-react'
 import { ActionFeedback } from '@/components/action-feedback'
 import { Page, PageFill, PageHeader, ScrollArea, Toolbar } from '@/components/shell/page'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ActionButton } from '@/components/ui/action-button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyState } from '@/components/ui/feedback'
 import { Input } from '@/components/ui/input'
 import { Panel, PanelBody, PanelFooter, PanelHeader } from '@/components/ui/panel'
 import { useActionRegistry, useDecAction } from '@/lib/action-context'
+import type { ActionRecord } from '@/lib/action-registry'
 import { invokeTyped, runOrWatchTyped } from '@/lib/api'
 import { actionSpec, resource } from '@/lib/console'
 import { cn } from '@/lib/utils'
@@ -16,6 +17,12 @@ import type { DirectoryListing, ManagedProject } from '@/lib/utils'
 
 // auto-fit：项目少时卡片自己铺开占满整行，不会在宽屏右侧留一整列空白。
 const cardGrid = 'grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(18rem,1fr))]'
+
+// 接管流水线的两块面板：分栏时各自吃满整列并在内部滚动；堆叠时不设高度上限，
+// 由整页滚动兜底。堆叠时强行 max-h-full，面板内容会溢出并画到自己的 footer 上。
+const flowPanel = 'flex min-h-0 shrink-0 flex-col xl:max-h-full xl:shrink xl:overflow-hidden'
+// 列表同理：窄屏固定高度，分栏时才吃满剩余高度。
+const flowList = 'h-56 min-h-0 shrink-0 overflow-y-auto xl:h-auto xl:flex-1 xl:shrink'
 
 export function ProjectsPage(props: {
   deviceId: string
@@ -25,22 +32,56 @@ export function ProjectsPage(props: {
 }) {
   const [picker, setPicker] = useState(false)
   const [browserPath, setBrowserPath] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
   const [query, setQuery] = useState('')
   const actions = useActionRegistry()
   const refreshState = useDecAction(
     actionSpec(`device:refresh:${props.deviceId}`, '刷新设备状态', props.deviceId, [resource.global], 'read'),
   )
   const scanPrefix = `projects:scan:${props.deviceId}:`
-  const latestScan = Object.values(actions.state.records)
+  const importPrefix = `projects:register:${props.deviceId}:`
+  const records = Object.values(actions.state.records)
+  // 扫描反馈跟着最近一次扫描走（可能还在跑），结果只认最近一次成功的。
+  const scanRecord = records
+    .filter((record) => record.key.startsWith(scanPrefix))
+    .sort((a, b) => (b.finishedAt || b.startedAt) - (a.finishedAt || a.startedAt))[0]
+  const latestScan = records
     .filter((record) => record.key.startsWith(scanPrefix) && record.status === 'succeeded')
     .sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0))[0]
   const scan = ((latestScan?.result as { Projects?: ManagedProject[] } | undefined)?.Projects || [])
     .filter((project) => !props.projects.some((item) => item.Root === project.Root))
 
-  async function register(root: string) {
-    const spec = actionSpec(`projects:register:${props.deviceId}:${root}`, `导入 ${root}`, props.deviceId, [resource.global], 'write', '项目已导入')
-    const outcome = await actions.run(spec, () => invokeTyped<ManagedProject>('register_managed_project', '', 'global', { Root: root }, spec.key))
-    if (outcome.ok) await props.onRefresh()
+  const importSpec = (root: string) => actionSpec(
+    `${importPrefix}${root}`,
+    `导入 ${root}`,
+    props.deviceId,
+    [resource.global],
+    'write',
+    '项目已导入',
+  )
+  // 只用来问「现在能不能改本机受管列表」，这个 key 本身永远不会执行。
+  const importBlocked = Boolean(actions.blockedBy(importSpec('#probe')))
+  const importing = records.some((record) => record.key.startsWith(importPrefix) && record.status === 'running')
+  const picked = selected.filter((root) => scan.some((project) => project.Root === root))
+
+  // 队列串行跑：受管列表是同一份全局配置，并发导入只会互相阻塞。
+  // 跑完才刷新一次设备——每导入一个就全量巡检，等待时间会随选中数线性叠加。
+  async function importRoots(roots: string[]) {
+    const failed: string[] = []
+    for (const root of roots) {
+      const spec = importSpec(root)
+      const outcome = await actions.run(spec, () => invokeTyped<ManagedProject>(
+        'register_managed_project',
+        '',
+        'global',
+        { Root: root },
+        spec.key,
+      ))
+      if (!outcome.ok) failed.push(root)
+    }
+    await props.onRefresh()
+    // 只清掉这一批里成功的；期间新勾的行保留，失败的留在选中态里可以直接重试。
+    setSelected((prev) => prev.filter((root) => failed.includes(root) || !roots.includes(root)))
   }
 
   async function scanRoot(root: string) {
@@ -54,7 +95,6 @@ export function ProjectsPage(props: {
     }))
   }
 
-  const currentScanKey = browserPath ? `${scanPrefix}${browserPath}` : latestScan?.key
   const keyword = query.trim().toLowerCase()
   const filtered = keyword
     ? props.projects.filter((project) =>
@@ -81,76 +121,76 @@ export function ProjectsPage(props: {
         }
       />
       <PageFill>
-        {currentScanKey && <ActionFeedback actionKey={currentScanKey} />}
-        {picker && (
-          <DirectoryBrowser
-            deviceId={props.deviceId}
-            initialPath={browserPath}
-            onPathChange={setBrowserPath}
-            onSelect={register}
-            onScan={scanRoot}
-          />
-        )}
-        {scan.length > 0 && (
-          <Panel className="mb-4 shrink-0">
-            <PanelHeader title="扫描发现" description={`${scan.length} 个尚未接管的项目`} />
-            <div className="max-h-56 divide-y divide-line overflow-y-auto">
-              {scan.map((project) => {
-                const spec = actionSpec(`projects:register:${props.deviceId}:${project.Root}`, `导入 ${project.Root}`, props.deviceId, [resource.global], 'write', '项目已导入')
-                return (
-                  <div key={project.Root} className="flex items-center gap-3 px-4 py-2.5">
-                    <Folder className="size-4 shrink-0 text-faint" />
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">{project.Root}</span>
-                    <Badge tone={project.Initialized ? 'good' : 'warn'}>
-                      {project.Initialized ? '已初始化' : '待初始化'}
-                    </Badge>
-                    <ActionButton
-                      size="sm"
-                      variant="secondary"
-                      spec={spec}
-                      action={() => invokeTyped<ManagedProject>('register_managed_project', '', 'global', { Root: project.Root }, spec.key)}
-                      runningLabel="导入中…"
-                      onSuccess={props.onRefresh}
-                    >
-                      导入
-                    </ActionButton>
-                  </div>
-                )
-              })}
-            </div>
-          </Panel>
-        )}
-
-        <Toolbar>
-          <div className="relative w-72">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-faint" />
-            <Input className="pl-8" placeholder="按名称或路径过滤" value={query} onChange={(e) => setQuery(e.target.value)} />
-          </div>
-          <span className="tnum text-xs text-faint">
-            {keyword ? `${filtered.length} / ${props.projects.length} 个匹配` : `共 ${props.projects.length} 个 · 已初始化 ${initialized}`}
-          </span>
-        </Toolbar>
-
-        <ScrollArea className="-mx-1 px-1 pb-1">
-          {filtered.length === 0 ? (
-            <EmptyState
-              icon={<FolderSearch className="size-5" />}
-              text={props.projects.length === 0 ? '这台设备还没有受管项目' : '没有匹配的项目'}
-              hint={props.projects.length === 0
-                ? '用「接管目录」选择设备上的项目路径，或先扫描一个范围找出已有 Dec 项目。'
-                : '换个关键词，或清空过滤条件。'}
-              action={props.projects.length === 0
-                ? <Button size="sm" onClick={() => setPicker(true)}>接管目录</Button>
-                : <Button size="sm" variant="ghost" onClick={() => setQuery('')}>清空过滤</Button>}
+        {picker ? (
+          // 选目录 → 扫描 → 勾选导入是一条流水线：两步并排铺满，别把结果挤成四行。
+          <div className="flex min-h-0 flex-1 flex-col gap-4 xl:grid xl:grid-cols-2 xl:overflow-hidden">
+            <DirectoryBrowser
+              deviceId={props.deviceId}
+              initialPath={browserPath}
+              onPathChange={setBrowserPath}
+              onSelect={(root) => void importRoots([root])}
+              onScan={scanRoot}
             />
-          ) : (
-            <div className={cardGrid}>
-              {filtered.map((project) => (
-                <ProjectCard key={project.Root} project={project} onOpen={() => props.onOpen(project)} />
+            <ScanResults
+              projects={scan}
+              picked={picked}
+              scanRecord={scanRecord}
+              importing={importing}
+              blocked={importBlocked}
+              recordOf={(root) => actions.state.records[`${importPrefix}${root}`]}
+              onToggle={(root) => setSelected((prev) => (
+                prev.includes(root) ? prev.filter((item) => item !== root) : [...prev, root]
               ))}
-            </div>
-          )}
-        </ScrollArea>
+              onToggleAll={() => setSelected(
+                picked.length >= scan.length ? [] : scan.map((project) => project.Root),
+              )}
+              onImport={(roots) => void importRoots(roots)}
+            />
+          </div>
+        ) : (
+          <>
+            {scan.length > 0 && (
+              <div className="mb-3 flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent/8 px-3.5 py-2.5">
+                <FolderSearch className="size-4 shrink-0 text-accent-hi" />
+                <span className="min-w-0 flex-1 text-xs text-muted">
+                  上次扫描还有 {scan.length} 个尚未接管的项目
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => setPicker(true)}>继续导入</Button>
+              </div>
+            )}
+
+            <Toolbar>
+              <div className="relative w-72">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-faint" />
+                <Input className="pl-8" placeholder="按名称或路径过滤" value={query} onChange={(e) => setQuery(e.target.value)} />
+              </div>
+              <span className="tnum text-xs text-faint">
+                {keyword ? `${filtered.length} / ${props.projects.length} 个匹配` : `共 ${props.projects.length} 个 · 已初始化 ${initialized}`}
+              </span>
+            </Toolbar>
+
+            <ScrollArea className="-mx-1 px-1 pb-1">
+              {filtered.length === 0 ? (
+                <EmptyState
+                  icon={<FolderSearch className="size-5" />}
+                  text={props.projects.length === 0 ? '这台设备还没有受管项目' : '没有匹配的项目'}
+                  hint={props.projects.length === 0
+                    ? '用「接管目录」选择设备上的项目路径，或先扫描一个范围找出已有 Dec 项目。'
+                    : '换个关键词，或清空过滤条件。'}
+                  action={props.projects.length === 0
+                    ? <Button size="sm" onClick={() => setPicker(true)}>接管目录</Button>
+                    : <Button size="sm" variant="ghost" onClick={() => setQuery('')}>清空过滤</Button>}
+                />
+              ) : (
+                <div className={cardGrid}>
+                  {filtered.map((project) => (
+                    <ProjectCard key={project.Root} project={project} onOpen={() => props.onOpen(project)} />
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </>
+        )}
       </PageFill>
     </Page>
   )
@@ -198,6 +238,144 @@ function ProjectCard({ project, onOpen }: { project: ManagedProject; onOpen: () 
   )
 }
 
+function ScanResults(props: {
+  projects: ManagedProject[]
+  picked: string[]
+  scanRecord?: ActionRecord
+  importing: boolean
+  blocked: boolean
+  recordOf: (root: string) => ActionRecord | undefined
+  onToggle: (root: string) => void
+  onToggleAll: () => void
+  onImport: (roots: string[]) => void
+}) {
+  const total = props.projects.length
+  const allPicked = total > 0 && props.picked.length >= total
+  const done = props.picked.filter((root) => props.recordOf(root)?.status === 'succeeded').length
+  const scanning = props.scanRecord?.status === 'running'
+  const scanned = Boolean(props.scanRecord) && !scanning
+
+  return (
+    <Panel className={cn(flowPanel, 'min-h-[16rem]')}>
+      <PanelHeader
+        title="第 2 步 · 勾选要导入的项目"
+        description={total > 0
+          ? `${total} 个尚未接管 · 已选 ${props.picked.length}`
+          : '导入只登记路径，不改动项目里的任何文件。'}
+        action={total > 0 && (
+          <Button size="sm" variant="ghost" onClick={props.onToggleAll}>{allPicked ? '清空选择' : '全选'}</Button>
+        )}
+      />
+      {props.scanRecord && (
+        <div className="shrink-0 px-4 pt-3 empty:hidden">
+          <ActionFeedback actionKey={props.scanRecord.key} />
+        </div>
+      )}
+      {total === 0 ? (
+        <PanelBody className="flex min-h-0 flex-1 items-center justify-center">
+          <EmptyState
+            className="w-full border-none"
+            icon={<FolderSearch className="size-5" />}
+            text={scanning ? '正在扫描这个范围' : scanned ? '这个范围里的项目都已接管' : '还没有扫描结果'}
+            hint={scanned
+              ? '换一个目录再扫，或用「接管此目录」直接登记左边选中的路径。'
+              : '在左边选一个目录，点「扫描此范围」。带 .dec 或 .git 的目录都会被找出来。'}
+          />
+        </PanelBody>
+      ) : (
+        <div className={cn(flowList, 'divide-y divide-line')}>
+          {props.projects.map((project) => (
+            <ScanRow
+              key={project.Root}
+              project={project}
+              checked={props.picked.includes(project.Root)}
+              record={props.recordOf(project.Root)}
+              importing={props.importing}
+              blocked={props.blocked}
+              onToggle={() => props.onToggle(project.Root)}
+              onImport={() => props.onImport([project.Root])}
+            />
+          ))}
+        </div>
+      )}
+      <PanelFooter>
+        <Button
+          disabled={props.picked.length === 0 || props.blocked}
+          onClick={() => props.onImport(props.picked)}
+        >
+          {props.importing && <LoaderCircle className="size-4 animate-spin" />}
+          {props.importing
+            ? `导入中 ${done}/${props.picked.length}`
+            : props.picked.length > 0
+              ? `导入选中的 ${props.picked.length} 个`
+              : '导入选中项'}
+        </Button>
+        <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-faint">
+          勾完一次性导入：队列串行执行，全部登记完才刷新一次设备，不用守着一个个点。
+        </span>
+      </PanelFooter>
+    </Panel>
+  )
+}
+
+function ScanRow(props: {
+  project: ManagedProject
+  checked: boolean
+  record?: ActionRecord
+  importing: boolean
+  blocked: boolean
+  onToggle: () => void
+  onImport: () => void
+}) {
+  const status = props.record?.status
+  const running = status === 'running'
+  const imported = status === 'succeeded'
+  const queued = props.checked && props.importing && !running && !imported
+
+  return (
+    <div className={cn('flex items-center gap-3 px-4 py-2', props.checked && 'bg-accent/8')}>
+      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 py-1">
+        <Checkbox
+          aria-label={props.project.Root}
+          checked={props.checked}
+          disabled={running || imported}
+          onChange={props.onToggle}
+        />
+        <Folder className="size-4 shrink-0 text-faint" />
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted" title={props.project.Root}>
+          {props.project.Root}
+        </span>
+      </label>
+      {status === 'failed' && props.record?.error && (
+        <span className="max-w-[12rem] truncate text-[11px] text-bad" title={props.record.error}>
+          {props.record.error}
+        </span>
+      )}
+      <Badge tone={props.project.Initialized ? 'good' : 'warn'}>
+        {props.project.Initialized ? '已初始化' : '待初始化'}
+      </Badge>
+      {/* 固定宽度的状态位：导入过程中行不会因为字数变化左右跳动。 */}
+      <div className="flex w-20 shrink-0 items-center justify-end">
+        {running ? (
+          <span className="flex items-center gap-1.5 text-[11px] text-accent-hi">
+            <LoaderCircle className="size-3.5 animate-spin" />
+            导入中
+          </span>
+        ) : imported ? (
+          <span className="flex items-center gap-1.5 text-[11px] text-good">
+            <CheckCircle2 className="size-3.5" />
+            已导入
+          </span>
+        ) : queued ? (
+          <span className="text-[11px] text-faint">排队中</span>
+        ) : (
+          <Button size="sm" variant="ghost" disabled={props.blocked} onClick={props.onImport}>导入</Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function DirectoryBrowser(props: {
   deviceId: string
   initialPath: string
@@ -233,11 +411,11 @@ function DirectoryBrowser(props: {
   useEffect(() => { void open(initialPath.current) }, [open])
 
   return (
-    <Panel className="mb-4 shrink-0">
-      <PanelHeader title="选择设备上的目录" description="双击进入下一级，选中后可直接接管，或只扫描这个范围。" />
-      <PanelBody className="space-y-3">
+    <Panel className={cn(flowPanel, 'min-h-[18rem]')}>
+      <PanelHeader title="第 1 步 · 选择设备上的目录" description="双击进入下一级；选中后扫描这个范围，或直接接管它。" />
+      <PanelBody className="flex min-h-0 flex-1 flex-col gap-3">
         <ActionFeedback actionKey={browseSpec.key} />
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <div className="flex min-w-[18rem] flex-1 gap-2">
             <Input
               className="font-mono text-xs"
@@ -262,7 +440,7 @@ function DirectoryBrowser(props: {
             ))}
           </div>
         </div>
-        <div className="h-56 overflow-y-auto rounded-lg border border-line bg-canvas/60">
+        <div className={cn(flowList, 'rounded-lg border border-line bg-canvas/60')}>
           {listing?.Entries.length === 0 && (
             <div className="px-3 py-6 text-center text-xs text-faint">这个目录下没有子目录</div>
           )}
@@ -283,8 +461,8 @@ function DirectoryBrowser(props: {
         </div>
       </PanelBody>
       <PanelFooter>
-        <Button disabled={!path || mutationBlocked} onClick={() => props.onSelect(path)}>接管此目录</Button>
-        <Button variant="outline" disabled={!path || mutationBlocked} onClick={() => props.onScan(path)}>扫描此范围</Button>
+        <Button disabled={!path || mutationBlocked} onClick={() => props.onScan(path)}>扫描此范围</Button>
+        <Button variant="outline" disabled={!path || mutationBlocked} onClick={() => props.onSelect(path)}>接管此目录</Button>
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-faint">{path || '未选择目录'}</span>
       </PanelFooter>
     </Panel>

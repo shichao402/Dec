@@ -211,6 +211,31 @@ export const cases: Case[] = [
     },
   },
   {
+    name: 'projects-scan',
+    scenario: 'typical',
+    open: async (page) => {
+      await connect(page)
+      await nav(page, '项目')
+      await page.getByRole('button', { name: '接管目录' }).click()
+      await page.getByRole('button', { name: '扫描此范围' }).click()
+      await page.getByRole('button', { name: '全选' }).click()
+      // 勾完一次导入：批量按钮要带上选中数，行内不再需要逐个点。
+      await expect(page.getByRole('button', { name: '导入选中的 14 个' })).toBeEnabled()
+    },
+  },
+  {
+    name: 'projects-scan-extreme',
+    scenario: 'extreme',
+    open: async (page) => {
+      await connect(page)
+      await nav(page, '项目')
+      await page.getByRole('button', { name: '接管目录' }).click()
+      await page.getByRole('button', { name: '扫描此范围' }).click()
+      await page.getByRole('button', { name: '全选' }).click()
+      await expect(page.getByRole('button', { name: '导入选中的 2 个' })).toBeEnabled()
+    },
+  },
+  {
     name: 'project',
     scenario: 'typical',
     open: async (page) => {

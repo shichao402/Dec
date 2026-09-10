@@ -172,6 +172,9 @@ export function installTauriMock(scenario: Scenario) {
       const operation = String(args.operation || '')
       const global = String(args.workspacePlane || '') === 'global'
       if (operation === 'preview_push') return ok(global ? globalPushPreview : projectPushPreview)
+      if (operation === 'scan_managed_projects') {
+        return ok({ ScanRoot: scenario.listing.Current, Projects: scenario.scan })
+      }
       if (operation === 'delete') {
         return ok({
           DecDeleted: 0,

@@ -19,8 +19,9 @@ npm run tauri dev
 
 以上命令从仓库根目录执行。`--prepare-runtime-only` 只生成并保留当前平台的
 `src-tauri/resources/runtime/<os>-<arch>/`，不会打完整 Console 包；首次开发或版本变化后需重新运行。
-要把当前源码装成本机常驻 Console，在仓库根运行 `python scripts/build-console.py --skip-deps`
-并覆盖安装产物；安装包内置同版本运行时套件，不要单独部署运行时。
+要把当前源码装成本机**开发用** Console，在仓库根运行 `python scripts/build-console.py --deploy`
+（覆盖安装，不是发版）。安装包内置同版本运行时套件，不要单独部署运行时。
+给别人用的包走 CI / RUP，不要用本机覆盖安装代替。
 release 构建仍严格要求内置资源，只有 debug 模式会在资源尚未准备且现有本机运行时可直接连接时跳过缓存预热。
 
 开发前端固定在 `127.0.0.1:59124`（避开 Vite 默认 5173）。debug 窗口在显示前会核对页面里的 `dec-console` 身份标记；对不上或端口上是别的项目，直接退出，避免把主密码框交给别人的前端。不要直接运行 `src-tauri/target/debug/app.exe`——那样不会启动本仓库的 Vite，只会去加载当时占着 `devUrl` 的任意页面。
@@ -31,13 +32,19 @@ Console 是主密码、TOTP 与设备登录确认的唯一人工入口，服务�
 
 连接会保存 Bitwarden 邮箱。主密码默认不保存；用户明确勾选后才通过统一的系统凭据接口写入 Windows Credential Manager、macOS Keychain 或 Linux Secret Service，不会进入 `connections.json`。取消勾选或删除连接时会同时删除对应凭据。Linux 构建静态携带 D-Bus 客户端依赖，桌面会话仍需提供 Secret Service（如 GNOME Keyring 或 KWallet）。
 
+勾选保存主密码还有第二重作用：解锁时 Console 会带上 `retain_password`，目标 `dec-server`
+把主密码留在进程内存。有效期内云端会话失效时服务自行重新登录；解锁有效期到点后是否也
+自动登录由设置页的 `auto_reunlock_on_timeout` 开关决定（默认开启）。关闭时 Console 只从
+凭据库回填密码，必须由人确认提交。解锁有效期由 `session_timeout` 配置（默认 4 小时）：
+到期一律作废内存凭据，云端会话是否还有效不作数。
+
 本机交互 MCP 缺 session 时会拉起尚未运行的 Console，或聚焦现有窗口，并等待用户完成
 Authenticate；并发请求共享同一次认证。管理远端设备时，输入仍发生在操作者当前
 Console，由它提交给目标服务，远端主机无需桌面。远端无桌面/CI/测试等非交互上下文
 不得自动拉起 Console，应收到结构化认证错误。
 
 Bitwarden session、vault/user key、TOTP 与 2FA 中间态均不得落盘；用户明确保存的主密码
-只能进入上述系统凭据库。测试必须注入认证协调桩，禁止启动或聚焦真实 Console。详见
+只能进入上述系统凭据库或 `dec-server` 进程内存（进程退出即消失）。测试必须注入认证协调桩，禁止启动或聚焦真实 Console。详见
 [ADR 0022](../Documents/decisions/0022-console-bitwarden-unlock.md)。
 
 远程直连必须使用由系统信任根校验的 TLS；若服务只监听 loopback，使用 SSH 隧道。连接成功后的完整流程是：
@@ -79,6 +86,7 @@ src/
 - 有边框的卡片用 `fitBlock`（可缩不可长）：内容短就贴合内容，长了才吃满剩余高度并内部滚动。强行 `flex-1` 会得到「5 行内容 + 400px 空白」的面板。
 - 表格类主体（资产选择）撑满高度：底部操作条贴住视口下沿，行的位置不随条数跳动。
 - `SplitPane` 内的列表用 `<ScrollArea splitOnly>`：分栏时各自滚动，堆叠时把滚动交给外层，避免同一祖先链上出现两个滚动区。
+- 并排的流水线面板（项目页「选目录 → 勾选导入」）只在分栏时 `max-h-full` + 内部滚动；堆叠时必须 `shrink-0` 且列表给固定高度，交给整页滚动。否则面板被压缩、内容溢出画到自己的 footer 上，按钮会被遮住点不到。
 - 截断文本要给 `title`，让省略号后面的内容仍可获取。
 
 ## 布局回归测试
@@ -86,7 +94,7 @@ src/
 布局不靠看截图判断，靠测量。`tests/` 下是 Playwright 驱动的布局断言，跑「页面 × 数据形态 × 视口」矩阵：
 
 ```bash
-npm run test:layout                  # 75 个用例，约 25 秒
+npm run test:layout                  # 87 个用例，约 30 秒
 SHOTS=1 npx playwright test tests/shots.spec.ts   # 输出 .shots/*.png 供人工过目
 ```
 

@@ -300,6 +300,11 @@ Global / Local 门面共享同一服务 session，但拿不到明文。Console A
 不得拉起 Console，须返回结构化认证错误。`DEC_BW_PASSWORD` 仍可用于首次拉起服务时的
 程序化认证。
 
+session 的有效期取本机 `session_timeout`（默认 4 小时）：到期即作废，云端会话是否还有效
+不作数。用户在 Console 勾选保存主密码后，服务可用进程内存里的那份静默重登录；
+`auto_reunlock_on_timeout`（默认开启）决定到期后是否自动重登录，关闭时须回到 Console
+人工确认。有效期内云端 session 提前失效仍会静默恢复一次。
+
 session、vault/user key、主密码、TOTP、临时密钥与 2FA 中间态均不得落盘；允许保存的
 设备信任材料仅为 `deviceIdentifier` 与 `two_factor_remember`。详见
 [0022](decisions/0022-console-bitwarden-unlock.md)、[ARCHITECTURE.md](./ARCHITECTURE.md)

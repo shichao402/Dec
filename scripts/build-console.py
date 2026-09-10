@@ -199,7 +199,7 @@ def main() -> None:
     parser.add_argument(
         "--deploy",
         action="store_true",
-        help="local redeploy: reuse deps, then stop the running Console and install silently",
+        help="dev-only: reuse deps, stop the running Console, then silently install the local package (not a release)",
     )
     args = parser.parse_args()
     if args.deploy:
@@ -230,7 +230,8 @@ def main() -> None:
         stop_console()
         install_package(output)
         print(
-            f"已安装 Console v{version}。首次启动会把内置运行时套件释放到 ~/.dec/bin；"
+            f"已在本机装上开发用 Console v{version}（覆盖安装，不是发版）。"
+            "首次启动会把内置运行时套件释放到 ~/.dec/bin；"
             "Cursor 里的 dec-mcp 需重载 MCP 才用上新二进制。"
         )
 

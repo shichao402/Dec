@@ -65,6 +65,7 @@ func (s *Server) Invoke(ctx context.Context, req *servicev1.InvokeRequest) (*ser
 	}
 	if req.Method == "save_global_settings" {
 		s.presence.setTimeout(loadIdleTimeout())
+		s.refreshSessionTTL()
 	}
 	data, err := json.Marshal(result)
 	if err != nil {

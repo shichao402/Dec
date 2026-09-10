@@ -126,14 +126,20 @@ export async function pingServer() {
   return invoke<PingInfo>('ping_server')
 }
 
-export async function authenticate(email: string, password: string, totp: string, rememberDevice: boolean) {
+export async function authenticate(
+  email: string,
+  password: string,
+  totp: string,
+  rememberDevice: boolean,
+  retainPassword: boolean,
+) {
   return invoke<{
     unlocked: boolean
     need_2fa: boolean
     control_token: string
     expires_in_ms: number
     error: string
-  }>('authenticate', { email, password, totp, rememberDevice })
+  }>('authenticate', { email, password, totp, rememberDevice, retainPassword })
 }
 
 export async function invokeMethod(

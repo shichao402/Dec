@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/sysproc"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -47,7 +47,7 @@ func useStubSecretsSession(t *testing.T) {
 
 func runGitProjectTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := sysproc.Command("git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -58,7 +58,7 @@ func runGitProjectTest(t *testing.T, dir string, args ...string) string {
 
 func runGitNoDirProjectTest(t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := sysproc.Command("git", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s 失败: %v\n%s", strings.Join(args, " "), err, string(output))

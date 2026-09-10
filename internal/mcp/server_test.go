@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/shichao402/Dec/internal/service"
 	"github.com/shichao402/Dec/internal/serviceapi"
 	"github.com/shichao402/Dec/internal/servicehost"
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 func TestHandleStatus_NoConfig(t *testing.T) {
@@ -148,7 +148,7 @@ func setupRemoteRepo(t *testing.T, files map[string]string) string {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := sysproc.Command("git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)

@@ -2,33 +2,58 @@ package secrets
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/shichao402/Dec/internal/config"
 )
 
-// DefaultSessionTTL 对齐 Bitwarden Identity 常见的 access_token expires_in（约 3600s）。
-// 云端无法调该值；客户端到期后 HasSession 为假，须重新 EnsureSession。
-const DefaultSessionTTL = time.Hour
+// DefaultSessionTTL 是一次解锁在本机的默认有效期，可由 ~/.dec/config.yaml 的
+// session_timeout 覆盖。到期即丢弃进程内 session 与 vault key，云端 access_token
+// 是否仍然有效不参与判断；保留了主密码时由 TryAutoUnlock 静默重登录。
+const DefaultSessionTTL = 4 * time.Hour
 
 var (
 	sessionMu       sync.Mutex
 	session         string
 	userKey         []byte
 	sessionDeadline time.Time
+	sessionTimedOut bool
 	sessionNow      = time.Now
 	sessionChanged  = make(chan struct{})
+	sessionTTL      = configuredSessionTTL
 )
 
-// SetSession 写入进程内 Bitwarden session（禁止落盘），默认 DefaultSessionTTL 后失效。
+func configuredSessionTTL() time.Duration {
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil || cfg == nil {
+		return DefaultSessionTTL
+	}
+	ttl, err := time.ParseDuration(strings.TrimSpace(cfg.SessionTimeout))
+	if err != nil || ttl <= 0 {
+		return DefaultSessionTTL
+	}
+	return ttl
+}
+
+// SessionTTL 返回本机当前配置的解锁有效期。
+func SessionTTL() time.Duration {
+	return sessionTTL()
+}
+
+// SetSession 写入进程内 Bitwarden session（禁止落盘），到 session_timeout 后失效。
 func SetSession(token string) {
+	ttl := sessionTTL()
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
-	setSessionLocked(token, DefaultSessionTTL)
+	setSessionLocked(token, ttl)
 	notifySessionChangedLocked()
 }
 
 func setSessionLocked(token string, ttl time.Duration) {
 	session = token
+	sessionTimedOut = false
 	if token == "" {
 		sessionDeadline = time.Time{}
 		return
@@ -39,10 +64,11 @@ func setSessionLocked(token string, ttl time.Duration) {
 	sessionDeadline = sessionNow().Add(ttl)
 }
 
-func expireSessionLocked() {
+func expireSessionLocked(timedOut bool) {
 	session = ""
 	userKey = nil
 	sessionDeadline = time.Time{}
+	sessionTimedOut = timedOut
 	notifySessionChangedLocked()
 }
 
@@ -51,8 +77,17 @@ func dropIfSessionExpiredLocked() {
 		return
 	}
 	if !sessionDeadline.IsZero() && !sessionNow().Before(sessionDeadline) {
-		expireSessionLocked()
+		expireSessionLocked(true)
 	}
+}
+
+// SessionTimedOut 表示当前锁定是本机解锁有效期到点导致的，而不是云端 401、
+// 服务刚启动或显式清理。
+func SessionTimedOut() bool {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+	dropIfSessionExpiredLocked()
+	return sessionTimedOut
 }
 
 func sessionLiveLocked() bool {
@@ -119,16 +154,17 @@ func InvalidateSession(rejectedToken string) bool {
 	if session == "" || session != rejectedToken {
 		return false
 	}
-	expireSessionLocked()
+	expireSessionLocked(false)
 	return true
 }
 
-// ClearSession 清除进程内 session 与 vault key（测试用）。
+// ClearSession 清除进程内 session、vault key 与保留的主密码（测试用）。
 func ClearSession() {
 	lockBypassForTest = false
+	ClearRetainedPassword()
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
-	expireSessionLocked()
+	expireSessionLocked(false)
 }
 
 func notifySessionChangedLocked() {

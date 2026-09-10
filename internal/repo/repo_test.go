@@ -3,10 +3,11 @@ package repo
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 func TestRepoHost(t *testing.T) {
@@ -272,7 +273,7 @@ func writeFile(t *testing.T, path, content string) {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := sysproc.Command("git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -283,7 +284,7 @@ func runGit(t *testing.T, dir string, args ...string) string {
 
 func runGitNoDir(t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := sysproc.Command("git", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s 失败: %v\n%s", strings.Join(args, " "), err, string(output))

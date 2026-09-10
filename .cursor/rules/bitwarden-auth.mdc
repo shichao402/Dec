@@ -13,9 +13,17 @@ Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `Documents/
 - Bitwarden session **仅在本机单例 `dec-server` 进程内存**中保存；服务进程退出即失效。Console / MCP 门面共享服务 session，但拿不到 session 明文。
 - **禁止**将 session 持久化到磁盘：`~/.dec/secrets/session`、`BW_SESSION` 文件、或任何 env/配置文件形式的 session 缓存均不允许。
 - 不存在 `~/.dec/secrets/state.json` 之类的本地同步状态文件（已删除，见 `Documents/decisions/0001-secrets-landing-path.md`），不要为了缓存 session 而重新引入。
-- `dec-server` 内已有**未过期** session → 直接复用；无 session 或已过期 → 先尝试程序化认证（见下），交互环境再由 Console Authenticate 承载人工认证。
-- 客户端 session 默认寿命 **1 小时**（`DefaultSessionTTL`），对齐云端 Identity `access_token` 常见 `expires_in=3600`。到期后内存凭据作废，不依赖等 401。云端无法调该 TTL。个人账号的「保险库超时」只作用于官方 App，不管 Dec。
-- session、vault/user key、主密码、TOTP、临时密钥、challenge 与 2FA 中间态均不得落盘、写日志或进入 operation 结果；完成、取消、超时或进程退出后清除。
+- `dec-server` 内已有**未过期** session → 直接复用；云端 session 提前失效时先尝试保留主密码的静默重解锁；本机解锁有效期到点后是否静默重解锁由 `auto_reunlock_on_timeout` 决定。不能静默恢复时，交互环境由 Console Authenticate 承载人工认证。
+- 解锁有效期由本机 `~/.dec/config.yaml` 的 `session_timeout` 决定（默认 `DefaultSessionTTL` = **4 小时**，Console 设置页可改）。**到期即作废内存凭据，云端 access_token 是否仍然有效不作数**；反过来云端提前失效（401）也不等有效期，立即清 session 并重认证一次。
+- session、vault/user key、TOTP、临时密钥、challenge 与 2FA 中间态均不得落盘、写日志或进入 operation 结果；完成、取消、超时或进程退出后清除。
+
+## 保留主密码与静默重解锁
+
+- Console 勾选「保存主密码」时，`Authenticate` 带 `retain_password=1`，`dec-server` 才在**进程内存**保留主密码（`internal/secrets/retain.go`）。云端 session 在有效期内失效时自行重登录；有效期到点后是否重登录由 `auto_reunlock_on_timeout` 控制（默认开启，Console 设置页可关）。
+- `auto_reunlock_on_timeout=false` 时，有效期到点必须回到 Console Authenticate 人工确认；主密码可以预填，但不得自动提交。该开关不影响有效期内对云端 401 的一次静默恢复。
+- 保留的主密码同样**禁止落盘**、写日志或进入 operation 结果；进程退出即消失，重启后必须重新人工解锁。磁盘上的那份只存在 Console 侧的系统凭据库，由用户勾选控制。
+- 未勾选保存 → 服务端不保留任何主密码，缺 session 的行为与过去一致。
+- 静默重解锁连续失败到 `retainedFailureLimit` 次，或 remember token 失效重新要 2FA 时，丢弃保留的主密码并回落人工认证；不得无限重试逼近账号锁定。
 
 ## 开发 / Agent 程序化解锁
 

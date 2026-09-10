@@ -61,11 +61,18 @@ CI 默认继续使用平台 Secrets 中的业务变量，不把 Bitwarden 主密
 ### 5. 敏感状态只在内存
 
 Bitwarden session、vault/user key、主密码、TOTP，以及认证过程中的临时密钥、challenge
-和 2FA 中间态都只存在于相关进程内存，完成、取消、超时或进程退出后清除。禁止写入
+和 2FA 中间态都只存在于相关进程内存，取消、超时或进程退出后清除。禁止写入
 `server.json`、`connections.json`、环境缓存、日志、operation 结果或任何状态文件。
 
+例外只有一条：用户在 Console 勾选保存主密码时，`Authenticate` 带 `retain_password`，
+目标 `dec-server` 可把主密码留在进程内存，用于云端会话失效后的静默重登录。
+`auto_reunlock_on_timeout`（默认开启）决定解锁有效期到点后是否也自动重登录；关闭时必须
+回到 Console Authenticate 人工确认，但有效期内云端 401 仍可静默恢复。主密码仍然不落盘、
+不进日志与 operation 结果，进程退出即消失；连续失败到上限或重新需要 2FA 时立即丢弃并
+回落人工认证。
+
 允许落盘的设备信任材料仍仅限 `deviceIdentifier` 与 `two_factor_remember`；它们不是
-session 或 vault key。用户明确选择保存主密码时，只能使用 Console 的系统凭据库接口。
+session 或 vault key。主密码要落盘只能走 Console 的系统凭据库接口。
 
 ### 6. 测试不得自动弹 Console
 

@@ -20,6 +20,8 @@ export type Scenario = {
   settings: GlobalSettings
   assets: AssetSelection
   listing: DirectoryListing
+  // 扫描发现的候选项目，与 device.Projects 不重叠：接管流程的第二步全靠它。
+  scan: ManagedProject[]
 }
 
 const longLabel = '腾讯云基础设施与发布流水线共享资产集合（含证书与域名）'
@@ -88,6 +90,8 @@ function settings(overrides: Partial<GlobalSettings> = {}): GlobalSettings {
     EffectiveIDEs: ['cursor'],
     ConfiguredEditor: 'code --wait',
     ServerIdleTimeout: '30m',
+    SessionTimeout: '4h',
+    AutoReunlockOnTimeout: true,
     ...overrides,
   }
 }
@@ -102,6 +106,15 @@ const listing: DirectoryListing = {
     Path: `D:\\workspace\\GitHub\\repo-${String(index + 1).padStart(2, '0')}`,
   })),
 }
+
+const discovered = Array.from({ length: 14 }, (_, index) =>
+  project({
+    Root: `D:\\workspace\\scan\\candidate-${String(index + 1).padStart(2, '0')}`,
+    Label: `candidate-${index + 1}`,
+    Name: `candidate${index + 1}`,
+    Initialized: index % 4 === 0,
+  }),
+)
 
 function base(): Scenario {
   const projects = [
@@ -137,6 +150,7 @@ function base(): Scenario {
       ],
     },
     listing,
+    scan: discovered.map((item) => ({ ...item })),
   }
 }
 
@@ -191,6 +205,10 @@ export const scenarios: Record<ScenarioName, () => Scenario> = {
     scenario.assets.Bundles = [
       bundle({ Name: 'tencent-cloud-infrastructure-and-release-pipeline', Description: longLabel }),
       bundle({ Name: 'another-extremely-long-bundle-name-without-separators', Description: `${longLabel}${longLabel}`, Enabled: false }),
+    ]
+    scenario.scan = [
+      project({ Root: `${longRoot}\\scanned-candidate-without-separators`, Label: longLabel, Name: 'scanned', Initialized: false }),
+      project({ Root: `${longRoot}\\second\\deeper\\another-scanned-candidate`, Label: `${longLabel}（扫描）`, Name: 'another-scanned' }),
     ]
     return scenario
   },

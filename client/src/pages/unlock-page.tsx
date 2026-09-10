@@ -67,6 +67,9 @@ export function UnlockPage(props: {
                   checked={props.rememberPassword}
                   onChange={() => props.setRememberPassword(!props.rememberPassword)}
                 />
+                <p className="text-[11px] leading-relaxed text-faint">
+                  保存后，解锁有效期内 Bitwarden 会话失效由 dec-server 用内存里的主密码自行续上，不再回到这一页。
+                </p>
                 <div className="flex gap-2 pt-1">
                   <Button className="flex-1" type="submit" disabled={props.busy}>
                     {props.busy ? '解锁中…' : '解锁'}
@@ -79,7 +82,7 @@ export function UnlockPage(props: {
             </PanelBody>
           </Panel>
           <p className="mt-3 text-center text-[11px] leading-relaxed text-faint">
-            session 只存在于 dec-server 进程内存，默认 1 小时后失效，不落盘。
+            session 只存在于 dec-server 进程内存，到设置页的解锁有效期（默认 4 小时）后失效，不落盘。
           </p>
         </div>
       </div>

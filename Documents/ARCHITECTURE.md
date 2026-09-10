@@ -34,7 +34,10 @@ Bitwarden session 按需建立。**Console Authenticate 是唯一人工入口**�
 均不收集主密码或 TOTP。本机桌面交互 MCP 缺 session 时拉起/聚焦 Console 并等待，成功
 后重试原操作；远端无桌面、CI、测试及明确非交互上下文直接返回结构化错误。管理远端时
 由操作者当前 Console 提交认证输入，目标主机无需桌面。`DEC_BW_PASSWORD` 保留为首次
-拉起服务时的程序化路径。session、vault/user key 与 2FA 中间态只在内存，详见
+拉起服务时的程序化路径。解锁有效期取本机 `session_timeout`（默认 4 小时）：到期一律作废，
+云端会话是否还有效不作数。用户勾选保存主密码时，服务可用进程内存里的那份静默重登录；
+到期后是否自动重登录由 `auto_reunlock_on_timeout` 控制（默认开启），关闭后须回到 Console
+人工确认。该开关不影响有效期内云端 401 的静默恢复。session、vault/user key、保留的主密码与 2FA 中间态都只在内存，详见
 [0022](decisions/0022-console-bitwarden-unlock.md)。
 
 资产按 [ADR 0016](decisions/0016-p-four-quadrant-model.md) 的顶层 **项目** 组织：

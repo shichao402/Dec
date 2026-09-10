@@ -15,6 +15,10 @@ message GlobalConfig {
   repeated string enabled_projects = 5 [json_name = "enabled_projects"];
   // Console 显式接管或扫描导入的目标设备项目目录。
   repeated ManagedProject managed_projects = 6 [json_name = "managed_projects"];
+  // 一次 Bitwarden 解锁在本机的有效期（Go duration，如 "4h"）。
+  string session_timeout = 7 [json_name = "session_timeout"];
+  // 解锁有效期到点后，是否用进程内保留的主密码自动重新解锁。
+  optional bool auto_reunlock_on_timeout = 8 [json_name = "auto_reunlock_on_timeout"];
 }
 
 message ManagedProject {

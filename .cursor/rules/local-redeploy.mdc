@@ -1,22 +1,27 @@
 ---
-description: 本机重新部署 Dec 只有一条命令，不要每次换搞法
+description: 开发期本机 Console 只有一条生效命令，不要每次换搞法，也不要当成发版
 alwaysApply: true
 ---
 
-# 本机重新部署
+# 开发期本机重新部署
 
-改完代码要在本机生效：**本地打一份 Console 装上去**，覆盖现有安装。机器上永远只有一份。
+改完代码要在**这台开发机**上生效：本地打一份 Console 装上去，覆盖现有安装。
+机器上永远只有一份。这是开发循环，**不是**发版：用户面安装包只走 GitHub Actions / RUP
+（`dev/v*`、`stable/v*` tag），不要因为本机已经能用就去打 tag 或改渠道。
 
 ```bash
-python scripts/build-console.py --skip-deps
+python scripts/build-console.py --deploy
 ```
 
-产出 `dist/dec-console-<os>-<arch>.<ext>`，直接覆盖安装（Windows NSIS 静默装用 `/S`；装前退出正在跑的 Console）。增量构建约 3 分钟，比等 CI 发布快一个量级。
+`--deploy` 会复用 `node_modules`、停掉正在跑的 Console，再静默装上刚打的包
+（Windows 是 NSIS，`/S`）。只想拿安装包、自己点安装时用 `--skip-deps`，产物在
+`dist/dec-console-<os>-<arch>.<ext>`。增量构建约 3 分钟。
 
 Console 启动后从自身内置 resources 把运行时套件（`dec-server`、`dec-mcp`、`dec-exec`、`dec-host-setup`）释放到 `~/.dec/bin`，**不需要**单独部署运行时：Console 与各组件出自同一次构建，版本天然相等。改前端要热重载时才用 `--prepare-runtime-only` + `cd client && npm run tauri dev`，其版本同样取 `version.json`，与刚装的 Console 一致。
 
 ## 禁止
 
+- 把本机覆盖安装说成「已发布」，或用它代替 CI / RUP
 - 单独覆盖 `~/.dec/bin`，或引入任何「让运行时对齐已装 Console」的版本探测。**版本源只有 `version.json`**
 - 新增 `install-dev.sh`、`redeploy.ps1`、`make install-dev` 等第二入口
 - 用 `go build` / `go install` 把任何运行时组件丢进 PATH 或 NSIS 目录当入口

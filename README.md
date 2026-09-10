@@ -119,7 +119,7 @@ Codex MCP 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
 用户只安装面板；首次连接本机或 SSH 设备时，Console 会按自身版本检查并初始化目标端运行时，
 无需另外下载二进制，也不用跑 `install.sh` / `install.ps1`。
 
-开发者若要从源码跑面板，见下方「从源码跑 Console」。
+开发者若要从源码跑面板或把当前源码装到本机开发用 Console，见下方「从源码跑 Console」。
 
 ### 2. 打开 Console
 
@@ -290,18 +290,18 @@ npm run tauri dev
 
 第一条命令只编译并保留当前平台的 Tauri runtime resources，不打完整安装包；源码 debug 需要先执行一次。要求 Node.js、Go、Rust stable；Windows 需要 WebView2。细节见 [client/README.md](client/README.md)。
 
-### 本地构建并安装（绕过发布）
+### 开发期本机安装
 
-不想等 GitHub 发布时，在本机打一份 Console 覆盖安装即可，机器上仍只有一份：
+日常改代码要在这台开发机上点开看，用本地 NSIS/DMG 覆盖安装，**不要**当成发版，也**不要**为此打 tag：
 
 ```bash
 cd Dec
-python scripts/build-console.py --skip-deps
+python scripts/build-console.py --deploy
 ```
 
-产出 `dist/dec-console-<os>-<arch>.<ext>`，覆盖安装前先退出正在跑的 Console。增量构建约 3 分钟。安装包内置同版本运行时套件，Console 启动后会释放到 `~/.dec/bin`，因此**不需要**单独部署运行时——两者出自同一次构建，版本天然相等。Cursor 里的 `dec-mcp` 需重载 MCP 才用上新二进制。
+`--deploy` 会停掉正在跑的 Console 再静默装上。只出包、自己点安装时用 `--skip-deps`，产物是 `dist/dec-console-<os>-<arch>.<ext>`。增量构建约 3 分钟。安装包内置同版本运行时套件，Console 启动后会释放到 `~/.dec/bin`，因此**不需要**单独部署运行时——两者出自同一次构建，版本天然相等。Cursor 里的 `dec-mcp` 需重载 MCP 才用上新二进制。
 
-只改 Go、还要从源码跑 Console UI 时，用上一节的 `--prepare-runtime-only` + `npm run tauri dev`，不必再走发版。
+给别人用的安装包只走 GitHub Actions / RUP（`dev/v*`、`stable/v*`）。只改 Go、还要从源码跑 Console UI 时，用上一节的 `--prepare-runtime-only` + `npm run tauri dev`，不必再打安装包。
 
 ### 运行测试
 

@@ -159,6 +159,8 @@ export type GlobalSettings = {
   EffectiveIDEs: string[]
   ConfiguredEditor: string
   ServerIdleTimeout: string
+  SessionTimeout: string
+  AutoReunlockOnTimeout: boolean
 }
 
 export type OperationEvent = {
