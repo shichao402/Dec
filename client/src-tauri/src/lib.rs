@@ -1,5 +1,6 @@
 mod frontend_guard;
 mod grpc;
+mod proc;
 mod runtime_bundle;
 
 use grpc::{read_local_metadata, spawn_local_server, AuthResult, InvokeResult, PingInfo, Session};
@@ -159,7 +160,7 @@ fn suite_binary(name: &str) -> PathBuf {
 }
 
 fn component_version(component: &str) -> Option<String> {
-    let output = std::process::Command::new(suite_binary(component))
+    let output = proc::command(suite_binary(component))
         .arg("--version")
         .stdin(Stdio::null())
         .output()
@@ -228,13 +229,11 @@ fn stop_legacy_local_server() -> Result<(), String> {
         return Ok(());
     }
     let status = if cfg!(windows) {
-        std::process::Command::new("taskkill")
+        proc::command("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .status()
     } else {
-        std::process::Command::new("kill")
-            .arg(pid.to_string())
-            .status()
+        proc::command("kill").arg(pid.to_string()).status()
     }
     .map_err(|e| format!("停止旧 dec-server 失败: {e}"))?;
     if !status.success() && local_pid_running(pid) {
@@ -246,7 +245,7 @@ fn stop_legacy_local_server() -> Result<(), String> {
 
 fn local_pid_running(pid: u64) -> bool {
     if cfg!(windows) {
-        std::process::Command::new("tasklist")
+        proc::command("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/NH"])
             .output()
             .map(|out| {
@@ -256,7 +255,7 @@ fn local_pid_running(pid: u64) -> bool {
             })
             .unwrap_or(true)
     } else {
-        std::process::Command::new("kill")
+        proc::command("kill")
             .args(["-0", &pid.to_string()])
             .status()
             .map(|s| s.success())
@@ -332,7 +331,15 @@ fn read_saved_connections() -> Result<Vec<SavedConnection>, String> {
 }
 
 #[tauri::command]
-async fn list_connections(app: AppHandle) -> Result<Vec<SavedConnection>, String> {
+fn list_connections() -> Result<Vec<SavedConnection>, String> {
+    read_saved_connections()
+}
+
+/// 受管 SSH 设备记在本机服务的配置里，读它必须先把 dec-server 连上——那条路径
+/// 可能要补装运行时、停旧服务，慢到数秒。已保存的连接就在磁盘上，不该跟着等，
+/// 所以 `list_connections` 只读磁盘，发现受管设备单独走这里。
+#[tauri::command]
+async fn discover_connections(app: AppHandle) -> Result<Vec<SavedConnection>, String> {
     let mut list = read_saved_connections()?;
     let mut control = connect_local(&app).await?;
     let result = control
@@ -777,7 +784,7 @@ async fn connect_ssh(user: &str, host: &str, remote_port: u16) -> Result<Session
     };
     let (dial, ssh_port) = ssh_dial_target(&combined);
     let spec = format!("{local_port}:127.0.0.1:{remote_port}");
-    let mut cmd = std::process::Command::new("ssh");
+    let mut cmd = proc::command("ssh");
     cmd.args(["-N", "-L", &spec]);
     if let Some(port) = ssh_port {
         cmd.args(["-p", &port.to_string()]);
@@ -982,6 +989,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             take_open_intent,
             list_connections,
+            discover_connections,
             save_connection,
             delete_connection,
             load_saved_password,

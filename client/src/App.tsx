@@ -4,6 +4,7 @@ import {
   authenticate,
   connectTarget,
   deleteConnection,
+  discoverConnections,
   disconnect,
   invokeTyped,
   listConnections,
@@ -158,7 +159,12 @@ export default function App() {
 
   useEffect(() => {
     const spec = actionSpec('connections:list', '加载设备连接', 'console', [resource.connections], 'read')
-    void runAction(spec, listConnections).then((outcome) => {
+    void runAction(spec, async () => {
+      // 磁盘上的设备先上屏。受管设备的发现要等本机服务拉起，让已保存的设备跟着
+      // 等，界面会先空着报「还没有保存的设备」，几秒后再自己长出来。
+      setSaved(await listConnections())
+      return discoverConnections()
+    }).then((outcome) => {
       if (outcome.ok) setSaved(outcome.value)
     })
   }, [runAction])
@@ -216,6 +222,7 @@ export default function App() {
           let intent = await takeOpenIntent()
           while (intent) {
             if (intent === 'unlock-local') {
+              // 只要挑出本机那条，受管的都是 SSH 设备，读磁盘就够。
               const connections = await listConnections()
               setSaved(connections)
               await handleConnectRef.current(selectLocalConnection(connections), true)
@@ -291,7 +298,7 @@ export default function App() {
     const spec = actionSpec(`connections:save:${draft.id || 'new'}`, '正在保存连接', 'console', [resource.connections], 'write', '连接已保存')
     const outcome = await actions.run(spec, async () => {
       const stored = await saveConnection(draft)
-      return { stored, all: await listConnections() }
+      return { stored, all: await discoverConnections() }
     })
     if (!outcome.ok) return
     setDraft(outcome.value.stored)
@@ -312,7 +319,7 @@ export default function App() {
       }
       const result = await authenticate(email, secret, totp, true, retain)
       if (result.error) throw new Error(result.error)
-      if (!result.unlocked) return { result, stored, loaded: null, all: await listConnections() }
+      if (!result.unlocked) return { result, stored, loaded: null, all: await discoverConnections() }
       stored = await saveConnection(
         { ...stored, auth_email: email.trim(), password_saved: retain },
         retain ? secret : undefined,
@@ -321,7 +328,7 @@ export default function App() {
         result,
         stored,
         loaded: await fetchDevice(spec.key),
-        all: await listConnections(),
+        all: await discoverConnections(),
       }
     })
     if (!outcome.ok) return
@@ -412,7 +419,7 @@ export default function App() {
     const spec = actionSpec(`connections:delete:${id}`, '正在删除连接', 'console', [resource.connections], 'write', '连接已删除')
     const outcome = await actions.run(spec, async () => {
       await deleteConnection(id)
-      return listConnections()
+      return discoverConnections()
     })
     if (outcome.ok) setSaved(outcome.value)
   }

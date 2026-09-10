@@ -8,6 +8,11 @@ export async function listConnections() {
   return invoke<SavedConnection[]>('list_connections')
 }
 
+// 受管 SSH 设备记在本机服务里，读它要先把 dec-server 连上，可能慢到数秒。
+export async function discoverConnections() {
+  return invoke<SavedConnection[]>('discover_connections')
+}
+
 export async function saveConnection(conn: SavedConnection, password?: string) {
   return invoke<SavedConnection>('save_connection', { conn, password })
 }
