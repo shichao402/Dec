@@ -141,6 +141,19 @@ export function installTauriMock(scenario: Scenario) {
 
   const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     take_open_intent: () => null,
+    check_console_update: () => ({
+      currentVersion: 'v1.13.61',
+      latestVersion: 'v1.13.61',
+      needUpdate: false,
+      mandatory: false,
+      releaseNotesMarkdown: '',
+      releaseNotesUrl: '',
+      checkedAt: new Date().toISOString(),
+      fromCache: false,
+      autoCheckInterval: '24h0m0s',
+      canAutoInstall: true,
+    }),
+    install_console_update: () => ({}),
     list_connections: () => state.connections,
     discover_connections: () => state.connections,
     save_connection: (args) => {

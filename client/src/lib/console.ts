@@ -5,6 +5,7 @@ export type View = 'overview' | 'global' | 'projects' | 'project' | 'sync' | 'de
 
 export const resource = {
   connections: 'console:connections',
+  consoleUpdate: 'console:update',
   session: 'session',
   global: 'workspace:global',
   workspace: (root: string) => (root ? `workspace:${root}` : 'workspace:global'),

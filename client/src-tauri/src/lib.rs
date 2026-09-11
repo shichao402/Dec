@@ -1,3 +1,4 @@
+mod console_update;
 mod frontend_guard;
 mod grpc;
 mod proc;
@@ -19,6 +20,7 @@ use uuid::Uuid;
 #[derive(Default)]
 struct AppState {
     session: Mutex<Option<Session>>,
+    console_update: Mutex<()>,
     pending_intents: StdMutex<VecDeque<OpenIntent>>,
 }
 
@@ -114,6 +116,25 @@ const CREDENTIAL_SERVICE: &str = "dev.dec.console";
 const REMOTE_PROVISION_PORT: u16 = 47_653;
 const CONSOLE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const RUNTIME_COMPONENTS: [&str; 4] = ["dec-server", "dec-mcp", "dec-exec", "dec-host-setup"];
+
+#[tauri::command]
+async fn check_console_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    force: bool,
+) -> Result<console_update::ConsoleUpdateStatus, String> {
+    let _guard = state.console_update.lock().await;
+    console_update::check(&app, CONSOLE_VERSION, force).await
+}
+
+#[tauri::command]
+async fn install_console_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<console_update::ConsoleUpdateStatus, String> {
+    let _guard = state.console_update.lock().await;
+    console_update::install(&app, CONSOLE_VERSION).await
+}
 
 fn dec_home() -> PathBuf {
     std::env::var_os("DEC_HOME")
@@ -988,6 +1009,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             take_open_intent,
+            check_console_update,
+            install_console_update,
             list_connections,
             discover_connections,
             save_connection,

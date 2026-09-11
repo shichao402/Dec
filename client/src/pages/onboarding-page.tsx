@@ -34,7 +34,7 @@ export function OnboardingPage(props: {
   const [assets, setAssets] = useState<AssetSelection | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [query, setQuery] = useState('')
-  const saveDeviceSpec = actionSpec('onboarding:settings', '验证并保存设备设置', props.deviceId, [resource.global], 'write', '设备设置已保存')
+  const saveDeviceSpec = actionSpec('onboarding:settings', '验证并保存设备配置', props.deviceId, [resource.global], 'write', '设备配置已保存')
   const saveAssetsSpec = actionSpec('onboarding:assets', '保存 Global 资产选择', props.deviceId, [resource.global], 'write', 'Global 资产选择已保存')
 
   const saveDevice = async () => {
@@ -76,7 +76,7 @@ export function OnboardingPage(props: {
     <Page>
       <PageHeader
         title="准备这台设备"
-        description="三步完成初始化：连上私仓、选好 Global 资产、拉取落地。之后都能在设备设置里改。"
+        description="三步完成初始化：连上私仓、选好 Global 资产、拉取落地。之后都能在设置里改。"
       />
       <PageScroll className="max-w-5xl">
         <div className="grid gap-6 lg:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">

@@ -460,9 +460,11 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 - 远端与本机是两套事务，不能混选；远端密钥进 Bitwarden 回收站可恢复
   （[0024](decisions/0024-vault-delete-to-trash.md)）
 
-#### 自更新（同步页）
+#### 自更新（设置页）
 
-- 唯一用户面入口：Console **同步** 页（检查 → 确认 → 下载替换）
+- 属于本机 Console 程序壳，不属于目标设备上的 `dec-server` 业务
+- 唯一用户面入口：Console **设置** 页（启动时自动检查；手动检查 → 确认 → 下载替换）
+- 连接 SSH / TLS 远端时仍只更新本机 Console，不经目标服务 RPC
 - 无 `dec update` CLI
 - 实现见 `internal/update/` 与 [UPDATE_ARCHITECTURE.md](./UPDATE_ARCHITECTURE.md)
 

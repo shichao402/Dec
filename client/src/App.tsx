@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import {
   authenticate,
+  checkConsoleUpdate,
   connectTarget,
   deleteConnection,
   discoverConnections,
   disconnect,
   invokeTyped,
+  installConsoleUpdate,
   listConnections,
   loadSavedPassword,
   probeRemoteHost,
@@ -38,6 +40,7 @@ import { SettingsPage } from '@/pages/settings-page'
 import { SyncPage, type PullHistoryEntry } from '@/pages/sync-page'
 import { UnlockPage } from '@/pages/unlock-page'
 import type {
+  ConsoleUpdateStatus,
   DeviceSummary,
   GlobalSettings,
   ManagedProject,
@@ -57,7 +60,7 @@ const viewTitles: Record<View, string> = {
   project: '项目',
   sync: '同步',
   delete: '删除',
-  settings: '设备设置',
+  settings: '设置',
 }
 
 const emptyConn = (): SavedConnection => ({
@@ -85,6 +88,8 @@ export default function App() {
   const [ping, setPing] = useState<PingInfo | null>(null)
   const [summary, setSummary] = useState<DeviceSummary | null>(null)
   const [settings, setSettings] = useState<GlobalSettings | null>(null)
+  const [updateStatus, setUpdateStatus] = useState<ConsoleUpdateStatus | null>(null)
+  const [updateError, setUpdateError] = useState('')
   const [selectedProject, setSelectedProject] = useState<ManagedProject | null>(null)
   const [history, setHistory] = useState<PullHistoryEntry[]>([])
   const [email, setEmail] = useState('')
@@ -118,6 +123,15 @@ export default function App() {
   const observedRoots = ['', ...(summary?.Projects.map((project) => project.Root) || [])]
 
   useOperationObserver(deviceId, observedRoots, screen === 'console' && Boolean(current))
+
+  useEffect(() => {
+    void checkConsoleUpdate(false)
+      .then((status) => {
+        setUpdateStatus(status)
+        setUpdateError('')
+      })
+      .catch((error) => setUpdateError(error instanceof Error ? error.message : String(error)))
+  }, [])
 
   useEffect(() => {
     if (!current) return
@@ -601,7 +615,20 @@ export default function App() {
                   settings={settings}
                   summary={summary}
                   ping={ping}
+                  updateStatus={updateStatus}
+                  updateError={updateError}
                   setSettings={setSettings}
+                  onCheckUpdate={async () => {
+                    const status = await checkConsoleUpdate(true)
+                    setUpdateStatus(status)
+                    setUpdateError('')
+                    return status
+                  }}
+                  onInstallUpdate={async () => {
+                    const status = await installConsoleUpdate()
+                    setUpdateStatus(status)
+                    return status
+                  }}
                   onSaved={refreshDevice}
                   onRestart={restartService}
                 />

@@ -38,7 +38,7 @@ export function Sidebar(props: {
         { id: 'delete', label: '删除', icon: Trash2 },
       ],
     },
-    { label: '设备', items: [{ id: 'settings', label: '设备设置', icon: Settings }] },
+    { label: '管理', items: [{ id: 'settings', label: '设置', icon: Settings }] },
   ]
 
   return (

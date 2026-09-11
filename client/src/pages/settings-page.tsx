@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { RotateCw, Search, Trash2 } from 'lucide-react'
+import { Download, RefreshCw, RotateCw, Search, Trash2 } from 'lucide-react'
 import { ActionFeedback } from '@/components/action-feedback'
 import { Page, PageHeader, PageScroll } from '@/components/shell/page'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +13,7 @@ import { useDecAction } from '@/lib/action-context'
 import { invokeTyped, runTyped } from '@/lib/api'
 import { actionSpec, resource, toggle } from '@/lib/console'
 import type {
+  ConsoleUpdateStatus,
   DeviceSummary,
   GlobalSettings,
   LocalCleanupPreview,
@@ -26,7 +27,11 @@ export function SettingsPage(props: {
   settings: GlobalSettings
   summary: DeviceSummary
   ping: PingInfo | null
+  updateStatus: ConsoleUpdateStatus | null
+  updateError: string
   setSettings: (value: GlobalSettings) => void
+  onCheckUpdate: () => Promise<ConsoleUpdateStatus>
+  onInstallUpdate: () => Promise<ConsoleUpdateStatus>
   onSaved: () => void
   onRestart: () => void
 }) {
@@ -38,11 +43,13 @@ export function SettingsPage(props: {
   const [cleanupPreview, setCleanupPreview] = useState<LocalCleanupPreview | null>(null)
   const [cleanupConfirm, setCleanupConfirm] = useState('')
   const [cleanupResult, setCleanupResult] = useState<LocalCleanupResult | null>(null)
-  const saveSpec = actionSpec(`settings:save:${props.deviceId}`, '保存设备设置', props.deviceId, [resource.global], 'write', '设备设置已保存')
+  const saveSpec = actionSpec(`settings:save:${props.deviceId}`, '保存设备配置', props.deviceId, [resource.global], 'write', '设备配置已保存')
   const restartSpec = actionSpec(`session:restart:${props.deviceId}`, '重启服务并重连', props.deviceId, [resource.session], 'session')
   const restartState = useDecAction(restartSpec)
   const previewCleanupSpec = actionSpec(`cleanup:preview:${props.deviceId}`, '扫描本机 Dec 落点', props.deviceId, [resource.global], 'read')
   const cleanupSpec = actionSpec(`cleanup:run:${props.deviceId}`, '清理本机 Dec 资产', props.deviceId, [resource.global], 'operation', '本机 Dec 资产已清理')
+  const checkUpdateSpec = actionSpec('console:update:check', '检查 Console 更新', 'console', [resource.consoleUpdate], 'read')
+  const installUpdateSpec = actionSpec('console:update:install', '下载并安装 Console 更新', 'console', [resource.consoleUpdate], 'session')
   const dirty =
     repoURL !== props.settings.RepoURL ||
     idle !== props.settings.ServerIdleTimeout ||
@@ -72,11 +79,56 @@ export function SettingsPage(props: {
 
   return (
     <Page>
-      <PageHeader title="设备设置" description="这些设置属于目标设备上的 dec-server，不是本地客户端偏好。" />
+      <PageHeader title="设置" description="Console 与当前目标设备的设置按分区列在这里。" />
       <PageScroll className="max-w-4xl space-y-4">
+        <Panel>
+          <PanelHeader
+            title="Console 更新"
+            description="属于本机程序壳，不经过当前连接的 dec-server，也不会更新远端设备。"
+          />
+          <PanelBody className="space-y-3">
+            <ActionFeedback actionKey={checkUpdateSpec.key} />
+            <ActionFeedback actionKey={installUpdateSpec.key} />
+            <div className="flex flex-wrap items-center gap-2 text-xs text-faint">
+              <Badge tone="quiet" className="font-mono">
+                当前 {props.updateStatus?.currentVersion || '版本未知'}
+              </Badge>
+              {props.updateStatus?.needUpdate ? (
+                <Badge tone="warn">可更新至 {props.updateStatus.latestVersion}</Badge>
+              ) : props.updateStatus ? (
+                <Badge tone="good">已是最新版本</Badge>
+              ) : (
+                <Badge tone="quiet">尚未完成检查</Badge>
+              )}
+              {props.updateStatus?.fromCache && <span>显示上次检查结果</span>}
+            </div>
+            <p className="text-xs leading-relaxed text-faint">
+              Console 启动时自动检查，成功检查后 24 小时内复用结果；只检查，不会自动安装。
+            </p>
+            {props.updateError && <Notice tone="warn" text={`自动检查失败：${props.updateError}`} />}
+            {props.updateStatus?.releaseNotesMarkdown && (
+              <div className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-canvas/60 px-3 py-2 text-xs leading-relaxed text-muted">
+                {props.updateStatus.releaseNotesMarkdown}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <ActionButton spec={checkUpdateSpec} variant="outline" action={props.onCheckUpdate}>
+                <RefreshCw className="size-4" />
+                检查更新
+              </ActionButton>
+              {props.updateStatus?.needUpdate && (
+                <ActionButton spec={installUpdateSpec} action={props.onInstallUpdate} runningLabel="下载更新中…">
+                  <Download className="size-4" />
+                  {props.updateStatus.canAutoInstall ? '下载并安装' : '下载安装包'}
+                </ActionButton>
+              )}
+            </div>
+          </PanelBody>
+        </Panel>
+
         <ActionFeedback actionKey={saveSpec.key} />
         <Panel>
-          <PanelHeader title="私仓与运行环境" description="保存时会校验私仓是否可达。" />
+          <PanelHeader title="设备配置" description="以下配置属于当前目标设备上的 dec-server；保存时会校验私仓是否可达。" />
           <div className="divide-y divide-line">
             <SettingsSection
               title="Dec 私仓"

@@ -133,9 +133,9 @@ Console 主要页面：
 | 认证 | 按需完成 Bitwarden Authenticate |
 | 概览 / 引导 | 项目概览、建议下一步、project 初始化 |
 | 项目 / 资产 | 浏览资产、选择 bundle、保存 enabled |
-| 同步 | 拉取、推送（Global 与项目）、密钥清单（只读元数据）、自更新 |
+| 同步 | 拉取、推送（Global 与项目）、密钥清单（只读元数据） |
 | 删除 | 列远端与本机库存、勾选删除；密钥进 Bitwarden 回收站可恢复 |
-| 设置 | 连接仓库、Bitwarden、全局 IDE 与 editor |
+| 设置 | Console 更新；仓库、Bitwarden、全局 IDE、服务与清理 |
 
 Console Authenticate 是 Bitwarden **唯一人工认证入口**。本机交互 MCP 缺 session 时会
 自动拉起或聚焦 Console 并等待；管理远端设备时也在当前 Console 输入，远端主机无需桌面。

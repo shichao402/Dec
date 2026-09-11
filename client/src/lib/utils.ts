@@ -163,6 +163,19 @@ export type GlobalSettings = {
   AutoReunlockOnTimeout: boolean
 }
 
+export type ConsoleUpdateStatus = {
+  currentVersion: string
+  latestVersion: string
+  needUpdate: boolean
+  mandatory: boolean
+  releaseNotesMarkdown: string
+  releaseNotesUrl: string
+  checkedAt: string
+  fromCache: boolean
+  autoCheckInterval: string
+  canAutoInstall: boolean
+}
+
 export type OperationEvent = {
   level: string
   scope: string
@@ -239,7 +252,7 @@ export function describeServiceError(reason: unknown) {
   const matched = staleServicePattern.exec(text)
   if (!matched) return text
   const target = matched[1] ? `「${matched[1]}」` : '该能力'
-  return `目标 dec-server 版本较旧，不认识${target}。在设备设置里重启服务后重连即可加载新版本。原始错误：${text}`
+  return `目标 dec-server 版本较旧，不认识${target}。在设置里重启服务后重连即可加载新版本。原始错误：${text}`
 }
 
 export function isStaleServiceError(reason: unknown) {

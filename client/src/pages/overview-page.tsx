@@ -78,7 +78,7 @@ export function OverviewPage(props: {
                   <QuickAction icon={RefreshCw} label="拉取 Global 资产" hint="按当前选择落地到用户环境" onClick={props.onPullGlobal} />
                   <QuickAction icon={Globe} label="调整 Global 资产" hint="勾选装到这台设备的 bundle" onClick={() => props.onNavigate('global')} />
                   <QuickAction icon={FolderSearch} label="接管项目目录" hint="登记目录或扫描已有 Dec 项目" onClick={() => props.onNavigate('projects')} />
-                  <QuickAction icon={Settings} label="设备设置" hint="私仓、IDE、服务实例" onClick={() => props.onNavigate('settings')} />
+                  <QuickAction icon={Settings} label="设置" hint="Console 更新、私仓、IDE、服务实例" onClick={() => props.onNavigate('settings')} />
                 </div>
               </Panel>
               <Panel className="shrink-0">

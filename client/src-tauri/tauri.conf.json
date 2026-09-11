@@ -36,7 +36,8 @@
       "appimage"
     ],
     "resources": [
-      "resources/runtime/**/*"
+      "resources/runtime/**/*",
+      "resources/updater/**/*"
     ],
     "icon": [
       "icons/32x32.png",

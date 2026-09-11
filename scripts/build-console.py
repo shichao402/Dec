@@ -19,6 +19,7 @@ CLIENT = ROOT / "client"
 TAURI = CLIENT / "src-tauri"
 DIST = ROOT / "dist"
 RUNTIME_RESOURCES = TAURI / "resources" / "runtime"
+UPDATER_RESOURCES = TAURI / "resources" / "updater"
 RUNTIME_COMPONENTS = ("dec-server", "dec-mcp", "dec-exec", "dec-host-setup")
 
 
@@ -79,19 +80,20 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def clean_runtime_resources() -> None:
-    RUNTIME_RESOURCES.mkdir(parents=True, exist_ok=True)
-    for child in RUNTIME_RESOURCES.iterdir():
-        if child.name == ".gitkeep":
-            continue
-        if child.is_dir():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
+def clean_generated_resources() -> None:
+    for root in (RUNTIME_RESOURCES, UPDATER_RESOURCES):
+        root.mkdir(parents=True, exist_ok=True)
+        for child in root.iterdir():
+            if child.name == ".gitkeep":
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
 
 
 def prepare_runtime_resources(version: str, os_id: str, arch: str) -> Path:
-    clean_runtime_resources()
+    clean_generated_resources()
     platform_dir = RUNTIME_RESOURCES / f"{os_id}-{arch}"
     platform_dir.mkdir(parents=True)
     env = os.environ.copy()
@@ -128,6 +130,22 @@ def prepare_runtime_resources(version: str, os_id: str, arch: str) -> Path:
     (platform_dir / "runtime-manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
+    )
+    updater_dir = UPDATER_RESOURCES / f"{os_id}-{arch}"
+    updater_dir.mkdir(parents=True)
+    updater_name = "dec-console-updater.exe" if os_id == "windows" else "dec-console-updater"
+    subprocess.run(
+        [
+            "go",
+            "build",
+            "-trimpath",
+            "-o",
+            str(updater_dir / updater_name),
+            "./cmd/dec-console-updater",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=True,
     )
     return platform_dir
 
@@ -218,7 +236,7 @@ def main() -> None:
             subprocess.run([npm, "ci"], cwd=CLIENT, check=True)
         subprocess.run([npm, "run", "tauri", "build"], cwd=CLIENT, check=True)
     finally:
-        clean_runtime_resources()
+        clean_generated_resources()
     matches = sorted((TAURI / "target" / "release" / "bundle").glob(pattern))
     if len(matches) != 1:
         raise SystemExit(f"expected one Console installer matching {pattern}, got {matches}")

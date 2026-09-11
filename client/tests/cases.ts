@@ -329,8 +329,8 @@ export const cases: Case[] = [
     scenario: 'typical',
     open: async (page) => {
       await connect(page)
-      await nav(page, '设备设置')
-      await expect(page.getByRole('heading', { name: '设备设置' })).toBeVisible()
+      await nav(page, '设置')
+      await expect(page.getByRole('heading', { name: '设置' })).toBeVisible()
     },
   },
   {
@@ -338,8 +338,8 @@ export const cases: Case[] = [
     scenario: 'extreme',
     open: async (page) => {
       await connect(page)
-      await nav(page, '设备设置')
-      await expect(page.getByRole('heading', { name: '设备设置' })).toBeVisible()
+      await nav(page, '设置')
+      await expect(page.getByRole('heading', { name: '设置' })).toBeVisible()
     },
   },
 ]

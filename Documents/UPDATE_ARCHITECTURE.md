@@ -16,8 +16,10 @@ Dec 运行时的检查/下载使用 `go.firoyang.com/relkit/sdk`（`replace` 到
 
 入口：
 
-- Console **同步** 页（唯一用户面入口）
-- `CheckBackground` 仍可供启动时读本地缓存
+- Console **设置** 页（唯一用户面入口）
+- 更新由本机 Console 壳及其内置 `dec-console-updater` 执行，不经过当前目标 `dec-server`
+- Console 启动时自动检查；成功检查后 24 小时内复用本地结果，只提示、不自动安装
+- 手动检查忽略节流；用户确认后才下载并启动安装包
 
 `CheckResult{CurrentVersion, LatestVersion, NeedUpdate}` 形状保持不变。
 
