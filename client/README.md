@@ -29,6 +29,8 @@ release 构建仍严格要求内置资源，只有 debug 模式会在资源尚�
 启动后先选连接（本机 / 远程 gRPC / SSH 隧道）。实例控制权建立后，仅在操作需要
 Bitwarden 时进入 Authenticate 页面；实例控制与 vault session 是两种独立内存态。
 Console 是主密码、TOTP 与设备登录确认的唯一人工入口，服务端不再打开认证页面。
+启动时会在 `127.0.0.1` 打开 Agent 网关并写入 `~/.dec/run/console.json`，供多个
+`dec-mcp` 共用；MCP 不再直连 `dec-server`。
 
 连接会保存 Bitwarden 邮箱。主密码默认不保存；用户明确勾选后才通过统一的系统凭据接口写入 Windows Credential Manager、macOS Keychain 或 Linux Secret Service，不会进入 `connections.json`。取消勾选或删除连接时会同时删除对应凭据。Linux 构建静态携带 D-Bus 客户端依赖，桌面会话仍需提供 Secret Service（如 GNOME Keyring 或 KWallet）。
 
@@ -38,8 +40,7 @@ Console 是主密码、TOTP 与设备登录确认的唯一人工入口，服务�
 凭据库回填密码，必须由人确认提交。解锁有效期由 `session_timeout` 配置（默认 4 小时）：
 到期一律作废内存凭据，云端会话是否还有效不作数。
 
-本机交互 MCP 缺 session 时会拉起尚未运行的 Console，或聚焦现有窗口，并等待用户完成
-Authenticate；并发请求共享同一次认证。管理远端设备时，输入仍发生在操作者当前
+本机交互 MCP 连不上 Console 网关时会拉起尚未运行的 Console，或聚焦现有窗口。缺 Bitwarden session 时仍等待 Authenticate；并发请求共享同一次认证。管理远端设备时，输入仍发生在操作者当前
 Console，由它提交给目标服务，远端主机无需桌面。远端无桌面/CI/测试等非交互上下文
 不得自动拉起 Console，应收到结构化认证错误。
 

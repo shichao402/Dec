@@ -1,3 +1,4 @@
+mod agent;
 mod console_update;
 mod frontend_guard;
 mod grpc;
@@ -13,15 +14,30 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 #[derive(Default)]
-struct AppState {
-    session: Mutex<Option<Session>>,
+pub(crate) struct AppState {
+    pub(crate) session: Mutex<Option<Session>>,
+    pub(crate) current: Mutex<Option<CurrentTarget>>,
     console_update: Mutex<()>,
     pending_intents: StdMutex<VecDeque<OpenIntent>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub(crate) struct CurrentTarget {
+    pub kind: String,
+    pub host: String,
+    pub port: u16,
+    pub ssh_host: String,
+    pub ssh_user: String,
+    pub tls: bool,
+    pub tls_server_name: String,
+    pub saved_id: String,
+    pub unlocked: bool,
+    pub version: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -76,7 +92,7 @@ fn take_open_intent(state: State<'_, AppState>) -> Option<OpenIntent> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SavedConnection {
+pub(crate) struct SavedConnection {
     id: String,
     label: String,
     kind: String,
@@ -136,7 +152,7 @@ async fn install_console_update(
     console_update::install(&app, CONSOLE_VERSION).await
 }
 
-fn dec_home() -> PathBuf {
+pub(crate) fn dec_home() -> PathBuf {
     std::env::var_os("DEC_HOME")
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|home| home.join(".dec")))
@@ -333,7 +349,7 @@ fn data_file() -> Result<PathBuf, String> {
     Ok(dir.join("connections.json"))
 }
 
-fn read_saved_connections() -> Result<Vec<SavedConnection>, String> {
+pub(crate) fn read_saved_connections() -> Result<Vec<SavedConnection>, String> {
     let path = data_file()?;
     if !path.exists() {
         return Ok(Vec::new());
@@ -576,6 +592,9 @@ async fn provision_remote_host(
         project_root,
         "global".into(),
         serde_json::to_vec(&payload).map_err(|e| e.to_string())?,
+        "dec-console".into(),
+        "web".into(),
+        0,
         |event| {
             emit_action_event(
                 &app,
@@ -601,13 +620,40 @@ async fn connect_target(
     tls_server_name: String,
     state: State<'_, AppState>,
 ) -> Result<PingInfo, String> {
+    let _ = state;
+    connect_target_inner(
+        &app,
+        kind,
+        host,
+        port,
+        ssh_host,
+        ssh_user,
+        tls,
+        tls_server_name,
+        String::new(),
+    )
+    .await
+}
+
+pub(crate) async fn connect_target_inner(
+    app: &AppHandle,
+    kind: String,
+    host: String,
+    port: u16,
+    ssh_host: String,
+    ssh_user: String,
+    tls: bool,
+    tls_server_name: String,
+    saved_id: String,
+) -> Result<PingInfo, String> {
+    let state = app.state::<AppState>();
     disconnect_inner(&state).await;
     validate_remote_transport(&kind, &host, tls)?;
     let mut session = match kind.as_str() {
-        "local" => connect_local(&app).await?,
+        "local" => connect_local(app).await?,
         "ssh" => {
             let target = ssh_destination(&ssh_user, &ssh_host);
-            ensure_remote_service_running(&app, &target).await?;
+            ensure_remote_service_running(app, &target).await?;
             connect_ssh("", &target, REMOTE_PROVISION_PORT).await?
         }
         _ => {
@@ -636,6 +682,18 @@ async fn connect_target(
     if ping.unlocked {
         session.start_keep_alive();
     }
+    *state.current.lock().await = Some(CurrentTarget {
+        kind: kind.clone(),
+        host: host.clone(),
+        port,
+        ssh_host: ssh_host.clone(),
+        ssh_user: ssh_user.clone(),
+        tls,
+        tls_server_name: tls_server_name.clone(),
+        saved_id,
+        unlocked: ping.unlocked,
+        version: ping.version.clone(),
+    });
     *state.session.lock().await = Some(session);
     Ok(ping)
 }
@@ -774,6 +832,9 @@ async fn ensure_remote_service_running(app: &AppHandle, target: &str) -> Result<
             operation_key.clone(),
             "global".into(),
             serde_json::to_vec(&provision_payload).map_err(|e| e.to_string())?,
+            "dec-console".into(),
+            "web".into(),
+            0,
             |_| {},
         )
         .await?;
@@ -823,6 +884,7 @@ async fn connect_ssh(user: &str, host: &str, remote_port: u16) -> Result<Session
 }
 
 async fn disconnect_inner(state: &AppState) {
+    *state.current.lock().await = None;
     let mut guard = state.session.lock().await;
     if let Some(mut session) = guard.take() {
         if let Some(task) = session.keep_alive.take() {
@@ -855,9 +917,16 @@ async fn stop_service(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 async fn ping_server(state: State<'_, AppState>) -> Result<PingInfo, String> {
-    let mut guard = state.session.lock().await;
-    let session = guard.as_mut().ok_or("尚未连接")?;
-    session.ping().await
+    let client = {
+        let guard = state.session.lock().await;
+        guard.as_ref().ok_or("尚未连接")?.client_clone()
+    };
+    let ping = grpc::ping(client).await?;
+    if let Some(current) = state.current.lock().await.as_mut() {
+        current.unlocked = ping.unlocked;
+        current.version = ping.version.clone();
+    }
+    Ok(ping)
 }
 
 #[tauri::command]
@@ -877,6 +946,10 @@ async fn authenticate(
     if result.unlocked {
         session.start_keep_alive();
     }
+    drop(guard);
+    if let Some(current) = state.current.lock().await.as_mut() {
+        current.unlocked = result.unlocked;
+    }
     Ok(result)
 }
 
@@ -890,16 +963,19 @@ async fn invoke_method(
     action_key: String,
     state: State<'_, AppState>,
 ) -> Result<InvokeResult, String> {
-    let mut guard = state.session.lock().await;
-    let session = guard.as_mut().ok_or("尚未连接")?;
-    let mut result = session
-        .invoke(
-            method.clone(),
-            project_root.clone(),
-            workspace_plane,
-            payload_json.into_bytes(),
-        )
-        .await?;
+    let client = {
+        let guard = state.session.lock().await;
+        guard.as_ref().ok_or("尚未连接")?.client_clone()
+    };
+    let mut result = grpc::invoke(
+        client,
+        method.clone(),
+        project_root.clone(),
+        workspace_plane,
+        payload_json.into_bytes(),
+        0,
+    )
+    .await?;
     for event in result.events.drain(..) {
         emit_action_event(&app, &action_key, &project_root, &method, event);
     }
@@ -911,9 +987,11 @@ async fn get_active_operation(
     project_root: String,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let mut guard = state.session.lock().await;
-    let session = guard.as_mut().ok_or("尚未连接")?;
-    session.active_operation(project_root).await
+    let client = {
+        let guard = state.session.lock().await;
+        guard.as_ref().ok_or("尚未连接")?.client_clone()
+    };
+    grpc::active_operation(client, project_root).await
 }
 
 #[tauri::command]
@@ -958,6 +1036,9 @@ async fn run_operation(
         project_root,
         workspace_plane,
         payload_json.into_bytes(),
+        "dec-console".into(),
+        "web".into(),
+        0,
         |event| {
             emit_action_event(&app, &action_key, &event_root, &event_operation, event);
         },
@@ -1005,6 +1086,10 @@ pub fn run() {
             let args: Vec<_> = std::env::args().collect();
             enqueue_open_intents(app.handle(), args.iter().map(String::as_str));
             focus_main_window(app.handle());
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                agent::serve(handle).await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1028,8 +1113,13 @@ pub fn run() {
             get_active_operation,
             watch_operation,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Dec console");
+        .build(tauri::generate_context!())
+        .expect("error while running Dec console")
+        .run(|_app, event| {
+            if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
+                agent::remove_metadata();
+            }
+        });
 }
 
 #[cfg(test)]

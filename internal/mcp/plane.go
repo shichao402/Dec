@@ -63,6 +63,7 @@ type planeOutcome struct {
 func (s *Server) dispatchPlanes(
 	ctx context.Context,
 	raw string,
+	projectRoot string,
 	fn func(ctx context.Context, ws app.Workspace, reporter app.Reporter) (any, error),
 ) (*mcp.CallToolResult, any, error) {
 	planes, err := parsePlanes(raw)
@@ -70,8 +71,11 @@ func (s *Server) dispatchPlanes(
 		return toolFail(err, nil)
 	}
 	if len(planes) == 1 {
+		ws, err := s.workspace(planes[0], projectRoot)
+		if err != nil {
+			return toolFail(err, nil)
+		}
 		reporter, logs := newCollector()
-		ws := app.NewWorkspace(planes[0], s.projectRoot())
 		result, runErr := fn(ctx, ws, reporter)
 		if runErr != nil {
 			return toolFail(runErr, logs())
@@ -83,10 +87,16 @@ func (s *Server) dispatchPlanes(
 	allLogs := make([]logEntry, 0)
 	anyOK := false
 	for _, plane := range planes {
-		reporter, logs := newCollector()
-		ws := app.NewWorkspace(plane, s.projectRoot())
-		result, runErr := fn(ctx, ws, reporter)
 		oc := planeOutcome{Plane: string(plane)}
+		reporter, logs := newCollector()
+		ws, err := s.workspace(plane, projectRoot)
+		if err != nil {
+			oc.Error = err.Error()
+			outcomes = append(outcomes, oc)
+			allLogs = append(allLogs, logs()...)
+			continue
+		}
+		result, runErr := fn(ctx, ws, reporter)
 		if runErr != nil {
 			oc.Error = runErr.Error()
 		} else {

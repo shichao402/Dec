@@ -23,7 +23,7 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tonic = { version = "0.12", features = ["tls-roots"] }
 prost = "0.13"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "io-util", "net"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"
 tokio-stream = { version = "0.1.19", features = ["sync"] }

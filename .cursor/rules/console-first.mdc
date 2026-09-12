@@ -16,7 +16,7 @@ Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）�
 - Secrets / Bitwarden / SSH / env 部署等操作通过 Console 触达（设置、同步、项目、远端设备）。
 - **同步** pull：解析绑定项目与引入 → 拉 Dec Git（→ `.dec/cache/`）+ 自动拉 Bitwarden **secrets**（→ **`.secrets/`** 同步根，零路径重叠）；见 `Documents/BUNDLE-SECRETS-MODEL.md`。
 - **`dec-exec`**（独立程序）：按 bundle 作用域读取 `.secrets/**/.env/*.env` 并启动子进程，供 MCP / Agent 运行时注入；不经过 `dec-server`、不碰 session，也不是用户面 secrets 管理入口。
-- **服务 / 门面**：`dec-server` 是一机单例业务服务；Console 与 `dec-mcp` 是薄门面，连不上时由目标侧检查并初始化 / 拉起服务，禁止回退到门面内嵌 `internal/app`。
+- **服务 / 门面**：`dec-server` 是一机单例业务服务；Console 是人机入口并提供 Agent loopback 网关。`dec-mcp` 只适配 stdio，连不上时拉起/聚焦 Console，禁止自行 RestartServer，禁止回退到门面内嵌 `internal/app`。
 - **唯一人工认证入口**：Bitwarden 主密码、TOTP 与设备登录确认只在 Console Authenticate 中收集；服务端不得打开临时认证页面，CLI/MCP 不得提示或接收主密码。
 - **缺 session 协调**：本机交互 MCP 自动拉起/聚焦 Console 并等待；远端无桌面、CI、测试与其他非交互上下文返回结构化错误，不得自动弹 Console。
 - **跨页异步 IO**：慢 IO 跟 Shell 生命周期走，不跟当前页；切页禁止打断在飞请求；独立 busy 信号 + 防重复 + gen 丢弃过期结果（见 `client/README.md` 与 ADR 0018）。
@@ -45,7 +45,7 @@ Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）�
 
 ## 非交互环境
 
-- Agent 通过 `dec-mcp` → `dec-server` 调用业务；CI 内部代码连接服务 API；env 注入用 `dec-exec`。**不要**假设存在 `dec pull` 等用户面子命令。
+- Agent 通过 `dec-mcp` → Console 网关 → 当前目标 `dec-server` 调用业务；CI 内部代码仍可直连服务 API；env 注入用 `dec-exec`。**不要**假设存在 `dec pull` 等用户面子命令。
 
 ## 反例
 

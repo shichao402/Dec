@@ -147,7 +147,7 @@ func TestSaveGlobalSettingsConfiguresAllSupportedIDEsByDefault(t *testing.T) {
 	if !ok {
 		t.Fatalf("cursor mcp.json 应包含 dec 条目: %#v", mcpCfg.MCPServers)
 	}
-	if decMCP.Command != "dec-mcp" || len(decMCP.Args) < 1 || decMCP.Args[0] != "--project-root" {
+	if decMCP.Command != "dec-mcp" || len(decMCP.Args) != 0 {
 		t.Fatalf("dec MCP 配置 = %#v", decMCP)
 	}
 	if !result.VarsCreated {

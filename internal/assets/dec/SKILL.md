@@ -7,7 +7,7 @@ description: >
 
 # Dec 代理
 
-Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用户交互以 **Dec Console** 为第一入口；Agent 走 **`dec-mcp`** 调本机 `dec-server`。不要发明已下线的用户面子命令（旧的 list / search / config / pull CLI），也不要再引导用户运行终端 TUI。
+Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用户交互以 **Dec Console** 为第一入口；Agent 走 **`dec-mcp`**（stdio 适配器）经本机唯一 Console 网关调用当前连接的 `dec-server`。不要发明已下线的用户面子命令（旧的 list / search / config / pull CLI），也不要再引导用户运行终端 TUI。
 
 项目里由 Dec pull 出来的 IDE 配置不等于「禁止提交」。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 这类项目级输出，如果是托管资产生成的结果，通常可以按仓库约定单独提交。敏感值放 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置，不要写回这些输出文件。
 
@@ -16,9 +16,9 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 ### 主动建议用户的场景
 
 1. **新项目需要接入 Dec**
-   - Console **引导 / 项目** 初始化项目（可选套用 vault 同名 project）；Agent 用 `dec_init_project`
+   - Console **引导 / 项目** 初始化项目（可选套用 vault 同名 project）；Agent 用 `dec_init_project`（必填 `project_root`）
    - 模板有 `{{VAR_NAME}}` 时，在 Console 项目设置里编辑 `.dec/vars.yaml`
-   - Console 资产页勾选并保存；Agent 用 `dec_set_assets` 后 `dec_pull`（`plane=project`）
+   - Console 资产页勾选并保存；Agent 用 `dec_set_assets` 后 `dec_pull`（`plane=local`，带 `project_root`）
    - pull 后若仓库跟踪 Dec 托管的 IDE 输出，询问是否单独 commit
 
 2. **用户要找以前做过的工具/配置**
@@ -57,11 +57,16 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 
 ## Agent MCP 快速参考
 
-当前平面用 `plane=project`（项目内 IDE 目录）或 `plane=user`（`~` 用户级 IDE 目录）。用户平面在 Console 的 Global 资产里管理，不要用已删除的 `dec --user`。
+`dec-mcp` 不绑定某个仓库。先 `dec_console_status` / `dec_list_managed_projects`，本地平面操作带上 `project_root`。目标是 Console **当前连接**的设备（本机或 SSH 远端）。
+
+当前平面用 `plane=local`（项目内 IDE 目录）或 `plane=global`（本机）。用户平面在 Console 的 Global 资产里管理。
 
 | 目的 | 工具 |
 |------|------|
-| 状态 | `dec_status` |
+| Console / 当前连接 | `dec_console_status`；`dec_list_connections` / `dec_connect` |
+| 受管项目 / 设备 | `dec_list_managed_projects`、`dec_list_managed_devices`、`dec_register_managed_project` |
+| 新建本地资产 | `dec_create_local_asset` |
+| 状态 | `dec_status`（local 需 `project_root`） |
 | 已启用 bundle / 成员 | `dec_list_assets` |
 | 改启用列表 | `dec_set_assets`（不支持 both；改完通常再 `dec_pull`） |
 | 拉取并渲染 | `dec_pull` |
@@ -70,7 +75,7 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 | 删除候选 / 删除 | `dec_list_delete_candidates` / `dec_delete`（Console 在删除页） |
 | 置备远端设备 | `dec_provision_remote`（Linux/macOS；首次置备必须 `confirmed=true`） |
 | 连仓库 | `dec_connect_repo` |
-| 初始化项目 | `dec_init_project` |
+| 初始化项目 | `dec_init_project`（`project_root` 必填） |
 
 env 注入给子进程用独立程序 `dec-exec`，不经过 `dec-server`、不是用户面入口。
 

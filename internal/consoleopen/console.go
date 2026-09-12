@@ -15,7 +15,7 @@ const UnlockLocalFlag = "--unlock-local"
 
 var (
 	ErrNonInteractive = errors.New("当前环境不可启动 Dec Console")
-	launch            = launchInstalledConsole
+	launch            = startInstalled
 )
 
 // Available reports whether this process is allowed to open a desktop app.
@@ -34,24 +34,31 @@ func Available() bool {
 	return true
 }
 
-func OpenUnlockLocal() error {
+func Open() error {
 	if !Available() {
 		return ErrNonInteractive
 	}
 	return launch()
 }
 
-func launchInstalledConsole() error {
+func OpenUnlockLocal() error {
+	if !Available() {
+		return ErrNonInteractive
+	}
+	return launch(UnlockLocalFlag)
+}
+
+func startInstalled(args ...string) error {
 	path, err := findConsoleExecutable()
 	if err != nil {
 		return err
 	}
-	return startDetached(path, UnlockLocalFlag)
+	return startDetached(path, args...)
 }
 
 // SetLaunchForTest replaces the Console launcher and returns a restore function.
 func SetLaunchForTest(fn func() error) func() {
 	old := launch
-	launch = fn
+	launch = func(args ...string) error { return fn() }
 	return func() { launch = old }
 }

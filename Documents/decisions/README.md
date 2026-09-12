@@ -45,3 +45,4 @@
 | [0022](0022-console-bitwarden-unlock.md) | Console 统一承载 Bitwarden 人工解锁 | 已接受；部分取代 0008、0018 的旧解锁叙事 |
 | [0023](0023-facade-capability-parity.md) | 门面能力口径：Console 覆盖人面能力，MCP 扩展需登记 | 已接受（已实现） |
 | [0024](0024-vault-delete-to-trash.md) | 远端删除移入保险库回收站，不永久删除 | 已接受（已实现） |
+| [0025](0025-mcp-console-gateway.md) | MCP 经唯一 Console 网关代理，不再直连 dec-server | 已接受（已实现） |

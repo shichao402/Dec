@@ -32,7 +32,7 @@ Console 启动后从自身内置 resources 把运行时套件（`dec-server`、`
 
 - **目录**：NSIS 装 Console 程序；`~/.dec` 是这台机器上的 Dec（运行时套件、配置、secrets、服务锁）。运行时组件不进 NSIS 目录。
 - **版本**：Console 拥有 `~/.dec/bin`，要求每个组件都与 Console 严格相等（ADR 0021）。高于就停服改写，低于就拒绝控制。
-- **发现**：门面读 `${DEC_HOME}/run/server.json`（默认 `~/.dec`），一机一实例；`dec-mcp` 拉起的是**自己同目录**的 `dec-server`，Console 拉起 `DEC_HOME/bin` 里的。
+- **发现**：Console 读/写 `${DEC_HOME}/run/server.json`（默认 `~/.dec`）并拉起 `DEC_HOME/bin` 里的 `dec-server`；`dec-mcp` 只发现 `${DEC_HOME}/run/console.json`，经唯一 Console 网关转发（ADR 0025）。
 
 两份运行时或两个版本号，必然演化成互相改写与拒绝连接。
 

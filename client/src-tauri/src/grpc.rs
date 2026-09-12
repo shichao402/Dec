@@ -21,6 +21,26 @@ use tonic::{Request, Status};
 #[derive(Clone)]
 pub struct TokenInterceptor {
     pub token: Arc<Mutex<String>>,
+    pub facade: String,
+    pub client_id: String,
+}
+
+impl TokenInterceptor {
+    fn console(token: String) -> Self {
+        Self {
+            token: Arc::new(Mutex::new(token)),
+            facade: "web".into(),
+            client_id: "dec-console".into(),
+        }
+    }
+
+    fn with_identity(&self, facade: &str, client_id: &str) -> Self {
+        Self {
+            token: self.token.clone(),
+            facade: facade.to_string(),
+            client_id: client_id.to_string(),
+        }
+    }
 }
 
 impl Interceptor for TokenInterceptor {
@@ -35,12 +55,16 @@ impl Interceptor for TokenInterceptor {
                 .map_err(|_| Status::internal("invalid token metadata"))?;
             request.metadata_mut().insert("x-dec-token", value);
         }
-        request
-            .metadata_mut()
-            .insert("x-dec-facade", "web".parse().unwrap());
-        request
-            .metadata_mut()
-            .insert("x-dec-client-id", "dec-console".parse().unwrap());
+        let facade = self
+            .facade
+            .parse()
+            .map_err(|_| Status::internal("invalid facade metadata"))?;
+        let client_id = self
+            .client_id
+            .parse()
+            .map_err(|_| Status::internal("invalid client-id metadata"))?;
+        request.metadata_mut().insert("x-dec-facade", facade);
+        request.metadata_mut().insert("x-dec-client-id", client_id);
         request.metadata_mut().insert(
             "x-dec-client-version",
             env!("CARGO_PKG_VERSION").parse().unwrap(),
@@ -55,6 +79,7 @@ pub type Svc =
 pub struct Session {
     pub interceptor: TokenInterceptor,
     pub client: Svc,
+    pub channel: Channel,
     #[allow(dead_code)]
     pub endpoint: String,
     pub ssh: Option<Child>,
@@ -120,13 +145,12 @@ pub async fn connect_channel(
         .connect()
         .await
         .map_err(|e| e.to_string())?;
-    let interceptor = TokenInterceptor {
-        token: Arc::new(Mutex::new(token.to_string())),
-    };
-    let client = DecServiceClient::with_interceptor(channel, interceptor.clone());
+    let interceptor = TokenInterceptor::console(token.to_string());
+    let client = DecServiceClient::with_interceptor(channel.clone(), interceptor.clone());
     Ok(Session {
         interceptor,
         client,
+        channel,
         endpoint: endpoint.to_string(),
         ssh: None,
         keep_alive: None,
@@ -136,6 +160,13 @@ pub async fn connect_channel(
 impl Session {
     pub fn client_clone(&self) -> Svc {
         self.client.clone()
+    }
+
+    pub fn client_for(&self, facade: &str, client_id: &str) -> Svc {
+        DecServiceClient::with_interceptor(
+            self.channel.clone(),
+            self.interceptor.with_identity(facade, client_id),
+        )
     }
 
     pub fn start_keep_alive(&mut self) {
@@ -255,46 +286,83 @@ impl Session {
         workspace_plane: String,
         payload_json: Vec<u8>,
     ) -> Result<InvokeResult, String> {
-        let resp = self
-            .client
-            .invoke(Request::new(InvokeRequest {
-                method,
-                project_root,
-                payload_json,
-                unlock_timeout_ms: 0,
-                workspace_plane,
-            }))
-            .await
-            .map_err(|e| e.to_string())?
-            .into_inner();
-        Ok(InvokeResult {
-            result_json: String::from_utf8_lossy(&resp.result_json).into_owned(),
-            error: String::new(),
-            events: resp.events.into_iter().map(operation_event_json).collect(),
-        })
+        invoke(
+            self.client_clone(),
+            method,
+            project_root,
+            workspace_plane,
+            payload_json,
+            0,
+        )
+        .await
     }
 
     pub async fn active_operation(
         &mut self,
         project_root: String,
     ) -> Result<serde_json::Value, String> {
-        let resp = self
-            .client
-            .get_active_operation(Request::new(GetActiveOperationRequest { project_root }))
-            .await
-            .map_err(|e| e.to_string())?
-            .into_inner();
-        match resp.operation {
-            None => Ok(serde_json::json!({ "active": false })),
-            Some(op) => Ok(serde_json::json!({
-                "active": op.active,
-                "operationId": op.operation_id,
-                "operation": op.operation,
-                "facade": op.facade,
-                "clientId": op.client_id,
-                "startedAtUnixMs": op.started_at_unix_ms,
-            })),
-        }
+        active_operation(self.client_clone(), project_root).await
+    }
+}
+
+pub async fn invoke(
+    mut client: Svc,
+    method: String,
+    project_root: String,
+    workspace_plane: String,
+    payload_json: Vec<u8>,
+    unlock_timeout_ms: i64,
+) -> Result<InvokeResult, String> {
+    let resp = client
+        .invoke(Request::new(InvokeRequest {
+            method,
+            project_root,
+            payload_json,
+            unlock_timeout_ms,
+            workspace_plane,
+        }))
+        .await
+        .map_err(|e| e.to_string())?
+        .into_inner();
+    Ok(InvokeResult {
+        result_json: String::from_utf8_lossy(&resp.result_json).into_owned(),
+        error: String::new(),
+        events: resp.events.into_iter().map(operation_event_json).collect(),
+    })
+}
+
+pub async fn ping(mut client: Svc) -> Result<PingInfo, String> {
+    let resp = client
+        .ping(Request::new(PingRequest {}))
+        .await
+        .map_err(|e| e.to_string())?
+        .into_inner();
+    Ok(PingInfo {
+        version: resp.version,
+        instance_id: resp.instance_id,
+        unlocked: resp.unlocked,
+    })
+}
+
+pub async fn active_operation(
+    mut client: Svc,
+    project_root: String,
+) -> Result<serde_json::Value, String> {
+    let resp = client
+        .get_active_operation(Request::new(GetActiveOperationRequest { project_root }))
+        .await
+        .map_err(|e| e.to_string())?
+        .into_inner();
+    match resp.operation {
+        None => Ok(serde_json::json!({ "active": false })),
+        Some(op) => Ok(serde_json::json!({
+            "active": op.active,
+            "operationId": op.operation_id,
+            "operation": op.operation,
+            "facade": op.facade,
+            "clientId": op.client_id,
+            "startedAtUnixMs": op.started_at_unix_ms,
+        })),
     }
 }
 
@@ -304,16 +372,19 @@ pub async fn run_operation(
     project_root: String,
     workspace_plane: String,
     payload_json: Vec<u8>,
+    client_id: String,
+    facade: String,
+    unlock_timeout_ms: i64,
     mut on_event: impl FnMut(serde_json::Value),
 ) -> Result<InvokeResult, String> {
     let mut stream = client
         .run_operation(Request::new(RunOperationRequest {
             operation,
             project_root,
-            client_id: "dec-console".into(),
-            facade: "web".into(),
+            client_id,
+            facade,
             payload_json,
-            unlock_timeout_ms: 0,
+            unlock_timeout_ms,
             workspace_plane,
         }))
         .await

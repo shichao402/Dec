@@ -23,12 +23,12 @@ Dec 是一个以 **Console** 为第一人机入口、以 **MCP** 为 Agent 入�
 | 程序 | 职责 |
 |------|------|
 | `dec-server` | 本机单例；持有实例控制状态与进程内 BW session，不承载人工认证 UI |
-| `dec-mcp` | Agent stdio MCP 门面；无服务时自动拉起 `dec-server` |
+| `dec-mcp` | Agent stdio 适配器；发现 Console 网关（`~/.dec/run/console.json`），经当前连接转发 |
 | `dec-exec` | 独立 env 注入程序；只读已落地 `.secrets/**/.env/*.env`，不经过服务、不碰 session |
 | `dec-host-setup` | 目标机置备期单用途脚手架；幂等写入 `dec-server` 管理监听配置 |
 | Dec Console | 独立 Tauri 客户端（`client/`）；本机/远程连接、Authenticate 与日常管理 |
 
-门面与服务默认绑定 `127.0.0.1` 的 gRPC；可用 `management_listen` + TLS 做远程直连。端点与本机随机 token 写在 `~/.dec/run/server.json`。进程启动后锁定，见 [0018](decisions/0018-instance-lock-and-console.md)。同一 project 的 pull/push 等写操作互斥；未发起操作的门面可旁观该 project 当前操作的实时进度。详见 [0008](decisions/0008-service-facade-split.md)。
+门面与服务默认绑定 `127.0.0.1` 的 gRPC；可用 `management_listen` + TLS 做远程直连。端点与本机随机 token 写在 `~/.dec/run/server.json`。Console 另写 `~/.dec/run/console.json` 供多个 `dec-mcp` 共用入站网关（[0025](decisions/0025-mcp-console-gateway.md)）。进程启动后锁定，见 [0018](decisions/0018-instance-lock-and-console.md)。同一 project 的 pull/push 等写操作互斥；未发起操作的门面可旁观该 project 当前操作的实时进度。详见 [0008](decisions/0008-service-facade-split.md)。
 
 Bitwarden session 按需建立。**Console Authenticate 是唯一人工入口**；服务、CLI 与 MCP
 均不收集主密码或 TOTP。本机桌面交互 MCP 缺 session 时拉起/聚焦 Console 并等待，成功
@@ -537,7 +537,7 @@ pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感
 独立程序入口层：
 
 - `dec-server/`：单例业务服务
-- `dec-mcp/`：Agent MCP 门面
+- `dec-mcp/`：Agent stdio 适配器（经 Console 网关）
 - `dec-exec/`：secrets env 注入执行器
 - `dec-host-setup/`：目标机置备脚手架
 
@@ -588,7 +588,7 @@ IDE 抽象层，区分项目级输出目录与用户级内置资产安装目录�
 
 ### Console 驱动
 
-日常交互通过 Console 完成；Agent / CI 经 `dec-mcp` 或服务 API 调用 `internal/app/`。
+日常交互通过 Console 完成；Agent 经 `dec-mcp` → Console 网关到达当前目标；CI 可直连服务 API。
 
 ### 旧 Project > Bundle（仅迁移背景）
 

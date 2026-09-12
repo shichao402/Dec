@@ -19,7 +19,7 @@ func TestProvisionRemoteParamsExposeExplicitConfirmation(t *testing.T) {
 }
 
 func TestProvisionRemoteRejectsEmptyTargetBeforeServiceCall(t *testing.T) {
-	s := New(Config{ProjectRoot: t.TempDir()})
+	s := New(Config{})
 	_, out, err := s.handleProvisionRemote(context.Background(), nil, provisionRemoteParams{Confirmed: true})
 	if err != nil {
 		t.Fatalf("工具协议层不应返回 error: %v", err)

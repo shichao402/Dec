@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"io"
-	"os"
 	"testing"
 	"time"
 )
@@ -60,15 +59,5 @@ func TestIsUnexpandedPlaceholder(t *testing.T) {
 	}
 	if isUnexpandedPlaceholder(`D:\workspace\GitHub\Dec`) {
 		t.Fatal("真实路径不应被当成占位符")
-	}
-}
-
-func TestResolveProjectRoot_FallsBackToCwdForUnexpandedPlaceholder(t *testing.T) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := resolveProjectRoot("${workspaceFolder}"); got != cwd {
-		t.Fatalf("got %q want cwd %q", got, cwd)
 	}
 }

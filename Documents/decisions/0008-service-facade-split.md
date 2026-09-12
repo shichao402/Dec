@@ -24,7 +24,7 @@
 |------|------|----------|
 | **`dec-server`** | 本机单例服务：session、程序化认证、pull/push、资产与 secrets 权威编排 | 否（由门面自动拉起） |
 | **`dec`** | TUI 门面（保持无参打开 TUI） | 是 |
-| **`dec-mcp`** | Agent MCP 门面（stdio MCP → 调服务） | 否（IDE 配置） |
+| **`dec-mcp`** | Agent stdio 适配器（stdio MCP → Console 网关 → 当前目标服务） | 否（IDE 配置） |
 | **`dec-exec`** | 本地 env 注入 shim | 否（hidden / MCP `command`） |
 
 仍不新增用户面 Cobra 子命令（无 `dec unlock` / `dec pull` / `dec daemon` 等）。此处原先的 TUI 与最小 CLI 已由 [0020](0020-retire-tui.md) 后续决策整体移除，用户只接触 Console。
@@ -32,7 +32,8 @@
 ### 一机一服务 + 自动拉起
 
 - 每台设备只应有一个 `dec-server` 实例（单例锁）。
-- 门面（TUI / MCP）启动时：连不上服务 → **自动拉起** `dec-server` → 等待就绪 → 再连。
+- Console 启动时：连不上本机服务 → **自动拉起** `dec-server` → 等待就绪 → 再连。
+- `dec-mcp` 不再直连或拉起 `dec-server`；连不上时拉起/聚焦 Console，经 Console 网关到达当前目标（[0025](0025-mcp-console-gateway.md)）。
 - **不做降级**：禁止「无服务时门面内嵌 `internal/app` / 嵌入式单次模式」双路径。CI / Agent / 脚本与日常用户走同一条「有服务才干活」路径。
 
 ### 生命周期与 session
