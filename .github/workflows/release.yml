@@ -181,6 +181,9 @@ jobs:
           python-version: "3.12"
 
       - name: Fetch relkit SDK
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: "1"
         run: python scripts/relkit_consume.py --sdk-only
 
       - name: Setup Rust
