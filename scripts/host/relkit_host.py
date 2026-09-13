@@ -35,6 +35,12 @@ LOCAL_SCHEMA = "relkit.onboarding.local/1"
 LOCK_SCHEMA = "relkit.consume/2"
 DEFAULT_SERVE_DIR = "/etc/relkit-serve"
 DEFAULT_AGENT_CONFIG = "/etc/relkit-agent/relkit-agent.json"
+# deploy installs with --prefix /usr/local/bin, which the standard sudoers
+# secure_path (/sbin:/bin:/usr/sbin:/usr/bin) excludes. Invoking these by bare
+# name under sudo therefore fails with "command not found" on a correctly
+# provisioned host, so every remote call spells out the path.
+SERVE_BIN = "/usr/local/bin/relkit-serve"
+AGENT_BIN = "/usr/local/bin/relkit-agent"
 AGENT_ORIGIN_HOST = "update.devcloud.woa.com"
 AGENT_ORIGIN_NETLOC = "update.devcloud.woa.com:8080"
 GITHUB_REPO = os.environ.get("RELKIT_RELEASE_REPO", "shichao402/relkit")
@@ -140,6 +146,7 @@ DIGESTED_ISSUE_CODES = frozenset(
         "onboarding-json-ignored",
         "sdk-readonly-backup-rmtree",
         "host-scripts-pycache-untracked",
+        "upgrade-legacy-inventory-unreadable",
     }
 )
 
@@ -1769,12 +1776,12 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
         print("relkit: CI publish skips SSH probes to the serve/agent host")
     elif host:
         try:
-            version = ssh_run(host, ["relkit-serve", "-version"], port=port).stdout.strip()
+            version = ssh_run(host, [SERVE_BIN, "-version"], port=port).stdout.strip()
             serve["remoteVersion"] = version
             serve["sshPort"] = port
             listed = ssh_run(
                 host,
-                ["sudo", "relkit-serve", "init", "-out", str(config_dir), "-list-products"],
+                ["sudo", SERVE_BIN, "init", "-out", str(config_dir), "-list-products"],
                 port=port,
             ).stdout
             products = parse_list_products(listed)
@@ -1814,13 +1821,13 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
     if agent_host and not via_ci:
         try:
             version = ssh_run(
-                agent_host, ["relkit-agent", "-version"], port=agent_port
+                agent_host, [AGENT_BIN, "-version"], port=agent_port
             ).stdout.strip()
             agent["remoteVersion"] = version
             agent["sshPort"] = agent_port
             listed = ssh_run(
                 agent_host,
-                ["sudo", "relkit-agent", "init", "-config", str(config_path), "-list-products"],
+                ["sudo", AGENT_BIN, "init", "-config", str(config_path), "-list-products"],
                 port=agent_port,
             ).stdout
             products = parse_agent_products(listed)
@@ -2726,7 +2733,7 @@ def cmd_serve_list(root: Path) -> int:
         return 1
     out = ssh_run(
         host,
-        ["sudo", "relkit-serve", "init", "-out", str(config_dir), "-list-products"],
+        ["sudo", SERVE_BIN, "init", "-out", str(config_dir), "-list-products"],
     )
     print(redact_text(out.stdout))
     return 0
@@ -2743,7 +2750,7 @@ def cmd_serve_add(root: Path, args: argparse.Namespace) -> int:
     share_with = args.share_with or (state.get("serve") or {}).get("shareWith")
     remote = [
         "sudo",
-        "relkit-serve",
+        SERVE_BIN,
         "init",
         "-out",
         str(config_dir),
@@ -2858,7 +2865,7 @@ def cmd_serve_rotate(root: Path, args: argparse.Namespace) -> int:
         host,
         [
             "sudo",
-            "relkit-serve",
+            SERVE_BIN,
             "init",
             "-out",
             str(config_dir),
@@ -2897,7 +2904,7 @@ def cmd_serve_remove(root: Path, args: argparse.Namespace) -> int:
         host,
         [
             "sudo",
-            "relkit-serve",
+            SERVE_BIN,
             "init",
             "-out",
             str(config_dir),
@@ -2924,7 +2931,7 @@ def cmd_agent_list(root: Path) -> int:
         raise Fail("no agent/serve ssh host recorded")
     out = ssh_run(
         host,
-        ["sudo", "relkit-agent", "init", "-config", str(config_path), "-list-products"],
+        ["sudo", AGENT_BIN, "init", "-config", str(config_path), "-list-products"],
     )
     print(redact_text(out.stdout))
     return 0
@@ -2941,7 +2948,7 @@ def cmd_agent_add(root: Path, args: argparse.Namespace) -> int:
     share_with = args.share_with or (state.get("serve") or {}).get("shareWith")
     remote = [
         "sudo",
-        "relkit-agent",
+        AGENT_BIN,
         "init",
         "-config",
         str(config_path),
@@ -3009,7 +3016,7 @@ def cmd_agent_provision(root: Path, args: argparse.Namespace) -> int:
             host_name,
             [
                 "sudo",
-                "relkit-agent",
+                AGENT_BIN,
                 "init",
                 "-config",
                 str(config_path),
@@ -3052,7 +3059,7 @@ def cmd_agent_remove(root: Path, args: argparse.Namespace) -> int:
         host,
         [
             "sudo",
-            "relkit-agent",
+            AGENT_BIN,
             "init",
             "-config",
             str(config_path),
@@ -3318,6 +3325,24 @@ def retrospect_report(root: Path) -> dict[str, Any]:
         "rewrite_lock_artifacts pins relkit-sdk-go.zip",
         f"artifacts={sorted(probe_artifacts)}",
         "sdk-go" in probe_artifacts,
+    )
+
+    # Matches sudo followed directly by a bare binary name. systemctl unit
+    # names are safe because sudo is followed by systemctl there.
+    module_source = inspect.getsource(sys.modules[__name__])
+    sudo_bare_name = bool(
+        re.search(r'"sudo",\s*"relkit-(?:serve|agent)"', module_source)
+    )
+    check(
+        "sudo-absolute-remote-binaries",
+        host_path,
+        "remote sudo calls spell out /usr/local/bin, which sudoers secure_path excludes",
+        (
+            "sudo invokes relkit-serve/relkit-agent by bare name"
+            if sudo_bare_name
+            else f"remote binaries resolve to {SERVE_BIN} and {AGENT_BIN}"
+        ),
+        not sudo_bare_name,
     )
 
     inspect_source = inspect.getsource(env_inspect_report)

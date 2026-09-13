@@ -64,7 +64,7 @@
     },
     "consume.lock": {
       "status": "verified",
-      "value": "v0.3.16",
+      "value": "v0.3.17",
       "note": "lock installed"
     },
     "sidecar.layout": {
@@ -83,9 +83,9 @@
       "note": ""
     },
     "ops.retrospect": {
-      "status": "unanswered",
-      "value": null,
-      "note": ""
+      "status": "verified",
+      "value": "relkit_host.py retrospect",
+      "note": "mechanical ops checks passed"
     }
   },
   "serve": {
