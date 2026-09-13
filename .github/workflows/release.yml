@@ -104,7 +104,7 @@ jobs:
 
       - name: Fetch relkit SDK
         shell: bash
-        run: python3 scripts/relkit_consume.py --sdk-only
+        run: python3 scripts/host/relkit_host.py install
 
       - name: go test
         shell: bash
@@ -125,7 +125,7 @@ jobs:
 
       - name: Fetch relkit SDK
         shell: bash
-        run: python3 scripts/relkit_consume.py --sdk-only
+        run: python3 scripts/host/relkit_host.py install
 
       - name: Build runtime suite
         shell: bash
@@ -184,7 +184,7 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: "1"
-        run: python scripts/relkit_consume.py --sdk-only
+        run: python scripts/host/relkit_host.py install
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -264,7 +264,7 @@ jobs:
 
       - name: Fetch relkit
         shell: bash
-        run: python3 scripts/relkit_consume.py --sdk-only
+        run: python3 scripts/host/relkit_host.py install
 
       - name: RUP stage and publish
         shell: bash
@@ -286,7 +286,7 @@ jobs:
             echo "RELKIT_UPLOAD_TOKEN 未配置，非渠道 tag 触发，跳过 RUP 发布"
             exit 0
           fi
-          ( cd third_party/relkit && go build -o "$OLDPWD/relkit-bin" ./cmd/relkit )
+          RELKIT=./tools/bin/relkit-linux-amd64
           CODE=$(python3 -c "maj,min,pat='${VER}'.split('.'); print(int(maj)*1000000+int(min)*1000+int(pat))")
           set -- stage "$VER" --code "$CODE" --channel "$CHANNEL"
           for f in dist/dec-*; do
@@ -318,9 +318,9 @@ jobs:
             esac
             set -- "$@" --add "$f" "id=dec-console-${os}-${arch},os=$os,arch=$arch,component=console,audience=user"
           done
-          ./relkit-bin "$@"
+          "$RELKIT" "$@"
           AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com/v1}"
-          CAS_RESULT="$(./relkit-bin cas-put \
+          CAS_RESULT="$("$RELKIT" cas-put \
             --product dec \
             --version "$VER" \
             --url "$AGENT_URL")"

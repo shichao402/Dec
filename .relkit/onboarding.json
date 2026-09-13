@@ -33,54 +33,54 @@
       "note": ""
     },
     "ssh.host": {
-      "status": "stale",
+      "status": "skipped",
       "value": "cvm-gz",
-      "note": "cvm-gz:22 (ssh default)"
+      "note": "not on the configured publish route"
     },
     "ssh.config_dir": {
-      "status": "stale",
+      "status": "skipped",
       "value": "/etc/relkit-serve",
-      "note": ""
+      "note": "not on the configured publish route"
     },
     "token.isolation": {
-      "status": "stale",
+      "status": "skipped",
       "value": "exclusive",
-      "note": ""
+      "note": "not on the configured publish route"
     },
     "serve.register": {
-      "status": "unanswered",
+      "status": "skipped",
       "value": null,
-      "note": ""
+      "note": "not on the configured publish route"
     },
     "agent.register": {
-      "status": "unanswered",
+      "status": "skipped",
       "value": null,
-      "note": ""
+      "note": "not on the configured publish route"
     },
     "signing.keys": {
-      "status": "unanswered",
-      "value": null,
-      "note": ""
+      "status": "verified",
+      "value": "dec-2026",
+      "note": "relkit.json names the key id and public key; private key at .secrets/bundles/dec/keys/dec-2026.private.pb"
     },
     "consume.lock": {
       "status": "verified",
-      "value": "v0.3.18",
-      "note": "lock installed"
+      "value": "v0.3.20",
+      "note": "lock present"
     },
     "sidecar.layout": {
-      "status": "unanswered",
-      "value": null,
-      "note": ""
+      "status": "verified",
+      "value": "tools/bin",
+      "note": "lock-pinned updater present: D:/workspace/GitHub/Dec/tools/bin/relkit-updater.exe"
     },
     "fake.release": {
-      "status": "unanswered",
-      "value": null,
-      "note": ""
+      "status": "verified",
+      "value": "1.13.64",
+      "note": "stage+simulate verified; publish remains CI-only"
     },
     "pack.ci": {
-      "status": "unanswered",
-      "value": null,
-      "note": ""
+      "status": "confirmed",
+      "value": ".github/workflows/release.yml",
+      "note": "GitHub Actions publishes lock-pinned relkit artifacts; token stays in CI secrets"
     },
     "ops.retrospect": {
       "status": "verified",

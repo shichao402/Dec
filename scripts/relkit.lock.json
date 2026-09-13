@@ -1,9 +1,9 @@
 {
   "schema": "relkit.consume/2",
-  "release": "v0.3.18",
-  "commit": "1759d106d743918dababea515b1dc5caa5285817",
+  "release": "v0.3.20",
+  "commit": "9e8b5c5164ca88abef9772372c7d78ad2c1b661b",
   "consumerSha256": "7ab814a0b83aa6451566819269f1b252593d7d6f0f3b2dbfbed50422a470bab7",
-  "hostScriptsSha256": "aa73085d277fb4ece0c478479253a18e7d14c642027153396c71cbdf14e86589",
+  "hostScriptsSha256": "dd58e328778696f0c2a1c14653ea3aeb7472449c9ebe37f3ae9bc9f697cf1f7a",
   "protocol": {
     "min": 2,
     "max": 2
@@ -14,63 +14,63 @@
   },
   "artifacts": {
     "host-scripts": {
-      "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-host-scripts.zip",
-      "sha256": "26417db9acd4353037e33cd4cb142e601088b9b23157a46232c4a06e956adc40"
+      "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-host-scripts.zip",
+      "sha256": "45077c3d292726b454cf06cfb012e49155ed86576e4e98196202db64f0420eb5"
     },
     "sdk-dart": {
-      "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-sdk-dart.zip",
+      "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-sdk-dart.zip",
       "sha256": "c12b732e7044638eb26358039e1fb3fd272963afca8e8a307598a9103a60f6a0"
     },
     "sdk-rust": {
-      "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-sdk-rust.zip",
+      "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-sdk-rust.zip",
       "sha256": "691ac859a331d6c82a49816acd6146d33d4875b72a78efb5998e4e7cfb816de3"
     },
     "sdk-go": {
-      "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-sdk-go.zip",
+      "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-sdk-go.zip",
       "sha256": "6c81ce8e134497dc9e8397af218281506866b97d9db934bb08fdd71570fa5244"
     },
     "cli": {
       "linux-amd64": {
-        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-linux-amd64",
-        "sha256": "18600359be1d4776f955e037cf5d11925c62170e1a8d709ee1bd940d13135ebb"
+        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-linux-amd64",
+        "sha256": "35b9e7f1e25d1539894d74188ed5cf262e6c80f26d7e7f3e7bc9a2a95aeb936a"
       },
       "linux-arm64": {
-        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-linux-arm64",
-        "sha256": "55857cfdcce34a2b75c083d050b4ceb7a3fc7b3cf228d040d052c780fedcb280"
+        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-linux-arm64",
+        "sha256": "1895c6a80e6b00ce359b19a35dbb1a1ef3db43d62ccd83307fd4bed3c9a55b96"
       },
       "windows-amd64": {
-        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-windows-amd64.exe",
-        "sha256": "90a156e1e9f37fbc14418dc04c23c55f9b98b7bb856265846f40f47003c50744"
+        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-windows-amd64.exe",
+        "sha256": "e3d0fffbe8c5a0ab4d7affbba42d1953ac665a88c4d9f7279ee18d93526d5916"
       },
       "darwin-amd64": {
-        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-darwin-amd64",
-        "sha256": "7546985edb614d897135100729159c54a41b90b067d1cf48d450147c7c18c09e"
+        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-darwin-amd64",
+        "sha256": "54c3010cf3aaa019fdb148fe31d8fde1f8f56f6e97e6cf21c5069659e314f0ca"
       },
       "darwin-arm64": {
-        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-darwin-arm64",
-        "sha256": "c91d8d337da886718a8a33895da0f33be5278285eedb0ab186a57b3d33dec17a"
+        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-darwin-arm64",
+        "sha256": "39351a999bdeaffff742ec19bd1bdedd20b6bcc403a7eee3c01878f9bb418224"
       }
     },
     "updater": {
       "linux-amd64": {
-        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-updater-linux-amd64",
-        "sha256": "c3d2b19bac76c17f7fa06ac6dfb492f3fa4e4cbcec94eec639078e18ac5c46e2"
+        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-updater-linux-amd64",
+        "sha256": "0ad8f3ab7b7decc6ee7eb0257cd7ae029cbd559f9f8df716020295b407207ec9"
       },
       "linux-arm64": {
-        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-updater-linux-arm64",
-        "sha256": "cd25ceb914203c94be120cf8c7947eba5f2c4e17b596e7a53e0cbdd848ea1a36"
+        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-updater-linux-arm64",
+        "sha256": "c62b4d2a3ff820381ef05f8009aef8fd18dbfceaaef84452f2b4eb5283318cff"
       },
       "windows-amd64": {
-        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-updater-windows-amd64.exe",
-        "sha256": "d3ee74a7841a3b335b3f24a76da92b3f8f4194cf8dc181800cc6050d8118a562"
+        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-updater-windows-amd64.exe",
+        "sha256": "5e69ee51f1b45b17fc9e5bb39772075755ceb1477dd25f68b50c6dd7b52d72bc"
       },
       "darwin-amd64": {
-        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-updater-darwin-amd64",
-        "sha256": "89262351aec3fad82167c6e58b396c3860ada9d4f6d4e3dd58b60be621b221e2"
+        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-updater-darwin-amd64",
+        "sha256": "4c8afb72b8f5965890177b8efa4a11e34ac0feb30e2205f75a93bae513404afe"
       },
       "darwin-arm64": {
-        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.18/relkit-updater-darwin-arm64",
-        "sha256": "774411736b85898e6fac7692993637909d274c862fbd8982511df843a4d9388d"
+        "url": "https://github.com/shichao402/relkit/releases/download/v0.3.20/relkit-updater-darwin-arm64",
+        "sha256": "81392a4fcf8cd500a4c8bc827ec6971533bad8e35c60ba44cc8fa74bb7d42a92"
       }
     }
   }

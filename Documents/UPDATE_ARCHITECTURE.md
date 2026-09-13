@@ -77,16 +77,16 @@ RUP 限制：当前 SDK 的 chain 选择最高可达版本，不支持任意历�
 
 ## 本地依赖
 
-开发 / CI 通过 sparse-checkout 拉取 relkit：
+开发 / CI 通过 checksum-pinned 的 release 附件安装 relkit：
 
 ```
-scripts/relkit_consume.py --sdk-only
+python scripts/host/relkit_host.py install
 ```
 
-落到 `third_party/relkit/`，`go.mod` 使用：
+Go SDK 落到 `third_party/relkit/`，CLI / updater 落到 `tools/bin/`。`go.mod` 使用：
 
 ```
 replace go.firoyang.com/relkit => ./third_party/relkit
 ```
 
-上游 URL 与 ref 来自 `scripts/relkit.lock.json`（schema `relkit.consume/1`）：默认 `channel: main`，即每次拉当时的 HEAD。冻结某次提交时把完整 SHA 写进 lock 的 `commit`（短 SHA 不能直接 `git fetch`），临时覆盖用 `--ref` / `RELKIT_REF`。`scripts/relkit_consume.py` 是上游 `scripts/host/relkit_consume.py` 的逐字节副本，只负责解析 lock 并转交该 SHA 的 `scripts/consume.py`；cone 与构建规则不在本仓。Go 模块路径是 `go.firoyang.com/relkit`（replace 到 `third_party/relkit`），源码从 GitHub 检出，不要 `go get` 该模块。
+上游 release、commit 与附件哈希来自 `scripts/relkit.lock.json`（schema `relkit.consume/2`）。入口是 `scripts/host/relkit_host.py`，不要再跑根目录的 v1 `scripts/relkit_consume.py`。Go 模块路径是 `go.firoyang.com/relkit`（replace 到 `third_party/relkit`），不要 `go get` 该模块。

@@ -59,7 +59,7 @@ jobs:
 
       - name: Fetch relkit CLI
         shell: bash
-        run: python3 scripts/relkit_consume.py --sdk-only
+        run: python3 scripts/host/relkit_host.py install
 
       - name: Build payload and CLI
         shell: bash
@@ -80,11 +80,11 @@ jobs:
             echo "size_mib ${SIZE_MIB} is too large for a bench (max 512)"
             exit 1
           fi
-          ( cd third_party/relkit && go build -o "$OLDPWD/relkit-bin" ./cmd/relkit )
           mkdir -p dist
           echo "writing ${SIZE_MIB}MiB incompressible blob"
           dd if=/dev/urandom of=dist/dec-upload-bench.bin bs=1M count="$SIZE_MIB" status=progress
-          ./relkit-bin stage 0.0.999 --code 999 --channel dev \
+          RELKIT=./tools/bin/relkit-linux-amd64
+          "$RELKIT" stage 0.0.999 --code 999 --channel dev \
             --add dist/dec-upload-bench.bin "id=dec-upload-bench,kind=blob,component=bench,audience=runtime"
           tar -C .relkit/staged/0.0.999 -czf staged.tar.gz .
           BYTES=$(stat -c '%s' staged.tar.gz)
@@ -150,17 +150,17 @@ jobs:
 
           case "$MODE" in
             multipart)
-              run_leg "multipart x${CONCURRENCY}" ./relkit-bin staged-put staged.tar.gz \
+              run_leg "multipart x${CONCURRENCY}" ./tools/bin/relkit-linux-amd64 staged-put staged.tar.gz \
                 --product dec --version 0.0.999 --url "$AGENT_URL"
               ;;
             single)
-              run_leg "single PUT" ./relkit-bin staged-put staged.tar.gz \
+              run_leg "single PUT" ./tools/bin/relkit-linux-amd64 staged-put staged.tar.gz \
                 --product dec --version 0.0.999 --url "$AGENT_URL" --single
               ;;
             both)
-              run_leg "multipart x${CONCURRENCY}" ./relkit-bin staged-put staged.tar.gz \
+              run_leg "multipart x${CONCURRENCY}" ./tools/bin/relkit-linux-amd64 staged-put staged.tar.gz \
                 --product dec --version 0.0.999 --url "$AGENT_URL"
-              run_leg "single PUT" ./relkit-bin staged-put staged.tar.gz \
+              run_leg "single PUT" ./tools/bin/relkit-linux-amd64 staged-put staged.tar.gz \
                 --product dec --version 0.0.999 --url "$AGENT_URL" --single
               ;;
             *)
