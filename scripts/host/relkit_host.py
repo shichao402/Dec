@@ -147,6 +147,7 @@ DIGESTED_ISSUE_CODES = frozenset(
         "sdk-readonly-backup-rmtree",
         "host-scripts-pycache-untracked",
         "upgrade-legacy-inventory-unreadable",
+        "decision-before-live-inventory",
     }
 )
 
@@ -553,7 +554,9 @@ def recommended_value(root: Path, state: dict[str, Any], step_id: str) -> Option
     return str(value) if value else None
 
 
-def decision_options(root: Path, step_id: str) -> list[str]:
+def decision_options(
+    root: Path, step_id: str, evidence: Optional[dict[str, Any]] = None
+) -> list[str]:
     if step_id == "updater.process":
         return list(UPDATER_PROCESS_VALUES)
     if step_id == "channel.ssot":
@@ -572,17 +575,29 @@ def decision_options(root: Path, step_id: str) -> list[str]:
                 values.append(host)
         return values
     if step_id == "token.isolation":
-        return ["exclusive", "share-with:<existing-product>"]
+        options = ["exclusive"]
+        remote = (evidence or {}).get("remote") or {}
+        if remote.get("available"):
+            options.extend(
+                f"share-with:{product}"
+                for product in remote.get("products") or []
+            )
+        return options
     return []
 
 
 def question_batch_revision(
-    root: Path, state: dict[str, Any], intent: str
+    root: Path,
+    state: dict[str, Any],
+    intent: str,
+    evidence: Optional[dict[str, Any]] = None,
 ) -> str:
     inspection = env_inspect_report(root)
+    resolved_evidence = evidence or decision_evidence(root, state)
     material = {
         "intent": intent,
         "inspect": inspection,
+        "evidence": resolved_evidence,
         "decisions": {
             step: {
                 "status": state["steps"][step]["status"],
@@ -612,6 +627,7 @@ def build_question_batch(
         )
     existing_product = str(state.get("product") or "")
     inspection = env_inspect_report(root)
+    evidence = decision_evidence(root, state)
     configured_product = str(
         (inspection.get("facts") or {}).get("product") or ""
     )
@@ -631,6 +647,13 @@ def build_question_batch(
         ]
     else:
         selected = list(BATCH_DECISION_STEPS)
+    applicable = evidence.get("applicable") or {}
+    blocked = evidence.get("blockedDecisions") or {}
+    selected = [
+        step
+        for step in selected
+        if applicable.get(step, True) and step not in blocked
+    ]
     questions: list[dict[str, Any]] = []
     for step in selected:
         questions.append(
@@ -638,7 +661,7 @@ def build_question_batch(
                 "id": step,
                 "prompt": explain_step(step),
                 "hint": choice_hint(root, step),
-                "options": decision_options(root, step),
+                "options": decision_options(root, step, evidence),
                 "recommended": recommended_value(root, state, step),
                 "current": state["steps"][step]["value"],
             }
@@ -646,8 +669,13 @@ def build_question_batch(
     return {
         "schema": QUESTION_BATCH_SCHEMA,
         "intent": intent,
-        "revision": question_batch_revision(root, state, intent),
+        "revision": question_batch_revision(root, state, intent, evidence),
         "inspection": inspection,
+        "evidence": evidence,
+        "blocked": [
+            {"id": step, "reason": reason}
+            for step, reason in blocked.items()
+        ],
         "questions": questions,
         "answerSchema": ANSWER_BATCH_SCHEMA,
         "answerShape": {
@@ -1001,6 +1029,10 @@ def print_ssh_inventory(inventory: dict[str, Any]) -> None:
 
 def inspect_path(root: Path) -> Path:
     return cache_dir(root) / "inspect.json"
+
+
+def inventory_path(root: Path) -> Path:
+    return cache_dir(root) / "inventory.json"
 
 
 def ops_journal_path(root: Path) -> Path:
@@ -1475,6 +1507,249 @@ def parse_list_products(text: str) -> list[str]:
     return products
 
 
+def publish_topology(root: Path) -> dict[str, Any]:
+    """Describe the configured publish path without guessing operator intent."""
+    path = root / "relkit.json"
+    if not path.is_file():
+        return {
+            "mode": "unknown",
+            "publishTo": [],
+            "backendTypes": {},
+            "agentUrl": None,
+            "tokenRequired": None,
+            "serveRequired": None,
+            "reason": "relkit.json is absent",
+        }
+    try:
+        config = load_json(path)
+    except (OSError, json.JSONDecodeError, TypeError) as error:
+        return {
+            "mode": "unknown",
+            "publishTo": [],
+            "backendTypes": {},
+            "agentUrl": None,
+            "tokenRequired": None,
+            "serveRequired": None,
+            "reason": f"relkit.json is unreadable: {error}",
+        }
+    backends = config.get("backends")
+    backends = backends if isinstance(backends, dict) else {}
+    publish_to = config.get("publishTo")
+    selected = (
+        [str(item) for item in publish_to]
+        if isinstance(publish_to, list)
+        else [str(item) for item in backends]
+    )
+    backend_types = {
+        name: str((backends.get(name) or {}).get("type") or "")
+        for name in selected
+        if isinstance(backends.get(name), dict)
+    }
+    agent_url = str((config.get("agent") or {}).get("url") or "").strip() or None
+    gateway_types = {"relkit-compatible", "intranet-relkit-compatible"}
+    gateway_backends = [
+        name for name, kind in backend_types.items() if kind in gateway_types
+    ]
+    if agent_url:
+        mode = "agent"
+        token_required: Optional[bool] = True
+        serve_required: Optional[bool] = False
+        reason = "relkit.json agent.url routes release through relkit-agent"
+    elif gateway_backends:
+        mode = "gateway" if len(gateway_backends) == len(selected) else "mixed"
+        token_required = True
+        serve_required = True
+        reason = "publishTo includes a relkit-compatible backend"
+    elif selected and len(backend_types) == len(selected):
+        mode = "direct"
+        token_required = False
+        serve_required = False
+        reason = "publishTo contains only direct backends"
+    else:
+        mode = "unknown"
+        token_required = None
+        serve_required = None
+        reason = "publishTo cannot be resolved to configured backends"
+    return {
+        "mode": mode,
+        "publishTo": selected,
+        "backendTypes": backend_types,
+        "agentUrl": agent_url,
+        "tokenRequired": token_required,
+        "serveRequired": serve_required,
+        "reason": reason,
+    }
+
+
+def _version_tuple(raw: str) -> Optional[tuple[int, int, int]]:
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", raw)
+    if not match:
+        return None
+    return tuple(int(item) for item in match.groups())
+
+
+def remote_inventory(
+    root: Path, state: dict[str, Any], topology: dict[str, Any]
+) -> dict[str, Any]:
+    """Read a configured remote without mutating it or exposing token bytes."""
+    use_agent = topology.get("mode") == "agent"
+    role = "agent" if use_agent else "serve"
+    config = (state.get(role) or {}) if role == "agent" else (state.get("serve") or {})
+    host = str(config.get("sshHost") or "")
+    if use_agent and not host:
+        host = str((state.get("serve") or {}).get("sshHost") or "")
+    port = config.get("sshPort") or ssh_host_port(host)
+    on_route = bool(
+        topology.get("tokenRequired")
+        and ((use_agent and topology.get("agentUrl")) or topology.get("serveRequired"))
+    )
+    result: dict[str, Any] = {
+        "configured": bool(host),
+        "onPublishRoute": on_route,
+        "role": role,
+        "host": host or None,
+        "port": port,
+        "available": False,
+        "binary": AGENT_BIN if use_agent else SERVE_BIN,
+        "version": None,
+        "serviceActive": None,
+        "serviceEnabled": None,
+        "operatorTokenPresent": None,
+        "products": [],
+        "error": None,
+    }
+    if not host:
+        result["error"] = "no confirmed SSH host"
+        return result
+    binary = AGENT_BIN if use_agent else SERVE_BIN
+    unit = "relkit-agent" if use_agent else "relkit-serve"
+    try:
+        version = ssh_run(host, [binary, "-version"], port=port).stdout.strip()
+        status = ssh_run(
+            host,
+            [
+                "bash",
+                "-lc",
+                (
+                    f"systemctl is-active {shlex.quote(unit)} 2>/dev/null || true; "
+                    f"systemctl is-enabled {shlex.quote(unit)} 2>/dev/null || true"
+                ),
+            ],
+            port=port,
+        ).stdout.splitlines()
+        if use_agent:
+            config_path = str(config.get("configPath") or DEFAULT_AGENT_CONFIG)
+            listed = ssh_run(
+                host,
+                [
+                    "sudo",
+                    AGENT_BIN,
+                    "init",
+                    "-config",
+                    config_path,
+                    "-list-products",
+                ],
+                port=port,
+            ).stdout
+            products = parse_agent_products(listed)
+        else:
+            config_dir = str(config.get("configDir") or DEFAULT_SERVE_DIR)
+            listed = ssh_run(
+                host,
+                [
+                    "sudo",
+                    SERVE_BIN,
+                    "init",
+                    "-out",
+                    config_dir,
+                    "-list-products",
+                ],
+                port=port,
+            ).stdout
+            products = parse_list_products(listed)
+        result.update(
+            {
+                "available": True,
+                "version": version,
+                "serviceActive": status[0].strip() if status else "unknown",
+                "serviceEnabled": status[1].strip() if len(status) > 1 else "unknown",
+                "operatorTokenPresent": bool(
+                    re.search(r"(?mi)^\s*operator\s+\S+", listed)
+                ),
+                "products": products,
+            }
+        )
+    except Fail as error:
+        result["error"] = str(error)
+    lock_path = root / "scripts" / "relkit.lock.json"
+    if lock_path.is_file():
+        try:
+            lock_release = str(load_json(lock_path).get("release") or "")
+        except (OSError, json.JSONDecodeError, TypeError):
+            lock_release = ""
+        remote_version = _version_tuple(str(result.get("version") or ""))
+        locked_version = _version_tuple(lock_release)
+        result["lockRelease"] = lock_release or None
+        result["versionRelation"] = (
+            "behind"
+            if remote_version and locked_version and remote_version < locked_version
+            else "current-or-newer"
+            if remote_version and locked_version
+            else "unknown"
+        )
+    return result
+
+
+def decision_evidence(root: Path, state: dict[str, Any]) -> dict[str, Any]:
+    topology = publish_topology(root)
+    remote = remote_inventory(root, state, topology)
+    implications: list[str] = []
+    blocked: dict[str, str] = {}
+    applicable = {step: True for step in STEP_IDS}
+    if topology.get("mode") == "direct":
+        implications.append(
+            "release publishes directly to configured backends; serve/agent product tokens are not on this route"
+        )
+        for step in (
+            "ssh.host",
+            "ssh.config_dir",
+            "token.isolation",
+            "serve.register",
+            "agent.register",
+        ):
+            applicable[step] = False
+    if remote.get("available"):
+        products = list(remote.get("products") or [])
+        if products:
+            implications.append(
+                "share-with is limited to remote products: " + ", ".join(products)
+            )
+        else:
+            implications.append(
+                "the remote has no product token to inherit; operator credentials are not product tokens"
+            )
+        if remote.get("versionRelation") == "behind":
+            message = (
+                f"remote {remote.get('role')} {remote.get('version')} is behind "
+                f"lock {remote.get('lockRelease')}"
+            )
+            implications.append(message)
+            if remote.get("onPublishRoute"):
+                blocked["token.isolation"] = message + "; upgrade the remote first"
+    elif topology.get("tokenRequired"):
+        blocked["token.isolation"] = (
+            "live remote inventory is required before choosing token isolation: "
+            + str(remote.get("error") or "unavailable")
+        )
+    return {
+        "topology": topology,
+        "remote": remote,
+        "applicable": applicable,
+        "implications": implications,
+        "blockedDecisions": blocked,
+    }
+
+
 def parse_agent_products(text: str) -> list[str]:
     products: list[str] = []
     in_products = False
@@ -1767,6 +2042,8 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
     drift: list[str] = []
     unconfirmed: list[str] = []
     via_ci = os.environ.get("RELKIT_RELEASE_VIA_CI") == "1"
+    topology = publish_topology(root)
+    remote_relevant = topology.get("mode") != "direct"
     serve = state.get("serve") or {}
     host = serve.get("sshHost")
     port = serve.get("sshPort") or ssh_host_port(host or "")
@@ -1774,7 +2051,7 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
     if via_ci:
         # CI 构建机到不了发布机的 SSH 端口；真发走 agent HTTP + RELKIT_UPLOAD_TOKEN。
         print("relkit: CI publish skips SSH probes to the serve/agent host")
-    elif host:
+    elif host and remote_relevant:
         try:
             version = ssh_run(host, [SERVE_BIN, "-version"], port=port).stdout.strip()
             serve["remoteVersion"] = version
@@ -1808,7 +2085,7 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
             )
         except Fail as error:
             unconfirmed.append(str(error))
-    elif not via_ci and state["steps"]["serve.register"]["status"] in (
+    elif not via_ci and remote_relevant and state["steps"]["serve.register"]["status"] in (
         "applied",
         "verified",
     ):
@@ -1818,7 +2095,7 @@ def reconcile(root: Path, state: dict[str, Any], *, write: bool) -> dict[str, An
     agent_host = agent.get("sshHost") or host
     agent_port = agent.get("sshPort") or ssh_host_port(agent_host or "")
     config_path = agent.get("configPath") or DEFAULT_AGENT_CONFIG
-    if agent_host and not via_ci:
+    if agent_host and not via_ci and remote_relevant:
         try:
             version = ssh_run(
                 agent_host, [AGENT_BIN, "-version"], port=agent_port
@@ -2048,10 +2325,19 @@ def cmd_onboard_set(
 
 def cmd_onboard_questions(root: Path, intent: str, as_json: bool = False) -> int:
     batch = build_question_batch(root, load_state(root), intent)
+    inventory_path(root).parent.mkdir(parents=True, exist_ok=True)
+    inventory_path(root).write_text(
+        dump_json(batch["evidence"]), encoding="utf-8"
+    )
     if as_json:
         print(dump_json(batch), end="")
         return 0
     print(f"批量决策 intent={intent} revision={batch['revision']}")
+    print("现场判断:")
+    for implication in batch["evidence"].get("implications") or []:
+        print(f"   - {implication}")
+    for blocked in batch.get("blocked") or []:
+        print(f"   - 暂不询问 {blocked['id']}: {blocked['reason']}")
     for index, item in enumerate(batch["questions"], start=1):
         print(f"{index}. {item['id']}: {item['prompt']}")
         if item["options"]:
@@ -2142,10 +2428,24 @@ def cmd_onboard_apply(root: Path, answers_path: Path) -> int:
     if unknown:
         conflicts.append("not asked: " + ", ".join(unknown))
     candidate = json.loads(json.dumps(state))
+    questions_by_id = {item["id"]: item for item in batch["questions"]}
     if not conflicts:
         for step in expected:
             try:
                 value, share_with, note = _answer_value(step, answers[step])
+                if step == "token.isolation":
+                    canonical = (
+                        f"share-with:{share_with}"
+                        if value == "share-with" and share_with
+                        else value
+                    )
+                    allowed = questions_by_id[step].get("options") or []
+                    if canonical not in allowed:
+                        raise Fail(
+                            "token choice is not supported by the live inventory; "
+                            "regenerate questions after refreshing the remote evidence",
+                            code="token-inventory-conflict",
+                        )
                 apply_decision_to_state(
                     root, candidate, step, value, share_with, note
                 )
@@ -2559,9 +2859,24 @@ def publish_via_agent(
     return 0
 
 
-def release_incomplete_steps(state: dict[str, Any], *, via_ci: bool = False) -> list[str]:
+def release_incomplete_steps(
+    state: dict[str, Any], *, via_ci: bool = False, root: Optional[Path] = None
+) -> list[str]:
     missing: list[str] = []
+    irrelevant: set[str] = set()
+    if root is not None and publish_topology(root).get("mode") == "direct":
+        irrelevant.update(
+            {
+                "ssh.host",
+                "ssh.config_dir",
+                "token.isolation",
+                "serve.register",
+                "agent.register",
+            }
+        )
     for step in REQUIRED_FOR_RELEASE:
+        if step in irrelevant:
+            continue
         if step == "ops.retrospect" and via_ci:
             continue
         status = state["steps"][step]["status"]
@@ -2584,7 +2899,7 @@ def cmd_release(root: Path, args: argparse.Namespace) -> int:
             + "\n  ".join(report["unconfirmed"])
         )
     via_ci = os.environ.get("RELKIT_RELEASE_VIA_CI") == "1"
-    missing = release_incomplete_steps(state, via_ci=via_ci)
+    missing = release_incomplete_steps(state, via_ci=via_ci, root=root)
     if missing:
         raise Fail("release refused: incomplete steps: " + ", ".join(missing))
     binary = relkit_bin(root)
@@ -3285,6 +3600,43 @@ def retrospect_report(root: Path) -> dict[str, Any]:
         "rust" in UPDATER_PROCESS_VALUES and "rust-shell" not in UPDATER_PROCESS_VALUES,
     )
 
+    batch_source = inspect.getsource(build_question_batch)
+    options_source = inspect.getsource(decision_options)
+    evidence_gates_questions = (
+        "decision_evidence(root, state)" in batch_source
+        and "blockedDecisions" in batch_source
+        and "remote.get(\"products\")" in options_source
+        and "share-with:<existing-product>" not in options_source
+    )
+    check(
+        "decision-evidence-before-questions",
+        host_path,
+        "question batches use live topology/inventory and never invent share-with ids",
+        (
+            "questions are applicability-filtered and share-with ids come from remote products"
+            if evidence_gates_questions
+            else "questions can be emitted before live evidence or with placeholder product ids"
+        ),
+        evidence_gates_questions,
+    )
+    release_source = inspect.getsource(release_incomplete_steps)
+    direct_skips_remote = (
+        'publish_topology(root).get("mode") == "direct"' in release_source
+        and '"token.isolation"' in release_source
+        and '"serve.register"' in release_source
+    )
+    check(
+        "direct-publish-applicability",
+        host_path,
+        "direct backend releases do not require serve/agent token steps",
+        (
+            "direct topology removes remote token steps from the release gate"
+            if direct_skips_remote
+            else "release still requires remote token steps for direct backends"
+        ),
+        direct_skips_remote,
+    )
+
     upgrade_source = inspect.getsource(cmd_upgrade)
     upgrade_builds_lock = (
         "build_release_lock(" in upgrade_source
@@ -3460,6 +3812,23 @@ def retrospect_report(root: Path) -> dict[str, Any]:
                 else "completion remains tied to the mechanical command"
             ),
             not prose_gate,
+        )
+        evidence_first = (
+            "evidence.topology" in text
+            and "evidence.remote" in text
+            and "`blocked` 中的决策本轮禁止询问" in text
+            and "operatorTokenPresent=true" in text
+        )
+        check(
+            f"skill-evidence-first:{display_path}",
+            display_path,
+            "skill requires showing live evidence before dependent questions",
+            (
+                "topology, remote inventory, blocked decisions and operator/product distinction are required"
+                if evidence_first
+                else "skill still permits dependent questions before live evidence"
+            ),
+            evidence_first,
         )
 
     encountered, digested, undigested = classify_ops_journal(root)
