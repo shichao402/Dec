@@ -44,6 +44,9 @@ AGENT_SECRET_NOTE = Path(".secrets") / "project" / "relkit-agent-upload-token"
 GITIGNORE_RELKIT = (
     ".relkit/cache/",
     ".relkit-keys/*.private.pb",
+    # install puts python entrypoints in scripts/host; running them leaves
+    # bytecode caches that would otherwise read as product repo changes.
+    "__pycache__/",
 )
 PUBLISH_PROTOCOL_FALLBACK = 2
 UPDATER_IPC_FALLBACK = 1
@@ -136,6 +139,7 @@ DIGESTED_ISSUE_CODES = frozenset(
         "v2-no-go-sdk-artifact",
         "onboarding-json-ignored",
         "sdk-readonly-backup-rmtree",
+        "host-scripts-pycache-untracked",
     }
 )
 
@@ -3216,7 +3220,11 @@ def retrospect_report(root: Path) -> dict[str, Any]:
                 False,
             )
 
-    expected_ignores = {".relkit/cache/", ".relkit-keys/*.private.pb"}
+    expected_ignores = {
+        ".relkit/cache/",
+        ".relkit-keys/*.private.pb",
+        "__pycache__/",
+    }
     check(
         "gitignore-contract",
         host_path,
