@@ -1,0 +1,105 @@
+{
+  "schema": "relkit.onboarding/1",
+  "product": "dec",
+  "steps": {
+    "repo.root": {
+      "status": "verified",
+      "value": ".",
+      "note": "go"
+    },
+    "env.inspect": {
+      "status": "verified",
+      "value": "clean",
+      "note": "no error findings"
+    },
+    "product.id": {
+      "status": "confirmed",
+      "value": "dec",
+      "note": ""
+    },
+    "updater.process": {
+      "status": "confirmed",
+      "value": "go",
+      "note": ""
+    },
+    "channel.ssot": {
+      "status": "confirmed",
+      "value": "VERSION.json",
+      "note": ""
+    },
+    "backend.kind": {
+      "status": "confirmed",
+      "value": "s3-compatible",
+      "note": ""
+    },
+    "ssh.host": {
+      "status": "stale",
+      "value": "cvm-gz",
+      "note": "cvm-gz:22 (ssh default)"
+    },
+    "ssh.config_dir": {
+      "status": "stale",
+      "value": "/etc/relkit-serve",
+      "note": ""
+    },
+    "token.isolation": {
+      "status": "stale",
+      "value": "exclusive",
+      "note": ""
+    },
+    "serve.register": {
+      "status": "unanswered",
+      "value": null,
+      "note": ""
+    },
+    "agent.register": {
+      "status": "unanswered",
+      "value": null,
+      "note": ""
+    },
+    "signing.keys": {
+      "status": "unanswered",
+      "value": null,
+      "note": ""
+    },
+    "consume.lock": {
+      "status": "verified",
+      "value": "v0.3.15",
+      "note": "lock installed"
+    },
+    "sidecar.layout": {
+      "status": "unanswered",
+      "value": null,
+      "note": ""
+    },
+    "fake.release": {
+      "status": "unanswered",
+      "value": null,
+      "note": ""
+    },
+    "pack.ci": {
+      "status": "unanswered",
+      "value": null,
+      "note": ""
+    },
+    "ops.retrospect": {
+      "status": "unanswered",
+      "value": null,
+      "note": ""
+    }
+  },
+  "serve": {
+    "sshHost": "cvm-gz",
+    "sshPort": null,
+    "configDir": "/etc/relkit-serve",
+    "shareWith": null,
+    "remoteVersion": null
+  },
+  "agent": {
+    "sshHost": null,
+    "sshPort": null,
+    "configPath": "/etc/relkit-agent/relkit-agent.json",
+    "remoteVersion": null
+  },
+  "root": "D:\\workspace\\GitHub\\Dec"
+}

@@ -39,7 +39,13 @@ Thumbs.db
 # 开发根目录（开发时使用）
 .root/
 
-.relkit/
+# 开箱决策要提交；其余都是可丢弃产物。父目录若整体排除，negate 子文件无效，
+# 所以这里用 .relkit/* 而不是 .relkit/。
+.relkit/*
+!.relkit/onboarding.json
+
+# relkit 往 scripts/host/ 装 python 脚本，跑一次就留字节码缓存。
+__pycache__/
 staged.tar.gz
 publish-req.json
 dist/
@@ -92,3 +98,4 @@ mise.local.toml
 .relkit-keys/*.private.pb
 *.private.pb
 
+.relkit/cache/
