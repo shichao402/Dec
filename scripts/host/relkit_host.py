@@ -3577,7 +3577,7 @@ def routing_help() -> str:
 CI must name a subcommand. Mutations need --execute. Restarts need --restart.
 
 Empty-machine install / binary replace lives in the relkit repo:
-  python deploy/relkit.py build|install|upgrade
+  python scripts/deploy/relkit.py build|install|upgrade
 """
 
 
@@ -3690,7 +3690,7 @@ def retrospect_report(root: Path) -> dict[str, Any]:
         )
 
     routes = routing_help()
-    canonical_deploy = "python deploy/relkit.py build|install|upgrade"
+    canonical_deploy = "python scripts/deploy/relkit.py build|install|upgrade"
     check(
         "canonical-deploy-route",
         host_path,
@@ -3698,7 +3698,11 @@ def retrospect_report(root: Path) -> dict[str, Any]:
         "canonical deploy route present" if canonical_deploy in routes else "canonical deploy route missing",
         canonical_deploy in routes,
     )
-    forbidden_routes = ("scripts/relkit_host.py", "deploy/relkit.py serve", "deploy/relkit.py agent")
+    forbidden_routes = (
+        "scripts/relkit_host.py",
+        "scripts/deploy/relkit.py serve",
+        "scripts/deploy/relkit.py agent",
+    )
     found_forbidden = [item for item in forbidden_routes if item in routes]
     check(
         "canonical-product-routes",

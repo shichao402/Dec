@@ -64,7 +64,7 @@
     },
     "consume.lock": {
       "status": "verified",
-      "value": "v0.3.20",
+      "value": "v0.3.21",
       "note": "lock present"
     },
     "sidecar.layout": {
@@ -74,7 +74,7 @@
     },
     "fake.release": {
       "status": "verified",
-      "value": "1.13.65",
+      "value": "1.13.72",
       "note": "stage+simulate verified; publish remains CI-only"
     },
     "pack.ci": {
