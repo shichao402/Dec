@@ -148,6 +148,7 @@ function ProjectBinding(props: {
   const prepareSpec = actionSpec(`project:prepare:${deviceId}:${project.Root}`, '检查项目配置', deviceId, [workspaceResource], 'read')
   const createSpec = actionSpec(`project:create-remote:${deviceId}:${project.Root}`, '在私仓新建项目', deviceId, [resource.global], 'write', '项目已创建并推送到私仓')
   const bindSpec = actionSpec(`project:bind:${deviceId}:${project.Root}`, project.Initialized ? '保存家项目绑定' : '初始化项目', deviceId, [workspaceResource, resource.global], 'write', project.Initialized ? '绑定已保存' : '项目初始化完成')
+  const bindLabel = project.Initialized ? '保存绑定' : '确认初始化'
 
   const prepare = () => invokeTyped<ProjectPreparation>('prepare_project_config_init', project.Root, 'local', {}, prepareSpec.key)
   const applyPreparation = (value: ProjectPreparation, prefer = '') => {
@@ -188,40 +189,45 @@ function ProjectBinding(props: {
               text={`当前绑定的 “${boundName}” 不在私仓里，所以拉不到任何资产。选一个已有项目，或在下面就地新建它。`}
             />
           )}
-          <div className="grid gap-4 lg:grid-cols-2">
-            {available.length > 0 ? (
-              <Field label="绑定为家项目" hint={boundName ? `设备上记录的绑定：${boundName}` : undefined}>
-                <Select value={homeProject} onChange={(e) => setHomeProject(e.target.value)}>
-                  {available.map((name) => <option key={name} value={name}>{name}</option>)}
-                </Select>
-              </Field>
-            ) : (
-              <Notice tone="info" text="仓库中没有项目清单，将保留本地最小配置。" />
-            )}
-            <Field label="或在私仓新建一个项目" hint="小写字母、数字与连字符，例如 agentshelpme">
-              <div className="flex gap-2">
-                <Input value={newProject} onChange={(e) => setNewProject(e.target.value)} />
-                <ActionButton
-                  variant="secondary"
-                  spec={createSpec}
-                  disabled={!newProject.trim()}
-                  action={async () => {
-                    const created = await invokeTyped<{ Name: string }>('create_remote_project', '', 'global', { Name: newProject.trim(), Title: project.Label || project.Name }, createSpec.key)
-                    return { created, preparation: await prepare() }
-                  }}
-                  runningLabel="创建中…"
-                  onSuccess={({ created, preparation: refreshed }) => applyPreparation(refreshed, created.Name)}
-                >
-                  新建并选中
-                </ActionButton>
-              </div>
+          {available.length > 0 ? (
+            <Field label="绑定为家项目" hint={boundName ? `设备上记录的绑定：${boundName}` : undefined} className="max-w-sm">
+              <Select value={homeProject} onChange={(e) => setHomeProject(e.target.value)}>
+                {available.map((name) => <option key={name} value={name}>{name}</option>)}
+              </Select>
             </Field>
-          </div>
+          ) : (
+            <Notice tone="info" text="仓库中没有项目清单，将保留本地最小配置。" />
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <ActionButton spec={bindSpec} action={bind} runningLabel={project.Initialized ? '保存中…' : '初始化中…'} onSuccess={props.onBound}>
-              {project.Initialized ? '保存绑定' : '确认初始化'}
+              {bindLabel}
             </ActionButton>
             {props.extraAction}
+          </div>
+          <div className="rounded-lg border border-dashed border-line px-3 py-3">
+            <p className="text-xs leading-relaxed text-faint">
+              私仓里还没有想绑的项目？先在这里建一个，它会出现在上面的下拉框里并自动选中，仍要点「{bindLabel}」才会真正绑定。
+            </p>
+            <div className="mt-2.5 flex max-w-sm gap-2">
+              <Input
+                value={newProject}
+                onChange={(e) => setNewProject(e.target.value)}
+                placeholder="小写字母、数字与连字符"
+              />
+              <ActionButton
+                variant="secondary"
+                spec={createSpec}
+                disabled={!newProject.trim()}
+                action={async () => {
+                  const created = await invokeTyped<{ Name: string }>('create_remote_project', '', 'global', { Name: newProject.trim(), Title: project.Label || project.Name }, createSpec.key)
+                  return { created, preparation: await prepare() }
+                }}
+                runningLabel="创建中…"
+                onSuccess={({ created, preparation: refreshed }) => applyPreparation(refreshed, created.Name)}
+              >
+                在私仓新建
+              </ActionButton>
+            </div>
           </div>
         </>
       )}
