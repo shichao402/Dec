@@ -90,7 +90,7 @@ func isProjectMutation(method string) bool {
 	case "save_enabled_bundles", "prepare_project_config_init", "ensure_local_project_config",
 		"ensure_home_p", "bind_managed_project", "create_local_asset",
 		"apply_vault_project", "save_project_settings", "ensure_project_vars",
-		"prepare_remote_note_edit", "prepare_remote_ssh_hosts_edit":
+		"prepare_remote_note_edit", "prepare_remote_ssh_hosts_edit", "save_project_provides":
 		return true
 	default:
 		return false
@@ -281,6 +281,17 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.LoadProjectVarsView(projectRoot)
 	case "ensure_project_vars":
 		return app.EnsureProjectVarsFile(projectRoot)
+	case "load_project_provides":
+		return app.LoadProjectProvides(projectRoot)
+	case "suggest_project_provides":
+		return app.SuggestProjectProvides(projectRoot)
+	case "save_project_provides":
+		var in app.SaveProjectProvidesInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		in.ProjectRoot = projectRoot
+		return app.SaveProjectProvides(in)
 	case "list_secret_sync_targets":
 		return app.ListSecretSyncTargets(projectRoot)
 	case "suggest_secret_targets":
@@ -497,6 +508,44 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		return writer.PushWorkspace(ctx, workspace, reporter)
 	case "preview_push":
 		return app.PreviewPushWorkspaceAssets(workspace)
+	case "preview_sync":
+		if workspace.EffectivePlane() == app.WorkspaceGlobal {
+			return app.PreviewPushWorkspaceAssets(workspace)
+		}
+		return app.PreviewProjectProvidesSync(ctx, projectRoot, reporter)
+	case "preview_provides_sync":
+		return app.PreviewProjectProvidesSync(ctx, projectRoot, reporter)
+	case "sync":
+		var in struct {
+			Mode           app.ProvideSyncMode
+			ConflictAction string
+		}
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		if workspace.EffectivePlane() == app.WorkspaceGlobal {
+			switch in.Mode {
+			case app.ProvideSyncPull:
+				return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
+			case app.ProvideSyncPush:
+				return writer.PushWorkspace(ctx, workspace, reporter)
+			default:
+				if _, err := app.PullWorkspaceAssets(ctx, workspace, "", reporter); err != nil {
+					return nil, err
+				}
+				return writer.PushWorkspace(ctx, workspace, reporter)
+			}
+		}
+		return app.SyncProjectProvidesAction(ctx, projectRoot, in.Mode, in.ConflictAction, reporter)
+	case "sync_provides":
+		var in struct {
+			Mode           app.ProvideSyncMode
+			ConflictAction string
+		}
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.SyncProjectProvidesAction(ctx, projectRoot, in.Mode, in.ConflictAction, reporter)
 	case "prepare_repo_gcm_bootstrap":
 		var in struct {
 			RepoURL string

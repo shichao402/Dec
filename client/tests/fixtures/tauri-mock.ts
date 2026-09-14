@@ -31,6 +31,21 @@ export function installTauriMock(scenario: Scenario) {
     load_device_summary: scenario.device,
     load_global_settings: state.settings,
     load_asset_selection: scenario.assets,
+    load_project_provides: {
+      Provides: {
+        dec: {
+          Source: 'DecAssets/skills/dec',
+          Visibility: 'public',
+          Plane: 'local',
+          Type: 'skill',
+          Name: 'dec',
+        },
+      },
+      Targets: { dec: 'dec/public/local/skills/dec' },
+      ProvidesRoot: 'DecAssets',
+      AuthorDirs: ['DecAssets/skills', 'DecAssets/commands', 'DecAssets/rules', 'DecAssets/mcp'],
+    },
+    save_project_provides: {},
     save_global_settings: {},
     save_enabled_bundles: {},
     browse_directories: scenario.listing,
@@ -137,6 +152,30 @@ export function installTauriMock(scenario: Scenario) {
     ],
   }
 
+  const syncPreview = (global: boolean) => ({
+    Items: [
+      {
+        Source: global ? '~/.cursor/skills/dec' : '.cursor/skills/dec',
+        Target: global ? 'p/dec/private/user/skills/dec' : 'p/dec/private/project/skills/dec',
+        Status: 'modified',
+        LocalMtime: '2026-09-14 10:30',
+        RemoteCommitTime: '2026-09-13 18:20',
+        LastSyncTime: '2026-09-13 18:21',
+        LocalContent: '# local skill',
+        RemoteContent: '# remote skill',
+      },
+      {
+        Source: '.secrets/relkit/.env/upload.env',
+        Target: 'relkit/private/project',
+        Status: 'remote-newer',
+        LocalMtime: '2026-09-12 09:00',
+        RemoteCommitTime: '2026-09-14 08:00',
+        LastSyncTime: '2026-09-12 09:01',
+        Secret: true,
+      },
+    ],
+  })
+
   const ok = (value: unknown) => ({ result_json: JSON.stringify(value ?? {}), error: '' })
 
   const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
@@ -185,6 +224,7 @@ export function installTauriMock(scenario: Scenario) {
     run_operation: (args) => {
       const operation = String(args.operation || '')
       const global = String(args.workspacePlane || '') === 'global'
+      if (operation === 'preview_sync' || operation === 'sync') return ok(syncPreview(global))
       if (operation === 'preview_push') return ok(global ? globalPushPreview : projectPushPreview)
       if (operation === 'scan_managed_projects') {
         return ok({ ScanRoot: scenario.listing.Current, Projects: scenario.scan })
@@ -215,6 +255,21 @@ export function installTauriMock(scenario: Scenario) {
     },
     invoke_method: (args) => {
       const method = String(args.method || '')
+      if (method === 'load_asset_selection') {
+        const projectRoot = String(args.projectRoot || args.project_root || '')
+        if (!projectRoot || scenario.assets.Bundles.length === 0) return ok(scenario.assets)
+        const home = {
+          ...scenario.assets.Bundles[0],
+          Name: 'dec',
+          Vault: 'dec',
+          Home: true,
+          Enabled: true,
+        }
+        return ok({
+          ...scenario.assets,
+          Bundles: [home, ...scenario.assets.Bundles.filter((item) => item.Name !== 'dec')],
+        })
+      }
       if (method === 'save_project_tags') {
         const raw = String(args.payloadJson || args.payload_json || '{}')
         const payload = JSON.parse(raw) as { Name?: string; Tags?: string[] }

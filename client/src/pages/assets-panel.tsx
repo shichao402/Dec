@@ -47,8 +47,10 @@ export function AssetsPanel(props: {
 
   const applySelection = useCallback((result: AssetSelection) => {
     setData(result)
-    setSelected(result.Bundles.filter((item) => item.Enabled).map((item) => item.Name))
-  }, [])
+    setSelected(result.Bundles
+      .filter((item) => item.Enabled || (props.plane === 'local' && item.Home))
+      .map((item) => item.Name))
+  }, [props.plane])
 
   const load = useCallback(async () => {
     const outcome = await runAction(
@@ -106,7 +108,7 @@ export function AssetsPanel(props: {
     if (ag !== bg) return ag - bg
     return a.Name.localeCompare(b.Name)
   })
-  const selectable = visible.filter((item) => !item.OtherPlane)
+  const selectable = visible.filter((item) => !item.OtherPlane && !(props.plane === 'local' && item.Home))
   const rejected = saveState.record?.result
     ? [...(saveState.record.result.RejectedProjects || []), ...(saveState.record.result.RejectedBundles || [])]
     : []
@@ -167,6 +169,7 @@ export function AssetsPanel(props: {
                 item={item}
                 checked={selected.includes(item.Name)}
                 changed={added.includes(item.Name) || removed.includes(item.Name)}
+                locked={props.plane === 'local' && item.Home}
                 tagging={tagState.running}
                 onToggle={() => setSelected(toggle(selected, item.Name))}
                 onToggleGlobalTag={() => void saveGlobalTag(item)}
@@ -227,6 +230,7 @@ export function AssetRow({
   checked,
   changed,
   compact,
+  locked,
   tagging,
   onToggle,
   onToggleGlobalTag,
@@ -235,6 +239,7 @@ export function AssetRow({
   checked: boolean
   changed?: boolean
   compact?: boolean
+  locked?: boolean
   tagging?: boolean
   onToggle: () => void
   onToggleGlobalTag?: () => void
@@ -247,15 +252,15 @@ export function AssetRow({
       className={cn(
         compact ? compactRow : row,
         'px-3.5 py-2 transition-colors',
-        item.OtherPlane ? 'cursor-not-allowed opacity-45' : 'cursor-pointer hover:bg-panel-hi',
+        item.OtherPlane || locked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-panel-hi',
         changed && 'bg-accent/6',
       )}
     >
-      <Checkbox className="mt-0.5" aria-label={item.Name} checked={checked} disabled={item.OtherPlane} onChange={onToggle} />
+      <Checkbox className="mt-0.5" aria-label={item.Name} checked={checked} disabled={item.OtherPlane || locked} onChange={onToggle} />
       <div className="flex min-w-0 flex-col">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-[13px] font-medium text-ink" title={item.Name}>{item.Name}</span>
-          {item.Home && <Badge tone="accent">home</Badge>}
+          {item.Home && <Badge tone="accent">{locked ? 'home · 必选' : 'home'}</Badge>}
           {item.Required && <Badge>requires</Badge>}
           <GlobalTagBadge recommended={recommended} disabled={item.OtherPlane || tagging} onToggle={onToggleGlobalTag} />
           {item.SecretsOnly && <Badge tone="quiet">secrets</Badge>}

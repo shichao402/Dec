@@ -161,6 +161,8 @@ export type GlobalSettings = {
   ServerIdleTimeout: string
   SessionTimeout: string
   AutoReunlockOnTimeout: boolean
+  DiffTool?: 'internal' | 'git'
+  DiffToolName?: string
 }
 
 export type ConsoleUpdateStatus = {

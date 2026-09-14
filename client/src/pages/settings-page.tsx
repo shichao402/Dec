@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { ActionButton } from '@/components/ui/action-button'
 import { CheckOption } from '@/components/ui/checkbox'
 import { KeyValue, Notice, WarningList } from '@/components/ui/feedback'
-import { Input } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import { Panel, PanelBody, PanelFooter, PanelHeader, SettingsSection } from '@/components/ui/panel'
 import { useDecAction } from '@/lib/action-context'
 import { invokeTyped, runTyped } from '@/lib/api'
@@ -39,6 +39,8 @@ export function SettingsPage(props: {
   const [idle, setIdle] = useState(props.settings.ServerIdleTimeout)
   const [sessionTimeout, setSessionTimeout] = useState(props.settings.SessionTimeout)
   const [autoReunlockOnTimeout, setAutoReunlockOnTimeout] = useState(props.settings.AutoReunlockOnTimeout)
+  const [diffTool, setDiffTool] = useState<'internal' | 'git'>(props.settings.DiffTool || 'internal')
+  const [diffToolName, setDiffToolName] = useState(props.settings.DiffToolName || '')
   const [ides, setIDEs] = useState(props.settings.SelectedIDEs)
   const [cleanupPreview, setCleanupPreview] = useState<LocalCleanupPreview | null>(null)
   const [cleanupConfirm, setCleanupConfirm] = useState('')
@@ -55,6 +57,8 @@ export function SettingsPage(props: {
     idle !== props.settings.ServerIdleTimeout ||
     sessionTimeout !== props.settings.SessionTimeout ||
     autoReunlockOnTimeout !== props.settings.AutoReunlockOnTimeout ||
+    diffTool !== (props.settings.DiffTool || 'internal') ||
+    diffToolName !== (props.settings.DiffToolName || '') ||
     ides.join(',') !== props.settings.SelectedIDEs.join(',')
 
   const save = async () => {
@@ -68,6 +72,8 @@ export function SettingsPage(props: {
         ServerIdleTimeout: idle,
         SessionTimeout: sessionTimeout,
         AutoReunlockOnTimeout: autoReunlockOnTimeout,
+        DiffTool: diffTool,
+        DiffToolName: diffToolName,
       },
       saveSpec.key,
     )
@@ -168,6 +174,24 @@ export function SettingsPage(props: {
             </SettingsSection>
 
             <SettingsSection
+              title="内容对比工具"
+              description="同步预览默认使用 Console 内置对比；也可指定本机 Git difftool 名称。后端未支持时会忽略这两个可选字段。"
+            >
+              <Select value={diffTool} onChange={(event) => setDiffTool(event.target.value as 'internal' | 'git')} className="max-w-52">
+                <option value="internal">Console 内置</option>
+                <option value="git">Git difftool</option>
+              </Select>
+              {diffTool === 'git' && (
+                <Input
+                  className="max-w-80 font-mono text-xs"
+                  value={diffToolName}
+                  onChange={(event) => setDiffToolName(event.target.value)}
+                  placeholder="例如 vscode、meld、beyondcompare"
+                />
+              )}
+            </SettingsSection>
+
+            <SettingsSection
               title="目标 IDE"
               description="决定 rules / skills / MCP 配置写到哪些 IDE 目录。"
             >
@@ -189,6 +213,8 @@ export function SettingsPage(props: {
               setIdle(next.ServerIdleTimeout)
               setSessionTimeout(next.SessionTimeout)
               setAutoReunlockOnTimeout(next.AutoReunlockOnTimeout)
+              setDiffTool(next.DiffTool || 'internal')
+              setDiffToolName(next.DiffToolName || '')
               setIDEs(next.SelectedIDEs)
               props.onSaved()
             }}>

@@ -179,6 +179,9 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 	if err := m.checkProjectRoot(); err != nil {
 		return err
 	}
+	if config == nil {
+		return fmt.Errorf("项目配置不能为空")
+	}
 	decDir := m.GetDecDir()
 	if err := os.MkdirAll(decDir, 0755); err != nil {
 		return fmt.Errorf("创建 .dec 目录失败: %w", err)
@@ -192,6 +195,18 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 	}
 	normalized.IDEs, _ = stripRemovedBuiltInIDEs(config.IDEs)
 	config.IDEs = append([]string(nil), normalized.IDEs...)
+	providesRoot, err := ResolveProvidesRoot(normalized.ProvidesRoot, normalized.Provides)
+	if err != nil {
+		return fmt.Errorf("校验 provides_root 失败: %w", err)
+	}
+	normalized.ProvidesRoot = providesRoot
+	config.ProvidesRoot = providesRoot
+	provides, err := NormalizeProjectProvides(normalized.ProjectName, providesRoot, normalized.Provides)
+	if err != nil {
+		return fmt.Errorf("校验 provides 失败: %w", err)
+	}
+	normalized.Provides = provides
+	config.Provides = provides
 
 	data, err := yaml.Marshal(&normalized)
 	if err != nil {
@@ -372,6 +387,16 @@ func loadProjectConfigV2(data []byte, configPath string) (*types.ProjectConfig, 
 	}
 	config.Kind = types.ConfigKindProject
 	config.Version = types.ProjectConfigVersionV2
+	providesRoot, err := ResolveProvidesRoot(config.ProvidesRoot, config.Provides)
+	if err != nil {
+		return nil, fmt.Errorf("校验 %s 中的 provides_root 失败: %w", configPath, err)
+	}
+	config.ProvidesRoot = providesRoot
+	provides, err := NormalizeProjectProvides(config.ProjectName, providesRoot, config.Provides)
+	if err != nil {
+		return nil, fmt.Errorf("校验 %s 中的 provides 失败: %w", configPath, err)
+	}
+	config.Provides = provides
 	return &config, nil
 }
 

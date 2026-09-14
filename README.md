@@ -162,15 +162,26 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 
 ### 5. 推送与新增资产
 
-在 Console **同步** 页推送 `.dec/cache/` 中的修改到远程仓库。secrets bundle 走 Bitwarden API，不进 Git。
+项目可在 `.dec/config.yaml` 的 `provides` 中登记作者目录
+`skills/`、`commands/`、`rules/`、`mcp/` 中的资产，经 Git vault 分发。
+这四个目录在新项目中默认位于 `DecAssets/`，项目页可用 `provides_root` 整组挪走，
+避免与业务目录撞名；基准点只影响本地落点，远端布局不变。已有 `provides` 但没有
+该字段的旧项目继续按仓库根解释。
+来源、类型、名称和目标路径均由项目页的资产选择派生，不要求手写路径。
+`provides` 只登记 Git 资产：secrets 由 `.secrets/<项目>` 的 SyncTarget 规则同步，
+不在这里声明。
 
 新增资产流程：
 
-1. 在 Console 资产页或 `.dec/config.yaml` 中启用 bundle / 资产
-2. 在 `.dec/cache/<bundle>/` 下创建对应文件（skills / rules / mcp）
-3. 在 **同步** 页执行推送
+1. 在产品仓中创建并提交作者文件
+2. 在项目页“我提供的资产”里勾选扫描到的候选
+3. 在 **同步** 二级页预览本地与远端，再自动同步或单向 Pull / Push
 
-推送读取源是 `.dec/cache/`，不是 `.cursor/`、`.codex/` 等 IDE 目录。
+配置了 `provides` 的项目只从作者目录推送；`.dec/` 与 `.cursor/`、
+`.codex/` 等 IDE 目录都是状态或渲染结果，校验会拒绝把它们声明为 source，
+`provides_root` 同样不能指向这类点目录。
+未配置 provides 的旧项目暂时保留 cache push
+兼容路径。
 
 ## 推荐工作流
 
@@ -189,15 +200,15 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 
 ### 工作流 C：更新已有资产
 
-1. 修改 `.dec/cache/` 中的缓存文件
-2. **同步** 页推送
-3. 在其他项目的 **同步** 页拉取最新版本
+1. 修改 `.dec/config.yaml` 的 `provides[].source` 指向的作者文件
+2. **同步** 页查看 side-by-side 预览并自动同步
+3. 有 Git 冲突时在保留的工作副本中解决，再继续推送
 
 ### 工作流 D：新增资产
 
-1. 资产页刷新并启用新 bundle / 资产
-2. 编辑 `.dec/cache/<bundle>/` 下文件
-3. **同步** 页推送
+1. 在产品仓选择作者路径并创建文件
+2. 项目页登记到“我提供的资产”
+3. **同步** 页预览并推送
 
 ## 程序边界
 

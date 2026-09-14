@@ -126,6 +126,7 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, 'Global 资产')
       await expect(page.getByRole('heading', { name: 'Global 资产' })).toBeVisible()
+      await expect(page.getByText(/提供的 Global/)).toHaveCount(0)
     },
   },
   {
@@ -242,7 +243,19 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
-      await expect(page.getByRole('button', { name: '拉取到设备' })).toBeVisible()
+      await expect(page.getByRole('main').getByRole('button', { name: '同步' })).toBeVisible()
+      await expect(page.getByText('我提供的资产')).toBeVisible()
+      await expect(page.getByText('我引用的资产')).toBeVisible()
+      // 新项目默认 DecAssets；改根后已登记来源要跟着平移。
+      const authorRoot = page.getByLabel('作者目录基准点')
+      await expect(authorRoot).toHaveValue('DecAssets')
+      await authorRoot.fill('ProductAssets')
+      await authorRoot.blur()
+      await expect(page.getByText('ProductAssets/skills', { exact: false }).first()).toBeVisible()
+      const home = page.getByRole('checkbox', { name: 'dec' })
+      await expect(home).toBeChecked()
+      await expect(home).toBeDisabled()
+      await expect(page.getByText('home · 必选')).toBeVisible()
     },
   },
   {
@@ -252,7 +265,7 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.locator('main button').filter({ hasText: '腾讯云基础设施' }).first().click()
-      await expect(page.getByRole('button', { name: '拉取到设备' })).toBeVisible()
+      await expect(page.getByRole('main').getByRole('button', { name: '同步' })).toBeVisible()
     },
   },
   {
@@ -272,18 +285,26 @@ export const cases: Case[] = [
     scenario: 'typical',
     open: async (page) => {
       await connect(page)
-      await page.getByRole('button', { name: /拉取 Global 资产/ }).click()
+      await nav(page, '项目')
+      await page.getByRole('button', { name: /^Dec/ }).first().click()
+      await page.getByRole('main').getByRole('button', { name: '同步' }).click()
       await expect(page.getByRole('heading', { name: '同步' })).toBeVisible()
-      // 默认目标是 Global：预览必须走 global 平面，mock 才会回 private/user。
-      await page.getByRole('button', { name: '预览推送' }).click()
-      await expect(page.getByText('private/user', { exact: true })).toBeVisible()
-      // 切到项目目标后预览必须改走 local 平面。
-      await page.getByLabel('推送目标').selectOption({ index: 1 })
-      await page.getByRole('button', { name: '预览推送' }).click()
-      await expect(page.getByText('private/project', { exact: true })).toBeVisible()
+      // 从项目页进入时必须预选当前项目，而不是回退到 Global。
+      await expect(page.getByLabel('同步目标')).toHaveValue('D:\\workspace\\GitHub\\Dec')
+      await page.getByRole('button', { name: '刷新预览' }).click()
+      await expect(page.getByText('p/dec/private/project/skills/dec')).toBeVisible()
+      // 最窄视口也必须不滚动就能点到对比：操作列不能被时间列挤出视口。
+      await expect(page.getByRole('button', { name: '对比' })).toBeInViewport()
+      await page.getByRole('button', { name: '对比' }).click()
+      await expect(page.getByText('# local skill')).toBeVisible()
+      await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
+      await page.getByRole('button', { name: '元数据' }).click()
+      await expect(page.getByText('Secret 正文永不传入或显示，只能选择同步方向。')).toBeVisible()
+      await expect(page.getByText('# local skill')).toHaveCount(0)
+      await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
       // 密钥清单只列路径与状态，未落地的条目也要能看见。
       await page.getByRole('button', { name: '列出密钥' }).click()
-      await expect(page.getByText('.secrets/relkit/.env/upload.env')).toBeVisible()
+      await expect(page.getByText('.secrets/relkit/.env/upload.env').last()).toBeVisible()
       await expect(page.getByText('未落地')).toBeVisible()
     },
   },

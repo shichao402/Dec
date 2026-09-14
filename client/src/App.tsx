@@ -37,7 +37,7 @@ import { OverviewPage } from '@/pages/overview-page'
 import { ProjectPage } from '@/pages/project-page'
 import { ProjectsPage } from '@/pages/projects-page'
 import { SettingsPage } from '@/pages/settings-page'
-import { SyncPage, type PullHistoryEntry } from '@/pages/sync-page'
+import { SyncPage, type PullHistoryEntry, type SyncTarget } from '@/pages/sync-page'
 import { UnlockPage } from '@/pages/unlock-page'
 import type {
   ConsoleUpdateStatus,
@@ -91,6 +91,7 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState<ConsoleUpdateStatus | null>(null)
   const [updateError, setUpdateError] = useState('')
   const [selectedProject, setSelectedProject] = useState<ManagedProject | null>(null)
+  const [syncTarget, setSyncTarget] = useState<SyncTarget | null>(null)
   const [history, setHistory] = useState<PullHistoryEntry[]>([])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -468,6 +469,7 @@ export default function App() {
           onboarding={onboarding}
           onView={(next) => {
             if (next !== 'project') setSelectedProject(null)
+            if (next === 'sync') setSyncTarget(null)
             setView(next)
           }}
           onProject={(project) => {
@@ -570,7 +572,10 @@ export default function App() {
                 <GlobalAssetsPage
                   deviceId={deviceId}
                   repoURL={summary.RepoURL}
-                  onPull={() => pull('Global', '', 'global')}
+                  onSync={() => {
+                    setSyncTarget({ key: 'global', label: 'Global（本机）', root: '', plane: 'global' })
+                    setView('sync')
+                  }}
                 />
               )}
               {view === 'projects' && (
@@ -588,7 +593,15 @@ export default function App() {
                 <ProjectPage
                   deviceId={deviceId}
                   project={selectedProject}
-                  onPull={() => pull(selectedProject.Name, selectedProject.Root, 'local')}
+                  onSync={() => {
+                    setSyncTarget({
+                      key: selectedProject.Root,
+                      label: selectedProject.Label || selectedProject.Name,
+                      root: selectedProject.Root,
+                      plane: 'local',
+                    })
+                    setView('sync')
+                  }}
                   onChanged={refreshDevice}
                   onRemoved={async () => {
                     setSelectedProject(null)
@@ -603,6 +616,11 @@ export default function App() {
                   projects={summary.Projects}
                   events={events}
                   history={history}
+                  initialTarget={syncTarget}
+                  onBack={syncTarget ? () => {
+                    setView(syncTarget.plane === 'global' ? 'global' : 'project')
+                    setSyncTarget(null)
+                  } : undefined}
                 />
               )}
               {view === 'delete' && (
@@ -658,6 +676,9 @@ function buildCrumbs(input: {
   if (input.onboarding) return [device, '初始化设备']
   if (input.view === 'project') {
     return [device, viewTitles.projects, input.project?.Label || input.project?.Name || '项目']
+  }
+  if (input.view === 'sync' && input.project) {
+    return [device, viewTitles.projects, input.project.Label || input.project.Name, viewTitles.sync]
   }
   return [device, viewTitles[input.view]]
 }

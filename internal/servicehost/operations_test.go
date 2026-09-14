@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/types"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
 )
 
@@ -34,6 +36,35 @@ func TestConsoleProjectManagementDispatch(t *testing.T) {
 	}
 	if len(listed.([]app.ManagedProjectState)) != 1 {
 		t.Fatalf("unexpected projects: %#v", listed)
+	}
+}
+
+func TestProjectProvidesDispatchSaveAndLoad(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
+	project := t.TempDir()
+	if err := config.NewProjectConfigManager(project).SaveProjectConfig(&types.ProjectConfig{ProjectName: "demo"}); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(app.SaveProjectProvidesInput{
+		Provides: map[string]types.ProjectProvide{
+			"rule": {
+				Source: "rules/demo.mdc", Visibility: types.AssetVisibilityPublic,
+				Plane: types.AssetPlaneLocal, Type: "rule", Name: "demo",
+			},
+		},
+	})
+	if _, err := dispatchInvokeWorkspace(context.Background(), "save_project_provides",
+		app.NewWorkspace(app.WorkspaceProject, project), payload, nil, app.DefaultPWriter()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := dispatchInvokeWorkspace(context.Background(), "load_project_provides",
+		app.NewWorkspace(app.WorkspaceProject, project), nil, nil, app.DefaultPWriter())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := got.(*app.ProjectProvidesState)
+	if state.Targets["rule"] != "demo/public/local/rules/demo.mdc" {
+		t.Fatalf("state = %#v", state)
 	}
 }
 

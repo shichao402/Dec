@@ -38,4 +38,17 @@ message ProjectConfig {
   string editor = 4;
   reserved 5, 6, 7;
   reserved "available", "enabled", "enabled_bundles";
+  // 作者工作区提供的资产；key 是稳定的本地声明 ID。
+  map<string, ProjectProvide> provides = 8;
+  // 作者目录基准点（相对项目根，新项目默认 DecAssets；旧项目空=仓库根）。
+  string provides_root = 9 [json_name = "provides_root"];
+}
+
+message ProjectProvide {
+  // 相对 project root 的安全路径。
+  string source = 1;
+  string visibility = 2; // public | private
+  string plane = 3; // global | local
+  string type = 4; // skill | rule | mcp | command | secret
+  string name = 5;
 }

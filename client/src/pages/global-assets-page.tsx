@@ -6,9 +6,13 @@ import { useDecAction } from '@/lib/action-context'
 import { actionSpec, resource } from '@/lib/console'
 import { AssetsPanel } from '@/pages/assets-panel'
 
-export function GlobalAssetsPage(props: { deviceId: string; repoURL: string; onPull: () => void }) {
-  const pullState = useDecAction(
-    actionSpec(`operation:pull:${props.deviceId}:global`, '拉取资产', props.deviceId, [resource.global], 'operation'),
+export function GlobalAssetsPage(props: {
+  deviceId: string
+  repoURL: string
+  onSync: () => void
+}) {
+  const syncState = useDecAction(
+    actionSpec(`operation:sync:${props.deviceId}:global`, '同步 Global 资产', props.deviceId, [resource.global], 'operation'),
   )
   return (
     <Page>
@@ -17,9 +21,9 @@ export function GlobalAssetsPage(props: { deviceId: string; repoURL: string; onP
         description="装到这台设备用户环境的 bundle，不属于任何单个项目。"
         meta={props.repoURL ? <Badge tone="quiet" className="font-mono">{props.repoURL}</Badge> : undefined}
         actions={
-          <Button onClick={props.onPull} disabled={pullState.blocked}>
+          <Button onClick={props.onSync} disabled={syncState.blocked}>
             <RefreshCw className="size-4" />
-            拉取到设备
+            同步
           </Button>
         }
       />
@@ -28,7 +32,7 @@ export function GlobalAssetsPage(props: { deviceId: string; repoURL: string; onP
           deviceId={props.deviceId}
           root=""
           plane="global"
-          hint="Global 平面的资产装到用户环境（如 ~/.cursor、~/.claude）；secrets 落到 .secrets 同步根。行上的 global 标签表示推荐导入本机，点击可写入私仓。"
+          hint="Global 平面的资产装到用户环境（如 ~/.cursor、~/.claude）；提供项请在各自项目页管理。"
         />
       </PageFill>
     </Page>

@@ -241,6 +241,22 @@ type ProjectConfig struct {
 	Editor      string   `yaml:"editor,omitempty"`
 	// EnabledBundles 是旧启用列表；项目模型下 requires 才是 SSOT。
 	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
+	// ProvidesRoot 是作者目录（skills/commands/rules/mcp）的基准点，相对项目根。
+	// 新项目默认 DecAssets；旧项目空值表示仓库根。它不影响派生的 vault target。
+	ProvidesRoot string `yaml:"provides_root,omitempty"`
+	// Provides 声明作者工作区向绑定 Project 提供的资产。map key 是稳定的本地声明 ID；
+	// Git 目标只由 ProjectName 与条目的 visibility/plane/type/name 派生。
+	Provides map[string]ProjectProvide `yaml:"provides,omitempty"`
+}
+
+// ProjectProvide 是作者工作区中的一项源资产声明。
+// Source 始终是相对项目根的安全路径；secret 的正文绝不进入 Git。
+type ProjectProvide struct {
+	Source     string          `yaml:"source"`
+	Visibility AssetVisibility `yaml:"visibility"`
+	Plane      AssetPlane      `yaml:"plane"`
+	Type       string          `yaml:"type"`
+	Name       string          `yaml:"name"`
 }
 
 // BundleScope 是 bundle 的二元作用域（ADR 0009）。

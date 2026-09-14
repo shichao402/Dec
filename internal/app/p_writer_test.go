@@ -28,7 +28,8 @@ func TestPWriterProjectSelectionWritesHomeRequires(t *testing.T) {
 	}
 
 	result, err := DefaultPWriter().SaveProjects(
-		NewWorkspace(WorkspaceProject, root), []string{"my-app", "shared"}, nil)
+		// 即使门面漏传 home，服务端也必须保留绑定的家项目。
+		NewWorkspace(WorkspaceProject, root), []string{"shared"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

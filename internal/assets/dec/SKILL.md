@@ -121,25 +121,34 @@ enabled_bundles:
 
 Settings 可编辑本机 vars；Project 页编辑项目 vars。缺失变量会提示并保留占位符。
 
-## 新增资产（cache，不是 IDE 目录）
+## 新增资产（作者源由 provides 决定）
 
-推送源是 cache，不是 `.cursor/` 等渲染副本。
+新项目通过 Console 项目页从作者目录 `skills/`、`commands/`、`rules/`、`mcp/`
+选择资产，Console 派生并写入 `provides`；`.dec/` 与各 IDE 目录都是状态或
+渲染副本，不能被选择，配置校验也会拒绝。
+
+作者目录在新项目中默认位于 `DecAssets/`，项目可用 `.dec/config.yaml` 的
+`provides_root` 整组挪动。基准点只改本地路径，派生的 vault 目标不变；它不能指向
+`.dec/`、`.cursor/` 等点目录。已有 `provides` 但没有该字段的旧项目仍按仓库根解释。
 
 1. 项目已初始化（Home / `dec_init_project`）
-2. 目标 bundle 在对应平面 `enabled_bundles` 中
-3. cache 里登记 bundle 成员并写文件：
+2. 在产品仓规范作者目录中创建作者文件
+3. 在项目页勾选扫描到的资产；source、type、name 自动派生，只选择 visibility 和 plane：
 
 ```text
-.dec/cache/<vault>/skills/<name>/SKILL.md
-.dec/cache/<vault>/rules/<name>.mdc
-.dec/cache/<vault>/mcp/<name>.json
+source: skills/my-skill
+visibility: public
+plane: local
+type: skill
+name: my-skill
 ```
 
-用户平面把 `.dec/cache` 换成 `~/.dec/cache`。
+目标 vault 路径由 Dec 派生。`provides` 只登记 Git 资产：secrets 由 `.secrets/<项目>`
+的 SyncTarget 规则同步，声明它反而写出第二套规则，配置校验会拒绝 `type: secret`。
 4. 有占位符则补 vars
-5. Console **同步** 或 `dec_push`
+5. Console **同步**；旧项目没有 provides 时才继续使用 cache push
 
-不要把 IDE 目录当新增来源。项目级托管输出可以单独提交，只要敏感值已抽到 vars。
+不要把 cache 或 IDE 目录当新增来源。项目级托管输出可以单独提交，只要敏感值已抽到 vars。
 
 ## 资产格式
 
@@ -156,8 +165,8 @@ Settings 可编辑本机 vars；Project 页编辑项目 vars。缺失变量会�
 
 ## 修改资产的正确流程
 
-1. 改对应平面 cache
-2. push
+1. 改 `provides[].source` 指向的作者文件
+2. 在同步页预览后同步
 3. 其他项目 / 平面再 pull
 
 刚 pull 完且仓库跟踪 IDE 输出：先看 diff，再问是否单独 commit。

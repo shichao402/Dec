@@ -45,12 +45,14 @@ Bitwarden session 按需建立。**Console Authenticate 是唯一人工入口**�
 | 层级 | 存储位置 | 职责 |
 |------|----------|------|
 | **项目声明** | Git Vault `<p>/dec.yaml` | 展示信息、标签（当前 `global` 表示推荐本机导入）、IDE 默认值、direct `requires` |
-| **Git 四象限** | `<p>/{public,private}/{user,project}/` | 全部为非敏感资产；private 仅表示不可被其它项目引用 |
-| **BW private** | `<p>/private/{user,project}` folder | 敏感正文；与 Git 同 项目/plane/相对路径 零冲突 |
+| **作者源映射** | 产品仓 `.dec/config.yaml` 的 `provides` | 声明任意仓内 source 提供到哪个类型与象限；唯一映射门面 |
+| **Git 四象限** | `<p>/{public,private}/{global,local}/` | 全部为非敏感资产；private 仅表示不可被其它项目引用 |
+| **BW private** | `<p>/private/{global,local}` | 敏感正文；与 Git 同 项目/plane/相对路径 零冲突 |
 
 用户平面显式启用项目；项目工作区绑定家项目。家项目的 project 两象限可见，且只展开其
 direct requires 的 `public/project`，不递归、不引入 user/private。Git 资产落到
-`.dec/cache/<p>/<visibility>/<plane>/` 后渲染 IDE；BW 内容独立落到
+`.dec/cache/<p>/<visibility>/<plane>/` 后渲染 IDE；配置了 `provides` 时，Push
+只读取映射 source，cache 仍是可删除的安装缓存。BW 内容独立落到
 `.secrets/<p>/` 或 `~/.dec/secrets/<p>/`。项目级 SSH/GCM 定向到家工作区，
 机器级 SSH/GCM 保持用户范围。
 
@@ -59,7 +61,8 @@ direct requires 的 `public/project`，不递归、不引入 user/private。Git 
 - 仓库连接 / 本机 vars / 服务版本与重启：Console **设置**
 - 项目初始化 / project 选择：Console **引导 / 项目**
 - 项目启用、家项目 requires、标签（推荐 Global）与四象限浏览：Console **项目 / Global 资产**
-- pull / push / remove（含成功对照后的孤儿 reconcile）：Console **同步**
+- 提供映射、引用选择：Console **项目 / Global 资产**
+- 自动同步 / Pull / Push / 冲突恢复（含 side-by-side 预览）：Console **同步**
 - 远端设备探测与置备：Console **连接**（ADR 0019）
 
 运行时每个程序自行支持 `--version`；不存在用一个通用 CLI 代表整套版本的探针。
@@ -231,8 +234,9 @@ secrets 没有本地同步状态文件：push 时**递归扫描** `.secrets/` �
 ```text
 <workspace>/
 ├── .dec/
-│   ├── config.yaml          # project_name + 本地 override + enabled_bundles
-│   ├── cache/               # 资产缓存（pull 写入，push 读取）
+│   ├── config.yaml          # project_name + provides + 本地 override
+│   ├── cache/               # 安装缓存（pull 写入，可删除）
+│   ├── sync/                # 持久 Git 同步工作副本与恢复状态（派生、gitignore）
 │   ├── .version             # 最近一次 pull 的 commit 记录
 │   ├── vars.yaml            # 项目变量定义（主文件，覆盖 vars.d/）
 │   └── vars.d/              # 可选：拆分的变量片段 *.yaml / *.yml
@@ -245,8 +249,9 @@ secrets 没有本地同步状态文件：push 时**递归扫描** `.secrets/` �
 
 `.dec/` 适合纳入版本控制：
 
-- `config.yaml`：`project_name`、机器级 IDE / editor 覆盖、`enabled_bundles`
-- `cache/`：pull 下来的 **公开** 资产缓存，也是 push 的读取源（私密文件不进 cache）
+- `config.yaml`：`project_name`、`provides`、机器级 IDE / editor 覆盖
+- `cache/`：pull 下来的 **公开** 资产缓存；provides 模式下不是 push 源
+- `sync/`：运行态 worktree 与状态，不纳入版本控制；冲突时保留到用户继续或放弃
 - `.version`：当前项目最近一次 pull 对应的远端 commit
 - `vars.yaml`：项目级变量与资产级变量覆盖
 
@@ -419,9 +424,11 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 - **Dec 产品源码**：`internal/`、`cmd/`、`Documents/` 等，通过构建进入二进制
 - **项目级落地产物**：`.dec/`、`.cursor/`、`.claude/` 等，由 Console pull 写入
-- **Vault 资产源**：远端 `projects/`、`projects/<name>.yaml` 与各 `bundles/<name>/` 目录与项目 `.dec/cache/`
+- **项目作者源**：由工作区 `.dec/config.yaml` 的 `provides[].source` 指向，跟产品代码共同提交
+- **Vault 分发源**：远端项目四象限；`.dec/cache/` 只是安装缓存
 
-修改 `internal/assets/` 走源码 commit + release；`.dec/cache/` 变更走 Console **同步** 页 push；project 声明变更走 vault `projects/` push。
+修改 `internal/assets/` 走源码 commit + release；provides source 变更走 Console **同步**；
+没有 provides 的存量项目暂时保留 cache push 兼容。
 
 ### 4. 资产生命周期
 
@@ -449,10 +456,12 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 #### push（同步页）
 
-- 从 `.dec/cache/` 读取已启用资产，写回 Git Vault
-- project 声明变更：更新 vault `projects/<name>.yaml`
-- secrets bundle 走 Bitwarden API，不进 Git
-- 推送目标含 Global（本机）与各项目；本机平面 `projectRoot` 为空（[0015](decisions/0015-project-config-boundary.md)）
+- 先 side-by-side 展示 provides source、派生目标、时间与动作
+- 公开资产在持久 worktree 中由系统 Git fetch/merge；成功后 backfill source 再 push
+- Git 冲突不 abort，保留工作副本供用户继续或放弃
+- secrets 不在 provides 中声明：`.secrets/<p>` 整树按 SyncTarget 规则同步，
+  自动模式只提示需要显式 Pull 或 Push（ADR 0026）
+- 无 provides 的存量项目继续从 `.dec/cache/` 读取，作为兼容路径
 
 #### remove（删除页）
 

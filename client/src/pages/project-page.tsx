@@ -13,6 +13,7 @@ import { useDecAction } from '@/lib/action-context'
 import { invokeTyped } from '@/lib/api'
 import { actionSpec, resource, suggestProjectName } from '@/lib/console'
 import { AssetsPanel } from '@/pages/assets-panel'
+import { ProvidesPanel } from '@/pages/provides-panel'
 import type { ManagedProject } from '@/lib/utils'
 
 type ProjectPreparation = { AvailableProjects: string[]; HomeProject: string }
@@ -20,7 +21,7 @@ type ProjectPreparation = { AvailableProjects: string[]; HomeProject: string }
 export function ProjectPage(props: {
   deviceId: string
   project: ManagedProject
-  onPull: () => void
+  onSync: () => void
   onRemoved: () => void
   onChanged: () => void | Promise<void>
 }) {
@@ -28,8 +29,8 @@ export function ProjectPage(props: {
   const [bindingOpen, setBindingOpen] = useState(false)
   const workspaceResource = resource.workspace(project.Root)
   const removeSpec = actionSpec(`project:remove:${props.deviceId}:${project.Root}`, '移除项目管理', props.deviceId, [workspaceResource, resource.global], 'write', '已移除项目管理')
-  const pullSpec = actionSpec(`operation:pull:${props.deviceId}:${project.Root}`, '拉取项目资产', props.deviceId, [workspaceResource], 'operation')
-  const pullState = useDecAction(pullSpec)
+  const syncSpec = actionSpec(`operation:sync:${props.deviceId}:${project.Root}`, '同步项目资产', props.deviceId, [workspaceResource], 'operation')
+  const syncState = useDecAction(syncSpec)
   const removeButton = (
     <ActionButton
       variant="outline"
@@ -82,9 +83,9 @@ export function ProjectPage(props: {
         actions={
           <>
             {removeButton}
-            <Button onClick={props.onPull} disabled={pullState.blocked}>
+            <Button onClick={props.onSync} disabled={syncState.blocked}>
               <RefreshCw className="size-4" />
-              拉取到设备
+              同步
             </Button>
           </>
         }
@@ -111,12 +112,21 @@ export function ProjectPage(props: {
             </PanelBody>
           )}
         </Panel>
-        <AssetsPanel
-          deviceId={props.deviceId}
-          root={project.Root}
-          plane="local"
-          hint="这里的选择只影响这个目录：家项目自带的资产加上本仓库 requires 声明的引入。"
-        />
+        <div className="space-y-4">
+          <ProvidesPanel deviceId={props.deviceId} root={project.Root} />
+          <div>
+            <div className="mb-2">
+              <h2 className="text-[13px] font-semibold text-ink">我引用的资产</h2>
+              <p className="mt-0.5 text-xs text-faint">家项目自带资产加上本仓库 requires 声明的引入。</p>
+            </div>
+            <AssetsPanel
+              deviceId={props.deviceId}
+              root={project.Root}
+              plane="local"
+              hint="这里的选择只影响当前项目目录。"
+            />
+          </div>
+        </div>
       </PageFill>
     </Page>
   )
