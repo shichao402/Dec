@@ -8,5 +8,4 @@ kind: project
 version: v2
 layout_version: 1
 project_name: dec
-enabled_bundles:
-    - dec
+provides_root: DecAssets
