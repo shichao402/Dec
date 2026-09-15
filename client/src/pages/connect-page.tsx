@@ -1,4 +1,5 @@
 import { Pencil, Plus, RefreshCw, Rocket, Server, Trash2 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { Page, PageFill, PageHeader, ScrollArea } from '@/components/shell/page'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,7 @@ export function ConnectPage(props: {
   onProbeRemote: () => void
   onProvisionRemote: () => void
   busy: boolean
+  updatePanel: ReactNode
 }) {
   const { draft, setDraft, remoteProbe } = props
   const editing = Boolean(draft.id)
@@ -186,6 +188,7 @@ export function ConnectPage(props: {
             </PanelFooter>
           </Panel>
         </div>
+        <div className="mt-4 max-w-4xl">{props.updatePanel}</div>
       </PageFill>
     </Page>
   )

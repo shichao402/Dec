@@ -133,20 +133,14 @@ def prepare_runtime_resources(version: str, os_id: str, arch: str) -> Path:
     )
     updater_dir = UPDATER_RESOURCES / f"{os_id}-{arch}"
     updater_dir.mkdir(parents=True)
-    updater_name = "dec-console-updater.exe" if os_id == "windows" else "dec-console-updater"
-    subprocess.run(
-        [
-            "go",
-            "build",
-            "-trimpath",
-            "-o",
-            str(updater_dir / updater_name),
-            "./cmd/dec-console-updater",
-        ],
-        cwd=ROOT,
-        env=env,
-        check=True,
-    )
+    updater_name = "relkit-updater.exe" if os_id == "windows" else "relkit-updater"
+    updater_source = ROOT / "tools/bin" / updater_name
+    if not updater_source.is_file():
+        raise SystemExit(
+            f"missing lock-pinned updater sidecar: {updater_source}; "
+            "run python scripts/host/relkit_host.py install"
+        )
+    shutil.copy2(updater_source, updater_dir / updater_name)
     return platform_dir
 
 

@@ -165,19 +165,6 @@ export type GlobalSettings = {
   DiffToolName?: string
 }
 
-export type ConsoleUpdateStatus = {
-  currentVersion: string
-  latestVersion: string
-  needUpdate: boolean
-  mandatory: boolean
-  releaseNotesMarkdown: string
-  releaseNotesUrl: string
-  checkedAt: string
-  fromCache: boolean
-  autoCheckInterval: string
-  canAutoInstall: boolean
-}
-
 export type OperationEvent = {
   level: string
   scope: string

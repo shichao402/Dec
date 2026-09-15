@@ -30,17 +30,19 @@ from typing import Any, Optional, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-LOCK_SCHEMA = "relkit.consume/2"
-COMPONENTS = ("host-scripts", "sdk-dart", "sdk-go", "sdk-rust", "cli", "updater")
-DEFAULT_COMPONENTS = ("sdk-dart", "cli", "updater")
-PORTABLE_COMPONENTS = ("host-scripts", "sdk-dart", "sdk-go", "sdk-rust")
-TARGETS = (
-    "linux-amd64",
-    "linux-arm64",
-    "windows-amd64",
-    "darwin-amd64",
-    "darwin-arm64",
+from hostlib.facets import (
+    BY_NAME,
+    TARGETS,
+    default_components,
+    portable_components,
+    product_components,
 )
+from hostlib.digest import tree_sha256
+
+LOCK_SCHEMA = "relkit.consume/2"
+COMPONENTS = tuple(row.name for row in product_components())
+DEFAULT_COMPONENTS = tuple(row.name for row in default_components())
+PORTABLE_COMPONENTS = tuple(row.name for row in portable_components())
 DOWNLOAD_ATTEMPTS = 3
 
 
@@ -278,19 +280,10 @@ def download_artifact(root: Path, component: str, spec: dict[str, str]) -> Path:
 
 
 def binary_destination(root: Path, component: str, target: str) -> Path:
-    windows = target.startswith("windows-")
-    if component == "cli":
-        if windows:
-            name = "relkit.exe"
-        elif target == "linux-amd64":
-            name = "relkit-linux-amd64"
-        else:
-            name = "relkit"
-    elif component == "updater":
-        name = "relkit-updater.exe" if windows else "relkit-updater"
-    else:
+    row = BY_NAME.get(component)
+    if row is None or row.role != "product-binary":
         raise RuntimeError(f"{component} is not a binary component")
-    return root / "tools" / "bin" / name
+    return root / row.destination / row.install_name(target)
 
 
 def install_binary(
@@ -336,55 +329,38 @@ def remove_tree(path: Path, *, ignore_errors: bool = False) -> None:
 
 
 def sdk_destination(root: Path, component: str) -> Path:
-    """Where an SDK artifact lands.
-
-    Go is the module itself, so it owns third_party/relkit and the host's
-    `replace go.firoyang.com/relkit => ./third_party/relkit` resolves against
-    it. The other SDKs are subdirectories of that module.
-    """
-    if component == "sdk-go":
-        return root / "third_party" / "relkit"
-    return root / "third_party" / "relkit" / "sdk" / component[4:]
+    """Where a product-tree artifact lands."""
+    row = BY_NAME.get(component)
+    if row is None or row.role != "product-tree" or component == "host-scripts":
+        raise RuntimeError(f"{component} is not an SDK/bindings tree component")
+    return root / row.destination
 
 
 def preserved_sdk_subtrees(component: str) -> tuple[str, ...]:
-    """Sibling SDK artifacts that live inside the tree being replaced."""
-    if component == "sdk-go":
-        return ("sdk/dart", "sdk/node", "sdk/rust")
-    return ()
+    """Other registry trees nested below the tree being replaced."""
+    owner = BY_NAME[component].destination.rstrip("/")
+    prefix = owner + "/"
+    return tuple(
+        row.destination[len(prefix):]
+        for row in product_components()
+        if row.role == "product-tree"
+        and row.name not in (component, "host-scripts")
+        and row.destination.startswith(prefix)
+    )
 
 
 def sdk_complete(destination: Path, component: str) -> bool:
-    if component == "sdk-dart":
-        return (destination / "pubspec.yaml").is_file() and (destination / "lib").is_dir()
-    if component == "sdk-go":
-        return (
-            (destination / "go.mod").is_file()
-            and (destination / "sdk").is_dir()
-            and (destination / "api" / "updater" / "v1").is_dir()
-        )
-    if component == "sdk-rust":
-        return (
-            (destination / "Cargo.toml").is_file()
-            and (destination / "src" / "lib.rs").is_file()
-            and (destination / "proto" / "updater" / "v1" / "updater.proto").is_file()
-        )
-    return False
+    row = BY_NAME.get(component)
+    if row is None or row.role != "product-tree":
+        return False
+    return all((destination / relative).exists() for relative in row.required_paths)
 
 
 def host_scripts_tree_sha256(directory: Path) -> str:
-    digest = hashlib.sha256()
-    for name in ("relkit_consume.py", "relkit_host.py"):
-        path = directory / name
-        if not path.is_file():
-            raise RuntimeError(f"host scripts artifact is missing {name}")
-        digest.update(name.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(
-            path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-        )
-        digest.update(b"\0")
-    return digest.hexdigest()
+    try:
+        return tree_sha256(directory)
+    except ValueError as error:
+        raise RuntimeError("host scripts artifact is empty") from error
 
 
 def safe_extract_host_scripts(
@@ -399,11 +375,18 @@ def safe_extract_host_scripts(
             names = sorted(
                 item.filename for item in archive.infolist() if not item.is_dir()
             )
-            if names != ["relkit_consume.py", "relkit_host.py"]:
-                raise RuntimeError(
-                    "host scripts artifact must contain exactly "
-                    "relkit_consume.py and relkit_host.py"
-                )
+            expected = set(names)
+            required = set(BY_NAME["host-scripts"].required_paths)
+            if not required.issubset(expected) or any(
+                name.startswith("/") or ".." in Path(name).parts or "__pycache__" in Path(name).parts
+                for name in names
+            ):
+                raise RuntimeError("host scripts artifact has unsafe or incomplete tree")
+            root = temporary.resolve()
+            for member in archive.infolist():
+                target = (temporary / member.filename).resolve()
+                if target != root and root not in target.parents:
+                    raise RuntimeError(f"unsafe host scripts archive path: {member.filename}")
             archive.extractall(temporary)
         actual = host_scripts_tree_sha256(temporary)
         if actual != expected_tree_hash:
@@ -412,40 +395,22 @@ def safe_extract_host_scripts(
                 f"expected {expected_tree_hash}, got {actual}"
             )
         destination.mkdir(parents=True, exist_ok=True)
-        previous: dict[str, tuple[bytes, int] | None] = {}
-        replaced: list[str] = []
-        for name in ("relkit_consume.py", "relkit_host.py"):
-            path = destination / name
-            previous[name] = (
-                (path.read_bytes(), path.stat().st_mode) if path.is_file() else None
-            )
+        backup = destination.with_name(destination.name + ".relkit-old")
         try:
-            for name in ("relkit_consume.py", "relkit_host.py"):
-                os.replace(temporary / name, destination / name)
-                replaced.append(name)
+            if backup.exists():
+                remove_tree(backup)
+            os.replace(destination, backup)
+            os.replace(temporary, destination)
             if host_scripts_tree_sha256(destination) != expected_tree_hash:
                 raise RuntimeError("installed host scripts hash drifted")
         except Exception as install_error:
-            rollback_errors: list[str] = []
-            for name in reversed(replaced):
-                path = destination / name
-                prior = previous[name]
-                try:
-                    if prior is None:
-                        path.unlink(missing_ok=True)
-                        continue
-                    restore = temporary / f".restore-{name}"
-                    restore.write_bytes(prior[0])
-                    restore.chmod(prior[1])
-                    os.replace(restore, path)
-                except OSError as rollback_error:
-                    rollback_errors.append(f"{name}: {rollback_error}")
-            if rollback_errors:
-                raise RuntimeError(
-                    f"host scripts install failed ({install_error}); "
-                    "rollback also failed: " + "; ".join(rollback_errors)
-                ) from install_error
+            if destination.exists():
+                remove_tree(destination, ignore_errors=True)
+            if backup.exists():
+                os.replace(backup, destination)
             raise
+        if backup.exists():
+            remove_tree(backup, ignore_errors=True)
         print("relkit consume: installed scripts/host")
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
@@ -471,6 +436,55 @@ def carry_preserved_subtrees(
             remove_tree(carried)
         carried.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(existing, carried)
+
+
+def replace_watched_tree_on_windows(staging: Path, destination: Path, backup: Path) -> None:
+    """Replace a tree whose directory handle is held by an IDE watcher.
+
+    Windows cannot rename a watched directory even when every file is closed.
+    Keep file replacement atomic and retain a full rollback copy instead.
+    """
+    shutil.copytree(destination, backup)
+    desired_files = {
+        path.relative_to(staging)
+        for path in staging.rglob("*")
+        if path.is_file()
+    }
+    try:
+        for source in sorted(staging.rglob("*")):
+            relative = source.relative_to(staging)
+            target = destination / relative
+            if source.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            pending = target.with_name(target.name + ".relkit-new")
+            shutil.copy2(source, pending)
+            os.replace(pending, target)
+        for existing in sorted(destination.rglob("*"), reverse=True):
+            relative = existing.relative_to(destination)
+            if existing.is_file() and relative not in desired_files:
+                existing.unlink()
+            elif existing.is_dir():
+                try:
+                    existing.rmdir()
+                except OSError:
+                    pass
+    except Exception:
+        # Restore the previous tree file-by-file; the watched directory itself
+        # remains stable throughout both install and rollback.
+        for existing in sorted(destination.rglob("*"), reverse=True):
+            if existing.is_file():
+                existing.unlink()
+        for source in sorted(backup.rglob("*")):
+            relative = source.relative_to(backup)
+            target = destination / relative
+            if source.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+        raise
 
 
 def safe_extract_sdk(
@@ -513,8 +527,17 @@ def safe_extract_sdk(
         if backup.exists():
             remove_tree(backup)
         if destination.exists():
-            os.replace(destination, backup)
-        os.replace(temporary, destination)
+            try:
+                os.replace(destination, backup)
+            except PermissionError:
+                if os.name != "nt":
+                    raise
+                replace_watched_tree_on_windows(temporary, destination, backup)
+                remove_tree(temporary, ignore_errors=True)
+            else:
+                os.replace(temporary, destination)
+        else:
+            os.replace(temporary, destination)
         if backup.exists():
             # The new tree is already in place; a stubborn backup is litter,
             # not a failed install.
@@ -565,7 +588,7 @@ def check_installed(
         if actual != expected:
             raise RuntimeError("installed scripts/host does not match lock")
         return
-    if component.startswith("sdk-"):
+    if BY_NAME[component].role == "product-tree":
         destination = sdk_destination(root, component)
         marker = destination / ".relkit-artifact.json"
         state = json.loads(marker.read_text(encoding="utf-8"))
@@ -632,7 +655,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         root / "scripts" / "host",
                         expected,
                     )
-                elif component.startswith("sdk-"):
+                elif BY_NAME[component].role == "product-tree":
                     safe_extract_sdk(
                         artifact,
                         sdk_destination(root, component),

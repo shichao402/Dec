@@ -1,27 +1,26 @@
 # Dec 自更新架构（RUP + COS）
 
-Dec 运行时的检查/下载使用 `go.firoyang.com/relkit/sdk`（`replace` 到 `third_party/relkit`），发布走腾讯云 COS 自有域名。
+Console 自更新由 Tauri 壳调用 `third_party/relkit/sdk/rust` facade 与 lock-pinned `relkit-updater` sidecar；目标运行时套件的检查/下载仍使用 `go.firoyang.com/relkit/sdk`（`replace` 到 `third_party/relkit`）。发布走腾讯云 COS 自有域名。
 终端用户只下载 Console；运行时套件是 Console 管理的目标端程序组。
 
-## 客户端
+## 两条客户端链
 
-- 内嵌 `entryUrls`：`https://updates.firoyang.com/rup/directory/dec.pb`
-- 公钥单 SSOT：人只改根目录 `relkit.json` → `signing.publicKeys`；`go generate ./internal/update` 复制到 `internal/update/embed/` 后由 `go:embed` 钉进二进制（运行时不读磁盘旁路文件）
+- 共同入口来自根目录 `relkit.json`：`https://raw.firoyang.com/rup/directory/dec.pb`
+- Console 壳用 `include_str!` 编入同一份 `relkit.json`；Go 运行时套件链通过 `go generate ./internal/update` 复制到 `internal/update/embed/`。后者只服务 `audience=runtime`，不是 Console 自更新入口
 - `CurrentCode` = `sdk.SemverCode(version)`（`v1.13.25` → `1013025`）
 - 默认 channel：`dev`（目前仅个人使用；正式对外再切回 `stable`）
-- selectors：`os` / `arch` / `component` / `audience=runtime`，component 为 `dec-server`、`dec-mcp`、`dec-exec`、`dec-host-setup`
-- Apply：`DoUpdate` 把每个组件的 `destPath` 对准已装的 `bin/<component>`，SDK 先 size 再 sha256，一致则跳过 GET；只有哈希变了或原地写入失败（Windows 锁文件）才下到临时文件再 `ReplaceFile`（rename-aside）
+- Console selectors：`os` / `arch` / `component=console` / `audience=user`；Tauri 直接 `Updater::open`、`check`、`download`，安装器启动、Windows `/S`、detach 与 relaunch 留在壳内
+- Tauri 只输出 relkit canonical ProtoJSON；前端从 `third_party/relkit/bindings/ts` import 生成的 `CheckResultSchema` / `StatusSnapshotSchema`，按 `upToDate`、`updateAvailable`、`fallbackRequired`、`throttled`、`failed` 五变体渲染
+- 运行时 selectors：`os` / `arch` / `component` / `audience=runtime`，component 为 `dec-server`、`dec-mcp`、`dec-exec`、`dec-host-setup`
 - Console bundle：每个安装包只带同 `os/arch` 运行时套件和 `runtime-manifest.json`；首次连接/升级从 resources 校验后以临时文件 + rename 释放到 `~/.dec/bin`，同时缓存到 `~/.dec/runtime-cache/<version>/<os>-<arch>/`
 - SSH 置备：发起端按目标 `os/arch` 命中校验过的缓存则复用，否则请求签名 RUP；只有 RUP head 恰好等于 Console 钉死版本才下载。渠道已有更高版本时提示先更新 Console 或预置旧版本缓存
 
 入口：
 
 - Console **设置** 页（唯一用户面入口）
-- 更新由本机 Console 壳及其内置 `dec-console-updater` 执行，不经过当前目标 `dec-server`
-- Console 启动时自动检查；成功检查后 24 小时内复用本地结果，只提示、不自动安装
+- 更新由本机 Console 壳及其内置 `relkit-updater` sidecar 执行，不经过当前目标 `dec-server`；连接与解锁页复用更新面板，因此未连接也能操作
+- Console 启动时自动检查；`CheckPolicy.after_success=24h`、`after_failure=1h` 由引擎执行节流，只提示、不自动安装
 - 手动检查忽略节流；用户确认后才下载并启动安装包
-
-`CheckResult{CurrentVersion, LatestVersion, NeedUpdate}` 形状保持不变。
 
 ## 发布
 
@@ -83,7 +82,13 @@ RUP 限制：当前 SDK 的 chain 选择最高可达版本，不支持任意历�
 python scripts/host/relkit_host.py install
 ```
 
-Go SDK 落到 `third_party/relkit/`，CLI / updater 落到 `tools/bin/`。`go.mod` 使用：
+升 lock（在 relkit 打出含 `bindings-ts` 的 GitHub Release 之后）：
+
+```
+python scripts/host/relkit_host.py upgrade v0.3.22
+```
+
+Go SDK 落到 `third_party/relkit/`，Rust facade 落到 `third_party/relkit/sdk/rust/`，TypeScript 绑定落到 `third_party/relkit/bindings/ts/`，CLI / updater 落到 `tools/bin/`。Tauri 与前端只 import 已 consume 的生成物；产品仓不生成 updater 协议代码。`go.mod` 使用：
 
 ```
 replace go.firoyang.com/relkit => ./third_party/relkit

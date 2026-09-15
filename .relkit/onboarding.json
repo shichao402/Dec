@@ -19,7 +19,7 @@
     },
     "updater.process": {
       "status": "confirmed",
-      "value": "go",
+      "value": "rust",
       "note": ""
     },
     "channel.ssot": {
@@ -64,7 +64,7 @@
     },
     "consume.lock": {
       "status": "verified",
-      "value": "v0.3.21",
+      "value": "v0.3.23",
       "note": "lock present"
     },
     "sidecar.layout": {

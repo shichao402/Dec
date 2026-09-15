@@ -472,10 +472,10 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 #### 自更新（设置页）
 
 - 属于本机 Console 程序壳，不属于目标设备上的 `dec-server` 业务
-- 唯一用户面入口：Console **设置** 页（启动时自动检查；手动检查 → 确认 → 下载替换）
+- 唯一用户面入口：Console **设置** 页；连接与解锁页复用同一 Console 更新面板，因此无需先连接服务（启动时自动检查；手动检查 → 确认 → 下载替换）
 - 连接 SSH / TLS 远端时仍只更新本机 Console，不经目标服务 RPC
 - 无 `dec update` CLI
-- 实现见 `internal/update/` 与 [UPDATE_ARCHITECTURE.md](./UPDATE_ARCHITECTURE.md)
+- 壳侧实现见 `client/src-tauri/src/console_update.rs`；WebView import relkit 生成绑定（[0027](decisions/0027-relkit-owned-update-contract.md)）；`internal/update/` 只保留目标运行时套件下载与校验。详见 [UPDATE_ARCHITECTURE.md](./UPDATE_ARCHITECTURE.md)
 
 #### 远端设备置备与按需拉起（Console / MCP）
 

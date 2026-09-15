@@ -18,11 +18,14 @@ protoc-bin-vendored = "3"
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+base64 = "0.22"
 log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tonic = { version = "0.12", features = ["tls-roots"] }
 prost = "0.13"
+pbjson-types = "0.7"
+relkit-updater = { path = "../../third_party/relkit/sdk/rust" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "io-util", "net"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"

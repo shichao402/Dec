@@ -182,17 +182,29 @@ export function installTauriMock(scenario: Scenario) {
     take_open_intent: () => null,
     check_console_update: () => ({
       currentVersion: 'v1.13.61',
-      latestVersion: 'v1.13.61',
-      needUpdate: false,
-      mandatory: false,
-      releaseNotesMarkdown: '',
-      releaseNotesUrl: '',
-      checkedAt: new Date().toISOString(),
-      fromCache: false,
-      autoCheckInterval: '24h0m0s',
       canAutoInstall: true,
+      result: {
+        upToDate: {
+          sequence: '1',
+          currentIsYanked: false,
+        },
+      },
+      status: {
+        lastResult: 'LAST_RESULT_UP_TO_DATE',
+        lastSeenSequence: '1',
+        skippedCodes: [],
+      },
     }),
-    install_console_update: () => ({}),
+    install_console_update: () => ({
+      currentVersion: 'v1.13.61',
+      canAutoInstall: true,
+      result: { upToDate: { sequence: '1', currentIsYanked: false } },
+      status: {
+        lastResult: 'LAST_RESULT_UP_TO_DATE',
+        lastSeenSequence: '1',
+        skippedCodes: [],
+      },
+    }),
     list_connections: () => state.connections,
     discover_connections: () => state.connections,
     save_connection: (args) => {

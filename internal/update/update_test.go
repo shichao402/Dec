@@ -9,9 +9,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestManualInstallCommand(t *testing.T) {
@@ -77,106 +77,9 @@ type timeoutError struct{}
 func (timeoutError) Error() string { return "context deadline exceeded" }
 func (timeoutError) Timeout() bool { return true }
 
-func TestShouldCheckBacksOffAfterFailure(t *testing.T) {
-	t.Setenv("DEC_HOME", t.TempDir())
-
-	if !ShouldCheck() {
-		t.Fatal("无状态文件时应执行检查")
-	}
-
-	now := time.Now()
-	mustSaveState(t, &CheckState{LastCheck: now, LatestVersion: "v1.0.0", LastAttempt: now})
-	if ShouldCheck() {
-		t.Fatal("距上次成功检查不足 24 小时，不应再检查")
-	}
-
-	stale := now.Add(-48 * time.Hour)
-	mustSaveState(t, &CheckState{LastCheck: stale, LatestVersion: "v1.0.0", LastAttempt: now.Add(-10 * time.Minute)})
-	if ShouldCheck() {
-		t.Fatal("最近一次检查失败，应按 retryInterval 退避")
-	}
-
-	mustSaveState(t, &CheckState{LastCheck: stale, LatestVersion: "v1.0.0", LastAttempt: now.Add(-2 * time.Hour)})
-	if !ShouldCheck() {
-		t.Fatal("超过退避间隔后应重新检查")
-	}
-}
-
-func TestRecordFailedAttemptKeepsCachedVersion(t *testing.T) {
-	t.Setenv("DEC_HOME", t.TempDir())
-
-	lastCheck := time.Now().Add(-48 * time.Hour)
-	mustSaveState(t, &CheckState{LastCheck: lastCheck, LatestVersion: "v1.5.0"})
-
-	recordFailedAttempt()
-
-	state, err := loadState()
-	if err != nil {
-		t.Fatalf("读取状态失败: %v", err)
-	}
-	if state.LatestVersion != "v1.5.0" {
-		t.Fatalf("失败不应清掉缓存版本, LatestVersion = %q", state.LatestVersion)
-	}
-	if !state.LastCheck.Equal(lastCheck) {
-		t.Fatalf("失败不应刷新 LastCheck, 实际 %v", state.LastCheck)
-	}
-	if state.LastAttempt.IsZero() {
-		t.Fatal("失败后应记录 LastAttempt")
-	}
-}
-
-func TestCheckBackgroundReturnsFromCacheWithoutWaitingForRefresh(t *testing.T) {
-	t.Setenv("DEC_HOME", t.TempDir())
-	mustSaveState(t, &CheckState{
-		LastCheck:     time.Now().Add(-48 * time.Hour),
-		LatestVersion: "v2.0.0",
-	})
-
-	started := make(chan struct{})
-	finished := make(chan struct{})
-	old := refreshStateFn
-	defer func() {
-		<-started
-		<-finished
-		refreshStateFn = old
-	}()
-	refreshStateFn = func(string) {
-		close(started)
-		time.Sleep(300 * time.Millisecond)
-		close(finished)
-	}
-
-	begin := time.Now()
-	result := CheckBackground("v1.0.0")
-	elapsed := time.Since(begin)
-
-	if elapsed > 200*time.Millisecond {
-		t.Fatalf("CheckBackground 耗时 %v, 不应等待后台刷新", elapsed)
-	}
-	if result == nil || result.LatestVersion != "v2.0.0" {
-		t.Fatalf("result = %#v, 期望使用缓存的 v2.0.0", result)
-	}
-}
-
-func TestCheckBackgroundReturnsNilWhenCacheIsCurrent(t *testing.T) {
-	t.Setenv("DEC_HOME", t.TempDir())
-	mustSaveState(t, &CheckState{
-		LastCheck:     time.Now(),
-		LatestVersion: "v1.0.0",
-		LastAttempt:   time.Now(),
-	})
-
-	if result := CheckBackground("v1.0.0"); result != nil {
-		t.Fatalf("已是最新版本时应返回 nil, 实际 %#v", result)
-	}
-}
-
 func TestUpdaterSelectsRuntimeAudience(t *testing.T) {
 	t.Setenv("DEC_HOME", t.TempDir())
-	rt, err := newRuntime("v1.13.48", "dec-server")
-	if err != nil {
-		t.Fatal(err)
-	}
+	rt := fileSetRuntime("dec-server", runtime.GOOS, runtime.GOARCH, semverCodeOrZero("v1.13.48"), t.TempDir())
 	if got := rt.ClientSelectors["audience"]; got != "runtime" {
 		t.Fatalf("audience selector = %q, want runtime", got)
 	}
@@ -248,12 +151,5 @@ func TestTrustedKeysFromEmbeddedRelkit(t *testing.T) {
 	gotB64 := base64.StdEncoding.EncodeToString(pk)
 	if gotB64 != wantB64 {
 		t.Fatalf("dec-2026 public key = %q, want %q from root relkit.json", gotB64, wantB64)
-	}
-}
-
-func mustSaveState(t *testing.T, state *CheckState) {
-	t.Helper()
-	if err := saveState(state); err != nil {
-		t.Fatalf("写入状态失败: %v", err)
 	}
 }

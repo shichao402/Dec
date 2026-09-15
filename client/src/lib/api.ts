@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { ConsoleUpdateStatus, InvokeResult, PingInfo, SavedConnection } from '@/lib/utils'
+import { decodeConsoleUpdateEnvelope, type ConsoleUpdateEnvelope } from '@/lib/console-update'
+import type { InvokeResult, PingInfo, SavedConnection } from '@/lib/utils'
 import type { OperationEvent } from '@/lib/utils'
 import { runOrWatch, type ActiveOperation, type OperationInput } from '@/lib/operation-runner'
 
@@ -9,12 +10,16 @@ export async function listConnections() {
 }
 
 export async function checkConsoleUpdate(force = false) {
-  return invoke<ConsoleUpdateStatus>('check_console_update', { force })
+  const value = await invoke<Parameters<typeof decodeConsoleUpdateEnvelope>[0]>('check_console_update', { force })
+  return decodeConsoleUpdateEnvelope(value)
 }
 
 export async function installConsoleUpdate() {
-  return invoke<ConsoleUpdateStatus>('install_console_update')
+  const value = await invoke<Parameters<typeof decodeConsoleUpdateEnvelope>[0]>('install_console_update')
+  return decodeConsoleUpdateEnvelope(value)
 }
+
+export type { ConsoleUpdateEnvelope }
 
 // 受管 SSH 设备记在本机服务里，读它要先把 dec-server 连上，可能慢到数秒。
 export async function discoverConnections() {

@@ -1,4 +1,5 @@
 import { KeyRound } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { Page } from '@/components/shell/page'
 import { Button } from '@/components/ui/button'
 import { CheckOption } from '@/components/ui/checkbox'
@@ -22,13 +23,15 @@ export function UnlockPage(props: {
   onUnlock: () => void
   onBack: () => void
   busy: boolean
+  updatePanel: ReactNode
 }) {
   return (
     <Page>
       <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto px-8 py-10">
-        <div className="my-auto w-full max-w-sm">
-          <Panel>
-            <PanelBody className="space-y-5 p-5">
+        <div className="my-auto grid w-full max-w-4xl gap-4 lg:grid-cols-2">
+          <div>
+            <Panel>
+              <PanelBody className="space-y-5 p-5">
               <div className="space-y-2">
                 <span className="grid size-9 place-items-center rounded-lg bg-accent/15 text-accent-hi">
                   <KeyRound className="size-4" />
@@ -79,11 +82,13 @@ export function UnlockPage(props: {
                   </Button>
                 </div>
               </form>
-            </PanelBody>
-          </Panel>
-          <p className="mt-3 text-center text-[11px] leading-relaxed text-faint">
-            session 只存在于 dec-server 进程内存，到设置页的解锁有效期（默认 4 小时）后失效，不落盘。
-          </p>
+              </PanelBody>
+            </Panel>
+            <p className="mt-3 text-center text-[11px] leading-relaxed text-faint">
+              session 只存在于 dec-server 进程内存，到设置页的解锁有效期（默认 4 小时）后失效，不落盘。
+            </p>
+          </div>
+          <div>{props.updatePanel}</div>
         </div>
       </div>
     </Page>

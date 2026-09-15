@@ -34,7 +34,7 @@ Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）�
 | pull / push（Global 与项目两个平面） | **同步** 页 |
 | 查看有哪些密钥文件（只读元数据） | **同步** 页「密钥清单」 |
 | 删除远端资产 / 密钥、清理本机落地 | **删除** 页 |
-| Console 更新；仓库、Bitwarden、IDE、vars、重启服务 | **设置** 页 |
+| Console 更新（连接 / 解锁页也复用）；仓库、Bitwarden、IDE、vars、重启服务 | **设置** 页 |
 | 未初始化 | 引导 |
 
 若 Console 尚未覆盖某能力，在代码中留 `TODO(console)` 并在对应页面引导，而不是恢复 CLI 子命令或 TUI。
@@ -42,6 +42,8 @@ Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）�
 **门面能力口径**（ADR 0023）：一项能力归哪个门面看**谁在用**。人会用的能力必须在 Console 有入口，
 不因「MCP 已经能做」而免除；只为免交互自动化存在的参数（如 `plane=both`）允许 MCP 独有，但必须登记
 在 ADR 0023 的扩展表里。**没登记的差异算缺口**，不是默认合法。
+
+Console 自更新是本机壳能力：Tauri 直连 lock-pinned relkit Rust facade / sidecar，未连接、未解锁也可操作，禁止经 `dec-server` RPC。MCP 不提供 check/install，只指向 Console；这是 ADR 0023 登记过的不对称。
 
 ## 非交互环境
 

@@ -27,6 +27,19 @@
     }
   },
   "publishTo": ["cos"],
+  "sidecar": {
+    "packScript": "scripts/build-console.py"
+  },
+  "updater": {
+    "urlAllowlist": [
+      "internal/config/global.go",
+      "internal/update/update.go",
+      "internal/update/update_test.go",
+      "internal/update/embed/relkit.json",
+      "scripts/install.ps1",
+      "scripts/install.sh"
+    ]
+  },
   "recovery": {
     "message": "Automatic updates are unavailable (network or update service failure). Download an official Dec release and install it manually.",
     "links": [

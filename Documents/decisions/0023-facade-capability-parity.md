@@ -46,6 +46,7 @@ Console-first 只规定「新功能先设计 Console 页，Console 未覆盖就�
 | `plane=both` | 省一次往返。人在界面上分两次操作，反而更清楚当前在动哪个平面 |
 | `dec_provision_remote` 的 `branch` / `tags` | 免交互置备要一次传全；Console 有人在场，可逐步确认 |
 | `dec_init_project` 的 `apply_vault_project` | 同上；Console 的初始化流已有显式绑定步骤 |
+| 无 `dec_check_update` / `dec_install_update` | 自更新会替换本机 Console，必须由人在设置页确认；MCP 只在状态或错误中指向 Console |
 
 新增 Console 没有的 MCP 工具或参数时，必须在本表加一行并写明人为何不需要。**没登记就算缺口**，
 而不是默认合法。
@@ -55,7 +56,11 @@ Console-first 只规定「新功能先设计 Console 页，Console 未覆盖就�
 MCP 永不承载人工认证输入，这不是缺口，见 [0022](0022-console-bitwarden-unlock.md)。
 反方向同理：Console 不提供 `plane=both` 式的批量开关。
 
-### 5. 平面参数按 0015 传递
+### 5. 自更新方向的不对称是设计
+
+Console 自更新属于本机程序壳，不属于当前连接的 `dec-server`。Console 在未连接、未解锁时仍可检查和安装；MCP 不提供检查或安装工具，只通过 `dec_status` 或结构化错误引导用户打开 Console。这不是能力缺口，而是避免 Agent 在无人确认时替换承载自身网关的程序。
+
+### 6. 平面参数按 0015 传递
 
 Console 补本机平面能力时，`projectRoot` 必须为空、`workspacePlane` 为 `global`。
 服务端不得把「Root 为空」一律当成「缺项目根」报错——那会让本机平面永远调不通

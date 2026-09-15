@@ -18,12 +18,14 @@ import {
   stopService,
 } from '@/lib/api'
 import { ActionCenter } from '@/components/action-feedback'
+import { ConsoleUpdatePanel } from '@/components/console-update-panel'
 import { Sidebar } from '@/components/shell/sidebar'
 import { TopBar } from '@/components/shell/top-bar'
 import { Badge } from '@/components/ui/badge'
 import { useActionRegistry, useOperationObserver } from '@/lib/action-context'
 import { runningActions } from '@/lib/action-registry'
 import { actionSpec, resource, shortInstanceId, type View } from '@/lib/console'
+import type { ConsoleUpdateEnvelope } from '@/lib/console-update'
 import {
   onOpenIntent,
   selectLocalConnection,
@@ -40,7 +42,6 @@ import { SettingsPage } from '@/pages/settings-page'
 import { SyncPage, type PullHistoryEntry, type SyncTarget } from '@/pages/sync-page'
 import { UnlockPage } from '@/pages/unlock-page'
 import type {
-  ConsoleUpdateStatus,
   DeviceSummary,
   GlobalSettings,
   ManagedProject,
@@ -88,7 +89,7 @@ export default function App() {
   const [ping, setPing] = useState<PingInfo | null>(null)
   const [summary, setSummary] = useState<DeviceSummary | null>(null)
   const [settings, setSettings] = useState<GlobalSettings | null>(null)
-  const [updateStatus, setUpdateStatus] = useState<ConsoleUpdateStatus | null>(null)
+  const [updateStatus, setUpdateStatus] = useState<ConsoleUpdateEnvelope | null>(null)
   const [updateError, setUpdateError] = useState('')
   const [selectedProject, setSelectedProject] = useState<ManagedProject | null>(null)
   const [syncTarget, setSyncTarget] = useState<SyncTarget | null>(null)
@@ -442,6 +443,25 @@ export default function App() {
   const consoleReady = screen === 'console' && summary && settings
   const onboarding = Boolean(consoleReady && summary && !summary.Initialized)
   const crumbs = buildCrumbs({ screen, view, onboarding, deviceLabel: current?.label, project: selectedProject })
+  const handleCheckConsoleUpdate = async () => {
+    const status = await checkConsoleUpdate(true)
+    setUpdateStatus(status)
+    setUpdateError('')
+    return status
+  }
+  const handleInstallConsoleUpdate = async () => {
+    const status = await installConsoleUpdate()
+    setUpdateStatus(status)
+    return status
+  }
+  const consoleUpdatePanel = (
+    <ConsoleUpdatePanel
+      status={updateStatus}
+      error={updateError}
+      onCheck={handleCheckConsoleUpdate}
+      onInstall={handleInstallConsoleUpdate}
+    />
+  )
 
   return (
     <div className="flex h-screen min-h-0 overflow-hidden bg-canvas text-ink">
@@ -512,6 +532,7 @@ export default function App() {
               setProvisionConfirm={setProvisionConfirm}
               onProbeRemote={handleProbeRemote}
               onProvisionRemote={handleProvisionRemote}
+              updatePanel={consoleUpdatePanel}
               onResetDraft={() => {
                 setDraft(emptyConn())
                 setRemoteProbe(null)
@@ -537,6 +558,7 @@ export default function App() {
               onUnlock={handleUnlock}
               onBack={handleDisconnect}
               busy={busy}
+              updatePanel={consoleUpdatePanel}
             />
           )}
           {consoleReady && summary && settings && !summary.Initialized && (
@@ -636,17 +658,8 @@ export default function App() {
                   updateStatus={updateStatus}
                   updateError={updateError}
                   setSettings={setSettings}
-                  onCheckUpdate={async () => {
-                    const status = await checkConsoleUpdate(true)
-                    setUpdateStatus(status)
-                    setUpdateError('')
-                    return status
-                  }}
-                  onInstallUpdate={async () => {
-                    const status = await installConsoleUpdate()
-                    setUpdateStatus(status)
-                    return status
-                  }}
+                  onCheckUpdate={handleCheckConsoleUpdate}
+                  onInstallUpdate={handleInstallConsoleUpdate}
                   onSaved={refreshDevice}
                   onRestart={restartService}
                 />

@@ -43,7 +43,7 @@ func (s *Server) gateway() Gateway {
 func (s *Server) Register(mcpServer *mcp.Server) {
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_console_status",
-		Description: "查看 Console 网关与当前连接（是否已连、是否已解锁、当前设备）。操作作用在 Console 当前目标上。",
+		Description: "查看 Console 网关与当前连接（是否已连、是否已解锁、当前设备）。操作作用在 Console 当前目标上；Console 自更新请由用户打开 Console 的更新面板。",
 	}, s.handleConsoleStatus)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_connections",
@@ -71,7 +71,7 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handleCreateLocalAsset)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_status",
-		Description: "查看某平面的 Dec 状态（仓库连接、绑定项目、requires 与 public/private × global/local 四象限；plane=local|global）。",
+		Description: "查看某平面的 Dec 状态（仓库连接、绑定项目、requires 与 public/private × global/local 四象限；plane=local|global）。不检查或安装 Console 更新；自更新请由用户打开 Console。",
 	}, s.handleStatus)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_connect_repo",

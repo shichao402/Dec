@@ -9,6 +9,11 @@
 
 终端用户只下载 Dec Console。每个 Console 只内置与自身 `os/arch` 相同的 `dec-server`、`dec-mcp`、`dec-exec`、`dec-host-setup`；跨平台运行时仍保留在签名 RUP manifest 中，供发起端按 SSH 目标的 `os/arch` 下载。
 
+用户面自更新与目标运行时分成两条所有权链：
+
+- **Console 自更新**由本机 Tauri 壳直接调用 lock-pinned `sdk-rust` facade 与同 SHA `relkit-updater` sidecar。设置页未连接、未解锁时也可检查和安装；`dec-server` 不暴露自更新 RPC，也不参与检查。
+- **目标运行时对齐**仍由发起端按已安装 Console 的版本释放或下载 `audience=runtime` 套件，再推送到本机或 SSH 目标。目标 `dec-server` 不自检、自升。
+
 同一次发布的 Console 与所有运行时组件使用同一 SemVer。每个程序都必须支持 `--version`，套件只有在逐组件版本相同后才视为完整。连接只允许版本相等：
 
 - Console 低于服务：服务在 `Ping` 之外拒绝控制 RPC，Console 同时拒绝进入会话；
@@ -36,7 +41,7 @@ SSH 置备由**发起端**解析目标 `os/arch`：
 
 `scripts/build-console.py` 在原生 Windows / macOS 节点：
 
-1. 为当前平台编译同 os/arch 运行时套件并写入 Tauri resources，同时生成摘要清单
+1. 为当前平台编译同 os/arch 运行时套件并写入 Tauri resources，同时生成摘要清单；把 consume 安装的 lock-pinned `relkit-updater` sidecar 一并放进更新 resources
 2. 构建 Console 安装包，归一化为 `dist/dec-console-<os>-<arch>.<ext>`
 3. 构建结束清理生成资源；二进制不纳入仓库
 
@@ -51,3 +56,5 @@ Tauri 安装包不能从 Linux 交叉出 NSIS/DMG。relkit-serve 人页 audience
 **允许版本区间兼容。** 首版否决：RPC 与 UI 同步演进，严格相等让失败发生在连接边界，避免半可用会话。未来若引入独立协议版本，再重新评估兼容窗口。
 
 **让 `dec-mcp` 自行升级。** 否决：MCP 是 Agent 门面，不应在无用户确认时改变安装；运行时所有权归 Console。
+
+**让 `dec-server` 检查或安装 Console 更新。** 否决：用户必须先连接某台服务才能更新本机壳，且会先升级 Console、再由新 Console 升级目标运行时，所有权与顺序都倒置。

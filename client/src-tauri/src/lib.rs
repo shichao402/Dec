@@ -138,7 +138,7 @@ async fn check_console_update(
     app: AppHandle,
     state: State<'_, AppState>,
     force: bool,
-) -> Result<console_update::ConsoleUpdateStatus, String> {
+) -> Result<console_update::ConsoleUpdateEnvelope, String> {
     let _guard = state.console_update.lock().await;
     console_update::check(&app, CONSOLE_VERSION, force).await
 }
@@ -147,7 +147,7 @@ async fn check_console_update(
 async fn install_console_update(
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<console_update::ConsoleUpdateStatus, String> {
+) -> Result<console_update::ConsoleUpdateEnvelope, String> {
     let _guard = state.console_update.lock().await;
     console_update::install(&app, CONSOLE_VERSION).await
 }

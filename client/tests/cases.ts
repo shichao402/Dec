@@ -27,6 +27,7 @@ async function boot(page: Page, scenario: ScenarioName) {
   await page.addInitScript(installTauriMock, scenarios[scenario]())
   await page.goto('/')
   await expect(page.getByRole('heading', { name: '选择设备' })).toBeVisible()
+  await expect(page.getByText('Console 更新', { exact: true })).toBeVisible()
 }
 
 async function connect(page: Page) {
@@ -74,6 +75,7 @@ export const cases: Case[] = [
     open: async (page) => {
       await connect(page)
       await expect(page.getByRole('heading', { name: /解锁/ })).toBeVisible()
+      await expect(page.getByText('Console 更新', { exact: true })).toBeVisible()
     },
     // 居中的解锁卡片是业界通行做法，不该被横向利用率规则判死。
     ignore: ['width-usage', 'container-usage'],
