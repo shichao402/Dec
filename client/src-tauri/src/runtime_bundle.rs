@@ -221,6 +221,29 @@ fn component_files(resource_platform: &Path, manifest: &RuntimeManifest) -> Vec<
         .collect()
 }
 
+fn suite_matches_manifest(target_dir: &Path, manifest: &RuntimeManifest) -> bool {
+    COMPONENTS.iter().all(|component| {
+        let name = binary_name(component);
+        let Some(expected) = manifest.files.get(&name) else {
+            return false;
+        };
+        let target = target_dir.join(name);
+        target.is_file()
+            && sha256_file(&target).is_ok_and(|actual| actual.eq_ignore_ascii_case(expected))
+    })
+}
+
+// installed_matches 校验 ~/.dec/bin 是否逐字节归属于当前 Console。
+// SemVer 只用于升级/降级门闩；同版本不能证明是同一次构建或文件未被篡改。
+pub fn installed_matches(
+    app: &AppHandle,
+    dec_home: &Path,
+    console_version: &str,
+) -> Result<bool, String> {
+    let (_, manifest, _) = bundle(app, console_version)?;
+    Ok(suite_matches_manifest(&dec_home.join("bin"), &manifest))
+}
+
 pub fn prewarm(app: &AppHandle, dec_home: &Path, console_version: &str) -> Result<(), String> {
     let (resource_platform, platform_id) = resource_platform(app)?;
     if cfg!(debug_assertions) && !resource_platform.join("runtime-manifest.json").is_file() {
@@ -264,8 +287,9 @@ pub fn install(app: &AppHandle, dec_home: &Path, console_version: &str) -> Resul
 mod tests {
     use super::{
         binary_name, platform, read_manifest, remove_legacy_dec, replace_suite, sha256_file,
-        SuiteFile,
+        suite_matches_manifest, RuntimeManifest, SuiteFile, COMPONENTS,
     };
+    use std::collections::BTreeMap;
     use std::fs;
     use uuid::Uuid;
 
@@ -332,6 +356,38 @@ mod tests {
         fs::write(&legacy, b"legacy").unwrap();
         remove_legacy_dec(&root).unwrap();
         assert!(!legacy.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn installed_suite_must_match_manifest_bytes() {
+        let root = std::env::temp_dir().join(format!("dec-runtime-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let mut files = BTreeMap::new();
+        for component in COMPONENTS {
+            let name = binary_name(component);
+            let path = root.join(&name);
+            fs::write(&path, format!("expected-{component}")).unwrap();
+            files.insert(name, sha256_file(&path).unwrap());
+        }
+        let manifest = RuntimeManifest {
+            version: "v1.0.0".into(),
+            os: platform().0.into(),
+            arch: platform().1.into(),
+            files,
+        };
+
+        assert!(suite_matches_manifest(&root, &manifest));
+
+        let server = root.join(binary_name("dec-server"));
+        fs::write(&server, b"same version, different build").unwrap();
+        assert!(!suite_matches_manifest(&root, &manifest));
+
+        fs::write(&server, b"expected-dec-server").unwrap();
+        assert!(suite_matches_manifest(&root, &manifest));
+
+        fs::remove_file(root.join(binary_name("dec-mcp"))).unwrap();
+        assert!(!suite_matches_manifest(&root, &manifest));
         let _ = fs::remove_dir_all(root);
     }
 }

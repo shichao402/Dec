@@ -234,12 +234,6 @@ fn installed_suite_version() -> Option<String> {
     }
 }
 
-fn suite_complete() -> bool {
-    RUNTIME_COMPONENTS
-        .iter()
-        .all(|name| suite_binary(name).is_file())
-}
-
 fn remove_legacy_dec_cli() -> Result<(), String> {
     let legacy = suite_binary("dec");
     if legacy.is_file() {
@@ -315,7 +309,9 @@ async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
                     "Dec Console {CONSOLE_VERSION} 低于本机运行时 {installed}，拒绝降级。请先更新 Console"
                 ));
             }
-            Ordering::Equal if suite_complete() => {
+            Ordering::Equal
+                if runtime_bundle::installed_matches(app, &dec_home(), CONSOLE_VERSION)? =>
+            {
                 remove_legacy_dec_cli()?;
                 return Ok(());
             }
@@ -330,8 +326,8 @@ async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
             "Console 与运行时版本未对齐：Console {CONSOLE_VERSION} / 运行时 {installed}"
         ));
     }
-    if !suite_complete() {
-        return Err("安装后 Dec 运行时套件仍不完整".into());
+    if !runtime_bundle::installed_matches(app, &dec_home(), CONSOLE_VERSION)? {
+        return Err("安装后 Dec 运行时套件与 Console 内置 manifest 不一致".into());
     }
     remove_legacy_dec_cli()?;
     Ok(())
@@ -712,9 +708,11 @@ async fn connect_local(app: &AppHandle) -> Result<Session, String> {
             if let Ok(ping) = session.ping().await {
                 reject_newer_server(&ping.version)?;
                 if compare_versions(CONSOLE_VERSION, &ping.version)? == Ordering::Equal {
-                    if installed_suite_version().is_some_and(|version| {
+                    let suite_version_matches = installed_suite_version().is_some_and(|version| {
                         compare_versions(CONSOLE_VERSION, &version).ok() == Some(Ordering::Equal)
-                    }) && suite_complete()
+                    });
+                    if suite_version_matches
+                        && runtime_bundle::installed_matches(app, &dec_home(), CONSOLE_VERSION)?
                     {
                         remove_legacy_dec_cli()?;
                         return Ok(session);
