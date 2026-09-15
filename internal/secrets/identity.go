@@ -45,6 +45,8 @@ func (r tokenErrorResponse) requires2FA() bool {
 	desc := strings.ToLower(r.ErrorDescription + " " + r.Error)
 	return strings.Contains(desc, "two factor") ||
 		strings.Contains(desc, "two-factor") ||
+		strings.Contains(desc, "two step") ||
+		strings.Contains(desc, "two-step") ||
 		strings.Contains(desc, "2fa")
 }
 

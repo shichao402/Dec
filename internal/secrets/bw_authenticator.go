@@ -73,6 +73,12 @@ func (a *BWAuthenticator) Unlock(ctx context.Context, email, password string) (s
 		opts.RememberToken = rememberToken
 	}
 	attempt, err := a.client.Login(ctx, password, "", "", "", opts)
+	if err != nil && rememberToken != "" {
+		// 记住设备令牌失效时服务端可能直接报错，而不是要求 2FA。令牌留在
+		// device.json 里，每次登录都会被重新带上，用户就永远到不了验证码这一步。
+		_ = ClearRememberToken(a.email)
+		attempt, err = a.client.Login(ctx, password, "", "", "", LoginOptions{})
+	}
 	if err != nil {
 		return "", false, err
 	}
