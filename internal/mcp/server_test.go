@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/shichao402/Dec/internal/app"
 )
 
@@ -57,6 +58,17 @@ func (f *fakeGateway) Connect(context.Context, map[string]any) (*Hello, error) {
 
 func (f *fakeGateway) ActiveOperation(context.Context, string) (any, error) {
 	return map[string]any{"active": false}, nil
+}
+
+// jsonschema tag 的合法性只在 AddTool 推导 schema 时校验，违规直接 panic，
+// 表现为 dec-mcp 启动即崩、Cursor 侧看上去是「连不上 Console」。
+func TestRegisterAllTools(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("注册 tools panic: %v", r)
+		}
+	}()
+	New(Config{Gateway: &fakeGateway{}}).Register(mcp.NewServer(&mcp.Implementation{Name: "dec", Version: "test"}, nil))
 }
 
 func TestHandleStatus_NoProjectRootLocalFails(t *testing.T) {

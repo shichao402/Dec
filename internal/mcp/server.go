@@ -286,7 +286,7 @@ func (s *Server) handleRegisterManagedProject(ctx context.Context, _ *mcp.CallTo
 }
 
 type createLocalAssetParams struct {
-	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane=local 必填"`
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 时必填"`
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global。留空默认 local；不支持 both。"`
 	Project     string `json:"project" jsonschema:"vault 项目名"`
 	Kind        string `json:"kind" jsonschema:"skill|rule|mcp|command 或私密类型 id"`
@@ -314,7 +314,7 @@ func (s *Server) handleCreateLocalAsset(ctx context.Context, _ *mcp.CallToolRequ
 }
 
 type statusParams struct {
-	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane=local 必填"`
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 时必填"`
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local（本仓库）、global（本机）。留空默认 local；不支持 both。project/user 为旧别名。"`
 }
 
@@ -386,7 +386,7 @@ func (s *Server) handleInitProject(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 type listAssetsParams struct {
-	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane=local 或 both 时必填"`
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
@@ -404,7 +404,7 @@ func (s *Server) handleListAssets(ctx context.Context, _ *mcp.CallToolRequest, i
 }
 
 type setAssetsParams struct {
-	ProjectRoot     string   `json:"project_root,omitempty" jsonschema:"项目根；plane=local 必填"`
+	ProjectRoot     string   `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 时必填"`
 	EnabledProjects []string `json:"enabled_projects,omitempty" jsonschema:"项目名称列表；project 中表示家项目及直接 requires，user 中表示启用项目"`
 	EnabledBundles  []string `json:"enabled_bundles,omitempty" jsonschema:"兼容字段；enabled_projects 未提供时使用"`
 	Plane           string   `json:"plane,omitempty" jsonschema:"作用平面：local|global（旧名 project|user）。留空默认 local；不支持 both。"`
@@ -430,7 +430,7 @@ func (s *Server) handleSetAssets(ctx context.Context, _ *mcp.CallToolRequest, in
 }
 
 type pullParams struct {
-	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane=local 或 both 时必填"`
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
@@ -448,7 +448,7 @@ func (s *Server) handlePull(ctx context.Context, _ *mcp.CallToolRequest, in pull
 }
 
 type pushParams struct {
-	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane=local 或 both 时必填"`
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
@@ -466,7 +466,7 @@ func (s *Server) handlePush(ctx context.Context, _ *mcp.CallToolRequest, in push
 }
 
 type previewPushParams struct {
-	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane=local 或 both 时必填"`
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
@@ -523,7 +523,7 @@ func (s *Server) handleProvidesSync(ctx context.Context, _ *mcp.CallToolRequest,
 }
 
 type listSecretsParams struct {
-	ProjectRoot   string `json:"project_root,omitempty" jsonschema:"项目根；plane=local 或 both 时必填"`
+	ProjectRoot   string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
 	IncludeRemote *bool  `json:"include_remote,omitempty" jsonschema:"是否检查 Bitwarden 远端存在性（默认 true，可能要求在 Console 解锁）"`
 	Plane         string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
@@ -548,7 +548,7 @@ func (s *Server) handleListSecrets(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 type listDeleteCandidatesParams struct {
-	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane=local 或 both 时必填"`
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
@@ -581,7 +581,7 @@ type deleteItemInput struct {
 }
 
 type deleteParams struct {
-	ProjectRoot string            `json:"project_root,omitempty" jsonschema:"项目根；plane=local 必填"`
+	ProjectRoot string            `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 时必填"`
 	Items       []deleteItemInput `json:"items" jsonschema:"要删除的条目"`
 	Confirmed   bool              `json:"confirmed" jsonschema:"必须为 true 才会执行删除"`
 	Plane       string            `json:"plane,omitempty" jsonschema:"作用平面：local|global（旧名 project|user）。留空默认 local；不支持 both。候选项须来自同平面的 dec_list_delete_candidates。"`
