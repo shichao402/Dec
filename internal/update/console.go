@@ -16,15 +16,19 @@ import (
 const consoleComponent = "console"
 
 // ConsoleCheckResult is the shell-owned update state shown by Dec Console.
+//
+// 更新服务的形状 SSOT 在 relkit（CheckResult / UpdateAvailable），这里只是 helper 给
+// 设置页的投影。在 relkit 投影钉死「键恒定出现」之前，这几个值类型字段不能 omitempty：
+// 空说明、非缓存结果会整键消失，壳侧 serde 以 missing field 拒绝整个检查。
 type ConsoleCheckResult struct {
 	CurrentVersion       string    `json:"currentVersion"`
 	LatestVersion        string    `json:"latestVersion"`
 	NeedUpdate           bool      `json:"needUpdate"`
 	Mandatory            bool      `json:"mandatory"`
-	ReleaseNotesMarkdown string    `json:"releaseNotesMarkdown,omitempty"`
-	ReleaseNotesURL      string    `json:"releaseNotesUrl,omitempty"`
+	ReleaseNotesMarkdown string    `json:"releaseNotesMarkdown"`
+	ReleaseNotesURL      string    `json:"releaseNotesUrl"`
 	CheckedAt            time.Time `json:"checkedAt"`
-	FromCache            bool      `json:"fromCache,omitempty"`
+	FromCache            bool      `json:"fromCache"`
 	AutoCheckInterval    string    `json:"autoCheckInterval"`
 	CanAutoInstall       bool      `json:"canAutoInstall"`
 }
