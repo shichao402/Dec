@@ -2,13 +2,16 @@
 
 The deploy CLI, immutable consumer, and product gates all import this module.
 Adding a facade therefore means adding one validated row, not another branch.
+Product-tree rows also declare how their zip is packed so deploy never branches
+on component names.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Mapping, Optional, Sequence
+import re
 
 TARGETS = (
     "linux-amd64",
@@ -19,6 +22,10 @@ TARGETS = (
 )
 ROLES = ("host-binary", "product-binary", "product-tree")
 PROBES = ("files", "tree-sha256")
+PACK_KINDS = ("tracked-tree", "working-tree", "listed-files", "go-deps")
+HOST_API = ("protocol", "facade")
+INPROCESS_IN_HOST_ZIP = re.compile(r"\bRupUpdater\b|\bpackage inprocess\b")
+HOST_SOURCE_SUFFIXES = {".go", ".dart", ".ts", ".tsx", ".js", ".rs"}
 
 
 @dataclass(frozen=True)
@@ -40,6 +47,21 @@ class Component:
     import_signals: tuple[str, ...] = ()
     webview_projection: bool = False
     install_names: tuple[tuple[str, str], ...] = ()
+    pack: str = ""
+    pack_files: tuple[str, ...] = ()
+    pack_extras: tuple[tuple[str, str], ...] = ()
+    pack_exclude_parts: tuple[str, ...] = ()
+    pack_exclude_suffixes: tuple[str, ...] = ()
+    pack_exclude_paths: tuple[str, ...] = ()
+    go_entrypoints: tuple[str, ...] = ()
+    go_module: str = ""
+    host_api: tuple[str, ...] = ()
+    facade_paths: tuple[str, ...] = ()
+
+    def pack_kind(self) -> str:
+        if self.role != "product-tree":
+            return ""
+        return self.pack or "tracked-tree"
 
     def install_name(self, target: str) -> str:
         overrides = dict(self.install_names)
@@ -81,6 +103,8 @@ COMPONENTS: tuple[Component, ...] = (
             "hostlib/runtime.py",
         ),
         portable=True,
+        pack="working-tree",
+        pack_exclude_parts=("__pycache__",),
     ),
     Component(
         "sdk-dart", "product-tree", "dart-sdk", "relkit-sdk-dart.zip",
@@ -88,6 +112,14 @@ COMPONENTS: tuple[Component, ...] = (
         ("pubspec.yaml", "lib"), portable=True, default_consume=True,
         detect=("pubspec.yaml",), updater_process="dart",
         import_signals=("package:rup_client/",),
+        host_api=("protocol", "facade"),
+        facade_paths=("lib/src/updater_facade.dart",),
+        pack_exclude_paths=(
+            "lib/src/updater.dart",
+            "lib/src/scheduler.dart",
+            "example/",
+            "test/",
+        ),
     ),
     Component(
         "sdk-go", "product-tree", "go-sdk", "relkit-sdk-go.zip",
@@ -95,6 +127,13 @@ COMPONENTS: tuple[Component, ...] = (
         ("go.mod", "sdk", "api/updater/v1"), portable=True,
         detect=("go.mod",), updater_process="go",
         import_signals=("go.firoyang.com/relkit/sdk",),
+        pack="go-deps",
+        pack_files=("go.mod", "go.sum"),
+        pack_exclude_suffixes=("_test.go",),
+        go_entrypoints=("./sdk", "./sdk/updaterfacade"),
+        go_module="go.firoyang.com/relkit",
+        host_api=("protocol", "facade"),
+        facade_paths=("sdk/updaterfacade/facade.go",),
     ),
     Component(
         "sdk-rust", "product-tree", "rust-sdk", "relkit-sdk-rust.zip",
@@ -102,6 +141,11 @@ COMPONENTS: tuple[Component, ...] = (
         ("Cargo.toml", "src/lib.rs", "proto/updater/v1/updater.proto"),
         portable=True, detect=("Cargo.toml", "**/src-tauri/Cargo.toml"),
         updater_process="rust", import_signals=("relkit_updater", "relkit-updater"),
+        pack_extras=(
+            ("proto/updater/v1/updater.proto", "proto/updater/v1/updater.proto"),
+        ),
+        host_api=("facade",),
+        facade_paths=("src/lib.rs",),
     ),
     Component(
         "bindings-ts", "product-tree", "bindings-ts",
@@ -111,6 +155,15 @@ COMPONENTS: tuple[Component, ...] = (
         detect=("package.json", "**/package.json"), updater_process="node",
         import_signals=("third_party/relkit/bindings/ts", "@relkit/updater-bindings"),
         webview_projection=True,
+        pack="listed-files",
+        pack_files=(
+            "package.json",
+            "README.md",
+            "dist/updater_pb.js",
+            "dist/updater_pb.d.ts",
+        ),
+        host_api=("facade",),
+        facade_paths=("dist/updater_pb.js",),
     ),
 )
 
@@ -143,6 +196,52 @@ def validate_components(rows: Sequence[Component]) -> None:
             raise ValueError(f"duplicate component name/build flag: {row.name}/{row.build_flag}")
         if row.portable != (row.role == "product-tree"):
             raise ValueError(f"component {row.name} portable disagrees with role")
+        if row.role != "product-tree":
+            extra_pack = (
+                row.pack,
+                row.pack_files,
+                row.pack_extras,
+                row.pack_exclude_parts,
+                row.pack_exclude_suffixes,
+                row.pack_exclude_paths,
+                row.go_entrypoints,
+                row.go_module,
+                row.host_api,
+                row.facade_paths,
+                row.updater_process,
+            )
+            if any(extra_pack):
+                raise ValueError(f"component {row.name} pack fields only apply to product-tree")
+        else:
+            kind = row.pack_kind()
+            if kind not in PACK_KINDS:
+                raise ValueError(f"component {row.name} has invalid pack {row.pack}")
+            if kind == "listed-files" and not row.pack_files:
+                raise ValueError(f"component {row.name} listed-files pack requires pack_files")
+            if kind == "go-deps" and (not row.go_entrypoints or not row.go_module):
+                raise ValueError(f"component {row.name} go-deps pack requires go_entrypoints and go_module")
+            if kind != "go-deps" and (row.go_entrypoints or row.go_module):
+                raise ValueError(f"component {row.name} go-deps fields require pack=go-deps")
+            if kind not in ("listed-files", "go-deps") and row.pack_files:
+                raise ValueError(f"component {row.name} pack_files require listed-files or go-deps")
+            if kind != "working-tree" and row.pack_exclude_parts:
+                raise ValueError(f"component {row.name} pack_exclude_parts require working-tree")
+            if kind != "go-deps" and row.pack_exclude_suffixes:
+                raise ValueError(f"component {row.name} pack_exclude_suffixes require go-deps")
+            if kind not in ("tracked-tree", "working-tree") and row.pack_exclude_paths:
+                raise ValueError(f"component {row.name} pack_exclude_paths require tracked-tree or working-tree")
+            if any("inprocess" in item for item in row.go_entrypoints):
+                raise ValueError(f"component {row.name} go_entrypoints must not pack internal/inprocess")
+            if row.updater_process:
+                unknown = [item for item in row.host_api if item not in HOST_API]
+                if unknown:
+                    raise ValueError(f"component {row.name} has invalid host_api {unknown}")
+                if "facade" not in row.host_api:
+                    raise ValueError(f"component {row.name} updater_process requires host_api to include facade")
+                if not row.facade_paths:
+                    raise ValueError(f"component {row.name} updater_process requires facade_paths")
+            elif row.host_api or row.facade_paths:
+                raise ValueError(f"component {row.name} host_api/facade_paths require updater_process")
         names.add(row.name)
         flags.add(row.build_flag)
 
@@ -189,3 +288,23 @@ def with_component(row: Component) -> tuple[Component, ...]:
     rows = COMPONENTS + (row,)
     validate_components(rows)
     return rows
+
+
+def packed_host_surface_errors(
+    row: Component,
+    archive_names: Sequence[str],
+    texts: Mapping[str, str],
+) -> tuple[str, ...]:
+    """Host zips may ship protocol helpers plus a facade, never an in-process engine."""
+    if not row.updater_process:
+        return ()
+    names = set(archive_names)
+    errors: list[str] = []
+    for path in row.facade_paths:
+        if path not in names:
+            errors.append(f"{row.name} facade {path} is not packed")
+    for name, text in texts.items():
+        suffix = Path(name).suffix.lower()
+        if suffix in HOST_SOURCE_SUFFIXES and INPROCESS_IN_HOST_ZIP.search(text):
+            errors.append(f"{row.name} packs in-process updater in {name}")
+    return tuple(errors)

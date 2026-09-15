@@ -299,7 +299,7 @@ def _impl_retrospect_report(root: Path) -> dict[str, Any]:
         "inspect/reconcile/retrospect gates are registered functions",
         f"registered={sorted(GATES)}",
         {"updater-sdk-contract", "webview-projection", "other-declarations",
-         "updater-chokepoints"}.issubset(GATES),
+         "updater-chokepoints", "legacy-in-process-updater"}.issubset(GATES),
     )
 
     if not callable(clear_stale_staged_trees):

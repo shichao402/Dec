@@ -221,3 +221,31 @@ def updater_chokepoints(root: Path, state: dict[str, Any], drift: list[str]) -> 
             drift.append(f"handwritten updater shape/proto/default detected: {relative}")
         if relative not in allowed_urls and url.search(text):
             drift.append(f"updater endpoint/base URL is not allowlisted: {relative}")
+
+
+def _engine_authoring(relative: str) -> bool:
+    parts = Path(relative).parts
+    return (
+        parts[:1] == ("sdk",)
+		or parts[:2] == ("internal", "updater")
+		or parts[:2] == ("internal", "inprocess")
+		or parts[:2] == ("internal", "ipc")
+        or parts[:2] == ("cmd", "relkit-updater")
+        or parts[:1] == ("conformance",)
+    )
+
+
+@gate("legacy-in-process-updater")
+def legacy_in_process_updater(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    if not _step_value(state, "updater.process"):
+        return
+    legacy = re.compile(r"\bRupUpdater\b|\bsdk\.Updater\b")
+    for path in _source_files(root):
+        relative = path.relative_to(root).as_posix()
+        if _engine_authoring(relative):
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if legacy.search(text):
+            drift.append(
+                f"in-process updater API is not a host calling surface: {relative}"
+            )
