@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/shichao402/Dec/internal/pmodel"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 func TestWorkspacePlaneAliases(t *testing.T) {
@@ -67,5 +70,34 @@ func TestBrowseDirectoriesReturnsDirectoriesOnly(t *testing.T) {
 	}
 	if len(listing.Entries) != 1 || listing.Entries[0].Name != "folder" {
 		t.Fatalf("unexpected listing: %#v", listing.Entries)
+	}
+}
+
+func TestProjectConsumersOnlyReturnsDirectManagedReferences(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
+	root := t.TempDir()
+	writeProject := func(dir, home string) ManagedProjectState {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(dir, ".dec"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		data := []byte("kind: project\nversion: v2\nproject_name: " + home + "\n")
+		if err := os.WriteFile(filepath.Join(dir, ".dec", "config.yaml"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return ManagedProjectState{Root: dir, Name: home, Exists: true, Initialized: true}
+	}
+	direct := writeProject(filepath.Join(root, "direct"), "app")
+	unrelated := writeProject(filepath.Join(root, "unrelated"), "other")
+	broken := ManagedProjectState{Root: filepath.Join(root, "broken"), Exists: true, Initialized: true, Error: "invalid"}
+	projects := map[string]*pmodel.Loaded{
+		"app":    {Manifest: types.P{Name: "app", Requires: []string{"shared"}}},
+		"other":  {Manifest: types.P{Name: "other"}},
+		"shared": {Manifest: types.P{Name: "shared"}},
+	}
+
+	got := projectConsumers("shared", []ManagedProjectState{unrelated, broken, direct}, projects)
+	if len(got.Consumers) != 1 || got.Consumers[0].Root != direct.Root {
+		t.Fatalf("consumers = %#v", got.Consumers)
 	}
 }

@@ -6,10 +6,12 @@ import { Page, PageFill, PageHeader, ScrollArea } from '@/components/shell/page'
 import { ActionButton } from '@/components/ui/action-button'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyState, Notice, WarningList } from '@/components/ui/feedback'
 import { Field, Select } from '@/components/ui/input'
 import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel'
-import { runOrWatchTyped } from '@/lib/api'
+import { invokeTyped, runOrWatchTyped } from '@/lib/api'
+import { useDecAction } from '@/lib/action-context'
 import { actionSpec, resource } from '@/lib/console'
 import { SecretsPanel, type SecretsMetadata } from '@/pages/secrets-panel'
 import { cn, pullResultDiagnosis } from '@/lib/utils'
@@ -30,7 +32,7 @@ function formatSyncTime(value?: string): string {
 
 export type PullHistoryEntry = { title: string; result: PullResult; at: Date }
 
-export type SyncTarget = { key: string; label: string; root: string; plane: 'local' | 'global' }
+export type SyncTarget = { key: string; label: string; root: string; plane: 'local' | 'global'; projectName?: string }
 type SyncMode = 'auto' | 'pull' | 'push'
 type SyncPreviewItem = {
   Source: string
@@ -56,6 +58,15 @@ type SyncPreview = {
   HasConflicts?: boolean
   ConflictedPaths?: string[]
 }
+type ProjectConsumersResult = {
+  Provider: string
+  Consumers: ManagedProject[]
+}
+type ConsumerPullOutcome = {
+  project: ManagedProject
+  result?: PullResult
+  error?: string
+}
 
 // GLOBAL_TARGET_KEY 标识本机平面。本机平面的 projectRoot 必须为空，
 // 否则 .dec/ 会退化成相对服务 cwd 的路径并覆盖 ~/.dec/config.yaml（ADR 0015）。
@@ -70,6 +81,7 @@ export function SyncPage(props: {
   history: PullHistoryEntry[]
   initialTarget?: SyncTarget | null
   onBack?: () => void
+  onPullResult?: (title: string, result: PullResult) => void
 }) {
   const projects = props.projects.filter((project) => project.Initialized)
   const targets: PushTarget[] = [
@@ -79,11 +91,33 @@ export function SyncPage(props: {
       label: item.Label || item.Name,
       root: item.Root,
       plane: 'local' as const,
+      projectName: item.Name,
     })),
   ]
   const [targetKey, setTargetKey] = useState(props.initialTarget?.key || GLOBAL_TARGET_KEY)
   const [secrets, setSecrets] = useState<SecretsMetadata | null>(null)
+  const [consumers, setConsumers] = useState<ProjectConsumersResult | null>(null)
   const target = targets.find((item) => item.key === targetKey) || targets[0]
+  const consumerListSpec = actionSpec(
+    `consumers:list:${props.deviceId}`,
+    '查找引用方',
+    props.deviceId,
+    [resource.global],
+    'read',
+  )
+  const consumerListAction = useDecAction<ProjectConsumersResult>(consumerListSpec)
+
+  async function loadConsumers(provider: string) {
+    setConsumers(null)
+    const outcome = await consumerListAction.run(() => invokeTyped<ProjectConsumersResult>(
+      'list_project_consumers',
+      '',
+      'global',
+      { Provider: provider },
+      consumerListSpec.key,
+    ))
+    if (outcome.ok) setConsumers(outcome.value)
+  }
 
   useEffect(() => {
     if (props.initialTarget) setTargetKey(props.initialTarget.key)
@@ -109,8 +143,19 @@ export function SyncPage(props: {
             onTarget={(value) => {
               setTargetKey(value)
               setSecrets(null)
+              setConsumers(null)
             }}
+            onPushed={(provider) => loadConsumers(provider)}
           />
+          <ActionFeedback actionKey={consumerListSpec.key} />
+          {consumers && (
+            <ConsumerRefreshPanel
+              key={consumers.Provider}
+              deviceId={props.deviceId}
+              data={consumers}
+              onPullResult={props.onPullResult}
+            />
+          )}
           <div className="grid gap-3 xl:grid-cols-2">
             <SecretsPanel
               deviceId={props.deviceId}
@@ -143,6 +188,7 @@ function SyncPreviewPanel(props: {
   targets: SyncTarget[]
   target: SyncTarget
   onTarget: (key: string) => void
+  onPushed: (provider: string) => Promise<void>
 }) {
   const [preview, setPreview] = useState<SyncPreview | null>(null)
   const [selected, setSelected] = useState<SyncPreviewItem | null>(null)
@@ -267,7 +313,12 @@ function SyncPreviewPanel(props: {
                     spec={spec}
                     variant={mode === 'auto' ? 'default' : 'outline'}
                     action={() => runSync(mode)}
-                    onSuccess={setPreview}
+                    onSuccess={async (value) => {
+                      setPreview(value)
+                      if (mode === 'push' && target.plane === 'local' && target.projectName) {
+                        await props.onPushed(target.projectName)
+                      }
+                    }}
                     runningLabel="同步中…"
                   >
                     {mode === 'auto' ? <RefreshCw className="size-4" /> : mode === 'push' ? <UploadCloud className="size-4" /> : <ArrowLeft className="size-4" />}
@@ -286,6 +337,97 @@ function SyncPreviewPanel(props: {
         )}
       </PanelBody>
       <DiffDialog item={selected} onClose={() => setSelected(null)} />
+    </Panel>
+  )
+}
+
+function ConsumerRefreshPanel(props: {
+  deviceId: string
+  data: ProjectConsumersResult
+  onPullResult?: (title: string, result: PullResult) => void
+}) {
+  const [selected, setSelected] = useState(() => props.data.Consumers.map((project) => project.Root))
+  const [outcomes, setOutcomes] = useState<ConsumerPullOutcome[]>([])
+  const picked = props.data.Consumers.filter((project) => selected.includes(project.Root))
+  const batchSpec = actionSpec(
+    `consumers:pull:${props.deviceId}:${props.data.Provider}`,
+    `刷新 ${props.data.Provider} 的引用方`,
+    props.deviceId,
+    picked.map((project) => resource.workspace(project.Root)),
+    'operation',
+    '引用方刷新完成',
+  )
+  const runPulls = async (): Promise<ConsumerPullOutcome[]> => {
+    const results: ConsumerPullOutcome[] = []
+    for (const [index, project] of picked.entries()) {
+      try {
+        const result = await runOrWatchTyped<PullResult>({
+          actionKey: `${batchSpec.key}:${index}`,
+          operation: 'pull',
+          projectRoot: project.Root,
+          workspacePlane: 'local',
+        })
+        results.push({ project, result })
+      } catch (error) {
+        results.push({ project, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+    return results
+  }
+
+  return (
+    <Panel>
+      <PanelHeader
+        title="刷新引用方"
+        description={`刚刚推送了 ${props.data.Provider}；以下受管项目直接 requires 它。`}
+      />
+      <PanelBody className="space-y-3">
+        {props.data.Consumers.length === 0 ? (
+          <Notice tone="info" text="这台设备登记的项目中没有直接引用方，无需继续刷新。" />
+        ) : (
+          <>
+            <Notice tone="info" text="选中的工作区会依次 Pull。若仓库跟踪生成后的 IDE 配置，请在各仓库审阅变更后再提交。" />
+            <div className="divide-y divide-line overflow-hidden rounded-lg border border-line">
+              {props.data.Consumers.map((project) => {
+                const outcome = outcomes.find((item) => item.project.Root === project.Root)
+                return (
+                  <label key={project.Root} className="flex cursor-pointer items-start gap-3 px-3 py-2.5">
+                    <Checkbox
+                      checked={selected.includes(project.Root)}
+                      onChange={() => setSelected((items) => (
+                        items.includes(project.Root)
+                          ? items.filter((root) => root !== project.Root)
+                          : [...items, project.Root]
+                      ))}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm text-ink">{project.Label || project.Name}</span>
+                      <span className="block truncate font-mono text-[11px] text-faint" title={project.Root}>{project.Root}</span>
+                      {outcome?.error && <span className="mt-1 block text-xs text-bad">{outcome.error}</span>}
+                      {outcome?.result && <span className="mt-1 block text-xs text-good">Pull 完成</span>}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+            <ActionButton
+              spec={batchSpec}
+              action={runPulls}
+              disabled={picked.length === 0}
+              onSuccess={(results) => {
+                setOutcomes(results)
+                for (const item of results) {
+                  if (item.result) props.onPullResult?.(item.project.Label || item.project.Name, item.result)
+                }
+              }}
+              runningLabel="正在逐项刷新…"
+            >
+              <RefreshCw className="size-4" />刷新选中的 {picked.length} 个项目
+            </ActionButton>
+            <ActionFeedback actionKey={batchSpec.key} />
+          </>
+        )}
+      </PanelBody>
     </Panel>
   )
 }

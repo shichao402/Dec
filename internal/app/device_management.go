@@ -11,7 +11,9 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/repo"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 type ManagedProjectState struct {
@@ -51,6 +53,11 @@ type ProjectScanResult struct {
 	Projects []ManagedProjectState
 }
 
+type ProjectConsumersResult struct {
+	Provider  string
+	Consumers []ManagedProjectState
+}
+
 func LoadDeviceSummary() (*DeviceSummary, error) {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
@@ -85,6 +92,58 @@ func ListManagedProjectStates() ([]ManagedProjectState, error) {
 		result = append(result, inspectManagedProject(item.Root, item.Label))
 	}
 	return result, nil
+}
+
+// ListProjectConsumers returns initialized managed workspaces whose home project
+// directly requires provider. It deliberately stays within the managed-project
+// inventory instead of scanning arbitrary directories on the device.
+func ListProjectConsumers(provider string) (*ProjectConsumersResult, error) {
+	provider = strings.TrimSpace(provider)
+	if !types.IsValidPName(provider) {
+		return nil, fmt.Errorf("提供方项目名 %q 非法，必须为小写 kebab-case", provider)
+	}
+	tx, err := repo.NewLocalReadTransaction()
+	if err != nil {
+		return nil, fmt.Errorf("打开仓库只读事务失败: %w", err)
+	}
+	defer tx.Close()
+	projects, err := pmodel.Scan(tx.WorkDir())
+	if err != nil {
+		return nil, fmt.Errorf("扫描 Dec 项目失败: %w", err)
+	}
+	if _, ok := projects[provider]; !ok {
+		return nil, fmt.Errorf("Dec 仓库中不存在提供方项目 %q", provider)
+	}
+	states, err := ListManagedProjectStates()
+	if err != nil {
+		return nil, err
+	}
+	return projectConsumers(provider, states, projects), nil
+}
+
+func projectConsumers(provider string, states []ManagedProjectState, projects map[string]*pmodel.Loaded) *ProjectConsumersResult {
+	result := &ProjectConsumersResult{Provider: provider}
+	for _, state := range states {
+		if !state.Exists || !state.Initialized || state.Error != "" {
+			continue
+		}
+		cfg, err := config.NewProjectConfigManager(state.Root).LoadProjectConfig()
+		if err != nil || cfg == nil {
+			continue
+		}
+		home := strings.TrimSpace(cfg.ProjectName)
+		project, ok := projects[home]
+		if !ok {
+			continue
+		}
+		for _, required := range project.Manifest.Requires {
+			if required == provider {
+				result.Consumers = append(result.Consumers, state)
+				break
+			}
+		}
+	}
+	return result
 }
 
 func RegisterManagedProject(root, label string) (*ManagedProjectState, error) {

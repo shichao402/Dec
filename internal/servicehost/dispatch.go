@@ -137,6 +137,12 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.PreviewLocalCleanup()
 	case "list_managed_projects":
 		return app.ListManagedProjectStates()
+	case "list_project_consumers":
+		var in struct{ Provider string }
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.ListProjectConsumers(in.Provider)
 	case "list_managed_devices":
 		return app.ListManagedDevices()
 	case "register_managed_device":

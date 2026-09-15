@@ -650,6 +650,9 @@ export default function App() {
                   events={events}
                   history={history}
                   initialTarget={syncTarget}
+                  onPullResult={(title, result) => {
+                    setHistory((items) => [{ title, result, at: new Date() }, ...items].slice(0, 20))
+                  }}
                   onBack={syncTarget ? () => {
                     setView(syncTarget.plane === 'global' ? 'global' : 'project')
                     setSyncTarget(null)
