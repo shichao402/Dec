@@ -24,6 +24,11 @@ import { TopBar } from '@/components/shell/top-bar'
 import { Badge } from '@/components/ui/badge'
 import { useActionRegistry, useOperationObserver } from '@/lib/action-context'
 import { runningActions } from '@/lib/action-registry'
+import {
+  loadLastConnectionId,
+  rememberLastConnection,
+  selectAutoConnectConnection,
+} from '@/lib/auto-connect'
 import { actionSpec, resource, shortInstanceId, type View } from '@/lib/console'
 import type { ConsoleUpdateEnvelope } from '@/lib/console-update'
 import {
@@ -151,10 +156,8 @@ export default function App() {
     setScreen('unlock')
   }, [actions.state.records, current])
 
-  // session 过期后 Console 直接跳回解锁页，不再走 handleConnect，
-  // 所以凭据库里的主密码要跟着解锁页出现回填，而不是跟着连接动作。
-  // 策略允许时，存了密码就直接替用户解锁一次；关闭策略或服务重启后的首次连接只回填，
-  // 仍须人工确认。restoredPasswordFor 用于挡住失败重试循环。
+  // 保存密码就是授权 Console 走到底：无论是首次连接、服务重启还是 session 过期，
+  // 解锁页出现后都从系统凭据库取密码并自动提交。restoredPasswordFor 挡住失败重试循环。
   useEffect(() => {
     if (screen !== 'unlock') {
       restoredPasswordFor.current = ''
@@ -169,19 +172,26 @@ export default function App() {
     void runAction(spec, () => loadSavedPassword(conn.id)).then((outcome) => {
       if (!outcome.ok || !outcome.value) return
       setPassword(outcome.value)
-      if (settings?.AutoReunlockOnTimeout) void handleUnlockRef.current(outcome.value)
+      void handleUnlockRef.current(outcome.value)
     })
-  }, [screen, current, settings?.AutoReunlockOnTimeout, runAction])
+  }, [screen, current, runAction])
 
   useEffect(() => {
     const spec = actionSpec('connections:list', '加载设备连接', 'console', [resource.connections], 'read')
     void runAction(spec, async () => {
       // 磁盘上的设备先上屏。受管设备的发现要等本机服务拉起，让已保存的设备跟着
       // 等，界面会先空着报「还没有保存的设备」，几秒后再自己长出来。
-      setSaved(await listConnections())
-      return discoverConnections()
+      const stored = await listConnections()
+      setSaved(stored)
+      return {
+        stored,
+        discovered: await discoverConnections(),
+      }
     }).then((outcome) => {
-      if (outcome.ok) setSaved(outcome.value)
+      if (!outcome.ok) return
+      setSaved(outcome.value.discovered)
+      const conn = selectAutoConnectConnection(outcome.value.stored, loadLastConnectionId())
+      if (conn) void handleConnectRef.current(conn)
     })
   }, [runAction])
 
@@ -215,6 +225,7 @@ export default function App() {
     })
     if (!outcome.ok) return
     const { info, loaded } = outcome.value
+    rememberLastConnection(conn.id)
     setCurrent(conn)
     setPing(info)
     setSummary(loaded?.device || null)
