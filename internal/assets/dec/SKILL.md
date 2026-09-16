@@ -11,6 +11,8 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 
 项目里由 Dec pull 出来的 IDE 配置不等于「禁止提交」。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 这类项目级输出，如果是托管资产生成的结果，通常可以按仓库约定单独提交。敏感值放 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置，不要写回这些输出文件。
 
+官方资产来自 Dec 仓 `registry` 分支。消费仓 `.dec/config.yaml` 用 `requires` map 声明装谁、装哪一版（`latest` 或 `v*`）。个人 Git 只进设置里的私仓。密钥走 Bitwarden。改官方安装物不要 `dec_push`，用草稿 + `dec_propose_upstream`。
+
 ## 何时使用
 
 ### 主动建议用户的场景
@@ -25,19 +27,20 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
    - Agent：`dec_list_assets`（`plane=project|user|both`）看已启用 bundle 与成员
    - 用户：Console 资产页浏览/搜索
 
-3. **用户改了已拉取的资产**
-   - 只改 `.dec/cache/`（项目）或 `~/.dec/cache/`（用户平面）
-   - Console **同步** 页 push；Agent 用 `dec_push`（对应 `plane`）
-   - **禁止**手改其他 IDE 目录里的同名副本
+3. **用户改了已拉取的官方资产**
+   - 改动应出现在 `.dec/drafts/`；不要改 `.dec/cache/`（重装会丢）
+   - Agent：`dec_propose_upstream`（`origin_repo`、`diff`、`mode=auto|pr|issue`）
+   - **禁止** `dec_push` 官方路径进私仓
 
-4. **新增资产**
+4. **新增个人资产**
    - 把当前项目里已验证的能力抽出来复用：优先 `dec-extract-asset`
-   - 否则在对应平面的 cache 下写内容，并确保目标 bundle 已启用
-   - Console **同步** push；Agent：`dec_push`
+   - 个人 Git 写作者目录或私仓，人提交私仓
+   - Console **同步** push 仅个人 Git + 密钥；Agent：`dec_push`
 
 5. **从当前项目沉淀已有能力**
-   - 用 `dec-extract-asset`；结果必须落到 cache，而不是只留在 IDE 目录
-   - 完成后 `dec_push` / Console **同步** push
+   - 用 `dec-extract-asset`
+   - 官方产品资产进提供方源仓 `DecAssets/`，打 `v*` 后 CI `dec-registry publish-provides`
+   - 个人资产进私仓，不要写进官方 registry
 
 6. **删除远端或本机托管资产**
    - Console **删除** 页；Agent 先 `dec_list_delete_candidates`，再 `dec_delete`（`confirmed=true`，一次一个平面）
@@ -70,7 +73,8 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 | 已启用 bundle / 成员 | `dec_list_assets` |
 | 改启用列表 | `dec_set_assets`（不支持 both；改完通常再 `dec_pull`） |
 | 拉取并渲染 | `dec_pull` |
-| 推回远端 | `dec_push`；先可用 `dec_preview_push` |
+| 个人 Git / 密钥推回 | `dec_push`；官方路径禁止 |
+| 贡献官方草稿 | `dec_propose_upstream` |
 | 私密资产元数据 | `dec_list_secrets`（绝不返回正文/密钥；Console 在同步页「密钥清单」） |
 | 删除候选 / 删除 | `dec_list_delete_candidates` / `dec_delete`（Console 在删除页） |
 | 置备远端设备 | `dec_provision_remote`（Linux/macOS；首次置备必须 `confirmed=true`） |
@@ -93,15 +97,15 @@ env 注入给子进程用独立程序 `dec-exec`，不经过 `dec-server`、不�
 
 ## 配置要点
 
-项目：`<project>/.dec/config.yaml` 的 `enabled_bundles`。用户平面：`~/.dec/config.yaml` 的 `enabled_bundles`（`scope: user`）。成员随 bundle 拉取，不能单资产启用。
+项目：`<project>/.dec/config.yaml` 的官方 `requires` map 与个人启用列表。本机 global：`~/.dec/config.yaml` 的 `requires` / `enabled_projects`。
 
 ```yaml
 version: v2
 project_name: my-app
-ides:                 # 可选；覆盖全局 IDE
+ides:
   - cursor
-enabled_bundles:
-  - my-vault
+requires:
+  relkit: latest
 ```
 
 - 早期 `available` / `enabled` 已移除；读到旧配置会迁移

@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/bundle"
+	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/contribute"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/types"
 	"gopkg.in/yaml.v3"
@@ -82,12 +84,37 @@ func CreateLocalAsset(in CreateLocalAssetInput) (*CreateLocalAssetResult, error)
 }
 
 func writeGitAsset(workspace Workspace, project string, vis types.AssetVisibility, plane types.AssetPlane, kind bundle.VaultAssetKind, name string) (string, error) {
+	if workspace.EffectivePlane() != WorkspaceGlobal && workspace.Root != "" {
+		cfg, err := config.NewProjectConfigManager(workspace.Root).LoadProjectConfig()
+		if err == nil {
+			req, _ := workspaceOfficialRequires(workspace, cfg)
+			if req.Has(project) {
+				dir := contribute.DraftDir(workspace.Root, project+"-"+name)
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					return "", err
+				}
+				dest := filepath.Join(dir, bundle.AssetFileName(kind, name))
+				return writeGitAssetBody(kind, name, dest)
+			}
+			if len(cfg.Provides) > 0 {
+				dir := filepath.Join(workspace.Root, filepath.FromSlash(config.ProvideAuthorDir(cfg.ProvidesRoot, kind.Dir)))
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					return "", err
+				}
+				dest := filepath.Join(dir, bundle.AssetFileName(kind, name))
+				return writeGitAssetBody(kind, name, dest)
+			}
+		}
+	}
 	dir := filepath.Join(workspaceCacheDir(workspace), project, string(vis), string(plane), kind.Dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	fileName := bundle.AssetFileName(kind, name)
-	dest := filepath.Join(dir, fileName)
+	dest := filepath.Join(dir, bundle.AssetFileName(kind, name))
+	return writeGitAssetBody(kind, name, dest)
+}
+
+func writeGitAssetBody(kind bundle.VaultAssetKind, name, dest string) (string, error) {
 	if kind.DirEntries {
 		if err := os.MkdirAll(dest, 0o755); err != nil {
 			return "", err

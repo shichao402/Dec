@@ -54,6 +54,31 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadRequiresMap(t *testing.T) {
+	projectRoot := t.TempDir()
+	mgr := NewProjectConfigManager(projectRoot)
+	cfg := &types.ProjectConfig{
+		Requires: types.RequiresSpec{"relkit": "v0.3.20", "tencent-cloud": "latest"},
+	}
+	if err := mgr.SaveProjectConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := mgr.LoadProjectConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Requires["relkit"] != "v0.3.20" || loaded.Requires["tencent-cloud"] != "latest" {
+		t.Fatalf("%#v", loaded.Requires)
+	}
+	raw, err := os.ReadFile(filepath.Join(projectRoot, ".dec", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "- relkit") {
+		t.Fatalf("requires 不应再写成列表:\n%s", raw)
+	}
+}
+
 func TestLoadProjectConfig_PersistsStrippedInternalIDEs(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := NewProjectConfigManager(projectRoot)

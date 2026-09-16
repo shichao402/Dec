@@ -40,22 +40,20 @@ description: >
    - 稳定的流程 bucket 名、label 名、状态名、固定约定不要为了抽象而强行变量化
    - 保留真正可复用的流程、约束、检查清单和输出格式
 
-4. 一律写入 Dec 缓存，不直接把 IDE 目录当成 push 源
-   - Skill 写到 `.dec/cache/<vault>/skills/<name>/`
-   - Rule 写到 `.dec/cache/<vault>/rules/<name>.mdc`
-   - MCP 写到 `.dec/cache/<vault>/mcp/<name>.json`
+4. 官方资产写入提供方源仓 `DecAssets/`（并登记 `provides`），个人资产写入私仓作者目录。不要把官方路径 `dec_push` 进私仓，也不要只改 `.dec/cache/`。
 
 5. 同步维护项目配置
-   - 把所属 bundle 写进 `.dec/config.yaml` 的 `enabled_bundles`（Console 资产页或 `dec_set_assets`）
-   - 并在该 bundle 的 `bundle.yaml` 里登记成员，否则 pull 不会下发
+   - 消费仓把官方依赖写进 `.dec/config.yaml` 的 `requires` map
+   - 个人启用列表与 `provides` 分开
 
 6. 有变量就补变量说明
    - 如果引入了 `{{VAR_NAME}}`，同步更新 `.dec/vars.yaml`
    - 机器级敏感信息放 `~/.dec/local/vars.yaml`
 
-7. 完成后推送
-   - Console **同步** 页 push，或 Agent `dec_push`（`plane=project`）
-   - 其他项目：引导初始化 + 资产勾选 + 同步 pull；Agent 用 `dec_init_project` / `dec_set_assets` / `dec_pull`
+7. 完成后
+   - 官方：源仓评审合入并打产品 `v*`，CI `dec-registry publish-provides` 写入 Dec `registry`
+   - 个人：Console **同步** 页 push 私仓，或 Agent `dec_push`（`plane=local`）
+   - 改官方安装物：草稿 + `dec_propose_upstream`
 
 ## 信息不全时的推荐提问模板
 

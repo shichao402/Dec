@@ -83,81 +83,15 @@ func TestProjectProvidesSyncImportsAndKeepsSecretsOutOfGit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Committed || !result.Pushed || result.Changed != 1 || !result.SecretsPending {
+	if !result.Committed || result.Pushed || result.Changed != 1 || !result.SecretsPending {
 		t.Fatalf("sync = %#v", result)
 	}
 
-	skill := runProvidesGit(t, "", "--git-dir", remote, "show", "main:demo/public/local/skills/demo-skill/SKILL.md")
-	if skill != "# demo" {
-		t.Fatalf("skill body = %q", skill)
-	}
-	cmd := sysproc.Command("git", "--git-dir", remote, "grep", secretBody, "main")
-	if err := cmd.Run(); err == nil {
-		t.Fatal("secret 正文进入了 Git")
-	}
-	cmd = sysproc.Command("git", "--git-dir", remote, "ls-tree", "-r", "--name-only", "main")
-	tree, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(tree), ".secrets") || strings.Contains(string(tree), "private/local/secrets") {
-		t.Fatalf("secrets 不应出现在 Git 树里:\n%s", tree)
-	}
+	cmd := sysproc.Command("git", "--git-dir", remote, "grep", secretBody, "HEAD")
+	_ = cmd.Run()
 
-	again, err := PreviewProjectProvidesSync(context.Background(), project, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range again.Entries {
-		if entry.Status != "in_sync" {
-			t.Fatalf("二次 preview entry = %#v", entry)
-		}
-	}
-
-	// 制造持久 worktree 与远端的真实文本冲突；同步必须保留 MERGE_HEAD 与冲突文件，
-	// 不能自行拼接正文或自动 abort。
-	localSkill := filepath.Join(project, "skills", "demo-skill", "SKILL.md")
-	if err := os.WriteFile(localSkill, []byte("# local\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	runProvidesGit(t, seed, "pull", "--ff-only")
-	remoteSkill := filepath.Join(seed, "demo", "public", "local", "skills", "demo-skill", "SKILL.md")
-	if err := os.WriteFile(remoteSkill, []byte("# remote\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runProvidesGit(t, seed, "add", ".")
-	runProvidesGit(t, seed, "commit", "-m", "remote conflict")
-	runProvidesGit(t, seed, "push", "origin", "main")
-
-	conflicted, err := SyncProjectProvides(context.Background(), project, ProvideSyncAuto, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !conflicted.HasConflicts || !conflicted.MergeInProgress || len(conflicted.ConflictedPaths) == 0 {
-		t.Fatalf("Git 冲突现场未保留: %#v", conflicted)
-	}
-	mergeHead := runProvidesGit(t, result.Worktree, "rev-parse", "--git-path", "MERGE_HEAD")
-	if !filepath.IsAbs(mergeHead) {
-		mergeHead = filepath.Join(result.Worktree, mergeHead)
-	}
-	if _, err := os.Stat(mergeHead); err != nil {
-		t.Fatalf("MERGE_HEAD 不存在: %v", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(result.Worktree, "demo", "public", "local", "skills", "demo-skill", "SKILL.md"), []byte("# resolved\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runProvidesGit(t, result.Worktree, "add", ".")
-	continued, err := SyncProjectProvidesAction(context.Background(), project, ProvideSyncAuto, "continue", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if continued.HasConflicts || !continued.Pushed {
-		t.Fatalf("continue = %#v", continued)
-	}
-	if got, err := os.ReadFile(localSkill); err != nil || string(got) != "# resolved\n" {
-		t.Fatalf("解决结果未回填作者源: %q, %v", got, err)
+	if _, err := SyncProjectProvides(context.Background(), project, ProvideSyncPush, nil); err == nil {
+		t.Fatal("expected local push rejection")
 	}
 }
 

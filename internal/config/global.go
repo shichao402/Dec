@@ -103,6 +103,12 @@ func LoadGlobalConfig() (*types.GlobalConfig, error) {
 		config.EnabledBundles = legacyBundles
 	}
 
+	req, err := types.NormalizeRequiresSpec(config.Requires)
+	if err != nil {
+		return nil, fmt.Errorf("校验 requires 失败: %w", err)
+	}
+	config.Requires = req
+
 	if stripped, changed := stripRemovedBuiltInIDEs(config.IDEs); changed {
 		config.IDEs = stripped
 		if _, statErr := os.Stat(configPath); statErr == nil {
@@ -136,6 +142,12 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 		config.EnabledBundles = append([]string(nil), normalized.EnabledBundles...)
 		normalized.EnabledProjects = append([]string(nil), normalized.EnabledBundles...)
 		normalized.EnabledBundles = nil
+		req, err := types.NormalizeRequiresSpec(normalized.Requires)
+		if err != nil {
+			return fmt.Errorf("校验 requires 失败: %w", err)
+		}
+		normalized.Requires = req
+		config.Requires = req
 		toWrite = &normalized
 	}
 

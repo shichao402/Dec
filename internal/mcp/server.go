@@ -95,8 +95,12 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 	}, s.handlePull)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_push",
-		Description: "把某平面的本地改动推回远端（plane=local|global|both）：Dec 资产推 Git，secrets 推 Bitwarden。本仓库用 plane=local；本机凭据/SSH 用 plane=global；两边都改过用 both。",
+		Description: "把某平面的个人 Git 改动与 secrets 推回私仓 / Bitwarden（plane=local|global|both）。官方资产禁止 push，请用 dec_propose_upstream。",
 	}, s.handlePush)
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "dec_propose_upstream",
+		Description: "把官方资产草稿以 PR 或 Issue 提交到提供方源仓（mode=auto|pr|issue）。不写 Dec registry。合入并打产品 v* 后由提供方 CI publish。",
+	}, s.handleProposeUpstream)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_preview_push",
 		Description: "预览某平面 push 将涉及的 Dec 与 secrets 变更（plane=local|global|both，不写远端）。推之前先 preview 确认范围。",
@@ -462,6 +466,34 @@ func (s *Server) handlePush(ctx context.Context, _ *mcp.CallToolRequest, in push
 			return nil, fmt.Errorf("%s", res.Error)
 		}
 		return res.data(), nil
+	})
+}
+
+type proposeUpstreamParams struct {
+	ProjectRoot string `json:"project_root" jsonschema:"消费仓或草稿所在项目根"`
+	OriginRepo  string `json:"origin_repo" jsonschema:"提供方源仓 owner/name"`
+	Asset       string `json:"asset,omitempty" jsonschema:"资产名"`
+	Title       string `json:"title,omitempty"`
+	Body        string `json:"body,omitempty"`
+	Diff        string `json:"diff" jsonschema:"unified diff，空则拒绝"`
+	Mode        string `json:"mode,omitempty" jsonschema:"auto|pr|issue"`
+	Branch      string `json:"branch,omitempty" jsonschema:"开 PR 时已推送的分支名"`
+}
+
+func (s *Server) handleProposeUpstream(ctx context.Context, _ *mcp.CallToolRequest, in proposeUpstreamParams) (*mcp.CallToolResult, any, error) {
+	ws, err := s.workspace(app.WorkspaceLocal, in.ProjectRoot)
+	if err != nil {
+		return toolFail(err, nil)
+	}
+	return s.invokeWS(ctx, "propose_upstream", ws, map[string]any{
+		"ProjectRoot": in.ProjectRoot,
+		"OriginRepo":  in.OriginRepo,
+		"Asset":       in.Asset,
+		"Title":       in.Title,
+		"Body":        in.Body,
+		"Diff":        in.Diff,
+		"Mode":        in.Mode,
+		"Branch":      in.Branch,
 	})
 }
 

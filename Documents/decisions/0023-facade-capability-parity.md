@@ -47,6 +47,8 @@ Console-first 只规定「新功能先设计 Console 页，Console 未覆盖就�
 | `dec_provision_remote` 的 `branch` / `tags` | 免交互置备要一次传全；Console 有人在场，可逐步确认 |
 | `dec_init_project` 的 `apply_vault_project` | 同上；Console 的初始化流已有显式绑定步骤 |
 | 无 `dec_check_update` / `dec_install_update` | 自更新会替换本机 Console，必须由人在设置页确认；MCP 只在状态或错误中指向 Console |
+| 官方资产无 `dec_push`；MCP `dec_propose_upstream` | 官方注册表只由提供方 CI 写。人改官方走源仓 PR/Issue。Console 同步页有说明；独立贡献页仍是 TODO(console) |
+| Console / MCP 不提供 yank/purge/publish-provides | 写官方 registry 必须用 CI token，不能走本机 GCM |
 
 新增 Console 没有的 MCP 工具或参数时，必须在本表加一行并写明人为何不需要。**没登记就算缺口**，
 而不是默认合法。

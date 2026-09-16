@@ -64,6 +64,7 @@ type GlobalConfig struct {
 	Version           int        `yaml:"version,omitempty"`
 	LayoutVersion     int        `yaml:"layout_version,omitempty"`
 	RepoURL           string     `yaml:"repo_url,omitempty"`
+	RegistryURL       string     `yaml:"registry_url,omitempty"`
 	IDEs              []string   `yaml:"ides,omitempty"`
 	Editor            string     `yaml:"editor,omitempty"`
 	ServerIdleTimeout string     `yaml:"server_idle_timeout,omitempty"`
@@ -77,6 +78,8 @@ type GlobalConfig struct {
 	ManagementListen  string `yaml:"management_listen,omitempty"`
 	ManagementTLSCert string `yaml:"management_tls_cert,omitempty"`
 	ManagementTLSKey  string `yaml:"management_tls_key,omitempty"`
+	// Requires 是本机 global 平面要安装的官方提供方及版本。
+	Requires RequiresSpec `yaml:"requires,omitempty"`
 	// EnabledProjects 是本机启用的 Project 列表。
 	EnabledProjects []string `yaml:"enabled_projects,omitempty"`
 	// EnabledBundles 仅用于读取旧配置；运行时会归一到当前启用列表。
@@ -241,6 +244,8 @@ type ProjectConfig struct {
 	Editor      string   `yaml:"editor,omitempty"`
 	// EnabledBundles 是旧启用列表；项目模型下 requires 才是 SSOT。
 	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
+	// Requires 声明本工作区要安装的官方提供方及版本（latest 或 v*）。
+	Requires RequiresSpec `yaml:"requires,omitempty"`
 	// ProvidesRoot 是作者目录（skills/commands/rules/mcp）的基准点，相对项目根。
 	// 新项目默认 DecAssets；旧项目空值表示仓库根。它不影响派生的 vault target。
 	ProvidesRoot string `yaml:"provides_root,omitempty"`

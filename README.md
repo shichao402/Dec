@@ -24,79 +24,39 @@ Dec 的解决方案：
 
 ## 核心概念
 
-### 1. Project、Bundle 与资产仓库
+### 1. 三套存储
 
-在 Console **设置** 页连接你的资产仓库，底层是一个 Git 仓库。
+| 存储 | 写谁 | 装什么 |
+|------|------|--------|
+| **官方注册表** | 提供方 CI → Dec 仓 orphan 分支 `registry`，tag `registry/<项目>/<v>` | relkit 等官方发行物 |
+| **个人私仓** | 人 `git push` / Console 对私仓提交 | 你自己要留的 Git 资产 |
+| **Bitwarden** | Console 认证后由 `dec-server` | 密钥，不进任何 Git |
 
-配置按 **Project > Bundle** 两层组织：
+消费仓用 `requires` 声明官方依赖。个人资产由本机/私仓启用列表决定，不和官方 `requires` 混写。
 
-| 层级 | 位置 | 说明 |
-|------|------|------|
-| **Project** | vault `projects/<name>.yaml` | 声明启用哪些 bundle；跨机器共享 |
-| **Bundle** | Git Vault `bundles/<name>/` + Bitwarden secrets bundle | Skills、Rules、MCP 及对应私密文件 |
+### 2. 消费配置 `requires`
 
-```text
-<repo>/
-├── projects/my-app.yaml    # bundles: [vikunja, helloworld]
-└── bundles/
-    ├── vikunja/
-    │   ├── bundle.yaml
-    │   ├── skills/
-    │   ├── rules/
-    │   ├── mcp/
-    │   └── commands/
-    └── default/
-        └── skills/helloworld/...
-```
-
-同名 Bitwarden folder 与 `.secrets` 同步根镜像；Secure Note 名 = 相对同步根路径（如 `.env/vikunja.env` → `.secrets/bundles/vikunja/.env/vikunja.env`），SSH Key Item 名 `.sshkey/<实例>` pull 到 `~/.ssh/dec_<bundle>_<实例>`；公开资产仍在 `.dec/cache/`。MCP 安装时包一层 `dec-exec --bundle …`。详见 [Documents/BUNDLE-SECRETS-MODEL.md](Documents/BUNDLE-SECRETS-MODEL.md) 与 [ADR 0002](Documents/decisions/0002-secrets-synctarget-root.md)。
-
-### 2. 项目配置
-
-**Vault project**（真相源）示例：
+写在消费仓 `.dec/config.yaml`（提交进该仓）。本机 global 平面写在 `~/.dec/config.yaml`。
 
 ```yaml
-name: my-app
-description: 我的应用项目
-bundles:
-  - vikunja
-  - helloworld
-ides:
-  - cursor
+requires:
+  relkit: v0.3.20
+  tencent-cloud: latest
 ```
 
-**本地** `.dec/config.yaml` 引用 vault project：
+只接受精确版本或 `latest`。指向不存在或已被 purge 的版本会报错，不回落。`latest` 跳过已 yank 的 tag。
 
-```yaml
-version: v2
-
-project_name: my-app       # 引用 projects/my-app.yaml
-
-ides:                      # 可选：机器级 IDE 覆盖
-  - cursor
-
-enabled_bundles:           # 唯一的资产启用入口；从 vault project 同步，Bundles 页可调整
-  - vikunja
-  - helloworld
-```
-
-资产只能按 bundle 启用，成员随 bundle 一并下发；早期的单资产字段（`available` / `enabled`）已移除，加载旧配置时会折叠成 `enabled_bundles` 并回写。
-
-- Console **引导 / 项目** 初始化 project（自动匹配、选择或新建）
-- Console 资产页扫描仓库、勾选 bundle
-- **同步** 页按 project 的 bundle 列表拉取 Dec + secrets bundle
+`install` 按 `requires` 从 registry 重画 IDE 目录。`.dec/cache` 只是只读下载缓存。
 
 ### 3. 资产部署
 
-Console **同步** 页将资产部署到当前项目的配置 IDE。
+Console **同步** 页：官方走 registry 安装；个人 Git 与密钥仍走私仓 / Bitwarden。官方禁止 `dec_push`；改官方安装物用草稿 + 源仓 PR/Issue。
 
 Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 
 - `.cursor/skills/dec-create-api-test/`
 - `.cursor/rules/dec-my-rule.mdc`
 - `.cursor/mcp.json` 中的 `dec-postgres-tool`
-
-一次 **pull bundle** 会先拉 Dec Git bundle 到 `.dec/cache/`，再自动拉 Bitwarden secrets bundle（Secure Note → 项目根，SSH Key → `~/.ssh/`）；项目根零路径重叠校验后渲染 IDE。
 
 ### 4. 支持的 IDE
 
@@ -245,27 +205,26 @@ MCP 必须是单个 server 片段 JSON，`command` 必填：
 
 ```
 .dec/
-├── config.yaml      # project_name + enabled_bundles + available/enabled
-├── cache/           # 资产缓存（pull 写入，push 读取）
-├── .version         # 当前 pull 的版本记录
+├── config.yaml      # requires map + provides（提供方）+ 个人启用
+├── cache/           # 只读下载缓存（按来源/项目/tag）
+├── drafts/          # 官方安装物的本地草稿
 ├── vars.yaml        # 项目变量定义
 └── vars.d/          # 可选：拆分的变量片段
 ```
 
-Vault project 声明位于 Git 仓库 `projects/<name>.yaml`。
-
-机器级变量文件位于 `~/.dec/local/vars.yaml`。
+官方快照在 Dec 仓 `registry` 分支。个人 Git 在设置里的 `repo_url`。密钥仍在 Bitwarden。
 
 全局配置位于 `~/.dec/config.yaml`，例如：
 
 ```yaml
 repo_url: https://github.com/<user>/<your-repo>
+registry_url: https://github.com/shichao402/Dec.git
+
+requires:
+  relkit: latest
 
 ides:
   - cursor
-  - codebuddy
-
-editor: code --wait
 ```
 
 ## 故障排查

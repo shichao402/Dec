@@ -123,9 +123,6 @@ name: project-workflow
 	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-project-workflow", "SKILL.md")); err != nil {
 		t.Fatalf("安装后的 skill 应存在: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", ".version")); err != nil {
-		t.Fatalf(".dec/.version 应存在: %v", err)
-	}
 
 	giPath := filepath.Join(projectRoot, ".gitignore")
 	giData, giErr := os.ReadFile(giPath)

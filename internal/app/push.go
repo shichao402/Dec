@@ -107,6 +107,12 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 		return 0, "", "", err
 	}
 
+	if reason := officialGitPushBlocked(projectConfig); reason != "" {
+		skippedReason = reason
+		emit(reporter, EventWarn, "push.dec", reason, nil)
+		return 0, skippedReason, "", nil
+	}
+
 	if len(projectConfig.EnabledBundles) == 0 && strings.TrimSpace(projectConfig.ProjectName) == "" {
 		skippedReason = "无已启用 bundle"
 		emit(reporter, EventInfo, "push.dec", "无已启用 bundle，跳过 Dec 推送", nil)
@@ -128,11 +134,12 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 			return resolveErr
 		}
 
-		assets := writableResolvedAssets(workspace, projectConfig, resolved.Assets)
+		req, _ := workspaceOfficialRequires(workspace, projectConfig)
+		assets := filterOfficialVaultAssets(req, writableResolvedAssets(workspace, projectConfig, resolved.Assets))
 		if extra, extraErr := scanWritableCacheAssets(workspace, projectConfig); extraErr != nil {
 			return extraErr
 		} else {
-			assets = unionTypedAssets(assets, extra)
+			assets = filterOfficialVaultAssets(req, unionTypedAssets(assets, extra))
 		}
 		resolvedForPush := *resolved
 		resolvedForPush.Assets = assets

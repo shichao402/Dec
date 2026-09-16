@@ -174,6 +174,9 @@ func syncProjectProvides(ctx context.Context, projectRoot string, mode ProvideSy
 		return &ProvidesSyncResult{Mode: mode, Worktree: state.Worktree}, nil
 	}
 	result := &ProvidesSyncResult{Mode: mode, Worktree: state.Worktree}
+	if execute && mode == ProvideSyncPush {
+		return nil, fmt.Errorf("官方 provides 禁止本机推柜；请用提供方 CI 的 dec-registry publish-provides")
+	}
 	err = repo.WithPersistentWorktree(state.Worktree, projectRoot, func(worktree, branch, defaultBranch string) error {
 		result.Branch, result.RemoteBranch = branch, defaultBranch
 		conflicts, merge, err := gitConflictState(ctx, worktree)
@@ -296,11 +299,7 @@ func syncProjectProvides(ctx context.Context, projectRoot string, mode ProvideSy
 		if mode == ProvideSyncPull || result.Ahead == 0 {
 			return nil
 		}
-		if err := runGit(ctx, worktree, "push", "origin", "HEAD:"+defaultBranch); err != nil {
-			return fmt.Errorf("provides 已提交到持久 worktree，但 push 失败，可重试同步: %w", err)
-		}
-		result.Pushed = true
-		result.Ahead = 0
+		// 官方快照只由 CI 写入 Dec registry，本机 auto 同步不再 push 私仓。
 		return nil
 	})
 	if err != nil {

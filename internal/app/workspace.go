@@ -74,7 +74,10 @@ func loadWorkspaceBundleConfig(workspace Workspace) (*types.ProjectConfig, error
 		if err != nil {
 			return nil, err
 		}
-		return &types.ProjectConfig{EnabledBundles: append([]string(nil), globalConfig.EnabledBundles...)}, nil
+		return &types.ProjectConfig{
+			EnabledBundles: append([]string(nil), globalConfig.EnabledBundles...),
+			Requires:       globalConfig.Requires,
+		}, nil
 	}
 	return config.NewProjectConfigManager(workspace.Root).LoadProjectConfig()
 }

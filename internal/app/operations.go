@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/shichao402/Dec/internal/bundle"
 	"github.com/shichao402/Dec/internal/config"
@@ -88,6 +87,21 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	projectIDEs := uniqueWorkspaceIDEs(workspace, ideSelection.IDEs)
 	result.EffectiveIDEs = projectIDENames(projectIDEs)
 
+	official, err := installOfficialRequires(ctx, workspace, projectConfig, reporter)
+	if err != nil {
+		return nil, err
+	}
+	req, _ := workspaceOfficialRequires(workspace, projectConfig)
+	if err := renderOfficialFromCache(workspace, req, projectIDEs, result, reporter); err != nil {
+		return nil, err
+	}
+	for _, item := range official {
+		result.RequiredProjects = appendUniqueSource(result.RequiredProjects, item.Project)
+		if item.Warning != "" {
+			result.NonFatalWarnings = append(result.NonFatalWarnings, item.Warning)
+		}
+	}
+
 	var migrationNotes []string
 	if workspace.EffectivePlane() == WorkspaceProject {
 		migrationNotes, err = migrateLegacyProjectLayouts(projectRoot, projectIDEs)
@@ -110,16 +124,12 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 		if workspace.EffectivePlane() == WorkspaceProject && strings.TrimSpace(projectConfig.ProjectName) != "" {
 			usesP, _ = connectedRepositoryUsesPModel()
 		}
-		if !usesP {
+		if !usesP && len(req) == 0 {
 			result.SkippedReason = "未启用 bundle"
 			emit(reporter, EventInfo, "pull.prepare", "请先在 Bundles 页勾选并保存", nil)
 			applyAssetCleanup(result, workspace, nil, projectIDEs, reporter)
 			return result, nil
 		}
-	}
-
-	if err := migrateRemotePlanes(ctx, reporter); err != nil {
-		return nil, fmt.Errorf("迁移远端平面目录失败: %w", err)
 	}
 
 	createTx := func() (*repo.Transaction, error) {
@@ -131,6 +141,11 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 
 	tx, err := createTx()
 	if err != nil {
+		if len(official) > 0 {
+			emit(reporter, EventWarn, "pull.vault", "私仓不可用，已只安装官方 registry 资产", nil)
+			result.NonFatalWarnings = append(result.NonFatalWarnings, err.Error())
+			return result, nil
+		}
 		return nil, err
 	}
 	defer tx.Close()
@@ -292,7 +307,6 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 		commitHash := tx.CommitHash()
 		if commitHash != "" {
 			result.VersionCommit = commitHash
-			saveVersionMeta(workspaceCacheRoot(workspace), commitHash)
 		}
 		return result, nil
 	}
@@ -300,7 +314,6 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	commitHash := tx.CommitHash()
 	if commitHash != "" {
 		result.VersionCommit = commitHash
-		saveVersionMeta(workspaceCacheRoot(workspace), commitHash)
 	}
 
 	summary := fmt.Sprintf("✅ 完成：%d 个资产已拉取", result.PulledCount)
@@ -1126,13 +1139,6 @@ func enabledBundleNamesFromConfig(projectConfig *types.ProjectConfig, overviews 
 	}
 	sort.Strings(names)
 	return names
-}
-
-func saveVersionMeta(projectRoot, commitHash string) {
-	versionPath := filepath.Join(projectRoot, ".dec", ".version")
-	content := fmt.Sprintf("commit: %s\npulled_at: %q\n", commitHash, time.Now().Format(time.RFC3339))
-	_ = os.MkdirAll(filepath.Dir(versionPath), 0755)
-	_ = os.WriteFile(versionPath, []byte(content), 0644)
 }
 
 // stripExternalEnvLauncher 去掉历史外部启动器外壳（如 mise exec ... --），返回真实命令。

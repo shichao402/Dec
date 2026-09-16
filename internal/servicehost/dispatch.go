@@ -90,7 +90,8 @@ func isProjectMutation(method string) bool {
 	case "save_enabled_bundles", "prepare_project_config_init", "ensure_local_project_config",
 		"ensure_home_p", "bind_managed_project", "create_local_asset",
 		"apply_vault_project", "save_project_settings", "ensure_project_vars",
-		"prepare_remote_note_edit", "prepare_remote_ssh_hosts_edit", "save_project_provides":
+		"prepare_remote_note_edit", "prepare_remote_ssh_hosts_edit", "save_project_provides",
+		"propose_upstream":
 		return true
 	default:
 		return false
@@ -589,6 +590,13 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		}
 		in.Workspace = workspace
 		return app.CreateLocalAsset(in)
+	case "propose_upstream":
+		var in app.ProposeUpstreamInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		in.ProjectRoot = projectRoot
+		return app.ProposeUpstream(ctx, in)
 	case "add_secret":
 		var in struct {
 			Target  secrets.SyncTarget

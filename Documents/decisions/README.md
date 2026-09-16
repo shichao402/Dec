@@ -46,5 +46,6 @@
 | [0023](0023-facade-capability-parity.md) | 门面能力口径：Console 覆盖人面能力，MCP 扩展需登记 | 已接受（已实现） |
 | [0024](0024-vault-delete-to-trash.md) | 远端删除移入保险库回收站，不永久删除 | 已接受（已实现） |
 | [0025](0025-mcp-console-gateway.md) | MCP 经唯一 Console 网关代理，不再直连 dec-server | 已接受（已实现） |
-| [0026](0026-project-provides-and-sync-worktree.md) | 项目作者源映射与可恢复同步工作副本 | 已接受（实现中） |
+| [0026](0026-project-provides-and-sync-worktree.md) | 项目作者源映射与可恢复同步工作副本 | 发版 / 本机推柜段已被 [0028](0028-official-registry-and-install.md) 取代；`provides` 作者源映射仍有效 |
 | [0027](0027-relkit-owned-update-contract.md) | 更新契约只由 relkit 声明 | 已接受（已实现） |
+| [0028](0028-official-registry-and-install.md) | 官方注册表、安装器与个人私仓 | 已接受 |

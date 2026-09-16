@@ -207,6 +207,12 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 	}
 	normalized.Provides = provides
 	config.Provides = provides
+	requires, err := types.NormalizeRequiresSpec(normalized.Requires)
+	if err != nil {
+		return fmt.Errorf("校验 requires 失败: %w", err)
+	}
+	normalized.Requires = requires
+	config.Requires = requires
 
 	data, err := yaml.Marshal(&normalized)
 	if err != nil {
@@ -397,6 +403,11 @@ func loadProjectConfigV2(data []byte, configPath string) (*types.ProjectConfig, 
 		return nil, fmt.Errorf("校验 %s 中的 provides 失败: %w", configPath, err)
 	}
 	config.Provides = provides
+	requires, err := types.NormalizeRequiresSpec(config.Requires)
+	if err != nil {
+		return nil, fmt.Errorf("校验 %s 中的 requires 失败: %w", configPath, err)
+	}
+	config.Requires = requires
 	return &config, nil
 }
 

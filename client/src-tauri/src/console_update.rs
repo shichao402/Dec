@@ -195,6 +195,7 @@ fn updater(app: &AppHandle, current: &str) -> Result<Updater, String> {
                 .into_owned(),
             preserve: Vec::new(),
             retain: 0,
+            reserved_codes: Vec::new(),
             relaunch: true,
             file_set: Vec::new(),
         }),

@@ -136,6 +136,10 @@ export function SyncPage(props: {
       />
       <PageFill>
         <ScrollArea className="space-y-3 pr-0.5">
+          <Notice
+            tone="info"
+            text="官方资产从 Dec 仓 registry 分支按 requires 安装。改官方安装物请用草稿 + 源仓 PR/Issue（MCP dec_propose_upstream）；本页 Push 只处理个人私仓与密钥。TODO(console)：贡献入口尚未做成独立页。"
+          />
           <SyncPreviewPanel
             deviceId={props.deviceId}
             targets={targets}

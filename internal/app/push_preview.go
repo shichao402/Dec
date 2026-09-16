@@ -48,6 +48,9 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 	if err != nil {
 		return nil, err
 	}
+	if reason := officialGitPushBlocked(projectConfig); reason != "" {
+		preview.DecSkippedReason = reason
+	}
 
 	preview.EnabledBundleNames = append([]string(nil), projectConfig.EnabledBundles...)
 	preview.EnabledBundleCount = len(preview.EnabledBundleNames)
@@ -89,6 +92,12 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 		preview.Changes = changes
 		if skipped != "" {
 			preview.DecSkippedReason = skipped
+		}
+		if reason := officialGitPushBlocked(projectConfig); reason != "" {
+			preview.DecSkippedReason = reason
+			preview.DecHasChanges = false
+			preview.DecCandidateCount = 0
+			preview.Changes = nil
 		}
 	}
 	return preview, nil

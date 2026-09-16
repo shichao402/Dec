@@ -877,6 +877,12 @@ func deleteRemoteDecAssetOnly(projectRoot string, plane WorkspacePlane, itemType
 		Name:        name,
 		Vault:       vault,
 	}
+	ws := NewWorkspace(plane, projectRoot)
+	cfg, _ := loadWorkspaceBundleConfig(ws)
+	req, _ := workspaceOfficialRequires(ws, cfg)
+	if req.Has(vault) {
+		return nil, fmt.Errorf("官方资产 %s 不能从本机删除远端；请由提供方 CI yank/purge", vault)
+	}
 	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
 		repoDir := tx.WorkDir()
 		foundVault := vault
