@@ -299,7 +299,26 @@ def _impl_retrospect_report(root: Path) -> dict[str, Any]:
         "inspect/reconcile/retrospect gates are registered functions",
         f"registered={sorted(GATES)}",
         {"updater-sdk-contract", "webview-projection", "other-declarations",
-         "updater-chokepoints", "legacy-in-process-updater"}.issubset(GATES),
+         "updater-chokepoints", "legacy-in-process-updater",
+         "consumer-entry-only", "host-python-floor"}.issubset(GATES),
+    )
+
+    floor_literal = re.compile(r"sys\.version_info\s*<\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)")
+    guards: dict[str, Any] = {}
+    for name in ("relkit_host.py", "relkit_consume.py"):
+        try:
+            text = (host_scripts_dir() / name).read_text(encoding="utf-8")
+        except OSError:
+            guards[name] = None
+            continue
+        found = floor_literal.search(text)
+        guards[name] = (int(found.group(1)), int(found.group(2))) if found else None
+    check(
+        "host-python-floor-declared",
+        host_path,
+        f"entry guards refuse below MIN_PYTHON={tuple(MIN_PYTHON)}",
+        f"guards={guards}",
+        all(value == tuple(MIN_PYTHON) for value in guards.values()),
     )
 
     if not callable(clear_stale_staged_trees):

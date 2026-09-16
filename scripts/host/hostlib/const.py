@@ -10,6 +10,12 @@ LOCAL_SCHEMA = "relkit.onboarding.local/1"
 
 LOCK_SCHEMA = "relkit.consume/2"
 
+# hostlib evaluates PEP 585 builtin generics while importing (gates.Gate), so an
+# older interpreter dies inside the import instead of at the entry guard. The
+# entry scripts repeat this floor as a literal because they must refuse before
+# importing hostlib at all; retrospect checks the two agree.
+MIN_PYTHON = (3, 9)
+
 DEFAULT_SERVE_DIR = "/etc/relkit-serve"
 
 DEFAULT_AGENT_CONFIG = "/etc/relkit-agent/relkit-agent.json"
@@ -43,6 +49,12 @@ PUBLISH_PROTOCOL_FALLBACK = 2
 UPDATER_IPC_FALLBACK = 1
 
 UPDATER_PROCESS_VALUES = updater_process_values()
+
+# Writable publish destinations. Read-only mirrors are not a backend type.
+BACKEND_KIND_VALUES = (
+    "intranet-relkit-compatible",
+    "s3-compatible",
+)
 
 UPDATER_PROCESS_EXPLAIN = (
     "谁调用 Updater.open。只记封闭词，不要另写决策备忘。"
@@ -102,7 +114,7 @@ DECISION_STEPS = (
 
 ACTION_STEPS = tuple(step for step in STEP_IDS if step not in DECISION_STEPS)
 
-STALE_BACKEND_TYPES = frozenset({"http-put", "local"})
+STALE_BACKEND_TYPES = frozenset({"http-put", "local", "static-http"})
 
 INSPECT_SCHEMA = "relkit.inspect/1"
 
@@ -147,6 +159,9 @@ DIGESTED_ISSUE_CODES = frozenset(
         "host-scripts-pycache-untracked",
         "upgrade-legacy-inventory-unreadable",
         "decision-before-live-inventory",
+        "sidecar-universal-not-darwin",
+        "sidecar-universal-missing-attachment",
+        "sidecar-universal-lipo-failed",
     }
 )
 
@@ -159,7 +174,10 @@ EXPLAIN_TEXTS = {
     "product.id": "Stable product id used by serve/agent tokens and relkit.json.",
     "updater.process": UPDATER_PROCESS_EXPLAIN,
     "channel.ssot": "VERSION.json is the version SSOT; host.py/CI call relkit version, people do not.",
-    "backend.kind": "Where bits live. Intranet products share a serve host with a new product id.",
+    "backend.kind": (
+        "Where bits live for publish. Intranet products share a serve host "
+        "with a new product id."
+    ),
     "ssh.host": (
         "OpenSSH Host from ~/.ssh/config plus Include files. "
         "This script lists exact names, glob patterns, and matching hostnames; "

@@ -99,6 +99,24 @@ def _impl_env_inspect_report(root: Path) -> dict[str, Any]:
             for name, backend in backends.items()
             if isinstance(backend, dict)
         }
+        site = data.get("site") if isinstance(data.get("site"), dict) else {}
+        facts["siteTitle"] = site.get("title")
+        if "makers" in site:
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": "product-site-makers",
+                    "detail": "site.makers belongs in relkit-agent.json; product relkit.json may only carry title/description/homepage",
+                }
+            )
+        if site and not str(site.get("title") or "").strip():
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": "missing-site-title",
+                    "detail": "relkit.json site.title is required for the human release catalog",
+                }
+            )
         for name, kind in facts["backends"].items():
             if kind in STALE_BACKEND_TYPES:
                 findings.append(

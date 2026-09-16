@@ -77,13 +77,6 @@ def _impl_extract_publish_profile(machine: dict[str, Any]) -> dict[str, Any]:
     }
     if signing.get("privateKeyEnv"):
         profile_signing["privateKeyEnv"] = signing["privateKeyEnv"]
-    # Site blurbs travel in the staged release-policy.json. A profile carries
-    # only the Makers token env name; anything else here is an unknown field
-    # the agent refuses to parse.
-    profile_site: dict[str, Any] = {}
-    token_env = ((machine.get("site") or {}).get("makers") or {}).get("tokenEnv")
-    if token_env:
-        profile_site["makers"] = {"tokenEnv": token_env}
     profile: dict[str, Any] = {
         "product": machine.get("product"),
         "signing": profile_signing,
@@ -93,8 +86,6 @@ def _impl_extract_publish_profile(machine: dict[str, Any]) -> dict[str, Any]:
     directory_publish_to = (machine.get("directory") or {}).get("publishTo")
     if directory_publish_to:
         profile["directory"] = {"publishTo": list(directory_publish_to)}
-    if profile_site:
-        profile["site"] = profile_site
     return profile
 
 def _impl_machine_publish_config(root: Path, product: str, key_id: str, private_relpath: str) -> dict[str, Any]:
@@ -111,6 +102,12 @@ def _impl_machine_publish_config(root: Path, product: str, key_id: str, private_
     signing = dict(cfg.get("signing") or {})
     signing["keyId"] = key_id
     signing["privateKeyPath"] = private_relpath
+    source_site = cfg.get("site") or {}
+    product_site = {
+        key: source_site[key]
+        for key in ("title", "description", "homepage")
+        if source_site.get(key)
+    }
     return {
         "product": product,
         "defaultChannel": cfg.get("defaultChannel") or "stable",
@@ -121,7 +118,7 @@ def _impl_machine_publish_config(root: Path, product: str, key_id: str, private_
         "publishTo": list(cfg.get("publishTo") or backends.keys()),
         "directory": {"publishTo": list((cfg.get("directory") or {}).get("publishTo") or cfg.get("publishTo") or backends.keys())},
         "signing": signing,
-        "site": cfg.get("site") or {},
+        "site": product_site,
     }
 
 def _impl_parse_list_products(text: str) -> list[str]:
@@ -258,6 +255,7 @@ def _impl_remote_inventory(
         "serviceActive": None,
         "serviceEnabled": None,
         "operatorTokenPresent": None,
+        "siteStatus": None,
         "products": [],
         "error": None,
     }
@@ -275,7 +273,12 @@ def _impl_remote_inventory(
                 "-lc",
                 (
                     f"systemctl is-active {shlex.quote(unit)} 2>/dev/null || true; "
-                    f"systemctl is-enabled {shlex.quote(unit)} 2>/dev/null || true"
+                    f"systemctl is-enabled {shlex.quote(unit)} 2>/dev/null || true; "
+                    + (
+                        "curl -fsS http://127.0.0.1:8787/-/site 2>/dev/null || true"
+                        if use_agent
+                        else "true"
+                    )
                 ),
             ],
             port=port,
@@ -322,6 +325,17 @@ def _impl_remote_inventory(
                 "products": products,
             }
         )
+        if use_agent and len(status) > 2 and status[2].strip().startswith("{"):
+            try:
+                site_status = json.loads(status[2])
+                result["siteStatus"] = {
+                    "configured": bool(site_status.get("configured")),
+                    "projectId": site_status.get("projectId"),
+                    "tokenEnv": site_status.get("tokenEnv"),
+                    "tokenPresent": bool(site_status.get("tokenPresent")),
+                }
+            except (json.JSONDecodeError, TypeError):
+                result["siteStatus"] = None
     except Fail as error:
         result["error"] = str(error)
     lock_path = root / "scripts" / "relkit.lock.json"
@@ -378,6 +392,16 @@ def _impl_decision_evidence(root: Path, state: dict[str, Any]) -> dict[str, Any]
             implications.append(message)
             if remote.get("onPublishRoute"):
                 blocked["token.isolation"] = message + "; upgrade the remote first"
+        if remote.get("onPublishRoute") and remote.get("role") == "agent":
+            site_status = remote.get("siteStatus")
+            if site_status is None:
+                implications.append("agent site readiness is unavailable; /-/site did not return status")
+            elif not site_status.get("configured"):
+                implications.append("agent has no top-level site.makers; protocol publish works but static site rebuild cannot deploy")
+            elif not site_status.get("tokenPresent"):
+                implications.append(
+                    f"agent site token env {site_status.get('tokenEnv') or '(unset)'} is absent from the running process"
+                )
     elif topology.get("tokenRequired"):
         blocked["token.isolation"] = (
             "live remote inventory is required before choosing token isolation: "

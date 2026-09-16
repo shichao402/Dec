@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
+from .const import MIN_PYTHON
 from .facets import BY_NAME, components
 
 Gate = Callable[[Path, dict[str, Any], list[str]], None]
@@ -23,6 +24,12 @@ EXECUTABLE_SUFFIXES = {
     ".rs", ".go", ".dart", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
     ".py", ".sh", ".ps1",
 }
+# Entry scripts pick the interpreter, so this scan has to reach the Windows
+# batch proxies that the shared source scan deliberately ignores.
+ENTRY_SUFFIXES = {".sh", ".bash", ".bat", ".cmd", ".ps1", ".py", ".yml", ".yaml"}
+HOST_ENTRY_SIGNAL = re.compile(r"relkit_host\.py|relkit_consume\.py")
+CONSUMER_IMPORT = re.compile(r"^[ \t]*(?:import|from)[ \t]+relkit_consume\b", re.M)
+RETIRED_CONSUMER_PATH = re.compile(r"scripts[/\\]relkit_consume\.py")
 
 
 def gate(name: str) -> Callable[[Gate], Gate]:
@@ -71,6 +78,29 @@ def _source_files(root: Path) -> list[Path]:
         and not path.relative_to(root).as_posix().startswith("scripts/host/")
     ]
 
+@gate("product-site-policy")
+def product_site_policy(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    cfg = _config(root)
+    if not cfg:
+        return
+    site = cfg.get("site")
+    if not isinstance(site, dict) or not str(site.get("title") or "").strip():
+        drift.append("relkit.json site.title is required for the human release catalog")
+        return
+    if "makers" in site:
+        drift.append("relkit.json site.makers is forbidden; configure it once in relkit-agent.json")
+
+
+def _entry_files(root: Path) -> list[Path]:
+    return [
+        path for path in root.rglob("*")
+        if path.is_file()
+        and path.suffix.lower() in ENTRY_SUFFIXES
+        and not any(part in EXCLUDED for part in path.relative_to(root).parts)
+        and not any(part.startswith(".") for part in path.relative_to(root).parts[:-1])
+        and not path.relative_to(root).as_posix().startswith("scripts/host/")
+    ]
+
 
 def has_webview(root: Path) -> bool:
     return any(
@@ -100,6 +130,64 @@ def _tree_is_installed(root: Path, lock: dict[str, Any], name: str) -> bool:
         installed.get("sha256") == spec.get("sha256")
         and all((destination / relative).exists() for relative in row.required_paths)
     )
+
+
+@gate("consumer-entry-only")
+def consumer_entry_only(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    """The pinned consumer is release-internal, not a product import.
+
+    relkit_consume.py ships inside scripts/host next to hostlib and moves with
+    the release, so a product that imports it as a top-level module or spells
+    the retired root path only finds out at build time, one upgrade later.
+    """
+    if not _step_value(state, "consume.lock"):
+        return
+    for path in _source_files(root):
+        relative = path.relative_to(root).as_posix()
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if CONSUMER_IMPORT.search(text):
+            drift.append(
+                "relkit_consume is release-internal; go through relkit_host.py: "
+                f"{relative}"
+            )
+        if RETIRED_CONSUMER_PATH.search(text):
+            drift.append(
+                "scripts/relkit_consume.py is retired; the consumer ships in "
+                f"scripts/host: {relative}"
+            )
+
+
+@gate("host-python-floor")
+def host_python_floor(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    """Entry scripts must pick an interpreter that can import hostlib.
+
+    Accepting an older interpreter fails deep inside the hostlib import on
+    whichever CI worker happens to have only that version installed, so the
+    floor is checked where the interpreter is chosen.
+    """
+    if not _step_value(state, "consume.lock"):
+        return
+    minor = MIN_PYTHON[1]
+    declared = re.compile(r"version_info\s*(?:>=|<)\s*\(\s*3\s*,\s*(\d+)\s*\)")
+    interpreters = (
+        re.compile(r"python-?3\.?(\d{1,2})\b", re.I),
+        # Windows proxies select through the py launcher instead of a name.
+        re.compile(r"\bpy\s+-3\.(\d{1,2})\b", re.I),
+    )
+    for path in _entry_files(root):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if not HOST_ENTRY_SIGNAL.search(text):
+            continue
+        found = {int(item) for item in declared.findall(text)}
+        for pattern in interpreters:
+            found.update(int(item) for item in pattern.findall(text))
+        stale = sorted(item for item in found if item < minor)
+        if stale:
+            drift.append(
+                f"entry script accepts Python 3.{stale[0]} but relkit host "
+                f"scripts need >= 3.{minor}: "
+                f"{path.relative_to(root).as_posix()}"
+            )
 
 
 @gate("updater-sdk-contract")

@@ -100,6 +100,69 @@ def _impl_cmd_install(root: Path, consume_argv: Sequence[str]) -> int:
         save_state(root, state)
     return code
 
+def _impl_cmd_sidecar_universal(root: Path, out: Path) -> int:
+    """Fuse the lock's darwin updater attachments into one universal sidecar.
+
+    macOS products ship a universal main binary, so the sidecar beside it must
+    be universal too. ``install`` can only ever place the packaging machine's
+    own architecture at ``tools/bin/relkit-updater``, and every target installs
+    under that same name, so the two-architecture shape needs its own command
+    instead of a product reaching into the pinned consumer.
+    """
+    if sys.platform != "darwin":
+        raise Fail(
+            "sidecar universal needs macOS lipo; run it on the macOS packaging job",
+            code="sidecar-universal-not-darwin",
+        )
+    consume = import_consume()
+    lock = consume.load_lock(root / "scripts" / "relkit.lock.json")
+    with tempfile.TemporaryDirectory(prefix="relkit-sidecar-universal-") as raw:
+        staged: list[Path] = []
+        for target in ("darwin-amd64", "darwin-arm64"):
+            try:
+                spec = consume.artifact_spec(lock, "updater", target)
+            except (RuntimeError, KeyError, ValueError) as error:
+                raise Fail(
+                    f"lock does not pin the updater for {target}: {error}",
+                    code="sidecar-universal-missing-attachment",
+                ) from error
+            artifact = consume.download_artifact(root, f"updater-{target}", spec)
+            copy = Path(raw) / target
+            shutil.copyfile(artifact, copy)
+            copy.chmod(copy.stat().st_mode | 0o755)
+            staged.append(copy)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        archs = _lipo_fuse(staged, out)
+    print(f"relkit: universal updater sidecar {out} ({' '.join(archs)})")
+    return 0
+
+def _impl__lipo_fuse(inputs: Sequence[Path], out: Path) -> list[str]:
+    """Run lipo and report the architectures the result actually carries."""
+    try:
+        subprocess.run(
+            ["lipo", "-create", *(str(item) for item in inputs), "-output", str(out)],
+            check=True,
+        )
+        out.chmod(out.stat().st_mode | 0o755)
+        archs = subprocess.run(
+            ["lipo", "-archs", str(out)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise Fail(
+            f"lipo failed to fuse the updater sidecar: {error}",
+            code="sidecar-universal-lipo-failed",
+        ) from error
+    missing = [item for item in ("x86_64", "arm64") if item not in archs]
+    if missing:
+        raise Fail(
+            f"universal sidecar is missing {' '.join(missing)}: {out}",
+            code="sidecar-universal-lipo-failed",
+        )
+    return archs
+
 def _impl_int_window(raw: Any, fallback: int) -> dict[str, int]:
     try:
         minimum = int((raw or {}).get("min") or fallback)
@@ -661,6 +724,8 @@ _IMPLEMENTATIONS = {
     "require_host_scripts_match_lock": _impl_require_host_scripts_match_lock,
     "lock_artifact_names": _impl_lock_artifact_names,
     "cmd_install": _impl_cmd_install,
+    "cmd_sidecar_universal": _impl_cmd_sidecar_universal,
+    "_lipo_fuse": _impl__lipo_fuse,
     "int_window": _impl_int_window,
     "build_release_lock": _impl_build_release_lock,
     "cmd_upgrade": _impl_cmd_upgrade,

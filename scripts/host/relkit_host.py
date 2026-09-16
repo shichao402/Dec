@@ -23,6 +23,15 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
 
+# Must refuse before the hostlib import, which itself needs 3.9. Keep in sync
+# with hostlib.const.MIN_PYTHON; retrospect checks both literals agree.
+if sys.version_info < (3, 9):
+    raise SystemExit(
+        "relkit host scripts need Python >= 3.9, but this interpreter is "
+        f"{sys.version_info.major}.{sys.version_info.minor}; "
+        "point the entry script at a newer interpreter"
+    )
+
 from hostlib.const import *
 from hostlib.facets import (
     BY_NAME,
@@ -171,6 +180,8 @@ from hostlib.release import (
     require_host_scripts_match_lock,
     lock_artifact_names,
     cmd_install,
+    cmd_sidecar_universal,
+    _lipo_fuse,
     int_window,
     build_release_lock,
     cmd_upgrade,
@@ -250,6 +261,14 @@ def build_parser() -> argparse.ArgumentParser:
     apply_answers.add_argument("--answers", required=True)
 
     sub.add_parser("install", help="install lock-pinned artifacts via relkit_consume.py")
+    sidecar = sub.add_parser(
+        "sidecar", help="build lock-pinned sidecar shapes install cannot place"
+    )
+    sidecar_sub = sidecar.add_subparsers(dest="sidecar_cmd", required=True)
+    sidecar_universal = sidecar_sub.add_parser(
+        "universal", help="fuse the lock's darwin updater attachments with lipo"
+    )
+    sidecar_universal.add_argument("--out", required=True)
     retrospect = sub.add_parser(
         "retrospect", help="run the final non-interactive ops consistency gate"
     )
@@ -373,6 +392,8 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
         )
     if args.cmd == "install":
         return cmd_install(root, [])
+    if args.cmd == "sidecar":
+        return cmd_sidecar_universal(root, Path(args.out))
     if args.cmd == "retrospect":
         return cmd_retrospect(root, args.json)
     if args.cmd == "upgrade":

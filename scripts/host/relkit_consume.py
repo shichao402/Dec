@@ -30,6 +30,15 @@ from typing import Any, Optional, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+# Must refuse before the hostlib import, which itself needs 3.9. Keep in sync
+# with hostlib.const.MIN_PYTHON; retrospect checks both literals agree.
+if sys.version_info < (3, 9):
+    raise SystemExit(
+        "relkit host scripts need Python >= 3.9, but this interpreter is "
+        f"{sys.version_info.major}.{sys.version_info.minor}; "
+        "point the entry script at a newer interpreter"
+    )
+
 from hostlib.facets import (
     BY_NAME,
     TARGETS,

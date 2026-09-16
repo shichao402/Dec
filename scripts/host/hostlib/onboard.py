@@ -89,7 +89,7 @@ def _impl_recommendations(root: Path, state: dict[str, Any]) -> dict[str, str]:
             if (root / "VERSION").is_file() and not (root / "VERSION.json").is_file()
             else "VERSION.json via relkit version"
         ),
-        "backend.kind": "choose: intranet-relkit-compatible / s3-compatible / static-http",
+        "backend.kind": "choose: intranet-relkit-compatible / s3-compatible",
         "ssh.host": ssh_host_recommend(),
         "ssh.config_dir": DEFAULT_SERVE_DIR + " (confirm against journal config: line)",
         "token.isolation": "exclusive (pass --share-with only when the user names an existing id)",
@@ -116,7 +116,7 @@ def _impl_choice_hint(root: Path, step_id: str) -> str:
         "product.id": "稳定的小写 ID，例如 loom；发布后不要随意改",
         "updater.process": " / ".join(UPDATER_PROCESS_VALUES),
         "channel.ssot": "migrate:VERSION->VERSION.json / VERSION.json / custom",
-        "backend.kind": "intranet-relkit-compatible / s3-compatible / static-http",
+        "backend.kind": " / ".join(BACKEND_KIND_VALUES),
         "env.inspect": "clean error findings then onboard inspect; no typed confirmation",
         "ssh.host": ssh_host_recommend(root=root),
         "ssh.config_dir": "运行中服务日志实际打印的配置目录",
@@ -155,7 +155,7 @@ def _impl_decision_options(
             options.insert(0, "migrate:VERSION->VERSION.json")
         return options
     if step_id == "backend.kind":
-        return ["intranet-relkit-compatible", "s3-compatible", "static-http"]
+        return list(BACKEND_KIND_VALUES)
     if step_id == "ssh.host":
         inventory = ssh_inventory(root)
         values = list(inventory.get("exact") or [])
@@ -513,9 +513,8 @@ def _impl_apply_decision_to_state(
             raise Fail("updater.process must be " + " / ".join(UPDATER_PROCESS_VALUES))
         set_step(state, step_id, "confirmed", value, kept_note, mark_later_stale=True)
     elif step_id == "backend.kind":
-        allowed = ("intranet-relkit-compatible", "s3-compatible", "static-http")
-        if value not in allowed:
-            raise Fail("backend.kind must be " + " / ".join(allowed))
+        if value not in BACKEND_KIND_VALUES:
+            raise Fail("backend.kind must be " + " / ".join(BACKEND_KIND_VALUES))
         set_step(
             state,
             step_id,
