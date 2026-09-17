@@ -129,7 +129,9 @@ jobs:
 
       - name: Build runtime suite
         shell: bash
-        run: bash scripts/build.sh --all
+        run: |
+          bash scripts/build.sh --all
+          bash scripts/build-ci-tools.sh
 
       - name: Checksums
         shell: bash
@@ -145,6 +147,7 @@ jobs:
           if-no-files-found: error
           path: |
             dist/dec-*
+            dist/ci/dec-registry-*
             version.json
 
   console:
@@ -387,11 +390,11 @@ jobs:
             git tag "${VERSION}"
             git push origin "refs/tags/${VERSION}"
           fi
-          # 人面只挂 Console。运行时组件走 RUP，不进 GitHub Release。
+          # 人面与提供方 CI 工具挂 GitHub Release。运行时组件只走 RUP。
           shopt -s nullglob
-          assets=(dist/dec-console-*)
+          assets=(dist/dec-console-* dist/ci/dec-registry-*)
           if [ "${#assets[@]}" -eq 0 ]; then
-            echo "没有 Console 产物可挂到 GitHub Release"
+            echo "没有 Console / CI 工具产物可挂到 GitHub Release"
             exit 1
           fi
           gh release create "${VERSION}" \
