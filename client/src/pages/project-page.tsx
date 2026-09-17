@@ -74,7 +74,7 @@ export function ProjectPage(props: {
     <Page>
       <PageHeader
         title={project.Label || project.Name}
-        description="官方依赖、本仓库提供项与个人资产。"
+        description="提供项、依赖与个人资产。"
         meta={
           <>
             <Badge tone="quiet" className="font-mono" title={project.Root}>{project.Root}</Badge>

@@ -257,6 +257,20 @@ export function installTauriMock(scenario: Scenario) {
           Bundles: [home, ...scenario.assets.Bundles.filter((item) => item.Name !== 'dec')],
         })
       }
+      if (method === 'list_official_requires') {
+        const projectRoot = String(args.projectRoot || args.project_root || '')
+        if (!projectRoot) return ok({ Items: [] })
+        return ok({
+          Items: [{
+            Project: 'relkit',
+            Want: 'latest',
+            Installed: '',
+            Available: 'v0.4.2',
+            Tag: 'registry/relkit/v0.4.2',
+            UpdateAvailable: true,
+          }],
+        })
+      }
       if (method === 'save_project_tags') {
         const raw = String(args.payloadJson || args.payload_json || '{}')
         const payload = JSON.parse(raw) as { Name?: string; Tags?: string[] }

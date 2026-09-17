@@ -246,6 +246,9 @@ export const cases: Case[] = [
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
       await expect(page.getByRole('main').getByRole('button', { name: '同步' })).toBeVisible()
+      await expect(page.getByText('官方依赖', { exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: '安装' })).toBeVisible()
+      await expect(page.getByText(/可用 v0\.4\.2/)).toBeVisible()
       await expect(page.getByText('我提供的资产')).toBeVisible()
       await expect(page.getByText('我引用的资产')).toBeVisible()
       // 新项目默认 DecAssets；改根后已登记来源要跟着平移。
