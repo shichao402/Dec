@@ -49,8 +49,14 @@ export function pathTail(root: string) {
 }
 
 // 私仓项目名是小写 kebab-case，目录名通常是驼峰或含下划线，这里给一个可直接用的建议值。
+// 驼峰边界要留成连字符：抹平后的 cppsvnauthoranalysis 人根本读不出来。
 export function suggestProjectName(root: string) {
-  return pathTail(root).toLowerCase().replace(/[^a-z0-9]+/g, '')
+  return pathTail(root)
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1-$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
 }
 
 export function toggle(items: string[], value: string) {
