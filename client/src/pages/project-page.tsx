@@ -1,34 +1,30 @@
-import { useState } from 'react'
-import type { ReactNode } from 'react'
-import { ChevronDown, ChevronRight, FileDiff, Link2, RefreshCw, Upload } from 'lucide-react'
+import { FileDiff, Link2, RefreshCw, Upload, UploadCloud } from 'lucide-react'
 import { ActionFeedback } from '@/components/action-feedback'
 import { Page, PageFill, PageHeader, PageScroll } from '@/components/shell/page'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ActionButton } from '@/components/ui/action-button'
-import { Notice } from '@/components/ui/feedback'
-import { Field, Input, Select } from '@/components/ui/input'
+import { NavCard, NavCardGrid } from '@/components/ui/nav-card'
 import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel'
 import { useDecAction } from '@/lib/action-context'
 import { invokeTyped } from '@/lib/api'
-import { actionSpec, resource, suggestProjectName } from '@/lib/console'
+import { actionSpec, resource } from '@/lib/console'
+import { ProjectBinding } from '@/pages/project-binding-page'
 import { SubscriptionPanel } from '@/pages/subscription-panel'
-import { WorkspaceWritePanel } from '@/pages/workspace-write-panel'
 import type { ManagedProject } from '@/lib/utils'
-
-type ProjectPreparation = { AvailableProjects: string[]; HomeProject: string }
 
 export function ProjectPage(props: {
   deviceId: string
   project: ManagedProject
   onSync: () => void
+  onBinding: () => void
   onOverrides: () => void
   onProvides: () => void
+  onWriteback: () => void
   onRemoved: () => void
-  onChanged: () => void | Promise<void>
+  onBound: (project: ManagedProject) => void | Promise<void>
 }) {
-  const [project, setProject] = useState(props.project)
-  const [bindingOpen, setBindingOpen] = useState(false)
+  const project = props.project
   const workspaceResource = resource.workspace(project.Root)
   const removeSpec = actionSpec(`project:remove:${props.deviceId}:${project.Root}`, '移除项目管理', props.deviceId, [workspaceResource, resource.global], 'write', '已移除项目管理')
   const syncSpec = actionSpec(`operation:update:${props.deviceId}:${project.Root}`, '更新项目资产', props.deviceId, [workspaceResource], 'operation')
@@ -44,11 +40,6 @@ export function ProjectPage(props: {
       移除管理
     </ActionButton>
   )
-  const onBound = async (refreshed: ManagedProject) => {
-    setProject(refreshed)
-    setBindingOpen(false)
-    await props.onChanged()
-  }
 
   if (!project.Initialized) {
     return (
@@ -63,7 +54,7 @@ export function ProjectPage(props: {
           <Panel>
             <PanelHeader title="家项目绑定" description="家项目决定这个目录能装哪些资产，绑定名必须是私仓里已存在的项目。" />
             <PanelBody>
-              <ProjectBinding deviceId={props.deviceId} project={project} onBound={onBound} />
+              <ProjectBinding deviceId={props.deviceId} project={project} onBound={props.onBound} />
             </PanelBody>
           </Panel>
         </PageScroll>
@@ -75,7 +66,7 @@ export function ProjectPage(props: {
     <Page>
       <PageHeader
         title={project.Label || project.Name}
-        description="订阅依赖与个人资产写回；覆写与提供项在下级页。"
+        description="主区是订阅；换绑、覆写、提供项与写回都在下级页。"
         meta={
           <>
             <Badge tone="quiet" className="font-mono" title={project.Root}>{project.Root}</Badge>
@@ -94,173 +85,44 @@ export function ProjectPage(props: {
       />
       <PageFill>
         <ActionFeedback actionKey={removeSpec.key} />
-        {/* 换绑、覆写与提供项都是偶发操作，收在同一张卡里，主区留给写回与订阅。 */}
-        <Panel className="mb-4 shrink-0 overflow-hidden">
-          <button
-            onClick={() => setBindingOpen((value) => !value)}
-            className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-panel-hi"
-          >
-            <Link2 className="size-4 shrink-0 text-faint" />
-            <span className="min-w-0 flex-1">
-              <span className="block text-[13px] font-medium text-ink">家项目绑定</span>
-              <span className="block truncate text-xs text-faint">
-                {bindingOpen ? '绑定名必须是私仓里已存在的项目' : '需要换绑或在私仓新建项目时展开'}
-              </span>
-            </span>
-            <ChevronDown className={`size-4 shrink-0 text-faint transition-transform ${bindingOpen ? 'rotate-180' : ''}`} />
-          </button>
-          {bindingOpen && (
-            <PanelBody className="border-t border-line">
-              <ProjectBinding deviceId={props.deviceId} project={project} onBound={onBound} />
-            </PanelBody>
-          )}
-          <button
-            onClick={props.onOverrides}
-            className="flex w-full items-center gap-3 border-t border-line px-4 py-3 text-left transition-colors hover:bg-panel-hi"
-          >
-            <FileDiff className="size-4 shrink-0 text-faint" />
-            <span className="min-w-0 flex-1">
-              <span className="block text-[13px] font-medium text-ink">本地覆写</span>
-              <span className="block truncate text-xs text-faint">临时修改官方资产，并关联上游 Issue 或 PR</span>
-            </span>
-            <ChevronRight className="size-4 shrink-0 text-faint" />
-          </button>
-          <button
-            onClick={props.onProvides}
-            className="flex w-full items-center gap-3 border-t border-line px-4 py-3 text-left transition-colors hover:bg-panel-hi"
-          >
-            <Upload className="size-4 shrink-0 text-faint" />
-            <span className="min-w-0 flex-1">
-              <span className="block text-[13px] font-medium text-ink">我提供的资产</span>
-              <span className="block truncate text-xs text-faint">作者视角：登记本项目对外提供的 Git 资产</span>
-            </span>
-            <ChevronRight className="size-4 shrink-0 text-faint" />
-          </button>
-        </Panel>
-        <div className="space-y-4">
-          <WorkspaceWritePanel
-            deviceId={props.deviceId}
-            root={project.Root}
-            plane="local"
-            label={project.Label || project.Name}
+        {/* 换绑、覆写、提供项与写回都是偶发操作，收成一排入口卡，主区留给订阅。 */}
+        <NavCardGrid className="mb-4">
+          <NavCard
+            icon={Link2}
+            title="家项目绑定"
+            description="换绑家项目，或在私仓里新建一个"
+            onClick={props.onBinding}
           />
-          <div>
-            <div className="mb-2">
-              <h2 className="text-[13px] font-semibold text-ink">订阅</h2>
-              <p className="mt-0.5 text-xs text-faint">本项目消费哪些项目：官方注册表或个人私仓。</p>
-            </div>
-            <SubscriptionPanel
-              deviceId={props.deviceId}
-              root={project.Root}
-              plane="local"
-              hint="订阅只写当前项目的 .dec/config.yaml；安装在「更新」页做。"
-            />
-          </div>
+          <NavCard
+            icon={FileDiff}
+            title="本地覆写"
+            description="临时改官方资产，关联上游 Issue 或 PR"
+            onClick={props.onOverrides}
+          />
+          <NavCard
+            icon={Upload}
+            title="我提供的资产"
+            description="作者视角：登记本项目对外提供的 Git 资产"
+            onClick={props.onProvides}
+          />
+          <NavCard
+            icon={UploadCloud}
+            title="写回与密钥"
+            description="个人资产写入私仓，密钥写入 Bitwarden"
+            onClick={props.onWriteback}
+          />
+        </NavCardGrid>
+        <div className="mb-2">
+          <h2 className="text-[13px] font-semibold text-ink">订阅</h2>
+          <p className="mt-0.5 text-xs text-faint">本项目消费哪些项目：官方注册表或个人私仓。</p>
         </div>
+        <SubscriptionPanel
+          deviceId={props.deviceId}
+          root={project.Root}
+          plane="local"
+          hint="订阅只写当前项目的 .dec/config.yaml；安装在「更新」页做。"
+        />
       </PageFill>
     </Page>
-  )
-}
-
-// 家项目必须先存在于私仓：bind 与 push 都只接受已存在的项目名，
-// 所以新机器上的新项目要能在这里就地新建，否则心流断在「绑定名不存在」。
-function ProjectBinding(props: {
-  deviceId: string
-  project: ManagedProject
-  onBound: (project: ManagedProject) => void | Promise<void>
-  extraAction?: ReactNode
-}) {
-  const { deviceId, project } = props
-  const [preparation, setPreparation] = useState<ProjectPreparation | null>(null)
-  const [homeProject, setHomeProject] = useState('')
-  const [newProject, setNewProject] = useState('')
-  const workspaceResource = resource.workspace(project.Root)
-  const prepareSpec = actionSpec(`project:prepare:${deviceId}:${project.Root}`, '检查项目配置', deviceId, [workspaceResource], 'read')
-  const createSpec = actionSpec(`project:create-remote:${deviceId}:${project.Root}`, '在私仓新建项目', deviceId, [resource.global], 'write', '项目已创建并推送到私仓')
-  const bindSpec = actionSpec(`project:bind:${deviceId}:${project.Root}`, project.Initialized ? '保存家项目绑定' : '初始化项目', deviceId, [workspaceResource, resource.global], 'write', project.Initialized ? '绑定已保存' : '项目初始化完成')
-  const bindLabel = project.Initialized ? '保存绑定' : '确认初始化'
-
-  const prepare = () => invokeTyped<ProjectPreparation>('prepare_project_config_init', project.Root, 'local', {}, prepareSpec.key)
-  const applyPreparation = (value: ProjectPreparation, prefer = '') => {
-    setPreparation(value)
-    const available = value.AvailableProjects || []
-    const wanted = [prefer, value.HomeProject].find((name) => name && available.includes(name))
-    setHomeProject(wanted || available[0] || '')
-    if (!newProject) setNewProject(suggestProjectName(project.Root))
-  }
-  const bind = async () => {
-    if (homeProject) {
-      await invokeTyped('bind_managed_project', project.Root, 'local', { ProjectName: homeProject }, bindSpec.key)
-    }
-    return invokeTyped<ManagedProject>('register_managed_project', '', 'global', { Root: project.Root, Label: project.Label }, bindSpec.key)
-  }
-
-  const available = preparation?.AvailableProjects || []
-  const boundName = preparation?.HomeProject?.trim() || ''
-  const boundMissing = Boolean(preparation && boundName && !available.includes(boundName))
-
-  return (
-    <div className="space-y-4">
-      <ActionFeedback actionKey={prepareSpec.key} />
-      <ActionFeedback actionKey={createSpec.key} />
-      <ActionFeedback actionKey={bindSpec.key} />
-      {!preparation ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <ActionButton spec={prepareSpec} action={prepare} runningLabel="检查中…" onSuccess={(value) => applyPreparation(value)}>
-            {project.Initialized ? '读取私仓项目列表' : '检查并初始化'}
-          </ActionButton>
-          {props.extraAction}
-          <span className="text-xs text-faint">读取私仓里可用的项目名，不会修改任何文件。</span>
-        </div>
-      ) : (
-        <>
-          {boundMissing && (
-            <Notice
-              text={`当前绑定的 “${boundName}” 不在私仓里，所以拉不到任何资产。选一个已有项目，或在下面就地新建它。`}
-            />
-          )}
-          {available.length > 0 ? (
-            <Field label="绑定为家项目" hint={boundName ? `设备上记录的绑定：${boundName}` : undefined} className="max-w-sm">
-              <Select value={homeProject} onChange={(e) => setHomeProject(e.target.value)}>
-                {available.map((name) => <option key={name} value={name}>{name}</option>)}
-              </Select>
-            </Field>
-          ) : (
-            <Notice tone="info" text="仓库中没有项目清单，将保留本地最小配置。" />
-          )}
-          <div className="flex flex-wrap items-center gap-2">
-            <ActionButton spec={bindSpec} action={bind} runningLabel={project.Initialized ? '保存中…' : '初始化中…'} onSuccess={props.onBound}>
-              {bindLabel}
-            </ActionButton>
-            {props.extraAction}
-          </div>
-          <div className="rounded-lg border border-dashed border-line px-3 py-3">
-            <p className="text-xs leading-relaxed text-faint">
-              私仓里还没有想绑的项目？先在这里建一个，它会出现在上面的下拉框里并自动选中，仍要点「{bindLabel}」才会真正绑定。
-            </p>
-            <div className="mt-2.5 flex max-w-sm gap-2">
-              <Input
-                value={newProject}
-                onChange={(e) => setNewProject(e.target.value)}
-                placeholder="小写字母、数字与连字符"
-              />
-              <ActionButton
-                variant="secondary"
-                spec={createSpec}
-                disabled={!newProject.trim()}
-                action={async () => {
-                  const created = await invokeTyped<{ Name: string }>('create_remote_project', '', 'global', { Name: newProject.trim(), Title: project.Label || project.Name }, createSpec.key)
-                  return { created, preparation: await prepare() }
-                }}
-                runningLabel="创建中…"
-                onSuccess={({ created, preparation: refreshed }) => applyPreparation(refreshed, created.Name)}
-              >
-                在私仓新建
-              </ActionButton>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
   )
 }

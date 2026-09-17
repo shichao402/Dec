@@ -246,13 +246,15 @@ export const cases: Case[] = [
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
       await expect(page.getByRole('main').getByRole('button', { name: '更新', exact: true })).toBeVisible()
-      await expect(page.getByText('写回', { exact: true })).toBeVisible()
-      // 覆写搬到下级页后，项目页只留入口行，不再自己加载官方资产列表。
+      // 四个下级页都只在主区留一张入口卡，表单与列表本身不在项目页加载。
+      await expect(page.getByRole('button', { name: /^家项目绑定/ })).toBeVisible()
       await expect(page.getByRole('button', { name: /^本地覆写/ })).toBeVisible()
       await expect(page.getByRole('button', { name: '修改', exact: true })).toHaveCount(0)
-      // 提供项同理：项目页只有入口行，作者表单在下级页。
       await expect(page.getByRole('button', { name: /^我提供的资产/ })).toBeVisible()
       await expect(page.getByLabel('作者目录基准点')).toHaveCount(0)
+      await expect(page.getByRole('button', { name: /^写回与密钥/ })).toBeVisible()
+      await expect(page.getByRole('button', { name: '预览写回' })).toHaveCount(0)
+      await expect(page.getByRole('button', { name: '列出密钥' })).toHaveCount(0)
       // 订阅面板一张表同时列私仓与官方注册表项目，同名项目只给一行（ADR 0029）。
       await expect(page.getByText('订阅', { exact: true })).toBeVisible()
       await expect(page.getByRole('checkbox', { name: 'relkit' })).toHaveCount(1)
@@ -322,9 +324,40 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
-      await page.getByRole('button', { name: /家项目绑定/ }).click()
+      await page.getByRole('button', { name: /^家项目绑定/ }).click()
+      await expect(page.getByRole('heading', { name: '家项目绑定' })).toBeVisible()
       await page.getByRole('button', { name: '读取私仓项目列表' }).click()
       await expect(page.getByText('绑定为家项目')).toBeVisible()
+      await expect(page.getByRole('button', { name: '返回' })).toBeVisible()
+    },
+  },
+  {
+    name: 'project-writeback',
+    scenario: 'typical',
+    open: async (page) => {
+      await connect(page)
+      await nav(page, '项目')
+      await page.getByRole('button', { name: /^Dec/ }).first().click()
+      await page.getByRole('button', { name: /^写回与密钥/ }).click()
+      await expect(page.getByRole('heading', { name: '写回与密钥' })).toBeVisible()
+      await page.getByRole('button', { name: '预览写回' }).click()
+      await expect(page.getByText('p/dec/public/project/skills/release/SKILL.md')).toBeVisible()
+      await page.getByRole('button', { name: '列出密钥' }).click()
+      await expect(page.getByText('.secrets/relkit/.env/upload.env')).toBeVisible()
+      await expect(page.getByRole('button', { name: '返回' })).toBeVisible()
+    },
+  },
+  {
+    name: 'global-writeback',
+    scenario: 'typical',
+    open: async (page) => {
+      await connect(page)
+      await nav(page, 'Global 资产')
+      await page.getByRole('button', { name: /^写回与密钥/ }).click()
+      await expect(page.getByRole('heading', { name: '写回与密钥' })).toBeVisible()
+      await page.getByRole('button', { name: '预览写回' }).click()
+      // 平面参数传错就会拿到项目那份预览，这里按路径认平面。
+      await expect(page.getByText('p/dec/private/user/env/machine.env')).toBeVisible()
     },
   },
   {

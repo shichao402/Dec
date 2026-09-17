@@ -73,8 +73,9 @@ src/
   components/ui/           button / input / panel / badge / checkbox / feedback 等基础件
   pages/                   连接、认证、引导、概览、Global 资产、项目、项目详情、更新、删除、设置
                            subscription-panel.tsx 是订阅（requires）的唯一面板，项目页与 Global 资产页共用
-                           official-overrides-page.tsx 与 provides-page.tsx 是项目页的下级页面：
-                           偶发的作者侧操作只留入口行，不占项目页主区，也不进侧栏导航
+                           project-binding-page.tsx、official-overrides-page.tsx、provides-page.tsx 是项目页的下级页面；
+                           writeback-page.tsx（写回 + 密钥清单）是项目页与 Global 资产页共用的下级页面。
+                           这些都是偶发操作，上级页只留一张 NavCard 入口，主区留给订阅，也不进侧栏导航
   lib/console.ts           视图枚举、资源锁常量、连接与路径展示的共享函数
 ```
 
@@ -84,6 +85,8 @@ src/
 - `PageFill`：列表类页面本身不滚动，内部 `ScrollArea` 撑满视口剩余高度；宽屏用 `SplitPane` 把主内容与上下文栏分列，窄屏自动退化为单列堆叠。
 
 颜色、间距、字号一律走 token 与基础组件，页面里不直接写 `zinc-xxx` 之类的原始色值。新增页面优先复用 `Panel` / `SettingsSection` / `Stat` / `EmptyState`，保证密度与对齐一致。
+
+下级页入口一律用 `NavCardGrid` + `NavCard`（图标 + 标题 + 一句说明 + 右侧 chevron），放在上级页主内容之上。不要再用整行列表堆入口：宽屏上一行一个会拉出几条几乎空白的横带，而这些入口都是低频操作，不该按行占据主区高度。`lib/console.ts` 的 `navView` 负责把下级视图折算回上级导航项，侧栏高亮只认上级。
 
 面板与表格的高度策略不同，别混用：
 

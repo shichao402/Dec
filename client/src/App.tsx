@@ -29,7 +29,7 @@ import {
   rememberLastConnection,
   selectAutoConnectConnection,
 } from '@/lib/auto-connect'
-import { actionSpec, resource, shortInstanceId, type View } from '@/lib/console'
+import { actionSpec, navView, resource, shortInstanceId, type View } from '@/lib/console'
 import type { ConsoleUpdateEnvelope } from '@/lib/console-update'
 import {
   onOpenIntent,
@@ -42,12 +42,14 @@ import { GlobalAssetsPage } from '@/pages/global-assets-page'
 import { OnboardingPage } from '@/pages/onboarding-page'
 import { OverviewPage } from '@/pages/overview-page'
 import { OfficialOverridesPage } from '@/pages/official-overrides-page'
+import { ProjectBindingPage } from '@/pages/project-binding-page'
 import { ProjectPage } from '@/pages/project-page'
 import { ProvidesPage } from '@/pages/provides-page'
 import { ProjectsPage } from '@/pages/projects-page'
 import { SettingsPage } from '@/pages/settings-page'
 import { SyncPage, type PullHistoryEntry, type SyncTarget } from '@/pages/sync-page'
 import { UnlockPage } from '@/pages/unlock-page'
+import { WritebackPage } from '@/pages/writeback-page'
 import type {
   DeviceSummary,
   GlobalSettings,
@@ -66,8 +68,10 @@ const viewTitles: Record<View, string> = {
   global: 'Global 资产',
   projects: '项目',
   project: '项目',
+  binding: '家项目绑定',
   overrides: '本地覆写',
   provides: '我提供的资产',
+  writeback: '写回与密钥',
   sync: '更新',
   delete: '删除',
   settings: '设置',
@@ -102,6 +106,8 @@ export default function App() {
   const [updateError, setUpdateError] = useState('')
   const [selectedProject, setSelectedProject] = useState<ManagedProject | null>(null)
   const [syncTarget, setSyncTarget] = useState<SyncTarget | null>(null)
+  // 写回页两个平面共用，目标跟着入口走，和 syncTarget 同一套写法。
+  const [writeTarget, setWriteTarget] = useState<SyncTarget | null>(null)
   const [history, setHistory] = useState<PullHistoryEntry[]>([])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -446,6 +452,13 @@ export default function App() {
     setView('sync')
   }
 
+  // 绑定既可能来自未初始化项目的主区，也可能来自下级页；两处都回到项目页看结果。
+  async function handleProjectBound(refreshed: ManagedProject) {
+    setSelectedProject(refreshed)
+    setView('project')
+    await refreshDevice()
+  }
+
   async function handleDeleteConnection(id: string) {
     const spec = actionSpec(`connections:delete:${id}`, '正在删除连接', 'console', [resource.connections], 'write', '连接已删除')
     const outcome = await actions.run(spec, async () => {
@@ -457,7 +470,14 @@ export default function App() {
 
   const consoleReady = screen === 'console' && summary && settings
   const onboarding = Boolean(consoleReady && summary && !summary.Initialized)
-  const crumbs = buildCrumbs({ screen, view, onboarding, deviceLabel: current?.label, project: selectedProject })
+  const crumbs = buildCrumbs({
+    screen,
+    view,
+    onboarding,
+    deviceLabel: current?.label,
+    project: selectedProject,
+    writePlane: writeTarget?.plane,
+  })
   const handleCheckConsoleUpdate = async () => {
     const status = await checkConsoleUpdate(true)
     setUpdateStatus(status)
@@ -498,13 +518,14 @@ export default function App() {
           saved={saved}
           current={current}
           ping={ping}
-          view={view}
+          view={navView(view, writeTarget?.plane)}
           projectCount={summary?.Projects.length || 0}
           project={selectedProject}
           onboarding={onboarding}
           onView={(next) => {
             if (next !== 'project') setSelectedProject(null)
             if (next === 'sync') setSyncTarget(null)
+            setWriteTarget(null)
             setView(next)
           }}
           onProject={(project) => {
@@ -613,6 +634,10 @@ export default function App() {
                     setSyncTarget({ key: 'global', label: 'Global（本机）', root: '', plane: 'global' })
                     setView('sync')
                   }}
+                  onWriteback={() => {
+                    setWriteTarget({ key: 'global', label: 'Global', root: '', plane: 'global' })
+                    setView('writeback')
+                  }}
                 />
               )}
               {view === 'projects' && (
@@ -639,13 +664,43 @@ export default function App() {
                     })
                     setView('sync')
                   }}
+                  onBinding={() => setView('binding')}
                   onOverrides={() => setView('overrides')}
                   onProvides={() => setView('provides')}
-                  onChanged={refreshDevice}
+                  onWriteback={() => {
+                    setWriteTarget({
+                      key: selectedProject.Root,
+                      label: selectedProject.Label || selectedProject.Name,
+                      root: selectedProject.Root,
+                      plane: 'local',
+                    })
+                    setView('writeback')
+                  }}
+                  onBound={handleProjectBound}
                   onRemoved={async () => {
                     setSelectedProject(null)
                     setView('projects')
                     await refreshDevice()
+                  }}
+                />
+              )}
+              {view === 'binding' && selectedProject && (
+                <ProjectBindingPage
+                  deviceId={deviceId}
+                  project={selectedProject}
+                  onBound={handleProjectBound}
+                  onBack={() => setView('project')}
+                />
+              )}
+              {view === 'writeback' && writeTarget && (
+                <WritebackPage
+                  deviceId={deviceId}
+                  root={writeTarget.root}
+                  plane={writeTarget.plane}
+                  label={writeTarget.label}
+                  onBack={() => {
+                    setView(writeTarget.plane === 'global' ? 'global' : 'project')
+                    setWriteTarget(null)
                   }}
                 />
               )}
@@ -718,6 +773,7 @@ function buildCrumbs(input: {
   onboarding: boolean
   deviceLabel?: string
   project: ManagedProject | null
+  writePlane?: 'local' | 'global'
 }) {
   if (input.screen === 'connect') return ['Dec Console', '设备']
   const device = input.deviceLabel || 'Dec Console'
@@ -726,7 +782,11 @@ function buildCrumbs(input: {
   if (input.view === 'project') {
     return [device, viewTitles.projects, input.project?.Label || input.project?.Name || '项目']
   }
-  if ((input.view === 'overrides' || input.view === 'provides') && input.project) {
+  if (input.view === 'writeback' && input.writePlane === 'global') {
+    return [device, viewTitles.global, viewTitles.writeback]
+  }
+  const subViews: View[] = ['binding', 'overrides', 'provides', 'writeback']
+  if (subViews.includes(input.view) && input.project) {
     return [device, viewTitles.projects, input.project.Label || input.project.Name, viewTitles[input.view]]
   }
   if (input.view === 'sync' && input.project) {

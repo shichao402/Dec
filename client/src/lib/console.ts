@@ -1,8 +1,27 @@
 import type { ActionSpec } from '@/lib/action-registry'
 import type { SavedConnection } from '@/lib/utils'
 
-// overrides 与 provides 是 project 的下级页面：不进侧栏导航，只能从项目页进入。
-export type View = 'overview' | 'global' | 'projects' | 'project' | 'overrides' | 'provides' | 'sync' | 'delete' | 'settings'
+// binding / overrides / provides 是 project 的下级页面，writeback 是 project 与 global 共用的下级页面：
+// 都不进侧栏导航，只能从上级页的入口卡进入。
+export type View =
+  | 'overview'
+  | 'global'
+  | 'projects'
+  | 'project'
+  | 'binding'
+  | 'overrides'
+  | 'provides'
+  | 'writeback'
+  | 'sync'
+  | 'delete'
+  | 'settings'
+
+// 下级页没有自己的导航项，高亮留在它所属的上级导航上。
+export function navView(view: View, writebackPlane?: 'local' | 'global'): View {
+  if (view === 'binding' || view === 'overrides' || view === 'provides') return 'project'
+  if (view === 'writeback') return writebackPlane === 'global' ? 'global' : 'project'
+  return view
+}
 
 export const resource = {
   connections: 'console:connections',

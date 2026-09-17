@@ -1,16 +1,17 @@
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, UploadCloud } from 'lucide-react'
 import { Page, PageFill, PageHeader } from '@/components/shell/page'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { NavCard, NavCardGrid } from '@/components/ui/nav-card'
 import { useDecAction } from '@/lib/action-context'
 import { actionSpec, resource } from '@/lib/console'
 import { SubscriptionPanel } from '@/pages/subscription-panel'
-import { WorkspaceWritePanel } from '@/pages/workspace-write-panel'
 
 export function GlobalAssetsPage(props: {
   deviceId: string
   repoURL: string
   onSync: () => void
+  onWriteback: () => void
 }) {
   const syncState = useDecAction(
     actionSpec(`operation:update:${props.deviceId}:global`, '更新 Global 资产', props.deviceId, [resource.global], 'operation'),
@@ -29,9 +30,15 @@ export function GlobalAssetsPage(props: {
         }
       />
       <PageFill>
-        <div className="mb-4">
-          <WorkspaceWritePanel deviceId={props.deviceId} root="" plane="global" label="Global" />
-        </div>
+        {/* 写回与密钥清单是偶发操作，和项目页用同一种入口卡，主区留给订阅。 */}
+        <NavCardGrid className="mb-4">
+          <NavCard
+            icon={UploadCloud}
+            title="写回与密钥"
+            description="个人资产写入私仓，密钥写入 Bitwarden"
+            onClick={props.onWriteback}
+          />
+        </NavCardGrid>
         <SubscriptionPanel
           deviceId={props.deviceId}
           root=""
