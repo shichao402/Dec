@@ -293,17 +293,14 @@ export const cases: Case[] = [
       await expect(page.getByRole('heading', { name: '同步' })).toBeVisible()
       // 从项目页进入时必须预选当前项目，而不是回退到 Global。
       await expect(page.getByLabel('同步目标')).toHaveValue('D:\\workspace\\GitHub\\Dec')
+      // 项目平面同样要能 Push 个人资产与密钥，不能只剩官方安装。
+      await expect(page.getByRole('main').getByRole('button', { name: 'Push' })).toBeVisible()
       await page.getByRole('button', { name: '刷新预览' }).click()
-      await expect(page.getByText('p/dec/private/project/skills/dec')).toBeVisible()
-      // 最窄视口也必须不滚动就能点到对比：操作列不能被时间列挤出视口。
-      await expect(page.getByRole('button', { name: '对比' })).toBeInViewport()
-      await page.getByRole('button', { name: '对比' }).click()
-      await expect(page.getByText('# local skill')).toBeVisible()
-      await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
-      await page.getByRole('button', { name: '元数据' }).click()
-      await expect(page.getByText('Secret 正文永不传入或显示，只能选择同步方向。')).toBeVisible()
-      await expect(page.getByText('# local skill')).toHaveCount(0)
-      await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
+      // 预览只讲 Push 方向：列待推的个人改动，不再出现三方对比与冲突。
+      await expect(page.getByText('p/dec/public/project/skills/release/SKILL.md')).toBeVisible()
+      await expect(page.getByRole('button', { name: '对比' })).toHaveCount(0)
+      // 最窄视口也必须不滚动就能看到操作徽标：象限列可以藏，操作不行。
+      await expect(page.getByText('修改').first()).toBeInViewport()
       // 密钥清单只列路径与状态，未落地的条目也要能看见。
       await page.getByRole('button', { name: '列出密钥' }).click()
       await expect(page.getByText('.secrets/relkit/.env/upload.env').last()).toBeVisible()

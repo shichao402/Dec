@@ -58,8 +58,9 @@ secrets，但依据是 SyncTarget 规则而非登记内容；正文没有三方�
 ### 4. Console 是规则与同步的人机门面
 
 “我提供的”只在各项目页管理；Global 页只管理当前设备引用的 Global 资产。
-“同步”页对项目只展示按 `requires` 从 registry 重新安装，不再展示 provides 的
-source → 私仓 target 或自动同步。“我提供的”分区先列出扫描到的候选供勾选，人不必
+“同步”页对两个平面给同一组动作：Pull（按 `requires` 安装官方资产，再取回个人资产
+与密钥）、Push（只回写个人私仓与 Bitwarden）与 Push 方向的预览。provides 的
+source → 私仓 target 对比、自动同步与冲突续做都已删除。“我提供的”分区先列出扫描到的候选供勾选，人不必
 手写来源路径。候选只扫描作者根下的 `skills/`、`commands/`、`rules/`、`mcp/`；
 `.dec/` 状态目录和各 IDE 渲染目录既不扫描，配置校验也禁止引用，避免安装产物被
 反向当成作者源。项目页可改作者根，改动会让已登记来源整体平移。

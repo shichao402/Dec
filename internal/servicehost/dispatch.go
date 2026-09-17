@@ -515,28 +515,6 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		return writer.PushWorkspace(ctx, workspace, reporter)
 	case "preview_push":
 		return app.PreviewPushWorkspaceAssets(workspace)
-	case "preview_sync":
-		return app.PreviewPushWorkspaceAssets(workspace)
-	case "preview_provides_sync":
-		return nil, fmt.Errorf("provides 私仓同步已移除；官方资产由提供方 CI 发布到 Dec registry")
-	case "sync":
-		var in struct {
-			Mode           string
-			ConflictAction string
-		}
-		if err := decode(payload, &in); err != nil {
-			return nil, err
-		}
-		switch strings.ToLower(strings.TrimSpace(in.Mode)) {
-		case "pull":
-			return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
-		case "push":
-			return writer.PushWorkspace(ctx, workspace, reporter)
-		default:
-			return nil, fmt.Errorf("自动双向同步已移除；请明确选择 Pull 安装或 Push 个人私仓/密钥")
-		}
-	case "sync_provides":
-		return nil, fmt.Errorf("provides 私仓同步已移除；官方资产由提供方 CI 发布到 Dec registry")
 	case "prepare_repo_gcm_bootstrap":
 		var in struct {
 			RepoURL string

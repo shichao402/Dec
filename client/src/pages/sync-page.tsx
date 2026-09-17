@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
 import { Activity, ArrowLeft, CheckCircle2, GitCompare, History, RefreshCw, TriangleAlert, UploadCloud } from 'lucide-react'
 import { ActionFeedback } from '@/components/action-feedback'
 import { Page, PageFill, PageHeader, ScrollArea } from '@/components/shell/page'
@@ -17,46 +16,32 @@ import { SecretsPanel, type SecretsMetadata } from '@/pages/secrets-panel'
 import { cn, pullResultDiagnosis } from '@/lib/utils'
 import type { ManagedProject, OperationEvent, PullResult } from '@/lib/utils'
 
-// 操作列固定在最后一列且不参与滚动：窄窗口宁可折行时间，也不能让「对比」滑出视口。
-const previewGrid = 'grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 px-3'
-  + ' xl:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem_8rem_auto]'
-
-// 预览只需要「哪个更新」，完整 ISO 串会把三列时间撑到必须横向滚动。
-function formatSyncTime(value?: string): string {
-  if (!value) return '—'
-  const at = new Date(value)
-  if (Number.isNaN(at.getTime())) return value
-  const pad = (input: number) => String(input).padStart(2, '0')
-  return `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
-}
+// 路径列吃掉剩余宽度：窄窗口先隐藏象限，也不能让操作徽标被挤出视口。
+const previewGrid = 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-3'
+  + ' xl:grid-cols-[minmax(0,1fr)_6rem_10rem]'
 
 export type PullHistoryEntry = { title: string; result: PullResult; at: Date }
 
 export type SyncTarget = { key: string; label: string; root: string; plane: 'local' | 'global'; projectName?: string }
-type SyncMode = 'pull' | 'push'
-type SyncPreviewItem = {
-  Source: string
-  Target: string
-  Status: string
-  LocalMtime?: string
-  RemoteCommitTime?: string
-  LastSyncTime?: string
-  SourceModifiedAt?: string
-  TargetModifiedAt?: string
-  Secret?: boolean
-  LocalContent?: string
-  RemoteContent?: string
-  Diff?: string
-  MetadataOnly?: boolean
+type PushChange = { Op: string; Path: string; Quadrant?: string }
+// 预览只覆盖 Push 方向：官方资产是只读安装物，没有「本机比远端新」这回事。
+type PushPreview = {
+  EnabledBundleCount?: number
+  SecretsTargetCount?: number
+  ProjectSecretsName?: string
+  DecCandidateCount?: number
+  DecHasChanges?: boolean
+  DecSkippedReason?: string
+  BitwardenConfigured?: boolean
+  Changes?: PushChange[]
 }
-type SyncConflict = { Worktree?: string; Message?: string }
-type SyncPreview = {
-  Items?: SyncPreviewItem[]
-  Entries?: SyncPreviewItem[]
-  Conflict?: SyncConflict
-  Worktree?: string
-  HasConflicts?: boolean
-  ConflictedPaths?: string[]
+type PushResult = {
+  DecPushedCount?: number
+  DecSkippedReason?: string
+  VersionCommit?: string
+  SecretsCreatedCount?: number
+  SecretsUpdatedCount?: number
+  SecretsSkippedReason?: string
 }
 type ProjectConsumersResult = {
   Provider: string
@@ -127,7 +112,7 @@ export function SyncPage(props: {
     <Page>
       <PageHeader
         title="同步"
-        description="项目按 requires 从官方 registry 安装；Global 只同步个人私仓与密钥。"
+        description="Pull 按 requires 安装官方资产并取回个人资产与密钥；Push 只回写个人私仓与 Bitwarden。"
         actions={props.onBack && (
           <Button variant="outline" onClick={props.onBack}>
             <ArrowLeft className="size-4" />返回
@@ -138,33 +123,20 @@ export function SyncPage(props: {
         <ScrollArea className="space-y-3 pr-0.5">
           <Notice
             tone="info"
-            text="官方资产从 Dec 仓 registry 分支按 requires 安装。改官方安装物请用草稿 + 源仓 PR/Issue（MCP dec_propose_upstream）；本页 Push 只处理个人私仓与密钥。TODO(console)：贡献入口尚未做成独立页。"
+            text="官方资产从 Dec 仓 registry 分支按 requires 安装，本机改不动也推不回去：要改请用草稿 + 源仓 PR/Issue（MCP dec_propose_upstream）。TODO(console)：贡献入口尚未做成独立页。"
           />
-          {target.plane === 'local' ? (
-            <OfficialInstallPanel
-              deviceId={props.deviceId}
-              targets={targets}
-              target={target}
-              onTarget={(value) => {
-                setTargetKey(value)
-                setSecrets(null)
-                setConsumers(null)
-              }}
-              onPullResult={props.onPullResult}
-            />
-          ) : (
-            <SyncPreviewPanel
-              deviceId={props.deviceId}
-              targets={targets}
-              target={target}
-              onTarget={(value) => {
-                setTargetKey(value)
-                setSecrets(null)
-                setConsumers(null)
-              }}
-              onPushed={(provider) => loadConsumers(provider)}
-            />
-          )}
+          <SyncPanel
+            deviceId={props.deviceId}
+            targets={targets}
+            target={target}
+            onTarget={(value) => {
+              setTargetKey(value)
+              setSecrets(null)
+              setConsumers(null)
+            }}
+            onPullResult={props.onPullResult}
+            onPushed={(provider) => loadConsumers(provider)}
+          />
           <ActionFeedback actionKey={consumerListSpec.key} />
           {consumers && (
             <ConsumerRefreshPanel
@@ -201,103 +173,47 @@ export function SyncPage(props: {
   )
 }
 
-function OfficialInstallPanel(props: {
+function SyncPanel(props: {
   deviceId: string
   targets: SyncTarget[]
   target: SyncTarget
   onTarget: (key: string) => void
   onPullResult?: (title: string, result: PullResult) => void
+  onPushed: (provider: string) => Promise<void>
 }) {
+  const [preview, setPreview] = useState<PushPreview | null>(null)
+  const [pushed, setPushed] = useState<PushResult | null>(null)
   const { target } = props
-  const spec = actionSpec(
+  const workspaceResource = resource.workspace(target.root)
+  const previewSpec = actionSpec(`sync:preview:${props.deviceId}:${target.key}`, '预览待推送内容', props.deviceId, [workspaceResource], 'read')
+  const pullSpec = actionSpec(
     `operation:pull:${props.deviceId}:${target.key}`,
-    `安装 ${target.label} 的官方依赖`,
+    `Pull ${target.label}`,
     props.deviceId,
-    [resource.workspace(target.root)],
+    [workspaceResource],
     'operation',
-    `${target.label} 安装完成`,
+    `${target.label} 拉取完成`,
   )
-  const runPull = () => runOrWatchTyped<PullResult>({
-    actionKey: spec.key,
-    operation: 'pull',
+  const pushSpec = actionSpec(
+    `operation:push:${props.deviceId}:${target.key}`,
+    `Push ${target.label}`,
+    props.deviceId,
+    [workspaceResource],
+    'operation',
+    `${target.label} 推送完成`,
+  )
+  const run = <T,>(actionKey: string, operation: string) => runOrWatchTyped<T>({
+    actionKey,
+    operation,
     projectRoot: target.root,
-    workspacePlane: 'local',
+    workspacePlane: target.plane,
   })
 
   return (
     <Panel>
       <PanelHeader
-        title="官方资产安装"
-        description="消费版本由项目 .dec/config.yaml 的 requires 决定；安装器从 Dec registry 重画 IDE 目录。"
-      />
-      <PanelBody className="space-y-3">
-        <div className="flex flex-wrap items-end gap-2">
-          <Field label="项目" className="min-w-64 flex-1">
-            <Select aria-label="项目" value={target.key} onChange={(event) => props.onTarget(event.target.value)}>
-              {props.targets.filter((item) => item.plane === 'local').map((item) => (
-                <option key={item.key} value={item.key}>{item.label}</option>
-              ))}
-            </Select>
-          </Field>
-          <ActionButton
-            spec={spec}
-            action={runPull}
-            onSuccess={(result) => props.onPullResult?.(`${target.label} Pull`, result)}
-            runningLabel="安装中…"
-          >
-            <RefreshCw className="size-4" />重新安装
-          </ActionButton>
-        </div>
-        <p className="break-all font-mono text-[11px] text-faint">{target.root}</p>
-        <Notice
-          tone="info"
-          text="这里不再比较或推送 provides。提供方修改 DecAssets 后提交源仓，打产品 v*，再由 CI 发布 registry/<项目>/<版本>。"
-        />
-        <ActionFeedback actionKey={spec.key} />
-      </PanelBody>
-    </Panel>
-  )
-}
-
-function SyncPreviewPanel(props: {
-  deviceId: string
-  targets: SyncTarget[]
-  target: SyncTarget
-  onTarget: (key: string) => void
-  onPushed: (provider: string) => Promise<void>
-}) {
-  const [preview, setPreview] = useState<SyncPreview | null>(null)
-  const [selected, setSelected] = useState<SyncPreviewItem | null>(null)
-  const { target } = props
-  const workspaceResource = resource.workspace(target.root)
-  const previewSpec = actionSpec(`sync:preview:${props.deviceId}:${target.key}`, '预览同步差异', props.deviceId, [workspaceResource], 'read')
-  const syncSpec = (mode: SyncMode) => actionSpec(
-    `operation:sync:${props.deviceId}:${target.key}:${mode}`,
-    `${mode === 'pull' ? 'Pull' : 'Push'} ${target.label}`,
-    props.deviceId,
-    [workspaceResource],
-    'operation',
-    `${target.label} 同步完成`,
-  )
-  const runOperation = async (actionKey: string, operation: string, payload?: unknown) => {
-    return normalizeSyncPreview(await runOrWatchTyped<SyncPreview>({
-      actionKey,
-      operation,
-      projectRoot: target.root,
-      workspacePlane: target.plane,
-      payload,
-    }))
-  }
-  const runPreview = () => runOperation(previewSpec.key, 'preview_sync')
-
-  const runSync = (mode: SyncMode) =>
-    runOperation(syncSpec(mode).key, 'sync', { Mode: mode })
-
-  return (
-    <Panel>
-      <PanelHeader
-        title="个人资产与密钥"
-        description="Global 平面只处理个人私仓和 Bitwarden；官方 registry 不在这里写入。"
+        title="拉取与推送"
+        description="Pull：registry 官方资产 + 个人私仓 + 密钥落地。Push：只回写个人私仓与 Bitwarden。"
       />
       <PanelBody className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
@@ -308,88 +224,93 @@ function SyncPreviewPanel(props: {
               onChange={(event) => {
                 props.onTarget(event.target.value)
                 setPreview(null)
-                setSelected(null)
+                setPushed(null)
               }}
             >
               {props.targets.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
             </Select>
           </Field>
-          <ActionButton spec={previewSpec} variant="outline" action={runPreview} onSuccess={setPreview} runningLabel="预览中…">
+          <ActionButton
+            spec={pullSpec}
+            action={() => run<PullResult>(pullSpec.key, 'pull')}
+            onSuccess={(result) => props.onPullResult?.(`${target.label} Pull`, result)}
+            runningLabel="拉取中…"
+          >
+            <ArrowLeft className="size-4" />Pull
+          </ActionButton>
+          <ActionButton
+            spec={previewSpec}
+            variant="outline"
+            action={() => run<PushPreview>(previewSpec.key, 'preview_push')}
+            onSuccess={setPreview}
+            runningLabel="预览中…"
+          >
             <GitCompare className="size-4" />刷新预览
+          </ActionButton>
+          <ActionButton
+            spec={pushSpec}
+            variant="outline"
+            action={() => run<PushResult>(pushSpec.key, 'push')}
+            onSuccess={async (result) => {
+              setPushed(result)
+              setPreview(null)
+              if (target.plane === 'local' && target.projectName) {
+                await props.onPushed(target.projectName)
+              }
+            }}
+            runningLabel="推送中…"
+          >
+            <UploadCloud className="size-4" />Push
           </ActionButton>
         </div>
         <p className="break-all font-mono text-[11px] text-faint">
           {target.root || 'Global 本机平面（projectRoot 为空）'}
         </p>
+        <ActionFeedback actionKey={pullSpec.key} />
         <ActionFeedback actionKey={previewSpec.key} />
-        {(['pull', 'push'] as SyncMode[]).map((mode) => (
-          <ActionFeedback key={mode} actionKey={syncSpec(mode).key} />
-        ))}
-        {!preview && <Notice tone="info" text="刷新预览后可检查个人私仓与本机的差异，再明确选择 Pull 或 Push。" />}
+        <ActionFeedback actionKey={pushSpec.key} />
+        {!preview && !pushed && (
+          <Notice tone="info" text="Push 前可以先刷新预览，确认这次会把哪些个人资产写回私仓；官方安装物不会出现在列表里。" />
+        )}
         {preview && (
           <>
-            <div className="min-h-56 rounded-lg border border-line">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <SyncMetric label="待推文件" value={preview.DecCandidateCount || 0} />
+              <SyncMetric label="密钥 folder" value={preview.SecretsTargetCount || 0} />
+              <SyncMetric label="Bitwarden" value={preview.BitwardenConfigured ? '已配置' : '未配置'} />
+            </div>
+            {preview.DecSkippedReason && <Notice tone="warn" text={`Dec Git 跳过：${preview.DecSkippedReason}`} />}
+            <div className="min-h-32 rounded-lg border border-line">
               <div className={cn(previewGrid, 'border-b border-line bg-canvas/50 py-2 text-[11px] text-faint')}>
-                <span>source → target</span>
-                <span>状态</span>
-                <span className="hidden xl:block">本地 mtime</span>
-                <span className="hidden xl:block">远端 commit</span>
-                <span className="hidden xl:block">last sync</span>
-                <span />
+                <span>路径</span>
+                <span>操作</span>
+                <span className="hidden xl:block">象限</span>
               </div>
-              {(preview.Items || []).map((item, index) => (
-                <div key={`${item.Source}-${item.Target}-${index}`} className={cn(previewGrid, 'border-b border-line/70 py-2.5 text-xs last:border-b-0')}>
-                  <div className="min-w-0">
-                    <p className="truncate font-mono text-muted" title={item.Source}>{item.Source || '—'}</p>
-                    <p className="truncate font-mono text-[11px] text-faint" title={item.Target}>→ {item.Target || '—'}</p>
-                    {/* 窄窗口装不下三个时间列，但时间是判断同步方向的关键，
-                        所以折行显示而不是靠横向滚动藏起来。 */}
-                    <p className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-faint xl:hidden">
-                      <span>本地 {formatSyncTime(item.LocalMtime)}</span>
-                      <span>远端 {formatSyncTime(item.RemoteCommitTime)}</span>
-                      <span>上次 {formatSyncTime(item.LastSyncTime)}</span>
-                    </p>
-                  </div>
-                  <Badge tone={item.Status === 'conflict' ? 'bad' : item.Status === 'synced' ? 'good' : 'warn'}>{item.Status || 'unknown'}</Badge>
-                  <span className="hidden tnum text-[11px] text-faint xl:block">{formatSyncTime(item.LocalMtime)}</span>
-                  <span className="hidden tnum text-[11px] text-faint xl:block">{formatSyncTime(item.RemoteCommitTime)}</span>
-                  <span className="hidden tnum text-[11px] text-faint xl:block">{formatSyncTime(item.LastSyncTime)}</span>
-                  <Button size="sm" variant="outline" onClick={() => setSelected(item)}>
-                    {item.Secret || item.MetadataOnly ? '元数据' : '对比'}
-                  </Button>
+              {(preview.Changes || []).map((item, index) => (
+                <div key={`${item.Path}-${index}`} className={cn(previewGrid, 'border-b border-line/70 py-2.5 text-xs last:border-b-0')}>
+                  <p className="truncate font-mono text-muted" title={item.Path}>{item.Path}</p>
+                  <Badge tone={item.Op === '删除' ? 'bad' : item.Op === '新建' ? 'good' : 'warn'}>{item.Op}</Badge>
+                  <span className="hidden text-[11px] text-faint xl:block">{item.Quadrant || '—'}</span>
                 </div>
               ))}
-              {(preview.Items || []).length === 0 && (
-                <p className="px-3 py-5 text-center text-xs text-faint">没有待同步或可比较的资产。</p>
+              {(preview.Changes || []).length === 0 && (
+                <p className="px-3 py-5 text-center text-xs text-faint">没有待推送的个人改动。</p>
               )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {(['pull', 'push'] as SyncMode[]).map((mode) => {
-                const spec = syncSpec(mode)
-                return (
-                  <ActionButton
-                    key={mode}
-                    spec={spec}
-                    variant={mode === 'pull' ? 'default' : 'outline'}
-                    action={() => runSync(mode)}
-                    onSuccess={async (value) => {
-                      setPreview(value)
-                      if (mode === 'push' && target.plane === 'local' && target.projectName) {
-                        await props.onPushed(target.projectName)
-                      }
-                    }}
-                    runningLabel="同步中…"
-                  >
-                    {mode === 'push' ? <UploadCloud className="size-4" /> : <ArrowLeft className="size-4" />}
-                    {mode === 'pull' ? 'Pull' : 'Push'}
-                  </ActionButton>
-                )
-              })}
             </div>
           </>
         )}
+        {pushed && (
+          <>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <SyncMetric label="已推文件" value={pushed.DecPushedCount || 0} />
+              <SyncMetric label="新建密钥" value={pushed.SecretsCreatedCount || 0} />
+              <SyncMetric label="更新密钥" value={pushed.SecretsUpdatedCount || 0} />
+            </div>
+            {pushed.DecSkippedReason && <Notice tone="warn" text={`Dec Git 跳过：${pushed.DecSkippedReason}`} />}
+            {pushed.SecretsSkippedReason && <Notice tone="warn" text={`Secrets 跳过：${pushed.SecretsSkippedReason}`} />}
+          </>
+        )}
       </PanelBody>
-      <DiffDialog item={selected} onClose={() => setSelected(null)} />
     </Panel>
   )
 }
@@ -482,74 +403,6 @@ function ConsumerRefreshPanel(props: {
         )}
       </PanelBody>
     </Panel>
-  )
-}
-
-function normalizeSyncPreview(value: SyncPreview): SyncPreview {
-  const items = value.Items || value.Entries || []
-  const hasConflicts = value.HasConflicts || Boolean(value.ConflictedPaths?.length)
-  return {
-    ...value,
-    Items: items.map((item) => ({
-      ...item,
-      LocalMtime: item.LocalMtime || item.SourceModifiedAt,
-      RemoteCommitTime: item.RemoteCommitTime || item.TargetModifiedAt,
-      Secret: item.Secret || item.MetadataOnly,
-    })),
-    Conflict: value.Conflict || (hasConflicts
-      ? { Worktree: value.Worktree, Message: value.ConflictedPaths?.join('、') || '存在未解决冲突' }
-      : undefined),
-  }
-}
-
-function DiffDialog({ item, onClose }: { item: SyncPreviewItem | null; onClose: () => void }) {
-  return (
-    <Dialog.Root open={Boolean(item)} onOpenChange={(open) => { if (!open) onClose() }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/65" />
-        <Dialog.Content className="fixed inset-[3vh_2vw] z-50 flex flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-2xl">
-          <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
-            <div>
-              <Dialog.Title className="text-sm font-semibold text-ink">{item?.Secret ? 'Secret 元数据' : '内容对比'}</Dialog.Title>
-              <Dialog.Description className="mt-1 text-xs text-faint">
-                {item?.Secret ? 'Secret 正文永不传入或显示，只能选择同步方向。' : `${item?.Source || 'source'} → ${item?.Target || 'target'}`}
-              </Dialog.Description>
-            </div>
-            <Dialog.Close asChild><Button size="sm" variant="ghost">关闭</Button></Dialog.Close>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto p-4">
-            {item?.Secret ? (
-              <div className="space-y-3">
-                <Notice tone="warn" text="为避免泄露，此处仅显示状态和时间元数据，不展示本地或远端正文。" />
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <SyncMetric label="本地" value={item.LocalMtime || '不存在'} />
-                  <SyncMetric label="远端" value={item.RemoteCommitTime || '不存在'} />
-                </div>
-                <p className="text-xs text-faint">在预览页使用 Pull 或 Push 选择保留远端或本地版本。</p>
-              </div>
-            ) : item?.Diff ? (
-              <pre className="overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-canvas p-3 font-mono text-xs text-muted">{item.Diff}</pre>
-            ) : (
-              <div className="grid gap-3 lg:grid-cols-2">
-                <DiffColumn title="source / 本地" content={item?.LocalContent} />
-                <DiffColumn title="target / 远端" content={item?.RemoteContent} />
-              </div>
-            )}
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  )
-}
-
-function DiffColumn({ title, content }: { title: string; content?: string }) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-1.5 text-xs font-medium text-muted">{title}</div>
-      <pre className="h-[calc(94vh-9rem)] min-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-canvas p-3 font-mono text-xs text-muted">
-        {content || '（无可显示内容）'}
-      </pre>
-    </div>
   )
 }
 

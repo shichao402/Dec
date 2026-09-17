@@ -152,30 +152,6 @@ export function installTauriMock(scenario: Scenario) {
     ],
   }
 
-  const syncPreview = (global: boolean) => ({
-    Items: [
-      {
-        Source: global ? '~/.cursor/skills/dec' : '.cursor/skills/dec',
-        Target: global ? 'p/dec/private/user/skills/dec' : 'p/dec/private/project/skills/dec',
-        Status: 'modified',
-        LocalMtime: '2026-09-14 10:30',
-        RemoteCommitTime: '2026-09-13 18:20',
-        LastSyncTime: '2026-09-13 18:21',
-        LocalContent: '# local skill',
-        RemoteContent: '# remote skill',
-      },
-      {
-        Source: '.secrets/relkit/.env/upload.env',
-        Target: 'relkit/private/project',
-        Status: 'remote-newer',
-        LocalMtime: '2026-09-12 09:00',
-        RemoteCommitTime: '2026-09-14 08:00',
-        LastSyncTime: '2026-09-12 09:01',
-        Secret: true,
-      },
-    ],
-  })
-
   const ok = (value: unknown) => ({ result_json: JSON.stringify(value ?? {}), error: '' })
 
   const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
@@ -236,7 +212,6 @@ export function installTauriMock(scenario: Scenario) {
     run_operation: (args) => {
       const operation = String(args.operation || '')
       const global = String(args.workspacePlane || '') === 'global'
-      if (operation === 'preview_sync' || operation === 'sync') return ok(syncPreview(global))
       if (operation === 'preview_push') return ok(global ? globalPushPreview : projectPushPreview)
       if (operation === 'scan_managed_projects') {
         return ok({ ScanRoot: scenario.listing.Current, Projects: scenario.scan })

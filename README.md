@@ -139,7 +139,8 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 
 `.dec/` 与 `.cursor/`、
 `.codex/` 等 IDE 目录都是状态或渲染结果，校验会拒绝把它们声明为 source，
-`provides_root` 同样不能指向这类点目录。本机不再把 provides 或 cache 推入私仓。
+`provides_root` 同样不能指向这类点目录。本机不再把官方 provides 推入任何仓库；
+个人 Git 资产仍从 cache 推回设置中的私仓。
 
 ## 推荐工作流
 
