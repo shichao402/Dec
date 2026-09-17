@@ -222,6 +222,8 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.LoadWorkspaceOverviewOpts(workspace, app.OverviewLoadOpts{IncludeVaultBundles: in.IncludeVaultBundles})
 	case "load_asset_selection":
 		return app.LoadWorkspaceAssetSelection(workspace, reporter)
+	case "list_official_requires":
+		return app.ListOfficialRequires(ctx, workspace)
 	case "save_enabled_bundles":
 		var in struct {
 			EnabledProjects []string

@@ -112,7 +112,7 @@ export function SyncPage(props: {
     <Page>
       <PageHeader
         title="同步"
-        description="Pull 按 requires 安装官方资产并取回个人资产与密钥；Push 只回写个人私仓与 Bitwarden。"
+        description="个人私仓与密钥的 Pull / Push。"
         actions={props.onBack && (
           <Button variant="outline" onClick={props.onBack}>
             <ArrowLeft className="size-4" />返回
@@ -121,10 +121,6 @@ export function SyncPage(props: {
       />
       <PageFill>
         <ScrollArea className="space-y-3 pr-0.5">
-          <Notice
-            tone="info"
-            text="官方资产从 Dec 仓 registry 分支按 requires 安装，本机改不动也推不回去：要改请用草稿 + 源仓 PR/Issue（MCP dec_propose_upstream）。TODO(console)：贡献入口尚未做成独立页。"
-          />
           <SyncPanel
             deviceId={props.deviceId}
             targets={targets}
@@ -213,7 +209,7 @@ function SyncPanel(props: {
     <Panel>
       <PanelHeader
         title="拉取与推送"
-        description="Pull：registry 官方资产 + 个人私仓 + 密钥落地。Push：只回写个人私仓与 Bitwarden。"
+        description="个人私仓与 Bitwarden。官方依赖请到项目页更新。"
       />
       <PanelBody className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
@@ -270,7 +266,7 @@ function SyncPanel(props: {
         <ActionFeedback actionKey={previewSpec.key} />
         <ActionFeedback actionKey={pushSpec.key} />
         {!preview && !pushed && (
-          <Notice tone="info" text="Push 前可以先刷新预览，确认这次会把哪些个人资产写回私仓；官方安装物不会出现在列表里。" />
+          <Notice tone="info" text="先刷新预览，再 Push。" />
         )}
         {preview && (
           <>

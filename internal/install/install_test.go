@@ -90,6 +90,19 @@ func TestOfficialInstallsPublishedTag(t *testing.T) {
 	if len(assets) != 1 || assets[0].Name != "demo-ops" {
 		t.Fatalf("%+v", assets)
 	}
+	if got := ReadInstalledVersion(cache, "demo"); got != "v0.1.0" {
+		t.Fatalf("installed version = %q", got)
+	}
+	status, err := Status(ctx, Options{
+		CacheDir: cache, RegistryURL: bare,
+		Requires: types.RequiresSpec{"demo": "latest"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status) != 1 || status[0].Available != "v0.1.0" || status[0].UpdateAvailable {
+		t.Fatalf("status = %+v", status)
+	}
 	if _, err := Official(ctx, Options{
 		CacheDir: cache, RegistryURL: bare,
 		Requires: types.RequiresSpec{"demo": "v9.9.9"},

@@ -56,6 +56,52 @@ func installOfficialRequires(ctx context.Context, workspace Workspace, cfg *type
 	return resolved, nil
 }
 
+// OfficialRequireStatus 是 Console「官方依赖」面板的一行。
+type OfficialRequireStatus struct {
+	Project         string
+	Want            string
+	Installed       string
+	Available       string
+	Tag             string
+	UpdateAvailable bool
+	Error           string
+}
+
+type OfficialRequiresState struct {
+	Items []OfficialRequireStatus
+}
+
+// ListOfficialRequires 对照本机 cache 与远端 registry，不安装。
+func ListOfficialRequires(ctx context.Context, workspace Workspace) (*OfficialRequiresState, error) {
+	cfg, err := loadWorkspaceBundleConfig(workspace)
+	if err != nil {
+		return nil, err
+	}
+	req, url := workspaceOfficialRequires(workspace, cfg)
+	items, err := install.Status(ctx, install.Options{
+		CacheDir:    workspaceCacheDir(workspace),
+		RegistryURL: url,
+		GitToken:    os.Getenv("DEC_REGISTRY_TOKEN"),
+		Requires:    req,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &OfficialRequiresState{Items: make([]OfficialRequireStatus, 0, len(items))}
+	for _, item := range items {
+		out.Items = append(out.Items, OfficialRequireStatus{
+			Project:         item.Project,
+			Want:            item.Want,
+			Installed:       item.Installed,
+			Available:       item.Available,
+			Tag:             item.Tag,
+			UpdateAvailable: item.UpdateAvailable,
+			Error:           item.Error,
+		})
+	}
+	return out, nil
+}
+
 func renderOfficialFromCache(workspace Workspace, req types.RequiresSpec, projectIDEs []ide.IDE, result *PullProjectAssetsResult, reporter Reporter) error {
 	if len(req) == 0 {
 		return nil

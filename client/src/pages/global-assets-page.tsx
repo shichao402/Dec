@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { useDecAction } from '@/lib/action-context'
 import { actionSpec, resource } from '@/lib/console'
 import { AssetsPanel } from '@/pages/assets-panel'
+import { RequiresPanel } from '@/pages/requires-panel'
 
 export function GlobalAssetsPage(props: {
   deviceId: string
@@ -28,6 +29,9 @@ export function GlobalAssetsPage(props: {
         }
       />
       <PageFill>
+        <div className="mb-4">
+          <RequiresPanel deviceId={props.deviceId} root="" plane="global" />
+        </div>
         <AssetsPanel
           deviceId={props.deviceId}
           root=""

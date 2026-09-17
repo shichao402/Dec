@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/internal/bundle"
@@ -72,8 +73,53 @@ func Official(ctx context.Context, opts Options) ([]Resolved, error) {
 		if item.Yanked {
 			item.Warning = fmt.Sprintf("%s@%s 已被 yank，仍按精确 requires 安装", project, version)
 		}
-		if err := materializeTag(ctx, work, opts.CacheDir, project, tag); err != nil {
+		if err := materializeTag(ctx, work, opts.CacheDir, project, version, tag); err != nil {
 			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// Status 只读：对照 requires、本机 cache 版本戳与远端 tag，不改任何文件。
+func Status(ctx context.Context, opts Options) ([]StatusItem, error) {
+	req, err := types.NormalizeRequiresSpec(opts.Requires)
+	if err != nil {
+		return nil, err
+	}
+	if len(req) == 0 {
+		return nil, nil
+	}
+	url := strings.TrimSpace(opts.RegistryURL)
+	if url == "" {
+		url = registry.DefaultURL
+	}
+	env := registry.TokenEnv(opts.GitToken)
+	tags, err := registry.ListRemoteTags(ctx, url, env)
+	if err != nil {
+		return nil, fmt.Errorf("列举注册表 tag: %w", err)
+	}
+	var out []StatusItem
+	names := make([]string, 0, len(req))
+	for project := range req {
+		names = append(names, project)
+	}
+	sort.Strings(names)
+	for _, project := range names {
+		want := req[project]
+		versions := registry.VersionsFromTags(project, tags)
+		item := StatusItem{
+			Project:   project,
+			Want:      want,
+			Installed: ReadInstalledVersion(opts.CacheDir, project),
+		}
+		tag, version, resolveErr := registry.Resolve(project, want, versions, registry.Yanked{})
+		if resolveErr != nil {
+			item.Error = resolveErr.Error()
+		} else {
+			item.Available = version
+			item.Tag = tag
+			item.UpdateAvailable = item.Installed == "" || item.Installed != version
 		}
 		out = append(out, item)
 	}
@@ -88,7 +134,7 @@ func cloneRegistry(ctx context.Context, work, url string, env []string) error {
 	return nil
 }
 
-func materializeTag(ctx context.Context, repoDir, cacheDir, project, tag string) error {
+func materializeTag(ctx context.Context, repoDir, cacheDir, project, version, tag string) error {
 	tmp, err := os.MkdirTemp("", "dec-registry-co-*")
 	if err != nil {
 		return err
@@ -102,7 +148,46 @@ func materializeTag(ctx context.Context, repoDir, cacheDir, project, tag string)
 	if err := os.RemoveAll(dst); err != nil {
 		return err
 	}
-	return copyDir(src, dst)
+	if err := copyDir(src, dst); err != nil {
+		return err
+	}
+	return WriteInstalledVersion(cacheDir, project, version)
+}
+
+const installedVersionFile = ".dec-installed-version"
+
+type StatusItem struct {
+	Project         string
+	Want            string
+	Installed       string
+	Available       string
+	Tag             string
+	UpdateAvailable bool
+	Error           string
+}
+
+func installedVersionPath(cacheDir, project string) string {
+	return filepath.Join(cacheDir, project, installedVersionFile)
+}
+
+func ReadInstalledVersion(cacheDir, project string) string {
+	data, err := os.ReadFile(installedVersionPath(cacheDir, project))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func WriteInstalledVersion(cacheDir, project, version string) error {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return fmt.Errorf("安装版本不能为空")
+	}
+	path := installedVersionPath(cacheDir, project)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(version+"\n"), 0o644)
 }
 
 // CacheAsset 是 cache 里一份已物化的官方资产。

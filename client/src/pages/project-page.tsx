@@ -14,6 +14,7 @@ import { invokeTyped } from '@/lib/api'
 import { actionSpec, resource, suggestProjectName } from '@/lib/console'
 import { AssetsPanel } from '@/pages/assets-panel'
 import { ProvidesPanel } from '@/pages/provides-panel'
+import { RequiresPanel } from '@/pages/requires-panel'
 import type { ManagedProject } from '@/lib/utils'
 
 type ProjectPreparation = { AvailableProjects: string[]; HomeProject: string }
@@ -73,7 +74,7 @@ export function ProjectPage(props: {
     <Page>
       <PageHeader
         title={project.Label || project.Name}
-        description="家项目与本仓库的 requires 决定这里能安装的资产。"
+        description="官方依赖、本仓库提供项与个人资产。"
         meta={
           <>
             <Badge tone="quiet" className="font-mono" title={project.Root}>{project.Root}</Badge>
@@ -113,11 +114,12 @@ export function ProjectPage(props: {
           )}
         </Panel>
         <div className="space-y-4">
+          <RequiresPanel deviceId={props.deviceId} root={project.Root} plane="local" />
           <ProvidesPanel deviceId={props.deviceId} root={project.Root} />
           <div>
             <div className="mb-2">
               <h2 className="text-[13px] font-semibold text-ink">我引用的资产</h2>
-              <p className="mt-0.5 text-xs text-faint">家项目自带资产加上本仓库 requires 声明的引入。</p>
+              <p className="mt-0.5 text-xs text-faint">家项目自带资产与个人启用项。</p>
             </div>
             <AssetsPanel
               deviceId={props.deviceId}
