@@ -21,7 +21,17 @@
 
 `install` 是纯函数：按 `requires` + 个人启用列表重画 IDE 目录。`.dec/cache` 只按 tag 下载，改它无效。已发布 tag 的字节不可改；撤回用 yank / purge，只由提供方 CI 执行。
 
-提供方用非用户面 `dec-registry publish-provides`。Console / MCP 不写官方注册表。改官方安装物走草稿 + `dec_propose_upstream`（源仓 PR 或 Issue）；合入并打产品 `v*` 后 CI 才 publish。
+提供方用非用户面 `dec-registry publish-provides`。Dec 发版把它单独构建到
+`dist/ci/dec-registry-<os>-<arch>`，stable GitHub Release 挂载该工具；它不属于
+RUP runtime，也不进入 Console resources / `~/.dec/bin`。提供方 CI 使用
+`.github/actions/publish-provides`，以 deploy key 或 token 写 registry。
+
+Console / MCP 不写官方注册表。消费方改官方安装物时，在具体项目建立
+`.dec/overrides/<提供方>/<类型>/<资产>/` **本地覆写**并关联源仓 PR 或 Issue；
+票据关闭/合并且 registry 出现新版本后，用户在「更新」页确认安装，新正式版替换并删除已解决覆写。
+
+Console「更新」只做远端到本地：跨 Global / 项目多选官方 `requires`，预览后安装。
+个人 Git 与 Bitwarden 的写回位于对应项目页或 Global 资产页，不与更新混为双向同步。
 
 `scripts/relkit.lock.json` 是 relkit 产品锁，Dec 不读它来填 `requires`。跟宿主版本耦合的资产必须 `public/local`，不得放在 global。
 

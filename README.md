@@ -16,7 +16,7 @@ Dec 是一个个人 AI 知识仓库工具。
 Dec 的解决方案：
 
 - 个人维度：在 Console **设置** 页连接你的资产仓库
-- 项目维度：Console **引导 / 项目** 初始化 project；资产页调整 bundle；**同步** 页拉取到项目
+- 项目维度：Console **引导 / 项目** 初始化 project；资产页调整 bundle；**更新** 页安装官方依赖
 - IDE 维度：Dec 自动将资产部署到配置的 IDE 目录
 - 私密维度：Bitwarden folder ↔ 项目 **`.secrets/`** 同步根（project / bundle 同构）；env 经独立 `dec-exec` 注入；SSH Key 落地机器级 `~/.ssh/`，均不进 `.dec/`
 
@@ -50,7 +50,7 @@ requires:
 
 ### 3. 资产部署
 
-Console **同步** 页：官方走 registry 安装；个人 Git 与密钥仍走私仓 / Bitwarden。官方禁止 `dec_push`；改官方安装物用草稿 + 源仓 PR/Issue。
+Console **更新** 页只做远端到本地：跨工作区多选官方依赖，预览后安装。个人 Git 与密钥在项目 / Global 资产页分别写回。官方禁止 `dec_push`；消费方临时修改官方安装物时，在具体项目页创建**本地覆写**并关联源仓 PR/Issue。
 
 Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 
@@ -93,7 +93,7 @@ Console 主要页面：
 | 认证 | 按需完成 Bitwarden Authenticate |
 | 概览 / 引导 | 项目概览、建议下一步、project 初始化 |
 | 项目 / 资产 | 浏览资产、选择 bundle、保存 enabled |
-| 同步 | 拉取、推送（Global 与项目）、密钥清单（只读元数据） |
+| 更新 | 多选官方依赖，预览并安装到 Global / 项目 |
 | 删除 | 列远端与本机库存、勾选删除；密钥进 Bitwarden 回收站可恢复 |
 | 设置 | Console 更新；仓库、Bitwarden、全局 IDE、服务与清理 |
 
@@ -107,7 +107,7 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 1. **设置** → 连接个人 Git 仓库 URL
 2. **设置** → 配置本机 IDE（安装 Dec 内置 Skills）
 3. **引导 / 项目** → 初始化 project（**自动匹配** vault 中同名 `projects/<目录名>.yaml`，或选择/新建）
-4. **同步** → 拉取 project 内 bundle 到当前项目 IDE 目录
+4. **更新** → 选择官方依赖，预览并安装
 
 ### 4. 变量与占位符
 
@@ -137,6 +137,19 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 2. 在项目页“我提供的资产”里勾选扫描到的候选
 3. 修改产品版本并打 `v*` tag，由 CI 执行 `publish-provides`
 
+提供方 CI 推荐直接使用 Dec 的复合 Action：
+
+```yaml
+- uses: shichao402/Dec/.github/actions/publish-provides@main
+  with:
+    project-root: ${{ github.workspace }}
+    ref: ${{ github.ref_name }}
+    registry-ssh-key: ${{ secrets.DEC_REGISTRY_SSH_KEY }}
+```
+
+Action 优先下载 stable GitHub Release 中 `dist/ci/` 构建出的 `dec-registry-<os>-<arch>`；
+尚无该产物时从同一 Action ref 的源码构建。CI 工具不进入 RUP、Console resources 或 `~/.dec/bin`。
+
 `.dec/` 与 `.cursor/`、
 `.codex/` 等 IDE 目录都是状态或渲染结果，校验会拒绝把它们声明为 source，
 `provides_root` 同样不能指向这类点目录。本机不再把官方 provides 推入任何仓库；
@@ -149,13 +162,13 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 1. 打开 Dec Console
 2. **设置** → 连接仓库、配置 IDE
 3. 资产页 → 选择 bundle / 资产并保存
-4. **同步** → 拉取到项目
+4. **更新** → 预览并安装
 
 ### 工作流 B：在新项目中复用
 
 1. 打开 Console 并连接到该项目所在设备
 2. **引导 / 项目** → 自动匹配或选择 vault 中同名 project
-3. **同步** → 拉取
+3. **更新** → 预览并安装
 
 ### 工作流 C：更新已有资产
 
@@ -206,7 +219,7 @@ MCP 必须是单个 server 片段 JSON，`command` 必填：
 .dec/
 ├── config.yaml      # requires map + provides（提供方）+ 个人启用
 ├── cache/           # 只读下载缓存（按来源/项目/tag）
-├── drafts/          # 官方安装物的本地草稿
+├── overrides/       # 消费方官方资产本地覆写 + 上游票据元数据
 ├── vars.yaml        # 项目变量定义
 └── vars.d/          # 可选：拆分的变量片段
 ```

@@ -62,7 +62,8 @@ direct requires 的 `public/project`，不递归、不引入 user/private。Git 
 - 项目初始化 / project 选择：Console **引导 / 项目**
 - 项目启用、家项目 requires、标签（推荐 Global）与四象限浏览：Console **项目 / Global 资产**
 - 提供映射、引用选择：Console **项目 / Global 资产**
-- 官方 `requires` 安装、个人私仓 Pull / Push、密钥清单：Console **同步**
+- 官方 `requires` 多选预览与安装：Console **更新**
+- 个人私仓 / Bitwarden 写回与密钥清单：Console **项目 / Global 资产**
 - 远端设备探测与置备：Console **连接**（ADR 0019）
 
 运行时每个程序自行支持 `--version`；不存在用一个通用 CLI 代表整套版本的探针。
@@ -427,8 +428,8 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 - **项目作者源**：由工作区 `.dec/config.yaml` 的 `provides[].source` 指向，跟产品代码共同提交
 - **Vault 分发源**：远端项目四象限；`.dec/cache/` 只是安装缓存
 
-修改 `internal/assets/` 走源码 commit + release；provides source 变更走 Console **同步**；
-没有 provides 的存量项目暂时保留 cache push 兼容。
+修改 `internal/assets/` 走源码 commit + release；provides source 随提供方产品 `v*`
+由 CI 的 `publish-provides` Action 发布。消费方临时修改官方资产走项目页本地覆写。
 
 ### 4. 资产生命周期
 
@@ -445,7 +446,7 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 - 勾选保存后只写 `.dec/config.yaml` 的 `enabled_bundles`
 - 保留已有 `project_name` / `ides` / `editor`
 
-#### pull（同步页）
+#### update（更新页）
 
 1. 解析 `project_name` → vault `projects/<name>.yaml`（或使用本地 `enabled_bundles`）
 2. 对每个 enabled bundle：拉 Dec Git bundle → `.dec/cache/<bundle>/`
@@ -454,7 +455,7 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 5. 从 cache 渲染安装到 IDE 目录 + 非敏感 vars 占位符替换
 6. 记录 commit 到 `.dec/.version`
 
-#### push（同步页）
+#### write back（项目 / Global 资产页）
 
 - 官方 provides 不在本机 push；提供方提交源仓并打产品 `v*`，由 CI 写 Dec registry
 - 个人 Git 资产只写设置中的私仓，官方项目名会被过滤
@@ -626,7 +627,8 @@ Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真�
   Git/BW 同路径与落地边界校验 → 独立落地 + IDE 渲染
 - MCP 经独立 `dec-exec` 注入 `.env/*.env`；不再依赖 mise 落地路径
 - Schema：`Project`（`schema/dec/v1/projects.proto`）、`BundleBinding`、`SecretsConfig`（`schema/secrets/v1/`）
-- Console：同步页一次 pull、推送两个平面、只读密钥清单；资产页选 bundle；删除页清远端与本机；
+- Console：更新页多选官方依赖并安装；项目 / Global 页写回个人资产和密钥、查看密钥清单；
+  资产页选 bundle；删除页清远端与本机；
   设置页配置 Bitwarden
 
 ## 已知限制

@@ -11,7 +11,7 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 
 项目里由 Dec pull 出来的 IDE 配置不等于「禁止提交」。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 这类项目级输出，如果是托管资产生成的结果，通常可以按仓库约定单独提交。敏感值放 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置，不要写回这些输出文件。
 
-官方资产来自 Dec 仓 `registry` 分支。消费仓 `.dec/config.yaml` 用 `requires` map 声明装谁、装哪一版（`latest` 或 `v*`）。个人 Git 只进设置里的私仓。密钥走 Bitwarden。改官方安装物不要 `dec_push`，用草稿 + `dec_propose_upstream`。
+官方资产来自 Dec 仓 `registry` 分支。消费仓 `.dec/config.yaml` 用 `requires` map 声明装谁、装哪一版（`latest` 或 `v*`）。个人 Git 只进设置里的私仓。密钥走 Bitwarden。改官方安装物不要 `dec_push`，用项目内本地覆写 + `dec_propose_upstream`。
 
 ## 何时使用
 
@@ -28,7 +28,7 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
    - 用户：Console 资产页浏览/搜索
 
 3. **用户改了已拉取的官方资产**
-   - 改动应出现在 `.dec/drafts/`；不要改 `.dec/cache/`（重装会丢）
+   - 改动应出现在 `.dec/overrides/`；不要改 `.dec/cache/`（重装会丢）
    - Agent：`dec_propose_upstream`（`origin_repo`、`diff`、`mode=auto|pr|issue`）
    - **禁止** `dec_push` 官方路径进私仓
 
@@ -74,7 +74,7 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 | 改启用列表 | `dec_set_assets`（不支持 both；改完通常再 `dec_pull`） |
 | 拉取并渲染 | `dec_pull` |
 | 个人 Git / 密钥推回 | `dec_push`；官方路径禁止 |
-| 贡献官方草稿 | `dec_propose_upstream` |
+| 提交官方本地覆写 | `dec_propose_upstream` |
 | 私密资产元数据 | `dec_list_secrets`（绝不返回正文/密钥；Console 在同步页「密钥清单」） |
 | 删除候选 / 删除 | `dec_list_delete_candidates` / `dec_delete`（Console 在删除页） |
 | 置备远端设备 | `dec_provision_remote`（Linux/macOS；首次置备必须 `confirmed=true`） |

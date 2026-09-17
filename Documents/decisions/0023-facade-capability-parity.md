@@ -3,7 +3,7 @@
 - **状态**：已接受（已实现）
 - **日期**：2026-09-07
 - **关联**：[0008](0008-service-facade-split.md)（服务 / 门面拆分）、[0020](0020-retire-tui.md)（Console 为人机入口）、[0022](0022-console-bitwarden-unlock.md)（认证只在 Console）
-- **影响范围**：`client/src/pages/`（同步、删除页）、`internal/mcp/`、`internal/app/list_secrets.go`、`.cursor/rules/console-first.mdc`
+- **影响范围**：`client/src/pages/`（更新、项目、Global、删除页）、`internal/mcp/`、`internal/app/list_secrets.go`、`.cursor/rules/console-first.mdc`
 
 ## 问题
 
@@ -35,9 +35,9 @@ Console-first 只规定「新功能先设计 Console 页，Console 未覆盖就�
 
 | 能力 | Console 入口 | 此前状况 |
 |------|--------------|----------|
-| secrets 元数据只读清单 | 同步页「密钥清单」 | 只有 `dec_list_secrets`；「我的 token 在哪」在 Console 无法回答 |
+| secrets 元数据只读清单 | 项目 / Global 资产页「密钥清单」 | 只有 `dec_list_secrets`；「我的 token 在哪」在 Console 无法回答 |
 | 删除远端与本机库存 | 删除页 | 只有 `dec_list_delete_candidates` / `dec_delete`；破坏性操作只在 Agent 门面 |
-| Global 平面预览与推送 | 同步页推送目标选 Global | 只能推项目；本机凭据改完没有界面推 |
+| Global 平面预览与推送 | Global 资产页「写回」 | 只能推项目；本机凭据改完没有界面推 |
 
 ### 3. 允许的 MCP 独有扩展（需登记）
 
@@ -47,7 +47,7 @@ Console-first 只规定「新功能先设计 Console 页，Console 未覆盖就�
 | `dec_provision_remote` 的 `branch` / `tags` | 免交互置备要一次传全；Console 有人在场，可逐步确认 |
 | `dec_init_project` 的 `apply_vault_project` | 同上；Console 的初始化流已有显式绑定步骤 |
 | 无 `dec_check_update` / `dec_install_update` | 自更新会替换本机 Console，必须由人在设置页确认；MCP 只在状态或错误中指向 Console |
-| 官方资产无 `dec_push`；MCP `dec_propose_upstream` | 官方注册表只由提供方 CI 写。人改官方走源仓 PR/Issue。Console 同步页有说明；独立贡献页仍是 TODO(console) |
+| 官方资产无 `dec_push`；MCP `dec_propose_upstream` | 官方注册表只由提供方 CI 写。Console 项目页用「本地覆写」预览修改、提交源仓 PR/Issue，并把票据 id/url 固化到覆写元数据 |
 | Console / MCP 不提供 yank/purge/publish-provides | 写官方 registry 必须用 CI token，不能走本机 GCM |
 
 新增 Console 没有的 MCP 工具或参数时，必须在本表加一行并写明人为何不需要。**没登记就算缺口**，
@@ -93,7 +93,8 @@ Console 补本机平面能力时，`projectRoot` 必须为空、`workspacePlane`
 
 ## 实施结果
 
-- Console 同步页：推送目标扩展为「Global（本机）+ 各项目」，新增密钥清单面板
+- Console 更新页：跨 Global / 项目多选官方依赖，预览后安装；不含 Push
+- Console 项目 / Global 资产页：个人 Git 与密钥分别写回，并提供密钥清单
 - Console 删除页：列库存、按分区勾选（远端 / 本机互斥）、确认词门控、结果区渲染残留项
 - `ListWorkspaceSecretsMetadata` 放宽用户平面的空 Root 检查，项目平面仍拒绝
 - 布局测试覆盖两个平面各一次推送预览，以及删除页的分区锁定与确认门控

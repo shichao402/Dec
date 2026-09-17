@@ -53,7 +53,7 @@ description: >
 7. 完成后
    - 官方：源仓评审合入并打产品 `v*`，CI `dec-registry publish-provides` 写入 Dec `registry`
    - 个人：Console **同步** 页 push 私仓，或 Agent `dec_push`（`plane=local`）
-   - 改官方安装物：草稿 + `dec_propose_upstream`
+   - 改官方安装物：项目内本地覆写 + `dec_propose_upstream`
 
 ## 信息不全时的推荐提问模板
 
