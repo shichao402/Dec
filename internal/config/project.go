@@ -207,6 +207,7 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 	}
 	normalized.Provides = provides
 	config.Provides = provides
+	normalized.LegacyEnabledBundles = nil
 	requires, err := types.NormalizeRequiresSpec(normalized.Requires)
 	if err != nil {
 		return fmt.Errorf("校验 requires 失败: %w", err)
@@ -403,6 +404,12 @@ func loadProjectConfigV2(data []byte, configPath string) (*types.ProjectConfig, 
 		return nil, fmt.Errorf("校验 %s 中的 provides 失败: %w", configPath, err)
 	}
 	config.Provides = provides
+	// ADR 0029：旧 enabled_bundles 折叠为 requires 的 vault pin；家项目自身不进订阅表。
+	if legacy := NormalizeBundleNames(config.LegacyEnabledBundles); len(legacy) > 0 {
+		config.Requires = config.Requires.AddVaultProjects(legacy)
+		delete(config.Requires, strings.TrimSpace(config.ProjectName))
+	}
+	config.LegacyEnabledBundles = nil
 	requires, err := types.NormalizeRequiresSpec(config.Requires)
 	if err != nil {
 		return nil, fmt.Errorf("校验 %s 中的 requires 失败: %w", configPath, err)
@@ -428,7 +435,7 @@ func (m *ProjectConfigManager) persistStrippedProjectIDEs(config *types.ProjectC
 
 // dropLegacyAssetSections 清理 v2 配置里残留的 available / enabled 段。
 //
-// 这两段来自「按单资产勾选」的历史设计，现在资产启用只认 enabled_bundles。
+// 这两段来自「按单资产勾选」的历史设计，现在只认消费声明 requires（ADR 0029）。
 // 迁移策略：enabled 里出现过的 vault 折叠成同名 bundle 引用，available 直接丢弃，
 // 然后立即回写磁盘，让配置文件里不再出现废弃字段。
 //
@@ -444,7 +451,8 @@ func (m *ProjectConfigManager) dropLegacyAssetSections(config *types.ProjectConf
 		return nil
 	}
 
-	config.EnabledBundles = foldLegacyBundles(config.EnabledBundles, legacy.Enabled)
+	config.Requires = config.Requires.AddVaultProjects(foldLegacyBundles(nil, legacy.Enabled))
+	delete(config.Requires, strings.TrimSpace(config.ProjectName))
 	if err := m.SaveProjectConfig(config); err != nil {
 		return fmt.Errorf("清理项目配置中的废弃字段失败: %w", err)
 	}
@@ -458,10 +466,10 @@ func (m *ProjectConfigManager) upgradeProjectConfigV1ToV2(data []byte) error {
 	}
 
 	upgraded := &types.ProjectConfig{
-		Version:        types.ProjectConfigVersionV2,
-		IDEs:           v1.IDEs,
-		Editor:         v1.Editor,
-		EnabledBundles: foldLegacyBundles(nil, v1.Enabled),
+		Version:  types.ProjectConfigVersionV2,
+		IDEs:     v1.IDEs,
+		Editor:   v1.Editor,
+		Requires: types.RequiresSpec(nil).AddVaultProjects(foldLegacyBundles(nil, v1.Enabled)),
 	}
 
 	if err := m.SaveProjectConfig(upgraded); err != nil {

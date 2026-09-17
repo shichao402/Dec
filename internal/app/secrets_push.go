@@ -45,7 +45,7 @@ func PushWorkspaceSecretsBundles(ctx context.Context, workspace Workspace, repor
 	if err != nil {
 		return nil, err
 	}
-	enabledBundles := append([]string(nil), projectConfig.EnabledBundles...)
+	enabledBundles := consumedProjectNames(projectConfig, workspace.EffectivePlane())
 
 	cfg, err := secrets.LoadConfig()
 	if err != nil {

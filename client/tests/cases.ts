@@ -137,7 +137,7 @@ export const cases: Case[] = [
     open: async (page) => {
       await connect(page)
       await nav(page, 'Global 资产')
-      await expect(page.getByText('这个范围里还没有可选资产')).toBeVisible()
+      await expect(page.getByText('这个范围里还没有可订阅的项目')).toBeVisible()
     },
   },
   {
@@ -246,24 +246,22 @@ export const cases: Case[] = [
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
       await expect(page.getByRole('main').getByRole('button', { name: '更新', exact: true })).toBeVisible()
-      await expect(page.getByText('官方依赖', { exact: true })).toBeVisible()
-      await expect(page.getByText('到「更新」页安装')).toBeVisible()
-      await expect(page.getByText(/可用 v0\.4\.2/)).toBeVisible()
       await expect(page.getByText('写回', { exact: true })).toBeVisible()
-      await page.getByRole('button', { name: '修改' }).click()
-      await page.getByLabel('SKILL.md').fill('# changed')
-      await page.getByLabel('上游仓库').fill('example/relkit')
-      await page.getByRole('button', { name: '预览修改' }).click()
-      await expect(page.getByText('+# changed', { exact: false })).toBeVisible()
-      await expect(page.getByRole('button', { name: '提交 Issue 并启用覆写' })).toBeVisible()
-      await expect(page.getByText('我提供的资产')).toBeVisible()
-      await expect(page.getByText('我引用的资产')).toBeVisible()
-      // 新项目默认 DecAssets；改根后已登记来源要跟着平移。
-      const authorRoot = page.getByLabel('作者目录基准点')
-      await expect(authorRoot).toHaveValue('DecAssets')
-      await authorRoot.fill('ProductAssets')
-      await authorRoot.blur()
-      await expect(page.getByText('ProductAssets/skills', { exact: false }).first()).toBeVisible()
+      // 覆写搬到下级页后，项目页只留入口行，不再自己加载官方资产列表。
+      await expect(page.getByRole('button', { name: /^本地覆写/ })).toBeVisible()
+      await expect(page.getByRole('button', { name: '修改', exact: true })).toHaveCount(0)
+      // 提供项同理：项目页只有入口行，作者表单在下级页。
+      await expect(page.getByRole('button', { name: /^我提供的资产/ })).toBeVisible()
+      await expect(page.getByLabel('作者目录基准点')).toHaveCount(0)
+      // 订阅面板一张表同时列私仓与官方注册表项目，同名项目只给一行（ADR 0029）。
+      await expect(page.getByText('订阅', { exact: true })).toBeVisible()
+      await expect(page.getByRole('checkbox', { name: 'relkit' })).toHaveCount(1)
+      await expect(page.getByText('私仓', { exact: true }).first()).toBeVisible()
+      // 官方 pin 的行必须按官方身份渲染，并在任何宽度都留下「有更新」与去哪更新的提示：
+      // 版本列窄屏会收起，唯一不该收起的是这两条，否则 CI 发了新版用户仍然不知道。
+      await expect(page.getByText('官方', { exact: true }).first()).toBeVisible()
+      await expect(page.getByText('有更新', { exact: true }).first()).toBeVisible()
+      await expect(page.getByText(/有新版本，到「更新」页预览后安装/)).toBeVisible()
       const home = page.getByRole('checkbox', { name: 'dec' })
       await expect(home).toBeChecked()
       await expect(home).toBeDisabled()
@@ -278,6 +276,43 @@ export const cases: Case[] = [
       await nav(page, '项目')
       await page.locator('main button').filter({ hasText: '腾讯云基础设施' }).first().click()
       await expect(page.getByRole('main').getByRole('button', { name: '更新', exact: true })).toBeVisible()
+    },
+  },
+  {
+    name: 'project-overrides',
+    scenario: 'typical',
+    open: async (page) => {
+      await connect(page)
+      await nav(page, '项目')
+      await page.getByRole('button', { name: /^Dec/ }).first().click()
+      await page.getByRole('button', { name: /^本地覆写/ }).click()
+      await expect(page.getByRole('heading', { name: '本地覆写' })).toBeVisible()
+      await page.getByRole('button', { name: '修改', exact: true }).click()
+      await page.getByLabel('SKILL.md').fill('# changed')
+      await page.getByLabel('上游仓库').fill('example/relkit')
+      await page.getByRole('button', { name: '预览修改' }).click()
+      await expect(page.getByText('+# changed', { exact: false })).toBeVisible()
+      await expect(page.getByRole('button', { name: '提交 Issue 并启用覆写' })).toBeVisible()
+      // 返回回到项目页，而不是回到项目列表。
+      await expect(page.getByRole('button', { name: '返回' })).toBeVisible()
+    },
+  },
+  {
+    name: 'project-provides',
+    scenario: 'typical',
+    open: async (page) => {
+      await connect(page)
+      await nav(page, '项目')
+      await page.getByRole('button', { name: /^Dec/ }).first().click()
+      await page.getByRole('button', { name: /^我提供的资产/ }).click()
+      await expect(page.getByRole('heading', { name: '我提供的资产' })).toBeVisible()
+      // 新项目默认 DecAssets；改根后已登记来源要跟着平移。
+      const authorRoot = page.getByLabel('作者目录基准点')
+      await expect(authorRoot).toHaveValue('DecAssets')
+      await authorRoot.fill('ProductAssets')
+      await authorRoot.blur()
+      await expect(page.getByText('ProductAssets/skills', { exact: false }).first()).toBeVisible()
+      await expect(page.getByRole('button', { name: '返回' })).toBeVisible()
     },
   },
   {

@@ -35,6 +35,7 @@ func Official(ctx context.Context, opts Options) ([]Resolved, error) {
 	if err != nil {
 		return nil, err
 	}
+	req = req.Official()
 	if len(req) == 0 {
 		return nil, nil
 	}
@@ -87,6 +88,7 @@ func Status(ctx context.Context, opts Options) ([]StatusItem, error) {
 	if err != nil {
 		return nil, err
 	}
+	req = req.Official()
 	if len(req) == 0 {
 		return nil, nil
 	}

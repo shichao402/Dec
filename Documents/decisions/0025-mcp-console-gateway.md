@@ -2,7 +2,7 @@
 
 - **状态**：已接受（已实现）
 - **日期**：2026-09-12
-- **关联**：[0008](0008-service-facade-split.md)（服务 / 门面）、[0018](0018-instance-lock-and-console.md)（Console 单例）、[0021](0021-console-owned-runtime.md)（运行时所有权）、[0022](0022-console-bitwarden-unlock.md)（认证只在 Console）、[0023](0023-facade-capability-parity.md)（门面能力口径）
+- **关联**：[0008](0008-service-facade-split.md)（服务 / 门面）、[0018](0018-instance-lock-and-console.md)（Console 单例）、[0021](0021-console-owned-runtime.md)（运行时所有权）、[0022](0022-console-bitwarden-unlock.md)（认证只在 Console）、[0023](0023-facade-capability-parity.md)（门面能力口径）、[0030](0030-agent-tools-thin-shell.md)（工具清单与编排下移）
 - **影响范围**：`client/src-tauri/`（loopback Agent 网关）、`internal/mcp/`、`internal/consoleopen/`、内置 `mcp.json` 模板、门面文档
 
 ## 问题

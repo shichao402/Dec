@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/internal/editor"
@@ -90,17 +91,23 @@ func LoadGlobalConfig() (*types.GlobalConfig, error) {
 		config.IDEs = legacyIDEs
 	}
 
-	config.EnabledProjects = NormalizeBundleNames(config.EnabledProjects)
-	config.EnabledBundles = NormalizeBundleNames(config.EnabledBundles)
-	if len(config.EnabledProjects) > 0 {
-		config.EnabledBundles = append([]string(nil), config.EnabledProjects...)
+	// ADR 0029：旧的 enabled_projects / enabled_bundles 一次性折叠为 requires 的 vault pin，
+	// 不再写回。这三处同名不同义的声明只保留 requires 一处。
+	legacy := NormalizeBundleNames(config.LegacyEnabledProjects)
+	if len(legacy) == 0 {
+		legacy = NormalizeBundleNames(config.LegacyEnabledBundles)
 	}
-	if len(config.EnabledBundles) == 0 {
-		legacyBundles, err := loadLegacySecretsEnabledBundles()
+	if len(legacy) == 0 {
+		legacySecrets, err := loadLegacySecretsEnabledBundles()
 		if err != nil {
 			return nil, err
 		}
-		config.EnabledBundles = legacyBundles
+		legacy = legacySecrets
+	}
+	config.LegacyEnabledProjects = nil
+	config.LegacyEnabledBundles = nil
+	if len(legacy) > 0 {
+		config.Requires = config.Requires.AddVaultProjects(legacy)
 	}
 
 	req, err := types.NormalizeRequiresSpec(config.Requires)
@@ -138,10 +145,8 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 		normalized := *config
 		normalized.IDEs, _ = stripRemovedBuiltInIDEs(config.IDEs)
 		config.IDEs = append([]string(nil), normalized.IDEs...)
-		normalized.EnabledBundles = NormalizeBundleNames(config.EnabledBundles)
-		config.EnabledBundles = append([]string(nil), normalized.EnabledBundles...)
-		normalized.EnabledProjects = append([]string(nil), normalized.EnabledBundles...)
-		normalized.EnabledBundles = nil
+		normalized.LegacyEnabledProjects = nil
+		normalized.LegacyEnabledBundles = nil
 		req, err := types.NormalizeRequiresSpec(normalized.Requires)
 		if err != nil {
 			return fmt.Errorf("校验 requires 失败: %w", err)
@@ -168,7 +173,7 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 		return fmt.Errorf("序列化配置失败: %w", err)
 	}
 
-	header := "# Dec 全局配置\n# kind: global\n# version: 配置字段版本\n# layout_version: cache/secrets 布局版本\n# enabled_projects: 本机启用的项目\n\n"
+	header := "# Dec 全局配置\n# kind: global\n# version: 配置字段版本\n# layout_version: cache/secrets 布局版本\n# requires: 本机订阅（项目名 → latest / v* / vault）\n\n"
 	if err := os.WriteFile(configPath, []byte(header+string(data)), 0644); err != nil {
 		return fmt.Errorf("写入全局配置失败: %w", err)
 	}
@@ -183,13 +188,18 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 	return nil
 }
 
-// UserEnabledBundles 返回全局配置中的用户平面启用列表（已规范化）。
-func UserEnabledBundles() ([]string, error) {
+// GlobalConsumedProjects 返回本机 global 平面订阅的项目名（ADR 0029：唯一来源是 requires）。
+func GlobalConsumedProjects() ([]string, error) {
 	config, err := LoadGlobalConfig()
 	if err != nil {
 		return nil, err
 	}
-	return NormalizeBundleNames(config.EnabledBundles), nil
+	names := make([]string, 0, len(config.Requires))
+	for name := range config.Requires {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // bundleFolderPrefix 是 Bitwarden folder 里 bundle 级前缀；启用列表只存短名。

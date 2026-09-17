@@ -52,7 +52,7 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 		preview.DecSkippedReason = reason
 	}
 
-	preview.EnabledBundleNames = append([]string(nil), projectConfig.EnabledBundles...)
+	preview.EnabledBundleNames = consumedProjectNames(projectConfig, workspace.EffectivePlane())
 	preview.EnabledBundleCount = len(preview.EnabledBundleNames)
 	if usesP, _ := connectedRepositoryUsesPModel(); usesP {
 		preview.Model = "p"
@@ -60,7 +60,7 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 			preview.HomeProject = projectConfig.ProjectName
 			preview.WritableProjects = []string{projectConfig.ProjectName}
 		} else {
-			preview.WritableProjects = append([]string(nil), projectConfig.EnabledBundles...)
+			preview.WritableProjects = projectConfig.Requires.VaultProjects()
 		}
 	}
 
@@ -104,9 +104,9 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 }
 
 func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConfig *types.ProjectConfig, reporter Reporter) (candidateCount int, hasChanges bool, skippedReason string, changes []PushChange, err error) {
-	if len(projectConfig.EnabledBundles) == 0 &&
+	if len(projectConfig.Requires.VaultProjects()) == 0 &&
 		(workspace.EffectivePlane() == WorkspaceUser || strings.TrimSpace(projectConfig.ProjectName) == "") {
-		return 0, false, "无已启用 bundle", nil, nil
+		return 0, false, "没有可写的个人私仓项目", nil, nil
 	}
 
 	err = withAppWriteRepo(func(tx *repo.Transaction) error {
@@ -132,7 +132,7 @@ func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConf
 		}
 		resolvedForPreview := *resolved
 		resolvedForPreview.Assets = assets
-		if len(assets) == 0 && len(projectConfig.EnabledBundles) == 0 {
+		if len(assets) == 0 {
 			skippedReason = "没有可推送的有效资产"
 			return nil
 		}
@@ -140,21 +140,6 @@ func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConf
 		synced, pruned, syncErr := syncDecVaultFromCache(workspace, repoDir, projectConfig, &resolvedForPreview, reporter)
 		if syncErr != nil {
 			return syncErr
-		}
-
-		if !hasPAssets(assets) {
-			for _, bundleName := range projectConfig.EnabledBundles {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				ok, pushErr := pushBundleYAMLFromCache(workspace, repoDir, bundleName, reporter)
-				if pushErr != nil {
-					return pushErr
-				}
-				if ok {
-					synced++
-				}
-			}
 		}
 
 		git := repo.NewGitOps(repoDir)

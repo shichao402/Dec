@@ -131,16 +131,10 @@ func projectConsumers(provider string, states []ManagedProjectState, projects ma
 		if err != nil || cfg == nil {
 			continue
 		}
-		home := strings.TrimSpace(cfg.ProjectName)
-		project, ok := projects[home]
-		if !ok {
-			continue
-		}
-		for _, required := range project.Manifest.Requires {
-			if required == provider {
-				result.Consumers = append(result.Consumers, state)
-				break
-			}
+		// 消费关系的唯一来源是工作区订阅 requires（ADR 0029），
+		// 不再从家项目清单的 depends_on 反推。
+		if cfg.Requires.Has(provider) {
+			result.Consumers = append(result.Consumers, state)
 		}
 	}
 	return result

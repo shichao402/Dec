@@ -20,7 +20,7 @@ import (
 func TestPullProjectAssets_UsesDefaultServerWithoutConfigFile(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"default/public/project/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -30,7 +30,7 @@ func TestPullProjectAssets_UsesDefaultServerWithoutConfigFile(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"default"},
+		Requires: types.RequiresSpec{"default": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestPullProjectAssets_RejectsSecretsOverlap(t *testing.T) {
 		return &secrets.StubClient{
 			NotesByFolder: map[string][]secrets.SecureNote{
 				"combo/private/project": {{
-					RelativePath: ".dec/cache/combo/skills/bundle-skill/SKILL.md",
+					RelativePath: ".dec/cache/combo/public/local/skills/bundle-skill/SKILL.md",
 					Content:      "secret",
 				}},
 			},
@@ -93,10 +93,8 @@ func TestPullProjectAssets_RejectsSecretsOverlap(t *testing.T) {
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/combo/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
-		"bundles/combo/bundle.yaml": `name: combo
-members:
-  - skill/bundle-skill
+		"combo/public/project/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
+		"combo/dec.yaml": `name: combo
 `,
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -108,7 +106,7 @@ members:
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
 		ProjectName:    "combo",
-		EnabledBundles: []string{"combo"},
+		Requires: types.RequiresSpec{"combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -126,7 +124,7 @@ members:
 	}
 
 	// secrets 在公开资产之后执行：重叠校验只拦下密文落地，不回滚已就绪的 Dec 资产。
-	cached, readErr := os.ReadFile(filepath.Join(projectRoot, ".dec", "cache", "combo", "skills", "bundle-skill", "SKILL.md"))
+	cached, readErr := os.ReadFile(filepath.Join(projectRoot, ".dec", "cache", "combo", "public", "local", "skills", "bundle-skill", "SKILL.md"))
 	if readErr != nil {
 		t.Fatalf("Dec 资产缓存应存在: %v", readErr)
 	}
@@ -140,12 +138,15 @@ members:
 
 // secrets 失败（未解锁 / 网络故障）不应让已就绪的公开资产落空。
 func TestPullProjectAssets_InstallsAssetsWhenSecretsFail(t *testing.T) {
-	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	// 先写好 Bitwarden 配置并建立 session，再清掉 session：否则 IsConfigured=false
+	// 会静默跳过 secrets，NonFatalWarnings 为空，测不到「解锁失败仍装公开资产」。
+	setupSecretsConfigForPushTest(t)
+	setEnvForProjectTest(t, "DEC_NO_CONSOLE_LAUNCH", "1")
+	secrets.ClearSession()
+
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/cli/skills/cli-skill/SKILL.md": "---\nname: cli-skill\n---\n",
-		"bundles/cli/bundle.yaml": `name: cli
-members:
-  - skill/cli-skill
+		"cli/public/project/skills/cli-skill/SKILL.md": "---\nname: cli-skill\n---\n",
+		"cli/dec.yaml": `name: cli
 `,
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -154,14 +155,12 @@ members:
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"cli"},
+		IDEs:        []string{"cursor"},
+		ProjectName: "cli",
+		Requires:    types.RequiresSpec{"cli": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
-
-	// 无 session：secrets 阶段要求 Console 解锁；测试环境不会启动桌面程序。
-	secrets.ClearSession()
 
 	result, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
 	if err != nil {
@@ -202,7 +201,7 @@ func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T)
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "demo",
-		EnabledBundles: []string{"demo"},
+		Requires: types.RequiresSpec{"demo": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +258,7 @@ func TestPullEnabledSecretsBundles_RejectsSecretsDecOverlap(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "combo",
-		EnabledBundles: []string{"combo"},
+		Requires: types.RequiresSpec{"combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +305,7 @@ func TestPullEnabledSecretsBundles_MixedNotesAndSSHKeys(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "vikunja",
-		EnabledBundles: []string{"vikunja"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +371,7 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "vikunja",
-		EnabledBundles: []string{"vikunja"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +392,7 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 // 启用的其它项目只贡献 Git 资产，不带来项目平面 secrets。
 func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
-	if err := config.SaveGlobalConfig(&types.GlobalConfig{EnabledBundles: []string{"woa", "vikunja"}}); err != nil {
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{Requires: types.RequiresSpec{"woa": types.RequiresVault, "vikunja": types.RequiresVault}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -401,7 +400,7 @@ func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "demo",
-		EnabledBundles: []string{"vikunja"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}

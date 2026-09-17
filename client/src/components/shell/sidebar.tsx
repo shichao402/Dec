@@ -100,7 +100,10 @@ export function Sidebar(props: {
                       disabled={props.busy}
                       className={cn(
                         'mt-0.5 ml-3 flex w-[calc(100%-0.75rem)] items-center gap-1.5 rounded-lg border-l border-line pl-2.5 pr-2 py-1.5 text-left transition-colors disabled:opacity-50',
-                        props.view === 'project' ? 'bg-panel-hi text-ink' : 'text-muted hover:bg-panel-hi hover:text-ink',
+                        // 覆写与提供项是项目的下级页面，没有自己的导航项，高亮留在项目上。
+                        props.view === 'project' || props.view === 'overrides' || props.view === 'provides'
+                          ? 'bg-panel-hi text-ink'
+                          : 'text-muted hover:bg-panel-hi hover:text-ink',
                       )}
                     >
                               <ChevronRight className="size-3.5 shrink-0 text-faint" />

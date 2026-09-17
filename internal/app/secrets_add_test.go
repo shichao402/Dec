@@ -16,11 +16,12 @@ func tencentProjectScope() secrets.RemoteScope {
 	return secrets.RemoteScope{P: "tencent-cloud", Plane: secrets.SyncPlaneProject}
 }
 
-// enableBundlesForAddTest 让 tencent-cloud 成为当前平面已启用的项目。
+// enableBundlesForAddTest 让指定项目成为当前平面已订阅的私仓项目。
 func enableBundlesForAddTest(t *testing.T, projectRoot string, names ...string) {
 	t.Helper()
 	mgr := config.NewProjectConfigManager(projectRoot)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{EnabledBundles: names}); err != nil {
+	spec := types.RequiresSpec(nil).AddVaultProjects(names)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{Requires: spec}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -154,7 +155,7 @@ func TestSuggestSecretAddresses_OnlyHomeProjectOnProjectPlane(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "demo",
-		EnabledBundles: []string{"vikunja", "combo"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault, "combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}

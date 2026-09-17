@@ -104,6 +104,7 @@ func setupRemoteBareRepoProjectTest(t *testing.T, files map[string]string) strin
 	for path, content := range files {
 		writeFileProjectTest(t, filepath.Join(seedDir, path), content)
 	}
+	ensurePManifestsInSeed(t, seedDir)
 	runGitProjectTest(t, seedDir, "add", ".")
 	runGitProjectTest(t, seedDir, "commit", "-m", "initial commit")
 	runGitProjectTest(t, seedDir, "branch", "-M", "main")
@@ -111,6 +112,31 @@ func setupRemoteBareRepoProjectTest(t *testing.T, files map[string]string) strin
 	runGitNoDirProjectTest(t, "--git-dir", remoteBareDir, "symbolic-ref", "HEAD", "refs/heads/main")
 
 	return remoteBareDir
+}
+
+// ensurePManifestsInSeed 给缺少 dec.yaml 的顶层项目目录补声明，避免 pmodel.Scan 失败。
+func ensurePManifestsInSeed(t *testing.T, seedDir string) {
+	t.Helper()
+	entries, err := os.ReadDir(seedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == ".git" || name == types.VaultProjectsDir || name == types.VaultBundlesDir {
+			continue
+		}
+		manifest := filepath.Join(seedDir, name, "dec.yaml")
+		if _, err := os.Stat(manifest); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		writeFileProjectTest(t, manifest, "name: "+name+"\n")
+	}
 }
 
 func TestPrepareProjectConfigInitRequiresConnectedRepo(t *testing.T) {
@@ -128,8 +154,8 @@ func TestPrepareProjectConfigInitRequiresConnectedRepo(t *testing.T) {
 func TestPrepareProjectConfigInitPreservesExistingConfigAndWritesFiles(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
-		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+		"default/public/project/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"cli/public/project/rules/cli-release-rules.mdc": "---\ndescription: test\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -140,7 +166,7 @@ func TestPrepareProjectConfigInitPreservesExistingConfigAndWritesFiles(t *testin
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"codex"},
 		Editor:         "code --wait",
-		EnabledBundles: []string{"cli"},
+		Requires: types.RequiresSpec{"cli": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("写入现有项目配置失败: %v", err)
 	}
@@ -178,8 +204,8 @@ func TestPrepareProjectConfigInitPreservesExistingConfigAndWritesFiles(t *testin
 	if len(loaded.IDEs) != 1 || loaded.IDEs[0] != "codex" {
 		t.Fatalf("IDEs = %#v, 期望保留原值", loaded.IDEs)
 	}
-	if len(loaded.EnabledBundles) != 1 || loaded.EnabledBundles[0] != "cli" {
-		t.Fatalf("EnabledBundles = %#v, 期望保留 [cli]", loaded.EnabledBundles)
+	if len(loaded.Requires.VaultProjects()) != 1 || loaded.Requires.VaultProjects()[0] != "cli" {
+		t.Fatalf("EnabledBundles = %#v, 期望保留 [cli]", loaded.Requires.VaultProjects())
 	}
 	if _, err := os.Stat(prepared.ConfigPath); err != nil {
 		t.Fatalf("配置文件应已写入: %v", err)
@@ -192,8 +218,8 @@ func TestPrepareProjectConfigInitPreservesExistingConfigAndWritesFiles(t *testin
 func TestPrepareProjectConfigInitPreservesEnabledBundlesAndDiscoversBundles(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"cli/public/project/rules/cli-release-rules.mdc": "---\ndescription: test\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -202,7 +228,7 @@ func TestPrepareProjectConfigInitPreservesEnabledBundlesAndDiscoversBundles(t *t
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		EnabledBundles: []string{"vikunja"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("写入现有项目配置失败: %v", err)
 	}
@@ -211,8 +237,8 @@ func TestPrepareProjectConfigInitPreservesEnabledBundlesAndDiscoversBundles(t *t
 	if err != nil {
 		t.Fatalf("PrepareProjectConfigInit() 失败: %v", err)
 	}
-	if len(prepared.ProjectConfig.EnabledBundles) != 1 || prepared.ProjectConfig.EnabledBundles[0] != "vikunja" {
-		t.Fatalf("EnabledBundles 应保留, got %v", prepared.ProjectConfig.EnabledBundles)
+	if len(prepared.ProjectConfig.Requires.VaultProjects()) != 1 || prepared.ProjectConfig.Requires.VaultProjects()[0] != "vikunja" {
+		t.Fatalf("EnabledBundles 应保留, got %v", prepared.ProjectConfig.Requires.VaultProjects())
 	}
 	if prepared.BundleCount < 2 {
 		t.Fatalf("BundleCount = %d, 期望至少 2", prepared.BundleCount)
@@ -277,8 +303,8 @@ bundles:
 	if inference.ProjectName != "dec-app" {
 		t.Fatalf("ProjectName = %q, 期望 dec-app", inference.ProjectName)
 	}
-	if len(inference.EnabledBundles) != 2 {
-		t.Fatalf("EnabledBundles = %#v, 期望 2 个", inference.EnabledBundles)
+	if len(inference.SubscribedProjects) != 2 {
+		t.Fatalf("EnabledBundles = %#v, 期望 2 个", inference.SubscribedProjects)
 	}
 
 	mgr := config.NewProjectConfigManager(projectRoot)
@@ -289,6 +315,7 @@ bundles:
 
 func TestTryAutoApplyVaultProjectAppliesWhenNoConfig(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	// 仅 legacy projects/*.yaml、无私仓顶层 pmodel 项目，走旧推断路径。
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"projects/dec-app.yaml": `name: dec-app
 bundles:
@@ -297,16 +324,6 @@ bundles:
 ides:
   - cursor
 editor: code --wait
-`,
-		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
-		"bundles/vikunja/bundle.yaml": `name: vikunja
-members:
-  - skill/vikunja-workflow
-`,
-		"bundles/cli/bundle.yaml": `name: cli
-members:
-  - rule/cli-release-rules
 `,
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -328,8 +345,8 @@ members:
 	if result.ProjectName != "dec-app" {
 		t.Fatalf("ProjectName = %q, 期望 dec-app", result.ProjectName)
 	}
-	if len(result.EnabledBundles) != 2 {
-		t.Fatalf("EnabledBundles = %#v, 期望 2 个", result.EnabledBundles)
+	if len(result.SubscribedProjects) != 2 {
+		t.Fatalf("SubscribedProjects = %#v, 期望 2 个", result.SubscribedProjects)
 	}
 
 	mgr := config.NewProjectConfigManager(projectRoot)
@@ -343,8 +360,8 @@ members:
 	if loaded.ProjectName != "dec-app" {
 		t.Fatalf("ProjectName = %q, 期望 dec-app", loaded.ProjectName)
 	}
-	if len(loaded.EnabledBundles) != 2 {
-		t.Fatalf("EnabledBundles = %#v, 期望 2 个", loaded.EnabledBundles)
+	if len(loaded.Requires.VaultProjects()) != 2 {
+		t.Fatalf("Requires.VaultProjects() = %#v, 期望 2 个", loaded.Requires.VaultProjects())
 	}
 	if _, err := os.Stat(result.VarsPath); err != nil {
 		t.Fatalf("应创建 vars 模板: %v", err)
@@ -358,7 +375,7 @@ func TestTryAutoApplyVaultProjectSkipsWhenProjectNameSet(t *testing.T) {
 bundles:
   - vikunja
 `,
-		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -368,7 +385,7 @@ bundles:
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "dec-app",
-		EnabledBundles: []string{"custom"},
+		Requires: types.RequiresSpec{"custom": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -385,15 +402,15 @@ bundles:
 	if err != nil {
 		t.Fatalf("LoadProjectConfig() 失败: %v", err)
 	}
-	if len(loaded.EnabledBundles) != 1 || loaded.EnabledBundles[0] != "custom" {
-		t.Fatalf("EnabledBundles 不应被覆盖, got %#v", loaded.EnabledBundles)
+	if len(loaded.Requires.VaultProjects()) != 1 || loaded.Requires.VaultProjects()[0] != "custom" {
+		t.Fatalf("EnabledBundles 不应被覆盖, got %#v", loaded.Requires.VaultProjects())
 	}
 }
 
 func TestTryAutoApplyVaultProjectSkipsWhenVaultProjectMissing(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"default/public/project/skills/foo/SKILL.md": "---\nname: foo\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)

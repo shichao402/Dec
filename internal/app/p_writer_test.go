@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/internal/config"
@@ -12,7 +13,7 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
-func TestPWriterProjectSelectionWritesHomeRequires(t *testing.T) {
+func TestPWriterSetRequiresWritesConsumerConfig(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"my-app/dec.yaml": "name: my-app\n",
@@ -27,23 +28,31 @@ func TestPWriterProjectSelectionWritesHomeRequires(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := DefaultPWriter().SaveProjects(
-		// 即使门面漏传 home，服务端也必须保留绑定的家项目。
-		NewWorkspace(WorkspaceProject, root), []string{"shared"}, nil)
+	result, err := DefaultPWriter().SetRequires(
+		context.Background(),
+		NewWorkspace(WorkspaceProject, root),
+		types.RequiresSpec{"shared": types.RequiresVault, "my-app": types.RequiresVault},
+		nil,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Model != "p" || result.HomeProject != "my-app" ||
-		len(result.RequiredProjects) != 1 || result.RequiredProjects[0] != "shared" {
-		t.Fatalf("result = %#v", result)
+	if result.HomeProject != "my-app" {
+		t.Fatalf("HomeProject = %q, 期望 my-app", result.HomeProject)
+	}
+	if len(result.Subscribed) != 1 || result.Subscribed[0].Project != "shared" || result.Subscribed[0].Pin != types.RequiresVault {
+		t.Fatalf("Subscribed = %#v, 期望仅 shared:vault", result.Subscribed)
+	}
+	if len(result.Rejected) != 1 || !strings.Contains(result.Rejected[0], "my-app") {
+		t.Fatalf("作者身份项目应被拒: %#v", result.Rejected)
 	}
 	if err := withAppReadRepo(func(tx *repo.Transaction) error {
 		loaded, err := pmodel.Load(tx.WorkDir(), "my-app")
 		if err != nil {
 			return err
 		}
-		if len(loaded.Manifest.Requires) != 1 || loaded.Manifest.Requires[0] != "shared" {
-			t.Fatalf("requires = %#v", loaded.Manifest.Requires)
+		if len(loaded.Manifest.DependsOn) != 0 {
+			t.Fatalf("订阅不得改写提供方 depends_on: %#v", loaded.Manifest.DependsOn)
 		}
 		return nil
 	}); err != nil {
@@ -53,12 +62,12 @@ func TestPWriterProjectSelectionWritesHomeRequires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.EnabledBundles) != 0 {
-		t.Fatalf("项目模型不得继续把 project requires 写入 enabled_bundles: %#v", cfg.EnabledBundles)
+	if cfg.Requires["shared"] != types.RequiresVault || len(cfg.Requires) != 1 {
+		t.Fatalf("Requires = %#v, 期望 {shared: vault}", cfg.Requires)
 	}
 }
 
-func TestPWriterUserSelectionWritesEnabledProjects(t *testing.T) {
+func TestPWriterSetRequiresUserWritesGlobalConfig(t *testing.T) {
 	decHome := t.TempDir()
 	setEnvForProjectTest(t, "DEC_HOME", decHome)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
@@ -67,20 +76,24 @@ func TestPWriterUserSelectionWritesEnabledProjects(t *testing.T) {
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
-	result, err := DefaultPWriter().SaveProjects(
-		NewWorkspace(WorkspaceUser, ""), []string{"tools"}, nil)
+	result, err := DefaultPWriter().SetRequires(
+		context.Background(),
+		NewWorkspace(WorkspaceUser, ""),
+		types.RequiresSpec{"tools": types.RequiresVault},
+		nil,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Model != "p" || len(result.EnabledProjects) != 1 {
+	if len(result.Subscribed) != 1 || result.Subscribed[0].Project != "tools" {
 		t.Fatalf("result = %#v", result)
 	}
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.EnabledProjects) != 1 || cfg.EnabledProjects[0] != "tools" {
-		t.Fatalf("enabled_projects = %#v", cfg.EnabledProjects)
+	if cfg.Requires["tools"] != types.RequiresVault || len(cfg.Requires) != 1 {
+		t.Fatalf("Requires = %#v", cfg.Requires)
 	}
 }
 
@@ -185,6 +198,6 @@ func TestPreviewPushPDoesNotCountRequiredProjectCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	if preview.DecHasChanges || preview.DecCandidateCount != 0 {
-		t.Fatalf("requires 副本只读，不应进入 push 预览: %#v", preview)
+		t.Fatalf("depends_on 副本只读，不应进入 push 预览: %#v", preview)
 	}
 }

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -278,51 +279,48 @@ func TestEnsureBuiltinIDEAssetsSkipsRemovedInternalIDEs(t *testing.T) {
 	}
 }
 
-func TestSaveGlobalSettings_PersistsEnabledBundlesInGlobalConfig(t *testing.T) {
+func TestSaveGlobalSettings_DoesNotChangeRequires(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	setEnvForProjectTest(t, "HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
+		"cli/dec.yaml": "name: cli\n",
+		"woa/dec.yaml": "name: woa\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
-
-	result, err := SaveGlobalSettings(SaveGlobalSettingsInput{
-		RepoURL:        remote,
-		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"woa", "cli"},
-	}, nil)
-	if err != nil {
-		t.Fatalf("SaveGlobalSettings() = %v", err)
+	if _, err := SetWorkspaceRequires(
+		context.Background(),
+		NewWorkspace(WorkspaceUser, ""),
+		types.RequiresSpec{"woa": types.RequiresVault, "cli": types.RequiresVault},
+		nil,
+	); err != nil {
+		t.Fatalf("SetWorkspaceRequires() = %v", err)
 	}
-	if len(result.EnabledBundles) != 2 {
-		t.Fatalf("EnabledBundles = %#v", result.EnabledBundles)
+
+	if _, err := SaveGlobalSettings(SaveGlobalSettingsInput{
+		RepoURL: remote,
+		IDEs:    []string{"cursor"},
+	}, nil); err != nil {
+		t.Fatalf("SaveGlobalSettings() = %v", err)
 	}
 
 	globalConfig, err := config.LoadGlobalConfig()
 	if err != nil {
 		t.Fatalf("LoadGlobalConfig() = %v", err)
 	}
-	if len(globalConfig.EnabledBundles) != 2 || globalConfig.EnabledBundles[0] != "woa" {
-		t.Fatalf("GlobalConfig.EnabledBundles = %#v", globalConfig.EnabledBundles)
+	if len(globalConfig.Requires.VaultProjects()) != 2 ||
+		globalConfig.Requires["woa"] != types.RequiresVault ||
+		globalConfig.Requires["cli"] != types.RequiresVault {
+		t.Fatalf("SaveGlobalSettings 不应改 requires: %#v", globalConfig.Requires)
 	}
 
 	state, err := LoadGlobalSettings(nil)
 	if err != nil {
 		t.Fatalf("LoadGlobalSettings() = %v", err)
 	}
-	if len(state.EnabledBundles) != 2 || state.EnabledBundles[0] != "woa" || state.EnabledBundles[1] != "cli" {
-		t.Fatalf("state.EnabledBundles = %#v", state.EnabledBundles)
-	}
-	found := false
-	for _, name := range state.AvailableSecretBundles {
-		if name == "cli" || name == "woa" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("AvailableSecretBundles 应包含 vault/已启用项: %#v", state.AvailableSecretBundles)
+	if len(state.SubscribedProjects) != 2 {
+		t.Fatalf("state.SubscribedProjects = %#v", state.SubscribedProjects)
 	}
 }
 

@@ -10,7 +10,7 @@ option go_package = "github.com/shichao402/Dec/schema/dec/v1;decv1";
 //
 //   name: my-app
 //   title: My App
-//   requires:
+//   depends_on:
 //     - shared-tools
 //   ides:
 //     - cursor
@@ -20,8 +20,10 @@ message Project {
   string name = 1;
   string title = 2;
   string description = 3;
-  // 仅直接引用目标项目的 public/project；不传递，private 永不被引用。
-  repeated string requires = 4;
+  // 提供方组成：本项目的资产依赖哪些项目。被订阅方的 depends_on 闭包只装 public（ADR 0029）。
+  // 它不是消费声明；工作区订阅只在 .dec/config.yaml 的 requires 里。
+  // 改名前叫 requires，读旧字段时折叠进本字段。
+  repeated string depends_on = 4 [json_name = "depends_on"];
   // 该项目默认 IDE 列表；本地 .dec/config.yaml 可覆盖。
   repeated string ides = 5;
   // 该项目默认交互式编辑器；本地可覆盖。

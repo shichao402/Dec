@@ -38,6 +38,7 @@ Console-first 只规定「新功能先设计 Console 页，Console 未覆盖就�
 | secrets 元数据只读清单 | 项目 / Global 资产页「密钥清单」 | 只有 `dec_list_secrets`；「我的 token 在哪」在 Console 无法回答 |
 | 删除远端与本机库存 | 删除页 | 只有 `dec_list_delete_candidates` / `dec_delete`；破坏性操作只在 Agent 门面 |
 | Global 平面预览与推送 | Global 资产页「写回」 | 只能推项目；本机凭据改完没有界面推 |
+| 订阅官方注册表项目（写 `requires`） | 项目 / Global 资产页「订阅」面板 | 官方 `requires` 只能手改 YAML；CI 发布成功后 Console 里看不到、也无法订阅（补于 [0029](0029-single-consumer-requires.md)） |
 
 ### 3. 允许的 MCP 独有扩展（需登记）
 
@@ -47,8 +48,9 @@ Console-first 只规定「新功能先设计 Console 页，Console 未覆盖就�
 | `dec_provision_remote` 的 `branch` / `tags` | 免交互置备要一次传全；Console 有人在场，可逐步确认 |
 | `dec_init_project` 的 `apply_vault_project` | 同上；Console 的初始化流已有显式绑定步骤 |
 | 无 `dec_check_update` / `dec_install_update` | 自更新会替换本机 Console，必须由人在设置页确认；MCP 只在状态或错误中指向 Console |
-| 官方资产无 `dec_push`；MCP `dec_propose_upstream` | 官方注册表只由提供方 CI 写。Console 项目页用「本地覆写」预览修改、提交源仓 PR/Issue，并把票据 id/url 固化到覆写元数据 |
+| 官方资产无 `dec_push`；MCP `dec_propose_upstream` | 官方注册表只由提供方 CI 写。Console 从项目页进入下级页「本地覆写」预览修改、提交源仓 PR/Issue，并把票据 id/url 固化到覆写元数据 |
 | Console / MCP 不提供 yank/purge/publish-provides | 写官方 registry 必须用 CI token，不能走本机 GCM |
+| Agent 工具清单 / schema 不编译进 `dec-mcp` | 清单由 `dec-server --dump-agent-tools` 写出、Console 落盘；壳只读转发（见 [0030](0030-agent-tools-thin-shell.md)） |
 
 新增 Console 没有的 MCP 工具或参数时，必须在本表加一行并写明人为何不需要。**没登记就算缺口**，
 而不是默认合法。

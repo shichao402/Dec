@@ -17,7 +17,7 @@ func TestPushSecretsBundles_UsesDefaultServerWithoutConfigFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		EnabledBundles: []string{"default"},
+		Requires: types.RequiresSpec{"default": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "dec",
-		EnabledBundles: []string{"vikunja", "dec"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault, "dec": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "dec",
-		EnabledBundles: []string{"dec"},
+		Requires: types.RequiresSpec{"dec": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	if err := config.SaveGlobalConfig(&types.GlobalConfig{
-		EnabledBundles: []string{"tencent-cloud"},
+		Requires: types.RequiresSpec{"tencent-cloud": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "dec",
-		EnabledBundles: []string{"dec"},
+		Requires: types.RequiresSpec{"dec": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}

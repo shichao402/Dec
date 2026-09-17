@@ -63,7 +63,7 @@ func PushWorkspaceAssets(ctx context.Context, workspace Workspace, reporter Repo
 					result.WritableProjects = []string{result.HomeProject}
 				}
 			} else {
-				result.WritableProjects = append([]string(nil), cfg.EnabledBundles...)
+				result.WritableProjects = cfg.Requires.VaultProjects()
 			}
 		}
 	}
@@ -132,9 +132,9 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 		return 0, skippedReason, "", nil
 	}
 
-	if len(projectConfig.EnabledBundles) == 0 && strings.TrimSpace(projectConfig.ProjectName) == "" {
-		skippedReason = "无已启用 bundle"
-		emit(reporter, EventInfo, "push.dec", "无已启用 bundle，跳过 Dec 推送", nil)
+	if len(projectConfig.Requires.VaultProjects()) == 0 && strings.TrimSpace(projectConfig.ProjectName) == "" {
+		skippedReason = "没有可写的个人私仓项目"
+		emit(reporter, EventInfo, "push.dec", "没有可写的个人私仓项目，跳过 Dec 推送", nil)
 		return 0, skippedReason, "", nil
 	}
 
@@ -162,7 +162,7 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 		}
 		resolvedForPush := *resolved
 		resolvedForPush.Assets = assets
-		if len(assets) == 0 && len(projectConfig.EnabledBundles) == 0 {
+		if len(assets) == 0 {
 			skippedReason = "没有可推送的有效资产"
 			emit(reporter, EventInfo, "push.dec", skippedReason, nil)
 			return nil
@@ -175,21 +175,6 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 		synced, pruned, syncErr := syncDecVaultFromCache(workspace, repoDir, projectConfig, &resolvedForPush, reporter)
 		if syncErr != nil {
 			return syncErr
-		}
-
-		if !hasPAssets(resolved.Assets) {
-			for _, bundleName := range projectConfig.EnabledBundles {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				ok, pushErr := pushBundleYAMLFromCache(workspace, repoDir, bundleName, reporter)
-				if pushErr != nil {
-					return pushErr
-				}
-				if ok {
-					synced++
-				}
-			}
 		}
 
 		git := repo.NewGitOps(repoDir)

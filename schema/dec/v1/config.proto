@@ -11,7 +11,7 @@ message GlobalConfig {
   string editor = 3;
   // dec-server 在无门面连接后退出前的等待时长（Go duration，如 "30m"）。
   string server_idle_timeout = 4 [json_name = "server_idle_timeout"];
-  // 用户平面启用的项目名；每项安装该项目的 public/user 与 private/user。
+  // 改名前的本机启用项目名。只读兼容：加载时折叠为 requires{<名>: vault}，保存不写回（ADR 0029）。
   repeated string enabled_projects = 5 [json_name = "enabled_projects"];
   // Console 显式接管或扫描导入的目标设备项目目录。
   repeated ManagedProject managed_projects = 6 [json_name = "managed_projects"];
@@ -19,6 +19,8 @@ message GlobalConfig {
   string session_timeout = 7 [json_name = "session_timeout"];
   // 解锁有效期到点后，是否用进程内保留的主密码自动重新解锁。
   optional bool auto_reunlock_on_timeout = 8 [json_name = "auto_reunlock_on_timeout"];
+  // Global 平面唯一的消费声明：项目名 → pin（latest / v* 走官方注册表，vault 走个人私仓）。
+  map<string, string> requires = 9;
 }
 
 message ManagedProject {
@@ -27,10 +29,10 @@ message ManagedProject {
 }
 
 // ProjectConfig 对应 <workspace>/.dec/config.yaml（version v2）。
-// 本地配置以 project_name 绑定 Git Vault 顶层 <p>/dec.yaml。
 message ProjectConfig {
   string version = 1;
-  // 引用的 vault Project 名，对应 projects/<project_name>.yaml。
+  // 作者身份：本工作区创作私仓里的哪个项目（<project_name>/dec.yaml）。
+  // 它不是订阅锚点，不出现在 requires 里（ADR 0029）。
   string project_name = 2 [json_name = "project_name"];
   // 机器级 IDE 覆盖（可选）；未设置时继承 vault Project.ides → 全局 ides。
   repeated string ides = 3;
@@ -42,6 +44,9 @@ message ProjectConfig {
   map<string, ProjectProvide> provides = 8;
   // 作者目录基准点（相对项目根，新项目默认 DecAssets；旧项目空=仓库根）。
   string provides_root = 9 [json_name = "provides_root"];
+  // 本工作区唯一的消费声明：项目名 → pin（latest / v* 走官方注册表，vault 走个人私仓）。
+  // 改名前的 enabled_bundles 已 reserved，只在加载时折叠为 requires{<名>: vault}（ADR 0029）。
+  map<string, string> requires = 10;
 }
 
 message ProjectProvide {

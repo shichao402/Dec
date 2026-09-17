@@ -41,7 +41,9 @@ import { DeletePage } from '@/pages/delete-page'
 import { GlobalAssetsPage } from '@/pages/global-assets-page'
 import { OnboardingPage } from '@/pages/onboarding-page'
 import { OverviewPage } from '@/pages/overview-page'
+import { OfficialOverridesPage } from '@/pages/official-overrides-page'
 import { ProjectPage } from '@/pages/project-page'
+import { ProvidesPage } from '@/pages/provides-page'
 import { ProjectsPage } from '@/pages/projects-page'
 import { SettingsPage } from '@/pages/settings-page'
 import { SyncPage, type PullHistoryEntry, type SyncTarget } from '@/pages/sync-page'
@@ -64,6 +66,8 @@ const viewTitles: Record<View, string> = {
   global: 'Global 资产',
   projects: '项目',
   project: '项目',
+  overrides: '本地覆写',
+  provides: '我提供的资产',
   sync: '更新',
   delete: '删除',
   settings: '设置',
@@ -635,12 +639,30 @@ export default function App() {
                     })
                     setView('sync')
                   }}
+                  onOverrides={() => setView('overrides')}
+                  onProvides={() => setView('provides')}
                   onChanged={refreshDevice}
                   onRemoved={async () => {
                     setSelectedProject(null)
                     setView('projects')
                     await refreshDevice()
                   }}
+                />
+              )}
+              {view === 'overrides' && selectedProject && (
+                <OfficialOverridesPage
+                  deviceId={deviceId}
+                  root={selectedProject.Root}
+                  label={selectedProject.Label || selectedProject.Name}
+                  onBack={() => setView('project')}
+                />
+              )}
+              {view === 'provides' && selectedProject && (
+                <ProvidesPage
+                  deviceId={deviceId}
+                  root={selectedProject.Root}
+                  label={selectedProject.Label || selectedProject.Name}
+                  onBack={() => setView('project')}
                 />
               )}
               {view === 'sync' && (
@@ -703,6 +725,9 @@ function buildCrumbs(input: {
   if (input.onboarding) return [device, '初始化设备']
   if (input.view === 'project') {
     return [device, viewTitles.projects, input.project?.Label || input.project?.Name || '项目']
+  }
+  if ((input.view === 'overrides' || input.view === 'provides') && input.project) {
+    return [device, viewTitles.projects, input.project.Label || input.project.Name, viewTitles[input.view]]
   }
   if (input.view === 'sync' && input.project) {
     return [device, viewTitles.projects, input.project.Label || input.project.Name, viewTitles.sync]

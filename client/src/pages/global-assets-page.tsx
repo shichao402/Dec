@@ -4,8 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useDecAction } from '@/lib/action-context'
 import { actionSpec, resource } from '@/lib/console'
-import { AssetsPanel } from '@/pages/assets-panel'
-import { RequiresPanel } from '@/pages/requires-panel'
+import { SubscriptionPanel } from '@/pages/subscription-panel'
 import { WorkspaceWritePanel } from '@/pages/workspace-write-panel'
 
 export function GlobalAssetsPage(props: {
@@ -31,16 +30,13 @@ export function GlobalAssetsPage(props: {
       />
       <PageFill>
         <div className="mb-4">
-          <RequiresPanel deviceId={props.deviceId} root="" plane="global" />
-        </div>
-        <div className="mb-4">
           <WorkspaceWritePanel deviceId={props.deviceId} root="" plane="global" label="Global" />
         </div>
-        <AssetsPanel
+        <SubscriptionPanel
           deviceId={props.deviceId}
           root=""
           plane="global"
-          hint="Global 平面的资产装到用户环境（如 ~/.cursor、~/.claude）；提供项请在各自项目页管理。"
+          hint="官方项目按 pin 安装，私仓项目跟随 HEAD；装到用户环境（如 ~/.cursor、~/.claude）。"
         />
       </PageFill>
     </Page>

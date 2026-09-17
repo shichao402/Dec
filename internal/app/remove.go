@@ -87,6 +87,7 @@ func removeP(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, e
 	result := &RemoveBundleResult{
 		ProjectRoot: workspace.Root, BundleName: name, ProjectName: name, Model: "p",
 	}
+	var removedAssets []types.TypedAssetRef
 	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
 		projects, err := pmodel.Scan(tx.WorkDir())
 		if err != nil {
@@ -97,15 +98,16 @@ func removeP(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, e
 			return fmt.Errorf("未找到项目 %q", name)
 		}
 		result.MemberCount = len(target.Assets)
+		removedAssets = append([]types.TypedAssetRef(nil), target.Assets...)
 		if err := os.RemoveAll(filepath.Join(tx.WorkDir(), name)); err != nil {
 			return err
 		}
 		for otherName, project := range projects {
-			if otherName == name || !containsName(project.Manifest.Requires, name) {
+			if otherName == name || !containsName(project.Manifest.DependsOn, name) {
 				continue
 			}
 			manifest := project.Manifest
-			manifest.Requires, _ = removeEnabledBundle(manifest.Requires, name)
+			manifest.DependsOn, _ = removeEnabledBundle(manifest.DependsOn, name)
 			if err := pmodel.SaveManifest(tx.WorkDir(), manifest); err != nil {
 				return err
 			}
@@ -120,21 +122,55 @@ func removeP(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, e
 		return nil, err
 	}
 
+	projectIDEs := resolveWorkspaceIDEs(workspace, reporter)
+	removedIDEs := make(map[string]struct{})
+	for _, asset := range removedAssets {
+		for _, ideImpl := range projectIDEs {
+			removed, remErr := removeAssetFromIDE(asset.Type, asset.Name, workspace, ideImpl)
+			if remErr != nil {
+				emit(reporter, EventWarn, "remove.ide", fmt.Sprintf("IDE %s 清理 %s 失败: %v", ideImpl.Name(), asset.Name, remErr), nil)
+				continue
+			}
+			if removed {
+				removedIDEs[ideImpl.Name()] = struct{}{}
+			}
+		}
+	}
+	if len(removedIDEs) > 0 {
+		ideNames := make([]string, 0, len(removedIDEs))
+		for ideName := range removedIDEs {
+			ideNames = append(ideNames, ideName)
+		}
+		sort.Strings(ideNames)
+		result.RemovedFromIDEs = ideNames
+	}
+
 	if err := os.RemoveAll(filepath.Join(workspaceCacheDir(workspace), name)); err == nil {
 		result.RemovedFromCache = true
 	}
-	if global, err := config.LoadGlobalConfig(); err == nil {
-		global.EnabledProjects, _ = removeEnabledBundle(global.EnabledProjects, name)
-		global.EnabledBundles, _ = removeEnabledBundle(global.EnabledBundles, name)
+	if err := secrets.ForgetSecretBundles([]string{name}); err != nil {
+		emit(reporter, EventWarn, "remove.cleanup", fmt.Sprintf("清除 known_secret_bundles 失败: %v", err), nil)
+	}
+	if global, err := config.LoadGlobalConfig(); err == nil && global.Requires.Has(name) {
+		delete(global.Requires, name)
 		_ = config.SaveGlobalConfig(global)
 	}
 	if workspace.EffectivePlane() == WorkspaceProject {
 		mgr := config.NewProjectConfigManager(workspace.Root)
-		if cfg, err := mgr.LoadProjectConfig(); err == nil && cfg != nil && cfg.ProjectName == name {
-			cfg.ProjectName = ""
-			cfg.EnabledBundles = nil
-			if err := mgr.SaveProjectConfig(cfg); err == nil {
-				result.ConfigUpdated = true
+		if cfg, err := mgr.LoadProjectConfig(); err == nil && cfg != nil {
+			changed := false
+			if cfg.Requires.Has(name) {
+				delete(cfg.Requires, name)
+				changed = true
+			}
+			if cfg.ProjectName == name {
+				cfg.ProjectName = ""
+				changed = true
+			}
+			if changed {
+				if err := mgr.SaveProjectConfig(cfg); err == nil {
+					result.ConfigUpdated = true
+				}
 			}
 		}
 		secretDir := filepath.Join(workspace.Root, secrets.SecretsRootDir, name)
@@ -155,7 +191,7 @@ func removeP(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, e
 
 // RemoveBundle 执行 bundle 级删除：远端删除 bundles/<name>/、清理 IDE / cache / 启用与登记。
 //
-// 会同步摘掉 vault projects/*.yaml 引用、known_secret_bundles、两平面 enabled_bundles，
+// 会同步摘掉 vault 项目声明中的引用、known_secret_bundles、两平面 requires，
 // 以及本地 secrets 同步根 / SSH Key 落地。不会自动清空 Bitwarden folder（见 Remnants 提示）。
 func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, error) {
 	reporter = defaultReporter(reporter)
@@ -461,9 +497,31 @@ func isRemovableAssetType(t string) bool {
 	return bundle.IsKnownType(t)
 }
 
-// locateAssetInRepo 在 repo 中定位资产文件。vaultHint 非空时优先走该 bundle；为空时遍历 bundles/ 子目录查找唯一匹配。
+// locateAssetInRepo 在 repo 中定位资产文件。优先按项目四象限（pmodel）查找，
+// 再回退到 legacy bundles/<name>/；vaultHint 非空时只在该项目/包内找。
 func locateAssetInRepo(repoDir, itemType, assetName, vaultHint string) (string, string, error) {
+	tryTyped := func(vault string) (string, bool) {
+		for _, visibility := range []types.AssetVisibility{types.AssetVisibilityPublic, types.AssetVisibilityPrivate} {
+			for _, plane := range []types.AssetPlane{types.AssetPlaneLocal, types.AssetPlaneGlobal} {
+				fullPath := resolveTypedAssetFile(repoDir, types.TypedAssetRef{
+					Type: itemType, Visibility: visibility, Plane: plane,
+					AssetRef: types.AssetRef{Name: assetName, Vault: vault},
+				})
+				if fullPath == "" {
+					continue
+				}
+				if _, err := os.Stat(fullPath); err == nil {
+					return fullPath, true
+				}
+			}
+		}
+		return "", false
+	}
+
 	if vaultHint != "" {
+		if fullPath, ok := tryTyped(vaultHint); ok {
+			return vaultHint, fullPath, nil
+		}
 		fullPath := resolveAssetFile(repoDir, vaultHint, itemType, assetName)
 		if fullPath == "" {
 			return "", "", fmt.Errorf("不支持的资产类型: %s", itemType)
@@ -472,6 +530,24 @@ func locateAssetInRepo(repoDir, itemType, assetName, vaultHint string) (string, 
 			return "", "", fmt.Errorf("未找到 %s '%s' (bundle: %s)", itemType, assetName, vaultHint)
 		}
 		return vaultHint, fullPath, nil
+	}
+
+	if projects, err := pmodel.Scan(repoDir); err == nil && len(projects) > 0 {
+		var foundVault, foundPath string
+		for name := range projects {
+			fullPath, ok := tryTyped(name)
+			if !ok {
+				continue
+			}
+			if foundVault != "" && foundVault != name {
+				return "", "", fmt.Errorf("资产 %s/%s 在多个项目中存在，请指定 vault", itemType, assetName)
+			}
+			foundVault, foundPath = name, fullPath
+		}
+		if foundVault != "" {
+			return foundVault, foundPath, nil
+		}
+		return "", "", fmt.Errorf("未找到 %s '%s'", itemType, assetName)
 	}
 
 	bundlesDir := filepath.Join(repoDir, types.VaultBundlesDir)

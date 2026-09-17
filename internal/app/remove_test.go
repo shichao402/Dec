@@ -14,7 +14,7 @@ import (
 func TestRemoveBundleRejectsWhenUnconfirmed(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 
-	_, err := RemoveBundle(RemoveBundleInput{
+	_, err := DefaultPWriter().RemoveBundle(RemoveBundleInput{
 		ProjectRoot: t.TempDir(),
 		BundleName:  "vikunja",
 		Confirmed:   false,
@@ -27,7 +27,7 @@ func TestRemoveBundleRejectsWhenUnconfirmed(t *testing.T) {
 func TestRemoveBundleRejectsEmptyName(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 
-	_, err := RemoveBundle(RemoveBundleInput{
+	_, err := DefaultPWriter().RemoveBundle(RemoveBundleInput{
 		ProjectRoot: t.TempDir(),
 		BundleName:  "",
 		Confirmed:   true,
@@ -40,8 +40,9 @@ func TestRemoveBundleRejectsEmptyName(t *testing.T) {
 func TestRemoveBundleRemovesRemoteAndCleansLocal(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"bundles/vikunja/rules/vikunja-rules.mdc":          "---\ndescription: test\n---\n",
+		"vikunja/dec.yaml": "name: vikunja\n",
+		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"vikunja/public/project/rules/vikunja-rules.mdc":          "---\ndescription: test\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -51,7 +52,7 @@ func TestRemoveBundleRemovesRemoteAndCleansLocal(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"vikunja"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestRemoveBundleRemovesRemoteAndCleansLocal(t *testing.T) {
 	}
 
 	var events []OperationEvent
-	result, err := RemoveBundle(RemoveBundleInput{
+	result, err := DefaultPWriter().RemoveBundle(RemoveBundleInput{
 		ProjectRoot: projectRoot,
 		BundleName:  "vikunja",
 		Members: []AssetSelectionItem{
@@ -118,8 +119,8 @@ func TestRemoveBundleRemovesRemoteAndCleansLocal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProjectConfig() 失败: %v", err)
 	}
-	if len(updatedConfig.EnabledBundles) != 0 {
-		t.Fatalf("EnabledBundles 应已清空, got %v", updatedConfig.EnabledBundles)
+	if len(updatedConfig.Requires.VaultProjects()) != 0 {
+		t.Fatalf("EnabledBundles 应已清空, got %v", updatedConfig.Requires.VaultProjects())
 	}
 
 	var sawFinish bool
@@ -137,7 +138,7 @@ func TestRemoveBundleRemovesRemoteAndCleansLocal(t *testing.T) {
 func TestRemoveBundleReturnsNotFound(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/other-workflow/SKILL.md": "---\nname: other-workflow\n---\n",
+		"default/public/project/skills/other-workflow/SKILL.md": "---\nname: other-workflow\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -151,7 +152,7 @@ func TestRemoveBundleReturnsNotFound(t *testing.T) {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	_, err := RemoveBundle(RemoveBundleInput{
+	_, err := DefaultPWriter().RemoveBundle(RemoveBundleInput{
 		ProjectRoot: projectRoot,
 		BundleName:  "missing-bundle",
 		Confirmed:   true,

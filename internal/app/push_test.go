@@ -54,12 +54,12 @@ func TestPushProjectAssets_PushesDecCacheChanges(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "combo",
-		EnabledBundles: []string{"combo"},
+		Requires: types.RequiresSpec{"combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	cacheSkill := filepath.Join(projectRoot, ".dec", "cache", "combo", "public", "project", "skills", "bundle-skill", "SKILL.md")
+	cacheSkill := filepath.Join(projectRoot, ".dec", "cache", "combo", "public", "local", "skills", "bundle-skill", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(cacheSkill), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -114,12 +114,12 @@ func TestPushProjectAssets_SkipsDecWhenCacheMatchesRemote(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "combo",
-		EnabledBundles: []string{"combo"},
+		Requires: types.RequiresSpec{"combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	cacheSkill := filepath.Join(projectRoot, ".dec", "cache", "combo", "public", "project", "skills", "bundle-skill", "SKILL.md")
+	cacheSkill := filepath.Join(projectRoot, ".dec", "cache", "combo", "public", "local", "skills", "bundle-skill", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(cacheSkill), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -143,14 +143,15 @@ func TestPushProjectAssets_RejectsLegacyRepositoryAndGuidesMigration(t *testing.
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/combo/bundle.yaml": "name: combo\nscope: project\nmembers: []\n",
+		"bundles/legacy/bundle.yaml": "name: legacy\nmembers: []\n",
+		"projects/old.yaml":          "name: old\nbundles: [legacy]\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
 	projectRoot := t.TempDir()
 	if err := config.NewProjectConfigManager(projectRoot).SaveProjectConfig(&types.ProjectConfig{
-		EnabledBundles: []string{"combo"},
+		ProjectName: "demo",
 	}); err != nil {
 		t.Fatal(err)
 	}

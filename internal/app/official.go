@@ -33,6 +33,7 @@ func workspaceOfficialRequires(workspace Workspace, cfg *types.ProjectConfig) (t
 
 func installOfficialRequires(ctx context.Context, workspace Workspace, cfg *types.ProjectConfig, reporter Reporter) ([]install.Resolved, error) {
 	req, url := workspaceOfficialRequires(workspace, cfg)
+	req = req.Official()
 	if len(req) == 0 {
 		return nil, nil
 	}
@@ -80,6 +81,7 @@ func ListOfficialRequires(ctx context.Context, workspace Workspace) (*OfficialRe
 		return nil, err
 	}
 	req, url := workspaceOfficialRequires(workspace, cfg)
+	req = req.Official()
 	items, err := install.Status(ctx, install.Options{
 		CacheDir:    workspaceCacheDir(workspace),
 		RegistryURL: url,
@@ -114,6 +116,7 @@ func UpdateOfficialRequires(ctx context.Context, workspace Workspace, projects [
 		return nil, err
 	}
 	all, url := workspaceOfficialRequires(workspace, cfg)
+	all = all.Official()
 	selected := make(types.RequiresSpec)
 	for _, project := range projects {
 		project = strings.TrimSpace(project)
@@ -197,13 +200,16 @@ func officialGitPushBlocked(cfg *types.ProjectConfig) string {
 	return ""
 }
 
+// filterOfficialVaultAssets 从可写 Git 资产里剔除官方 registry 订阅（latest/v*）：
+// 那些由提供方 CI 发布，禁止本机 push；私仓 vault pin 必须保留。
 func filterOfficialVaultAssets(req types.RequiresSpec, assets []types.TypedAssetRef) []types.TypedAssetRef {
-	if len(req) == 0 {
+	official := req.Official()
+	if len(official) == 0 {
 		return assets
 	}
 	out := make([]types.TypedAssetRef, 0, len(assets))
 	for _, asset := range assets {
-		if req.Has(asset.Vault) {
+		if official.Has(asset.Vault) {
 			continue
 		}
 		out = append(out, asset)

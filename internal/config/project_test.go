@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 	cfg := &types.ProjectConfig{
 		IDEs:           []string{"cursor"},
 		Editor:         "vim",
-		EnabledBundles: []string{"vikunja", "cli"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault, "cli": types.RequiresVault},
 	}
 
 	if err := mgr.SaveProjectConfig(cfg); err != nil {
@@ -40,8 +41,11 @@ func TestSaveAndLoadProjectConfig(t *testing.T) {
 		t.Fatalf("加载失败: %v", err)
 	}
 
-	if len(loaded.EnabledBundles) != 2 || loaded.EnabledBundles[0] != "vikunja" {
-		t.Fatalf("enabled_bundles = %#v, 期望 [vikunja cli]", loaded.EnabledBundles)
+	if !reflect.DeepEqual(loaded.Requires.VaultProjects(), []string{"cli", "vikunja"}) {
+		t.Fatalf("Requires.VaultProjects() = %#v, 期望 [cli vikunja]", loaded.Requires.VaultProjects())
+	}
+	if loaded.Requires["vikunja"] != types.RequiresVault || loaded.Requires["cli"] != types.RequiresVault {
+		t.Fatalf("Requires = %#v", loaded.Requires)
 	}
 	if loaded.Editor != "vim" {
 		t.Fatalf("editor = %q, 期望 %q", loaded.Editor, "vim")
@@ -143,21 +147,15 @@ enabled:
 		t.Fatalf("加载失败: %v", err)
 	}
 
-	// enabled 里的 vault 折叠成同名 bundle，已有的 enabled_bundles 保持在前。
-	want := []string{"tencent-cloud", "default", "vikunja"}
-	if len(loaded.EnabledBundles) != len(want) {
-		t.Fatalf("enabled_bundles = %#v, 期望 %#v", loaded.EnabledBundles, want)
-	}
-	got := map[string]int{}
-	for i, name := range loaded.EnabledBundles {
-		got[name] = i
-	}
-	if got["tencent-cloud"] != 0 {
-		t.Fatalf("原有 bundle 应排在前面, 实际: %#v", loaded.EnabledBundles)
+	// enabled / enabled_bundles 折叠进 requires，pin 为 vault。
+	want := []string{"default", "tencent-cloud", "vikunja"}
+	got := loaded.Requires.VaultProjects()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Requires.VaultProjects() = %#v, 期望 %#v", got, want)
 	}
 	for _, name := range want {
-		if _, ok := got[name]; !ok {
-			t.Fatalf("enabled_bundles 应包含 %q, 实际: %#v", name, loaded.EnabledBundles)
+		if loaded.Requires[name] != types.RequiresVault {
+			t.Fatalf("Requires[%s] = %q, 期望 vault", name, loaded.Requires[name])
 		}
 	}
 
@@ -168,6 +166,9 @@ enabled:
 	content := string(raw)
 	if strings.Contains(content, "available:") || strings.Contains(content, "enabled:\n") {
 		t.Fatalf("回写后不应保留 available / enabled 段, 实际内容:\n%s", content)
+	}
+	if strings.Contains(content, "enabled_bundles:") {
+		t.Fatalf("回写后不应再写 enabled_bundles, 实际内容:\n%s", content)
 	}
 }
 
@@ -216,8 +217,11 @@ enabled:
 		t.Fatalf("ides = %#v, 期望 [cursor]", loaded.IDEs)
 	}
 	// v1 的 enabled 只声明了 team vault，available 里的 infra 不代表用户意图，应被丢弃。
-	if len(loaded.EnabledBundles) != 1 || loaded.EnabledBundles[0] != "team" {
-		t.Fatalf("enabled_bundles = %#v, 期望 [team]", loaded.EnabledBundles)
+	if !reflect.DeepEqual(loaded.Requires.VaultProjects(), []string{"team"}) {
+		t.Fatalf("Requires.VaultProjects() = %#v, 期望 [team]", loaded.Requires.VaultProjects())
+	}
+	if loaded.Requires["team"] != types.RequiresVault {
+		t.Fatalf("Requires = %#v", loaded.Requires)
 	}
 
 	raw, err := os.ReadFile(configPath)
@@ -230,6 +234,9 @@ enabled:
 	}
 	if strings.Contains(content, "- name:") || strings.Contains(content, "available:") {
 		t.Fatalf("迁移后不应保留 v1 资产结构, 实际内容:\n%s", content)
+	}
+	if strings.Contains(content, "enabled_bundles:") {
+		t.Fatalf("迁移后不应再写 enabled_bundles, 实际内容:\n%s", content)
 	}
 }
 

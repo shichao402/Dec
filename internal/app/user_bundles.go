@@ -25,7 +25,7 @@ type userEnableRepair struct {
 	Created []string
 	// Upgraded 是缺省 scope 被推断写回为 user 的 bundle 名。
 	Upgraded []string
-	// Rejected 是不能在用户平面启用的名字；调用方必须把它们排除在 enabled_bundles 之外。
+	// Rejected 是不能在用户平面启用的名字；调用方必须把它们排除在 requires 之外。
 	Rejected []userEnableRejection
 }
 

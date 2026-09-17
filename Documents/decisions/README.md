@@ -49,3 +49,5 @@
 | [0026](0026-project-provides-and-sync-worktree.md) | 项目作者源映射与可恢复同步工作副本 | 发版 / 本机推柜段已被 [0028](0028-official-registry-and-install.md) 取代；`provides` 作者源映射仍有效 |
 | [0027](0027-relkit-owned-update-contract.md) | 更新契约只由 relkit 声明 | 已接受（已实现） |
 | [0028](0028-official-registry-and-install.md) | 官方注册表、安装器与个人私仓 | 已接受 |
+| [0029](0029-single-consumer-requires.md) | 消费声明唯一化：`requires` + 提供方 `depends_on` | 已接受 |
+| [0030](0030-agent-tools-thin-shell.md) | Agent 工具清单与编排下移，dec-mcp 零业务知识 | 已接受 |

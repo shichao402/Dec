@@ -16,8 +16,8 @@ func TestPullProjectAssets_ReportsMissingEnabledBundles(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/live/skills/live-skill/SKILL.md": "---\nname: live-skill\n---\n",
-		"bundles/live/bundle.yaml":                "name: live\nscope: project\nmembers:\n  - skills/live-skill\n",
+		"live/public/project/skills/live-skill/SKILL.md": "---\nname: live-skill\n---\n",
+		"live/dec.yaml": "name: live\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
@@ -26,8 +26,7 @@ func TestPullProjectAssets_ReportsMissingEnabledBundles(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Demo",
-		EnabledBundles: []string{"live", "deleted"},
+		Requires: types.RequiresSpec{"live": types.RequiresVault, "deleted": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +52,7 @@ func TestPullProjectAssets_SkipReasonWhenAllBundlesMissing(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/other/bundle.yaml": "name: other\nscope: project\nmembers: []\n",
+		"other/dec.yaml": "name: other\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
@@ -62,8 +61,7 @@ func TestPullProjectAssets_SkipReasonWhenAllBundlesMissing(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Demo",
-		EnabledBundles: []string{"vikunja", "default"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault, "default": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}

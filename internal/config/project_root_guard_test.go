@@ -36,7 +36,7 @@ func TestProjectConfigRefusesToWriteOverDecHome(t *testing.T) {
 
 	if err := SaveGlobalConfig(&types.GlobalConfig{
 		RepoURL:        "https://example.com/vault.git",
-		EnabledBundles: []string{"cli"},
+		Requires: types.RequiresSpec{"cli": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveGlobalConfig() 失败: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestProjectConfigRefusesToWriteOverDecHome(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatalf("全局配置被改写:\n--- 之前 ---\n%s\n--- 之后 ---\n%s", before, after)
 	}
-	if !strings.Contains(string(after), "enabled_projects") {
-		t.Fatalf("全局配置丢了 enabled_projects:\n%s", after)
+	if !strings.Contains(string(after), "requires:") || !strings.Contains(string(after), "cli:") {
+		t.Fatalf("全局配置丢了 requires:\n%s", after)
 	}
 }

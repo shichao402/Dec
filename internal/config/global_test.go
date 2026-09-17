@@ -108,7 +108,7 @@ func TestSaveGlobalConfig_RemovesLegacyLocalConfig(t *testing.T) {
 	}
 }
 
-// ADR 0009：用户平面启用列表从 ~/.dec/secrets/config.yaml 迁到 GlobalConfig.EnabledBundles。
+// ADR 0009：用户平面启用列表从 ~/.dec/secrets/config.yaml 迁到 GlobalConfig.Requires.VaultProjects()。
 func TestLoadGlobalConfig_MergesLegacySecretsEnabledBundles(t *testing.T) {
 	decHome := t.TempDir()
 	setEnvForGlobalTest(t, "DEC_HOME", decHome)
@@ -119,8 +119,8 @@ func TestLoadGlobalConfig_MergesLegacySecretsEnabledBundles(t *testing.T) {
 		t.Fatalf("LoadGlobalConfig() 失败: %v", err)
 	}
 	want := []string{"tencent-cloud", "woa"}
-	if !reflect.DeepEqual(cfg.EnabledBundles, want) {
-		t.Fatalf("EnabledBundles = %#v, 期望 %#v", cfg.EnabledBundles, want)
+	if !reflect.DeepEqual(cfg.Requires.VaultProjects(), want) {
+		t.Fatalf("EnabledBundles = %#v, 期望 %#v", cfg.Requires.VaultProjects(), want)
 	}
 }
 
@@ -136,8 +136,8 @@ func TestLoadGlobalConfig_PrefersOwnEnabledBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadGlobalConfig() 失败: %v", err)
 	}
-	if !reflect.DeepEqual(cfg.EnabledBundles, []string{"current"}) {
-		t.Fatalf("EnabledBundles = %#v, 期望 [current]", cfg.EnabledBundles)
+	if !reflect.DeepEqual(cfg.Requires.VaultProjects(), []string{"current"}) {
+		t.Fatalf("EnabledBundles = %#v, 期望 [current]", cfg.Requires.VaultProjects())
 	}
 }
 
@@ -172,17 +172,27 @@ func TestSaveGlobalConfig_ClearsLegacySecretsEnabledBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取全局配置失败: %v", err)
 	}
-	if !strings.Contains(string(globalData), "enabled_projects:") {
-		t.Fatalf("全局配置应写入 enabled_projects, 实际:\n%s", globalData)
+	text := string(globalData)
+	if !strings.Contains(text, "requires:") || !strings.Contains(text, "woa:") {
+		t.Fatalf("全局配置应写入 requires.woa: vault, 实际:\n%s", text)
+	}
+	for _, line := range strings.Split(text, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "#") || trim == "" {
+			continue
+		}
+		if strings.HasPrefix(trim, "enabled_bundles:") || strings.HasPrefix(trim, "enabled_projects:") {
+			t.Fatalf("保存后 YAML 正文不应再有 enabled_* 字段, 实际:\n%s", text)
+		}
 	}
 
 	// 迁移后重新加载不应再依赖旧位置。
-	names, err := UserEnabledBundles()
+	names, err := GlobalConsumedProjects()
 	if err != nil {
-		t.Fatalf("UserEnabledBundles() 失败: %v", err)
+		t.Fatalf("GlobalConsumedProjects() 失败: %v", err)
 	}
 	if !reflect.DeepEqual(names, []string{"woa"}) {
-		t.Fatalf("UserEnabledBundles() = %#v, 期望 [woa]", names)
+		t.Fatalf("GlobalConsumedProjects() = %#v, 期望 [woa]", names)
 	}
 }
 

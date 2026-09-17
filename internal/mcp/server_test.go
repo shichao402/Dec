@@ -3,20 +3,22 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/shichao402/Dec/internal/app"
+	"github.com/shichao402/Dec/internal/agenttools"
 )
 
 type fakeGateway struct {
-	hello       *Hello
-	helloErr    error
-	invokeFn    func(method, root, plane string) *RPCResult
-	runFn       func(op, root, plane string) *RPCResult
-	connections any
-	methods     []string
+	hello          *Hello
+	helloErr       error
+	toolCallFn     func(name string, args json.RawMessage) *ToolCallResult
+	connections    any
+	calls          []string
+	manifestVersion string
 }
 
 func (f *fakeGateway) Hello(context.Context) (*Hello, error) {
@@ -29,20 +31,12 @@ func (f *fakeGateway) Hello(context.Context) (*Hello, error) {
 	return &Hello{Version: "test", Connected: true, Unlocked: true}, nil
 }
 
-func (f *fakeGateway) Invoke(_ context.Context, method, projectRoot, plane string, _ any) (*RPCResult, error) {
-	f.methods = append(f.methods, method+":"+plane+":"+projectRoot)
-	if f.invokeFn != nil {
-		return f.invokeFn(method, projectRoot, plane), nil
-	}
-	return &RPCResult{OK: true, Result: json.RawMessage(`{"ok":true}`)}, nil
+func (f *fakeGateway) Invoke(context.Context, string, string, string, any) (*RPCResult, error) {
+	return &RPCResult{OK: true, Result: json.RawMessage(`{}`)}, nil
 }
 
-func (f *fakeGateway) Run(_ context.Context, operation, projectRoot, plane string, _ any) (*RPCResult, error) {
-	f.methods = append(f.methods, operation+":"+plane+":"+projectRoot)
-	if f.runFn != nil {
-		return f.runFn(operation, projectRoot, plane), nil
-	}
-	return &RPCResult{OK: true, Result: json.RawMessage(`{"ok":true}`)}, nil
+func (f *fakeGateway) Run(context.Context, string, string, string, any) (*RPCResult, error) {
+	return &RPCResult{OK: true, Result: json.RawMessage(`{}`)}, nil
 }
 
 func (f *fakeGateway) Connections(context.Context) (any, error) {
@@ -60,114 +54,90 @@ func (f *fakeGateway) ActiveOperation(context.Context, string) (any, error) {
 	return map[string]any{"active": false}, nil
 }
 
-// jsonschema tag 的合法性只在 AddTool 推导 schema 时校验，违规直接 panic，
-// 表现为 dec-mcp 启动即崩、Cursor 侧看上去是「连不上 Console」。
-func TestRegisterAllTools(t *testing.T) {
+func (f *fakeGateway) ToolCall(_ context.Context, name string, args json.RawMessage, _ string) (*ToolCallResult, error) {
+	f.calls = append(f.calls, name)
+	if f.toolCallFn != nil {
+		return f.toolCallFn(name, args), nil
+	}
+	return &ToolCallResult{
+		OK:              true,
+		Result:          json.RawMessage(`{"ok":true}`),
+		ManifestVersion: f.manifestVersion,
+	}, nil
+}
+
+func TestRegisterFromManifest(t *testing.T) {
+	dir := t.TempDir()
+	raw, err := agenttools.DumpJSON("v9.9.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "agent-tools.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("注册 tools panic: %v", r)
 		}
 	}()
-	New(Config{Gateway: &fakeGateway{}}).Register(mcp.NewServer(&mcp.Implementation{Name: "dec", Version: "test"}, nil))
-}
-
-func TestHandleStatus_NoProjectRootLocalFails(t *testing.T) {
-	s := New(Config{Gateway: &fakeGateway{}})
-	_, out, err := s.handleStatus(context.Background(), nil, statusParams{})
-	if err != nil {
-		t.Fatalf("handleStatus() err = %v", err)
-	}
-	resp := out.(toolResponse)
-	if resp.OK {
-		t.Fatal("缺 project_root 的 local 状态应失败")
-	}
-	if !strings.Contains(resp.Error, "dec_list_managed_projects") {
-		t.Fatalf("错误应提示受管项目: %s", resp.Error)
+	s := New(Config{Gateway: &fakeGateway{}, ManifestPath: path, ClientVersion: "v9.9.9"})
+	s.Register(mcp.NewServer(&mcp.Implementation{Name: "dec", Version: "test"}, nil))
+	if s.manifest == nil || len(s.manifest.Tools) != len(agenttools.ToolNames()) {
+		t.Fatalf("manifest tools = %d", len(s.manifest.Tools))
 	}
 }
 
-func TestHandleStatus_UsesGateway(t *testing.T) {
+func TestRegisterBootstrapWhenMissing(t *testing.T) {
+	s := New(Config{Gateway: &fakeGateway{}, ManifestPath: filepath.Join(t.TempDir(), "missing.json")})
+	s.Register(mcp.NewServer(&mcp.Implementation{Name: "dec", Version: "test"}, nil))
+	if len(s.manifest.Tools) != 1 || s.manifest.Tools[0].Name != agenttools.BootstrapTool {
+		t.Fatalf("%+v", s.manifest)
+	}
+}
+
+func TestCallToolForwardsArguments(t *testing.T) {
+	var gotArgs json.RawMessage
 	gw := &fakeGateway{
-		invokeFn: func(method, root, plane string) *RPCResult {
-			if method != "load_project_overview" {
-				t.Fatalf("method = %s", method)
-			}
-			if root != "/work" || plane != "local" {
-				t.Fatalf("ws = %s %s", plane, root)
-			}
-			return &RPCResult{OK: true, Result: json.RawMessage(`{"ProjectRoot":"/work"}`)}
+		toolCallFn: func(name string, args json.RawMessage) *ToolCallResult {
+			gotArgs = append(json.RawMessage(nil), args...)
+			return &ToolCallResult{OK: true, Result: json.RawMessage(`{"plane":"local"}`)}
 		},
 	}
-	s := New(Config{Gateway: gw})
-	_, out, err := s.handleStatus(context.Background(), nil, statusParams{ProjectRoot: "/work"})
-	if err != nil {
-		t.Fatalf("handleStatus() err = %v", err)
-	}
-	resp := out.(toolResponse)
-	if !resp.OK {
-		t.Fatalf("expected ok, got %#v", resp)
-	}
-	data := resp.Data.(map[string]any)
-	if data["plane"] != "local" {
-		t.Fatalf("plane = %#v", data["plane"])
-	}
-}
-
-func TestHandleConnectRepoAndInit(t *testing.T) {
-	gw := &fakeGateway{}
-	s := New(Config{Gateway: gw})
-	_, connectOut, err := s.handleConnectRepo(context.Background(), nil, connectRepoParams{RepoURL: "git://x"})
-	connectResp := connectOut.(toolResponse)
-	if err != nil || !connectResp.OK {
-		t.Fatalf("handleConnectRepo() = %#v, %v", connectResp, err)
-	}
-	_, initOut, err := s.handleInitProject(context.Background(), nil, initProjectParams{ProjectRoot: t.TempDir()})
-	initResp := initOut.(toolResponse)
-	if err != nil || !initResp.OK {
-		t.Fatalf("handleInitProject() = %#v, %v", initResp, err)
-	}
-}
-
-func TestHandleListAssets_BothPlanes(t *testing.T) {
-	s := New(Config{Gateway: &fakeGateway{}})
-	_, out, err := s.handleListAssets(context.Background(), nil, listAssetsParams{Plane: "both", ProjectRoot: t.TempDir()})
-	if err != nil {
-		t.Fatalf("handleListAssets() err = %v", err)
-	}
-	resp := out.(toolResponse)
-	if !resp.OK {
-		t.Fatalf("expected ok, got %#v", out)
-	}
-	data := resp.Data.(map[string]any)
-	outcomes := data["planes"].([]planeOutcome)
-	if len(outcomes) != 2 {
-		t.Fatalf("planes len = %d", len(outcomes))
-	}
-	if outcomes[0].Plane != string(app.WorkspaceLocal) || outcomes[1].Plane != string(app.WorkspaceGlobal) {
-		t.Fatalf("planes order = %q,%q", outcomes[0].Plane, outcomes[1].Plane)
-	}
-}
-
-func TestHandleDelete_RejectsBoth(t *testing.T) {
-	s := New(Config{Gateway: &fakeGateway{}})
-	_, out, err := s.handleDelete(context.Background(), nil, deleteParams{Confirmed: true, Plane: "both", ProjectRoot: t.TempDir()})
-	if err != nil {
-		t.Fatalf("handleDelete() err = %v", err)
-	}
-	resp, ok := out.(toolResponse)
-	if !ok || resp.OK {
-		t.Fatalf("plane=both 应失败: %#v", out)
-	}
-}
-
-func TestHandleConsoleStatus(t *testing.T) {
-	s := New(Config{Gateway: &fakeGateway{hello: &Hello{Connected: true, Unlocked: false, Version: "1.0"}}})
-	_, out, err := s.handleConsoleStatus(context.Background(), nil, emptyParams{})
+	dir := t.TempDir()
+	raw, _ := agenttools.DumpJSON("v1")
+	path := filepath.Join(dir, "agent-tools.json")
+	_ = os.WriteFile(path, raw, 0o600)
+	s := New(Config{Gateway: gw, ManifestPath: path})
+	s.Register(mcp.NewServer(&mcp.Implementation{Name: "dec", Version: "test"}, nil))
+	args := json.RawMessage(`{"project_root":"/work","plane":"local"}`)
+	res, err := s.callTool(context.Background(), "dec_status", args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp := out.(toolResponse)
-	if !resp.OK {
-		t.Fatalf("%#v", resp)
+	if res.IsError {
+		t.Fatalf("%+v", res)
+	}
+	if string(gotArgs) != string(args) {
+		t.Fatalf("args rewritten: %s", gotArgs)
+	}
+}
+
+func TestManifestVersionTriggersReload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent-tools.json")
+	v1, _ := agenttools.DumpJSON("v1")
+	_ = os.WriteFile(path, v1, 0o600)
+	gw := &fakeGateway{manifestVersion: "v2#997fc99e78d37300"}
+	s := New(Config{Gateway: gw, ManifestPath: path, ClientVersion: "v1"})
+	s.Register(mcp.NewServer(&mcp.Implementation{Name: "dec", Version: "test"}, nil))
+	if !strings.HasPrefix(s.manifest.Version, "v1#") {
+		t.Fatalf("start version = %s", s.manifest.Version)
+	}
+	v2, _ := agenttools.DumpJSON("v2")
+	_ = os.WriteFile(path, v2, 0o600)
+	_, _ = s.callTool(context.Background(), "dec_console_status", json.RawMessage(`{}`))
+	if !strings.HasPrefix(s.manifest.Version, "v2#") {
+		t.Fatalf("reloaded version = %s", s.manifest.Version)
 	}
 }

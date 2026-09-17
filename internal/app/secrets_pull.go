@@ -63,12 +63,32 @@ func planWorkspaceSecretsSync(workspace Workspace, enabledBundles []string, cfg 
 		}
 		names = filtered
 	}
-	if len(projects) > 0 {
+	if len(projects) > 0 && workspace.EffectivePlane() != WorkspaceProject {
+		valid := names[:0]
 		for _, name := range names {
-			if _, ok := projects[name]; !ok {
-				return nil, fmt.Errorf("项目 %q 不存在，不能声明 secrets target", name)
+			if _, ok := projects[name]; ok {
+				valid = append(valid, name)
 			}
 		}
+		names = valid
+	} else if len(projects) > 0 && workspace.EffectivePlane() == WorkspaceProject {
+		// 家项目可能已从私仓删除：仍保留名字以便 Bitwarden 对照后做 secrets 收敛。
+		// 非法 / 占位名（ResolveProjectName 回落到目录名）若不在私仓且不在 requires，则丢弃。
+		valid := names[:0]
+		enabled := make(map[string]struct{}, len(enabledBundles))
+		for _, n := range config.NormalizeBundleNames(enabledBundles) {
+			enabled[n] = struct{}{}
+		}
+		for _, name := range names {
+			if _, ok := projects[name]; ok {
+				valid = append(valid, name)
+				continue
+			}
+			if _, ok := enabled[name]; ok {
+				valid = append(valid, name)
+			}
+		}
+		names = valid
 	}
 	// 平面隔离（ADR 0009）：project 上下文只解析项目平面 target。
 	targets, err := secrets.ResolvePSyncTargets(workspace.SecretsPlane(), names)

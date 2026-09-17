@@ -15,7 +15,7 @@ func TestPreviewPushProjectAssets_CountsSecretsTargetsNotFiles(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "demo",
-		EnabledBundles: []string{"combo"},
+		Requires: types.RequiresSpec{"combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -24,8 +24,8 @@ func TestPreviewPushProjectAssets_CountsSecretsTargetsNotFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PreviewPushProjectAssets() = %v", err)
 	}
-	if preview.EnabledBundleCount != 1 {
-		t.Fatalf("EnabledBundleCount = %d, want 1", preview.EnabledBundleCount)
+	if preview.EnabledBundleCount != 2 {
+		t.Fatalf("EnabledBundleCount = %d, want 2（home + requires）", preview.EnabledBundleCount)
 	}
 	if preview.SecretsTargetCount != 1 || preview.ProjectSecretsName != "demo/private/local" {
 		t.Fatalf("SecretsTargetCount = %d, ProjectSecretsName = %q",

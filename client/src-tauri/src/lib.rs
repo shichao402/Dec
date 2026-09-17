@@ -1,4 +1,5 @@
 mod agent;
+mod agent_tools;
 mod console_update;
 mod frontend_guard;
 mod grpc;
@@ -24,6 +25,7 @@ pub(crate) struct AppState {
     pub(crate) current: Mutex<Option<CurrentTarget>>,
     console_update: Mutex<()>,
     pending_intents: StdMutex<VecDeque<OpenIntent>>,
+    pub(crate) agent_tools: agent_tools::AgentToolsState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -191,7 +193,7 @@ fn reject_newer_server(server_version: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn suite_binary(name: &str) -> PathBuf {
+pub(crate) fn suite_binary(name: &str) -> PathBuf {
     let suffix = if cfg!(windows) { ".exe" } else { "" };
     dec_home().join("bin").join(format!("{name}{suffix}"))
 }
@@ -313,6 +315,7 @@ async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
                 if runtime_bundle::installed_matches(app, &dec_home(), CONSOLE_VERSION)? =>
             {
                 remove_legacy_dec_cli()?;
+                let _ = agent_tools::refresh_agent_tools_manifest(app);
                 return Ok(());
             }
             _ => {}
@@ -330,6 +333,7 @@ async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
         return Err("安装后 Dec 运行时套件与 Console 内置 manifest 不一致".into());
     }
     remove_legacy_dec_cli()?;
+    agent_tools::refresh_agent_tools_manifest(app)?;
     Ok(())
 }
 
@@ -715,6 +719,7 @@ async fn connect_local(app: &AppHandle) -> Result<Session, String> {
                         && runtime_bundle::installed_matches(app, &dec_home(), CONSOLE_VERSION)?
                     {
                         remove_legacy_dec_cli()?;
+                        let _ = agent_tools::refresh_agent_tools_manifest(app);
                         return Ok(session);
                     }
                 }

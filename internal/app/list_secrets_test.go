@@ -65,7 +65,7 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		EnabledBundles: []string{"vikunja"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronDown, Link2, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileDiff, Link2, RefreshCw, Upload } from 'lucide-react'
 import { ActionFeedback } from '@/components/action-feedback'
 import { Page, PageFill, PageHeader, PageScroll } from '@/components/shell/page'
 import { Badge } from '@/components/ui/badge'
@@ -12,10 +12,7 @@ import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel'
 import { useDecAction } from '@/lib/action-context'
 import { invokeTyped } from '@/lib/api'
 import { actionSpec, resource, suggestProjectName } from '@/lib/console'
-import { AssetsPanel } from '@/pages/assets-panel'
-import { ProvidesPanel } from '@/pages/provides-panel'
-import { RequiresPanel } from '@/pages/requires-panel'
-import { OfficialOverridesPanel } from '@/pages/official-overrides-panel'
+import { SubscriptionPanel } from '@/pages/subscription-panel'
 import { WorkspaceWritePanel } from '@/pages/workspace-write-panel'
 import type { ManagedProject } from '@/lib/utils'
 
@@ -25,6 +22,8 @@ export function ProjectPage(props: {
   deviceId: string
   project: ManagedProject
   onSync: () => void
+  onOverrides: () => void
+  onProvides: () => void
   onRemoved: () => void
   onChanged: () => void | Promise<void>
 }) {
@@ -76,7 +75,7 @@ export function ProjectPage(props: {
     <Page>
       <PageHeader
         title={project.Label || project.Name}
-        description="提供项、依赖与个人资产。"
+        description="订阅依赖与个人资产写回；覆写与提供项在下级页。"
         meta={
           <>
             <Badge tone="quiet" className="font-mono" title={project.Root}>{project.Root}</Badge>
@@ -95,7 +94,8 @@ export function ProjectPage(props: {
       />
       <PageFill>
         <ActionFeedback actionKey={removeSpec.key} />
-        <Panel className="mb-4 shrink-0">
+        {/* 换绑、覆写与提供项都是偶发操作，收在同一张卡里，主区留给写回与订阅。 */}
+        <Panel className="mb-4 shrink-0 overflow-hidden">
           <button
             onClick={() => setBindingOpen((value) => !value)}
             className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-panel-hi"
@@ -114,11 +114,30 @@ export function ProjectPage(props: {
               <ProjectBinding deviceId={props.deviceId} project={project} onBound={onBound} />
             </PanelBody>
           )}
+          <button
+            onClick={props.onOverrides}
+            className="flex w-full items-center gap-3 border-t border-line px-4 py-3 text-left transition-colors hover:bg-panel-hi"
+          >
+            <FileDiff className="size-4 shrink-0 text-faint" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px] font-medium text-ink">本地覆写</span>
+              <span className="block truncate text-xs text-faint">临时修改官方资产，并关联上游 Issue 或 PR</span>
+            </span>
+            <ChevronRight className="size-4 shrink-0 text-faint" />
+          </button>
+          <button
+            onClick={props.onProvides}
+            className="flex w-full items-center gap-3 border-t border-line px-4 py-3 text-left transition-colors hover:bg-panel-hi"
+          >
+            <Upload className="size-4 shrink-0 text-faint" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px] font-medium text-ink">我提供的资产</span>
+              <span className="block truncate text-xs text-faint">作者视角：登记本项目对外提供的 Git 资产</span>
+            </span>
+            <ChevronRight className="size-4 shrink-0 text-faint" />
+          </button>
         </Panel>
         <div className="space-y-4">
-          <RequiresPanel deviceId={props.deviceId} root={project.Root} plane="local" />
-          <OfficialOverridesPanel deviceId={props.deviceId} root={project.Root} />
-          <ProvidesPanel deviceId={props.deviceId} root={project.Root} />
           <WorkspaceWritePanel
             deviceId={props.deviceId}
             root={project.Root}
@@ -127,14 +146,14 @@ export function ProjectPage(props: {
           />
           <div>
             <div className="mb-2">
-              <h2 className="text-[13px] font-semibold text-ink">我引用的资产</h2>
-              <p className="mt-0.5 text-xs text-faint">家项目自带资产与个人启用项。</p>
+              <h2 className="text-[13px] font-semibold text-ink">订阅</h2>
+              <p className="mt-0.5 text-xs text-faint">本项目消费哪些项目：官方注册表或个人私仓。</p>
             </div>
-            <AssetsPanel
+            <SubscriptionPanel
               deviceId={props.deviceId}
               root={project.Root}
               plane="local"
-              hint="这里的选择只影响当前项目目录。"
+              hint="订阅只写当前项目的 .dec/config.yaml；安装在「更新」页做。"
             />
           </div>
         </div>

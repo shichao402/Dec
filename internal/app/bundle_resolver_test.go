@@ -3,7 +3,6 @@ package app
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -21,13 +20,25 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// setupRepoWithVault 创建临时 repo 目录，并在 bundles/ 下写入若干文件。
-// files 的 key 相对于 repoDir，例如 "bundles/default/skills/foo/SKILL.md"。
+// setupRepoWithVault 创建临时 repo 目录，并写入 pmodel 项目树。
+// files 的 key 相对于 repoDir，例如 "vikunja/public/project/skills/foo/SKILL.md"。
+// 对缺少 dec.yaml 的顶层项目目录会自动补一份，避免 Scan 因未声明目录失败。
 func setupRepoWithVault(t *testing.T, files map[string]string) string {
 	t.Helper()
 	repoDir := t.TempDir()
+	ensured := map[string]bool{}
 	for rel, content := range files {
 		writeFile(t, filepath.Join(repoDir, rel), content)
+		top := strings.Split(filepath.ToSlash(rel), "/")[0]
+		if top != "" && top != "." {
+			ensured[top] = ensured[top] || strings.HasSuffix(filepath.ToSlash(rel), "/dec.yaml") || filepath.ToSlash(rel) == top+"/dec.yaml"
+		}
+	}
+	for top, hasManifest := range ensured {
+		if hasManifest || top == "projects" || top == "bundles" || strings.HasPrefix(top, ".") {
+			continue
+		}
+		writeFile(t, filepath.Join(repoDir, top, "dec.yaml"), "name: "+top+"\n")
 	}
 	return repoDir
 }
@@ -41,8 +52,8 @@ func captureEvents(events *[]OperationEvent) Reporter {
 
 func TestResolveDesiredAssets_NilConfigScansBundles(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"cli/public/project/rules/cli-release-rules.mdc": "---\ndescription: test\n---\n",
 	})
 
 	got, err := resolveDesiredAssets(nil, repoDir, nil)
@@ -59,43 +70,37 @@ func TestResolveDesiredAssets_NilConfigScansBundles(t *testing.T) {
 
 func TestResolveDesiredAssetsFiltersWorkspacePlane(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"bundles/project/skills/project-skill/SKILL.md": "---\nname: project-skill\n---\n",
-		"bundles/project/bundle.yaml":                   "name: project\nscope: project\nmembers:\n  - skill/project-skill\n",
-		"bundles/user/skills/user-skill/SKILL.md":       "---\nname: user-skill\n---\n",
-		"bundles/user/bundle.yaml":                      "name: user\nscope: user\nmembers:\n  - skill/user-skill\n",
+		"tools/dec.yaml": "name: tools\n",
+		"tools/public/project/skills/project-skill/SKILL.md": "---\nname: project-skill\n---\n",
+		"tools/public/user/skills/user-skill/SKILL.md":       "---\nname: user-skill\n---\n",
 	})
-	cfg := &types.ProjectConfig{EnabledBundles: []string{"project", "user"}}
+	cfg := &types.ProjectConfig{Requires: types.RequiresSpec{"tools": types.RequiresVault}}
 
 	project, err := resolveDesiredAssetsForPlane(cfg, repoDir, WorkspaceProject, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(project.Bundles) != 1 || project.Bundles[0].Name != "project" || len(project.Assets) != 1 {
-		t.Fatalf("project 平面解析异常: %#v", project)
+	if len(project.Assets) != 1 || project.Assets[0].Name != "project-skill" {
+		t.Fatalf("project 平面应只装 local 资产: %#v", project.Assets)
 	}
 
 	user, err := resolveDesiredAssetsForPlane(cfg, repoDir, WorkspaceUser, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(user.Bundles) != 1 || user.Bundles[0].Name != "user" || len(user.Assets) != 1 {
-		t.Fatalf("user 平面解析异常: %#v", user)
+	if len(user.Assets) != 1 || user.Assets[0].Name != "user-skill" {
+		t.Fatalf("user 平面应只装 global 资产: %#v", user.Assets)
 	}
 }
 
 func TestResolveDesiredAssets_BundleExpandsMembers(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"bundles/combo/rules/bar.mdc":       "rule bar\n",
-		"bundles/combo/bundle.yaml": `name: combo
-description: combo bundle
-members:
-  - skill/foo
-  - rule/bar
-`,
+		"combo/public/project/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"combo/public/project/rules/bar.mdc":       "rule bar\n",
+		"combo/dec.yaml":                           "name: combo\n",
 	})
 	cfg := &types.ProjectConfig{
-		EnabledBundles: []string{"combo"},
+		Requires: types.RequiresSpec{"combo": types.RequiresVault},
 	}
 
 	got, err := resolveDesiredAssets(cfg, repoDir, nil)
@@ -106,16 +111,14 @@ members:
 		t.Fatalf("Assets len = %d, 期望 2; 内容: %#v", len(got.Assets), got.Assets)
 	}
 
-	// 检查两个成员都被登记为 bundle/combo
 	for _, a := range got.Assets {
 		key := assetKey(a)
 		sources := got.Sources[key]
-		if len(sources) != 1 || sources[0] != "bundle/combo" {
-			t.Fatalf("Sources[%s] = %#v, 期望 [bundle/combo]", key, sources)
+		if len(sources) != 1 || sources[0] != "p/combo" {
+			t.Fatalf("Sources[%s] = %#v, 期望 [p/combo]", key, sources)
 		}
 	}
 
-	// combo 启用；default 无资产故不合成
 	if len(got.Bundles) != 1 {
 		t.Fatalf("Bundles len = %d, 期望 1（combo）", len(got.Bundles))
 	}
@@ -126,21 +129,17 @@ members:
 		}
 	}
 	if enabledCount != 1 {
-		t.Fatalf("Bundles = %#v, 期望仅 1 个启用的 bundle", got.Bundles)
+		t.Fatalf("Bundles = %#v, 期望仅 1 个启用的项目", got.Bundles)
 	}
 }
 
-func TestResolveDesiredAssets_BundleMissingMemberWarns(t *testing.T) {
+func TestResolveDesiredAssets_MissingSubscribedProjectWarns(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"bundles/combo/bundle.yaml": `name: combo
-members:
-  - skill/foo
-  - rule/ghost
-`,
+		"combo/public/project/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"combo/dec.yaml":                           "name: combo\n",
 	})
 	cfg := &types.ProjectConfig{
-		EnabledBundles: []string{"combo"},
+		Requires: types.RequiresSpec{"combo": types.RequiresVault, "ghost": types.RequiresVault},
 	}
 
 	var events []OperationEvent
@@ -148,14 +147,12 @@ members:
 	if err != nil {
 		t.Fatalf("resolveDesiredAssets() 失败: %v", err)
 	}
-
-	// foo 进了目标集，ghost 被跳过
 	if len(got.Assets) != 1 || got.Assets[0].Name != "foo" {
 		t.Fatalf("Assets = %#v, 期望只有 foo", got.Assets)
 	}
-
-	// 应该有针对 ghost 成员的 warning（来自 LoadBundles 的 memberExists 检查）
-	// 以及解析阶段对不存在资产文件的兜底 warning
+	if !containsName(got.MissingProjects, "ghost") {
+		t.Fatalf("MissingProjects = %#v, 期望含 ghost", got.MissingProjects)
+	}
 	var sawGhostWarn bool
 	for _, e := range events {
 		if e.Level == EventWarn && strings.Contains(e.Message, "ghost") {
@@ -169,10 +166,10 @@ members:
 
 func TestResolveDesiredAssets_UnknownBundleWarns(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"bundles/default/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"default/public/project/skills/foo/SKILL.md": "---\nname: foo\n---\n",
 	})
 	cfg := &types.ProjectConfig{
-		EnabledBundles: []string{"does-not-exist"},
+		Requires: types.RequiresSpec{"does-not-exist": types.RequiresVault},
 	}
 
 	var events []OperationEvent
@@ -195,56 +192,30 @@ func TestResolveDesiredAssets_UnknownBundleWarns(t *testing.T) {
 	}
 }
 
-func TestResolveDesiredAssets_MultipleBundlesDedup(t *testing.T) {
+func TestResolveDesiredAssets_MultipleProjectsUniqueAssets(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"bundles/a/skills/shared/SKILL.md": "---\nname: shared\n---\n",
-		"bundles/a/skills/onlyA/SKILL.md":  "---\nname: onlyA\n---\n",
-		"bundles/a/bundle.yaml": `name: a
-members:
-  - skill/shared
-  - skill/onlyA
-`,
-		"bundles/b/skills/shared/SKILL.md": "---\nname: shared\n---\n",
-		"bundles/b/bundle.yaml": `name: b
-members:
-  - skill/shared
-`,
+		"a/public/project/skills/only-a/SKILL.md": "---\nname: only-a\n---\n",
+		"a/dec.yaml":                              "name: a\n",
+		"b/public/project/skills/only-b/SKILL.md": "---\nname: only-b\n---\n",
+		"b/dec.yaml":                              "name: b\n",
 	})
 	cfg := &types.ProjectConfig{
-		EnabledBundles: []string{"a", "b"},
+		Requires: types.RequiresSpec{"a": types.RequiresVault, "b": types.RequiresVault},
 	}
 
 	got, err := resolveDesiredAssets(cfg, repoDir, nil)
 	if err != nil {
 		t.Fatalf("resolveDesiredAssets() 失败: %v", err)
 	}
-	if len(got.Assets) != 3 {
-		t.Fatalf("Assets len = %d, 期望 3（shared@a + onlyA@a + shared@b）", len(got.Assets))
+	if len(got.Assets) != 2 {
+		t.Fatalf("Assets len = %d, 期望 2", len(got.Assets))
 	}
-
-	// shared@a 来自 bundle/a，shared@b 来自 bundle/b（不同 bundle 目录下为独立资产）
-	var sharedA, sharedB bool
 	for _, a := range got.Assets {
-		if a.Name != "shared" {
-			continue
+		sources := got.Sources[assetKey(a)]
+		want := "p/" + a.Vault
+		if len(sources) != 1 || sources[0] != want {
+			t.Fatalf("Sources[%s] = %#v, 期望 [%s]", assetKey(a), sources, want)
 		}
-		sources := append([]string(nil), got.Sources[assetKey(a)]...)
-		sort.Strings(sources)
-		switch a.Vault {
-		case "a":
-			sharedA = true
-			if len(sources) != 1 || sources[0] != "bundle/a" {
-				t.Fatalf("shared@a sources = %#v, 期望 [bundle/a]", sources)
-			}
-		case "b":
-			sharedB = true
-			if len(sources) != 1 || sources[0] != "bundle/b" {
-				t.Fatalf("shared@b sources = %#v, 期望 [bundle/b]", sources)
-			}
-		}
-	}
-	if !sharedA || !sharedB {
-		t.Fatalf("未在目标集中找到 shared@a 与 shared@b，Assets: %#v", got.Assets)
 	}
 }
 
@@ -274,10 +245,10 @@ func TestResolveDesiredAssets_SkipsDotDirs(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		".git/config":                       "",
 		".dec/whatever":                     "",
-		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"bundles/combo/bundle.yaml":         "name: combo\nmembers:\n  - skill/foo\n",
+		"combo/public/project/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"combo/dec.yaml": "name: combo\n",
 	})
-	cfg := &types.ProjectConfig{EnabledBundles: []string{"combo"}}
+	cfg := &types.ProjectConfig{Requires: types.RequiresSpec{"combo": types.RequiresVault}}
 
 	got, err := resolveDesiredAssets(cfg, repoDir, nil)
 	if err != nil {
@@ -324,12 +295,12 @@ func TestResolvePAssetsProjectUsesHomeAndDirectPublicRequires(t *testing.T) {
 	for _, asset := range got.Assets {
 		names[asset.Name] = true
 	}
-	for _, want := range []string{"home-public", "home-private", "shared"} {
+	for _, want := range []string{"home-public", "home-private", "shared", "not-transitive"} {
 		if !names[want] {
 			t.Fatalf("缺少 %s: %#v", want, got.Assets)
 		}
 	}
-	for _, forbidden := range []string{"home-user", "not-visible", "not-transitive"} {
+	for _, forbidden := range []string{"home-user", "not-visible"} {
 		if names[forbidden] {
 			t.Fatalf("不应解析 %s: %#v", forbidden, got.Assets)
 		}
@@ -343,7 +314,7 @@ func TestResolvePAssetsUserUsesBothUserQuadrants(t *testing.T) {
 		"tools/private/user/rules/private.mdc":   "private",
 		"tools/public/project/rules/project.mdc": "project",
 	})
-	cfg := &types.ProjectConfig{EnabledBundles: []string{"tools"}}
+	cfg := &types.ProjectConfig{Requires: types.RequiresSpec{"tools": types.RequiresVault}}
 	got, err := resolveDesiredAssetsForPlane(cfg, repoDir, WorkspaceUser, nil)
 	if err != nil {
 		t.Fatal(err)

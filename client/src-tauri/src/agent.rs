@@ -37,6 +37,15 @@ struct InvokeBody {
 }
 
 #[derive(Debug, Deserialize)]
+struct ToolCallBody {
+    name: String,
+    #[serde(default)]
+    arguments: serde_json::Value,
+    #[serde(default)]
+    client_version: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct ConnectBody {
     #[serde(default)]
     id: String,
@@ -54,6 +63,40 @@ struct ConnectBody {
     tls: bool,
     #[serde(default)]
     tls_server_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlanResult {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    owner: String,
+    #[serde(default)]
+    shape: String,
+    #[serde(default)]
+    steps: Vec<PlanStep>,
+    #[serde(default)]
+    envelope: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    error: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlanStep {
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    method: String,
+    #[serde(default)]
+    project_root: String,
+    #[serde(default)]
+    plane: String,
+    #[serde(default)]
+    payload: serde_json::Value,
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    optional: bool,
 }
 
 pub async fn serve(app: AppHandle) {
@@ -274,6 +317,20 @@ async fn dispatch(
                 serde_json::from_slice(body).map_err(|e| (400, e.to_string(), String::new()))?;
             connect(app, req).await.map_err(|e| (400, e, String::new()))
         }
+        ("POST", "/agent/tool_call") => {
+            let req: ToolCallBody =
+                serde_json::from_slice(body).map_err(|e| (400, e.to_string(), String::new()))?;
+            if is_blocked_method(&req.name) {
+                return Err((
+                    403,
+                    "禁止经 Agent 网关认证".into(),
+                    "CONSOLE_AUTH_FORBIDDEN".into(),
+                ));
+            }
+            tool_call(app, req, &client_id)
+                .await
+                .map_err(status_for_rpc)
+        }
         _ => Err((404, format!("未知路径 {path}"), String::new())),
     }
 }
@@ -469,10 +526,291 @@ async fn connect(app: &AppHandle, req: ConnectBody) -> Result<serde_json::Value,
         saved_id,
     )
     .await?;
+    // 连接本机时会对齐运行时；顺带保证清单已写出，供壳 bootstrap 后重载。
+    let _ = crate::agent_tools::refresh_agent_tools_manifest(app);
     hello(app).await.map(|mut value| {
         value["ping"] = serde_json::to_value(ping).unwrap_or(serde_json::Value::Null);
         value
     })
+}
+
+async fn tool_call(
+    app: &AppHandle,
+    req: ToolCallBody,
+    client_id: &str,
+) -> Result<serde_json::Value, String> {
+    let _ = req.client_version;
+    let cache = crate::agent_tools::ensure_agent_tools_cache(app)?;
+    let owner = cache
+        .owners
+        .get(req.name.as_str())
+        .cloned()
+        .unwrap_or_else(|| {
+            // bootstrap 单工具或清单尚未缓存时，按名字兜底。
+            if matches!(
+                req.name.as_str(),
+                "dec_console_status" | "dec_list_connections" | "dec_connect"
+            ) {
+                "console".into()
+            } else {
+                "server".into()
+            }
+        });
+
+    let (ok, result, error, events) = if owner == "console" {
+        execute_console_tool(app, &req).await?
+    } else {
+        execute_server_tool(app, &req, client_id).await?
+    };
+
+    let manifest_version = crate::agent_tools::manifest_version_from_disk()
+        .unwrap_or(cache.version);
+
+    Ok(serde_json::json!({
+        "ok": ok,
+        "result": result,
+        "error": error,
+        "events": events,
+        "manifest_version": manifest_version,
+    }))
+}
+
+async fn execute_console_tool(
+    app: &AppHandle,
+    req: &ToolCallBody,
+) -> Result<(bool, serde_json::Value, String, Vec<serde_json::Value>), String> {
+    match req.name.as_str() {
+        "dec_console_status" => {
+            // 清单缺失（bootstrap）时才 dump；已有文件不覆盖，便于同版本改 schema 后壳重载。
+            if crate::agent_tools::manifest_version_from_disk().is_none() {
+                let _ = crate::agent_tools::refresh_agent_tools_manifest(app);
+            }
+            let value = hello(app).await?;
+            Ok((true, value, String::new(), Vec::new()))
+        }
+        "dec_list_connections" => {
+            let value = connections(app)?;
+            Ok((true, value, String::new(), Vec::new()))
+        }
+        "dec_connect" => {
+            let body: ConnectBody = serde_json::from_value(req.arguments.clone())
+                .map_err(|e| format!("dec_connect 参数无效: {e}"))?;
+            let value = connect(app, body).await?;
+            Ok((true, value, String::new(), Vec::new()))
+        }
+        other => Err(format!("未知 Console 工具 {other}")),
+    }
+}
+
+async fn execute_server_tool(
+    app: &AppHandle,
+    req: &ToolCallBody,
+    client_id: &str,
+) -> Result<(bool, serde_json::Value, String, Vec<serde_json::Value>), String> {
+    let client = rpc_client(app, client_id).await?;
+    let plan_payload = serde_json::json!({
+        "Name": req.name,
+        "Arguments": req.arguments,
+    });
+    let plan_raw = serde_json::to_vec(&plan_payload).map_err(|e| e.to_string())?;
+    let plan_invoke = crate::grpc::invoke(
+        client.clone(),
+        "plan_agent_tool".into(),
+        String::new(),
+        "global".into(),
+        plan_raw,
+        MCP_UNLOCK_TIMEOUT_MS,
+    )
+    .await?;
+    if !plan_invoke.error.is_empty() {
+        return Ok((
+            false,
+            serde_json::Value::Null,
+            plan_invoke.error,
+            plan_invoke.events,
+        ));
+    }
+    let plan: PlanResult = serde_json::from_str(&plan_invoke.result_json)
+        .map_err(|e| format!("解析 plan_agent_tool 失败: {e}"))?;
+    if !plan.error.is_empty() {
+        return Ok((false, serde_json::Value::Null, plan.error, Vec::new()));
+    }
+    execute_plan(app, client_id, plan).await
+}
+
+async fn execute_plan(
+    app: &AppHandle,
+    client_id: &str,
+    plan: PlanResult,
+) -> Result<(bool, serde_json::Value, String, Vec<serde_json::Value>), String> {
+    let mut all_events = Vec::new();
+    match plan.shape.as_str() {
+        "planes" => {
+            let mut outcomes = Vec::new();
+            let mut any_ok = false;
+            for step in plan.steps {
+                let plane = if step.plane.is_empty() {
+                    "local".to_string()
+                } else {
+                    step.plane.clone()
+                };
+                if step.kind == "error" {
+                    outcomes.push(serde_json::json!({
+                        "plane": plane,
+                        "ok": false,
+                        "error": step.method,
+                    }));
+                    continue;
+                }
+                match run_step(app, client_id, &step, &mut all_events).await {
+                    Ok(value) => {
+                        any_ok = true;
+                        outcomes.push(serde_json::json!({
+                            "plane": plane,
+                            "ok": true,
+                            "result": value,
+                        }));
+                    }
+                    Err(err) => {
+                        outcomes.push(serde_json::json!({
+                            "plane": plane,
+                            "ok": false,
+                            "error": err,
+                        }));
+                    }
+                }
+            }
+            if !any_ok {
+                return Ok((
+                    false,
+                    serde_json::json!({ "planes": outcomes }),
+                    "两平面均失败，详见 planes[].error".into(),
+                    all_events,
+                ));
+            }
+            Ok((
+                true,
+                serde_json::json!({ "planes": outcomes }),
+                String::new(),
+                all_events,
+            ))
+        }
+        "keyed" => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in plan.envelope {
+                out.insert(k, v);
+            }
+            for step in plan.steps {
+                match run_step(app, client_id, &step, &mut all_events).await {
+                    Ok(value) => {
+                        let key = if step.key.is_empty() {
+                            "result".into()
+                        } else {
+                            step.key
+                        };
+                        out.insert(key, value);
+                    }
+                    Err(err) => {
+                        if step.optional {
+                            continue;
+                        }
+                        return Ok((false, serde_json::Value::Null, err, all_events));
+                    }
+                }
+            }
+            Ok((true, serde_json::Value::Object(out), String::new(), all_events))
+        }
+        _ => {
+            // single
+            let Some(step) = plan.steps.into_iter().next() else {
+                return Ok((true, serde_json::Value::Null, String::new(), all_events));
+            };
+            match run_step(app, client_id, &step, &mut all_events).await {
+                Ok(value) => Ok((true, value, String::new(), all_events)),
+                Err(err) => Ok((false, serde_json::Value::Null, err, all_events)),
+            }
+        }
+    }
+}
+
+async fn run_step(
+    app: &AppHandle,
+    client_id: &str,
+    step: &PlanStep,
+    events: &mut Vec<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    match step.kind.as_str() {
+        "error" => Err(step.method.clone()),
+        "console_active_operation" => {
+            match active_operation(app, step.project_root.clone(), client_id).await {
+                Ok(value) => Ok(value),
+                Err(_err) if step.optional => Ok(serde_json::Value::Null),
+                Err(err) => Err(err),
+            }
+        }
+        "invoke" => {
+            let client = rpc_client(app, client_id).await?;
+            let plane = if step.plane.trim().is_empty() {
+                "local".to_string()
+            } else {
+                step.plane.clone()
+            };
+            let payload = serde_json::to_vec(&step.payload).map_err(|e| e.to_string())?;
+            let result = crate::grpc::invoke(
+                client,
+                step.method.clone(),
+                step.project_root.clone(),
+                plane,
+                payload,
+                MCP_UNLOCK_TIMEOUT_MS,
+            )
+            .await?;
+            emit_events(app, &step.project_root, &step.method, &result.events);
+            events.extend(result.events);
+            if !result.error.is_empty() {
+                return Err(result.error);
+            }
+            Ok(parse_result_json(&result.result_json))
+        }
+        "run" => {
+            let client = rpc_client(app, client_id).await?;
+            let plane = if step.plane.trim().is_empty() {
+                "local".to_string()
+            } else {
+                step.plane.clone()
+            };
+            let payload = serde_json::to_vec(&step.payload).map_err(|e| e.to_string())?;
+            let project_root = step.project_root.clone();
+            let app_clone = app.clone();
+            let op_clone = step.method.clone();
+            let result = crate::grpc::run_operation(
+                client,
+                step.method.clone(),
+                project_root.clone(),
+                plane,
+                payload,
+                client_id.to_string(),
+                "mcp".into(),
+                MCP_UNLOCK_TIMEOUT_MS,
+                |event| emit_action(&app_clone, &project_root, &op_clone, event),
+            )
+            .await?;
+            events.extend(result.events.clone());
+            if !result.error.is_empty() {
+                return Err(result.error);
+            }
+            Ok(parse_result_json(&result.result_json))
+        }
+        other => Err(format!("未知计划步骤 kind {other}")),
+    }
+}
+
+fn parse_result_json(raw: &str) -> serde_json::Value {
+    if raw.trim().is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(raw).unwrap_or(serde_json::Value::String(raw.to_string()))
+    }
 }
 
 async fn rpc_client(app: &AppHandle, client_id: &str) -> Result<crate::grpc::Svc, String> {
@@ -608,6 +946,7 @@ async fn write_response(
 mod tests {
     use super::{
         is_blocked_method, is_blocked_path, token_from_headers, write_metadata, ConsoleMetadata,
+        PlanResult,
     };
     use std::fs;
 
@@ -618,6 +957,23 @@ mod tests {
         assert!(is_blocked_method("Authenticate"));
         assert!(!is_blocked_method("invoke"));
         assert!(!is_blocked_path("/agent/hello"));
+        assert!(!is_blocked_method("dec_set_requires"));
+    }
+
+    #[test]
+    fn assemble_keyed_merges_envelope() {
+        let mut envelope = serde_json::Map::new();
+        envelope.insert("plane".into(), serde_json::json!("local"));
+        let plan = PlanResult {
+            name: "dec_status".into(),
+            owner: "server".into(),
+            shape: "keyed".into(),
+            steps: vec![],
+            envelope,
+            error: String::new(),
+        };
+        assert_eq!(plan.shape, "keyed");
+        assert_eq!(plan.envelope.get("plane").and_then(|v| v.as_str()), Some("local"));
     }
 
     #[test]

@@ -64,26 +64,22 @@ func bundleScopeForPlane(plane WorkspacePlane) types.BundleScope {
 	return types.BundleScopeProject
 }
 
-// loadWorkspaceBundleConfig 按平面读取已启用 bundle 列表（ADR 0009 平面隔离）。
+// loadWorkspaceBundleConfig 按平面读取消费声明（ADR 0009 平面隔离 + ADR 0029 单一 requires）。
 //
-// 用户平面的启用列表在 ~/.dec/config.yaml 的 enabled_bundles，这里只填充
-// EnabledBundles，其余项目字段留空——用户平面没有 project vars / project secrets。
+// Global 平面的订阅在 ~/.dec/config.yaml 的 requires，这里只填 Requires，
+// 其余项目字段留空——Global 平面没有 project vars / project secrets。
 func loadWorkspaceBundleConfig(workspace Workspace) (*types.ProjectConfig, error) {
 	if workspace.EffectivePlane() == WorkspaceUser {
 		globalConfig, err := config.LoadGlobalConfig()
 		if err != nil {
 			return nil, err
 		}
-		return &types.ProjectConfig{
-			EnabledBundles: append([]string(nil), globalConfig.EnabledBundles...),
-			Requires:       globalConfig.Requires,
-		}, nil
+		return &types.ProjectConfig{Requires: globalConfig.Requires}, nil
 	}
 	return config.NewProjectConfigManager(workspace.Root).LoadProjectConfig()
 }
 
-// removeWorkspaceEnabledBundle 从当前平面的启用列表中摘掉一个 bundle。
-// 返回是否发生变更。
+// removeWorkspaceEnabledBundle 从当前平面的订阅中摘掉一个项目。返回是否发生变更。
 func removeWorkspaceEnabledBundle(workspace Workspace, bundleName string) (bool, error) {
 	bundleName = strings.TrimSpace(bundleName)
 	if bundleName == "" {
@@ -94,11 +90,10 @@ func removeWorkspaceEnabledBundle(workspace Workspace, bundleName string) (bool,
 		if err != nil {
 			return false, err
 		}
-		updated, ok := removeEnabledBundle(globalConfig.EnabledBundles, bundleName)
-		if !ok {
+		if !globalConfig.Requires.Has(bundleName) {
 			return false, nil
 		}
-		globalConfig.EnabledBundles = updated
+		delete(globalConfig.Requires, bundleName)
 		if err := config.SaveGlobalConfig(globalConfig); err != nil {
 			return false, err
 		}
@@ -109,11 +104,10 @@ func removeWorkspaceEnabledBundle(workspace Workspace, bundleName string) (bool,
 	if err != nil {
 		return false, err
 	}
-	updated, ok := removeEnabledBundle(projectConfig.EnabledBundles, bundleName)
-	if !ok {
+	if !projectConfig.Requires.Has(bundleName) {
 		return false, nil
 	}
-	projectConfig.EnabledBundles = updated
+	delete(projectConfig.Requires, bundleName)
 	if err := mgr.SaveProjectConfig(projectConfig); err != nil {
 		return false, err
 	}

@@ -1,5 +1,5 @@
-// bundle_resolver.go 负责把 ProjectConfig.enabled_bundles 解析为本轮 pull 的目标资产集合，
-// 并记录每个资产的来源（bundle/<name>）。
+// bundle_resolver.go 负责把消费声明 requires 里 pin 为 vault 的项目（ADR 0029）解析为本轮
+// pull 的目标资产集合，并记录每个资产的来源（p/<name> 或 depends_on <name>）。
 //
 // 本文件只做「想装哪些资产」的解析；真正的装卸仍由 operations.go 内的 installAssetToIDEs
 // 与 cleanupRemovedAssets 负责。同一资产被多个 bundle 引用时来源会叠加，
@@ -28,11 +28,11 @@ type BundleOverview struct {
 	VaultName string
 	// Members 是 bundle 声明的成员引用列表（按 YAML 顺序），含 <type>/<name> 原文。
 	Members []string
-	// Enabled 表示该 bundle 是否出现在当前平面的 enabled_bundles 中。
+	// Enabled 表示该项目在当前平面被订阅（requires）或是作者身份家项目。
 	Enabled bool
 	// Model 在 ADR 0016 仓库中为 "p"；空值表示 legacy bundle。
 	Model string
-	// Home / Required 描述 project 平面的家项目与直接 requires 关系。
+	// Home 是作者身份家项目；Required 表示已在 requires 中订阅。
 	Home     bool
 	Required bool
 	// Quadrants 是四象限资产计数，key 为 public/user 等稳定路径。
@@ -86,120 +86,23 @@ func resolveDesiredAssetsForPlane(projectConfig *types.ProjectConfig, repoDir st
 	if err != nil {
 		return nil, err
 	}
-	if len(projects) > 0 {
-		return resolvePAssets(projectConfig, projects, plane, reporter)
-	}
-	result := &ResolvedAssets{
-		Sources: make(map[string][]string),
-	}
-
-	// 1. 扫描 vault 目录并加载所有 bundles（含隐式 vault bundle）。
-	// 即使尚无项目配置也要扫描，供 Assets TUI / config init 展示 bundle 列表。
-	vaultBundles, bundleOverviews, err := scanVaultBundles(repoDir, reporter)
-	if err != nil {
-		return nil, err
-	}
-	wantScope := bundleScopeForPlane(plane)
-	filteredBundles := make(map[string][]vaultBundle)
-	for name, matches := range vaultBundles {
-		for _, match := range matches {
-			if match.bundle.Scope == wantScope {
-				filteredBundles[name] = append(filteredBundles[name], match)
-			}
-		}
-	}
-	filteredOverviews := make([]BundleOverview, 0, len(bundleOverviews))
-	for _, overview := range bundleOverviews {
-		for _, match := range filteredBundles[overview.Name] {
-			if match.vaultName == overview.VaultName {
-				filteredOverviews = append(filteredOverviews, overview)
-				break
-			}
-		}
-	}
-	vaultBundles = filteredBundles
-	bundleOverviews = filteredOverviews
-	result.Bundles = bundleOverviews
-
-	if projectConfig == nil {
-		return result, nil
-	}
-
-	seen := make(map[string]int) // key -> index in result.Assets
-	addAsset := func(asset types.TypedAssetRef, source string) {
-		key := assetKey(asset)
-		if idx, ok := seen[key]; ok {
-			// 已存在，只追加 source
-			result.Assets[idx] = asset
-			result.Sources[key] = appendUniqueSource(result.Sources[key], source)
-			return
-		}
-		seen[key] = len(result.Assets)
-		result.Assets = append(result.Assets, asset)
-		result.Sources[key] = []string{source}
-	}
-
-	// 2. 展开 bundle 成员。
-	for _, bundleName := range projectConfig.EnabledBundles {
-		matches := vaultBundles[bundleName]
-		if len(matches) == 0 {
-			emit(reporter, EventWarn, "pull.bundle",
-				fmt.Sprintf("enabled_bundles 引用的 bundle %q 在任何 vault 里都找不到声明，已忽略", bundleName), nil)
-			continue
-		}
-		// 标记启用
-		for i := range result.Bundles {
-			if result.Bundles[i].Name == bundleName && containsVault(matches, result.Bundles[i].VaultName) {
-				result.Bundles[i].Enabled = true
-			}
-		}
-
-		chosen := matches[0]
-		if len(matches) > 1 {
-			emit(reporter, EventWarn, "pull.bundle",
-				fmt.Sprintf("bundle %q 在多个 vault 中都有声明（%s），将使用 %q；跨 vault bundle 冲突需要手动消歧",
-					bundleName, joinVaultNames(matches), chosen.vaultName), nil)
-		}
-
-		for _, raw := range chosen.bundle.Members {
-			member, parseErr := bundle.ParseMember(raw)
-			if parseErr != nil {
-				// 正常情况下 LoadBundles 已经校验过，这里不应该发生；稳妥起见仍然 warning。
-				emit(reporter, EventWarn, "pull.bundle",
-					fmt.Sprintf("bundle %q 成员 %q 解析失败，已跳过：%v", bundleName, raw, parseErr), nil)
-				continue
-			}
-			if !assetFileExists(repoDir, chosen.vaultName, member.Type, member.Name) {
-				emit(reporter, EventWarn, "pull.bundle",
-					fmt.Sprintf("bundle %q 成员 %s/%s 在 vault %q 内不存在，已跳过",
-						bundleName, member.Type, member.Name, chosen.vaultName), nil)
-				continue
-			}
-			asset := types.TypedAssetRef{
-				Type:     member.Type,
-				AssetRef: types.AssetRef{Name: member.Name, Vault: chosen.vaultName},
-			}
-			addAsset(asset, "bundle/"+bundleName)
-		}
-	}
-
-	return result, nil
+	return resolvePAssets(projectConfig, projects, plane, reporter)
 }
 
-// resolvePAssets implements ADR 0016. User context installs the selected projects'
-// user quadrants. Project context installs the home project's project quadrants and
-// only the public/project quadrant of its direct requires.
+// resolvePAssets 按 ADR 0029 解析个人私仓订阅：
+// requires 里 pin 为 vault 的项目（项目平面另加作者身份 home）装本平面全部资产，
+// 它们 depends_on 的传递闭包只装 public。
 func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmodel.Loaded, plane WorkspacePlane, reporter Reporter) (*ResolvedAssets, error) {
 	result := &ResolvedAssets{Sources: make(map[string][]string)}
 	enabled := make(map[string]struct{})
 	selected := make([]types.TypedAssetRef, 0)
 
-	addProjectAssets := func(name string, visibility *types.AssetVisibility, source string) error {
+	addProjectAssets := func(name string, visibility *types.AssetVisibility, source string) bool {
 		p, ok := projects[name]
 		if !ok {
-			emit(reporter, EventWarn, "pull.project", fmt.Sprintf("引用的项目 %q 不存在，已忽略", name), nil)
+			emit(reporter, EventWarn, "pull.project", fmt.Sprintf("订阅的项目 %q 不在私仓，已忽略", name), nil)
 			result.MissingProjects = appendUniqueSource(result.MissingProjects, name)
-			return nil
+			return false
 		}
 		enabled[name] = struct{}{}
 		for _, asset := range p.Assets {
@@ -213,31 +116,35 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 			selected = append(selected, asset)
 			result.Sources[assetKey(asset)] = appendUniqueSource(result.Sources[assetKey(asset)], source)
 		}
-		return nil
+		return true
 	}
 
 	if projectConfig != nil {
-		if plane == WorkspaceUser {
-			for _, name := range configEnabledPNames(projectConfig) {
-				if err := addProjectAssets(name, nil, "p/"+name); err != nil {
-					return nil, err
-				}
+		seeds := workspaceVaultSeeds(projectConfig, plane)
+		public := types.AssetVisibilityPublic
+		visited := make(map[string]struct{}, len(seeds))
+		queue := make([]string, 0, len(seeds))
+		for _, name := range seeds {
+			if !addProjectAssets(name, nil, "p/"+name) {
+				continue
 			}
-		} else {
-			home := strings.TrimSpace(projectConfig.ProjectName)
-			if home == "" {
-				return nil, fmt.Errorf("项目模型下项目配置必须声明 project_name")
+			visited[name] = struct{}{}
+			if p, ok := projects[name]; ok {
+				queue = append(queue, p.Manifest.DependsOn...)
 			}
-			if err := addProjectAssets(home, nil, "p/"+home); err != nil {
-				return nil, err
+		}
+		for len(queue) > 0 {
+			name := queue[0]
+			queue = queue[1:]
+			if _, seen := visited[name]; seen {
+				continue
 			}
-			if p, ok := projects[home]; ok {
-				public := types.AssetVisibilityPublic
-				for _, required := range p.Manifest.Requires {
-					if err := addProjectAssets(required, &public, "p/"+home+" requires "+required); err != nil {
-						return nil, err
-					}
-				}
+			visited[name] = struct{}{}
+			if !addProjectAssets(name, &public, "depends_on "+name) {
+				continue
+			}
+			if p, ok := projects[name]; ok {
+				queue = append(queue, p.Manifest.DependsOn...)
 			}
 		}
 	}
@@ -274,16 +181,38 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 			Model: "p", Quadrants: countPQuadrants(p.Assets), Tags: append([]string(nil), p.Manifest.Tags...),
 		})
 	}
-	if plane == WorkspaceProject && projectConfig != nil {
+	if projectConfig != nil {
 		home := strings.TrimSpace(projectConfig.ProjectName)
 		for i := range result.Bundles {
-			result.Bundles[i].Home = result.Bundles[i].Name == home
-			if p, ok := projects[home]; ok {
-				result.Bundles[i].Required = containsName(p.Manifest.Requires, result.Bundles[i].Name)
-			}
+			result.Bundles[i].Home = plane == WorkspaceProject && result.Bundles[i].Name == home
+			result.Bundles[i].Required = projectConfig.Requires.IsVault(result.Bundles[i].Name)
 		}
 	}
 	return result, nil
+}
+
+// workspaceVaultSeeds 返回本工作区直接订阅的私仓项目：requires 里的 vault pin，
+// 项目平面另加作者身份 home（它从工作树创作，但安装目标与订阅一致）。
+func workspaceVaultSeeds(projectConfig *types.ProjectConfig, plane WorkspacePlane) []string {
+	if projectConfig == nil {
+		return nil
+	}
+	seeds := make([]string, 0, len(projectConfig.Requires)+1)
+	seen := make(map[string]struct{})
+	if plane == WorkspaceProject {
+		if home := strings.TrimSpace(projectConfig.ProjectName); home != "" {
+			seeds = append(seeds, home)
+			seen[home] = struct{}{}
+		}
+	}
+	for _, name := range projectConfig.Requires.VaultProjects() {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		seeds = append(seeds, name)
+	}
+	return seeds
 }
 
 func countPQuadrants(assets []types.TypedAssetRef) map[string]int {
@@ -304,26 +233,6 @@ func containsName(names []string, name string) bool {
 		}
 	}
 	return false
-}
-
-func configEnabledPNames(cfg *types.ProjectConfig) []string {
-	if cfg == nil {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(cfg.EnabledBundles))
-	out := make([]string, 0, len(cfg.EnabledBundles))
-	for _, raw := range cfg.EnabledBundles {
-		name := strings.TrimSpace(strings.TrimPrefix(raw, "bundle/"))
-		if !types.IsValidPName(name) {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-	}
-	return out
 }
 
 // vaultBundle 跟踪 bundle 所在的 vault。

@@ -135,14 +135,12 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 	projectEditor := ""
 	var projectIDEs []string
 	projectName := ""
-	var enabledBundles []string
+	var requires types.RequiresSpec
 	if existingConfig != nil {
 		projectEditor = existingConfig.Editor
 		projectIDEs = existingConfig.IDEs
 		projectName = existingConfig.ProjectName
-		if len(existingConfig.EnabledBundles) > 0 {
-			enabledBundles = append([]string(nil), existingConfig.EnabledBundles...)
-		}
+		requires = existingConfig.Requires
 	}
 	// 新项目默认写入 cwd basename 作为 project_name，避免用户后续需要手写。
 	// 已有配置时保留原值（即使为空）——不自动填充 basename，防止悄悄篡改用户意图。
@@ -153,10 +151,10 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 	}
 
 	prepared.ProjectConfig = &types.ProjectConfig{
-		ProjectName:    projectName,
-		IDEs:           projectIDEs,
-		Editor:         projectEditor,
-		EnabledBundles: enabledBundles,
+		ProjectName: projectName,
+		IDEs:        projectIDEs,
+		Editor:      projectEditor,
+		Requires:    requires,
 	}
 	prepared.HomeProject = projectName
 
@@ -208,7 +206,7 @@ func PrepareProjectConfigInit(projectRoot string, reporter Reporter) (*ConfigIni
 }
 
 // EnsureLocalProjectConfig 在无 vault 匹配时创建最小本地 .dec/config.yaml（basename 作 project_name）。
-// 已存在配置时幂等返回，不覆盖 project_name 或 enabled_bundles。
+// 已存在配置时幂等返回，不覆盖 project_name 或 requires。
 func EnsureLocalProjectConfig(projectRoot string, reporter Reporter) (*ConfigInitPreparation, error) {
 	reporter = defaultReporter(reporter)
 	mgr := config.NewProjectConfigManager(projectRoot)

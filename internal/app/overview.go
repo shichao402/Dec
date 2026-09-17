@@ -28,8 +28,8 @@ type ProjectOverview struct {
 	VarsFileReady         bool
 	// AvailableBundleCount 是仓库里扫描到的 bundle 总数（含未启用）。
 	AvailableBundleCount int
-	// EnabledBundleCount 记录 project config 中 enabled_bundles 声明的数量。
-	// 不代表解析后展开的成员数量，只是 config 层面的引用数。
+	// EnabledBundleCount 记录消费方配置中 requires 声明的数量（ADR 0029）。
+	// 不代表解析后展开的成员数量，只是 config 层面的订阅数。
 	EnabledBundleCount int
 	// Bundles 在仓库已连接时填充：扫描所有 vault 内的 bundle 声明，标注是否启用。
 	// 未连接仓库或仓库读取失败时保持为 nil，调用方应容忍空列表。
@@ -89,11 +89,11 @@ func LoadWorkspaceOverviewOpts(workspace Workspace, opts OverviewLoadOpts) (*Pro
 		if loadErr != nil {
 			return nil, loadErr
 		}
-		projectConfig = &types.ProjectConfig{EnabledBundles: append([]string(nil), globalConfig.EnabledBundles...)}
+		projectConfig = &types.ProjectConfig{Requires: globalConfig.Requires}
 		overview.ProjectConfigPath, _ = config.GetGlobalConfigPath()
 		overview.VarsPath, _ = config.GetGlobalVarsPath()
 		overview.ProjectConfigReady = true
-		overview.EnabledBundleCount = len(projectConfig.EnabledBundles)
+		overview.EnabledBundleCount = len(projectConfig.Requires)
 		overview.ProjectName = "user"
 		overview.ProjectNameFromConfig = true
 	} else if overview.ProjectConfigReady {
@@ -102,7 +102,7 @@ func LoadWorkspaceOverviewOpts(workspace Workspace, opts OverviewLoadOpts) (*Pro
 			return nil, err
 		}
 		projectConfig = loaded
-		overview.EnabledBundleCount = len(loaded.EnabledBundles)
+		overview.EnabledBundleCount = len(loaded.Requires)
 	}
 
 	if workspace.EffectivePlane() != WorkspaceUser {

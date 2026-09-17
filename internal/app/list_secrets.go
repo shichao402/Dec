@@ -116,7 +116,7 @@ func mergeRemoteSecretMetadataForWorkspace(ctx context.Context, workspace Worksp
 	if err != nil {
 		return err
 	}
-	plan, err := planWorkspaceSecretsBrowse(workspace, projectConfig.EnabledBundles, cfg, reporter)
+	plan, err := planWorkspaceSecretsBrowse(workspace, consumedProjectNames(projectConfig, workspace.EffectivePlane()), cfg, reporter)
 	if err != nil {
 		return err
 	}

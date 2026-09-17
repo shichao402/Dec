@@ -68,8 +68,8 @@ func TestEnsureManagementListenPreservesOtherFields(t *testing.T) {
 	if len(cfg.IDEs) != 1 || cfg.IDEs[0] != "cursor" {
 		t.Fatalf("ides 被冲掉: %v", cfg.IDEs)
 	}
-	if len(cfg.EnabledProjects) != 1 || cfg.EnabledProjects[0] != "alpha" {
-		t.Fatalf("enabled_projects 被冲掉: %v", cfg.EnabledProjects)
+	if len(cfg.Requires.VaultProjects()) != 1 || cfg.Requires.VaultProjects()[0] != "alpha" {
+		t.Fatalf("enabled_projects 被冲掉: %v", cfg.Requires.VaultProjects())
 	}
 	if cfg.ManagementListen != "127.0.0.1:47653" {
 		t.Fatalf("management_listen 未写入: %q", cfg.ManagementListen)

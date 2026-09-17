@@ -12,7 +12,7 @@ import (
 func TestLoadProjectOverviewWithExistingProjectConfig(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"default/public/project/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -23,7 +23,7 @@ func TestLoadProjectOverviewWithExistingProjectConfig(t *testing.T) {
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"codex"},
 		Editor:         "code --wait",
-		EnabledBundles: []string{"default"},
+		Requires: types.RequiresSpec{"default": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -64,11 +64,8 @@ func TestLoadProjectOverviewWithExistingProjectConfig(t *testing.T) {
 func TestLoadProjectOverviewSurfacesBundles(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/combo/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"bundles/combo/bundle.yaml": `name: combo
-description: combo bundle
-members:
-  - skill/foo
+		"combo/public/project/skills/foo/SKILL.md": "---\nname: foo\n---\n",
+		"combo/dec.yaml": `name: combo
 `,
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -79,7 +76,7 @@ members:
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"combo"},
+		Requires: types.RequiresSpec{"combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}

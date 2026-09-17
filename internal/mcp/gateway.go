@@ -28,6 +28,8 @@ type Gateway interface {
 	Connections(ctx context.Context) (any, error)
 	Connect(ctx context.Context, req map[string]any) (*Hello, error)
 	ActiveOperation(ctx context.Context, projectRoot string) (any, error)
+	// ToolCall 是统一入口：{name, arguments} → Console 编排执行（ADR 0030）。
+	ToolCall(ctx context.Context, name string, arguments json.RawMessage, clientVersion string) (*ToolCallResult, error)
 }
 
 type Hello struct {
@@ -45,6 +47,15 @@ type RPCResult struct {
 	Result json.RawMessage  `json:"result"`
 	Error  string           `json:"error"`
 	Events []map[string]any `json:"events"`
+}
+
+// ToolCallResult 是 /agent/tool_call 的响应。
+type ToolCallResult struct {
+	OK              bool             `json:"ok"`
+	Result          json.RawMessage  `json:"result"`
+	Error           string           `json:"error"`
+	Events          []map[string]any `json:"events"`
+	ManifestVersion string           `json:"manifest_version,omitempty"`
 }
 
 type consoleMetadata struct {
@@ -208,6 +219,41 @@ func (g *httpGateway) ActiveOperation(ctx context.Context, projectRoot string) (
 		return nil, err
 	}
 	return out, nil
+}
+
+func (g *httpGateway) ToolCall(ctx context.Context, name string, arguments json.RawMessage, clientVersion string) (*ToolCallResult, error) {
+	var out ToolCallResult
+	body := struct {
+		Name          string          `json:"name"`
+		Arguments     json.RawMessage `json:"arguments"`
+		ClientVersion string          `json:"client_version"`
+	}{Name: name, Arguments: arguments, ClientVersion: clientVersion}
+	if err := g.do(ctx, http.MethodPost, "/agent/tool_call", body, &out); err != nil {
+		return nil, err
+	}
+	if out.Error != "" {
+		out.OK = false
+	}
+	return &out, nil
+}
+
+func (r *ToolCallResult) data() any {
+	if len(r.Result) == 0 || string(r.Result) == "null" {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(r.Result, &v); err != nil {
+		return string(r.Result)
+	}
+	return v
+}
+
+func agentToolsPath() (string, error) {
+	dir, err := service.RuntimeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "agent-tools.json"), nil
 }
 
 func (g *httpGateway) rpc(ctx context.Context, path string, body any) (*RPCResult, error) {

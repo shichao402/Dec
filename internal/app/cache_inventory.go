@@ -12,7 +12,8 @@ func writableProjectNames(workspace Workspace, cfg *types.ProjectConfig) []strin
 		return nil
 	}
 	if workspace.EffectivePlane() == WorkspaceGlobal {
-		return configEnabledPNames(cfg)
+		// 只有个人私仓项目可写；官方注册表安装物由提供方 CI 发布（ADR 0028）。
+		return cfg.Requires.VaultProjects()
 	}
 	home := strings.TrimSpace(cfg.ProjectName)
 	if home == "" {

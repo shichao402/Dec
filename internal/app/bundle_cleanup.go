@@ -23,7 +23,7 @@ type BundleCleanupReport struct {
 }
 
 // pruneBundleFromVaultProjects 从 vault projects/*.yaml 的 bundles 列表摘掉已删包。
-// 避免 Home 自动应用 / 新机器初始化再次把该包写回 enabled_bundles。
+// 避免 Home 自动应用 / 新机器初始化再次把该包写回订阅。
 func pruneBundleFromVaultProjects(repoDir, bundleName string) ([]string, error) {
 	bundleName = strings.TrimSpace(bundleName)
 	if repoDir == "" || bundleName == "" {
@@ -108,7 +108,7 @@ func cleanupDeletedBundleLocalState(workspace Workspace, bundleName string, repo
 		} else {
 			report.ClearedProjectEnable = true
 		}
-		emit(reporter, EventInfo, "remove.cleanup", "已从另一平面 enabled_bundles 移除", nil)
+		emit(reporter, EventInfo, "remove.cleanup", "已从另一平面 requires 移除", nil)
 	}
 
 	for _, dir := range localSecretBundleDirs(workspace, bundleName) {

@@ -32,7 +32,7 @@ type GlobalSettingsState struct {
 	ConfiguredEditor       string
 	ConnectedBarePath      string
 	AvailableSecretBundles []string // Settings 候选：vault ∪ known ∪ BW ∪ 已启用（语义：本机 bundle）
-	EnabledBundles         []string // 用户平面启用的 bundle 短名（GlobalConfig.enabled_bundles，ADR 0009）
+	SubscribedProjects     []string // 本机订阅的项目名（GlobalConfig.requires，ADR 0029）
 	SecretsConfigPath      string
 	BitwardenSessionReady  bool
 	ServerIdleTimeout      string
@@ -52,8 +52,7 @@ type ConnectRepoResult struct {
 type SaveGlobalSettingsInput struct {
 	RepoURL string
 	IDEs    []string
-	// EnabledBundles nil = 不改用户平面启用列表；非 nil（含空切片）= 写回 GlobalConfig.EnabledBundles。
-	EnabledBundles        []string
+	// 订阅不在设置页写：requires 由 set_requires 独占（ADR 0029）。
 	ServerIdleTimeout     string
 	SessionTimeout        string
 	AutoReunlockOnTimeout *bool
@@ -62,14 +61,12 @@ type SaveGlobalSettingsInput struct {
 type SaveGlobalSettingsResult struct {
 	RepoURL               string
 	IDEs                  []string
-	EnabledBundles        []string
 	ConfigPath            string
 	VarsPath              string
 	VarsCreated           bool
 	BareRepo              string
 	InstallWarnings       []string
 	SecretsConfigPath     string
-	CreatedVaultBundles   []string // 本次为用户平面启用新建的 vault 占位
 	ServerIdleTimeout     string
 	SessionTimeout        string
 	AutoReunlockOnTimeout bool
@@ -119,7 +116,7 @@ func LoadGlobalSettings(reporter Reporter) (*GlobalSettingsState, error) {
 		ServerIdleTimeout:     normalizedServerIdleTimeout(globalConfig.ServerIdleTimeout),
 		SessionTimeout:        normalizedSessionTimeout(globalConfig.SessionTimeout),
 		AutoReunlockOnTimeout: globalConfig.AutoReunlockOnTimeout == nil || *globalConfig.AutoReunlockOnTimeout,
-		EnabledBundles:        config.NormalizeBundleNames(globalConfig.EnabledBundles),
+		SubscribedProjects:    sortedRequireNames(globalConfig.Requires),
 	}
 
 	availableIDEs := ide.List()
@@ -194,7 +191,7 @@ func attachUserSecretBundleSettings(state *GlobalSettingsState, reporter Reporte
 		cfg = refreshed
 	}
 	state.AvailableSecretBundles = listUserSecretBundleCandidates(
-		state.EnabledBundles,
+		state.SubscribedProjects,
 		cfg.KnownSecretBundleNames(),
 		remoteNames,
 		vaultNames,
@@ -375,20 +372,8 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 		}
 	}
 
-	var savedUserBundles []string
+	// 订阅由 set_requires 独占写入（ADR 0029），设置页不再顺手改启用列表。
 	var secretsConfigPath string
-	// 先落盘用户平面启用列表，避免后续 repo.Connect 失败导致勾选丢失。
-	if input.EnabledBundles != nil {
-		globalConfig.EnabledBundles = config.NormalizeBundleNames(input.EnabledBundles)
-		if err := config.SaveGlobalConfig(globalConfig); err != nil {
-			return nil, fmt.Errorf("保存用户平面启用 bundle 失败: %w", err)
-		}
-		savedUserBundles = append([]string(nil), globalConfig.EnabledBundles...)
-		_ = secrets.RememberSecretBundles(savedUserBundles)
-		if path, err := secrets.ConfigPath(); err == nil {
-			secretsConfigPath = path
-		}
-	}
 
 	if err := repo.Connect(targetRepoURL); err != nil {
 		return nil, err
@@ -397,7 +382,6 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 	result := &SaveGlobalSettingsResult{
 		RepoURL:           targetRepoURL,
 		IDEs:              append([]string(nil), targetIDEs...),
-		EnabledBundles:    savedUserBundles,
 		SecretsConfigPath: secretsConfigPath,
 	}
 	result.InstallWarnings = append(result.InstallWarnings, EnsureBuiltinIDEAssets(targetIDEs, reporter)...)
@@ -455,16 +439,6 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 	result.VarsPath = varsPath
 	result.VarsCreated = varsCreated
 	result.BareRepo = bareRepo
-
-	if len(savedUserBundles) > 0 {
-		repair, err := ensureVaultBundlesForUserEnable(savedUserBundles, reporter)
-		if err != nil {
-			return nil, err
-		}
-		if repair != nil {
-			result.CreatedVaultBundles = repair.Created
-		}
-	}
 
 	emit(reporter, EventInfo, "settings.save", "已写入全局配置与本机变量模板", &Progress{Phase: "save", Current: 3, Total: 3})
 	return result, nil

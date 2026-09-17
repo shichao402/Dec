@@ -30,10 +30,10 @@ Git Vault                         Bitwarden                     本地
 - Secure Note / SSH Key 条目名：`private/global/<rel>` 或 `private/local/<rel>`（旧 `user`/`project` 前缀仍可读）
 
 - 项目名严格匹配 `^[a-z0-9]+(?:-[a-z0-9]+)*$`。
-- 本机平面安装显式 `enabled_projects` 的 `public/global` 与 `private/global`。
-- 本仓库安装绑定项目的 `public/local` 与 `private/local`，再安装其
-  `requires` 直接指向的 `public/local`。
-- `requires` 不递归、不传递，不可引用 `public/global` 或任何 `private/*`。
+- 本机平面安装 `~/.dec/config.yaml` 的 `requires` 订阅项目的 `public/global` 与 `private/global`。
+- 本仓库安装 `.dec/config.yaml` 的 `requires` 订阅项目（另加作者身份家项目）的 `public/local`
+  与 `private/local`，再安装它们 `depends_on` 闭包的 `public/local`（ADR 0029）。
+- `depends_on` 闭包只取 `public`，不可引用任何 `private/*`。
 - 同一平面多个项目竞争同一个 IDE 目标路径时硬失败。
 - 同一项目 / plane / 相对路径不得同时由 Git private 象限和 Bitwarden 持有。
 - `private/local` 的 GCM 与 SSH 副作用定向到绑定工作区；`private/global` 保持机器级语义。
@@ -52,7 +52,7 @@ Git Vault                         Bitwarden                     本地
 | skill / rule / command | `~/.cursor/skills/` 等 | `<project>/.cursor/skills/` |
 | MCP | `~/.cursor/mcp.json` | `<project>/.cursor/mcp.json` |
 | secrets | `~/.dec/secrets/bundles/<name>/` | `<project>/.secrets/bundles/<name>/` |
-| 启用列表 | `~/.dec/config.yaml` 的 `enabled_bundles` | `<project>/.dec/config.yaml` 的 `enabled_bundles` |
+| 消费声明 | `~/.dec/config.yaml` 的 `requires` | `<project>/.dec/config.yaml` 的 `requires` |
 | 管理入口 | `dec --global` | 普通 `dec`（本仓库） |
 
 平面隔离：user 上下文只看 user scope；project 上下文只看 project scope。Bitwarden session 与 `device.json` 共享。
@@ -83,7 +83,7 @@ bundles/tencent-cloud/              └── .cursor/
   scope: user
   skills/...                      ~/.cursor/skills/dec-tencent-cloud/
                                   ~/.dec/secrets/bundles/tencent-cloud/
-                                  ~/.dec/config.yaml  enabled_bundles: [tencent-cloud]
+                                  ~/.dec/config.yaml  requires: {tencent-cloud: latest}
 ```
 
 ## SyncTarget 模型
@@ -118,12 +118,12 @@ bundles:                                  skills/vikunja-workflow/
                                           bundle.yaml
                                           （私密半边可选）bundle/vikunja
 
-Pull（project 上下文）：
-  1. 解析 enabled_bundles（仅 scope: project）
+Pull（project 平面）：
+  1. 解析 .dec/config.yaml 的 requires（仅本平面）
   2. Dec Git → 项目 .dec/cache + IDE；Bitwarden → .secrets/bundles/<bundle>/
 
-Pull（dec --global）：
-  1. 解析 ~/.dec/config.yaml 的 enabled_bundles（仅 scope: user）
+Pull（global 平面）：
+  1. 解析 ~/.dec/config.yaml 的 requires（仅本平面）
   2. Dec Git → 用户 IDE 目录；Bitwarden → ~/.dec/secrets/bundles/<bundle>/
 ```
 
@@ -134,22 +134,22 @@ Pull（dec --global）：
 
 | 维度 | bundle 级（project scope） | bundle 级（user scope） |
 |------|---------------------------|------------------------|
-| 触发条件 | 项目 `enabled_bundles` | `~/.dec/config.yaml` 的 `enabled_bundles` |
+| 触发条件 | 项目 `requires` | `~/.dec/config.yaml` 的 `requires` |
 | Bitwarden folder | `bundle/<name>` | `bundle/<name>` |
 | 本地同步根 | `.secrets/bundles/<bundle>/` | `~/.dec/secrets/bundles/<bundle>/` |
 | SSH Key | 一律 `~/.ssh/` | 一律 `~/.ssh/` |
 
 `known_secret_bundles` 仍是本机发现缓存，落在 `~/.dec/secrets/config.yaml`，**不等于**启用；禁止任何启用语义（ADR 0014）。
 
-`~/.dec/config.yaml` 示例（启用列表）：
+`~/.dec/config.yaml` 示例（本机消费声明）：
 
 ```yaml
 repo_url: git@github.com:me/dec.git
 ides:
   - cursor
-enabled_bundles:
-  - tencent-cloud
-  - woa
+requires:
+  tencent-cloud: latest
+  woa: vault
 ```
 
 `~/.dec/secrets/config.yaml` 示例（仅 secrets 职责）：
@@ -258,7 +258,7 @@ sequenceDiagram
   participant Sec as secrets 同步根
   participant IDE as IDE 目录
 
-  TUI->>Dec: 0. 按上下文解析 enabled_bundles（仅当前 scope）
+  TUI->>Dec: 0. 按当前平面解析 requires（仅本平面）
   loop 每个 SyncTarget
     TUI->>Dec: 1. 拉取 Dec bundle
     Dec->>DecRoot: cache / 用户或项目 IDE 根
@@ -317,8 +317,8 @@ session、vault/user key、主密码、TOTP、临时密钥与 2FA 中间态均�
 
 ## 配置与绑定
 
-- **Project 声明**：vault `projects/<name>.yaml` 的 `bundles`
-- **启用列表**：用户平面 `~/.dec/config.yaml`；项目平面 `<project>/.dec/config.yaml`（字段同名 `enabled_bundles`）
+- **Project 声明**：私仓 `<name>/dec.yaml`（提供方组成写 `depends_on`）
+- **消费声明**：本机平面 `~/.dec/config.yaml`；项目平面 `<project>/.dec/config.yaml`（字段同名 `requires`，唯一写入口 `set_requires`）
 - **Bundle scope**：vault `bundles/<name>/bundle.yaml` 的 `scope`
 - 显式绑定：`schema/secrets/v1/config.proto` 的 `BundleBinding`
 - **无本地同步状态文件**
@@ -327,7 +327,7 @@ session、vault/user key、主密码、TOTP、临时密钥与 2FA 中间态均�
 
 - Project 声明：`schema/dec/v1/projects.proto`
 - Dec bundle 声明：`schema/dec/v1/assets.proto`（含 `scope`）
-- 本地配置：`schema/dec/v1/config.proto`（GlobalConfig / ProjectConfig 均有 `enabled_bundles`）
+- 本地配置：`schema/dec/v1/config.proto`（GlobalConfig / ProjectConfig 均有 `requires`）
 - Secrets 绑定：`schema/secrets/v1/config.proto`
 
 ## 相关文档

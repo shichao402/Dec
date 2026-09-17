@@ -47,7 +47,7 @@ export function installTauriMock(scenario: Scenario) {
     },
     save_project_provides: {},
     save_global_settings: {},
-    save_enabled_bundles: {},
+    set_requires: {},
     browse_directories: scenario.listing,
     register_managed_project: scenario.device.Projects[0] || {},
     remove_managed_project: {},
@@ -245,9 +245,42 @@ export function installTauriMock(scenario: Scenario) {
     },
     invoke_method: (args) => {
       const method = String(args.method || '')
-      if (method === 'load_asset_selection') {
+      if (method === 'load_asset_selection' || method === 'list_subscription_candidates') {
         const projectRoot = String(args.projectRoot || args.project_root || '')
-        if (!projectRoot || scenario.assets.Bundles.length === 0) return ok(scenario.assets)
+        const official = {
+          Name: 'relkit',
+          Description: '官方注册表项目，最新 v0.4.3',
+          Vault: 'relkit',
+          Members: [],
+          Enabled: true,
+          SecretsOnly: false,
+          OtherPlane: false,
+          RemoteMissing: false,
+          RemoteUnverified: false,
+          Model: 'p',
+          Home: false,
+          Quadrants: {},
+          Required: true,
+          Source: 'official',
+          Pin: 'latest',
+          Installed: 'v0.4.2',
+          Available: 'v0.4.3',
+          UpdateAvailable: true,
+        }
+        // 同名项目只给一行，且身份跟着 pin 走：官方 pin 的行按官方下发，带上版本与「有更新」。
+        // 空场景连注册表也没得选，订阅面板才该显示空态。
+        const withOfficial = (bundles: Record<string, unknown>[]) => {
+          if (method !== 'list_subscription_candidates' || scenario.assets.Bundles.length === 0) return bundles
+          if (bundles.some((item) => item.Name === official.Name)) {
+            return bundles.map((item) =>
+              item.Name === official.Name ? { ...item, ...official, Members: item.Members } : item,
+            )
+          }
+          return [...bundles, official]
+        }
+        if (!projectRoot || scenario.assets.Bundles.length === 0) {
+          return ok({ ...scenario.assets, Bundles: withOfficial(scenario.assets.Bundles) })
+        }
         const home = {
           ...scenario.assets.Bundles[0],
           Name: 'dec',
@@ -257,7 +290,7 @@ export function installTauriMock(scenario: Scenario) {
         }
         return ok({
           ...scenario.assets,
-          Bundles: [home, ...scenario.assets.Bundles.filter((item) => item.Name !== 'dec')],
+          Bundles: withOfficial([home, ...scenario.assets.Bundles.filter((item) => item.Name !== 'dec')]),
         })
       }
       if (method === 'list_official_requires') {

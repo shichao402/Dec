@@ -41,11 +41,12 @@ func Load(repoDir, name string) (*Loaded, error) {
 	if manifest.Name != name {
 		return nil, fmt.Errorf("项目声明 %s 的 name %q 必须与目录名 %q 一致", manifestPath, manifest.Name, name)
 	}
-	requires, err := normalizeRequires(manifest.Requires, name)
+	dependsOn, err := normalizeDependsOn(foldLegacyDependsOn(manifest), name)
 	if err != nil {
 		return nil, fmt.Errorf("项目声明 %s: %w", manifestPath, err)
 	}
-	manifest.Requires = requires
+	manifest.DependsOn = dependsOn
+	manifest.LegacyRequires = nil
 	tags, err := normalizeTags(manifest.Tags)
 	if err != nil {
 		return nil, fmt.Errorf("项目声明 %s: %w", manifestPath, err)
@@ -73,11 +74,12 @@ func SaveManifest(repoDir string, manifest types.P) error {
 	if !types.IsValidPName(manifest.Name) {
 		return fmt.Errorf("项目名 %q 非法，必须为小写 kebab-case", manifest.Name)
 	}
-	requires, err := normalizeRequires(manifest.Requires, manifest.Name)
+	dependsOn, err := normalizeDependsOn(foldLegacyDependsOn(manifest), manifest.Name)
 	if err != nil {
 		return err
 	}
-	manifest.Requires = requires
+	manifest.DependsOn = dependsOn
+	manifest.LegacyRequires = nil
 	tags, err := normalizeTags(manifest.Tags)
 	if err != nil {
 		return err
@@ -193,16 +195,24 @@ func HasTag(tags []string, tag string) bool {
 	return false
 }
 
-func normalizeRequires(values []string, self string) ([]string, error) {
+// foldLegacyDependsOn 把改名前的 requires 字段并入 depends_on（ADR 0029）。
+func foldLegacyDependsOn(manifest types.P) []string {
+	if len(manifest.DependsOn) > 0 {
+		return manifest.DependsOn
+	}
+	return manifest.LegacyRequires
+}
+
+func normalizeDependsOn(values []string, self string) ([]string, error) {
 	seen := make(map[string]struct{}, len(values))
 	out := make([]string, 0, len(values))
 	for _, raw := range values {
 		name := strings.TrimSpace(raw)
 		if !types.IsValidPName(name) {
-			return nil, fmt.Errorf("requires 中的项目名 %q 非法，必须为小写 kebab-case", raw)
+			return nil, fmt.Errorf("depends_on 中的项目名 %q 非法，必须为小写 kebab-case", raw)
 		}
 		if name == self {
-			return nil, fmt.Errorf("requires 不能直接引用自身 %q", self)
+			return nil, fmt.Errorf("depends_on 不能直接引用自身 %q", self)
 		}
 		if _, ok := seen[name]; ok {
 			continue

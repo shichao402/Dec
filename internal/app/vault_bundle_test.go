@@ -6,6 +6,9 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
+// 以下用例仍覆盖 legacy bundles/ 扫描辅助函数（scanVaultBundles / synthesize）。
+// 解析安装目标已走 pmodel；这些 helper 还被 Remote / remove 等路径引用。
+
 func TestSynthesizeVaultBundles_CreatesImplicitBundlePerVault(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
@@ -73,7 +76,6 @@ func TestSynthesizeVaultBundles_SkipsWhenExplicitBundleExists(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
 		"bundles/vikunja/bundle.yaml": `name: vikunja
-description: explicit
 members:
   - skills/vikunja-workflow
 `,
@@ -92,18 +94,19 @@ members:
 	}
 }
 
-func TestResolveDesiredAssets_VaultBundleViaEnabledBundles(t *testing.T) {
+func TestResolveDesiredAssets_VaultProjectViaRequires(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"bundles/vikunja/rules/vikunja-integration.mdc":    "---\ndescription: test\n---\n",
+		"vikunja/dec.yaml": "name: vikunja\n",
+		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"vikunja/public/project/rules/vikunja-integration.mdc":    "---\ndescription: test\n---\n",
 	})
-	cfg := &types.ProjectConfig{EnabledBundles: []string{"vikunja"}}
+	cfg := &types.ProjectConfig{Requires: types.RequiresSpec{"vikunja": types.RequiresVault}}
 
 	resolved, err := resolveDesiredAssets(cfg, repoDir, nil)
 	if err != nil {
-		t.Fatalf("resolveDesiredAssets() 失败: %v", err)
+		t.Fatal(err)
 	}
 	if len(resolved.Assets) != 2 {
-		t.Fatalf("启用 vikunja bundle 应展开 2 个资产, got %d", len(resolved.Assets))
+		t.Fatalf("Assets = %#v, 期望 2", resolved.Assets)
 	}
 }

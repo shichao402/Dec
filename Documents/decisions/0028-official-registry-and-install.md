@@ -1,6 +1,6 @@
 # 0028 — 官方注册表、安装器与个人私仓
 
-- **状态**：已接受
+- **状态**：已接受；消费声明段被 [0029](0029-single-consumer-requires.md) 细化（`requires` 同时承载官方 pin 与私仓 `vault` pin，是唯一消费声明）
 - **日期**：2026-09-16
 - **关联**：[0016](0016-p-four-quadrant-model.md)、[0023](0023-facade-capability-parity.md)、[0026](0026-project-provides-and-sync-worktree.md)（发版与本机推柜段被本决策取代）、[0027](0027-relkit-owned-update-contract.md)
 - **影响范围**：`internal/registry`、`internal/publish`、`internal/install`、`internal/contribute`、`cmd/dec-registry`、消费仓 `.dec/config.yaml` 的 `requires`
@@ -26,8 +26,8 @@
 RUP runtime，也不进入 Console resources / `~/.dec/bin`。提供方 CI 使用
 `.github/actions/publish-provides`，以 deploy key 或 token 写 registry。
 
-Console / MCP 不写官方注册表。消费方改官方安装物时，在具体项目建立
-`.dec/overrides/<提供方>/<类型>/<资产>/` **本地覆写**并关联源仓 PR 或 Issue；
+Console / MCP 不写官方注册表。消费方改官方安装物时，从具体项目页进入下级页「本地覆写」，建立
+`.dec/overrides/<提供方>/<类型>/<资产>/` 并关联源仓 PR 或 Issue；
 票据关闭/合并且 registry 出现新版本后，用户在「更新」页确认安装，新正式版替换并删除已解决覆写。
 
 Console「更新」只做远端到本地：跨 Global / 项目多选官方 `requires`，预览后安装。

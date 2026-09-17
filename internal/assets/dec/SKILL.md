@@ -7,11 +7,11 @@ description: >
 
 # Dec 代理
 
-Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用户交互以 **Dec Console** 为第一入口；Agent 走 **`dec-mcp`**（stdio 适配器）经本机唯一 Console 网关调用当前连接的 `dec-server`。不要发明已下线的用户面子命令（旧的 list / search / config / pull CLI），也不要再引导用户运行终端 TUI。
+Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用户交互以 **Dec Console** 为第一入口；Agent 走 **`dec-mcp`**（零业务知识的 stdio 壳）经本机唯一 Console 网关调用当前连接的 `dec-server`。工具名 / schema 来自 `~/.dec/run/agent-tools.json`（Console 对齐运行时后写出），不要假设它们编译在 `dec-mcp` 里。不要发明已下线的用户面子命令（旧的 list / search / config / pull CLI），也不要再引导用户运行终端 TUI。
 
 项目里由 Dec pull 出来的 IDE 配置不等于「禁止提交」。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 这类项目级输出，如果是托管资产生成的结果，通常可以按仓库约定单独提交。敏感值放 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置，不要写回这些输出文件。
 
-官方资产来自 Dec 仓 `registry` 分支。消费仓 `.dec/config.yaml` 用 `requires` map 声明装谁、装哪一版（`latest` 或 `v*`）。个人 Git 只进设置里的私仓。密钥走 Bitwarden。改官方安装物不要 `dec_push`，用项目内本地覆写 + `dec_propose_upstream`。
+消费声明只有一处：`.dec/config.yaml`（项目）与 `~/.dec/config.yaml`（本机）的 `requires` map，项目名 → `latest` / `v*`（官方 `registry` 分支）/ `vault`（设置里的个人私仓）。密钥走 Bitwarden。改官方安装物不要 `dec_push`，用 Console 项目下级页「本地覆写」+ `dec_propose_upstream`。
 
 ## 何时使用
 
@@ -20,12 +20,12 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 1. **新项目需要接入 Dec**
    - Console **引导 / 项目** 初始化项目（可选套用 vault 同名 project）；Agent 用 `dec_init_project`（必填 `project_root`）
    - 模板有 `{{VAR_NAME}}` 时，在 Console 项目设置里编辑 `.dec/vars.yaml`
-   - Console 资产页勾选并保存；Agent 用 `dec_set_assets` 后 `dec_pull`（`plane=local`，带 `project_root`）
+   - Console 项目页「订阅」勾选并保存；Agent 用 `dec_set_requires` 后 `dec_pull`（`plane=local`，带 `project_root`）
    - pull 后若仓库跟踪 Dec 托管的 IDE 输出，询问是否单独 commit
 
 2. **用户要找以前做过的工具/配置**
-   - Agent：`dec_list_assets`（`plane=project|user|both`）看已启用 bundle 与成员
-   - 用户：Console 资产页浏览/搜索
+   - Agent：`dec_list_assets`（`plane=project|user|both`）看已订阅项目与成员
+   - 用户：Console 项目 / Global 资产页浏览/搜索
 
 3. **用户改了已拉取的官方资产**
    - 改动应出现在 `.dec/overrides/`；不要改 `.dec/cache/`（重装会丢）
@@ -70,8 +70,9 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 | 受管项目 / 设备 | `dec_list_managed_projects`、`dec_list_managed_devices`、`dec_register_managed_project` |
 | 新建本地资产 | `dec_create_local_asset` |
 | 状态 | `dec_status`（local 需 `project_root`） |
-| 已启用 bundle / 成员 | `dec_list_assets` |
-| 改启用列表 | `dec_set_assets`（不支持 both；改完通常再 `dec_pull`） |
+| 已订阅项目 / 成员 | `dec_list_assets` |
+| 可订阅项目（私仓 ∪ 官方已发布） | `dec_list_subscription_candidates` |
+| 改订阅 | `dec_set_requires`（整表覆盖，不支持 both；改完通常再 `dec_pull`） |
 | 拉取并渲染 | `dec_pull` |
 | 个人 Git / 密钥推回 | `dec_push`；官方路径禁止 |
 | 提交官方本地覆写 | `dec_propose_upstream` |
@@ -89,26 +90,28 @@ env 注入给子进程用独立程序 `dec-exec`，不经过 `dec-server`、不�
 |------|------|
 | 连接仓库 / 全局 IDE / Bitwarden / 本机 vars | **设置** |
 | 项目初始化 | **引导 / 项目** |
-| 勾选 bundle | **项目 / Global 资产** |
+| 勾选订阅（官方 ∪ 私仓） | **项目 / Global 资产** |
 | 项目变量 | **项目**（本机平面无项目配置） |
-| pull / push / remove | **同步** |
+| 已订阅项目的更新预览与安装 | **更新** |
+| 个人 Git / 密钥写回 | **项目 / Global 资产** |
 | Console 自动检查 / 手动安装更新 | **设置**（连接 / 解锁页复用；MCP 无更新工具） |
 | 远端设备探测与置备 | **连接** |
 
 ## 配置要点
 
-项目：`<project>/.dec/config.yaml` 的官方 `requires` map 与个人启用列表。本机 global：`~/.dec/config.yaml` 的 `requires` / `enabled_projects`。
+项目：`<project>/.dec/config.yaml`。本机 global：`~/.dec/config.yaml`。两处都只有一张 `requires` 表。
 
 ```yaml
 version: v2
-project_name: my-app
+project_name: my-app   # 作者身份：本仓创作私仓里的 my-app，不进 requires
 ides:
   - cursor
 requires:
-  relkit: latest
+  relkit: latest       # 官方注册表，跟随最新已发布 tag
+  my-notes: vault      # 个人私仓，跟随 HEAD
 ```
 
-- 早期 `available` / `enabled` 已移除；读到旧配置会迁移
+- 旧的 `enabled_bundles` / `enabled_projects` 读到即折叠为 `requires{<名>: vault}`，不再写回；更早的 `available` / `enabled` 已移除
 - `ides` 不写则继承 Settings 全局列表
 - pull 会清掉不在本次启用目标集里的 cache / IDE 托管副本（secrets/SSH 仅在远端对照成功时 prune）
 - Claude / Codex 分别使用 `.claude/`、`.codex/`（项目级与用户级同名目录）
@@ -163,9 +166,9 @@ name: my-skill
 ## 故障排查
 
 - 仓库未连接：Settings，或 `dec_connect_repo` / `dec_status`
-- 找不到资产：`dec_list_assets`；确认 bundle 已启用且成员名单包含它
-- 拉取失败：`dec_status`；检查 `enabled_bundles`；补齐未定义的 `{{VAR}}`
-- 没有启用任何 bundle：Bundles 勾选保存，或 `dec_set_assets`
+- 找不到资产：`dec_list_assets`；确认项目已订阅且成员名单包含它
+- 拉取失败：`dec_status`；检查 `requires`；补齐未定义的 `{{VAR}}`
+- 没有订阅任何项目：Console 项目 / Global 资产页勾选保存，或 `dec_set_requires`
 
 ## 修改资产的正确流程
 

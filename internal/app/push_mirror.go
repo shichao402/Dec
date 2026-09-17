@@ -11,7 +11,7 @@ import (
 // syncDecVaultFromCache 将 enabled 范围内的 vault 资产与本地 cache 对齐：复制存在项、删除 cache 已缺失项。
 func syncDecVaultFromCache(workspace Workspace, repoDir string, projectConfig *types.ProjectConfig, resolved *ResolvedAssets, reporter Reporter) (synced, pruned int, err error) {
 	assets := resolved.Assets
-	if len(assets) == 0 && len(projectConfig.EnabledBundles) == 0 {
+	if len(assets) == 0 {
 		return 0, 0, nil
 	}
 
@@ -108,7 +108,7 @@ func hasPAssets(assets []types.TypedAssetRef) bool {
 
 func collectEnabledBundleNames(projectConfig *types.ProjectConfig, assets []types.TypedAssetRef) map[string]struct{} {
 	out := make(map[string]struct{})
-	for _, name := range projectConfig.EnabledBundles {
+	for _, name := range projectConfig.Requires.VaultProjects() {
 		out[name] = struct{}{}
 	}
 	for _, asset := range assets {

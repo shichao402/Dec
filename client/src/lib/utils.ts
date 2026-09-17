@@ -139,6 +139,12 @@ export type AssetOption = {
   Required: boolean
   Quadrants: Record<string, number>
   Tags?: string[]
+  // 订阅来源与 pin（ADR 0029）：vault 为个人私仓，official 为官方注册表。
+  Source?: string
+  Pin?: string
+  Installed?: string
+  Available?: string
+  UpdateAvailable?: boolean
 }
 
 export type AssetSelection = {

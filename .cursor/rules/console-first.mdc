@@ -30,6 +30,8 @@ Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）�
 | 本机 / SSH 远端 / 置备 | **连接** 页 |
 | Bitwarden 人工认证 | **认证** 页（Console Authenticate） |
 | 绑定项目资产树、新建本地资产 | **项目** 页 |
+| 官方资产本地覆写（预览修改、关联源仓 PR/Issue） | **项目** 页 → 下级页「本地覆写」 |
+| 登记本项目对外提供的 Git 资产 | **项目** 页 → 下级页「我提供的资产」 |
 | Global 资产 / 推荐 Global 标签 | **Global 资产** 页 |
 | 官方 requires 多选预览 / 安装（Global 与项目） | **更新** 页 |
 | 个人 Git / Bitwarden 写回 | **项目 / Global 资产** 页 |

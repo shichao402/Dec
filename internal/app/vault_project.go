@@ -19,7 +19,7 @@ type VaultProjectAutoApplyResult struct {
 	ConfigPath       string
 	VarsPath         string
 	ProjectName      string
-	EnabledBundles   []string
+	SubscribedProjects []string
 	Applied          bool
 	VarsCreated      bool
 	AssetCount       int
@@ -34,7 +34,7 @@ type VaultProjectInference struct {
 	ProjectRoot      string
 	ProjectName      string
 	VaultPath        string
-	EnabledBundles   []string
+	SubscribedProjects []string
 	IDEs             []string
 	Editor           string
 	Model            string
@@ -149,10 +149,10 @@ func InferVaultProject(projectRoot string, reporter Reporter) (*VaultProjectInfe
 			return &VaultProjectInference{
 				ProjectRoot: projectRoot, ProjectName: inferredP.Name,
 				VaultPath:      types.PManifestPath(inferredP.Name),
-				EnabledBundles: append([]string(nil), inferredP.Requires...),
+				SubscribedProjects: append([]string(nil), inferredP.DependsOn...),
 				IDEs:           append([]string(nil), inferredP.IDEs...), Editor: inferredP.Editor,
 				Model: "p", HomeProject: inferredP.Name,
-				RequiredProjects: append([]string(nil), inferredP.Requires...),
+				RequiredProjects: append([]string(nil), inferredP.DependsOn...),
 			}, nil
 		}
 		return nil, nil
@@ -170,8 +170,8 @@ func InferVaultProject(projectRoot string, reporter Reporter) (*VaultProjectInfe
 	}
 
 	enabledBundles := normalizeEnabledBundles(vaultProject.Bundles)
-	if existingConfig != nil && len(existingConfig.EnabledBundles) > 0 {
-		enabledBundles = append([]string(nil), existingConfig.EnabledBundles...)
+	if existingConfig != nil && len(existingConfig.Requires.VaultProjects()) > 0 {
+		enabledBundles = append([]string(nil), existingConfig.Requires.VaultProjects()...)
 	}
 
 	projectEditor := strings.TrimSpace(vaultProject.Editor)
@@ -186,12 +186,12 @@ func InferVaultProject(projectRoot string, reporter Reporter) (*VaultProjectInfe
 	}
 
 	return &VaultProjectInference{
-		ProjectRoot:    projectRoot,
-		ProjectName:    projectName,
-		VaultPath:      types.VaultProjectPath(projectName),
-		EnabledBundles: enabledBundles,
-		IDEs:           projectIDEs,
-		Editor:         projectEditor,
+		ProjectRoot:        projectRoot,
+		ProjectName:        projectName,
+		VaultPath:          types.VaultProjectPath(projectName),
+		SubscribedProjects: enabledBundles,
+		IDEs:               projectIDEs,
+		Editor:             projectEditor,
 	}, nil
 }
 
@@ -245,7 +245,7 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 		}
 		result.Applied = true
 		result.BundleCount = 1 + len(inference.RequiredProjects)
-		result.EnabledBundles = append([]string(nil), inference.RequiredProjects...)
+		result.SubscribedProjects = append([]string(nil), inference.RequiredProjects...)
 		result.VarsCreated, _ = mgr.EnsureVarsConfigTemplate()
 		return result, nil
 	}
@@ -276,7 +276,7 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 
 	projectEditor := inference.Editor
 	projectIDEs := append([]string(nil), inference.IDEs...)
-	enabledBundles := append([]string(nil), inference.EnabledBundles...)
+	enabledBundles := append([]string(nil), inference.SubscribedProjects...)
 	if existingConfig != nil {
 		if projectEditor == "" {
 			projectEditor = existingConfig.Editor
@@ -284,8 +284,8 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 		if len(projectIDEs) == 0 {
 			projectIDEs = append([]string(nil), existingConfig.IDEs...)
 		}
-		if len(existingConfig.EnabledBundles) > 0 {
-			enabledBundles = append([]string(nil), existingConfig.EnabledBundles...)
+		if len(existingConfig.Requires.VaultProjects()) > 0 {
+			enabledBundles = append([]string(nil), existingConfig.Requires.VaultProjects()...)
 		}
 	}
 	if len(enabledBundles) == 0 {
@@ -299,10 +299,10 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 	}
 
 	projectConfig := &types.ProjectConfig{
-		ProjectName:    projectName,
-		IDEs:           projectIDEs,
-		Editor:         projectEditor,
-		EnabledBundles: enabledBundles,
+		ProjectName: projectName,
+		IDEs:        projectIDEs,
+		Editor:      projectEditor,
+		Requires:    types.RequiresSpec(nil).AddVaultProjects(enabledBundles),
 	}
 
 	if err := withLocalReadRepoDir(func(repoDir string) error {
@@ -327,7 +327,7 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 	}
 
 	result.Applied = true
-	result.EnabledBundles = append([]string(nil), enabledBundles...)
+	result.SubscribedProjects = append([]string(nil), enabledBundles...)
 	result.VarsCreated = varsCreated
 	return result, nil
 }

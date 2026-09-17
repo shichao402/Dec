@@ -58,10 +58,8 @@ func TestPullReconcile_CleansRemoteDeletedOrphans(t *testing.T) {
 	home := useTempHomeForSSH(t)
 
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/pkv/skills/keep-skill/SKILL.md": "---\nname: keep-skill\n---\n",
-		"bundles/pkv/bundle.yaml": `name: pkv
-members:
-  - skill/keep-skill
+		"pkv/public/project/skills/keep-skill/SKILL.md": "---\nname: keep-skill\n---\n",
+		"pkv/dec.yaml": `name: pkv
 `,
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -75,12 +73,12 @@ members:
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "pkv",
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"pkv"},
+		Requires: types.RequiresSpec{"pkv": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	orphanCache := filepath.Join(projectRoot, ".dec", "cache", "pkv", "skills", "gone-skill", "SKILL.md")
+	orphanCache := filepath.Join(projectRoot, ".dec", "cache", "pkv", "public", "local", "skills", "gone-skill", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(orphanCache), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -162,15 +160,11 @@ members:
 func TestPullReconcile_DoesNotTouchDisabledBundleSecrets(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/active/skills/active-skill/SKILL.md": "---\nname: active-skill\n---\n",
-		"bundles/active/bundle.yaml": `name: active
-members:
-  - skill/active-skill
+		"active/public/project/skills/active-skill/SKILL.md": "---\nname: active-skill\n---\n",
+		"active/dec.yaml": `name: active
 `,
-		"bundles/parked/skills/parked-skill/SKILL.md": "---\nname: parked-skill\n---\n",
-		"bundles/parked/bundle.yaml": `name: parked
-members:
-  - skill/parked-skill
+		"parked/public/project/skills/parked-skill/SKILL.md": "---\nname: parked-skill\n---\n",
+		"parked/dec.yaml": `name: parked
 `,
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -181,7 +175,7 @@ members:
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"active"},
+		Requires: types.RequiresSpec{"active": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +216,7 @@ func TestPullReconcile_ReportsSecretsWhenBWUnconfirmed(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", decHome)
 
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/ok/SKILL.md": "---\nname: ok\n---\n",
+		"default/public/project/skills/ok/SKILL.md": "---\nname: ok\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
@@ -232,7 +226,7 @@ func TestPullReconcile_ReportsSecretsWhenBWUnconfirmed(t *testing.T) {
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"pkv"},
+		Requires: types.RequiresSpec{"pkv": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -258,9 +252,9 @@ func TestPullReconcile_ReportsSecretsWhenBWUnconfirmed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, b := range updated.EnabledBundles {
+	for _, b := range updated.Requires.VaultProjects() {
 		if b == "pkv" {
-			t.Fatalf("vault 已确认缺失时应从 enabled 摘掉 pkv: %#v", updated.EnabledBundles)
+			t.Fatalf("vault 已确认缺失时应从 enabled 摘掉 pkv: %#v", updated.Requires.VaultProjects())
 		}
 	}
 }
@@ -269,14 +263,14 @@ func TestPullReconcile_ReportsSecretsWhenBWUnconfirmed(t *testing.T) {
 func TestPullReconcile_UserPlaneOnlyCleansMachineSecrets(t *testing.T) {
 	decHome := setupSecretsConfigForPushTest(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/woa/bundle.yaml": "name: woa\nscope: user\nmembers: []\n",
+		"woa/dec.yaml": "name: woa\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
 	if err := config.SaveGlobalConfig(&types.GlobalConfig{
 		RepoURL:        remote,
-		EnabledBundles: []string{"woa"},
+		Requires: types.RequiresSpec{"woa": types.RequiresVault},
 		IDEs:           []string{"cursor"},
 	}); err != nil {
 		t.Fatal(err)
@@ -322,7 +316,7 @@ func TestPullReconcile_UserPlaneOnlyCleansMachineSecrets(t *testing.T) {
 func TestPullReconcile_MissingVaultBundleFullCleanup(t *testing.T) {
 	setupSecretsConfigForPushTest(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/ok/SKILL.md": "---\nname: ok\n---\n",
+		"default/public/project/skills/ok/SKILL.md": "---\nname: ok\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
@@ -333,7 +327,7 @@ func TestPullReconcile_MissingVaultBundleFullCleanup(t *testing.T) {
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:    "pkv",
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"pkv"},
+		Requires: types.RequiresSpec{"pkv": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -371,9 +365,9 @@ func TestPullReconcile_MissingVaultBundleFullCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, b := range updated.EnabledBundles {
+	for _, b := range updated.Requires.VaultProjects() {
 		if b == "pkv" {
-			t.Fatalf("应摘除 enabled pkv: %#v", updated.EnabledBundles)
+			t.Fatalf("应摘除 enabled pkv: %#v", updated.Requires.VaultProjects())
 		}
 	}
 	cfg, err := secrets.LoadConfig()

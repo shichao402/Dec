@@ -91,6 +91,9 @@ func TestCleanupDoesNotDeleteOfficialLocalPlane(t *testing.T) {
 	if err := os.WriteFile(official, []byte("# official\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := install.WriteInstalledVersion(filepath.Join(root, ".dec", "cache"), "relkit", "v0.4.2"); err != nil {
+		t.Fatal(err)
+	}
 
 	cleanupRemovedAssets(NewWorkspace(WorkspaceProject, root), nil, nil)
 	if _, err := os.Stat(official); err != nil {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"reflect"
 	"testing"
 
@@ -14,8 +15,10 @@ import (
 func TestLoadAssetSelectionReturnsEnabledState(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
-		"bundles/cli/rules/cli-release-rules.mdc":          "description: test\n",
+		"default/dec.yaml":                            "name: default\n",
+		"default/public/project/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"cli/dec.yaml":                                "name: cli\n",
+		"cli/public/project/rules/cli-release-rules.mdc": "description: test\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -24,9 +27,9 @@ func TestLoadAssetSelectionReturnsEnabledState(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"codex"},
-		Editor:         "code --wait",
-		EnabledBundles: []string{"default"},
+		IDEs:     []string{"codex"},
+		Editor:   "code --wait",
+		Requires: types.RequiresSpec{"default": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -42,18 +45,20 @@ func TestLoadAssetSelectionReturnsEnabledState(t *testing.T) {
 		t.Fatalf("Bundles = %d, 期望 2", len(state.Bundles))
 	}
 	if !bundleEnabledInState(state, "default") {
-		t.Fatal("default bundle 应为启用态")
+		t.Fatal("default 应为启用态")
 	}
 	if bundleEnabledInState(state, "cli") {
-		t.Fatal("cli bundle 未被引用，不应为启用态")
+		t.Fatal("cli 未被引用，不应为启用态")
 	}
 }
 
 func TestLoadAssetSelectionDiscoversBundlesWithoutProjectConfig(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+		"vikunja/dec.yaml": "name: vikunja\n",
+		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"cli/dec.yaml": "name: cli\n",
+		"cli/public/project/rules/cli-release-rules.mdc": "---\ndescription: test\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -67,19 +72,25 @@ func TestLoadAssetSelectionDiscoversBundlesWithoutProjectConfig(t *testing.T) {
 		t.Fatal("无 .dec/config.yaml 时不应标记 ExistingConfig")
 	}
 	if len(state.Bundles) < 2 {
-		t.Fatalf("无项目配置时仍应发现 bundle, Bundles = %d", len(state.Bundles))
+		t.Fatalf("无项目配置时仍应发现项目, Bundles = %d", len(state.Bundles))
 	}
 	for _, bo := range state.Bundles {
 		if bo.Enabled {
-			t.Fatalf("无项目配置时不应有已启用 bundle: %s", bo.Name)
+			t.Fatalf("无项目配置时不应有已启用项目: %s", bo.Name)
 		}
 	}
 }
 
-// TestSaveEnabledBundlesPreservesOtherFields 保证保存 bundle 勾选时，
+// TestSetWorkspaceRequiresPreservesOtherFields 保证保存订阅时，
 // 未参与本次交互的字段（IDEs / Editor）原样保留。
-func TestSaveEnabledBundlesPreservesOtherFields(t *testing.T) {
+func TestSetWorkspaceRequiresPreservesOtherFields(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"default/dec.yaml": "name: default\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
@@ -89,12 +100,17 @@ func TestSaveEnabledBundlesPreservesOtherFields(t *testing.T) {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	result, err := SaveEnabledBundles(projectRoot, []string{"default"}, nil)
+	result, err := SetWorkspaceRequires(
+		context.Background(),
+		NewWorkspace(WorkspaceProject, projectRoot),
+		types.RequiresSpec{"default": types.RequiresVault},
+		nil,
+	)
 	if err != nil {
-		t.Fatalf("SaveEnabledBundles() 失败: %v", err)
+		t.Fatalf("SetWorkspaceRequires() 失败: %v", err)
 	}
-	if result.EnabledBundleCount != 1 {
-		t.Fatalf("EnabledBundleCount = %d, 期望 1", result.EnabledBundleCount)
+	if len(result.Subscribed) != 1 {
+		t.Fatalf("Subscribed = %#v, 期望 1", result.Subscribed)
 	}
 	if !result.VarsCreated {
 		t.Fatal("首次保存应创建 vars 模板")
@@ -110,71 +126,87 @@ func TestSaveEnabledBundlesPreservesOtherFields(t *testing.T) {
 	if !reflect.DeepEqual(loaded.IDEs, []string{"codex"}) {
 		t.Fatalf("IDEs = %#v, 期望 %#v", loaded.IDEs, []string{"codex"})
 	}
-	if !reflect.DeepEqual(loaded.EnabledBundles, []string{"default"}) {
-		t.Fatalf("EnabledBundles = %#v, 期望 [default]", loaded.EnabledBundles)
+	if !reflect.DeepEqual(loaded.Requires.VaultProjects(), []string{"default"}) {
+		t.Fatalf("Requires.VaultProjects() = %#v, 期望 [default]", loaded.Requires.VaultProjects())
 	}
 }
 
-// TestSaveEnabledBundlesNormalizes 保证传入列表会去重、去空白。
-func TestSaveEnabledBundlesNormalizes(t *testing.T) {
+// TestSetWorkspaceRequiresNormalizes 保证传入声明会去重、去空白。
+func TestSetWorkspaceRequiresNormalizes(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"combo/dec.yaml":   "name: combo\n",
+		"vikunja/dec.yaml": "name: vikunja\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{IDEs: []string{"codex"}}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	result, err := SaveEnabledBundles(projectRoot, []string{"combo", "  combo  ", "", "vikunja"}, nil)
+	result, err := SetWorkspaceRequires(
+		context.Background(),
+		NewWorkspace(WorkspaceProject, projectRoot),
+		types.RequiresSpec{"combo": types.RequiresVault, "vikunja": types.RequiresVault},
+		nil,
+	)
 	if err != nil {
-		t.Fatalf("SaveEnabledBundles() 失败: %v", err)
+		t.Fatalf("SetWorkspaceRequires() 失败: %v", err)
 	}
-	if result.EnabledBundleCount != 2 {
-		t.Fatalf("EnabledBundleCount = %d, 期望 2", result.EnabledBundleCount)
+	if len(result.Subscribed) != 2 {
+		t.Fatalf("Subscribed = %#v, 期望 2", result.Subscribed)
 	}
 
 	loaded, err := mgr.LoadProjectConfig()
 	if err != nil {
 		t.Fatalf("LoadProjectConfig() 失败: %v", err)
 	}
-	if !reflect.DeepEqual(loaded.EnabledBundles, []string{"combo", "vikunja"}) {
-		t.Fatalf("EnabledBundles = %#v, 期望 [combo vikunja]", loaded.EnabledBundles)
+	if !reflect.DeepEqual(loaded.Requires.VaultProjects(), []string{"combo", "vikunja"}) {
+		t.Fatalf("Requires.VaultProjects() = %#v, 期望 [combo vikunja]", loaded.Requires.VaultProjects())
 	}
 }
 
-// TestSaveEnabledBundlesEmptyPersistsNil 保证传入空列表时 EnabledBundles 清空为 nil，
-// 便于 yaml omitempty 移除该键。
-func TestSaveEnabledBundlesEmptyPersistsNil(t *testing.T) {
+// TestSetWorkspaceRequiresEmptyPersistsNil 保证传入空声明时 Requires 清空为 nil。
+func TestSetWorkspaceRequiresEmptyPersistsNil(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"codex"},
-		EnabledBundles: []string{"vikunja"},
+		IDEs:     []string{"codex"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	if _, err := SaveEnabledBundles(projectRoot, []string{}, nil); err != nil {
-		t.Fatalf("SaveEnabledBundles() 失败: %v", err)
+	if _, err := SetWorkspaceRequires(
+		context.Background(),
+		NewWorkspace(WorkspaceProject, projectRoot),
+		nil,
+		nil,
+	); err != nil {
+		t.Fatalf("SetWorkspaceRequires() 失败: %v", err)
 	}
 
 	loaded, err := mgr.LoadProjectConfig()
 	if err != nil {
 		t.Fatalf("LoadProjectConfig() 失败: %v", err)
 	}
-	if loaded.EnabledBundles != nil {
-		t.Fatalf("EnabledBundles = %#v, 期望 nil", loaded.EnabledBundles)
+	if loaded.Requires != nil {
+		t.Fatalf("Requires = %#v, 期望 nil", loaded.Requires)
 	}
 }
 
-// TestSaveEnabledBundlesRoundTrip 覆盖「取消 bundle 后勾选自己弹回来」的回归点：
-// 取消并保存后重新加载，该 bundle 不应再被判定为启用。
-func TestSaveEnabledBundlesRoundTrip(t *testing.T) {
+// TestSetWorkspaceRequiresRoundTrip 覆盖「取消订阅后勾选自己弹回来」的回归点。
+func TestSetWorkspaceRequiresRoundTrip(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"bundles/vikunja/rules/vikunja-integration.mdc":    "---\ndescription: test\n---\n",
-		"bundles/cli/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
+		"vikunja/dec.yaml": "name: vikunja\n",
+		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"cli/dec.yaml": "name: cli\n",
+		"cli/public/project/rules/cli-release-rules.mdc": "---\ndescription: test\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
@@ -183,8 +215,8 @@ func TestSaveEnabledBundlesRoundTrip(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"codex"},
-		EnabledBundles: []string{"vikunja", "cli"},
+		IDEs:     []string{"codex"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault, "cli": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -194,11 +226,16 @@ func TestSaveEnabledBundlesRoundTrip(t *testing.T) {
 		t.Fatalf("LoadAssetSelection() 失败: %v", err)
 	}
 	if !bundleEnabledInState(state, "vikunja") || !bundleEnabledInState(state, "cli") {
-		t.Fatal("前置条件不成立：两个 bundle 初始都应为启用态")
+		t.Fatal("前置条件不成立：两个项目初始都应为启用态")
 	}
 
-	if _, err := SaveEnabledBundles(projectRoot, []string{"cli"}, nil); err != nil {
-		t.Fatalf("SaveEnabledBundles() 失败: %v", err)
+	if _, err := SetWorkspaceRequires(
+		context.Background(),
+		NewWorkspace(WorkspaceProject, projectRoot),
+		types.RequiresSpec{"cli": types.RequiresVault},
+		nil,
+	); err != nil {
+		t.Fatalf("SetWorkspaceRequires() 失败: %v", err)
 	}
 
 	reloaded, err := LoadAssetSelection(projectRoot, nil)
@@ -266,18 +303,18 @@ func TestListEffectiveEnabledAssetsDeduplicatesAcrossBundles(t *testing.T) {
 	}
 }
 
-func TestLoadAssetSelectionDoesNotMergeUserEnabled(t *testing.T) {
+func TestLoadAssetSelectionDoesNotMergeUserRequires(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
-		"bundles/cli/rules/cli-release-rules.mdc":          "description: test\n",
-		"bundles/cli/bundle.yaml":                          "name: cli\nscope: user\nmembers:\n  - rules/cli-release-rules\n",
-		"bundles/default/bundle.yaml":                      "name: default\nscope: project\nmembers:\n  - skills/project-workflow\n",
+		"default/dec.yaml": "name: default\n",
+		"default/public/project/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
+		"cli/dec.yaml": "name: cli\n",
+		"cli/public/project/rules/cli-release-rules.mdc": "description: test\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
-	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, EnabledBundles: []string{"cli"}}); err != nil {
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, Requires: types.RequiresSpec{"cli": types.RequiresVault}}); err != nil {
 		t.Fatalf("SaveGlobalConfig() 失败: %v", err)
 	}
 
@@ -286,33 +323,33 @@ func TestLoadAssetSelectionDoesNotMergeUserEnabled(t *testing.T) {
 		t.Fatalf("LoadAssetSelection() 失败: %v", err)
 	}
 	if bundleEnabledInState(state, "cli") {
-		t.Fatal("cli 为 scope:user，项目平面 Bundles 列表不应启用它")
-	}
-	for _, bo := range state.Bundles {
-		if bo.Name == "cli" {
-			t.Fatal("项目平面不应列出 scope:user 的 cli bundle")
-		}
+		t.Fatal("本机 Global 订阅不应让项目平面把 cli 标为启用")
 	}
 }
 
-func TestSaveWorkspaceEnabledBundlesUserWritesGlobalConfig(t *testing.T) {
+func TestSetWorkspaceRequiresUserWritesGlobalConfig(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
+		"cli/dec.yaml": "name: cli\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
 
-	if _, err := SaveWorkspaceEnabledBundles(NewWorkspace(WorkspaceUser, ""), []string{"cli"}, nil); err != nil {
-		t.Fatalf("SaveWorkspaceEnabledBundles(user) 失败: %v", err)
+	if _, err := SetWorkspaceRequires(
+		context.Background(),
+		NewWorkspace(WorkspaceUser, ""),
+		types.RequiresSpec{"cli": types.RequiresVault},
+		nil,
+	); err != nil {
+		t.Fatalf("SetWorkspaceRequires(user) 失败: %v", err)
 	}
 	global, err := config.LoadGlobalConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(global.EnabledBundles, []string{"cli"}) {
-		t.Fatalf("GlobalConfig.EnabledBundles = %#v", global.EnabledBundles)
+	if !reflect.DeepEqual(global.Requires.VaultProjects(), []string{"cli"}) {
+		t.Fatalf("GlobalConfig.Requires.VaultProjects() = %#v", global.Requires.VaultProjects())
 	}
 }
 
@@ -328,8 +365,8 @@ func bundleEnabledInState(state *AssetSelectionState, name string) bool {
 func TestLoadAssetSelection_IncludesRemoteSecretMembersAndCaches(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/agents-board/skills/board/SKILL.md": "---\nname: board\n---\n",
-		"bundles/agents-board/bundle.yaml":           "name: agents-board\nscope: project\nmembers:\n  - skill/board\n",
+		"agents-board/dec.yaml": "name: agents-board\n",
+		"agents-board/public/project/skills/board/SKILL.md": "---\nname: board\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
@@ -371,8 +408,8 @@ func TestLoadAssetSelection_IncludesRemoteSecretMembersAndCaches(t *testing.T) {
 func TestLoadAssetSelection_UsesCachedSecretMembersWithoutSession(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/agents-board/skills/board/SKILL.md": "---\nname: board\n---\n",
-		"bundles/agents-board/bundle.yaml":           "name: agents-board\nscope: project\nmembers:\n  - skill/board\n",
+		"agents-board/dec.yaml": "name: agents-board\n",
+		"agents-board/public/project/skills/board/SKILL.md": "---\nname: board\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
@@ -394,7 +431,7 @@ func TestLoadAssetSelection_UsesCachedSecretMembersWithoutSession(t *testing.T) 
 func TestLoadWorkspaceAssetSelection_SecretsOnlyShowsCachedMembers(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/cli/bundle.yaml": "name: cli\nscope: user\nmembers: []\n",
+		"cli/dec.yaml": "name: cli\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)

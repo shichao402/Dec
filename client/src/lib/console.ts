@@ -1,7 +1,8 @@
 import type { ActionSpec } from '@/lib/action-registry'
 import type { SavedConnection } from '@/lib/utils'
 
-export type View = 'overview' | 'global' | 'projects' | 'project' | 'sync' | 'delete' | 'settings'
+// overrides 与 provides 是 project 的下级页面：不进侧栏导航，只能从项目页进入。
+export type View = 'overview' | 'global' | 'projects' | 'project' | 'overrides' | 'provides' | 'sync' | 'delete' | 'settings'
 
 export const resource = {
   connections: 'console:connections',

@@ -55,6 +55,6 @@ Tauri 安装包不能从 Linux 交叉出 NSIS/DMG。relkit-serve 人页 audience
 
 **允许版本区间兼容。** 首版否决：RPC 与 UI 同步演进，严格相等让失败发生在连接边界，避免半可用会话。未来若引入独立协议版本，再重新评估兼容窗口。
 
-**让 `dec-mcp` 自行升级。** 否决：MCP 是 Agent 门面，不应在无用户确认时改变安装；运行时所有权归 Console。
+**让 `dec-mcp` 自行升级。** 否决：MCP 是 Agent 门面，不应在无用户确认时改变安装；运行时所有权归 Console。工具清单由 Console dump 到 `~/.dec/run/agent-tools.json`，壳只读清单、不参与 SemVer 相等门闩（见 [0030](0030-agent-tools-thin-shell.md)）。
 
 **让 `dec-server` 检查或安装 Console 更新。** 否决：用户必须先连接某台服务才能更新本机壳，且会先升级 Console、再由新 Console 升级目标运行时，所有权与顺序都倒置。

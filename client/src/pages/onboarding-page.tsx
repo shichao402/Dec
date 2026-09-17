@@ -10,7 +10,7 @@ import { Field, Input } from '@/components/ui/input'
 import { Panel, PanelBody, PanelFooter, PanelHeader } from '@/components/ui/panel'
 import { invokeTyped } from '@/lib/api'
 import { actionSpec, PROJECT_TAG_GLOBAL, hasTag, resource, toggle } from '@/lib/console'
-import { AssetRow } from '@/pages/assets-panel'
+import { AssetRow } from '@/pages/subscription-panel'
 import { cn } from '@/lib/utils'
 import type { AssetSelection, GlobalSettings } from '@/lib/utils'
 
@@ -50,7 +50,7 @@ export function OnboardingPage(props: {
     }
     const next = await invokeTyped<GlobalSettings>('load_global_settings', '', 'global', {}, saveDeviceSpec.key)
     props.setSettings(next)
-    return invokeTyped<AssetSelection>('load_asset_selection', '', 'global', {}, saveDeviceSpec.key)
+    return invokeTyped<AssetSelection>('list_subscription_candidates', '', 'global', {}, saveDeviceSpec.key)
   }
 
   const initialSelection = (selection: AssetSelection) => {
@@ -59,7 +59,15 @@ export function OnboardingPage(props: {
     return selection.Bundles.filter((item) => hasTag(item.Tags, PROJECT_TAG_GLOBAL)).map((item) => item.Name)
   }
 
-  const saveAssets = () => invokeTyped('save_enabled_bundles', '', 'global', { EnabledProjects: selected }, saveAssetsSpec.key)
+  // 订阅表按来源给 pin：官方跟随最新已发布 tag，私仓只能跟 HEAD（ADR 0029）。
+  const saveAssets = () => {
+    const requires: Record<string, string> = {}
+    for (const name of selected) {
+      const item = (assets?.Bundles || []).find((bundle) => bundle.Name === name)
+      requires[name] = item?.Source === 'official' ? 'latest' : 'vault'
+    }
+    return invokeTyped('set_requires', '', 'global', { Requires: requires }, saveAssetsSpec.key)
+  }
   const bundles = assets?.Bundles || []
   const keyword = query.trim().toLowerCase()
   const visible = (keyword

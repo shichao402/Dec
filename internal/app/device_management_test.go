@@ -76,22 +76,25 @@ func TestBrowseDirectoriesReturnsDirectoriesOnly(t *testing.T) {
 func TestProjectConsumersOnlyReturnsDirectManagedReferences(t *testing.T) {
 	t.Setenv("DEC_HOME", t.TempDir())
 	root := t.TempDir()
-	writeProject := func(dir, home string) ManagedProjectState {
+	writeProject := func(dir, home, require string) ManagedProjectState {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Join(dir, ".dec"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		data := []byte("kind: project\nversion: v2\nproject_name: " + home + "\n")
-		if err := os.WriteFile(filepath.Join(dir, ".dec", "config.yaml"), data, 0o644); err != nil {
+		data := "kind: project\nversion: v2\nproject_name: " + home + "\n"
+		if require != "" {
+			data += "requires:\n  " + require + ": vault\n"
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".dec", "config.yaml"), []byte(data), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		return ManagedProjectState{Root: dir, Name: home, Exists: true, Initialized: true}
 	}
-	direct := writeProject(filepath.Join(root, "direct"), "app")
-	unrelated := writeProject(filepath.Join(root, "unrelated"), "other")
+	direct := writeProject(filepath.Join(root, "direct"), "app", "shared")
+	unrelated := writeProject(filepath.Join(root, "unrelated"), "other", "")
 	broken := ManagedProjectState{Root: filepath.Join(root, "broken"), Exists: true, Initialized: true, Error: "invalid"}
 	projects := map[string]*pmodel.Loaded{
-		"app":    {Manifest: types.P{Name: "app", Requires: []string{"shared"}}},
+		"app":    {Manifest: types.P{Name: "app", DependsOn: []string{"shared"}}},
 		"other":  {Manifest: types.P{Name: "other"}},
 		"shared": {Manifest: types.P{Name: "shared"}},
 	}

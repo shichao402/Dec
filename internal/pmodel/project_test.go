@@ -34,8 +34,8 @@ func TestLoadFourQuadrants(t *testing.T) {
 	if len(got.Assets) != 4 {
 		t.Fatalf("assets = %#v", got.Assets)
 	}
-	if got.Manifest.Requires[0] != "shared-tools" {
-		t.Fatalf("requires = %#v", got.Manifest.Requires)
+	if got.Manifest.DependsOn[0] != "shared-tools" {
+		t.Fatalf("requires = %#v", got.Manifest.DependsOn)
 	}
 	seenPrivateProject := false
 	for _, asset := range got.Assets {

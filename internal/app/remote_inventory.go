@@ -35,7 +35,7 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 	seenDecLocal := make(map[string]struct{})
 	groupCtx := newDeleteGroupContext(workspace, projectConfig)
 	scopeByBundle := map[string]string{}
-	enabledBundles := config.NormalizeBundleNames(projectConfig.EnabledBundles)
+	enabledBundles := config.NormalizeBundleNames(consumedProjectNames(projectConfig, WorkspaceProject))
 	usesPModel, _ := connectedRepositoryUsesPModel()
 
 	addDec := func(kind DeleteItemKind, itemType, name, vault string, orphan bool, partition RemotePartition, scopeTag string) {

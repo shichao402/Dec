@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -9,80 +10,67 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
-// 项目平面此前直接写盘，于是已从 vault 删除的 bundle 名能一直留在 enabled_bundles 里，
-// pull 每次只报一句「找不到声明，已忽略」。勾选必须挡在配置之外。
-func TestSaveWorkspaceEnabledBundles_ProjectPlaneRejectsUnknownBundle(t *testing.T) {
+// 项目平面此前直接写盘，于是已从 vault 删除的项目名能一直留在 requires 里。
+// 勾选必须挡在配置之外。
+func TestSetWorkspaceRequires_ProjectPlaneRejectsUnknownProject(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/live/skills/live-skill/SKILL.md": "---\nname: live-skill\n---\n",
-		"bundles/live/bundle.yaml":                "name: live\nscope: project\nmembers:\n  - skills/live-skill\n",
-		"bundles/mine/bundle.yaml":                "name: mine\nscope: user\nmembers: []\n",
+		"live/dec.yaml": "name: live\n",
+		"live/public/project/skills/live-skill/SKILL.md": "---\nname: live-skill\n---\n",
+		"mine/dec.yaml": "name: mine\n",
 	})
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
 
 	projectRoot := t.TempDir()
-	result, err := SaveWorkspaceEnabledBundles(
+	result, err := SetWorkspaceRequires(
+		context.Background(),
 		NewWorkspace(WorkspaceProject, projectRoot),
-		[]string{"live", "mine", "deleted"}, nil)
+		types.RequiresSpec{
+			"live":    types.RequiresVault,
+			"deleted": types.RequiresVault,
+		},
+		nil,
+	)
 	if err != nil {
-		t.Fatalf("SaveWorkspaceEnabledBundles() 失败: %v", err)
+		t.Fatalf("SetWorkspaceRequires() 失败: %v", err)
 	}
-	if result.EnabledBundleCount != 1 {
-		t.Fatalf("EnabledBundleCount = %d, 期望只留 live", result.EnabledBundleCount)
+	if len(result.Subscribed) != 1 || result.Subscribed[0].Project != "live" {
+		t.Fatalf("Subscribed = %#v, 期望只留 live", result.Subscribed)
 	}
-	if len(result.RejectedBundles) != 2 {
-		t.Fatalf("RejectedBundles = %#v, 期望 mine 与 deleted 各一条", result.RejectedBundles)
-	}
-	joined := strings.Join(result.RejectedBundles, " | ")
-	if !strings.Contains(joined, "mine") || !strings.Contains(joined, "scope: user") {
-		t.Fatalf("scope: user 的包应说明属于用户平面: %s", joined)
-	}
-	if !strings.Contains(joined, "deleted") {
-		t.Fatalf("vault 里不存在的包应被拒: %s", joined)
+	if len(result.Rejected) != 1 || !strings.Contains(result.Rejected[0], "deleted") {
+		t.Fatalf("vault 里不存在的项目应被拒: %#v", result.Rejected)
 	}
 
 	loaded, err := config.NewProjectConfigManager(projectRoot).LoadProjectConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.EnabledBundles) != 1 || loaded.EnabledBundles[0] != "live" {
-		t.Fatalf("enabled_bundles = %#v, 期望 [live]", loaded.EnabledBundles)
+	if len(loaded.Requires.VaultProjects()) != 1 || loaded.Requires.VaultProjects()[0] != "live" {
+		t.Fatalf("Requires = %#v, 期望 [live]", loaded.Requires.VaultProjects())
 	}
 }
 
-// 离线时无从校验，不能因此保存不了。
-func TestValidateProjectEnabledBundles_AllowsWhenRepoDisconnected(t *testing.T) {
+// 离线时无从校验官方发布状态，不能因此保存不了；私仓 pin 仍要求能扫到私仓。
+func TestSetWorkspaceRequires_AllowsOfficialWhenRegistryUnreachable(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
-
-	rejected, err := validateProjectEnabledBundles([]string{"anything"}, nil)
-	if err != nil {
-		t.Fatalf("validateProjectEnabledBundles() 失败: %v", err)
-	}
-	if len(rejected) != 0 {
-		t.Fatalf("仓库未连接时不应拒绝: %#v", rejected)
-	}
-}
-
-// 隐式 bundle（目录有资产但没 manifest）在项目平面同样算可见。
-func TestValidateProjectEnabledBundles_AcceptsSynthesizedBundle(t *testing.T) {
-	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
-	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/implicit/skills/implicit-skill/SKILL.md": "---\nname: implicit-skill\n---\n",
-	})
-	if err := repo.Connect(remote); err != nil {
-		t.Fatal(err)
-	}
-	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote}); err != nil {
+	projectRoot := t.TempDir()
+	if err := config.NewProjectConfigManager(projectRoot).SaveProjectConfig(&types.ProjectConfig{}); err != nil {
 		t.Fatal(err)
 	}
 
-	rejected, err := validateProjectEnabledBundles([]string{"implicit"}, nil)
+	// 仓库未连接：私仓 pin 会因扫仓失败而报错；官方 pin 在 published==nil 时放行。
+	result, err := SetWorkspaceRequires(
+		context.Background(),
+		NewWorkspace(WorkspaceProject, projectRoot),
+		types.RequiresSpec{"relkit": "latest"},
+		nil,
+	)
 	if err != nil {
-		t.Fatalf("validateProjectEnabledBundles() 失败: %v", err)
+		t.Fatalf("SetWorkspaceRequires() 失败: %v", err)
 	}
-	if len(rejected) != 0 {
-		t.Fatalf("隐式 bundle 不应被拒: %#v", rejected)
+	if len(result.Subscribed) != 1 || result.Subscribed[0].Project != "relkit" {
+		t.Fatalf("Subscribed = %#v", result.Subscribed)
 	}
 }

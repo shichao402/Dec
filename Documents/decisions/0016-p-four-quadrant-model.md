@@ -1,6 +1,6 @@
 # 0016 — 顶层 Project 与公开/私有 × 本机/本仓库四象限
 
-- **状态**：已接受（阶段 1–7 已实施）；平面第二段改名为 `global`/`local`，见 [0017](0017-local-layout-version.md)
+- **状态**：已接受（阶段 1–7 已实施）；平面第二段改名为 `global`/`local`，见 [0017](0017-local-layout-version.md)。消费声明与 `requires` 语义段已被 [0029](0029-single-consumer-requires.md) 取代：消费只写 `.dec/config.yaml` 的 `requires` map，提供方组成改名 `depends_on`
 - **日期**：2026-08-27
 - **取代**：[0009](0009-bundle-binary-scope.md)、[0013](0013-secrets-belong-to-declared-target.md)、[0014](0014-bundle-sole-writable-aggregate.md)
 - **保留边界**：[0015](0015-project-config-boundary.md)；本机平面（`dec --global`）仍没有项目配置

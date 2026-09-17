@@ -152,11 +152,12 @@ func newDeleteGroupContext(workspace Workspace, projectConfig *types.ProjectConf
 		bundleOrder:  make(map[string]int),
 		secretsToDec: make(map[string]string),
 	}
-	for i, name := range projectConfig.EnabledBundles {
+	consumed := consumedProjectNames(projectConfig, workspace.EffectivePlane())
+	for i, name := range consumed {
 		ctx.bundleOrder[name] = i
 	}
 	// 远端地址 <p>/private/<plane> 直接指回项目名，没有别名可解析。
-	for _, pName := range projectConfig.EnabledBundles {
+	for _, pName := range consumed {
 		for _, plane := range []secrets.SyncPlane{secrets.SyncPlaneMachine, secrets.SyncPlaneProject} {
 			if target, err := secrets.NewPSyncTarget(pName, plane); err == nil {
 				ctx.secretsToDec[target.Address] = pName
@@ -261,7 +262,7 @@ func appendLocalSecretCandidates(
 		emit(reporter, EventWarn, "delete.secrets", "读取 secrets 配置失败，跳过本地 secrets 扫描: "+err.Error(), nil)
 		return
 	}
-	plan, err := planWorkspaceSecretsBrowse(workspace, projectConfig.EnabledBundles, cfg, reporter)
+	plan, err := planWorkspaceSecretsBrowse(workspace, consumedProjectNames(projectConfig, workspace.EffectivePlane()), cfg, reporter)
 	if err != nil {
 		emit(reporter, EventWarn, "delete.secrets", "规划 SyncTarget 失败，跳过本地 secrets 扫描: "+err.Error(), nil)
 		return
@@ -324,7 +325,7 @@ func appendRemoteSecretCandidates(
 	}
 
 	client := secretsClientFactory()
-	plan, err := planWorkspaceSecretsBrowse(workspace, projectConfig.EnabledBundles, cfg, reporter)
+	plan, err := planWorkspaceSecretsBrowse(workspace, consumedProjectNames(projectConfig, workspace.EffectivePlane()), cfg, reporter)
 	if err != nil {
 		emit(reporter, EventWarn, "delete.secrets", "规划 SyncTarget 失败: "+err.Error(), nil)
 		return nil

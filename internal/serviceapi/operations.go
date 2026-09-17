@@ -76,25 +76,15 @@ func LoadWorkspaceAssetSelection(workspace app.Workspace, reporter app.Reporter)
 	return invokeWorkspace[app.AssetSelectionState](context.Background(), "load_asset_selection", workspace, nil, reporter)
 }
 
-func SaveEnabledBundles(projectRoot string, bundles []string, reporter app.Reporter) (*app.SaveBundleSelectionResult, error) {
-	return invoke[app.SaveBundleSelectionResult](context.Background(), "save_enabled_bundles", projectRoot,
-		struct {
-			EnabledProjects []string
-			EnabledBundles  []string
-		}{EnabledProjects: bundles, EnabledBundles: bundles}, reporter)
+// SetWorkspaceRequires 是订阅的唯一写入口（ADR 0029）：写所属平面 config.yaml 的 requires。
+func SetWorkspaceRequires(workspace app.Workspace, spec types.RequiresSpec, reporter app.Reporter) (*app.SetRequiresResult, error) {
+	return invokeWorkspace[app.SetRequiresResult](context.Background(), "set_requires", workspace,
+		struct{ Requires types.RequiresSpec }{Requires: spec}, reporter)
 }
 
-func SaveWorkspaceEnabledBundles(workspace app.Workspace, bundles []string, reporter app.Reporter) (*app.SaveBundleSelectionResult, error) {
-	return invokeWorkspace[app.SaveBundleSelectionResult](context.Background(), "save_enabled_bundles", workspace,
-		struct {
-			EnabledProjects []string
-			EnabledBundles  []string
-		}{EnabledProjects: bundles, EnabledBundles: bundles}, reporter)
-}
-
-// SaveWorkspaceProjects is the ADR 0016 name; SaveWorkspaceEnabledBundles is retained for clients.
-func SaveWorkspaceProjects(workspace app.Workspace, projects []string, reporter app.Reporter) (*app.SaveBundleSelectionResult, error) {
-	return SaveWorkspaceEnabledBundles(workspace, projects, reporter)
+// ListWorkspaceSubscriptionCandidates 列出可订阅项目：个人私仓 ∪ 官方注册表已发布。
+func ListWorkspaceSubscriptionCandidates(workspace app.Workspace, reporter app.Reporter) (*app.AssetSelectionState, error) {
+	return invokeWorkspace[app.AssetSelectionState](context.Background(), "list_subscription_candidates", workspace, nil, reporter)
 }
 
 func ConnectRepo(repoURL string, reporter app.Reporter) (*app.ConnectRepoResult, error) {

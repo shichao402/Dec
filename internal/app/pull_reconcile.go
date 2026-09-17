@@ -242,10 +242,10 @@ func reconcileMissingVaultBundles(
 			other = NewWorkspace(WorkspaceUser, workspace.Root)
 		}
 		if changed, err := removeWorkspaceEnabledBundle(other, name); err != nil {
-			emit(reporter, EventWarn, "pull.reconcile", fmt.Sprintf("摘除另一平面 enabled 失败: %v", err), nil)
+			emit(reporter, EventWarn, "pull.reconcile", fmt.Sprintf("摘除另一平面订阅失败: %v", err), nil)
 		} else if changed {
 			emit(reporter, EventInfo, "pull.reconcile",
-				fmt.Sprintf("已从另一平面 enabled_bundles 移除 %q", name), nil)
+				fmt.Sprintf("已从另一平面 requires 移除 %q", name), nil)
 		}
 
 		if err := secrets.ForgetSecretBundles([]string{name}); err != nil {

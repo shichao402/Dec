@@ -225,11 +225,17 @@ export function SyncPage(props: {
               </PanelBody>
             )}
           </Panel>
-          {props.history.map((entry, index) => (
-            <PullResultCard key={`${entry.at.toISOString()}-${index}`} entry={entry} />
-          ))}
-          {props.history.length === 0 && (
+          {props.history.length === 0 ? (
             <EmptyState icon={<History className="size-5" />} text="还没有更新记录" />
+          ) : (
+            <Panel>
+              <PanelHeader title="更新记录" description={`最近 ${props.history.length} 条`} />
+              <div className="divide-y divide-line">
+                {props.history.map((entry, index) => (
+                  <PullResultLog key={`${entry.at.toISOString()}-${index}`} entry={entry} />
+                ))}
+              </div>
+            </Panel>
           )}
         </ScrollArea>
       </PageFill>
@@ -237,29 +243,36 @@ export function SyncPage(props: {
   )
 }
 
-function PullResultCard({ entry }: { entry: PullHistoryEntry }) {
+function PullResultLog({ entry }: { entry: PullHistoryEntry }) {
   const { headline, warnings, missing, skipped } = pullResultDiagnosis(entry.result)
   const result = entry.result
   const failed = Boolean(result.FailedCount)
   const hasNotes = Boolean(headline || skipped) || missing.length > 0 || warnings.length > 0
   return (
-    <Panel>
-      <PanelHeader
-        title={
-          <span className="flex items-center gap-2">
-            {failed ? <TriangleAlert className="size-4 text-bad" /> : <CheckCircle2 className="size-4 text-good" />}
-            {entry.title}
+    <div className="px-4 py-2.5">
+      <div className="flex items-start gap-2">
+        {failed
+          ? <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-bad" />
+          : <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-good" />}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[13px] text-ink">{entry.title}</span>
             {failed ? <Badge tone="bad">有失败</Badge> : hasNotes ? <Badge tone="warn">需要处理</Badge> : <Badge tone="good">完成</Badge>}
-          </span>
-        }
-        description={entry.at.toLocaleString()}
-      />
-      <PanelBody className="space-y-2">
-        {headline && <Notice text={headline} />}
-        {skipped && <Notice text={`已跳过：${skipped}`} />}
-        {missing.length > 0 && <WarningList title="缺失项目 / 资产" items={missing} />}
-        {warnings.length > 0 && <WarningList title="警告" items={warnings} />}
-      </PanelBody>
-    </Panel>
+            <span className="text-[11px] text-faint">{entry.at.toLocaleString()}</span>
+          </div>
+          <div className="tnum mt-0.5 text-[11px] text-faint">
+            已拉取 {result.PulledCount || 0} · Secrets {(result.SecretsNoteCount || 0) + (result.SecretsSSHKeyCount || 0)} · 失败 {result.FailedCount || 0}
+          </div>
+          {hasNotes && (
+            <div className="mt-2 space-y-1.5">
+              {headline && <Notice text={headline} />}
+              {skipped && <Notice text={`已跳过：${skipped}`} />}
+              {missing.length > 0 && <WarningList title="缺失项目 / 资产" items={missing} />}
+              {warnings.length > 0 && <WarningList title="警告" items={warnings} />}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }

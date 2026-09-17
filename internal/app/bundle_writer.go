@@ -27,14 +27,9 @@ func (w PWriter) BindHomeProject(projectRoot string, reporter Reporter) (*Config
 	return w.BindHomeP(projectRoot, reporter)
 }
 
-// SaveProjects 保存项目选择：user 平面写 enabled_projects；project 平面写家项目的 requires。
-func (PWriter) SaveProjects(workspace Workspace, names []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
-	return saveWorkspacePSelection(workspace, names, reporter)
-}
-
-// SaveEnabledBundles 是 wire/source 兼容名，新仓库中按项目语义执行。
-func (w PWriter) SaveEnabledBundles(workspace Workspace, names []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
-	return w.SaveProjects(workspace, names, reporter)
+// SetRequires 是订阅的唯一写入口（ADR 0029）：写所属平面消费方配置的 requires。
+func (PWriter) SetRequires(ctx context.Context, workspace Workspace, spec types.RequiresSpec, reporter Reporter) (*SetRequiresResult, error) {
+	return SetWorkspaceRequires(ctx, workspace, spec, reporter)
 }
 
 func (PWriter) PushWorkspace(ctx context.Context, workspace Workspace, reporter Reporter) (*PushProjectAssetsResult, error) {

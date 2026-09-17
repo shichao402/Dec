@@ -110,7 +110,7 @@ TUI 切页仍不取消在飞的那次 `Pull`（延续 async_io）。旁观流的
 | `GetStatus` | unary | `dec_status` / Home 概览（需 `project_root`） |
 | `ConnectRepo` | unary | `dec_connect_repo` |
 | `InitProject` | unary | `dec_init_project` |
-| `ListAssets` / `SetAssets` | unary | `dec_list_assets` / `dec_set_assets` |
+| `ListAssets` / `SetRequires` | unary | `dec_list_assets` / `dec_set_requires`（改名见 [0029](0029-single-consumer-requires.md)） |
 | `Pull` / `Push` / `PreviewPush` | **带进度流** | Run 页 / 同名 MCP：同一次调用里陆续推进度，最后给结果；project 忙时返回 busy |
 | `GetActiveOperation` | unary | 查某 project 是否有活跃操作及其元信息（类型/发起方/起始时间） |
 | `WatchOperation` | **server-stream** | 旁观某 project 的活跃操作进度（TUI 显示「MCP 正在 pull…」） |
@@ -119,7 +119,7 @@ TUI 切页仍不取消在飞的那次 `Pull`（延续 async_io）。旁观流的
 | `EnsureSession` / `SessionStatus` | unary | 请求 session；**不**向门面回传 session 明文或主密码；人工认证由 Console 协调 |
 | （配置）读写含 `server_idle_timeout` 的本机设置 | unary | Settings；与现有全局配置保存同一路径 |
 
-所有项目相关调用带 **`project_root`（或等价作用域）**；机器平面操作（如 user-enabled bundles）明确标为 machine scope。
+所有项目相关调用带 **`project_root`（或等价作用域）**；机器平面操作（如本机 `requires`）明确标为 machine scope。
 
 **首版不进 RPC**：`dec-exec` 合并与子进程启动；全局事件总线（跨 project 广播）。
 

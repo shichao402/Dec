@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -9,8 +10,88 @@ import (
 
 const RequiresLatest = "latest"
 
-// RequiresSpec 是消费声明：提供方项目名 → latest 或提供方版本（如 v0.3.20）。
+// RequiresVault 是个人私仓 pin：私仓是单分支可变仓，没有版本，只能跟随 HEAD（ADR 0029）。
+const RequiresVault = "vault"
+
+// RequiresSpec 是唯一的消费声明：提供方项目名 → pin。
+// pin 为 latest 或精确 v* 时解析官方注册表，为 vault 时解析个人私仓。
 type RequiresSpec map[string]string
+
+// IsVaultPin 判断 pin 是否指向个人私仓。
+func IsVaultPin(pin string) bool {
+	return strings.TrimSpace(pin) == RequiresVault
+}
+
+// VaultProjects 返回按名字排序的个人私仓订阅。
+func (r RequiresSpec) VaultProjects() []string {
+	out := make([]string, 0, len(r))
+	for name, pin := range r {
+		if IsVaultPin(pin) {
+			out = append(out, strings.TrimSpace(name))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// OfficialProjects 返回按名字排序的官方注册表订阅。
+func (r RequiresSpec) OfficialProjects() []string {
+	out := make([]string, 0, len(r))
+	for name, pin := range r {
+		if !IsVaultPin(pin) {
+			out = append(out, strings.TrimSpace(name))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Official 只保留官方注册表订阅，供 install 解析 tag。
+func (r RequiresSpec) Official() RequiresSpec {
+	if len(r) == 0 {
+		return nil
+	}
+	out := make(RequiresSpec, len(r))
+	for name, pin := range r {
+		if !IsVaultPin(pin) {
+			out[strings.TrimSpace(name)] = strings.TrimSpace(pin)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// IsVault 判断某个项目是否按私仓 pin 订阅。
+func (r RequiresSpec) IsVault(name string) bool {
+	if len(r) == 0 {
+		return false
+	}
+	return IsVaultPin(r[strings.TrimSpace(name)])
+}
+
+// AddVaultProjects 把私仓项目名并入声明，已存在的项目保持原 pin 不变。
+func (r RequiresSpec) AddVaultProjects(names []string) RequiresSpec {
+	out := make(RequiresSpec, len(r)+len(names))
+	for name, pin := range r {
+		out[strings.TrimSpace(name)] = strings.TrimSpace(pin)
+	}
+	for _, raw := range names {
+		name := strings.TrimSpace(strings.TrimPrefix(raw, "bundle/"))
+		if name == "" || !IsValidProjectName(name) {
+			continue
+		}
+		if _, ok := out[name]; ok {
+			continue
+		}
+		out[name] = RequiresVault
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 func (r *RequiresSpec) UnmarshalYAML(value *yaml.Node) error {
 	if r == nil {
@@ -68,8 +149,8 @@ func NormalizeRequiresSpec(in RequiresSpec) (RequiresSpec, error) {
 		if strings.ContainsAny(ver, "/\\ \t") {
 			return nil, fmt.Errorf("requires.%s 版本 %q 非法", name, rawVer)
 		}
-		if ver != RequiresLatest && !strings.HasPrefix(ver, "v") {
-			return nil, fmt.Errorf("requires.%s 版本 %q 必须是 latest 或 v 开头的提供方 tag", name, rawVer)
+		if ver != RequiresLatest && ver != RequiresVault && !strings.HasPrefix(ver, "v") {
+			return nil, fmt.Errorf("requires.%s pin %q 必须是 latest、vault 或 v 开头的提供方 tag", name, rawVer)
 		}
 		if _, dup := out[name]; dup {
 			return nil, fmt.Errorf("requires 重复项目 %q", name)

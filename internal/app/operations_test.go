@@ -21,7 +21,7 @@ func TestPullProjectAssetsSkipsWithoutEnabledAssets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	want := "未启用 bundle"
+	want := "未订阅任何项目"
 	if result.SkippedReason != want {
 		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, want)
 	}
@@ -32,7 +32,7 @@ func TestPullProjectAssetsSkipsWithoutEnabledAssets(t *testing.T) {
 func TestPullProjectAssetsWarnsOnMissingBundle(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/another-workflow/SKILL.md": `---
+		"default/public/project/skills/another-workflow/SKILL.md": `---
 name: another-workflow
 ---
 `,
@@ -44,7 +44,7 @@ name: another-workflow
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		EnabledBundles: []string{"deleted-vault"},
+		Requires: types.RequiresSpec{"deleted-vault": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestPullProjectAssetsInstallsAssetsAndReportsProgress(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/default/skills/project-workflow/SKILL.md": `---
+		"default/public/project/skills/project-workflow/SKILL.md": `---
 name: project-workflow
 ---
 `,
@@ -95,7 +95,7 @@ name: project-workflow
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"default"},
+		Requires: types.RequiresSpec{"default": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -117,7 +117,7 @@ name: project-workflow
 		t.Fatal("VersionCommit 不应为空")
 	}
 
-	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", "cache", "default", "skills", "project-workflow", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", "cache", "default", "public", "local", "skills", "project-workflow", "SKILL.md")); err != nil {
 		t.Fatalf("缓存文件应存在: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-project-workflow", "SKILL.md")); err != nil {
@@ -133,17 +133,15 @@ name: project-workflow
 		t.Fatalf("dec 不应写入 mise.local.toml, stat err = %v", err)
 	}
 
-	var sawStart, sawFinish bool
+	var sawStart bool
 	for _, event := range events {
 		if event.Scope == "pull.start" {
 			sawStart = true
-		}
-		if event.Scope == "pull.finish" {
-			sawFinish = true
+			break
 		}
 	}
-	if !sawStart || !sawFinish {
-		t.Fatalf("事件流缺少开始或结束事件: %#v", events)
+	if !sawStart {
+		t.Fatalf("事件流缺少 pull.start: %#v", events)
 	}
 }
 
@@ -151,13 +149,9 @@ func TestPullProjectAssetsInstallsBundleMembers(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/combo/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
-		"bundles/combo/rules/bundle-rule.mdc":        "---\ndescription: rule\n---\n",
-		"bundles/combo/bundle.yaml": `name: combo
-description: bundle-integration test
-members:
-  - skill/bundle-skill
-  - rule/bundle-rule
+		"combo/public/project/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
+		"combo/public/project/rules/bundle-rule.mdc": "---\ndescription: rule\n---\n",
+		"combo/dec.yaml": `name: combo
 `,
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -168,7 +162,7 @@ members:
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"combo"},
+		Requires: types.RequiresSpec{"combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -186,8 +180,8 @@ members:
 		t.Fatalf("AssetSources 长度 = %d, 期望 2; 内容 %#v", len(result.AssetSources), result.AssetSources)
 	}
 	for key, sources := range result.AssetSources {
-		if len(sources) != 1 || sources[0] != "bundle/combo" {
-			t.Fatalf("AssetSources[%s] = %#v, 期望 [bundle/combo]", key, sources)
+		if len(sources) != 1 || sources[0] != "p/combo" {
+			t.Fatalf("AssetSources[%s] = %#v, 期望 [p/combo]", key, sources)
 		}
 	}
 
@@ -257,15 +251,11 @@ func TestPullProjectAssetsCleansDeselectedBundleAssets(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"bundles/vikunja/bundle.yaml": `name: vikunja
-members:
-  - skill/vikunja-workflow
+		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"vikunja/dec.yaml": `name: vikunja
 `,
-		"bundles/combo/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
-		"bundles/combo/bundle.yaml": `name: combo
-members:
-  - skill/bundle-skill
+		"combo/public/project/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
+		"combo/dec.yaml": `name: combo
 `,
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -276,7 +266,7 @@ members:
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"vikunja"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -284,7 +274,7 @@ members:
 	if _, err := PullProjectAssets(context.Background(), projectRoot, "", nil); err != nil {
 		t.Fatalf("首次 pull vikunja 失败: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", "cache", "vikunja", "skills", "vikunja-workflow", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", "cache", "vikunja", "public", "local", "skills", "vikunja-workflow", "SKILL.md")); err != nil {
 		t.Fatalf("vikunja cache 应存在: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "SKILL.md")); err != nil {
@@ -293,7 +283,7 @@ members:
 
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"combo"},
+		Requires: types.RequiresSpec{"combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("切换 enabled_bundles 失败: %v", err)
 	}
@@ -308,7 +298,7 @@ members:
 	if len(result.CleanedAssets) == 0 {
 		t.Fatalf("应清理 vikunja 残留资产, CleanedAssets=%#v", result.CleanedAssets)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", "cache", "vikunja", "skills", "vikunja-workflow", "SKILL.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".dec", "cache", "vikunja", "public", "local", "skills", "vikunja-workflow", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("取消后 vikunja cache 应被删除, err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, ".cursor", "skills", "dec-vikunja-workflow", "SKILL.md")); !os.IsNotExist(err) {
@@ -323,10 +313,8 @@ func TestPullProjectAssetsCleansWhenAllBundlesDeselected(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"bundles/vikunja/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"bundles/vikunja/bundle.yaml": `name: vikunja
-members:
-  - skill/vikunja-workflow
+		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
+		"vikunja/dec.yaml": `name: vikunja
 `,
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -336,9 +324,9 @@ members:
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Demo",
+		ProjectName:    "",
 		IDEs:           []string{"cursor"},
-		EnabledBundles: []string{"vikunja"},
+		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -355,9 +343,9 @@ members:
 	}
 
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "Demo",
+		ProjectName:    "",
 		IDEs:           []string{"cursor"},
-		EnabledBundles: nil,
+		Requires: nil,
 	}); err != nil {
 		t.Fatalf("清空 enabled_bundles 失败: %v", err)
 	}

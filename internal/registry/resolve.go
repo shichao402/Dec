@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/internal/types"
@@ -37,6 +38,34 @@ func Resolve(project, want string, versions []string, yanked Yanked) (tag string
 		return "", "", err
 	}
 	return tag, version, nil
+}
+
+// ProjectsFromTags 从 git tag 列表抽出所有已发布项目名（按名字排序、去重）。
+func ProjectsFromTags(tags []string) []string {
+	seen := make(map[string]struct{}, len(tags))
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if !strings.HasPrefix(t, TagPrefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(t, TagPrefix)
+		idx := strings.Index(rest, "/")
+		if idx <= 0 {
+			continue
+		}
+		project := rest[:idx]
+		if !types.IsValidProjectName(project) {
+			continue
+		}
+		if _, ok := seen[project]; ok {
+			continue
+		}
+		seen[project] = struct{}{}
+		out = append(out, project)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // VersionsFromTags 从 git tag 列表抽出某项目的版本。

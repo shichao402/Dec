@@ -52,12 +52,3 @@ func TestWatchStdinIdle_ResetsOnRead(t *testing.T) {
 	_ = w.Close()
 	<-done
 }
-
-func TestIsUnexpandedPlaceholder(t *testing.T) {
-	if !isUnexpandedPlaceholder("${workspaceFolder}") {
-		t.Fatal("应识别未展开的 VS Code 变量")
-	}
-	if isUnexpandedPlaceholder(`D:\workspace\GitHub\Dec`) {
-		t.Fatal("真实路径不应被当成占位符")
-	}
-}

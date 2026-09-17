@@ -25,7 +25,7 @@ func TestLockedInvokeWhitelistIsNarrow(t *testing.T) {
 		"load_global_settings",
 		"list_secrets",
 		"connect_repo",
-		"save_enabled_bundles",
+		"set_requires",
 	}
 	for _, method := range blocked {
 		if invokeAllowedWhenLocked(method) {

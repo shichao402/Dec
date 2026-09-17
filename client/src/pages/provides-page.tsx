@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import { ActionFeedback } from '@/components/action-feedback'
+import { Page, PageHeader, PageScroll } from '@/components/shell/page'
 import { ActionButton } from '@/components/ui/action-button'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState, Loading } from '@/components/ui/feedback'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Field, Input, Select } from '@/components/ui/input'
-import { Panel, PanelFooter, PanelHeader } from '@/components/ui/panel'
+import { Panel, PanelFooter } from '@/components/ui/panel'
 import { useActionRegistry } from '@/lib/action-context'
 import { invokeTyped } from '@/lib/api'
 import { actionSpec, resource } from '@/lib/console'
 
-export type ProvideMapping = {
+type ProvideMapping = {
   Source: string
   Visibility: string
   Plane: string
@@ -62,7 +63,13 @@ function providesPayload(mappings: ProvideMapping[]) {
   return Object.fromEntries(mappings.map(({ Target: _target, ...mapping }) => [mapping.Name, mapping]))
 }
 
-export function ProvidesPanel(props: { deviceId: string; root: string; planeFilter?: 'global' | 'local'; title?: string }) {
+// 只有资产作者会碰提供项，所以它是项目的下级页面，不占项目页主区。
+export function ProvidesPage(props: {
+  deviceId: string
+  root: string
+  label: string
+  onBack: () => void
+}) {
   const [saved, setSaved] = useState<ProvideMapping[] | null>(null)
   const [draft, setDraft] = useState<ProvideMapping[]>([])
   const [savedRoot, setSavedRoot] = useState('')
@@ -73,15 +80,14 @@ export function ProvidesPanel(props: { deviceId: string; root: string; planeFilt
   const actions = useActionRegistry()
   const runAction = actions.run
   const workspaceResource = resource.workspace(props.root)
-  const scope = props.root || 'global'
   const loadSpec = useMemo(
-    () => actionSpec(`provides:load:${props.deviceId}:${scope}`, '加载项目提供项', props.deviceId, [workspaceResource], 'read'),
-    [props.deviceId, scope, workspaceResource],
+    () => actionSpec(`provides:load:${props.deviceId}:${props.root}`, '加载项目提供项', props.deviceId, [workspaceResource], 'read'),
+    [props.deviceId, props.root, workspaceResource],
   )
-  const saveSpec = actionSpec(`provides:save:${props.deviceId}:${scope}`, '保存项目提供项', props.deviceId, [workspaceResource], 'write', '项目提供项已保存')
+  const saveSpec = actionSpec(`provides:save:${props.deviceId}:${props.root}`, '保存项目提供项', props.deviceId, [workspaceResource], 'write', '项目提供项已保存')
   const suggestSpec = useMemo(
-    () => actionSpec(`provides:suggest:${props.deviceId}:${scope}`, '扫描可提供资产', props.deviceId, [workspaceResource], 'read'),
-    [props.deviceId, scope, workspaceResource],
+    () => actionSpec(`provides:suggest:${props.deviceId}:${props.root}`, '扫描可提供资产', props.deviceId, [workspaceResource], 'read'),
+    [props.deviceId, props.root, workspaceResource],
   )
 
   const load = useCallback(async () => {
@@ -129,17 +135,11 @@ export function ProvidesPanel(props: { deviceId: string; root: string; planeFilt
     setRoot(value)
   }
   const declaredSources = new Set(draft.map((item) => item.Source.toLowerCase()))
-  const available = (candidates || []).filter((item) => (
-    !declaredSources.has(item.Source.toLowerCase())
-    && (!props.planeFilter || item.Plane === props.planeFilter)
-  ))
+  const available = (candidates || []).filter((item) => !declaredSources.has(item.Source.toLowerCase()))
   const addCandidates = (items: Candidate[]) => {
     setDraft((current) => [
       ...current,
-      ...items.map(({ Origin: _origin, Declared: _declared, ...mapping }) => ({
-        ...mapping,
-        Plane: props.planeFilter || mapping.Plane,
-      })),
+      ...items.map(({ Origin: _origin, Declared: _declared, ...mapping }) => mapping),
     ])
     setEditing(null)
   }
@@ -148,102 +148,107 @@ export function ProvidesPanel(props: { deviceId: string; root: string; planeFilt
   }
 
   return (
-    <Panel className="shrink-0">
-      <PanelHeader
-        title={props.title || '我提供的资产'}
+    <Page>
+      <PageHeader
+        title="我提供的资产"
         description="登记本项目提供的 Git 资产；secrets 由 .secrets 同步规则决定，不在这里声明。"
-        action={
-          <Button size="sm" variant="ghost" onClick={() => void scan()}>
-            <RefreshCw className="size-3.5" />重新扫描
-          </Button>
+        meta={<Badge tone="quiet" className="font-mono" title={props.root}>{props.label}</Badge>}
+        actions={
+          <>
+            <Button variant="outline" onClick={props.onBack}>返回</Button>
+            <Button variant="outline" onClick={() => void scan()}>
+              <RefreshCw className="size-4" />
+              重新扫描
+            </Button>
+          </>
         }
       />
-      <div className="px-4 pt-3 empty:hidden">
-        <ActionFeedback actionKey={loadSpec.key} />
-        <ActionFeedback actionKey={suggestSpec.key} />
-        <ActionFeedback actionKey={saveSpec.key} />
-      </div>
-      <AuthorRootField
-        value={root}
-        savedDirs={authorDirs}
-        pending={root !== savedRoot}
-        onCommit={commitRoot}
-      />
-      <CandidatePicker candidates={available} onAdd={addCandidates} />
-      {saved === null ? (
-        <Loading />
-      ) : draft.filter((item) => !props.planeFilter || item.Plane === props.planeFilter).length === 0 ? (
-        <EmptyState
-          text="当前项目还没有登记提供项"
-          hint={available.length > 0
-            ? '上面是从作者目录扫描到的资产，勾选即可登记。'
-            : `请先在上面列出的作者目录中创建资产（${authorDirs.join('、') || 'skills、commands、rules、mcp'}），再重新扫描。`}
-        />
-      ) : (
-        <div className="divide-y divide-line">
-          {draft.map((item, index) => {
-            if (props.planeFilter && item.Plane !== props.planeFilter) return null
-            const open = editing === index
-            return (
-              <div key={`${index}-${item.Source}-${item.Name}`} className="px-4 py-3">
-                {open ? (
-                  <ProvideEditor
-                    value={item}
-                    onChange={(value) => update(index, value)}
-                    onDone={() => setEditing(null)}
-                  />
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-mono text-xs font-medium text-ink">{item.Type}/{item.Name || '未命名'}</span>
-                        <Badge tone="quiet">{item.Visibility}</Badge>
-                        <Badge tone="quiet">{item.Plane}</Badge>
-                      </div>
-                      <p className="mt-1 truncate font-mono text-[11px] text-faint" title={item.Source}>
-                        {item.Source || '尚未填写来源'}{item.Target ? ` → ${item.Target}` : ''}
-                      </p>
-                    </div>
-                    <Button size="icon" variant="ghost" aria-label={`编辑 ${item.Name}`} onClick={() => setEditing(index)}>
-                      <Pencil className="size-3.5" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label={`删除 ${item.Name}`}
-                      onClick={() => {
-                        setDraft((items) => items.filter((_, itemIndex) => itemIndex !== index))
-                        setEditing(null)
-                      }}
-                    >
-                      <Trash2 className="size-3.5 text-bad" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )
-          })}
+      <PageScroll className="space-y-4">
+        <div className="space-y-2 empty:hidden">
+          <ActionFeedback actionKey={loadSpec.key} />
+          <ActionFeedback actionKey={suggestSpec.key} />
+          <ActionFeedback actionKey={saveSpec.key} />
         </div>
-      )}
-      <PanelFooter>
-        <ActionButton
-          spec={saveSpec}
-          disabled={!dirty || draft.some((item) => !item.Source.trim() || !item.Name.trim())}
-          action={() => invokeTyped(
-            'save_project_provides',
-            props.root,
-            'local',
-            { ProvidesRoot: root, Provides: providesPayload(draft) },
-            saveSpec.key,
+        <Panel>
+          <AuthorRootField
+            value={root}
+            savedDirs={authorDirs}
+            pending={root !== savedRoot}
+            onCommit={commitRoot}
+          />
+          <CandidatePicker candidates={available} onAdd={addCandidates} />
+          {saved === null ? (
+            <Loading />
+          ) : draft.length === 0 ? (
+            <EmptyState
+              text="当前项目还没有登记提供项"
+              hint={available.length > 0
+                ? '上面是从作者目录扫描到的资产，勾选即可登记。'
+                : `请先在上面列出的作者目录中创建资产（${authorDirs.join('、') || 'skills、commands、rules、mcp'}），再重新扫描。`}
+            />
+          ) : (
+            <div className="divide-y divide-line">
+              {draft.map((item, index) => (
+                <div key={`${index}-${item.Source}-${item.Name}`} className="px-4 py-3">
+                  {editing === index ? (
+                    <ProvideEditor
+                      value={item}
+                      onChange={(value) => update(index, value)}
+                      onDone={() => setEditing(null)}
+                    />
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono text-xs font-medium text-ink">{item.Type}/{item.Name || '未命名'}</span>
+                          <Badge tone="quiet">{item.Visibility}</Badge>
+                          <Badge tone="quiet">{item.Plane}</Badge>
+                        </div>
+                        <p className="mt-1 truncate font-mono text-[11px] text-faint" title={item.Source}>
+                          {item.Source || '尚未填写来源'}{item.Target ? ` → ${item.Target}` : ''}
+                        </p>
+                      </div>
+                      <Button size="icon" variant="ghost" aria-label={`编辑 ${item.Name}`} onClick={() => setEditing(index)}>
+                        <Pencil className="size-3.5" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`删除 ${item.Name}`}
+                        onClick={() => {
+                          setDraft((items) => items.filter((_, itemIndex) => itemIndex !== index))
+                          setEditing(null)
+                        }}
+                      >
+                        <Trash2 className="size-3.5 text-bad" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
-          runningLabel="保存中…"
-          onSuccess={() => { void load(); void scan() }}
-        >
-          保存提供项
-        </ActionButton>
-        <span className="text-xs text-faint">{dirty ? '有未保存的改动' : `已配置 ${draft.length} 项`}</span>
-      </PanelFooter>
-    </Panel>
+          <PanelFooter>
+            <ActionButton
+              spec={saveSpec}
+              disabled={!dirty || draft.some((item) => !item.Source.trim() || !item.Name.trim())}
+              action={() => invokeTyped(
+                'save_project_provides',
+                props.root,
+                'local',
+                { ProvidesRoot: root, Provides: providesPayload(draft) },
+                saveSpec.key,
+              )}
+              runningLabel="保存中…"
+              onSuccess={() => { void load(); void scan() }}
+            >
+              保存提供项
+            </ActionButton>
+            <span className="text-xs text-faint">{dirty ? '有未保存的改动' : `已配置 ${draft.length} 项`}</span>
+          </PanelFooter>
+        </Panel>
+      </PageScroll>
+    </Page>
   )
 }
 

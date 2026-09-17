@@ -39,7 +39,7 @@ type AssetBundleOption struct {
 	// Members 为 bundle 成员解析后的定位信息，顺序与 bundle YAML 中声明保持一致。
 	// 若成员解析失败或资产不存在，这里会跳过（LoadAssetSelection 已通过 reporter 打 warning）。
 	Members []AssetSelectionItem
-	// Enabled 表示当前平面的 enabled_bundles 是否已引用该 bundle。
+	// Enabled 表示该项目已被当前平面的 requires 订阅，或是作者身份家项目。
 	Enabled bool
 	// SecretsOnly 表示该 bundle 目前只存在于 Bitwarden / known 列表，vault 里还没有 manifest。
 	// 勾选保存后 ensureVaultBundlesForUserEnable 会补一份 scope=user 的 manifest，此标记随之消失。
@@ -49,22 +49,37 @@ type AssetBundleOption struct {
 	// 它不是「未登记」，也不能在本平面启用——跨平面要先显式改 manifest 的 scope（ADR 0013）。
 	OtherPlane bool
 	// RemoteMissing 表示本次核对过 Bitwarden，远端并没有同名 secrets folder：
-	// 该候选纯粹来自本机 known_secret_bundles / enabled_bundles 的残留记录。
+	// 该候选纯粹来自本机 known_secret_bundles / 历史订阅的残留记录。
 	// 仅在 SecretsOnly 为 true 时有意义，用于避免谎称「Bitwarden 已有同名 secrets」。
 	RemoteMissing bool
 	// RemoteUnverified 表示本次没能核对远端（无 session、枚举失败，或该 bundle 配了别名 folder），
 	// 因此既不能声称远端已有、也不能断言远端没有。仅在 SecretsOnly 为 true 时有意义。
 	RemoteUnverified bool
-	// Model="p" 表示顶层项目；Home/Required 分别表示家项目与直接 requires。
+	// Model="p" 表示顶层项目；Home 表示本工作区的作者身份项目，
+	// Required 表示已在 requires 中订阅（ADR 0029）。
 	Model     string
 	Home      bool
 	Required  bool
 	Quadrants map[string]int
 	// Tags 来自项目声明。global 表示推荐作为 Global 资产导入本机。
 	Tags []string
+	// Source 指出该项目来自哪套存储：vault 为个人私仓，official 为官方注册表。
+	Source string
+	// Pin 是当前订阅的 requires 值（latest / v* / vault）；未订阅时为空。
+	Pin string
+	// Installed / Available 只对官方注册表项目有意义：本机已装版本与远端可用版本。
+	Installed       string
+	Available       string
+	UpdateAvailable bool
 }
 
-// AssetSelectionState 是 Bundles 页的数据源：仓库里全部 bundle + 当前启用态。
+// 订阅来源（ADR 0029）。
+const (
+	AssetSourceVault    = "vault"
+	AssetSourceOfficial = "official"
+)
+
+// AssetSelectionState 是订阅面板的数据源：可订阅项目 + 当前订阅态。
 type AssetSelectionState struct {
 	ProjectRoot    string
 	ConfigPath     string
@@ -85,7 +100,7 @@ type SaveBundleSelectionResult struct {
 	VarsPath           string
 	VarsCreated        bool
 	EnabledBundleCount int
-	// RejectedBundles 是本次勾选中未能启用的条目（含原因），已从 enabled_bundles 排除。
+	// RejectedBundles 是本次勾选中未能订阅的条目（含原因），已从 requires 排除。
 	// 两平面都会出现：跨平面启用需先显式改 vault manifest 的 scope（ADR 0013 §7 / §7a）。
 	RejectedBundles []string
 	// 新语义字段；旧字段保留 wire 兼容。
@@ -133,7 +148,7 @@ func LoadWorkspaceAssetSelection(workspace Workspace, reporter Reporter) (*Asset
 		state.ConfigPath = globalPath
 		state.VarsPath, _ = config.GetGlobalVarsPath()
 		state.ExistingConfig = true
-		existingConfig = &types.ProjectConfig{EnabledBundles: append([]string(nil), globalConfig.EnabledBundles...)}
+		existingConfig = &types.ProjectConfig{Requires: globalConfig.Requires}
 	} else if mgr.Exists() {
 		state.ExistingConfig = true
 		emit(reporter, EventInfo, "assets.load", "检测到现有项目配置，准备加载 bundle 选择状态", nil)
@@ -166,193 +181,6 @@ func LoadWorkspaceAssetSelection(workspace Workspace, reporter Reporter) (*Asset
 	return state, nil
 }
 
-// SaveEnabledBundles 把 bundle 勾选写入 .dec/config.yaml。
-//
-// bundles 为 nil 或空表示「一个 bundle 都不启用」，会清空 enabled_bundles。
-// 除 enabled_bundles 外的字段（IDEs / Editor / Version / ProjectName）一律从磁盘原样带过。
-func SaveEnabledBundles(projectRoot string, bundles []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
-	return SaveWorkspaceEnabledBundles(NewWorkspace(WorkspaceProject, projectRoot), bundles, reporter)
-}
-
-// SaveWorkspaceEnabledBundles 将选择写入所属平面的唯一配置源。
-func SaveWorkspaceEnabledBundles(workspace Workspace, bundles []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
-	if usesP, _ := connectedRepositoryUsesPModel(); usesP {
-		return saveWorkspacePSelection(workspace, bundles, reporter)
-	}
-	return saveWorkspaceLegacyBundleSelection(workspace, bundles, reporter)
-}
-
-func saveWorkspaceLegacyBundleSelection(workspace Workspace, bundles []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
-	reporter = defaultReporter(reporter)
-	if workspace.EffectivePlane() == WorkspaceUser {
-		globalConfig, err := config.LoadGlobalConfig()
-		if err != nil {
-			return nil, err
-		}
-		configPath, err := config.GetGlobalConfigPath()
-		if err != nil {
-			return nil, err
-		}
-		result := &SaveBundleSelectionResult{ConfigPath: configPath}
-		result.VarsPath, _ = config.GetGlobalVarsPath()
-
-		// 先修/校验共享 vault，再落本机启用列表：被拒绝的名字不能进 enabled_bundles，
-		// 否则会留下一个「勾了但平面隔离永远看不见」的条目（ADR 0013）。
-		requested := normalizeEnabledBundles(bundles)
-		emit(reporter, EventInfo, "assets.save", "校验仓库 bundle 声明", &Progress{Phase: "write", Current: 1, Total: 2})
-		repair, err := ensureVaultBundlesForUserEnable(requested, reporter)
-		if err != nil {
-			return nil, err
-		}
-		if repair != nil && len(repair.Rejected) > 0 {
-			requested = excludeBundleNames(requested, repair.rejectedNames())
-			for _, rj := range repair.Rejected {
-				result.RejectedBundles = append(result.RejectedBundles,
-					fmt.Sprintf("%s（%s）", rj.Name, rj.Reason))
-			}
-		}
-
-		globalConfig.EnabledBundles = requested
-		result.EnabledBundleCount = len(requested)
-		if err := config.SaveGlobalConfig(globalConfig); err != nil {
-			return nil, fmt.Errorf("写入用户平面配置失败: %w", err)
-		}
-		emit(reporter, EventInfo, "assets.save", "bundle 选择已保存", &Progress{Phase: "write", Current: 2, Total: 2})
-		return result, nil
-	}
-	projectRoot := workspace.Root
-	mgr := config.NewProjectConfigManager(projectRoot)
-	result := &SaveBundleSelectionResult{
-		ConfigPath: filepath.Join(mgr.GetDecDir(), "config.yaml"),
-		VarsPath:   mgr.GetVarsPath(),
-	}
-
-	projectConfig, err := mgr.LoadProjectConfig()
-	if err != nil {
-		return nil, err
-	}
-	if projectConfig == nil {
-		projectConfig = &types.ProjectConfig{}
-	}
-
-	// 与用户平面一样先校验仓库声明：本平面看不见的名字不能进 enabled_bundles，
-	// 否则每次 pull 只会得到一句「引用的 bundle 找不到声明，已忽略」。
-	requested := normalizeEnabledBundles(bundles)
-	emit(reporter, EventInfo, "assets.save", "校验仓库 bundle 声明", nil)
-	rejected, err := validateProjectEnabledBundles(requested, reporter)
-	if err != nil {
-		return nil, err
-	}
-	if len(rejected) > 0 {
-		requested = excludeBundleNames(requested, projectRejectedNames(rejected))
-		for _, rj := range rejected {
-			result.RejectedBundles = append(result.RejectedBundles,
-				fmt.Sprintf("%s（%s）", rj.Name, rj.Reason))
-		}
-	}
-
-	projectConfig.EnabledBundles = requested
-	result.EnabledBundleCount = len(projectConfig.EnabledBundles)
-
-	emit(reporter, EventInfo, "assets.save", "写入项目配置", &Progress{Phase: "write", Current: 1, Total: 2})
-	if err := mgr.SaveProjectConfig(projectConfig); err != nil {
-		return nil, fmt.Errorf("写入配置失败: %w", err)
-	}
-
-	varsCreated, err := mgr.EnsureVarsConfigTemplate()
-	if err != nil {
-		return nil, fmt.Errorf("写入变量定义模板失败: %w", err)
-	}
-	result.VarsCreated = varsCreated
-
-	emit(reporter, EventInfo, "assets.save", "bundle 选择已保存", &Progress{Phase: "write", Current: 2, Total: 2})
-	return result, nil
-}
-
-func saveWorkspacePSelection(workspace Workspace, names []string, reporter Reporter) (*SaveBundleSelectionResult, error) {
-	reporter = defaultReporter(reporter)
-	requested := normalizeEnabledBundles(names)
-	result := &SaveBundleSelectionResult{Model: "p"}
-	var available map[string]*pmodel.Loaded
-	if err := withLocalReadRepoDir(func(repoDir string) error {
-		var err error
-		available, err = pmodel.Scan(repoDir)
-		return err
-	}); err != nil {
-		return nil, err
-	}
-	valid := make([]string, 0, len(requested))
-	for _, name := range requested {
-		if _, ok := available[name]; !ok {
-			result.RejectedProjects = append(result.RejectedProjects, name+"（项目不存在）")
-			result.RejectedBundles = append(result.RejectedBundles, name+"（项目不存在）")
-			continue
-		}
-		valid = append(valid, name)
-	}
-	if workspace.EffectivePlane() == WorkspaceUser {
-		cfg, err := config.LoadGlobalConfig()
-		if err != nil {
-			return nil, err
-		}
-		cfg.EnabledProjects = append([]string(nil), valid...)
-		cfg.EnabledBundles = append([]string(nil), valid...)
-		if err := config.SaveGlobalConfig(cfg); err != nil {
-			return nil, err
-		}
-		result.ConfigPath, _ = config.GetGlobalConfigPath()
-		result.VarsPath, _ = config.GetGlobalVarsPath()
-		result.EnabledProjects = append([]string(nil), valid...)
-		result.EnabledBundleCount = len(valid)
-		emit(reporter, EventInfo, "p.save", fmt.Sprintf("已保存 %d 个用户启用项目", len(valid)), nil)
-		return result, nil
-	}
-
-	mgr := config.NewProjectConfigManager(workspace.Root)
-	cfg, err := mgr.LoadProjectConfig()
-	if err != nil {
-		return nil, err
-	}
-	home := strings.TrimSpace(cfg.ProjectName)
-	if !types.IsValidPName(home) {
-		return nil, fmt.Errorf("项目尚未绑定合法家项目")
-	}
-	requires := make([]string, 0, len(valid))
-	for _, name := range valid {
-		if name != home {
-			requires = append(requires, name)
-		}
-	}
-	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
-		loaded, err := pmodel.Load(tx.WorkDir(), home)
-		if err != nil {
-			return fmt.Errorf("加载家项目 %q 失败: %w", home, err)
-		}
-		manifest := loaded.Manifest
-		manifest.Requires = requires
-		if err := pmodel.SaveManifest(tx.WorkDir(), manifest); err != nil {
-			return err
-		}
-		_, err = tx.CommitAndPush("p: update " + home + " requires")
-		return err
-	}); err != nil {
-		return nil, err
-	}
-	// 项目模型下本地配置只绑定家项目；requires 的 SSOT 是 <home>/dec.yaml。
-	cfg.EnabledBundles = nil
-	if err := mgr.SaveProjectConfig(cfg); err != nil {
-		return nil, err
-	}
-	result.ConfigPath = filepath.Join(mgr.GetDecDir(), "config.yaml")
-	result.VarsPath = mgr.GetVarsPath()
-	result.HomeProject = home
-	result.RequiredProjects = append([]string(nil), requires...)
-	result.EnabledProjects = append([]string{home}, requires...)
-	result.EnabledBundleCount = len(result.EnabledProjects)
-	emit(reporter, EventInfo, "p.save", fmt.Sprintf("家项目 %s requires 已保存：%s", home, strings.Join(requires, ", ")), nil)
-	return result, nil
-}
-
 // loadBundleSelection 扫描仓库内 bundle 声明，返回全部 bundle 选项（含未启用的）。
 //
 // 本函数只为 Bundles 页展示服务，任何错误都降级为 reporter warning，不向上传播；
@@ -381,11 +209,9 @@ func loadBundleSelectionForPlane(projectConfig *types.ProjectConfig, plane Works
 		_ = secrets.RememberSecretBundles(names)
 	}
 
-	enabledSet := make(map[string]struct{})
+	var requires types.RequiresSpec
 	if projectConfig != nil {
-		for _, name := range projectConfig.EnabledBundles {
-			enabledSet[name] = struct{}{}
-		}
+		requires = projectConfig.Requires
 	}
 	options := make([]AssetBundleOption, 0, len(resolved.Bundles))
 	for _, bo := range resolved.Bundles {
@@ -393,15 +219,16 @@ func loadBundleSelectionForPlane(projectConfig *types.ProjectConfig, plane Works
 			Name:        bo.Name,
 			Description: bo.Description,
 			Vault:       bo.VaultName,
-			Enabled:     bo.Enabled,
+			Enabled:     bo.Enabled || requires.IsVault(bo.Name),
 			Model:       bo.Model,
 			Home:        bo.Home,
 			Required:    bo.Required,
 			Quadrants:   bo.Quadrants,
 			Tags:        append([]string(nil), bo.Tags...),
+			Source:      AssetSourceVault,
 		}
-		if _, ok := enabledSet[bo.Name]; ok {
-			opt.Enabled = true
+		if requires.IsVault(bo.Name) {
+			opt.Pin = types.RequiresVault
 		}
 		opt.Members = buildBundleMemberItems(bo, tx.WorkDir())
 		options = append(options, opt)
@@ -432,7 +259,7 @@ func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Works
 
 	var enabled []string
 	if projectConfig != nil {
-		enabled = projectConfig.EnabledBundles
+		enabled = projectConfig.Requires.VaultProjects()
 	}
 	sessionReady := secrets.HasSession() && secrets.HasUserKey()
 	inventory := listRemoteSecretBundleInventory(sessionReady, "assets.bundle", reporter)

@@ -32,25 +32,29 @@ Dec 的解决方案：
 | **个人私仓** | 人 `git push` / Console 对私仓提交 | 你自己要留的 Git 资产 |
 | **Bitwarden** | Console 认证后由 `dec-server` | 密钥，不进任何 Git |
 
-消费仓用 `requires` 声明官方依赖。个人资产由本机/私仓启用列表决定，不和官方 `requires` 混写。
+消费仓用一张 `requires` 表声明订阅，官方与个人私仓都在里面，来源由 pin 决定。
 
 ### 2. 消费配置 `requires`
 
 写在消费仓 `.dec/config.yaml`（提交进该仓）。本机 global 平面写在 `~/.dec/config.yaml`。
+这是唯一的消费声明，见 [ADR 0029](Documents/decisions/0029-single-consumer-requires.md)。
 
 ```yaml
 requires:
-  relkit: v0.3.20
-  tencent-cloud: latest
+  relkit: v0.3.20       # 官方注册表，钉死
+  tencent-cloud: latest # 官方注册表，跟随最新已发布 tag
+  my-notes: vault       # 个人私仓，跟随私仓 HEAD
 ```
 
-只接受精确版本或 `latest`。指向不存在或已被 purge 的版本会报错，不回落。`latest` 跳过已 yank 的 tag。
+官方 pin 只接受精确版本或 `latest`：指向不存在或已被 purge 的版本会报错，不回落，`latest`
+跳过已 yank 的 tag。个人私仓是单分支可变仓、没有版本，pin 只能是 `vault`。
+在 Console 项目页 / Global 资产页的「订阅」面板勾选保存即写这张表。
 
 `install` 按 `requires` 从 registry 重画 IDE 目录。`.dec/cache` 只是只读下载缓存。
 
 ### 3. 资产部署
 
-Console **更新** 页只做远端到本地：跨工作区多选官方依赖，预览后安装。个人 Git 与密钥在项目 / Global 资产页分别写回。官方禁止 `dec_push`；消费方临时修改官方安装物时，在具体项目页创建**本地覆写**并关联源仓 PR/Issue。
+Console **更新** 页只做远端到本地：跨工作区多选官方依赖，预览后安装。个人 Git 与密钥在项目 / Global 资产页分别写回。官方禁止 `dec_push`；消费方临时修改官方安装物时，从具体项目页进入下级页「**本地覆写**」创建覆写并关联源仓 PR/Issue。
 
 Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 
@@ -217,7 +221,7 @@ MCP 必须是单个 server 片段 JSON，`command` 必填：
 
 ```
 .dec/
-├── config.yaml      # requires map + provides（提供方）+ 个人启用
+├── config.yaml      # requires map（唯一消费声明）+ project_name + provides（提供方）
 ├── cache/           # 只读下载缓存（按来源/项目/tag）
 ├── overrides/       # 消费方官方资产本地覆写 + 上游票据元数据
 ├── vars.yaml        # 项目变量定义
@@ -245,9 +249,10 @@ ides:
 
 在 Console **设置** 页连接仓库 URL。
 
-### 配置校验警告
+### 订阅被拒
 
-拉取前会校验 enabled 中的资产是否在 available 中存在。若看到警告，检查拼写或在 **Assets** 页重新扫描。
+保存订阅时会校验：私仓 pin 的项目必须在私仓里存在，官方 pin 的项目必须已发布到注册表。
+被拒条目连同理由显示在「订阅」面板，检查拼写或先让提供方 CI 发布一版。
 
 ### 推送/拉取失败
 

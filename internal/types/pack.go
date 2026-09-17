@@ -78,12 +78,12 @@ type GlobalConfig struct {
 	ManagementListen  string `yaml:"management_listen,omitempty"`
 	ManagementTLSCert string `yaml:"management_tls_cert,omitempty"`
 	ManagementTLSKey  string `yaml:"management_tls_key,omitempty"`
-	// Requires 是本机 global 平面要安装的官方提供方及版本。
+	// Requires 是本机 global 平面唯一的消费声明：项目 → latest / v* / vault（ADR 0029）。
 	Requires RequiresSpec `yaml:"requires,omitempty"`
-	// EnabledProjects 是本机启用的 Project 列表。
-	EnabledProjects []string `yaml:"enabled_projects,omitempty"`
-	// EnabledBundles 仅用于读取旧配置；运行时会归一到当前启用列表。
-	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
+	// LegacyEnabledProjects / LegacyEnabledBundles 只用于读取旧配置；
+	// 加载时折叠为 requires 的 vault pin 后清空，保存时不再写回。
+	LegacyEnabledProjects []string `yaml:"enabled_projects,omitempty"`
+	LegacyEnabledBundles  []string `yaml:"enabled_bundles,omitempty"`
 	// ManagedProjects 是 Console 显式接管或扫描导入的项目目录。
 	// 它只记录管理入口，不改变项目配置，也不参与 Global 平面资产解析。
 	ManagedProjects []ManagedProject `yaml:"managed_projects,omitempty"`
@@ -164,9 +164,13 @@ type Project struct {
 	Description string `yaml:"description,omitempty"`
 	// Tags 是展示与推荐用标签。当前 Console 可配置的只有 global（推荐本机导入）。
 	// 未知合法标签会原样保留，便于以后扩展。
-	Tags     []string `yaml:"tags,omitempty"`
-	Requires []string `yaml:"requires,omitempty"`
-	IDEs     []string `yaml:"ides,omitempty"`
+	Tags []string `yaml:"tags,omitempty"`
+	// DependsOn 是提供方组成：本项目的资产依赖哪些项目（ADR 0029）。
+	// 它不是消费声明；工作区订阅只在 .dec/config.yaml 的 requires 里。
+	DependsOn []string `yaml:"depends_on,omitempty"`
+	// LegacyRequires 只用于读取改名前的 requires 字段，加载时折叠进 DependsOn 后清空。
+	LegacyRequires []string `yaml:"requires,omitempty"`
+	IDEs           []string `yaml:"ides,omitempty"`
 	Editor   string   `yaml:"editor,omitempty"`
 }
 
@@ -238,14 +242,15 @@ type ProjectConfig struct {
 	Kind          ConfigKind `yaml:"kind,omitempty"`
 	Version       string     `yaml:"version,omitempty"`
 	LayoutVersion int        `yaml:"layout_version,omitempty"`
-	// ProjectName 是绑定项目名，对应 vault <name>/dec.yaml。
+	// ProjectName 是作者身份：本工作区创作 vault <name>/dec.yaml 这个项目（ADR 0029）。
+	// 它不是订阅锚点，也不出现在 requires 里。
 	ProjectName string   `yaml:"project_name,omitempty"`
 	IDEs        []string `yaml:"ides,omitempty"`
 	Editor      string   `yaml:"editor,omitempty"`
-	// EnabledBundles 是旧启用列表；项目模型下 requires 才是 SSOT。
-	EnabledBundles []string `yaml:"enabled_bundles,omitempty"`
-	// Requires 声明本工作区要安装的官方提供方及版本（latest 或 v*）。
+	// Requires 是本工作区唯一的消费声明：项目 → latest / v* / vault（ADR 0029）。
 	Requires RequiresSpec `yaml:"requires,omitempty"`
+	// LegacyEnabledBundles 只用于读取旧配置；加载时折叠为 requires 的 vault pin 后清空。
+	LegacyEnabledBundles []string `yaml:"enabled_bundles,omitempty"`
 	// ProvidesRoot 是作者目录（skills/commands/rules/mcp）的基准点，相对项目根。
 	// 新项目默认 DecAssets；旧项目空值表示仓库根。它不影响派生的 vault target。
 	ProvidesRoot string `yaml:"provides_root,omitempty"`

@@ -8,9 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shichao402/Dec/internal/agenttools"
 	"github.com/shichao402/Dec/internal/app"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/service"
+	"github.com/shichao402/Dec/internal/types"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -87,7 +89,7 @@ func callerFromMetadata(ctx context.Context) (facade, clientID string) {
 
 func isProjectMutation(method string) bool {
 	switch method {
-	case "save_enabled_bundles", "prepare_project_config_init", "ensure_local_project_config",
+	case "set_requires", "prepare_project_config_init", "ensure_local_project_config",
 		"ensure_home_p", "bind_managed_project", "create_local_asset",
 		"apply_vault_project", "save_project_settings", "ensure_project_vars",
 		"prepare_remote_note_edit", "prepare_remote_ssh_hosts_edit", "save_project_provides",
@@ -110,11 +112,13 @@ func isMachineMutation(method string) bool {
 }
 
 // invokeAllowedWhenLocked 只包含连接远端前必须执行、且不读取 Bitwarden / 资产正文的
-// 设备生命周期方法。设备清单仍要求解锁，避免通用 Invoke 在锁定态变成配置读取旁路。
+// 设备生命周期方法，以及 Agent 工具编排只读接口。设备清单仍要求解锁，避免通用 Invoke
+// 在锁定态变成配置读取旁路。
 func invokeAllowedWhenLocked(method string) bool {
 	switch method {
 	case "probe_remote_host", "ensure_remote_service", "configure_remote_service",
-		"list_managed_devices", "register_managed_device", "remove_managed_device":
+		"list_managed_devices", "register_managed_device", "remove_managed_device",
+		"plan_agent_tool":
 		return true
 	default:
 		return false
@@ -244,19 +248,16 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 			return nil, err
 		}
 		return app.ApplyOfficialOverride(ctx, workspace, in)
-	case "save_enabled_bundles":
+	case "set_requires":
 		var in struct {
-			EnabledProjects []string
-			EnabledBundles  []string
+			Requires types.RequiresSpec
 		}
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		names := in.EnabledProjects
-		if names == nil {
-			names = in.EnabledBundles
-		}
-		return writer.SaveProjects(workspace, names, reporter)
+		return writer.SetRequires(ctx, workspace, in.Requires, reporter)
+	case "list_subscription_candidates":
+		return app.ListSubscriptionCandidates(ctx, workspace, reporter)
 	case "connect_repo":
 		var in struct{ RepoURL string }
 		if err := decode(payload, &in); err != nil {
@@ -380,6 +381,13 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return map[string]bool{
 			"ready": secrets.HasSession() && secrets.HasUserKey(),
 		}, nil
+	case "plan_agent_tool":
+		// 只读：把 Agent 工具名编成步骤表，不碰 Bitwarden / 资产正文（ADR 0030）。
+		var in agenttools.PlanRequest
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return agenttools.Plan(in.Name, in.Arguments), nil
 	default:
 		return nil, fmt.Errorf("未知服务方法 %q", method)
 	}
