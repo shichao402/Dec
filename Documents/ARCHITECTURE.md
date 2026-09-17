@@ -644,6 +644,11 @@ Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真�
 
 ## 已知限制
 
+### 托管 MCP 与 IDE Reload
+
+`dec-mcp` 薄壳在只刷新 `~/.dec/run/agent-tools.json`、未改 `mcp.json` 的 `dec` 条目时热加载工具列表，一般不必 Reload。
+其它托管 MCP（以及 `dec` 条目本身若被改写）没有等价热更新：pull / 更新 / 删除在 `mcp.json` 发生增删改时执行关 → 杀匹配进程 → 开，结果字段 `McpReload` 列出名字。IDE 若不跟随配置文件重拉，仍须在 MCP 面板手动 Reload。Skill / rule / command 只覆盖文件，不走该流程。
+
 ### CodeBuddy MCP 路径
 
 CodeBuddy MCP 位于项目根 `.mcp.json`。Codex 位于 `.codex/config.toml`。

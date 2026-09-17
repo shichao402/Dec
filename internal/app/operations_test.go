@@ -368,3 +368,85 @@ func TestPullProjectAssetsCleansWhenAllBundlesDeselected(t *testing.T) {
 		t.Fatalf("停用 bundle 不应删除已落地的密文件: %v", err)
 	}
 }
+
+func TestPullProjectAssetsBouncesChangedMCP(t *testing.T) {
+	origList, origKill := listMCPProcesses, killMCPProcess
+	t.Cleanup(func() {
+		listMCPProcesses, killMCPProcess = origList, origKill
+	})
+	var killed []int
+	listMCPProcesses = func() ([]mcpProcess, error) {
+		return []mcpProcess{
+			{PID: 55, CmdLine: `dec-exec --project-root /x --p demo -- npx -y old-tool`},
+		}, nil
+	}
+	killMCPProcess = func(pid int) error {
+		killed = append(killed, pid)
+		return nil
+	}
+
+	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
+	useStubSecretsSession(t)
+	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"demo/public/project/mcp/tool.json": `{"command":"npx","args":["-y","old-tool"]}`,
+		"demo/public/project/skills/only-skill/SKILL.md": "---\nname: only-skill\n---\n",
+		"demo/dec.yaml": "name: demo\n",
+	})
+	if err := repo.Connect(remote); err != nil {
+		t.Fatalf("repo.Connect() 失败: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	mgr := config.NewProjectConfigManager(projectRoot)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		IDEs:     []string{"cursor"},
+		Requires: types.RequiresSpec{"demo": types.RequiresVault},
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig() 失败: %v", err)
+	}
+
+	first, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
+	if err != nil {
+		t.Fatalf("首次 pull 失败: %v", err)
+	}
+	if len(first.McpReload) != 1 || first.McpReload[0] != "dec-tool" {
+		t.Fatalf("首次安装 MCP 应列入 McpReload, got %#v", first.McpReload)
+	}
+
+	// 内容未变再 pull：不 bounce。
+	killed = nil
+	second, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
+	if err != nil {
+		t.Fatalf("二次 pull 失败: %v", err)
+	}
+	if len(second.McpReload) != 0 {
+		t.Fatalf("未变更不应 McpReload, got %#v", second.McpReload)
+	}
+	if len(killed) != 0 {
+		t.Fatalf("未变更不应杀进程, killed=%v", killed)
+	}
+
+	// 只装 skill 的仓库：名单空。
+	remote2 := setupRemoteBareRepoProjectTest(t, map[string]string{
+		"skillonly/public/project/skills/s/SKILL.md": "---\nname: s\n---\n",
+		"skillonly/dec.yaml":                         "name: skillonly\n",
+	})
+	if err := repo.Connect(remote2); err != nil {
+		t.Fatalf("repo.Connect skillonly 失败: %v", err)
+	}
+	project2 := t.TempDir()
+	mgr2 := config.NewProjectConfigManager(project2)
+	if err := mgr2.SaveProjectConfig(&types.ProjectConfig{
+		IDEs:     []string{"cursor"},
+		Requires: types.RequiresSpec{"skillonly": types.RequiresVault},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	skillOnly, err := PullProjectAssets(context.Background(), project2, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skillOnly.McpReload) != 0 {
+		t.Fatalf("skill-only 不应 McpReload, got %#v", skillOnly.McpReload)
+	}
+}

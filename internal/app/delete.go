@@ -127,6 +127,7 @@ type DeleteProjectResult struct {
 	SkippedReason  string
 	Remnants       []string
 	Mode           DeleteMode
+	McpReload      []string
 }
 
 // ErrDeleteNotConfirmed 调用方没有完成二次确认。
@@ -425,8 +426,12 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 			}
 			if mode == DeleteModeLocal {
 				emit(reporter, EventInfo, "delete.bundle", fmt.Sprintf("只清本机 bundle %s（不写 vault）", bundleName), nil)
-				if localErr := deleteLocalBundleOnly(workspace, bundleName, item.Members, reporter); localErr != nil {
+				bounced, localErr := deleteLocalBundleOnly(workspace, bundleName, item.Members, reporter)
+				if localErr != nil {
 					return nil, localErr
+				}
+				for _, name := range bounced {
+					result.McpReload = appendUniqueSorted(result.McpReload, name)
 				}
 			} else {
 				emit(reporter, EventInfo, "delete.bundle", fmt.Sprintf("只删远端 bundle %s（不碰本地）", bundleName), nil)
@@ -442,8 +447,12 @@ func DeleteProjectItems(ctx context.Context, input DeleteProjectInput, reporter 
 		case DeleteKindDecAsset:
 			if mode == DeleteModeLocal {
 				emit(reporter, EventInfo, "delete.dec", fmt.Sprintf("只清本机 [%s] %s", item.Type, item.Name), nil)
-				if localErr := deleteLocalDecAssetOnly(workspace, item.Type, item.Name, item.Vault, item.Visibility, item.AssetPlane, reporter); localErr != nil {
+				bounced, localErr := deleteLocalDecAssetOnly(workspace, item.Type, item.Name, item.Vault, item.Visibility, item.AssetPlane, reporter)
+				if localErr != nil {
 					return nil, localErr
+				}
+				for _, name := range bounced {
+					result.McpReload = appendUniqueSorted(result.McpReload, name)
 				}
 				pruneEmptyDecCacheBundle(workspace, item.Vault, reporter)
 			} else {
@@ -702,11 +711,16 @@ func isVaultMissingErr(err error) bool {
 	return strings.Contains(msg, "未找到")
 }
 
-func deleteLocalDecAssetOnly(workspace Workspace, itemType, name, vault string, visibility types.AssetVisibility, assetPlane types.AssetPlane, reporter Reporter) error {
+func deleteLocalDecAssetOnly(workspace Workspace, itemType, name, vault string, visibility types.AssetVisibility, assetPlane types.AssetPlane, reporter Reporter) ([]string, error) {
+	var mcpReload []string
 	projectIDEs := resolveWorkspaceIDEs(workspace, reporter)
 	for _, ideImpl := range projectIDEs {
-		if _, err := removeAssetFromIDE(itemType, name, workspace, ideImpl); err != nil {
+		_, bounced, err := removeAssetFromIDE(itemType, name, workspace, ideImpl)
+		if err != nil {
 			emit(reporter, EventWarn, "delete.dec", fmt.Sprintf("IDE %s 清理失败: %v", ideImpl.Name(), err), nil)
+		}
+		if bounced != "" {
+			mcpReload = appendUniqueSorted(mcpReload, bounced)
 		}
 	}
 	cachePath := getWorkspaceCachePath(workspace, vault, itemType, name)
@@ -717,35 +731,40 @@ func deleteLocalDecAssetOnly(workspace Workspace, itemType, name, vault string, 
 		})
 	}
 	if cachePath == "" {
-		return nil
+		return mcpReload, nil
 	}
 	if _, err := os.Stat(cachePath); err != nil {
 		if os.IsNotExist(err) {
 			emit(reporter, EventInfo, "delete.dec", "本地 cache 已不存在，跳过", nil)
-			return nil
+			return mcpReload, nil
 		}
-		return fmt.Errorf("检查本地 cache 失败: %w", err)
+		return mcpReload, fmt.Errorf("检查本地 cache 失败: %w", err)
 	}
 	if err := os.RemoveAll(cachePath); err != nil {
-		return fmt.Errorf("删除本地 cache %s 失败: %w", cachePath, err)
+		return mcpReload, fmt.Errorf("删除本地 cache %s 失败: %w", cachePath, err)
 	}
 	emit(reporter, EventInfo, "delete.dec", fmt.Sprintf("已删本地 cache [%s] %s", itemType, name), nil)
-	return nil
+	return mcpReload, nil
 }
 
-func deleteLocalBundleOnly(workspace Workspace, bundleName string, members []AssetSelectionItem, reporter Reporter) error {
+func deleteLocalBundleOnly(workspace Workspace, bundleName string, members []AssetSelectionItem, reporter Reporter) ([]string, error) {
+	var mcpReload []string
 	projectIDEs := resolveWorkspaceIDEs(workspace, reporter)
 	for _, member := range members {
 		for _, ideImpl := range projectIDEs {
-			if _, err := removeAssetFromIDE(member.Type, member.Name, workspace, ideImpl); err != nil {
+			_, bounced, err := removeAssetFromIDE(member.Type, member.Name, workspace, ideImpl)
+			if err != nil {
 				emit(reporter, EventWarn, "delete.bundle", fmt.Sprintf("IDE %s 清理 %s 失败: %v", ideImpl.Name(), member.Name, err), nil)
+			}
+			if bounced != "" {
+				mcpReload = appendUniqueSorted(mcpReload, bounced)
 			}
 		}
 	}
 	cacheBundleDir := filepath.Join(workspaceCacheDir(workspace), bundleName)
 	if _, err := os.Stat(cacheBundleDir); err == nil {
 		if err := os.RemoveAll(cacheBundleDir); err != nil {
-			return fmt.Errorf("删除本地 bundle cache 失败: %w", err)
+			return mcpReload, fmt.Errorf("删除本地 bundle cache 失败: %w", err)
 		}
 		emit(reporter, EventInfo, "delete.bundle", "已删本地 bundle 缓存", nil)
 	}
@@ -768,7 +787,7 @@ func deleteLocalBundleOnly(workspace Workspace, bundleName string, members []Ass
 		emit(reporter, EventWarn, "delete.bundle", fmt.Sprintf("清理 projects 声明失败（继续本地清理）: %v", err), nil)
 	}
 	cleanupDeletedBundleLocalState(workspace, bundleName, reporter)
-	return nil
+	return mcpReload, nil
 }
 
 // pruneEmptyDecCacheBundle 删除 cache/<bundle> 下已空的类型目录，若整个 bundle 目录变空则删掉目录。

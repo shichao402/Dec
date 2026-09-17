@@ -244,10 +244,10 @@ export function SyncPage(props: {
 }
 
 function PullResultLog({ entry }: { entry: PullHistoryEntry }) {
-  const { headline, warnings, missing, skipped } = pullResultDiagnosis(entry.result)
+  const { headline, warnings, missing, skipped, mcpReload } = pullResultDiagnosis(entry.result)
   const result = entry.result
   const failed = Boolean(result.FailedCount)
-  const hasNotes = Boolean(headline || skipped) || missing.length > 0 || warnings.length > 0
+  const hasNotes = Boolean(headline || skipped) || missing.length > 0 || warnings.length > 0 || mcpReload.length > 0
   return (
     <div className="px-4 py-2.5">
       <div className="flex items-start gap-2">
@@ -268,6 +268,12 @@ function PullResultLog({ entry }: { entry: PullHistoryEntry }) {
               {headline && <Notice text={headline} />}
               {skipped && <Notice text={`已跳过：${skipped}`} />}
               {missing.length > 0 && <WarningList title="缺失项目 / 资产" items={missing} />}
+              {mcpReload.length > 0 && (
+                <WarningList
+                  title="MCP 配置已更新（已尝试重启；若 IDE 仍显示旧工具请手动 Reload）"
+                  items={mcpReload}
+                />
+              )}
               {warnings.length > 0 && <WarningList title="警告" items={warnings} />}
             </div>
           )}

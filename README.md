@@ -286,7 +286,9 @@ cd Dec
 python scripts/build-console.py --deploy
 ```
 
-`--deploy` 会停掉正在跑的 Console 再静默装上。只出包、自己点安装时用 `--skip-deps`，产物是 `dist/dec-console-<os>-<arch>.<ext>`。增量构建约 3 分钟。安装包内置同版本运行时套件，Console 启动后会释放到 `~/.dec/bin`，因此**不需要**单独部署运行时——两者出自同一次构建，版本天然相等。Cursor 里的 `dec-mcp` 需重载 MCP 才用上新二进制。
+`--deploy` 会停掉正在跑的 Console 再静默装上。只出包、自己点安装时用 `--skip-deps`，产物是 `dist/dec-console-<os>-<arch>.<ext>`。增量构建约 3 分钟。安装包内置同版本运行时套件，Console 启动后会释放到 `~/.dec/bin`，因此**不需要**单独部署运行时——两者出自同一次构建，版本天然相等。
+
+`dec-mcp` 是薄壳：只改工具清单（`~/.dec/run/agent-tools.json`）而 **未改** IDE `mcp.json` 里的 `dec` 条目时，已在跑的进程会热加载，一般不必 Reload。若 pull / 更新 / 删除让任何托管 MCP 条目（含 `dec`）在 `mcp.json` 里发生增删改，Console 会关 → 杀匹配进程 → 再开，并在结果区列出名字；IDE 若仍显示旧工具，再在 MCP 面板手动 Reload。
 
 给别人用的安装包只走 GitHub Actions / RUP（`dev/v*`、`stable/v*`）。只改 Go、还要从源码跑 Console UI 时，用上一节的 `--prepare-runtime-only` + `npm run tauri dev`，不必再打安装包。
 

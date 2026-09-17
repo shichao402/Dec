@@ -270,7 +270,8 @@ func renderOneOfficialAsset(workspace Workspace, asset install.CacheAsset, sourc
 	if err != nil {
 		return err
 	}
-	return installAssetToIDEs(asset.Type, asset.Name, asset.Project, source, workspace, uniqueWorkspaceIDEs(workspace, selection.IDEs))
+	_, err = installAssetToIDEs(asset.Type, asset.Name, asset.Project, source, workspace, uniqueWorkspaceIDEs(workspace, selection.IDEs))
+	return err
 }
 
 func readEditableFiles(root string) ([]OfficialAssetFile, error) {

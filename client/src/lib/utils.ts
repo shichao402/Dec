@@ -200,6 +200,8 @@ export type PullResult = {
   SelectedProjects: string[]
   RequiredProjects: string[]
   Quadrants: Record<string, number>
+  /** 本轮因 mcp.json 变更而关→杀→开的托管 MCP；IDE 未跟随时需手动 Reload */
+  McpReload?: string[]
 }
 
 function uniqueTexts(items: (string | undefined)[]) {
@@ -215,6 +217,7 @@ export function pullResultIssues(result: PullResult) {
   return {
     missing: uniqueTexts([...(result.MissingProjects || []), ...(result.MissingBundles || [])]),
     warnings: uniqueTexts([...(result.ValidationWarnings || []), ...(result.NonFatalWarnings || [])]),
+    mcpReload: uniqueTexts([...(result.McpReload || [])]),
   }
 }
 
@@ -222,9 +225,9 @@ export function pullResultIssues(result: PullResult) {
 // 三个角度各报一次，加上跳过原因和缺失列表，同一件事在卡片上出现四五处，读的人
 // 反而不知道到底哪里出了问题、下一步该做什么。这里收敛成一句带动作的结论。
 export function pullResultDiagnosis(result: PullResult) {
-  const { missing, warnings } = pullResultIssues(result)
+  const { missing, warnings, mcpReload } = pullResultIssues(result)
   if (missing.length === 0) {
-    return { headline: '', missing, warnings, skipped: result.SkippedReason || '' }
+    return { headline: '', missing, warnings, skipped: result.SkippedReason || '', mcpReload }
   }
   const restates = (warning: string) =>
     warning.includes('不存在') && missing.some((name) => warning.includes(name))
@@ -234,6 +237,7 @@ export function pullResultDiagnosis(result: PullResult) {
     missing: [],
     warnings: warnings.filter((warning) => !restates(warning)),
     skipped: '',
+    mcpReload,
   }
 }
 

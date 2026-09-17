@@ -49,6 +49,9 @@ type PullProjectAssetsResult struct {
 	OrphanSSHKeys        []string
 	OrphanClearedBundles []string
 	OrphanReportedOnly   []string
+	// McpReload 是本轮因 mcp.json 条目增删改而执行关→杀→开的托管 MCP server 名。
+	// IDE 若未跟随配置重拉，人需在 MCP 面板手动 Reload 这些名字。
+	McpReload []string
 	// ADR 0016 structured result. Bundle fields remain for compatible clients.
 	Model            string
 	HomeProject      string
@@ -271,10 +274,14 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 			continue
 		}
 
-		if err := installAssetToIDEs(asset.Type, asset.Name, asset.Vault, fullPath, workspace, projectIDEs); err != nil {
+		bounced, err := installAssetToIDEs(asset.Type, asset.Name, asset.Vault, fullPath, workspace, projectIDEs)
+		if err != nil {
 			result.FailedCount++
 			emit(reporter, EventWarn, "pull.asset", fmt.Sprintf("⚠️  [%-5s] %s (%v)", asset.Type, asset.Name, err), progress)
 			continue
+		}
+		for _, name := range bounced {
+			result.McpReload = appendUniqueSorted(result.McpReload, name)
 		}
 
 		if workspace.EffectivePlane() == WorkspaceProject {
@@ -339,7 +346,11 @@ func missingEnabledBundleNames(enabled []string, resolved []BundleOverview) []st
 }
 
 func applyAssetCleanup(result *PullProjectAssetsResult, workspace Workspace, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE, reporter Reporter) {
-	result.CleanedAssets = cleanupRemovedAssets(workspace, enabledAssets, projectIDEs)
+	cleaned, bounced := cleanupRemovedAssets(workspace, enabledAssets, projectIDEs)
+	result.CleanedAssets = cleaned
+	for _, name := range bounced {
+		result.McpReload = appendUniqueSorted(result.McpReload, name)
+	}
 	if len(result.CleanedAssets) == 0 {
 		return
 	}
@@ -438,10 +449,10 @@ func migrateLegacyProjectLayouts(projectRoot string, projectIDEs []ide.IDE) ([]s
 	return notes, nil
 }
 
-func cleanupRemovedAssets(workspace Workspace, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE) []string {
+func cleanupRemovedAssets(workspace Workspace, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE) (cleaned []string, mcpReload []string) {
 	cacheDir := workspaceCacheDir(workspace)
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
-		return nil
+		return nil, nil
 	}
 	if hasPAssets(enabledAssets) || cacheUsesPLayout(cacheDir) {
 		return cleanupRemovedPAssets(workspace, cacheDir, enabledAssets, projectIDEs)
@@ -453,7 +464,6 @@ func cleanupRemovedAssets(workspace Workspace, enabledAssets []types.TypedAssetR
 	}
 
 	vaultDirs, _ := os.ReadDir(cacheDir)
-	var removed []string
 	for _, vaultDir := range vaultDirs {
 		if !vaultDir.IsDir() {
 			continue
@@ -475,10 +485,13 @@ func cleanupRemovedAssets(workspace Workspace, enabledAssets []types.TypedAssetR
 				}
 
 				for _, ideImpl := range projectIDEs {
-					_, _ = removeAssetFromIDE(assetType, name, workspace, ideImpl)
+					_, bounced, _ := removeAssetFromIDE(assetType, name, workspace, ideImpl)
+					if bounced != "" {
+						mcpReload = appendUniqueSorted(mcpReload, bounced)
+					}
 				}
 				_ = os.RemoveAll(filepath.Join(subDir, entry.Name()))
-				removed = append(removed, fmt.Sprintf("[%-5s] %s (vault: %s)", assetType, name, vaultName))
+				cleaned = append(cleaned, fmt.Sprintf("[%-5s] %s (vault: %s)", assetType, name, vaultName))
 			}
 			// 清理空的类型子目录（skills/rules/...）
 			_ = removeDirIfEmpty(subDir)
@@ -487,8 +500,8 @@ func cleanupRemovedAssets(workspace Workspace, enabledAssets []types.TypedAssetR
 		_ = removeDirIfEmpty(filepath.Join(cacheDir, vaultName))
 	}
 
-	sort.Strings(removed)
-	return removed
+	sort.Strings(cleaned)
+	return cleaned, mcpReload
 }
 
 func cacheUsesPLayout(cacheDir string) bool {
@@ -506,12 +519,11 @@ func cacheUsesPLayout(cacheDir string) bool {
 	return false
 }
 
-func cleanupRemovedPAssets(workspace Workspace, cacheDir string, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE) []string {
+func cleanupRemovedPAssets(workspace Workspace, cacheDir string, enabledAssets []types.TypedAssetRef, projectIDEs []ide.IDE) (cleaned []string, mcpReload []string) {
 	enabled := make(map[string]struct{}, len(enabledAssets))
 	for _, asset := range enabledAssets {
 		enabled[assetKey(asset)] = struct{}{}
 	}
-	var removed []string
 	projects, _ := os.ReadDir(cacheDir)
 	for _, project := range projects {
 		if !project.IsDir() {
@@ -540,18 +552,21 @@ func cleanupRemovedPAssets(workspace Workspace, cacheDir string, enabledAssets [
 								continue
 							}
 							for _, ideImpl := range projectIDEs {
-								_, _ = removeAssetFromIDE(kind.Type, name, workspace, ideImpl)
+								_, bounced, _ := removeAssetFromIDE(kind.Type, name, workspace, ideImpl)
+								if bounced != "" {
+									mcpReload = appendUniqueSorted(mcpReload, bounced)
+								}
 							}
 							_ = os.RemoveAll(filepath.Join(dir, entry.Name()))
-							removed = append(removed, fmt.Sprintf("[%-5s] %s (项目: %s, %s/%s)", kind.Type, name, project.Name(), visibility, plane))
+							cleaned = append(cleaned, fmt.Sprintf("[%-5s] %s (项目: %s, %s/%s)", kind.Type, name, project.Name(), visibility, plane))
 						}
 					}
 				}
 			}
 		}
 	}
-	sort.Strings(removed)
-	return removed
+	sort.Strings(cleaned)
+	return cleaned, mcpReload
 }
 
 func removeDirIfEmpty(dir string) error {
@@ -682,28 +697,33 @@ func managedName(name string) string {
 	return "dec-" + name
 }
 
-func installAssetToIDEs(itemType, assetName, vaultName, srcPath string, workspace Workspace, projectIDEs []ide.IDE) error {
+func installAssetToIDEs(itemType, assetName, vaultName, srcPath string, workspace Workspace, projectIDEs []ide.IDE) ([]string, error) {
 	installed := make([]ide.IDE, 0, len(projectIDEs))
+	var bounced []string
 
 	for _, ideImpl := range projectIDEs {
-		if err := installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath, workspace, ideImpl); err != nil {
+		mcpName, err := installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath, workspace, ideImpl)
+		if err != nil {
 			rollbackErrors := rollbackInstalledAsset(itemType, assetName, workspace, installed)
 			if len(rollbackErrors) > 0 {
-				return fmt.Errorf("安装到 %s 失败: %v；回滚失败: %s", ideImpl.Name(), err, strings.Join(rollbackErrors, "; "))
+				return nil, fmt.Errorf("安装到 %s 失败: %v；回滚失败: %s", ideImpl.Name(), err, strings.Join(rollbackErrors, "; "))
 			}
-			return fmt.Errorf("安装到 %s 失败: %w", ideImpl.Name(), err)
+			return nil, fmt.Errorf("安装到 %s 失败: %w", ideImpl.Name(), err)
+		}
+		if mcpName != "" {
+			bounced = appendUniqueSorted(bounced, mcpName)
 		}
 		installed = append(installed, ideImpl)
 	}
 
-	return nil
+	return bounced, nil
 }
 
 func rollbackInstalledAsset(itemType, assetName string, workspace Workspace, installed []ide.IDE) []string {
 	var rollbackErrors []string
 	for i := len(installed) - 1; i >= 0; i-- {
 		ideImpl := installed[i]
-		removed, err := removeAssetFromIDE(itemType, assetName, workspace, ideImpl)
+		removed, _, err := removeAssetFromIDE(itemType, assetName, workspace, ideImpl)
 		if err != nil {
 			rollbackErrors = append(rollbackErrors, fmt.Sprintf("%s: %v", ideImpl.Name(), err))
 		} else if !removed {
@@ -714,10 +734,12 @@ func rollbackInstalledAsset(itemType, assetName string, workspace Workspace, ins
 }
 
 func installAssetToIDE(itemType, assetName, vaultName, srcPath, projectRoot string, ideImpl ide.IDE) error {
-	return installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath, NewWorkspace(WorkspaceProject, projectRoot), ideImpl)
+	_, err := installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath, NewWorkspace(WorkspaceProject, projectRoot), ideImpl)
+	return err
 }
 
-func installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath string, workspace Workspace, ideImpl ide.IDE) error {
+// installAssetToIDEForWorkspace 安装资产。对 mcp 返回 bounced 的 managed server 名（未变更则为空）。
+func installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath string, workspace Workspace, ideImpl ide.IDE) (string, error) {
 	managed := managedName(assetName)
 	home, _ := os.UserHomeDir()
 	plane := workspace.IDEPlane()
@@ -727,51 +749,51 @@ func installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath strin
 	case "skill":
 		destDir := filepath.Join(ideImpl.SkillsDirForPlane(plane, projectRoot, home), managed)
 		if err := copyDir(srcPath, destDir); err != nil {
-			return err
+			return "", err
 		}
-		return injectRenderedHeaderDir(destDir, vaultName)
+		return "", injectRenderedHeaderDir(destDir, vaultName)
 	case "command":
 		destDir := filepath.Join(ideImpl.CommandsDirForPlane(plane, projectRoot, home), managed)
 		if err := copyDir(srcPath, destDir); err != nil {
-			return err
+			return "", err
 		}
-		return injectRenderedHeaderDir(destDir, vaultName)
+		return "", injectRenderedHeaderDir(destDir, vaultName)
 	case "rule":
 		destDir := ideImpl.RulesDirForPlane(plane, projectRoot, home)
 		if err := os.MkdirAll(destDir, 0755); err != nil {
-			return err
+			return "", err
 		}
 		destPath := filepath.Join(destDir, managed+".mdc")
 		if err := copyFile(srcPath, destPath); err != nil {
-			return err
+			return "", err
 		}
-		return injectRenderedHeaderFile(destPath, vaultName)
+		return "", injectRenderedHeaderFile(destPath, vaultName)
 	case "mcp":
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
-			return fmt.Errorf("读取 MCP 配置失败: %w", err)
+			return "", fmt.Errorf("读取 MCP 配置失败: %w", err)
 		}
 		var server types.MCPServer
 		if err := json.Unmarshal(data, &server); err != nil {
-			return fmt.Errorf("解析 MCP 配置失败: %w", err)
+			return "", fmt.Errorf("解析 MCP 配置失败: %w", err)
 		}
 		cmd, args := stripExternalEnvLauncher(server.Command, server.Args)
 		server.Command, server.Args, server.Env = WrapMCPServerWithExecForPlane(projectRoot, vaultName, workspace.SecretsPlane(), "dec-exec", cmd, args, server.Env)
-		existingConfig, err := ideImpl.LoadMCPConfigForPlane(plane, projectRoot, home)
+		bounced, err := bounceInstallMCP(ideImpl, plane, projectRoot, home, managed, server)
 		if err != nil {
-			return fmt.Errorf("加载 IDE MCP 配置失败: %w", err)
+			return "", err
 		}
-		if existingConfig.MCPServers == nil {
-			existingConfig.MCPServers = make(map[string]types.MCPServer)
+		if bounced {
+			return managed, nil
 		}
-		existingConfig.MCPServers[managed] = server
-		return ideImpl.WriteMCPConfigForPlane(plane, projectRoot, home, existingConfig)
+		return "", nil
 	default:
-		return nil
+		return "", nil
 	}
 }
 
-func removeAssetFromIDE(itemType, assetName string, workspace Workspace, ideImpl ide.IDE) (bool, error) {
+// removeAssetFromIDE 移除 IDE 落地。对 mcp 第二返回值为 bounced 的 managed 名。
+func removeAssetFromIDE(itemType, assetName string, workspace Workspace, ideImpl ide.IDE) (bool, string, error) {
 	managed := managedName(assetName)
 	home, _ := os.UserHomeDir()
 	plane := workspace.IDEPlane()
@@ -781,39 +803,38 @@ func removeAssetFromIDE(itemType, assetName string, workspace Workspace, ideImpl
 	case "skill":
 		destDir := filepath.Join(ideImpl.SkillsDirForPlane(plane, projectRoot, home), managed)
 		if _, err := os.Stat(destDir); os.IsNotExist(err) {
-			return false, nil
+			return false, "", nil
 		} else if err != nil {
-			return false, err
+			return false, "", err
 		}
-		return true, os.RemoveAll(destDir)
+		return true, "", os.RemoveAll(destDir)
 	case "command":
 		destDir := filepath.Join(ideImpl.CommandsDirForPlane(plane, projectRoot, home), managed)
 		if _, err := os.Stat(destDir); os.IsNotExist(err) {
-			return false, nil
+			return false, "", nil
 		} else if err != nil {
-			return false, err
+			return false, "", err
 		}
-		return true, os.RemoveAll(destDir)
+		return true, "", os.RemoveAll(destDir)
 	case "rule":
 		destPath := filepath.Join(ideImpl.RulesDirForPlane(plane, projectRoot, home), managed+".mdc")
 		if err := os.Remove(destPath); os.IsNotExist(err) {
-			return false, nil
+			return false, "", nil
 		} else if err != nil {
-			return false, err
+			return false, "", err
 		}
-		return true, nil
+		return true, "", nil
 	case "mcp":
-		existingConfig, err := ideImpl.LoadMCPConfigForPlane(plane, projectRoot, home)
+		removed, bounced, err := bounceRemoveMCP(ideImpl, plane, projectRoot, home, managed)
 		if err != nil {
-			return false, nil
+			return false, "", err
 		}
-		if _, exists := existingConfig.MCPServers[managed]; !exists {
-			return false, nil
+		if bounced {
+			return removed, managed, nil
 		}
-		delete(existingConfig.MCPServers, managed)
-		return true, ideImpl.WriteMCPConfigForPlane(plane, projectRoot, home, existingConfig)
+		return removed, "", nil
 	default:
-		return false, nil
+		return false, "", nil
 	}
 }
 

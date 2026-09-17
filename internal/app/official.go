@@ -181,10 +181,14 @@ func renderOfficialFromCache(workspace Workspace, req types.RequiresSpec, projec
 			if override := activeOverrideSource(workspace, asset); override != "" {
 				source = override
 			}
-			if err := installAssetToIDEs(asset.Type, asset.Name, asset.Project, source, workspace, projectIDEs); err != nil {
+			bounced, err := installAssetToIDEs(asset.Type, asset.Name, asset.Project, source, workspace, projectIDEs)
+			if err != nil {
 				result.FailedCount++
 				emit(reporter, EventWarn, "install.official", fmt.Sprintf("渲染 %s/%s 失败: %v", asset.Project, asset.Name, err), nil)
 				continue
+			}
+			for _, name := range bounced {
+				result.McpReload = appendUniqueSorted(result.McpReload, name)
 			}
 			result.PulledCount++
 			result.RequestedCount++

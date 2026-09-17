@@ -37,6 +37,7 @@ type RemoveAssetResult struct {
 	RemovedFromCache bool
 	ConfigUpdated    bool
 	VersionCommit    string
+	McpReload        []string
 }
 
 // ErrRemoveNotConfirmed 调用方没有完成二次确认。
@@ -69,6 +70,7 @@ type RemoveBundleResult struct {
 	Remnants          []string
 	Model             string
 	ProjectName       string
+	McpReload         []string
 }
 
 func removeP(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, error) {
@@ -126,10 +128,13 @@ func removeP(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResult, e
 	removedIDEs := make(map[string]struct{})
 	for _, asset := range removedAssets {
 		for _, ideImpl := range projectIDEs {
-			removed, remErr := removeAssetFromIDE(asset.Type, asset.Name, workspace, ideImpl)
+			removed, bounced, remErr := removeAssetFromIDE(asset.Type, asset.Name, workspace, ideImpl)
 			if remErr != nil {
 				emit(reporter, EventWarn, "remove.ide", fmt.Sprintf("IDE %s 清理 %s 失败: %v", ideImpl.Name(), asset.Name, remErr), nil)
 				continue
+			}
+			if bounced != "" {
+				result.McpReload = appendUniqueSorted(result.McpReload, bounced)
 			}
 			if removed {
 				removedIDEs[ideImpl.Name()] = struct{}{}
@@ -264,10 +269,13 @@ func RemoveBundle(input RemoveBundleInput, reporter Reporter) (*RemoveBundleResu
 	removedIDEs := make(map[string]struct{})
 	for _, member := range members {
 		for _, ideImpl := range projectIDEs {
-			removed, err := removeAssetFromIDE(member.Type, member.Name, workspace, ideImpl)
+			removed, bounced, err := removeAssetFromIDE(member.Type, member.Name, workspace, ideImpl)
 			if err != nil {
 				emit(reporter, EventWarn, "remove.ide", fmt.Sprintf("IDE %s 清理 %s 失败: %v", ideImpl.Name(), member.Name, err), nil)
 				continue
+			}
+			if bounced != "" {
+				result.McpReload = appendUniqueSorted(result.McpReload, bounced)
 			}
 			if removed {
 				removedIDEs[ideImpl.Name()] = struct{}{}
@@ -450,10 +458,13 @@ func RemoveAsset(input RemoveAssetInput, reporter Reporter) (*RemoveAssetResult,
 	// Stage 2: IDE 清理（尽力而为）。
 	projectIDEs := resolveWorkspaceIDEs(workspace, reporter)
 	for _, ideImpl := range projectIDEs {
-		removed, err := removeAssetFromIDE(itemType, assetName, workspace, ideImpl)
+		removed, bounced, err := removeAssetFromIDE(itemType, assetName, workspace, ideImpl)
 		if err != nil {
 			emit(reporter, EventWarn, "remove.ide", fmt.Sprintf("IDE %s 清理失败: %v", ideImpl.Name(), err), nil)
 			continue
+		}
+		if bounced != "" {
+			result.McpReload = appendUniqueSorted(result.McpReload, bounced)
 		}
 		if removed {
 			result.RemovedFromIDEs = append(result.RemovedFromIDEs, ideImpl.Name())

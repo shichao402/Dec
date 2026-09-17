@@ -47,6 +47,7 @@ describe('pullResultIssues', () => {
     expect(pullResultIssues(result)).toEqual({
       missing: ['project-a', 'legacy-bundle'],
       warnings: ['invalid path', 'offline cache'],
+      mcpReload: [],
     })
   })
 
@@ -56,6 +57,14 @@ describe('pullResultIssues', () => {
       MissingBundles: ['AgentsHelpMe'],
     } as PullResult
     expect(pullResultIssues(result).missing).toEqual(['AgentsHelpMe'])
+  })
+
+  it('surfaces mcp reload names as structured follow-up work', () => {
+    const result = {
+      McpReload: ['dec-vikunja', 'dec'],
+    } as PullResult
+    expect(pullResultIssues(result).mcpReload).toEqual(['dec-vikunja', 'dec'])
+    expect(pullResultDiagnosis(result).mcpReload).toEqual(['dec-vikunja', 'dec'])
   })
 })
 
