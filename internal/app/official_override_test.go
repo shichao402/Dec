@@ -81,3 +81,19 @@ func TestOfficialOverrideRejectsTraversal(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupDoesNotDeleteOfficialLocalPlane(t *testing.T) {
+	root := t.TempDir()
+	official := filepath.Join(root, ".dec", "cache", "relkit", "public", "local", "skills", "relkit-ops", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(official), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(official, []byte("# official\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupRemovedAssets(NewWorkspace(WorkspaceProject, root), nil, nil)
+	if _, err := os.Stat(official); err != nil {
+		t.Fatalf("official local cache must survive personal asset cleanup: %v", err)
+	}
+}
