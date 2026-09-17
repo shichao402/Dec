@@ -106,14 +106,6 @@ func (s *Server) Register(mcpServer *mcp.Server) {
 		Description: "预览某平面 push 将涉及的 Dec 与 secrets 变更（plane=local|global|both，不写远端）。推之前先 preview 确认范围。",
 	}, s.handlePreviewPush)
 	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name:        "dec_preview_sync",
-		Description: "预览当前项目 provides 与权威 Dec 仓库的同步差异，不修改作者源或 Git 工作副本。",
-	}, s.handlePreviewProvidesSync)
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name:        "dec_sync",
-		Description: "同步当前项目 provides。mode=auto|pull|push；Git 冲突解决后可传 conflict_action=continue，或传 abort 放弃本次 merge。",
-	}, s.handleProvidesSync)
-	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "dec_list_secrets",
 		Description: "列出某平面私密资产元数据（路径、本地/远端存在性；plane=local|global|both）。绝不返回 token/密钥/正文。",
 	}, s.handleListSecrets)
@@ -513,45 +505,6 @@ func (s *Server) handlePreviewPush(ctx context.Context, _ *mcp.CallToolRequest, 
 		}
 		return res.data(), nil
 	})
-}
-
-type providesSyncParams struct {
-	ProjectRoot    string `json:"project_root" jsonschema:"项目根路径；必须是已初始化且声明 provides 的项目"`
-	Mode           string `json:"mode,omitempty" jsonschema:"同步模式：auto|pull|push，默认 auto"`
-	ConflictAction string `json:"conflict_action,omitempty" jsonschema:"冲突现场操作：continue|abort；一般留空"`
-}
-
-func (s *Server) handlePreviewProvidesSync(ctx context.Context, _ *mcp.CallToolRequest, in providesSyncParams) (*mcp.CallToolResult, any, error) {
-	if strings.TrimSpace(in.ProjectRoot) == "" {
-		return nil, nil, fmt.Errorf("project_root 不能为空")
-	}
-	res, err := s.gateway().Run(ctx, "preview_sync", in.ProjectRoot, "local", nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	if res != nil && !res.OK && res.Error != "" {
-		return nil, nil, fmt.Errorf("%s", res.Error)
-	}
-	return nil, res.data(), nil
-}
-
-func (s *Server) handleProvidesSync(ctx context.Context, _ *mcp.CallToolRequest, in providesSyncParams) (*mcp.CallToolResult, any, error) {
-	if strings.TrimSpace(in.ProjectRoot) == "" {
-		return nil, nil, fmt.Errorf("project_root 不能为空")
-	}
-	mode := strings.TrimSpace(in.Mode)
-	if mode == "" {
-		mode = "auto"
-	}
-	payload := map[string]any{"Mode": mode, "ConflictAction": strings.TrimSpace(in.ConflictAction)}
-	res, err := s.gateway().Run(ctx, "sync", in.ProjectRoot, "local", payload)
-	if err != nil {
-		return nil, nil, err
-	}
-	if res != nil && !res.OK && res.Error != "" {
-		return nil, nil, fmt.Errorf("%s", res.Error)
-	}
-	return nil, res.data(), nil
 }
 
 type listSecretsParams struct {

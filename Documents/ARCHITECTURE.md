@@ -62,7 +62,7 @@ direct requires 的 `public/project`，不递归、不引入 user/private。Git 
 - 项目初始化 / project 选择：Console **引导 / 项目**
 - 项目启用、家项目 requires、标签（推荐 Global）与四象限浏览：Console **项目 / Global 资产**
 - 提供映射、引用选择：Console **项目 / Global 资产**
-- 自动同步 / Pull / Push / 冲突恢复（含 side-by-side 预览）：Console **同步**
+- 官方 `requires` 安装、个人私仓 Pull / Push、密钥清单：Console **同步**
 - 远端设备探测与置备：Console **连接**（ADR 0019）
 
 运行时每个程序自行支持 `--version`；不存在用一个通用 CLI 代表整套版本的探针。
@@ -456,12 +456,10 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 #### push（同步页）
 
-- 先 side-by-side 展示 provides source、派生目标、时间与动作
-- 公开资产在持久 worktree 中由系统 Git fetch/merge；成功后 backfill source 再 push
-- Git 冲突不 abort，保留工作副本供用户继续或放弃
+- 官方 provides 不在本机 push；提供方提交源仓并打产品 `v*`，由 CI 写 Dec registry
+- 个人 Git 资产只写设置中的私仓，官方项目名会被过滤
 - secrets 不在 provides 中声明：`.secrets/<p>` 整树按 SyncTarget 规则同步，
-  自动模式只提示需要显式 Pull 或 Push（ADR 0026）
-- 无 provides 的存量项目继续从 `.dec/cache/` 读取，作为兼容路径
+  用户必须明确选择 Pull 或 Push
 
 #### remove（删除页）
 

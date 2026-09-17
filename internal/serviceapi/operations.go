@@ -201,21 +201,6 @@ func SaveProjectProvides(projectRoot, providesRoot string, provides map[string]t
 		app.SaveProjectProvidesInput{ProjectRoot: projectRoot, ProvidesRoot: providesRoot, Provides: provides}, reporter)
 }
 
-func PreviewProjectProvidesSync(ctx context.Context, projectRoot string, reporter app.Reporter) (*app.ProvidesSyncResult, error) {
-	return run[app.ProvidesSyncResult](ctx, "preview_sync", projectRoot, nil, reporter)
-}
-
-func SyncProjectProvides(ctx context.Context, projectRoot string, mode app.ProvideSyncMode, reporter app.Reporter) (*app.ProvidesSyncResult, error) {
-	return SyncProjectProvidesAction(ctx, projectRoot, mode, "", reporter)
-}
-
-func SyncProjectProvidesAction(ctx context.Context, projectRoot string, mode app.ProvideSyncMode, conflictAction string, reporter app.Reporter) (*app.ProvidesSyncResult, error) {
-	return run[app.ProvidesSyncResult](ctx, "sync", projectRoot, struct {
-		Mode           app.ProvideSyncMode
-		ConflictAction string
-	}{mode, conflictAction}, reporter)
-}
-
 func ListSecretSyncTargets(projectRoot string) ([]app.SecretTargetOption, error) {
 	return invokeSlice[app.SecretTargetOption](context.Background(), "list_secret_sync_targets", projectRoot, nil, nil)
 }

@@ -33,7 +33,7 @@ function formatSyncTime(value?: string): string {
 export type PullHistoryEntry = { title: string; result: PullResult; at: Date }
 
 export type SyncTarget = { key: string; label: string; root: string; plane: 'local' | 'global'; projectName?: string }
-type SyncMode = 'auto' | 'pull' | 'push'
+type SyncMode = 'pull' | 'push'
 type SyncPreviewItem = {
   Source: string
   Target: string
@@ -127,7 +127,7 @@ export function SyncPage(props: {
     <Page>
       <PageHeader
         title="同步"
-        description="先预览 source 与 target 的差异，再选择自动同步、Pull 或 Push。"
+        description="项目按 requires 从官方 registry 安装；Global 只同步个人私仓与密钥。"
         actions={props.onBack && (
           <Button variant="outline" onClick={props.onBack}>
             <ArrowLeft className="size-4" />返回
@@ -140,17 +140,31 @@ export function SyncPage(props: {
             tone="info"
             text="官方资产从 Dec 仓 registry 分支按 requires 安装。改官方安装物请用草稿 + 源仓 PR/Issue（MCP dec_propose_upstream）；本页 Push 只处理个人私仓与密钥。TODO(console)：贡献入口尚未做成独立页。"
           />
-          <SyncPreviewPanel
-            deviceId={props.deviceId}
-            targets={targets}
-            target={target}
-            onTarget={(value) => {
-              setTargetKey(value)
-              setSecrets(null)
-              setConsumers(null)
-            }}
-            onPushed={(provider) => loadConsumers(provider)}
-          />
+          {target.plane === 'local' ? (
+            <OfficialInstallPanel
+              deviceId={props.deviceId}
+              targets={targets}
+              target={target}
+              onTarget={(value) => {
+                setTargetKey(value)
+                setSecrets(null)
+                setConsumers(null)
+              }}
+              onPullResult={props.onPullResult}
+            />
+          ) : (
+            <SyncPreviewPanel
+              deviceId={props.deviceId}
+              targets={targets}
+              target={target}
+              onTarget={(value) => {
+                setTargetKey(value)
+                setSecrets(null)
+                setConsumers(null)
+              }}
+              onPushed={(provider) => loadConsumers(provider)}
+            />
+          )}
           <ActionFeedback actionKey={consumerListSpec.key} />
           {consumers && (
             <ConsumerRefreshPanel
@@ -187,6 +201,64 @@ export function SyncPage(props: {
   )
 }
 
+function OfficialInstallPanel(props: {
+  deviceId: string
+  targets: SyncTarget[]
+  target: SyncTarget
+  onTarget: (key: string) => void
+  onPullResult?: (title: string, result: PullResult) => void
+}) {
+  const { target } = props
+  const spec = actionSpec(
+    `operation:pull:${props.deviceId}:${target.key}`,
+    `安装 ${target.label} 的官方依赖`,
+    props.deviceId,
+    [resource.workspace(target.root)],
+    'operation',
+    `${target.label} 安装完成`,
+  )
+  const runPull = () => runOrWatchTyped<PullResult>({
+    actionKey: spec.key,
+    operation: 'pull',
+    projectRoot: target.root,
+    workspacePlane: 'local',
+  })
+
+  return (
+    <Panel>
+      <PanelHeader
+        title="官方资产安装"
+        description="消费版本由项目 .dec/config.yaml 的 requires 决定；安装器从 Dec registry 重画 IDE 目录。"
+      />
+      <PanelBody className="space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="项目" className="min-w-64 flex-1">
+            <Select aria-label="项目" value={target.key} onChange={(event) => props.onTarget(event.target.value)}>
+              {props.targets.filter((item) => item.plane === 'local').map((item) => (
+                <option key={item.key} value={item.key}>{item.label}</option>
+              ))}
+            </Select>
+          </Field>
+          <ActionButton
+            spec={spec}
+            action={runPull}
+            onSuccess={(result) => props.onPullResult?.(`${target.label} Pull`, result)}
+            runningLabel="安装中…"
+          >
+            <RefreshCw className="size-4" />重新安装
+          </ActionButton>
+        </div>
+        <p className="break-all font-mono text-[11px] text-faint">{target.root}</p>
+        <Notice
+          tone="info"
+          text="这里不再比较或推送 provides。提供方修改 DecAssets 后提交源仓，打产品 v*，再由 CI 发布 registry/<项目>/<版本>。"
+        />
+        <ActionFeedback actionKey={spec.key} />
+      </PanelBody>
+    </Panel>
+  )
+}
+
 function SyncPreviewPanel(props: {
   deviceId: string
   targets: SyncTarget[]
@@ -201,42 +273,31 @@ function SyncPreviewPanel(props: {
   const previewSpec = actionSpec(`sync:preview:${props.deviceId}:${target.key}`, '预览同步差异', props.deviceId, [workspaceResource], 'read')
   const syncSpec = (mode: SyncMode) => actionSpec(
     `operation:sync:${props.deviceId}:${target.key}:${mode}`,
-    `${mode === 'auto' ? '自动同步' : mode === 'pull' ? 'Pull' : 'Push'} ${target.label}`,
+    `${mode === 'pull' ? 'Pull' : 'Push'} ${target.label}`,
     props.deviceId,
     [workspaceResource],
     'operation',
     `${target.label} 同步完成`,
   )
-  const runCompatible = async (actionKey: string, operation: string, legacyOperation: string, payload?: unknown) => {
-    const input = {
+  const runOperation = async (actionKey: string, operation: string, payload?: unknown) => {
+    return normalizeSyncPreview(await runOrWatchTyped<SyncPreview>({
       actionKey,
       operation,
       projectRoot: target.root,
       workspacePlane: target.plane,
       payload,
-    }
-    try {
-      return normalizeSyncPreview(await runOrWatchTyped<SyncPreview>(input))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (!message.includes('未知操作') && !message.includes('unknown operation')) throw error
-      return normalizeSyncPreview(await runOrWatchTyped<SyncPreview>({ ...input, operation: legacyOperation }))
-    }
+    }))
   }
-  const runPreview = () => runCompatible(previewSpec.key, 'preview_sync', 'preview_provides_sync')
-  const conflict = preview?.Conflict
-  // Worktree 是所有 provides 同步都会有的持久工作区，不等于发生冲突。
-  // 只有后端明确返回 Conflict 时才展示 Continue / Abort。
-  const conflictWorktree = conflict?.Worktree
+  const runPreview = () => runOperation(previewSpec.key, 'preview_sync')
 
-  const runSync = (mode: SyncMode, conflictAction?: 'continue' | 'abort') =>
-    runCompatible(syncSpec(mode).key, 'sync', 'sync_provides', { Mode: mode, ...(conflictAction ? { ConflictAction: conflictAction } : {}) })
+  const runSync = (mode: SyncMode) =>
+    runOperation(syncSpec(mode).key, 'sync', { Mode: mode })
 
   return (
     <Panel>
       <PanelHeader
-        title="同步预览"
-        description="source 是项目提供源，target 是私仓或本机落点；预览不会修改文件。"
+        title="个人资产与密钥"
+        description="Global 平面只处理个人私仓和 Bitwarden；官方 registry 不在这里写入。"
       />
       <PanelBody className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
@@ -261,10 +322,10 @@ function SyncPreviewPanel(props: {
           {target.root || 'Global 本机平面（projectRoot 为空）'}
         </p>
         <ActionFeedback actionKey={previewSpec.key} />
-        {(['auto', 'pull', 'push'] as SyncMode[]).map((mode) => (
+        {(['pull', 'push'] as SyncMode[]).map((mode) => (
           <ActionFeedback key={mode} actionKey={syncSpec(mode).key} />
         ))}
-        {!preview && <Notice tone="info" text="刷新预览后会显示方向、状态以及三种时间；执行同步前可逐项检查内容差异。" />}
+        {!preview && <Notice tone="info" text="刷新预览后可检查个人私仓与本机的差异，再明确选择 Pull 或 Push。" />}
         {preview && (
           <>
             <div className="min-h-56 rounded-lg border border-line">
@@ -302,20 +363,14 @@ function SyncPreviewPanel(props: {
                 <p className="px-3 py-5 text-center text-xs text-faint">没有待同步或可比较的资产。</p>
               )}
             </div>
-            {conflictWorktree && (
-              <Notice
-                tone="warn"
-                text={`检测到冲突${conflict?.Message ? `：${conflict.Message}` : ''}。worktree：${conflictWorktree}`}
-              />
-            )}
             <div className="flex flex-wrap gap-2">
-              {(['auto', 'pull', 'push'] as SyncMode[]).map((mode) => {
+              {(['pull', 'push'] as SyncMode[]).map((mode) => {
                 const spec = syncSpec(mode)
                 return (
                   <ActionButton
                     key={mode}
                     spec={spec}
-                    variant={mode === 'auto' ? 'default' : 'outline'}
+                    variant={mode === 'pull' ? 'default' : 'outline'}
                     action={() => runSync(mode)}
                     onSuccess={async (value) => {
                       setPreview(value)
@@ -325,17 +380,11 @@ function SyncPreviewPanel(props: {
                     }}
                     runningLabel="同步中…"
                   >
-                    {mode === 'auto' ? <RefreshCw className="size-4" /> : mode === 'push' ? <UploadCloud className="size-4" /> : <ArrowLeft className="size-4" />}
-                    {mode === 'auto' ? '自动同步' : mode === 'pull' ? 'Pull' : 'Push'}
+                    {mode === 'push' ? <UploadCloud className="size-4" /> : <ArrowLeft className="size-4" />}
+                    {mode === 'pull' ? 'Pull' : 'Push'}
                   </ActionButton>
                 )
               })}
-              {conflictWorktree && (
-                <>
-                  <ActionButton spec={syncSpec('auto')} variant="secondary" action={() => runSync('auto', 'continue')} onSuccess={setPreview}>Continue</ActionButton>
-                  <ActionButton spec={syncSpec('auto')} variant="destructive" action={() => runSync('auto', 'abort')} onSuccess={setPreview}>Abort</ActionButton>
-                </>
-              )}
             </div>
           </>
         )}

@@ -120,10 +120,10 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 
 私密 env 从 `.secrets/**/.env/*.env` 读取，经独立 `dec-exec` 注入子进程（MCP 安装时自动包装），不通过模板占位符注入。未定义的公开占位符会保留原样，并在拉取时提示。可在 Console 项目设置里编辑 `.dec/vars.yaml`。
 
-### 5. 推送与新增资产
+### 5. 发布与新增资产
 
-项目可在 `.dec/config.yaml` 的 `provides` 中登记作者目录
-`skills/`、`commands/`、`rules/`、`mcp/` 中的资产，经 Git vault 分发。
+提供方项目可在 `.dec/config.yaml` 的 `provides` 中登记作者目录
+`skills/`、`commands/`、`rules/`、`mcp/` 中的官方资产，由提供方 CI 发布到 Dec registry。
 这四个目录在新项目中默认位于 `DecAssets/`，项目页可用 `provides_root` 整组挪走，
 避免与业务目录撞名；基准点只影响本地落点，远端布局不变。已有 `provides` 但没有
 该字段的旧项目继续按仓库根解释。
@@ -135,13 +135,11 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 
 1. 在产品仓中创建并提交作者文件
 2. 在项目页“我提供的资产”里勾选扫描到的候选
-3. 在 **同步** 二级页预览本地与远端，再自动同步或单向 Pull / Push
+3. 修改产品版本并打 `v*` tag，由 CI 执行 `publish-provides`
 
-配置了 `provides` 的项目只从作者目录推送；`.dec/` 与 `.cursor/`、
+`.dec/` 与 `.cursor/`、
 `.codex/` 等 IDE 目录都是状态或渲染结果，校验会拒绝把它们声明为 source，
-`provides_root` 同样不能指向这类点目录。
-未配置 provides 的旧项目暂时保留 cache push
-兼容路径。
+`provides_root` 同样不能指向这类点目录。本机不再把 provides 或 cache 推入私仓。
 
 ## 推荐工作流
 
@@ -161,14 +159,14 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 ### 工作流 C：更新已有资产
 
 1. 修改 `.dec/config.yaml` 的 `provides[].source` 指向的作者文件
-2. **同步** 页查看 side-by-side 预览并自动同步
-3. 有 Git 冲突时在保留的工作副本中解决，再继续推送
+2. 在提供方源仓提交、评审并修改产品版本
+3. 打产品 `v*`，由 CI 发布不可变的 `registry/<项目>/<版本>`
 
 ### 工作流 D：新增资产
 
 1. 在产品仓选择作者路径并创建文件
 2. 项目页登记到“我提供的资产”
-3. **同步** 页预览并推送
+3. 随产品版本由 CI 发布
 
 ## 程序边界
 

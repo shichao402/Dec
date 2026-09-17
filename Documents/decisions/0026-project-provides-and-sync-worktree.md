@@ -50,25 +50,16 @@ secrets，但依据是 SyncTarget 规则而非登记内容；正文没有三方�
 真实 Note 名巧合一致。嵌套路径 `.secrets/<p>/.env/app.env` 的真实 Note 名是
 `.env/app.env`，逐条声明会把它显示成一个不存在的地址。
 
-### 3. Git 同步保留工作副本
+### 3. Git 同步工作副本（已被 0028 取代）
 
-每个提供方项目使用 `.dec/sync/vault/` 持久 Git worktree。自动同步使用系统 Git：
-
-1. 将 `provides` 的公开 source 导入 worktree 并提交本地快照；
-2. fetch 并 merge 远端；
-3. 无冲突时将合并结果回写对应 source；
-4. push，并刷新安装缓存；
-5. 有冲突时保留 `MERGE_HEAD` 与文件，等待继续或显式放弃。
-
-Dec 不实现自己的文本合并算法。仅 Push 遇远端领先时拒绝覆盖。工作副本与状态是派生
-运行数据，不是第三份作者源。
+`.dec/sync/vault/`、三方 merge、backfill 与本机 push 已删除。`provides` 现在只描述
+提供方源仓里的作者文件；产品打 `v*` 后，由提供方 CI 发布到 Dec registry。
 
 ### 4. Console 是规则与同步的人机门面
 
 “我提供的”只在各项目页管理；Global 页只管理当前设备引用的 Global 资产。
-“同步”进入二级页，先展示
-本地 source 与远端目标、时间和动作，再执行自动 / Pull / Push。文本可用内置简单
-diff 或标准 Git diff/merge 工具。“我提供的”分区先列出扫描到的候选供勾选，人不必
+“同步”页对项目只展示按 `requires` 从 registry 重新安装，不再展示 provides 的
+source → 私仓 target 或自动同步。“我提供的”分区先列出扫描到的候选供勾选，人不必
 手写来源路径。候选只扫描作者根下的 `skills/`、`commands/`、`rules/`、`mcp/`；
 `.dec/` 状态目录和各 IDE 渲染目录既不扫描，配置校验也禁止引用，避免安装产物被
 反向当成作者源。项目页可改作者根，改动会让已登记来源整体平移。

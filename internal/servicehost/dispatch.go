@@ -516,43 +516,27 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 	case "preview_push":
 		return app.PreviewPushWorkspaceAssets(workspace)
 	case "preview_sync":
-		if workspace.EffectivePlane() == app.WorkspaceGlobal {
-			return app.PreviewPushWorkspaceAssets(workspace)
-		}
-		return app.PreviewProjectProvidesSync(ctx, projectRoot, reporter)
+		return app.PreviewPushWorkspaceAssets(workspace)
 	case "preview_provides_sync":
-		return app.PreviewProjectProvidesSync(ctx, projectRoot, reporter)
+		return nil, fmt.Errorf("provides 私仓同步已移除；官方资产由提供方 CI 发布到 Dec registry")
 	case "sync":
 		var in struct {
-			Mode           app.ProvideSyncMode
+			Mode           string
 			ConflictAction string
 		}
 		if err := decode(payload, &in); err != nil {
 			return nil, err
 		}
-		if workspace.EffectivePlane() == app.WorkspaceGlobal {
-			switch in.Mode {
-			case app.ProvideSyncPull:
-				return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
-			case app.ProvideSyncPush:
-				return writer.PushWorkspace(ctx, workspace, reporter)
-			default:
-				if _, err := app.PullWorkspaceAssets(ctx, workspace, "", reporter); err != nil {
-					return nil, err
-				}
-				return writer.PushWorkspace(ctx, workspace, reporter)
-			}
+		switch strings.ToLower(strings.TrimSpace(in.Mode)) {
+		case "pull":
+			return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
+		case "push":
+			return writer.PushWorkspace(ctx, workspace, reporter)
+		default:
+			return nil, fmt.Errorf("自动双向同步已移除；请明确选择 Pull 安装或 Push 个人私仓/密钥")
 		}
-		return app.SyncProjectProvidesAction(ctx, projectRoot, in.Mode, in.ConflictAction, reporter)
 	case "sync_provides":
-		var in struct {
-			Mode           app.ProvideSyncMode
-			ConflictAction string
-		}
-		if err := decode(payload, &in); err != nil {
-			return nil, err
-		}
-		return app.SyncProjectProvidesAction(ctx, projectRoot, in.Mode, in.ConflictAction, reporter)
+		return nil, fmt.Errorf("provides 私仓同步已移除；官方资产由提供方 CI 发布到 Dec registry")
 	case "prepare_repo_gcm_bootstrap":
 		var in struct {
 			RepoURL string
