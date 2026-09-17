@@ -14,9 +14,10 @@ if [ "${TARGET_OS}" = "windows" ]; then
 fi
 
 mkdir -p "${OUTPUT_DIR}"
+cd "${ROOT}"
 CGO_ENABLED=0 GOOS="${TARGET_OS}" GOARCH="${TARGET_ARCH}" go build \
   -trimpath \
   -o "${OUTPUT_DIR}/dec-registry-${TARGET_OS}-${TARGET_ARCH}${EXT}" \
-  "${ROOT}/cmd/dec-registry"
+  ./cmd/dec-registry
 
 echo "${OUTPUT_DIR}/dec-registry-${TARGET_OS}-${TARGET_ARCH}${EXT}"
