@@ -50,7 +50,8 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 - `updater.urlAllowlist` 是路径列表，只豁免这些路径中的 updater endpoint/base URL 文本；不豁免 sidecar 名、手写 `CheckResult` / `UpdateAvailable`、自声明 proto 或宽松反序列化。
 - agent 发布：`release --execute` 必须由 CI 设 `RELKIT_RELEASE_VIA_CI=1`；本地不要发。
 - 人页：产品 `relkit.json` 只写 `site.title/description/homepage`，禁止 `site.makers`。Makers projectId/region/tokenEnv 属于箱上 `relkit-agent.json` 顶层；产品发布只更新 `site/`、`latest/` 数据，agent 异步全量静态重建。人页落后时到 relkit 仓按 `relkit-deploy` 跑 `relkit-agent site-rebuild`，禁止靠重发产品版本救页。
-- `share-with`：只能从 `evidence.remote.products` 的真实产品 ID 中选择；`operatorTokenPresent=true` 不等于存在可继承的产品 token。远端不可读或 `blocked` 含 `token.isolation` 时禁止让用户猜。磁盘 token 仍是**已有 owner** 的 `{owner}.token`，不打印 token 内容。
+- `share-with`：只能从 `evidence.remote.products` 的真实产品 ID 中选择；`operatorTokenPresent=true` 不等于存在可继承的产品 token。远端不可读或 `blocked` 含 `token.isolation` 时禁止让用户猜。独占文件是 `{product}.token`；共用后改名为 `tokens/shared.token`（冲突则 `shared-N`）。chown / restart 必须读 `list` 打出的文件名，禁止用 `share-with` 的产品 id 拼路径。不打印 token 内容。
+- publish profile 的字段归属：`baseUrl` 属产品（进签名 manifest 的客户端下载地址，以产品仓 `relkit.json` 为准）；`uploadUrl` 与 `tokenEnv` 属箱子（agent 自己的写入端点与 systemd 喂给它的凭据变量，本形态是 `RELKIT_SERVE_TOKEN`）。CI 的 `RELKIT_UPLOAD_TOKEN` 只到 agent HTTP API 为止，不在 agent 进程环境里，别把它填进 profile。`agent provision` 会从箱上已装 profile 继承箱上字段，不要手改远端 profile 绕过它。
 - 远端版本：`versionRelation=behind` 且 `onPublishRoute=true` 时先升级远端（relkit 仓 `relkit-deploy`）；若 `onPublishRoute=false`，明确告诉用户它落后但不阻塞当前产品发布。
 - 失败记账：带 `code=` 的 `Fail` 写入 `.relkit/cache/ops-journal.jsonl`（`unclassified` 不记）。`retrospect` 输出本次遇到 / 已修进脚本或 skill / 未消化；未消化非 0。
 
