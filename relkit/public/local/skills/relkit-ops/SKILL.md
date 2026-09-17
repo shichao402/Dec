@@ -1,7 +1,8 @@
 ---
 name: relkit-ops
 description: >
-  产品仓 relkit 开箱、发版、升 lock、在已有 serve/agent 上注册/列产品/轮换/吊销 token。
+  产品仓 relkit 开箱、发版、升 lock、在已有 serve/agent 上注册/列产品/轮换/吊销 token；
+  以及两轨发布（--install / --payload）、InstallSpec.placement、内部更新接入。
   有 scripts/host/relkit_host.py（或 scripts/relkit_host.py）时使用。
 ---
 
@@ -14,6 +15,8 @@ description: >
 判断不了就问人。不要手拼 SSH 写配置，不要编造命令输出。
 
 Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维 CLI。发布协议仍由它们实现；常驻进程仍要跑。产品 token 与开箱决策只经 host.py。
+
+**两轨 / Placement / 内部更新**的产品接入合同在同目录 [`host-update.md`](host-update.md)。改发布脚本、填 `InstallSpec`、决定某平台开不开 payload 时先读它；不要去 relkit 仓 docs 里另找一份平行指南。协议实现细节才回 relkit ADR 0013 / 0014。
 
 **箱子上的二进制**（空机 systemd、换 `relkit-agent` / `relkit-serve`）不在本 skill。那是 relkit 仓的 [`relkit-deploy`](../relkit-deploy/SKILL.md) 与 `python scripts/deploy/relkit.py`。现网箱 **agent + serve 固定配套**，缺 serve 不算升完。产品仓里若 `versionRelation=behind` 且 `onPublishRoute=true`，告诉用户先到 relkit 仓升远端，不要在本仓假装能 `upgrade --host`。
 
@@ -37,8 +40,8 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 - 开箱前先跑 `onboard start` / `onboard inspect`：脚本会列出 `relkit.json` backends、VERSION、lock、SSH Include/通配匹配主机。`http-put` / `local` / `static-http` 等陈旧类型是 error，挡住 `product.id`。不要用手写确认代替 inspect。
 - `ssh.host`：问人之前脚本已展开 `~/.ssh/config` 的 Include 与通配，并列出 exact / patterns / matched。通配本身不是 SSH 别名。写入 `onboard set ssh.host <值>`。
 - 发布拓扑：只认 `questions --json` 的 `evidence.topology`。`mode=direct` 表示 `publishTo` 只含 S3 等直连后端，serve/agent token 与注册不在发布链路上；不要因状态里残留 `ssh.host` 就把远端说成必需。
-- `sidecar.layout`：只认 lock 装到 `tools/bin/relkit-updater`；可选 `relkit.json` `sidecar.packScript` 只校验接线，不硬编码 `.mjs`。真产物归 `pack.ci`。macOS 的 universal sidecar 只跑 `relkit_host.py sidecar universal --out <路径>`：`install` 每个目标都装成同一个文件名，只能放构建机自己的架构。**这条闸门说的是 sidecar 二进制打进发布树的位置，与客户端 `InstallSpec.placement`（`IN_PLACE` / `LIBRARY`）无关**，同名不同事。
-- 安装落点：宿主填 `InstallSpec.placement` 之前先读 relkit 仓 ADR 0013 / 0014。SPEC 附录 B 只分类。要点：`LIBRARY` 的 launcher **由产品自己提供**；是否退出宿主由 apply 表判定，不是 placement 常量；`retain` 按最近 N 份清理并尊重 `reserved_codes`（项目 pin），多实例跨更新至少 `retain=2`；`active.json` 只是默认指针，按项目选版靠产品 pin + `CheckOp.exact_code` + `ApplyOp.install_only` + list/switch/rollback；macOS 的 `LIBRARY` 拷完整 `.app` 到 `versions/<id>/<Product>.app`，launcher 必须用 LaunchServices/`open` 启动，禁止 exec `Contents/MacOS/*`。installRoot 不能放在签名 `.app` 内部。内部更新用 `--payload` 打 `kind=payload` 的 zip，完整安装用 `--install`。IPC 窗口现为 `[3,3]`。
+- `sidecar.layout`：只认 lock 装到 `tools/bin/relkit-updater`；可选 `relkit.json` `sidecar.packScript` 只校验接线，不硬编码 `.mjs`。真产物归 `pack.ci`。macOS 的 universal sidecar 只跑 `relkit_host.py sidecar universal --out <路径>`：`install` 每个目标都装成同一个文件名，只能放构建机自己的架构。**这条闸门说的是 sidecar 二进制打进发布树的位置，与客户端 `InstallSpec.placement` 无关**，同名不同事。
+- 宿主接入：两轨、`InstallSpec.placement`、IPC `[3,3]`、payload 软链限制、闸门与禁止项见同目录 [`host-update.md`](host-update.md)。SPEC 附录 B 只分类。
 - `relkit_consume.py` 是 release 内部件，随版本在 `scripts/host/` 里搬家。产品代码禁止 `import relkit_consume`，也禁止再写 `scripts/relkit_consume.py` 这个已退役路径；闸门 `consumer-entry-only` 会报，改法是走 `relkit_host.py` 的子命令。
 - host 脚本要求 Python ≥ 3.9（hostlib 导入期就会求值 PEP 585 泛型）。产品入口脚本不要接受或安装 3.8，否则闸门 `host-python-floor` 报 drift；CI 容器只装 3.8 时要改成装 3.9 以上。
 - `fake.release`：只跑 `relkit_host.py fake verify`。缺 staged 树时脚本自己 dummy stage + simulate，禁止手调 `relkit.exe stage`。本机无 COS/S3 发布密钥时仍应能 simulate（对着空远端 index 合并 dummy staged）。
