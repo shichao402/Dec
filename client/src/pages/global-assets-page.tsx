@@ -6,6 +6,7 @@ import { useDecAction } from '@/lib/action-context'
 import { actionSpec, resource } from '@/lib/console'
 import { AssetsPanel } from '@/pages/assets-panel'
 import { RequiresPanel } from '@/pages/requires-panel'
+import { WorkspaceWritePanel } from '@/pages/workspace-write-panel'
 
 export function GlobalAssetsPage(props: {
   deviceId: string
@@ -13,7 +14,7 @@ export function GlobalAssetsPage(props: {
   onSync: () => void
 }) {
   const syncState = useDecAction(
-    actionSpec(`operation:sync:${props.deviceId}:global`, '同步 Global 资产', props.deviceId, [resource.global], 'operation'),
+    actionSpec(`operation:update:${props.deviceId}:global`, '更新 Global 资产', props.deviceId, [resource.global], 'operation'),
   )
   return (
     <Page>
@@ -24,13 +25,16 @@ export function GlobalAssetsPage(props: {
         actions={
           <Button onClick={props.onSync} disabled={syncState.blocked}>
             <RefreshCw className="size-4" />
-            同步
+            更新
           </Button>
         }
       />
       <PageFill>
         <div className="mb-4">
           <RequiresPanel deviceId={props.deviceId} root="" plane="global" />
+        </div>
+        <div className="mb-4">
+          <WorkspaceWritePanel deviceId={props.deviceId} root="" plane="global" label="Global" />
         </div>
         <AssetsPanel
           deviceId={props.deviceId}

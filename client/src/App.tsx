@@ -64,7 +64,7 @@ const viewTitles: Record<View, string> = {
   global: 'Global 资产',
   projects: '项目',
   project: '项目',
-  sync: '同步',
+  sync: '更新',
   delete: '删除',
   settings: '设置',
 }

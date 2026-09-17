@@ -228,7 +228,7 @@ export function installTauriMock(scenario: Scenario) {
           Mode: 'remote',
         })
       }
-      if (operation === 'push') {
+      if (operation === 'push' || operation === 'push_personal') {
         return ok({
           DecPushedCount: 2,
           DecSkippedReason: '',
@@ -237,6 +237,9 @@ export function installTauriMock(scenario: Scenario) {
           SecretsUpdatedCount: 1,
           SecretsSkippedReason: '',
         })
+      }
+      if (operation === 'push_secrets') {
+        return ok({ CreatedCount: 0, UpdatedCount: 1, SkippedReason: '' })
       }
       return ok(pullResult)
     },
@@ -270,6 +273,32 @@ export function installTauriMock(scenario: Scenario) {
             UpdateAvailable: true,
           }],
         })
+      }
+      if (method === 'list_official_asset_edits') {
+        return ok({
+          Assets: [{
+            Project: 'relkit',
+            Type: 'skill',
+            Name: 'relkit-ops',
+            BaseVersion: 'v0.4.2',
+            OverrideActive: false,
+          }],
+        })
+      }
+      if (method === 'load_official_asset_edit') {
+        return ok({
+          Project: 'relkit',
+          Type: 'skill',
+          Name: 'relkit-ops',
+          BaseVersion: 'v0.4.2',
+          Files: [{ Path: 'SKILL.md', Content: '# relkit ops\n' }],
+        })
+      }
+      if (method === 'preview_official_override') {
+        return ok({ Diff: '--- a/SKILL.md\n+++ b/SKILL.md\n-# relkit ops\n+# changed\n' })
+      }
+      if (method === 'apply_official_override') {
+        return ok({ ID: 'mock-id', Kind: 'issue', URL: 'https://github.com/example/relkit/issues/1' })
       }
       if (method === 'save_project_tags') {
         const raw = String(args.payloadJson || args.payload_json || '{}')

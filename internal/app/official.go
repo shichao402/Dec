@@ -58,13 +58,15 @@ func installOfficialRequires(ctx context.Context, workspace Workspace, cfg *type
 
 // OfficialRequireStatus 是 Console「官方依赖」面板的一行。
 type OfficialRequireStatus struct {
-	Project         string
-	Want            string
-	Installed       string
-	Available       string
-	Tag             string
-	UpdateAvailable bool
-	Error           string
+	Project             string
+	Want                string
+	Installed           string
+	Available           string
+	Tag                 string
+	UpdateAvailable     bool
+	Error               string
+	OverrideActive      bool
+	OverrideReadyToDrop bool
 }
 
 type OfficialRequiresState struct {
@@ -89,17 +91,76 @@ func ListOfficialRequires(ctx context.Context, workspace Workspace) (*OfficialRe
 	}
 	out := &OfficialRequiresState{Items: make([]OfficialRequireStatus, 0, len(items))}
 	for _, item := range items {
+		overrideActive, overrideReady := officialOverrideStatus(ctx, workspace, item.Project, item.Available)
 		out.Items = append(out.Items, OfficialRequireStatus{
-			Project:         item.Project,
-			Want:            item.Want,
-			Installed:       item.Installed,
-			Available:       item.Available,
-			Tag:             item.Tag,
-			UpdateAvailable: item.UpdateAvailable,
-			Error:           item.Error,
+			Project:             item.Project,
+			Want:                item.Want,
+			Installed:           item.Installed,
+			Available:           item.Available,
+			Tag:                 item.Tag,
+			UpdateAvailable:     item.UpdateAvailable,
+			Error:               item.Error,
+			OverrideActive:      overrideActive,
+			OverrideReadyToDrop: overrideReady,
 		})
 	}
 	return out, nil
+}
+
+// UpdateOfficialRequires 只更新用户选中的官方依赖，不触碰个人私仓或 Bitwarden。
+func UpdateOfficialRequires(ctx context.Context, workspace Workspace, projects []string, reporter Reporter) (*PullProjectAssetsResult, error) {
+	cfg, err := loadWorkspaceBundleConfig(workspace)
+	if err != nil {
+		return nil, err
+	}
+	all, url := workspaceOfficialRequires(workspace, cfg)
+	selected := make(types.RequiresSpec)
+	for _, project := range projects {
+		project = strings.TrimSpace(project)
+		if want, ok := all[project]; ok {
+			selected[project] = want
+		}
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("没有选中有效的官方依赖")
+	}
+
+	ideSelection, err := config.ResolveEffectiveIDEs(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("解析有效 IDE 失败: %w", err)
+	}
+	projectIDEs := uniqueWorkspaceIDEs(workspace, ideSelection.IDEs)
+	result := &PullProjectAssetsResult{
+		ProjectRoot:   workspace.Root,
+		AssetSources:  make(map[string][]string),
+		EffectiveIDEs: projectIDENames(projectIDEs),
+		IDEWarnings:   append([]string(nil), ideSelection.Warnings...),
+	}
+	resolved, err := install.Official(ctx, install.Options{
+		CacheDir:    workspaceCacheDir(workspace),
+		RegistryURL: url,
+		GitToken:    os.Getenv("DEC_REGISTRY_TOKEN"),
+		Requires:    selected,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range resolved {
+		if err := dropResolvedOverrides(ctx, workspace, item.Project, item.Version); err != nil {
+			return nil, err
+		}
+	}
+	if err := renderOfficialFromCache(workspace, selected, projectIDEs, result, reporter); err != nil {
+		return nil, err
+	}
+	for _, item := range resolved {
+		result.RequiredProjects = appendUniqueSource(result.RequiredProjects, item.Project)
+		if item.Warning != "" {
+			result.NonFatalWarnings = append(result.NonFatalWarnings, item.Warning)
+		}
+		emit(reporter, EventInfo, "update.official", fmt.Sprintf("%s@%s", item.Project, item.Version), nil)
+	}
+	return result, nil
 }
 
 func renderOfficialFromCache(workspace Workspace, req types.RequiresSpec, projectIDEs []ide.IDE, result *PullProjectAssetsResult, reporter Reporter) error {
@@ -113,7 +174,11 @@ func renderOfficialFromCache(workspace Workspace, req types.RequiresSpec, projec
 			return err
 		}
 		for _, asset := range assets {
-			if err := installAssetToIDEs(asset.Type, asset.Name, asset.Project, asset.Path, workspace, projectIDEs); err != nil {
+			source := asset.Path
+			if override := activeOverrideSource(workspace, asset); override != "" {
+				source = override
+			}
+			if err := installAssetToIDEs(asset.Type, asset.Name, asset.Project, source, workspace, projectIDEs); err != nil {
 				result.FailedCount++
 				emit(reporter, EventWarn, "install.official", fmt.Sprintf("渲染 %s/%s 失败: %v", asset.Project, asset.Name, err), nil)
 				continue

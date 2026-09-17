@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { ActionFeedback } from '@/components/action-feedback'
-import { ActionButton } from '@/components/ui/action-button'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState, Loading, Notice } from '@/components/ui/feedback'
 import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel'
 import { useActionRegistry } from '@/lib/action-context'
-import { invokeTyped, runOrWatchTyped } from '@/lib/api'
+import { invokeTyped } from '@/lib/api'
 import { actionSpec, resource } from '@/lib/console'
-import type { PullResult } from '@/lib/utils'
 
 type OfficialRequire = {
   Project: string
@@ -19,6 +17,8 @@ type OfficialRequire = {
   Tag?: string
   UpdateAvailable?: boolean
   Error?: string
+  OverrideActive?: boolean
+  OverrideReadyToDrop?: boolean
 }
 
 type OfficialRequiresState = { Items?: OfficialRequire[] }
@@ -27,7 +27,6 @@ export function RequiresPanel(props: {
   deviceId: string
   root: string
   plane: 'local' | 'global'
-  onPullResult?: (title: string, result: PullResult) => void
 }) {
   const [items, setItems] = useState<OfficialRequire[] | null>(null)
   const actions = useActionRegistry()
@@ -37,14 +36,6 @@ export function RequiresPanel(props: {
   const loadSpec = useMemo(
     () => actionSpec(`requires:list:${props.deviceId}:${scope}`, '检查官方依赖', props.deviceId, [workspaceResource], 'read'),
     [props.deviceId, scope, workspaceResource],
-  )
-  const updateSpec = actionSpec(
-    `operation:pull:${props.deviceId}:${scope}:requires`,
-    '更新官方依赖',
-    props.deviceId,
-    [workspaceResource],
-    'operation',
-    '官方依赖已更新',
   )
 
   const load = useCallback(async () => {
@@ -74,7 +65,6 @@ export function RequiresPanel(props: {
       />
       <div className="px-4 pt-3 empty:hidden">
         <ActionFeedback actionKey={loadSpec.key} />
-        <ActionFeedback actionKey={updateSpec.key} />
       </div>
       {items === null ? (
         <Loading />
@@ -89,6 +79,8 @@ export function RequiresPanel(props: {
                   <span className="font-mono text-sm font-medium text-ink">{item.Project}</span>
                   <Badge tone="quiet">{item.Want}</Badge>
                   {item.UpdateAvailable && <Badge tone="warn">有更新</Badge>}
+                  {item.OverrideActive && <Badge tone="warn">本地覆写</Badge>}
+                  {item.OverrideReadyToDrop && <Badge tone="good">上游已解决</Badge>}
                   {item.Error && <Badge tone="bad">失败</Badge>}
                   {!item.Error && !item.UpdateAvailable && item.Installed && <Badge tone="good">已最新</Badge>}
                 </div>
@@ -99,24 +91,7 @@ export function RequiresPanel(props: {
                 </p>
                 {item.Error && <Notice className="mt-2" tone="warn" text={item.Error} />}
               </div>
-              <ActionButton
-                size="sm"
-                variant={item.UpdateAvailable ? 'default' : 'outline'}
-                spec={updateSpec}
-                action={() => runOrWatchTyped<PullResult>({
-                  actionKey: updateSpec.key,
-                  operation: 'pull',
-                  projectRoot: props.root,
-                  workspacePlane: props.plane,
-                })}
-                runningLabel="更新中…"
-                onSuccess={(result) => {
-                  props.onPullResult?.(`${item.Project} 更新`, result)
-                  void load()
-                }}
-              >
-                {item.Installed ? (item.UpdateAvailable ? '更新' : '重新安装') : '安装'}
-              </ActionButton>
+              <span className="text-xs text-faint">到「更新」页安装</span>
             </div>
           ))}
         </PanelBody>

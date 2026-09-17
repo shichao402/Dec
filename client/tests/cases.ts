@@ -245,10 +245,17 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
-      await expect(page.getByRole('main').getByRole('button', { name: '同步' })).toBeVisible()
+      await expect(page.getByRole('main').getByRole('button', { name: '更新', exact: true })).toBeVisible()
       await expect(page.getByText('官方依赖', { exact: true })).toBeVisible()
-      await expect(page.getByRole('button', { name: '安装' })).toBeVisible()
+      await expect(page.getByText('到「更新」页安装')).toBeVisible()
       await expect(page.getByText(/可用 v0\.4\.2/)).toBeVisible()
+      await expect(page.getByText('写回', { exact: true })).toBeVisible()
+      await page.getByRole('button', { name: '修改' }).click()
+      await page.getByLabel('SKILL.md').fill('# changed')
+      await page.getByLabel('上游仓库').fill('example/relkit')
+      await page.getByRole('button', { name: '预览修改' }).click()
+      await expect(page.getByText('+# changed', { exact: false })).toBeVisible()
+      await expect(page.getByRole('button', { name: '提交 Issue 并启用覆写' })).toBeVisible()
       await expect(page.getByText('我提供的资产')).toBeVisible()
       await expect(page.getByText('我引用的资产')).toBeVisible()
       // 新项目默认 DecAssets；改根后已登记来源要跟着平移。
@@ -270,7 +277,7 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.locator('main button').filter({ hasText: '腾讯云基础设施' }).first().click()
-      await expect(page.getByRole('main').getByRole('button', { name: '同步' })).toBeVisible()
+      await expect(page.getByRole('main').getByRole('button', { name: '更新', exact: true })).toBeVisible()
     },
   },
   {
@@ -292,22 +299,15 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
-      await page.getByRole('main').getByRole('button', { name: '同步' }).click()
-      await expect(page.getByRole('heading', { name: '同步' })).toBeVisible()
-      // 从项目页进入时必须预选当前项目，而不是回退到 Global。
-      await expect(page.getByLabel('同步目标')).toHaveValue('D:\\workspace\\GitHub\\Dec')
-      // 项目平面同样要能 Push 个人资产与密钥，不能只剩官方安装。
-      await expect(page.getByRole('main').getByRole('button', { name: 'Push' })).toBeVisible()
-      await page.getByRole('button', { name: '刷新预览' }).click()
-      // 预览只讲 Push 方向：列待推的个人改动，不再出现三方对比与冲突。
-      await expect(page.getByText('p/dec/public/project/skills/release/SKILL.md')).toBeVisible()
-      await expect(page.getByRole('button', { name: '对比' })).toHaveCount(0)
-      // 最窄视口也必须不滚动就能看到操作徽标：象限列可以藏，操作不行。
-      await expect(page.getByText('修改').first()).toBeInViewport()
-      // 密钥清单只列路径与状态，未落地的条目也要能看见。
-      await page.getByRole('button', { name: '列出密钥' }).click()
-      await expect(page.getByText('.secrets/relkit/.env/upload.env').last()).toBeVisible()
-      await expect(page.getByText('未落地')).toBeVisible()
+      await page.getByRole('main').getByRole('button', { name: '更新', exact: true }).click()
+      await expect(page.getByRole('heading', { name: '更新' })).toBeVisible()
+      // 更新页跨工作区列出依赖；从项目页进入时默认勾选当前项目的可用更新。
+      await expect(page.getByText('Dec', { exact: true }).last()).toBeVisible()
+      await expect(page.getByText('relkit', { exact: true }).last()).toBeVisible()
+      await page.getByRole('button', { name: '预览更新' }).click()
+      await expect(page.getByText(/未安装 → v0\.4\.2/)).toBeVisible()
+      await expect(page.getByRole('button', { name: /确认更新 1 项/ })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Push' })).toHaveCount(0)
     },
   },
   {
@@ -315,8 +315,8 @@ export const cases: Case[] = [
     scenario: 'typical',
     open: async (page) => {
       await connect(page)
-      await nav(page, '同步')
-      await expect(page.getByRole('heading', { name: '同步' })).toBeVisible()
+      await nav(page, '更新')
+      await expect(page.getByRole('heading', { name: '更新' })).toBeVisible()
     },
   },
   {

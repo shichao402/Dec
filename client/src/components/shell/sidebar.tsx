@@ -34,7 +34,7 @@ export function Sidebar(props: {
     {
       label: '运行',
       items: [
-        { id: 'sync', label: '同步', icon: RefreshCw },
+        { id: 'sync', label: '更新', icon: RefreshCw },
         { id: 'delete', label: '删除', icon: Trash2 },
       ],
     },

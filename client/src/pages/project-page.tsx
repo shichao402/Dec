@@ -15,6 +15,8 @@ import { actionSpec, resource, suggestProjectName } from '@/lib/console'
 import { AssetsPanel } from '@/pages/assets-panel'
 import { ProvidesPanel } from '@/pages/provides-panel'
 import { RequiresPanel } from '@/pages/requires-panel'
+import { OfficialOverridesPanel } from '@/pages/official-overrides-panel'
+import { WorkspaceWritePanel } from '@/pages/workspace-write-panel'
 import type { ManagedProject } from '@/lib/utils'
 
 type ProjectPreparation = { AvailableProjects: string[]; HomeProject: string }
@@ -30,7 +32,7 @@ export function ProjectPage(props: {
   const [bindingOpen, setBindingOpen] = useState(false)
   const workspaceResource = resource.workspace(project.Root)
   const removeSpec = actionSpec(`project:remove:${props.deviceId}:${project.Root}`, '移除项目管理', props.deviceId, [workspaceResource, resource.global], 'write', '已移除项目管理')
-  const syncSpec = actionSpec(`operation:sync:${props.deviceId}:${project.Root}`, '同步项目资产', props.deviceId, [workspaceResource], 'operation')
+  const syncSpec = actionSpec(`operation:update:${props.deviceId}:${project.Root}`, '更新项目资产', props.deviceId, [workspaceResource], 'operation')
   const syncState = useDecAction(syncSpec)
   const removeButton = (
     <ActionButton
@@ -86,7 +88,7 @@ export function ProjectPage(props: {
             {removeButton}
             <Button onClick={props.onSync} disabled={syncState.blocked}>
               <RefreshCw className="size-4" />
-              同步
+              更新
             </Button>
           </>
         }
@@ -115,7 +117,14 @@ export function ProjectPage(props: {
         </Panel>
         <div className="space-y-4">
           <RequiresPanel deviceId={props.deviceId} root={project.Root} plane="local" />
+          <OfficialOverridesPanel deviceId={props.deviceId} root={project.Root} />
           <ProvidesPanel deviceId={props.deviceId} root={project.Root} />
+          <WorkspaceWritePanel
+            deviceId={props.deviceId}
+            root={project.Root}
+            plane="local"
+            label={project.Label || project.Name}
+          />
           <div>
             <div className="mb-2">
               <h2 className="text-[13px] font-semibold text-ink">我引用的资产</h2>

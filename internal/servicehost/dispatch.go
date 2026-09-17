@@ -91,7 +91,7 @@ func isProjectMutation(method string) bool {
 		"ensure_home_p", "bind_managed_project", "create_local_asset",
 		"apply_vault_project", "save_project_settings", "ensure_project_vars",
 		"prepare_remote_note_edit", "prepare_remote_ssh_hosts_edit", "save_project_provides",
-		"propose_upstream":
+		"propose_upstream", "apply_official_override":
 		return true
 	default:
 		return false
@@ -224,6 +224,26 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.LoadWorkspaceAssetSelection(workspace, reporter)
 	case "list_official_requires":
 		return app.ListOfficialRequires(ctx, workspace)
+	case "list_official_asset_edits":
+		return app.ListOfficialAssetEdits(workspace)
+	case "load_official_asset_edit":
+		var in app.PreviewOfficialOverrideInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.LoadOfficialAssetEdit(workspace, in)
+	case "preview_official_override":
+		var in app.PreviewOfficialOverrideInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.PreviewOfficialOverride(workspace, in)
+	case "apply_official_override":
+		var in app.ApplyOfficialOverrideInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.ApplyOfficialOverride(ctx, workspace, in)
 	case "save_enabled_bundles":
 		var in struct {
 			EnabledProjects []string
@@ -513,8 +533,20 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		return app.CleanupLocalInstallation(ctx, in, reporter)
 	case "pull":
 		return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
+	case "update_official":
+		var in struct {
+			Projects []string
+		}
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.UpdateOfficialRequires(ctx, workspace, in.Projects, reporter)
 	case "push":
 		return writer.PushWorkspace(ctx, workspace, reporter)
+	case "push_personal":
+		return app.PushWorkspacePersonalAssets(ctx, workspace, reporter)
+	case "push_secrets":
+		return app.PushWorkspaceSecretsOnly(ctx, workspace, reporter)
 	case "preview_push":
 		return app.PreviewPushWorkspaceAssets(workspace)
 	case "prepare_repo_gcm_bootstrap":

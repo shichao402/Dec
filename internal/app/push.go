@@ -30,6 +30,25 @@ func PushProjectAssets(ctx context.Context, projectRoot string, reporter Reporte
 	return PushWorkspaceAssets(ctx, NewWorkspace(WorkspaceProject, projectRoot), reporter)
 }
 
+// PushWorkspacePersonalAssets 只写个人 Git 资产，不访问 Bitwarden。
+func PushWorkspacePersonalAssets(ctx context.Context, workspace Workspace, reporter Reporter) (*PushProjectAssetsResult, error) {
+	reporter = defaultReporter(reporter)
+	pushed, skipped, commit, err := pushDecBundles(ctx, workspace, reporter)
+	if err != nil {
+		return nil, fmt.Errorf("push.dec 失败: %w", err)
+	}
+	return &PushProjectAssetsResult{
+		DecPushedCount:   pushed,
+		DecSkippedReason: skipped,
+		VersionCommit:    commit,
+	}, nil
+}
+
+// PushWorkspaceSecretsOnly 只写 Bitwarden，不提交个人 Git 资产。
+func PushWorkspaceSecretsOnly(ctx context.Context, workspace Workspace, reporter Reporter) (*PushSecretsResult, error) {
+	return PushWorkspaceSecretsBundles(ctx, workspace, reporter)
+}
+
 // PushWorkspaceAssets 把当前平面的本地缓存与 secrets 落地文件推回远端。
 // 用户平面读 ~/.dec/cache 与 ~/.dec/secrets，只涉及 scope: user 的 bundle。
 func PushWorkspaceAssets(ctx context.Context, workspace Workspace, reporter Reporter) (*PushProjectAssetsResult, error) {

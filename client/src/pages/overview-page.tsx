@@ -39,7 +39,7 @@ export function OverviewPage(props: {
     <Page>
       <PageHeader
         title="设备概览"
-        description="这台设备由 Dec 管理的私仓连接、项目与最近一次同步结果。"
+        description="这台设备由 Dec 管理的私仓连接、项目与最近一次更新结果。"
         actions={
           <Button variant="outline" onClick={props.onRefresh} disabled={refreshState.blocked}>
             <RefreshCw className={refreshState.running ? 'size-4 animate-spin' : 'size-4'} />
@@ -83,7 +83,7 @@ export function OverviewPage(props: {
               </Panel>
               <Panel className="shrink-0">
                 <PanelHeader
-                  title="最近同步"
+                  title="最近更新"
                   action={
                     <Button size="sm" variant="ghost" onClick={() => props.onNavigate('sync')}>
                       全部记录
@@ -93,7 +93,7 @@ export function OverviewPage(props: {
                 />
                 <PanelBody>
                   {props.lastPull ? <LastPull entry={props.lastPull} /> : (
-                    <p className="text-xs leading-relaxed text-faint">这次连接还没有执行同步。拉取完成后，结论会显示在这里和同步页。</p>
+                    <p className="text-xs leading-relaxed text-faint">这次连接还没有执行更新。</p>
                   )}
                 </PanelBody>
               </Panel>

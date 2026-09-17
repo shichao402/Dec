@@ -3,6 +3,7 @@ package contribute
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,7 +77,11 @@ func DraftDir(projectRoot, provideKey string) string {
 func createIssue(ctx context.Context, repo, title, body string) (*Result, error) {
 	out, err := gh(ctx, "issue", "create", "-R", repo, "-t", title, "-b", body, "-l", "dec-asset")
 	if err != nil {
-		return nil, err
+		// 第一次接入的提供方仓库通常还没有 dec-asset label；标签不应阻断贡献。
+		out, err = gh(ctx, "issue", "create", "-R", repo, "-t", title, "-b", body)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &Result{Kind: "issue", URL: firstURL(out)}, nil
 }
@@ -116,4 +121,32 @@ func firstURL(s string) string {
 		}
 	}
 	return s
+}
+
+// Resolved 查询已绑定的上游票据是否已结束。查询失败由调用方按“状态未知”处理。
+func Resolved(ctx context.Context, url string) (bool, error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return false, nil
+	}
+	kind := ""
+	switch {
+	case strings.Contains(url, "/pull/"):
+		kind = "pr"
+	case strings.Contains(url, "/issues/"):
+		kind = "issue"
+	default:
+		return false, fmt.Errorf("无法识别上游 URL %q", url)
+	}
+	out, err := gh(ctx, kind, "view", url, "--json", "state")
+	if err != nil {
+		return false, err
+	}
+	var state struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(out), &state); err != nil {
+		return false, err
+	}
+	return strings.EqualFold(state.State, "closed") || strings.EqualFold(state.State, "merged"), nil
 }
