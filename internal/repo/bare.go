@@ -105,7 +105,7 @@ func FetchBare() error {
 	defer cancel()
 	cmd := sysproc.CommandContext(ctx, "git", "--git-dir", bareDir, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
 	// 禁止交互：凭证过期时不能让 git/GCM 弹窗阻塞 dec-server，失败后由门面显式确认走 bootstrap。
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
+	cmd.Env = gitRemoteQuietEnv()
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))
@@ -337,9 +337,12 @@ func gitCloneBare(url, targetDir string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := sysproc.CommandContext(ctx, "git", "clone", "--bare", url, targetDir)
+	cmd.Env = gitRemoteQuietEnv()
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git clone --bare 失败: %s", strings.TrimSpace(string(output)))
+		message := strings.TrimSpace(string(output))
+		cloneErr := fmt.Errorf("git clone --bare 失败: %s", message)
+		return classifyRemoteAuthError(url, message, cloneErr)
 	}
 	return nil
 }

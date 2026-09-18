@@ -310,9 +310,9 @@ session、vault/user key、主密码、TOTP、临时密钥与 2FA 中间态均�
 [0022](decisions/0022-console-bitwarden-unlock.md)、[ARCHITECTURE.md](./ARCHITECTURE.md)
 与 [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)。
 
-首次连接 HTTPS 私仓存在特殊自举路径（[0011](decisions/0011-private-repo-gcm-bootstrap.md)）：
-仅在 Git 明确认定认证失败且用户确认后，服务不依赖 bundle manifest，直接枚举 Bitwarden
-中现有 `.gcm/*` Note，按正文 `host` 匹配仓库、复用 GCM Processor Apply 并重试。
+首次连接 HTTPS / SSH 私仓存在特殊自举路径（[0011](decisions/0011-private-repo-gcm-bootstrap.md)）：
+仅在 Git 明确认定认证失败且用户确认后（恰好一条匹配 `.gcm` 时自动 Apply），服务不依赖 bundle manifest，直接枚举 Bitwarden
+中现有 `.gcm/*` Note，按正文 `host` 匹配仓库、复用 GCM Processor Apply；SSH 地址会改写成 HTTPS 再探测。
 这只是基础能力的特殊编排；不新增 secret 类型、SyncTarget、token 副本或本地 session。
 
 ## 配置与绑定

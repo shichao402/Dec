@@ -138,6 +138,13 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	}
 
 	tx, err := createTx()
+	if err != nil && repo.IsAuthenticationError(err) {
+		if _, recovered, recErr := recoverRepoAuthWithGCM(ctx, "", reporter); recovered {
+			tx, err = createTx()
+		} else if recErr != nil {
+			emit(reporter, EventWarn, "pull.vault", recErr.Error(), nil)
+		}
+	}
 	if err != nil {
 		if len(official) > 0 {
 			emit(reporter, EventWarn, "pull.vault", "私仓不可用，已只安装官方 registry 资产", nil)

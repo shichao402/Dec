@@ -118,6 +118,80 @@ func TestApplyRepoGCMBootstrapReusesGCMHandlerAndProbesRepo(t *testing.T) {
 	}
 }
 
+func TestPrepareRepoGCMBootstrapMatchesSSHURLByHost(t *testing.T) {
+	secrets.SetSession("test-session")
+	t.Cleanup(secrets.ClearSession)
+	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+		"github/private/user": {
+			{RelativePath: ".gcm/github.yaml", Content: "host: github.com\nusername: firo\npassword: gh-secret\n"},
+		},
+	}}
+	oldFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = oldFactory })
+
+	result, err := PrepareRepoGCMBootstrap(context.Background(), "git@github.com:shichao402/dec-source-private.git", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 1 || result.RepoHost != "github.com" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestApplyRepoGCMBootstrapRewritesSSHURLToHTTPS(t *testing.T) {
+	secrets.SetSession("test-session")
+	t.Cleanup(secrets.ClearSession)
+	stub := &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+		"github/private/user": {
+			{RelativePath: ".gcm/github.yaml", Content: "host: github.com\nusername: firo\npassword: gh-secret\n"},
+		},
+	}}
+	oldFactory := secretsClientFactory
+	secretsClientFactory = func() secrets.Client { return stub }
+	t.Cleanup(func() { secretsClientFactory = oldFactory })
+
+	capture := &captureGCMHandler{}
+	reg := handler.NewRegistry()
+	reg.Register(capture)
+	restoreRegistry := handler.SetDefault(reg)
+	t.Cleanup(restoreRegistry)
+
+	probed := ""
+	oldProbe := probeRepoForBootstrap
+	probeRepoForBootstrap = func(repoURL string) error {
+		probed = repoURL
+		return nil
+	}
+	t.Cleanup(func() { probeRepoForBootstrap = oldProbe })
+
+	persisted := ""
+	oldPersist := persistRepoURLAfterGCM
+	persistRepoURLAfterGCM = func(httpsURL string) error {
+		persisted = httpsURL
+		return nil
+	}
+	t.Cleanup(func() { persistRepoURLAfterGCM = oldPersist })
+
+	result, err := ApplyRepoGCMBootstrap(context.Background(), ApplyRepoGCMBootstrapInput{
+		RepoURL: "git@github.com:shichao402/dec-source-private.git",
+		Address: "github/private/user", NotePath: ".gcm/github.yaml",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://github.com/shichao402/dec-source-private.git"
+	if probed != want {
+		t.Fatalf("probe = %q, want %q", probed, want)
+	}
+	if persisted != want {
+		t.Fatalf("persisted = %q, want %q", persisted, want)
+	}
+	if result.RepoURL != want {
+		t.Fatalf("result.RepoURL = %q, want %q", result.RepoURL, want)
+	}
+}
+
 func TestApplyRepoGCMBootstrapRejectsHostMismatchBeforeApply(t *testing.T) {
 	secrets.SetSession("test-session")
 	t.Cleanup(secrets.ClearSession)

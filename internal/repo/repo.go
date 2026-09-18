@@ -53,10 +53,11 @@ func StripAuthMarker(message string) string {
 }
 
 // classifyRemoteAuthError 把 git 远端操作失败按凭证原因分类。
-// repoURL 决定是否 HTTPS 与 host；非 HTTPS 或非凭证类失败原样返回，避免误导用户走 bootstrap。
+// HTTPS 与 SSH 的凭证失败都标出来：SSH 失败后由上层回退到 Bitwarden `.gcm`（GCM 只认 HTTPS）。
+// DNS / 超时 / host key 校验失败原样返回，避免误导用户走 bootstrap。
 func classifyRemoteAuthError(repoURL, message string, err error) error {
 	host, hostErr := RepoHost(repoURL)
-	if hostErr != nil || !isHTTPSRepoURL(repoURL) || !looksLikeAuthenticationFailure(message) {
+	if hostErr != nil || !isRemoteGitURL(repoURL) || !looksLikeAuthenticationFailure(message) {
 		return err
 	}
 	return &AuthenticationError{Host: host, Err: err}
@@ -81,11 +82,11 @@ func RepoHost(repoURL string) (string, error) {
 }
 
 // Probe 在不修改本地 repo 的前提下验证远端可访问性。
-// 禁止终端/GCM 交互，认证失败交由 TUI 显式确认是否走 Bitwarden bootstrap。
+// 禁止终端/GCM/SSH 口令交互，认证失败交由门面显式确认是否走 Bitwarden GCM bootstrap。
 func Probe(repoURL string) error {
 	repoURL = strings.TrimSpace(repoURL)
 	cmd := sysproc.Command("git", "ls-remote", "--heads", repoURL)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
+	cmd.Env = gitRemoteQuietEnv()
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		return nil
@@ -97,13 +98,77 @@ func Probe(repoURL string) error {
 	return classifyRemoteAuthError(repoURL, message, fmt.Errorf("git ls-remote: %s", message))
 }
 
+func gitRemoteQuietEnv() []string {
+	return append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GCM_INTERACTIVE=Never",
+		// SSH 失败必须立刻返回，不能卡在口令/密钥提示上；上层才能回退 GCM。
+		"GIT_SSH_COMMAND=ssh -o BatchMode=yes",
+	)
+}
+
 func isHTTPSRepoURL(repoURL string) bool {
 	lower := strings.ToLower(strings.TrimSpace(repoURL))
 	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://")
 }
 
+func isSSHRepoURL(repoURL string) bool {
+	raw := strings.TrimSpace(repoURL)
+	lower := strings.ToLower(raw)
+	if strings.HasPrefix(lower, "ssh://") {
+		return true
+	}
+	if strings.Contains(lower, "://") {
+		return false
+	}
+	at := strings.LastIndex(raw, "@")
+	colon := strings.Index(raw, ":")
+	return at >= 0 && colon > at
+}
+
+func isRemoteGitURL(repoURL string) bool {
+	return isHTTPSRepoURL(repoURL) || isSSHRepoURL(repoURL)
+}
+
+// HTTPSRemoteURL 把 SSH 克隆地址改成 GCM 能用的 HTTPS。已经是 HTTPS 则原样返回。
+func HTTPSRemoteURL(repoURL string) (string, error) {
+	raw := strings.TrimSpace(repoURL)
+	if raw == "" {
+		return "", fmt.Errorf("仓库地址为空")
+	}
+	if isHTTPSRepoURL(raw) {
+		return raw, nil
+	}
+	if strings.HasPrefix(strings.ToLower(raw), "ssh://") {
+		parsed, err := url.Parse(raw)
+		if err != nil || parsed.Hostname() == "" {
+			return "", fmt.Errorf("无法把仓库地址转成 HTTPS: %q", repoURL)
+		}
+		path := strings.TrimPrefix(parsed.Path, "/")
+		if path == "" {
+			return "", fmt.Errorf("无法把仓库地址转成 HTTPS: %q", repoURL)
+		}
+		return "https://" + parsed.Hostname() + "/" + path, nil
+	}
+	if isSSHRepoURL(raw) {
+		at := strings.LastIndex(raw, "@")
+		rest := raw[at+1:]
+		colon := strings.Index(rest, ":")
+		host := rest[:colon]
+		path := strings.TrimPrefix(rest[colon+1:], "/")
+		if host == "" || path == "" {
+			return "", fmt.Errorf("无法把仓库地址转成 HTTPS: %q", repoURL)
+		}
+		return "https://" + host + "/" + path, nil
+	}
+	return "", fmt.Errorf("无法把仓库地址转成 HTTPS: %q", repoURL)
+}
+
 func looksLikeAuthenticationFailure(message string) bool {
 	lower := strings.ToLower(message)
+	if strings.Contains(lower, "host key verification failed") {
+		return false
+	}
 	for _, marker := range []string{
 		"authentication failed",
 		"credentials have expired",
@@ -118,6 +183,12 @@ func looksLikeAuthenticationFailure(message string) bool {
 		"http 403",
 		"error: 403",
 		"repository not found",
+		"permission denied (publickey)",
+		"permission denied (keyboard-interactive",
+		"permission denied (password)",
+		"no supported authentication methods",
+		"too many authentication failures",
+		"please make sure you have the correct access rights",
 	} {
 		if strings.Contains(lower, marker) {
 			return true

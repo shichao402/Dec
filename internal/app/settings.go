@@ -293,12 +293,20 @@ func ConnectRepo(repoURL string, reporter Reporter) (*ConnectRepoResult, error) 
 	emit(reporter, EventInfo, "settings.repo", "开始连接仓库", &Progress{Phase: "connect", Current: 1, Total: 2})
 	if err := probeRepoForSettings(repoURL); err != nil {
 		if repo.IsAuthenticationError(err) {
-			host, _ := repo.RepoHost(repoURL)
-			return &ConnectRepoResult{
-				RepoURL: repoURL, RepoAuthRequired: true, RepoHost: host, ConnectError: "Git HTTPS authentication failed",
-			}, nil
+			if httpsURL, recovered, recErr := recoverRepoAuthWithGCM(context.Background(), repoURL, reporter); recovered {
+				repoURL = httpsURL
+			} else {
+				if recErr != nil {
+					emit(reporter, EventWarn, "settings.repo", recErr.Error(), nil)
+				}
+				host, _ := repo.RepoHost(repoURL)
+				return &ConnectRepoResult{
+					RepoURL: repoURL, RepoAuthRequired: true, RepoHost: host, ConnectError: repoAuthConnectError,
+				}, nil
+			}
+		} else {
+			return nil, err
 		}
-		return nil, err
 	}
 	if err := repo.Connect(repoURL); err != nil {
 		return nil, err
@@ -363,12 +371,20 @@ func SaveGlobalSettings(input SaveGlobalSettingsInput, reporter Reporter) (*Save
 	if needsRepoProbe(targetRepoURL) {
 		if probeErr := probeRepoForSettings(targetRepoURL); probeErr != nil {
 			if repo.IsAuthenticationError(probeErr) {
-				host, _ := repo.RepoHost(targetRepoURL)
-				return &SaveGlobalSettingsResult{
-					RepoURL: targetRepoURL, RepoAuthRequired: true, RepoHost: host, ConnectError: "Git HTTPS authentication failed",
-				}, nil
+				if httpsURL, recovered, recErr := recoverRepoAuthWithGCM(context.Background(), targetRepoURL, reporter); recovered {
+					targetRepoURL = httpsURL
+				} else {
+					if recErr != nil {
+						emit(reporter, EventWarn, "settings.save", recErr.Error(), nil)
+					}
+					host, _ := repo.RepoHost(targetRepoURL)
+					return &SaveGlobalSettingsResult{
+						RepoURL: targetRepoURL, RepoAuthRequired: true, RepoHost: host, ConnectError: repoAuthConnectError,
+					}, nil
+				}
+			} else {
+				return nil, probeErr
 			}
-			return nil, probeErr
 		}
 	}
 

@@ -36,8 +36,9 @@ Settings 不再 probe（URL 未变），若不在 Run 页 pull 失败路径补�
 流程：
 
 1. 用禁交互的 `git ls-remote` / `git fetch` 探测仓库；网络、DNS、地址错误按原错误返回。
-2. 仅 HTTPS 认证失败时，错误携带稳定标记 `[dec:repo-auth-required]`（跨 RPC 后仍可判定），
-   Console 明确询问用户是否从 Bitwarden 查找 GCM。
+2. 仅远端认证失败时（HTTPS 凭证，或 SSH `Permission denied (publickey)` 一类），错误携带稳定标记 `[dec:repo-auth-required]`（跨 RPC 后仍可判定），
+   Console 明确询问用户是否从 Bitwarden 查找 GCM。SSH 与 HTTPS 共用这一入口：GCM 只认 HTTPS，
+   Apply 成功后把 `repo_url` / bare origin 改写成 HTTPS 再探测。恰好一条匹配 host 的 `.gcm` Note 时自动 Apply。
 3. 用户确认后，由 `dec-server` 复用现有 Bitwarden session；缺 session 时按 0022 进入
    Console Authenticate。
 4. 不读取 Git bundle manifest；直接枚举 Bitwarden folder 中名字匹配 `.gcm/*` 的
@@ -52,8 +53,9 @@ MCP 缺 session 时由认证协调器拉起/聚焦 Console 并等待，远端无
 
 ## 安全与生命周期约束
 
-- Bootstrap 只由用户确认触发，不因任意 Git 错误自动读取 Bitwarden。
-- 仅明确的 HTTPS 认证错误可进入流程；SSH、DNS、超时、证书错误不进入。
+- Bootstrap 不因任意 Git 错误自动读取 Bitwarden。认证失败后恰好一条匹配 host 的 `.gcm` Note 时自动 Apply；多条仍须用户选择。
+- 仅明确的远端认证错误可进入流程；DNS、超时、证书错误、SSH host key 校验失败不进入。
+  SSH 公钥被拒与 HTTPS 401/过期一样进入，因为私仓 token 在 `.gcm` 里，失败后应回退使用。
 - 不在 `~/.dec/config.yaml`、环境变量、日志或 RPC 结果中保存/回传 token。
 - Bitwarden session 仍只在 `dec-server` 内存；GCM 副作用仍由 0005 的 Processor 管理。
 - 仓库连通后回到正常 bundle pull；Bootstrap 不改变 bundle scope、SyncTarget 或 pull 语义。
@@ -83,6 +85,6 @@ Note 与同一个 Handler 能打破环依赖，同时避免维护一套“bootst
 
 否决：会把网络/DNS/地址错误误判为认证问题，也会在未经确认时读取秘密并产生机器副作用。
 
-### E. 改用 SSH
+### E. 改用 SSH 作为通用解法
 
-否决为通用解法：只改变凭证类型，不消除自举依赖；HTTPS/GCM 仍是 CNB 等服务的实际需求。
+否决为「只把凭证类型换成 SSH、仍从私仓自举密钥」：环依赖还在。SSH URL 认证失败时回退到同一份 `.gcm`、并把 origin 改成 HTTPS，是本决策的补充，不是用 SSH 替代 GCM。

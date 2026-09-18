@@ -38,6 +38,8 @@ func TestAuthenticationErrorClassification(t *testing.T) {
 		"remote: Your Credentials have Expired.",
 		"fatal: Authentication failed",
 		"fatal: could not read Username: terminal prompts disabled",
+		"git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.",
+		"Please make sure you have the correct access rights\nand the repository exists.",
 	} {
 		if !looksLikeAuthenticationFailure(message) {
 			t.Fatalf("应识别认证错误: %q", message)
@@ -45,6 +47,9 @@ func TestAuthenticationErrorClassification(t *testing.T) {
 	}
 	if looksLikeAuthenticationFailure("Could not resolve host: cnb.cool") {
 		t.Fatal("DNS 错误不得识别为认证错误")
+	}
+	if looksLikeAuthenticationFailure("Host key verification failed") {
+		t.Fatal("host key 校验失败不得识别为认证错误")
 	}
 
 	classified := classifyRemoteAuthError(
@@ -55,12 +60,41 @@ func TestAuthenticationErrorClassification(t *testing.T) {
 	if !IsAuthenticationError(classified) {
 		t.Fatalf("HTTPS 凭证过期应分类为 AuthenticationError, got %v", classified)
 	}
+	sshDenied := classifyRemoteAuthError(
+		"git@github.com:owner/private.git",
+		"git@github.com: Permission denied (publickey).",
+		errors.New("git fetch failed"),
+	)
+	if !IsAuthenticationError(sshDenied) {
+		t.Fatalf("SSH 公钥拒绝应分类为 AuthenticationError, got %v", sshDenied)
+	}
 	if dns := classifyRemoteAuthError(
 		"https://cnb.cool/owner/repo.git",
 		"Could not resolve host: cnb.cool",
 		errors.New("git fetch failed"),
 	); IsAuthenticationError(dns) {
 		t.Fatal("DNS 错误不得分类为 AuthenticationError")
+	}
+	if hostKey := classifyRemoteAuthError(
+		"git@github.com:owner/private.git",
+		"Host key verification failed",
+		errors.New("git fetch failed"),
+	); IsAuthenticationError(hostKey) {
+		t.Fatal("host key 校验失败不得分类为 AuthenticationError")
+	}
+}
+
+func TestHTTPSRemoteURL(t *testing.T) {
+	for input, want := range map[string]string{
+		"https://github.com/owner/repo.git":     "https://github.com/owner/repo.git",
+		"git@github.com:owner/repo.git":         "https://github.com/owner/repo.git",
+		"ssh://git@github.com/owner/repo.git":   "https://github.com/owner/repo.git",
+		"ssh://git@cnb.cool:22/owner/repo.git":  "https://cnb.cool/owner/repo.git",
+	} {
+		got, err := HTTPSRemoteURL(input)
+		if err != nil || got != want {
+			t.Fatalf("HTTPSRemoteURL(%q) = %q, %v; want %q", input, got, err, want)
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/secrets/handler"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 // RepoGCMCandidate 是可用于私仓 bootstrap 的 Bitwarden GCM Note 元数据。
@@ -42,6 +43,9 @@ type ApplyRepoGCMBootstrapResult struct {
 }
 
 var probeRepoForBootstrap = repo.Probe
+var persistRepoURLAfterGCM = persistBootstrapRepoURL
+
+const repoAuthConnectError = "Git 仓库认证失败"
 
 // IsRepoAuthRequiredMessage 判断一次操作失败（含跨 RPC 回传的文本）是否为仓库凭证失效。
 // 门面据此才提示走 GCM bootstrap，避免把 Bitwarden 401 之类的失败也导向 Git 凭证流程。
@@ -204,8 +208,19 @@ func ApplyRepoGCMBootstrap(ctx context.Context, input ApplyRepoGCMBootstrapInput
 	if err := h.Apply(ctx, item); err != nil {
 		return nil, err
 	}
-	if err := probeRepoForBootstrap(input.RepoURL); err != nil {
+	probeURL, err := repo.HTTPSRemoteURL(input.RepoURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := probeRepoForBootstrap(probeURL); err != nil {
 		return nil, fmt.Errorf("GCM 已应用，但仓库仍不可访问: %w", err)
+	}
+	if probeURL != input.RepoURL {
+		if err := persistRepoURLAfterGCM(probeURL); err != nil {
+			return nil, fmt.Errorf("GCM 已应用且 HTTPS 探测成功，但改写仓库地址失败: %w", err)
+		}
+		emit(reporter, EventInfo, "settings.repo.bootstrap",
+			fmt.Sprintf("SSH 地址已改为 %s，后续用 GCM 认证", probeURL), nil)
 	}
 	_, scopeErr := secrets.ParseRemoteScope(input.Address)
 	candidate := RepoGCMCandidate{
@@ -214,7 +229,46 @@ func ApplyRepoGCMBootstrap(ctx context.Context, input ApplyRepoGCMBootstrapInput
 		Unmanaged: scopeErr != nil,
 	}
 	emit(reporter, EventInfo, "settings.repo.bootstrap", "GCM 已应用，仓库认证验证通过", nil)
-	return &ApplyRepoGCMBootstrapResult{RepoURL: input.RepoURL, RepoHost: host, Candidate: candidate}, nil
+	return &ApplyRepoGCMBootstrapResult{RepoURL: probeURL, RepoHost: host, Candidate: candidate}, nil
+}
+
+func persistBootstrapRepoURL(httpsURL string) error {
+	if err := repo.Connect(httpsURL); err != nil {
+		return err
+	}
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		cfg = &types.GlobalConfig{}
+	}
+	cfg.RepoURL = httpsURL
+	return config.SaveGlobalConfig(cfg)
+}
+
+// recoverRepoAuthWithGCM 在 SSH/HTTPS 认证失败后，若 Bitwarden 里恰好有一条匹配 host 的 .gcm Note，
+// 就自动 Apply 并用 HTTPS 探测。0 条或多条不擅自挑选，返回 recovered=false 让调用方走人工确认。
+func recoverRepoAuthWithGCM(ctx context.Context, repoURL string, reporter Reporter) (httpsURL string, recovered bool, err error) {
+	prepared, err := PrepareRepoGCMBootstrap(ctx, repoURL, reporter)
+	if err != nil {
+		return "", false, err
+	}
+	if len(prepared.Candidates) != 1 {
+		if len(prepared.Candidates) > 1 {
+			emit(reporter, EventWarn, "settings.repo.bootstrap",
+				fmt.Sprintf("匹配 %s 的 GCM 候选有 %d 条，需要手工选择", prepared.RepoHost, len(prepared.Candidates)), nil)
+		}
+		return "", false, nil
+	}
+	chosen := prepared.Candidates[0]
+	applied, err := ApplyRepoGCMBootstrap(ctx, ApplyRepoGCMBootstrapInput{
+		RepoURL: repoURL, Address: chosen.Address, NotePath: chosen.NotePath,
+	}, reporter)
+	if err != nil {
+		return "", false, err
+	}
+	return applied.RepoURL, true, nil
 }
 
 func stripHostPort(host string) string {
