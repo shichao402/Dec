@@ -105,3 +105,11 @@ LIBRARY 要点：
 
 5. **宿主运行时**  
    facade `check` → `INTERNAL` 则 `download` + `apply`；`FULL_INSTALL` 则走平台安装。是否先退出看 `requires_host_exit`。
+
+## 4. 最佳实践
+
+- **人页 = 安装器。** 产品门户 / 下载页只挂完整安装轨（`--install`：exe / dmg / deb / 平台安装器），不要把内部更新包当给人点的下载项。
+- **payload 不给人下。** `kind=payload` 只给已装客户端经 `relkit-updater` 消费；人页与公开目录不得列出。
+- **`latest` id = 人工入口。** `/-/latest/<product>/<channel>/<artifact-id>` 面向人与安装脚本；id 应对应完整安装 artifact，不要指向 payload。
+- **无内部更新的平台只 `--install`。** 某平台暂时没有可打包的 payload 树时，只发完整安装包即可；不要为了「凑两轨」伪造空 payload。
+- **完整 zip 不是推荐人页形态。** 人页优先平台安装器；裸 `archive` zip 可以发版给机器或回退用，但不宜作为默认「给人点」的主下载形态。
