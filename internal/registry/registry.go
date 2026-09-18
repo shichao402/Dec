@@ -121,7 +121,7 @@ func (y Yanked) Remove(project, version string) {
 	y[project] = out
 }
 
-// LatestVersion 在 versions 里挑最新未 yank 的（按字符串降序，要求 v 前缀 semver 风格）。
+// LatestVersion 在 versions 里挑最新未 yank 的（semver 数值降序；tag 形如 v0.4.10）。
 func LatestVersion(project string, versions []string, yanked Yanked) (string, error) {
 	var ok []string
 	for _, v := range versions {
@@ -137,8 +137,62 @@ func LatestVersion(project string, versions []string, yanked Yanked) (string, er
 	return ok[0], nil
 }
 
+// compareVersion 按 semver 数值比较（可选 v 前缀）。字典序会把 v0.4.10 排到 v0.4.9 前面。
+// 返回 >0 表示 a 更新，<0 表示 b 更新，0 表示相等。解析失败时回退到字符串比较。
 func compareVersion(a, b string) int {
-	return strings.Compare(a, b)
+	as, aOK := versionParts(a)
+	bs, bOK := versionParts(b)
+	if !aOK || !bOK {
+		return strings.Compare(a, b)
+	}
+	n := len(as)
+	if len(bs) > n {
+		n = len(bs)
+	}
+	for i := 0; i < n; i++ {
+		var av, bv int
+		if i < len(as) {
+			av = as[i]
+		}
+		if i < len(bs) {
+			bv = bs[i]
+		}
+		if av != bv {
+			if av > bv {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
+}
+
+func versionParts(v string) ([]int, bool) {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	v = strings.TrimPrefix(v, "V")
+	if v == "" || strings.ContainsAny(v, "-+") {
+		return nil, false
+	}
+	chunks := strings.Split(v, ".")
+	if len(chunks) == 0 {
+		return nil, false
+	}
+	out := make([]int, len(chunks))
+	for i, c := range chunks {
+		if c == "" {
+			return nil, false
+		}
+		n := 0
+		for _, r := range c {
+			if r < '0' || r > '9' {
+				return nil, false
+			}
+			n = n*10 + int(r-'0')
+		}
+		out[i] = n
+	}
+	return out, true
 }
 
 func unique(in []string) []string {

@@ -54,6 +54,32 @@ func TestLatestSkipsYanked(t *testing.T) {
 	}
 }
 
+func TestLatestPrefersSemverOverLexicographic(t *testing.T) {
+	// 字典序下 "v0.4.9" > "v0.4.10"；latest 必须按数值选 0.4.10。
+	got, err := LatestVersion("relkit", []string{"v0.4.9", "v0.4.10", "v0.4.8"}, Yanked{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "v0.4.10" {
+		t.Fatalf("got %s, want v0.4.10", got)
+	}
+}
+
+func TestCompareVersionSemver(t *testing.T) {
+	if compareVersion("v0.4.10", "v0.4.9") <= 0 {
+		t.Fatal("v0.4.10 should be newer than v0.4.9")
+	}
+	if compareVersion("v0.4.9", "v0.4.10") >= 0 {
+		t.Fatal("v0.4.9 should be older than v0.4.10")
+	}
+	if compareVersion("v1.2.3", "v1.2.3") != 0 {
+		t.Fatal("equal versions should compare equal")
+	}
+	if compareVersion("v1.10.0", "v1.9.99") <= 0 {
+		t.Fatal("v1.10.0 should be newer than v1.9.99")
+	}
+}
+
 func TestLatestAllYanked(t *testing.T) {
 	y := Yanked{"relkit": {"v0.3.24"}}
 	if _, err := LatestVersion("relkit", []string{"v0.3.24"}, y); err == nil {
