@@ -140,7 +140,11 @@ export type AssetOption = {
   Quadrants: Record<string, number>
   Tags?: string[]
   // 订阅来源与 pin（ADR 0029）：vault 为个人私仓，official 为官方注册表。
+  // Source 是当前生效身份；两个 *Available 指出这个项目在哪几套存储里存在，
+  // 都为真时行内要能切换来源。
   Source?: string
+  VaultAvailable?: boolean
+  OfficialAvailable?: boolean
   Pin?: string
   Installed?: string
   Available?: string

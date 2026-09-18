@@ -63,8 +63,13 @@ type AssetBundleOption struct {
 	Quadrants map[string]int
 	// Tags 来自项目声明。global 表示推荐作为 Global 资产导入本机。
 	Tags []string
-	// Source 指出该项目来自哪套存储：vault 为个人私仓，official 为官方注册表。
+	// Source 指出该项目按哪套存储下发：vault 为个人私仓，official 为官方注册表。
+	// 同名项目两边都有时它是「当前生效的身份」，由 Pin 决定；未订阅则优先官方。
 	Source string
+	// VaultAvailable / OfficialAvailable 指出这个项目在个人私仓、官方注册表里分别是否存在。
+	// 两者同时为真时订阅面板必须允许切换来源，否则用户被锁在先出现的那一种身份上。
+	VaultAvailable    bool
+	OfficialAvailable bool
 	// Pin 是当前订阅的 requires 值（latest / v* / vault）；未订阅时为空。
 	Pin string
 	// Installed / Available 只对官方注册表项目有意义：本机已装版本与远端可用版本。

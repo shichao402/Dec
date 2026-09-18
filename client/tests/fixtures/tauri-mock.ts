@@ -262,6 +262,7 @@ export function installTauriMock(scenario: Scenario) {
           Quadrants: {},
           Required: true,
           Source: 'official',
+          OfficialAvailable: true,
           Pin: 'latest',
           Installed: 'v0.4.2',
           Available: 'v0.4.3',
@@ -273,7 +274,10 @@ export function installTauriMock(scenario: Scenario) {
           if (method !== 'list_subscription_candidates' || scenario.assets.Bundles.length === 0) return bundles
           if (bundles.some((item) => item.Name === official.Name)) {
             return bundles.map((item) =>
-              item.Name === official.Name ? { ...item, ...official, Members: item.Members } : item,
+              // 私仓里也有同名项目：行要带双来源标记，面板才会给出来源切换。
+              item.Name === official.Name
+                ? { ...item, ...official, Members: item.Members, VaultAvailable: true }
+                : item,
             )
           }
           return [...bundles, official]

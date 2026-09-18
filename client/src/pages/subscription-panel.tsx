@@ -24,14 +24,25 @@ const compactRow = 'grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3
 const PIN_LATEST = 'latest'
 const PIN_VAULT = 'vault'
 
-function isOfficial(item: AssetOption) {
-  return item.Source === 'official'
+type Source = 'official' | 'vault'
+
+// 生效来源跟着 pin 走，不能只看服务端下发的 Source：
+// 用户在行内切了来源、还没保存时，徽标与版本列必须立刻跟上。
+function sourceOf(item: AssetOption, pin?: string): Source {
+  if (pin) return pin === PIN_VAULT ? 'vault' : 'official'
+  return item.Source === 'official' ? 'official' : 'vault'
 }
 
-// 默认 pin：官方跟随最新已发布 tag，私仓只能跟 HEAD（ADR 0029）。
+// 注册表已发布的项目同时在私仓里有同名目录时，来源是一次可切换的选择。
+function isDualSource(item: AssetOption) {
+  return Boolean(item.VaultAvailable && item.OfficialAvailable)
+}
+
+// 默认 pin：注册表已发布就跟随最新已发布 tag，否则只能跟私仓 HEAD（ADR 0029）。
 function defaultPin(item: AssetOption) {
-  if (!isOfficial(item)) return PIN_VAULT
-  return item.Pin && item.Pin !== PIN_VAULT ? item.Pin : PIN_LATEST
+  if (item.Pin) return item.Pin
+  if (item.OfficialAvailable || item.Source === 'official') return PIN_LATEST
+  return PIN_VAULT
 }
 
 export function SubscriptionPanel(props: {
@@ -121,9 +132,10 @@ export function SubscriptionPanel(props: {
   }
 
   const visible = bundles.filter((item) => {
+    const source = sourceOf(item, pins[item.Name])
     if (filter === 'enabled' && !pins[item.Name]) return false
-    if (filter === 'official' && !isOfficial(item)) return false
-    if (filter === 'vault' && isOfficial(item)) return false
+    if (filter === 'official' && source !== 'official') return false
+    if (filter === 'vault' && source !== 'vault') return false
     if (filter === 'tagged' && !hasTag(item.Tags, PROJECT_TAG_GLOBAL)) return false
     if (!query.trim()) return true
     const haystack = `${item.Name} ${item.Description} ${(item.Tags || []).join(' ')} ${(item.Members || []).map((m) => `${m.Type}/${m.Name}`).join(' ')}`
@@ -199,7 +211,7 @@ export function SubscriptionPanel(props: {
           <ScrollArea className="divide-y divide-line">
             {visible.map((item) => (
               <AssetRow
-                key={`${item.Source || 'vault'}-${item.Name}`}
+                key={item.Name}
                 item={item}
                 // 家项目不是订阅（它从工作树创作），但资产无条件安装：勾上且不可改，别让它看起来像没装。
                 checked={(props.plane === 'local' && item.Home) || Boolean(pins[item.Name])}
@@ -300,6 +312,7 @@ export function AssetRow({
   const members = item.Members || []
   const memberTypes = [...new Set(members.map((member) => member.Type))]
   const recommended = hasTag(item.Tags, PROJECT_TAG_GLOBAL)
+  const source = sourceOf(item, pin)
   return (
     <label
       className={cn(
@@ -313,7 +326,7 @@ export function AssetRow({
       <div className="flex min-w-0 flex-col">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-[13px] font-medium text-ink" title={item.Name}>{item.Name}</span>
-          <Badge tone={isOfficial(item) ? 'accent' : 'quiet'}>{isOfficial(item) ? '官方' : '私仓'}</Badge>
+          <Badge tone={source === 'official' ? 'accent' : 'quiet'}>{source === 'official' ? '官方' : '私仓'}</Badge>
           {item.Home && <Badge tone="accent">{locked ? 'home · 必选' : 'home'}</Badge>}
           {/* 没订阅却已装：来自别人的 depends_on 闭包。不勾也在，勾了才是自己订阅。 */}
           {item.Enabled && !item.Pin && !item.Home && (
@@ -339,7 +352,10 @@ export function AssetRow({
             {item.Description || (memberTypes.length ? memberTypes.join(' · ') : '无描述')}
           </span>
           <span className="hidden items-start justify-end gap-1 pt-0.5 xl:flex">
-            {isOfficial(item) ? (
+            {isDualSource(item) && checked && !locked && onPin && (
+              <SourceSwitch source={source} onPin={onPin} />
+            )}
+            {source === 'official' ? (
               <PinControl item={item} checked={checked} pin={pin} onPin={onPin} />
             ) : (
               <>
@@ -355,6 +371,27 @@ export function AssetRow({
         </>
       )}
     </label>
+  )
+}
+
+// SourceSwitch 是两边都有同名项目时的来源选择：官方装注册表已发布版本，私仓跟自己的 HEAD。
+// 少了它，注册表已发布、私仓里又有同名目录的项目就只能停在私仓 pin 上，
+// 而「更新」页只认官方 pin，用户永远更新不到。
+function SourceSwitch({ source, onPin }: { source: Source; onPin: (pin: string) => void }) {
+  const official = source === 'official'
+  return (
+    <button
+      type="button"
+      title={official ? '改为跟随个人私仓 HEAD' : '改为安装官方注册表已发布版本，可在「更新」页升级'}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        onPin(official ? PIN_VAULT : PIN_LATEST)
+      }}
+      className="rounded-md border border-dashed border-line px-1.5 py-0.5 text-[11px] leading-4 text-faint hover:border-line-hi hover:text-ink"
+    >
+      {official ? '改用私仓' : '改用官方'}
+    </button>
   )
 }
 

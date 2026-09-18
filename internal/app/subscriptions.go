@@ -158,8 +158,17 @@ func ListSubscriptionCandidates(ctx context.Context, workspace Workspace, report
 //
 // 合成后的行必须自洽：来源跟着 pin 走。官方 pin 的项目即便私仓里有同名目录，也按官方行下发，
 // 否则面板标成「私仓」，还会藏掉已装/可用版本与「有更新」，用户看不到该升级。
-// 未被官方 pin 订阅的同名项目保持私仓身份，只补上远端可用版本作为参考。
+// 显式 `vault` pin 是用户的选择，保持私仓身份，只补上远端可用版本作为参考。
+//
+// 还没订阅的同名项目按官方身份下发：私仓身份只在用户显式选了 vault pin 时才成立。
+// 反过来（默认私仓）会锁死一整类项目——注册表已发布、私仓里又有同名目录的项目
+// 只能勾出 `vault` pin，而「更新」页只认官方 pin，于是永远更新不到，且面板里
+// 没有任何入口能改。两边都有的行一律标上 VaultAvailable + OfficialAvailable，
+// 让面板把来源选择交回用户。
 func mergeOfficialCandidates(vault, official []AssetBundleOption) []AssetBundleOption {
+	for i := range vault {
+		vault[i].VaultAvailable = true
+	}
 	if len(official) == 0 {
 		return vault
 	}
@@ -170,19 +179,25 @@ func mergeOfficialCandidates(vault, official []AssetBundleOption) []AssetBundleO
 	for _, opt := range official {
 		i, ok := index[opt.Name]
 		if !ok {
+			opt.OfficialAvailable = true
 			vault = append(vault, opt)
 			continue
 		}
+		vault[i].OfficialAvailable = true
 		vault[i].Available = opt.Available
 		vault[i].Installed = opt.Installed
-		if opt.Pin == "" {
+		// 家项目从工作树创作，永远不按官方行下发。
+		if vault[i].Home || types.IsVaultPin(vault[i].Pin) {
 			continue
 		}
 		vault[i].Source = AssetSourceOfficial
+		vault[i].UpdateAvailable = opt.UpdateAvailable
+		if opt.Pin == "" {
+			continue
+		}
 		vault[i].Pin = opt.Pin
 		vault[i].Enabled = true
 		vault[i].Required = true
-		vault[i].UpdateAvailable = opt.UpdateAvailable
 	}
 	return vault
 }
