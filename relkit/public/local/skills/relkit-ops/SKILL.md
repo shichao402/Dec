@@ -91,6 +91,19 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 落盘后 `ops.retrospect` 变 `stale`、`retrospect` 非 0，直到该类被修进脚本 / skill /
 测试并进入已消化集合。
 
+若复盘留下未消化的 **generic**（或必须改 host / skill 才能消化的 note），
+先问用户选 **效率绕过** 还是 **标准回修**；禁止 agent 自行默绕或默修。
+
+- **不可绕过**：`lock.releaseRelation=behind`；远端 `versionRelation=behind` 且
+  `onPublishRoute=true`；会导致发错包的 CI / 宿主行为。
+- **效率绕过**：产品缺口已落地即可继续日常；接受本机 `ops.retrospect=stale`；
+  **不得**手改 lock / `DIGESTED`（会 drift）；回话写明「用户选择绕过」与上游
+  issue/PR 链接。绕过不等于 verified，也不把 journal 标成已消化。
+- **标准回修**：回 relkit 修脚本 / skill / 测试 → 进 `DIGESTED` → 发版 → 产品
+  `upgrade` → `retrospect` 0 / `ops.retrospect=verified`。
+- 产品类已在产品仓修好的 code：只在 relkit 发版时纳入已消化集合；不要鼓励产品仓
+  改 `scripts/host` 消 note。
+
 会话复盘完成后，运行 `python scripts/host/relkit_host.py retrospect`，再运行
 `status` 检查 `ops.retrospect` 已是 `verified`。若之后用户验收又暴露新问题，
 前一次 verified 已过期，必须重新复盘并重跑。只有会话复盘没有未消化项、且命令
