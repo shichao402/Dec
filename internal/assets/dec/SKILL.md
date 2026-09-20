@@ -9,7 +9,7 @@ description: >
 
 Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用户交互以 **Dec Console** 为第一入口；Agent 走 **`dec-mcp`**（零业务知识的 stdio 壳）经本机唯一 Console 网关调用当前连接的 `dec-server`。工具名 / schema 来自 `~/.dec/run/agent-tools.json`（Console 对齐运行时后写出），不要假设它们编译在 `dec-mcp` 里。不要发明已下线的用户面子命令（旧的 list / search / config / pull CLI），也不要再引导用户运行终端 TUI。
 
-项目里由 Dec pull 出来的 IDE 配置不等于「禁止提交」。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.mcp.json` 这类项目级输出，如果是托管资产生成的结果，通常可以按仓库约定单独提交。敏感值放 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置，不要写回这些输出文件。
+项目里由 Dec pull 出来的 IDE 配置不等于「禁止提交」。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.with/`、`.mcp.json` 这类项目级输出，如果是托管资产生成的结果，通常可以按仓库约定单独提交。With 的用户平面落在 `~/.bg-agent/config-with-app/`（skills / rules / `mcp_config.json`）。敏感值放 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置，不要写回这些输出文件。
 
 消费声明只有一处：`.dec/config.yaml`（项目）与 `~/.dec/config.yaml`（本机）的 `requires` map，项目名 → `latest` / `v*`（官方 `registry` 分支）/ `vault`（设置里的个人私仓）。密钥走 Bitwarden。改官方安装物不要 `dec_push`，用 Console 项目下级页「本地覆写」+ `dec_propose_upstream`。
 

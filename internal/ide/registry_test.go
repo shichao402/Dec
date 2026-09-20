@@ -26,7 +26,7 @@ func TestGetUnregisteredIDEReturnsFallback(t *testing.T) {
 }
 
 func TestIsValidRegistered(t *testing.T) {
-	for _, name := range []string{"cursor", "codebuddy", "claude", "codex"} {
+	for _, name := range []string{"cursor", "codebuddy", "claude", "codex", "with"} {
 		if !IsValid(name) {
 			t.Fatalf("已注册 IDE %s 应返回 IsValid=true", name)
 		}
@@ -58,7 +58,7 @@ func TestListContainsAllRegistered(t *testing.T) {
 	names := List()
 	sort.Strings(names)
 
-	expected := []string{"claude", "codebuddy", "codex", "cursor"}
+	expected := []string{"claude", "codebuddy", "codex", "cursor", "with"}
 	if len(names) != len(expected) {
 		t.Fatalf("期望 %d 个 IDE，得到 %d 个: %v", len(expected), len(names), names)
 	}
@@ -103,6 +103,7 @@ func TestIDEDirectoryStructure(t *testing.T) {
 		{"codebuddy", filepath.Join("/project", ".codebuddy", "rules"), filepath.Join("/project", ".codebuddy", "skills")},
 		{"claude", filepath.Join("/project", ".claude", "rules"), filepath.Join("/project", ".claude", "skills")},
 		{"codex", filepath.Join("/project", ".codex", "rules"), filepath.Join("/project", ".codex", "skills")},
+		{"with", filepath.Join("/project", ".with", "rules"), filepath.Join("/project", ".with", "skills")},
 	}
 
 	for _, tt := range tests {
@@ -127,6 +128,7 @@ func TestIDEPlanePaths(t *testing.T) {
 		{"codebuddy", filepath.Join("/home/dev", ".codebuddy"), filepath.Join("/home/dev", ".mcp.json"), filepath.Join("/home/dev", ".codebuddy", "skills")},
 		{"claude", filepath.Join("/home/dev", ".claude"), filepath.Join("/home/dev", ".claude", "mcp.json"), filepath.Join("/home/dev", ".claude", "skills")},
 		{"codex", filepath.Join("/home/dev", ".codex"), filepath.Join("/home/dev", ".codex", "config.toml"), filepath.Join("/home/dev", ".codex", "skills")},
+		{"with", filepath.Join("/home/dev", ".bg-agent", "config-with-app"), filepath.Join("/home/dev", ".bg-agent", "config-with-app", "mcp_config.json"), filepath.Join("/home/dev", ".bg-agent", "config-with-app", "skills")},
 	}
 
 	for _, tt := range tests {

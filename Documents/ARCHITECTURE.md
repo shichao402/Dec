@@ -403,8 +403,9 @@ my-app/
 | CodeBuddy | `.codebuddy/skills/` | `.codebuddy/rules/` | `.mcp.json` |
 | Claude | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
+| With | `.with/skills/`（用户平面：`~/.bg-agent/config-with-app/skills/`） | `.with/rules/`（用户平面同根 `rules/`） | `.with/mcp_config.json`（用户平面同根 `mcp_config.json`） |
 
-Dec 托管产物统一使用 `dec-` 前缀。Codex MCP 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
+Dec 托管产物统一使用 `dec-` 前缀。Codex MCP 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。With 的用户平面根目录是 `~/.bg-agent/config-with-app`；写 MCP 时只改 `dec` / `dec-*` 条目，保留其 `transportType` / `headers` / `timeout` 等字段。
 
 ## 关键运行机制
 
@@ -651,7 +652,7 @@ Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真�
 
 ### CodeBuddy MCP 路径
 
-CodeBuddy MCP 位于项目根 `.mcp.json`。Codex 位于 `.codex/config.toml`。
+CodeBuddy MCP 位于项目根 `.mcp.json`。Codex 位于 `.codex/config.toml`。With 用户平面位于 `~/.bg-agent/config-with-app/mcp_config.json`，项目平面位于 `.with/mcp_config.json`。
 
 ### 文件权限
 

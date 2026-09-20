@@ -676,8 +676,10 @@ func installBuiltinMCPs(ideName, homeDir string, mcps []assets.MCPAsset) error {
 		} else {
 			server = withRuntimeGenerationMarker(server)
 		}
-		if isCodexIDE(ideName) {
-			if err := mergeCodexBuiltinMCPEntry(ideName, homeDir, serverName, server); err != nil {
+		// Codex / With 的 MCP 文件有自有字段语义，必须走 IDE.Write 合并，
+		// 不能用通用 JSON 直写（会丢掉 transportType / disabled 等）。
+		if usesIDEOwnedMCPWrite(ideName) {
+			if err := mergeIDEBuiltinMCPEntry(ideName, homeDir, serverName, server); err != nil {
 				return err
 			}
 			continue
@@ -689,11 +691,16 @@ func installBuiltinMCPs(ideName, homeDir string, mcps []assets.MCPAsset) error {
 	return nil
 }
 
-func isCodexIDE(ideName string) bool {
-	return ideName == "codex"
+func usesIDEOwnedMCPWrite(ideName string) bool {
+	switch ideName {
+	case "codex", "with":
+		return true
+	default:
+		return false
+	}
 }
 
-func mergeCodexBuiltinMCPEntry(ideName, homeDir, serverName string, server types.MCPServer) error {
+func mergeIDEBuiltinMCPEntry(ideName, homeDir, serverName string, server types.MCPServer) error {
 	ideImpl := ide.Get(ideName)
 	existing, err := ideImpl.LoadMCPConfigForPlane(ide.PlaneUser, "", homeDir)
 	if err != nil {

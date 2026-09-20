@@ -59,4 +59,5 @@ func init() {
 	Register(&baseIDE{name: "codebuddy", dirKey: ".codebuddy", mcpConfigPath: ".mcp.json", userMCPPath: ".mcp.json"})
 	Register(&baseIDE{name: "claude", dirKey: ".claude"})
 	Register(newCodexIDE())
+	Register(newWithIDE())
 }
