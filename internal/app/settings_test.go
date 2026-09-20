@@ -279,6 +279,100 @@ func TestEnsureBuiltinIDEAssetsSkipsRemovedInternalIDEs(t *testing.T) {
 	}
 }
 
+func setRuntimeVersionForTest(t *testing.T, version string) {
+	t.Helper()
+	previous := RuntimeVersion()
+	SetRuntimeVersion(version)
+	t.Cleanup(func() { SetRuntimeVersion(previous) })
+}
+
+func readCursorMCPConfig(t *testing.T, homeDir string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(homeDir, ".cursor", "mcp.json"))
+	if err != nil {
+		t.Fatalf("read mcp.json: %v", err)
+	}
+	return data
+}
+
+func decMCPEntry(t *testing.T, data []byte) types.MCPServer {
+	t.Helper()
+	var parsed struct {
+		MCPServers map[string]types.MCPServer `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse mcp.json: %v", err)
+	}
+	server, ok := parsed.MCPServers[builtinDecMCPServerName]
+	if !ok {
+		t.Fatalf("mcp.json 缺少 dec 条目: %s", string(data))
+	}
+	return server
+}
+
+func TestEnsureBuiltinIDEAssetsMarksRuntimeVersion(t *testing.T) {
+	homeDir := t.TempDir()
+	setEnvForProjectTest(t, "HOME", homeDir)
+	setRuntimeVersionForTest(t, "v1.13.73")
+
+	if warnings := EnsureBuiltinIDEAssets([]string{"cursor"}, nil); len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	got := decMCPEntry(t, readCursorMCPConfig(t, homeDir)).Env[builtinDecMCPRuntimeVersionEnv]
+	if got != "v1.13.73" {
+		t.Fatalf("%s = %q, 期望 v1.13.73", builtinDecMCPRuntimeVersionEnv, got)
+	}
+}
+
+// 同版本重复同步必须逐字节一致，否则 IDE 每次启动都会白白重启一次 dec-mcp。
+func TestEnsureBuiltinIDEAssetsKeepsMCPEntryStableAcrossSameVersion(t *testing.T) {
+	homeDir := t.TempDir()
+	setEnvForProjectTest(t, "HOME", homeDir)
+	setRuntimeVersionForTest(t, "v1.13.73")
+
+	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
+	first := readCursorMCPConfig(t, homeDir)
+	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
+	second := readCursorMCPConfig(t, homeDir)
+
+	if string(first) != string(second) {
+		t.Fatalf("同版本重复同步改写了配置:\n%s\n---\n%s", string(first), string(second))
+	}
+}
+
+// 换版本必须让条目内容变化，这是 IDE 重启 dec-mcp 的唯一触发条件。
+func TestEnsureBuiltinIDEAssetsRewritesMCPEntryOnVersionChange(t *testing.T) {
+	homeDir := t.TempDir()
+	setEnvForProjectTest(t, "HOME", homeDir)
+
+	setRuntimeVersionForTest(t, "v1.13.73")
+	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
+	before := readCursorMCPConfig(t, homeDir)
+
+	setRuntimeVersionForTest(t, "v1.13.74")
+	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
+	after := readCursorMCPConfig(t, homeDir)
+
+	if string(before) == string(after) {
+		t.Fatalf("换版本后配置未变化: %s", string(before))
+	}
+	if got := decMCPEntry(t, after).Env[builtinDecMCPRuntimeVersionEnv]; got != "v1.13.74" {
+		t.Fatalf("%s = %q, 期望 v1.13.74", builtinDecMCPRuntimeVersionEnv, got)
+	}
+}
+
+// 版本未登记时不写标记，保持 dec-server 之外调用方的既有行为。
+func TestEnsureBuiltinIDEAssetsOmitsMarkerWithoutRuntimeVersion(t *testing.T) {
+	homeDir := t.TempDir()
+	setEnvForProjectTest(t, "HOME", homeDir)
+	setRuntimeVersionForTest(t, "")
+
+	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
+	if _, ok := decMCPEntry(t, readCursorMCPConfig(t, homeDir)).Env[builtinDecMCPRuntimeVersionEnv]; ok {
+		t.Fatalf("未登记版本时不应写入 %s", builtinDecMCPRuntimeVersionEnv)
+	}
+}
+
 func TestSaveGlobalSettings_DoesNotChangeRequires(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	setEnvForProjectTest(t, "HOME", t.TempDir())

@@ -634,6 +634,29 @@ func installBuiltinRules(rulesDir string, rules []assets.RuleAsset) error {
 // builtinDecMCPServerName 是 Dec 自身 MCP server 在 IDE 配置中的条目名。
 const builtinDecMCPServerName = "dec"
 
+// builtinDecMCPRuntimeVersionEnv 让 IDE 看得出 dec-mcp 二进制换了版本。
+//
+// IDE 只在 MCP 条目内容变化时重启对应 server。dec 条目固定是 {"command": "dec-mcp"}，
+// Console 覆盖安装换掉 ~/.dec/bin/dec-mcp 之后内容一模一样，IDE 于是继续用已经跑着的
+// 旧进程，直到用户手动重启 IDE。把版本写进 env，换运行时就成了一次内容变化。
+// 该变量不被 dec-mcp 读取，只起标记作用；同版本重复写入内容不变，不会造成无谓重启。
+const builtinDecMCPRuntimeVersionEnv = "DEC_RUNTIME_VERSION"
+
+// withRuntimeVersionMarker 给内置 dec 条目补上版本标记。版本未登记时原样返回。
+func withRuntimeVersionMarker(server types.MCPServer) types.MCPServer {
+	version := RuntimeVersion()
+	if version == "" {
+		return server
+	}
+	env := make(map[string]string, len(server.Env)+1)
+	for key, value := range server.Env {
+		env[key] = value
+	}
+	env[builtinDecMCPRuntimeVersionEnv] = version
+	server.Env = env
+	return server
+}
+
 func installBuiltinMCPs(ideName, homeDir string, mcps []assets.MCPAsset) error {
 	if len(mcps) == 0 {
 		return nil
@@ -650,6 +673,8 @@ func installBuiltinMCPs(ideName, homeDir string, mcps []assets.MCPAsset) error {
 		serverName := builtinDecMCPServerName
 		if asset.Name != "dec" {
 			serverName = managedName(asset.Name)
+		} else {
+			server = withRuntimeVersionMarker(server)
 		}
 		if isCodexIDE(ideName) {
 			if err := mergeCodexBuiltinMCPEntry(ideName, homeDir, serverName, server); err != nil {
