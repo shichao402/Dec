@@ -71,6 +71,22 @@ type PlanResult struct {
 	Error     string         `json:"error,omitempty"`
 }
 
+// MarshalJSON 保证 steps 永远是数组。
+// Go 的 nil 切片会编成 null，而 Console（Rust）按 Vec 反序列化，
+// 预检失败的 Plan 因此被整条拒绝，错误文案丢失。
+func (p PlanResult) MarshalJSON() ([]byte, error) {
+	type plain PlanResult
+	steps := p.Steps
+	if steps == nil {
+		steps = []Step{}
+	}
+	out := struct {
+		plain
+		Steps []Step `json:"steps"`
+	}{plain: plain(p), Steps: steps}
+	return json.Marshal(out)
+}
+
 // PlanRequest 是 plan_agent_tool 的 payload。
 type PlanRequest struct {
 	Name      string          `json:"Name"`

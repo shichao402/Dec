@@ -1,5 +1,5 @@
 use crate::connect_target_inner;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -9,6 +9,16 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
+
+/// 容忍 Go 侧 nil 切片编出的 `null`：按空数组处理，避免整条 Plan 被拒。
+fn null_or_seq<'de, D, T>(de: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let opt: Option<Vec<T>> = Option::deserialize(de)?;
+    Ok(opt.unwrap_or_default())
+}
 
 const METADATA_VERSION: u32 = 1;
 const MCP_UNLOCK_TIMEOUT_MS: i64 = 180_000;
@@ -73,7 +83,7 @@ struct PlanResult {
     owner: String,
     #[serde(default)]
     shape: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_or_seq")]
     steps: Vec<PlanStep>,
     #[serde(default)]
     envelope: serde_json::Map<String, serde_json::Value>,
