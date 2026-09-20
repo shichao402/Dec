@@ -68,6 +68,7 @@ func (s *Server) ensureProjectRepaired(projectRoot string, reporter app.Reporter
 }
 
 func Run(ctx context.Context, version string) error {
+	app.SetRuntimeVersion(version)
 	lock, err := service.AcquireServerLock()
 	if err != nil {
 		return err
@@ -126,6 +127,7 @@ func Run(ctx context.Context, version string) error {
 			diag.StartupLog("compat: %s", note)
 		}
 		pruneOrphanWorktreesAtStartup()
+		syncBuiltinIDEAssetsAtStartup()
 	}()
 
 	errCh := make(chan error, 1)
@@ -162,6 +164,24 @@ func pruneOrphanWorktreesAtStartup() {
 	}
 	if removed > 0 {
 		diag.StartupLog("pruneOrphanWorktrees removed=%d", removed)
+	}
+}
+
+// syncBuiltinIDEAssetsAtStartup 让各 IDE 里的内置 skills / rules / dec MCP 跟上本次启动的版本。
+//
+// 覆盖安装 Console 只换掉 ~/.dec/bin 下的二进制，不会重写这些资产。在此之前只有
+// 「设置页保存」会刷新，于是升级后 IDE 里长期留着旧版内置 skill。
+func syncBuiltinIDEAssetsAtStartup() {
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		diag.StartupLog("syncBuiltinIDEAssets error: %v", err)
+		return
+	}
+	if len(cfg.IDEs) == 0 {
+		return
+	}
+	for _, warning := range app.EnsureBuiltinIDEAssets(cfg.IDEs, nil) {
+		diag.StartupLog("syncBuiltinIDEAssets warning: %s", warning)
 	}
 }
 
