@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shichao402/Dec/internal/app"
@@ -107,7 +108,7 @@ func WaitForGateway(ctx context.Context, clientID string) (Gateway, error) {
 	var last error
 	opened := false
 	for time.Now().Before(deadline) {
-		gw, err := connectGateway(clientID)
+		gw, err := newRefreshingGateway(clientID)
 		if err == nil {
 			if hello, helloErr := gw.Hello(ctx); helloErr == nil {
 				if !hello.Connected {
@@ -146,7 +147,17 @@ func connectGateway(clientID string) (*httpGateway, error) {
 	if err != nil {
 		return nil, err
 	}
+	return gatewayFromMeta(meta, clientID)
+}
+
+func gatewayFromMeta(meta *consoleMetadata, clientID string) (*httpGateway, error) {
+	if meta == nil {
+		return nil, fmt.Errorf("console.json 无效")
+	}
 	endpoint := strings.TrimSpace(meta.Endpoint)
+	if endpoint == "" {
+		return nil, fmt.Errorf("console.json 无效")
+	}
 	if !strings.Contains(endpoint, "://") {
 		endpoint = "http://" + endpoint
 	}
@@ -156,6 +167,163 @@ func connectGateway(clientID string) (*httpGateway, error) {
 		clientID: clientID,
 		http:     &http.Client{Timeout: app.MCPSessionUnlockTimeout + 30*time.Second},
 	}, nil
+}
+
+// refreshingGateway 每次调用前对照 ~/.dec/run/console.json。
+// Console 重启会换 loopback 端口与 token；dec-mcp 是长驻 stdio 进程，
+// 若启动时钉死网关，就会一直打到旧端口（connection refused）。
+type refreshingGateway struct {
+	clientID string
+	mu       sync.Mutex
+	meta     consoleMetadata
+	inner    *httpGateway
+}
+
+func newRefreshingGateway(clientID string) (*refreshingGateway, error) {
+	g := &refreshingGateway{clientID: clientID}
+	if err := g.ensure(true); err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+func sameConsoleMeta(a, b consoleMetadata) bool {
+	return a.Endpoint == b.Endpoint && a.Token == b.Token && a.PID == b.PID && a.Version == b.Version
+}
+
+func (g *refreshingGateway) ensure(force bool) error {
+	meta, err := readConsoleMetadata()
+	if err != nil {
+		return err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !force && g.inner != nil && sameConsoleMeta(g.meta, *meta) {
+		return nil
+	}
+	inner, err := gatewayFromMeta(meta, g.clientID)
+	if err != nil {
+		return err
+	}
+	g.meta = *meta
+	g.inner = inner
+	return nil
+}
+
+func (g *refreshingGateway) current() *httpGateway {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.inner
+}
+
+func shouldRefreshGateway(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "connection refused"):
+		return true
+	case strings.Contains(msg, "actively refused"):
+		return true
+	case strings.Contains(msg, "No connection could be made"):
+		return true
+	case strings.Contains(msg, "connectex"):
+		return true
+	case strings.Contains(msg, "HTTP 401"):
+		return true
+	case strings.Contains(msg, "未授权"):
+		return true
+	case strings.Contains(msg, "Unauthorized"):
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *refreshingGateway) withInner(ctx context.Context, call func(*httpGateway) error) error {
+	if err := g.ensure(false); err != nil {
+		return err
+	}
+	err := call(g.current())
+	if err == nil || !shouldRefreshGateway(err) {
+		return err
+	}
+	// Console 可能已重启并改写了 console.json；强制重读后重试一次。
+	if refreshErr := g.ensure(true); refreshErr != nil {
+		return err
+	}
+	return call(g.current())
+}
+
+func (g *refreshingGateway) Hello(ctx context.Context) (*Hello, error) {
+	var out *Hello
+	err := g.withInner(ctx, func(inner *httpGateway) error {
+		hello, callErr := inner.Hello(ctx)
+		out = hello
+		return callErr
+	})
+	return out, err
+}
+
+func (g *refreshingGateway) Invoke(ctx context.Context, method, projectRoot, plane string, payload any) (*RPCResult, error) {
+	var out *RPCResult
+	err := g.withInner(ctx, func(inner *httpGateway) error {
+		res, callErr := inner.Invoke(ctx, method, projectRoot, plane, payload)
+		out = res
+		return callErr
+	})
+	return out, err
+}
+
+func (g *refreshingGateway) Run(ctx context.Context, operation, projectRoot, plane string, payload any) (*RPCResult, error) {
+	var out *RPCResult
+	err := g.withInner(ctx, func(inner *httpGateway) error {
+		res, callErr := inner.Run(ctx, operation, projectRoot, plane, payload)
+		out = res
+		return callErr
+	})
+	return out, err
+}
+
+func (g *refreshingGateway) Connections(ctx context.Context) (any, error) {
+	var out any
+	err := g.withInner(ctx, func(inner *httpGateway) error {
+		res, callErr := inner.Connections(ctx)
+		out = res
+		return callErr
+	})
+	return out, err
+}
+
+func (g *refreshingGateway) Connect(ctx context.Context, req map[string]any) (*Hello, error) {
+	var out *Hello
+	err := g.withInner(ctx, func(inner *httpGateway) error {
+		hello, callErr := inner.Connect(ctx, req)
+		out = hello
+		return callErr
+	})
+	return out, err
+}
+
+func (g *refreshingGateway) ActiveOperation(ctx context.Context, projectRoot string) (any, error) {
+	var out any
+	err := g.withInner(ctx, func(inner *httpGateway) error {
+		res, callErr := inner.ActiveOperation(ctx, projectRoot)
+		out = res
+		return callErr
+	})
+	return out, err
+}
+
+func (g *refreshingGateway) ToolCall(ctx context.Context, name string, arguments json.RawMessage, clientVersion string) (*ToolCallResult, error) {
+	var out *ToolCallResult
+	err := g.withInner(ctx, func(inner *httpGateway) error {
+		res, callErr := inner.ToolCall(ctx, name, arguments, clientVersion)
+		out = res
+		return callErr
+	})
+	return out, err
 }
 
 func (g *httpGateway) Hello(ctx context.Context) (*Hello, error) {
