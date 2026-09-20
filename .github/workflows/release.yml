@@ -315,11 +315,11 @@ jobs:
             mkdir -p "$payload_dir"
             cp "$f" "$payload_dir/$dest"
             set -- "$@" --install "$f" \
-              "kind=binary,os=$os,arch=$arch,component=$component,audience=runtime"
+              "id=$base,kind=binary,os=$os,arch=$arch,component=$component,audience=runtime"
             set -- "$@" --payload "$payload_dir" \
               "os=$os,arch=$arch,component=$component,audience=runtime"
           done
-          set -- "$@" --add "dist/dec-runtime-manifest.json" \
+          set -- "$@" --install "dist/dec-runtime-manifest.json" \
             "id=dec-runtime-manifest,filename=dec-runtime-manifest.json,kind=blob,component=manifest,audience=runtime"
           for f in dist/dec-console-*; do
             [ -f "$f" ] || continue
@@ -333,7 +333,7 @@ jobs:
               *) continue ;;
             esac
             set -- "$@" --install "$f" \
-              "kind=installer,os=$os,arch=$arch,component=console,audience=user"
+              "id=dec-console-${os}-${arch},kind=installer,os=$os,arch=$arch,component=console,audience=user"
           done
           "$RELKIT" "$@"
           AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com/v1}"

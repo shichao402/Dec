@@ -85,7 +85,7 @@ jobs:
           dd if=/dev/urandom of=dist/dec-upload-bench.bin bs=1M count="$SIZE_MIB" status=progress
           RELKIT=./tools/bin/relkit-linux-amd64
           "$RELKIT" stage 0.0.999 --code 999 --channel dev \
-            --add dist/dec-upload-bench.bin "id=dec-upload-bench,kind=blob,component=bench,audience=runtime"
+            --install dist/dec-upload-bench.bin "id=dec-upload-bench,kind=blob,component=bench,audience=runtime"
           tar -C .relkit/staged/0.0.999 -czf staged.tar.gz .
           BYTES=$(stat -c '%s' staged.tar.gz)
           echo "STAGED_BYTES=${BYTES}" >> "$GITHUB_ENV"
