@@ -68,7 +68,7 @@ func (s *Server) ensureProjectRepaired(projectRoot string, reporter app.Reporter
 }
 
 func Run(ctx context.Context, version string) error {
-	app.SetRuntimeVersion(version)
+	app.SetRuntimeGeneration(app.DetectRuntimeGeneration(version))
 	lock, err := service.AcquireServerLock()
 	if err != nil {
 		return err

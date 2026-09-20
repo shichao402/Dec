@@ -279,11 +279,11 @@ func TestEnsureBuiltinIDEAssetsSkipsRemovedInternalIDEs(t *testing.T) {
 	}
 }
 
-func setRuntimeVersionForTest(t *testing.T, version string) {
+func setRuntimeGenerationForTest(t *testing.T, generation string) {
 	t.Helper()
-	previous := RuntimeVersion()
-	SetRuntimeVersion(version)
-	t.Cleanup(func() { SetRuntimeVersion(previous) })
+	previous := RuntimeGeneration()
+	SetRuntimeGeneration(generation)
+	t.Cleanup(func() { SetRuntimeGeneration(previous) })
 }
 
 func readCursorMCPConfig(t *testing.T, homeDir string) []byte {
@@ -310,25 +310,25 @@ func decMCPEntry(t *testing.T, data []byte) types.MCPServer {
 	return server
 }
 
-func TestEnsureBuiltinIDEAssetsMarksRuntimeVersion(t *testing.T) {
+func TestEnsureBuiltinIDEAssetsMarksRuntimeGeneration(t *testing.T) {
 	homeDir := t.TempDir()
 	setEnvForProjectTest(t, "HOME", homeDir)
-	setRuntimeVersionForTest(t, "v1.13.73")
+	setRuntimeGenerationForTest(t, "v1.13.73+0123456789abcdef")
 
 	if warnings := EnsureBuiltinIDEAssets([]string{"cursor"}, nil); len(warnings) != 0 {
 		t.Fatalf("warnings = %#v", warnings)
 	}
-	got := decMCPEntry(t, readCursorMCPConfig(t, homeDir)).Env[builtinDecMCPRuntimeVersionEnv]
-	if got != "v1.13.73" {
-		t.Fatalf("%s = %q, 期望 v1.13.73", builtinDecMCPRuntimeVersionEnv, got)
+	got := decMCPEntry(t, readCursorMCPConfig(t, homeDir)).Env[builtinDecMCPRuntimeGenerationEnv]
+	if got != "v1.13.73+0123456789abcdef" {
+		t.Fatalf("%s = %q", builtinDecMCPRuntimeGenerationEnv, got)
 	}
 }
 
-// 同版本重复同步必须逐字节一致，否则 IDE 每次启动都会白白重启一次 dec-mcp。
-func TestEnsureBuiltinIDEAssetsKeepsMCPEntryStableAcrossSameVersion(t *testing.T) {
+// 相同内容代号重复同步必须逐字节一致，否则 IDE 每次启动都会白白重启一次 dec-mcp。
+func TestEnsureBuiltinIDEAssetsKeepsMCPEntryStableAcrossSameGeneration(t *testing.T) {
 	homeDir := t.TempDir()
 	setEnvForProjectTest(t, "HOME", homeDir)
-	setRuntimeVersionForTest(t, "v1.13.73")
+	setRuntimeGenerationForTest(t, "v1.13.73+0123456789abcdef")
 
 	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
 	first := readCursorMCPConfig(t, homeDir)
@@ -336,40 +336,40 @@ func TestEnsureBuiltinIDEAssetsKeepsMCPEntryStableAcrossSameVersion(t *testing.T
 	second := readCursorMCPConfig(t, homeDir)
 
 	if string(first) != string(second) {
-		t.Fatalf("同版本重复同步改写了配置:\n%s\n---\n%s", string(first), string(second))
+		t.Fatalf("相同内容代号重复同步改写了配置:\n%s\n---\n%s", string(first), string(second))
 	}
 }
 
-// 换版本必须让条目内容变化，这是 IDE 重启 dec-mcp 的唯一触发条件。
-func TestEnsureBuiltinIDEAssetsRewritesMCPEntryOnVersionChange(t *testing.T) {
+// 同版本换二进制必须让条目内容变化，这是开发期覆盖安装后重启 dec-mcp 的触发条件。
+func TestEnsureBuiltinIDEAssetsRewritesMCPEntryOnGenerationChange(t *testing.T) {
 	homeDir := t.TempDir()
 	setEnvForProjectTest(t, "HOME", homeDir)
 
-	setRuntimeVersionForTest(t, "v1.13.73")
+	setRuntimeGenerationForTest(t, "v1.13.73+0123456789abcdef")
 	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
 	before := readCursorMCPConfig(t, homeDir)
 
-	setRuntimeVersionForTest(t, "v1.13.74")
+	setRuntimeGenerationForTest(t, "v1.13.73+fedcba9876543210")
 	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
 	after := readCursorMCPConfig(t, homeDir)
 
 	if string(before) == string(after) {
-		t.Fatalf("换版本后配置未变化: %s", string(before))
+		t.Fatalf("同版本换二进制后配置未变化: %s", string(before))
 	}
-	if got := decMCPEntry(t, after).Env[builtinDecMCPRuntimeVersionEnv]; got != "v1.13.74" {
-		t.Fatalf("%s = %q, 期望 v1.13.74", builtinDecMCPRuntimeVersionEnv, got)
+	if got := decMCPEntry(t, after).Env[builtinDecMCPRuntimeGenerationEnv]; got != "v1.13.73+fedcba9876543210" {
+		t.Fatalf("%s = %q", builtinDecMCPRuntimeGenerationEnv, got)
 	}
 }
 
-// 版本未登记时不写标记，保持 dec-server 之外调用方的既有行为。
-func TestEnsureBuiltinIDEAssetsOmitsMarkerWithoutRuntimeVersion(t *testing.T) {
+// 内容代号未登记时不写标记，保持 dec-server 之外调用方的既有行为。
+func TestEnsureBuiltinIDEAssetsOmitsMarkerWithoutRuntimeGeneration(t *testing.T) {
 	homeDir := t.TempDir()
 	setEnvForProjectTest(t, "HOME", homeDir)
-	setRuntimeVersionForTest(t, "")
+	setRuntimeGenerationForTest(t, "")
 
 	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
-	if _, ok := decMCPEntry(t, readCursorMCPConfig(t, homeDir)).Env[builtinDecMCPRuntimeVersionEnv]; ok {
-		t.Fatalf("未登记版本时不应写入 %s", builtinDecMCPRuntimeVersionEnv)
+	if _, ok := decMCPEntry(t, readCursorMCPConfig(t, homeDir)).Env[builtinDecMCPRuntimeGenerationEnv]; ok {
+		t.Fatalf("未登记内容代号时不应写入 %s", builtinDecMCPRuntimeGenerationEnv)
 	}
 }
 
