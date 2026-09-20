@@ -6,10 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 func listMCPProcessesOS() ([]mcpProcess, error) {
@@ -17,7 +18,7 @@ func listMCPProcessesOS() ([]mcpProcess, error) {
 	script := `Get-CimInstance Win32_Process -Filter "Name='dec-exec.exe' OR Name='dec-mcp.exe'" | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress`
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd := sysproc.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("列举进程失败: %w", err)
@@ -60,7 +61,7 @@ func killMCPProcessOS(pid int) error {
 	if pid <= 0 {
 		return fmt.Errorf("无效 pid")
 	}
-	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
+	cmd := sysproc.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("taskkill pid=%d: %w (%s)", pid, err, strings.TrimSpace(string(out)))
 	}
