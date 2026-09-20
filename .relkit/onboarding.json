@@ -74,7 +74,7 @@
     },
     "fake.release": {
       "status": "verified",
-      "value": "1.13.75",
+      "value": "1.13.77",
       "note": "stage+simulate verified; publish remains CI-only"
     },
     "pack.ci": {
@@ -85,7 +85,7 @@
     "ops.retrospect": {
       "status": "stale",
       "value": "relkit_host.py retrospect",
-      "note": "session finding upgrade-ipc-window-not-reported is undigested"
+      "note": "session finding multi-payload-filename-collision is undigested"
     }
   },
   "serve": {
