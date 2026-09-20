@@ -140,6 +140,12 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 				continue
 			}
 			visited[name] = struct{}{}
+			// 同名项目已由官方 requires 消费时，私仓 depends_on 不能再落地它。
+			// 否则 pull 会先安装官方快照，随后用私仓旧副本覆盖同一 cache / IDE
+			// 路径，形成「版本戳已更新、资产正文仍旧」的假成功。
+			if pin, declared := projectConfig.Requires[name]; declared && !types.IsVaultPin(pin) {
+				continue
+			}
 			if !addProjectAssets(name, &public, "depends_on "+name) {
 				continue
 			}

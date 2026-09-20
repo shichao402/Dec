@@ -53,7 +53,7 @@ func captureEvents(events *[]OperationEvent) Reporter {
 func TestResolveDesiredAssets_NilConfigScansBundles(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
-		"cli/public/project/rules/cli-release-rules.mdc": "---\ndescription: test\n---\n",
+		"cli/public/project/rules/cli-release-rules.mdc":          "---\ndescription: test\n---\n",
 	})
 
 	got, err := resolveDesiredAssets(nil, repoDir, nil)
@@ -133,10 +133,55 @@ func TestResolveDesiredAssets_BundleExpandsMembers(t *testing.T) {
 	}
 }
 
+func TestResolveDesiredAssetsOfficialRequireWinsOverVaultDependency(t *testing.T) {
+	repoDir := setupRepoWithVault(t, map[string]string{
+		"app/dec.yaml":    "name: app\ndepends_on: [relkit]\n",
+		"relkit/dec.yaml": "name: relkit\n",
+		"relkit/public/local/skills/relkit-ops/SKILL.md": "---\nname: relkit-ops\n---\nold vault copy\n",
+	})
+	cfg := &types.ProjectConfig{
+		ProjectName: "app",
+		Requires:    types.RequiresSpec{"relkit": types.RequiresLatest},
+	}
+
+	got, err := resolveDesiredAssetsForPlane(cfg, repoDir, WorkspaceProject, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Assets) != 0 {
+		t.Fatalf("官方 requires 不应再从私仓 depends_on 落地同名项目: %#v", got.Assets)
+	}
+	for _, bundle := range got.Bundles {
+		if bundle.Name == "relkit" && bundle.Enabled {
+			t.Fatalf("官方 requires 的同名私仓项目不应标为 Enabled: %#v", bundle)
+		}
+	}
+}
+
+func TestResolveDesiredAssetsVaultRequireStillFollowsDependency(t *testing.T) {
+	repoDir := setupRepoWithVault(t, map[string]string{
+		"app/dec.yaml":    "name: app\ndepends_on: [relkit]\n",
+		"relkit/dec.yaml": "name: relkit\n",
+		"relkit/public/local/skills/relkit-ops/SKILL.md": "---\nname: relkit-ops\n---\n",
+	})
+	cfg := &types.ProjectConfig{
+		ProjectName: "app",
+		Requires:    types.RequiresSpec{"relkit": types.RequiresVault},
+	}
+
+	got, err := resolveDesiredAssetsForPlane(cfg, repoDir, WorkspaceProject, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Assets) != 1 || got.Assets[0].Vault != "relkit" {
+		t.Fatalf("vault pin 必须继续从私仓消费: %#v", got.Assets)
+	}
+}
+
 func TestResolveDesiredAssets_MissingSubscribedProjectWarns(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"combo/public/project/skills/foo/SKILL.md": "---\nname: foo\n---\n",
-		"combo/dec.yaml":                           "name: combo\n",
+		"combo/dec.yaml": "name: combo\n",
 	})
 	cfg := &types.ProjectConfig{
 		Requires: types.RequiresSpec{"combo": types.RequiresVault, "ghost": types.RequiresVault},
@@ -195,9 +240,9 @@ func TestResolveDesiredAssets_UnknownBundleWarns(t *testing.T) {
 func TestResolveDesiredAssets_MultipleProjectsUniqueAssets(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"a/public/project/skills/only-a/SKILL.md": "---\nname: only-a\n---\n",
-		"a/dec.yaml":                              "name: a\n",
+		"a/dec.yaml": "name: a\n",
 		"b/public/project/skills/only-b/SKILL.md": "---\nname: only-b\n---\n",
-		"b/dec.yaml":                              "name: b\n",
+		"b/dec.yaml": "name: b\n",
 	})
 	cfg := &types.ProjectConfig{
 		Requires: types.RequiresSpec{"a": types.RequiresVault, "b": types.RequiresVault},
@@ -243,8 +288,8 @@ func TestResolveDesiredAssets_EmptyRepoDir(t *testing.T) {
 func TestResolveDesiredAssets_SkipsDotDirs(t *testing.T) {
 	// 保证隐藏目录（.git / .dec 等）不会被当作 vault 扫描。
 	repoDir := setupRepoWithVault(t, map[string]string{
-		".git/config":                       "",
-		".dec/whatever":                     "",
+		".git/config":   "",
+		".dec/whatever": "",
 		"combo/public/project/skills/foo/SKILL.md": "---\nname: foo\n---\n",
 		"combo/dec.yaml": "name: combo\n",
 	})
