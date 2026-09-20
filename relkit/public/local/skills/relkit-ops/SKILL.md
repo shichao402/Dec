@@ -47,7 +47,8 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 - `relkit_consume.py` 是 release 内部件，随版本在 `scripts/host/` 里搬家。产品代码禁止 `import relkit_consume`，也禁止再写 `scripts/relkit_consume.py` 这个已退役路径；闸门 `consumer-entry-only` 会报，改法是走 `relkit_host.py` 的子命令。
 - host 脚本要求 Python ≥ 3.9（hostlib 导入期就会求值 PEP 585 泛型）。产品入口脚本不要接受或安装 3.8，否则闸门 `host-python-floor` 报 drift；CI 容器只装 3.8 时要改成装 3.9 以上。
 - `fake.release`：只跑 `relkit_host.py fake verify`。缺 staged 树时脚本自己 dummy stage + simulate，禁止手调 `relkit.exe stage`。本机无 COS/S3 发布密钥时仍应能 simulate（对着空远端 index 合并 dummy staged）。
-- `pack.ci`：GitHub Actions 里 `relkit_host.py install` 之后真正 `stage`/`cas-put`/`release --execute` 的工作流算已接线；只 `install` 不够。产品源码调用 updater `apply` 时，CI 还必须出现 `--payload`；`internal-update-two-track` 会在用户点安装前拦住「只发完整安装轨」。
+- `pack.ci`：产品仓声明 `relkit.json` `release.packScript`（产出 `relkit.release-artifacts/1`），CI 只调 `relkit_host.py ci release --channel <dev|stable> --execute`（需 `RELKIT_RELEASE_VIA_CI=1` + agent token）。蓝盾 PAC 认 `ci/build_*.yaml` + `scripts/ci_win_release.cmd`；GitHub Actions 仍可直接 `stage`/`cas-put`/`release --execute`。只 `install` 不够。产品源码调用 updater `apply` 时，CI 还必须出现 `--payload`；`internal-update-two-track` 会在用户点安装前拦住「只发完整安装轨」。
+- Windows consume：HTTPS 固定优先 `%SystemRoot%\System32\curl.exe`（Schannel），不跟 PATH 上的 Cygwin/Git OpenSSL curl；默认 fail-closed，`RELKIT_CONSUME_ALLOW_INSECURE=1` 才允许校验后的 insecure 回退。
 - `updater.process`：封闭词由组件 registry 派生（当前 `rust` / `node` / `dart` / `go` / `other`），**不是** `rust-shell`。手写 DTO / `serde(default)` 吞缺键是 drift。产品源码出现 `RupUpdater` 或 `sdk.Updater` 也是 drift：升级宿主只许走 facade + sidecar。选择 `other` 时，`relkit.json` 必须声明存在的 `updater.entry`；存在 WebView 还必须声明 `updater.projection`。sidecar 名只能出现在声明入口（及 `sidecar.packScript`），projection 仍按满强度形状检测。
 - `updater.urlAllowlist` 是路径列表，只豁免这些路径中的 updater endpoint/base URL 文本；不豁免 sidecar 名、手写 `CheckResult` / `UpdateAvailable`、自声明 proto 或宽松反序列化。
 - agent 发布：`release --execute` 必须由 CI 设 `RELKIT_RELEASE_VIA_CI=1`；本地不要发。
