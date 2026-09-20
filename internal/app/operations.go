@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -758,13 +759,13 @@ func installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath strin
 		if err := copyDir(srcPath, destDir); err != nil {
 			return "", err
 		}
-		return "", injectRenderedHeaderDir(destDir, vaultName)
+		return "", injectRenderedHeaderDir(destDir, workspace, vaultName)
 	case "command":
 		destDir := filepath.Join(ideImpl.CommandsDirForPlane(plane, projectRoot, home), managed)
 		if err := copyDir(srcPath, destDir); err != nil {
 			return "", err
 		}
-		return "", injectRenderedHeaderDir(destDir, vaultName)
+		return "", injectRenderedHeaderDir(destDir, workspace, vaultName)
 	case "rule":
 		destDir := ideImpl.RulesDirForPlane(plane, projectRoot, home)
 		if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -774,7 +775,7 @@ func installAssetToIDEForWorkspace(itemType, assetName, vaultName, srcPath strin
 		if err := copyFile(srcPath, destPath); err != nil {
 			return "", err
 		}
-		return "", injectRenderedHeaderFile(destPath, vaultName)
+		return "", injectRenderedHeaderFile(destPath, workspace, vaultName)
 	case "mcp":
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
@@ -1083,19 +1084,99 @@ func copyDir(src, dst string) error {
 }
 
 // renderedHeaderMarker 是用来识别本文件顶部是否已注入过「勿编辑」注释的幂等标记。
-// 只要顶部 Markdown 注释中包含这个子串，就视为已注入，不再重复。
+// 只要顶部 Markdown 注释中包含这个子串，就视为已注入；重新 pull 时会整段替换，
+// 以便纠正过时指引（例如误写 Run 页 push）。
 const renderedHeaderMarker = "本文件由 `dec pull` 从"
 
-// renderedHeader 生成写入 rule/skill 副本顶部的「勿编辑」Markdown 注释。
-// vaultName 为空时退化为通用占位，避免误导读者。
-func renderedHeader(vaultName string) string {
+type renderHeaderMode int
+
+const (
+	renderHeaderVault renderHeaderMode = iota
+	renderHeaderOfficial
+	renderHeaderProvider
+)
+
+// renderHeaderInfo 决定写入 IDE 副本顶部的编辑/发布指引。
+type renderHeaderInfo struct {
+	Mode     renderHeaderMode
+	Vault    string
+	EditRoot string // provider: provides_root；vault: .dec/cache/<vault>
+}
+
+// renderHeaderInfoFor 按当前工作区身份选择头部：
+//   - 家项目且声明了 provides → 编辑 provides_root，由 CI publish-provides
+//   - 官方 registry 订阅 → 只读安装物，禁止 Run 页 push
+//   - 其余（个人私仓）→ 编辑 .dec/cache，Run 页 push
+func renderHeaderInfoFor(workspace Workspace, vaultName string) renderHeaderInfo {
 	vault := strings.TrimSpace(vaultName)
 	if vault == "" {
 		vault = "<vault>"
 	}
-	return fmt.Sprintf("<!-- 本文件由 `dec pull` 从 .dec/cache/%s/ 渲染生成，请勿直接编辑。\n"+
-		"     修改流程：编辑 .dec/cache/%s/... → 在 Run 页 push → pull 验证 -->\n\n",
-		vault, vault)
+	info := renderHeaderInfo{
+		Mode:     renderHeaderVault,
+		Vault:    vault,
+		EditRoot: path.Join(".dec/cache", vault),
+	}
+	cfg, err := loadWorkspaceBundleConfig(workspace)
+	if err != nil {
+		cfg = nil
+	}
+	if cfg != nil && strings.TrimSpace(cfg.ProjectName) == vault && len(cfg.Provides) > 0 {
+		root := strings.TrimSpace(cfg.ProvidesRoot)
+		if root == "" {
+			root = "."
+		}
+		return renderHeaderInfo{Mode: renderHeaderProvider, Vault: vault, EditRoot: root}
+	}
+	req, _ := workspaceOfficialRequires(workspace, cfg)
+	if req.Official().Has(vault) {
+		return renderHeaderInfo{Mode: renderHeaderOfficial, Vault: vault}
+	}
+	return info
+}
+
+// renderedHeader 生成写入 rule/skill 副本顶部的「勿编辑」Markdown 注释。
+func renderedHeader(info renderHeaderInfo) string {
+	vault := strings.TrimSpace(info.Vault)
+	if vault == "" {
+		vault = "<vault>"
+	}
+	switch info.Mode {
+	case renderHeaderProvider:
+		root := strings.TrimSpace(info.EditRoot)
+		if root == "" {
+			root = "."
+		}
+		return fmt.Sprintf("<!-- 本文件由 `dec pull` 从 %s/ 作者目录渲染生成，请勿直接编辑本副本。\n"+
+			"     修改流程：编辑 %s/skills|commands|rules|mcp/... → 提交源仓并由 CI publish-provides（产品 v*）；禁止 Run 页 push -->\n\n",
+			root, root)
+	case renderHeaderOfficial:
+		return fmt.Sprintf("<!-- 本文件由 `dec pull` 从 Dec registry 的 %s/ 渲染生成，请勿直接编辑。\n"+
+			"     官方资产由提供方 CI 发布；临时改动用 Console「本地覆写」。禁止 Run 页 push / dec_push -->\n\n",
+			vault)
+	default:
+		return fmt.Sprintf("<!-- 本文件由 `dec pull` 从 .dec/cache/%s/ 渲染生成，请勿直接编辑。\n"+
+			"     修改流程：编辑 .dec/cache/%s/... → 在 Run 页 push → pull 验证 -->\n\n",
+			vault, vault)
+	}
+}
+
+// stripRenderedHeader 去掉文件顶部已有的 dec pull 注释，便于用新指引覆盖。
+func stripRenderedHeader(data []byte) []byte {
+	trimmed := strings.TrimLeft(string(data), " \t\r\n")
+	if !strings.HasPrefix(trimmed, "<!--") {
+		return data
+	}
+	end := strings.Index(trimmed, "-->")
+	if end < 0 {
+		return data
+	}
+	comment := trimmed[:end+3]
+	if !strings.Contains(comment, renderedHeaderMarker) {
+		return data
+	}
+	rest := strings.TrimLeft(trimmed[end+3:], " \t\r\n")
+	return []byte(rest)
 }
 
 // shouldInjectHeader 只对 Markdown 类文本资产注入注释，避免破坏 JSON/TOML/其它格式。
@@ -1109,8 +1190,8 @@ func shouldInjectHeader(path string) bool {
 }
 
 // injectRenderedHeaderFile 在单个 Markdown 副本顶部注入「勿编辑」注释。
-// 如果目标文件已经包含注释标记，则保持幂等不重复注入。
-func injectRenderedHeaderFile(path, vaultName string) error {
+// 若已有旧注释则整段替换，保证 provides_root / 官方只读指引能纠正过时文案。
+func injectRenderedHeaderFile(path string, workspace Workspace, vaultName string) error {
 	if !shouldInjectHeader(path) {
 		return nil
 	}
@@ -1118,21 +1199,14 @@ func injectRenderedHeaderFile(path, vaultName string) error {
 	if err != nil {
 		return err
 	}
-	// 幂等：只检查文件前 512 字节，足够覆盖任何正常 header。
-	head := data
-	if len(head) > 512 {
-		head = head[:512]
-	}
-	if strings.Contains(string(head), renderedHeaderMarker) {
-		return nil
-	}
-	header := renderedHeader(vaultName)
-	combined := append([]byte(header), data...)
+	body := stripRenderedHeader(data)
+	header := renderedHeader(renderHeaderInfoFor(workspace, vaultName))
+	combined := append([]byte(header), body...)
 	return os.WriteFile(path, combined, 0644)
 }
 
 // injectRenderedHeaderDir 递归为一个 skill 目录内所有 Markdown 副本注入注释。
-func injectRenderedHeaderDir(dir, vaultName string) error {
+func injectRenderedHeaderDir(dir string, workspace Workspace, vaultName string) error {
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -1140,7 +1214,7 @@ func injectRenderedHeaderDir(dir, vaultName string) error {
 		if info.IsDir() {
 			return nil
 		}
-		return injectRenderedHeaderFile(path, vaultName)
+		return injectRenderedHeaderFile(path, workspace, vaultName)
 	})
 }
 
