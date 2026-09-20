@@ -186,8 +186,9 @@ def _impl_build_release_lock(
 
     Constructing instead of patching is what lets a relkit.consume/1 repo run
     upgrade directly: every pinned value is restated by the release, so the old
-    lock's shape is never a precondition. Only the updater IPC window carries
-    over, because no release attachment declares it.
+    lock's shape is never a precondition. The updater IPC window comes from
+    the release manifest (`minUpdaterIpc` / `maxUpdaterIpc`); older releases
+    that omit those fields fall back to UPDATER_IPC_FALLBACK.
     """
     artifacts: dict[str, Any] = {}
     rewrite_lock_artifacts(artifacts, base, sums)
@@ -204,7 +205,13 @@ def _impl_build_release_lock(
             },
             PUBLISH_PROTOCOL_FALLBACK,
         ),
-        "updaterIpc": int_window(previous.get("updaterIpc"), UPDATER_IPC_FALLBACK),
+        "updaterIpc": int_window(
+            {
+                "min": manifest.get("minUpdaterIpc"),
+                "max": manifest.get("maxUpdaterIpc"),
+            },
+            UPDATER_IPC_FALLBACK,
+        ),
         "artifacts": artifacts,
     }
 
@@ -513,7 +520,7 @@ def _impl_cmd_release(root: Path, args: argparse.Namespace) -> int:
     if agent:
         if args.execute and not via_ci:
             raise Fail(
-                "agent publish is CI-only; scripts/ci_release.mjs must set "
+                "agent publish is CI-only; relkit_host.py ci release must set "
                 "RELKIT_RELEASE_VIA_CI=1"
             )
         if args.execute:
@@ -624,14 +631,14 @@ def _impl_cmd_fake_verify(root: Path, version: Optional[str]) -> int:
     print(f"verified fake.release={resolved}")
     return 0
 
-def _impl_serve_token_path(
-    config_dir: str, product: str, share_with: Optional[str] = None
-) -> str:
-    """On-disk token after init. -share-with keeps the existing owner's file."""
-    owner = (share_with or product or "").strip()
-    if not owner:
-        raise Fail("token owner product id is required")
-    return str(Path(config_dir) / "tokens" / f"{owner}.token").replace("\\", "/")
+def _impl_serve_token_path(config_dir: str, rel: str) -> str:
+    """Absolute path for a token file taken from init -list-products."""
+    rel = (rel or "").strip()
+    if not rel:
+        raise Fail("token file path is empty")
+    if rel.startswith("/"):
+        return rel
+    return str(Path(config_dir) / rel).replace("\\", "/")
 
 def _impl_cmd_keys_gen(root: Path, args: argparse.Namespace) -> int:
     require_execute(args, "keys gen")
@@ -686,12 +693,12 @@ def _impl_stage_dummy_release(root: Path, version: str, binary: Path) -> None:
         [
             "stage",
             version,
-            "--add",
+            "--install",
             str(windows),
-            "os=windows,arch=x64,meta.layout=wholeRoot",
-            "--add",
+            "os=windows,arch=x64",
+            "--install",
             str(macos),
-            "os=macos,meta.layout=wholeRoot",
+            "os=macos",
         ],
     )
 
@@ -706,6 +713,7 @@ def _impl_routing_help() -> str:
   upgrade vX.Y.Z
   fake verify [--version X.Y.Z+N]
   release [--execute]
+  ci release --channel <dev|stable> [--execute]
   serve list|add|restart|rotate|remove
   agent list|add|provision|restart|remove
   keys gen
@@ -717,6 +725,283 @@ CI must name a subcommand. Mutations need --execute. Restarts need --restart.
 Empty-machine install / binary replace lives in the relkit repo:
   python scripts/deploy/relkit.py build|install|upgrade
 """
+
+RELEASE_ARTIFACTS_SCHEMA = "relkit.release-artifacts/1"
+DEFAULT_RELEASE_MANIFEST = "dist/release-artifacts.json"
+
+
+def _impl_release_pack_config(root: Path) -> dict[str, str]:
+    config = relkit_config(root)
+    release = config.get("release")
+    if not isinstance(release, dict):
+        raise Fail(
+            "relkit.json must declare release.packScript for ci release",
+            code="release-pack-missing",
+        )
+    pack_script = str(release.get("packScript") or "").strip()
+    if not pack_script:
+        raise Fail(
+            "relkit.json release.packScript must be a non-empty string",
+            code="release-pack-missing",
+        )
+    manifest = str(release.get("manifest") or DEFAULT_RELEASE_MANIFEST).strip()
+    if not manifest:
+        raise Fail(
+            "relkit.json release.manifest must be a non-empty path",
+            code="release-manifest-missing",
+        )
+    return {"packScript": pack_script, "manifest": manifest}
+
+
+def _impl_resolve_project_path(root: Path, relative: str, *, label: str) -> Path:
+    raw = Path(relative)
+    if raw.is_absolute():
+        raise Fail(f"{label} must be relative to the project root: {relative}")
+    resolved = (root / raw).resolve()
+    try:
+        resolved.relative_to(root.resolve())
+    except ValueError as error:
+        raise Fail(f"{label} escapes the project root: {relative}") from error
+    return resolved
+
+
+def _impl_pack_script_command(script: Path) -> list[str]:
+    suffix = script.suffix.lower()
+    if suffix in {".mjs", ".js", ".cjs"}:
+        node = os.environ.get("RELKIT_NODE") or shutil.which("node") or "node"
+        return [node, str(script)]
+    if suffix == ".py":
+        python = os.environ.get("RELKIT_PYTHON") or sys.executable
+        return [python, str(script)]
+    if suffix == ".ps1":
+        powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+        if not powershell:
+            raise Fail("powershell is required to run release.packScript")
+        return [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+        ]
+    if suffix in {".cmd", ".bat"}:
+        return ["cmd.exe", "/c", str(script)]
+    raise Fail(
+        f"unsupported release.packScript type {suffix or '(none)'}; "
+        "use .mjs/.js/.py/.ps1/.cmd"
+    )
+
+
+def _impl_run_release_pack_script(root: Path, script: Path) -> None:
+    if not script.is_file():
+        raise Fail(f"release.packScript is missing: {script.relative_to(root).as_posix()}")
+    command = pack_script_command(script)
+    print("> " + " ".join(command))
+    result = subprocess.run(command, cwd=str(root), check=False)
+    if result.returncode != 0:
+        raise Fail(
+            f"release.packScript failed (exit {result.returncode}): "
+            f"{script.relative_to(root).as_posix()}"
+        )
+
+
+def _impl_normalize_selectors(raw: Any, *, label: str) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        raise Fail(f"{label}.selectors must be a non-empty string")
+    return raw.strip()
+
+
+def _impl_load_release_artifacts_manifest(
+    root: Path, manifest_path: Path, *, expected_version: str
+) -> dict[str, Any]:
+    if not manifest_path.is_file():
+        raise Fail(
+            f"release manifest missing after packScript: "
+            f"{manifest_path.relative_to(root).as_posix()}"
+        )
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise Fail(f"release manifest is not readable JSON: {error}") from error
+    if not isinstance(data, dict):
+        raise Fail("release manifest must be a JSON object")
+    if data.get("schema") != RELEASE_ARTIFACTS_SCHEMA:
+        raise Fail(
+            f"release manifest schema must be {RELEASE_ARTIFACTS_SCHEMA!r}"
+        )
+    version = str(data.get("version") or "").strip()
+    if version != expected_version:
+        raise Fail(
+            f"release manifest version {version!r} does not match "
+            f"project version {expected_version!r}"
+        )
+    install = data.get("install")
+    payload = data.get("payload")
+    if not isinstance(install, dict) or not isinstance(payload, dict):
+        raise Fail("release manifest requires install and payload objects")
+    install_path = resolve_project_path(
+        root, str(install.get("path") or "").strip(), label="install.path"
+    )
+    payload_path = resolve_project_path(
+        root, str(payload.get("path") or "").strip(), label="payload.path"
+    )
+    if not install_path.is_file() or install_path.stat().st_size == 0:
+        raise Fail(f"install artifact missing or empty: {install_path}")
+    if not payload_path.is_dir():
+        raise Fail(f"payload path must be a directory: {payload_path}")
+    kind = str(install.get("kind") or "").strip()
+    if kind != "installer":
+        raise Fail('install.kind must be "installer" for the full-install track')
+    install_selectors = normalize_selectors(install.get("selectors"), label="install")
+    payload_selectors = normalize_selectors(payload.get("selectors"), label="payload")
+    if install_selectors == payload_selectors:
+        # Same selector group is required so one UpdateAvailable carries both tracks.
+        pass
+    archives_raw = data.get("archives") or []
+    if archives_raw is None:
+        archives_raw = []
+    if not isinstance(archives_raw, list):
+        raise Fail("release manifest archives must be a list")
+    archives: list[dict[str, str]] = []
+    for index, item in enumerate(archives_raw):
+        if not isinstance(item, dict):
+            raise Fail(f"archives[{index}] must be an object")
+        path = resolve_project_path(
+            root,
+            str(item.get("path") or "").strip(),
+            label=f"archives[{index}].path",
+        )
+        if not path.is_file() or path.stat().st_size == 0:
+            raise Fail(f"archives[{index}] missing or empty: {path}")
+        role = str(item.get("role") or "ci-only").strip() or "ci-only"
+        if role != "ci-only":
+            raise Fail(
+                f"archives[{index}].role must be ci-only "
+                "(archives are never staged)"
+            )
+        archives.append(
+            {
+                "path": path.relative_to(root).as_posix(),
+                "absolute": str(path),
+                "role": role,
+            }
+        )
+    return {
+        "schema": RELEASE_ARTIFACTS_SCHEMA,
+        "version": version,
+        "install": {
+            "path": install_path.relative_to(root).as_posix(),
+            "absolute": str(install_path),
+            "kind": kind,
+            "selectors": install_selectors,
+        },
+        "payload": {
+            "path": payload_path.relative_to(root).as_posix(),
+            "absolute": str(payload_path),
+            "selectors": payload_selectors,
+        },
+        "archives": archives,
+    }
+
+
+def _impl_resolve_ci_channel(root: Path, explicit: str) -> str:
+    config = relkit_config(root)
+    channels = config.get("channels")
+    allowed = (
+        [str(item).strip() for item in channels if str(item).strip()]
+        if isinstance(channels, list)
+        else ["stable", "dev"]
+    )
+    channel = (explicit or os.environ.get("RUP_CHANNEL") or "").strip()
+    if channel not in allowed:
+        raise Fail(
+            f"--channel must be one of {', '.join(allowed)}; got {channel or '(empty)'}"
+        )
+    tag = (
+        os.environ.get("BK_CI_REPO_GIT_WEBHOOK_TAG_NAME")
+        or os.environ.get("BK_CI_GIT_REPO_TAG_NAME")
+        or ""
+    ).strip()
+    if tag and not tag.startswith(f"{channel}/"):
+        raise Fail(
+            f"trigger tag {tag} does not match channel {channel}; "
+            f"expected {channel}/<VERSION.json>"
+        )
+    return channel
+
+
+def _impl_cmd_ci_release(root: Path, args: argparse.Namespace) -> int:
+    """Single CI entry: install → pack → stage → simulate → fake → publish."""
+    channel = resolve_ci_channel(root, getattr(args, "channel", ""))
+    execute = bool(getattr(args, "execute", False))
+    if execute and os.environ.get("RELKIT_RELEASE_VIA_CI") != "1":
+        raise Fail(
+            "ci release --execute requires RELKIT_RELEASE_VIA_CI=1 "
+            "(CI holds the agent token; local shells must not publish)"
+        )
+    if execute and not os.environ.get(TOKEN_ENV, "").strip():
+        raise Fail(
+            f"ci release --execute requires {TOKEN_ENV} "
+            "(product agent Bearer injected by CI secrets)"
+        )
+
+    print(f"relkit ci release channel={channel} execute={execute}")
+    cmd_install(root, [])
+    binary = relkit_bin(root)
+    version = project_version_for_relkit(root)
+    if not version:
+        raise Fail("VERSION.json / VERSION is required for ci release")
+
+    pack = release_pack_config(root)
+    script = resolve_project_path(root, pack["packScript"], label="release.packScript")
+    manifest_path = resolve_project_path(
+        root, pack["manifest"], label="release.manifest"
+    )
+    run_release_pack_script(root, script)
+    artifacts = load_release_artifacts_manifest(
+        root, manifest_path, expected_version=version
+    )
+
+    install = artifacts["install"]
+    payload = artifacts["payload"]
+    stage_argv = [
+        "stage",
+        version,
+        "--channel",
+        channel,
+        "--install",
+        install["absolute"],
+        f"kind={install['kind']},{install['selectors']}",
+        "--payload",
+        payload["absolute"],
+        payload["selectors"],
+    ]
+    print(
+        "staging install="
+        + install["path"]
+        + " payload="
+        + payload["path"]
+        + " archives="
+        + str(len(artifacts["archives"]))
+        + " (ci-only, not staged)"
+    )
+    run_relkit(root, binary, stage_argv)
+    run_relkit(root, binary, ["simulate", "--with-staged", version, "--from", "all"])
+    cmd_fake_verify(root, version)
+
+    if not execute:
+        print(
+            "ci release dry-run complete "
+            "(install → pack → stage → simulate → fake); "
+            "pass --execute with RELKIT_RELEASE_VIA_CI=1 to publish"
+        )
+        return 0
+
+    # Existing release gate owns drift / incomplete / agent publish.
+    publish_args = argparse.Namespace(execute=True)
+    return cmd_release(root, publish_args)
+
 
 _IMPLEMENTATIONS = {
     "import_consume": _impl_import_consume,
@@ -751,6 +1036,14 @@ _IMPLEMENTATIONS = {
     "dummy_stage_zip": _impl_dummy_stage_zip,
     "stage_dummy_release": _impl_stage_dummy_release,
     "routing_help": _impl_routing_help,
+    "release_pack_config": _impl_release_pack_config,
+    "resolve_project_path": _impl_resolve_project_path,
+    "pack_script_command": _impl_pack_script_command,
+    "run_release_pack_script": _impl_run_release_pack_script,
+    "normalize_selectors": _impl_normalize_selectors,
+    "load_release_artifacts_manifest": _impl_load_release_artifacts_manifest,
+    "resolve_ci_channel": _impl_resolve_ci_channel,
+    "cmd_ci_release": _impl_cmd_ci_release,
 }
 
 def _export(name: str):

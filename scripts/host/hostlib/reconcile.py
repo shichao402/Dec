@@ -181,18 +181,34 @@ def _impl_reconcile_pack_ci(root: Path, state: dict[str, Any]) -> None:
         return
     yaml_dev = root / "ci" / "build_dev.yaml"
     yaml_stable = root / "ci" / "build_stable.yaml"
-    entry = root / "scripts" / "ci_release.mjs"
-    if not (yaml_dev.is_file() and yaml_stable.is_file() and entry.is_file()):
+    win_release = root / "scripts" / "ci_win_release.cmd"
+    config_path = root / "relkit.json"
+    if not (yaml_dev.is_file() and yaml_stable.is_file() and win_release.is_file()):
         return
-    text = entry.read_text(encoding="utf-8")
-    if "relkit_host.py" not in text or "release" not in text:
+    try:
+        config = load_json(config_path) if config_path.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        return
+    release = config.get("release") if isinstance(config, dict) else None
+    pack_script = (
+        str(release.get("packScript") or "").strip()
+        if isinstance(release, dict)
+        else ""
+    )
+    if not pack_script:
+        return
+    text = win_release.read_text(encoding="utf-8")
+    if "relkit_host.py" not in text or "ci release" not in text:
+        return
+    pack_path = root / pack_script
+    if not pack_path.is_file():
         return
     set_step(
         state,
         "pack.ci",
         "confirmed",
         "ci/build_dev.yaml,ci/build_stable.yaml",
-        "BK-CI PAC; entry scripts/ci_release.mjs; CI holds agent token only",
+        "BK-CI PAC; entry relkit_host.py ci release; packScript declared in relkit.json",
     )
 
 def _impl_reconcile_fake_stage(root: Path, state: dict[str, Any]) -> None:

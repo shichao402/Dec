@@ -28,6 +28,13 @@ AGENT_ORIGIN_HOST = "update.devcloud.woa.com"
 
 AGENT_ORIGIN_NETLOC = "update.devcloud.woa.com:8080"
 
+# The agent writes to its backends with the operator credential systemd puts in
+# its own environment. Which variable holds it is a fact about the box, not
+# about any product repository: CI's RELKIT_UPLOAD_TOKEN only reaches the
+# agent's HTTP API and is never in the agent process environment. Used to seed
+# a brand new profile; an existing profile on the box wins over it.
+AGENT_BACKEND_TOKEN_ENV = "RELKIT_SERVE_TOKEN"
+
 GITHUB_REPO = os.environ.get("RELKIT_RELEASE_REPO", "shichao402/relkit")
 
 TOKEN_ENV = "RELKIT_UPLOAD_TOKEN"
@@ -126,6 +133,16 @@ ANSWER_BATCH_SCHEMA = "relkit.onboarding-answers/1"
 
 ONBOARD_INTENTS = ("fresh", "reconfigure", "upgrade")
 
+# A product repo that silently stays on an old lock looks healthy: every local
+# hash agrees with itself. The newest published tag is the only outside
+# reference, so inspect resolves it once an hour and caches the answer.
+UPSTREAM_LATEST_TTL = 3600
+
+# retrospect can only read files and command failures, so a finding that only a
+# human or agent observed needs its own intake. The class decides where the fix
+# belongs, mirroring the skill's conversation-retrospect split.
+RETROSPECT_NOTE_CLASSES = ("generic", "product", "agent")
+
 BATCH_DECISION_STEPS = tuple(
     step for step in DECISION_STEPS if step not in ("repo.root", "env.inspect")
 )
@@ -162,6 +179,18 @@ DIGESTED_ISSUE_CODES = frozenset(
         "sidecar-universal-not-darwin",
         "sidecar-universal-missing-attachment",
         "sidecar-universal-lipo-failed",
+        "retrospect-note-code-invalid",
+        "retrospect-note-class-invalid",
+        "retrospect-note-text-missing",
+        "consume-stale-proto-shadow",
+        "ci-zip-as-full-install",
+        "host-ignore-full-install-disposition",
+        "pack-ci-missing-payload-track",
+        "full-install-disposition-unhandled",
+        "windows-install-root-unwritable",
+        "lock-latest-cache-stale",
+        "dec-publish-not-in-ci",
+        "dec-skill-header-push-route",
     }
 )
 

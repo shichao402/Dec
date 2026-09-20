@@ -30,6 +30,7 @@ ENTRY_SUFFIXES = {".sh", ".bash", ".bat", ".cmd", ".ps1", ".py", ".yml", ".yaml"
 HOST_ENTRY_SIGNAL = re.compile(r"relkit_host\.py|relkit_consume\.py")
 CONSUMER_IMPORT = re.compile(r"^[ \t]*(?:import|from)[ \t]+relkit_consume\b", re.M)
 RETIRED_CONSUMER_PATH = re.compile(r"scripts[/\\]relkit_consume\.py")
+INTERNAL_APPLY_CALL = re.compile(r"\bapply\s*\(", re.I)
 
 
 def gate(name: str) -> Callable[[Gate], Gate]:
@@ -209,6 +210,78 @@ def updater_sdk_contract(root: Path, state: dict[str, Any], drift: list[str]) ->
     source = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in _source_files(root))
     if row.import_signals and not any(signal in source for signal in row.import_signals):
         drift.append(f"updater.process={process} source does not import installed {row.name}")
+
+
+@gate("internal-update-two-track")
+def internal_update_two_track(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    """A host that calls the updater apply facade needs a payload publish track.
+
+    A full-install artifact may still be selected for old clients, but the sidecar
+    deliberately refuses to apply it. Without this cross-check a product can pass
+    pack.ci, download a valid archive, and only fail after the user clicks install.
+    """
+    process = str(_step_value(state, "updater.process") or "")
+    if not process:
+        return
+    row = next(
+        (item for item in components("product-tree") if item.updater_process == process),
+        None,
+    )
+    if row is None:
+        return
+    source = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in _source_files(root)
+    )
+    if not any(signal in source for signal in row.import_signals):
+        return
+    if not INTERNAL_APPLY_CALL.search(source):
+        return
+
+    ci_files = [
+        path
+        for pattern in (
+            ".github/workflows/*.yml",
+            ".github/workflows/*.yaml",
+            "ci/*.yml",
+            "ci/*.yaml",
+            "scripts/*.js",
+            "scripts/*.mjs",
+            "scripts/*.py",
+            "scripts/*.sh",
+            "scripts/*.ps1",
+            "scripts/*.cmd",
+            "scripts/*.bat",
+        )
+        for path in root.glob(pattern)
+        if path.is_file()
+    ]
+    ci_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in ci_files
+    )
+    # Legacy products hand-stage both tracks; new products declare
+    # release.packScript and call `ci release`, which always stages payload.
+    config_path = root / "relkit.json"
+    release_pack = False
+    if config_path.is_file():
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            config = {}
+        release = config.get("release") if isinstance(config, dict) else None
+        release_pack = (
+            isinstance(release, dict)
+            and bool(str(release.get("packScript") or "").strip())
+        )
+    if "--payload" in ci_text:
+        return
+    if release_pack and "ci release" in ci_text:
+        return
+    drift.append(
+        "internal updater apply requires a CI payload track paired with "
+        "the full-install selectors (--payload is missing)"
+    )
 
 
 @gate("webview-projection")

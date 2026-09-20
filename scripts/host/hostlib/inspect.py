@@ -67,6 +67,72 @@ def _impl_onboarding_ignored(root: Path) -> Optional[bool]:
         return False
     return None
 
+def _release_tuple(value: Any) -> Optional[tuple[int, ...]]:
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", str(value or "").strip())
+    if not match:
+        return None
+    return tuple(int(item) for item in match.groups())
+
+def _impl_upstream_latest_release(root: Path) -> str:
+    """Newest published release tag, or "" when it cannot be resolved.
+
+    Anonymous api.github.com allows 60 calls an hour and does not share that
+    budget with release downloads, so the tag comes from the redirect that
+    /releases/latest answers with. A network failure must leave inspect usable,
+    so it degrades to an unknown relation instead of a finding.
+
+    The TTL cache is also invalidated when the pinned lock.release is newer than
+    the cached latest: a just-published tag can otherwise look stale for up to
+    an hour even though the lock already advanced.
+    """
+    cached_path = cache_dir(root) / "upstream-latest.json"
+    now = datetime.now(timezone.utc).timestamp()
+    try:
+        cached = load_json(cached_path)
+        if now - float(cached.get("checkedAt") or 0) < UPSTREAM_LATEST_TTL:
+            cached_release = str(cached.get("release") or "")
+            lock_path = root / "scripts" / "relkit.lock.json"
+            try:
+                locked = _release_tuple(load_json(lock_path).get("release"))
+                newest_cached = _release_tuple(cached_release)
+                if locked and newest_cached and locked > newest_cached:
+                    pass  # lock already past cache; refetch
+                else:
+                    return cached_release
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                return cached_release
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    url = f"https://github.com/{GITHUB_REPO}/releases/latest"
+    try:
+        with urlopen(
+            Request(url, headers={"User-Agent": "relkit-host"}), timeout=15
+        ) as response:
+            resolved = urlparse(response.geturl()).path.rsplit("/", 1)[-1]
+    except (HTTPError, URLError, TimeoutError, OSError, ValueError):
+        return ""
+    if not _release_tuple(resolved):
+        return ""
+    try:
+        cache_dir(root).mkdir(parents=True, exist_ok=True)
+        cached_path.write_text(
+            dump_json({"checkedAt": now, "release": resolved}), encoding="utf-8"
+        )
+    except OSError:
+        pass
+    return resolved
+
+def _impl_lock_currency(root: Path, lock_release: Any) -> dict[str, Any]:
+    """Compare the pinned release against the newest published one."""
+    latest = upstream_latest_release(root)
+    locked = _release_tuple(lock_release)
+    newest = _release_tuple(latest)
+    if locked and newest:
+        relation = "behind" if locked < newest else "current-or-newer"
+    else:
+        relation = "unknown"
+    return {"latestRelease": latest or None, "releaseRelation": relation}
+
 def _impl_env_inspect_report(root: Path) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
     facts: dict[str, Any] = {
@@ -160,10 +226,24 @@ def _impl_env_inspect_report(root: Path) -> dict[str, Any]:
                 if (host_dir / "relkit_host.py").is_file()
                 else ""
             )
+            currency = lock_currency(root, lock.get("release"))
             facts["lock"] = {
                 "release": lock.get("release"),
                 "hostScriptsMatch": bool(expected) and expected == actual,
+                **currency,
             }
+            if currency["releaseRelation"] == "behind":
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "lock-behind-upstream",
+                        "detail": (
+                            f"lock {lock.get('release')} is behind upstream "
+                            f"{currency['latestRelease']}; confirm the intent to "
+                            f"upgrade or to stay before other ops"
+                        ),
+                    }
+                )
             if expected and actual and expected != actual:
                 findings.append(
                     {
@@ -295,6 +375,8 @@ _IMPLEMENTATIONS = {
     "inventory_path": _impl_inventory_path,
     "ops_journal_path": _impl_ops_journal_path,
     "onboarding_ignored": _impl_onboarding_ignored,
+    "upstream_latest_release": _impl_upstream_latest_release,
+    "lock_currency": _impl_lock_currency,
     "env_inspect_report": _impl_env_inspect_report,
     "print_env_inspect": _impl_print_env_inspect,
     "apply_env_inspect": _impl_apply_env_inspect,

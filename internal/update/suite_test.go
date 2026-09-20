@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
 	"go.firoyang.com/relkit/sdk"
 )
 
@@ -21,7 +22,7 @@ func TestSuiteRuntimeKeepsPinnedVersionEligible(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := fileSetRuntime("dec-server", "linux", "arm64", int64(code-1), t.TempDir())
+	rt := suiteRuntime("dec-server", "linux", "arm64", int64(code-1), t.TempDir())
 	if rt.CurrentCode != int64(code-1) {
 		t.Fatalf("CurrentCode = %d, want %d", rt.CurrentCode, code-1)
 	}
@@ -30,6 +31,12 @@ func TestSuiteRuntimeKeepsPinnedVersionEligible(t *testing.T) {
 		rt.ClientSelectors["arch"] != "arm64" ||
 		rt.ClientSelectors["audience"] != "runtime" {
 		t.Fatalf("selectors 不正确: %#v", rt.ClientSelectors)
+	}
+	if rt.Install.GetPlacement() != updaterv1.Placement_PLACEMENT_IN_PLACE {
+		t.Fatalf("placement = %v, want IN_PLACE", rt.Install.GetPlacement())
+	}
+	if rt.Install.GetExecutableRelpath() != "dec-server" {
+		t.Fatalf("executable_relpath = %q", rt.Install.GetExecutableRelpath())
 	}
 }
 

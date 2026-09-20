@@ -11,7 +11,7 @@ import (
 )
 
 // SuiteComponents is the Dec runtime installed under ~/.dec/bin.
-// relkit-updater is the fifth fileSet member once ADR 0010 sidecar is published.
+// relkit-updater 由 Console 内置 resources 释放，不走运行时套件 payload。
 var SuiteComponents = []string{"dec-server", "dec-mcp", "dec-exec", "dec-host-setup"}
 
 const UpdaterComponent = "relkit-updater"
@@ -35,7 +35,7 @@ func DownloadSuite(ctx context.Context, version, goos, goarch, destDir string) e
 		return fmt.Errorf("无效目标版本 code: %d", code)
 	}
 	for _, component := range SuiteComponents {
-		rt := fileSetRuntime(component, goos, goarch, int64(code-1), destDir)
+		rt := suiteRuntime(component, goos, goarch, int64(code-1), destDir)
 		u, err := openUpdater(ctx, rt)
 		if err != nil {
 			return err

@@ -47,7 +47,8 @@ def _impl_ssh_path_exists(host: str, remote_path: str) -> bool:
 def _impl_agent_profile_path(config_path: str, product: str) -> str:
     return f"{Path(config_path).parent.as_posix()}/products/{product}.json"
 
-def _impl_rewrite_agent_backend_url(url: str) -> str:
+def _impl_agent_upload_url(url: str) -> str:
+    """Data-plane endpoint the agent PUTs to. Never a client download address."""
     parsed = urlparse(url)
     if parsed.hostname != AGENT_ORIGIN_HOST:
         return url
@@ -57,17 +58,57 @@ def _impl_rewrite_agent_backend_url(url: str) -> str:
         ("http", AGENT_ORIGIN_NETLOC, parsed.path, parsed.params, parsed.query, parsed.fragment)
     )
 
-def _impl_apply_agent_backend_urls(backend: dict[str, Any]) -> None:
-    """Clients download via baseUrl; the agent uploads via origin uploadUrl."""
-    base = backend.get("baseUrl")
-    if not isinstance(base, str) or not base:
-        return
-    origin = rewrite_agent_backend_url(base)
-    upload = backend.get("uploadUrl")
-    if isinstance(upload, str) and upload:
-        backend["uploadUrl"] = rewrite_agent_backend_url(upload)
-    else:
-        backend["uploadUrl"] = origin
+def _impl_to_agent_backend(
+    backend: dict[str, Any], inherited: Optional[dict[str, Any]] = None
+) -> None:
+    """Translate a product-repo backend into the one the agent will run.
+
+    Three kinds of fields, three owners:
+
+    `baseUrl` belongs to the product. It is the public download address that
+    goes into signed manifests and the human page, so it is kept exactly as the
+    repository wrote it.
+
+    `uploadUrl` and the credential variable belong to the box. The agent reaches
+    the data plane on its own endpoint and authenticates with whatever systemd
+    put in its environment; a product repository cannot know either. Take them
+    from the profile already installed on the box, and fall back to the local
+    defaults only when the box has no profile yet.
+    """
+    inherited = inherited if isinstance(inherited, dict) else {}
+
+    upload = inherited.get("uploadUrl")
+    if not (isinstance(upload, str) and upload):
+        upload = backend.get("uploadUrl") or backend.get("baseUrl")
+        upload = _impl_agent_upload_url(upload) if isinstance(upload, str) and upload else None
+    if upload:
+        backend["uploadUrl"] = upload
+
+    token_env = inherited.get("tokenEnv")
+    if not (isinstance(token_env, str) and token_env):
+        if backend.get("type") == "relkit-compatible":
+            token_env = AGENT_BACKEND_TOKEN_ENV
+        else:
+            token_env = backend.get("tokenEnv")
+    if isinstance(token_env, str) and token_env:
+        backend["tokenEnv"] = token_env
+
+def _impl_read_agent_profile(
+    host: str, config_path: str, product: str
+) -> Optional[dict[str, Any]]:
+    """The publish profile already on the box, or None when there is none."""
+    path = agent_profile_path(str(config_path), product)
+    if not ssh_path_exists(host, path):
+        return None
+    try:
+        raw = ssh_run(host, ["sudo", "cat", path]).stdout
+    except Fail:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 def _impl_extract_publish_profile(machine: dict[str, Any]) -> dict[str, Any]:
     signing = dict(machine.get("signing") or {})
@@ -88,7 +129,13 @@ def _impl_extract_publish_profile(machine: dict[str, Any]) -> dict[str, Any]:
         profile["directory"] = {"publishTo": list(directory_publish_to)}
     return profile
 
-def _impl_machine_publish_config(root: Path, product: str, key_id: str, private_relpath: str) -> dict[str, Any]:
+def _impl_machine_publish_config(
+    root: Path,
+    product: str,
+    key_id: str,
+    private_relpath: str,
+    installed_backends: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     config_path = root / "relkit.json"
     if not config_path.is_file():
         raise Fail(f"missing {config_path}")
@@ -96,9 +143,10 @@ def _impl_machine_publish_config(root: Path, product: str, key_id: str, private_
     backends = json.loads(json.dumps(cfg.get("backends") or {}))
     if not backends:
         raise Fail("relkit.json has no backends for the machine publish profile")
-    for backend in backends.values():
+    installed = installed_backends if isinstance(installed_backends, dict) else {}
+    for name, backend in backends.items():
         if isinstance(backend, dict):
-            apply_agent_backend_urls(backend)
+            _impl_to_agent_backend(backend, installed.get(name))
     signing = dict(cfg.get("signing") or {})
     signing["keyId"] = key_id
     signing["privateKeyPath"] = private_relpath
@@ -148,6 +196,60 @@ def _impl_parse_list_products(text: str) -> list[str]:
                 if item and item not in products:
                     products.append(item)
     return products
+
+def _impl_parse_product_token_files(text: str) -> dict[str, str]:
+    """Map product id -> token file from init -list-products.
+
+    Only lines whose last field is a token file. Agent also prints a products
+    block with roots and profiles; those lines are ignored.
+    """
+    mapping: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        parts = stripped.split()
+        if len(parts) < 2:
+            continue
+        products, rel = parts[0], parts[-1]
+        if products in ("config", "operator", "uploadTokens", "products"):
+            continue
+        if "tokens/" not in rel and not rel.endswith(".token"):
+            continue
+        for item in products.split(","):
+            if item:
+                mapping[item] = rel
+    return mapping
+
+def _impl_token_file_abs(config_dir: str, rel: str) -> str:
+    rel = (rel or "").strip()
+    if not rel:
+        raise Fail("token file path is empty")
+    if rel.startswith("/"):
+        return rel
+    return str(Path(config_dir) / rel).replace("\\", "/")
+
+def _impl_listed_product_token_path(config_dir: str, listing: str, product: str) -> str:
+    files = _impl_parse_product_token_files(listing)
+    rel = files.get(product)
+    if not rel:
+        raise Fail(
+            f"product {product} is not in the live token listing; "
+            "not guessing a filename from share-with"
+        )
+    return _impl_token_file_abs(config_dir, rel)
+
+def _impl_list_serve_products(host: str, config_dir: str) -> str:
+    return ssh_run(
+        host,
+        ["sudo", SERVE_BIN, "init", "-out", str(config_dir), "-list-products"],
+    ).stdout
+
+def _impl_list_agent_products(host: str, config_path: str) -> str:
+    return ssh_run(
+        host,
+        ["sudo", AGENT_BIN, "init", "-config", str(config_path), "-list-products"],
+    ).stdout
 
 def _impl_publish_topology(root: Path) -> dict[str, Any]:
     """Describe the configured publish path without guessing operator intent."""
@@ -326,8 +428,10 @@ def _impl_remote_inventory(
             }
         )
         if use_agent and len(status) > 2 and status[2].strip().startswith("{"):
+            # /-/site answers with an indented JSON object, so the body spans
+            # every line after the two systemctl answers.
             try:
-                site_status = json.loads(status[2])
+                site_status = json.loads("\n".join(status[2:]))
                 result["siteStatus"] = {
                     "configured": bool(site_status.get("configured")),
                     "projectId": site_status.get("projectId"),
@@ -362,6 +466,13 @@ def _impl_decision_evidence(root: Path, state: dict[str, Any]) -> dict[str, Any]
     implications: list[str] = []
     blocked: dict[str, str] = {}
     applicable = {step: True for step in STEP_IDS}
+    lock_release = remote.get("lockRelease")
+    lock = {"release": lock_release, **lock_currency(root, lock_release)}
+    if lock["releaseRelation"] == "behind":
+        implications.append(
+            f"lock {lock['release']} is behind upstream {lock['latestRelease']}; "
+            "the intent to upgrade or to stay is a human decision"
+        )
     if topology.get("mode") == "direct":
         implications.append(
             "release publishes directly to configured backends; serve/agent product tokens are not on this route"
@@ -410,6 +521,7 @@ def _impl_decision_evidence(root: Path, state: dict[str, Any]) -> dict[str, Any]
     return {
         "topology": topology,
         "remote": remote,
+        "lock": lock,
         "applicable": applicable,
         "implications": implications,
         "blockedDecisions": blocked,
@@ -522,22 +634,39 @@ def _impl_cmd_status(root: Path, as_json: bool = False) -> int:
             print(f"  {item}")
     return 1 if drift else 0
 
-def _impl_agent_token_path(product: str, share_with: Optional[str] = None) -> str:
-    owner = (share_with or product or "").strip()
-    if not owner:
-        raise Fail("token owner product id is required")
-    return "/etc/relkit-agent/tokens/" + owner + ".token"
+def _impl_agent_token_path(rel: str, config_dir: str = "/etc/relkit-agent") -> str:
+    return _impl_token_file_abs(config_dir, rel)
+
+def _impl_chown_token_file(host: str, token_path: str) -> None:
+    ssh_run(host, ["sudo", "chown", "relkit:relkit", token_path])
+    ssh_run(host, ["sudo", "chmod", "0600", token_path])
+    print(f"chown relkit:relkit {token_path}")
 
 def _impl_chown_serve_product_token(
     host: str,
     config_dir: str,
     product: str,
-    share_with: Optional[str] = None,
+    listing: Optional[str] = None,
 ) -> None:
-    token_path = serve_token_path(config_dir, product, share_with)
+    if listing is None:
+        listing = _impl_list_serve_products(host, config_dir)
+    token_path = _impl_listed_product_token_path(config_dir, listing, product)
+    _impl_chown_token_file(host, token_path)
+
+def _impl_chown_agent_product_token(
+    host: str,
+    config_path: str,
+    product: str,
+    root_dir: str,
+    listing: Optional[str] = None,
+) -> None:
+    if listing is None:
+        listing = _impl_list_agent_products(host, config_path)
+    config_dir = str(Path(config_path).parent.as_posix())
+    token_path = _impl_listed_product_token_path(config_dir, listing, product)
+    ssh_run(host, ["sudo", "chown", "-R", "relkit:relkit", str(root_dir)])
     ssh_run(host, ["sudo", "chown", "relkit:relkit", token_path])
-    ssh_run(host, ["sudo", "chmod", "0600", token_path])
-    print(f"chown relkit:relkit {token_path}")
+    print(f"chown relkit:relkit {root_dir} and {token_path}")
 
 def _impl_cmd_serve_list(root: Path) -> int:
     state = load_state(root)
@@ -587,7 +716,7 @@ def _impl_cmd_serve_add(root: Path, args: argparse.Namespace) -> int:
         print("share-with does not print a token")
     else:
         raise Fail("init did not print a token; not guessing")
-    chown_serve_product_token(host, config_dir, product, share_with)
+    chown_serve_product_token(host, config_dir, product)
     state["product"] = product
     state["serve"]["sshHost"] = host
     state["serve"]["sshPort"] = ssh_host_port(host)
@@ -626,9 +755,8 @@ def _impl_cmd_serve_restart(root: Path, args: argparse.Namespace) -> int:
     except Fail:
         product = state["steps"]["serve.register"].get("value")
     config_dir = (state.get("serve") or {}).get("configDir") or DEFAULT_SERVE_DIR
-    share_with = (state.get("serve") or {}).get("shareWith")
     if product:
-        chown_serve_product_token(host, str(config_dir), str(product), share_with)
+        chown_serve_product_token(host, str(config_dir), str(product))
     ssh_run(host, ["sudo", "systemctl", "reset-failed", "relkit-serve"])
     ssh_run(host, ["sudo", "systemctl", "restart", "relkit-serve"])
     if product:
@@ -650,15 +778,10 @@ def _impl_cmd_agent_restart(root: Path, args: argparse.Namespace) -> int:
             product = product_id(state)
         except Fail:
             product = state["steps"]["agent.register"].get("value")
+    config_path = getattr(args, "config", None) or (state.get("agent") or {}).get("configPath") or DEFAULT_AGENT_CONFIG
     if product:
         root_dir = args.root_path or f"/srv/relkit/{product}"
-        share_with = (state.get("serve") or {}).get("shareWith") or getattr(
-            args, "share_with", None
-        )
-        token_path = agent_token_path(str(product), share_with)
-        ssh_run(host, ["sudo", "chown", "-R", "relkit:relkit", str(root_dir)])
-        ssh_run(host, ["sudo", "chown", "relkit:relkit", token_path])
-        print(f"chown relkit:relkit {root_dir} and {token_path}")
+        chown_agent_product_token(host, str(config_path), str(product), str(root_dir))
     ssh_run(host, ["sudo", "systemctl", "restart", "relkit-agent"])
     if product:
         set_step(state, "agent.register", "applied", product, "restarted")
@@ -803,7 +926,10 @@ def _impl_cmd_agent_provision(root: Path, args: argparse.Namespace) -> int:
     private_local = root / private_rel
     if not private_local.is_file():
         raise Fail(f"missing {private_rel}; generate keys on this repo first")
-    machine = machine_publish_config(root, product, key_id, private_rel)
+    installed = read_agent_profile(host_name, str(config_path), product) or {}
+    machine = machine_publish_config(
+        root, product, key_id, private_rel, installed.get("backends")
+    )
     publish_profile = extract_publish_profile(machine)
     profile_path = agent_profile_path(str(config_path), product)
     if ssh_path_exists(host_name, profile_path):
@@ -901,11 +1027,17 @@ def _impl_run_relkit(root: Path, binary: Path, argv: Sequence[str]) -> subproces
 _IMPLEMENTATIONS = {
     "ssh_path_exists": _impl_ssh_path_exists,
     "agent_profile_path": _impl_agent_profile_path,
-    "rewrite_agent_backend_url": _impl_rewrite_agent_backend_url,
-    "apply_agent_backend_urls": _impl_apply_agent_backend_urls,
+    "agent_upload_url": _impl_agent_upload_url,
+    "to_agent_backend": _impl_to_agent_backend,
+    "read_agent_profile": _impl_read_agent_profile,
     "extract_publish_profile": _impl_extract_publish_profile,
     "machine_publish_config": _impl_machine_publish_config,
     "parse_list_products": _impl_parse_list_products,
+    "parse_product_token_files": _impl_parse_product_token_files,
+    "token_file_abs": _impl_token_file_abs,
+    "listed_product_token_path": _impl_listed_product_token_path,
+    "list_serve_products": _impl_list_serve_products,
+    "list_agent_products": _impl_list_agent_products,
     "publish_topology": _impl_publish_topology,
     "_version_tuple": _impl__version_tuple,
     "remote_inventory": _impl_remote_inventory,
@@ -918,7 +1050,9 @@ _IMPLEMENTATIONS = {
     "relkit_bin": _impl_relkit_bin,
     "cmd_status": _impl_cmd_status,
     "agent_token_path": _impl_agent_token_path,
+    "chown_token_file": _impl_chown_token_file,
     "chown_serve_product_token": _impl_chown_serve_product_token,
+    "chown_agent_product_token": _impl_chown_agent_product_token,
     "cmd_serve_list": _impl_cmd_serve_list,
     "cmd_serve_add": _impl_cmd_serve_add,
     "cmd_serve_restart": _impl_cmd_serve_restart,

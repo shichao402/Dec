@@ -94,6 +94,8 @@ from hostlib.inspect import (
     inventory_path,
     ops_journal_path,
     onboarding_ignored,
+    upstream_latest_release,
+    lock_currency,
     env_inspect_report,
     print_env_inspect,
     apply_env_inspect,
@@ -144,11 +146,17 @@ from hostlib.reconcile import (
 from hostlib.remote import (
     ssh_path_exists,
     agent_profile_path,
-    rewrite_agent_backend_url,
-    apply_agent_backend_urls,
+    agent_upload_url,
+    to_agent_backend,
+    read_agent_profile,
     extract_publish_profile,
     machine_publish_config,
     parse_list_products,
+    parse_product_token_files,
+    token_file_abs,
+    listed_product_token_path,
+    list_serve_products,
+    list_agent_products,
     publish_topology,
     _version_tuple,
     remote_inventory,
@@ -161,7 +169,9 @@ from hostlib.remote import (
     relkit_bin,
     cmd_status,
     agent_token_path,
+    chown_token_file,
     chown_serve_product_token,
+    chown_agent_product_token,
     cmd_serve_list,
     cmd_serve_add,
     cmd_serve_restart,
@@ -207,11 +217,20 @@ from hostlib.release import (
     dummy_stage_zip,
     stage_dummy_release,
     routing_help,
+    release_pack_config,
+    resolve_project_path,
+    pack_script_command,
+    run_release_pack_script,
+    normalize_selectors,
+    load_release_artifacts_manifest,
+    resolve_ci_channel,
+    cmd_ci_release,
 )
 from hostlib.retrospect import (
     _retrospect_skill_paths,
     _retrospect_item,
     retrospect_report,
+    cmd_retrospect_note,
     classify_ops_journal,
     _retrospect_line,
     retrospect_failures,
@@ -273,6 +292,15 @@ def build_parser() -> argparse.ArgumentParser:
         "retrospect", help="run the final non-interactive ops consistency gate"
     )
     retrospect.add_argument("--json", action="store_true")
+    retrospect_sub = retrospect.add_subparsers(dest="retrospect_cmd")
+    retrospect_note = retrospect_sub.add_parser(
+        "note", help="record a conversation finding the mechanical gate cannot see"
+    )
+    retrospect_note.add_argument("--code", required=True)
+    retrospect_note.add_argument(
+        "--class", dest="note_class", required=True, choices=list(RETROSPECT_NOTE_CLASSES)
+    )
+    retrospect_note.add_argument("--text", required=True)
     upgrade = sub.add_parser("upgrade", help="rewrite lock to a GitHub release and install")
     upgrade.add_argument("release")
 
@@ -283,6 +311,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     release = sub.add_parser("release", help="publish if onboard is verified and there is no drift")
     release.add_argument("--execute", action="store_true")
+
+    ci = sub.add_parser("ci", help="CI-facing product release entry")
+    ci_sub = ci.add_subparsers(dest="ci_cmd", required=True)
+    ci_release = ci_sub.add_parser(
+        "release",
+        help="install → packScript → stage → simulate → fake verify → publish",
+    )
+    ci_release.add_argument("--channel", required=True)
+    ci_release.add_argument("--execute", action="store_true")
 
     serve = sub.add_parser("serve")
     serve_sub = serve.add_subparsers(dest="serve_cmd", required=True)
@@ -395,6 +432,8 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
     if args.cmd == "sidecar":
         return cmd_sidecar_universal(root, Path(args.out))
     if args.cmd == "retrospect":
+        if getattr(args, "retrospect_cmd", None) == "note":
+            return cmd_retrospect_note(root, args.code, args.note_class, args.text)
         return cmd_retrospect(root, args.json)
     if args.cmd == "upgrade":
         return cmd_upgrade(root, args.release)
@@ -402,6 +441,10 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
         return cmd_fake_verify(root, args.version)
     if args.cmd == "release":
         return cmd_release(root, args)
+    if args.cmd == "ci":
+        if args.ci_cmd == "release":
+            return cmd_ci_release(root, args)
+        raise Fail(f"unknown ci command {args.ci_cmd}")
     if args.cmd == "serve":
         if args.serve_cmd == "list":
             return cmd_serve_list(root)

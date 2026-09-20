@@ -1,10 +1,11 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use relkit_updater::proto::apply_result;
 use relkit_updater::proto::check_result;
 use relkit_updater::proto::download_result;
 use relkit_updater::proto::{
-    CheckPolicy, ClientProfile, InstallSpec, Layout, RecoveryHelp, RecoveryLink, Runtime,
-    TrustedKey,
+    ApplyDisposition, CheckPolicy, ClientProfile, InstallSpec, Placement, RecoveryHelp,
+    RecoveryLink, Runtime, TrustedKey,
 };
 use relkit_updater::{check_result_to_json, OpenResult, Updater};
 use serde::{Deserialize, Serialize};
@@ -156,11 +157,21 @@ fn updater(app: &AppHandle, current: &str) -> Result<Updater, String> {
     let data_dir = updater_data_dir(app)?;
     let executable =
         std::env::current_exe().map_err(|err| format!("定位 Console 可执行文件失败: {err}"))?;
-    let install_root = executable
+    let install_root_path = executable
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .to_string_lossy()
-        .into_owned();
+        .to_path_buf();
+    let install_root = install_root_path.to_string_lossy().into_owned();
+    let sidecar_relpath = sidecar
+        .strip_prefix(&install_root_path)
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| {
+            sidecar
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        });
     let profile = ClientProfile {
         product: config.product,
         allowed_channels: config.channels,
@@ -181,23 +192,17 @@ fn updater(app: &AppHandle, current: &str) -> Result<Updater, String> {
         ]),
         data_dir: data_dir.to_string_lossy().into_owned(),
         install: Some(InstallSpec {
-            layout: Layout::WholeRoot as i32,
+            placement: Placement::InPlace as i32,
             install_root,
             executable_relpath: executable
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .into_owned(),
-            sidecar_relpath: sidecar
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned(),
+            sidecar_relpath,
             preserve: Vec::new(),
-            retain: 0,
-            reserved_codes: Vec::new(),
             relaunch: true,
-            file_set: Vec::new(),
+            library: None,
         }),
         sidecar_path: sidecar.to_string_lossy().into_owned(),
     };
@@ -227,6 +232,7 @@ struct Checked {
     envelope: ConsoleUpdateEnvelope,
     plan_id: Option<String>,
     artifact_name: Option<String>,
+    apply_disposition: i32,
 }
 
 fn check_sync(app: &AppHandle, current: &str, force: bool) -> Result<Checked, String> {
@@ -267,12 +273,14 @@ fn check_sync(app: &AppHandle, current: &str, force: bool) -> Result<Checked, St
                 envelope,
                 plan_id: Some(available.plan_id.clone()),
                 artifact_name: artifact,
+                apply_disposition: available.apply_disposition,
             })
         }
         _ => Ok(Checked {
             envelope,
             plan_id: None,
             artifact_name: None,
+            apply_disposition: ApplyDisposition::Unspecified as i32,
         }),
     }
 }
@@ -290,8 +298,35 @@ pub async fn install(app: &AppHandle, current: &str) -> Result<ConsoleUpdateEnve
     let plan_id = checked
         .plan_id
         .ok_or_else(|| result_error(&checked.envelope.result, current))?;
-    let artifact_name = checked.artifact_name.ok_or("更新包不可用")?;
     let updater = updater(app, current)?;
+    if checked.apply_disposition == ApplyDisposition::Internal as i32 {
+        let download = updater.download(plan_id.clone(), |_| {});
+        if let Some(download_result::Kind::Failed(failed)) = download.kind {
+            return Err(failed
+                .error
+                .as_ref()
+                .map(error_message)
+                .unwrap_or_else(|| "下载 Console 更新失败".into()));
+        }
+        let applied = updater.apply(plan_id, |_| {});
+        match applied.kind {
+            Some(apply_result::Kind::Failed(failed)) => {
+                return Err(failed
+                    .error
+                    .as_ref()
+                    .map(error_message)
+                    .unwrap_or_else(|| "应用 Console 更新失败".into()));
+            }
+            Some(apply_result::Kind::Accepted(accepted)) => {
+                if accepted.requires_host_exit {
+                    app.exit(0);
+                }
+                return Ok(checked.envelope);
+            }
+            _ => return Err("应用 Console 更新失败".into()),
+        }
+    }
+    let artifact_name = checked.artifact_name.ok_or("更新包不可用")?;
     let download = updater.download(plan_id.clone(), |_| {});
     if let Some(download_result::Kind::Failed(failed)) = download.kind {
         return Err(failed

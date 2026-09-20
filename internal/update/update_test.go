@@ -79,7 +79,7 @@ func (timeoutError) Timeout() bool { return true }
 
 func TestUpdaterSelectsRuntimeAudience(t *testing.T) {
 	t.Setenv("DEC_HOME", t.TempDir())
-	rt := fileSetRuntime("dec-server", runtime.GOOS, runtime.GOARCH, semverCodeOrZero("v1.13.48"), t.TempDir())
+	rt := suiteRuntime("dec-server", runtime.GOOS, runtime.GOARCH, semverCodeOrZero("v1.13.48"), t.TempDir())
 	if got := rt.ClientSelectors["audience"]; got != "runtime" {
 		t.Fatalf("audience selector = %q, want runtime", got)
 	}

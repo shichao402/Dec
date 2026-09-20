@@ -104,10 +104,12 @@ func updaterSidecarPath() string {
 	return filepath.Join(filepath.Dir(exe), name)
 }
 
-func fileSetRuntime(component, goos, goarch string, currentCode int64, installRoot string) *updaterv1.Runtime {
+func suiteRuntime(component, goos, goarch string, currentCode int64, installRoot string) *updaterv1.Runtime {
 	name := component
+	sidecar := "relkit-updater"
 	if goos == "windows" {
 		name += ".exe"
+		sidecar += ".exe"
 	}
 	dataDir, err := stateDir()
 	if err != nil {
@@ -125,12 +127,10 @@ func fileSetRuntime(component, goos, goarch string, currentCode int64, installRo
 		},
 		DataDir: dataDir,
 		Install: &updaterv1.InstallSpec{
-			Layout:      updaterv1.Layout_LAYOUT_FILE_SET,
-			InstallRoot: installRoot,
-			FileSet: []*updaterv1.FileSetEntry{{
-				DestRelpath:  name,
-				ArtifactName: name,
-			}},
+			Placement:         updaterv1.Placement_PLACEMENT_IN_PLACE,
+			InstallRoot:       installRoot,
+			ExecutableRelpath: name,
+			SidecarRelpath:    sidecar,
 		},
 		SidecarPath: updaterSidecarPath(),
 	}
