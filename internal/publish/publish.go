@@ -9,12 +9,14 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/registry"
+	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -152,7 +154,24 @@ func writeSnapshot(projectRoot, registryRoot, project string, cfg *types.Project
 			return fmt.Errorf("复制 %s: %w", item.Source, err)
 		}
 	}
-	return nil
+	origin := strings.TrimSpace(cfg.OriginRepo)
+	if origin == "" {
+		origin = detectOriginRepo(projectRoot)
+	}
+	return registry.WriteProviderMeta(filepath.Join(registryRoot, project), registry.ProviderMeta{OriginRepo: origin})
+}
+
+func detectOriginRepo(projectRoot string) string {
+	cmd := exec.Command("git", "-C", projectRoot, "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	raw := strings.TrimSpace(string(out))
+	if https, convErr := repo.HTTPSRemoteURL(raw); convErr == nil {
+		return https
+	}
+	return raw
 }
 
 func hashRefTree(ctx context.Context, repoDir, spec, project string) (string, error) {

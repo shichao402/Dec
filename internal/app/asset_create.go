@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -44,6 +45,7 @@ type CreateLocalAssetInput struct {
 
 type CreateLocalAssetResult struct {
 	Path string
+	Mode string
 }
 
 func CreateLocalAsset(in CreateLocalAssetInput) (*CreateLocalAssetResult, error) {
@@ -66,11 +68,11 @@ func CreateLocalAsset(in CreateLocalAssetInput) (*CreateLocalAssetResult, error)
 
 	kind, ok := bundle.KindByType(in.Kind)
 	if ok {
-		path, err := writeGitAsset(in.Workspace, project, vis, plane, kind, name)
+		path, mode, err := writeGitAsset(in.Workspace, project, vis, plane, kind, name)
 		if err != nil {
 			return nil, err
 		}
-		return &CreateLocalAssetResult{Path: path}, nil
+		return &CreateLocalAssetResult{Path: path, Mode: mode}, nil
 	}
 	proc, ok := secrets.LookupProcessor(in.Kind)
 	if !ok {
@@ -80,38 +82,90 @@ func CreateLocalAsset(in CreateLocalAssetInput) (*CreateLocalAssetResult, error)
 	if err != nil {
 		return nil, err
 	}
-	return &CreateLocalAssetResult{Path: path}, nil
+	return &CreateLocalAssetResult{Path: path, Mode: "secret"}, nil
 }
 
-func writeGitAsset(workspace Workspace, project string, vis types.AssetVisibility, plane types.AssetPlane, kind bundle.VaultAssetKind, name string) (string, error) {
+func writeGitAsset(workspace Workspace, project string, vis types.AssetVisibility, plane types.AssetPlane, kind bundle.VaultAssetKind, name string) (string, string, error) {
+	if root := providerWriteRoot(workspace, project); root != "" {
+		path, err := writeProvideAsset(root, vis, plane, kind, name)
+		return path, "provides", err
+	}
 	if workspace.EffectivePlane() != WorkspaceGlobal && workspace.Root != "" {
 		cfg, err := config.NewProjectConfigManager(workspace.Root).LoadProjectConfig()
-		if err == nil {
+		if err == nil && cfg != nil {
 			req, _ := workspaceOfficialRequires(workspace, cfg)
-			if req.Has(project) {
+			if req.Has(project) && !types.IsVaultPin(req[project]) {
 				dir := contribute.DraftDir(workspace.Root, project+"-"+name)
 				if err := os.MkdirAll(dir, 0o755); err != nil {
-					return "", err
+					return "", "", err
 				}
 				dest := filepath.Join(dir, bundle.AssetFileName(kind, name))
-				return writeGitAssetBody(kind, name, dest)
-			}
-			if len(cfg.Provides) > 0 {
-				dir := filepath.Join(workspace.Root, filepath.FromSlash(config.ProvideAuthorDir(cfg.ProvidesRoot, kind.Dir)))
-				if err := os.MkdirAll(dir, 0o755); err != nil {
-					return "", err
-				}
-				dest := filepath.Join(dir, bundle.AssetFileName(kind, name))
-				return writeGitAssetBody(kind, name, dest)
+				path, err := writeGitAssetBody(kind, name, dest)
+				return path, "draft", err
 			}
 		}
 	}
 	dir := filepath.Join(workspaceCacheDir(workspace), project, string(vis), string(plane), kind.Dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", "", err
+	}
+	dest := filepath.Join(dir, bundle.AssetFileName(kind, name))
+	path, err := writeGitAssetBody(kind, name, dest)
+	return path, "cache", err
+}
+
+func providerWriteRoot(workspace Workspace, project string) string {
+	if workspace.Root != "" {
+		cfg, err := config.NewProjectConfigManager(workspace.Root).LoadProjectConfig()
+		if err == nil && cfg != nil && strings.TrimSpace(cfg.ProjectName) == project &&
+			(len(cfg.Provides) > 0 || strings.TrimSpace(cfg.ProvidesRoot) != "") {
+			return workspace.Root
+		}
+	}
+	if vaultProjectAccess(project) == types.ProviderAccessDirect {
+		return ProviderAuthorRoot(project)
+	}
+	return ""
+}
+
+func writeProvideAsset(root string, vis types.AssetVisibility, plane types.AssetPlane, kind bundle.VaultAssetKind, name string) (string, error) {
+	mgr := config.NewProjectConfigManager(root)
+	cfg, err := mgr.LoadProjectConfig()
+	if err != nil {
+		return "", err
+	}
+	if cfg == nil {
+		return "", fmt.Errorf("提供方工作区缺少 .dec/config.yaml")
+	}
+	dir := filepath.Join(root, filepath.FromSlash(config.ProvideAuthorDir(cfg.ProvidesRoot, kind.Dir)))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	dest := filepath.Join(dir, bundle.AssetFileName(kind, name))
-	return writeGitAssetBody(kind, name, dest)
+	path, err := writeGitAssetBody(kind, name, dest)
+	if err != nil {
+		return "", err
+	}
+	if err := registerProjectProvide(mgr, cfg, vis, plane, kind, name); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func registerProjectProvide(mgr *config.ProjectConfigManager, cfg *types.ProjectConfig, vis types.AssetVisibility, plane types.AssetPlane, kind bundle.VaultAssetKind, name string) error {
+	key := kind.Type + "-" + name
+	source := filepath.ToSlash(path.Join(config.ProvideAuthorDir(cfg.ProvidesRoot, kind.Dir), bundle.AssetFileName(kind, name)))
+	if cfg.Provides == nil {
+		cfg.Provides = map[string]types.ProjectProvide{}
+	}
+	cfg.Provides[key] = types.ProjectProvide{
+		Source:     source,
+		Visibility: vis,
+		Plane:      plane,
+		Type:       kind.Type,
+		Name:       name,
+	}
+	return mgr.SaveProjectConfig(cfg)
 }
 
 func writeGitAssetBody(kind bundle.VaultAssetKind, name, dest string) (string, error) {

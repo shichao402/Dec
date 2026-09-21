@@ -13,6 +13,36 @@ const RequiresLatest = "latest"
 // RequiresVault 是个人私仓 pin：私仓是单分支可变仓，没有版本，只能跟随 HEAD（ADR 0029）。
 const RequiresVault = "vault"
 
+// 提供方贡献方式（ADR 0031）。写在 personal 控制面 <project>/dec.yaml，不写提供方源仓。
+const (
+	ProviderAccessDirect  = "direct"
+	ProviderAccessPropose = "propose"
+)
+
+// ValidateProviderAccess 允许空（视为 propose）、direct、propose。
+func ValidateProviderAccess(raw string) error {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	switch v {
+	case "", ProviderAccessDirect, ProviderAccessPropose:
+		return nil
+	default:
+		return fmt.Errorf("access %q 必须是 direct、propose 或空", raw)
+	}
+}
+
+// CanonicalProviderAccess 把已通过校验的值收成小写；空保持空。
+func CanonicalProviderAccess(raw string) string {
+	return strings.TrimSpace(strings.ToLower(raw))
+}
+
+// EffectiveProviderAccess 未声明时视为 propose。
+func EffectiveProviderAccess(raw string) string {
+	if CanonicalProviderAccess(raw) == ProviderAccessDirect {
+		return ProviderAccessDirect
+	}
+	return ProviderAccessPropose
+}
+
 // RequiresSpec 是唯一的消费声明：提供方项目名 → pin。
 // pin 为 latest 或精确 v* 时解析官方注册表，为 vault 时解析个人私仓。
 type RequiresSpec map[string]string

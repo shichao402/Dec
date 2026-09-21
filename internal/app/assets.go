@@ -76,6 +76,12 @@ type AssetBundleOption struct {
 	Installed       string
 	Available       string
 	UpdateAvailable bool
+	// Access 来自 personal 控制面（ADR 0031）：direct 改源仓，propose 走覆写。
+	Access string
+	// OriginRepo 来自 registry 快照 provider.yaml，供 direct clone 与 propose 使用。
+	OriginRepo string
+	// AuthorRoot 是本机受管提供方源仓路径（有 provides 且 project_name 匹配时）。
+	AuthorRoot string
 }
 
 // 订阅来源（ADR 0029）。
@@ -231,6 +237,8 @@ func loadBundleSelectionForPlane(projectConfig *types.ProjectConfig, plane Works
 			Quadrants:   bo.Quadrants,
 			Tags:        append([]string(nil), bo.Tags...),
 			Source:      AssetSourceVault,
+			Access:      types.EffectiveProviderAccess(bo.Access),
+			AuthorRoot:  ProviderAuthorRoot(bo.Name),
 		}
 		if requires.IsVault(bo.Name) {
 			opt.Pin = types.RequiresVault

@@ -104,6 +104,28 @@ func Plan(name string, arguments json.RawMessage) *PlanResult {
 			return planFail(name, err.Error())
 		}
 		return singleInvoke(name, "list_subscription_candidates", root, string(plane), nil)
+	case "dec_list_provider_access":
+		var in listProviderAccessParams
+		if err := json.Unmarshal(arguments, &in); err != nil {
+			return planFail(name, err.Error())
+		}
+		plane, err := parseSinglePlane(in.Plane)
+		if err != nil {
+			return planFail(name, err.Error())
+		}
+		root, err := resolveWorkspace(plane, in.ProjectRoot)
+		if err != nil {
+			return planFail(name, err.Error())
+		}
+		return singleInvoke(name, "list_provider_access", root, string(plane), nil)
+	case "dec_save_project_access":
+		var in saveProjectAccessParams
+		if err := json.Unmarshal(arguments, &in); err != nil {
+			return planFail(name, err.Error())
+		}
+		return singleInvoke(name, "save_project_access", "", "global", map[string]any{
+			"Name": in.Name, "Access": in.Access,
+		})
 	case "dec_propose_upstream":
 		var in proposeUpstreamParams
 		if err := json.Unmarshal(arguments, &in); err != nil {

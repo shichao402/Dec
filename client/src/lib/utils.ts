@@ -149,6 +149,9 @@ export type AssetOption = {
   Installed?: string
   Available?: string
   UpdateAvailable?: boolean
+  Access?: string
+  OriginRepo?: string
+  AuthorRoot?: string
 }
 
 export type AssetSelection = {

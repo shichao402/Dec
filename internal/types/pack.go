@@ -172,6 +172,9 @@ type Project struct {
 	LegacyRequires []string `yaml:"requires,omitempty"`
 	IDEs           []string `yaml:"ides,omitempty"`
 	Editor   string   `yaml:"editor,omitempty"`
+	// Access 是维护者对该项目的贡献方式（ADR 0031）：direct 改源仓 DecAssets，
+	// propose 走覆写 + PR/Issue。空值视为 propose。只写在 personal 控制面，不写提供方仓。
+	Access string `yaml:"access,omitempty"`
 }
 
 // P 是 Project 的旧类型名。
@@ -257,6 +260,8 @@ type ProjectConfig struct {
 	// Provides 声明作者工作区向绑定 Project 提供的资产。map key 是稳定的本地声明 ID；
 	// Git 目标只由 ProjectName 与条目的 visibility/plane/type/name 派生。
 	Provides map[string]ProjectProvide `yaml:"provides,omitempty"`
+	// OriginRepo 可选。publish-provides 写入 registry provider.yaml；空则用 git origin。
+	OriginRepo string `yaml:"origin_repo,omitempty"`
 }
 
 // ProjectProvide 是作者工作区中的一项源资产声明。

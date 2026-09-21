@@ -61,6 +61,16 @@ type listSubscriptionCandidatesParams struct {
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global（旧名 project|user）。留空默认 local；不支持 both。"`
 }
 
+type listProviderAccessParams struct {
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 时必填"`
+	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global。留空默认 local；不支持 both。"`
+}
+
+type saveProjectAccessParams struct {
+	Name   string `json:"name" jsonschema:"personal 控制面项目名"`
+	Access string `json:"access" jsonschema:"direct 或 propose；空视为 propose"`
+}
+
 type pullParams struct {
 	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`

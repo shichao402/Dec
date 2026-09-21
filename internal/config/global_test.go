@@ -203,6 +203,28 @@ func TestNormalizeBundleNames_TrimsPrefixAndDuplicates(t *testing.T) {
 	}
 }
 
+func TestLoadGlobalConfig_LegacyEnabledDoesNotOverrideLatestPin(t *testing.T) {
+	decHome := t.TempDir()
+	setEnvForGlobalTest(t, "DEC_HOME", decHome)
+	body := "kind: global\nversion: 1\nrequires:\n  agent-dev-playbook: latest\n  notes: vault\nenabled_projects:\n  - agent-dev-playbook\n  - woa\n"
+	if err := os.WriteFile(filepath.Join(decHome, "config.yaml"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Requires["agent-dev-playbook"] != types.RequiresLatest {
+		t.Fatalf("playbook pin = %#v", cfg.Requires)
+	}
+	if cfg.Requires["woa"] != types.RequiresVault || cfg.Requires["notes"] != types.RequiresVault {
+		t.Fatalf("vault pins = %#v", cfg.Requires)
+	}
+	if len(cfg.LegacyEnabledProjects) != 0 {
+		t.Fatalf("legacy should be folded away: %#v", cfg.LegacyEnabledProjects)
+	}
+}
+
 func writeLegacySecretsConfig(t *testing.T, decHome, content string) string {
 	t.Helper()
 

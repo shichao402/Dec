@@ -186,6 +186,12 @@ func mergeOfficialCandidates(vault, official []AssetBundleOption) []AssetBundleO
 		vault[i].OfficialAvailable = true
 		vault[i].Available = opt.Available
 		vault[i].Installed = opt.Installed
+		if vault[i].OriginRepo == "" {
+			vault[i].OriginRepo = opt.OriginRepo
+		}
+		if vault[i].AuthorRoot == "" {
+			vault[i].AuthorRoot = opt.AuthorRoot
+		}
 		// 家项目从工作树创作，永远不按官方行下发。
 		if vault[i].Home || types.IsVaultPin(vault[i].Pin) {
 			continue
@@ -244,6 +250,9 @@ func ListOfficialCandidates(ctx context.Context, workspace Workspace, cfg *types
 			Pin:         pin,
 			Installed:   installed,
 			Available:   available,
+			Access:      vaultProjectAccess(name),
+			OriginRepo:  install.ReadOriginRepo(cacheDir, name),
+			AuthorRoot:  ProviderAuthorRoot(name),
 		}
 		if pin != "" && available != "" {
 			opt.UpdateAvailable = installed == "" || installed != available

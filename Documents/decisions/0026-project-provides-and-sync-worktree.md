@@ -1,6 +1,6 @@
 # 0026 — 项目作者源映射与可恢复同步工作副本
 
-- **状态**：发版与本机推柜段已被 [0028](0028-official-registry-and-install.md) 取代；`provides` 作者源映射仍有效
+- **状态**：发版与本机推柜段已被 [0028](0028-official-registry-and-install.md) 取代；`provides` 作者源映射仍有效。控制面 vs 提供方源仓见 [0031](0031-provider-direct-access.md)
 - **日期**：2026-09-14
 - **关联**：0016（四象限）、0017（本地布局）、0023（门面能力）
 

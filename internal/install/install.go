@@ -180,6 +180,14 @@ func ReadInstalledVersion(cacheDir, project string) string {
 	return strings.TrimSpace(string(data))
 }
 
+func ReadOriginRepo(cacheDir, project string) string {
+	meta, err := registry.LoadProviderMeta(filepath.Join(cacheDir, project))
+	if err != nil {
+		return ""
+	}
+	return meta.OriginRepo
+}
+
 func WriteInstalledVersion(cacheDir, project, version string) error {
 	version = strings.TrimSpace(version)
 	if version == "" {

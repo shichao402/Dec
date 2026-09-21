@@ -11,7 +11,9 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 
 项目里由 Dec pull 出来的 IDE 配置不等于「禁止提交」。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.with/`、`.mcp.json` 这类项目级输出，如果是托管资产生成的结果，通常可以按仓库约定单独提交。With 的用户平面落在 `~/.bg-agent/config-with-app/`（skills / rules / `mcp_config.json`）。敏感值放 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置，不要写回这些输出文件。
 
-消费声明只有一处：`.dec/config.yaml`（项目）与 `~/.dec/config.yaml`（本机）的 `requires` map，项目名 → `latest` / `v*`（官方 `registry` 分支）/ `vault`（设置里的个人私仓）。密钥走 Bitwarden。改官方安装物不要 `dec_push`，用 Console 项目下级页「本地覆写」+ `dec_propose_upstream`。
+消费声明只有一处：`.dec/config.yaml`（项目）与 `~/.dec/config.yaml`（本机）的 `requires` map，项目名 → `latest` / `v*`（官方 `registry` 分支）/ `vault`（设置里的个人私仓）。密钥走 Bitwarden。
+
+个人私仓是控制面：管订阅和提供方 `access`（`direct` / `propose`），不存放官方提供方正文。提供方源仓彼此平级；`access=direct` 且本机已登记该仓时改 `DecAssets/`，由 CI 发 registry。否则改官方安装物走覆写 + `dec_propose_upstream`。有 `provides` 的工作区禁止 `dec_push` 进私仓。
 
 ## 何时使用
 
@@ -28,18 +30,18 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
    - 用户：Console 项目 / Global 资产页浏览/搜索
 
 3. **用户改了已拉取的官方资产**
-   - 改动应出现在 `.dec/overrides/`；不要改 `.dec/cache/`（重装会丢）
-   - Agent：`dec_propose_upstream`（`origin_repo`、`diff`、`mode=auto|pr|issue`）
+   - 先看该提供方 `access`（`dec_list_provider_access` 或订阅面板）
+   - `direct`：改受管源仓 `DecAssets/`，提交源仓，等 CI 发 registry。不要改 `.dec/cache/`
+   - `propose`：改动进 `.dec/overrides/`；Agent：`dec_propose_upstream`
    - **禁止** `dec_push` 官方路径进私仓
 
 4. **新增个人资产**
-   - 把当前项目里已验证的能力抽出来复用：优先 `dec-extract-asset`
-   - 个人 Git 写作者目录或私仓，人提交私仓
+   - 只有真正的个人笔记才写私仓 / cache；优先 `dec-extract-asset` 判断目标提供方
    - Console **同步** push 仅个人 Git + 密钥；Agent：`dec_push`
 
 5. **从当前项目沉淀已有能力**
-   - 用 `dec-extract-asset`
-   - 官方产品资产进提供方源仓 `DecAssets/`，打 `v*` 后 CI `dec-registry publish-provides`
+   - 用 `dec-extract-asset`：问目标提供方，按 `access` 分流
+   - 官方 / 直写提供方进源仓 `DecAssets/` + `provides`，CI `publish-provides`
    - 个人资产进私仓，不要写进官方 registry
 
 6. **删除远端或本机托管资产**
@@ -68,7 +70,8 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 |------|------|
 | Console / 当前连接 | `dec_console_status`；`dec_list_connections` / `dec_connect` |
 | 受管项目 / 设备 | `dec_list_managed_projects`、`dec_list_managed_devices`、`dec_register_managed_project` |
-| 新建本地资产 | `dec_create_local_asset` |
+| 新建本地资产 | `dec_create_local_asset`（direct 提供方写 `DecAssets/`） |
+| 提供方 access / origin | `dec_list_provider_access` |
 | 状态 | `dec_status`（local 需 `project_root`） |
 | 已订阅项目 / 成员 | `dec_list_assets` |
 | 可订阅项目（私仓 ∪ 官方已发布） | `dec_list_subscription_candidates` |

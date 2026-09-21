@@ -59,7 +59,7 @@ func catalog() []toolDef {
 			},
 			{
 				Name:        "dec_create_local_asset",
-				Description: "在指定平面创建本地资产（skill/rule/mcp/command 或私密类型）。",
+				Description: "创建资产。家项目或 access=direct 的受管提供方写入 DecAssets/ 并登记 provides；官方非直写写入覆写草稿；其余写入 cache。",
 				Owner:       OwnerServer,
 				Sample:      createLocalAssetParams{},
 			},
@@ -95,9 +95,21 @@ func catalog() []toolDef {
 			},
 			{
 				Name:        "dec_list_subscription_candidates",
-				Description: "列出可订阅项目：个人私仓项目 ∪ 官方注册表已发布项目，带来源、当前 pin、已装与可用版本。",
+				Description: "列出可订阅项目：个人私仓项目 ∪ 官方注册表已发布项目，带来源、当前 pin、已装与可用版本、access、origin_repo。",
 				Owner:       OwnerServer,
 				Sample:      listSubscriptionCandidatesParams{},
+			},
+			{
+				Name:        "dec_list_provider_access",
+				Description: "列出提供方贡献方式（direct 改源仓 DecAssets，propose 走覆写/PR）以及 origin_repo 与本机受管源仓路径。",
+				Owner:       OwnerServer,
+				Sample:      listProviderAccessParams{},
+			},
+			{
+				Name:        "dec_save_project_access",
+				Description: "把 personal 控制面项目的 access 写成 direct 或 propose 并推私仓。不改提供方资产正文。",
+				Owner:       OwnerServer,
+				Sample:      saveProjectAccessParams{},
 			},
 			{
 				Name:        "dec_pull",

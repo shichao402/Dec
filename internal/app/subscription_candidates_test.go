@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/shichao402/Dec/internal/types"
+)
 
 // 官方 pin 的项目在私仓里也有同名目录时，行必须按官方身份下发：
 // 否则面板标「私仓」、藏掉版本与「有更新」，CI 发了新版用户也看不到。
@@ -118,5 +122,20 @@ func TestMergeOfficialCandidates_AppendsUnknownProjects(t *testing.T) {
 	}
 	if merged[1].Name != "relkit" || merged[1].Source != AssetSourceOfficial {
 		t.Errorf("官方项目应独立成行：%+v", merged[1])
+	}
+}
+
+func TestMergeOfficialCandidates_KeepsControlPlaneAccess(t *testing.T) {
+	vault := []AssetBundleOption{{Name: "playbook", Source: AssetSourceVault, Access: types.ProviderAccessDirect, AuthorRoot: `D:\src\playbook`}}
+	official := []AssetBundleOption{{Name: "playbook", Source: AssetSourceOfficial, OriginRepo: "https://github.com/a/b", Pin: "latest"}}
+	merged := mergeOfficialCandidates(vault, official)
+	if merged[0].Access != types.ProviderAccessDirect {
+		t.Errorf("access = %q", merged[0].Access)
+	}
+	if merged[0].AuthorRoot == "" || merged[0].OriginRepo == "" {
+		t.Errorf("author/origin lost: %+v", merged[0])
+	}
+	if merged[0].Source != AssetSourceOfficial {
+		t.Errorf("pin latest should be official: %q", merged[0].Source)
 	}
 }

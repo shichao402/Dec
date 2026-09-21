@@ -22,6 +22,28 @@ func TestNormalizeRequiresSpec(t *testing.T) {
 	}
 }
 
+func TestEffectiveProviderAccess(t *testing.T) {
+	if EffectiveProviderAccess("") != ProviderAccessPropose {
+		t.Fatal("empty")
+	}
+	if EffectiveProviderAccess("DIRECT") != ProviderAccessDirect {
+		t.Fatal("direct")
+	}
+	if err := ValidateProviderAccess("write"); err == nil {
+		t.Fatal("invalid")
+	}
+}
+
+func TestAddVaultProjectsKeepsExistingLatestPin(t *testing.T) {
+	got := RequiresSpec{"agent-dev-playbook": RequiresLatest, "notes": RequiresVault}.AddVaultProjects([]string{"agent-dev-playbook", "woa"})
+	if got["agent-dev-playbook"] != RequiresLatest {
+		t.Fatalf("latest pin overwritten: %#v", got)
+	}
+	if got["woa"] != RequiresVault || got["notes"] != RequiresVault {
+		t.Fatalf("vault pins: %#v", got)
+	}
+}
+
 func TestRequiresSpecRejectsYAMLList(t *testing.T) {
 	var cfg struct {
 		Requires RequiresSpec `yaml:"requires"`

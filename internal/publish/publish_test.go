@@ -97,3 +97,77 @@ func TestPublishIdempotentAndRejectRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPublishWritesOriginRepo(t *testing.T) {
+	ctx := context.Background()
+	bare := t.TempDir()
+	if _, err := registry.Git(ctx, "", "init", "--bare", bare); err != nil {
+		t.Fatal(err)
+	}
+	seed := t.TempDir()
+	if _, err := registry.Git(ctx, "", "clone", bare, seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "checkout", "--orphan", registry.Branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, "README"), []byte("registry\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "config", "user.email", "t@t"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "config", "user.name", "t"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "add", "README"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "commit", "-m", "init"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "push", "-u", "origin", registry.Branch); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := t.TempDir()
+	skillDir := filepath.Join(provider, "DecAssets", "skills", "demo-ops")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := config.NewProjectConfigManager(provider)
+	cfg := &types.ProjectConfig{
+		ProjectName:  "demo",
+		ProvidesRoot: "DecAssets",
+		OriginRepo:   "https://github.com/example/playbook.git",
+		Provides: map[string]types.ProjectProvide{
+			"demo-ops": {
+				Source:     "DecAssets/skills/demo-ops",
+				Visibility: types.AssetVisibilityPublic,
+				Plane:      types.AssetPlaneLocal,
+				Type:       "skill",
+				Name:       "demo-ops",
+			},
+		},
+	}
+	if err := mgr.SaveProjectConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Publish(ctx, Options{ProjectRoot: provider, Ref: "v0.1.0", RegistryURL: bare}); err != nil {
+		t.Fatal(err)
+	}
+	checkout := t.TempDir()
+	if _, err := registry.Git(ctx, "", "clone", "--branch", registry.Branch, bare, checkout); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := registry.LoadProviderMeta(filepath.Join(checkout, "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.OriginRepo != "https://github.com/example/playbook.git" {
+		t.Fatalf("origin = %q", meta.OriginRepo)
+	}
+}
