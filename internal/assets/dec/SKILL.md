@@ -13,7 +13,7 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 
 消费声明只有一处：`.dec/config.yaml`（项目）与 `~/.dec/config.yaml`（本机）的 `requires` map，项目名 → `latest` / `v*`（官方 `registry` 分支）/ `vault`（设置里的个人私仓）。密钥走 Bitwarden。
 
-个人私仓是控制面：管订阅和提供方 `access`（`direct` / `propose`），不存放官方提供方正文。提供方源仓彼此平级；`access=direct` 且本机已登记该仓时改 `DecAssets/`，由 CI 发 registry。否则改官方安装物走覆写 + `dec_propose_upstream`。有 `provides` 的工作区禁止 `dec_push` 进私仓。
+个人私仓是纯控制面：只管订阅哪些提供方，不存放提供方正文，也不记录贡献方式。提供方源仓彼此平级，改它们只有一条路：改动进 `.dec/overrides/`，再 `dec_propose_upstream` 提 Issue / PR，附上脱敏后的来源经验，由提供方仓统一整理合入。有 `provides` 的工作区禁止 `dec_push` 进私仓。
 
 ## 何时使用
 
@@ -30,9 +30,9 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
    - 用户：Console 项目 / Global 资产页浏览/搜索
 
 3. **用户改了已拉取的官方资产**
-   - 先看该提供方 `access`（`dec_list_provider_access` 或订阅面板）
-   - `direct`：改受管源仓 `DecAssets/`，提交源仓，等 CI 发 registry。不要改 `.dec/cache/`
-   - `propose`：改动进 `.dec/overrides/`；Agent：`dec_propose_upstream`
+   - 改动进 `.dec/overrides/`；Agent：`dec_propose_upstream` 提 Issue / PR
+   - 上游仓从订阅面板或 registry 快照的 `origin_repo` 取，不要靠猜
+   - 不要改 `.dec/cache/`，那只是安装缓存
    - **禁止** `dec_push` 官方路径进私仓
 
 4. **新增个人资产**
@@ -40,8 +40,8 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
    - Console **同步** push 仅个人 Git + 密钥；Agent：`dec_push`
 
 5. **从当前项目沉淀已有能力**
-   - 用 `dec-extract-asset`：问目标提供方，按 `access` 分流
-   - 官方 / 直写提供方进源仓 `DecAssets/` + `provides`，CI `publish-provides`
+   - 用 `dec-extract-asset`：抽象后提 Issue / PR，附脱敏来源经验
+   - 提供方仓统一整理合入，再由 CI `publish-provides` 发 registry
    - 个人资产进私仓，不要写进官方 registry
 
 6. **删除远端或本机托管资产**
@@ -70,8 +70,7 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 |------|------|
 | Console / 当前连接 | `dec_console_status`；`dec_list_connections` / `dec_connect` |
 | 受管项目 / 设备 | `dec_list_managed_projects`、`dec_list_managed_devices`、`dec_register_managed_project` |
-| 新建本地资产 | `dec_create_local_asset`（direct 提供方写 `DecAssets/`） |
-| 提供方 access / origin | `dec_list_provider_access` |
+| 新建本地资产 | `dec_create_local_asset`（家项目写 `DecAssets/`，官方订阅写覆写草稿） |
 | 状态 | `dec_status`（local 需 `project_root`） |
 | 已订阅项目 / 成员 | `dec_list_assets` |
 | 可订阅项目（私仓 ∪ 官方已发布） | `dec_list_subscription_candidates` |

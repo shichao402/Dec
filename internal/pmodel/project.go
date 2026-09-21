@@ -52,10 +52,6 @@ func Load(repoDir, name string) (*Loaded, error) {
 		return nil, fmt.Errorf("项目声明 %s: %w", manifestPath, err)
 	}
 	manifest.Tags = tags
-	if err := types.ValidateProviderAccess(manifest.Access); err != nil {
-		return nil, fmt.Errorf("项目声明 %s: %w", manifestPath, err)
-	}
-	manifest.Access = types.CanonicalProviderAccess(manifest.Access)
 
 	loaded := &Loaded{Manifest: manifest}
 	for _, visibility := range []types.AssetVisibility{types.AssetVisibilityPublic, types.AssetVisibilityPrivate} {
@@ -89,10 +85,6 @@ func SaveManifest(repoDir string, manifest types.P) error {
 		return err
 	}
 	manifest.Tags = tags
-	if err := types.ValidateProviderAccess(manifest.Access); err != nil {
-		return err
-	}
-	manifest.Access = types.CanonicalProviderAccess(manifest.Access)
 	data, err := yaml.Marshal(&manifest)
 	if err != nil {
 		return fmt.Errorf("序列化项目 %q 声明失败: %w", manifest.Name, err)

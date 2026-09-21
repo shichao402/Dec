@@ -1,6 +1,6 @@
 # 0028 — 官方注册表、安装器与个人私仓
 
-- **状态**：已接受；消费声明段被 [0029](0029-single-consumer-requires.md) 细化；个人私仓作为控制面、提供方直写权限见 [0031](0031-provider-direct-access.md)
+- **状态**：已接受；消费声明段被 [0029](0029-single-consumer-requires.md) 细化；个人私仓作为纯控制面见 [0031](0031-control-plane-and-upstream-contribution.md)
 - **日期**：2026-09-16
 - **关联**：[0016](0016-p-four-quadrant-model.md)、[0023](0023-facade-capability-parity.md)、[0026](0026-project-provides-and-sync-worktree.md)（发版与本机推柜段被本决策取代）、[0027](0027-relkit-owned-update-contract.md)
 - **影响范围**：`internal/registry`、`internal/publish`、`internal/install`、`internal/contribute`、`cmd/dec-registry`、消费仓 `.dec/config.yaml` 的 `requires`
@@ -14,7 +14,7 @@
 三套存储互不顶替：
 
 1. **官方注册表**：Dec 仓库 orphan 分支 `registry`，tag `registry/<项目>/<提供方版本>`。
-2. **个人私仓**：`repo_url`。控制面（订阅身份、`access`）以及**真正的个人 Git 资产**；官方提供方正文不写进这里。
+2. **个人私仓**：`repo_url`。控制面（订阅身份）以及**真正的个人 Git 资产**；提供方正文不写进这里。
 3. **密钥**：Bitwarden。不进任何 Git。
 
 消费声明只有一张 `requires` 表（项目 → `latest` 或精确 `v*`），写在 `.dec/config.yaml` 或本机 `~/.dec/config.yaml`。没有 pin 字段，没有 semver range，不再接受 `requires: [relkit]` 列表。

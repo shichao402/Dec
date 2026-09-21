@@ -172,9 +172,6 @@ type Project struct {
 	LegacyRequires []string `yaml:"requires,omitempty"`
 	IDEs           []string `yaml:"ides,omitempty"`
 	Editor   string   `yaml:"editor,omitempty"`
-	// Access 是维护者对该项目的贡献方式（ADR 0031）：direct 改源仓 DecAssets，
-	// propose 走覆写 + PR/Issue。空值视为 propose。只写在 personal 控制面，不写提供方仓。
-	Access string `yaml:"access,omitempty"`
 }
 
 // P 是 Project 的旧类型名。

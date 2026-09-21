@@ -1,6 +1,6 @@
 # 0029 — 消费声明唯一化与提供方组成改名
 
-- **状态**：已接受；提供方 `access` / `origin_repo` 见 [0031](0031-provider-direct-access.md)
+- **状态**：已接受；控制面边界与上游贡献口径见 [0031](0031-control-plane-and-upstream-contribution.md)
 - **日期**：2026-09-17
 - **关联**：[0015](0015-project-config-boundary.md)、[0016](0016-p-four-quadrant-model.md)（`requires` 语义段被本决策取代）、[0023](0023-facade-capability-parity.md)、[0026](0026-project-provides-and-sync-worktree.md)、[0028](0028-official-registry-and-install.md)（消费声明段被本决策细化）
 - **影响范围**：`internal/types`、`internal/config`、`internal/install`、`internal/app` 解析与写入、`set_requires` RPC 与 `dec_set_requires`、Console 订阅面板与「更新」页

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/shichao402/Dec/internal/config"
-	"github.com/shichao402/Dec/internal/repo"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -110,11 +109,11 @@ func TestOfficialGitPushBlockedWhenProvidesDeclared(t *testing.T) {
 	}
 }
 
-func TestCreateLocalAssetDirectManagedWritesProvides(t *testing.T) {
+// 别的提供方源仓即使在本机登记过，也不是落点：那条路只有 Issue / PR（ADR 0031）。
+func TestCreateLocalAssetNeverWritesAnotherProvidersRepo(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	playbook := t.TempDir()
-	mgr := config.NewProjectConfigManager(playbook)
-	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+	if err := config.NewProjectConfigManager(playbook).SaveProjectConfig(&types.ProjectConfig{
 		ProjectName:  "agent-dev-playbook",
 		ProvidesRoot: "DecAssets",
 		Provides: map[string]types.ProjectProvide{
@@ -129,14 +128,7 @@ func TestCreateLocalAssetDirectManagedWritesProvides(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"agent-dev-playbook/dec.yaml": "name: agent-dev-playbook\naccess: direct\ntags: [global]\n",
-	})
-	if err := repo.Connect(remote); err != nil {
-		t.Fatal(err)
-	}
 	if err := config.SaveGlobalConfig(&types.GlobalConfig{
-		RepoURL:         remote,
 		ManagedProjects: []types.ManagedProject{{Root: playbook}},
 	}); err != nil {
 		t.Fatal(err)
@@ -154,16 +146,11 @@ func TestCreateLocalAssetDirectManagedWritesProvides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Mode != "provides" {
-		t.Fatalf("mode=%s path=%s", res.Mode, res.Path)
+	if res.Mode == "provides" {
+		t.Fatalf("不得写进别人的源仓: %s", res.Path)
 	}
-	want := filepath.Join(playbook, "DecAssets", "skills", "extracted", "SKILL.md")
-	if res.Path != want {
-		t.Fatalf("path=%s want=%s", res.Path, want)
-	}
-	cache := filepath.Join(consumer, ".dec", "cache")
-	if _, err := os.Stat(cache); !os.IsNotExist(err) {
-		t.Fatalf("direct write must not create consumer cache: %v", err)
+	if _, err := os.Stat(filepath.Join(playbook, "DecAssets", "skills", "extracted")); !os.IsNotExist(err) {
+		t.Fatalf("提供方源仓被改写: %v", err)
 	}
 }
 

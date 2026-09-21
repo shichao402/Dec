@@ -142,6 +142,10 @@ func checkoutRegistry(ctx context.Context, work, url string, env []string) error
 }
 
 func writeSnapshot(projectRoot, registryRoot, project string, cfg *types.ProjectConfig) error {
+	// registry 分支是累积的，不先清空就会把上一版里已经删掉的 provide 一路带进后续每个 tag。
+	if err := os.RemoveAll(filepath.Join(registryRoot, project)); err != nil {
+		return fmt.Errorf("清理快照目录 %s: %w", project, err)
+	}
 	for _, key := range sortedProvideKeys(cfg) {
 		item := cfg.Provides[key]
 		target, err := config.ProjectProvideTarget(project, item)

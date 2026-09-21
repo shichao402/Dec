@@ -40,9 +40,10 @@ description: >
    - 稳定的流程 bucket 名、label 名、状态名、固定约定不要为了抽象而强行变量化
    - 保留真正可复用的流程、约束、检查清单和输出格式
 
-4. 先查目标提供方的 `access`（`dec_list_provider_access`）。默认目标是 `agent-dev-playbook`。
-   - `direct`：写入该提供方受管源仓 `DecAssets/` 并登记 `provides`，提交源仓，等 CI 发 registry。禁止 `dec_push` cache。playbook 的短路径见其源仓 `dec-extract-to-playbook`。
-   - `propose` 或未登记源仓：`.dec/overrides/` + `dec_propose_upstream`
+4. 沉淀到提供方只有一条路：`.dec/overrides/` + `dec_propose_upstream` 提 Issue / PR。
+   - 上游仓从订阅面板或 registry 快照的 `origin_repo` 取
+   - 提的时候连同脱敏后的来源经验一起给：这条经验在哪验证过、失败模式是什么、边界在哪
+   - 合不合、怎么整理由提供方仓决定；不要替它排版或直接改它的源仓
    - 真正的个人笔记才写入私仓 / cache
    不要把官方路径 `dec_push` 进私仓，也不要只改 `.dec/cache/`。
 
@@ -55,9 +56,9 @@ description: >
    - 机器级敏感信息放 `~/.dec/local/vars.yaml`
 
 7. 完成后
-   - 提供方：源仓合入后由 CI `publish-provides` 写入 registry；`direct` 由维护者直接 push 源仓
+   - 提供方：票据合入源仓后由 CI `publish-provides` 写入 registry，消费方再 `dec_pull`
    - 个人：Console **同步** 页 push 私仓，或 Agent `dec_push`（`plane=local`）
-   - 无写权限：Console 项目下级页「本地覆写」+ `dec_propose_upstream`
+   - 入口：Console 项目下级页「本地覆写」+ `dec_propose_upstream`
 
 ## 信息不全时的推荐提问模板
 
@@ -84,10 +85,9 @@ description: >
 
 1. 识别要沉淀的本地资产来源
 2. 提炼出通用版本，替换项目特有内容
-3. `dec_list_provider_access` 看目标提供方 `access` / 受管源仓
-4. `direct`：写入源仓 `DecAssets/` 并登记 `provides`，提交源仓
-5. `propose`：覆写 + `dec_propose_upstream`
-6. 仅个人资产才写 cache，再 `dec_push`
+3. 从订阅面板或 `origin_repo` 确认上游仓
+4. 覆写 + `dec_propose_upstream`，附脱敏来源经验
+5. 仅个人资产才写 cache，再 `dec_push`
 
 ## 输出标准
 

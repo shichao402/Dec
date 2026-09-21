@@ -437,13 +437,13 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 内容平面（ADR 0031）：
 
 - **Dec 产品源码**：`internal/`、`cmd/`、`Documents/` 等，通过构建进入二进制
-- **控制面（personal）**：`repo_url` 私仓。订阅身份、项目 `access`（direct / propose），以及真正的个人 Git 资产。官方提供方正文不写在这里。
-- **分发面（registry）**：只读快照；`requires` 的 `latest` / `v*` 只从这里安装。快照含 `provider.yaml` 的 `origin_repo`。
+- **控制面（personal）**：`repo_url` 私仓。只记订阅哪些提供方，以及真正的个人 Git 资产。提供方正文与贡献方式都不写在这里。
+- **分发面（registry）**：只读快照；`requires` 的 `latest` / `v*` 只从这里安装。快照含 `provider.yaml` 的 `origin_repo`，消费方据此定位上游仓。
 - **提供方源仓**：彼此平级。作者源由工作区 `provides[].source`（通常 `DecAssets/`）指向，CI `publish-provides` 写入 registry。
 - **项目级落地产物**：`.dec/cache/`、`.cursor/` 等，由 pull 写入。cache 不是作者源。
 
 修改 `internal/assets/` 走源码 commit + release。提供方 `DecAssets` 随产品 `v*` / VERSION 由 CI 发布。
-`access=direct` 且本机已登记该源仓时，直接改 `DecAssets/`；否则消费方走「本地覆写」+ `dec_propose_upstream`。有 `provides` 的工作区禁止把正文 `dec_push` 进 personal。
+消费方改提供方资产只有一条路：「本地覆写」+ `dec_propose_upstream` 提 Issue / PR，附脱敏来源经验。有 `provides` 的工作区禁止把正文 `dec_push` 进 personal。
 
 ### 4. 资产生命周期
 

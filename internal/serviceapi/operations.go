@@ -320,14 +320,6 @@ func CreateLocalAsset(ctx context.Context, workspace app.Workspace, in app.Creat
 	return invokeWorkspace[app.CreateLocalAssetResult](ctx, "create_local_asset", workspace, in, reporter)
 }
 
-func ListProviderAccess(ctx context.Context, workspace app.Workspace, reporter app.Reporter) (*app.ProviderAccessState, error) {
-	return invokeWorkspace[app.ProviderAccessState](ctx, "list_provider_access", workspace, nil, reporter)
-}
-
-func SaveProjectAccess(ctx context.Context, in app.SaveProjectAccessInput, reporter app.Reporter) (*app.SaveProjectAccessResult, error) {
-	return invoke[app.SaveProjectAccessResult](ctx, "save_project_access", "", in, reporter)
-}
-
 func ListManagedDevices(ctx context.Context, reporter app.Reporter) ([]types.ManagedDevice, error) {
 	return invokeSlice[types.ManagedDevice](ctx, "list_managed_devices", "", nil, reporter)
 }

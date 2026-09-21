@@ -90,43 +90,6 @@ func TestSaveManifestRoundTripsUnknownTags(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsDirectAccess(t *testing.T) {
-	root := t.TempDir()
-	put(t, root, "playbook/dec.yaml", "name: playbook\naccess: direct\n")
-	got, err := Load(root, "playbook")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Manifest.Access != types.ProviderAccessDirect {
-		t.Fatalf("access = %q", got.Manifest.Access)
-	}
-	if types.EffectiveProviderAccess("") != types.ProviderAccessPropose {
-		t.Fatal("空 access 应视为 propose")
-	}
-}
-
-func TestLoadRejectsInvalidAccess(t *testing.T) {
-	root := t.TempDir()
-	put(t, root, "playbook/dec.yaml", "name: playbook\naccess: write\n")
-	if _, err := Load(root, "playbook"); err == nil {
-		t.Fatal("非法 access 应失败")
-	}
-}
-
-func TestSaveManifestRoundTripsAccess(t *testing.T) {
-	root := t.TempDir()
-	if err := SaveManifest(root, types.P{Name: "playbook", Access: "DIRECT"}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Load(root, "playbook")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Manifest.Access != types.ProviderAccessDirect {
-		t.Fatalf("access = %q", got.Manifest.Access)
-	}
-}
-
 func TestLoadRejectsSelfRequire(t *testing.T) {
 	root := t.TempDir()
 	put(t, root, "my-app/dec.yaml", "name: my-app\nrequires: [my-app]\n")

@@ -327,11 +327,8 @@ export function AssetRow({
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-[13px] font-medium text-ink" title={item.Name}>{item.Name}</span>
           <Badge tone={source === 'official' ? 'accent' : 'quiet'}>{source === 'official' ? '官方' : '私仓'}</Badge>
-          {item.Access === 'direct' && (
-            <Badge tone="accent" title={item.AuthorRoot || item.OriginRepo || '直接改提供方源仓'}>直写</Badge>
-          )}
-          {source === 'official' && item.Access !== 'direct' && (
-            <Badge tone="quiet" title={item.OriginRepo || '覆写后提 PR / Issue'}>建议上游</Badge>
+          {source === 'official' && (
+            <Badge tone="quiet" title={item.OriginRepo || '覆写后提 Issue / PR'}>上游贡献</Badge>
           )}
           {item.Home && <Badge tone="accent">{locked ? 'home · 必选' : 'home'}</Badge>}
           {/* 没订阅却已装：来自别人的 depends_on 闭包。不勾也在，勾了才是自己订阅。 */}

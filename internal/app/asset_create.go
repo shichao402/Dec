@@ -114,18 +114,23 @@ func writeGitAsset(workspace Workspace, project string, vis types.AssetVisibilit
 	return path, "cache", err
 }
 
+// providerWriteRoot 只认当前工作区自己就是该提供方家项目的情况（ADR 0031）。
+// 跨仓写别人的源仓不是 Dec 的落点：那条路是 Issue / PR。
 func providerWriteRoot(workspace Workspace, project string) string {
-	if workspace.Root != "" {
-		cfg, err := config.NewProjectConfigManager(workspace.Root).LoadProjectConfig()
-		if err == nil && cfg != nil && strings.TrimSpace(cfg.ProjectName) == project &&
-			(len(cfg.Provides) > 0 || strings.TrimSpace(cfg.ProvidesRoot) != "") {
-			return workspace.Root
-		}
+	if workspace.Root == "" {
+		return ""
 	}
-	if vaultProjectAccess(project) == types.ProviderAccessDirect {
-		return ProviderAuthorRoot(project)
+	cfg, err := config.NewProjectConfigManager(workspace.Root).LoadProjectConfig()
+	if err != nil || cfg == nil {
+		return ""
 	}
-	return ""
+	if strings.TrimSpace(cfg.ProjectName) != project {
+		return ""
+	}
+	if len(cfg.Provides) == 0 && strings.TrimSpace(cfg.ProvidesRoot) == "" {
+		return ""
+	}
+	return workspace.Root
 }
 
 func writeProvideAsset(root string, vis types.AssetVisibility, plane types.AssetPlane, kind bundle.VaultAssetKind, name string) (string, error) {

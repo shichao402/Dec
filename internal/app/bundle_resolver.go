@@ -39,8 +39,6 @@ type BundleOverview struct {
 	Quadrants map[string]int
 	// Tags 来自 <p>/dec.yaml，用于推荐与筛选；当前 Console 可配置的只有 global。
 	Tags []string
-	// Access 来自 personal 控制面（ADR 0031）：direct / propose / 空。
-	Access string
 }
 
 // ResolvedAssets 是解析后的目标资产集合及来源追踪信息。
@@ -187,7 +185,6 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 		result.Bundles = append(result.Bundles, BundleOverview{
 			Name: name, Description: p.Manifest.Description, VaultName: name, Members: members, Enabled: isEnabled,
 			Model: "p", Quadrants: countPQuadrants(p.Assets), Tags: append([]string(nil), p.Manifest.Tags...),
-			Access: p.Manifest.Access,
 		})
 	}
 	if projectConfig != nil {

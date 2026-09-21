@@ -2,8 +2,6 @@ package app
 
 import (
 	"testing"
-
-	"github.com/shichao402/Dec/internal/types"
 )
 
 // 官方 pin 的项目在私仓里也有同名目录时，行必须按官方身份下发：
@@ -125,15 +123,13 @@ func TestMergeOfficialCandidates_AppendsUnknownProjects(t *testing.T) {
 	}
 }
 
-func TestMergeOfficialCandidates_KeepsControlPlaneAccess(t *testing.T) {
-	vault := []AssetBundleOption{{Name: "playbook", Source: AssetSourceVault, Access: types.ProviderAccessDirect, AuthorRoot: `D:\src\playbook`}}
+// 官方行带来的 origin_repo 是提 Issue / PR 的落脚点，合并时不能丢。
+func TestMergeOfficialCandidates_KeepsOriginRepo(t *testing.T) {
+	vault := []AssetBundleOption{{Name: "playbook", Source: AssetSourceVault}}
 	official := []AssetBundleOption{{Name: "playbook", Source: AssetSourceOfficial, OriginRepo: "https://github.com/a/b", Pin: "latest"}}
 	merged := mergeOfficialCandidates(vault, official)
-	if merged[0].Access != types.ProviderAccessDirect {
-		t.Errorf("access = %q", merged[0].Access)
-	}
-	if merged[0].AuthorRoot == "" || merged[0].OriginRepo == "" {
-		t.Errorf("author/origin lost: %+v", merged[0])
+	if merged[0].OriginRepo != "https://github.com/a/b" {
+		t.Errorf("origin lost: %+v", merged[0])
 	}
 	if merged[0].Source != AssetSourceOfficial {
 		t.Errorf("pin latest should be official: %q", merged[0].Source)
