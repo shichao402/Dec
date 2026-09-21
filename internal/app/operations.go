@@ -92,14 +92,16 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	projectIDEs := uniqueWorkspaceIDEs(workspace, ideSelection.IDEs)
 	result.EffectiveIDEs = projectIDENames(projectIDEs)
 
+	req, _ := workspaceOfficialRequires(workspace, projectConfig)
+	beforeInstall := officialCacheInventory(workspace, req.Official())
 	official, err := installOfficialRequires(ctx, workspace, projectConfig, reporter)
 	if err != nil {
 		return nil, err
 	}
-	req, _ := workspaceOfficialRequires(workspace, projectConfig)
 	if err := renderOfficialFromCache(workspace, req, projectIDEs, result, reporter); err != nil {
 		return nil, err
 	}
+	pruneRemovedOfficialAssets(workspace, beforeInstall, req.Official(), projectIDEs, result, reporter)
 	for _, item := range official {
 		result.RequiredProjects = appendUniqueSource(result.RequiredProjects, item.Project)
 		if item.Warning != "" {

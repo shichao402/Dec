@@ -139,6 +139,7 @@ func UpdateOfficialRequires(ctx context.Context, workspace Workspace, projects [
 		EffectiveIDEs: projectIDENames(projectIDEs),
 		IDEWarnings:   append([]string(nil), ideSelection.Warnings...),
 	}
+	beforeInstall := officialCacheInventory(workspace, selected)
 	resolved, err := install.Official(ctx, install.Options{
 		CacheDir:    workspaceCacheDir(workspace),
 		RegistryURL: url,
@@ -156,6 +157,7 @@ func UpdateOfficialRequires(ctx context.Context, workspace Workspace, projects [
 	if err := renderOfficialFromCache(workspace, selected, projectIDEs, result, reporter); err != nil {
 		return nil, err
 	}
+	pruneRemovedOfficialAssets(workspace, beforeInstall, selected, projectIDEs, result, reporter)
 	for _, item := range resolved {
 		result.RequiredProjects = appendUniqueSource(result.RequiredProjects, item.Project)
 		if item.Warning != "" {
@@ -164,6 +166,49 @@ func UpdateOfficialRequires(ctx context.Context, workspace Workspace, projects [
 		emit(reporter, EventInfo, "update.official", fmt.Sprintf("%s@%s", item.Project, item.Version), nil)
 	}
 	return result, nil
+}
+
+// officialCacheInventory 记录安装前 cache 里有哪些官方资产。安装会整目录重写 cache，
+// 上游删掉的资产随之消失，届时已经无从判断它曾经被渲染进 IDE。
+func officialCacheInventory(workspace Workspace, req types.RequiresSpec) map[string]install.CacheAsset {
+	if len(req) == 0 {
+		return nil
+	}
+	cache := workspaceCacheDir(workspace)
+	out := make(map[string]install.CacheAsset)
+	for project := range req {
+		assets, err := install.ListCache(cache, project)
+		if err != nil {
+			continue
+		}
+		for _, asset := range assets {
+			out[asset.Project+"/"+asset.Type+"/"+asset.Name] = asset
+		}
+	}
+	return out
+}
+
+// pruneRemovedOfficialAssets 把上游已删的官方资产从 IDE 里摘掉。
+// 不这样做，消费方无论 pull 多少次都清不掉一份提供方早已下架的 Skill。
+func pruneRemovedOfficialAssets(workspace Workspace, before map[string]install.CacheAsset, req types.RequiresSpec, projectIDEs []ide.IDE, result *PullProjectAssetsResult, reporter Reporter) {
+	if len(before) == 0 {
+		return
+	}
+	after := officialCacheInventory(workspace, req)
+	for key, asset := range before {
+		if _, ok := after[key]; ok {
+			continue
+		}
+		for _, ideImpl := range projectIDEs {
+			_, bounced, _ := removeAssetFromIDE(asset.Type, asset.Name, workspace, ideImpl)
+			if bounced != "" {
+				result.McpReload = appendUniqueSorted(result.McpReload, bounced)
+			}
+		}
+		line := fmt.Sprintf("[%-5s] %s (项目: %s, 上游已删)", asset.Type, asset.Name, asset.Project)
+		result.CleanedAssets = appendUniqueSorted(result.CleanedAssets, line)
+		emit(reporter, EventInfo, "pull.cleanup", line, nil)
+	}
 }
 
 func renderOfficialFromCache(workspace Workspace, req types.RequiresSpec, projectIDEs []ide.IDE, result *PullProjectAssetsResult, reporter Reporter) error {
