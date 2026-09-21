@@ -18,6 +18,7 @@ use tauri::{AppHandle, Manager};
 #[serde(rename_all = "camelCase")]
 pub struct ConsoleUpdateEnvelope {
     pub current_version: String,
+    pub channel: String,
     pub can_auto_install: bool,
     pub result: serde_json::Value,
     pub status: serde_json::Value,
@@ -121,9 +122,13 @@ fn version_code(version: &str) -> Result<i64, String> {
     Ok(parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2])
 }
 
+fn relkit_config() -> Result<RelkitConfig, String> {
+    serde_json::from_str(include_str!("../../../relkit.json"))
+        .map_err(|err| format!("解析内置更新配置失败: {err}"))
+}
+
 fn updater(app: &AppHandle, current: &str) -> Result<Updater, String> {
-    let config: RelkitConfig = serde_json::from_str(include_str!("../../../relkit.json"))
-        .map_err(|err| format!("解析内置更新配置失败: {err}"))?;
+    let config = relkit_config()?;
     let trusted_keys = config
         .signing
         .public_keys
@@ -258,6 +263,7 @@ fn check_sync(app: &AppHandle, current: &str, force: bool) -> Result<Checked, St
         serde_json::to_value(status).map_err(|err| format!("序列化更新状态失败: {err}"))?;
     let envelope = ConsoleUpdateEnvelope {
         current_version: current.to_string(),
+        channel: relkit_config()?.default_channel,
         can_auto_install: cfg!(windows),
         result: result_json,
         status: status_json,

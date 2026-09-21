@@ -1,4 +1,4 @@
-import { Boxes, ChevronRight, Folder, Globe, LayoutDashboard, LogOut, RefreshCw, Settings, Trash2 } from 'lucide-react'
+import { ArrowUpCircle, Boxes, ChevronRight, Folder, Globe, LayoutDashboard, LogOut, RefreshCw, Settings, Trash2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/badge'
@@ -12,6 +12,9 @@ export function Sidebar(props: {
   saved: SavedConnection[]
   current: SavedConnection | null
   ping: PingInfo | null
+  consoleVersion: string
+  // 有 Console 更新时才给出目标版本，底部随之长出入口。
+  updateVersion: string
   view: View
   projectCount: number
   project: ManagedProject | null
@@ -19,6 +22,7 @@ export function Sidebar(props: {
   onView: (view: View) => void
   onProject: (project: ManagedProject) => void
   onConnect: (conn: SavedConnection) => void
+  onConsoleUpdate: () => void
   onDisconnect: () => void
   busy: boolean
 }) {
@@ -122,11 +126,29 @@ export function Sidebar(props: {
         ))}
       </nav>
 
-      <div className="shrink-0 border-t border-line p-2.5">
-        <div className="mb-2 flex items-center justify-between px-1.5 text-[11px] text-faint">
-          <span>dec-server</span>
-          <span className="font-mono">{props.ping?.version || '—'}</span>
+      <div className="shrink-0 space-y-2 border-t border-line p-2.5">
+        <div className="space-y-1">
+          <div className="flex items-center justify-between px-1.5 text-[11px] text-faint">
+            <span>Console</span>
+            <span className="font-mono">{props.consoleVersion || '—'}</span>
+          </div>
+          <div className="flex items-center justify-between px-1.5 text-[11px] text-faint">
+            <span>dec-server</span>
+            <span className="font-mono">{props.ping?.version || '—'}</span>
+          </div>
         </div>
+        {props.updateVersion && (
+          <button
+            onClick={props.onConsoleUpdate}
+            disabled={props.busy || props.onboarding}
+            title="到设置页查看 Console 更新"
+            className="flex w-full items-center gap-1.5 rounded-lg border border-warn/35 bg-warn/12 px-2 py-1.5 text-[11px] text-warn transition-colors enabled:hover:bg-warn/20 disabled:opacity-50"
+          >
+            <ArrowUpCircle className="size-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-left">Console 可更新至 {props.updateVersion}</span>
+            <ChevronRight className="size-3.5 shrink-0" />
+          </button>
+        )}
         <Button variant="outline" size="sm" className="w-full" onClick={props.onDisconnect} disabled={props.busy}>
           <LogOut className="size-3.5" /> 断开连接
         </Button>

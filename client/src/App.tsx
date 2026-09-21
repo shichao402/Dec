@@ -30,7 +30,7 @@ import {
   selectAutoConnectConnection,
 } from '@/lib/auto-connect'
 import { actionSpec, navView, resource, shortInstanceId, type View } from '@/lib/console'
-import type { ConsoleUpdateEnvelope } from '@/lib/console-update'
+import { availableVersion, type ConsoleUpdateEnvelope } from '@/lib/console-update'
 import {
   onOpenIntent,
   selectLocalConnection,
@@ -104,6 +104,8 @@ export default function App() {
   const [settings, setSettings] = useState<GlobalSettings | null>(null)
   const [updateStatus, setUpdateStatus] = useState<ConsoleUpdateEnvelope | null>(null)
   const [updateError, setUpdateError] = useState('')
+  // 侧边栏入口每次点击都要重新滚动 + 高亮，计数比布尔量省一次复位。
+  const [updateFocus, setUpdateFocus] = useState(0)
   const [selectedProject, setSelectedProject] = useState<ManagedProject | null>(null)
   const [syncTarget, setSyncTarget] = useState<SyncTarget | null>(null)
   // 写回页两个平面共用，目标跟着入口走，和 syncTarget 同一套写法。
@@ -518,6 +520,8 @@ export default function App() {
           saved={saved}
           current={current}
           ping={ping}
+          consoleVersion={updateStatus?.currentVersion || ''}
+          updateVersion={availableVersion(updateStatus)}
           view={navView(view, writeTarget?.plane)}
           projectCount={summary?.Projects.length || 0}
           project={selectedProject}
@@ -533,6 +537,13 @@ export default function App() {
             setView('project')
           }}
           onConnect={handleConnect}
+          onConsoleUpdate={() => {
+            setSelectedProject(null)
+            setSyncTarget(null)
+            setWriteTarget(null)
+            setView('settings')
+            setUpdateFocus((value) => value + 1)
+          }}
           onDisconnect={handleDisconnect}
           busy={busy}
         />
@@ -748,6 +759,7 @@ export default function App() {
                   ping={ping}
                   updateStatus={updateStatus}
                   updateError={updateError}
+                  updateFocus={updateFocus}
                   setSettings={setSettings}
                   onCheckUpdate={handleCheckConsoleUpdate}
                   onInstallUpdate={handleInstallConsoleUpdate}

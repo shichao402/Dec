@@ -30,6 +30,7 @@ export function SettingsPage(props: {
   ping: PingInfo | null
   updateStatus: ConsoleUpdateEnvelope | null
   updateError: string
+  updateFocus: number
   setSettings: (value: GlobalSettings) => void
   onCheckUpdate: () => Promise<ConsoleUpdateEnvelope>
   onInstallUpdate: () => Promise<ConsoleUpdateEnvelope>
@@ -89,6 +90,7 @@ export function SettingsPage(props: {
         <ConsoleUpdatePanel
           status={props.updateStatus}
           error={props.updateError}
+          focusSignal={props.updateFocus}
           onCheck={props.onCheckUpdate}
           onInstall={props.onInstallUpdate}
         />

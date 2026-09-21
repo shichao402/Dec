@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { Download, RefreshCw } from 'lucide-react'
 import { ActionFeedback } from '@/components/action-feedback'
 import { Badge } from '@/components/ui/badge'
@@ -6,6 +7,7 @@ import { Notice } from '@/components/ui/feedback'
 import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel'
 import { actionSpec, resource } from '@/lib/console'
 import type { ConsoleUpdateEnvelope } from '@/lib/console-update'
+import { cn } from '@/lib/utils'
 
 const checkUpdateSpec = actionSpec(
   'console:update:check',
@@ -27,14 +29,27 @@ export function ConsoleUpdatePanel(props: {
   error: string
   onCheck: () => Promise<ConsoleUpdateEnvelope>
   onInstall: () => Promise<ConsoleUpdateEnvelope>
+  // 侧边栏跳进来时递增，卡片滚到可视区并闪一下边框。
+  focusSignal?: number
 }) {
   const kind = props.status?.result.kind
   const available = kind?.case === 'updateAvailable' ? kind.value : null
   const fallback = kind?.case === 'fallbackRequired' ? kind.value : null
   const failed = kind?.case === 'failed' ? kind.value : null
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [focused, setFocused] = useState(false)
+  const focusSignal = props.focusSignal
+
+  useEffect(() => {
+    if (!focusSignal) return
+    panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setFocused(true)
+    const timer = setTimeout(() => setFocused(false), 1600)
+    return () => clearTimeout(timer)
+  }, [focusSignal])
 
   return (
-    <Panel>
+    <Panel ref={panelRef} className={cn(focused && 'ring-2 ring-accent/60')}>
       <PanelHeader
         title="Console 更新"
         description="属于本机程序壳，不经过当前连接的 dec-server，也不会更新远端设备。"
@@ -46,6 +61,7 @@ export function ConsoleUpdatePanel(props: {
           <Badge tone="quiet" className="font-mono">
             当前 {props.status?.currentVersion || '版本未知'}
           </Badge>
+          {props.status?.channel && <Badge tone="quiet">渠道 {props.status.channel}</Badge>}
           {available ? (
             <Badge tone="warn">可更新至 {available.version}</Badge>
           ) : kind?.case === 'upToDate' ? (
@@ -62,6 +78,7 @@ export function ConsoleUpdatePanel(props: {
         </div>
         <p className="text-xs leading-relaxed text-faint">
           Console 启动时由更新引擎检查；成功后 24 小时内由引擎节流。只检查，不会自动安装。
+          渠道由这份构建决定，换渠道要装对应渠道的安装包。
         </p>
         {props.error && <Notice tone="warn" text={`自动检查失败：${props.error}`} />}
         {failed?.error?.message && <Notice tone="warn" text={failed.error.message} />}
