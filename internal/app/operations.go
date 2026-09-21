@@ -539,7 +539,10 @@ func cleanupRemovedPAssets(workspace Workspace, cacheDir string, enabledAssets [
 		if !project.IsDir() {
 			continue
 		}
-		// 官方注册表安装会写版本戳；个人私仓落地不写。清理订阅孤儿时不得误删官方 cache。
+		// 有版本戳的是官方安装快照，不是个人可写副本。本函数的 enabled 集只含
+		// 私仓资产；官方资产不在里头。若不跳过，pull 会把整个官方安装当孤儿删掉。
+		// 官方 cache 的更新/裁剪由 install.Official（整目录重写）负责，IDE 残留由
+		// pruneRemovedOfficialAssets 摘掉。本地改官方资产走 .dec/overrides/，不写 cache。
 		if install.ReadInstalledVersion(cacheDir, project.Name()) != "" {
 			continue
 		}
