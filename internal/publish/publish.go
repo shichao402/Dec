@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/registry"
 	"github.com/shichao402/Dec/internal/repo"
+	"github.com/shichao402/Dec/internal/sysproc"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -28,9 +28,9 @@ type Options struct {
 }
 
 type Result struct {
-	Project string
-	Tag     string
-	Commit  string
+	Project    string
+	Tag        string
+	Commit     string
 	Idempotent bool
 }
 
@@ -166,7 +166,7 @@ func writeSnapshot(projectRoot, registryRoot, project string, cfg *types.Project
 }
 
 func detectOriginRepo(projectRoot string) string {
-	cmd := exec.Command("git", "-C", projectRoot, "remote", "get-url", "origin")
+	cmd := sysproc.Command("git", "-C", projectRoot, "remote", "get-url", "origin")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
