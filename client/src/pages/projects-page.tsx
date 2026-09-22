@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, ChevronRight, CornerLeftUp, Folder, FolderSearch, LoaderCircle, RefreshCw, Search } from 'lucide-react'
+import {
+  CheckCircle2,
+  ChevronRight,
+  CornerLeftUp,
+  Folder,
+  FolderSearch,
+  LayoutGrid,
+  List,
+  LoaderCircle,
+  RefreshCw,
+  Search,
+} from 'lucide-react'
 import { ActionFeedback } from '@/components/action-feedback'
 import { Page, PageFill, PageHeader, ScrollArea, Toolbar } from '@/components/shell/page'
 import { Badge } from '@/components/ui/badge'
@@ -24,6 +35,8 @@ const flowPanel = 'flex min-h-0 shrink-0 flex-col xl:max-h-full xl:shrink xl:ove
 // 列表同理：窄屏固定高度，分栏时才吃满剩余高度。
 const flowList = 'h-56 min-h-0 shrink-0 overflow-y-auto xl:h-auto xl:flex-1 xl:shrink'
 
+type LayoutMode = 'grid' | 'list'
+
 export function ProjectsPage(props: {
   deviceId: string
   projects: ManagedProject[]
@@ -34,12 +47,18 @@ export function ProjectsPage(props: {
   const [browserPath, setBrowserPath] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [query, setQuery] = useState('')
+  const [layout, setLayout] = useState<LayoutMode>('grid')
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<string[]>([])
   const actions = useActionRegistry()
   const refreshState = useDecAction(
     actionSpec(`device:refresh:${props.deviceId}`, '刷新设备状态', props.deviceId, [resource.global], 'read'),
   )
   const scanPrefix = `projects:scan:${props.deviceId}:`
   const importPrefix = `projects:register:${props.deviceId}:`
+  const removePrefix = `projects:remove:${props.deviceId}:`
+  const purgePrefix = `projects:purge:${props.deviceId}:`
+  const autoInitPrefix = `projects:auto-init:${props.deviceId}:`
   const records = Object.values(actions.state.records)
   // 扫描反馈跟着最近一次扫描走（可能还在跑），结果只认最近一次成功的。
   const scanRecord = records
@@ -61,8 +80,18 @@ export function ProjectsPage(props: {
   )
   // 只用来问「现在能不能改本机受管列表」，这个 key 本身永远不会执行。
   const importBlocked = Boolean(actions.blockedBy(importSpec('#probe')))
+  const batchBlocked = Boolean(
+    actions.blockedBy(actionSpec(`${removePrefix}#probe`, '移除导入', props.deviceId, [resource.global], 'write'))
+    || actions.blockedBy(actionSpec(`${purgePrefix}#probe`, '移除管理', props.deviceId, [resource.global], 'write'))
+    || actions.blockedBy(actionSpec(`${autoInitPrefix}#probe`, '自动初始化', props.deviceId, [resource.global], 'write')),
+  )
   const importing = records.some((record) => record.key.startsWith(importPrefix) && record.status === 'running')
-  const picked = selected.filter((root) => scan.some((project) => project.Root === root))
+  const batching = records.some((record) => (
+    (record.key.startsWith(removePrefix) || record.key.startsWith(purgePrefix) || record.key.startsWith(autoInitPrefix))
+    && record.status === 'running'
+  ))
+  const scanPicked = selected.filter((root) => scan.some((project) => project.Root === root))
+  const managedPicked = picked.filter((root) => props.projects.some((project) => project.Root === root))
 
   // 队列串行跑：受管列表是同一份全局配置，并发导入只会互相阻塞。
   // 跑完才刷新一次设备——每导入一个就全量巡检，等待时间会随选中数线性叠加。
@@ -95,12 +124,45 @@ export function ProjectsPage(props: {
     }))
   }
 
+  async function runBatch(
+    roots: string[],
+    kind: 'remove' | 'purge' | 'auto-init',
+  ) {
+    const failed: string[] = []
+    for (const root of roots) {
+      const workspace = resource.workspace(root)
+      if (kind === 'remove') {
+        const spec = actionSpec(`${removePrefix}${root}`, `移除导入 ${root}`, props.deviceId, [workspace, resource.global], 'write', '已移除导入')
+        const outcome = await actions.run(spec, () => invokeTyped('remove_managed_project', '', 'global', { Root: root }, spec.key))
+        if (!outcome.ok) failed.push(root)
+        continue
+      }
+      if (kind === 'purge') {
+        const spec = actionSpec(`${purgePrefix}${root}`, `移除管理 ${root}`, props.deviceId, [workspace, resource.global], 'write', '已移除管理')
+        const outcome = await actions.run(spec, () => invokeTyped('purge_managed_project', '', 'global', { Root: root }, spec.key))
+        if (!outcome.ok) failed.push(root)
+        continue
+      }
+      const spec = actionSpec(`${autoInitPrefix}${root}`, `自动初始化 ${root}`, props.deviceId, [workspace, resource.global], 'write', '自动初始化完成')
+      const outcome = await actions.run(spec, () => invokeTyped('auto_init_managed_project', root, 'local', {}, spec.key))
+      if (!outcome.ok) failed.push(root)
+    }
+    await props.onRefresh()
+    setPicked((prev) => prev.filter((root) => failed.includes(root) || !roots.includes(root)))
+  }
+
+  function exitSelecting() {
+    setSelecting(false)
+    setPicked([])
+  }
+
   const keyword = query.trim().toLowerCase()
   const filtered = keyword
     ? props.projects.filter((project) =>
         `${project.Label} ${project.Name} ${project.Root}`.toLowerCase().includes(keyword))
     : props.projects
   const initialized = props.projects.filter((project) => project.Initialized).length
+  const allFilteredPicked = filtered.length > 0 && filtered.every((project) => picked.includes(project.Root))
 
   return (
     <Page>
@@ -133,7 +195,7 @@ export function ProjectsPage(props: {
             />
             <ScanResults
               projects={scan}
-              picked={picked}
+              picked={scanPicked}
               scanRecord={scanRecord}
               importing={importing}
               blocked={importBlocked}
@@ -142,7 +204,7 @@ export function ProjectsPage(props: {
                 prev.includes(root) ? prev.filter((item) => item !== root) : [...prev, root]
               ))}
               onToggleAll={() => setSelected(
-                picked.length >= scan.length ? [] : scan.map((project) => project.Root),
+                scanPicked.length >= scan.length ? [] : scan.map((project) => project.Root),
               )}
               onImport={(roots) => void importRoots(roots)}
             />
@@ -164,10 +226,87 @@ export function ProjectsPage(props: {
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-faint" />
                 <Input className="pl-8" placeholder="按名称或路径过滤" value={query} onChange={(e) => setQuery(e.target.value)} />
               </div>
+              <div className="flex items-center rounded-lg border border-line p-0.5">
+                <Button
+                  size="icon"
+                  variant={layout === 'grid' ? 'secondary' : 'ghost'}
+                  aria-label="卡片布局"
+                  aria-pressed={layout === 'grid'}
+                  onClick={() => setLayout('grid')}
+                >
+                  <LayoutGrid className="size-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant={layout === 'list' ? 'secondary' : 'ghost'}
+                  aria-label="列表布局"
+                  aria-pressed={layout === 'list'}
+                  onClick={() => setLayout('list')}
+                >
+                  <List className="size-4" />
+                </Button>
+              </div>
+              {selecting ? (
+                <Button size="sm" variant="ghost" onClick={exitSelecting} disabled={batching}>退出选择</Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={props.projects.length === 0}
+                  onClick={() => setSelecting(true)}
+                >
+                  选择
+                </Button>
+              )}
               <span className="tnum text-xs text-faint">
                 {keyword ? `${filtered.length} / ${props.projects.length} 个匹配` : `共 ${props.projects.length} 个 · 已初始化 ${initialized}`}
               </span>
             </Toolbar>
+
+            {selecting && (
+              <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-line bg-panel px-3.5 py-2.5">
+                <span className="tnum text-xs text-muted">已选 {managedPicked.length}</span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={filtered.length === 0 || batching}
+                  onClick={() => setPicked(allFilteredPicked ? [] : filtered.map((project) => project.Root))}
+                >
+                  {allFilteredPicked ? '清空选择' : '全选'}
+                </Button>
+                <div className="mx-1 hidden h-4 w-px bg-line sm:block" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={managedPicked.length === 0 || batchBlocked}
+                  onClick={() => void runBatch(managedPicked, 'remove')}
+                >
+                  {batching ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                  移除导入
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={managedPicked.length === 0 || batchBlocked}
+                  onClick={() => {
+                    if (!window.confirm(
+                      `将移除管理选中的 ${managedPicked.length} 个项目：清理 .dec、IDE 落地与凭据配置，不删除业务源码。继续？`,
+                    )) return
+                    void runBatch(managedPicked, 'purge')
+                  }}
+                >
+                  移除管理
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={managedPicked.length === 0 || batchBlocked}
+                  onClick={() => void runBatch(managedPicked, 'auto-init')}
+                >
+                  自动初始化
+                </Button>
+              </div>
+            )}
 
             <ScrollArea className="-mx-1 px-1 pb-1">
               {filtered.length === 0 ? (
@@ -181,10 +320,38 @@ export function ProjectsPage(props: {
                     ? <Button size="sm" onClick={() => setPicker(true)}>导入目录</Button>
                     : <Button size="sm" variant="ghost" onClick={() => setQuery('')}>清空过滤</Button>}
                 />
-              ) : (
+              ) : layout === 'grid' ? (
                 <div className={cardGrid}>
                   {filtered.map((project) => (
-                    <ProjectCard key={project.Root} project={project} onOpen={() => props.onOpen(project)} />
+                    <ProjectCard
+                      key={project.Root}
+                      project={project}
+                      selecting={selecting}
+                      checked={picked.includes(project.Root)}
+                      onToggle={() => setPicked((prev) => (
+                        prev.includes(project.Root)
+                          ? prev.filter((item) => item !== project.Root)
+                          : [...prev, project.Root]
+                      ))}
+                      onOpen={() => props.onOpen(project)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-panel">
+                  {filtered.map((project) => (
+                    <ProjectRow
+                      key={project.Root}
+                      project={project}
+                      selecting={selecting}
+                      checked={picked.includes(project.Root)}
+                      onToggle={() => setPicked((prev) => (
+                        prev.includes(project.Root)
+                          ? prev.filter((item) => item !== project.Root)
+                          : [...prev, project.Root]
+                      ))}
+                      onOpen={() => props.onOpen(project)}
+                    />
                   ))}
                 </div>
               )}
@@ -196,14 +363,49 @@ export function ProjectsPage(props: {
   )
 }
 
-function ProjectCard({ project, onOpen }: { project: ManagedProject; onOpen: () => void }) {
+function ProjectStatusBadge({ project }: { project: ManagedProject }) {
+  if (!project.Exists) return <Badge tone="bad">目录缺失</Badge>
+  if (project.Error) return <Badge tone="bad">异常</Badge>
+  if (project.Initialized) return <Badge tone="good">已初始化</Badge>
+  return <Badge tone="warn">待初始化</Badge>
+}
+
+function ProjectCard(props: {
+  project: ManagedProject
+  selecting: boolean
+  checked: boolean
+  onToggle: () => void
+  onOpen: () => void
+}) {
+  const { project, selecting, checked, onToggle, onOpen } = props
   const broken = Boolean(project.Error) || !project.Exists
   return (
     <button
-      onClick={onOpen}
-      className="group flex min-h-[6.5rem] flex-col gap-1.5 rounded-xl border border-line bg-panel p-3.5 text-left transition-colors hover:border-line-hi hover:bg-panel-hi"
+      type="button"
+      onClick={() => (selecting ? onToggle() : onOpen())}
+      className={cn(
+        'group flex min-h-[6.5rem] flex-col gap-1.5 rounded-xl border bg-panel p-3.5 text-left transition-colors',
+        selecting
+          ? checked
+            ? 'border-accent/45 bg-accent/8'
+            : 'border-line hover:border-line-hi'
+          : 'border-line hover:border-line-hi hover:bg-panel-hi',
+      )}
     >
       <div className="flex min-w-0 items-center gap-2.5">
+        {selecting && (
+          <span
+            className="shrink-0"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <Checkbox
+              aria-label={`选择 ${project.Label || project.Name}`}
+              checked={checked}
+              onChange={onToggle}
+            />
+          </span>
+        )}
         <span
           className={cn(
             'grid size-8 shrink-0 place-items-center rounded-lg',
@@ -218,22 +420,65 @@ function ProjectCard({ project, onOpen }: { project: ManagedProject; onOpen: () 
         >
           {project.Label || project.Name}
         </span>
-        {!project.Exists ? (
-          <Badge tone="bad">目录缺失</Badge>
-        ) : project.Error ? (
-          <Badge tone="bad">异常</Badge>
-        ) : project.Initialized ? (
-          <Badge tone="good">已初始化</Badge>
-        ) : (
-          <Badge tone="warn">待初始化</Badge>
-        )}
+        <ProjectStatusBadge project={project} />
       </div>
       <div className="truncate font-mono text-[11px] text-faint" title={project.Root}>{project.Root}</div>
       {project.Error && <div className="text-[11px] leading-relaxed text-bad">{project.Error}</div>}
-      <div className="mt-auto flex items-center gap-1 text-[11px] text-faint transition-colors group-hover:text-accent-hi">
-        {project.Initialized ? '进入项目' : '初始化项目'}
-        <ChevronRight className="size-3.5" />
+      {!selecting && (
+        <div className="mt-auto flex items-center gap-1 text-[11px] text-faint transition-colors group-hover:text-accent-hi">
+          {project.Initialized ? '进入项目' : '初始化项目'}
+          <ChevronRight className="size-3.5" />
+        </div>
+      )}
+    </button>
+  )
+}
+
+function ProjectRow(props: {
+  project: ManagedProject
+  selecting: boolean
+  checked: boolean
+  onToggle: () => void
+  onOpen: () => void
+}) {
+  const { project, selecting, checked, onToggle, onOpen } = props
+  return (
+    <button
+      type="button"
+      onClick={() => (selecting ? onToggle() : onOpen())}
+      className={cn(
+        'flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors',
+        selecting && checked && 'bg-accent/8',
+        !selecting && 'hover:bg-panel-hi',
+      )}
+    >
+      {selecting && (
+        <span
+          className="shrink-0"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <Checkbox
+            aria-label={`选择 ${project.Label || project.Name}`}
+            checked={checked}
+            onChange={onToggle}
+          />
+        </span>
+      )}
+      <Folder className="size-4 shrink-0 text-faint" />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium text-ink" title={project.Label || project.Name}>
+          {project.Label || project.Name}
+        </div>
+        <div className="truncate font-mono text-[11px] text-faint" title={project.Root}>{project.Root}</div>
       </div>
+      <ProjectStatusBadge project={project} />
+      {!selecting && (
+        <span className="flex shrink-0 items-center gap-1 text-[11px] text-faint">
+          {project.Initialized ? '进入' : '初始化'}
+          <ChevronRight className="size-3.5" />
+        </span>
+      )}
     </button>
   )
 }

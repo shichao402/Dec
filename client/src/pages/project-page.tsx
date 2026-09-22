@@ -27,7 +27,7 @@ export function ProjectPage(props: {
 }) {
   const project = props.project
   const workspaceResource = resource.workspace(project.Root)
-  const removeSpec = actionSpec(`project:remove:${props.deviceId}:${project.Root}`, '移除项目管理', props.deviceId, [workspaceResource, resource.global], 'write', '已移除项目管理')
+  const removeSpec = actionSpec(`project:remove:${props.deviceId}:${project.Root}`, '移除导入', props.deviceId, [workspaceResource, resource.global], 'write', '已移除导入')
   const pullSpec = actionSpec(
     `operation:pull:${props.deviceId}:${project.Root}`,
     '正在拉取项目资产',
@@ -45,7 +45,7 @@ export function ProjectPage(props: {
       runningLabel="移除中…"
       onSuccess={props.onRemoved}
     >
-      移除管理
+      移除导入
     </ActionButton>
   )
 

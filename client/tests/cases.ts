@@ -204,6 +204,22 @@ export const cases: Case[] = [
     },
   },
   {
+    name: 'projects-select',
+    scenario: 'typical',
+    open: async (page) => {
+      await connect(page)
+      await nav(page, '项目')
+      await page.getByRole('button', { name: '列表布局' }).click()
+      await expect(page.getByRole('button', { name: '列表布局' })).toHaveAttribute('aria-pressed', 'true')
+      await page.getByRole('button', { name: '选择' }).click()
+      await page.getByRole('checkbox').first().click()
+      await expect(page.getByText('已选 1')).toBeVisible()
+      await expect(page.getByRole('button', { name: '移除导入' })).toBeEnabled()
+      await expect(page.getByRole('button', { name: '移除管理' })).toBeEnabled()
+      await expect(page.getByRole('button', { name: '自动初始化' })).toBeEnabled()
+    },
+  },
+  {
     name: 'projects-picker',
     scenario: 'typical',
     open: async (page) => {
@@ -245,7 +261,7 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
-      await expect(page.getByRole('main').getByRole('button', { name: '更新', exact: true })).toBeVisible()
+      await expect(page.getByRole('main').getByRole('button', { name: '官方更新', exact: true })).toBeVisible()
       // 四个下级页都只在主区留一张入口卡，表单与列表本身不在项目页加载。
       await expect(page.getByRole('button', { name: /^家项目绑定/ })).toBeVisible()
       await expect(page.getByRole('button', { name: /^本地覆写/ })).toBeVisible()
@@ -277,7 +293,7 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.locator('main button').filter({ hasText: '腾讯云基础设施' }).first().click()
-      await expect(page.getByRole('main').getByRole('button', { name: '更新', exact: true })).toBeVisible()
+      await expect(page.getByRole('main').getByRole('button', { name: '官方更新', exact: true })).toBeVisible()
     },
   },
   {
@@ -367,7 +383,7 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
-      await page.getByRole('main').getByRole('button', { name: '更新', exact: true }).click()
+      await page.getByRole('main').getByRole('button', { name: '官方更新', exact: true }).click()
       await expect(page.getByRole('heading', { name: '更新' })).toBeVisible()
       // 更新页跨工作区列出依赖；从项目页进入时默认勾选当前项目的可用更新。
       await expect(page.getByText('Dec', { exact: true }).last()).toBeVisible()

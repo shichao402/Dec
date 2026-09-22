@@ -51,6 +51,8 @@ export function installTauriMock(scenario: Scenario) {
     browse_directories: scenario.listing,
     register_managed_project: scenario.device.Projects[0] || {},
     remove_managed_project: {},
+    purge_managed_project: { Removed: true, Deleted: [], Modified: [], Revoked: [], Warnings: [] },
+    auto_init_managed_project: { Initialized: true, Skipped: false, HomeProject: 'dec' },
     bind_managed_project: {},
     create_remote_project: { Name: 'newproject' },
     prepare_project_config_init: {

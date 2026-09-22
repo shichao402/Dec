@@ -27,7 +27,8 @@
 - 路径选择器浏览的是目标服务器文件系统；
 - 自动扫描默认关闭，只有用户选定扫描根后才查找 `.dec/config.yaml`；
 - 登记信息保存在目标设备全局配置中，只作为 Console 管理入口；
-- “移除管理”只删除登记，不删除项目目录、`.dec` 配置或已落地资产。
+- “移除导入”只删除受管登记，不删除项目目录、`.dec` 配置或已落地资产；
+- “移除管理”在摘掉登记之外，还清理该目录的 `.dec/`、项目平面 IDE 落地、`.secrets` Dec 落地与 Git/SSH 凭据 fragment（保留 integration 测试凭据），不删业务源码。
 
 Console 连接期间持有 `KeepAlive`；Pull 等长操作跟 `dec-server` 生命周期走，切页后通过 `GetActiveOperation` / `WatchOperation` 恢复进度与结构化结果。
 

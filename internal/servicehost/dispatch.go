@@ -93,7 +93,7 @@ func isProjectMutation(method string) bool {
 		"ensure_home_p", "bind_managed_project", "create_local_asset",
 		"apply_vault_project", "save_project_settings", "ensure_project_vars",
 		"prepare_remote_note_edit", "prepare_remote_ssh_hosts_edit", "save_project_provides",
-		"apply_official_override":
+		"apply_official_override", "auto_init_managed_project":
 		return true
 	default:
 		return false
@@ -103,7 +103,7 @@ func isProjectMutation(method string) bool {
 func isMachineMutation(method string) bool {
 	switch method {
 	case "connect_repo", "save_global_settings", "ensure_builtin_ide_assets", "ensure_global_vars",
-		"register_managed_project", "remove_managed_project", "create_remote_project",
+		"register_managed_project", "remove_managed_project", "purge_managed_project", "create_remote_project",
 		"register_managed_device", "remove_managed_device", "save_project_tags":
 		return true
 	default:
@@ -206,6 +206,12 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 			return nil, err
 		}
 		return app.RemoveManagedProject(in.Root)
+	case "purge_managed_project":
+		var in struct{ Root string }
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.PurgeManagedProject(ctx, in.Root, reporter)
 	case "create_remote_project":
 		var in app.CreateRemoteProjectInput
 		if err := decode(payload, &in); err != nil {
@@ -266,6 +272,8 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 		return app.ConnectRepo(in.RepoURL, reporter)
 	case "prepare_project_config_init":
 		return app.PrepareProjectConfigInit(projectRoot, reporter)
+	case "auto_init_managed_project":
+		return app.AutoInitManagedProject(projectRoot, reporter)
 	case "bind_managed_project":
 		var in struct{ ProjectName string }
 		if err := decode(payload, &in); err != nil {

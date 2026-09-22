@@ -309,7 +309,11 @@ type cleanupGCMItem struct{ path, name, projectRoot string }
 
 func localGCMItems(decHome string, projects []string) []cleanupGCMItem {
 	var out []cleanupGCMItem
-	roots := []struct{ path, project string }{{filepath.Join(decHome, "secrets"), ""}}
+	var roots []struct{ path, project string }
+	// decHome 为空时只扫项目 .secrets（单项目 purge），不碰本机 secrets 根。
+	if decHome != "" {
+		roots = append(roots, struct{ path, project string }{filepath.Join(decHome, "secrets"), ""})
+	}
 	for _, project := range projects {
 		roots = append(roots, struct{ path, project string }{filepath.Join(project, ".secrets"), project})
 	}
