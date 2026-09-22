@@ -63,6 +63,40 @@ func TestBuiltinDecSkillUsesConsoleMCPSurface(t *testing.T) {
 	}
 }
 
+func TestBuiltinExtractAssetSkillGatesPersonalWrites(t *testing.T) {
+	bundle := GlobalAssets()
+	var body string
+	for _, skill := range bundle.Skills {
+		if skill.Name != "dec-extract-asset" {
+			continue
+		}
+		for _, file := range skill.Files {
+			if file.RelPath == "SKILL.md" {
+				body = string(file.Content)
+			}
+		}
+	}
+	if body == "" {
+		t.Fatal("缺少内置 dec-extract-asset/SKILL.md")
+	}
+	for _, banned := range []string{"`vault=cli`"} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("dec-extract-asset 仍含过时提问模板 %q", banned)
+		}
+	}
+	for _, want := range []string{
+		"硬门禁",
+		"~/.cursor/skills",
+		"dec_propose_upstream",
+		"缺提供方时绝不能用「先写个人 Skill」顶替",
+		"覆写已写 + 上游票据已开",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("dec-extract-asset 应包含 %q", want)
+		}
+	}
+}
+
 func TestGlobalAssetsReturnsCopies(t *testing.T) {
 	bundle := GlobalAssets()
 	if len(bundle.Skills) == 0 || len(bundle.Skills[0].Files) == 0 {
