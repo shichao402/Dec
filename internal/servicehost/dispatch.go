@@ -93,7 +93,7 @@ func isProjectMutation(method string) bool {
 		"ensure_home_p", "bind_managed_project", "create_local_asset",
 		"apply_vault_project", "save_project_settings", "ensure_project_vars",
 		"prepare_remote_note_edit", "prepare_remote_ssh_hosts_edit", "save_project_provides",
-		"propose_upstream", "apply_official_override":
+		"apply_official_override":
 		return true
 	default:
 		return false

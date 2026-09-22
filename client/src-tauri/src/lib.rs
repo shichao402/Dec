@@ -154,6 +154,16 @@ async fn install_console_update(
     console_update::install(&app, CONSOLE_VERSION).await
 }
 
+#[tauri::command]
+fn get_console_update_prefs() -> Result<console_update::ConsoleUpdatePrefs, String> {
+    console_update::get_prefs()
+}
+
+#[tauri::command]
+fn set_console_update_channel(channel: String) -> Result<console_update::ConsoleUpdatePrefs, String> {
+    console_update::set_channel(&channel)
+}
+
 pub(crate) fn dec_home() -> PathBuf {
     std::env::var_os("DEC_HOME")
         .map(PathBuf::from)
@@ -1099,6 +1109,8 @@ pub fn run() {
             take_open_intent,
             check_console_update,
             install_console_update,
+            get_console_update_prefs,
+            set_console_update_channel,
             list_connections,
             discover_connections,
             save_connection,

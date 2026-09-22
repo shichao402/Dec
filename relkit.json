@@ -1,6 +1,6 @@
 {
   "product": "dec",
-  "defaultChannel": "dev",
+  "defaultChannel": "stable",
   "channels": ["stable", "dev"],
   "codeStrategy": "semver",
   "retainVersions": 20,

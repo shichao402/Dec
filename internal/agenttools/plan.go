@@ -113,7 +113,7 @@ func Plan(name string, arguments json.RawMessage) *PlanResult {
 		if err != nil {
 			return planFail(name, err.Error())
 		}
-		return singleInvoke(name, "propose_upstream", root, "local", map[string]any{
+		return singleRun(name, "propose_upstream", root, "local", map[string]any{
 			"ProjectRoot": in.ProjectRoot, "OriginRepo": in.OriginRepo, "Asset": in.Asset,
 			"Title": in.Title, "Body": in.Body, "Diff": in.Diff, "Mode": in.Mode, "Branch": in.Branch,
 		})
@@ -151,12 +151,20 @@ func Plan(name string, arguments json.RawMessage) *PlanResult {
 }
 
 func singleInvoke(name, method, root, plane string, payload any) *PlanResult {
+	return singleStep(name, StepInvoke, method, root, plane, payload)
+}
+
+func singleRun(name, method, root, plane string, payload any) *PlanResult {
+	return singleStep(name, StepRun, method, root, plane, payload)
+}
+
+func singleStep(name, kind, method, root, plane string, payload any) *PlanResult {
 	return &PlanResult{
 		Name:  name,
 		Owner: OwnerServer,
 		Shape: ShapeSingle,
 		Steps: []Step{{
-			Kind: StepInvoke, Method: method, ProjectRoot: root, Plane: plane,
+			Kind: kind, Method: method, ProjectRoot: root, Plane: plane,
 			Payload: mustPayload(payload),
 		}},
 	}

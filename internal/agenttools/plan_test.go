@@ -60,6 +60,27 @@ func TestPlan_BothPullSplitsPlanes(t *testing.T) {
 	}
 }
 
+func TestPlan_ProposeUpstreamUsesRunOperation(t *testing.T) {
+	plan := Plan("dec_propose_upstream", json.RawMessage(`{
+		"project_root":"D:/work",
+		"origin_repo":"owner/provider",
+		"diff":"diff --git a/file b/file"
+	}`))
+	if plan.Error != "" {
+		t.Fatal(plan.Error)
+	}
+	if plan.Shape != ShapeSingle || len(plan.Steps) != 1 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	step := plan.Steps[0]
+	if step.Kind != StepRun || step.Method != "propose_upstream" {
+		t.Fatalf("step = %+v; propose_upstream is registered as a RunOperation", step)
+	}
+	if step.ProjectRoot != "D:/work" || step.Plane != "local" {
+		t.Fatalf("workspace = %+v", step)
+	}
+}
+
 func TestPlan_InitProjectOptionalVault(t *testing.T) {
 	plan := Plan("dec_init_project", json.RawMessage(`{"project_root":"D:/work","apply_vault_project":true}`))
 	if plan.Error != "" || plan.Shape != ShapeKeyed || len(plan.Steps) != 2 {

@@ -19,9 +19,24 @@ use tauri::{AppHandle, Manager};
 pub struct ConsoleUpdateEnvelope {
     pub current_version: String,
     pub channel: String,
+    pub allowed_channels: Vec<String>,
     pub can_auto_install: bool,
     pub result: serde_json::Value,
     pub status: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsoleUpdatePrefs {
+    pub update_channel: String,
+    pub allowed_channels: Vec<String>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreferencesFile {
+    #[serde(default)]
+    update_channel: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,8 +142,74 @@ fn relkit_config() -> Result<RelkitConfig, String> {
         .map_err(|err| format!("解析内置更新配置失败: {err}"))
 }
 
-fn updater(app: &AppHandle, current: &str) -> Result<Updater, String> {
+fn preferences_path() -> Result<PathBuf, String> {
+    let dir = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("dec-console");
+    std::fs::create_dir_all(&dir).map_err(|err| format!("创建 Console 数据目录失败: {err}"))?;
+    Ok(dir.join("preferences.json"))
+}
+
+fn read_preferences_file() -> Result<PreferencesFile, String> {
+    let path = preferences_path()?;
+    if !path.is_file() {
+        return Ok(PreferencesFile::default());
+    }
+    let data = std::fs::read_to_string(&path).map_err(|err| format!("读取更新偏好失败: {err}"))?;
+    serde_json::from_str(&data).map_err(|err| format!("解析更新偏好失败: {err}"))
+}
+
+fn write_preferences_file(prefs: &PreferencesFile) -> Result<(), String> {
+    let path = preferences_path()?;
+    let data = serde_json::to_string_pretty(prefs).map_err(|err| format!("序列化更新偏好失败: {err}"))?;
+    std::fs::write(&path, data + "\n").map_err(|err| format!("写入更新偏好失败: {err}"))
+}
+
+fn channel_allowed(channel: &str, allowed: &[String]) -> bool {
+    let channel = channel.trim();
+    !channel.is_empty() && allowed.iter().any(|value| value == channel)
+}
+
+fn effective_channel() -> Result<String, String> {
     let config = relkit_config()?;
+    let prefs = read_preferences_file()?;
+    let saved = prefs.update_channel.trim();
+    if channel_allowed(saved, &config.channels) {
+        return Ok(saved.to_string());
+    }
+    Ok(config.default_channel)
+}
+
+pub fn get_prefs() -> Result<ConsoleUpdatePrefs, String> {
+    let config = relkit_config()?;
+    Ok(ConsoleUpdatePrefs {
+        update_channel: effective_channel()?,
+        allowed_channels: config.channels,
+    })
+}
+
+pub fn set_channel(channel: &str) -> Result<ConsoleUpdatePrefs, String> {
+    let config = relkit_config()?;
+    let channel = channel.trim();
+    if !channel_allowed(channel, &config.channels) {
+        return Err(format!(
+            "无效更新渠道 {channel:?}（允许: {}）",
+            config.channels.join(", ")
+        ));
+    }
+    let mut prefs = read_preferences_file()?;
+    prefs.update_channel = channel.to_string();
+    write_preferences_file(&prefs)?;
+    Ok(ConsoleUpdatePrefs {
+        update_channel: channel.to_string(),
+        allowed_channels: config.channels,
+    })
+}
+
+fn updater(app: &AppHandle, current: &str) -> Result<(Updater, String, Vec<String>), String> {
+    let config = relkit_config()?;
+    let channel = effective_channel()?;
+    let allowed_channels = config.channels.clone();
     let trusted_keys = config
         .signing
         .public_keys
@@ -179,7 +260,7 @@ fn updater(app: &AppHandle, current: &str) -> Result<Updater, String> {
         });
     let profile = ClientProfile {
         product: config.product,
-        allowed_channels: config.channels,
+        allowed_channels: allowed_channels.clone(),
         entry_urls: config.directory.entry_urls,
         index_urls: Vec::new(),
         fallback_urls: Vec::new(),
@@ -187,7 +268,7 @@ fn updater(app: &AppHandle, current: &str) -> Result<Updater, String> {
         recovery: Some(recovery),
     };
     let runtime = Runtime {
-        channel: config.default_channel,
+        channel: channel.clone(),
         current_code: version_code(current)?,
         client_selectors: HashMap::from([
             ("os".into(), std::env::consts::OS.into()),
@@ -212,7 +293,7 @@ fn updater(app: &AppHandle, current: &str) -> Result<Updater, String> {
         sidecar_path: sidecar.to_string_lossy().into_owned(),
     };
     match Updater::open(profile, runtime) {
-        OpenResult::Opened { updater, .. } => Ok(*updater),
+        OpenResult::Opened { updater, .. } => Ok((*updater, channel, allowed_channels)),
         OpenResult::Failed(error) => Err(error_message(&error)),
     }
 }
@@ -241,7 +322,7 @@ struct Checked {
 }
 
 fn check_sync(app: &AppHandle, current: &str, force: bool) -> Result<Checked, String> {
-    let updater = updater(app, current)?;
+    let (updater, channel, allowed_channels) = updater(app, current)?;
     let policy = CheckPolicy {
         after_success: Some(pbjson_types::Duration {
             seconds: 24 * 60 * 60,
@@ -263,7 +344,8 @@ fn check_sync(app: &AppHandle, current: &str, force: bool) -> Result<Checked, St
         serde_json::to_value(status).map_err(|err| format!("序列化更新状态失败: {err}"))?;
     let envelope = ConsoleUpdateEnvelope {
         current_version: current.to_string(),
-        channel: relkit_config()?.default_channel,
+        channel,
+        allowed_channels,
         can_auto_install: cfg!(windows),
         result: result_json,
         status: status_json,
@@ -304,7 +386,7 @@ pub async fn install(app: &AppHandle, current: &str) -> Result<ConsoleUpdateEnve
     let plan_id = checked
         .plan_id
         .ok_or_else(|| result_error(&checked.envelope.result, current))?;
-    let updater = updater(app, current)?;
+    let (updater, _, _) = updater(app, current)?;
     if checked.apply_disposition == ApplyDisposition::Internal as i32 {
         let download = updater.download(plan_id.clone(), |_| {});
         if let Some(download_result::Kind::Failed(failed)) = download.kind {

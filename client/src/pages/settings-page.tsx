@@ -34,6 +34,7 @@ export function SettingsPage(props: {
   setSettings: (value: GlobalSettings) => void
   onCheckUpdate: () => Promise<ConsoleUpdateEnvelope>
   onInstallUpdate: () => Promise<ConsoleUpdateEnvelope>
+  onUpdateChannel: (channel: string) => Promise<ConsoleUpdateEnvelope>
   onSaved: () => void
   onRestart: () => void
 }) {
@@ -93,6 +94,7 @@ export function SettingsPage(props: {
           focusSignal={props.updateFocus}
           onCheck={props.onCheckUpdate}
           onInstall={props.onInstallUpdate}
+          onChannelChange={props.onUpdateChannel}
         />
 
         <ActionFeedback actionKey={saveSpec.key} />

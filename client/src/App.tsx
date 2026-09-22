@@ -15,6 +15,7 @@ import {
   provisionRemoteHost,
   runOrWatchTyped,
   saveConnection,
+  setConsoleUpdateChannel,
   stopService,
 } from '@/lib/api'
 import { ActionCenter } from '@/components/action-feedback'
@@ -491,12 +492,26 @@ export default function App() {
     setUpdateStatus(status)
     return status
   }
+  const handleConsoleUpdateChannel = async (channel: string) => {
+    try {
+      await setConsoleUpdateChannel(channel)
+      const status = await checkConsoleUpdate(true)
+      setUpdateStatus(status)
+      setUpdateError('')
+      return status
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setUpdateError(message)
+      throw error
+    }
+  }
   const consoleUpdatePanel = (
     <ConsoleUpdatePanel
       status={updateStatus}
       error={updateError}
       onCheck={handleCheckConsoleUpdate}
       onInstall={handleInstallConsoleUpdate}
+      onChannelChange={handleConsoleUpdateChannel}
     />
   )
 
@@ -763,6 +778,7 @@ export default function App() {
                   setSettings={setSettings}
                   onCheckUpdate={handleCheckConsoleUpdate}
                   onInstallUpdate={handleInstallConsoleUpdate}
+                  onUpdateChannel={handleConsoleUpdateChannel}
                   onSaved={refreshDevice}
                   onRestart={restartService}
                 />

@@ -9,14 +9,21 @@ import {
 export type ConsoleUpdateEnvelope = {
   currentVersion: string
   channel: string
+  allowedChannels: string[]
   canAutoInstall: boolean
   result: CheckResult
   status: StatusSnapshot
 }
 
+export type ConsoleUpdatePrefs = {
+  updateChannel: string
+  allowedChannels: string[]
+}
+
 export function decodeConsoleUpdateEnvelope(value: {
   currentVersion: string
   channel: string
+  allowedChannels: string[]
   canAutoInstall: boolean
   result: JsonValue
   status: JsonValue
@@ -24,6 +31,7 @@ export function decodeConsoleUpdateEnvelope(value: {
   return {
     currentVersion: value.currentVersion,
     channel: value.channel,
+    allowedChannels: value.allowedChannels || [],
     canAutoInstall: value.canAutoInstall,
     result: fromJson(CheckResultSchema, value.result),
     status: fromJson(StatusSnapshotSchema, value.status),

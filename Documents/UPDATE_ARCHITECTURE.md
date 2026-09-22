@@ -8,7 +8,7 @@ Console 自更新由 Tauri 壳调用 `third_party/relkit/sdk/rust` facade 与 lo
 - 共同入口来自根目录 `relkit.json`：`https://raw.firoyang.com/rup/directory/dec.pb`
 - Console 壳用 `include_str!` 编入同一份 `relkit.json`；Go 运行时套件链通过 `go generate ./internal/update` 复制到 `internal/update/embed/`。后者只服务 `audience=runtime`，不是 Console 自更新入口
 - `CurrentCode` = `sdk.SemverCode(version)`（`v1.13.25` → `1013025`）
-- 默认 channel：`dev`（目前仅个人使用；正式对外再切回 `stable`）
+- 默认 channel：`stable`；Console 设置页可改并落盘到本机壳偏好（`preferences.json`），检查与安装都跟所选渠道。发版仍由 `dev/v*` / `stable/v*` tag 决定
 - Console selectors：`os` / `arch` / `component=console` / `audience=user`；Tauri 直接 `Updater::open`、`check`、`download`，安装器启动、Windows `/S`、detach 与 relaunch 留在壳内
 - Tauri 只输出 relkit canonical ProtoJSON；前端从 `third_party/relkit/bindings/ts` import 生成的 `CheckResultSchema` / `StatusSnapshotSchema`，按 `upToDate`、`updateAvailable`、`fallbackRequired`、`throttled`、`failed` 五变体渲染
 - 运行时 selectors：`os` / `arch` / `component` / `audience=runtime`，component 为 `dec-server`、`dec-mcp`、`dec-exec`、`dec-host-setup`
