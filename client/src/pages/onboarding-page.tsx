@@ -71,7 +71,7 @@ export function OnboardingPage(props: {
     return selection.Bundles.filter((item) => hasTag(item.Tags, PROJECT_TAG_GLOBAL)).map((item) => item.Name)
   }
 
-  // 订阅表按来源给 pin：官方跟随最新已发布 tag，私仓只能跟 HEAD（ADR 0029）。
+  // 订阅表按来源给 pin：已发布项目跟随最新 tag，未发布的个人项目只能跟 HEAD（ADR 0031）。
   const saveAssets = () => {
     const requires: Record<string, string> = {}
     for (const name of selected) {
@@ -174,7 +174,7 @@ export function OnboardingPage(props: {
               <Panel className="overflow-hidden">
                 <PanelHeader
                   title="选择 Global 资产"
-                  description={`已选 ${selected.length} / ${bundles.length}，带 global 标签的是推荐导入本机的资产。之后可在 Global 资产页调整选择和标签。`}
+                  description={`已选 ${selected.length} / ${bundles.length}。带 global 标签的会在新机器上默认勾选。`}
                 />
                 <div className="border-b border-line p-3">
                   <div className="relative">

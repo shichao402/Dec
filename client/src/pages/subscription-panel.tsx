@@ -11,37 +11,27 @@ import { Panel } from '@/components/ui/panel'
 import { ActionButton } from '@/components/ui/action-button'
 import { useActionRegistry, useDecAction } from '@/lib/action-context'
 import { invokeTyped } from '@/lib/api'
-import { actionSpec, PROJECT_TAG_GLOBAL, hasTag, resource, toggleTag } from '@/lib/console'
-import { cn } from '@/lib/utils'
+import { actionSpec, PROJECT_TAG_GLOBAL, hasTag, resource } from '@/lib/console'
+import { cn, repoLabel, versionStatusLine } from '@/lib/utils'
 import type { AssetOption, AssetSelection } from '@/lib/utils'
 
 type Filter = 'all' | 'enabled' | 'official' | 'vault' | 'tagged'
-
-// 行按列对齐：名称、说明、成员各占固定语义列，宽屏不会只在左侧堆一小块。
-const row = 'grid grid-cols-[auto_minmax(9rem,16rem)_minmax(0,1fr)_auto] items-start gap-x-3'
-const compactRow = 'grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3'
 
 const PIN_LATEST = 'latest'
 const PIN_VAULT = 'vault'
 
 type Source = 'official' | 'vault'
 
-// 生效来源跟着 pin 走，不能只看服务端下发的 Source：
-// 用户在行内切了来源、还没保存时，徽标与版本列必须立刻跟上。
+// 草稿里的 pin 优先于服务端下发的 Source：还没保存时，徽标与版本列必须立刻跟上。
 function sourceOf(item: AssetOption, pin?: string): Source {
   if (pin) return pin === PIN_VAULT ? 'vault' : 'official'
   return item.Source === 'official' ? 'official' : 'vault'
 }
 
-// 注册表已发布的项目同时在私仓里有同名目录时，来源是一次可切换的选择。
-function isDualSource(item: AssetOption) {
-  return Boolean(item.VaultAvailable && item.OfficialAvailable)
-}
-
-// 默认 pin：注册表已发布就跟随最新已发布 tag，否则只能跟私仓 HEAD（ADR 0029）。
+// 已发布项目跟随最新 tag。注册表里没有的个人项目只能跟私仓 HEAD（ADR 0031）。
 function defaultPin(item: AssetOption) {
   if (item.Pin) return item.Pin
-  if (item.OfficialAvailable || item.Source === 'official') return PIN_LATEST
+  if (item.Source === 'official') return PIN_LATEST
   return PIN_VAULT
 }
 
@@ -64,10 +54,8 @@ export function SubscriptionPanel(props: {
     [props.deviceId, scope, workspaceResource],
   )
   const saveSpec = actionSpec(`requires:save:${props.deviceId}:${scope}`, '保存订阅', props.deviceId, [workspaceResource], 'write', '订阅已保存')
-  const tagSpec = actionSpec(`requires:tags:${props.deviceId}:${scope}`, '保存资产标签', props.deviceId, [resource.global], 'write', '资产标签已保存')
   const loadState = useDecAction<AssetSelection>(loadSpec)
   const saveState = useDecAction<{ Rejected?: string[] }>(saveSpec)
-  const tagState = useDecAction(tagSpec)
 
   const applySelection = useCallback((result: AssetSelection) => {
     setData(result)
@@ -82,30 +70,6 @@ export function SubscriptionPanel(props: {
     )
     if (outcome.ok) applySelection(outcome.value)
   }, [applySelection, loadSpec, props.plane, props.root, runAction])
-
-  const saveGlobalTag = async (item: AssetOption) => {
-    const nextTags = toggleTag(item.Tags, PROJECT_TAG_GLOBAL)
-    const outcome = await runAction(
-      tagSpec,
-      () => invokeTyped(
-        'save_project_tags',
-        '',
-        'global',
-        { Name: item.Name, Tags: nextTags },
-        tagSpec.key,
-      ),
-    )
-    if (!outcome.ok) return
-    setData((current) => {
-      if (!current) return current
-      return {
-        ...current,
-        Bundles: current.Bundles.map((bundle) =>
-          bundle.Name === item.Name ? { ...bundle, Tags: nextTags } : bundle,
-        ),
-      }
-    })
-  }
 
   // 远端工作区变化后需要重新同步服务端订阅状态。
   // oxlint-disable-next-line react/set-state-in-effect
@@ -138,7 +102,7 @@ export function SubscriptionPanel(props: {
     if (filter === 'vault' && source !== 'vault') return false
     if (filter === 'tagged' && !hasTag(item.Tags, PROJECT_TAG_GLOBAL)) return false
     if (!query.trim()) return true
-    const haystack = `${item.Name} ${item.Description} ${(item.Tags || []).join(' ')} ${(item.Members || []).map((m) => `${m.Type}/${m.Name}`).join(' ')}`
+    const haystack = `${item.Name} ${item.Description} ${item.OriginRepo || ''} ${(item.Tags || []).join(' ')} ${(item.Members || []).map((m) => `${m.Type}/${m.Name}`).join(' ')}`
     return haystack.toLowerCase().includes(query.trim().toLowerCase())
   }).sort((a, b) => {
     const ag = hasTag(a.Tags, PROJECT_TAG_GLOBAL) ? 0 : 1
@@ -193,7 +157,6 @@ export function SubscriptionPanel(props: {
       <div className="shrink-0 px-3 pt-3 empty:hidden">
         <ActionFeedback actionKey={loadSpec.key} />
         <ActionFeedback actionKey={saveSpec.key} />
-        <ActionFeedback actionKey={tagSpec.key} />
         {rejected.length > 0 && <Notice text={`已保存，但未订阅：${rejected.join('、')}`} />}
         {updatable > 0 && <Notice tone="warn" text={`${updatable} 个已订阅项目有新版本，到「更新」页预览后安装。`} />}
       </div>
@@ -202,12 +165,6 @@ export function SubscriptionPanel(props: {
         <Loading />
       ) : (
         <>
-          <div className={cn(row, 'shrink-0 border-b border-line bg-canvas/40 px-3.5 py-2 text-[11px] tracking-wide text-faint uppercase')}>
-            <span className="w-4" />
-            <span>项目</span>
-            <span className="hidden lg:block">说明</span>
-            <span className="hidden text-right xl:block">版本 / 成员</span>
-          </div>
           <ScrollArea className="divide-y divide-line">
             {visible.map((item) => (
               <AssetRow
@@ -218,10 +175,8 @@ export function SubscriptionPanel(props: {
                 pin={pins[item.Name]}
                 changed={added.includes(item.Name) || removed.includes(item.Name) || repinned.includes(item.Name)}
                 locked={props.plane === 'local' && item.Home}
-                tagging={tagState.running}
                 onToggle={() => togglePin(item)}
                 onPin={(pin) => setPin(item.Name, pin)}
-                onToggleGlobalTag={() => void saveGlobalTag(item)}
               />
             ))}
             {visible.length === 0 && (
@@ -231,7 +186,7 @@ export function SubscriptionPanel(props: {
                 text={query || filter !== 'all' ? '没有匹配的项目' : '这个范围里还没有可订阅的项目'}
                 hint={query || filter !== 'all'
                   ? filter === 'tagged'
-                    ? '当前没有打 global 标签的项目。可在行上把某项标为推荐 Global。'
+                    ? '当前没有带 global 标签的项目。'
                     : '换个关键词，或把筛选切回「全部」。'
                   : '官方项目来自注册表，个人项目来自已连接的私仓。'}
               />
@@ -293,10 +248,8 @@ export function AssetRow({
   changed,
   compact,
   locked,
-  tagging,
   onToggle,
   onPin,
-  onToggleGlobalTag,
 }: {
   item: AssetOption
   checked: boolean
@@ -304,97 +257,79 @@ export function AssetRow({
   changed?: boolean
   compact?: boolean
   locked?: boolean
-  tagging?: boolean
   onToggle: () => void
   onPin?: (pin: string) => void
-  onToggleGlobalTag?: () => void
 }) {
   const members = item.Members || []
-  const memberTypes = [...new Set(members.map((member) => member.Type))]
-  const recommended = hasTag(item.Tags, PROJECT_TAG_GLOBAL)
+  const shownMembers = members.slice(0, compact ? 3 : 6)
+  const hiddenMembers = members.length - shownMembers.length
+  const origin = repoLabel(item.OriginRepo)
+  const subtitle = [origin, (item.Description || '').trim()].filter(Boolean).join(' · ')
+  const tags = item.Tags || []
   const source = sourceOf(item, pin)
+  const version = source === 'official' ? versionStatusLine(item.Installed, item.Available) : ''
   return (
     <label
       className={cn(
-        compact ? compactRow : row,
-        'px-3.5 py-2 transition-colors',
+        'grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-x-3 px-3.5 transition-colors',
+        compact ? 'py-2.5' : 'py-3',
         item.OtherPlane || locked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-panel-hi',
         changed && 'bg-accent/6',
       )}
     >
       <Checkbox className="mt-0.5" aria-label={item.Name} checked={checked} disabled={item.OtherPlane || locked} onChange={onToggle} />
-      <div className="flex min-w-0 flex-col">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-[13px] font-medium text-ink" title={item.Name}>{item.Name}</span>
-          <Badge tone={source === 'official' ? 'accent' : 'quiet'}>{source === 'official' ? '官方' : '私仓'}</Badge>
-          {source === 'official' && (
-            <Badge tone="quiet" title={item.OriginRepo || '覆写后提 Issue / PR'}>上游贡献</Badge>
+      <div className="flex min-w-0 items-start justify-between gap-6">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-medium text-ink" title={item.Name}>{item.Name}</span>
+            {item.Home && <Badge tone="accent">{locked ? 'home · 必选' : 'home'}</Badge>}
+            {item.Enabled && !item.Pin && !item.Home && (
+              <Badge tone="quiet" title="随其他已订阅项目的 depends_on 一并安装，不需要自己订阅">依赖引入</Badge>
+            )}
+            {item.UpdateAvailable && <Badge tone="warn">有更新</Badge>}
+            {item.SecretsOnly && members.every((member) => member.Type === 'secret') && <Badge tone="quiet">secrets</Badge>}
+            {item.OtherPlane && <Badge tone="warn">另一平面</Badge>}
+            {item.RemoteMissing && <Badge tone="bad">私仓缺失</Badge>}
+            {item.RemoteUnverified && <Badge tone="warn">未校验</Badge>}
+            {tags.map((tag) => (
+              <Badge key={tag} tone="quiet" className="font-mono">{tag}</Badge>
+            ))}
+          </div>
+          {subtitle && (
+            <p className="mt-0.5 truncate text-xs text-faint" title={item.OriginRepo || item.Description}>
+              {subtitle}
+            </p>
           )}
-          {item.Home && <Badge tone="accent">{locked ? 'home · 必选' : 'home'}</Badge>}
-          {/* 没订阅却已装：来自别人的 depends_on 闭包。不勾也在，勾了才是自己订阅。 */}
-          {item.Enabled && !item.Pin && !item.Home && (
-            <Badge tone="quiet" title="随其他已订阅项目的 depends_on 一并安装，不需要自己订阅">依赖引入</Badge>
+          {shownMembers.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {shownMembers.map((member) => (
+                <Badge key={`${member.Type}-${member.Name}`} tone="quiet" className="font-mono">
+                  {member.Type}/{member.Name}
+                </Badge>
+              ))}
+              {hiddenMembers > 0 && <span className="tnum self-center text-[11px] text-faint">另外 {hiddenMembers} 项</span>}
+            </div>
           )}
-          {item.UpdateAvailable && <Badge tone="warn">有更新</Badge>}
-          <GlobalTagBadge recommended={recommended} disabled={item.OtherPlane || tagging} onToggle={onToggleGlobalTag} />
-          {item.SecretsOnly && <Badge tone="quiet">secrets</Badge>}
-          {item.OtherPlane && <Badge tone="warn">另一平面</Badge>}
-          {item.RemoteMissing && <Badge tone="bad">私仓缺失</Badge>}
-          {item.RemoteUnverified && <Badge tone="warn">未校验</Badge>}
-        </span>
-        <span className={cn('line-clamp-2 text-[11px] leading-4 text-faint', !compact && 'lg:hidden')}>
-          {item.Description || (memberTypes.length ? memberTypes.join(' · ') : `${members.length} 个成员`)}
-        </span>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className={cn('text-xs font-medium', source === 'official' ? 'text-accent-hi' : 'text-faint')}>
+              {source === 'official' ? '官方' : '私仓'}
+            </span>
+            {version && version !== '—' && (
+              <span className="tnum font-mono text-[11px] text-muted">{version}</span>
+            )}
+          </div>
+          {onPin && (
+            <div className="flex flex-wrap justify-end gap-1.5">
+              {source === 'official' && (
+                <PinControl item={item} checked={checked} pin={pin} onPin={onPin} />
+              )}
+            </div>
+          )}
+        </div>
       </div>
-      {compact ? (
-        <span className="tnum text-[11px] text-faint">{members.length} 项</span>
-      ) : (
-        <>
-          {/* 说明列允许两行：一刀切成单行时长描述只能读到不足一半，等于没写。 */}
-          <span className="hidden min-w-0 text-xs leading-4 text-faint lg:line-clamp-2">
-            {item.Description || (memberTypes.length ? memberTypes.join(' · ') : '无描述')}
-          </span>
-          <span className="hidden items-start justify-end gap-1 pt-0.5 xl:flex">
-            {isDualSource(item) && checked && !locked && onPin && (
-              <SourceSwitch source={source} onPin={onPin} />
-            )}
-            {source === 'official' ? (
-              <PinControl item={item} checked={checked} pin={pin} onPin={onPin} />
-            ) : (
-              <>
-                {members.slice(0, 2).map((member) => (
-                  <Badge key={`${member.Type}-${member.Name}`} tone="quiet" className="font-mono">
-                    {member.Type}/{member.Name}
-                  </Badge>
-                ))}
-                <span className="tnum w-12 text-right text-[11px] text-faint">{members.length} 项</span>
-              </>
-            )}
-          </span>
-        </>
-      )}
     </label>
-  )
-}
-
-// SourceSwitch 是两边都有同名项目时的来源选择：官方装注册表已发布版本，私仓跟自己的 HEAD。
-// 少了它，注册表已发布、私仓里又有同名目录的项目就只能停在私仓 pin 上，
-// 而「更新」页只认官方 pin，用户永远更新不到。
-function SourceSwitch({ source, onPin }: { source: Source; onPin: (pin: string) => void }) {
-  const official = source === 'official'
-  return (
-    <button
-      type="button"
-      title={official ? '改为跟随个人私仓 HEAD' : '改为安装官方注册表已发布版本，可在「更新」页升级'}
-      onClick={(event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        onPin(official ? PIN_VAULT : PIN_LATEST)
-      }}
-      className="rounded-md border border-dashed border-line px-1.5 py-0.5 text-[11px] leading-4 text-faint hover:border-line-hi hover:text-ink"
-    >
-      {official ? '改用私仓' : '改用官方'}
-    </button>
   )
 }
 
@@ -412,66 +347,23 @@ function PinControl({
   onPin?: (pin: string) => void
 }) {
   const available = item.Available || ''
-  const installed = item.Installed || ''
   const pinned = Boolean(pin && pin !== PIN_LATEST && pin !== PIN_VAULT)
-  return (
-    <span className="flex items-center gap-1.5">
-      <span className="tnum text-[11px] text-faint">
-        已装 {installed || '—'}
-        <span className="mx-1 text-line">·</span>
-        可用 {available || '—'}
-      </span>
-      {checked && onPin && available && (
-        <button
-          type="button"
-          title={pinned ? '改回跟随最新已发布版本' : `钉死在 ${available}`}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            onPin(pinned ? PIN_LATEST : available)
-          }}
-          className={cn(
-            'rounded-md border px-1.5 py-0.5 font-mono text-[11px] leading-4',
-            pinned ? 'border-accent/40 bg-accent/12 text-accent-hi' : 'border-dashed border-line text-faint hover:border-line-hi hover:text-ink',
-          )}
-        >
-          {pinned ? pin : PIN_LATEST}
-        </button>
-      )}
-    </span>
-  )
-}
-
-function GlobalTagBadge({
-  recommended,
-  disabled,
-  onToggle,
-}: {
-  recommended: boolean
-  disabled?: boolean
-  onToggle?: () => void
-}) {
-  if (!onToggle && !recommended) return null
-  if (!onToggle) {
-    return <Badge tone="accent" title="推荐作为 Global 资产导入本机">global</Badge>
-  }
+  if (!checked || !onPin || !available) return null
   return (
     <button
       type="button"
-      title={recommended ? '取消推荐作为 Global 资产' : '标为推荐 Global 资产，并写入私仓'}
-      disabled={disabled}
+      title={pinned ? '已固定在这个版本，点此改回跟随官方最新版' : `现在跟随官方最新版。点此固定在 ${available}，之后不再自动升级`}
       onClick={(event) => {
         event.preventDefault()
         event.stopPropagation()
-        onToggle()
+        onPin(pinned ? PIN_LATEST : available)
       }}
       className={cn(
-        'inline-flex max-w-full items-center rounded-md border px-1.5 py-0.5 text-[11px] leading-4 font-medium',
-        recommended ? 'border-accent/40 bg-accent/12 text-accent-hi' : 'border-dashed border-line text-faint hover:border-line-hi hover:text-ink',
-        disabled && 'cursor-not-allowed opacity-45',
+        'rounded-md border px-1.5 py-0.5 font-mono text-[11px] leading-4',
+        pinned ? 'border-accent/40 bg-accent/12 text-accent-hi' : 'border-dashed border-line text-faint hover:border-line-hi hover:text-ink',
       )}
     >
-      {recommended ? 'global' : '标为 Global'}
+      {pinned ? `固定在 ${pin}` : '跟随最新'}
     </button>
   )
 }
@@ -482,7 +374,7 @@ function SegmentedFilter({ value, onChange }: { value: Filter; onChange: (next: 
     ['enabled', '已订阅'],
     ['official', '官方'],
     ['vault', '私仓'],
-    ['tagged', '推荐 Global'],
+    ['tagged', 'global'],
   ]
   return (
     <div className="flex rounded-lg border border-line p-0.5">

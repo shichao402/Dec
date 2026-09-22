@@ -139,12 +139,8 @@ export type AssetOption = {
   Required: boolean
   Quadrants: Record<string, number>
   Tags?: string[]
-  // 订阅来源与 pin（ADR 0029）：vault 为个人私仓，official 为官方注册表。
-  // Source 是当前生效身份；两个 *Available 指出这个项目在哪几套存储里存在，
-  // 都为真时行内要能切换来源。
+  // 订阅来源与 pin（ADR 0029 / 0031）：vault 为未发布的个人项目，official 为官方注册表。
   Source?: string
-  VaultAvailable?: boolean
-  OfficialAvailable?: boolean
   Pin?: string
   Installed?: string
   Available?: string
@@ -262,6 +258,31 @@ export function describeServiceError(reason: unknown) {
 export function isStaleServiceError(reason: unknown) {
   const text = reason instanceof Error ? reason.message : String(reason)
   return staleServicePattern.test(text)
+}
+
+// 订阅行上显示的源仓名。完整地址留在 title 里。
+export function repoLabel(origin?: string): string {
+  const text = (origin || '').trim().replace(/\.git$/, '')
+  if (!text) return ''
+  const ssh = text.match(/^git@[^:]+:(.+)$/)
+  if (ssh) return ssh[1]
+  try {
+    const path = new URL(text).pathname.replace(/^\/+/, '')
+    return path || text
+  } catch {
+    return text
+  }
+}
+
+// 已装和可用相同时只写一个版本。不相同时写成从哪到哪。
+export function versionStatusLine(installed?: string, available?: string): string {
+  const have = (installed || '').trim()
+  const next = (available || '').trim()
+  if (have && next && have === next) return have
+  if (!have && next) return `未安装 → ${next}`
+  if (have && next) return `${have} → ${next}`
+  if (have) return `${have} → 不可用`
+  return '—'
 }
 
 export function parseResult<T>(raw: InvokeResult): T {

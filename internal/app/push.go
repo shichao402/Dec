@@ -132,7 +132,13 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 		return 0, skippedReason, "", nil
 	}
 
-	if len(projectConfig.Requires.VaultProjects()) == 0 && strings.TrimSpace(projectConfig.ProjectName) == "" {
+	if projectConfig != nil {
+		req, _ := resolvedRequires(ctx, workspace, projectConfig)
+		copied := *projectConfig
+		copied.Requires = req
+		projectConfig = &copied
+	}
+	if projectConfig == nil || (len(projectConfig.Requires.VaultProjects()) == 0 && strings.TrimSpace(projectConfig.ProjectName) == "") {
 		skippedReason = "没有可写的个人私仓项目"
 		emit(reporter, EventInfo, "push.dec", "没有可写的个人私仓项目，跳过 Dec 推送", nil)
 		return 0, skippedReason, "", nil
@@ -153,12 +159,11 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 			return resolveErr
 		}
 
-		req, _ := workspaceOfficialRequires(workspace, projectConfig)
-		assets := filterOfficialVaultAssets(req, writableResolvedAssets(workspace, projectConfig, resolved.Assets))
+		assets := filterOfficialVaultAssets(projectConfig.Requires, writableResolvedAssets(workspace, projectConfig, resolved.Assets))
 		if extra, extraErr := scanWritableCacheAssets(workspace, projectConfig); extraErr != nil {
 			return extraErr
 		} else {
-			assets = filterOfficialVaultAssets(req, unionTypedAssets(assets, extra))
+			assets = filterOfficialVaultAssets(projectConfig.Requires, unionTypedAssets(assets, extra))
 		}
 		resolvedForPush := *resolved
 		resolvedForPush.Assets = assets

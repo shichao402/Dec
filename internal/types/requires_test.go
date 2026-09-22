@@ -32,6 +32,26 @@ func TestAddVaultProjectsKeepsExistingLatestPin(t *testing.T) {
 	}
 }
 
+func TestFoldPublishedVaultPins(t *testing.T) {
+	published := map[string]struct{}{"relkit": {}, "playbook": {}}
+	got := RequiresSpec{
+		"relkit":   RequiresVault,
+		"playbook": "v0.2.0",
+		"notes":    RequiresVault,
+		"dec":      RequiresVault,
+	}.FoldPublishedVaultPins(published, "dec")
+	if got["relkit"] != RequiresLatest {
+		t.Fatalf("已发布项目的 vault pin 应收成 latest，got %#v", got)
+	}
+	if got["playbook"] != "v0.2.0" || got["notes"] != RequiresVault || got["dec"] != RequiresVault {
+		t.Fatalf("只改已发布且非家项目的 vault pin，got %#v", got)
+	}
+	same := RequiresSpec{"notes": RequiresVault}
+	if folded := same.FoldPublishedVaultPins(nil, ""); folded["notes"] != RequiresVault {
+		t.Fatalf("没确认注册表时不得改 pin，got %#v", folded)
+	}
+}
+
 func TestRequiresSpecRejectsYAMLList(t *testing.T) {
 	var cfg struct {
 		Requires RequiresSpec `yaml:"requires"`

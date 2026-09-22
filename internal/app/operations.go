@@ -75,6 +75,13 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	if err != nil {
 		return nil, err
 	}
+	folded, foldErr := persistFoldedRequires(ctx, workspace, projectConfig, reporter)
+	if foldErr != nil {
+		emit(reporter, EventWarn, "requires.fold", foldErr.Error(), nil)
+	}
+	if projectConfig != nil {
+		projectConfig.Requires = folded
+	}
 
 	result := &PullProjectAssetsResult{
 		ProjectRoot:  projectRoot,
@@ -122,7 +129,7 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	}
 
 	// 平面隔离（ADR 0009）：project 上下文只处理本平面订阅，不再并入 Global 平面。
-	// 订阅唯一来源是 requires（ADR 0029）；vault pin 的项目走私仓，其余走官方注册表。
+	// 订阅唯一来源是 requires（ADR 0029）。已发布项目只走注册表；vault pin 只留给未发布的个人项目（ADR 0031）。
 	pullConfig := *projectConfig
 	projectEnabled := workspaceVaultSeeds(&pullConfig, workspace.EffectivePlane())
 

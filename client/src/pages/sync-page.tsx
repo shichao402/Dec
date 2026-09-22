@@ -11,7 +11,7 @@ import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel'
 import { useActionRegistry } from '@/lib/action-context'
 import { invokeTyped, runOrWatchTyped } from '@/lib/api'
 import { actionSpec, resource } from '@/lib/console'
-import { pullResultDiagnosis } from '@/lib/utils'
+import { pullResultDiagnosis, versionStatusLine } from '@/lib/utils'
 import type { ManagedProject, OperationEvent, PullResult } from '@/lib/utils'
 
 export type PullHistoryEntry = { title: string; result: PullResult; at: Date }
@@ -174,7 +174,7 @@ export function SyncPage(props: {
                           {!row.Error && !row.UpdateAvailable && row.Installed && <Badge tone="good">已最新</Badge>}
                         </span>
                         <span className="mt-1 block font-mono text-[11px] text-faint">
-                          已装 {row.Installed || '—'} · 可用 {row.Available || '—'}
+                          {versionStatusLine(row.Installed, row.Available)}
                         </span>
                         {row.Error && <span className="mt-1 block text-xs text-bad">{row.Error}</span>}
                       </span>
@@ -211,7 +211,7 @@ export function SyncPage(props: {
                   <div className="rounded-lg border border-line bg-canvas/50 px-3 py-2.5 text-xs text-muted">
                     {preview.map((row) => (
                       <div key={row.key} className="py-0.5">
-                        {row.target.label} · {row.Project}: {row.Installed || '未安装'} → {row.Available || '不可用'}
+                        {row.target.label} · {row.Project}: {versionStatusLine(row.Installed, row.Available)}
                         {row.OverrideReadyToDrop ? '（将移除已解决的本地覆写）' : ''}
                       </div>
                     ))}

@@ -264,22 +264,18 @@ export function installTauriMock(scenario: Scenario) {
           Quadrants: {},
           Required: true,
           Source: 'official',
-          OfficialAvailable: true,
           Pin: 'latest',
           Installed: 'v0.4.2',
           Available: 'v0.4.3',
           UpdateAvailable: true,
         }
-        // 同名项目只给一行，且身份跟着 pin 走：官方 pin 的行按官方下发，带上版本与「有更新」。
+        // 同名项目只给一行。已经发布的就是官方行，带上版本与「有更新」。
         // 空场景连注册表也没得选，订阅面板才该显示空态。
         const withOfficial = (bundles: Record<string, unknown>[]) => {
           if (method !== 'list_subscription_candidates' || scenario.assets.Bundles.length === 0) return bundles
           if (bundles.some((item) => item.Name === official.Name)) {
             return bundles.map((item) =>
-              // 私仓里也有同名项目：行要带双来源标记，面板才会给出来源切换。
-              item.Name === official.Name
-                ? { ...item, ...official, Members: item.Members, VaultAvailable: true }
-                : item,
+              item.Name === official.Name ? { ...item, ...official, Members: item.Members } : item,
             )
           }
           return [...bundles, official]

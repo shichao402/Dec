@@ -2,6 +2,8 @@ package app
 
 import (
 	"testing"
+
+	"github.com/shichao402/Dec/internal/types"
 )
 
 // 官方 pin 的项目在私仓里也有同名目录时，行必须按官方身份下发：
@@ -47,8 +49,8 @@ func TestMergeOfficialCandidates_OfficialPinWinsOverVaultRow(t *testing.T) {
 	}
 }
 
-// 显式 vault pin 是用户的选择，仍是私仓行，只补远端可用版本供参考。
-func TestMergeOfficialCandidates_VaultPinKeepsVaultIdentity(t *testing.T) {
+// 已发布项目上残留的 vault pin 不是第二种安装来源，行必须改成官方并跟随 latest。
+func TestMergeOfficialCandidates_PublishedVaultPinBecomesOfficial(t *testing.T) {
 	vault := []AssetBundleOption{{Name: "relkit", Source: AssetSourceVault, Pin: "vault", Enabled: true}}
 	official := []AssetBundleOption{{Name: "relkit", Source: AssetSourceOfficial, Available: "v0.4.4"}}
 
@@ -56,22 +58,18 @@ func TestMergeOfficialCandidates_VaultPinKeepsVaultIdentity(t *testing.T) {
 	if len(merged) != 1 {
 		t.Fatalf("merged = %+v", merged)
 	}
-	if merged[0].Source != AssetSourceVault || merged[0].Pin != "vault" {
-		t.Errorf("私仓 pin 不应被官方行改写：%+v", merged[0])
+	if merged[0].Source != AssetSourceOfficial || merged[0].Pin != types.RequiresLatest {
+		t.Errorf("已发布项目不应留在私仓 pin：%+v", merged[0])
 	}
 	if merged[0].Available != "v0.4.4" {
 		t.Errorf("Available = %q, want v0.4.4", merged[0].Available)
 	}
-	if merged[0].UpdateAvailable {
-		t.Error("私仓行没有版本概念，不该报「有更新」")
-	}
-	if !merged[0].VaultAvailable || !merged[0].OfficialAvailable {
-		t.Errorf("两边都有的行必须标出双来源，否则面板没有切回官方的入口：%+v", merged[0])
+	if !merged[0].UpdateAvailable {
+		t.Error("已订阅的已发布项目要露出可用版本")
 	}
 }
 
-// 还没订阅的同名项目按官方身份下发。默认私仓会锁死这一类项目：
-// 勾出来只能是 vault pin，而「更新」页只认官方 pin，于是永远更新不到。
+// 还没订阅的同名项目按官方身份下发。私仓里的同名目录不构成另一个安装来源。
 func TestMergeOfficialCandidates_UnsubscribedPrefersOfficial(t *testing.T) {
 	vault := []AssetBundleOption{{Name: "relkit", Source: AssetSourceVault, Model: "p"}}
 	official := []AssetBundleOption{{Name: "relkit", Source: AssetSourceOfficial, Available: "v0.4.9"}}
@@ -89,9 +87,6 @@ func TestMergeOfficialCandidates_UnsubscribedPrefersOfficial(t *testing.T) {
 	}
 	if got.Available != "v0.4.9" {
 		t.Errorf("Available = %q, want v0.4.9", got.Available)
-	}
-	if !got.VaultAvailable || !got.OfficialAvailable {
-		t.Errorf("双来源标记缺失：%+v", got)
 	}
 }
 
@@ -123,8 +118,7 @@ func TestMergeOfficialCandidates_AppendsUnknownProjects(t *testing.T) {
 	}
 }
 
-// 私仓 pin 的行仍是私仓身份，但注册表里的源仓和 Git 资产要挂上来。
-// 否则订阅页只剩密钥名单，看不出这个产品已经从产品仓发布。
+// 已发布项目即使 requires 还写着 vault，行也是官方身份，并带上注册表里的源仓和资产。
 func TestMergeOfficialCandidates_ShowsPublishedAssetsOnVaultRow(t *testing.T) {
 	vault := []AssetBundleOption{{
 		Name:        "woa",
@@ -144,8 +138,8 @@ func TestMergeOfficialCandidates_ShowsPublishedAssetsOnVaultRow(t *testing.T) {
 
 	merged := mergeOfficialCandidates(vault, official)
 	got := merged[0]
-	if got.Source != AssetSourceVault || got.Pin != "vault" {
-		t.Fatalf("私仓 pin 被改写：%+v", got)
+	if got.Source != AssetSourceOfficial || got.Pin != types.RequiresLatest {
+		t.Fatalf("已发布项目应改为官方 latest：%+v", got)
 	}
 	if got.OriginRepo != official[0].OriginRepo {
 		t.Fatalf("origin = %q", got.OriginRepo)
@@ -194,7 +188,7 @@ func TestMergeOfficialCandidates_IdentityProductClearsSecretsPlaceholder(t *test
 	if got.Description != "" {
 		t.Fatalf("description = %q", got.Description)
 	}
-	if got.OriginRepo != official[0].OriginRepo || got.Pin != "vault" || got.Source != AssetSourceVault {
+	if got.OriginRepo != official[0].OriginRepo || got.Pin != types.RequiresLatest || got.Source != AssetSourceOfficial {
 		t.Fatalf("identity merge = %+v", got)
 	}
 	if len(got.Members) != 1 || got.Members[0].Type != AssetMemberTypeSecret {

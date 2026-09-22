@@ -5,6 +5,8 @@ import {
   isStaleServiceError,
   pullResultDiagnosis,
   pullResultIssues,
+  repoLabel,
+  versionStatusLine,
 } from './utils'
 import type { PullResult } from './utils'
 
@@ -98,5 +100,24 @@ describe('pullResultDiagnosis', () => {
     expect(diagnosis.headline).toBe('')
     expect(diagnosis.skipped).toBe('未启用 bundle')
     expect(diagnosis.warnings).toEqual(['离线缓存已过期'])
+  })
+})
+
+describe('repoLabel', () => {
+  it('keeps owner and name from an https origin', () => {
+    expect(repoLabel('https://github.com/shichao402/DecPersonalDevKit.git')).toBe('shichao402/DecPersonalDevKit')
+  })
+})
+
+describe('versionStatusLine', () => {
+  it('writes one version when installed and available match', () => {
+    expect(versionStatusLine('v0.1.0+4', 'v0.1.0+4')).toBe('v0.1.0+4')
+  })
+
+  it('writes an arrow only when the versions differ', () => {
+    expect(versionStatusLine('v0.1.0+3', 'v0.1.0+4')).toBe('v0.1.0+3 → v0.1.0+4')
+    expect(versionStatusLine('', 'v0.1.0+4')).toBe('未安装 → v0.1.0+4')
+    expect(versionStatusLine('v0.1.0+3', '')).toBe('v0.1.0+3 → 不可用')
+    expect(versionStatusLine('', '')).toBe('—')
   })
 })

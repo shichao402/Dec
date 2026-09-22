@@ -72,6 +72,11 @@ func SetWorkspaceRequires(ctx context.Context, workspace Workspace, spec types.R
 	result.HomeProject = home
 
 	published := officialPublishedProjects(ctx, reporter)
+	folded := normalized.FoldPublishedVaultPins(published, home)
+	if !requiresSame(normalized, folded) {
+		emit(reporter, EventInfo, "requires.fold", "已发布项目改为从官方注册表安装："+strings.Join(changedRequireNames(normalized, folded), "、"), nil)
+	}
+	normalized = folded
 	for _, name := range sortedRequireNames(normalized) {
 		pin := normalized[name]
 		switch {
@@ -141,12 +146,20 @@ func SetWorkspaceRequires(ctx context.Context, workspace Workspace, spec types.R
 
 // ListSubscriptionCandidates 是订阅面板的唯一数据源（ADR 0029）：
 // 个人私仓项目与官方注册表已发布项目合成一张表，每行带来源与当前 pin。
+// 已发布项目上残留的 vault pin 会先收成 latest 再写回（ADR 0031）。
 func ListSubscriptionCandidates(ctx context.Context, workspace Workspace, reporter Reporter) (*AssetSelectionState, error) {
-	state, err := LoadWorkspaceAssetSelection(workspace, reporter)
+	cfg, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := loadWorkspaceBundleConfig(workspace)
+	folded, foldErr := persistFoldedRequires(ctx, workspace, cfg, reporter)
+	if foldErr != nil {
+		emit(reporter, EventWarn, "requires.fold", foldErr.Error(), nil)
+	}
+	if cfg != nil {
+		cfg.Requires = folded
+	}
+	state, err := LoadWorkspaceAssetSelection(workspace, reporter)
 	if err != nil {
 		return nil, err
 	}
@@ -157,19 +170,10 @@ func ListSubscriptionCandidates(ctx context.Context, workspace Workspace, report
 
 // mergeOfficialCandidates 把官方注册表行并入私仓行，同名项目只留一行。
 //
-// 合成后的行必须自洽：来源跟着 pin 走。官方 pin 的项目即便私仓里有同名目录，也按官方行下发，
-// 否则面板标成「私仓」，还会藏掉已装/可用版本与「有更新」，用户看不到该升级。
-// 显式 `vault` pin 是用户的选择，保持私仓身份，只补上远端可用版本作为参考。
-//
-// 还没订阅的同名项目按官方身份下发：私仓身份只在用户显式选了 vault pin 时才成立。
-// 反过来（默认私仓）会锁死一整类项目——注册表已发布、私仓里又有同名目录的项目
-// 只能勾出 `vault` pin，而「更新」页只认官方 pin，于是永远更新不到，且面板里
-// 没有任何入口能改。两边都有的行一律标上 VaultAvailable + OfficialAvailable，
-// 让面板把来源选择交回用户。
+// 已发布的项目只有官方这一个安装来源（ADR 0031）。私仓里的同名目录是控制面 stub，
+// 不是另一份可订阅正文。家项目从工作树创作，保持原行。
+// 残留的 vault pin 在这里收成 latest，避免面板把已发布项目标成私仓。
 func mergeOfficialCandidates(vault, official []AssetBundleOption) []AssetBundleOption {
-	for i := range vault {
-		vault[i].VaultAvailable = true
-	}
 	if len(official) == 0 {
 		return vault
 	}
@@ -180,11 +184,9 @@ func mergeOfficialCandidates(vault, official []AssetBundleOption) []AssetBundleO
 	for _, opt := range official {
 		i, ok := index[opt.Name]
 		if !ok {
-			opt.OfficialAvailable = true
 			vault = append(vault, opt)
 			continue
 		}
-		vault[i].OfficialAvailable = true
 		vault[i].Available = opt.Available
 		vault[i].Installed = opt.Installed
 		if vault[i].OriginRepo == "" {
@@ -196,18 +198,24 @@ func mergeOfficialCandidates(vault, official []AssetBundleOption) []AssetBundleO
 		if secretsOnlyPlaceholder(vault[i].Description) {
 			vault[i].Description = ""
 		}
-		// 家项目从工作树创作，永远不按官方行下发。
-		if vault[i].Home || types.IsVaultPin(vault[i].Pin) {
+		if vault[i].Home {
 			continue
 		}
 		vault[i].Source = AssetSourceOfficial
-		vault[i].UpdateAvailable = opt.UpdateAvailable
-		if opt.Pin == "" {
-			continue
+		if opt.Pin != "" {
+			vault[i].Pin = opt.Pin
+			vault[i].Enabled = true
+			vault[i].Required = true
+		} else if types.IsVaultPin(vault[i].Pin) {
+			vault[i].Pin = types.RequiresLatest
+			vault[i].Enabled = true
+			vault[i].Required = true
 		}
-		vault[i].Pin = opt.Pin
-		vault[i].Enabled = true
-		vault[i].Required = true
+		if vault[i].Pin != "" && vault[i].Available != "" {
+			vault[i].UpdateAvailable = vault[i].Installed == "" || vault[i].Installed != vault[i].Available
+		} else {
+			vault[i].UpdateAvailable = false
+		}
 	}
 	return vault
 }
@@ -217,6 +225,7 @@ func mergeOfficialCandidates(vault, official []AssetBundleOption) []AssetBundleO
 func ListOfficialCandidates(ctx context.Context, workspace Workspace, cfg *types.ProjectConfig) []AssetBundleOption {
 	requires, url := workspaceOfficialRequires(workspace, cfg)
 	published := officialPublishedVersions(ctx, url)
+	requires = requires.FoldPublishedVaultPins(publishedNameSet(published), homeProjectName(workspace, cfg))
 	snapshots := officialHeadSnapshots(ctx, url)
 	if len(published) == 0 && len(requires) == 0 {
 		return nil
@@ -460,4 +469,84 @@ func sortedRequireNames(spec types.RequiresSpec) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func homeProjectName(workspace Workspace, cfg *types.ProjectConfig) string {
+	if cfg == nil || workspace.EffectivePlane() != WorkspaceProject {
+		return ""
+	}
+	return strings.TrimSpace(cfg.ProjectName)
+}
+
+func publishedNameSet(versions map[string]string) map[string]struct{} {
+	if len(versions) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(versions))
+	for name := range versions {
+		out[name] = struct{}{}
+	}
+	return out
+}
+
+func requiresSame(a, b types.RequiresSpec) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for name, pin := range a {
+		if b[name] != pin {
+			return false
+		}
+	}
+	return true
+}
+
+func changedRequireNames(before, after types.RequiresSpec) []string {
+	names := make([]string, 0)
+	for name, pin := range before {
+		if after[name] != pin {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// persistFoldedRequires 把已发布项目上的 vault pin 收成 latest 并写回消费声明。
+// 连不上注册表时不改。写盘失败时仍返回收好的声明，调用方按它安装。
+func persistFoldedRequires(ctx context.Context, workspace Workspace, cfg *types.ProjectConfig, reporter Reporter) (types.RequiresSpec, error) {
+	raw, url := workspaceOfficialRequires(workspace, cfg)
+	folded := raw.FoldPublishedVaultPins(publishedNameSet(officialPublishedVersions(ctx, url)), homeProjectName(workspace, cfg))
+	if requiresSame(raw, folded) {
+		return folded, nil
+	}
+	if err := saveWorkspaceRequires(workspace, folded); err != nil {
+		return folded, err
+	}
+	emit(reporter, EventInfo, "requires.fold", "已发布项目改为从官方注册表安装："+strings.Join(changedRequireNames(raw, folded), "、"), nil)
+	return folded, nil
+}
+
+func saveWorkspaceRequires(workspace Workspace, spec types.RequiresSpec) error {
+	if workspace.EffectivePlane() != WorkspaceProject {
+		cfg, err := config.LoadGlobalConfig()
+		if err != nil {
+			return err
+		}
+		if cfg == nil {
+			cfg = &types.GlobalConfig{}
+		}
+		cfg.Requires = spec
+		return config.SaveGlobalConfig(cfg)
+	}
+	mgr := config.NewProjectConfigManager(workspace.Root)
+	cfg, err := mgr.LoadProjectConfig()
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		cfg = &types.ProjectConfig{}
+	}
+	cfg.Requires = spec
+	return mgr.SaveProjectConfig(cfg)
 }

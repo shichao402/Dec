@@ -31,8 +31,16 @@ func workspaceOfficialRequires(workspace Workspace, cfg *types.ProjectConfig) (t
 	return cfg.Requires, url
 }
 
+// resolvedRequires 是这次要执行的消费声明。已发布项目上的 vault pin 收成 latest，
+// 不写盘；写盘由 persistFoldedRequires 负责。
+func resolvedRequires(ctx context.Context, workspace Workspace, cfg *types.ProjectConfig) (types.RequiresSpec, string) {
+	raw, url := workspaceOfficialRequires(workspace, cfg)
+	published := publishedNameSet(officialPublishedVersions(ctx, url))
+	return raw.FoldPublishedVaultPins(published, homeProjectName(workspace, cfg)), url
+}
+
 func installOfficialRequires(ctx context.Context, workspace Workspace, cfg *types.ProjectConfig, reporter Reporter) ([]install.Resolved, error) {
-	req, url := workspaceOfficialRequires(workspace, cfg)
+	req, url := resolvedRequires(ctx, workspace, cfg)
 	req = req.Official()
 	if len(req) == 0 {
 		return nil, nil
@@ -80,7 +88,7 @@ func ListOfficialRequires(ctx context.Context, workspace Workspace) (*OfficialRe
 	if err != nil {
 		return nil, err
 	}
-	req, url := workspaceOfficialRequires(workspace, cfg)
+	req, url := resolvedRequires(ctx, workspace, cfg)
 	req = req.Official()
 	items, err := install.Status(ctx, install.Options{
 		CacheDir:    workspaceCacheDir(workspace),
@@ -115,7 +123,10 @@ func UpdateOfficialRequires(ctx context.Context, workspace Workspace, projects [
 	if err != nil {
 		return nil, err
 	}
-	all, url := workspaceOfficialRequires(workspace, cfg)
+	if _, foldErr := persistFoldedRequires(ctx, workspace, cfg, reporter); foldErr != nil {
+		emit(reporter, EventWarn, "requires.fold", foldErr.Error(), nil)
+	}
+	all, url := resolvedRequires(ctx, workspace, cfg)
 	all = all.Official()
 	selected := make(types.RequiresSpec)
 	for _, project := range projects {
@@ -249,8 +260,9 @@ func officialGitPushBlocked(cfg *types.ProjectConfig) string {
 	return ""
 }
 
-// filterOfficialVaultAssets 从可写 Git 资产里剔除官方 registry 订阅（latest/v*）：
-// 那些由提供方 CI 发布，禁止本机 push；私仓 vault pin 必须保留。
+// filterOfficialVaultAssets 从可写 Git 资产里剔除官方 registry 订阅（latest/v*）。
+// req 必须已经收过已发布项目的 vault pin；那些由提供方 CI 发布，禁止本机 push。
+// 注册表未发布的个人项目仍是 vault pin，保留。
 func filterOfficialVaultAssets(req types.RequiresSpec, assets []types.TypedAssetRef) []types.TypedAssetRef {
 	official := req.Official()
 	if len(official) == 0 {

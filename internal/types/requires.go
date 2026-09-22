@@ -11,6 +11,7 @@ import (
 const RequiresLatest = "latest"
 
 // RequiresVault 是个人私仓 pin：私仓是单分支可变仓，没有版本，只能跟随 HEAD（ADR 0029）。
+// 只用于注册表未发布的个人项目。已发布项目不能再 pin 成 vault（ADR 0031）。
 const RequiresVault = "vault"
 
 // RequiresSpec 是唯一的消费声明：提供方项目名 → pin。
@@ -59,6 +60,32 @@ func (r RequiresSpec) Official() RequiresSpec {
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// FoldPublishedVaultPins 把已发布项目上残留的 vault pin 收成 latest。
+// 家项目保持原样：它从工作树创作，不进注册表订阅。
+// published 为空表示这次没能确认注册表，调用方不得猜测，原样返回。
+func (r RequiresSpec) FoldPublishedVaultPins(published map[string]struct{}, home string) RequiresSpec {
+	if len(r) == 0 || len(published) == 0 {
+		return r
+	}
+	home = strings.TrimSpace(home)
+	out := make(RequiresSpec, len(r))
+	changed := false
+	for name, pin := range r {
+		if name != home && IsVaultPin(pin) {
+			if _, ok := published[name]; ok {
+				out[name] = RequiresLatest
+				changed = true
+				continue
+			}
+		}
+		out[name] = pin
+	}
+	if !changed {
+		return r
 	}
 	return out
 }

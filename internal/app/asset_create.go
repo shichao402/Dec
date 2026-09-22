@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -93,7 +94,7 @@ func writeGitAsset(workspace Workspace, project string, vis types.AssetVisibilit
 	if workspace.EffectivePlane() != WorkspaceGlobal && workspace.Root != "" {
 		cfg, err := config.NewProjectConfigManager(workspace.Root).LoadProjectConfig()
 		if err == nil && cfg != nil {
-			req, _ := workspaceOfficialRequires(workspace, cfg)
+			req, _ := resolvedRequires(context.Background(), workspace, cfg)
 			if req.Has(project) && !types.IsVaultPin(req[project]) {
 				dir := contribute.DraftDir(workspace.Root, project+"-"+name)
 				if err := os.MkdirAll(dir, 0o755); err != nil {
