@@ -84,6 +84,30 @@ func TestWrapMCPServerWithExecForPlane_UserPlaneResolvesWorkspacePlaceholder(t *
 	}
 }
 
+func TestWrapMCPServerWithExecForPlane_URLOnlyServerNotWrapped(t *testing.T) {
+	// 远端 HTTP MCP（如 gongfeng）只提供 url，无本地 command。
+	// 不应被包成 dec-exec，否则会生成 `dec-exec ... -- ""` 畸形配置。
+	headers := map[string]string{"Authorization": "<tai_token>"}
+	cmd, args, env := WrapMCPServerWithExecForPlane(
+		"/project",
+		"gongfeng",
+		secrets.SyncPlaneProject,
+		"dec-exec",
+		"",
+		nil,
+		headers,
+	)
+	if cmd != "" {
+		t.Fatalf("url 型 MCP 不应改写 command: %q", cmd)
+	}
+	if len(args) != 0 {
+		t.Fatalf("url 型 MCP 不应追加 dec-exec 参数: %#v", args)
+	}
+	if env["Authorization"] != "<tai_token>" {
+		t.Fatalf("url 型 MCP 的 header 应原样保留: %#v", env)
+	}
+}
+
 func TestBuildExecEnviron_LoadsBundleEnvOnly(t *testing.T) {
 	root := t.TempDir()
 	bundleTarget, err := secrets.NewPSyncTarget("vikunja", secrets.SyncPlaneProject)

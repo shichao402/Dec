@@ -95,6 +95,11 @@ func WrapMCPServerWithExec(projectRoot, bundle, decBin string, command string, a
 // 指向当前打开的项目而不是 ~/.dec，会让 bundle 产物路径解析到不存在的位置；因此该平面下
 // 占位符一律就地展开成 home 绝对路径。
 func WrapMCPServerWithExecForPlane(projectRoot, bundle string, plane secrets.SyncPlane, decBin string, command string, args []string, env map[string]string) (string, []string, map[string]string) {
+	// 远端 HTTP MCP（只提供 url，无本地 command）不需要 spawn 子进程，dec-exec 无从注入。
+	// 直接原样返回，避免生成 `dec-exec ... -- ""` 这类畸形配置。
+	if strings.TrimSpace(command) == "" {
+		return command, args, env
+	}
 	if strings.TrimSpace(decBin) == "" {
 		decBin = "dec-exec"
 	}
