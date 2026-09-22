@@ -100,6 +100,35 @@ func readConsoleMetadata() (*consoleMetadata, error) {
 	return &meta, nil
 }
 
+// consoleMetadataStale 判定 console.json 是否可能是「上一任 Console」的残留：
+// 记录里的 PID 已经不在运行。
+//
+// Console 退出不一定清理 console.json（崩溃 / 强杀），于是每次重读都能读到
+// 合法的 endpoint+token，却连到一个无人监听的旧端口。用它可以在调用失败后
+// 把「Console 没开」如实告诉调用方，而不是抛回一个指向旧端口的 refused。
+//
+// 本函数只用于「调用已经失败之后」的诊断，绝不用来阻断调用：PID 会被系统
+// 复用，PID 活着也不代表 endpoint 可用；反过来，某些环境下也读不到真实 PID。
+//
+// PID<=1 视为「无从判断」（含测试 fixture 与未写入 PID 的老文件），不判 stale。
+func consoleMetadataStale(meta *consoleMetadata) bool {
+	if meta == nil || meta.PID <= 1 {
+		return false
+	}
+	_, alive := processIdentity(meta.PID)
+	return !alive
+}
+
+// staleEndpointError 描述一份 PID 已死的 console.json。
+type staleEndpointError struct {
+	PID      int
+	Endpoint string
+}
+
+func (e *staleEndpointError) Error() string {
+	return fmt.Sprintf("Dec Console 未运行：console.json 记录的进程 %d（%s）已退出，请启动 Dec Console 后重试", e.PID, e.Endpoint)
+}
+
 func WaitForGateway(ctx context.Context, clientID string) (Gateway, error) {
 	deadline := time.Now().Add(app.MCPSessionUnlockTimeout)
 	if until, ok := ctx.Deadline(); ok && until.Before(deadline) {
@@ -253,7 +282,17 @@ func (g *refreshingGateway) withInner(ctx context.Context, call func(*httpGatewa
 	if refreshErr := g.ensure(true); refreshErr != nil {
 		return err
 	}
-	return call(g.current())
+	retryErr := call(g.current())
+	if retryErr == nil {
+		return nil
+	}
+	// 两次都失败，且记录里的 Console 进程确实已不在：说明不是端口变了，
+	// 而是 Console 压根没开、console.json 是上一任的残留。把这点说清楚，
+	// 免得调用方对着一个 refused 的旧端口猜原因。
+	if meta, metaErr := readConsoleMetadata(); metaErr == nil && consoleMetadataStale(meta) {
+		return &staleEndpointError{PID: meta.PID, Endpoint: meta.Endpoint}
+	}
+	return retryErr
 }
 
 func (g *refreshingGateway) Hello(ctx context.Context) (*Hello, error) {

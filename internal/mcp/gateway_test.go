@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -230,5 +231,106 @@ func TestShouldRefreshGateway(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("%q -> %v, want %v", tc.err, got, tc.want)
 		}
+	}
+}
+
+func TestConsoleMetadataStale(t *testing.T) {
+	// PID<=1 无从判断，一律不判 stale（兼容未写 PID 的老文件与测试 fixture）。
+	for _, pid := range []int{0, 1, -1} {
+		if consoleMetadataStale(&consoleMetadata{Version: 1, Endpoint: "127.0.0.1:1", Token: "t", PID: pid}) {
+			t.Fatalf("PID=%d 不应判 stale", pid)
+		}
+	}
+	if consoleMetadataStale(nil) {
+		t.Fatal("nil 不应判 stale")
+	}
+	// 一个几乎不可能存在的 PID 必须判为残留。
+	if !consoleMetadataStale(&consoleMetadata{Version: 1, Endpoint: "127.0.0.1:1", Token: "t", PID: 0x7FFF_FFFE}) {
+		t.Fatal("已死 PID 应判 stale")
+	}
+}
+
+// TestWithInnerReportsStaleConsoleWhenProcessGone 锁定：Console 退出后残留的
+// console.json 会让两次调用都 refused；此时应当如实报「Console 未运行」，
+// 而不是抛回一个指向旧端口的 connection refused。
+//
+// 注意：stale 只在「调用确实失败」之后才判定，绝不用来阻断调用——
+// PID 会被系统复用，拿到一个活着的 PID 并不等于 endpoint 可用。
+func TestWithInnerReportsStaleConsoleWhenProcessGone(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
+	path, err := ConsoleMetadataPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// 指向一个确定无人监听的端口，并配一个已死的 PID。
+	meta, _ := json.Marshal(consoleMetadata{
+		Version:  1,
+		Endpoint: "127.0.0.1:1",
+		Token:    "tok",
+		PID:      0x7FFF_FFFE,
+	})
+	if err := os.WriteFile(path, meta, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := newRefreshingGateway("mcp-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = g.withInner(context.Background(), func(*httpGateway) error {
+		return fmt.Errorf("connectex: No connection could be made because the target machine actively refused it")
+	})
+	if err == nil {
+		t.Fatal("调用失败且 Console 进程已死时必须报错")
+	}
+	var stale *staleEndpointError
+	if !errors.As(err, &stale) {
+		t.Fatalf("want *staleEndpointError, got %T: %v", err, stale)
+	}
+	if !strings.Contains(err.Error(), "Dec Console 未运行") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// TestWithInnerKeepsOriginalErrorWhenProcessAlive 锁定：PID 仍活着时不得把
+// 真实失败改写为 stale —— 那时问题在别处（token 轮换、路径变更等），
+// 掩盖原始错误会让排查更难。
+func TestWithInnerKeepsOriginalErrorWhenProcessAlive(t *testing.T) {
+	t.Setenv("DEC_HOME", t.TempDir())
+	path, err := ConsoleMetadataPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	currentPID := os.Getpid()
+	meta, _ := json.Marshal(consoleMetadata{
+		Version:  1,
+		Endpoint: "127.0.0.1:1",
+		Token:    "tok",
+		PID:      currentPID,
+	})
+	if err := os.WriteFile(path, meta, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := newRefreshingGateway("mcp-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "connectex: refused"
+	err = g.withInner(context.Background(), func(*httpGateway) error {
+		return fmt.Errorf("%s", want)
+	})
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("PID 存活时应保留原始错误，got %v", err)
+	}
+	var stale *staleEndpointError
+	if errors.As(err, &stale) {
+		t.Fatalf("PID 存活时不得改写为 stale: %v", err)
 	}
 }

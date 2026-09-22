@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.13.82"
+version = "1.13.83"
 description = "Dec 管理客户端"
 authors = ["Dec"]
 edition = "2021"
