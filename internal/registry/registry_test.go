@@ -80,6 +80,32 @@ func TestCompareVersionSemver(t *testing.T) {
 	}
 }
 
+func TestCompareVersionBuildRevision(t *testing.T) {
+	// 字典序下 "+10" < "+9"；必须按修订号数值比较。
+	if compareVersion("v0.1.0+10", "v0.1.0+9") <= 0 {
+		t.Fatal("v0.1.0+10 should be newer than v0.1.0+9")
+	}
+	if compareVersion("v0.1.0+4", "v0.1.0+4") != 0 {
+		t.Fatal("equal +N versions should compare equal")
+	}
+	if compareVersion("v0.1.0+4", "v0.1.0") <= 0 {
+		t.Fatal("v0.1.0+4 should be newer than bare v0.1.0")
+	}
+	if compareVersion("v0.2.0", "v0.1.0+99") <= 0 {
+		t.Fatal("higher semver should beat any +N on older base")
+	}
+}
+
+func TestLatestPrefersNumericBuildRevision(t *testing.T) {
+	got, err := LatestVersion("p", []string{"v0.1.0", "v0.1.0+2", "v0.1.0+9", "v0.1.0+10", "v0.1.0+4"}, Yanked{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "v0.1.0+10" {
+		t.Fatalf("got %s, want v0.1.0+10", got)
+	}
+}
+
 func TestLatestAllYanked(t *testing.T) {
 	y := Yanked{"relkit": {"v0.3.24"}}
 	if _, err := LatestVersion("relkit", []string{"v0.3.24"}, y); err == nil {

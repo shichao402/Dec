@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/shichao402/Dec/internal/types"
@@ -121,7 +122,7 @@ func (y Yanked) Remove(project, version string) {
 	y[project] = out
 }
 
-// LatestVersion 在 versions 里挑最新未 yank 的（semver 数值降序；tag 形如 v0.4.10）。
+// LatestVersion 在 versions 里挑最新未 yank 的（数值降序；支持 v0.4.10 与 v0.1.0+4）。
 func LatestVersion(project string, versions []string, yanked Yanked) (string, error) {
 	var ok []string
 	for _, v := range versions {
@@ -137,7 +138,8 @@ func LatestVersion(project string, versions []string, yanked Yanked) (string, er
 	return ok[0], nil
 }
 
-// compareVersion 按 semver 数值比较（可选 v 前缀）。字典序会把 v0.4.10 排到 v0.4.9 前面。
+// compareVersion 按数值比较（可选 v 前缀；可选 +N 修订号）。
+// 注册表发版用 v0.1.0+4 这种形式：同一 semver 上 +N 递增。字典序会把 +10 排到 +9 后面。
 // 返回 >0 表示 a 更新，<0 表示 b 更新，0 表示相等。解析失败时回退到字符串比较。
 func compareVersion(a, b string) int {
 	as, aOK := versionParts(a)
@@ -171,15 +173,28 @@ func versionParts(v string) ([]int, bool) {
 	v = strings.TrimSpace(v)
 	v = strings.TrimPrefix(v, "v")
 	v = strings.TrimPrefix(v, "V")
-	if v == "" || strings.ContainsAny(v, "-+") {
+	if v == "" || strings.Contains(v, "-") {
+		return nil, false
+	}
+	build := 0
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		meta := v[i+1:]
+		v = v[:i]
+		if meta == "" {
+			return nil, false
+		}
+		n, err := strconv.Atoi(meta)
+		if err != nil || n < 0 {
+			return nil, false
+		}
+		build = n
+	}
+	if v == "" {
 		return nil, false
 	}
 	chunks := strings.Split(v, ".")
-	if len(chunks) == 0 {
-		return nil, false
-	}
-	out := make([]int, len(chunks))
-	for i, c := range chunks {
+	out := make([]int, 0, len(chunks)+1)
+	for _, c := range chunks {
 		if c == "" {
 			return nil, false
 		}
@@ -190,8 +205,10 @@ func versionParts(v string) ([]int, bool) {
 			}
 			n = n*10 + int(r-'0')
 		}
-		out[i] = n
+		out = append(out, n)
 	}
+	// 无 + 视为 +0，使 v0.1.0 < v0.1.0+1。
+	out = append(out, build)
 	return out, true
 }
 

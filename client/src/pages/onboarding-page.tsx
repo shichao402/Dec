@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, CheckCircle2, Search } from 'lucide-react'
+import { Check, CheckCircle2, LoaderCircle, Search } from 'lucide-react'
 import { ActionFeedback } from '@/components/action-feedback'
 import { Page, PageHeader, PageScroll } from '@/components/shell/page'
 import { Button } from '@/components/ui/button'
@@ -34,8 +34,20 @@ export function OnboardingPage(props: {
   const [assets, setAssets] = useState<AssetSelection | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [query, setQuery] = useState('')
+  // 完成页两个出口都会先刷设备状态；外层已有 action，这里只做按钮级反馈，避免再套一层 registry。
+  const [finishing, setFinishing] = useState<'enter' | 'pull' | null>(null)
   const saveDeviceSpec = actionSpec('onboarding:settings', '验证并保存设备配置', props.deviceId, [resource.global], 'write', '设备配置已保存')
   const saveAssetsSpec = actionSpec('onboarding:assets', '保存 Global 资产选择', props.deviceId, [resource.global], 'write', 'Global 资产选择已保存')
+
+  const runFinish = async (kind: 'enter' | 'pull', task: () => void | Promise<void>) => {
+    if (finishing) return
+    setFinishing(kind)
+    try {
+      await task()
+    } finally {
+      setFinishing(null)
+    }
+  }
 
   const saveDevice = async () => {
     const saved = await invokeTyped<{ RepoAuthRequired?: boolean; RepoHost?: string; ConnectError?: string }>(
@@ -202,8 +214,21 @@ export function OnboardingPage(props: {
                     现在可以直接拉取 Global 资产落地到用户环境，也可以先进入控制台接管项目目录。
                   </p>
                   <div className="flex justify-center gap-2 pt-1">
-                    <Button onClick={props.onPull}>拉取 Global 资产</Button>
-                    <Button variant="outline" onClick={props.onComplete}>进入控制台</Button>
+                    <Button
+                      disabled={finishing !== null}
+                      onClick={() => void runFinish('pull', props.onPull)}
+                    >
+                      {finishing === 'pull' && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                      {finishing === 'pull' ? '拉取中…' : '拉取 Global 资产'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={finishing !== null}
+                      onClick={() => void runFinish('enter', props.onComplete)}
+                    >
+                      {finishing === 'enter' && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                      {finishing === 'enter' ? '进入中…' : '进入控制台'}
+                    </Button>
                   </div>
                 </PanelBody>
               </Panel>
