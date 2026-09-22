@@ -209,7 +209,7 @@ export const cases: Case[] = [
     open: async (page) => {
       await connect(page)
       await nav(page, '项目')
-      await page.getByRole('button', { name: '管理目录' }).click()
+      await page.getByRole('button', { name: '导入目录' }).click()
       await expect(page.getByText('选择设备上的目录')).toBeVisible()
     },
   },
@@ -219,7 +219,7 @@ export const cases: Case[] = [
     open: async (page) => {
       await connect(page)
       await nav(page, '项目')
-      await page.getByRole('button', { name: '管理目录' }).click()
+      await page.getByRole('button', { name: '导入目录' }).click()
       await page.getByRole('button', { name: '扫描此范围' }).click()
       await page.getByRole('button', { name: '全选' }).click()
       // 勾完一次导入：批量按钮要带上选中数，行内不再需要逐个点。
@@ -232,7 +232,7 @@ export const cases: Case[] = [
     open: async (page) => {
       await connect(page)
       await nav(page, '项目')
-      await page.getByRole('button', { name: '管理目录' }).click()
+      await page.getByRole('button', { name: '导入目录' }).click()
       await page.getByRole('button', { name: '扫描此范围' }).click()
       await page.getByRole('button', { name: '全选' }).click()
       await expect(page.getByRole('button', { name: '导入选中的 2 个' })).toBeEnabled()
