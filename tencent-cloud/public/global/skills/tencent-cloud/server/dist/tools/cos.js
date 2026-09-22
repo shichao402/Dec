@@ -1,0 +1,264 @@
+import { z } from "zod";
+import { createCosClient } from "../clients.js";
+import { cosBucketOrThrow, promisifyCos } from "../lib.js";
+import { rejectBlocked } from "../sensitive.js";
+import { textResult } from "./common.js";
+export function registerCosTools(server, ctx) {
+    server.registerTool("cos_list_objects", {
+        description: "列出 COS 存储桶对象（getBucket）",
+        inputSchema: {
+            bucket: z.string().optional(),
+            region: z.string().optional(),
+            prefix: z.string().optional(),
+            maxKeys: z.number().int().min(1).max(1000).optional()
+        }
+    }, async ({ bucket, region, prefix, maxKeys }) => {
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const result = await promisifyCos(cos, "getBucket", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion,
+            Prefix: prefix,
+            MaxKeys: maxKeys ?? 100
+        });
+        return textResult(result);
+    });
+    server.registerTool("cos_upload_object", {
+        description: "上传文本内容到 COS（putObject）",
+        inputSchema: {
+            key: z.string(),
+            body: z.string(),
+            bucket: z.string().optional(),
+            region: z.string().optional(),
+            contentType: z.string().optional()
+        }
+    }, async ({ key, body, bucket, region, contentType }) => {
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const result = await promisifyCos(cos, "putObject", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion,
+            Key: key,
+            Body: body,
+            ContentType: contentType ?? "text/plain; charset=utf-8"
+        });
+        return textResult(result);
+    });
+    server.registerTool("cos_download_object", {
+        description: "下载 COS 对象为文本（getObject）；建议小于 4MB，大二进制请用预签名 URL",
+        inputSchema: {
+            key: z.string(),
+            bucket: z.string().optional(),
+            region: z.string().optional()
+        }
+    }, async ({ key, bucket, region }) => {
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const result = (await promisifyCos(cos, "getObject", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion,
+            Key: key
+        }));
+        const body = result.Body;
+        const text = body instanceof Buffer ? body.toString("utf8") : typeof body === "string" ? body : "";
+        return textResult({ ...result, Body: text, bodyLength: text.length });
+    });
+    server.registerTool("cos_head_object", {
+        description: "查询对象元数据（headObject）",
+        inputSchema: {
+            key: z.string(),
+            bucket: z.string().optional(),
+            region: z.string().optional()
+        }
+    }, async ({ key, bucket, region }) => {
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const result = await promisifyCos(cos, "headObject", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion,
+            Key: key
+        });
+        return textResult(result);
+    });
+    server.registerTool("cos_delete_object", {
+        description: "删除单个 COS 对象，需 confirm=true",
+        inputSchema: {
+            key: z.string(),
+            confirm: z.boolean().describe("必须为 true 才执行删除"),
+            bucket: z.string().optional(),
+            region: z.string().optional()
+        }
+    }, async ({ key, confirm, bucket, region }) => {
+        if (!confirm) {
+            return textResult(rejectBlocked("cos", "delete_object", "删除对象需显式设置 confirm=true"));
+        }
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const result = await promisifyCos(cos, "deleteObject", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion,
+            Key: key
+        });
+        return textResult(result);
+    });
+    server.registerTool("cos_get_bucket_info", {
+        description: "查询存储桶基本信息（headBucket）",
+        inputSchema: {
+            bucket: z.string().optional(),
+            region: z.string().optional()
+        }
+    }, async ({ bucket, region }) => {
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const result = await promisifyCos(cos, "headBucket", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion
+        });
+        return textResult(result);
+    });
+    server.registerTool("cos_get_bucket_cors", {
+        description: "获取存储桶 CORS 配置",
+        inputSchema: {
+            bucket: z.string().optional(),
+            region: z.string().optional()
+        }
+    }, async ({ bucket, region }) => {
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const result = await promisifyCos(cos, "getBucketCors", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion
+        });
+        return textResult(result);
+    });
+    server.registerTool("cos_put_bucket_cors", {
+        description: "设置存储桶 CORS 配置（CORSRules 为 JSON 数组字符串）",
+        inputSchema: {
+            corsRulesJson: z
+                .string()
+                .describe('CORS ?? JSON?? [{"AllowedOrigin":["*"],"AllowedMethod":["GET"],"AllowedHeader":["*"],"ExposeHeader":[],"MaxAgeSeconds":600}]'),
+            bucket: z.string().optional(),
+            region: z.string().optional()
+        }
+    }, async ({ corsRulesJson, bucket, region }) => {
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const CORSRules = JSON.parse(corsRulesJson);
+        const result = await promisifyCos(cos, "putBucketCors", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion,
+            CORSConfiguration: { CORSRules }
+        });
+        return textResult(result);
+    });
+    server.registerTool("cos_get_bucket_policy", {
+        description: "获取存储桶 Policy",
+        inputSchema: {
+            bucket: z.string().optional(),
+            region: z.string().optional()
+        }
+    }, async ({ bucket, region }) => {
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const result = await promisifyCos(cos, "getBucketPolicy", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion
+        });
+        return textResult(result);
+    });
+    server.registerTool("cos_put_bucket_policy", {
+        description: "设置存储桶 Policy（policyJson 为 JSON 字符串）",
+        inputSchema: {
+            policyJson: z.string().describe("Bucket Policy JSON 字符串"),
+            bucket: z.string().optional(),
+            region: z.string().optional()
+        }
+    }, async ({ policyJson, bucket, region }) => {
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        JSON.parse(policyJson);
+        const result = await promisifyCos(cos, "putBucketPolicy", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion,
+            Policy: policyJson
+        });
+        return textResult(result);
+    });
+    server.registerTool("cos_get_bucket_domain", {
+        description: "查询存储桶自定义源站域名（getBucketDomain）",
+        inputSchema: {
+            bucket: z.string().optional(),
+            region: z.string().optional()
+        }
+    }, async ({ bucket, region }) => {
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const result = await promisifyCos(cos, "getBucketDomain", {
+            Bucket: cosBucketOrThrow(creds, bucket),
+            Region: region ?? creds.cosRegion
+        });
+        return textResult(result);
+    });
+    server.registerTool("cos_put_bucket_domain", {
+        description: "绑定自定义源站域名（get 后合并再 putBucketDomain）。Type 固定 REST，避免把下载桶改成静态网站源站。需 confirm=true",
+        inputSchema: {
+            domain: z.string().describe("完整自定义域名，如 raw.firoyang.com"),
+            confirm: z.boolean().describe("必须为 true 才执行写入"),
+            status: z.enum(["ENABLED", "DISABLED"]).optional(),
+            type: z.enum(["REST", "WEBSITE", "ACCELERATE"]).optional(),
+            forcedReplacement: z.boolean().optional().describe("域名已被其他桶占用时强制切换"),
+            bucket: z.string().optional(),
+            region: z.string().optional()
+        }
+    }, async ({ domain, confirm, status, type, forcedReplacement, bucket, region }) => {
+        if (!confirm) {
+            return textResult(rejectBlocked("cos", "put_bucket_domain", "绑定自定义域名需显式设置 confirm=true"));
+        }
+        const name = domain.trim().toLowerCase();
+        if (!name || name.includes("/") || name.includes(" ")) {
+            throw new Error("domain 必须是完整主机名，不能带路径");
+        }
+        const domainType = type ?? "REST";
+        if (domainType === "WEBSITE") {
+            throw new Error("拒绝 Type=WEBSITE：会把下载桶改成静态网站源站，和 Range / .pb 缠在一起");
+        }
+        const creds = ctx.getCredentials();
+        const cos = createCosClient(creds);
+        const bucketName = cosBucketOrThrow(creds, bucket);
+        const cosRegion = region ?? creds.cosRegion;
+        let existing = {};
+        try {
+            existing = (await promisifyCos(cos, "getBucketDomain", {
+                Bucket: bucketName,
+                Region: cosRegion
+            }));
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!/NoSuchWebsiteConfiguration|NoSuchDomain|404|not exist/i.test(message)) {
+                throw error;
+            }
+        }
+        const rules = [...(existing.DomainRule ?? [])];
+        const found = rules.findIndex((rule) => (rule.Name ?? "").toLowerCase() === name);
+        const next = {
+            Status: status ?? "ENABLED",
+            Name: name,
+            Type: domainType,
+            ...(forcedReplacement ? { ForcedReplacement: "CNAME" } : {})
+        };
+        if (found >= 0) {
+            rules[found] = { ...rules[found], ...next };
+        }
+        else {
+            rules.push(next);
+        }
+        const result = await promisifyCos(cos, "putBucketDomain", {
+            Bucket: bucketName,
+            Region: cosRegion,
+            DomainRule: rules
+        });
+        return textResult({ put: result, DomainRule: rules });
+    });
+}
+//# sourceMappingURL=cos.js.map

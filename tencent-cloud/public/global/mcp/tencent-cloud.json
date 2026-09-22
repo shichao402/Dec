@@ -1,0 +1,4 @@
+{
+  "command": "node",
+  "args": ["${workspaceFolder}/.dec/cache/tencent-cloud/skills/tencent-cloud/server/run.mjs"]
+}
