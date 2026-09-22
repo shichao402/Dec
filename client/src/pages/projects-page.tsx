@@ -115,7 +115,7 @@ export function ProjectsPage(props: {
             </Button>
             <Button onClick={() => setPicker((value) => !value)}>
               <FolderSearch className="size-4" />
-              {picker ? '收起目录选择' : '接管目录'}
+              {picker ? '收起目录选择' : '管理目录'}
             </Button>
           </>
         }
@@ -175,10 +175,10 @@ export function ProjectsPage(props: {
                   icon={<FolderSearch className="size-5" />}
                   text={props.projects.length === 0 ? '这台设备还没有受管项目' : '没有匹配的项目'}
                   hint={props.projects.length === 0
-                    ? '用「接管目录」选择设备上的项目路径，或先扫描一个范围找出已有 Dec 项目。'
+                    ? '用「管理目录」选择设备上的项目路径，或先扫描一个范围找出已有 Dec 项目。'
                     : '换个关键词，或清空过滤条件。'}
                   action={props.projects.length === 0
-                    ? <Button size="sm" onClick={() => setPicker(true)}>接管目录</Button>
+                    ? <Button size="sm" onClick={() => setPicker(true)}>管理目录</Button>
                     : <Button size="sm" variant="ghost" onClick={() => setQuery('')}>清空过滤</Button>}
                 />
               ) : (
