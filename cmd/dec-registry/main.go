@@ -35,7 +35,9 @@ func publishCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("published %s commit=%s idempotent=%v\n", r.Tag, r.Commit, r.Idempotent)
+			for _, product := range r.Products {
+				fmt.Printf("published %s commit=%s idempotent=%v\n", product.Tag, product.Commit, product.Idempotent)
+			}
 			return nil
 		},
 	}

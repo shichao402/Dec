@@ -177,6 +177,146 @@ func pathContains(parent, child string) bool {
 	return child != parent && strings.HasPrefix(child, parent+"/")
 }
 
+// AuthorProduct 是发布用的一个产品。Provides 的 source 已换成相对仓根的路径，
+// 可以直接交给快照复制。
+type AuthorProduct struct {
+	Name     string
+	Root     string
+	Provides map[string]types.ProjectProvide
+}
+
+// AuthorProducts 返回这个仓要发布的产品。
+// 写了 products 时用那份声明；只有 project_name 与 provides_root 时折成一项，
+// 不改写配置文件。
+func AuthorProducts(cfg *types.ProjectConfig) ([]AuthorProduct, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("项目配置不能为空")
+	}
+	if len(cfg.Products) > 0 {
+		products, err := NormalizeDeclaredProducts(cfg.Products)
+		if err != nil {
+			return nil, err
+		}
+		if err := rejectMixedAuthor(cfg); err != nil {
+			return nil, err
+		}
+		names := sortedDeclaredProductNames(products)
+		out := make([]AuthorProduct, 0, len(names))
+		for _, name := range names {
+			item := products[name]
+			provides := make(map[string]types.ProjectProvide, len(item.Provides))
+			for key, provide := range item.Provides {
+				if item.Root != "" {
+					provide.Source = path.Join(item.Root, provide.Source)
+				}
+				provides[key] = provide
+			}
+			out = append(out, AuthorProduct{Name: name, Root: item.Root, Provides: provides})
+		}
+		return out, nil
+	}
+	name := strings.TrimSpace(cfg.ProjectName)
+	if !types.IsValidProjectName(name) {
+		return nil, fmt.Errorf("项目配置缺少合法 project_name")
+	}
+	return []AuthorProduct{{
+		Name:     name,
+		Root:     cfg.ProvidesRoot,
+		Provides: cfg.Provides,
+	}}, nil
+}
+
+// NormalizeDeclaredProducts 校验 products：产品名、互不重叠的作者目录，
+// 以及相对该目录的 provides。
+func NormalizeDeclaredProducts(in map[string]types.ProductDecl) (map[string]types.ProductDecl, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	names := sortedDeclaredProductNames(in)
+	roots := make([]string, 0, len(names))
+	out := make(map[string]types.ProductDecl, len(names))
+	for _, name := range names {
+		if !types.IsValidProjectName(name) {
+			return nil, fmt.Errorf("products 键 %q 不是合法产品名（小写 kebab-case）", name)
+		}
+		root, err := NormalizeProvidesRoot(in[name].Root)
+		if err != nil {
+			return nil, fmt.Errorf("products.%s.root: %w", name, err)
+		}
+		for _, previous := range roots {
+			if rootsOverlap(previous, root) {
+				return nil, fmt.Errorf("products.%s.root %q 与另一产品的作者目录重叠", name, displayRoot(root))
+			}
+		}
+		roots = append(roots, root)
+		provides, err := NormalizeProjectProvides(name, "", in[name].Provides)
+		if err != nil {
+			return nil, fmt.Errorf("products.%s: %w", name, err)
+		}
+		out[name] = types.ProductDecl{Root: root, Provides: provides}
+	}
+	return out, nil
+}
+
+func rejectMixedAuthor(cfg *types.ProjectConfig) error {
+	if strings.TrimSpace(cfg.ProjectName) != "" || strings.TrimSpace(cfg.ProvidesRoot) != "" || len(cfg.Provides) > 0 {
+		return fmt.Errorf("products 与 project_name、provides_root、provides 不能同时作为作者声明")
+	}
+	return nil
+}
+
+func sortedDeclaredProductNames(in map[string]types.ProductDecl) []string {
+	names := make([]string, 0, len(in))
+	for name := range in {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func rootsOverlap(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if a == "" || b == "" {
+		return true
+	}
+	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
+func displayRoot(root string) string {
+	if root == "" {
+		return "."
+	}
+	return root
+}
+
+// normalizeAuthorConfig 规范化作者声明。多产品仓不套用单产品的 DecAssets 默认值。
+func normalizeAuthorConfig(cfg *types.ProjectConfig) error {
+	if len(cfg.Products) > 0 {
+		if err := rejectMixedAuthor(cfg); err != nil {
+			return err
+		}
+		products, err := NormalizeDeclaredProducts(cfg.Products)
+		if err != nil {
+			return err
+		}
+		cfg.Products = products
+		return nil
+	}
+	providesRoot, err := ResolveProvidesRoot(cfg.ProvidesRoot, cfg.Provides)
+	if err != nil {
+		return fmt.Errorf("校验 provides_root 失败: %w", err)
+	}
+	cfg.ProvidesRoot = providesRoot
+	provides, err := NormalizeProjectProvides(cfg.ProjectName, providesRoot, cfg.Provides)
+	if err != nil {
+		return fmt.Errorf("校验 provides 失败: %w", err)
+	}
+	cfg.Provides = provides
+	return nil
+}
+
 // ProjectProvideTarget 返回资产的规范目标。公开资产是 vault 相对路径；
 // secret 是 Bitwarden 逻辑地址，绝不对应 Git 文件。
 func ProjectProvideTarget(projectName string, item types.ProjectProvide) (string, error) {

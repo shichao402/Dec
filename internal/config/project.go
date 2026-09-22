@@ -195,18 +195,12 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 	}
 	normalized.IDEs, _ = stripRemovedBuiltInIDEs(config.IDEs)
 	config.IDEs = append([]string(nil), normalized.IDEs...)
-	providesRoot, err := ResolveProvidesRoot(normalized.ProvidesRoot, normalized.Provides)
-	if err != nil {
-		return fmt.Errorf("校验 provides_root 失败: %w", err)
+	if err := normalizeAuthorConfig(&normalized); err != nil {
+		return err
 	}
-	normalized.ProvidesRoot = providesRoot
-	config.ProvidesRoot = providesRoot
-	provides, err := NormalizeProjectProvides(normalized.ProjectName, providesRoot, normalized.Provides)
-	if err != nil {
-		return fmt.Errorf("校验 provides 失败: %w", err)
-	}
-	normalized.Provides = provides
-	config.Provides = provides
+	config.ProvidesRoot = normalized.ProvidesRoot
+	config.Provides = normalized.Provides
+	config.Products = normalized.Products
 	normalized.LegacyEnabledBundles = nil
 	requires, err := types.NormalizeRequiresSpec(normalized.Requires)
 	if err != nil {
@@ -394,16 +388,9 @@ func loadProjectConfigV2(data []byte, configPath string) (*types.ProjectConfig, 
 	}
 	config.Kind = types.ConfigKindProject
 	config.Version = types.ProjectConfigVersionV2
-	providesRoot, err := ResolveProvidesRoot(config.ProvidesRoot, config.Provides)
-	if err != nil {
-		return nil, fmt.Errorf("校验 %s 中的 provides_root 失败: %w", configPath, err)
+	if err := normalizeAuthorConfig(&config); err != nil {
+		return nil, fmt.Errorf("校验 %s 中的作者声明失败: %w", configPath, err)
 	}
-	config.ProvidesRoot = providesRoot
-	provides, err := NormalizeProjectProvides(config.ProjectName, providesRoot, config.Provides)
-	if err != nil {
-		return nil, fmt.Errorf("校验 %s 中的 provides 失败: %w", configPath, err)
-	}
-	config.Provides = provides
 	// ADR 0029：旧 enabled_bundles 折叠为 requires 的 vault pin；家项目自身不进订阅表。
 	if legacy := NormalizeBundleNames(config.LegacyEnabledBundles); len(legacy) > 0 {
 		config.Requires = config.Requires.AddVaultProjects(legacy)

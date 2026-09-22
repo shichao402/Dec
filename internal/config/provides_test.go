@@ -1,7 +1,9 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/internal/types"
@@ -134,6 +136,146 @@ func TestResolveProvidesRootDefaultsNewProjectsAndPreservesLegacy(t *testing.T) 
 	root, err = ResolveProvidesRoot("", legacy)
 	if err != nil || root != "" {
 		t.Fatalf("legacy project root = %q, %v", root, err)
+	}
+}
+
+func TestDeclaredProductsKeepSourceRelativeToRoot(t *testing.T) {
+	got, err := NormalizeDeclaredProducts(map[string]types.ProductDecl{
+		"woa": {
+			Root: "woa",
+			Provides: map[string]types.ProjectProvide{
+				"gongfeng": validProvide("skills/gongfeng", "gongfeng"),
+			},
+		},
+		"tencent-cloud": {
+			Root: `tencent-cloud\`,
+			Provides: map[string]types.ProjectProvide{
+				"tencent-cloud": validProvide("skills/tencent-cloud", "tencent-cloud"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["woa"].Provides["gongfeng"].Source != "skills/gongfeng" {
+		t.Fatalf("source = %q", got["woa"].Provides["gongfeng"].Source)
+	}
+	if got["tencent-cloud"].Root != "tencent-cloud" {
+		t.Fatalf("root = %q", got["tencent-cloud"].Root)
+	}
+	authors, err := AuthorProducts(&types.ProjectConfig{Products: got})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(authors) != 2 || authors[0].Name != "tencent-cloud" || authors[1].Name != "woa" {
+		t.Fatalf("authors = %#v", authors)
+	}
+	if authors[1].Provides["gongfeng"].Source != "woa/skills/gongfeng" {
+		t.Fatalf("repo source = %q", authors[1].Provides["gongfeng"].Source)
+	}
+	target, err := ProjectProvideTarget("woa", got["woa"].Provides["gongfeng"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != "woa/public/local/skills/gongfeng" {
+		t.Fatalf("target = %q", target)
+	}
+}
+
+func TestDeclaredProductsRejectOverlapAndMixedAuthor(t *testing.T) {
+	_, err := NormalizeDeclaredProducts(map[string]types.ProductDecl{
+		"woa":        {Root: "woa"},
+		"woa-nested": {Root: "woa/extra"},
+	})
+	if err == nil {
+		t.Fatal("期望拒绝重叠的作者目录")
+	}
+	root := t.TempDir()
+	mgr := NewProjectConfigManager(root)
+	err = mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName: "demo",
+		Products: map[string]types.ProductDecl{
+			"woa": {Root: "woa", Provides: map[string]types.ProjectProvide{
+				"gongfeng": validProvide("skills/gongfeng", "gongfeng"),
+			}},
+		},
+	})
+	if err == nil {
+		t.Fatal("期望拒绝 products 与 project_name 同时存在")
+	}
+}
+
+func TestAuthorProductsFoldsSingleProjectWithoutRewriting(t *testing.T) {
+	cfg := &types.ProjectConfig{
+		ProjectName:  "relkit",
+		ProvidesRoot: "DecAssets",
+		Provides: map[string]types.ProjectProvide{
+			"relkit-ops": validProvide("DecAssets/skills/relkit-ops", "relkit-ops"),
+		},
+	}
+	authors, err := AuthorProducts(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(authors) != 1 || authors[0].Name != "relkit" || authors[0].Root != "DecAssets" {
+		t.Fatalf("authors = %#v", authors)
+	}
+	if authors[0].Provides["relkit-ops"].Source != "DecAssets/skills/relkit-ops" {
+		t.Fatalf("source = %q", authors[0].Provides["relkit-ops"].Source)
+	}
+	if len(cfg.Products) != 0 {
+		t.Fatal("单产品仓不应被改写成 products")
+	}
+
+	root := t.TempDir()
+	mgr := NewProjectConfigManager(root)
+	if err := mgr.SaveProjectConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".dec", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "products:") {
+		t.Fatalf("单产品配置不应写出 products:\n%s", data)
+	}
+}
+
+func TestProductsConfigRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewProjectConfigManager(root)
+	cfg := &types.ProjectConfig{
+		Products: map[string]types.ProductDecl{
+			"woa": {
+				Root: "woa",
+				Provides: map[string]types.ProjectProvide{
+					"gongfeng": validProvide("skills/gongfeng", "gongfeng"),
+				},
+			},
+		},
+	}
+	if err := mgr.SaveProjectConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".dec", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "project_name:") || strings.HasPrefix(line, "provides_root:") {
+			t.Fatalf("多产品配置不应写出单产品字段:\n%s", data)
+		}
+	}
+	loaded, err := mgr.LoadProjectConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Products["woa"].Provides["gongfeng"].Source != "skills/gongfeng" {
+		t.Fatalf("round trip = %#v", loaded.Products)
 	}
 }
 

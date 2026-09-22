@@ -171,7 +171,7 @@ type Project struct {
 	// LegacyRequires 只用于读取改名前的 requires 字段，加载时折叠进 DependsOn 后清空。
 	LegacyRequires []string `yaml:"requires,omitempty"`
 	IDEs           []string `yaml:"ides,omitempty"`
-	Editor   string   `yaml:"editor,omitempty"`
+	Editor         string   `yaml:"editor,omitempty"`
 }
 
 // P 是 Project 的旧类型名。
@@ -251,18 +251,31 @@ type ProjectConfig struct {
 	Requires RequiresSpec `yaml:"requires,omitempty"`
 	// LegacyEnabledBundles 只用于读取旧配置；加载时折叠为 requires 的 vault pin 后清空。
 	LegacyEnabledBundles []string `yaml:"enabled_bundles,omitempty"`
-	// ProvidesRoot 是作者目录（skills/commands/rules/mcp）的基准点，相对项目根。
+	// ProvidesRoot 是单产品仓的作者目录基准点，相对仓根。
 	// 新项目默认 DecAssets；旧项目空值表示仓库根。它不影响派生的 vault target。
+	// 与 Products 互斥。
 	ProvidesRoot string `yaml:"provides_root,omitempty"`
-	// Provides 声明作者工作区向绑定 Project 提供的资产。map key 是稳定的本地声明 ID；
-	// Git 目标只由 ProjectName 与条目的 visibility/plane/type/name 派生。
+	// Provides 声明单产品仓向 project_name 提供的资产。map key 是稳定的本地声明 ID；
+	// source 相对仓根，Git 目标由 ProjectName 与条目的 visibility/plane/type/name 派生。
+	// 与 Products 互斥。
 	Provides map[string]ProjectProvide `yaml:"provides,omitempty"`
+	// Products 让一个产品仓声明多个产品。key 是产品名（订阅名），与 ProjectName、
+	// ProvidesRoot、Provides 互斥。每个产品的 source 相对该产品的 Root。
+	Products map[string]ProductDecl `yaml:"products,omitempty"`
 	// OriginRepo 可选。publish-provides 写入 registry provider.yaml；空则用 git origin。
 	OriginRepo string `yaml:"origin_repo,omitempty"`
 }
 
+// ProductDecl 是产品仓中的一个产品。Root 相对仓根，其下仍是
+// skills/、commands/、rules/、mcp/。Provides 的 source 相对 Root。
+type ProductDecl struct {
+	Root     string                    `yaml:"root,omitempty"`
+	Provides map[string]ProjectProvide `yaml:"provides,omitempty"`
+}
+
 // ProjectProvide 是作者工作区中的一项源资产声明。
-// Source 始终是相对项目根的安全路径；secret 的正文绝不进入 Git。
+// 单产品仓的 Source 相对仓根；多产品仓的 Source 相对该产品的 Root。
+// secret 的正文绝不进入 Git。
 type ProjectProvide struct {
 	Source     string          `yaml:"source"`
 	Visibility AssetVisibility `yaml:"visibility"`

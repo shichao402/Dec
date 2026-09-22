@@ -32,6 +32,16 @@ type Result struct {
 	Tag        string
 	Commit     string
 	Idempotent bool
+	// Products 是这次发布涉及的每个产品。单产品仓时与上面的字段相同。
+	Products []ProductResult
+}
+
+// ProductResult 是一个产品的注册表 tag。
+type ProductResult struct {
+	Project    string
+	Tag        string
+	Commit     string
+	Idempotent bool
 }
 
 func Publish(ctx context.Context, opts Options) (*Result, error) {
@@ -45,16 +55,17 @@ func Publish(ctx context.Context, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	project := strings.TrimSpace(cfg.ProjectName)
-	if !types.IsValidProjectName(project) {
-		return nil, fmt.Errorf("项目配置缺少合法 project_name")
-	}
-	if len(cfg.Provides) == 0 {
-		return nil, fmt.Errorf("没有 provides，无内容可发布")
-	}
-	tag, err := registry.Tag(project, ref)
+	products, err := config.AuthorProducts(cfg)
 	if err != nil {
 		return nil, err
+	}
+	if len(products) == 0 {
+		return nil, fmt.Errorf("没有可发布的产品")
+	}
+	for _, product := range products {
+		if len(product.Provides) == 0 {
+			return nil, fmt.Errorf("产品 %s 没有 provides，无内容可发布", product.Name)
+		}
 	}
 	url := strings.TrimSpace(opts.RegistryURL)
 	if url == "" {
@@ -72,34 +83,47 @@ func Publish(ctx context.Context, opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	existing, err := registry.GitEnv(ctx, work, env, "rev-parse", "-q", "--verify", tag+"^{commit}")
-	if err == nil && existing != "" {
-		tmpSnap, err := os.MkdirTemp("", "dec-snapshot-*")
+	type planned struct {
+		product  config.AuthorProduct
+		tag      string
+		existing string
+	}
+	pending := make([]planned, 0, len(products))
+	done := make([]planned, 0, len(products))
+	for _, product := range products {
+		tag, err := registry.Tag(product.Name, ref)
 		if err != nil {
 			return nil, err
 		}
-		defer os.RemoveAll(tmpSnap)
-		if err := writeSnapshot(root, tmpSnap, project, cfg); err != nil {
-			return nil, err
+		existing, err := registry.GitEnv(ctx, work, env, "rev-parse", "-q", "--verify", tag+"^{commit}")
+		if err == nil && existing != "" {
+			same, err := snapshotMatches(ctx, root, work, tag, product, cfg)
+			if err != nil {
+				return nil, err
+			}
+			if !same {
+				return nil, fmt.Errorf("tag %s 已存在且内容不同，拒绝改写", tag)
+			}
+			done = append(done, planned{product: product, tag: tag, existing: existing})
+			continue
 		}
-		localHash, err := hashDir(filepath.Join(tmpSnap, project))
-		if err != nil {
-			return nil, err
+		pending = append(pending, planned{product: product, tag: tag})
+	}
+	if len(pending) == 0 {
+		items := make([]ProductResult, len(done))
+		for i, item := range done {
+			items[i] = ProductResult{Project: item.product.Name, Tag: item.tag, Commit: item.existing, Idempotent: true}
 		}
-		remoteHash, err := hashRefTree(ctx, work, tag, project)
-		if err != nil {
-			return nil, err
-		}
-		if localHash == remoteHash {
-			return &Result{Project: project, Tag: tag, Commit: existing, Idempotent: true}, nil
-		}
-		return nil, fmt.Errorf("tag %s 已存在且内容不同，拒绝改写", tag)
+		return publishResult(items), nil
 	}
 
-	if err := writeSnapshot(root, work, project, cfg); err != nil {
-		return nil, err
+	tags := make([]string, 0, len(pending))
+	for _, item := range pending {
+		if err := writeSnapshot(root, work, item.product.Name, snapshotConfig(cfg, item.product.Provides)); err != nil {
+			return nil, err
+		}
+		tags = append(tags, item.tag)
 	}
-
 	if _, err := registry.Git(ctx, work, "add", "-A"); err != nil {
 		return nil, err
 	}
@@ -109,23 +133,93 @@ func Publish(ctx context.Context, opts Options) (*Result, error) {
 	if _, err := registry.Git(ctx, work, "config", "user.name", "dec-registry"); err != nil {
 		return nil, err
 	}
-	if _, err := registry.Git(ctx, work, "commit", "--allow-empty", "-m", "publish "+tag); err != nil {
+	if _, err := registry.Git(ctx, work, "commit", "--allow-empty", "-m", "publish "+strings.Join(tags, " ")); err != nil {
 		return nil, err
 	}
-	if _, err := registry.Git(ctx, work, "tag", tag); err != nil {
-		return nil, err
+	for _, tag := range tags {
+		if _, err := registry.Git(ctx, work, "tag", tag); err != nil {
+			return nil, err
+		}
 	}
 	commit, err := registry.Git(ctx, work, "rev-parse", "HEAD")
 	if err != nil {
 		return nil, err
 	}
-	if _, err := registry.GitEnv(ctx, work, env, "push", "origin", "HEAD:refs/heads/"+registry.Branch); err != nil {
+	refs := make([]string, 0, 1+len(tags))
+	refs = append(refs, "HEAD:refs/heads/"+registry.Branch)
+	for _, tag := range tags {
+		refs = append(refs, "refs/tags/"+tag)
+	}
+	if _, err := registry.GitEnv(ctx, work, env, append([]string{"push", "origin"}, refs...)...); err != nil {
 		return nil, err
 	}
-	if _, err := registry.GitEnv(ctx, work, env, "push", "origin", "refs/tags/"+tag); err != nil {
-		return nil, err
+
+	byTag := map[string]ProductResult{}
+	for _, item := range done {
+		byTag[item.tag] = ProductResult{Project: item.product.Name, Tag: item.tag, Commit: item.existing, Idempotent: true}
 	}
-	return &Result{Project: project, Tag: tag, Commit: commit}, nil
+	for _, item := range pending {
+		byTag[item.tag] = ProductResult{Project: item.product.Name, Tag: item.tag, Commit: commit}
+	}
+	items := make([]ProductResult, 0, len(products))
+	for _, product := range products {
+		tag, err := registry.Tag(product.Name, ref)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, byTag[tag])
+	}
+	return publishResult(items), nil
+}
+
+func publishResult(items []ProductResult) *Result {
+	result := &Result{Products: items}
+	if len(items) == 1 {
+		result.Project = items[0].Project
+		result.Tag = items[0].Tag
+		result.Commit = items[0].Commit
+		result.Idempotent = items[0].Idempotent
+		return result
+	}
+	allIdempotent := true
+	for _, item := range items {
+		if item.Idempotent {
+			continue
+		}
+		allIdempotent = false
+		result.Commit = item.Commit
+	}
+	if result.Commit == "" && len(items) > 0 {
+		result.Commit = items[0].Commit
+	}
+	result.Idempotent = allIdempotent
+	return result
+}
+
+func snapshotConfig(cfg *types.ProjectConfig, provides map[string]types.ProjectProvide) *types.ProjectConfig {
+	one := *cfg
+	one.Provides = provides
+	return &one
+}
+
+func snapshotMatches(ctx context.Context, providerRoot, registryWork, tag string, product config.AuthorProduct, cfg *types.ProjectConfig) (bool, error) {
+	tmpSnap, err := os.MkdirTemp("", "dec-snapshot-*")
+	if err != nil {
+		return false, err
+	}
+	defer os.RemoveAll(tmpSnap)
+	if err := writeSnapshot(providerRoot, tmpSnap, product.Name, snapshotConfig(cfg, product.Provides)); err != nil {
+		return false, err
+	}
+	localHash, err := hashDir(filepath.Join(tmpSnap, product.Name))
+	if err != nil {
+		return false, err
+	}
+	remoteHash, err := hashRefTree(ctx, registryWork, tag, product.Name)
+	if err != nil {
+		return false, err
+	}
+	return localHash == remoteHash, nil
 }
 
 func checkoutRegistry(ctx context.Context, work, url string, env []string) error {

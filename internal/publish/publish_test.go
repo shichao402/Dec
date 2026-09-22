@@ -264,3 +264,97 @@ func seedRegistry(t *testing.T, ctx context.Context) string {
 	}
 	return bare
 }
+
+func TestPublishMultipleProductsOneRef(t *testing.T) {
+	ctx := context.Background()
+	bare := seedRegistry(t, ctx)
+	provider := t.TempDir()
+	writeSkill := func(root, name, body string) {
+		t.Helper()
+		dir := filepath.Join(provider, root, "skills", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSkill("woa", "gongfeng", "# gongfeng\n")
+	writeSkill("tencent-cloud", "tencent-cloud", "# tencent\n")
+	provide := func(name string) types.ProjectProvide {
+		return types.ProjectProvide{
+			Source:     "skills/" + name,
+			Visibility: types.AssetVisibilityPublic,
+			Plane:      types.AssetPlaneGlobal,
+			Type:       "skill",
+			Name:       name,
+		}
+	}
+	mgr := config.NewProjectConfigManager(provider)
+	cfg := &types.ProjectConfig{
+		OriginRepo: "https://github.com/example/DecPersonalDevKit.git",
+		Products: map[string]types.ProductDecl{
+			"woa": {Root: "woa", Provides: map[string]types.ProjectProvide{
+				"gongfeng": provide("gongfeng"),
+			}},
+			"tencent-cloud": {Root: "tencent-cloud", Provides: map[string]types.ProjectProvide{
+				"tencent-cloud": provide("tencent-cloud"),
+			}},
+		},
+	}
+	if err := mgr.SaveProjectConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{ProjectRoot: provider, Ref: "v0.1.0", RegistryURL: bare}
+	published, err := Publish(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if published.Idempotent || len(published.Products) != 2 {
+		t.Fatalf("%+v", published)
+	}
+	gotTags := map[string]bool{}
+	for _, product := range published.Products {
+		gotTags[product.Tag] = true
+		if product.Idempotent || product.Commit == "" {
+			t.Fatalf("%+v", product)
+		}
+	}
+	if !gotTags["registry/woa/v0.1.0"] || !gotTags["registry/tencent-cloud/v0.1.0"] {
+		t.Fatalf("tags = %#v", gotTags)
+	}
+
+	again, err := Publish(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.Idempotent {
+		t.Fatal("expected idempotent")
+	}
+
+	writeSkill("woa", "gongfeng", "# gongfeng changed\n")
+	if _, err := Publish(ctx, opts); err == nil {
+		t.Fatal("expected rewrite rejection")
+	}
+
+	checkout := t.TempDir()
+	if _, err := registry.Git(ctx, "", "clone", "--branch", registry.Branch, bare, checkout); err != nil {
+		t.Fatal(err)
+	}
+	for _, project := range []string{"woa", "tencent-cloud"} {
+		meta, err := registry.LoadProviderMeta(filepath.Join(checkout, project))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if meta.OriginRepo != cfg.OriginRepo {
+			t.Fatalf("%s origin = %q", project, meta.OriginRepo)
+		}
+	}
+	body, err := os.ReadFile(filepath.Join(checkout, "woa", "public", "global", "skills", "gongfeng", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "# gongfeng\n" {
+		t.Fatalf("rejected rewrite still changed snapshot: %q", body)
+	}
+}

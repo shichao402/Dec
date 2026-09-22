@@ -40,17 +40,26 @@ message ProjectConfig {
   string editor = 4;
   reserved 5, 6, 7;
   reserved "available", "enabled", "enabled_bundles";
-  // 作者工作区提供的资产；key 是稳定的本地声明 ID。
+  // 单产品仓提供的资产；key 是稳定的本地声明 ID。与 products 互斥。
   map<string, ProjectProvide> provides = 8;
-  // 作者目录基准点（相对项目根，新项目默认 DecAssets；旧项目空=仓库根）。
+  // 单产品仓的作者目录基准点（相对仓根，新项目默认 DecAssets；旧项目空=仓库根）。
+  // 与 products 互斥。
   string provides_root = 9 [json_name = "provides_root"];
   // 本工作区唯一的消费声明：项目名 → pin（latest / v* 走官方注册表，vault 走个人私仓）。
   // 改名前的 enabled_bundles 已 reserved，只在加载时折叠为 requires{<名>: vault}（ADR 0029）。
   map<string, string> requires = 10;
+  // 一个产品仓里的多个产品。key 是产品名。与 project_name / provides_root / provides 互斥。
+  map<string, ProductDecl> products = 11;
+}
+
+// ProductDecl 是产品仓中的一个产品。root 相对仓根；provides.source 相对 root。
+message ProductDecl {
+  string root = 1;
+  map<string, ProjectProvide> provides = 2;
 }
 
 message ProjectProvide {
-  // 相对 project root 的安全路径。
+  // 单产品仓相对仓根；写在 ProductDecl 里时相对该产品的 root。
   string source = 1;
   string visibility = 2; // public | private
   string plane = 3; // global | local
