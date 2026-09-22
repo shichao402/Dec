@@ -72,7 +72,7 @@ func Plan(name string, arguments json.RawMessage) *PlanResult {
 		if err != nil {
 			return planFail(name, err.Error())
 		}
-		return singleInvoke(name, "create_local_asset", root, string(plane), map[string]any{
+		return singleRun(name, "create_local_asset", root, string(plane), map[string]any{
 			"Project": in.Project, "Kind": in.Kind, "Name": in.Name,
 			"Visibility": in.Visibility, "Plane": in.AssetPlane,
 		})
