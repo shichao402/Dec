@@ -452,7 +452,6 @@ export default function App() {
       return
     }
     setHistory((items) => [{ title, result: outcome.value, at: new Date() }, ...items].slice(0, 20))
-    setView('sync')
   }
 
   // 绑定既可能来自未初始化项目的主区，也可能来自下级页；两处都回到项目页看结果。
@@ -656,6 +655,7 @@ export default function App() {
                 <GlobalAssetsPage
                   deviceId={deviceId}
                   repoURL={summary.RepoURL}
+                  onPull={() => pull('Global', '', 'global')}
                   onSync={() => {
                     setSyncTarget({ key: 'global', label: 'Global（本机）', root: '', plane: 'global' })
                     setView('sync')
@@ -681,6 +681,11 @@ export default function App() {
                 <ProjectPage
                   deviceId={deviceId}
                   project={selectedProject}
+                  onPull={() => pull(
+                    selectedProject.Label || selectedProject.Name,
+                    selectedProject.Root,
+                    'local',
+                  )}
                   onSync={() => {
                     setSyncTarget({
                       key: selectedProject.Root,

@@ -16,6 +16,7 @@ import type { ManagedProject } from '@/lib/utils'
 export function ProjectPage(props: {
   deviceId: string
   project: ManagedProject
+  onPull: () => void
   onSync: () => void
   onBinding: () => void
   onOverrides: () => void
@@ -27,8 +28,15 @@ export function ProjectPage(props: {
   const project = props.project
   const workspaceResource = resource.workspace(project.Root)
   const removeSpec = actionSpec(`project:remove:${props.deviceId}:${project.Root}`, '移除项目管理', props.deviceId, [workspaceResource, resource.global], 'write', '已移除项目管理')
-  const syncSpec = actionSpec(`operation:update:${props.deviceId}:${project.Root}`, '更新项目资产', props.deviceId, [workspaceResource], 'operation')
-  const syncState = useDecAction(syncSpec)
+  const pullSpec = actionSpec(
+    `operation:pull:${props.deviceId}:${project.Root}`,
+    '正在拉取项目资产',
+    props.deviceId,
+    [workspaceResource],
+    'operation',
+    '项目资产拉取完成',
+  )
+  const pullState = useDecAction(pullSpec)
   const removeButton = (
     <ActionButton
       variant="outline"
@@ -76,15 +84,19 @@ export function ProjectPage(props: {
         actions={
           <>
             {removeButton}
-            <Button onClick={props.onSync} disabled={syncState.blocked}>
+            <Button variant="outline" onClick={props.onSync}>
+              官方更新
+            </Button>
+            <Button onClick={props.onPull} disabled={pullState.blocked}>
               <RefreshCw className="size-4" />
-              更新
+              {pullState.running ? '拉取中…' : '拉取'}
             </Button>
           </>
         }
       />
       <PageFill>
         <ActionFeedback actionKey={removeSpec.key} />
+        <ActionFeedback actionKey={pullSpec.key} />
         {/* 换绑、覆写、提供项与写回都是偶发操作，收成一排入口卡，主区留给订阅。 */}
         <NavCardGrid className="mb-4">
           <NavCard
@@ -120,7 +132,7 @@ export function ProjectPage(props: {
           deviceId={props.deviceId}
           root={project.Root}
           plane="local"
-          hint="订阅只写当前项目的 .dec/config.yaml；安装在「更新」页做。"
+          hint="保存订阅后点「拉取」落地到本项目 IDE 目录；官方新版本用「官方更新」。"
         />
       </PageFill>
     </Page>
