@@ -48,14 +48,20 @@ message ProjectConfig {
   // 本工作区唯一的消费声明：项目名 → pin（latest / v* 走官方注册表，vault 走个人私仓）。
   // 改名前的 enabled_bundles 已 reserved，只在加载时折叠为 requires{<名>: vault}（ADR 0029）。
   map<string, string> requires = 10;
-  // 一个产品仓里的多个产品。key 是产品名。与 project_name / provides_root / provides 互斥。
+	// 一个产品仓里的多个产品。key 是产品名。与 project_name / provides_root / provides 互斥。
+	// provides 可以为空：这种产品只发布身份，密钥留在 Bitwarden 的同名项目下。
   map<string, ProductDecl> products = 11;
+  // 单产品的推荐标签。global 表示新机器初始化时建议默认勾选。随发布写入 registry。
+  // 与 products 同时出现时以各产品自己的 tags 为准。
+  repeated string tags = 12;
 }
 
 // ProductDecl 是产品仓中的一个产品。root 相对仓根；provides.source 相对 root。
 message ProductDecl {
   string root = 1;
   map<string, ProjectProvide> provides = 2;
+  // 该产品的推荐标签。global 表示新机器初始化时建议默认勾选。消费方只读。
+  repeated string tags = 3;
 }
 
 message ProjectProvide {

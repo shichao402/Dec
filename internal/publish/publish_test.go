@@ -358,3 +358,67 @@ func TestPublishMultipleProductsOneRef(t *testing.T) {
 		t.Fatalf("rejected rewrite still changed snapshot: %q", body)
 	}
 }
+
+func TestPublishIdentityOnlyProduct(t *testing.T) {
+	ctx := context.Background()
+	bare := t.TempDir()
+	if _, err := registry.Git(ctx, "", "init", "--bare", bare); err != nil {
+		t.Fatal(err)
+	}
+	seed := t.TempDir()
+	if _, err := registry.Git(ctx, "", "clone", bare, seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "checkout", "--orphan", registry.Branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, "README"), []byte("registry\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "config", "user.email", "t@t"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "config", "user.name", "t"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "add", "README"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "commit", "-m", "init"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Git(ctx, seed, "push", "-u", "origin", registry.Branch); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := t.TempDir()
+	mgr := config.NewProjectConfigManager(provider)
+	cfg := &types.ProjectConfig{
+		OriginRepo: "https://github.com/shichao402/DecPersonalDevKit.git",
+		Products: map[string]types.ProductDecl{
+			"github": {Root: "github", Tags: []string{"global"}},
+		},
+	}
+	if err := mgr.SaveProjectConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Publish(ctx, Options{ProjectRoot: provider, Ref: "v0.1.0", RegistryURL: bare})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Products) != 1 || result.Products[0].Project != "github" || result.Products[0].Idempotent {
+		t.Fatalf("%+v", result)
+	}
+	checkout := t.TempDir()
+	if _, err := registry.Git(ctx, "", "clone", "--branch", registry.Branch, bare, checkout); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := registry.ReadProjects(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := snap["github"]
+	if got.OriginRepo != cfg.OriginRepo || len(got.Assets) != 0 || len(got.Tags) != 1 || got.Tags[0] != "global" {
+		t.Fatalf("snapshot = %+v", got)
+	}
+}

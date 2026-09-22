@@ -15,6 +15,9 @@ const ProviderMetaFile = "provider.yaml"
 // ProviderMeta 随资产正文一起发布，消费方只读。
 type ProviderMeta struct {
 	OriginRepo string `yaml:"origin_repo,omitempty"`
+	// Tags 是提供方声明的推荐标签。global 表示新机器初始化时建议默认勾选。
+	// 消费方只读，不在订阅页改写。
+	Tags []string `yaml:"tags,omitempty"`
 }
 
 func ProviderMetaPath(projectDir string) string {
@@ -39,7 +42,7 @@ func LoadProviderMeta(projectDir string) (ProviderMeta, error) {
 
 func WriteProviderMeta(projectDir string, meta ProviderMeta) error {
 	meta.OriginRepo = strings.TrimSpace(meta.OriginRepo)
-	if meta.OriginRepo == "" {
+	if meta.OriginRepo == "" && len(meta.Tags) == 0 {
 		return nil
 	}
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {

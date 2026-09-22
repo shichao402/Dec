@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/bundle"
+	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/types"
 )
 
@@ -182,6 +183,7 @@ func pathContains(parent, child string) bool {
 type AuthorProduct struct {
 	Name     string
 	Root     string
+	Tags     []string
 	Provides map[string]types.ProjectProvide
 }
 
@@ -211,7 +213,7 @@ func AuthorProducts(cfg *types.ProjectConfig) ([]AuthorProduct, error) {
 				}
 				provides[key] = provide
 			}
-			out = append(out, AuthorProduct{Name: name, Root: item.Root, Provides: provides})
+			out = append(out, AuthorProduct{Name: name, Root: item.Root, Tags: item.Tags, Provides: provides})
 		}
 		return out, nil
 	}
@@ -219,9 +221,14 @@ func AuthorProducts(cfg *types.ProjectConfig) ([]AuthorProduct, error) {
 	if !types.IsValidProjectName(name) {
 		return nil, fmt.Errorf("项目配置缺少合法 project_name")
 	}
+	tags, err := pmodel.NormalizeTags(cfg.Tags)
+	if err != nil {
+		return nil, err
+	}
 	return []AuthorProduct{{
 		Name:     name,
 		Root:     cfg.ProvidesRoot,
+		Tags:     tags,
 		Provides: cfg.Provides,
 	}}, nil
 }
@@ -253,7 +260,11 @@ func NormalizeDeclaredProducts(in map[string]types.ProductDecl) (map[string]type
 		if err != nil {
 			return nil, fmt.Errorf("products.%s: %w", name, err)
 		}
-		out[name] = types.ProductDecl{Root: root, Provides: provides}
+		tags, err := pmodel.NormalizeTags(in[name].Tags)
+		if err != nil {
+			return nil, fmt.Errorf("products.%s.tags: %w", name, err)
+		}
+		out[name] = types.ProductDecl{Root: root, Tags: tags, Provides: provides}
 	}
 	return out, nil
 }

@@ -162,8 +162,8 @@ type Project struct {
 	Name        string `yaml:"name"`
 	Title       string `yaml:"title,omitempty"`
 	Description string `yaml:"description,omitempty"`
-	// Tags 是展示与推荐用标签。当前 Console 可配置的只有 global（推荐本机导入）。
-	// 未知合法标签会原样保留，便于以后扩展。
+	// Tags 是展示用标签。提供方产品的 global 由产品仓声明并随发布下发。
+	// 私仓 stub 上的同名标签不再当作订阅页的推荐开关。
 	Tags []string `yaml:"tags,omitempty"`
 	// DependsOn 是提供方组成：本项目的资产依赖哪些项目（ADR 0029）。
 	// 它不是消费声明；工作区订阅只在 .dec/config.yaml 的 requires 里。
@@ -264,12 +264,18 @@ type ProjectConfig struct {
 	Products map[string]ProductDecl `yaml:"products,omitempty"`
 	// OriginRepo 可选。publish-provides 写入 registry provider.yaml；空则用 git origin。
 	OriginRepo string `yaml:"origin_repo,omitempty"`
+	// Tags 是这个单产品的推荐标签。global 表示新机器初始化时建议默认勾选。
+	// 与 Products 同时出现时以各产品自己的 tags 为准。
+	Tags []string `yaml:"tags,omitempty"`
 }
 
 // ProductDecl 是产品仓中的一个产品。Root 相对仓根，其下仍是
 // skills/、commands/、rules/、mcp/。Provides 的 source 相对 Root。
+// Provides 可以为空：没有 Git 正文，只发布身份，密钥留在 Bitwarden 的同名项目下。
+// Tags 随发布写入注册表，消费方不能在订阅页改。
 type ProductDecl struct {
 	Root     string                    `yaml:"root,omitempty"`
+	Tags     []string                  `yaml:"tags,omitempty"`
 	Provides map[string]ProjectProvide `yaml:"provides,omitempty"`
 }
 

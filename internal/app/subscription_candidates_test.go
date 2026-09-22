@@ -123,6 +123,44 @@ func TestMergeOfficialCandidates_AppendsUnknownProjects(t *testing.T) {
 	}
 }
 
+// 私仓 pin 的行仍是私仓身份，但注册表里的源仓和 Git 资产要挂上来。
+// 否则订阅页只剩密钥名单，看不出这个产品已经从产品仓发布。
+func TestMergeOfficialCandidates_ShowsPublishedAssetsOnVaultRow(t *testing.T) {
+	vault := []AssetBundleOption{{
+		Name:        "woa",
+		Source:      AssetSourceVault,
+		Pin:         "vault",
+		Description: "secrets-only / machine-enabled placeholder (ADR 0003)",
+		Tags:        []string{"global"},
+		Members:     []AssetSelectionItem{{Name: ".sshkey/devcloud", Type: AssetMemberTypeSecret}},
+	}}
+	official := []AssetBundleOption{{
+		Name:       "woa",
+		Source:     AssetSourceOfficial,
+		Available:  "v0.1.0+1",
+		OriginRepo: "https://github.com/shichao402/DecPersonalDevKit.git",
+		Members:    []AssetSelectionItem{{Name: "gongfeng", Type: "skill"}, {Name: "gongfeng", Type: "mcp"}},
+	}}
+
+	merged := mergeOfficialCandidates(vault, official)
+	got := merged[0]
+	if got.Source != AssetSourceVault || got.Pin != "vault" {
+		t.Fatalf("私仓 pin 被改写：%+v", got)
+	}
+	if got.OriginRepo != official[0].OriginRepo {
+		t.Fatalf("origin = %q", got.OriginRepo)
+	}
+	if got.Description != "" {
+		t.Fatalf("密钥占位说明应让位，description = %q", got.Description)
+	}
+	if len(got.Members) != 3 || got.Members[0].Type != "skill" || got.Members[2].Type != AssetMemberTypeSecret {
+		t.Fatalf("members = %#v", got.Members)
+	}
+	if len(got.Tags) != 0 {
+		t.Fatalf("未发布推荐标签时，不该沿用私仓 stub 上的标签：%#v", got.Tags)
+	}
+}
+
 // 官方行带来的 origin_repo 是提 Issue / PR 的落脚点，合并时不能丢。
 func TestMergeOfficialCandidates_KeepsOriginRepo(t *testing.T) {
 	vault := []AssetBundleOption{{Name: "playbook", Source: AssetSourceVault}}
@@ -133,5 +171,36 @@ func TestMergeOfficialCandidates_KeepsOriginRepo(t *testing.T) {
 	}
 	if merged[0].Source != AssetSourceOfficial {
 		t.Errorf("pin latest should be official: %q", merged[0].Source)
+	}
+}
+
+func TestMergeOfficialCandidates_IdentityProductClearsSecretsPlaceholder(t *testing.T) {
+	vault := []AssetBundleOption{{
+		Name:        "github",
+		Description: "secrets-only / machine-enabled placeholder (ADR 0003)",
+		Tags:        []string{"global"},
+		Pin:         "vault",
+		Source:      AssetSourceVault,
+		Members:     []AssetSelectionItem{{Name: ".env/github.env", Type: AssetMemberTypeSecret}},
+	}}
+	official := []AssetBundleOption{{
+		Name:       "github",
+		Source:     AssetSourceOfficial,
+		OriginRepo: "https://github.com/shichao402/DecPersonalDevKit.git",
+		Tags:       []string{"global"},
+		Available:  "v0.1.0+2",
+	}}
+	got := mergeOfficialCandidates(vault, official)[0]
+	if got.Description != "" {
+		t.Fatalf("description = %q", got.Description)
+	}
+	if got.OriginRepo != official[0].OriginRepo || got.Pin != "vault" || got.Source != AssetSourceVault {
+		t.Fatalf("identity merge = %+v", got)
+	}
+	if len(got.Members) != 1 || got.Members[0].Type != AssetMemberTypeSecret {
+		t.Fatalf("members = %#v", got.Members)
+	}
+	if len(got.Tags) != 1 || got.Tags[0] != "global" {
+		t.Fatalf("tags = %#v", got.Tags)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/install"
@@ -189,6 +190,12 @@ func mergeOfficialCandidates(vault, official []AssetBundleOption) []AssetBundleO
 		if vault[i].OriginRepo == "" {
 			vault[i].OriginRepo = opt.OriginRepo
 		}
+		vault[i].Members = mergeAssetMembers(opt.Members, vault[i].Members)
+		// 已发布产品的推荐标签以注册表为准。私仓 stub 上的 global 是消费方旧开关，不再算数。
+		vault[i].Tags = append([]string(nil), opt.Tags...)
+		if secretsOnlyPlaceholder(vault[i].Description) {
+			vault[i].Description = ""
+		}
 		// 家项目从工作树创作，永远不按官方行下发。
 		if vault[i].Home || types.IsVaultPin(vault[i].Pin) {
 			continue
@@ -210,6 +217,7 @@ func mergeOfficialCandidates(vault, official []AssetBundleOption) []AssetBundleO
 func ListOfficialCandidates(ctx context.Context, workspace Workspace, cfg *types.ProjectConfig) []AssetBundleOption {
 	requires, url := workspaceOfficialRequires(workspace, cfg)
 	published := officialPublishedVersions(ctx, url)
+	snapshots := officialHeadSnapshots(ctx, url)
 	if len(published) == 0 && len(requires) == 0 {
 		return nil
 	}
@@ -236,10 +244,17 @@ func ListOfficialCandidates(ctx context.Context, workspace Workspace, cfg *types
 		}
 		installed := install.ReadInstalledVersion(cacheDir, name)
 		available := published[name]
+		snap := snapshots[name]
+		origin := snap.OriginRepo
+		if origin == "" {
+			origin = install.ReadOriginRepo(cacheDir, name)
+		}
 		opt := AssetBundleOption{
 			Name:        name,
 			Description: officialCandidateDescription(available),
 			Vault:       name,
+			Members:     snapshotMembers(name, snap),
+			Tags:        append([]string(nil), snap.Tags...),
 			Enabled:     pin != "",
 			Required:    pin != "",
 			Model:       "p",
@@ -247,7 +262,7 @@ func ListOfficialCandidates(ctx context.Context, workspace Workspace, cfg *types
 			Pin:         pin,
 			Installed:   installed,
 			Available:   available,
-			OriginRepo:  install.ReadOriginRepo(cacheDir, name),
+			OriginRepo:  origin,
 		}
 		if pin != "" && available != "" {
 			opt.UpdateAvailable = installed == "" || installed != available
@@ -262,6 +277,102 @@ func officialCandidateDescription(available string) string {
 		return "官方注册表项目"
 	}
 	return "官方注册表项目，最新 " + available
+}
+
+func snapshotMembers(project string, snap registry.ProjectSnapshot) []AssetSelectionItem {
+	if len(snap.Assets) == 0 {
+		return nil
+	}
+	out := make([]AssetSelectionItem, 0, len(snap.Assets))
+	for _, asset := range snap.Assets {
+		out = append(out, AssetSelectionItem{
+			Name:       asset.Name,
+			Type:       asset.Type,
+			Vault:      project,
+			Visibility: types.AssetVisibility(asset.Visibility),
+			Plane:      types.AssetPlane(asset.Plane),
+		})
+	}
+	return out
+}
+
+func mergeAssetMembers(official, vault []AssetSelectionItem) []AssetSelectionItem {
+	if len(official) == 0 {
+		return vault
+	}
+	seen := make(map[string]struct{}, len(official)+len(vault))
+	out := make([]AssetSelectionItem, 0, len(official)+len(vault))
+	for _, item := range append(append([]AssetSelectionItem{}, official...), vault...) {
+		key := item.Type + "\x00" + item.Name
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func secretsOnlyPlaceholder(description string) bool {
+	text := strings.ToLower(description)
+	return strings.Contains(text, "secrets-only") && strings.Contains(text, "placeholder")
+}
+
+var officialSnapshotMu sync.Mutex
+var officialSnapshotURL string
+var officialSnapshotSHA string
+var officialSnapshotProjects map[string]registry.ProjectSnapshot
+
+// officialHeadSnapshots 读 registry 分支顶端的产品目录。版本号仍来自 tag；
+// 这里补源仓和资产名单，订阅行才知道发布的是哪个仓里的哪些文件。
+func officialHeadSnapshots(ctx context.Context, registryURL string) map[string]registry.ProjectSnapshot {
+	url := strings.TrimSpace(registryURL)
+	if url == "" {
+		url = registry.DefaultURL
+	}
+	env := registry.TokenEnv(os.Getenv("DEC_REGISTRY_TOKEN"))
+	sha := registryHeadSHA(ctx, url, env)
+	if sha == "" {
+		return nil
+	}
+	officialSnapshotMu.Lock()
+	if officialSnapshotURL == url && officialSnapshotSHA == sha && officialSnapshotProjects != nil {
+		cached := officialSnapshotProjects
+		officialSnapshotMu.Unlock()
+		return cached
+	}
+	officialSnapshotMu.Unlock()
+
+	dir, err := os.MkdirTemp("", "dec-registry-head-*")
+	if err != nil {
+		return nil
+	}
+	defer os.RemoveAll(dir)
+	if _, err := registry.GitEnv(ctx, "", env, "clone", "--depth", "1", "--branch", registry.Branch, "--single-branch", url, dir); err != nil {
+		return nil
+	}
+	projects, err := registry.ReadProjects(dir)
+	if err != nil {
+		return nil
+	}
+	officialSnapshotMu.Lock()
+	officialSnapshotURL = url
+	officialSnapshotSHA = sha
+	officialSnapshotProjects = projects
+	officialSnapshotMu.Unlock()
+	return projects
+}
+
+func registryHeadSHA(ctx context.Context, url string, env []string) string {
+	out, err := registry.GitEnv(ctx, "", env, "ls-remote", url, "refs/heads/"+registry.Branch)
+	if err != nil {
+		return ""
+	}
+	line := strings.TrimSpace(out)
+	if line == "" {
+		return ""
+	}
+	return strings.Fields(line)[0]
 }
 
 // officialPublishedVersions 列出注册表里每个项目的最新已发布版本。连不上时返回空表。
