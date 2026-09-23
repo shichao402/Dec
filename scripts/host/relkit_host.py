@@ -303,6 +303,7 @@ def build_parser() -> argparse.ArgumentParser:
     retrospect_note.add_argument("--text", required=True)
     upgrade = sub.add_parser("upgrade", help="rewrite lock to a GitHub release and install")
     upgrade.add_argument("release")
+    upgrade.add_argument("--finalize", action="store_true", help=argparse.SUPPRESS)
 
     fake = sub.add_parser("fake", help="verify staged release wiring without publishing")
     fake_sub = fake.add_subparsers(dest="fake_cmd", required=True)
@@ -436,7 +437,7 @@ def dispatch(root: Path, args: argparse.Namespace) -> int:
             return cmd_retrospect_note(root, args.code, args.note_class, args.text)
         return cmd_retrospect(root, args.json)
     if args.cmd == "upgrade":
-        return cmd_upgrade(root, args.release)
+        return cmd_upgrade(root, args.release, args.finalize)
     if args.cmd == "fake":
         return cmd_fake_verify(root, args.version)
     if args.cmd == "release":

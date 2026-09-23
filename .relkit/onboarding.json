@@ -64,8 +64,8 @@
     },
     "consume.lock": {
       "status": "verified",
-      "value": "v0.4.18",
-      "note": "lock present"
+      "value": "v0.4.23",
+      "note": "lock installed"
     },
     "sidecar.layout": {
       "status": "verified",

@@ -31,7 +31,7 @@ from .facets import (
     updater_process_values,
 )
 from .digest import tree_sha256 as _tree_sha256
-from .gates import GATES, run_gates, has_webview
+from .gates import GATES, run_gates, client_query_channels, has_webview
 from . import runtime as _runtime
 
 
@@ -215,7 +215,7 @@ def _impl_build_release_lock(
         "artifacts": artifacts,
     }
 
-def _impl_cmd_upgrade(root: Path, release: str) -> int:
+def _impl_cmd_upgrade(root: Path, release: str, finalize: bool = False) -> int:
     if not re.fullmatch(r"v\d+\.\d+\.\d+", release):
         raise Fail("upgrade expects vX.Y.Z")
     lock_path = root / "scripts" / "relkit.lock.json"
@@ -261,7 +261,38 @@ def _impl_cmd_upgrade(root: Path, release: str) -> int:
     if previous_schema != LOCK_SCHEMA:
         print(f"rewrote {lock_path} from {previous_schema} to {LOCK_SCHEMA}")
     print(f"updated {lock_path} to {release}")
-    return cmd_install(root, [])
+    code = cmd_install(root, [])
+    if code != 0 or finalize:
+        return code
+
+    # cmd_install replaces scripts/host with the target release, but this
+    # process still has the old hostlib modules loaded. Re-enter through the
+    # newly installed script so fields introduced by the target release are
+    # present in the final lock instead of falling back in the old builder.
+    installed_entry = root / "scripts" / "host" / "relkit_host.py"
+    if not installed_entry.is_file():
+        raise Fail(
+            f"install succeeded but target host entry is missing: {installed_entry}",
+            code="upgrade-installed-host-finalize-failed",
+        )
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                str(installed_entry),
+                "upgrade",
+                release,
+                "--finalize",
+            ],
+            cwd=root,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise Fail(
+            f"installed host failed to finalize {release}: {error}",
+            code="upgrade-installed-host-finalize-failed",
+        ) from error
+    return 0
 
 def _impl_http_get(url: str) -> str:
     request = Request(url, headers={"User-Agent": "relkit-host"})
@@ -917,6 +948,20 @@ def _impl_resolve_ci_channel(root: Path, explicit: str) -> str:
     if channel not in allowed:
         raise Fail(
             f"--channel must be one of {', '.join(allowed)}; got {channel or '(empty)'}"
+        )
+    default_channel = str(config.get("defaultChannel") or allowed[0]).strip()
+    if default_channel and channel != default_channel:
+        print(
+            f"relkit: note: publishing non-default channel {channel}; "
+            f"defaultChannel is {default_channel}"
+        )
+    queried = client_query_channels(root, allowed=set(allowed))
+    if queried and channel not in queried:
+        raise Fail(
+            f"channel {channel} is not queried by any client "
+            f"(host source queries: {', '.join(sorted(queried))}); "
+            "installed clients will not see this release",
+            code="publish-channel-no-client-consumer",
         )
     tag = (
         os.environ.get("BK_CI_REPO_GIT_WEBHOOK_TAG_NAME")

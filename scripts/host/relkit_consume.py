@@ -21,6 +21,7 @@ import ssl
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import traceback
@@ -56,6 +57,8 @@ PORTABLE_COMPONENTS = tuple(row.name for row in portable_components())
 DOWNLOAD_ATTEMPTS = 3
 ALLOW_INSECURE_ENV = "RELKIT_CONSUME_ALLOW_INSECURE"
 CURL_OVERRIDE_ENV = "RELKIT_CURL"
+# Optional intranet mirror for the pinned Windows Schannel curl package.
+CURL_BOOTSTRAP_URL_ENV = "RELKIT_CURL_BOOTSTRAP_URL"
 _CA_ENV_KEYS = (
     "RELKIT_CA_BUNDLE",
     "SSL_CERT_FILE",
@@ -67,6 +70,24 @@ _windows_ca_bundle: Optional[Path] = None
 # Path -> backend name. A single global would poison later picks after PATH
 # found a Cygwin OpenSSL curl on the first call.
 _curl_backends: dict[str, str] = {}
+
+# Official curl-for-win Windows build (Schannel). Same pin scoop Main uses.
+# When System32 curl.exe is missing (Server 2016 builders), consume installs
+# this under .relkit/cache/tools/ and points RELKIT_CURL at it. Bootstrap of
+# the archive itself goes through PowerShell Schannel — never PATH OpenSSL curl.
+_WINDOWS_CURL_PIN = {
+    "version": "8.22.0_1",
+    "url": (
+        "https://curl.se/windows/dl-8.22.0_1/"
+        "curl-8.22.0_1-win64-mingw.tar.xz"
+    ),
+    "sha256": (
+        "6d69f979df3b2918fbaa944adf174fbbf2b3"
+        "cfc47efbb927b227dae583de1fe1"
+    ),
+    "extract_dir": "curl-8.22.0_1-win64-mingw",
+    "relative_exe": "bin/curl.exe",
+}
 
 
 class CertificateVerificationError(RuntimeError):
@@ -313,13 +334,199 @@ def system32_curl() -> Optional[Path]:
     return candidate if candidate.is_file() else None
 
 
+def cached_schannel_curl(root: Path) -> Optional[Path]:
+    """Pinned Schannel curl previously installed under the project cache."""
+    pin = _WINDOWS_CURL_PIN
+    exe = (
+        root
+        / ".relkit"
+        / "cache"
+        / "tools"
+        / f"curl-schannel-{pin['version']}"
+        / pin["extract_dir"]
+        / pin["relative_exe"].replace("/", os.sep)
+    )
+    return exe if exe.is_file() else None
+
+
+def download_with_powershell(url: str, destination: Path) -> None:
+    """Download via PowerShell Invoke-WebRequest (Windows Schannel / system roots).
+
+    Used to bootstrap a Schannel curl when System32 curl.exe is missing, and as
+    a strict download transport in the same trust model. Never goes through
+    PATH OpenSSL curl.
+    """
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+    if not powershell:
+        raise RuntimeError("powershell is unavailable")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + f".ps-{os.getpid()}")
+    temporary.unlink(missing_ok=True)
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        # Server 2016 / older .NET defaults omit TLS 1.2 and abort with
+        # "Could not create SSL/TLS secure channel" against modern hosts.
+        "[Net.ServicePointManager]::SecurityProtocol = "
+        "[Net.SecurityProtocolType]::Tls12\n"
+        f"$url = {json.dumps(url)}\n"
+        f"$out = {json.dumps(str(temporary))}\n"
+        "Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $out\n"
+    )
+    try:
+        result = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=180,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        temporary.unlink(missing_ok=True)
+        raise RuntimeError("powershell download timed out after 180s") from error
+    except OSError as error:
+        temporary.unlink(missing_ok=True)
+        raise RuntimeError(f"powershell download failed to start: {error}") from error
+    if result.returncode != 0 or not temporary.is_file() or temporary.stat().st_size == 0:
+        detail = summarize_error(result.stderr or result.stdout or "no stderr")
+        temporary.unlink(missing_ok=True)
+        lowered = detail.lower()
+        if any(
+            token in lowered
+            for token in (
+                "trust relationship",
+                "authentication or decryption has failed",
+                "could not establish trust",
+                "ssl/tls",
+                "certificate",
+            )
+        ):
+            raise CertificateVerificationError(detail)
+        raise RuntimeError(f"powershell download failed ({result.returncode}): {detail}")
+    temporary.replace(destination)
+
+
+def _extract_tar_xz(archive: Path, destination_dir: Path) -> None:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive, mode="r:xz") as tar:
+        # filter="data" is 3.12+; older interpreters extract with legacy defaults.
+        try:
+            tar.extractall(destination_dir, filter="data")  # type: ignore[call-arg]
+        except TypeError:
+            tar.extractall(destination_dir)
+
+
+def install_pinned_windows_schannel_curl(root: Path) -> Path:
+    """Fetch the pinned Schannel curl into .relkit/cache/tools and return curl.exe."""
+    pin = _WINDOWS_CURL_PIN
+    tools = root / ".relkit" / "cache" / "tools"
+    tools.mkdir(parents=True, exist_ok=True)
+    install_root = tools / f"curl-schannel-{pin['version']}"
+    exe = install_root / pin["extract_dir"] / pin["relative_exe"].replace("/", os.sep)
+    if exe.is_file() and detect_curl_backend(str(exe)) == "schannel":
+        return exe
+
+    if install_root.exists():
+        shutil.rmtree(install_root, ignore_errors=True)
+    install_root.mkdir(parents=True, exist_ok=True)
+
+    url = os.environ.get(CURL_BOOTSTRAP_URL_ENV, "").strip() or pin["url"]
+    archive = tools / f"curl-schannel-{pin['version']}.tar.xz"
+    archive.unlink(missing_ok=True)
+    print(
+        f"relkit consume: System32 curl missing; installing pinned Schannel "
+        f"curl {pin['version']} via PowerShell",
+        file=sys.stderr,
+    )
+    download_with_powershell(url, archive)
+    digest = file_sha256(archive)
+    if digest != pin["sha256"]:
+        archive.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"pinned Windows curl sha256 mismatch: got {digest}, want {pin['sha256']}"
+        )
+    _extract_tar_xz(archive, install_root)
+    archive.unlink(missing_ok=True)
+    if not exe.is_file():
+        raise RuntimeError(f"pinned Windows curl missing after extract: {exe}")
+    backend = detect_curl_backend(str(exe))
+    if backend != "schannel":
+        raise RuntimeError(
+            f"pinned Windows curl is not Schannel ({backend}): {exe}"
+        )
+    print(f"relkit consume: installed Schannel curl at {exe}", file=sys.stderr)
+    return exe
+
+
+def ensure_windows_schannel_curl(
+    root: Path,
+    *,
+    environ: Optional[dict[str, str]] = None,
+) -> Optional[str]:
+    """Env check: make a Schannel curl available on Windows, or return None.
+
+    Order: RELKIT_CURL override → System32 → cached pin → download+install pin.
+    Returns None only when install is impossible; callers then use PowerShell
+    Schannel as the download transport (same trust model as System32 curl).
+    """
+    if os.name != "nt":
+        return None
+    env = environ if environ is not None else os.environ
+    override = env.get(CURL_OVERRIDE_ENV, "").strip()
+    if override:
+        path = Path(override)
+        if not path.is_file():
+            raise RuntimeError(f"{CURL_OVERRIDE_ENV}={override} is not a file")
+        return str(path)
+
+    system = system32_curl()
+    if system is not None:
+        backend = detect_curl_backend(str(system))
+        if backend != "schannel":
+            raise RuntimeError(
+                f"Windows System32 curl is not Schannel ({backend}): {system}"
+            )
+        return str(system)
+
+    cached = cached_schannel_curl(root)
+    if cached is not None and detect_curl_backend(str(cached)) == "schannel":
+        env[CURL_OVERRIDE_ENV] = str(cached)
+        print(
+            f"relkit consume: using cached Schannel curl {cached}",
+            file=sys.stderr,
+        )
+        return str(cached)
+
+    try:
+        installed = install_pinned_windows_schannel_curl(root)
+    except Exception as error:
+        print(
+            "relkit consume: could not install pinned Schannel curl "
+            f"({summarize_error(error)}); will use PowerShell Schannel for downloads",
+            file=sys.stderr,
+        )
+        return None
+    env[CURL_OVERRIDE_ENV] = str(installed)
+    return str(installed)
+
+
 def resolve_curl(*, environ: Optional[dict[str, str]] = None) -> str:
     """Pick a deterministic curl for HTTPS downloads.
 
     On Windows the PATH often puts Cygwin/Git OpenSSL curl ahead of the OS
     Schannel curl. That backend does not share the machine Root store and is
     frequently decade-old. Prefer System32 Schannel; allow RELKIT_CURL to
-    override for tests and break-glass.
+    override for tests, break-glass, and the pinned cache install from
+    ensure_windows_schannel_curl.
     """
     env = environ if environ is not None else os.environ
     override = env.get(CURL_OVERRIDE_ENV, "").strip()
@@ -340,7 +547,8 @@ def resolve_curl(*, environ: Optional[dict[str, str]] = None) -> str:
             return str(system)
         raise RuntimeError(
             "Windows System32 curl.exe is missing; refuse PATH curl "
-            "(Cygwin/Git OpenSSL curl is not a trusted TLS transport)"
+            "(Cygwin/Git OpenSSL curl is not a trusted TLS transport); "
+            "call ensure_windows_schannel_curl before downloads"
         )
 
     curl = shutil.which("curl")
@@ -451,7 +659,9 @@ def fetch_url(
     *,
     allow_insecure: Optional[bool] = None,
 ) -> None:
-    # Strict TLS first. Windows OpenSSL transports get the system Root/CA PEM.
+    # Strict TLS first. On Windows prefer Schannel transports (System32 /
+    # pinned curl, then PowerShell) over OpenSSL-backed Python — builders
+    # without System32 curl still share the machine Root store that way.
     # Insecure fallback is fail-closed unless explicitly opted in; lock SHA-256
     # remains a second integrity layer, never a standing TLS substitute.
     if allow_insecure is None:
@@ -488,28 +698,46 @@ def fetch_url(
             curl=curl_path,
         )
 
-    strict_methods: list[tuple[str, Any]] = [
-        (
-            "Python HTTPS",
-            lambda: download_with_python(
-                url, destination, verify=True, ca_bundle=ca_bundle
-            ),
+    def powershell_download() -> None:
+        if os.name != "nt":
+            raise RuntimeError("PowerShell Schannel transport is Windows-only")
+        download_with_powershell(url, destination)
+
+    python_download = (
+        "Python HTTPS",
+        lambda: download_with_python(
+            url, destination, verify=True, ca_bundle=ca_bundle
         ),
-        ("system curl", curl_download),
-    ]
+    )
+    if os.name == "nt":
+        strict_methods: list[tuple[str, Any]] = [
+            ("system curl", curl_download),
+            ("PowerShell Schannel", powershell_download),
+            python_download,
+        ]
+    else:
+        strict_methods = [
+            python_download,
+            ("system curl", curl_download),
+        ]
     strict_errors: list[str] = []
     certificate_failed = False
     for label, download in strict_methods:
         destination.unlink(missing_ok=True)
         try:
             download()
+            backend = {
+                "system curl": curl_backend,
+                "PowerShell Schannel": "powershell-schannel",
+                "Python HTTPS": "python-ssl",
+            }.get(label, "unknown")
             log_transport(
                 "success",
                 method=label,
                 host=host or "-",
                 misses=len(strict_errors),
                 ca=ca_source_label(ca_bundle),
-                backend=curl_backend if label == "system curl" else "python-ssl",
+                backend=backend,
             )
             if strict_errors:
                 print(
@@ -560,6 +788,10 @@ def fetch_url(
             lambda: curl_download(extra_args=("--insecure",)),
         ),
     ]
+    if os.name == "nt":
+        # Last-resort: PowerShell still verifies by default; only keep the
+        # already-listed insecure Python/curl paths above.
+        pass
     fallback_errors: list[str] = []
     for label, download in fallback_methods:
         destination.unlink(missing_ok=True)
@@ -1018,12 +1250,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         components = args.component or list(DEFAULT_COMPONENTS)
         if "host-scripts" in lock["artifacts"] and "host-scripts" not in components:
             components.insert(0, "host-scripts")
+        # Windows env check before any lock download: System32 Schannel curl,
+        # else install the pinned copy, else PowerShell Schannel transport.
+        if os.name == "nt":
+            ensure_windows_schannel_curl(root)
         allow_insecure = True if args.allow_insecure else None
         resolved_artifacts: dict[str, str] = {}
         for component in components:
             spec = artifact_spec(lock, component, target)
             resolved_artifacts[component] = spec["sha256"]
             if args.command == "install":
+                if component == "host-scripts":
+                    expected = str(lock.get("hostScriptsSha256") or "").lower()
+                    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+                        raise RuntimeError("lock has no valid hostScriptsSha256")
+                    host_dir = root / "scripts" / "host"
+                    if (
+                        host_dir.is_dir()
+                        and host_scripts_tree_sha256(host_dir) == expected
+                    ):
+                        print(
+                            "relkit consume: host-scripts already match lock; "
+                            "skipping download",
+                            file=sys.stderr,
+                        )
+                        check_installed(root, lock, component, target)
+                        continue
                 artifact = download_artifact(
                     root, component, spec, allow_insecure=allow_insecure
                 )

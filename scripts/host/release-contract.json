@@ -1,0 +1,11 @@
+{
+  "schema": "relkit.host-contract/1",
+  "protocol": {
+    "min": 2,
+    "max": 2
+  },
+  "updaterIpc": {
+    "min": 3,
+    "max": 3
+  }
+}

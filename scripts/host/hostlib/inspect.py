@@ -31,7 +31,7 @@ from .facets import (
     updater_process_values,
 )
 from .digest import tree_sha256 as _tree_sha256
-from .gates import GATES, run_gates
+from .gates import GATES, run_gates, unused_publish_channels
 from . import runtime as _runtime
 
 
@@ -192,6 +192,23 @@ def _impl_env_inspect_report(root: Path) -> dict[str, Any]:
                         "detail": f"backends.{name}.type={kind}",
                     }
                 )
+        unused, queried = unused_publish_channels(root)
+        if unused:
+            facts["clientChannels"] = sorted(queried)
+            facts["unusedPublishChannels"] = sorted(unused)
+            findings.append(
+                {
+                    "severity": "warning",
+                    "code": "publish-channel-no-client-consumer",
+                    "detail": (
+                        "publish channel "
+                        + ", ".join(sorted(unused))
+                        + " is not queried by any client "
+                        + f"(host source queries: {', '.join(sorted(queried))}); "
+                        "installed clients will not see those releases"
+                    ),
+                }
+            )
     else:
         facts["relkit.json"] = False
         findings.append(

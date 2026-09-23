@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from .const import MIN_PYTHON
 from .facets import BY_NAME, components
@@ -31,6 +31,32 @@ HOST_ENTRY_SIGNAL = re.compile(r"relkit_host\.py|relkit_consume\.py")
 CONSUMER_IMPORT = re.compile(r"^[ \t]*(?:import|from)[ \t]+relkit_consume\b", re.M)
 RETIRED_CONSUMER_PATH = re.compile(r"scripts[/\\]relkit_consume\.py")
 INTERNAL_APPLY_CALL = re.compile(r"\bapply\s*\(", re.I)
+REMOVED_STAGE_FLAGS = {"--add": "--install"}
+PACKAGING_PATTERNS = (
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+    "ci/*.yml",
+    "ci/*.yaml",
+    "scripts/*.js",
+    "scripts/*.mjs",
+    "scripts/*.py",
+    "scripts/*.sh",
+    "scripts/*.ps1",
+    "scripts/*.cmd",
+    "scripts/*.bat",
+)
+CHANNEL_ID = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+CHANNEL_STRING = rf"[\"']({CHANNEL_ID})[\"']"
+CLIENT_CHANNEL_ASSIGN = re.compile(
+    rf"\b(?:UPDATE_CHANNEL|updateChannel|currentChannel|Runtime\.channel)\b"
+    rf"(?:\s*:\s*[A-Za-z0-9_.<>,|?\s]+)?\s*=\s*{CHANNEL_STRING}"
+)
+CLIENT_CHANNEL_FIELD = re.compile(rf"\bchannel\s*[:=]\s*{CHANNEL_STRING}")
+CLIENT_CHANNEL_UNION = re.compile(
+    rf"[\"']{CHANNEL_ID}[\"'](?:\s*\|\s*[\"']{CHANNEL_ID}[\"'])+"
+)
+CLIENT_CHANNEL_TOKEN = re.compile(CHANNEL_STRING)
+CI_CHANNEL_FLAG = re.compile(rf"--channel\s+({CHANNEL_ID})\b")
 
 
 def gate(name: str) -> Callable[[Gate], Gate]:
@@ -101,6 +127,129 @@ def _entry_files(root: Path) -> list[Path]:
         and not any(part.startswith(".") for part in path.relative_to(root).parts[:-1])
         and not path.relative_to(root).as_posix().startswith("scripts/host/")
     ]
+
+
+def _packaging_files(root: Path) -> list[Path]:
+    return [
+        path
+        for pattern in PACKAGING_PATTERNS
+        for path in root.glob(pattern)
+        if path.is_file()
+        and not path.relative_to(root).as_posix().startswith("scripts/host/")
+    ]
+
+
+def publish_channels(root: Path) -> set[str]:
+    """Channels relkit.json and packaging entrypoints can actually emit."""
+    found: set[str] = set()
+    cfg = _config(root)
+    channels = cfg.get("channels")
+    if isinstance(channels, list):
+        found.update(str(item).strip() for item in channels if str(item).strip())
+    for path in _packaging_files(root):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        found.update(CI_CHANNEL_FLAG.findall(text))
+    return {item for item in found if re.fullmatch(CHANNEL_ID, item)}
+
+
+def client_query_channels(
+    root: Path, *, allowed: Optional[set[str]] = None
+) -> set[str]:
+    """Compile-time channel names the host actually queries.
+
+    Returns an empty set when source has no closed channel constant, so
+    callers must treat empty as 'unknown' rather than 'queries nothing'.
+    """
+    allowed = allowed if allowed is not None else publish_channels(root)
+    if not allowed:
+        return set()
+    found: set[str] = set()
+    for path in _source_files(root):
+        if path.suffix.lower() not in EXECUTABLE_SUFFIXES:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        found.update(CLIENT_CHANNEL_ASSIGN.findall(text))
+        found.update(CLIENT_CHANNEL_FIELD.findall(text))
+        for span in CLIENT_CHANNEL_UNION.findall(text):
+            found.update(CLIENT_CHANNEL_TOKEN.findall(span))
+    return {item for item in found if item in allowed}
+
+
+def unused_publish_channels(root: Path) -> tuple[set[str], set[str]]:
+    """Publish channels no client compile-time constant will query."""
+    published = publish_channels(root)
+    queried = client_query_channels(root, allowed=published)
+    if not queried:
+        return set(), queried
+    return published - queried, queried
+
+
+@gate("stage-cli-flags")
+def stage_cli_flags(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    """Reject removed relkit stage flags in packaging entrypoints only."""
+    for path in _packaging_files(root):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "relkit" not in text or "stage" not in text:
+            continue
+        relative = path.relative_to(root).as_posix()
+        for removed, replacement in REMOVED_STAGE_FLAGS.items():
+            if re.search(
+                rf"(?<![A-Za-z0-9_-]){re.escape(removed)}(?![A-Za-z0-9_-])",
+                text,
+            ):
+                drift.append(
+                    f"removed relkit stage flag {removed} in {relative}; "
+                    f"use {replacement}"
+                )
+
+
+@gate("release-lock-contract")
+def release_lock_contract(root: Path, state: dict[str, Any], drift: list[str]) -> None:
+    """The installed target scripts must agree with the lock they just wrote."""
+    contract_path = root / "scripts" / "host" / "release-contract.json"
+    lock_path = root / "scripts" / "relkit.lock.json"
+    if not contract_path.is_file() or not lock_path.is_file():
+        return
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        drift.append(f"release lock contract is unreadable: {error}")
+        return
+    if contract.get("schema") != "relkit.host-contract/1":
+        drift.append("scripts/host/release-contract.json has an unsupported schema")
+        return
+    for field in ("protocol", "updaterIpc"):
+        expected = contract.get(field)
+        actual = lock.get(field)
+        if expected != actual:
+            drift.append(
+                f"lock {field}={actual} does not match installed release "
+                f"contract {expected}; rerun upgrade for {lock.get('release')}"
+            )
+
+
+@gate("publish-channel-no-client-consumer")
+def publish_channel_no_client_consumer(
+    root: Path, state: dict[str, Any], drift: list[str]
+) -> None:
+    """A publishable channel that no host compile-time constant queries is drift.
+
+    inspect / verify used to stay green while CI shipped beta to a client whose
+    Runtime.channel was compiled as stable. Skip when source has no closed
+    channel constant: that is unknown, not 'queries nothing'.
+    """
+    unused, queried = unused_publish_channels(root)
+    if not unused:
+        return
+    queried_text = ", ".join(sorted(queried)) or "(none)"
+    drift.append(
+        "publish channel "
+        + ", ".join(sorted(unused))
+        + " is not queried by any client "
+        + f"(host source queries: {queried_text}); "
+        "installed clients will not see those releases"
+    )
 
 
 def has_webview(root: Path) -> bool:
@@ -238,24 +387,7 @@ def internal_update_two_track(root: Path, state: dict[str, Any], drift: list[str
     if not INTERNAL_APPLY_CALL.search(source):
         return
 
-    ci_files = [
-        path
-        for pattern in (
-            ".github/workflows/*.yml",
-            ".github/workflows/*.yaml",
-            "ci/*.yml",
-            "ci/*.yaml",
-            "scripts/*.js",
-            "scripts/*.mjs",
-            "scripts/*.py",
-            "scripts/*.sh",
-            "scripts/*.ps1",
-            "scripts/*.cmd",
-            "scripts/*.bat",
-        )
-        for path in root.glob(pattern)
-        if path.is_file()
-    ]
+    ci_files = _packaging_files(root)
     ci_text = "\n".join(
         path.read_text(encoding="utf-8", errors="ignore")
         for path in ci_files
