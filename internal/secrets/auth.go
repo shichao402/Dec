@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shichao402/Dec/internal/consoleopen"
+	"github.com/shichao402/Dec/internal/diag"
 )
 
 // authenticatorFactory 供测试注入 mock Authenticator。
@@ -95,9 +96,11 @@ func EnsureSession(ctx context.Context, opts *EnsureSessionOpts) error {
 
 	configured, err := IsConfigured()
 	if err != nil {
+		authStatus(onStatus, "session check: config error: %v", err)
 		return fmt.Errorf("读取 Bitwarden 配置失败: %w", err)
 	}
 	if !configured {
+		authStatus(onStatus, "session check: Bitwarden 未配置")
 		return fmt.Errorf("Bitwarden 未配置")
 	}
 
@@ -118,10 +121,12 @@ func EnsureSession(ctx context.Context, opts *EnsureSessionOpts) error {
 		return nil
 	}
 	if passwordSet {
+		authStatus(onStatus, "programmatic unlock: gave up without opening Console")
 		return fmt.Errorf("程序化登录未成功，且已设置 DEC_BW_PASSWORD，不会启动 Console")
 	}
 
 	if opts == nil || !opts.InteractiveLocal || !consoleAvailable() {
+		authStatus(onStatus, "console unlock: unavailable interactive=%t", opts != nil && opts.InteractiveLocal)
 		return fmt.Errorf("%w: %w；请在有桌面的机器上打开 Console 完成认证",
 			ErrConsoleUnlockRequired, ErrConsoleUnlockUnavailable)
 	}
@@ -132,6 +137,7 @@ func EnsureSession(ctx context.Context, opts *EnsureSessionOpts) error {
 	}
 	authStatus(onStatus, "console unlock: requesting (timeout=%s)", timeout)
 	if err := requestConsoleUnlock(); err != nil {
+		authStatus(onStatus, "console unlock: launch failed: %v", err)
 		return fmt.Errorf("%w: %w: %v", ErrConsoleUnlockRequired, ErrConsoleLaunchFailed, err)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -142,8 +148,10 @@ func EnsureSession(ctx context.Context, opts *EnsureSessionOpts) error {
 			return fmt.Errorf("%w: %w（%s）", ErrConsoleUnlockRequired, ErrConsoleUnlockTimeout, timeout)
 		}
 		if errors.Is(err, context.Canceled) {
+			authStatus(onStatus, "console unlock: canceled: %v", err)
 			return fmt.Errorf("%w: %w: %w", ErrConsoleUnlockRequired, ErrConsoleUnlockCanceled, err)
 		}
+		authStatus(onStatus, "console unlock: wait failed: %v", err)
 		return err
 	}
 	authStatus(onStatus, "console unlock: success")
@@ -177,12 +185,13 @@ func authStatusFunc(opts *EnsureSessionOpts) func(string) {
 }
 
 func authStatus(onStatus func(string), format string, args ...any) {
-	if onStatus == nil {
-		return
-	}
 	msg := fmt.Sprintf(format, args...)
 	if !strings.HasPrefix(msg, "[auth]") {
 		msg = "[auth] " + msg
+	}
+	diag.AuthLog("%s", msg)
+	if onStatus == nil {
+		return
 	}
 	onStatus(msg)
 }

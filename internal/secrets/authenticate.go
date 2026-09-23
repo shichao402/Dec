@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/shichao402/Dec/internal/diag"
 )
 
 var (
@@ -40,24 +42,35 @@ func UnlockWithPassword(ctx context.Context, email, password, totp string, remem
 	password = strings.TrimSpace(password)
 	totp = strings.TrimSpace(totp)
 	email = strings.TrimSpace(email)
+	diag.AuthLog("unlock: start email=%s password_set=%t totp_set=%t retain=%t", email, password != "", totp != "", retainPassword)
 	if totp != "" {
-		return completePending2FA(ctx, totp, rememberDevice)
+		result, err := completePending2FA(ctx, totp, rememberDevice)
+		if err != nil {
+			diag.AuthLog("unlock: 2FA failed: %v", err)
+			return nil, err
+		}
+		diag.AuthLog("unlock: 2FA success")
+		return result, nil
 	}
 	if password == "" {
+		diag.AuthLog("unlock: rejected: empty password")
 		return nil, fmt.Errorf("主密码不能为空")
 	}
 
 	configured, err := IsConfigured()
 	if err != nil {
+		diag.AuthLog("unlock: config error: %v", err)
 		return nil, fmt.Errorf("读取 Bitwarden 配置失败: %w", err)
 	}
 	if !configured {
+		diag.AuthLog("unlock: Bitwarden 未配置")
 		return nil, fmt.Errorf("Bitwarden 未配置")
 	}
 	if email == "" {
 		email = KnownEmail()
 	}
 	if email == "" {
+		diag.AuthLog("unlock: rejected: no email")
 		return nil, fmt.Errorf("未配置 Bitwarden 邮箱")
 	}
 
@@ -69,6 +82,7 @@ func UnlockWithPassword(ctx context.Context, email, password, totp string, remem
 	token, need2FA, err := auth.Unlock(ctx, email, password)
 	if err != nil {
 		clearPendingAuth()
+		diag.AuthLog("unlock: failed: %v", err)
 		return nil, fmt.Errorf("Bitwarden 登录失败: %w", err)
 	}
 	if need2FA {
@@ -78,12 +92,14 @@ func UnlockWithPassword(ctx context.Context, email, password, totp string, remem
 		if retainPassword {
 			retainPending2FA(email, password)
 		}
+		diag.AuthLog("unlock: need 2FA")
 		return &UnlockResult{Need2FA: true}, nil
 	}
 	applyUnlockSession(token)
 	if retainPassword {
 		RetainUnlockPassword(email, password)
 	}
+	diag.AuthLog("unlock: success")
 	return &UnlockResult{}, nil
 }
 

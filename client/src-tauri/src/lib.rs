@@ -10,7 +10,8 @@ use grpc::{read_local_metadata, spawn_local_server, AuthResult, InvokeResult, Pi
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex as StdMutex;
@@ -169,6 +170,110 @@ pub(crate) fn dec_home() -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|home| home.join(".dec")))
         .unwrap_or_else(|| PathBuf::from(".dec"))
+}
+
+fn redact_auth(line: &str) -> String {
+    let mut out = String::new();
+    let lower = line.to_ascii_lowercase();
+    let keys = [
+        "access_token",
+        "refresh_token",
+        "twofactortoken",
+        "two_factor_token",
+        "twofactorremember",
+        "masterpasswordhash",
+        "passwordhash",
+        "password",
+        "totp",
+        "session",
+    ];
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let mut matched = false;
+        for key in keys {
+            if lower[i..].starts_with(key) {
+                let after = i + key.len();
+                let rest = &line[after..];
+                let sep = rest.find(['=', ':']).filter(|pos| rest[..*pos].chars().all(|c| c.is_whitespace() || c == '"' || c == '\''));
+                if let Some(pos) = sep {
+                    let mut end = after + pos + 1;
+                    while end < bytes.len() && bytes[end].is_ascii_whitespace() {
+                        end += 1;
+                    }
+                    if end < bytes.len() && (bytes[end] == b'"' || bytes[end] == b'\'') {
+                        end += 1;
+                    }
+                    let value_start = end;
+                    while end < bytes.len() && !matches!(bytes[end], b' ' | b'"' | b'\'' | b',' | b'}') {
+                        end += 1;
+                    }
+                    if value_start < end {
+                        out.push_str(&line[i..value_start]);
+                        out.push_str("[redacted]");
+                        i = end;
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !matched {
+            out.push(line[i..].chars().next().unwrap_or('\u{fffd}'));
+            i += line[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        }
+    }
+    out
+}
+
+fn auth_log(message: &str) {
+    let path = dec_home().join("logs").join("auth.log");
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) else {
+        return;
+    };
+    let line = format!(
+        "{} pid={} console {}\n",
+        auth_stamp(),
+        std::process::id(),
+        redact_auth(message)
+    );
+    let _ = file.write_all(line.as_bytes());
+}
+
+fn auth_stamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let days = (secs / 86_400) as i64;
+    let tod = secs % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        tod / 3600,
+        (tod % 3600) / 60,
+        tod % 60
+    )
+}
+
+fn civil_from_days(mut z: i64) -> (i64, u32, u32) {
+    z += 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let mut year = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    if month <= 2 {
+        year += 1;
+    }
+    (year, month, day)
 }
 
 fn parse_release_version(value: &str) -> Option<(u64, u64, u64)> {
@@ -545,9 +650,22 @@ async fn delete_connection(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 fn load_saved_password(id: String) -> Result<String, String> {
     match credential_entry(&id)?.get_password() {
-        Ok(password) => Ok(password),
-        Err(keyring::Error::NoEntry) => Ok(String::new()),
-        Err(err) => Err(format!("读取系统凭据库失败: {err}")),
+        Ok(password) => {
+            auth_log(&format!(
+                "credential read id={id} present={}",
+                !password.is_empty()
+            ));
+            Ok(password)
+        }
+        Err(keyring::Error::NoEntry) => {
+            auth_log(&format!("credential read id={id} missing"));
+            Ok(String::new())
+        }
+        Err(err) => {
+            let message = format!("读取系统凭据库失败: {err}");
+            auth_log(&format!("credential read id={id} failed: {message}"));
+            Err(message)
+        }
     }
 }
 
@@ -952,12 +1070,40 @@ async fn authenticate(
     state: State<'_, AppState>,
 ) -> Result<AuthResult, String> {
     let mut guard = state.session.lock().await;
-    let session = guard.as_mut().ok_or("尚未连接")?;
-    let result = session
+    let session = match guard.as_mut() {
+        Some(session) => session,
+        None => {
+            auth_log("authenticate: rejected: 尚未连接");
+            return Err("尚未连接".into());
+        }
+    };
+    auth_log(&format!(
+        "authenticate: start email_set={} password_set={} totp_set={} remember={} retain={}",
+        !email.trim().is_empty(),
+        !password.is_empty(),
+        !totp.trim().is_empty(),
+        remember_device,
+        retain_password
+    ));
+    let result = match session
         .authenticate(email, password, totp, remember_device, retain_password)
-        .await?;
-    if result.unlocked {
+        .await
+    {
+        Ok(result) => result,
+        Err(err) => {
+            auth_log(&format!("authenticate: transport error: {err}"));
+            return Err(err);
+        }
+    };
+    if !result.error.is_empty() {
+        auth_log(&format!("authenticate: rejected: {}", result.error));
+    } else if result.need_2fa {
+        auth_log("authenticate: need 2FA");
+    } else if result.unlocked {
+        auth_log("authenticate: success");
         session.start_keep_alive();
+    } else {
+        auth_log("authenticate: not unlocked");
     }
     drop(guard);
     if let Some(current) = state.current.lock().await.as_mut() {

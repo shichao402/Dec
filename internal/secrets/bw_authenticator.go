@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/shichao402/Dec/internal/diag"
 )
 
 // BWAuthenticator 通过 Bitwarden Identity API 完成 unlock / 2FA。
@@ -65,8 +67,10 @@ func (a *BWAuthenticator) Unlock(ctx context.Context, email, password string) (s
 
 	rememberToken, err := RememberToken(a.email)
 	if err != nil {
+		diag.AuthLog("login: read remember token failed: %v", err)
 		return "", false, err
 	}
+	diag.AuthLog("login: start remember_token=%t", rememberToken != "")
 
 	opts := LoginOptions{}
 	if rememberToken != "" {
@@ -76,10 +80,12 @@ func (a *BWAuthenticator) Unlock(ctx context.Context, email, password string) (s
 	if err != nil && rememberToken != "" {
 		// 记住设备令牌失效时服务端可能直接报错，而不是要求 2FA。令牌留在
 		// device.json 里，每次登录都会被重新带上，用户就永远到不了验证码这一步。
+		diag.AuthLog("login: remember token rejected, retrying without it: %v", err)
 		_ = ClearRememberToken(a.email)
 		attempt, err = a.client.Login(ctx, password, "", "", "", LoginOptions{})
 	}
 	if err != nil {
+		diag.AuthLog("login: failed: %v", err)
 		return "", false, err
 	}
 	if attempt.need2FA {
@@ -93,13 +99,17 @@ func (a *BWAuthenticator) Unlock(ctx context.Context, email, password string) (s
 		if a.twoFactorProvider == "" {
 			a.twoFactorProvider = twoFactorProviderAuthenticator
 		}
+		provider := a.twoFactorProvider
 		a.mu.Unlock()
+		diag.AuthLog("login: 2FA required provider=%s", provider)
 		return "", true, nil
 	}
 	token, err := a.completeLogin(ctx, password, attempt.accessToken, attempt.twoFactorRemember)
 	if err != nil {
+		diag.AuthLog("login: vault key failed: %v", err)
 		return "", false, err
 	}
+	diag.AuthLog("login: success")
 	return token, false, nil
 }
 
