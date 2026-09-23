@@ -340,10 +340,15 @@ jobs:
           done
           "$RELKIT" "$@"
           AGENT_URL="${RELKIT_AGENT_URL:-https://publish.firoyang.com/v1}"
+          # cas-put 不读 RELKIT_UPLOAD_PART_SIZE（每个 blob 仍是整对象 PUT）。
+          # 跨境到 COS 时并发整 PUT 更容易 UserNetworkTooSlow；先串行上传。
+          # 对象内分片要等 relkit CAS multipart。
+          CAS_CONCURRENCY="${RELKIT_UPLOAD_CONCURRENCY:-1}"
           CAS_RESULT="$("$RELKIT" cas-put \
             --product dec \
             --version "$VER" \
-            --url "$AGENT_URL")"
+            --url "$AGENT_URL" \
+            --concurrency "$CAS_CONCURRENCY")"
           echo "$CAS_RESULT"
           SHA="${CAS_RESULT##*sha256=}"
           SHA="${SHA%% *}"
