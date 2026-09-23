@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -28,11 +27,15 @@ var (
 )
 
 // SuggestProjectName 把目录 basename 收成小写 kebab-case，规则与 Console suggestProjectName 一致。
+// 两种分隔符都认：Console 的 pathTail 是这么切的，filepath.Base 的语义随编译平台变，对不上。
 func SuggestProjectName(root string) string {
-	name := filepath.Base(strings.TrimSpace(root))
-	if name == "" || name == "." || name == string(filepath.Separator) {
+	segments := strings.FieldsFunc(strings.TrimSpace(root), func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	if len(segments) == 0 {
 		return ""
 	}
+	name := segments[len(segments)-1]
 	name = reLowerDigitUpper.ReplaceAllString(name, `${1}-${2}`)
 	name = reAcronymWord.ReplaceAllString(name, `${1}-${2}`)
 	name = strings.ToLower(name)

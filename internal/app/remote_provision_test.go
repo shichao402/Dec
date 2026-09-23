@@ -61,8 +61,8 @@ func TestProbeCleanLinuxHostIsProvisionable(t *testing.T) {
 	if probe.DecInstalled {
 		t.Fatal("运行时套件缺失时 DecInstalled 应为 false")
 	}
-	if len(probe.MissingBinaries) != 4 {
-		t.Fatalf("应缺 4 个二进制，实际 %v", probe.MissingBinaries)
+	if len(probe.MissingBinaries) != len(decSuiteBinaries) {
+		t.Fatalf("应缺 %d 个二进制，实际 %v", len(decSuiteBinaries), probe.MissingBinaries)
 	}
 	if !strings.Contains(probe.NextAction, "可以置备") {
 		t.Fatalf("建议动作应为可置备，实际 %q", probe.NextAction)

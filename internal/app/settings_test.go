@@ -371,6 +371,21 @@ func TestEnsureBuiltinIDEAssetsStripsBearerHeader(t *testing.T) {
 	}
 }
 
+// pinRegistryToEmptyRemote 把官方注册表指到用例自己的空 bare repo。
+// 不钉住就会去线上列 tag：线上发布了和用例同名的项目时，vault pin 会按 ADR 0031 收成 latest，
+// 用例于是跟着线上数据飘（registry/woa 发布那天就是这么挂的）。
+func pinRegistryToEmptyRemote(t *testing.T, remote string) {
+	t.Helper()
+	globalConfig, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig() = %v", err)
+	}
+	globalConfig.RegistryURL = remote
+	if err := config.SaveGlobalConfig(globalConfig); err != nil {
+		t.Fatalf("SaveGlobalConfig() = %v", err)
+	}
+}
+
 func TestSaveGlobalSettings_DoesNotChangeRequires(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	setEnvForProjectTest(t, "HOME", t.TempDir())
@@ -381,6 +396,7 @@ func TestSaveGlobalSettings_DoesNotChangeRequires(t *testing.T) {
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
+	pinRegistryToEmptyRemote(t, remote)
 	if _, err := SetWorkspaceRequires(
 		context.Background(),
 		NewWorkspace(WorkspaceUser, ""),
