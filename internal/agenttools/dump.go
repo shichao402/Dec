@@ -60,7 +60,7 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	return &m, nil
 }
 
-// BootstrapManifest 清单缺失时壳内置的最小清单（仅 console_status）。
+// BootstrapManifest 是清单缺失时的最小清单（仅 console_status）。
 func BootstrapManifest(version string) *Manifest {
 	schema, _ := schemaFor(emptyParams{})
 	return &Manifest{
@@ -68,7 +68,7 @@ func BootstrapManifest(version string) *Manifest {
 		Version:  version,
 		Tools: []ToolListing{{
 			Name:        BootstrapTool,
-			Description: "查看 Console 网关与当前连接。清单尚未生成时这是唯一可用工具；调用后 Console 会写出完整工具表。",
+			Description: "查看本机 dec-server。清单尚未生成时这是唯一可用工具。",
 			Owner:       OwnerConsole,
 			InputSchema: schema,
 		}},

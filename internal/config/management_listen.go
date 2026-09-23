@@ -9,8 +9,17 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
-// ProvisionManagementListen is the loopback endpoint written by host provisioning.
+// ProvisionManagementListen is the only gRPC address dec-server accepts.
 const ProvisionManagementListen = "127.0.0.1:47653"
+
+// MCPListenAddr is the only Streamable HTTP address. It is not configurable.
+const MCPListenAddr = "127.0.0.1:47654"
+
+// MCPHTTPPath is the MCP endpoint on MCPListenAddr.
+const MCPHTTPPath = "/mcp"
+
+// MCPURL is the IDE MCP entry. Loopback requests are allowed without a header.
+const MCPURL = "http://127.0.0.1:47654/mcp"
 
 // ManagementListenResult 描述一次 management_listen 幂等写入的结果。
 type ManagementListenResult struct {

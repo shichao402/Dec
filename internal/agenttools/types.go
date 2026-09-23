@@ -1,7 +1,6 @@
-// Package agenttools 是 Agent MCP 工具清单与调用编排的唯一真相源（ADR 0030）。
+// Package agenttools 是 Agent MCP 工具清单与调用编排的唯一真相源（ADR 0030 / 0032）。
 //
-// dec-mcp 只读清单并转发；Console 执行步骤；schema / Plan 都在本包生成，
-// 不再编译进 stdio 壳。
+// dec-server 的 Streamable HTTP 按 Plan 在进程内执行步骤。schema / Plan 都在本包生成。
 package agenttools
 
 import "encoding/json"

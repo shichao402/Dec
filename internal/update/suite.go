@@ -12,7 +12,7 @@ import (
 
 // SuiteComponents is the Dec runtime installed under ~/.dec/bin.
 // relkit-updater 由 Console 内置 resources 释放，不走运行时套件 payload。
-var SuiteComponents = []string{"dec-server", "dec-mcp", "dec-exec", "dec-host-setup"}
+var SuiteComponents = []string{"dec-server", "dec-exec", "dec-host-setup"}
 
 const UpdaterComponent = "relkit-updater"
 

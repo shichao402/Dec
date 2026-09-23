@@ -45,10 +45,11 @@
 | [0022](0022-console-bitwarden-unlock.md) | Console 统一承载 Bitwarden 人工解锁 | 已接受；部分取代 0008、0018 的旧解锁叙事 |
 | [0023](0023-facade-capability-parity.md) | 门面能力口径：Console 覆盖人面能力，MCP 扩展需登记 | 已接受（已实现） |
 | [0024](0024-vault-delete-to-trash.md) | 远端删除移入保险库回收站，不永久删除 | 已接受（已实现） |
-| [0025](0025-mcp-console-gateway.md) | MCP 经唯一 Console 网关代理，不再直连 dec-server | 已接受（已实现） |
+| [0025](0025-mcp-console-gateway.md) | MCP 经唯一 Console 网关代理，不再直连 dec-server | 已被 0032 取代 |
 | [0026](0026-project-provides-and-sync-worktree.md) | 项目作者源映射与可恢复同步工作副本 | 发版 / 本机推柜段已被 [0028](0028-official-registry-and-install.md) 取代；`provides` 作者源映射仍有效 |
 | [0027](0027-relkit-owned-update-contract.md) | 更新契约只由 relkit 声明 | 已接受（已实现） |
 | [0028](0028-official-registry-and-install.md) | 官方注册表、安装器与个人私仓 | 已接受 |
 | [0029](0029-single-consumer-requires.md) | 消费声明唯一化：`requires` + 提供方 `depends_on` | 已接受 |
-| [0030](0030-agent-tools-thin-shell.md) | Agent 工具清单与编排下移，dec-mcp 零业务知识 | 已接受 |
+| [0030](0030-agent-tools-thin-shell.md) | Agent 工具清单与编排下移，dec-mcp 零业务知识 | 清单与 Plan 仍有效；壳与网关已被 0032 取代 |
 | [0031](0031-control-plane-and-upstream-contribution.md) | 个人私仓是纯控制面，提供方一律走上游贡献 | 已接受 |
+| [0032](0032-mcp-streamable-http.md) | MCP 改为 dec-server 上的 Streamable HTTP | 已接受 |

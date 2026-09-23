@@ -46,7 +46,7 @@ else
     LOG_FILE="${LOG_DIR}/build-$(date +%Y%m%d-%H%M%S).log"
 fi
 
-BINARY_NAMES=("dec-server" "dec-mcp" "dec-exec" "dec-host-setup")
+BINARY_NAMES=("dec-server" "dec-exec" "dec-host-setup")
 BUILD_ALL=false
 CLEAN_BEFORE=true
 CLEAN_AFTER=false

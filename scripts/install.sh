@@ -116,7 +116,7 @@ main() {
     local install_dir="${DEC_HOME:-${HOME}/.dec}"
     local bin_dir="${install_dir}/bin"
     local binary_path="${bin_dir}/dec-server"
-    local binaries=("dec-server" "dec-mcp" "dec-exec" "dec-host-setup")
+    local binaries=("dec-server" "dec-exec" "dec-host-setup")
     local update_branch="${DEC_BRANCH:-main}"
     local requested_version="${DEC_VERSION:-}"
 

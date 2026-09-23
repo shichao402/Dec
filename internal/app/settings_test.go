@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
@@ -137,8 +138,10 @@ func TestSaveGlobalSettingsConfiguresAllSupportedIDEsByDefault(t *testing.T) {
 	}
 	var mcpCfg struct {
 		MCPServers map[string]struct {
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			URL     string            `json:"url"`
+			Headers map[string]string `json:"headers"`
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(mcpData, &mcpCfg); err != nil {
@@ -148,7 +151,7 @@ func TestSaveGlobalSettingsConfiguresAllSupportedIDEsByDefault(t *testing.T) {
 	if !ok {
 		t.Fatalf("cursor mcp.json 应包含 dec 条目: %#v", mcpCfg.MCPServers)
 	}
-	if decMCP.Command != "dec-mcp" || len(decMCP.Args) != 0 {
+	if decMCP.URL != "http://127.0.0.1:47654/mcp" || decMCP.Command != "" || len(decMCP.Args) != 0 {
 		t.Fatalf("dec MCP 配置 = %#v", decMCP)
 	}
 	if !result.VarsCreated {
@@ -279,13 +282,6 @@ func TestEnsureBuiltinIDEAssetsSkipsRemovedInternalIDEs(t *testing.T) {
 	}
 }
 
-func setRuntimeGenerationForTest(t *testing.T, generation string) {
-	t.Helper()
-	previous := RuntimeGeneration()
-	SetRuntimeGeneration(generation)
-	t.Cleanup(func() { SetRuntimeGeneration(previous) })
-}
-
 func readCursorMCPConfig(t *testing.T, homeDir string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(homeDir, ".cursor", "mcp.json"))
@@ -295,10 +291,18 @@ func readCursorMCPConfig(t *testing.T, homeDir string) []byte {
 	return data
 }
 
-func decMCPEntry(t *testing.T, data []byte) types.MCPServer {
+func decMCPEntry(t *testing.T, data []byte) struct {
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+	Command string            `json:"command"`
+} {
 	t.Helper()
 	var parsed struct {
-		MCPServers map[string]types.MCPServer `json:"mcpServers"`
+		MCPServers map[string]struct {
+			URL     string            `json:"url"`
+			Headers map[string]string `json:"headers"`
+			Command string            `json:"command"`
+		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("parse mcp.json: %v", err)
@@ -310,66 +314,60 @@ func decMCPEntry(t *testing.T, data []byte) types.MCPServer {
 	return server
 }
 
-func TestEnsureBuiltinIDEAssetsMarksRuntimeGeneration(t *testing.T) {
+func TestEnsureBuiltinIDEAssetsWritesURLOnly(t *testing.T) {
 	homeDir := t.TempDir()
 	setEnvForProjectTest(t, "HOME", homeDir)
-	setRuntimeGenerationForTest(t, "v1.13.73+0123456789abcdef")
 
 	if warnings := EnsureBuiltinIDEAssets([]string{"cursor"}, nil); len(warnings) != 0 {
 		t.Fatalf("warnings = %#v", warnings)
 	}
-	got := decMCPEntry(t, readCursorMCPConfig(t, homeDir)).Env[builtinDecMCPRuntimeGenerationEnv]
-	if got != "v1.13.73+0123456789abcdef" {
-		t.Fatalf("%s = %q", builtinDecMCPRuntimeGenerationEnv, got)
+	got := decMCPEntry(t, readCursorMCPConfig(t, homeDir))
+	if got.URL != "http://127.0.0.1:47654/mcp" || len(got.Headers) != 0 || got.Command != "" {
+		t.Fatalf("dec 条目 = %#v", got)
 	}
 }
 
-// 相同内容代号重复同步必须逐字节一致，否则 IDE 每次启动都会白白重启一次 dec-mcp。
-func TestEnsureBuiltinIDEAssetsKeepsMCPEntryStableAcrossSameGeneration(t *testing.T) {
+func TestEnsureBuiltinIDEAssetsLeavesUnchangedMCPConfig(t *testing.T) {
 	homeDir := t.TempDir()
 	setEnvForProjectTest(t, "HOME", homeDir)
-	setRuntimeGenerationForTest(t, "v1.13.73+0123456789abcdef")
 
 	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
-	first := readCursorMCPConfig(t, homeDir)
+	path := filepath.Join(homeDir, ".cursor", "mcp.json")
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat mcp.json: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
 	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
-	second := readCursorMCPConfig(t, homeDir)
-
-	if string(first) != string(second) {
-		t.Fatalf("相同内容代号重复同步改写了配置:\n%s\n---\n%s", string(first), string(second))
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat mcp.json: %v", err)
+	}
+	if !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("内容未变时仍改写了 mcp.json: before=%s after=%s", before.ModTime(), after.ModTime())
 	}
 }
 
-// 同版本换二进制必须让条目内容变化，这是开发期覆盖安装后重启 dec-mcp 的触发条件。
-func TestEnsureBuiltinIDEAssetsRewritesMCPEntryOnGenerationChange(t *testing.T) {
+func TestEnsureBuiltinIDEAssetsStripsBearerHeader(t *testing.T) {
 	homeDir := t.TempDir()
 	setEnvForProjectTest(t, "HOME", homeDir)
-
-	setRuntimeGenerationForTest(t, "v1.13.73+0123456789abcdef")
-	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
-	before := readCursorMCPConfig(t, homeDir)
-
-	setRuntimeGenerationForTest(t, "v1.13.73+fedcba9876543210")
-	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
-	after := readCursorMCPConfig(t, homeDir)
-
-	if string(before) == string(after) {
-		t.Fatalf("同版本换二进制后配置未变化: %s", string(before))
+	dir := filepath.Join(homeDir, ".cursor")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
-	if got := decMCPEntry(t, after).Env[builtinDecMCPRuntimeGenerationEnv]; got != "v1.13.73+fedcba9876543210" {
-		t.Fatalf("%s = %q", builtinDecMCPRuntimeGenerationEnv, got)
+	seed := []byte("{\n  \"mcpServers\": {\n    \"dec\": {\n      \"headers\": {\"Authorization\": \"Bearer old-token\"},\n      \"url\": \"http://127.0.0.1:47654/mcp\"\n    },\n    \"other\": {\"url\": \"http://example.test/mcp\"}\n  }\n}\n")
+	if err := os.WriteFile(filepath.Join(dir, "mcp.json"), seed, 0644); err != nil {
+		t.Fatalf("seed mcp.json: %v", err)
 	}
-}
-
-// 内容代号未登记时不写标记，保持 dec-server 之外调用方的既有行为。
-func TestEnsureBuiltinIDEAssetsOmitsMarkerWithoutRuntimeGeneration(t *testing.T) {
-	homeDir := t.TempDir()
-	setEnvForProjectTest(t, "HOME", homeDir)
-	setRuntimeGenerationForTest(t, "")
 
 	EnsureBuiltinIDEAssets([]string{"cursor"}, nil)
-	if _, ok := decMCPEntry(t, readCursorMCPConfig(t, homeDir)).Env[builtinDecMCPRuntimeGenerationEnv]; ok {
-		t.Fatalf("未登记内容代号时不应写入 %s", builtinDecMCPRuntimeGenerationEnv)
+	data := readCursorMCPConfig(t, homeDir)
+	got := decMCPEntry(t, data)
+	if got.URL != "http://127.0.0.1:47654/mcp" || len(got.Headers) != 0 {
+		t.Fatalf("dec 条目 = %#v", got)
+	}
+	if !strings.Contains(string(data), `"other"`) {
+		t.Fatalf("其它 MCP 条目被丢掉: %s", string(data))
 	}
 }
 

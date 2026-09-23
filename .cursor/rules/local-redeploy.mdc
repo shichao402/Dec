@@ -17,7 +17,7 @@ python scripts/build-console.py --deploy
 （Windows 是 NSIS，`/S`）。只想拿安装包、自己点安装时用 `--skip-deps`，产物在
 `dist/dec-console-<os>-<arch>.<ext>`。增量构建约 3 分钟。
 
-Console 启动后从自身内置 resources 把运行时套件（`dec-server`、`dec-mcp`、`dec-exec`、`dec-host-setup`）释放到 `~/.dec/bin`，**不需要**单独部署运行时：Console 与各组件出自同一次构建，版本天然相等。改前端要热重载时才用 `--prepare-runtime-only` + `cd client && npm run tauri dev`，其版本同样取 `version.json`，与刚装的 Console 一致。
+Console 启动后从自身内置 resources 把运行时套件（`dec-server`、`dec-exec`、`dec-host-setup`）释放到 `~/.dec/bin`，**不需要**单独部署运行时：Console 与各组件出自同一次构建，版本天然相等。改前端要热重载时才用 `--prepare-runtime-only` + `cd client && npm run tauri dev`，其版本同样取 `version.json`，与刚装的 Console 一致。
 
 ## 禁止
 
@@ -26,14 +26,14 @@ Console 启动后从自身内置 resources 把运行时套件（`dec-server`、`
 - 新增 `install-dev.sh`、`redeploy.ps1`、`make install-dev` 等第二入口
 - 用 `go build` / `go install` 把任何运行时组件丢进 PATH 或 NSIS 目录当入口
 - 为发布慢就去打 tag、跑 GitHub Actions、改 RUP 渠道
-- 另开一套安装根；隔离实验才用 `DEC_HOME`，且 Console 与 `dec-mcp` 的 command 必须一起指向该沙箱
+- 另开一套安装根；隔离实验才用 `DEC_HOME`，且 Console 与 IDE 里的 MCP URL 必须一起指向该沙箱的本机服务
 
 ## 为什么必须一份
 
 - **目录**：NSIS 装 Console 程序；`~/.dec` 是这台机器上的 Dec（运行时套件、配置、secrets、服务锁）。运行时组件不进 NSIS 目录。
 - **版本**：Console 拥有 `~/.dec/bin`，要求每个组件都与 Console 严格相等（ADR 0021）。高于就停服改写，低于就拒绝控制。
-- **发现**：Console 读/写 `${DEC_HOME}/run/server.json`（默认 `~/.dec`）并拉起 `DEC_HOME/bin` 里的 `dec-server`；`dec-mcp` 只发现 `${DEC_HOME}/run/console.json`，经唯一 Console 网关转发（ADR 0025）。
+- **发现**：Console 读/写 `${DEC_HOME}/run/server.json`（默认 `~/.dec`）并拉起 `DEC_HOME/bin` 里的 `dec-server`。Agent 连该服务的 Streamable HTTP `127.0.0.1:47654/mcp`（ADR 0032）。
 
 两份运行时或两个版本号，必然演化成互相改写与拒绝连接。
 
-装完后 Cursor 里的 `dec-mcp` 仍是旧进程，需重载 MCP 才用上新二进制。
+装完后要重新打开 Console，让 `dec-server` 用新二进制起来。MCP 是固定 URL，本机连接不靠请求头。

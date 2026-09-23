@@ -12,13 +12,13 @@ Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）�
 - 新功能先设计 Console 页面 / 连接与初始化流，再实现 `internal/app/` 业务逻辑。
 - **不要新增**独立 Cobra 用户面子命令（pull、config、push 等均在 Console）。
 - **不要恢复** Bubble Tea TUI、根 `dec` CLI 或 `dec --global` / `dec --user` 终端平面入口。本机 / 项目平面由 Console 连接后在目标 `dec-server` 上操作。
-- 每个运行时程序自行支持 `--version`。Agent MCP、env 注入与目标机置备分别使用 `dec-mcp`、`dec-exec`、`dec-host-setup`；后者是非用户面的单用途工具。
+- 每个运行时程序自行支持 `--version`。Agent MCP 是 `dec-server` 上的 Streamable HTTP（`127.0.0.1:47654/mcp`）；env 注入与目标机置备分别使用 `dec-exec`、`dec-host-setup`。后者是非用户面的单用途工具。
 - Secrets / Bitwarden / SSH / env 部署等操作通过 Console 触达（设置、更新、项目、远端设备）。
 - **更新**：按 `requires` 从官方 registry 安装；只做远端到本地。个人 Git / Bitwarden 写回位于项目 / Global 资产页。
 - **`dec-exec`**（独立程序）：按 bundle 作用域读取 `.secrets/**/.env/*.env` 并启动子进程，供 MCP / Agent 运行时注入；不经过 `dec-server`、不碰 session，也不是用户面 secrets 管理入口。
-- **服务 / 门面**：`dec-server` 是一机单例业务服务；Console 是人机入口并提供 Agent loopback 网关。`dec-mcp` 只适配 stdio，连不上时拉起/聚焦 Console，禁止自行 RestartServer，禁止回退到门面内嵌 `internal/app`。
+- **服务 / 门面**：`dec-server` 是一机单例业务服务。Console 是人机入口，经 gRPC 连 `127.0.0.1:47653`。Agent 经 Streamable HTTP 连同一进程的 `127.0.0.1:47654/mcp`，不跟随 Console 的 SSH 会话，也不负责拉起服务。
 - **唯一人工认证入口**：Bitwarden 主密码、TOTP 与设备登录确认只在 Console Authenticate 中收集；服务端不得打开临时认证页面，CLI/MCP 不得提示或接收主密码。
-- **缺 session 协调**：本机交互 MCP 自动拉起/聚焦 Console 并等待；远端无桌面、CI、测试与其他非交互上下文返回结构化错误，不得自动弹 Console。
+- **缺 session 协调**：本机 `dec-server` 在缺主密码时打开 Console 并等待；远端无桌面、CI、测试与其他非交互上下文返回结构化错误，不得自动弹 Console。MCP URL 后面没有进程就是连接失败，不由 MCP 去拉起 Console。
 - **跨页异步 IO**：慢 IO 跟 Shell 生命周期走，不跟当前页；切页禁止打断在飞请求；独立 busy 信号 + 防重复 + gen 丢弃过期结果（见 `client/README.md` 与 ADR 0018）。
 - **按平面分流**：本机平面的 `Workspace.Root` 为空，**没有**项目配置 / `project_name` / vault project 推断。空 projectRoot 会让 `.dec/` 退化成相对服务 cwd 的路径并覆盖 `~/.dec/config.yaml`（ADR 0015）。
 - **结构化结果优先于事件区**：结果里已有结论（跳过原因、被拒 bundle、缺失 bundle）必须渲染在结果区；事件区只留最近十余条，靠它承载告警等于不告警。
@@ -50,7 +50,7 @@ Console 自更新是本机壳能力：Tauri 直连 lock-pinned relkit Rust facad
 
 ## 非交互环境
 
-- Agent 通过 `dec-mcp` → Console 网关 → 当前目标 `dec-server` 调用业务；CI 内部代码仍可直连服务 API；env 注入用 `dec-exec`。**不要**假设存在 `dec pull` 等用户面子命令。
+- Agent 通过本机 Streamable HTTP 调用本机 `dec-server`；CI 内部代码仍可直连服务 API；env 注入用 `dec-exec`。远端设备由 Console 的 SSH 会话操作。**不要**假设存在 `dec pull` 等用户面子命令。
 
 ## 反例
 

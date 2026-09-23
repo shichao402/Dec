@@ -22,13 +22,24 @@ Dec 是一个以 **Console** 为第一人机入口、以 **MCP** 为 Agent 入�
 
 | 程序 | 职责 |
 |------|------|
-| `dec-server` | 本机单例；持有实例控制状态与进程内 BW session，不承载人工认证 UI |
-| `dec-mcp` | Agent stdio 适配器；读 `~/.dec/run/agent-tools.json` 动态注册工具，经 Console 网关 `POST /agent/tool_call` 转发（[0025](decisions/0025-mcp-console-gateway.md)、[0030](decisions/0030-agent-tools-thin-shell.md)） |
+| `dec-server` | 本机单例；gRPC `127.0.0.1:47653` 给人机门面，Streamable HTTP `127.0.0.1:47654/mcp` 给 Agent。持有实例控制状态与进程内 BW session，不承载人工认证 UI |
 | `dec-exec` | 独立 env 注入程序；只读已落地 `.secrets/**/.env/*.env`，不经过服务、不碰 session |
 | `dec-host-setup` | 目标机置备期单用途脚手架；幂等写入 `dec-server` 管理监听配置 |
 | Dec Console | 独立 Tauri 客户端（`client/`）；本机/远程连接、Authenticate 与日常管理 |
 
-门面与服务默认绑定 `127.0.0.1` 的 gRPC；可用 `management_listen` + TLS 做远程直连。端点与本机随机 token 写在 `~/.dec/run/server.json`。Console 另写 `~/.dec/run/console.json` 供多个 `dec-mcp` 共用入站网关，并在对齐运行时后写出 `~/.dec/run/agent-tools.json` 工具清单（[0025](decisions/0025-mcp-console-gateway.md)、[0030](decisions/0030-agent-tools-thin-shell.md)）。进程启动后锁定，见 [0018](decisions/0018-instance-lock-and-console.md)。同一 project 的 pull/push 等写操作互斥；未发起操作的门面可旁观该 project 当前操作的实时进度。详见 [0008](decisions/0008-service-facade-split.md)。
+同一台机器上的两个监听。MCP 与 gRPC 都进同一套业务，互不调用对方的端口。
+
+```mermaid
+flowchart TB
+  cursor["Cursor"] -->|"Streamable HTTP"| mcp["MCP 127.0.0.1:47654"]
+  console["Console"] -->|"连本机时"| grpc["gRPC 127.0.0.1:47653"]
+  console -->|"连远端时 SSH 只转发 47653"| remote["远端 gRPC 47653"]
+  mcp --> core["同一套业务"]
+  grpc --> core
+  core -->|"缺主密码时打开"| auth["Console 认证"]
+```
+
+gRPC 只允许 `127.0.0.1:47653`。`management_listen` 写成别的地址则启动失败，端口被占用也不改听。端点与本机随机 token 写在 `~/.dec/run/server.json`，只给 Console 的 gRPC。MCP 只听 `127.0.0.1:47654`，对端是 loopback 就放行，不把 token 写进 IDE 配置（[0032](decisions/0032-mcp-streamable-http.md)）。工具声明与 `Plan` 在 `internal/agenttools`（[0030](decisions/0030-agent-tools-thin-shell.md)）。本机 Agent 只打本机 `47654`，不跟随 Console 的 SSH 会话。进程启动后锁定，见 [0018](decisions/0018-instance-lock-and-console.md)。同一 project 的 pull/push 等写操作互斥；未发起操作的门面可旁观该 project 当前操作的实时进度。详见 [0008](decisions/0008-service-facade-split.md)。
 
 Bitwarden session 按需建立。**Console Authenticate 是唯一人工入口**；服务、CLI 与 MCP
 均不收集主密码或 TOTP。本机桌面交互 MCP 缺 session 时拉起/聚焦 Console 并等待，成功
@@ -492,7 +503,7 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 #### 远端设备置备与按需拉起（Console / MCP）
 
-置备是**服务端能力**：由发起端 `dec-server` 作为 SSH 客户端执行，Console 与 `dec-mcp`
+置备是**服务端能力**：由发起端 `dec-server` 作为 SSH 客户端执行，Console 与本机 MCP
 共用同一条路径，客户端不内嵌 `internal/app`。实现见 `internal/app/remote_provision*.go`
 与 `internal/app/remote_service.go`，决策见 [0019](decisions/0019-remote-provisioning.md)。
 
@@ -558,8 +569,7 @@ pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感
 
 独立程序入口层：
 
-- `dec-server/`：单例业务服务
-- `dec-mcp/`：Agent stdio 适配器（经 Console 网关）
+- `dec-server/`：单例业务服务（gRPC 与 Streamable HTTP）
 - `dec-exec/`：secrets env 注入执行器
 - `dec-host-setup/`：目标机置备脚手架
 
@@ -610,7 +620,7 @@ IDE 抽象层，区分项目级输出目录与用户级内置资产安装目录�
 
 ### Console 驱动
 
-日常交互通过 Console 完成；Agent 经 `dec-mcp` → Console 网关到达当前目标；CI 可直连服务 API。
+日常交互通过 Console 完成；Agent 经本机 Streamable HTTP 到达本机 `dec-server`；CI 可直连服务 API。远端设备由 Console 的 SSH 会话操作。
 
 ### 旧 Project > Bundle（仅迁移背景）
 
@@ -648,8 +658,7 @@ Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真�
 
 ### 托管 MCP 与 IDE Reload
 
-`dec-mcp` 薄壳在只刷新 `~/.dec/run/agent-tools.json`、未改 `mcp.json` 的 `dec` 条目时热加载工具列表，一般不必 Reload。
-其它托管 MCP（以及 `dec` 条目本身若被改写）没有等价热更新：pull / 更新 / 删除在 `mcp.json` 发生增删改时执行关 → 杀匹配进程 → 开，结果字段 `McpReload` 列出名字。IDE 若不跟随配置文件重拉，仍须在 MCP 面板手动 Reload。Skill / rule / command 只覆盖文件，不走该流程。
+内置 `dec` 是固定 URL，没有 stdio 进程，也不带请求头。内容没变时不再改写 `mcp.json`。其它托管 MCP 在 `mcp.json` 发生增删改时执行关 → 杀匹配进程 → 开，结果字段 `McpReload` 列出名字。IDE 若不跟随配置文件重拉，仍须在 MCP 面板手动 Reload。Skill / rule / command 只覆盖文件，不走该流程。
 
 ### CodeBuddy MCP 路径
 

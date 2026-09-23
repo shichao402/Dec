@@ -34,13 +34,6 @@ impl TokenInterceptor {
         }
     }
 
-    fn with_identity(&self, facade: &str, client_id: &str) -> Self {
-        Self {
-            token: self.token.clone(),
-            facade: facade.to_string(),
-            client_id: client_id.to_string(),
-        }
-    }
 }
 
 impl Interceptor for TokenInterceptor {
@@ -79,7 +72,6 @@ pub type Svc =
 pub struct Session {
     pub interceptor: TokenInterceptor,
     pub client: Svc,
-    pub channel: Channel,
     #[allow(dead_code)]
     pub endpoint: String,
     pub ssh: Option<Child>,
@@ -146,11 +138,10 @@ pub async fn connect_channel(
         .await
         .map_err(|e| e.to_string())?;
     let interceptor = TokenInterceptor::console(token.to_string());
-    let client = DecServiceClient::with_interceptor(channel.clone(), interceptor.clone());
+    let client = DecServiceClient::with_interceptor(channel, interceptor.clone());
     Ok(Session {
         interceptor,
         client,
-        channel,
         endpoint: endpoint.to_string(),
         ssh: None,
         keep_alive: None,
@@ -160,13 +151,6 @@ pub async fn connect_channel(
 impl Session {
     pub fn client_clone(&self) -> Svc {
         self.client.clone()
-    }
-
-    pub fn client_for(&self, facade: &str, client_id: &str) -> Svc {
-        DecServiceClient::with_interceptor(
-            self.channel.clone(),
-            self.interceptor.with_identity(facade, client_id),
-        )
     }
 
     pub fn start_keep_alive(&mut self) {
@@ -297,12 +281,6 @@ impl Session {
         .await
     }
 
-    pub async fn active_operation(
-        &mut self,
-        project_root: String,
-    ) -> Result<serde_json::Value, String> {
-        active_operation(self.client_clone(), project_root).await
-    }
 }
 
 pub async fn invoke(

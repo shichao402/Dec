@@ -10,8 +10,6 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-const defaultListenAddr = "127.0.0.1:0"
-
 type listenSettings struct {
 	Addr string
 	Opts []grpc.ServerOption
@@ -20,11 +18,14 @@ type listenSettings struct {
 func loadListenSettings() (listenSettings, error) {
 	cfg, err := config.LoadGlobalConfig()
 	if err != nil || cfg == nil {
-		return listenSettings{Addr: defaultListenAddr}, nil
+		return listenSettings{Addr: config.ProvisionManagementListen}, nil
 	}
 	addr := strings.TrimSpace(cfg.ManagementListen)
 	if addr == "" {
-		addr = defaultListenAddr
+		addr = config.ProvisionManagementListen
+	}
+	if addr != config.ProvisionManagementListen {
+		return listenSettings{}, fmt.Errorf("management_listen 只允许 %s，当前是 %q；请改为该地址。不会改听其它端口", config.ProvisionManagementListen, addr)
 	}
 	host, _, err := splitHostPortAllowEmptyPort(addr)
 	if err != nil {

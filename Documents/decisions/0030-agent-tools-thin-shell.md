@@ -1,6 +1,8 @@
 # 0030 — Agent 工具清单与编排下移，dec-mcp 零业务知识
 
-- **状态**：已接受
+> **部分已被 [0032](0032-mcp-streamable-http.md) 取代**：stdio 壳、`dec-mcp` 读清单，以及 Console `POST /agent/tool_call` 转发不再使用。工具声明、`jsonschema` 与 `Plan` 仍在 `internal/agenttools`，这一段继续有效。
+
+- **状态**：清单与 Plan 仍有效；壳与网关已被 0032 取代
 - **日期**：2026-09-17
 - **关联**：[0021](0021-console-owned-runtime.md)、[0025](0025-mcp-console-gateway.md)、[0023](0023-facade-capability-parity.md)、[0008](0008-service-facade-split.md)
 - **影响范围**：`internal/agenttools/`、`cmd/dec-server --dump-agent-tools`、`plan_agent_tool` RPC、`client/src-tauri` Agent 网关 `POST /agent/tool_call`、`internal/mcp/` stdio 壳、`~/.dec/run/agent-tools.json`

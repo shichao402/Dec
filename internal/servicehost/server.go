@@ -2,9 +2,11 @@ package servicehost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -67,8 +69,14 @@ func (s *Server) ensureProjectRepaired(projectRoot string, reporter app.Reporter
 	}
 }
 
+// testGRPCListen and testMCPListen replace the fixed ports only inside tests.
+// Production leaves them empty and refuses any other address.
+var (
+	testGRPCListen string
+	testMCPListen  string
+)
+
 func Run(ctx context.Context, version string) error {
-	app.SetRuntimeGeneration(app.DetectRuntimeGeneration(version))
 	lock, err := service.AcquireServerLock()
 	if err != nil {
 		return err
@@ -83,11 +91,25 @@ func Run(ctx context.Context, version string) error {
 	if err != nil {
 		return err
 	}
-	listener, err := net.Listen("tcp", listen.Addr)
+	grpcAddr := listen.Addr
+	if testGRPCListen != "" {
+		grpcAddr = testGRPCListen
+	}
+	listener, err := listenFixed(grpcAddr)
 	if err != nil {
-		return fmt.Errorf("监听本机服务端口失败: %w", err)
+		return err
 	}
 	defer listener.Close()
+
+	mcpAddr := config.MCPListenAddr
+	if testMCPListen != "" {
+		mcpAddr = testMCPListen
+	}
+	mcpListener, err := listenFixed(mcpAddr)
+	if err != nil {
+		return err
+	}
+	defer mcpListener.Close()
 
 	idleTimeout := loadIdleTimeout()
 	stopRequested := make(chan struct{}, 1)
@@ -130,14 +152,28 @@ func Run(ctx context.Context, version string) error {
 		syncBuiltinIDEAssetsAtStartup()
 	}()
 
-	errCh := make(chan error, 1)
+	mcpHTTP := newMCPHTTPServer(host)
+	errCh := make(chan error, 2)
 	go func() { errCh <- grpcServer.Serve(listener) }()
+	go func() {
+		err := mcpHTTP.Serve(mcpListener)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+	stopMCP := func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = mcpHTTP.Shutdown(shutdownCtx)
+	}
 	select {
 	case <-ctx.Done():
+		stopMCP()
 		grpcServer.GracefulStop()
 		return ctx.Err()
 	case <-stopRequested:
 		// KeepAlive 等长连接会拖住 GracefulStop；更新/手动重启需尽快退出。
+		stopMCP()
 		done := make(chan struct{})
 		go func() {
 			grpcServer.GracefulStop()
@@ -150,8 +186,18 @@ func Run(ctx context.Context, version string) error {
 		}
 		return nil
 	case err := <-errCh:
+		stopMCP()
+		grpcServer.Stop()
 		return err
 	}
+}
+
+func listenFixed(addr string) (net.Listener, error) {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("监听 %s 失败。该端口被占用时不会改听其它端口，请自行腾出后重试: %w", addr, err)
+	}
+	return listener, nil
 }
 
 // pruneOrphanWorktreesAtStartup 在服务启动时后台回收上次异常退出残留的事务工作树。

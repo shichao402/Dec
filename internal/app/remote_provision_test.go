@@ -131,11 +131,9 @@ func TestProbeServerNotRunningIsNotABlocker(t *testing.T) {
 		"os=Linux",
 		"arch=x86_64",
 		"binary=dec-server",
-		"binary=dec-mcp",
 		"binary=dec-exec",
 		"binary=dec-host-setup",
 		"binary_version=dec-server|v1.4.2",
-		"binary_version=dec-mcp|v1.4.2",
 		"binary_version=dec-exec|v1.4.2",
 		"binary_version=dec-host-setup|v1.4.2",
 		"cmd=git",
@@ -176,11 +174,9 @@ func TestProbeFullyProvisionedHost(t *testing.T) {
 		"os=Darwin",
 		"arch=arm64",
 		"binary=dec-server",
-		"binary=dec-mcp",
 		"binary=dec-exec",
 		"binary=dec-host-setup",
 		"binary_version=dec-server|v1.4.2",
-		"binary_version=dec-mcp|v1.4.2",
 		"binary_version=dec-exec|v1.4.2",
 		"binary_version=dec-host-setup|v1.4.2",
 		"cmd=git",
@@ -216,12 +212,10 @@ func TestProbeRejectsMixedRuntimeVersions(t *testing.T) {
 		"os=Linux",
 		"arch=amd64",
 		"binary=dec-server",
-		"binary=dec-mcp",
 		"binary=dec-exec",
 		"binary=dec-host-setup",
 		"binary_version=dec-server|v1.4.2",
-		"binary_version=dec-mcp|v1.4.3",
-		"binary_version=dec-exec|v1.4.2",
+		"binary_version=dec-exec|v1.4.3",
 		"binary_version=dec-host-setup|v1.4.2",
 		"cmd=git",
 		"home_writable=1",
@@ -234,7 +228,7 @@ func TestProbeRejectsMixedRuntimeVersions(t *testing.T) {
 	if !hasSubstring(probe.Warnings, "版本不一致") {
 		t.Fatalf("应说明逐组件版本冲突: %v", probe.Warnings)
 	}
-	if component, installed := newerRuntimeComponent(probe, "v1.4.2"); component != "dec-mcp" || installed != "v1.4.3" {
+	if component, installed := newerRuntimeComponent(probe, "v1.4.2"); component != "dec-exec" || installed != "v1.4.3" {
 		t.Fatalf("应识别较新组件，实际 %s=%s", component, installed)
 	}
 }
@@ -245,11 +239,9 @@ func TestProbeConflictingListenWarns(t *testing.T) {
 		"os=Linux",
 		"arch=x86_64",
 		"binary=dec-server",
-		"binary=dec-mcp",
 		"binary=dec-exec",
 		"binary=dec-host-setup",
 		"binary_version=dec-server|v1.4.2",
-		"binary_version=dec-mcp|v1.4.2",
 		"binary_version=dec-exec|v1.4.2",
 		"binary_version=dec-host-setup|v1.4.2",
 		"cmd=git",

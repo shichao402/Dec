@@ -7,7 +7,7 @@ description: >
 
 # Dec 代理
 
-Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用户交互以 **Dec Console** 为第一入口；Agent 走 **`dec-mcp`**（零业务知识的 stdio 壳）经本机唯一 Console 网关调用当前连接的 `dec-server`。工具名 / schema 来自 `~/.dec/run/agent-tools.json`（Console 对齐运行时后写出），不要假设它们编译在 `dec-mcp` 里。不要发明已下线的用户面子命令（旧的 list / search / config / pull CLI），也不要再引导用户运行终端 TUI。
+Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用户交互以 **Dec Console** 为第一入口；Agent 走本机 `dec-server` 的 Streamable HTTP（`http://127.0.0.1:47654/mcp`）。工具声明在服务进程内，不另起 stdio 进程。本机 Agent 只操作本机服务，不跟随 Console 当前的 SSH 远端。不要发明已下线的用户面子命令（旧的 list / search / config / pull CLI），也不要再引导用户运行终端 TUI。
 
 项目里由 Dec pull 出来的 IDE 配置不等于「禁止提交」。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.with/`、`.mcp.json` 这类项目级输出，如果是托管资产生成的结果，通常可以按仓库约定单独提交。With 的用户平面落在 `~/.bg-agent/config-with-app/`（skills / rules / `mcp_config.json`）。敏感值放 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置，不要写回这些输出文件。
 
@@ -62,13 +62,13 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 
 ## Agent MCP 快速参考
 
-`dec-mcp` 不绑定某个仓库。先 `dec_console_status` / `dec_list_managed_projects`，本地平面操作带上 `project_root`。目标是 Console **当前连接**的设备（本机或 SSH 远端）。
+MCP 不绑定某个仓库，固定打本机服务。先 `dec_console_status` / `dec_list_managed_projects`，本地平面操作带上 `project_root`。切换远端设备用 Console 的连接页；本机 Agent 不会跟着那条 SSH 会话。
 
 当前平面用 `plane=local`（项目内 IDE 目录）或 `plane=global`（本机）。用户平面在 Console 的 Global 资产里管理。
 
 | 目的 | 工具 |
 |------|------|
-| Console / 当前连接 | `dec_console_status`；`dec_list_connections` / `dec_connect` |
+| 本机服务 | `dec_console_status`（版本与是否已解锁）。远端连接在 Console |
 | 受管项目 / 设备 | `dec_list_managed_projects`、`dec_list_managed_devices`、`dec_register_managed_project` |
 | 新建本地资产 | `dec_create_local_asset`（家项目写 `DecAssets/`，官方订阅写覆写草稿） |
 | 状态 | `dec_status`（local 需 `project_root`） |

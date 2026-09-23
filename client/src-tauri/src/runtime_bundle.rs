@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
-const COMPONENTS: [&str; 4] = ["dec-server", "dec-mcp", "dec-exec", "dec-host-setup"];
+const COMPONENTS: [&str; 3] = ["dec-server", "dec-exec", "dec-host-setup"];
 
 #[derive(Debug, Deserialize)]
 struct RuntimeManifest {
@@ -312,7 +312,7 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::create_dir_all(&target).unwrap();
         let mut files = Vec::new();
-        for (index, name) in ["dec-server", "dec-mcp", "dec-exec", "dec-host-setup"]
+        for (index, name) in ["dec-server", "dec-exec", "dec-host-setup"]
             .iter()
             .enumerate()
         {
@@ -321,7 +321,7 @@ mod tests {
             fs::write(target.join(name), format!("old-{name}")).unwrap();
             files.push(SuiteFile {
                 name: (*name).into(),
-                expected: if index == 3 {
+                expected: if index == 2 {
                     "0".repeat(64)
                 } else {
                     sha256_file(&source_path).unwrap()
@@ -330,7 +330,7 @@ mod tests {
             });
         }
         assert!(replace_suite(&files, &target).is_err());
-        for name in ["dec-server", "dec-mcp", "dec-exec", "dec-host-setup"] {
+        for name in ["dec-server", "dec-exec", "dec-host-setup"] {
             assert_eq!(
                 fs::read_to_string(target.join(name)).unwrap(),
                 format!("old-{name}")
@@ -386,7 +386,7 @@ mod tests {
         fs::write(&server, b"expected-dec-server").unwrap();
         assert!(suite_matches_manifest(&root, &manifest));
 
-        fs::remove_file(root.join(binary_name("dec-mcp"))).unwrap();
+        fs::remove_file(root.join(binary_name("dec-exec"))).unwrap();
         assert!(!suite_matches_manifest(&root, &manifest));
         let _ = fs::remove_dir_all(root);
     }

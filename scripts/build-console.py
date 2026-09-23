@@ -20,7 +20,7 @@ TAURI = CLIENT / "src-tauri"
 DIST = ROOT / "dist"
 RUNTIME_RESOURCES = TAURI / "resources" / "runtime"
 UPDATER_RESOURCES = TAURI / "resources" / "updater"
-RUNTIME_COMPONENTS = ("dec-server", "dec-mcp", "dec-exec", "dec-host-setup")
+RUNTIME_COMPONENTS = ("dec-server", "dec-exec", "dec-host-setup")
 
 
 def release_version() -> str:
@@ -243,8 +243,8 @@ def main() -> None:
         install_package(output)
         print(
             f"已在本机装上开发用 Console v{version}（覆盖安装，不是发版）。"
-            "首次启动会把内置运行时套件释放到 ~/.dec/bin；"
-            "Cursor 里的 dec-mcp 需重载 MCP 才用上新二进制。"
+            "首次启动会把内置运行时套件释放到 ~/.dec/bin。"
+            "重新打开 Console 后，本机 MCP 连固定 URL，不再改写请求头。"
         )
 
 

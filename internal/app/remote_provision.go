@@ -175,7 +175,7 @@ type RemoteHostProbe struct {
 }
 
 // decSuiteBinaries 与 Console 内置/RUP runtime suite 保持一致。
-var decSuiteBinaries = []string{"dec-server", "dec-mcp", "dec-exec", "dec-host-setup"}
+var decSuiteBinaries = []string{"dec-server", "dec-exec", "dec-host-setup"}
 
 // ProbeRemoteHost 只读探测目标机是否具备被置备的条件。
 //
@@ -225,7 +225,7 @@ echo "arch=$(uname -m 2>/dev/null)"
 dec_home="${DEC_HOME:-$HOME/.dec}"
 echo "dec_home=${dec_home}"
 bin_dir="${dec_home}/bin"
-for b in dec-server dec-mcp dec-exec dec-host-setup; do
+for b in dec-server dec-exec dec-host-setup; do
   if [ -x "${bin_dir}/${b}" ]; then
     echo "binary=${b}"
     version=$("${bin_dir}/${b}" --version 2>/dev/null || true)

@@ -1,6 +1,8 @@
 # 0025 — MCP 经唯一 Console 网关代理，不再直连 dec-server
 
-- **状态**：已接受（已实现）
+> **已被 [0032](0032-mcp-streamable-http.md) 取代**：stdio `dec-mcp` 与 Console 网关（`console.json`、`POST /agent/tool_call`）不再使用。MCP 是 `dec-server` 上的 Streamable HTTP，本机 Agent 不跟随 Console 的 SSH 会话。下文保留作历史记录。
+
+- **状态**：已被 0032 取代（原实现已撤下）
 - **日期**：2026-09-12
 - **关联**：[0008](0008-service-facade-split.md)（服务 / 门面）、[0018](0018-instance-lock-and-console.md)（Console 单例）、[0021](0021-console-owned-runtime.md)（运行时所有权）、[0022](0022-console-bitwarden-unlock.md)（认证只在 Console）、[0023](0023-facade-capability-parity.md)（门面能力口径）、[0030](0030-agent-tools-thin-shell.md)（工具清单与编排下移）
 - **影响范围**：`client/src-tauri/`（loopback Agent 网关）、`internal/mcp/`、`internal/consoleopen/`、内置 `mcp.json` 模板、门面文档

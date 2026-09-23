@@ -24,7 +24,7 @@ func planFail(name, msg string) *PlanResult {
 	return &PlanResult{Name: name, Error: msg}
 }
 
-// Plan 把 Agent 工具调用编成步骤表。Console 按步骤执行；本函数不碰网关。
+// Plan 把 Agent 工具调用编成步骤表。dec-server 的 Streamable HTTP 按步骤执行。
 func Plan(name string, arguments json.RawMessage) *PlanResult {
 	name = strings.TrimSpace(name)
 	def, err := lookupTool(name)

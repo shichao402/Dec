@@ -11,7 +11,7 @@ Console 自更新由 Tauri 壳调用 `third_party/relkit/sdk/rust` facade 与 lo
 - 默认 channel：`stable`；Console 设置页可改并落盘到本机壳偏好（`preferences.json`），检查与安装都跟所选渠道。发版仍由 `dev/v*` / `stable/v*` tag 决定
 - Console selectors：`os` / `arch` / `component=console` / `audience=user`；Tauri 直接 `Updater::open`、`check`、`download`，安装器启动、Windows `/S`、detach 与 relaunch 留在壳内
 - Tauri 只输出 relkit canonical ProtoJSON；前端从 `third_party/relkit/bindings/ts` import 生成的 `CheckResultSchema` / `StatusSnapshotSchema`，按 `upToDate`、`updateAvailable`、`fallbackRequired`、`throttled`、`failed` 五变体渲染
-- 运行时 selectors：`os` / `arch` / `component` / `audience=runtime`，component 为 `dec-server`、`dec-mcp`、`dec-exec`、`dec-host-setup`
+- 运行时 selectors：`os` / `arch` / `component` / `audience=runtime`，component 为 `dec-server`、`dec-exec`、`dec-host-setup`
 - Console bundle：每个安装包只带同 `os/arch` 运行时套件和 `runtime-manifest.json`；首次连接/升级从 resources 校验后以临时文件 + rename 释放到 `~/.dec/bin`，同时缓存到 `~/.dec/runtime-cache/<version>/<os>-<arch>/`
 - SSH 置备：发起端按目标 `os/arch` 命中校验过的缓存则复用，否则请求签名 RUP；只有 RUP head 恰好等于 Console 钉死版本才下载。渠道已有更高版本时提示先更新 Console 或预置旧版本缓存
 

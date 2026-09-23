@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/service"
 	servicev1 "github.com/shichao402/Dec/schema/gen/go/service/v1"
@@ -21,8 +23,8 @@ func TestNonLoopbackListenRequiresTLS(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("kind: global\nversion: 1\nmanagement_listen: 0.0.0.0:8443\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadListenSettings(); err == nil {
-		t.Fatal("非 loopback 且无 TLS 应拒绝启动")
+	if _, err := loadListenSettings(); err == nil || !strings.Contains(err.Error(), config.ProvisionManagementListen) {
+		t.Fatalf("非约定地址应拒绝启动: %v", err)
 	}
 }
 
@@ -32,7 +34,7 @@ func TestLoopbackListenDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.Addr != defaultListenAddr {
+	if settings.Addr != config.ProvisionManagementListen {
 		t.Fatalf("addr = %q", settings.Addr)
 	}
 	if len(settings.Opts) != 0 {
@@ -147,6 +149,9 @@ func TestAuthenticateUnlocksInstance(t *testing.T) {
 // t.Cleanup 是 LIFO，本函数在 t.Setenv 之后调用，因此退出时 DEC_HOME 仍是本用例的值。
 func startTestServer(t *testing.T) context.Context {
 	t.Helper()
+	prevGRPC, prevMCP := testGRPCListen, testMCPListen
+	testGRPCListen = "127.0.0.1:0"
+	testMCPListen = "127.0.0.1:0"
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -160,6 +165,8 @@ func startTestServer(t *testing.T) context.Context {
 		case <-time.After(15 * time.Second):
 			t.Error("dec-server 未在超时内退出")
 		}
+		testGRPCListen = prevGRPC
+		testMCPListen = prevMCP
 	})
 	waitMetadata(t)
 	return ctx

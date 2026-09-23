@@ -23,19 +23,19 @@ func catalog() []toolDef {
 		allTools = []toolDef{
 			{
 				Name:        "dec_console_status",
-				Description: "查看 Console 网关与当前连接（是否已连、是否已解锁、当前设备）。操作作用在 Console 当前目标上；Console 自更新请由用户打开 Console 的更新面板。",
+				Description: "查看本机 dec-server（版本、是否已解锁）。MCP 只打本机，不反映 Console 当前的远端连接。Console 自更新请由用户打开 Console 的更新面板。",
 				Owner:       OwnerConsole,
 				Sample:      emptyParams{},
 			},
 			{
 				Name:        "dec_list_connections",
-				Description: "列出 Console 已保存的连接（本机 / SSH / 远端）。不返回密码。",
+				Description: "已不再切换 Agent 目标。本机 MCP 只操作本机 dec-server；远端连接请用 Console 的连接页。",
 				Owner:       OwnerConsole,
 				Sample:      emptyParams{},
 			},
 			{
 				Name:        "dec_connect",
-				Description: "切换 Console 当前连接。传 id 使用已保存连接；或 kind=local 连本机。不接受 SSH 密码，使用已存凭据 / ssh-agent。",
+				Description: "已不再切换 Agent 目标。本机 MCP 只操作本机 dec-server；远端连接请用 Console 的连接页。",
 				Owner:       OwnerConsole,
 				Sample:      connectParams{},
 			},

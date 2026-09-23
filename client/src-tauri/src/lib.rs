@@ -1,5 +1,3 @@
-mod agent;
-mod agent_tools;
 mod console_update;
 mod frontend_guard;
 mod grpc;
@@ -16,7 +14,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -26,7 +24,6 @@ pub(crate) struct AppState {
     pub(crate) current: Mutex<Option<CurrentTarget>>,
     console_update: Mutex<()>,
     pending_intents: StdMutex<VecDeque<OpenIntent>>,
-    pub(crate) agent_tools: agent_tools::AgentToolsState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -134,7 +131,7 @@ struct ConnectProbe {
 const CREDENTIAL_SERVICE: &str = "dev.dec.console";
 const REMOTE_PROVISION_PORT: u16 = 47_653;
 const CONSOLE_VERSION: &str = env!("CARGO_PKG_VERSION");
-const RUNTIME_COMPONENTS: [&str; 4] = ["dec-server", "dec-mcp", "dec-exec", "dec-host-setup"];
+const RUNTIME_COMPONENTS: [&str; 3] = ["dec-server", "dec-exec", "dec-host-setup"];
 
 #[tauri::command]
 async fn check_console_update(
@@ -430,7 +427,6 @@ async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
                 if runtime_bundle::installed_matches(app, &dec_home(), CONSOLE_VERSION)? =>
             {
                 remove_legacy_dec_cli()?;
-                let _ = agent_tools::refresh_agent_tools_manifest(app);
                 return Ok(());
             }
             _ => {}
@@ -448,7 +444,6 @@ async fn install_local_suite(app: &AppHandle) -> Result<(), String> {
         return Err("安装后 Dec 运行时套件与 Console 内置 manifest 不一致".into());
     }
     remove_legacy_dec_cli()?;
-    agent_tools::refresh_agent_tools_manifest(app)?;
     Ok(())
 }
 
@@ -847,7 +842,6 @@ async fn connect_local(app: &AppHandle) -> Result<Session, String> {
                         && runtime_bundle::installed_matches(app, &dec_home(), CONSOLE_VERSION)?
                     {
                         remove_legacy_dec_cli()?;
-                        let _ = agent_tools::refresh_agent_tools_manifest(app);
                         return Ok(session);
                     }
                 }
@@ -1245,10 +1239,6 @@ pub fn run() {
             let args: Vec<_> = std::env::args().collect();
             enqueue_open_intents(app.handle(), args.iter().map(String::as_str));
             focus_main_window(app.handle());
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                agent::serve(handle).await;
-            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1276,11 +1266,7 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while running Dec console")
-        .run(|_app, event| {
-            if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
-                agent::remove_metadata();
-            }
-        });
+        .run(|_app, _event| {});
 }
 
 #[cfg(test)]

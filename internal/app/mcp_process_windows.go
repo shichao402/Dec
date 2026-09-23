@@ -14,8 +14,8 @@ import (
 )
 
 func listMCPProcessesOS() ([]mcpProcess, error) {
-	// 只查 dec-exec / dec-mcp 映像，避免全机 Win32_Process 扫描。
-	script := `Get-CimInstance Win32_Process -Filter "Name='dec-exec.exe' OR Name='dec-mcp.exe'" | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress`
+	// 只查 dec-exec 映像，避免全机 Win32_Process 扫描。
+	script := `Get-CimInstance Win32_Process -Filter "Name='dec-exec.exe'" | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress`
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	cmd := sysproc.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
