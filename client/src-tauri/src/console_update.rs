@@ -465,8 +465,7 @@ fn detached(command: &mut std::process::Command) {
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-        const DETACHED_PROCESS: u32 = 0x00000008;
-        command.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
     }
 }
 
@@ -476,16 +475,22 @@ fn spawn_installer(app: &AppHandle, package: &Path) -> Result<(), String> {
         let apply_dir = updater_data_dir(app)?.join("apply");
         std::fs::create_dir_all(&apply_dir).map_err(|err| format!("创建更新目录失败: {err}"))?;
         let script = apply_dir.join("install-console.ps1");
+        let log = apply_dir.join("install-console.log");
         let quote = |value: &Path| value.to_string_lossy().replace('\'', "''");
         let relaunch =
             std::env::current_exe().map_err(|err| format!("定位 Console 可执行文件失败: {err}"))?;
         std::fs::write(
             &script,
             format!(
-                "Start-Sleep -Milliseconds 1500\n\
-                 $p = Start-Process -FilePath '{}' -ArgumentList '/S' -Wait -PassThru\n\
+                "$deadline = (Get-Date).AddSeconds(45)\n\
+                 while ((Get-Process -Name 'dec-console' -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {{\n\
+                   Start-Sleep -Milliseconds 500\n\
+                 }}\n\
+                 $p = Start-Process -FilePath '{}' -Wait -PassThru\n\
+                 \"exit=$($p.ExitCode)\" | Set-Content -LiteralPath '{}'\n\
                  if ($p.ExitCode -eq 0) {{ Start-Process -FilePath '{}' }}\n",
                 quote(package),
+                quote(&log),
                 quote(&relaunch),
             ),
         )
