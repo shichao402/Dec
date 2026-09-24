@@ -244,7 +244,7 @@ func findOfficialCacheAsset(workspace Workspace, project, itemType, name string)
 	}
 	req, _ := workspaceOfficialRequires(workspace, cfg)
 	if !req.Has(project) {
-		return install.CacheAsset{}, fmt.Errorf("%s 不是此工作区的官方依赖", project)
+		return install.CacheAsset{}, fmt.Errorf("%s 不是这个工作区的订阅", project)
 	}
 	assets, err := install.ListCache(workspaceCacheDir(workspace), project)
 	if err != nil {

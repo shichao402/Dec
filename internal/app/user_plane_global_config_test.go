@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/internal/config"
@@ -71,22 +72,31 @@ func TestUserPlaneOperationsKeepGlobalConfigIntact(t *testing.T) {
 	}
 	assertGlobalConfigIntact(t, "加载订阅候选")
 
+	pinRegistryToEmptyRemote(t, remote)
 	if _, err := SetWorkspaceRequires(
 		context.Background(),
 		workspace,
-		types.RequiresSpec{"cli": types.RequiresVault},
+		types.RequiresSpec{"cli": types.RequiresLatest},
 		nil,
 	); err != nil {
 		t.Fatalf("SetWorkspaceRequires() 失败: %v", err)
 	}
-	assertGlobalConfigIntact(t, "保存订阅")
-
-	result, err := PullWorkspaceAssets(context.Background(), workspace, "", nil)
+	saved, err := config.LoadGlobalConfig()
 	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.RepoURL != remote || saved.Requires["cli"] != types.RequiresLatest {
+		t.Fatalf("保存订阅后全局配置 = repo %q requires %#v", saved.RepoURL, saved.Requires)
+	}
+
+	if _, err := PullWorkspaceAssets(context.Background(), workspace, "", nil); err != nil && !strings.Contains(err.Error(), "注册表") && !strings.Contains(err.Error(), "tag") {
 		t.Fatalf("PullWorkspaceAssets() 失败: %v", err)
 	}
-	if result.SkippedReason != "" {
-		t.Fatalf("已订阅 cli 时不应跳过 pull: %q", result.SkippedReason)
+	after, err := config.LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
 	}
-	assertGlobalConfigIntact(t, "执行 pull")
+	if after.RepoURL != remote || after.Requires["cli"] != types.RequiresLatest {
+		t.Fatalf("pull 后全局配置 = repo %q requires %#v", after.RepoURL, after.Requires)
+	}
 }

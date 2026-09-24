@@ -32,11 +32,12 @@ func workspaceOfficialRequires(workspace Workspace, cfg *types.ProjectConfig) (t
 }
 
 // resolvedRequires 是这次要执行的消费声明。已发布项目上的 vault pin 收成 latest，
-// 不写盘；写盘由 persistFoldedRequires 负责。
+// 其余 vault pin 不参与安装。写盘由 persistFoldedRequires 负责，且只在连上注册表时写。
 func resolvedRequires(ctx context.Context, workspace Workspace, cfg *types.ProjectConfig) (types.RequiresSpec, string) {
 	raw, url := workspaceOfficialRequires(workspace, cfg)
-	published := publishedNameSet(officialPublishedVersions(ctx, url))
-	return raw.FoldPublishedVaultPins(published, homeProjectName(workspace, cfg)), url
+	versions := officialPublishedVersions(ctx, url)
+	folded := raw.FoldPublishedVaultPins(publishedNameSet(versions), homeProjectName(workspace, cfg))
+	return folded.DropVaultPins(), url
 }
 
 func installOfficialRequires(ctx context.Context, workspace Workspace, cfg *types.ProjectConfig, reporter Reporter) ([]install.Resolved, error) {
@@ -65,7 +66,7 @@ func installOfficialRequires(ctx context.Context, workspace Workspace, cfg *type
 	return resolved, nil
 }
 
-// OfficialRequireStatus 是 Console「官方依赖」面板的一行。
+// OfficialRequireStatus 是 Console「更新」页里一条订阅的状态。
 type OfficialRequireStatus struct {
 	Project             string
 	Want                string
@@ -117,7 +118,7 @@ func ListOfficialRequires(ctx context.Context, workspace Workspace) (*OfficialRe
 	return out, nil
 }
 
-// UpdateOfficialRequires 只更新用户选中的官方依赖，不触碰个人私仓或 Bitwarden。
+// UpdateOfficialRequires 只更新用户选中的订阅，不触碰个人私仓或 Bitwarden。
 func UpdateOfficialRequires(ctx context.Context, workspace Workspace, projects []string, reporter Reporter) (*PullProjectAssetsResult, error) {
 	cfg, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
@@ -136,7 +137,7 @@ func UpdateOfficialRequires(ctx context.Context, workspace Workspace, projects [
 		}
 	}
 	if len(selected) == 0 {
-		return nil, fmt.Errorf("没有选中有效的官方依赖")
+		return nil, fmt.Errorf("没有选中要更新的订阅")
 	}
 
 	ideSelection, err := config.ResolveEffectiveIDEs(cfg)
@@ -261,8 +262,7 @@ func officialGitPushBlocked(cfg *types.ProjectConfig) string {
 }
 
 // filterOfficialVaultAssets 从可写 Git 资产里剔除官方 registry 订阅（latest/v*）。
-// req 必须已经收过已发布项目的 vault pin；那些由提供方 CI 发布，禁止本机 push。
-// 注册表未发布的个人项目仍是 vault pin，保留。
+// 那些由提供方 CI 发布，禁止本机 push。
 func filterOfficialVaultAssets(req types.RequiresSpec, assets []types.TypedAssetRef) []types.TypedAssetRef {
 	official := req.Official()
 	if len(official) == 0 {

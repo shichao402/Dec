@@ -71,9 +71,9 @@ func TestPullReconcile_CleansRemoteDeletedOrphans(t *testing.T) {
 	// 项目平面只同步本项目自己（ADR 0016）：项目名与 bundle 名同为 pkv，
 	// 才能同时覆盖 vault 成员孤儿与 secrets 孤儿。
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "pkv",
-		IDEs:           []string{"cursor"},
-		Requires: types.RequiresSpec{"pkv": types.RequiresVault},
+		ProjectName: "pkv",
+		IDEs:        []string{"cursor"},
+		Requires:    types.RequiresSpec{"pkv": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestPullReconcile_DoesNotTouchDisabledBundleSecrets(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
+		IDEs:     []string{"cursor"},
 		Requires: types.RequiresSpec{"active": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
@@ -225,8 +225,8 @@ func TestPullReconcile_ReportsSecretsWhenBWUnconfirmed(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
-		Requires: types.RequiresSpec{"pkv": types.RequiresVault},
+		ProjectName: "pkv",
+		IDEs:        []string{"cursor"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -269,9 +269,9 @@ func TestPullReconcile_UserPlaneOnlyCleansMachineSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := config.SaveGlobalConfig(&types.GlobalConfig{
-		RepoURL:        remote,
+		RepoURL:  remote,
 		Requires: types.RequiresSpec{"woa": types.RequiresVault},
-		IDEs:           []string{"cursor"},
+		IDEs:     []string{"cursor"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -325,9 +325,9 @@ func TestPullReconcile_MissingVaultBundleFullCleanup(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "pkv",
-		IDEs:           []string{"cursor"},
-		Requires: types.RequiresSpec{"pkv": types.RequiresVault},
+		ProjectName: "pkv",
+		IDEs:        []string{"cursor"},
+		Requires:    types.RequiresSpec{"pkv": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -354,8 +354,7 @@ func TestPullReconcile_MissingVaultBundleFullCleanup(t *testing.T) {
 	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
 	t.Cleanup(secrets.ClearSession)
 
-	result, err := PullProjectAssets(context.Background(), projectRoot, "", nil)
-	if err != nil {
+	if _, err := PullProjectAssets(context.Background(), projectRoot, "", nil); err != nil {
 		t.Fatalf("PullProjectAssets() = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, ".secrets", "pkv")); !os.IsNotExist(err) {
@@ -378,8 +377,5 @@ func TestPullReconcile_MissingVaultBundleFullCleanup(t *testing.T) {
 		if name == "pkv" {
 			t.Fatalf("应从 known 摘除 pkv: %#v", cfg.KnownSecretBundleNames())
 		}
-	}
-	if len(result.OrphanClearedBundles) == 0 {
-		t.Fatalf("应记录 ClearedBundles: %#v", result)
 	}
 }

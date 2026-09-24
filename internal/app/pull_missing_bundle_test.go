@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/internal/config"
@@ -35,15 +34,11 @@ func TestPullProjectAssets_ReportsMissingEnabledBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	if len(result.MissingBundles) != 1 || result.MissingBundles[0] != "deleted" {
-		t.Fatalf("MissingBundles = %#v, 期望 [deleted]", result.MissingBundles)
+	if result.SkippedReason != "未订阅任何项目" {
+		t.Fatalf("SkippedReason = %q, vault pin 不再安装私仓项目", result.SkippedReason)
 	}
-	joined := strings.Join(result.NonFatalWarnings, " | ")
-	if !strings.Contains(joined, "deleted") {
-		t.Fatalf("NonFatalWarnings 应点名缺失的 bundle: %s", joined)
-	}
-	if result.PulledCount != 1 {
-		t.Fatalf("PulledCount = %d, 仍在的 live 应被拉取", result.PulledCount)
+	if result.PulledCount != 0 {
+		t.Fatalf("PulledCount = %d, 期望 0", result.PulledCount)
 	}
 }
 
@@ -70,10 +65,7 @@ func TestPullProjectAssets_SkipReasonWhenAllBundlesMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	if len(result.MissingBundles) != 2 {
-		t.Fatalf("MissingBundles = %#v, 期望两个都缺失", result.MissingBundles)
-	}
-	if strings.TrimSpace(result.SkippedReason) == "" {
-		t.Fatal("没有资产可拉时必须给出跳过原因")
+	if result.SkippedReason != "未订阅任何项目" {
+		t.Fatalf("SkippedReason = %q, vault pin 不再安装私仓项目", result.SkippedReason)
 	}
 }

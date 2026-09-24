@@ -15,7 +15,6 @@ import (
 
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/install"
-	"github.com/shichao402/Dec/internal/pmodel"
 	"github.com/shichao402/Dec/internal/registry"
 	"github.com/shichao402/Dec/internal/types"
 )
@@ -28,7 +27,7 @@ type SetRequiresResult struct {
 	Subscribed []SubscribedProject
 	// Rejected 是被拒绝的订阅及原因，已从 requires 中排除。
 	Rejected []string
-	// HomeProject 是本工作区的作者身份项目（项目平面才有），它不进 requires。
+	// HomeProject 是本工作区的本仓项目（项目平面才有），它不进 requires。
 	HomeProject string
 	VarsCreated bool
 }
@@ -42,21 +41,25 @@ type SubscribedProject struct {
 
 // SetWorkspaceRequires 把订阅写入所属平面的唯一消费方配置。
 //
-// spec 为空表示「一项都不订阅」，会清空 requires。私仓 pin 必须在私仓里存在；
-// 官方 pin 在能连上注册表时校验项目是否已发布，连不上则接受并告警，不阻断离线编辑。
+// spec 为空表示「一项都不订阅」，会清空 requires。订阅版本只能是 latest 或 v*。
+// 能连上注册表时校验项目是否已发布，连不上则接受并告警，不阻断离线编辑。
 func SetWorkspaceRequires(ctx context.Context, workspace Workspace, spec types.RequiresSpec, reporter Reporter) (*SetRequiresResult, error) {
 	reporter = defaultReporter(reporter)
-	normalized, err := types.NormalizeRequiresSpec(spec)
+	result := &SetRequiresResult{}
+	writable := make(types.RequiresSpec, len(spec))
+	for name, pin := range spec {
+		if types.IsVaultPin(pin) {
+			result.Rejected = append(result.Rejected, strings.TrimSpace(name)+"（订阅版本只能是 latest 或 v*）")
+			continue
+		}
+		writable[name] = pin
+	}
+	normalized, err := types.NormalizeRequiresSpec(writable)
 	if err != nil {
 		return nil, err
 	}
 
-	result := &SetRequiresResult{}
 	accepted := make(types.RequiresSpec, len(normalized))
-	vaultProjects, vaultErr := scanVaultProjectNames()
-	if vaultErr != nil && len(normalized.VaultProjects()) > 0 {
-		return nil, vaultErr
-	}
 
 	home := ""
 	if workspace.EffectivePlane() == WorkspaceProject {
@@ -72,27 +75,15 @@ func SetWorkspaceRequires(ctx context.Context, workspace Workspace, spec types.R
 	result.HomeProject = home
 
 	published := officialPublishedProjects(ctx, reporter)
-	folded := normalized.FoldPublishedVaultPins(published, home)
-	if !requiresSame(normalized, folded) {
-		emit(reporter, EventInfo, "requires.fold", "已发布项目改为从官方注册表安装："+strings.Join(changedRequireNames(normalized, folded), "、"), nil)
-	}
-	normalized = folded
 	for _, name := range sortedRequireNames(normalized) {
 		pin := normalized[name]
 		switch {
 		case name == home:
-			result.Rejected = append(result.Rejected, name+"（作者身份项目从工作树创作，不进订阅）")
-		case types.IsVaultPin(pin):
-			if _, ok := vaultProjects[name]; !ok {
-				result.Rejected = append(result.Rejected, name+"（个人私仓里没有这个项目）")
-				continue
-			}
-			accepted[name] = pin
-			result.Subscribed = append(result.Subscribed, SubscribedProject{Project: name, Pin: pin, Source: AssetSourceVault})
+			result.Rejected = append(result.Rejected, name+"（本仓项目从工作树安装，不进订阅）")
 		default:
 			if published != nil {
 				if _, ok := published[name]; !ok {
-					result.Rejected = append(result.Rejected, name+"（官方注册表还没有发布这个项目）")
+					result.Rejected = append(result.Rejected, name+"（注册表里还没有这个项目）")
 					continue
 				}
 			}
@@ -144,9 +135,9 @@ func SetWorkspaceRequires(ctx context.Context, workspace Workspace, spec types.R
 	return result, nil
 }
 
-// ListSubscriptionCandidates 是订阅面板的唯一数据源（ADR 0029）：
-// 个人私仓项目与官方注册表已发布项目合成一张表，每行带来源与当前 pin。
-// 已发布项目上残留的 vault pin 会先收成 latest 再写回（ADR 0031）。
+// ListSubscriptionCandidates 是订阅面板的唯一数据源（ADR 0033）：
+// 只列出官方注册表已发布项目，加上本工作区的本仓项目。本仓项目不是订阅。
+// 已发布项目上残留的 vault pin 会先收成 latest；其余 vault pin 在能连上注册表时丢掉。
 func ListSubscriptionCandidates(ctx context.Context, workspace Workspace, reporter Reporter) (*AssetSelectionState, error) {
 	cfg, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
@@ -163,15 +154,27 @@ func ListSubscriptionCandidates(ctx context.Context, workspace Workspace, report
 	if err != nil {
 		return nil, err
 	}
-	state.Bundles = mergeOfficialCandidates(state.Bundles, ListOfficialCandidates(ctx, workspace, cfg))
+	state.Bundles = subscriptionCandidateRows(mergeOfficialCandidates(state.Bundles, ListOfficialCandidates(ctx, workspace, cfg)))
 	sortAssetOptions(state.Bundles)
 	return state, nil
+}
+
+// subscriptionCandidateRows 丢掉私仓扫描行。可订阅的只有官方项目；本仓项目留下是为了
+// 在项目平面显示「从工作树创作」，它不进 requires。
+func subscriptionCandidateRows(options []AssetBundleOption) []AssetBundleOption {
+	out := make([]AssetBundleOption, 0, len(options))
+	for _, opt := range options {
+		if opt.Home || opt.Source == AssetSourceOfficial {
+			out = append(out, opt)
+		}
+	}
+	return out
 }
 
 // mergeOfficialCandidates 把官方注册表行并入私仓行，同名项目只留一行。
 //
 // 已发布的项目只有官方这一个安装来源（ADR 0031）。私仓里的同名目录是控制面 stub，
-// 不是另一份可订阅正文。家项目从工作树创作，保持原行。
+// 不是另一份可订阅正文。本仓项目从工作树创作，保持原行。
 // 残留的 vault pin 在这里收成 latest，避免面板把已发布项目标成私仓。
 func mergeOfficialCandidates(vault, official []AssetBundleOption) []AssetBundleOption {
 	if len(official) == 0 {
@@ -283,9 +286,9 @@ func ListOfficialCandidates(ctx context.Context, workspace Workspace, cfg *types
 
 func officialCandidateDescription(available string) string {
 	if strings.TrimSpace(available) == "" {
-		return "官方注册表项目"
+		return "注册表里的项目"
 	}
-	return "官方注册表项目，最新 " + available
+	return "注册表里的项目，最新 " + available
 }
 
 func snapshotMembers(project string, snap registry.ProjectSnapshot) []AssetSelectionItem {
@@ -411,7 +414,7 @@ func officialPublishedProjects(ctx context.Context, reporter Reporter) map[strin
 	}
 	versions := officialPublishedVersions(ctx, url)
 	if len(versions) == 0 {
-		emit(reporter, EventWarn, "requires.save", "本次没能列举官方注册表，官方订阅未校验是否已发布", nil)
+		emit(reporter, EventWarn, "requires.save", "这次没能连上注册表，没有校验项目是否已发布", nil)
 		return nil
 	}
 	out := make(map[string]struct{}, len(versions))
@@ -421,24 +424,8 @@ func officialPublishedProjects(ctx context.Context, reporter Reporter) map[strin
 	return out
 }
 
-func scanVaultProjectNames() (map[string]struct{}, error) {
-	var projects map[string]*pmodel.Loaded
-	if err := withLocalReadRepoDir(func(repoDir string) error {
-		var err error
-		projects, err = pmodel.Scan(repoDir)
-		return err
-	}); err != nil {
-		return nil, err
-	}
-	out := make(map[string]struct{}, len(projects))
-	for name := range projects {
-		out[name] = struct{}{}
-	}
-	return out, nil
-}
-
-// consumedProjectNames 返回本工作区实际消费的项目名：requires 的全部键，
-// 加上项目平面的作者身份 home（它的公开资产与 secrets 同样落地本工作区）。
+// consumedProjectNames 返回本工作区实际消费的项目名：官方 requires，
+// 加上项目平面的本仓项目（它的公开资产与 secrets 同样落地本工作区）。
 // 它替代了改名前散落各处的 enabled_bundles / enabled_projects（ADR 0029）。
 func consumedProjectNames(cfg *types.ProjectConfig, plane WorkspacePlane) []string {
 	if cfg == nil {
@@ -452,7 +439,7 @@ func consumedProjectNames(cfg *types.ProjectConfig, plane WorkspacePlane) []stri
 			seen[home] = struct{}{}
 		}
 	}
-	for _, name := range sortedRequireNames(cfg.Requires) {
+	for _, name := range cfg.Requires.OfficialProjects() {
 		if _, ok := seen[name]; ok {
 			continue
 		}
@@ -501,30 +488,51 @@ func requiresSame(a, b types.RequiresSpec) bool {
 	return true
 }
 
-func changedRequireNames(before, after types.RequiresSpec) []string {
-	names := make([]string, 0)
-	for name, pin := range before {
-		if after[name] != pin {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
-}
-
-// persistFoldedRequires 把已发布项目上的 vault pin 收成 latest 并写回消费声明。
-// 连不上注册表时不改。写盘失败时仍返回收好的声明，调用方按它安装。
+// persistFoldedRequires 清理消费声明里的 vault pin 并写回。
+// 连上注册表时，已发布的名字收成 latest，其余 vault pin 丢掉。
+// 连不上时不改磁盘，避免把还能折叠的订阅抹掉。写盘失败时仍返回收好的声明。
 func persistFoldedRequires(ctx context.Context, workspace Workspace, cfg *types.ProjectConfig, reporter Reporter) (types.RequiresSpec, error) {
 	raw, url := workspaceOfficialRequires(workspace, cfg)
-	folded := raw.FoldPublishedVaultPins(publishedNameSet(officialPublishedVersions(ctx, url)), homeProjectName(workspace, cfg))
+	versions := officialPublishedVersions(ctx, url)
+	folded := raw.FoldPublishedVaultPins(publishedNameSet(versions), homeProjectName(workspace, cfg))
+	if versions != nil {
+		folded = folded.DropVaultPins()
+	}
 	if requiresSame(raw, folded) {
 		return folded, nil
 	}
 	if err := saveWorkspaceRequires(workspace, folded); err != nil {
 		return folded, err
 	}
-	emit(reporter, EventInfo, "requires.fold", "已发布项目改为从官方注册表安装："+strings.Join(changedRequireNames(raw, folded), "、"), nil)
+	emit(reporter, EventInfo, "requires.fold", requiresMigrationMessage(raw, folded), nil)
 	return folded, nil
+}
+
+func requiresMigrationMessage(before, after types.RequiresSpec) string {
+	var folded, dropped []string
+	for name, pin := range before {
+		next, ok := after[name]
+		if !ok {
+			dropped = append(dropped, name)
+			continue
+		}
+		if next != pin {
+			folded = append(folded, name)
+		}
+	}
+	sort.Strings(folded)
+	sort.Strings(dropped)
+	parts := make([]string, 0, 2)
+	if len(folded) > 0 {
+		parts = append(parts, "已发布的项目改为从注册表安装："+strings.Join(folded, "、"))
+	}
+	if len(dropped) > 0 {
+		parts = append(parts, "已去掉不再安装的私仓订阅："+strings.Join(dropped, "、"))
+	}
+	if len(parts) == 0 {
+		return "订阅已更新"
+	}
+	return strings.Join(parts, "；")
 }
 
 func saveWorkspaceRequires(workspace Workspace, spec types.RequiresSpec) error {

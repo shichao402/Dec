@@ -11,7 +11,7 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 
 项目里由 Dec pull 出来的 IDE 配置不等于「禁止提交」。像 `.cursor/`、`.claude/`、`.codex/`、`.codebuddy/`、`.with/`、`.mcp.json` 这类项目级输出，如果是托管资产生成的结果，通常可以按仓库约定单独提交。With 的用户平面落在 `~/.bg-agent/config-with-app/`（skills / rules / `mcp_config.json`）。敏感值放 `.dec/vars.yaml`、`~/.dec/local/vars.yaml` 或用户本机配置，不要写回这些输出文件。
 
-消费声明只有一处：`.dec/config.yaml`（项目）与 `~/.dec/config.yaml`（本机）的 `requires` map，项目名 → `latest` / `v*`（官方 `registry` 分支）/ `vault`（设置里的个人私仓）。密钥走 Bitwarden。
+消费声明只有一处：`.dec/config.yaml`（项目）与 `~/.dec/config.yaml`（本机）的 `requires` map，项目名 → 订阅版本 `latest` / `v*`，从注册表安装。本仓项目写在 `project_name`，不进这张表。密钥走 Bitwarden。
 
 个人私仓是纯控制面：只管订阅哪些提供方，不存放提供方正文，也不记录贡献方式。提供方源仓彼此平级，改它们只有一条路：改动进 `.dec/overrides/`，再 `dec_propose_upstream` 提 Issue / PR，附上脱敏后的来源经验，由提供方仓统一整理合入。有 `provides` 的工作区禁止 `dec_push` 进私仓。
 
@@ -70,7 +70,7 @@ MCP 不绑定某个仓库，固定打本机服务。先 `dec_console_status` / `
 |------|------|
 | 本机服务 | `dec_console_status`（版本与是否已解锁）。远端连接在 Console |
 | 受管项目 / 设备 | `dec_list_managed_projects`、`dec_list_managed_devices`、`dec_register_managed_project` |
-| 新建本地资产 | `dec_create_local_asset`（家项目写 `DecAssets/`，官方订阅写覆写草稿） |
+| 新建本地资产 | `dec_create_local_asset`（本仓项目写 `DecAssets/`，官方订阅写覆写草稿） |
 | 状态 | `dec_status`（local 需 `project_root`） |
 | 已订阅项目 / 成员 | `dec_list_assets` |
 | 可订阅项目（私仓 ∪ 官方已发布） | `dec_list_subscription_candidates` |
@@ -105,12 +105,12 @@ env 注入给子进程用独立程序 `dec-exec`，不经过 `dec-server`、不�
 
 ```yaml
 version: v2
-project_name: my-app   # 作者身份：本仓创作私仓里的 my-app，不进 requires
+project_name: my-app   # 本仓项目：这个目录正在写 my-app，不进 requires
 ides:
   - cursor
 requires:
-  relkit: latest       # 官方注册表，跟随最新已发布 tag
-  my-notes: vault      # 个人私仓，跟随 HEAD
+  relkit: latest       # 订阅版本：跟随注册表最新 tag
+  tencent-cloud: v0.2.1
 ```
 
 - 旧的 `enabled_bundles` / `enabled_projects` 读到即折叠为 `requires{<名>: vault}`，不再写回；更早的 `available` / `enabled` 已移除

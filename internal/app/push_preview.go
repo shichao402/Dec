@@ -59,8 +59,6 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 		if workspace.EffectivePlane() == WorkspaceProject {
 			preview.HomeProject = projectConfig.ProjectName
 			preview.WritableProjects = []string{projectConfig.ProjectName}
-		} else {
-			preview.WritableProjects = projectConfig.Requires.VaultProjects()
 		}
 	}
 
@@ -104,9 +102,8 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 }
 
 func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConfig *types.ProjectConfig, reporter Reporter) (candidateCount int, hasChanges bool, skippedReason string, changes []PushChange, err error) {
-	if len(projectConfig.Requires.VaultProjects()) == 0 &&
-		(workspace.EffectivePlane() == WorkspaceUser || strings.TrimSpace(projectConfig.ProjectName) == "") {
-		return 0, false, "没有可写的个人私仓项目", nil, nil
+	if workspace.EffectivePlane() != WorkspaceProject || strings.TrimSpace(projectConfig.ProjectName) == "" {
+		return 0, false, "没有可写的本仓项目", nil, nil
 	}
 
 	err = withAppWriteRepo(func(tx *repo.Transaction) error {
@@ -122,7 +119,7 @@ func previewDecPushChanges(ctx context.Context, workspace Workspace, projectConf
 			return resolveErr
 		}
 
-		// 与真正 push 使用同一可写边界：项目平面只能回推家项目，
+		// 与真正 push 使用同一可写边界：项目平面只能回推本仓项目，
 		// direct requires 的 public/project 副本只读，不能计入预览或被临时镜像。
 		assets := writableResolvedAssets(workspace, projectConfig, resolved.Assets)
 		if extra, extraErr := scanWritableCacheAssets(workspace, projectConfig); extraErr != nil {

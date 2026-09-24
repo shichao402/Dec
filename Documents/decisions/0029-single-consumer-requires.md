@@ -1,6 +1,6 @@
 # 0029 — 消费声明唯一化与提供方组成改名
 
-- **状态**：已接受；控制面边界与上游贡献口径见 [0031](0031-control-plane-and-upstream-contribution.md)
+- **状态**：已接受；`vault` pin 已被 [0033](0033-requires-registry-only.md) 废除。控制面边界见 [0031](0031-control-plane-and-upstream-contribution.md)
 - **日期**：2026-09-17
 - **关联**：[0015](0015-project-config-boundary.md)、[0016](0016-p-four-quadrant-model.md)（`requires` 语义段被本决策取代）、[0023](0023-facade-capability-parity.md)、[0026](0026-project-provides-and-sync-worktree.md)、[0028](0028-official-registry-and-install.md)（消费声明段被本决策细化）
 - **影响范围**：`internal/types`、`internal/config`、`internal/install`、`internal/app` 解析与写入、`set_requires` RPC 与 `dec_set_requires`、Console 订阅面板与「更新」页
@@ -16,7 +16,7 @@
 | 官方注册表 · 两个平面 | `.dec/config.yaml` 的 `requires` | `map[项目]版本` |
 
 第一行是病根：**消费者的选择被写进了提供方的数据模型**。于是代码里必须过滤 `name != home`，
-Global 平面因为没有 home 项目只能另开 `enabled_projects`，而 0028 新增官方 `requires` 时
+Global 平面因为没有 本仓项目只能另开 `enabled_projects`，而 0028 新增官方 `requires` 时
 无法复用上述任何一处，只能再开第四份语义——它至今没有任何写入入口，提供方 CI 发布成功后
 Console 里看不到、也无法订阅。四份声明同名不同义，等于没有 SSOT。
 
@@ -41,7 +41,7 @@ requires:
 全部资产，其 `depends_on` 闭包只装 `public`。读取旧 `requires` 字段时按 `depends_on` 处理，
 写入一律 `depends_on`；这样项目平面的有效安装集合与改名前完全相同，无需数据迁移。
 
-**三、`project_name` 只表示作者身份。** home 项目是「这个仓创作哪个项目」，从工作树渲染，
+**三、`project_name` 是本仓项目。** 它表示「这个仓正在写哪个项目」，从工作树安装，
 不出现在 `requires` 里，也不再兼任订阅列表的锚点。
 
 **四、删除 `enabled_projects` / `enabled_bundles` 与 legacy `bundles/` 解析。** 写入路径直接移除；
@@ -52,8 +52,8 @@ requires:
 与 `dec_set_assets`。Console 在项目页 / Global 资产页提供**订阅**面板：列出注册表已发布项目
 ∪ 私仓项目，每行标来源与 pin（官方默认 `latest`，私仓固定 `vault`），勾选保存即写 `requires`。
 
-同名项目只给一行，且**行的身份跟着 pin 走**：某项目在注册表与私仓同时存在时，若它被官方 pin
-订阅，这一行就是官方行，带已装 / 可用版本与「有更新」；否则保持私仓身份，只附带远端可用版本
+同名项目只给一行，且**行的身份跟着订阅版本走**：某项目在注册表与私仓同时存在时，若它的订阅版本是 `latest` 或 `v*`，
+这一行就是注册表行，带已装 / 可用版本与「有更新」；否则保持私仓身份，只附带远端可用版本
 作为参考。反过来（按私仓渲染官方订阅）会同时藏掉版本和更新提示——提供方 CI 发了新版，
 消费者在 Console 里依然看不到该升级，正是本决策要修的那个缺口。
 

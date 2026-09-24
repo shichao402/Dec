@@ -261,9 +261,9 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
-      await expect(page.getByRole('main').getByRole('button', { name: '官方更新', exact: true })).toBeVisible()
+      await expect(page.getByRole('main').getByRole('button', { name: '检查更新', exact: true })).toBeVisible()
       // 四个下级页都只在主区留一张入口卡，表单与列表本身不在项目页加载。
-      await expect(page.getByRole('button', { name: /^家项目绑定/ })).toBeVisible()
+      await expect(page.getByRole('button', { name: /^本仓项目/ })).toBeVisible()
       await expect(page.getByRole('button', { name: /^本地覆写/ })).toBeVisible()
       await expect(page.getByRole('button', { name: '修改', exact: true })).toHaveCount(0)
       await expect(page.getByRole('button', { name: /^我提供的资产/ })).toBeVisible()
@@ -271,19 +271,15 @@ export const cases: Case[] = [
       await expect(page.getByRole('button', { name: /^写回与密钥/ })).toBeVisible()
       await expect(page.getByRole('button', { name: '预览写回' })).toHaveCount(0)
       await expect(page.getByRole('button', { name: '列出密钥' })).toHaveCount(0)
-      // 订阅面板一张表同时列私仓与官方注册表项目，同名项目只给一行（ADR 0029）。
       await expect(page.getByText('订阅', { exact: true })).toBeVisible()
       await expect(page.getByRole('checkbox', { name: 'relkit' })).toHaveCount(1)
-      await expect(page.getByText('私仓', { exact: true }).first()).toBeVisible()
-      // 官方 pin 的行必须按官方身份渲染，并在任何宽度都留下「有更新」与去哪更新的提示：
-      // 版本列窄屏会收起，唯一不该收起的是这两条，否则 CI 发了新版用户仍然不知道。
-      await expect(page.getByText('官方', { exact: true }).first()).toBeVisible()
+      await expect(page.getByText('注册表', { exact: true }).first()).toBeVisible()
       await expect(page.getByText('有更新', { exact: true }).first()).toBeVisible()
       await expect(page.getByText(/有新版本，到「更新」页预览后安装/)).toBeVisible()
-      const home = page.getByRole('checkbox', { name: 'dec' })
-      await expect(home).toBeChecked()
-      await expect(home).toBeDisabled()
-      await expect(page.getByText('home · 必选')).toBeVisible()
+      const workspaceProject = page.getByRole('checkbox', { name: 'dec' })
+      await expect(workspaceProject).toBeChecked()
+      await expect(workspaceProject).toBeDisabled()
+      await expect(page.getByText('本仓 · 必装')).toBeVisible()
     },
   },
   {
@@ -293,7 +289,7 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.locator('main button').filter({ hasText: '腾讯云基础设施' }).first().click()
-      await expect(page.getByRole('main').getByRole('button', { name: '官方更新', exact: true })).toBeVisible()
+      await expect(page.getByRole('main').getByRole('button', { name: '检查更新', exact: true })).toBeVisible()
     },
   },
   {
@@ -340,10 +336,10 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
-      await page.getByRole('button', { name: /^家项目绑定/ }).click()
-      await expect(page.getByRole('heading', { name: '家项目绑定' })).toBeVisible()
+      await page.getByRole('button', { name: /^本仓项目/ }).click()
+      await expect(page.getByRole('heading', { name: '本仓项目' })).toBeVisible()
       await page.getByRole('button', { name: '读取私仓项目列表' }).click()
-      await expect(page.getByText('绑定为家项目')).toBeVisible()
+      await expect(page.getByLabel('本仓项目')).toBeVisible()
       await expect(page.getByRole('button', { name: '返回' })).toBeVisible()
     },
   },
@@ -383,7 +379,7 @@ export const cases: Case[] = [
       await connect(page)
       await nav(page, '项目')
       await page.getByRole('button', { name: /^Dec/ }).first().click()
-      await page.getByRole('main').getByRole('button', { name: '官方更新', exact: true }).click()
+      await page.getByRole('main').getByRole('button', { name: '检查更新', exact: true }).click()
       await expect(page.getByRole('heading', { name: '更新' })).toBeVisible()
       // 更新页跨工作区列出依赖；从项目页进入时默认勾选当前项目的可用更新。
       await expect(page.getByText('Dec', { exact: true }).last()).toBeVisible()

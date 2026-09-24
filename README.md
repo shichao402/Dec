@@ -16,7 +16,7 @@ Dec 是一个个人 AI 知识仓库工具。
 Dec 的解决方案：
 
 - 个人维度：在 Console **设置** 页连接你的资产仓库
-- 项目维度：Console **引导 / 项目** 初始化 project；资产页调整 bundle；**更新** 页安装官方依赖
+- 项目维度：Console **引导 / 项目** 初始化 project；资产页调整 bundle；**更新** 页安装订阅
 - IDE 维度：Dec 自动将资产部署到配置的 IDE 目录
 - 私密维度：Bitwarden folder ↔ 项目 **`.secrets/`** 同步根（project / bundle 同构）；env 经独立 `dec-exec` 注入；SSH Key 落地机器级 `~/.ssh/`，均不进 `.dec/`
 
@@ -28,11 +28,11 @@ Dec 的解决方案：
 
 | 存储 | 写谁 | 装什么 |
 |------|------|--------|
-| **官方注册表** | 提供方 CI → Dec 仓 orphan 分支 `registry`，tag `registry/<项目>/<v>` | relkit 等官方发行物 |
+| **注册表** | 提供方 CI → Dec 仓 orphan 分支 `registry`，tag `registry/<项目>/<v>` | relkit 等已发布的项目 |
 | **个人私仓** | 人 `git push` / Console 对私仓提交 | 你自己要留的 Git 资产 |
 | **Bitwarden** | Console 认证后由 `dec-server` | 密钥，不进任何 Git |
 
-消费仓用一张 `requires` 表声明订阅，官方与个人私仓都在里面，来源由 pin 决定。
+消费仓用一张 `requires` 表声明订阅。值是订阅版本：`latest` 或某个 `v*`，都从注册表安装。
 
 ### 2. 消费配置 `requires`
 
@@ -41,20 +41,18 @@ Dec 的解决方案：
 
 ```yaml
 requires:
-  relkit: v0.3.20       # 官方注册表，钉死
-  tencent-cloud: latest # 官方注册表，跟随最新已发布 tag
-  my-notes: vault       # 个人私仓，跟随私仓 HEAD
+  relkit: v0.3.20       # 订阅版本：固定在这一版
+  tencent-cloud: latest # 订阅版本：跟随注册表最新 tag
 ```
 
-官方 pin 只接受精确版本或 `latest`：指向不存在或已被 purge 的版本会报错，不回落，`latest`
-跳过已 yank 的 tag。个人私仓是单分支可变仓、没有版本，pin 只能是 `vault`。
+订阅版本只接受 `latest` 或 `v*`。指向不存在或已被 purge 的版本会报错，不回落。`latest` 跳过已 yank 的 tag。
 在 Console 项目页 / Global 资产页的「订阅」面板勾选保存即写这张表。
 
 `install` 按 `requires` 从 registry 重画 IDE 目录。`.dec/cache` 只是只读下载缓存。
 
 ### 3. 资产部署
 
-Console **更新** 页只做远端到本地：跨工作区多选官方依赖，预览后安装。个人 Git 与密钥在项目 / Global 资产页分别写回。官方禁止 `dec_push`；消费方临时修改官方安装物时，从具体项目页进入下级页「**本地覆写**」创建覆写并关联源仓 PR/Issue。
+Console **更新** 页只做远端到本地：跨工作区多选订阅，预览后安装。个人 Git 与密钥在项目 / Global 资产页分别写回。注册表里的项目禁止 `dec_push`；临时修改已安装内容时，从具体项目页进入下级页「**本地覆写**」创建覆写并关联源仓 PR/Issue。
 
 Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 
@@ -97,7 +95,7 @@ Console 主要页面：
 | 认证 | 按需完成 Bitwarden Authenticate |
 | 概览 / 引导 | 项目概览、建议下一步、project 初始化 |
 | 项目 / 资产 | 浏览资产、选择 bundle、保存 enabled |
-| 更新 | 多选官方依赖，预览并安装到 Global / 项目 |
+| 更新 | 多选订阅，预览并安装到 Global / 项目 |
 | 删除 | 列远端与本机库存、勾选删除；密钥进 Bitwarden 回收站可恢复 |
 | 设置 | Console 更新；仓库、Bitwarden、全局 IDE、服务与清理 |
 
@@ -111,7 +109,7 @@ CI、测试和其他非交互环境不会自动弹 Console，而是收到结构�
 1. **设置** → 连接个人 Git 仓库 URL
 2. **设置** → 配置本机 IDE（安装 Dec 内置 Skills）
 3. **引导 / 项目** → 初始化 project（**自动匹配** vault 中同名 `projects/<目录名>.yaml`，或选择/新建）
-4. **更新** → 选择官方依赖，预览并安装
+4. **更新** → 选择订阅，预览并安装
 
 ### 4. 变量与占位符
 
@@ -251,7 +249,7 @@ ides:
 
 ### 订阅被拒
 
-保存订阅时会校验：私仓 pin 的项目必须在私仓里存在，官方 pin 的项目必须已发布到注册表。
+保存订阅时会校验：项目必须已经发布到注册表。
 被拒条目连同理由显示在「订阅」面板，检查拼写或先让提供方 CI 发布一版。
 
 ### 推送/拉取失败

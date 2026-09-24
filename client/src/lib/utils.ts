@@ -139,7 +139,7 @@ export type AssetOption = {
   Required: boolean
   Quadrants: Record<string, number>
   Tags?: string[]
-  // 订阅来源与 pin（ADR 0029 / 0031）：vault 为未发布的个人项目，official 为官方注册表。
+  // 订阅来源：official 表示这一行来自注册表。私仓扫描行不进入订阅面板。
   Source?: string
   Pin?: string
   Installed?: string

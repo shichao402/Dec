@@ -36,7 +36,7 @@ func (PWriter) PushWorkspace(ctx context.Context, workspace Workspace, reporter 
 	return PushWorkspaceAssets(ctx, workspace, reporter)
 }
 
-// BindHomeP 初始化本地配置并确保仓库中存在家项目。
+// BindHomeP 初始化本地配置并确保仓库中存在本仓项目。
 func (PWriter) BindHomeP(projectRoot string, reporter Reporter) (*ConfigInitPreparation, error) {
 	prepared, err := EnsureLocalProjectConfig(projectRoot, reporter)
 	if err != nil || prepared == nil || prepared.ProjectConfig == nil {
@@ -44,7 +44,7 @@ func (PWriter) BindHomeP(projectRoot string, reporter Reporter) (*ConfigInitPrep
 	}
 	name := prepared.ProjectConfig.ProjectName
 	if !types.IsValidPName(name) {
-		return nil, fmt.Errorf("目录名 %q 不能绑定为家项目：必须为小写 kebab-case", name)
+		return nil, fmt.Errorf("目录名 %q 不能本仓项目：必须为小写 kebab-case", name)
 	}
 	if err := withAppWriteRepo(func(tx *repo.Transaction) error {
 		projects, scanErr := pmodel.Scan(tx.WorkDir())

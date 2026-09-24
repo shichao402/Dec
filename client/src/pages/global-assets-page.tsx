@@ -33,7 +33,7 @@ export function GlobalAssetsPage(props: {
         actions={
           <>
             <Button variant="outline" onClick={props.onSync}>
-              官方更新
+              检查更新
             </Button>
             <Button onClick={props.onPull} disabled={pullState.blocked}>
               <RefreshCw className="size-4" />
@@ -57,7 +57,7 @@ export function GlobalAssetsPage(props: {
           deviceId={props.deviceId}
           root=""
           plane="global"
-          hint="保存订阅后点「拉取」落地到用户环境（如 ~/.cursor、~/.claude）；官方新版本用「官方更新」。"
+          hint="保存后点「拉取」装到这台机器的 IDE。有新版本时用「检查更新」。"
         />
       </PageFill>
     </Page>

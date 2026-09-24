@@ -61,10 +61,9 @@ Bitwarden session 按需建立。**Console Authenticate 是唯一人工入口**�
 | **BW private** | `<p>/private/{global,local}` | 敏感正文；与 Git 同 项目/plane/相对路径 零冲突 |
 
 消费声明只有一处：`.dec/config.yaml` 与 `~/.dec/config.yaml` 的 `requires` map，项目名 →
-`latest` / `v*`（官方注册表）/ `vault`（个人私仓），见
-[ADR 0029](decisions/0029-single-consumer-requires.md)。项目工作区另有作者身份 `project_name`
-（家项目），它从工作树创作，不进 `requires`。被订阅项目装本平面两象限，其 `depends_on`
-闭包只装 `public`，不引入 private。Git 资产落到
+订阅版本（`latest` / `v*`），一律从注册表安装（[ADR 0033](decisions/0033-requires-registry-only.md)）。
+项目工作区另有 `project_name`（本仓项目）：这个目录正在写的项目，从工作树安装，不进 `requires`。
+Git 资产落到
 `.dec/cache/<p>/<visibility>/<plane>/` 后渲染 IDE；配置了 `provides` 时，Push
 只读取映射 source，cache 仍是可删除的安装缓存。BW 内容独立落到
 `.secrets/<p>/` 或 `~/.dec/secrets/<p>/`。项目级 SSH/GCM 定向到家工作区，
@@ -74,7 +73,7 @@ Bitwarden session 按需建立。**Console Authenticate 是唯一人工入口**�
 
 - 仓库连接 / 本机 vars / 服务版本与重启：Console **设置**
 - 项目初始化 / project 选择：Console **引导 / 项目**
-- 订阅（官方注册表 ∪ 个人私仓，写 `requires`）、标签（推荐 Global）与四象限浏览：Console **项目 / Global 资产**
+- 订阅（从注册表选择，写入 `requires`）、标签（推荐 Global）与四象限浏览：Console **项目 / Global 资产**
 - 提供映射：Console **项目 / Global 资产**
 - 已订阅项目的多选更新预览与安装：Console **更新**
 - 个人私仓 / Bitwarden 写回与密钥清单：Console **项目 / Global 资产**
@@ -84,17 +83,16 @@ Bitwarden session 按需建立。**Console Authenticate 是唯一人工入口**�
 
 资产目录类型（skill / command / rule / mcp）以 `internal/bundle.VaultAssetKinds`
 为共用真相源。`PWriter` 是新写路径唯一门面；订阅只经 `SetWorkspaceRequires` 写入，
-`enabled_bundles` / `enabled_projects` 只在读旧 YAML 时折叠成 `requires{<名>: vault}`，
-不能据此回退到旧存储模型。
+`enabled_bundles` / `enabled_projects` 只在读旧 YAML 时折进 `requires`。折出来的 `vault`
+pin 会在连上注册表后收成 `latest` 或丢掉（ADR 0033），不能据此回退到旧存储模型。
 
 ## 项目解析与写边界
 
 - `internal/pmodel` 严格加载 `<p>/dec.yaml` 及四象限；项目名、manifest 名称一致性、
   自引用、未声明顶层目录和资产符号链接均硬失败。
-- `internal/app/bundle_resolver.go` 按 `requires` 里 pin 为 `vault` 的项目解析个人私仓
-  （项目平面另加作者身份家项目）：种子项目取本平面两象限，其 `depends_on` 传递闭包只取
-  `public`。pin 为 `latest` / `v*` 的项目由 `internal/install` 从官方注册表安装。
-- 项目 push 只允许家项目；被订阅项目的副本不进入实际 push，也不进入 push 预览。
+- `internal/app/bundle_resolver.go` 只解析本仓项目在个人私仓里的资产。
+  `requires` 里的项目由 `internal/install` 从注册表安装。
+- 项目 push 只允许本仓项目；被订阅项目的副本不进入实际 push，也不进入 push 预览。
 - `internal/app/bundle_writer.go` 的 `PWriter` 统一承接订阅写入、push、Remote
   private 写入、delete/remove；服务端 dispatch 注入 writer，Console/MCP 不内嵌 app。
 - 普通 push 发现非空 `projects/` 或 `bundles/` 会拒绝，提示远端尚未完成一次性项目迁移。
@@ -170,37 +168,36 @@ editor: code --wait
 
 ### 本地消费声明
 
-工作区 `.dec/config.yaml` 用 **`requires`** 声明订阅，用 **`project_name`** 声明作者身份：
+工作区 `.dec/config.yaml` 用 **`requires`** 声明订阅，用 **`project_name`** 声明本仓项目：
 
 ```yaml
 version: v2
 
-project_name: my-app   # 作者身份：本仓创作私仓里的 my-app，不进 requires
+project_name: my-app   # 本仓项目：这个目录正在写 my-app，不进 requires
 
 ides:                  # 可选：机器级 IDE 覆盖
   - cursor
 
 requires:
-  relkit: latest       # 官方注册表，跟随最新已发布 tag
-  tencent-cloud: v0.2.1 # 官方注册表，钉死
-  my-notes: vault      # 个人私仓，跟随私仓 HEAD
+  relkit: latest        # 订阅版本：跟随注册表最新 tag
+  tencent-cloud: v0.2.1 # 订阅版本：固定在这一版
 ```
 
-`requires` 是唯一的消费声明（ADR 0029）：来源由 pin 决定，不由机制决定；成员资产随项目一并
-解析下发，不能单独启用或排除。保存只写消费方配置，绝不写私仓。私仓 pin 必须在私仓里存在；
-官方 pin 在能连上注册表时校验项目是否已发布，连不上则接受并告警，不阻断离线编辑。被拒条目
-连同理由回传给 Console。项目平面只校验、不创建占位也不改写 scope（见
+`requires` 是唯一的消费声明（ADR 0029 / 0033）：订阅版本只有 `latest` 和 `v*`，都从注册表安装。
+成员资产随项目一并解析下发，不能单独启用或排除。保存只写消费方配置，绝不写私仓。
+能连上注册表时校验项目是否已发布，连不上则接受并告警，不阻断离线编辑。`vault` 会被拒绝。
+被拒条目连同理由回传给 Console。项目平面只校验、不创建占位也不改写 scope（见
 [0013](decisions/0013-secrets-belong-to-declared-target.md) §7a）。
 
-读旧配置时，`enabled_bundles` / `enabled_projects` 一次性折叠为 `requires{<名>: vault}` 且不写回；
-更早的 `available` / `enabled` 字段已直接丢弃。
+读旧配置时，`enabled_bundles` / `enabled_projects` 一次性折进 `requires`。留下的 `vault` pin
+在连上注册表后收成 `latest` 或删除。更早的 `available` / `enabled` 字段已直接丢弃。
 
 **职责划分**：
 
 | 字段 | 存储 | 说明 |
 |------|------|------|
-| `requires` | 消费方本地 | 唯一消费声明：项目 → `latest` / `v*` / `vault`；pull 与更新解析用 |
-| `project_name` | 消费方本地 | 作者身份，关联私仓 `<name>/dec.yaml`；不是订阅 |
+| `requires` | 消费方本地 | 唯一消费声明：项目 → `latest` / `v*`；pull 与更新解析用 |
+| `project_name` | 消费方本地 | 本仓项目，关联私仓 `<name>/dec.yaml`；不是订阅 |
 | `depends_on` | 私仓项目声明 | 提供方组成；被订阅项目的闭包只装 `public` |
 | `ides` / `editor` | vault project + 本地覆盖 | 本地优先 |
 
@@ -217,7 +214,7 @@ flowchart TD
   D -->|否| F[Console：选择已有 project 或新建]
   B -->|是| G[加载 project_name]
   E --> H[写入 .dec/config.yaml]
-  F -->|选择已有| I[绑定作者身份 project_name]
+  F -->|选择已有| I[绑定本仓项目 project_name]
   F -->|新建| J[填名 → push <名>/dec.yaml]
   I --> H
   J --> H
@@ -227,7 +224,7 @@ flowchart TD
 
 1. **推断 project 名**：工作区目录 basename（如 `my-app`），或用户在 Console 中指定
 2. **自动匹配（新机器）**：私仓存在 `<basename>/dec.yaml` → 自动应用，写入本地 `project_name`
-3. **选择已有 project**：从私仓列出项目，用户选择作者身份
+3. **选择已有 project**：从私仓列出项目，用户选择本仓项目
 4. **新建 project**：填 project 名 → **push 到私仓** `<name>/dec.yaml` → 写入本地引用
 
 订阅是初始化之后的独立动作：在 Console 项目页 / Global 资产页勾选保存写 `requires`。
@@ -467,13 +464,13 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 
 #### 订阅（项目 / Global 资产页）
 
-- 列出官方注册表已发布项目 ∪ 私仓项目，每行标来源与 pin
-- 勾选保存只写本平面 `config.yaml` 的 `requires`（官方默认 `latest`，私仓固定 `vault`）
+- 列出注册表已发布项目，项目平面另显示本仓项目（不是订阅）
+- 勾选保存只写本平面 `config.yaml` 的 `requires`（默认 `latest`，也可钉死一个 `v*`）
 - 保留已有 `project_name` / `ides` / `editor`
 
 #### update（更新页）
 
-1. 读本平面 `requires`：官方行比注册表 tag，私仓行比 commit
+1. 读本平面 `requires`，和注册表 tag 比版本
 2. 对每个订阅项目：拉安装物 → `.dec/cache/<项目>/`
 3. 自动拉 Bitwarden secrets（各 SyncTarget）→ Secure Note **`.secrets/` 同步根**；SSH Key Item → **`~/.ssh/`** + Dec 管理 config 区块
 4. 零重叠校验（`.dec/` vs `.secrets/`）
@@ -579,7 +576,7 @@ pull 后、从 cache 安装到 IDE 目录之后执行，仅作用于 **非敏感
 
 - `project.go`：project init、项目配置写入
 - `overview.go`：概览数据（供 Console）
-- `assets.go` / `subscriptions.go`：订阅候选列举（私仓 ∪ 官方注册表）与 `requires` 持久化
+- `assets.go` / `subscriptions.go`：订阅候选列举（注册表，外加本仓项目）与 `requires` 持久化
 - `operations.go`：pull/push/remove 编排
 - `settings.go`：Settings 页仓库连接与全局配置
 - `vault_bundle.go`：bundle 解析与合成
@@ -647,7 +644,7 @@ Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真�
   按 user/project 副作用域分别落地
 - SyncTarget：Bitwarden `<p>/private/<plane>` ↔ 对应项目本地 secrets 根；Note 名 =
   相对同步根路径
-- Pull：按 `requires` 与作者身份家项目 → Git 四象限 → Bitwarden private →
+- Pull：按 `requires` 与本仓项目 → Git 四象限 → Bitwarden private →
   Git/BW 同路径与落地边界校验 → 独立落地 + IDE 渲染
 - MCP 经独立 `dec-exec` 注入 `.env/*.env`；不再依赖 mise 落地路径
 - Schema：`Project`（`schema/dec/v1/projects.proto`）、`BundleBinding`、`SecretsConfig`（`schema/secrets/v1/`）

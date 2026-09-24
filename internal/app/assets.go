@@ -39,7 +39,7 @@ type AssetBundleOption struct {
 	// Members 为 bundle 成员解析后的定位信息，顺序与 bundle YAML 中声明保持一致。
 	// 若成员解析失败或资产不存在，这里会跳过（LoadAssetSelection 已通过 reporter 打 warning）。
 	Members []AssetSelectionItem
-	// Enabled 表示该项目已被当前平面的 requires 订阅，或是作者身份家项目。
+	// Enabled 表示该项目已被当前平面的 requires 订阅，或是本仓项目。
 	Enabled bool
 	// SecretsOnly 表示该 bundle 目前只存在于 Bitwarden / known 列表，vault 里还没有 manifest。
 	// 勾选保存后 ensureVaultBundlesForUserEnable 会补一份 scope=user 的 manifest，此标记随之消失。
@@ -55,7 +55,7 @@ type AssetBundleOption struct {
 	// RemoteUnverified 表示本次没能核对远端（无 session、枚举失败，或该 bundle 配了别名 folder），
 	// 因此既不能声称远端已有、也不能断言远端没有。仅在 SecretsOnly 为 true 时有意义。
 	RemoteUnverified bool
-	// Model="p" 表示顶层项目；Home 表示本工作区的作者身份项目，
+	// Model="p" 表示顶层项目；Home 表示本工作区的本仓项目，
 	// Required 表示已在 requires 中订阅（ADR 0029）。
 	Model     string
 	Home      bool
@@ -63,12 +63,11 @@ type AssetBundleOption struct {
 	Quadrants map[string]int
 	// Tags 来自项目声明。global 表示推荐作为 Global 资产导入本机。
 	Tags []string
-	// Source 指出该项目按哪套存储安装：vault 为未发布的个人项目，official 为官方注册表。
-	// 已发布项目只有官方这一个来源，即便私仓里有同名目录（ADR 0031）。
+	// Source 指出该行从哪来：vault 是私仓扫描（只给本仓项目留在订阅面板），official 是注册表。
 	Source string
-	// Pin 是当前订阅的 requires 值（latest / v* / vault）；未订阅时为空。
+	// Pin 是当前订阅的 requires 值（latest / v*）；未订阅时为空。
 	Pin string
-	// Installed / Available 只对官方注册表项目有意义：本机已装版本与远端可用版本。
+	// Installed / Available 只对注册表项目有意义：本机已装版本与远端可用版本。
 	Installed       string
 	Available       string
 	UpdateAvailable bool
@@ -218,20 +217,21 @@ func loadBundleSelectionForPlane(projectConfig *types.ProjectConfig, plane Works
 	}
 	options := make([]AssetBundleOption, 0, len(resolved.Bundles))
 	for _, bo := range resolved.Bundles {
+		subscribed := requires.Has(bo.Name) && !requires.IsVault(bo.Name)
 		opt := AssetBundleOption{
 			Name:        bo.Name,
 			Description: bo.Description,
 			Vault:       bo.VaultName,
-			Enabled:     bo.Enabled || requires.IsVault(bo.Name),
+			Enabled:     bo.Enabled || subscribed,
 			Model:       bo.Model,
 			Home:        bo.Home,
-			Required:    bo.Required,
+			Required:    subscribed,
 			Quadrants:   bo.Quadrants,
 			Tags:        append([]string(nil), bo.Tags...),
 			Source:      AssetSourceVault,
 		}
-		if requires.IsVault(bo.Name) {
-			opt.Pin = types.RequiresVault
+		if subscribed {
+			opt.Pin = requires[bo.Name]
 		}
 		opt.Members = buildBundleMemberItems(bo, tx.WorkDir())
 		options = append(options, opt)
@@ -262,7 +262,7 @@ func appendSecretsOnlyBundleOptions(options []AssetBundleOption, workspace Works
 
 	var enabled []string
 	if projectConfig != nil {
-		enabled = projectConfig.Requires.VaultProjects()
+		enabled = projectConfig.Requires.OfficialProjects()
 	}
 	sessionReady := secrets.HasSession() && secrets.HasUserKey()
 	inventory := listRemoteSecretBundleInventory(sessionReady, "assets.bundle", reporter)

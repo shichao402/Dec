@@ -46,10 +46,10 @@ export function OfficialOverridesPage(props: {
   const runAction = actions.run
   const workspaceResource = resource.workspace(props.root)
   const loadSpec = useMemo(
-    () => actionSpec(`overrides:list:${props.deviceId}:${props.root}`, '加载可修改的官方资产', props.deviceId, [workspaceResource], 'read'),
+    () => actionSpec(`overrides:list:${props.deviceId}:${props.root}`, '加载可修改的资产', props.deviceId, [workspaceResource], 'read'),
     [props.deviceId, props.root, workspaceResource],
   )
-  const editSpec = actionSpec(`overrides:edit:${props.deviceId}:${props.root}`, '读取官方资产', props.deviceId, [workspaceResource], 'read')
+  const editSpec = actionSpec(`overrides:edit:${props.deviceId}:${props.root}`, '读取已安装的资产', props.deviceId, [workspaceResource], 'read')
   const previewSpec = actionSpec(`overrides:preview:${props.deviceId}:${props.root}`, '预览本地覆写', props.deviceId, [workspaceResource], 'read')
   const submitSpec = actionSpec(`overrides:submit:${props.deviceId}:${props.root}`, '提交上游并启用本地覆写', props.deviceId, [workspaceResource], 'write', '本地覆写已启用')
 
@@ -87,7 +87,7 @@ export function OfficialOverridesPage(props: {
     <Page>
       <PageHeader
         title="本地覆写"
-        description="临时修改这个项目里已安装的官方资产，并关联上游 Issue 或 PR。官方注册表只由提供方 CI 写。"
+        description="临时修改这个项目里已安装的资产，并关联上游 Issue 或 PR。注册表只由提供方 CI 写。"
         meta={<Badge tone="quiet" className="font-mono" title={props.root}>{props.label}</Badge>}
         actions={
           <>
@@ -107,11 +107,11 @@ export function OfficialOverridesPage(props: {
           <ActionFeedback actionKey={submitSpec.key} />
         </div>
         <Panel>
-          <PanelHeader title="可修改的官方资产" description="只列这个项目已安装的官方 bundle。" />
+          <PanelHeader title="可修改的已安装资产" description="只列这个项目已经安装的内容。" />
           {assets === null ? (
             <Loading />
           ) : assets.length === 0 ? (
-            <EmptyState text="还没有可修改的官方资产" hint="先到「更新」页安装官方依赖。" />
+            <EmptyState text="还没有可修改的已安装资产" hint="先在「订阅」里勾选，再到「更新」页安装。" />
           ) : (
             <div className="divide-y divide-line">
               {assets.map((asset) => (

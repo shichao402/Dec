@@ -31,7 +31,7 @@ type Options struct {
 }
 
 func Official(ctx context.Context, opts Options) ([]Resolved, error) {
-	req, err := types.NormalizeRequiresSpec(opts.Requires)
+	req, err := types.NormalizeRequiresSpec(opts.Requires.DropVaultPins())
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func Official(ctx context.Context, opts Options) ([]Resolved, error) {
 
 // Status 只读：对照 requires、本机 cache 版本戳与远端 tag，不改任何文件。
 func Status(ctx context.Context, opts Options) ([]StatusItem, error) {
-	req, err := types.NormalizeRequiresSpec(opts.Requires)
+	req, err := types.NormalizeRequiresSpec(opts.Requires.DropVaultPins())
 	if err != nil {
 		return nil, err
 	}

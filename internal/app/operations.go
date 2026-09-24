@@ -129,9 +129,14 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	}
 
 	// 平面隔离（ADR 0009）：project 上下文只处理本平面订阅，不再并入 Global 平面。
-	// 订阅唯一来源是 requires（ADR 0029）。已发布项目只走注册表；vault pin 只留给未发布的个人项目（ADR 0031）。
+	// 订阅从注册表安装（ADR 0033）。私仓这边只安装本仓项目。
 	pullConfig := *projectConfig
-	projectEnabled := workspaceVaultSeeds(&pullConfig, workspace.EffectivePlane())
+	var projectEnabled []string
+	if workspace.EffectivePlane() == WorkspaceProject {
+		if home := strings.TrimSpace(pullConfig.ProjectName); home != "" {
+			projectEnabled = []string{home}
+		}
+	}
 
 	if len(projectEnabled) == 0 && len(req) == 0 {
 		result.SkippedReason = "未订阅任何项目"
@@ -1116,7 +1121,7 @@ type renderHeaderInfo struct {
 }
 
 // renderHeaderInfoFor 按当前工作区身份选择头部：
-//   - 家项目且声明了 provides → 编辑 provides_root，由 CI publish-provides
+//   - 本仓项目且声明了 provides → 编辑 provides_root，由 CI publish-provides
 //   - 官方 registry 订阅 → 只读安装物，禁止 Run 页 push
 //   - 其余（个人私仓）→ 编辑 .dec/cache，Run 页 push
 func renderHeaderInfoFor(workspace Workspace, vaultName string) renderHeaderInfo {
@@ -1232,7 +1237,7 @@ func injectRenderedHeaderDir(dir string, workspace Workspace, vaultName string) 
 
 func enabledBundleNamesFromConfig(projectConfig *types.ProjectConfig, overviews []BundleOverview) []string {
 	if projectConfig != nil && len(projectConfig.Requires) > 0 {
-		return projectConfig.Requires.VaultProjects()
+		return projectConfig.Requires.OfficialProjects()
 	}
 	names := make([]string, 0, len(overviews))
 	for _, overview := range overviews {

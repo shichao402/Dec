@@ -53,3 +53,4 @@
 | [0030](0030-agent-tools-thin-shell.md) | Agent 工具清单与编排下移，dec-mcp 零业务知识 | 清单与 Plan 仍有效；壳与网关已被 0032 取代 |
 | [0031](0031-control-plane-and-upstream-contribution.md) | 个人私仓是纯控制面，提供方一律走上游贡献 | 已接受 |
 | [0032](0032-mcp-streamable-http.md) | MCP 改为 dec-server 上的 Streamable HTTP | 已接受 |
+| [0033](0033-requires-registry-only.md) | 订阅只从官方注册表安装，废除 `vault` pin | 已接受 |

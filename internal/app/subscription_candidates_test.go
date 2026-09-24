@@ -6,7 +6,7 @@ import (
 	"github.com/shichao402/Dec/internal/types"
 )
 
-// 官方 pin 的项目在私仓里也有同名目录时，行必须按官方身份下发：
+// 已订阅的项目在私仓里也有同名目录时，行必须按注册表身份下发：
 // 否则面板标「私仓」、藏掉版本与「有更新」，CI 发了新版用户也看不到。
 func TestMergeOfficialCandidates_OfficialPinWinsOverVaultRow(t *testing.T) {
 	vault := []AssetBundleOption{{
@@ -90,17 +90,17 @@ func TestMergeOfficialCandidates_UnsubscribedPrefersOfficial(t *testing.T) {
 	}
 }
 
-// 家项目从工作树创作，即便注册表也发布了同名项目，也不能被改写成官方行。
+// 本仓项目从工作树创作，即便注册表也发布了同名项目，也不能被改写成官方行。
 func TestMergeOfficialCandidates_HomeStaysVault(t *testing.T) {
 	vault := []AssetBundleOption{{Name: "relkit", Source: AssetSourceVault, Home: true, Enabled: true}}
 	official := []AssetBundleOption{{Name: "relkit", Source: AssetSourceOfficial, Available: "v0.4.9"}}
 
 	merged := mergeOfficialCandidates(vault, official)
 	if merged[0].Source != AssetSourceVault {
-		t.Errorf("家项目 Source = %q, want %q", merged[0].Source, AssetSourceVault)
+		t.Errorf("本仓项目 Source = %q, want %q", merged[0].Source, AssetSourceVault)
 	}
 	if merged[0].Pin != "" {
-		t.Errorf("家项目不进 requires，Pin 应为空，实际 %q", merged[0].Pin)
+		t.Errorf("本仓项目不进 requires，Pin 应为空，实际 %q", merged[0].Pin)
 	}
 }
 
@@ -165,6 +165,18 @@ func TestMergeOfficialCandidates_KeepsOriginRepo(t *testing.T) {
 	}
 	if merged[0].Source != AssetSourceOfficial {
 		t.Errorf("pin latest should be official: %q", merged[0].Source)
+	}
+}
+
+func TestSubscriptionCandidateRowsDropsVaultProjects(t *testing.T) {
+	rows := subscriptionCandidateRows([]AssetBundleOption{
+		{Name: "notes", Source: AssetSourceVault},
+		{Name: "dec", Source: AssetSourceVault, Home: true},
+		{Name: "relkit", Source: AssetSourceOfficial, Pin: "latest"},
+		{Name: "orphan", SecretsOnly: true},
+	})
+	if len(rows) != 2 || rows[0].Name != "dec" || rows[1].Name != "relkit" {
+		t.Fatalf("rows = %+v", rows)
 	}
 }
 

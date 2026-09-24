@@ -72,7 +72,7 @@ func planWorkspaceSecretsSync(workspace Workspace, enabledBundles []string, cfg 
 		}
 		names = valid
 	} else if len(projects) > 0 && workspace.EffectivePlane() == WorkspaceProject {
-		// 家项目可能已从私仓删除：仍保留名字以便 Bitwarden 对照后做 secrets 收敛。
+		// 本仓项目可能已从私仓删除：仍保留名字以便 Bitwarden 对照后做 secrets 收敛。
 		// 非法 / 占位名（ResolveProjectName 回落到目录名）若不在私仓且不在 requires，则丢弃。
 		valid := names[:0]
 		enabled := make(map[string]struct{}, len(enabledBundles))
@@ -135,7 +135,7 @@ func planWorkspaceSecretsBrowse(workspace Workspace, enabledBundles []string, cf
 	}
 	sort.Strings(browse)
 
-	// 浏览不走 pull 的「项目平面只认家项目」收窄：Remote 要能看见并清理别的项目
+	// 浏览不走 pull 的「项目平面只认本仓项目」收窄：Remote 要能看见并清理别的项目
 	// 在本平面留下的同步根与远端条目。名字不合法只跳过，不能整页失败。
 	targets := make([]secrets.SyncTarget, 0, len(browse))
 	for _, name := range browse {

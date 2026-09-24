@@ -52,7 +52,7 @@ type listAssetsParams struct {
 
 type setRequiresParams struct {
 	ProjectRoot string            `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 时必填"`
-	Requires    map[string]string `json:"requires" jsonschema:"订阅表：项目名 → pin。latest / v* 解析官方注册表，vault 解析个人私仓。整表覆盖，空表示清空订阅。"`
+	Requires    map[string]string `json:"requires" jsonschema:"订阅表：项目名 → 订阅版本。只能是 latest 或 v*，都从注册表安装。整表覆盖，空表示清空订阅。"`
 	Plane       string            `json:"plane,omitempty" jsonschema:"作用平面：local|global（旧名 project|user）。留空默认 local；不支持 both。"`
 }
 

@@ -25,8 +25,8 @@ export function ProjectBindingPage(props: {
   return (
     <Page>
       <PageHeader
-        title="家项目绑定"
-        description="家项目决定这个目录能装哪些资产，绑定名必须是私仓里已存在的项目。"
+        title="本仓项目"
+        description="这个目录正在写的项目。名字必须已经在私仓里。"
         meta={
           <Badge tone="quiet" className="font-mono" title={props.project.Root}>
             {props.project.Label || props.project.Name}
@@ -45,7 +45,7 @@ export function ProjectBindingPage(props: {
   )
 }
 
-// 家项目必须先存在于私仓：bind 与 push 都只接受已存在的项目名，
+// 本仓项目必须先存在于私仓：bind 与 push 都只接受已存在的项目名，
 // 所以新机器上的新项目要能在这里就地新建，否则心流断在「绑定名不存在」。
 export function ProjectBinding(props: {
   deviceId: string
@@ -60,7 +60,7 @@ export function ProjectBinding(props: {
   const workspaceResource = resource.workspace(project.Root)
   const prepareSpec = actionSpec(`project:prepare:${deviceId}:${project.Root}`, '检查项目配置', deviceId, [workspaceResource], 'read')
   const createSpec = actionSpec(`project:create-remote:${deviceId}:${project.Root}`, '在私仓新建项目', deviceId, [resource.global], 'write', '项目已创建并推送到私仓')
-  const bindSpec = actionSpec(`project:bind:${deviceId}:${project.Root}`, project.Initialized ? '保存家项目绑定' : '初始化项目', deviceId, [workspaceResource, resource.global], 'write', project.Initialized ? '绑定已保存' : '项目初始化完成')
+  const bindSpec = actionSpec(`project:bind:${deviceId}:${project.Root}`, project.Initialized ? '保存本仓项目' : '初始化项目', deviceId, [workspaceResource, resource.global], 'write', project.Initialized ? '绑定已保存' : '项目初始化完成')
   const bindLabel = project.Initialized ? '保存绑定' : '确认初始化'
 
   const prepare = () => invokeTyped<ProjectPreparation>('prepare_project_config_init', project.Root, 'local', {}, prepareSpec.key)
@@ -103,7 +103,7 @@ export function ProjectBinding(props: {
             />
           )}
           {available.length > 0 ? (
-            <Field label="绑定为家项目" hint={boundName ? `设备上记录的绑定：${boundName}` : undefined} className="max-w-sm">
+            <Field label="本仓项目" hint={boundName ? `设备上记录的绑定：${boundName}` : undefined} className="max-w-sm">
               <Select value={homeProject} onChange={(e) => setHomeProject(e.target.value)}>
                 {available.map((name) => <option key={name} value={name}>{name}</option>)}
               </Select>

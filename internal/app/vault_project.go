@@ -15,31 +15,31 @@ import (
 
 // VaultProjectAutoApplyResult 描述从 vault 应用 project 的结果。
 type VaultProjectAutoApplyResult struct {
-	ProjectRoot      string
-	ConfigPath       string
-	VarsPath         string
-	ProjectName      string
+	ProjectRoot        string
+	ConfigPath         string
+	VarsPath           string
+	ProjectName        string
 	SubscribedProjects []string
-	Applied          bool
-	VarsCreated      bool
-	AssetCount       int
-	BundleCount      int
-	Model            string
-	HomeProject      string
-	RequiredProjects []string
+	Applied            bool
+	VarsCreated        bool
+	AssetCount         int
+	BundleCount        int
+	Model              string
+	HomeProject        string
+	RequiredProjects   []string
 }
 
 // VaultProjectInference 描述从目录名推断出的 vault project（尚未写入本地配置）。
 type VaultProjectInference struct {
-	ProjectRoot      string
-	ProjectName      string
-	VaultPath        string
+	ProjectRoot        string
+	ProjectName        string
+	VaultPath          string
 	SubscribedProjects []string
-	IDEs             []string
-	Editor           string
-	Model            string
-	HomeProject      string
-	RequiredProjects []string
+	IDEs               []string
+	Editor             string
+	Model              string
+	HomeProject        string
+	RequiredProjects   []string
 }
 
 // NeedsVaultProjectAutoApply 判断当前项目是否应尝试从 vault 匹配 project。
@@ -148,9 +148,9 @@ func InferVaultProject(projectRoot string, reporter Reporter) (*VaultProjectInfe
 		if inferredP != nil {
 			return &VaultProjectInference{
 				ProjectRoot: projectRoot, ProjectName: inferredP.Name,
-				VaultPath:      types.PManifestPath(inferredP.Name),
+				VaultPath:          types.PManifestPath(inferredP.Name),
 				SubscribedProjects: append([]string(nil), inferredP.DependsOn...),
-				IDEs:           append([]string(nil), inferredP.IDEs...), Editor: inferredP.Editor,
+				IDEs:               append([]string(nil), inferredP.IDEs...), Editor: inferredP.Editor,
 				Model: "p", HomeProject: inferredP.Name,
 				RequiredProjects: append([]string(nil), inferredP.DependsOn...),
 			}, nil
@@ -170,8 +170,8 @@ func InferVaultProject(projectRoot string, reporter Reporter) (*VaultProjectInfe
 	}
 
 	enabledBundles := normalizeEnabledBundles(vaultProject.Bundles)
-	if existingConfig != nil && len(existingConfig.Requires.VaultProjects()) > 0 {
-		enabledBundles = append([]string(nil), existingConfig.Requires.VaultProjects()...)
+	if existingConfig != nil && len(existingConfig.Requires.OfficialProjects()) > 0 {
+		enabledBundles = existingConfig.Requires.OfficialProjects()
 	}
 
 	projectEditor := strings.TrimSpace(vaultProject.Editor)
@@ -284,8 +284,8 @@ func ApplyVaultProject(projectRoot string, reporter Reporter) (*VaultProjectAuto
 		if len(projectIDEs) == 0 {
 			projectIDEs = append([]string(nil), existingConfig.IDEs...)
 		}
-		if len(existingConfig.Requires.VaultProjects()) > 0 {
-			enabledBundles = append([]string(nil), existingConfig.Requires.VaultProjects()...)
+		if len(existingConfig.Requires.OfficialProjects()) > 0 {
+			enabledBundles = existingConfig.Requires.OfficialProjects()
 		}
 	}
 	if len(enabledBundles) == 0 {

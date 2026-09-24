@@ -31,7 +31,7 @@ Git Vault                         Bitwarden                     本地
 
 - 项目名严格匹配 `^[a-z0-9]+(?:-[a-z0-9]+)*$`。
 - 本机平面安装 `~/.dec/config.yaml` 的 `requires` 订阅项目的 `public/global` 与 `private/global`。
-- 本仓库安装 `.dec/config.yaml` 的 `requires` 订阅项目（另加作者身份家项目）的 `public/local`
+- 本仓库安装 `.dec/config.yaml` 的 `requires` 订阅项目（另加本仓项目）的 `public/local`
   与 `private/local`，再安装它们 `depends_on` 闭包的 `public/local`（ADR 0029）。
 - `depends_on` 闭包只取 `public`，不可引用任何 `private/*`。
 - 同一平面多个项目竞争同一个 IDE 目标路径时硬失败。
@@ -149,7 +149,7 @@ ides:
   - cursor
 requires:
   tencent-cloud: latest
-  woa: vault
+  woa: latest
 ```
 
 `~/.dec/secrets/config.yaml` 示例（仅 secrets 职责）：

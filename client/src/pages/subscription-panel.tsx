@@ -15,24 +15,19 @@ import { actionSpec, PROJECT_TAG_GLOBAL, hasTag, resource } from '@/lib/console'
 import { cn, repoLabel, versionStatusLine } from '@/lib/utils'
 import type { AssetOption, AssetSelection } from '@/lib/utils'
 
-type Filter = 'all' | 'enabled' | 'official' | 'vault' | 'tagged'
+type Filter = 'all' | 'enabled' | 'official' | 'tagged'
 
 const PIN_LATEST = 'latest'
-const PIN_VAULT = 'vault'
 
-type Source = 'official' | 'vault'
-
-// 草稿里的 pin 优先于服务端下发的 Source：还没保存时，徽标与版本列必须立刻跟上。
-function sourceOf(item: AssetOption, pin?: string): Source {
-  if (pin) return pin === PIN_VAULT ? 'vault' : 'official'
-  return item.Source === 'official' ? 'official' : 'vault'
+function isOfficial(item: AssetOption, pin?: string) {
+  if (pin && pin !== PIN_LATEST && !pin.startsWith('v')) return false
+  return item.Source === 'official' || Boolean(pin)
 }
 
-// 已发布项目跟随最新 tag。注册表里没有的个人项目只能跟私仓 HEAD（ADR 0031）。
+// 订阅版本只有两种：跟随最新，或固定在一个已发布的版本。
 function defaultPin(item: AssetOption) {
-  if (item.Pin) return item.Pin
-  if (item.Source === 'official') return PIN_LATEST
-  return PIN_VAULT
+  if (item.Pin && item.Pin !== 'vault') return item.Pin
+  return PIN_LATEST
 }
 
 export function SubscriptionPanel(props: {
@@ -96,10 +91,8 @@ export function SubscriptionPanel(props: {
   }
 
   const visible = bundles.filter((item) => {
-    const source = sourceOf(item, pins[item.Name])
     if (filter === 'enabled' && !pins[item.Name]) return false
-    if (filter === 'official' && source !== 'official') return false
-    if (filter === 'vault' && source !== 'vault') return false
+    if (filter === 'official' && !isOfficial(item, pins[item.Name])) return false
     if (filter === 'tagged' && !hasTag(item.Tags, PROJECT_TAG_GLOBAL)) return false
     if (!query.trim()) return true
     const haystack = `${item.Name} ${item.Description} ${item.OriginRepo || ''} ${(item.Tags || []).join(' ')} ${(item.Members || []).map((m) => `${m.Type}/${m.Name}`).join(' ')}`
@@ -170,7 +163,7 @@ export function SubscriptionPanel(props: {
               <AssetRow
                 key={item.Name}
                 item={item}
-                // 家项目不是订阅（它从工作树创作），但资产无条件安装：勾上且不可改，别让它看起来像没装。
+                // 本仓项目不是订阅，资产直接从工作树安装。勾上且不可改，避免看起来像没装。
                 checked={(props.plane === 'local' && item.Home) || Boolean(pins[item.Name])}
                 pin={pins[item.Name]}
                 changed={added.includes(item.Name) || removed.includes(item.Name) || repinned.includes(item.Name)}
@@ -188,7 +181,7 @@ export function SubscriptionPanel(props: {
                   ? filter === 'tagged'
                     ? '当前没有带 global 标签的项目。'
                     : '换个关键词，或把筛选切回「全部」。'
-                  : '官方项目来自注册表，个人项目来自已连接的私仓。'}
+                  : '可订阅的项目来自注册表。'}
               />
             )}
           </ScrollArea>
@@ -266,8 +259,8 @@ export function AssetRow({
   const origin = repoLabel(item.OriginRepo)
   const subtitle = [origin, (item.Description || '').trim()].filter(Boolean).join(' · ')
   const tags = item.Tags || []
-  const source = sourceOf(item, pin)
-  const version = source === 'official' ? versionStatusLine(item.Installed, item.Available) : ''
+  const official = isOfficial(item, pin)
+  const version = official ? versionStatusLine(item.Installed, item.Available) : ''
   return (
     <label
       className={cn(
@@ -282,7 +275,7 @@ export function AssetRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium text-ink" title={item.Name}>{item.Name}</span>
-            {item.Home && <Badge tone="accent">{locked ? 'home · 必选' : 'home'}</Badge>}
+            {item.Home && <Badge tone="accent">{locked ? '本仓 · 必装' : '本仓'}</Badge>}
             {item.Enabled && !item.Pin && !item.Home && (
               <Badge tone="quiet" title="随其他已订阅项目的 depends_on 一并安装，不需要自己订阅">依赖引入</Badge>
             )}
@@ -313,16 +306,14 @@ export function AssetRow({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <div className="flex items-center gap-2">
-            <span className={cn('text-xs font-medium', source === 'official' ? 'text-accent-hi' : 'text-faint')}>
-              {source === 'official' ? '官方' : '私仓'}
-            </span>
+            {official && !item.Home && <span className="text-xs font-medium text-accent-hi">注册表</span>}
             {version && version !== '—' && (
               <span className="tnum font-mono text-[11px] text-muted">{version}</span>
             )}
           </div>
           {onPin && (
             <div className="flex flex-wrap justify-end gap-1.5">
-              {source === 'official' && (
+              {official && (
                 <PinControl item={item} checked={checked} pin={pin} onPin={onPin} />
               )}
             </div>
@@ -333,7 +324,7 @@ export function AssetRow({
   )
 }
 
-// PinControl 只暴露两种 pin：跟随最新，或钉死当前可用版本。
+// 订阅版本只有两种：跟随最新，或固定在当前可用版本。
 // 更细的历史版本回退是「更新」页的事，订阅这里不该变成版本选择器。
 function PinControl({
   item,
@@ -347,12 +338,12 @@ function PinControl({
   onPin?: (pin: string) => void
 }) {
   const available = item.Available || ''
-  const pinned = Boolean(pin && pin !== PIN_LATEST && pin !== PIN_VAULT)
+  const pinned = Boolean(pin && pin !== PIN_LATEST && pin !== 'vault')
   if (!checked || !onPin || !available) return null
   return (
     <button
       type="button"
-      title={pinned ? '已固定在这个版本，点此改回跟随官方最新版' : `现在跟随官方最新版。点此固定在 ${available}，之后不再自动升级`}
+      title={pinned ? '已固定在这个版本。点此改回跟随最新' : `现在跟随最新。点此固定在 ${available}，之后不再自动升级`}
       onClick={(event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -372,8 +363,7 @@ function SegmentedFilter({ value, onChange }: { value: Filter; onChange: (next: 
   const options: [Filter, string][] = [
     ['all', '全部'],
     ['enabled', '已订阅'],
-    ['official', '官方'],
-    ['vault', '私仓'],
+    ['official', '注册表'],
     ['tagged', 'global'],
   ]
   return (

@@ -17,7 +17,7 @@ description: >
 下列任一条未满足时：**只提问，不创建、不覆盖、不移动任何资产文件。**
 
 1. **来源已确认**：要沉淀的目录 / 文件路径清楚（或用户授权代选且已写明假设）。
-2. **目标提供方已确认**：例如 `agent-dev-playbook` / `relkit`；消费 pin 用 `latest`，不是 `vault`。
+2. **目标提供方已确认**：例如 `agent-dev-playbook` / `relkit`；订阅版本用 `latest`，不能写 `vault`。
 3. **资产名与类型已确认**：跨项目可复用的名字；`skill` / `rule` / `mcp`。
 4. **落盘路径唯一**：官方资产只写当前消费项目的 `.dec/overrides/`，再 `dec_propose_upstream`。
 
@@ -73,7 +73,7 @@ description: >
    不要把官方路径 `dec_push` 进私仓，也不要只改 `.dec/cache/`。
 
 5. 同步维护项目配置
-   - 消费仓把官方依赖写进 `.dec/config.yaml` 的 `requires` map
+   - 消费仓把订阅写进 `.dec/config.yaml` 的 `requires` map
    - 个人启用列表与 `provides` 分开
 
 6. 有变量就补变量说明
@@ -94,7 +94,7 @@ description: >
    - `请告诉我要沉淀的来源路径，例如 .cursor/skills/foo 或某个具体文件。`
 
 2. 要放到哪个提供方？
-   - `目标提供方项目名是什么？例如 agent-dev-playbook / relkit。消费 pin 应是 latest，不是 vault。`
+   - `目标提供方项目名是什么？例如 agent-dev-playbook / relkit。订阅版本应是 latest，不能写 vault。`
 
 3. 新资产叫什么？
    - `沉淀后的资产名是什么？请给一个跨项目可复用的名字。`

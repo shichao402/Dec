@@ -71,12 +71,11 @@ export function OnboardingPage(props: {
     return selection.Bundles.filter((item) => hasTag(item.Tags, PROJECT_TAG_GLOBAL)).map((item) => item.Name)
   }
 
-  // 订阅表按来源给 pin：已发布项目跟随最新 tag，未发布的个人项目只能跟 HEAD（ADR 0031）。
+  // 新订阅的订阅版本一律写成 latest。
   const saveAssets = () => {
     const requires: Record<string, string> = {}
     for (const name of selected) {
-      const item = (assets?.Bundles || []).find((bundle) => bundle.Name === name)
-      requires[name] = item?.Source === 'official' ? 'latest' : 'vault'
+      requires[name] = 'latest'
     }
     return invokeTyped('set_requires', '', 'global', { Requires: requires }, saveAssetsSpec.key)
   }

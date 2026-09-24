@@ -242,7 +242,7 @@ type ProjectConfig struct {
 	Kind          ConfigKind `yaml:"kind,omitempty"`
 	Version       string     `yaml:"version,omitempty"`
 	LayoutVersion int        `yaml:"layout_version,omitempty"`
-	// ProjectName 是作者身份：本工作区创作 vault <name>/dec.yaml 这个项目（ADR 0029）。
+	// ProjectName 是本仓项目：这个工作区正在写的项目（ADR 0029）。
 	// 它不是订阅锚点，也不出现在 requires 里。
 	ProjectName string   `yaml:"project_name,omitempty"`
 	IDEs        []string `yaml:"ides,omitempty"`

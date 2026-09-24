@@ -10,15 +10,15 @@ import (
 
 const RequiresLatest = "latest"
 
-// RequiresVault 是个人私仓 pin：私仓是单分支可变仓，没有版本，只能跟随 HEAD（ADR 0029）。
-// 只用于注册表未发布的个人项目。已发布项目不能再 pin 成 vault（ADR 0031）。
+// RequiresVault 是已废除的 pin（ADR 0033）。旧配置里可能还有这个字，读进来只为
+// 收成 latest 或丢掉，不能再当成安装来源。
 const RequiresVault = "vault"
 
-// RequiresSpec 是唯一的消费声明：提供方项目名 → pin。
-// pin 为 latest 或精确 v* 时解析官方注册表，为 vault 时解析个人私仓。
+// RequiresSpec 是唯一的消费声明：项目名 → 订阅版本。
+// 订阅版本只能是 latest 或精确 v*，一律从注册表安装。
 type RequiresSpec map[string]string
 
-// IsVaultPin 判断 pin 是否指向个人私仓。
+// IsVaultPin 判断 pin 是否是已废除的私仓安装标记。
 func IsVaultPin(pin string) bool {
 	return strings.TrimSpace(pin) == RequiresVault
 }
@@ -64,8 +64,33 @@ func (r RequiresSpec) Official() RequiresSpec {
 	return out
 }
 
+// DropVaultPins 去掉已废除的 vault pin。调用方应先对已发布的名字做
+// FoldPublishedVaultPins，否则还没进注册表的旧订阅会直接消失，而已发布的
+// 会被收成 latest。
+func (r RequiresSpec) DropVaultPins() RequiresSpec {
+	if len(r) == 0 {
+		return r
+	}
+	out := make(RequiresSpec, len(r))
+	dropped := false
+	for name, pin := range r {
+		if IsVaultPin(pin) {
+			dropped = true
+			continue
+		}
+		out[name] = pin
+	}
+	if !dropped {
+		return r
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // FoldPublishedVaultPins 把已发布项目上残留的 vault pin 收成 latest。
-// 家项目保持原样：它从工作树创作，不进注册表订阅。
+// 本仓项目保持原样：它从工作树创作，不进注册表订阅。
 // published 为空表示这次没能确认注册表，调用方不得猜测，原样返回。
 func (r RequiresSpec) FoldPublishedVaultPins(published map[string]struct{}, home string) RequiresSpec {
 	if len(r) == 0 || len(published) == 0 {
@@ -158,8 +183,19 @@ func (r RequiresSpec) MarshalYAML() (any, error) {
 	return out, nil
 }
 
-// NormalizeRequiresSpec 校验并规范化。空值视为 latest。
+// NormalizeRequiresSpec 校验并规范化新写入的订阅。空值视为 latest。
+// vault 不是合法 pin（ADR 0033）。读旧文件用 NormalizeStoredRequires。
 func NormalizeRequiresSpec(in RequiresSpec) (RequiresSpec, error) {
+	return normalizeRequires(in, false)
+}
+
+// NormalizeStoredRequires 读取或原样回写旧配置。vault 先留着，等连上注册表后
+// 收成 latest 或丢掉，避免一次离线保存把还能折叠的订阅直接抹掉。
+func NormalizeStoredRequires(in RequiresSpec) (RequiresSpec, error) {
+	return normalizeRequires(in, true)
+}
+
+func normalizeRequires(in RequiresSpec, allowVault bool) (RequiresSpec, error) {
 	if len(in) == 0 {
 		return nil, nil
 	}
@@ -176,8 +212,15 @@ func NormalizeRequiresSpec(in RequiresSpec) (RequiresSpec, error) {
 		if strings.ContainsAny(ver, "/\\ \t") {
 			return nil, fmt.Errorf("requires.%s 版本 %q 非法", name, rawVer)
 		}
-		if ver != RequiresLatest && ver != RequiresVault && !strings.HasPrefix(ver, "v") {
-			return nil, fmt.Errorf("requires.%s pin %q 必须是 latest、vault 或 v 开头的提供方 tag", name, rawVer)
+		if IsVaultPin(ver) {
+			if !allowVault {
+				return nil, fmt.Errorf("requires.%s 的订阅版本不能是 vault，只能是 latest 或 v 开头的版本", name)
+			}
+			out[name] = RequiresVault
+			continue
+		}
+		if ver != RequiresLatest && !strings.HasPrefix(ver, "v") {
+			return nil, fmt.Errorf("requires.%s 的订阅版本 %q 必须是 latest 或 v 开头的版本", name, rawVer)
 		}
 		if _, dup := out[name]; dup {
 			return nil, fmt.Errorf("requires 重复项目 %q", name)

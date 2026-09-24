@@ -43,7 +43,7 @@ func SuggestProjectName(root string) string {
 	return strings.Trim(name, "-")
 }
 
-// AutoInitManagedProject 若私仓存在与目录名 kebab 同名的家项目则初始化并绑定；否则跳过且不写盘。
+// AutoInitManagedProject 若私仓存在与目录名 kebab 同名的本仓项目则初始化并绑定；否则跳过且不写盘。
 func AutoInitManagedProject(projectRoot string, reporter Reporter) (*AutoInitManagedProjectResult, error) {
 	reporter = defaultReporter(reporter)
 	normalized, err := config.NormalizeManagedProjectRoot(projectRoot)
@@ -91,7 +91,7 @@ func AutoInitManagedProject(projectRoot string, reporter Reporter) (*AutoInitMan
 		result.Skipped = true
 		result.Reason = "no matching home project"
 		emit(reporter, EventInfo, "projects.auto_init",
-			fmt.Sprintf("跳过 %s：私仓无同名家项目 %q", normalized, candidate), nil)
+			fmt.Sprintf("跳过 %s：私仓无同名本仓项目 %q", normalized, candidate), nil)
 		return result, nil
 	}
 

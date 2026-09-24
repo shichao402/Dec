@@ -132,7 +132,7 @@ func projectConsumers(provider string, states []ManagedProjectState, projects ma
 			continue
 		}
 		// 消费关系的唯一来源是工作区订阅 requires（ADR 0029），
-		// 不再从家项目清单的 depends_on 反推。
+		// 不再从本仓项目清单的 depends_on 反推。
 		if cfg.Requires.Has(provider) {
 			result.Consumers = append(result.Consumers, state)
 		}

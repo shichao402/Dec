@@ -61,7 +61,7 @@ export function SyncPage(props: {
   const loadSpec = useMemo(
     () => actionSpec(
       `updates:list:${props.deviceId}`,
-      '检查官方更新',
+      '检查更新',
       props.deviceId,
       targets.map((target) => resource.workspace(target.root)),
       'read',
@@ -102,12 +102,12 @@ export function SyncPage(props: {
   const picked = (rows || []).filter((row) => selected.includes(row.key))
   const updateSpec = actionSpec(
     `updates:apply:${props.deviceId}`,
-    `更新 ${picked.length} 项官方依赖`,
+    `更新 ${picked.length} 项订阅`,
     props.deviceId,
     [...new Map(picked.map((row) => [row.target.key, row.target])).values()]
       .map((target) => resource.workspace(target.root)),
     'operation',
-    '官方依赖更新完成',
+    '订阅已更新',
   )
 
   const toggle = (key: string) => {
@@ -144,20 +144,20 @@ export function SyncPage(props: {
     <Page>
       <PageHeader
         title="更新"
-        description="选择官方依赖，预览后安装到对应工作区。"
+        description="选择要更新的订阅，预览后安装到对应工作区。"
         actions={props.onBack && <Button variant="outline" onClick={props.onBack}>返回</Button>}
       />
       <PageFill>
         <ScrollArea className="space-y-3 pr-0.5">
           <Panel>
             <PanelHeader
-              title="官方依赖"
+              title="订阅"
               description={rows ? `${rows.filter((row) => row.UpdateAvailable).length} 项可更新` : '正在检查'}
               action={<Button size="sm" variant="ghost" onClick={() => void load()}><RefreshCw className="size-3.5" />检查更新</Button>}
             />
             <div className="px-4 pt-3"><ActionFeedback actionKey={loadSpec.key} /></div>
             {rows === null ? null : rows.length === 0 ? (
-              <EmptyState text="没有工作区声明官方依赖" />
+              <EmptyState text="还没有订阅" />
             ) : (
               <PanelBody className="space-y-3">
                 <div className="divide-y divide-line overflow-hidden rounded-lg border border-line">

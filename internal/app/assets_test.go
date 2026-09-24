@@ -15,9 +15,9 @@ import (
 func TestLoadAssetSelectionReturnsEnabledState(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"default/dec.yaml":                            "name: default\n",
+		"default/dec.yaml": "name: default\n",
 		"default/public/project/skills/project-workflow/SKILL.md": "---\nname: project-workflow\n---\n",
-		"cli/dec.yaml":                                "name: cli\n",
+		"cli/dec.yaml": "name: cli\n",
 		"cli/public/project/rules/cli-release-rules.mdc": "description: test\n",
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -27,9 +27,9 @@ func TestLoadAssetSelectionReturnsEnabledState(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:     []string{"codex"},
-		Editor:   "code --wait",
-		Requires: types.RequiresSpec{"default": types.RequiresVault},
+		IDEs:        []string{"codex"},
+		Editor:      "code --wait",
+		ProjectName: "default",
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -91,6 +91,7 @@ func TestSetWorkspaceRequiresPreservesOtherFields(t *testing.T) {
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
+	pinRegistryToEmptyRemote(t, remote)
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
@@ -103,7 +104,7 @@ func TestSetWorkspaceRequiresPreservesOtherFields(t *testing.T) {
 	result, err := SetWorkspaceRequires(
 		context.Background(),
 		NewWorkspace(WorkspaceProject, projectRoot),
-		types.RequiresSpec{"default": types.RequiresVault},
+		types.RequiresSpec{"default": types.RequiresLatest},
 		nil,
 	)
 	if err != nil {
@@ -126,8 +127,8 @@ func TestSetWorkspaceRequiresPreservesOtherFields(t *testing.T) {
 	if !reflect.DeepEqual(loaded.IDEs, []string{"codex"}) {
 		t.Fatalf("IDEs = %#v, 期望 %#v", loaded.IDEs, []string{"codex"})
 	}
-	if !reflect.DeepEqual(loaded.Requires.VaultProjects(), []string{"default"}) {
-		t.Fatalf("Requires.VaultProjects() = %#v, 期望 [default]", loaded.Requires.VaultProjects())
+	if !reflect.DeepEqual(loaded.Requires.OfficialProjects(), []string{"default"}) {
+		t.Fatalf("Requires = %#v, 期望 [default]", loaded.Requires)
 	}
 }
 
@@ -141,6 +142,7 @@ func TestSetWorkspaceRequiresNormalizes(t *testing.T) {
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
+	pinRegistryToEmptyRemote(t, remote)
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{IDEs: []string{"codex"}}); err != nil {
@@ -150,7 +152,7 @@ func TestSetWorkspaceRequiresNormalizes(t *testing.T) {
 	result, err := SetWorkspaceRequires(
 		context.Background(),
 		NewWorkspace(WorkspaceProject, projectRoot),
-		types.RequiresSpec{"combo": types.RequiresVault, "vikunja": types.RequiresVault},
+		types.RequiresSpec{"combo": types.RequiresLatest, "vikunja": types.RequiresLatest},
 		nil,
 	)
 	if err != nil {
@@ -164,8 +166,8 @@ func TestSetWorkspaceRequiresNormalizes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProjectConfig() 失败: %v", err)
 	}
-	if !reflect.DeepEqual(loaded.Requires.VaultProjects(), []string{"combo", "vikunja"}) {
-		t.Fatalf("Requires.VaultProjects() = %#v, 期望 [combo vikunja]", loaded.Requires.VaultProjects())
+	if !reflect.DeepEqual(loaded.Requires.OfficialProjects(), []string{"combo", "vikunja"}) {
+		t.Fatalf("Requires = %#v, 期望 [combo vikunja]", loaded.Requires)
 	}
 }
 
@@ -211,6 +213,7 @@ func TestSetWorkspaceRequiresRoundTrip(t *testing.T) {
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
+	pinRegistryToEmptyRemote(t, remote)
 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
@@ -221,32 +224,24 @@ func TestSetWorkspaceRequiresRoundTrip(t *testing.T) {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
 
-	state, err := LoadAssetSelection(projectRoot, nil)
-	if err != nil {
-		t.Fatalf("LoadAssetSelection() 失败: %v", err)
-	}
-	if !bundleEnabledInState(state, "vikunja") || !bundleEnabledInState(state, "cli") {
-		t.Fatal("前置条件不成立：两个项目初始都应为启用态")
-	}
-
 	if _, err := SetWorkspaceRequires(
 		context.Background(),
 		NewWorkspace(WorkspaceProject, projectRoot),
-		types.RequiresSpec{"cli": types.RequiresVault},
+		types.RequiresSpec{"cli": types.RequiresLatest},
 		nil,
 	); err != nil {
 		t.Fatalf("SetWorkspaceRequires() 失败: %v", err)
 	}
 
-	reloaded, err := LoadAssetSelection(projectRoot, nil)
+	reloaded, err := mgr.LoadProjectConfig()
 	if err != nil {
-		t.Fatalf("重新 LoadAssetSelection() 失败: %v", err)
+		t.Fatalf("LoadProjectConfig() 失败: %v", err)
 	}
-	if bundleEnabledInState(reloaded, "vikunja") {
-		t.Fatal("被取消的 vikunja 不应再是启用态")
+	if _, ok := reloaded.Requires["vikunja"]; ok {
+		t.Fatal("被取消的 vikunja 不应留在 requires")
 	}
-	if !bundleEnabledInState(reloaded, "cli") {
-		t.Fatal("未被取消的 cli 应保持启用态")
+	if reloaded.Requires["cli"] != types.RequiresLatest {
+		t.Fatalf("cli 应保持 latest，got %#v", reloaded.Requires)
 	}
 }
 
@@ -335,11 +330,12 @@ func TestSetWorkspaceRequiresUserWritesGlobalConfig(t *testing.T) {
 	if err := repo.Connect(remote); err != nil {
 		t.Fatalf("repo.Connect() 失败: %v", err)
 	}
+	pinRegistryToEmptyRemote(t, remote)
 
 	if _, err := SetWorkspaceRequires(
 		context.Background(),
 		NewWorkspace(WorkspaceUser, ""),
-		types.RequiresSpec{"cli": types.RequiresVault},
+		types.RequiresSpec{"cli": types.RequiresLatest},
 		nil,
 	); err != nil {
 		t.Fatalf("SetWorkspaceRequires(user) 失败: %v", err)
@@ -348,8 +344,8 @@ func TestSetWorkspaceRequiresUserWritesGlobalConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(global.Requires.VaultProjects(), []string{"cli"}) {
-		t.Fatalf("GlobalConfig.Requires.VaultProjects() = %#v", global.Requires.VaultProjects())
+	if !reflect.DeepEqual(global.Requires.OfficialProjects(), []string{"cli"}) {
+		t.Fatalf("GlobalConfig.Requires = %#v", global.Requires)
 	}
 }
 
@@ -365,7 +361,7 @@ func bundleEnabledInState(state *AssetSelectionState, name string) bool {
 func TestLoadAssetSelection_IncludesRemoteSecretMembersAndCaches(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"agents-board/dec.yaml": "name: agents-board\n",
+		"agents-board/dec.yaml":                             "name: agents-board\n",
 		"agents-board/public/project/skills/board/SKILL.md": "---\nname: board\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {
@@ -408,7 +404,7 @@ func TestLoadAssetSelection_IncludesRemoteSecretMembersAndCaches(t *testing.T) {
 func TestLoadAssetSelection_UsesCachedSecretMembersWithoutSession(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"agents-board/dec.yaml": "name: agents-board\n",
+		"agents-board/dec.yaml":                             "name: agents-board\n",
 		"agents-board/public/project/skills/board/SKILL.md": "---\nname: board\n---\n",
 	})
 	if err := repo.Connect(remote); err != nil {

@@ -29,8 +29,8 @@ func TestPullProjectAssets_UsesDefaultServerWithoutConfigFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
-		Requires: types.RequiresSpec{"default": types.RequiresVault},
+		IDEs:        []string{"cursor"},
+		ProjectName: "default",
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -104,9 +104,9 @@ func TestPullProjectAssets_RejectsSecretsOverlap(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
-		ProjectName:    "combo",
-		Requires: types.RequiresSpec{"combo": types.RequiresVault},
+		IDEs:        []string{"cursor"},
+		ProjectName: "combo",
+		Requires:    types.RequiresSpec{"combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -200,8 +200,8 @@ func TestPullEnabledSecretsBundles_PrunesRemoteDeletedKeepsPresent(t *testing.T)
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "demo",
-		Requires: types.RequiresSpec{"demo": types.RequiresVault},
+		ProjectName: "demo",
+		Requires:    types.RequiresSpec{"demo": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -257,8 +257,8 @@ func TestPullEnabledSecretsBundles_RejectsSecretsDecOverlap(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "combo",
-		Requires: types.RequiresSpec{"combo": types.RequiresVault},
+		ProjectName: "combo",
+		Requires:    types.RequiresSpec{"combo": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -304,8 +304,8 @@ func TestPullEnabledSecretsBundles_MixedNotesAndSSHKeys(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "vikunja",
-		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
+		ProjectName: "vikunja",
+		Requires:    types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -370,8 +370,8 @@ func TestPullEnabledSecretsBundles_SSHValidationFailureWritesNothing(t *testing.
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "vikunja",
-		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
+		ProjectName: "vikunja",
+		Requires:    types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -399,8 +399,8 @@ func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "demo",
-		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
+		ProjectName: "demo",
+		Requires:    types.RequiresSpec{"vikunja": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}

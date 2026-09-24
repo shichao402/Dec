@@ -43,13 +43,13 @@ type BindManagedProjectResult struct {
 	ConfigPath  string
 }
 
-// BindManagedProject 将服务器目录显式绑定到仓库中的家项目。
+// BindManagedProject 将服务器目录显式绑定到仓库中的本仓项目。
 // 只更新 project_name，保留 IDE、editor 与旧启用字段。
 func BindManagedProject(projectRoot, projectName string) (*BindManagedProjectResult, error) {
 	projectRoot = strings.TrimSpace(projectRoot)
 	projectName = strings.TrimSpace(projectName)
 	if projectRoot == "" || projectName == "" {
-		return nil, fmt.Errorf("项目路径与家项目不能为空")
+		return nil, fmt.Errorf("项目路径与本仓项目不能为空")
 	}
 	available := map[string]*pmodel.Loaded{}
 	if err := withLocalReadRepoDir(func(repoDir string) error {
@@ -61,10 +61,10 @@ func BindManagedProject(projectRoot, projectName string) (*BindManagedProjectRes
 	}
 	if len(available) > 0 {
 		if !types.IsValidPName(projectName) {
-			return nil, fmt.Errorf("家项目名称无效: %s", projectName)
+			return nil, fmt.Errorf("本仓项目名称无效: %s", projectName)
 		}
 		if _, ok := available[projectName]; !ok {
-			return nil, fmt.Errorf("仓库中不存在家项目 %q", projectName)
+			return nil, fmt.Errorf("仓库中不存在本仓项目 %q", projectName)
 		}
 	}
 	mgr := config.NewProjectConfigManager(projectRoot)

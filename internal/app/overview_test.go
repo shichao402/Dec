@@ -21,9 +21,9 @@ func TestLoadProjectOverviewWithExistingProjectConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"codex"},
-		Editor:         "code --wait",
-		Requires: types.RequiresSpec{"default": types.RequiresVault},
+		IDEs:        []string{"codex"},
+		Editor:      "code --wait",
+		ProjectName: "default",
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -75,8 +75,8 @@ func TestLoadProjectOverviewSurfacesBundles(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
-		Requires: types.RequiresSpec{"combo": types.RequiresVault},
+		IDEs:        []string{"cursor"},
+		ProjectName: "combo",
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}

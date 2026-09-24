@@ -21,14 +21,14 @@ func TestSetWorkspaceRequires_ExcludesRejectedFromUserConfig(t *testing.T) {
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote}); err != nil {
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, RegistryURL: remote}); err != nil {
 		t.Fatal(err)
 	}
 
 	result, err := SetWorkspaceRequires(
 		context.Background(),
 		NewWorkspace(WorkspaceUser, ""),
-		types.RequiresSpec{"cli": types.RequiresVault, "vikunja": types.RequiresVault},
+		types.RequiresSpec{"cli": types.RequiresLatest, "vikunja": types.RequiresVault},
 		nil,
 	)
 	if err != nil {
@@ -45,8 +45,8 @@ func TestSetWorkspaceRequires_ExcludesRejectedFromUserConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(saved.Requires.VaultProjects()) != 1 || saved.Requires.VaultProjects()[0] != "cli" {
-		t.Fatalf("Requires = %#v, 期望仅 [cli]", saved.Requires.VaultProjects())
+	if len(saved.Requires.OfficialProjects()) != 1 || saved.Requires["cli"] != types.RequiresLatest {
+		t.Fatalf("Requires = %#v, 期望仅 cli: latest", saved.Requires)
 	}
 }
 
@@ -60,7 +60,7 @@ func TestLoadWorkspaceAssetSelection_UserPlaneIncludesSecretsOnlyCandidates(t *t
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, Requires: types.RequiresSpec{"cli": types.RequiresVault}}); err != nil {
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, Requires: types.RequiresSpec{"cli": types.RequiresLatest}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -158,7 +158,7 @@ func TestLoadWorkspaceAssetSelection_MarksEnabledBundleMissingOnRemote(t *testin
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, Requires: types.RequiresSpec{"vikunja": types.RequiresVault}}); err != nil {
+	if err := config.SaveGlobalConfig(&types.GlobalConfig{RepoURL: remote, Requires: types.RequiresSpec{"vikunja": types.RequiresLatest}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -239,7 +239,6 @@ func TestLoadWorkspaceAssetSelection_MarksRemoteUnverifiedWithoutSession(t *test
 // 另一平面的条目必须标 OtherPlane——标成 SecretsOnly 会谎称「vault 尚无 manifest」，
 // 并诱导用户勾选，进而触发跨平面 scope 改写。
 
-
 // 平面隔离（ADR 0009）：project 上下文的 pull 不再并入用户平面启用列表。
 func TestPullProjectAssets_IgnoresUserEnabledBundles(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
@@ -258,7 +257,7 @@ func TestPullProjectAssets_IgnoresUserEnabledBundles(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
+		IDEs:     []string{"cursor"},
 		Requires: nil,
 	}); err != nil {
 		t.Fatal(err)

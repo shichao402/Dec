@@ -117,7 +117,7 @@ export function OverviewPage(props: {
                   className="border-none"
                   icon={<FolderSearch className="size-5" />}
                   text="尚未接管任何项目"
-                  hint="选择这台设备上的项目目录，Dec 就能把家项目和 requires 资产装进去。"
+                  hint="选择这台设备上的项目目录，Dec 就能把本仓项目和 requires 资产装进去。"
                   action={<Button size="sm" onClick={() => props.onNavigate('projects')}>选择项目目录</Button>}
                 />
               </PanelBody>

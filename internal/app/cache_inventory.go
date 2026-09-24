@@ -12,8 +12,8 @@ func writableProjectNames(workspace Workspace, cfg *types.ProjectConfig) []strin
 		return nil
 	}
 	if workspace.EffectivePlane() == WorkspaceGlobal {
-		// 只有个人私仓项目可写；官方注册表安装物由提供方 CI 发布（ADR 0028）。
-		return cfg.Requires.VaultProjects()
+		// Global 平面的订阅都来自注册表，不把私仓项目正文写回去（ADR 0033）。
+		return nil
 	}
 	home := strings.TrimSpace(cfg.ProjectName)
 	if home == "" {

@@ -62,8 +62,6 @@ func PushWorkspaceAssets(ctx context.Context, workspace Workspace, reporter Repo
 				if result.HomeProject != "" {
 					result.WritableProjects = []string{result.HomeProject}
 				}
-			} else {
-				result.WritableProjects = cfg.Requires.VaultProjects()
 			}
 		}
 	}
@@ -86,7 +84,7 @@ func PushWorkspaceAssets(ctx context.Context, workspace Workspace, reporter Repo
 
 	if result.Model == "p" && workspace.EffectivePlane() == WorkspaceProject &&
 		result.HomeProject != "" && !connectedPExists(result.HomeProject) {
-		result.SecretsSkippedReason = fmt.Sprintf("家项目 %q 已不存在，跳过 private/project 推送", result.HomeProject)
+		result.SecretsSkippedReason = fmt.Sprintf("本仓项目 %q 已不存在，跳过 private/project 推送", result.HomeProject)
 		emit(reporter, EventWarn, "push.secrets", result.SecretsSkippedReason, nil)
 		return result, nil
 	}
@@ -138,9 +136,9 @@ func pushDecBundles(ctx context.Context, workspace Workspace, reporter Reporter)
 		copied.Requires = req
 		projectConfig = &copied
 	}
-	if projectConfig == nil || (len(projectConfig.Requires.VaultProjects()) == 0 && strings.TrimSpace(projectConfig.ProjectName) == "") {
-		skippedReason = "没有可写的个人私仓项目"
-		emit(reporter, EventInfo, "push.dec", "没有可写的个人私仓项目，跳过 Dec 推送", nil)
+	if projectConfig == nil || workspace.EffectivePlane() != WorkspaceProject || strings.TrimSpace(projectConfig.ProjectName) == "" {
+		skippedReason = "没有可写的本仓项目"
+		emit(reporter, EventInfo, "push.dec", "没有可写的本仓项目，跳过 Dec 推送", nil)
 		return 0, skippedReason, "", nil
 	}
 

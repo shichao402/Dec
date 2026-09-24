@@ -1,6 +1,6 @@
 # 0031 — 个人私仓是纯控制面，提供方一律走上游贡献
 
-- **状态**：已接受
+- **状态**：已接受；`vault` pin 的删除见 [0033](0033-requires-registry-only.md)
 - **日期**：2026-09-21
 - **修订**：初版曾引入 personal `access: direct | propose` 与跨仓直写落点，当日废弃。见「被否方案」。
 - **关联**：[0026](0026-project-provides-and-sync-worktree.md)、[0028](0028-official-registry-and-install.md)、[0029](0029-single-consumer-requires.md)
@@ -34,7 +34,7 @@ requires:
 
 **贡献口径只有一条**：改动进 `.dec/overrides/`，再由 `dec_propose_upstream` 提 Issue / PR，连同脱敏后的来源经验一并提交，由提供方仓统一整理合入。维护者自己有写权限时，在提供方仓里正常开 PR 或直接改——那是 Git 的事，Dec 不为此增加标记或落点分支。
 
-`create_local_asset` 因此只有三个落点：当前工作区就是提供方家项目时写 `DecAssets/` 并登记 `provides`；当前工作区按官方 pin 订阅该项目时写 contribute 草稿；其余写 cache（仅真正的个人资产）。`officialGitPushBlocked`（有 `provides` 则禁止 cache push）保留。
+`create_local_asset` 因此只有三个落点：当前工作区就是这个提供方的本仓时写 `DecAssets/` 并登记 `provides`；当前工作区已经订阅该项目时写 contribute 草稿；其余写 cache（仅真正的个人资产）。`officialGitPushBlocked`（有 `provides` 则禁止 cache push）保留。
 
 ## 被否方案
 

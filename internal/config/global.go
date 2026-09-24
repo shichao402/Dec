@@ -110,7 +110,7 @@ func LoadGlobalConfig() (*types.GlobalConfig, error) {
 		config.Requires = config.Requires.AddVaultProjects(legacy)
 	}
 
-	req, err := types.NormalizeRequiresSpec(config.Requires)
+	req, err := types.NormalizeStoredRequires(config.Requires)
 	if err != nil {
 		return nil, fmt.Errorf("校验 requires 失败: %w", err)
 	}
@@ -147,7 +147,7 @@ func SaveGlobalConfig(config *types.GlobalConfig) error {
 		config.IDEs = append([]string(nil), normalized.IDEs...)
 		normalized.LegacyEnabledProjects = nil
 		normalized.LegacyEnabledBundles = nil
-		req, err := types.NormalizeRequiresSpec(normalized.Requires)
+		req, err := types.NormalizeStoredRequires(normalized.Requires)
 		if err != nil {
 			return fmt.Errorf("校验 requires 失败: %w", err)
 		}

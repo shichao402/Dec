@@ -108,9 +108,6 @@ func hasPAssets(assets []types.TypedAssetRef) bool {
 
 func collectEnabledBundleNames(projectConfig *types.ProjectConfig, assets []types.TypedAssetRef) map[string]struct{} {
 	out := make(map[string]struct{})
-	for _, name := range projectConfig.Requires.VaultProjects() {
-		out[name] = struct{}{}
-	}
 	for _, asset := range assets {
 		vault := strings.TrimSpace(asset.Vault)
 		if vault != "" {

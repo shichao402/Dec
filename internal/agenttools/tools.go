@@ -59,7 +59,7 @@ func catalog() []toolDef {
 			},
 			{
 				Name:        "dec_create_local_asset",
-				Description: "创建资产。当前工作区就是该项目家项目时写入 DecAssets/ 并登记 provides；按官方 pin 订阅该项目时写入覆写草稿；其余写入 cache。不写别人的源仓。",
+				Description: "创建资产。当前工作区就是该项目的本仓时写入 DecAssets/ 并登记 provides；已经订阅该项目时写入覆写草稿；其余写入 cache。不写别人的源仓。",
 				Owner:       OwnerServer,
 				Sample:      createLocalAssetParams{},
 			},
@@ -77,7 +77,7 @@ func catalog() []toolDef {
 			},
 			{
 				Name:        "dec_init_project",
-				Description: "初始化指定项目并绑定家项目（需已连接仓库）",
+				Description: "初始化指定项目并绑定本仓项目（需已连接仓库）",
 				Owner:       OwnerServer,
 				Sample:      initProjectParams{},
 			},
@@ -89,13 +89,13 @@ func catalog() []toolDef {
 			},
 			{
 				Name:        "dec_set_requires",
-				Description: "设置本平面订阅（唯一消费声明）：项目名 → latest / v* / vault，整表写 config.yaml 的 requires。",
+				Description: "设置本平面订阅（唯一消费声明）：项目名 → latest 或 v*，整表写 config.yaml 的 requires。不接受 vault。",
 				Owner:       OwnerServer,
 				Sample:      setRequiresParams{},
 			},
 			{
 				Name:        "dec_list_subscription_candidates",
-				Description: "列出可订阅项目：个人私仓项目 ∪ 官方注册表已发布项目，带来源、当前 pin、已装与可用版本、origin_repo。",
+				Description: "列出可订阅项目：注册表里已发布的项目，外加本工作区的本仓项目。带订阅版本、已装版本、可用版本和 origin_repo。",
 				Owner:       OwnerServer,
 				Sample:      listSubscriptionCandidatesParams{},
 			},

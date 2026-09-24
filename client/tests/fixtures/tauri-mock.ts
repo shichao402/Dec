@@ -251,7 +251,7 @@ export function installTauriMock(scenario: Scenario) {
         const projectRoot = String(args.projectRoot || args.project_root || '')
         const official = {
           Name: 'relkit',
-          Description: '官方注册表项目，最新 v0.4.3',
+          Description: '注册表里的项目，最新 v0.4.3',
           Vault: 'relkit',
           Members: [],
           Enabled: true,

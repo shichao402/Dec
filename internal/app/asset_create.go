@@ -95,7 +95,7 @@ func writeGitAsset(workspace Workspace, project string, vis types.AssetVisibilit
 		cfg, err := config.NewProjectConfigManager(workspace.Root).LoadProjectConfig()
 		if err == nil && cfg != nil {
 			req, _ := resolvedRequires(context.Background(), workspace, cfg)
-			if req.Has(project) && !types.IsVaultPin(req[project]) {
+			if req.Has(project) {
 				dir := contribute.DraftDir(workspace.Root, project+"-"+name)
 				if err := os.MkdirAll(dir, 0o755); err != nil {
 					return "", "", err
@@ -115,7 +115,7 @@ func writeGitAsset(workspace Workspace, project string, vis types.AssetVisibilit
 	return path, "cache", err
 }
 
-// providerWriteRoot 只认当前工作区自己就是该提供方家项目的情况（ADR 0031）。
+// providerWriteRoot 只认当前工作区自己就是这个提供方的本仓（ADR 0031）。
 // 跨仓写别人的源仓不是 Dec 的落点：那条路是 Issue / PR。
 func providerWriteRoot(workspace Workspace, project string) string {
 	if workspace.Root == "" {

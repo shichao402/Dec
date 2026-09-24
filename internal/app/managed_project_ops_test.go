@@ -112,7 +112,7 @@ func TestAutoInitManagedProjectBindsWhenNameMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Skipped || !result.Initialized || result.HomeProject != "cpp-svn-author-analysis" {
-		t.Fatalf("应绑定同名家项目: %#v", result)
+		t.Fatalf("应绑定同名本仓项目: %#v", result)
 	}
 	cfg, err := config.NewProjectConfigManager(root).LoadProjectConfig()
 	if err != nil || cfg == nil || cfg.ProjectName != "cpp-svn-author-analysis" {

@@ -1,5 +1,5 @@
-// bundle_resolver.go 负责把消费声明 requires 里 pin 为 vault 的项目（ADR 0029）解析为本轮
-// pull 的目标资产集合，并记录每个资产的来源（p/<name> 或 depends_on <name>）。
+// bundle_resolver.go 把本仓项目在个人私仓里的资产解析为本轮 pull 的目标。
+// 订阅项目不从私仓取正文（ADR 0033），由 internal/install 按 latest / v* 安装。
 //
 // 本文件只做「想装哪些资产」的解析；真正的装卸仍由 operations.go 内的 installAssetToIDEs
 // 与 cleanupRemovedAssets 负责。同一资产被多个 bundle 引用时来源会叠加，
@@ -28,11 +28,11 @@ type BundleOverview struct {
 	VaultName string
 	// Members 是 bundle 声明的成员引用列表（按 YAML 顺序），含 <type>/<name> 原文。
 	Members []string
-	// Enabled 表示该项目在当前平面被订阅（requires）或是作者身份家项目。
+	// Enabled 表示该项目在当前平面被订阅（requires）或是本仓项目。
 	Enabled bool
 	// Model 在 ADR 0016 仓库中为 "p"；空值表示 legacy bundle。
 	Model string
-	// Home 是作者身份家项目；Required 表示已在 requires 中订阅。
+	// Home 是本仓项目；Required 表示已在 requires 中订阅。
 	Home     bool
 	Required bool
 	// Quadrants 是四象限资产计数，key 为 public/user 等稳定路径。
@@ -89,18 +89,17 @@ func resolveDesiredAssetsForPlane(projectConfig *types.ProjectConfig, repoDir st
 	return resolvePAssets(projectConfig, projects, plane, reporter)
 }
 
-// resolvePAssets 按 ADR 0029 解析个人私仓订阅：
-// requires 里 pin 为 vault 的项目（项目平面另加作者身份 home）装本平面全部资产，
-// 它们 depends_on 的传递闭包只装 public。
+// resolvePAssets 只安装本仓项目自己的资产（ADR 0033）。
+// 其它项目的正文在官方注册表。私仓里的 depends_on 是 stub 上的配置，不拿来安装。
 func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmodel.Loaded, plane WorkspacePlane, reporter Reporter) (*ResolvedAssets, error) {
 	result := &ResolvedAssets{Sources: make(map[string][]string)}
 	enabled := make(map[string]struct{})
 	selected := make([]types.TypedAssetRef, 0)
 
-	addProjectAssets := func(name string, visibility *types.AssetVisibility, source string) bool {
+	addProjectAssets := func(name string, source string) bool {
 		p, ok := projects[name]
 		if !ok {
-			emit(reporter, EventWarn, "pull.project", fmt.Sprintf("订阅的项目 %q 不在私仓，已忽略", name), nil)
+			emit(reporter, EventWarn, "pull.project", fmt.Sprintf("本仓项目 %q 不在私仓，已忽略", name), nil)
 			result.MissingProjects = appendUniqueSource(result.MissingProjects, name)
 			return false
 		}
@@ -110,7 +109,7 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 			if plane == WorkspaceUser || plane == WorkspaceGlobal {
 				wantPlane = types.AssetPlaneGlobal
 			}
-			if types.CanonicalAssetPlane(asset.Plane) != wantPlane || (visibility != nil && asset.Visibility != *visibility) {
+			if types.CanonicalAssetPlane(asset.Plane) != wantPlane {
 				continue
 			}
 			selected = append(selected, asset)
@@ -119,39 +118,9 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 		return true
 	}
 
-	if projectConfig != nil {
-		seeds := workspaceVaultSeeds(projectConfig, plane)
-		public := types.AssetVisibilityPublic
-		visited := make(map[string]struct{}, len(seeds))
-		queue := make([]string, 0, len(seeds))
-		for _, name := range seeds {
-			if !addProjectAssets(name, nil, "p/"+name) {
-				continue
-			}
-			visited[name] = struct{}{}
-			if p, ok := projects[name]; ok {
-				queue = append(queue, p.Manifest.DependsOn...)
-			}
-		}
-		for len(queue) > 0 {
-			name := queue[0]
-			queue = queue[1:]
-			if _, seen := visited[name]; seen {
-				continue
-			}
-			visited[name] = struct{}{}
-			// 同名项目已由官方 requires 消费时，私仓 depends_on 不能再落地它。
-			// 否则 pull 会先安装官方快照，随后用私仓旧副本覆盖同一 cache / IDE
-			// 路径，形成「版本戳已更新、资产正文仍旧」的假成功。
-			if pin, declared := projectConfig.Requires[name]; declared && !types.IsVaultPin(pin) {
-				continue
-			}
-			if !addProjectAssets(name, &public, "depends_on "+name) {
-				continue
-			}
-			if p, ok := projects[name]; ok {
-				queue = append(queue, p.Manifest.DependsOn...)
-			}
+	if projectConfig != nil && plane == WorkspaceProject {
+		if home := strings.TrimSpace(projectConfig.ProjectName); home != "" {
+			addProjectAssets(home, "p/"+home)
 		}
 	}
 
@@ -191,34 +160,10 @@ func resolvePAssets(projectConfig *types.ProjectConfig, projects map[string]*pmo
 		home := strings.TrimSpace(projectConfig.ProjectName)
 		for i := range result.Bundles {
 			result.Bundles[i].Home = plane == WorkspaceProject && result.Bundles[i].Name == home
-			result.Bundles[i].Required = projectConfig.Requires.IsVault(result.Bundles[i].Name)
+			result.Bundles[i].Required = false
 		}
 	}
 	return result, nil
-}
-
-// workspaceVaultSeeds 返回本工作区直接订阅的私仓项目：requires 里的 vault pin，
-// 项目平面另加作者身份 home（它从工作树创作，但安装目标与订阅一致）。
-func workspaceVaultSeeds(projectConfig *types.ProjectConfig, plane WorkspacePlane) []string {
-	if projectConfig == nil {
-		return nil
-	}
-	seeds := make([]string, 0, len(projectConfig.Requires)+1)
-	seen := make(map[string]struct{})
-	if plane == WorkspaceProject {
-		if home := strings.TrimSpace(projectConfig.ProjectName); home != "" {
-			seeds = append(seeds, home)
-			seen[home] = struct{}{}
-		}
-	}
-	for _, name := range projectConfig.Requires.VaultProjects() {
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		seeds = append(seeds, name)
-	}
-	return seeds
 }
 
 func countPQuadrants(assets []types.TypedAssetRef) map[string]int {

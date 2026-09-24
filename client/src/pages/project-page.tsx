@@ -60,7 +60,7 @@ export function ProjectPage(props: {
         />
         <PageScroll className="max-w-3xl">
           <Panel>
-            <PanelHeader title="家项目绑定" description="家项目决定这个目录能装哪些资产，绑定名必须是私仓里已存在的项目。" />
+            <PanelHeader title="本仓项目" description="这个目录正在写的项目。名字必须已经在私仓里。" />
             <PanelBody>
               <ProjectBinding deviceId={props.deviceId} project={project} onBound={props.onBound} />
             </PanelBody>
@@ -85,7 +85,7 @@ export function ProjectPage(props: {
           <>
             {removeButton}
             <Button variant="outline" onClick={props.onSync}>
-              官方更新
+              检查更新
             </Button>
             <Button onClick={props.onPull} disabled={pullState.blocked}>
               <RefreshCw className="size-4" />
@@ -101,14 +101,14 @@ export function ProjectPage(props: {
         <NavCardGrid className="mb-4">
           <NavCard
             icon={Link2}
-            title="家项目绑定"
-            description="换绑家项目，或在私仓里新建一个"
+            title="本仓项目"
+            description="换一个名字，或在私仓里新建"
             onClick={props.onBinding}
           />
           <NavCard
             icon={FileDiff}
             title="本地覆写"
-            description="临时改官方资产，关联上游 Issue 或 PR"
+            description="临时改已安装的资产，关联上游 Issue 或 PR"
             onClick={props.onOverrides}
           />
           <NavCard
@@ -126,13 +126,13 @@ export function ProjectPage(props: {
         </NavCardGrid>
         <div className="mb-2">
           <h2 className="text-[13px] font-semibold text-ink">订阅</h2>
-          <p className="mt-0.5 text-xs text-faint">本项目消费哪些项目：官方注册表或个人私仓。</p>
+          <p className="mt-0.5 text-xs text-faint">从注册表选择要装到这个目录的项目。</p>
         </div>
         <SubscriptionPanel
           deviceId={props.deviceId}
           root={project.Root}
           plane="local"
-          hint="保存订阅后点「拉取」落地到本项目 IDE 目录；官方新版本用「官方更新」。"
+          hint="保存后点「拉取」装进这个目录的 IDE。有新版本时用「检查更新」。"
         />
       </PageFill>
     </Page>

@@ -17,7 +17,7 @@ Protobuf 是本目录的 **schema 真相源**；运行时 wire format 仍是 YAM
 - **Project**（`projects.proto`）：vault 顶层 `<name>/dec.yaml`；名称强制小写 kebab-case。已发布产品的 `global` 推荐由产品仓 `tags` 发布到 registry，消费方只读。
 - Git 资产位于 `<name>/{public,private}/{global,local}/`，四支均为非敏感内容。
 - 提供方 `depends_on` 声明「本项目的资产依赖哪些项目」；被订阅方的 `depends_on` 闭包只装 `public`，private 永不被引用。
-- 消费声明只有一处：`.dec/config.yaml` 与 `~/.dec/config.yaml` 的 `requires` map（项目名 → `latest` / `v*` / `vault`，见 [ADR 0029](../../Documents/decisions/0029-single-consumer-requires.md)）。`project_name` 只表示作者身份；`managed_projects` 仅记录 Console 在目标设备上接管的项目目录。
+- 消费声明只有一处：`.dec/config.yaml` 与 `~/.dec/config.yaml` 的 `requires` map（项目名 → 订阅版本 `latest` / `v*`，见 [ADR 0033](../../Documents/decisions/0033-requires-registry-only.md)）。`project_name` 是本仓项目（这个目录正在写的项目）；`managed_projects` 仅记录 Console 在目标设备上接管的项目目录。
 - Bitwarden 只保存 `<name>/private/{global,local}` 的敏感正文。
 
 ## 生成 Go 类型（可选）

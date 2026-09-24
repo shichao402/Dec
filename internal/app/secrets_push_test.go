@@ -64,8 +64,8 @@ func TestPushSecretsBundles_UpdatesFromSyncRoot(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "dec",
-		Requires: types.RequiresSpec{"vikunja": types.RequiresVault, "dec": types.RequiresVault},
+		ProjectName: "dec",
+		Requires:    types.RequiresSpec{"vikunja": types.RequiresVault, "dec": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +101,8 @@ func TestPushSecretsBundles_ReportsMissingLocalWithoutDeleting(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "dec",
-		Requires: types.RequiresSpec{"dec": types.RequiresVault},
+		ProjectName: "dec",
+		Requires:    types.RequiresSpec{"dec": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	t.Cleanup(func() { secretsClientFactory = origFactory })
 
 	if err := config.SaveGlobalConfig(&types.GlobalConfig{
-		Requires: types.RequiresSpec{"tencent-cloud": types.RequiresVault},
+		Requires: types.RequiresSpec{"tencent-cloud": types.RequiresLatest},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +146,8 @@ func TestPushWorkspaceSecretsBundles_UserPlaneSkipsProjectSecrets(t *testing.T) 
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "dec",
-		Requires: types.RequiresSpec{"dec": types.RequiresVault},
+		ProjectName: "dec",
+		Requires:    types.RequiresSpec{"dec": types.RequiresVault},
 	}); err != nil {
 		t.Fatal(err)
 	}

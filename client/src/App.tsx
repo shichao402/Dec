@@ -69,7 +69,7 @@ const viewTitles: Record<View, string> = {
   global: 'Global 资产',
   projects: '项目',
   project: '项目',
-  binding: '家项目绑定',
+  binding: '本仓项目',
   overrides: '本地覆写',
   provides: '我提供的资产',
   writeback: '写回与密钥',

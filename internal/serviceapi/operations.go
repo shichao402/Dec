@@ -82,7 +82,7 @@ func SetWorkspaceRequires(workspace app.Workspace, spec types.RequiresSpec, repo
 		struct{ Requires types.RequiresSpec }{Requires: spec}, reporter)
 }
 
-// ListWorkspaceSubscriptionCandidates 列出可订阅项目：个人私仓 ∪ 官方注册表已发布。
+// ListWorkspaceSubscriptionCandidates 列出可订阅项目：注册表已发布的项目，外加本工作区的本仓项目。
 func ListWorkspaceSubscriptionCandidates(workspace app.Workspace, reporter app.Reporter) (*app.AssetSelectionState, error) {
 	return invokeWorkspace[app.AssetSelectionState](context.Background(), "list_subscription_candidates", workspace, nil, reporter)
 }

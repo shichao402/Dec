@@ -400,7 +400,7 @@ func TestSaveGlobalSettings_DoesNotChangeRequires(t *testing.T) {
 	if _, err := SetWorkspaceRequires(
 		context.Background(),
 		NewWorkspace(WorkspaceUser, ""),
-		types.RequiresSpec{"woa": types.RequiresVault, "cli": types.RequiresVault},
+		types.RequiresSpec{"woa": types.RequiresLatest, "cli": types.RequiresLatest},
 		nil,
 	); err != nil {
 		t.Fatalf("SetWorkspaceRequires() = %v", err)
@@ -417,9 +417,9 @@ func TestSaveGlobalSettings_DoesNotChangeRequires(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadGlobalConfig() = %v", err)
 	}
-	if len(globalConfig.Requires.VaultProjects()) != 2 ||
-		globalConfig.Requires["woa"] != types.RequiresVault ||
-		globalConfig.Requires["cli"] != types.RequiresVault {
+	if len(globalConfig.Requires.OfficialProjects()) != 2 ||
+		globalConfig.Requires["woa"] != types.RequiresLatest ||
+		globalConfig.Requires["cli"] != types.RequiresLatest {
 		t.Fatalf("SaveGlobalSettings 不应改 requires: %#v", globalConfig.Requires)
 	}
 

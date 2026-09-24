@@ -202,7 +202,7 @@ func (m *ProjectConfigManager) SaveProjectConfig(config *types.ProjectConfig) er
 	config.Provides = normalized.Provides
 	config.Products = normalized.Products
 	normalized.LegacyEnabledBundles = nil
-	requires, err := types.NormalizeRequiresSpec(normalized.Requires)
+	requires, err := types.NormalizeStoredRequires(normalized.Requires)
 	if err != nil {
 		return fmt.Errorf("校验 requires 失败: %w", err)
 	}
@@ -391,13 +391,13 @@ func loadProjectConfigV2(data []byte, configPath string) (*types.ProjectConfig, 
 	if err := normalizeAuthorConfig(&config); err != nil {
 		return nil, fmt.Errorf("校验 %s 中的作者声明失败: %w", configPath, err)
 	}
-	// ADR 0029：旧 enabled_bundles 折叠为 requires 的 vault pin；家项目自身不进订阅表。
+	// ADR 0029：旧 enabled_bundles 折叠为 requires 的 vault pin；本仓项目自身不进订阅表。
 	if legacy := NormalizeBundleNames(config.LegacyEnabledBundles); len(legacy) > 0 {
 		config.Requires = config.Requires.AddVaultProjects(legacy)
 		delete(config.Requires, strings.TrimSpace(config.ProjectName))
 	}
 	config.LegacyEnabledBundles = nil
-	requires, err := types.NormalizeRequiresSpec(config.Requires)
+	requires, err := types.NormalizeStoredRequires(config.Requires)
 	if err != nil {
 		return nil, fmt.Errorf("校验 %s 中的 requires 失败: %w", configPath, err)
 	}

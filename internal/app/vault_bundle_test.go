@@ -50,7 +50,7 @@ func TestListBundleAssetMembers_IncludesCommands(t *testing.T) {
 
 func TestListBundleAssetMembers_AllKnownKinds(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
-		"bundles/demo/skills/s1/SKILL.md": "---\nname: s1\n---\n",
+		"bundles/demo/skills/s1/SKILL.md":  "---\nname: s1\n---\n",
 		"bundles/demo/commands/c1/note.md": "# c1\n",
 		"bundles/demo/rules/r1.mdc":        "---\ndescription: r1\n---\n",
 		"bundles/demo/mcp/m1.json":         `{"mcpServers":{}}`,
@@ -100,7 +100,7 @@ func TestResolveDesiredAssets_VaultProjectViaRequires(t *testing.T) {
 		"vikunja/public/project/skills/vikunja-workflow/SKILL.md": "---\nname: vikunja-workflow\n---\n",
 		"vikunja/public/project/rules/vikunja-integration.mdc":    "---\ndescription: test\n---\n",
 	})
-	cfg := &types.ProjectConfig{Requires: types.RequiresSpec{"vikunja": types.RequiresVault}}
+	cfg := &types.ProjectConfig{ProjectName: "vikunja"}
 
 	resolved, err := resolveDesiredAssets(cfg, repoDir, nil)
 	if err != nil {

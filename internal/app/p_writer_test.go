@@ -22,6 +22,7 @@ func TestPWriterSetRequiresWritesConsumerConfig(t *testing.T) {
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
+	pinRegistryToEmptyRemote(t, remote)
 	root := t.TempDir()
 	mgr := config.NewProjectConfigManager(root)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "my-app"}); err != nil {
@@ -31,7 +32,7 @@ func TestPWriterSetRequiresWritesConsumerConfig(t *testing.T) {
 	result, err := DefaultPWriter().SetRequires(
 		context.Background(),
 		NewWorkspace(WorkspaceProject, root),
-		types.RequiresSpec{"shared": types.RequiresVault, "my-app": types.RequiresVault},
+		types.RequiresSpec{"shared": types.RequiresLatest, "my-app": types.RequiresVault},
 		nil,
 	)
 	if err != nil {
@@ -40,11 +41,11 @@ func TestPWriterSetRequiresWritesConsumerConfig(t *testing.T) {
 	if result.HomeProject != "my-app" {
 		t.Fatalf("HomeProject = %q, 期望 my-app", result.HomeProject)
 	}
-	if len(result.Subscribed) != 1 || result.Subscribed[0].Project != "shared" || result.Subscribed[0].Pin != types.RequiresVault {
-		t.Fatalf("Subscribed = %#v, 期望仅 shared:vault", result.Subscribed)
+	if len(result.Subscribed) != 1 || result.Subscribed[0].Project != "shared" || result.Subscribed[0].Pin != types.RequiresLatest {
+		t.Fatalf("Subscribed = %#v, 期望仅 shared:latest", result.Subscribed)
 	}
 	if len(result.Rejected) != 1 || !strings.Contains(result.Rejected[0], "my-app") {
-		t.Fatalf("作者身份项目应被拒: %#v", result.Rejected)
+		t.Fatalf("本仓项目应被拒: %#v", result.Rejected)
 	}
 	if err := withAppReadRepo(func(tx *repo.Transaction) error {
 		loaded, err := pmodel.Load(tx.WorkDir(), "my-app")
@@ -62,8 +63,8 @@ func TestPWriterSetRequiresWritesConsumerConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Requires["shared"] != types.RequiresVault || len(cfg.Requires) != 1 {
-		t.Fatalf("Requires = %#v, 期望 {shared: vault}", cfg.Requires)
+	if cfg.Requires["shared"] != types.RequiresLatest || len(cfg.Requires) != 1 {
+		t.Fatalf("Requires = %#v, 期望 {shared: latest}", cfg.Requires)
 	}
 }
 
@@ -76,10 +77,11 @@ func TestPWriterSetRequiresUserWritesGlobalConfig(t *testing.T) {
 	if err := repo.Connect(remote); err != nil {
 		t.Fatal(err)
 	}
+	pinRegistryToEmptyRemote(t, remote)
 	result, err := DefaultPWriter().SetRequires(
 		context.Background(),
 		NewWorkspace(WorkspaceUser, ""),
-		types.RequiresSpec{"tools": types.RequiresVault},
+		types.RequiresSpec{"tools": types.RequiresLatest},
 		nil,
 	)
 	if err != nil {
@@ -92,7 +94,7 @@ func TestPWriterSetRequiresUserWritesGlobalConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Requires["tools"] != types.RequiresVault || len(cfg.Requires) != 1 {
+	if cfg.Requires["tools"] != types.RequiresLatest || len(cfg.Requires) != 1 {
 		t.Fatalf("Requires = %#v", cfg.Requires)
 	}
 }

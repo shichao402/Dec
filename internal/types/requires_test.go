@@ -20,6 +20,26 @@ func TestNormalizeRequiresSpec(t *testing.T) {
 	if _, err := NormalizeRequiresSpec(RequiresSpec{"relkit": "1.0"}); err == nil {
 		t.Fatal("expected v prefix")
 	}
+	if _, err := NormalizeRequiresSpec(RequiresSpec{"notes": RequiresVault}); err == nil {
+		t.Fatal("vault pin is not a subscription")
+	}
+	stored, err := NormalizeStoredRequires(RequiresSpec{"notes": RequiresVault, "relkit": RequiresLatest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored["notes"] != RequiresVault || stored["relkit"] != RequiresLatest {
+		t.Fatalf("stored = %#v", stored)
+	}
+}
+
+func TestDropVaultPins(t *testing.T) {
+	got := RequiresSpec{"relkit": RequiresLatest, "notes": RequiresVault, "dec": RequiresVault}.DropVaultPins()
+	if len(got) != 1 || got["relkit"] != RequiresLatest {
+		t.Fatalf("drop = %#v", got)
+	}
+	if (RequiresSpec{"notes": RequiresVault}).DropVaultPins() != nil {
+		t.Fatal("only vault pins should become nil")
+	}
 }
 
 func TestAddVaultProjectsKeepsExistingLatestPin(t *testing.T) {
@@ -44,7 +64,7 @@ func TestFoldPublishedVaultPins(t *testing.T) {
 		t.Fatalf("已发布项目的 vault pin 应收成 latest，got %#v", got)
 	}
 	if got["playbook"] != "v0.2.0" || got["notes"] != RequiresVault || got["dec"] != RequiresVault {
-		t.Fatalf("只改已发布且非家项目的 vault pin，got %#v", got)
+		t.Fatalf("只改已发布且非本仓项目的 vault pin，got %#v", got)
 	}
 	same := RequiresSpec{"notes": RequiresVault}
 	if folded := same.FoldPublishedVaultPins(nil, ""); folded["notes"] != RequiresVault {

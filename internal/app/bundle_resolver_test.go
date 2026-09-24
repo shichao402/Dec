@@ -74,7 +74,7 @@ func TestResolveDesiredAssetsFiltersWorkspacePlane(t *testing.T) {
 		"tools/public/project/skills/project-skill/SKILL.md": "---\nname: project-skill\n---\n",
 		"tools/public/user/skills/user-skill/SKILL.md":       "---\nname: user-skill\n---\n",
 	})
-	cfg := &types.ProjectConfig{Requires: types.RequiresSpec{"tools": types.RequiresVault}}
+	cfg := &types.ProjectConfig{ProjectName: "tools"}
 
 	project, err := resolveDesiredAssetsForPlane(cfg, repoDir, WorkspaceProject, nil)
 	if err != nil {
@@ -88,8 +88,8 @@ func TestResolveDesiredAssetsFiltersWorkspacePlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(user.Assets) != 1 || user.Assets[0].Name != "user-skill" {
-		t.Fatalf("user 平面应只装 global 资产: %#v", user.Assets)
+	if len(user.Assets) != 0 {
+		t.Fatalf("Global 平面不从私仓安装: %#v", user.Assets)
 	}
 }
 
@@ -99,9 +99,7 @@ func TestResolveDesiredAssets_BundleExpandsMembers(t *testing.T) {
 		"combo/public/project/rules/bar.mdc":       "rule bar\n",
 		"combo/dec.yaml":                           "name: combo\n",
 	})
-	cfg := &types.ProjectConfig{
-		Requires: types.RequiresSpec{"combo": types.RequiresVault},
-	}
+	cfg := &types.ProjectConfig{ProjectName: "combo"}
 
 	got, err := resolveDesiredAssets(cfg, repoDir, nil)
 	if err != nil {
@@ -158,7 +156,7 @@ func TestResolveDesiredAssetsOfficialRequireWinsOverVaultDependency(t *testing.T
 	}
 }
 
-func TestResolveDesiredAssetsVaultRequireStillFollowsDependency(t *testing.T) {
+func TestResolveDesiredAssetsVaultPinDoesNotInstall(t *testing.T) {
 	repoDir := setupRepoWithVault(t, map[string]string{
 		"app/dec.yaml":    "name: app\ndepends_on: [relkit]\n",
 		"relkit/dec.yaml": "name: relkit\n",
@@ -173,8 +171,8 @@ func TestResolveDesiredAssetsVaultRequireStillFollowsDependency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Assets) != 1 || got.Assets[0].Vault != "relkit" {
-		t.Fatalf("vault pin 必须继续从私仓消费: %#v", got.Assets)
+	if len(got.Assets) != 0 {
+		t.Fatalf("vault pin 不再从私仓安装: %#v", got.Assets)
 	}
 }
 
@@ -192,20 +190,11 @@ func TestResolveDesiredAssets_MissingSubscribedProjectWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveDesiredAssets() 失败: %v", err)
 	}
-	if len(got.Assets) != 1 || got.Assets[0].Name != "foo" {
-		t.Fatalf("Assets = %#v, 期望只有 foo", got.Assets)
+	if len(got.Assets) != 0 {
+		t.Fatalf("vault pin 不应安装私仓正文: %#v", got.Assets)
 	}
-	if !containsName(got.MissingProjects, "ghost") {
-		t.Fatalf("MissingProjects = %#v, 期望含 ghost", got.MissingProjects)
-	}
-	var sawGhostWarn bool
-	for _, e := range events {
-		if e.Level == EventWarn && strings.Contains(e.Message, "ghost") {
-			sawGhostWarn = true
-		}
-	}
-	if !sawGhostWarn {
-		t.Fatalf("期望 ghost 相关 warning，事件: %#v", events)
+	if len(got.MissingProjects) != 0 {
+		t.Fatalf("MissingProjects = %#v, vault pin 不再报缺失", got.MissingProjects)
 	}
 }
 
@@ -217,23 +206,12 @@ func TestResolveDesiredAssets_UnknownBundleWarns(t *testing.T) {
 		Requires: types.RequiresSpec{"does-not-exist": types.RequiresVault},
 	}
 
-	var events []OperationEvent
-	got, err := resolveDesiredAssets(cfg, repoDir, captureEvents(&events))
+	got, err := resolveDesiredAssets(cfg, repoDir, nil)
 	if err != nil {
 		t.Fatalf("resolveDesiredAssets() 失败: %v", err)
 	}
 	if len(got.Assets) != 0 {
 		t.Fatalf("Assets = %#v, 期望为空", got.Assets)
-	}
-
-	var sawWarn bool
-	for _, e := range events {
-		if e.Level == EventWarn && strings.Contains(e.Message, "does-not-exist") {
-			sawWarn = true
-		}
-	}
-	if !sawWarn {
-		t.Fatalf("期望 unknown bundle warning，事件: %#v", events)
 	}
 }
 
@@ -245,22 +223,16 @@ func TestResolveDesiredAssets_MultipleProjectsUniqueAssets(t *testing.T) {
 		"b/dec.yaml": "name: b\n",
 	})
 	cfg := &types.ProjectConfig{
-		Requires: types.RequiresSpec{"a": types.RequiresVault, "b": types.RequiresVault},
+		ProjectName: "a",
+		Requires:    types.RequiresSpec{"b": types.RequiresVault},
 	}
 
 	got, err := resolveDesiredAssets(cfg, repoDir, nil)
 	if err != nil {
 		t.Fatalf("resolveDesiredAssets() 失败: %v", err)
 	}
-	if len(got.Assets) != 2 {
-		t.Fatalf("Assets len = %d, 期望 2", len(got.Assets))
-	}
-	for _, a := range got.Assets {
-		sources := got.Sources[assetKey(a)]
-		want := "p/" + a.Vault
-		if len(sources) != 1 || sources[0] != want {
-			t.Fatalf("Sources[%s] = %#v, 期望 [%s]", assetKey(a), sources, want)
-		}
+	if len(got.Assets) != 1 || got.Assets[0].Name != "only-a" {
+		t.Fatalf("只应安装本仓项目，Assets = %#v", got.Assets)
 	}
 }
 
@@ -340,9 +312,14 @@ func TestResolvePAssetsProjectUsesHomeAndDirectPublicRequires(t *testing.T) {
 	for _, asset := range got.Assets {
 		names[asset.Name] = true
 	}
-	for _, want := range []string{"home-public", "home-private", "shared", "not-transitive"} {
+	for _, want := range []string{"home-public", "home-private"} {
 		if !names[want] {
 			t.Fatalf("缺少 %s: %#v", want, got.Assets)
+		}
+	}
+	for _, gone := range []string{"shared", "not-transitive"} {
+		if names[gone] {
+			t.Fatalf("depends_on 不应再从私仓安装 %s: %#v", gone, got.Assets)
 		}
 	}
 	for _, forbidden := range []string{"home-user", "not-visible"} {
@@ -364,8 +341,8 @@ func TestResolvePAssetsUserUsesBothUserQuadrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Assets) != 2 {
-		t.Fatalf("Assets = %#v", got.Assets)
+	if len(got.Assets) != 0 {
+		t.Fatalf("Global 平面不从私仓安装: %#v", got.Assets)
 	}
 }
 
@@ -377,9 +354,12 @@ func TestResolvePAssetsRejectsCrossProjectTargetCollision(t *testing.T) {
 		"b/dec.yaml":                        "name: b\n",
 		"b/public/project/rules/shared.mdc": "b",
 	})
-	_, err := resolveDesiredAssetsForPlane(&types.ProjectConfig{ProjectName: "my-app"}, repoDir, WorkspaceProject, nil)
-	if err == nil || !strings.Contains(err.Error(), "竞争同一安装目标") {
-		t.Fatalf("err = %v", err)
+	got, err := resolveDesiredAssetsForPlane(&types.ProjectConfig{ProjectName: "my-app"}, repoDir, WorkspaceProject, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Assets) != 0 {
+		t.Fatalf("本仓项目的 depends_on 不应把别的项目装进来: %#v", got.Assets)
 	}
 }
 

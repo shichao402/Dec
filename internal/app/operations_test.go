@@ -44,7 +44,7 @@ name: another-workflow
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		Requires: types.RequiresSpec{"deleted-vault": types.RequiresVault},
+		Requires: types.RequiresSpec{"deleted-vault": types.RequiresVault}, // 不再构成订阅
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -63,18 +63,8 @@ name: another-workflow
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	wantSkip := "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
-	if result.SkippedReason != wantSkip {
-		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, wantSkip)
-	}
-	var sawWarn bool
-	for _, event := range events {
-		if event.Level == EventWarn && strings.Contains(event.Message, "deleted-vault") {
-			sawWarn = true
-		}
-	}
-	if !sawWarn {
-		t.Fatalf("期望针对失效 bundle 的 warning，事件: %#v", events)
+	if result.SkippedReason != "未订阅任何项目" {
+		t.Fatalf("SkippedReason = %q, vault pin 不再构成订阅", result.SkippedReason)
 	}
 }
 
@@ -94,8 +84,8 @@ name: project-workflow
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
-		Requires: types.RequiresSpec{"default": types.RequiresVault},
+		IDEs:        []string{"cursor"},
+		ProjectName: "default",
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -150,7 +140,7 @@ func TestPullProjectAssetsInstallsBundleMembers(t *testing.T) {
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
 		"combo/public/project/skills/bundle-skill/SKILL.md": "---\nname: bundle-skill\n---\n",
-		"combo/public/project/rules/bundle-rule.mdc": "---\ndescription: rule\n---\n",
+		"combo/public/project/rules/bundle-rule.mdc":        "---\ndescription: rule\n---\n",
 		"combo/dec.yaml": `name: combo
 `,
 	})
@@ -161,8 +151,8 @@ func TestPullProjectAssetsInstallsBundleMembers(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
-		Requires: types.RequiresSpec{"combo": types.RequiresVault},
+		IDEs:        []string{"cursor"},
+		ProjectName: "combo",
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -265,8 +255,8 @@ func TestPullProjectAssetsCleansDeselectedBundleAssets(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
-		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
+		IDEs:        []string{"cursor"},
+		ProjectName: "vikunja",
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -282,8 +272,8 @@ func TestPullProjectAssetsCleansDeselectedBundleAssets(t *testing.T) {
 	}
 
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:           []string{"cursor"},
-		Requires: types.RequiresSpec{"combo": types.RequiresVault},
+		IDEs:        []string{"cursor"},
+		ProjectName: "combo",
 	}); err != nil {
 		t.Fatalf("切换 enabled_bundles 失败: %v", err)
 	}
@@ -324,9 +314,8 @@ func TestPullProjectAssetsCleansWhenAllBundlesDeselected(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "",
-		IDEs:           []string{"cursor"},
-		Requires: types.RequiresSpec{"vikunja": types.RequiresVault},
+		ProjectName: "vikunja",
+		IDEs:        []string{"cursor"},
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -343,9 +332,9 @@ func TestPullProjectAssetsCleansWhenAllBundlesDeselected(t *testing.T) {
 	}
 
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:    "",
-		IDEs:           []string{"cursor"},
-		Requires: nil,
+		ProjectName: "",
+		IDEs:        []string{"cursor"},
+		Requires:    nil,
 	}); err != nil {
 		t.Fatalf("清空 enabled_bundles 失败: %v", err)
 	}
@@ -388,7 +377,7 @@ func TestPullProjectAssetsBouncesChangedMCP(t *testing.T) {
 	setEnvForProjectTest(t, "DEC_HOME", t.TempDir())
 	useStubSecretsSession(t)
 	remote := setupRemoteBareRepoProjectTest(t, map[string]string{
-		"demo/public/project/mcp/tool.json": `{"command":"npx","args":["-y","old-tool"]}`,
+		"demo/public/project/mcp/tool.json":              `{"command":"npx","args":["-y","old-tool"]}`,
 		"demo/public/project/skills/only-skill/SKILL.md": "---\nname: only-skill\n---\n",
 		"demo/dec.yaml": "name: demo\n",
 	})
@@ -399,8 +388,8 @@ func TestPullProjectAssetsBouncesChangedMCP(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := config.NewProjectConfigManager(projectRoot)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:     []string{"cursor"},
-		Requires: types.RequiresSpec{"demo": types.RequiresVault},
+		IDEs:        []string{"cursor"},
+		ProjectName: "demo",
 	}); err != nil {
 		t.Fatalf("SaveProjectConfig() 失败: %v", err)
 	}
@@ -437,8 +426,8 @@ func TestPullProjectAssetsBouncesChangedMCP(t *testing.T) {
 	project2 := t.TempDir()
 	mgr2 := config.NewProjectConfigManager(project2)
 	if err := mgr2.SaveProjectConfig(&types.ProjectConfig{
-		IDEs:     []string{"cursor"},
-		Requires: types.RequiresSpec{"skillonly": types.RequiresVault},
+		IDEs:        []string{"cursor"},
+		ProjectName: "skillonly",
 	}); err != nil {
 		t.Fatal(err)
 	}
