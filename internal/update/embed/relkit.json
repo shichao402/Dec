@@ -1,7 +1,10 @@
 {
   "product": "dec",
   "defaultChannel": "stable",
-  "channels": ["stable", "dev"],
+  "channels": [
+    "stable",
+    "dev"
+  ],
   "codeStrategy": "semver",
   "retainVersions": 20,
   "signing": {
@@ -15,18 +18,17 @@
     ]
   },
   "backends": {
-    "cos": {
-      "type": "s3-compatible",
-      "endpoint": "https://cos.ap-guangzhou.myqcloud.com",
-      "bucket": "relkit-updates-1251882798",
-      "region": "ap-guangzhou",
-      "prefix": "rup/",
-      "baseUrl": "https://raw.firoyang.com/rup/",
-      "accessKeyEnv": "COS_SECRET_ID",
-      "secretKeyEnv": "COS_SECRET_KEY"
+    "serve": {
+      "type": "relkit-compatible",
+      "baseUrl": "https://publish.firoyang.com/",
+      "uploadUrl": "https://publish.firoyang.com/",
+      "tokenEnv": "RELKIT_SERVE_TOKEN",
+      "timeoutSeconds": 600
     }
   },
-  "publishTo": ["cos"],
+  "publishTo": [
+    "serve"
+  ],
   "sidecar": {
     "packScript": "scripts/build-console.py"
   },
@@ -43,31 +45,39 @@
   "recovery": {
     "message": "Automatic updates are unavailable (network or update service failure). Download an official Dec release and install it manually.",
     "links": [
-      {"label": "GitHub Releases", "url": "https://github.com/shichao402/Dec/releases"},
-      {"label": "CNB Releases", "url": "https://cnb.cool/shichao402/Dec/-/releases"}
+      {
+        "label": "GitHub Releases",
+        "url": "https://github.com/shichao402/Dec/releases"
+      },
+      {
+        "label": "CNB Releases",
+        "url": "https://cnb.cool/shichao402/Dec/-/releases"
+      }
     ]
   },
   "site": {
     "title": "Dec",
-    "description": "个人 AI 知识仓库代理。",
+    "description": "\u4e2a\u4eba AI \u77e5\u8bc6\u4ed3\u5e93\u4ee3\u7406\u3002",
     "homepage": "https://cnb.cool/shichao402/Dec"
   },
   "directory": {
-    "publishTo": ["cos"],
+    "publishTo": [
+      "serve"
+    ],
     "entryUrls": [
-      "https://raw.firoyang.com/rup/directory/dec.pb"
+      "https://publish.firoyang.com/directory/dec.pb"
     ],
     "services": [
       {
-        "id": "cos-primary",
+        "id": "publish-primary",
         "priority": 10,
-        "indexUrl": "https://raw.firoyang.com/rup/index/dec/stable.pb",
+        "indexUrl": "https://publish.firoyang.com/index/dec/stable.pb",
         "channel": "stable"
       },
       {
-        "id": "cos-dev",
+        "id": "publish-dev",
         "priority": 10,
-        "indexUrl": "https://raw.firoyang.com/rup/index/dec/dev.pb",
+        "indexUrl": "https://publish.firoyang.com/index/dec/dev.pb",
         "channel": "dev"
       }
     ]
