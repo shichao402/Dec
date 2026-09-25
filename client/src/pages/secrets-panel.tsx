@@ -21,6 +21,8 @@ type SecretFile = {
   origin_repo?: string
   identity_only?: boolean
   orphan?: boolean
+  // ADR 0035 声明平面：global = 机器根，local = 项目 .secrets/；空 = 未声明。
+  declared_plane?: string
 }
 
 export type SecretsMetadata = {
@@ -61,7 +63,7 @@ export function SecretsPanel(props: {
     <Panel>
       <PanelHeader
         title="密钥清单"
-        description="只显示落地路径与状态，不显示也不记录任何正文。清单以 Bitwarden 的 Note 列表为准；归属来自 registry 快照。"
+        description="只显示落地路径与状态，不显示也不记录任何正文。清单以 Bitwarden 的 Note 列表为准；归属与密钥平面均来自 registry 快照。"
       />
       <PanelBody className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -181,6 +183,14 @@ function SecretRow({ file }: { file: SecretFile }) {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-canvas/40 px-3 py-2">
       <span className="min-w-0 flex-1 break-all font-mono text-xs text-ink">{file.project_rel_path}</span>
       <Badge tone="quiet" className="font-mono">{file.secrets_bundle}</Badge>
+      {file.declared_plane && (
+        <Badge
+          tone="quiet"
+          title={`产品声明密钥平面为 ${file.declared_plane}：${file.declared_plane === 'global' ? '机器根 ~/.dec/secrets' : '项目 .secrets/'}`}
+        >
+          {file.declared_plane === 'global' ? '全局平面' : '项目平面'}
+        </Badge>
+      )}
       {file.orphan
         ? <Badge tone="warn" title="registry 里查无此产品；删除前先确认它真的不再被使用">未归属</Badge>
         : file.identity_only

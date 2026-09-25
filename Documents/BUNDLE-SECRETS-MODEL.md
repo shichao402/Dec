@@ -210,6 +210,24 @@ BW 地址模型不动（folder = 产品名）。仓归属的唯一事实源是 r
 `origin_repo` / `identity_only` / `orphan` 三个只读字段。详见
 [0034](decisions/0034-bw-belonging-annotation.md)。
 
+### 密钥平面声明（0035）
+
+BW 路径里的 `private/<plane>/` 段是平面推导的投影，不是声明。密钥平面的唯一声明在产品
+定义上（`secrets_plane: global | local`，多产品仓写在 `products.<name>` 下，单产品仓写
+顶层），随发布进 `provider.yaml`，与 `origin_repo` / `tags` 同链路：
+
+| 场景 | 行为 |
+|------|------|
+| 产品声明 `global` | 项目平面 pull / push / 密钥清单跳过；用户平面正常 |
+| 产品声明 `local` | 用户平面跳过；项目平面正常 |
+| 未声明（迁移期） | 两侧沿用平面推导，行为与声明前一致 |
+| registry 不可达 | 查本机 cache 已装回落；查不到按未声明处理 |
+| push 时不符且本地有文件 | 报错：迁移文件或修正声明，绝不静默丢弃 |
+
+Remote / 删除页不过滤：仍是上下文无关的完整远端浏览器（ADR 0004 修订）。
+`dec_list_secrets` 每条元数据带 `declared_plane`（global | local | 空）。详见
+[0035](decisions/0035-product-secrets-plane-declaration.md)。
+
 ## 环境变量与 `dec-exec`
 
 - 环境变量 **只认** `.env/*.env`（dotenv，单行标量 `KEY=value`）。

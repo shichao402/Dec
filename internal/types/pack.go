@@ -264,6 +264,10 @@ type ProjectConfig struct {
 	Products map[string]ProductDecl `yaml:"products,omitempty"`
 	// OriginRepo 可选。publish-provides 写入 registry provider.yaml；空则用 git origin。
 	OriginRepo string `yaml:"origin_repo,omitempty"`
+	// SecretsPlane 是单产品仓的密钥平面声明（ADR 0035）：global = 密钥落机器根
+	// ~/.dec/secrets/<p>/；local = 落项目 .secrets/<p>/。空表示未声明（迁移期，
+	// 消费侧沿用平面推导）。写了 products 时以各产品自己的声明为准，顶层被忽略。
+	SecretsPlane AssetPlane `yaml:"secrets_plane,omitempty"`
 	// Tags 是这个单产品的推荐标签。global 表示新机器初始化时建议默认勾选。
 	// 与 Products 同时出现时以各产品自己的 tags 为准。
 	Tags []string `yaml:"tags,omitempty"`
@@ -273,10 +277,13 @@ type ProjectConfig struct {
 // skills/、commands/、rules/、mcp/。Provides 的 source 相对 Root。
 // Provides 可以为空：没有 Git 正文，只发布身份，密钥留在 Bitwarden 的同名项目下。
 // Tags 随发布写入注册表，消费方不能在订阅页改。
+// SecretsPlane 声明密钥平面（ADR 0035）：global = 机器根，local = 项目 .secrets/；
+// 空 = 未声明（迁移期），消费侧沿用平面推导。
 type ProductDecl struct {
-	Root     string                    `yaml:"root,omitempty"`
-	Tags     []string                  `yaml:"tags,omitempty"`
-	Provides map[string]ProjectProvide `yaml:"provides,omitempty"`
+	Root         string                    `yaml:"root,omitempty"`
+	Tags         []string                  `yaml:"tags,omitempty"`
+	SecretsPlane AssetPlane                `yaml:"secrets_plane,omitempty"`
+	Provides     map[string]ProjectProvide `yaml:"provides,omitempty"`
 }
 
 // ProjectProvide 是作者工作区中的一项源资产声明。

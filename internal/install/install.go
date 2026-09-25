@@ -188,6 +188,16 @@ func ReadOriginRepo(cacheDir, project string) string {
 	return meta.OriginRepo
 }
 
+// ReadSecretsPlane 读本机已装产品的密钥平面声明（ADR 0035）。
+// registry 不可达时的 cache 回落：空串 = 未声明。
+func ReadSecretsPlane(cacheDir, project string) string {
+	meta, err := registry.LoadProviderMeta(filepath.Join(cacheDir, project))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(meta.SecretsPlane)
+}
+
 func WriteInstalledVersion(cacheDir, project, version string) error {
 	version = strings.TrimSpace(version)
 	if version == "" {

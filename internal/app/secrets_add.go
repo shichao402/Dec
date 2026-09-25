@@ -113,7 +113,7 @@ func SuggestSecretTargets(projectRoot string) ([]SecretTargetOption, error) {
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planSecretsSync(projectRoot, consumedProjectNames(projectConfig, WorkspaceProject), cfg)
+	plan, err := planSecretsSync(context.Background(), projectRoot, consumedProjectNames(projectConfig, WorkspaceProject), cfg)
 	if err != nil {
 		return nil, err
 	}

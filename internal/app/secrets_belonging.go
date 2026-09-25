@@ -16,6 +16,8 @@ type BelongingInfo struct {
 	OriginRepo   string
 	IdentityOnly bool
 	Orphan       bool
+	// DeclaredPlane 是该产品声明的密钥平面（ADR 0035）："global" | "local" | ""（未声明）。
+	DeclaredPlane string
 }
 
 // secretsBelongingSnapshotSource 读 registry head 快照；包级变量供测试注入，
@@ -49,6 +51,8 @@ type secretsBelongingResolver struct {
 	// authors 是本工作区的作者声明（ProjectName + Products key）→ origin repo。
 	// 作者侧产品尚未发布时 registry 查无，但不是孤儿。
 	authors map[string]string
+	// authorPlanes 是本工作区作者声明的密钥平面（ADR 0035），作者侧产品判定用。
+	authorPlanes map[string]string
 	// consumed 是本工作区 requires 消费的产品名，用于删除候选的高置信判定。
 	consumed map[string]struct{}
 	memo     map[string]BelongingInfo
@@ -58,13 +62,16 @@ func newSecretsBelongingResolver(ctx context.Context, workspace Workspace, cfg *
 	_, url := workspaceOfficialRequires(workspace, cfg)
 	snapshots := secretsBelongingSnapshotSource(ctx, url)
 	authors := make(map[string]string)
+	authorPlanes := make(map[string]string)
 	if cfg != nil {
 		origin := strings.TrimSpace(cfg.OriginRepo)
 		if home := homeProjectName(workspace, cfg); home != "" {
 			authors[home] = origin
+			authorPlanes[home] = string(cfg.SecretsPlane)
 		}
-		for name := range cfg.Products {
+		for name, decl := range cfg.Products {
 			authors[name] = origin
+			authorPlanes[name] = string(decl.SecretsPlane)
 		}
 	}
 	consumed := make(map[string]struct{})
@@ -74,12 +81,13 @@ func newSecretsBelongingResolver(ctx context.Context, workspace Workspace, cfg *
 	return &secretsBelongingResolver{
 		// 空 map 与不可达无法区分；registry 不会真的空，保守按不可达处理，
 		// 宁可漏报孤儿也不误报。
-		reachable: len(snapshots) > 0,
-		snapshots: snapshots,
-		cacheDir:  workspaceCacheDir(workspace),
-		authors:   authors,
-		consumed:  consumed,
-		memo:      make(map[string]BelongingInfo),
+		reachable:    len(snapshots) > 0,
+		snapshots:    snapshots,
+		cacheDir:     workspaceCacheDir(workspace),
+		authors:      authors,
+		authorPlanes: authorPlanes,
+		consumed:     consumed,
+		memo:         make(map[string]BelongingInfo),
 	}
 }
 
@@ -100,21 +108,26 @@ func (r *secretsBelongingResolver) resolve(p string) BelongingInfo {
 
 func (r *secretsBelongingResolver) compute(p string) BelongingInfo {
 	if !r.reachable {
-		return BelongingInfo{OriginRepo: install.ReadOriginRepo(r.cacheDir, p)}
+		return BelongingInfo{OriginRepo: install.ReadOriginRepo(r.cacheDir, p), DeclaredPlane: install.ReadSecretsPlane(r.cacheDir, p)}
 	}
 	if snap, ok := r.snapshots[p]; ok {
 		origin := strings.TrimSpace(snap.OriginRepo)
 		if origin == "" {
 			origin = install.ReadOriginRepo(r.cacheDir, p)
 		}
-		return BelongingInfo{OriginRepo: origin, IdentityOnly: len(snap.Assets) == 0}
+		return BelongingInfo{
+			OriginRepo:    origin,
+			IdentityOnly:  len(snap.Assets) == 0,
+			DeclaredPlane: strings.TrimSpace(snap.SecretsPlane),
+		}
 	}
 	if origin, ok := r.authors[p]; ok {
-		return BelongingInfo{OriginRepo: origin}
+		// 作者侧产品：平面以本工作区作者声明为准（尚未发布时 registry 查无）。
+		return BelongingInfo{OriginRepo: origin, DeclaredPlane: r.authorPlanes[p]}
 	}
 	if origin := install.ReadOriginRepo(r.cacheDir, p); origin != "" {
 		// 已安装但不在 registry head：本地证据说明它有主（可能被撤或尚未同步）。
-		return BelongingInfo{OriginRepo: origin}
+		return BelongingInfo{OriginRepo: origin, DeclaredPlane: install.ReadSecretsPlane(r.cacheDir, p)}
 	}
 	return BelongingInfo{Orphan: true}
 }
@@ -154,4 +167,30 @@ func belongingRowAnnotation(resolver *secretsBelongingResolver, address string) 
 	}
 	info := resolver.resolve(p)
 	return info.OriginRepo, info.IdentityOnly, info.Orphan
+}
+
+// declaredPlaneOf 返回产品声明的密钥平面（ADR 0035）："global" | "local" | ""。
+// 未声明产品返回空串；非产品名同样返回空串（不参与平面判定）。
+func declaredPlaneOf(resolver *secretsBelongingResolver, p string) string {
+	if resolver == nil {
+		return ""
+	}
+	return resolver.resolve(strings.TrimSpace(p)).DeclaredPlane
+}
+
+// assetPlaneMatchesWorkspace 报告产品声明平面与 workspace 平面是否同侧。
+// 声明 global 只在本机（用户）平面生效；声明 local 只在项目平面生效。
+// 未声明（空）恒为 true——迁移期 fail-open，行为与声明前一致。
+func assetPlaneMatchesWorkspace(declared string, workspace Workspace) bool {
+	switch strings.TrimSpace(declared) {
+	case "":
+		return true
+	case string(types.AssetPlaneGlobal):
+		return workspace.EffectivePlane() == WorkspaceGlobal
+	case string(types.AssetPlaneLocal):
+		return workspace.EffectivePlane() == WorkspaceLocal
+	default:
+		// 声明取值异常：不因此阻断同步，按未声明处理。
+		return true
+	}
 }

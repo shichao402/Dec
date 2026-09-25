@@ -396,7 +396,7 @@ func TestPublishIdentityOnlyProduct(t *testing.T) {
 	cfg := &types.ProjectConfig{
 		OriginRepo: "https://github.com/shichao402/DecPersonalDevKit.git",
 		Products: map[string]types.ProductDecl{
-			"github": {Root: "github", Tags: []string{"global"}},
+			"github": {Root: "github", Tags: []string{"global"}, SecretsPlane: types.AssetPlaneGlobal},
 		},
 	}
 	if err := mgr.SaveProjectConfig(cfg); err != nil {
@@ -420,5 +420,8 @@ func TestPublishIdentityOnlyProduct(t *testing.T) {
 	got := snap["github"]
 	if got.OriginRepo != cfg.OriginRepo || len(got.Assets) != 0 || len(got.Tags) != 1 || got.Tags[0] != "global" {
 		t.Fatalf("snapshot = %+v", got)
+	}
+	if got.SecretsPlane != "global" {
+		t.Fatalf("snapshot secrets_plane = %q, 期望 global", got.SecretsPlane)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/types"
 )
 
 type PushSecretsResult struct {
@@ -52,8 +53,13 @@ func PushWorkspaceSecretsBundles(ctx context.Context, workspace Workspace, repor
 		return nil, err
 	}
 
-	plan, err := planWorkspaceSecretsSync(workspace, enabledBundles, cfg)
+	plan, err := planWorkspaceSecretsSync(ctx, workspace, enabledBundles, cfg)
 	if err != nil {
+		return nil, err
+	}
+	// ADR 0035 fail-closed：被声明平面过滤掉的 target，若本地同步根仍有文件，
+	// push 直接报错——写回路径与声明不符就该报错，而不是静默丢弃。
+	if err := validateNoPlaneMismatchedSecrets(workspace, plan.SkippedByPlane); err != nil {
 		return nil, err
 	}
 	if plan.Total == 0 {
@@ -137,4 +143,27 @@ func PushWorkspaceSecretsBundles(ctx context.Context, workspace Workspace, repor
 			&Progress{Phase: "done", Current: total, Total: total})
 	}
 	return result, nil
+}
+
+// validateNoPlaneMismatchedSecrets 是 ADR 0035 的 fail-closed 校验：
+// 被声明平面过滤掉的 target，若本地同步根仍有文件，push 报错。
+// 静默跳过会让「迁移到另一平面」变成一次性数据丢失——文件还在本地、也还在旧远端，
+// 但再也不被任何 plan 覆盖。报错文案指向两条出路：迁移文件或修正声明。
+func validateNoPlaneMismatchedSecrets(workspace Workspace, skipped []secrets.SyncTarget) error {
+	var mismatched []string
+	for _, target := range skipped {
+		notes, scanErr := secrets.ScanSyncRoot(workspace.Root, target)
+		if scanErr != nil || len(notes) == 0 {
+			continue
+		}
+		declared := string(types.AssetPlaneGlobal)
+		if workspace.EffectivePlane() == WorkspaceGlobal {
+			declared = string(types.AssetPlaneLocal)
+		}
+		mismatched = append(mismatched, fmt.Sprintf("%s（声明 %s 平面，本地 %s 下仍有 %d 个文件）", target.Name, declared, target.LocalRoot, len(notes)))
+	}
+	if len(mismatched) > 0 {
+		return fmt.Errorf("以下产品声明为另一平面的密钥，本地同步根仍有文件，已拒绝推送：\n  %s\n请先把文件迁移到声明平面（或修正产品 secrets_plane 声明）再 push", strings.Join(mismatched, "\n  "))
+	}
+	return nil
 }

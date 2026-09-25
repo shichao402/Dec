@@ -55,3 +55,4 @@
 | [0032](0032-mcp-streamable-http.md) | MCP 改为 dec-server 上的 Streamable HTTP | 已接受 |
 | [0033](0033-requires-registry-only.md) | 订阅只从官方注册表安装，废除 `vault` pin | 已接受 |
 | [0034](0034-bw-belonging-annotation.md) | BW 归属标注：folder 保持平铺，registry 快照作为仓归属 SSOT | 已接受（草案） |
+| [0035](0035-product-secrets-plane-declaration.md) | 产品密钥平面声明：secrets_plane 进产品定义，路径降级为校验对象 | 已接受（草案） |

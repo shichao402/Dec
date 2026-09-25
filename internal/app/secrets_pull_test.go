@@ -405,7 +405,7 @@ func TestPlanSecretsSync_ProjectPlaneOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := planSecretsSync(projectRoot, []string{"vikunja"}, &secrets.Config{})
+	plan, err := planSecretsSync(context.Background(), projectRoot, []string{"vikunja"}, &secrets.Config{})
 	if err != nil {
 		t.Fatalf("planSecretsSync() = %v", err)
 	}
@@ -438,6 +438,7 @@ func TestPlanWorkspaceSecretsSync_PUsesHomeOnlyAndFixedPlane(t *testing.T) {
 	}
 
 	projectPlan, err := planWorkspaceSecretsSync(
+		context.Background(),
 		NewWorkspace(WorkspaceProject, projectRoot),
 		[]string{"my-app", "shared"},
 		&secrets.Config{},
@@ -455,6 +456,7 @@ func TestPlanWorkspaceSecretsSync_PUsesHomeOnlyAndFixedPlane(t *testing.T) {
 	}
 
 	userPlan, err := planWorkspaceSecretsSync(
+		context.Background(),
 		NewWorkspace(WorkspaceUser, ""),
 		[]string{"shared"},
 		&secrets.Config{},

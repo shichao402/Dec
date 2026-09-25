@@ -18,7 +18,7 @@ func TestReadProjectsListsOriginAndAssets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("woa/provider.yaml", "origin_repo: https://github.com/shichao402/DecPersonalDevKit.git\ntags: [global]\n")
+	write("woa/provider.yaml", "origin_repo: https://github.com/shichao402/DecPersonalDevKit.git\ntags: [global]\nsecrets_plane: global\n")
 	write("woa/public/global/skills/gongfeng/SKILL.md", "# gongfeng\n")
 	write("woa/public/global/mcp/gongfeng.json", "{}\n")
 	write("yanked.yaml", "{}\n")
@@ -36,6 +36,9 @@ func TestReadProjectsListsOriginAndAssets(t *testing.T) {
 	}
 	if len(woa.Tags) != 1 || woa.Tags[0] != "global" {
 		t.Fatalf("tags = %#v", woa.Tags)
+	}
+	if woa.SecretsPlane != "global" {
+		t.Fatalf("secrets_plane = %q", woa.SecretsPlane)
 	}
 	if len(woa.Assets) != 2 {
 		t.Fatalf("assets = %#v", woa.Assets)

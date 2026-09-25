@@ -72,7 +72,7 @@ func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview,
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planWorkspaceSecretsSync(workspace, preview.EnabledBundleNames, cfg)
+	plan, err := planWorkspaceSecretsSync(context.Background(), workspace, preview.EnabledBundleNames, cfg)
 	if err != nil {
 		return nil, err
 	}

@@ -162,6 +162,67 @@ func TestListSecretsMetadata_BelongingJoin(t *testing.T) {
 	}
 }
 
+// ADR 0035：声明平面的行带 declared_plane；声明为另一平面的产品不进本平面清单。
+func TestListSecretsMetadata_DeclaredPlaneFilter(t *testing.T) {
+	const kitRepo = "https://example.com/DecPersonalDevKit.git"
+	decHome := t.TempDir()
+	setEnvForProjectTest(t, "DEC_HOME", decHome)
+	stubBelongingSnapshots(t, map[string]registry.ProjectSnapshot{
+		"cnb":          {OriginRepo: kitRepo, Assets: []registry.SnapshotAsset{{Name: "demo"}}, SecretsPlane: "global"},
+		"local-product": {OriginRepo: kitRepo, SecretsPlane: "local"},
+	})
+	secretsDir := filepath.Join(decHome, "secrets")
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := secrets.Config{ServerURL: "https://vault.example.com"}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+
+	orig := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+			// StubClient 的 folder 键支持旧平面名归一；cnb 声明 global，
+			// 但项目平面 browse target 用 private/local 地址探测（仍可见，
+			// 然后由声明过滤决定是否展示）。
+			"cnb/private/project":          {{RelativePath: ".env/cnb.env", Content: "T=1\n"}},
+			"local-product/private/project": {{RelativePath: ".env/lp.env", Content: "T=1\n"}},
+		}}
+	}
+	t.Cleanup(func() { secretsClientFactory = orig })
+
+	result, err := ListSecretsMetadata(context.Background(), t.TempDir(), true, nil)
+	if err != nil {
+		t.Fatalf("ListSecretsMetadata() = %v", err)
+	}
+	var sawCnb, sawLocal bool
+	for _, file := range result.Files {
+		switch file.SecretsBundle {
+		case "cnb/private/local":
+			sawCnb = true
+		case "local-product/private/local":
+			sawLocal = true
+			if file.DeclaredPlane != "local" {
+				t.Fatalf("declared_plane = %q, 期望 local", file.DeclaredPlane)
+			}
+		}
+	}
+	if sawCnb {
+		t.Fatal("声明 global 的产品不应出现在项目平面清单")
+	}
+	if !sawLocal {
+		t.Fatalf("声明 local 的产品应保留: %#v", result.Files)
+	}
+}
+
 // 用户平面的 secrets 落在 ~/.dec/secrets 下，Root 必须为空（ADR 0015）；
 // 拿空 Root 当「缺项目根」报错会让 Console 的本机平面永远列不出 secrets。
 func TestListWorkspaceSecretsMetadata_UserPlaneAcceptsEmptyRoot(t *testing.T) {

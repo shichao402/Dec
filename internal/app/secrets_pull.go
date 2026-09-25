@@ -19,22 +19,32 @@ import (
 type secretsSyncPlan struct {
 	Targets []secrets.SyncTarget
 	Total   int
+	// SkippedByPlane 是被产品密钥平面声明（ADR 0035）过滤掉的 target。
+	// push 用它做 fail-closed 校验：这些 target 的本地同步根仍有文件时报错。
+	SkippedByPlane []secrets.SyncTarget
 }
 
-func planSecretsSync(projectRoot string, enabledBundles []string, cfg *secrets.Config) (*secretsSyncPlan, error) {
-	return planWorkspaceSecretsSync(NewWorkspace(WorkspaceProject, projectRoot), enabledBundles, cfg)
+func planSecretsSync(ctx context.Context, projectRoot string, enabledBundles []string, cfg *secrets.Config) (*secretsSyncPlan, error) {
+	return planWorkspaceSecretsSync(ctx, NewWorkspace(WorkspaceProject, projectRoot), enabledBundles, cfg)
 }
 
-func planWorkspaceSecretsSync(workspace Workspace, enabledBundles []string, cfg *secrets.Config) (*secretsSyncPlan, error) {
+func planWorkspaceSecretsSync(ctx context.Context, workspace Workspace, enabledBundles []string, cfg *secrets.Config) (*secretsSyncPlan, error) {
 	projectRoot := workspace.Root
 	projectName := ""
+	var projectConfig *types.ProjectConfig
 	if workspace.EffectivePlane() == WorkspaceProject {
 		mgr := config.NewProjectConfigManager(projectRoot)
-		projectConfig, err := mgr.LoadProjectConfig()
+		loaded, err := mgr.LoadProjectConfig()
 		if err != nil {
 			return nil, err
 		}
-		projectName, _ = ResolveProjectName(projectRoot, projectConfig)
+		projectConfig = loaded
+		projectName, _ = ResolveProjectName(projectRoot, loaded)
+	} else {
+		// 用户平面：Global 配置的 requires 也是平面判定的消费上下文。
+		if g, err := config.LoadGlobalConfig(); err == nil {
+			projectConfig = &types.ProjectConfig{Requires: g.Requires}
+		}
 	}
 	if cfg == nil {
 		cfg = &secrets.Config{}
@@ -95,7 +105,19 @@ func planWorkspaceSecretsSync(workspace Workspace, enabledBundles []string, cfg 
 	if err != nil {
 		return nil, err
 	}
-	return &secretsSyncPlan{Targets: targets, Total: len(targets)}, nil
+	// ADR 0035：声明平面的产品只出现在对应平面的 plan 里。未声明（迁移期）
+	// 与 registry 不可达时不过滤，沿用平面推导，行为与声明前一致。
+	belonging := newSecretsBelongingResolver(ctx, workspace, projectConfig)
+	kept := make([]secrets.SyncTarget, 0, len(targets))
+	var skippedByPlane []secrets.SyncTarget
+	for _, target := range targets {
+		if !assetPlaneMatchesWorkspace(declaredPlaneOf(belonging, target.Name), workspace) {
+			skippedByPlane = append(skippedByPlane, target)
+			continue
+		}
+		kept = append(kept, target)
+	}
+	return &secretsSyncPlan{Targets: kept, Total: len(kept), SkippedByPlane: skippedByPlane}, nil
 }
 
 // planWorkspaceSecretsBrowse 为 Remote / secrets 元数据浏览规划 SyncTarget（ADR 0004）。
@@ -380,7 +402,7 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planWorkspaceSecretsSync(workspace, enabledBundles, cfg)
+	plan, err := planWorkspaceSecretsSync(ctx, workspace, enabledBundles, cfg)
 	if err != nil {
 		return nil, err
 	}

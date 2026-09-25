@@ -181,10 +181,13 @@ func pathContains(parent, child string) bool {
 // AuthorProduct 是发布用的一个产品。Provides 的 source 已换成相对仓根的路径，
 // 可以直接交给快照复制。
 type AuthorProduct struct {
-	Name     string
-	Root     string
-	Tags     []string
-	Provides map[string]types.ProjectProvide
+	Name string
+	Root string
+	Tags []string
+	// SecretsPlane 是该产品的密钥平面声明（ADR 0035），随发布写入 provider.yaml。
+	// 空表示未声明（迁移期），消费侧沿用平面推导。
+	SecretsPlane types.AssetPlane
+	Provides     map[string]types.ProjectProvide
 }
 
 // AuthorProducts 返回这个仓要发布的产品。
@@ -213,7 +216,7 @@ func AuthorProducts(cfg *types.ProjectConfig) ([]AuthorProduct, error) {
 				}
 				provides[key] = provide
 			}
-			out = append(out, AuthorProduct{Name: name, Root: item.Root, Tags: item.Tags, Provides: provides})
+			out = append(out, AuthorProduct{Name: name, Root: item.Root, Tags: item.Tags, SecretsPlane: item.SecretsPlane, Provides: provides})
 		}
 		return out, nil
 	}
@@ -225,11 +228,16 @@ func AuthorProducts(cfg *types.ProjectConfig) ([]AuthorProduct, error) {
 	if err != nil {
 		return nil, err
 	}
+	plane, err := NormalizeSecretsPlane(cfg.SecretsPlane)
+	if err != nil {
+		return nil, fmt.Errorf("secrets_plane: %w", err)
+	}
 	return []AuthorProduct{{
-		Name:     name,
-		Root:     cfg.ProvidesRoot,
-		Tags:     tags,
-		Provides: cfg.Provides,
+		Name:         name,
+		Root:         cfg.ProvidesRoot,
+		Tags:         tags,
+		SecretsPlane: plane,
+		Provides:     cfg.Provides,
 	}}, nil
 }
 
@@ -264,9 +272,32 @@ func NormalizeDeclaredProducts(in map[string]types.ProductDecl) (map[string]type
 		if err != nil {
 			return nil, fmt.Errorf("products.%s.tags: %w", name, err)
 		}
-		out[name] = types.ProductDecl{Root: root, Tags: tags, Provides: provides}
+		plane, err := NormalizeSecretsPlane(in[name].SecretsPlane)
+		if err != nil {
+			return nil, fmt.Errorf("products.%s.secrets_plane: %w", name, err)
+		}
+		out[name] = types.ProductDecl{Root: root, Tags: tags, SecretsPlane: plane, Provides: provides}
 	}
 	return out, nil
+}
+
+// NormalizeSecretsPlane 校验并归一密钥平面声明（ADR 0035）。
+// 只接受 global / local（含旧象限名 user / project / machine 的归一映射）；
+// 空 = 未声明，原样返回。其余取值报错。
+func NormalizeSecretsPlane(raw types.AssetPlane) (types.AssetPlane, error) {
+	trimmed := types.AssetPlane(strings.ToLower(strings.TrimSpace(string(raw))))
+	switch trimmed {
+	case "":
+		return "", nil
+	case types.AssetPlaneUser:
+		return types.AssetPlaneGlobal, nil
+	case types.AssetPlaneProject:
+		return types.AssetPlaneLocal, nil
+	case types.AssetPlaneGlobal, types.AssetPlaneLocal:
+		return trimmed, nil
+	default:
+		return "", fmt.Errorf("%q 必须是 global 或 local", raw)
+	}
 }
 
 func rejectMixedAuthor(cfg *types.ProjectConfig) error {
@@ -325,6 +356,11 @@ func normalizeAuthorConfig(cfg *types.ProjectConfig) error {
 		return fmt.Errorf("校验 provides 失败: %w", err)
 	}
 	cfg.Provides = provides
+	plane, err := NormalizeSecretsPlane(cfg.SecretsPlane)
+	if err != nil {
+		return fmt.Errorf("校验 secrets_plane 失败: %w", err)
+	}
+	cfg.SecretsPlane = plane
 	return nil
 }
 

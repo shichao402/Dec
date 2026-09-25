@@ -114,7 +114,7 @@ func Publish(ctx context.Context, opts Options) (*Result, error) {
 
 	tags := make([]string, 0, len(pending))
 	for _, item := range pending {
-		if err := writeSnapshot(root, work, item.product.Name, snapshotConfig(cfg, item.product.Provides), item.product.Tags); err != nil {
+		if err := writeSnapshot(root, work, item.product.Name, snapshotConfig(cfg, item.product.Provides), item.product.Tags, string(item.product.SecretsPlane)); err != nil {
 			return nil, err
 		}
 		tags = append(tags, item.tag)
@@ -203,7 +203,7 @@ func snapshotMatches(ctx context.Context, providerRoot, registryWork, tag string
 		return false, err
 	}
 	defer os.RemoveAll(tmpSnap)
-	if err := writeSnapshot(providerRoot, tmpSnap, product.Name, snapshotConfig(cfg, product.Provides), product.Tags); err != nil {
+	if err := writeSnapshot(providerRoot, tmpSnap, product.Name, snapshotConfig(cfg, product.Provides), product.Tags, string(product.SecretsPlane)); err != nil {
 		return false, err
 	}
 	localHash, err := hashDir(filepath.Join(tmpSnap, product.Name))
@@ -230,7 +230,7 @@ func checkoutRegistry(ctx context.Context, work, url string, env []string) error
 	return nil
 }
 
-func writeSnapshot(projectRoot, registryRoot, project string, cfg *types.ProjectConfig, tags []string) error {
+func writeSnapshot(projectRoot, registryRoot, project string, cfg *types.ProjectConfig, tags []string, secretsPlane string) error {
 	// registry 分支是累积的，不先清空就会把上一版里已经删掉的 provide 一路带进后续每个 tag。
 	// provides 为空时只写 provider.yaml：产品身份在，Git 正文没有，密钥留在 Bitwarden。
 	if err := os.RemoveAll(filepath.Join(registryRoot, project)); err != nil {
@@ -252,7 +252,11 @@ func writeSnapshot(projectRoot, registryRoot, project string, cfg *types.Project
 	if origin == "" {
 		origin = detectOriginRepo(projectRoot)
 	}
-	return registry.WriteProviderMeta(filepath.Join(registryRoot, project), registry.ProviderMeta{OriginRepo: origin, Tags: tags})
+	return registry.WriteProviderMeta(filepath.Join(registryRoot, project), registry.ProviderMeta{
+		OriginRepo:   origin,
+		Tags:         tags,
+		SecretsPlane: strings.TrimSpace(secretsPlane),
+	})
 }
 
 func detectOriginRepo(projectRoot string) string {

@@ -22,7 +22,9 @@ type SnapshotAsset struct {
 type ProjectSnapshot struct {
 	OriginRepo string
 	Tags       []string
-	Assets     []SnapshotAsset
+	// SecretsPlane 是提供方声明的密钥平面（ADR 0035）；空 = 未声明。
+	SecretsPlane string
+	Assets       []SnapshotAsset
 }
 
 // ReadProjects 读取 registry 工作树里每个产品的 provider.yaml 与资产名单。
@@ -49,7 +51,12 @@ func ReadProjects(root string) (map[string]ProjectSnapshot, error) {
 		if err != nil {
 			return nil, err
 		}
-		out[name] = ProjectSnapshot{OriginRepo: meta.OriginRepo, Tags: append([]string(nil), meta.Tags...), Assets: assets}
+		out[name] = ProjectSnapshot{
+			OriginRepo:   meta.OriginRepo,
+			Tags:         append([]string(nil), meta.Tags...),
+			SecretsPlane: strings.TrimSpace(meta.SecretsPlane),
+			Assets:       assets,
+		}
 	}
 	return out, nil
 }

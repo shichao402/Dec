@@ -205,6 +205,88 @@ func TestDeclaredProductsRejectOverlapAndMixedAuthor(t *testing.T) {
 	}
 }
 
+// ADR 0035：secrets_plane 声明校验——合法取值归一，非法取值拒绝，
+// 且贯穿 AuthorProducts 进入发布产品。
+func TestNormalizeSecretsPlane(t *testing.T) {
+	cases := []struct {
+		raw  types.AssetPlane
+		want types.AssetPlane
+		ok   bool
+	}{
+		{"", "", true},
+		{"global", "global", true},
+		{"local", "local", true},
+		{"user", "global", true},
+		{"project", "local", true},
+		{" Global ", "global", true},
+		{"regional", "", false},
+	}
+	for _, tc := range cases {
+		got, err := NormalizeSecretsPlane(tc.raw)
+		if tc.ok {
+			if err != nil || got != tc.want {
+				t.Fatalf("NormalizeSecretsPlane(%q) = (%q, %v), 期望 (%q, nil)", tc.raw, got, err, tc.want)
+			}
+			continue
+		}
+		if err == nil {
+			t.Fatalf("NormalizeSecretsPlane(%q) 应报错，得到 %q", tc.raw, got)
+		}
+	}
+}
+
+func TestDeclaredProductsCarrySecretsPlane(t *testing.T) {
+	got, err := NormalizeDeclaredProducts(map[string]types.ProductDecl{
+		"cnb":    {Root: "cnb", SecretsPlane: types.AssetPlaneGlobal},
+		"github": {Root: "github", SecretsPlane: "local"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["cnb"].SecretsPlane != types.AssetPlaneGlobal || got["github"].SecretsPlane != types.AssetPlaneLocal {
+		t.Fatalf("planes = %#v", got)
+	}
+	_, err = NormalizeDeclaredProducts(map[string]types.ProductDecl{
+		"bad": {Root: "bad", SecretsPlane: "regional"},
+	})
+	if err == nil {
+		t.Fatal("期望拒绝非法 secrets_plane 取值")
+	}
+
+	authors, err := AuthorProducts(&types.ProjectConfig{Products: got})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, author := range authors {
+		if author.SecretsPlane == "" {
+			t.Fatalf("AuthorProduct 应贯穿平面声明: %#v", author)
+		}
+	}
+}
+
+// 单产品仓顶层声明同样贯穿，且走 SaveProjectConfig 的归一化校验。
+func TestSingleProductTopLevelSecretsPlane(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewProjectConfigManager(root)
+	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
+		ProjectName:  "relkit",
+		SecretsPlane: types.AssetPlaneGlobal,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	authors, err := AuthorProducts(&types.ProjectConfig{ProjectName: "relkit", SecretsPlane: types.AssetPlaneGlobal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authors[0].SecretsPlane != types.AssetPlaneGlobal {
+		t.Fatalf("author = %#v", authors[0])
+	}
+	err = mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "relkit", SecretsPlane: "regional"})
+	if err == nil {
+		t.Fatal("期望拒绝顶层非法 secrets_plane")
+	}
+}
+
 func TestAuthorProductsFoldsSingleProjectWithoutRewriting(t *testing.T) {
 	cfg := &types.ProjectConfig{
 		ProjectName:  "relkit",

@@ -24,6 +24,8 @@ type SecretFileMetadata struct {
 	OriginRepo   string `json:"origin_repo,omitempty"`
 	IdentityOnly bool   `json:"identity_only,omitempty"`
 	Orphan       bool   `json:"orphan,omitempty"`
+	// DeclaredPlane 是产品声明的密钥平面（ADR 0035）：global | local；空 = 未声明。
+	DeclaredPlane string `json:"declared_plane,omitempty"`
 }
 
 // ListSecretsMetadataResult 汇总私密资产元数据列表。
@@ -136,6 +138,13 @@ func mergeRemoteSecretMetadataForWorkspace(ctx context.Context, workspace Worksp
 	for _, target := range targets {
 		label := formatSyncTargetLabel(target)
 		origin, identityOnly, orphan := belongingRowAnnotation(belonging, target.Address)
+		// ADR 0035：声明为另一平面的产品不进本平面的密钥清单。
+		// 存量 folder（非产品名）与未声明产品维持原行为。
+		if p, ok := secretsAddressProject(target.Address); ok {
+			if declared := declaredPlaneOf(belonging, p); declared != "" && !assetPlaneMatchesWorkspace(declared, workspace) {
+				continue
+			}
+		}
 		notes, listErr := client.ListNotes(ctx, target)
 		if listErr != nil {
 			emit(reporter, EventWarn, "secrets.list", fmt.Sprintf("列出远端 %s 元数据失败: %v", label, listErr), nil)
@@ -161,6 +170,9 @@ func mergeRemoteSecretMetadataForWorkspace(ctx context.Context, workspace Worksp
 			meta.OriginRepo = origin
 			meta.IdentityOnly = identityOnly
 			meta.Orphan = orphan
+			if p, ok := secretsAddressProject(target.Address); ok {
+				meta.DeclaredPlane = declaredPlaneOf(belonging, p)
+			}
 			exists := true
 			meta.RemoteExists = &exists
 			localAbs, absErr := secrets.AbsolutePath(projectRoot, target, noteRel)
