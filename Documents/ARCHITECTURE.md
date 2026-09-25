@@ -411,7 +411,7 @@ my-app/
 | CodeBuddy | `.codebuddy/skills/` | `.codebuddy/rules/` | `.mcp.json` |
 | Claude | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
-| With | `.with/skills/`（用户平面：`~/.bg-agent/config-with-app/skills/`） | `.with/rules/`（用户平面同根 `rules/`） | `.with/mcp_config.json`（用户平面同根 `mcp_config.json`） |
+| With | `.with/skills/`（用户平面：`~/.bg-agent/config-with-app/skills/`） | `.with/rules/`（用户平面同根 `rules/`，仅为对称约定：macOS 实测 With 未读取该目录，规则走 Knot 插件动态挂载） | `.with/mcp_config.json`（用户平面同根 `mcp_config.json`） |
 
 Dec 托管产物统一使用 `dec-` 前缀。Codex MCP 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。With 的用户平面根目录是 `~/.bg-agent/config-with-app`；写 MCP 时只改 `dec` / `dec-*` 条目，保留其 `transportType` / `headers` / `timeout` 等字段。
 
@@ -660,6 +660,10 @@ Vault project 与 bundle 以目录和 YAML 文件直接组织，代码扫描真�
 ### CodeBuddy MCP 路径
 
 CodeBuddy MCP 位于项目根 `.mcp.json`。Codex 位于 `.codex/config.toml`。With 用户平面位于 `~/.bg-agent/config-with-app/mcp_config.json`，项目平面位于 `.with/mcp_config.json`。
+
+### With 用户平面 rules 目录
+
+`~/.bg-agent/config-with-app/rules/` 目前仅为 Dec 的对称目录约定：在 macOS 上实测（含 `with_daemon` 二进制字符串检查）With 不会扫描或读取该目录，其规则能力通过 Knot 市场插件随会话动态挂载实现。`RulesDirForPlane` 保留该路径生成逻辑以兼容将来 With 支持落盘 rules 的情况。
 
 ### 文件权限
 
