@@ -30,7 +30,7 @@ description: >
 3. 用户确认后再 `--apply`。不要把 `--stage-only` 说成升级完成。
 4. 工作区脏则停止，除非用户明确 `--allow-dirty`。默认从当前干净 HEAD 构建，stamp 读 `VERSION.json`；只有用户明确要求才 `--unsafe-from-dist`。不要传 `--version`。
 5. **agent + serve 是固定配套**：现网箱必须两个进程都在。缺哪个先 `install` 那个，再 `upgrade`（不要 `--agent-only` / `--serve-only`）。`--agent-only` / `--serve-only` 只留给临时抢救，不是现网拓扑。
-6. 公网站点配置属于 `/etc/relkit-agent/relkit-agent.json` 顶层 `site.makers`，不能下沉到产品 profile。升级后检查 `curl -fsS http://127.0.0.1:8787/-/site` 只返回脱敏 readiness；若配置或模板有变化，执行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。这不发布产品版本。
+6. 公网站点配置属于 `/etc/relkit-agent/relkit-agent.json` 顶层 `site.sinks[]`（`makers`/`backend`/`directory`，ADR 0015；旧 `site.makers` 加载时等价展开，已 deprecated），不能下沉到产品 profile。升级后检查 `curl -fsS http://127.0.0.1:8787/-/site` 只返回脱敏 readiness；若配置或模板有变化，执行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。这不发布产品版本。
 
 现网别名：
 
