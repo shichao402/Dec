@@ -194,6 +194,22 @@ Bitwarden folder: bundle/vikunja
 
 Note 名来自远端，按不可信输入处理：绝对路径、`~` 展开、`..` 逃逸、盘符一律拒绝。
 
+### 仓归属标注（0034）
+
+BW 地址模型不动（folder = 产品名）。仓归属的唯一事实源是 registry 快照（每产品一份
+`provider.yaml` + 资产名单），读取路径做一次 join：
+
+| 判读 | 依据 | 标注 |
+|------|------|------|
+| 正常产品 | registry 目录存在、资产非空 | 行带 `origin_repo` |
+| 身份型产品 | registry 目录存在、资产为空（`provides` 为空，只发身份） | 「仅密钥」badge |
+| 孤儿 folder | registry 查无此产品 | 折叠「疑似孤儿」区；`list_delete_candidates` 对「查无 + 无 requires 消费」标高置信候选 |
+
+归属信息只增强展示：不写回 BW、不迁移 folder、不隐式删除。registry 不可达时归属字段留空、
+不判孤儿（绝不把「连不上」误判成「无主」）。`dec_list_secrets` 的每条元数据带
+`origin_repo` / `identity_only` / `orphan` 三个只读字段。详见
+[0034](decisions/0034-bw-belonging-annotation.md)。
+
 ## 环境变量与 `dec-exec`
 
 - 环境变量 **只认** `.env/*.env`（dotenv，单行标量 `KEY=value`）。
@@ -336,6 +352,7 @@ session、vault/user key、主密码、TOTP、临时密钥与 2FA 中间态均�
 - [decisions/0009-bundle-binary-scope.md](decisions/0009-bundle-binary-scope.md)
 - [decisions/0011-private-repo-gcm-bootstrap.md](decisions/0011-private-repo-gcm-bootstrap.md)
 - [decisions/0022-console-bitwarden-unlock.md](decisions/0022-console-bitwarden-unlock.md)
+- [decisions/0034-bw-belonging-annotation.md](decisions/0034-bw-belonging-annotation.md)
 - [research/secrets-ci-centralization.md](./research/secrets-ci-centralization.md)：CI / 机器身份 / PM vs SM（调研，非正式决策）
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)

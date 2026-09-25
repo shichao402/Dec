@@ -34,6 +34,12 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 	seenDecRemote := make(map[string]struct{})
 	seenDecLocal := make(map[string]struct{})
 	groupCtx := newDeleteGroupContext(workspace, projectConfig)
+	// ADR 0034：远端分区做归属 join（registry 不可达时留空、不判孤儿）。
+	// 不查远端就没有可标注的对象，也就不碰 registry。
+	var belonging *secretsBelongingResolver
+	if includeRemote {
+		belonging = newSecretsBelongingResolver(ctx, workspace, projectConfig)
+	}
 	scopeByBundle := map[string]string{}
 	enabledBundles := config.NormalizeBundleNames(consumedProjectNames(projectConfig, WorkspaceProject))
 	usesPModel, _ := connectedRepositoryUsesPModel()
@@ -289,6 +295,12 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 		if partition == PartitionLocal {
 			treeRoot = localTreeRootSecrets
 		}
+		origin, identityOnly, highConfidence := belongingAnnotations(belonging, secretsBundle, partition)
+		if highConfidence {
+			tag += " · 疑似孤儿"
+		} else if identityOnly {
+			tag += " · 仅密钥"
+		}
 		candidates = append(candidates, DeleteCandidate{
 			Kind:          DeleteKindSecret,
 			SecretPath:    notePath,
@@ -304,6 +316,9 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 			Partition:     partition,
 			ScopeTag:      scopeTag,
 			Unmanaged:     unmanaged,
+			OriginRepo:    origin,
+			IdentityOnly:  identityOnly,
+			HighConfidenceOrphan: highConfidence,
 		})
 	}
 	seenSSHRemote := make(map[string]struct{})
@@ -340,6 +355,12 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 		if partition == PartitionLocal {
 			treeRoot = localTreeRootSecrets
 		}
+		origin, identityOnly, highConfidence := belongingAnnotations(belonging, secretsBundle, partition)
+		if highConfidence {
+			tag += " · 疑似孤儿"
+		} else if identityOnly {
+			tag += " · 仅密钥"
+		}
 		candidates = append(candidates, DeleteCandidate{
 			Kind:          DeleteKindSSHKey,
 			SSHKeyName:    keyName,
@@ -355,6 +376,9 @@ func ListRemoteInventory(ctx context.Context, workspace Workspace, includeRemote
 			Partition:     partition,
 			ScopeTag:      scopeTag,
 			Unmanaged:     unmanaged,
+			OriginRepo:    origin,
+			IdentityOnly:  identityOnly,
+			HighConfidenceOrphan: highConfidence,
 		})
 	}
 

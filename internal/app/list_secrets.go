@@ -20,6 +20,10 @@ type SecretFileMetadata struct {
 	LocalSizeBytes    int64  `json:"local_size_bytes,omitempty"`
 	LocalModifiedUnix int64  `json:"local_modified_unix,omitempty"`
 	RemoteExists      *bool  `json:"remote_exists,omitempty"`
+	// ADR 0034 归属标注：registry 快照 join 出的只读展示字段，不改变任何写路径。
+	OriginRepo   string `json:"origin_repo,omitempty"`
+	IdentityOnly bool   `json:"identity_only,omitempty"`
+	Orphan       bool   `json:"orphan,omitempty"`
 }
 
 // ListSecretsMetadataResult 汇总私密资产元数据列表。
@@ -125,9 +129,13 @@ func mergeRemoteSecretMetadataForWorkspace(ctx context.Context, workspace Worksp
 	targets = append(targets, discoverRemoteSecretTargets(
 		ctx, client, workspace, loadVaultBundleScopes(workspace, reporter), targets, reporter)...)
 
+	// ADR 0034：registry 快照 join 出归属标注；registry 不可达时字段留空、不判孤儿。
+	belonging := newSecretsBelongingResolver(ctx, workspace, projectConfig)
+
 	// ListNotes 只回 note 名（相对同步根），不回正文——元数据接口绝不能碰到密钥内容。
 	for _, target := range targets {
 		label := formatSyncTargetLabel(target)
+		origin, identityOnly, orphan := belongingRowAnnotation(belonging, target.Address)
 		notes, listErr := client.ListNotes(ctx, target)
 		if listErr != nil {
 			emit(reporter, EventWarn, "secrets.list", fmt.Sprintf("列出远端 %s 元数据失败: %v", label, listErr), nil)
@@ -149,6 +157,10 @@ func mergeRemoteSecretMetadataForWorkspace(ctx context.Context, workspace Worksp
 				meta = &SecretFileMetadata{SecretsBundle: target.Address, ProjectRelPath: projectRel}
 				byKey[key] = meta
 			}
+			// 归属按 folder（产品）判定，同一 target 的全部 note 共用一份标注。
+			meta.OriginRepo = origin
+			meta.IdentityOnly = identityOnly
+			meta.Orphan = orphan
 			exists := true
 			meta.RemoteExists = &exists
 			localAbs, absErr := secrets.AbsolutePath(projectRoot, target, noteRel)

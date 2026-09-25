@@ -6,6 +6,7 @@ import { EmptyState, Notice } from '@/components/ui/feedback'
 import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel'
 import { invokeTyped } from '@/lib/api'
 import { actionSpec, resource } from '@/lib/console'
+import { repoLabel } from '@/lib/utils'
 
 // SecretFile 只有元数据。list_secrets 按设计不返回 Note 正文，
 // Console 这一侧也不该有任何能显示密钥内容的分支。
@@ -16,6 +17,10 @@ type SecretFile = {
   local_size_bytes?: number
   local_modified_unix?: number
   remote_exists?: boolean
+  // ADR 0034 归属标注：registry 快照 join 出的只读字段；registry 不可达时全部留空。
+  origin_repo?: string
+  identity_only?: boolean
+  orphan?: boolean
 }
 
 export type SecretsMetadata = {
@@ -24,6 +29,15 @@ export type SecretsMetadata = {
   remote_checked: boolean
   files: SecretFile[]
   skipped_reason?: string
+}
+
+// 顶层分组键：孤儿折叠进「疑似孤儿」区，其余按来源仓分组。
+type BelongingGroup = {
+  key: string
+  title: string
+  subtitle: string
+  suspected: boolean
+  files: SecretFile[]
 }
 
 export function SecretsPanel(props: {
@@ -47,7 +61,7 @@ export function SecretsPanel(props: {
     <Panel>
       <PanelHeader
         title="密钥清单"
-        description="只显示落地路径与状态，不显示也不记录任何正文。清单以 Bitwarden 的 Note 列表为准。"
+        description="只显示落地路径与状态，不显示也不记录任何正文。清单以 Bitwarden 的 Note 列表为准；归属来自 registry 快照。"
       />
       <PanelBody className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -85,11 +99,7 @@ export function SecretsPanel(props: {
             </div>
             {data.skipped_reason && <Notice tone="info" text={data.skipped_reason} />}
             {data.files.length > 0 ? (
-              <div className="divide-y divide-line overflow-hidden rounded-lg border border-line">
-                {data.files.map((file) => (
-                  <SecretRow key={`${file.secrets_bundle}-${file.project_rel_path}`} file={file} />
-                ))}
-              </div>
+              <SecretsGroups files={data.files} />
             ) : (
               <EmptyState
                 className="border-none"
@@ -105,11 +115,79 @@ export function SecretsPanel(props: {
   )
 }
 
+// 按「来源仓 → 产品」两级分组（ADR 0034）：同一产品仓的多个产品 folder 归到一组，
+// 组头副标题显示 origin_repo；registry 查无归属的行折叠进「疑似孤儿」区。
+function SecretsGroups({ files }: { files: SecretFile[] }) {
+  const groups = groupByOrigin(files)
+  return (
+    <div className="space-y-2">
+      {groups.map((group) => (
+        <div
+          key={group.key}
+          className={`overflow-hidden rounded-lg border ${group.suspected ? 'border-warn/35' : 'border-line'}`}
+        >
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-canvas/40 px-3 py-2">
+            <span className="text-xs font-medium text-ink">{group.title}</span>
+            {group.subtitle && (
+              <Badge tone="quiet" className="font-mono" title={group.subtitle}>{group.subtitle}</Badge>
+            )}
+            {group.suspected && <Badge tone="warn">registry 查无此产品</Badge>}
+            <span className="tnum ml-auto text-[11px] text-faint">{group.files.length} 条</span>
+          </div>
+          <div className="divide-y divide-line">
+            {group.files.map((file) => (
+              <SecretRow key={`${file.secrets_bundle}-${file.project_rel_path}`} file={file} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function groupByOrigin(files: SecretFile[]): BelongingGroup[] {
+  const buckets = new Map<string, BelongingGroup>()
+  for (const file of files) {
+    const suspected = file.orphan === true
+    const origin = (file.origin_repo || '').trim()
+    const key = suspected ? '__orphan__' : origin || '__unassigned__'
+    let group = buckets.get(key)
+    if (!group) {
+      group = {
+        key,
+        title: suspected ? '疑似孤儿' : origin ? repoLabel(origin) : '未归属',
+        subtitle: suspected ? '' : origin,
+        suspected,
+        files: [],
+      }
+      buckets.set(key, group)
+    }
+    group.files.push(file)
+  }
+  const groups = [...buckets.values()]
+  const order = (group: BelongingGroup) =>
+    group.suspected ? 2 : group.key === '__unassigned__' ? 1 : 0
+  groups.sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title))
+  for (const group of groups) {
+    group.files.sort((a, b) =>
+      a.secrets_bundle.localeCompare(b.secrets_bundle) || a.project_rel_path.localeCompare(b.project_rel_path)
+    )
+  }
+  return groups
+}
+
 function SecretRow({ file }: { file: SecretFile }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-canvas/40 px-3 py-2">
       <span className="min-w-0 flex-1 break-all font-mono text-xs text-ink">{file.project_rel_path}</span>
       <Badge tone="quiet" className="font-mono">{file.secrets_bundle}</Badge>
+      {file.orphan
+        ? <Badge tone="warn" title="registry 里查无此产品；删除前先确认它真的不再被使用">未归属</Badge>
+        : file.identity_only
+          ? <Badge tone="accent" title="registry 里有产品身份但无 Git 资产；密钥留在 Bitwarden 同名 folder">仅密钥</Badge>
+          : file.origin_repo
+            ? <Badge tone="good" title={file.origin_repo}>已归属</Badge>
+            : <Badge tone="quiet" title="registry 不可达或产品未发布，暂无归属信息">归属未知</Badge>}
       {file.remote_exists && <Badge tone="good">远端</Badge>}
       {file.local_exists
         ? <span className="tnum text-[11px] text-faint">{describeLocal(file)}</span>

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shichao402/Dec/internal/config"
+	"github.com/shichao402/Dec/internal/registry"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/types"
 	"gopkg.in/yaml.v3"
@@ -91,11 +92,73 @@ func TestListSecretsMetadata_IncludeRemoteUsesStubWithoutContent(t *testing.T) {
 	if file.SecretsBundle != "vikunja/private/local" || file.ProjectRelPath != ".secrets/vikunja/.env/vikunja.env" {
 		t.Fatalf("元数据 = %#v", file)
 	}
+	// TestMain 把 registry 快照置为不可达：归属字段留空，绝不误判孤儿（ADR 0034 容错红线）。
+	if file.Orphan || file.IdentityOnly || file.OriginRepo != "" {
+		t.Fatalf("registry 不可达时归属字段应留空: %#v", file)
+	}
 	if file.RemoteExists == nil || !*file.RemoteExists {
 		t.Fatalf("RemoteExists = %#v", file.RemoteExists)
 	}
 	if !file.LocalExists || file.LocalSizeBytes == 0 {
 		t.Fatalf("本地元数据 = %#v", file)
+	}
+}
+
+// ADR 0034：归属 join 三态。正常产品带 origin_repo；身份型标 identity_only；
+// registry 查无的 folder 标 orphan。registry 不可达时全部留空（见上一用例）。
+func TestListSecretsMetadata_BelongingJoin(t *testing.T) {
+	const kitRepo = "https://example.com/DecPersonalDevKit.git"
+	decHome := t.TempDir()
+	setEnvForProjectTest(t, "DEC_HOME", decHome)
+	stubBelongingSnapshots(t, map[string]registry.ProjectSnapshot{
+		"cnb":           {OriginRepo: kitRepo, Assets: []registry.SnapshotAsset{{Name: "demo"}}},
+		"tencent-cloud": {OriginRepo: kitRepo},
+	})
+	secretsDir := filepath.Join(decHome, "secrets")
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := secrets.Config{ServerURL: "https://vault.example.com"}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "config.yaml"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	secrets.SetSession("test-session")
+	secrets.SetUserKey(bytes.Repeat([]byte{0x01}, 64))
+	t.Cleanup(secrets.ClearSession)
+
+	orig := secretsClientFactory
+	secretsClientFactory = func() secrets.Client {
+		return &secrets.StubClient{NotesByFolder: map[string][]secrets.SecureNote{
+			"cnb/private/project":           {{RelativePath: ".env/cnb.env", Content: "T=1\n"}},
+			"tencent-cloud/private/project": {{RelativePath: ".env/tc.env", Content: "T=1\n"}},
+			"nobody/private/project":        {{RelativePath: ".env/nobody.env", Content: "T=1\n"}},
+		}}
+	}
+	t.Cleanup(func() { secretsClientFactory = orig })
+
+	result, err := ListSecretsMetadata(context.Background(), t.TempDir(), true, nil)
+	if err != nil {
+		t.Fatalf("ListSecretsMetadata() = %v", err)
+	}
+	byFolder := make(map[string]SecretFileMetadata)
+	for _, file := range result.Files {
+		byFolder[file.SecretsBundle] = file
+	}
+	if got := len(byFolder); got != 3 {
+		t.Fatalf("files = %#v, 期望 3 个 folder", result.Files)
+	}
+	if file := byFolder["cnb/private/local"]; file.OriginRepo != kitRepo || file.IdentityOnly || file.Orphan {
+		t.Fatalf("正常产品 = %#v", file)
+	}
+	if file := byFolder["tencent-cloud/private/local"]; !file.IdentityOnly || file.Orphan || file.OriginRepo != kitRepo {
+		t.Fatalf("身份型产品 = %#v", file)
+	}
+	if file := byFolder["nobody/private/local"]; !file.Orphan || file.IdentityOnly || file.OriginRepo != "" {
+		t.Fatalf("疑似孤儿 = %#v", file)
 	}
 }
 

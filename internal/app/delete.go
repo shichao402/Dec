@@ -77,6 +77,11 @@ type DeleteCandidate struct {
 	AssetPlane    types.AssetPlane
 	Unmanaged     bool // 裸 folder 等非 Dec 管理节点
 	ReadOnly      bool // 只读展示（如无文件夹）
+
+	// ADR 0034 归属标注：registry 快照 join 出的只读展示信息，不影响删除语义。
+	OriginRepo           string // 来源产品仓（registry provider.yaml / cache 回落）
+	IdentityOnly         bool   // registry 有身份无资产：密钥留在 BW 同名 folder
+	HighConfidenceOrphan bool   // registry 查无 + 无 requires 消费：高置信删除候选
 }
 
 // DeleteSelectionItem 为一次删除操作选中的候选项。

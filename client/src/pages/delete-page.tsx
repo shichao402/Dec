@@ -11,6 +11,7 @@ import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel'
 import { invokeTyped, runOrWatchTyped } from '@/lib/api'
 import { actionSpec, resource } from '@/lib/console'
 import { cn } from '@/lib/utils'
+import { repoLabel } from '@/lib/utils'
 import type { ManagedProject } from '@/lib/utils'
 
 const CONFIRM_WORD = '删除'
@@ -42,6 +43,10 @@ type DeleteCandidate = {
   AssetPlane: string
   Unmanaged: boolean
   ReadOnly: boolean
+  // ADR 0034 归属标注：registry 快照 join 出的只读展示信息。
+  OriginRepo: string
+  IdentityOnly: boolean
+  HighConfidenceOrphan: boolean
 }
 
 type DeleteResult = {
@@ -307,6 +312,11 @@ function CandidateRow(props: {
       <span className="min-w-0 flex-1 break-all text-[13px] text-ink">{item.Label}</span>
       <Badge tone="quiet">{kindLabel(item.Kind)}</Badge>
       {item.GroupTitle && <Badge tone="quiet" className="font-mono">{item.GroupTitle}</Badge>}
+      {item.HighConfidenceOrphan && (
+        <Badge tone="bad" title="registry 查无此产品且无 requires 消费；删除前建议再人工确认一次">高置信孤儿</Badge>
+      )}
+      {item.OriginRepo && <Badge tone="quiet" title={item.OriginRepo}>{repoLabel(item.OriginRepo)}</Badge>}
+      {item.IdentityOnly && <Badge tone="accent" title="registry 有产品身份无 Git 资产；密钥留在 Bitwarden 同名 folder">仅密钥</Badge>}
       {item.Orphan && <Badge tone="warn">孤儿</Badge>}
       {item.Unmanaged && <Badge tone="warn">非 Dec 管理</Badge>}
     </label>

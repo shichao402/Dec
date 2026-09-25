@@ -78,7 +78,7 @@ MCP 不绑定某个仓库，固定打本机服务。先 `dec_console_status` / `
 | 拉取并渲染 | `dec_pull` |
 | 个人 Git / 密钥推回 | `dec_push`；官方路径禁止 |
 | 提交官方本地覆写 | `dec_propose_upstream` |
-| 私密资产元数据 | `dec_list_secrets`（绝不返回正文/密钥；Console 在同步页「密钥清单」） |
+| 私密资产元数据 | `dec_list_secrets`（绝不返回正文/密钥；带来源仓/仅密钥/疑似孤儿归属标注；Console 在同步页「密钥清单」） |
 | 删除候选 / 删除 | `dec_list_delete_candidates` / `dec_delete`（Console 在删除页） |
 | 置备远端设备 | `dec_provision_remote`（Linux/macOS；首次置备必须 `confirmed=true`） |
 | 连仓库 | `dec_connect_repo` |

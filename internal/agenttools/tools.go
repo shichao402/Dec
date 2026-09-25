@@ -125,7 +125,7 @@ func catalog() []toolDef {
 			},
 			{
 				Name:        "dec_list_secrets",
-				Description: "列出某平面私密资产元数据（路径、本地/远端存在性；plane=local|global|both）。绝不返回 token/密钥/正文。",
+				Description: "列出某平面私密资产元数据（路径、本地/远端存在性、来源仓 origin_repo、仅密钥 identity_only、疑似孤儿 orphan；plane=local|global|both）。绝不返回 token/密钥/正文。",
 				Owner:       OwnerServer,
 				Sample:      listSecretsParams{},
 			},
