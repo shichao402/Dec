@@ -28,7 +28,7 @@ func entryURLs() []string {
 		return append([]string(nil), cfg.Directory.EntryURLs...)
 	}
 	return []string{
-		"https://raw.firoyang.com/rup/directory/dec.pb",
+		"https://update-internal.firoyang.com/directory/dec.pb",
 	}
 }
 

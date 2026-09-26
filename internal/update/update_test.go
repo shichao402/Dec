@@ -85,12 +85,12 @@ func TestUpdaterSelectsRuntimeAudience(t *testing.T) {
 	}
 }
 
-func TestEntryURLsPointAtPublishDomain(t *testing.T) {
+func TestEntryURLsPointAtUpdateInternalDomain(t *testing.T) {
 	urls := entryURLs()
 	if len(urls) != 1 {
 		t.Fatalf("entryURLs = %v", urls)
 	}
-	if !strings.Contains(urls[0], "publish.firoyang.com") {
+	if !strings.Contains(urls[0], "update-internal.firoyang.com") {
 		t.Fatalf("primary entry = %q", urls[0])
 	}
 	for _, u := range urls {

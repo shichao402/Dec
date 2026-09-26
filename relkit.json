@@ -75,19 +75,19 @@
       "serve"
     ],
     "entryUrls": [
-      "https://publish.firoyang.com/directory/dec.pb"
+      "https://update-internal.firoyang.com/directory/dec.pb"
     ],
     "services": [
       {
-        "id": "publish-primary",
+        "id": "update-internal-primary",
         "priority": 10,
-        "indexUrl": "https://publish.firoyang.com/index/dec/stable.pb",
+        "indexUrl": "https://update-internal.firoyang.com/index/dec/stable.pb",
         "channel": "stable"
       },
       {
-        "id": "publish-dev",
+        "id": "update-internal-dev",
         "priority": 10,
-        "indexUrl": "https://publish.firoyang.com/index/dec/dev.pb",
+        "indexUrl": "https://update-internal.firoyang.com/index/dec/dev.pb",
         "channel": "dev"
       }
     ]
