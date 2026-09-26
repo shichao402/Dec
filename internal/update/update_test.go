@@ -85,17 +85,17 @@ func TestUpdaterSelectsRuntimeAudience(t *testing.T) {
 	}
 }
 
-func TestEntryURLsPointAtRawDomains(t *testing.T) {
+func TestEntryURLsPointAtPublishDomain(t *testing.T) {
 	urls := entryURLs()
 	if len(urls) != 1 {
 		t.Fatalf("entryURLs = %v", urls)
 	}
-	if !strings.Contains(urls[0], "raw.firoyang.com") {
+	if !strings.Contains(urls[0], "publish.firoyang.com") {
 		t.Fatalf("primary entry = %q", urls[0])
 	}
 	for _, u := range urls {
-		if strings.Contains(u, "raw2.firoyang.com") {
-			t.Fatalf("chengdu backup must be gone: %v", urls)
+		if strings.Contains(u, "raw.firoyang.com") || strings.Contains(u, "raw2.firoyang.com") {
+			t.Fatalf("cos raw planes must be gone: %v", urls)
 		}
 	}
 }
