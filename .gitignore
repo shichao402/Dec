@@ -99,3 +99,6 @@ mise.local.toml
 *.private.pb
 
 .relkit/cache/
+
+# 本地构建产物，不入库（relkit CLI 与 updater sidecar 二进制）
+tools/bin/
