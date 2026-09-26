@@ -1,11 +1,11 @@
-# Dec 自更新架构（RUP + COS）
+# Dec 自更新架构（RUP + relkit-store）
 
-Console 自更新由 Tauri 壳调用 `third_party/relkit/sdk/rust` facade 与 lock-pinned `relkit-updater` sidecar；目标运行时套件的检查/下载仍使用 `go.firoyang.com/relkit/sdk`（`replace` 到 `third_party/relkit`）。发布走腾讯云 COS 自有域名。
+Console 自更新由 Tauri 壳调用 `third_party/relkit/sdk/rust` facade 与 lock-pinned `relkit-updater` sidecar；目标运行时套件的检查/下载仍使用 `go.firoyang.com/relkit/sdk`（`replace` 到 `third_party/relkit`）。发布走发布机 relkit-store（COS 已于 2026-09-26 退役清零）。
 终端用户只下载 Console；运行时套件是 Console 管理的目标端程序组。
 
 ## 两条客户端链
 
-- 共同入口来自根目录 `relkit.json`：`https://raw.firoyang.com/rup/directory/dec.pb`
+- 共同入口来自根目录 `relkit.json`：`https://update-internal.firoyang.com/directory/dec.pb`（协议读切面；旧 `raw.firoyang.com/rup/` 与 `publish` 读兼容面已于 2026-09-26 下线/收敛，存量 ≤1.13.92 客户端靠自然升级消化）
 - Console 壳用 `include_str!` 编入同一份 `relkit.json`；Go 运行时套件链通过 `go generate ./internal/update` 复制到 `internal/update/embed/`。后者只服务 `audience=runtime`，不是 Console 自更新入口
 - `CurrentCode` = `sdk.SemverCode(version)`（`v1.13.25` → `1013025`）
 - 默认 channel：`stable`；Console 设置页可改并落盘到本机壳偏好（`preferences.json`），检查与安装都跟所选渠道。发版仍由 `dev/v*` / `stable/v*` tag 决定
@@ -28,7 +28,7 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 
 | Git tag | RUP channel | 额外动作 |
 |---------|-------------|---------|
-| `dev/vX.Y.Z` | `dev` | 仅 COS / RUP |
+| `dev/vX.Y.Z` | `dev` | 仅 RUP |
 | `stable/vX.Y.Z` | `stable` | 另推裸 tag `vX.Y.Z`、GitHub Release |
 
 流程：
@@ -38,8 +38,8 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 3. GitHub Actions：Ubuntu 交叉编全平台运行时套件；Console 只在 `windows-latest` 与 `macos-15-intel` 上原生编两套人面安装包并内置同平台套件（不发 Linux / darwin-arm64 Console）
 4. `relkit stage --channel <dev|stable>` 把两类产物写入同一次 staged 树（无私钥）
 5. runtime 标 `audience=runtime`，Console 标 `audience=user`
-6. `relkit cas-put` 向 agent 申请唯一 ingest 的上传 URL：COS 已有同 sha256 则跳过，否则 CI 直接 PUT；随后只上传 `staged.pb` + `release-policy.json`
-7. `POST /v1/publish` → 发布机从 CAS Promote、签名并写 COS
+6. `relkit cas-put` 向 agent 申请唯一 ingest 的上传 URL：store 已有同 sha256 则跳过，否则 CI 直接 PUT；随后只上传 `staged.pb` + `release-policy.json`
+7. `POST /v1/publish` → 发布机从 CAS Promote、签名并写 relkit-store
 8. `stable` 的 GitHub Release **只挂** `dec-console-*`；运行时组件不进人面附件
 9. 人类 browse 页按 audience 过滤依赖 **relkit-serve 发布端**升级，不能靠 Dec 本地 stage 单方面完成
 
@@ -56,7 +56,7 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 - `.secrets/` 已 gitignore；**禁止**把私钥内容 commit 进 git。
 - `.env` **不用于** relkit 私钥。
 - **不要**设置 `RELKIT_PRIVATE_KEY` / `signing.privateKeyEnv`。
-- `COS_SECRET_*` 只在发布机；CI 只有 **该产品** 的 `RELKIT_UPLOAD_TOKEN`（无私钥；可选 `RELKIT_AGENT_URL`，可写站点根或 `/v1`，默认 `https://publish.firoyang.com/v1`）。放到 GitHub 仓库 Secrets。同一 agent 上的每个产品各自一张 token；没有实例级 `RELKIT_AGENT_TOKEN`。
+- CI 只有 **该产品** 的 `RELKIT_UPLOAD_TOKEN`（无私钥；可选 `RELKIT_AGENT_URL`，可写站点根或 `/v1`，默认 `https://publish.firoyang.com/v1`）。放到 GitHub 仓库 Secrets。COS 凭据已随桶退役清零。同一 agent 上的每个产品各自一张 token；没有实例级 `RELKIT_AGENT_TOKEN`。
 
 ## 与首次安装 / GitHub 的关系
 

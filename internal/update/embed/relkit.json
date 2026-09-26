@@ -18,16 +18,6 @@
     ]
   },
   "backends": {
-    "cos": {
-      "type": "s3-compatible",
-      "endpoint": "https://cos.ap-guangzhou.myqcloud.com",
-      "bucket": "relkit-updates-1251882798",
-      "region": "ap-guangzhou",
-      "prefix": "rup/",
-      "baseUrl": "https://raw.firoyang.com/rup/",
-      "accessKeyEnv": "COS_SECRET_ID",
-      "secretKeyEnv": "COS_SECRET_KEY"
-    },
     "serve": {
       "type": "relkit-compatible",
       "baseUrl": "https://publish.firoyang.com/",
@@ -67,7 +57,7 @@
   },
   "site": {
     "title": "Dec",
-    "description": "\u4e2a\u4eba AI \u77e5\u8bc6\u4ed3\u5e93\u4ee3\u7406\u3002",
+    "description": "个人 AI 知识仓库代理。",
     "homepage": "https://cnb.cool/shichao402/Dec"
   },
   "directory": {
