@@ -23,6 +23,8 @@ type ProvideCandidate struct {
 	Origin      string
 	Declared    bool
 	DeclaredKey string
+	// Product 是候选所属的产品名；单产品仓为空，Console 归入默认分组。
+	Product string
 }
 
 type ProvideCandidatesState struct {
@@ -34,30 +36,46 @@ type ProvideCandidatesState struct {
 
 // SuggestProjectProvides 扫描项目里已经存在的资产目录，返回可直接登记的候选。
 // 它只读，不改配置，也不碰 .dec/sync 工作副本。
+// 多产品仓（ADR 0031）扫描每个产品的作者根；单产品仓沿用 provides_root。
 func SuggestProjectProvides(projectRoot string) (*ProvideCandidatesState, error) {
 	state, err := LoadProjectProvides(projectRoot)
 	if err != nil {
 		return nil, err
 	}
-	declared := make(map[string]string, len(state.Provides))
+
+	declared := map[string]string{}
+	// declaredSource 以「产品 + 相对产品 root 的 source」为唯一键，
+	// 同名目录在两个产品下互不冲突。
+	for _, product := range state.Products {
+		prefix := productKey(product.Name)
+		for key, item := range product.Provides {
+			declared[prefix+strings.ToLower(item.Source)] = key
+		}
+	}
 	for key, item := range state.Provides {
-		declared[strings.ToLower(filepath.ToSlash(item.Source))] = key
+		declared[productKey("")+strings.ToLower(item.Source)] = key
 	}
 
 	var out []ProvideCandidate
 	seen := map[string]bool{}
-	add := func(candidate ProvideCandidate) {
+	add := func(product string, sourceRoot string, candidate ProvideCandidate) {
 		candidate.Source = filepath.ToSlash(candidate.Source)
-		if seen[strings.ToLower(candidate.Source)] {
+		if seen[productKey(product)+strings.ToLower(candidate.Source)] {
 			return
 		}
 		if !config.IsValidProvideName(candidate.Name) {
 			return
 		}
-		if key, ok := declared[strings.ToLower(candidate.Source)]; ok {
+		candidate.Product = product
+		if key, ok := declared[productKey(product)+strings.ToLower(candidate.Source)]; ok {
 			candidate.Declared, candidate.DeclaredKey = true, key
 		}
-		if target, err := config.ProjectProvideTarget(state.ProjectName, types.ProjectProvide{
+		// 派生 target 用产品名（多产品）或 project_name（单产品）作订阅锚点。
+		projectName := state.ProjectName
+		if product != "" {
+			projectName = product
+		}
+		if target, err := config.ProjectProvideTarget(projectName, types.ProjectProvide{
 			Source:     candidate.Source,
 			Visibility: candidate.Visibility,
 			Plane:      candidate.Plane,
@@ -66,22 +84,47 @@ func SuggestProjectProvides(projectRoot string) (*ProvideCandidatesState, error)
 		}); err == nil {
 			candidate.Target = target
 		}
-		seen[strings.ToLower(candidate.Source)] = true
+		seen[productKey(product)+strings.ToLower(candidate.Source)] = true
 		out = append(out, candidate)
 	}
 
 	// 只扫作者根下的规范目录。`.dec/` 是 Dec 状态，IDE 目录是渲染目标；
 	// 两者都不是作者源，不能靠名字前缀猜测其中哪些文件“也许可以提供”。
-	for _, dir := range assetScanDirs(projectRoot, state.ProvidesRoot) {
-		for _, kind := range bundle.VaultAssetKinds {
-			if kind.Type != dir.kindType && dir.kindType != "" {
-				continue
+	if len(state.Products) > 0 {
+		for _, product := range state.Products {
+			for _, dir := range assetScanDirs(projectRoot, product.Root) {
+				for _, kind := range bundle.VaultAssetKinds {
+					if kind.Type != dir.kindType && dir.kindType != "" {
+						continue
+					}
+					scanAssetKind(projectRoot, dir, kind, func(candidate ProvideCandidate) {
+						// 扫描结果 source 相对仓根，产品声明的 source 相对产品 root；
+						// 折算后再比对与登记。
+						if product.Root != "" && strings.HasPrefix(candidate.Source, product.Root+"/") {
+							candidate.Source = strings.TrimPrefix(candidate.Source, product.Root+"/")
+						}
+						add(product.Name, product.Root, candidate)
+					})
+				}
 			}
-			scanAssetKind(projectRoot, dir, kind, add)
+		}
+	} else {
+		for _, dir := range assetScanDirs(projectRoot, state.ProvidesRoot) {
+			for _, kind := range bundle.VaultAssetKinds {
+				if kind.Type != dir.kindType && dir.kindType != "" {
+					continue
+				}
+				scanAssetKind(projectRoot, dir, kind, func(candidate ProvideCandidate) {
+					add("", state.ProvidesRoot, candidate)
+				})
+			}
 		}
 	}
 
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].Product != out[j].Product {
+			return out[i].Product < out[j].Product
+		}
 		if out[i].Type != out[j].Type {
 			return out[i].Type < out[j].Type
 		}
@@ -93,6 +136,10 @@ func SuggestProjectProvides(projectRoot string) (*ProvideCandidatesState, error)
 		AuthorDirs:   state.AuthorDirs,
 		Candidates:   out,
 	}, nil
+}
+
+func productKey(product string) string {
+	return strings.ToLower(product) + "\x00"
 }
 
 type assetScanDir struct {

@@ -11,7 +11,7 @@ import { Field, Input, Select } from '@/components/ui/input'
 import { Panel, PanelFooter } from '@/components/ui/panel'
 import { useActionRegistry } from '@/lib/action-context'
 import { invokeTyped } from '@/lib/api'
-import { actionSpec, resource } from '@/lib/console'
+import { actionSpec, hasTag, resource, toggleTag, PROJECT_TAG_GLOBAL } from '@/lib/console'
 
 type ProvideMapping = {
   Source: string
@@ -22,15 +22,28 @@ type ProvideMapping = {
   Target?: string
 }
 
+type ProductState = {
+  Name: string
+  Root: string
+  Tags?: string[] | null
+  SecretsPlane?: string
+  Provides?: Record<string, Omit<ProvideMapping, 'Target'>> | null
+  Targets?: Record<string, string>
+  AuthorDirs?: string[] | null
+  IdentityOnly?: boolean
+}
+
 type ProvidesResponse = {
+  ProjectName?: string
+  ProvidesRoot?: string
+  AuthorDirs?: string[] | null
   Mappings?: ProvideMapping[]
   Provides?: ProvideMapping[] | Record<string, Omit<ProvideMapping, 'Target'>>
   Targets?: Record<string, string>
-  ProvidesRoot?: string
-  AuthorDirs?: string[] | null
+  Products?: ProductState[] | null
 }
 
-type Candidate = ProvideMapping & { Origin?: string; Declared?: boolean }
+type Candidate = ProvideMapping & { Origin?: string; Declared?: boolean; Product?: string }
 type CandidatesResponse = { ProjectName?: string; Candidates?: Candidate[] | null }
 
 // 作者根只是 source 的前缀：改根时把每条来源整体平移，
@@ -63,6 +76,55 @@ function providesPayload(mappings: ProvideMapping[]) {
   return Object.fromEntries(mappings.map(({ Target: _target, ...mapping }) => [mapping.Name, mapping]))
 }
 
+type ProductDraft = {
+  Name: string
+  Root: string
+  Tags: string[]
+  SecretsPlane: string
+  Items: ProvideMapping[]
+  IdentityOnly: boolean
+}
+
+type LoadedState = {
+  mappings: ProvideMapping[]
+  root: string
+  authorDirs: string[]
+  products: ProductDraft[]
+  isMulti: boolean
+  projectName: string
+}
+
+function toDraft(product: ProductState): ProductDraft {
+  const items = Object.entries(product.Provides || {}).map(([key, mapping]) => ({
+    ...mapping,
+    Name: mapping.Name || key,
+    Target: product.Targets?.[key],
+  }))
+  return {
+    Name: product.Name,
+    Root: product.Root,
+    Tags: product.Tags || [],
+    SecretsPlane: product.SecretsPlane || '',
+    Items: items,
+    IdentityOnly: product.IdentityOnly ?? items.length === 0,
+  }
+}
+
+function fromResponse(value: ProvideMapping[] | ProvidesResponse): LoadedState {
+  if (Array.isArray(value)) {
+    return { mappings: value, root: '', authorDirs: [], products: [], isMulti: false, projectName: '' }
+  }
+  const products = (value.Products || []).map(toDraft)
+  return {
+    mappings: mappingsOf(value),
+    root: value.ProvidesRoot || '',
+    authorDirs: value.AuthorDirs || [],
+    products,
+    isMulti: products.length > 0,
+    projectName: value.ProjectName || '',
+  }
+}
+
 // 只有资产作者会碰提供项，所以它是项目的下级页面，不占项目页主区。
 export function ProvidesPage(props: {
   deviceId: string
@@ -70,12 +132,9 @@ export function ProvidesPage(props: {
   label: string
   onBack: () => void
 }) {
-  const [saved, setSaved] = useState<ProvideMapping[] | null>(null)
-  const [draft, setDraft] = useState<ProvideMapping[]>([])
-  const [savedRoot, setSavedRoot] = useState('')
-  const [root, setRoot] = useState('')
-  const [authorDirs, setAuthorDirs] = useState<string[]>([])
-  const [editing, setEditing] = useState<number | null>(null)
+  const [saved, setSaved] = useState<LoadedState | null>(null)
+  const [draft, setDraft] = useState<LoadedState | null>(null)
+  const [editing, setEditing] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<Candidate[] | null>(null)
   const actions = useActionRegistry()
   const runAction = actions.run
@@ -103,13 +162,9 @@ export function ProvidesPage(props: {
       { force: true },
     )
     if (!outcome.ok) return
-    const next = mappingsOf(outcome.value)
-    const nextRoot = Array.isArray(outcome.value) ? '' : outcome.value.ProvidesRoot || ''
+    const next = fromResponse(outcome.value)
     setSaved(next)
     setDraft(next)
-    setSavedRoot(nextRoot)
-    setRoot(nextRoot)
-    setAuthorDirs(Array.isArray(outcome.value) ? [] : outcome.value.AuthorDirs || [])
     setEditing(null)
   }, [loadSpec, props.root, runAction])
 
@@ -125,33 +180,63 @@ export function ProvidesPage(props: {
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { void load(); void scan() }, [load, scan])
 
-  const dirty = JSON.stringify(saved || []) !== JSON.stringify(draft) || savedRoot !== root
-  // 改根时已登记的来源必须跟着走，否则保存会被作者目录校验整批拒绝。
-  // 落到 blur 而不是每次按键，免得输入路径分隔符时被吃掉。
-  const commitRoot = (raw: string) => {
-    const value = normalizeRoot(raw)
-    if (value === root) return
-    setDraft((items) => items.map((item) => ({ ...item, Source: withRoot(stripRoot(item.Source, root), value) })))
-    setRoot(value)
-  }
-  const declaredSources = new Set(draft.map((item) => item.Source.toLowerCase()))
-  const available = (candidates || []).filter((item) => !declaredSources.has(item.Source.toLowerCase()))
-  const addCandidates = (items: Candidate[]) => {
-    setDraft((current) => [
+  const dirty = saved === null || draft === null
+    ? false
+    : JSON.stringify(saved) !== JSON.stringify(draft)
+  const multi = draft?.isMulti ?? false
+  const products = draft?.products || []
+  const singleCount = draft ? draft.mappings.length : 0
+  const totalCount = multi ? products.reduce((sum, item) => sum + item.Items.length, 0) : singleCount
+
+  const updateProduct = (name: string, value: ProductDraft) => {
+    setDraft((current) => current && ({
       ...current,
-      ...items.map(({ Origin: _origin, Declared: _declared, ...mapping }) => mapping),
-    ])
-    setEditing(null)
+      products: current.products.map((item) => item.Name === name ? value : item),
+    }))
   }
-  const update = (index: number, value: ProvideMapping) => {
-    setDraft((items) => items.map((item, itemIndex) => itemIndex === index ? value : item))
+  const updateProductItems = (name: string, items: ProvideMapping[]) => {
+    setDraft((current) => current && ({
+      ...current,
+      products: current.products.map((item) => item.Name === name
+        ? { ...item, Items: items, IdentityOnly: items.length === 0 && item.IdentityOnly }
+        : item),
+    }))
   }
+  const updateMappings = (value: ProvideMapping[]) => {
+    setDraft((current) => current && { ...current, mappings: value })
+  }
+
+  // 多产品仓保存：整体替换 products 声明，tags/secrets_plane/身份标记一并落盘。
+  const save = () => invokeTyped(
+    'save_project_provides',
+    props.root,
+    'local',
+    multi
+      ? {
+        Products: products.map((product) => ({
+          Name: product.Name,
+          Root: product.Root,
+          Tags: product.Tags,
+          SecretsPlane: product.SecretsPlane,
+          IdentityOnly: product.IdentityOnly,
+          Provides: Object.fromEntries(product.Items.map(({ Target: _target, ...mapping }) => [mapping.Name, mapping])),
+        })),
+      }
+      : { ProvidesRoot: draft?.root || '', Provides: providesPayload(draft?.mappings || []) },
+    saveSpec.key,
+  )
+
+  const invalid = multi
+    ? products.some((product) => !product.Name.trim() || product.Items.some((item) => !item.Source.trim() || !item.Name.trim()))
+    : (draft?.mappings || []).some((item) => !item.Source.trim() || !item.Name.trim())
 
   return (
     <Page>
       <PageHeader
         title="我提供的资产"
-        description="登记本项目提供的 Git 资产；secrets 由 .secrets 同步规则决定，不在这里声明。"
+        description={multi
+          ? `多产品仓：${products.length} 个产品，${totalCount} 项提供。身份型产品只发身份，密钥留在 Bitwarden。`
+          : '登记本项目提供的 Git 资产；secrets 由 .secrets 同步规则决定，不在这里声明。'}
         meta={<Badge tone="quiet" className="font-mono" title={props.root}>{props.label}</Badge>}
         actions={
           <>
@@ -169,86 +254,216 @@ export function ProvidesPage(props: {
           <ActionFeedback actionKey={suggestSpec.key} />
           <ActionFeedback actionKey={saveSpec.key} />
         </div>
-        <Panel>
-          <AuthorRootField
-            value={root}
-            savedDirs={authorDirs}
-            pending={root !== savedRoot}
-            onCommit={commitRoot}
-          />
-          <CandidatePicker candidates={available} onAdd={addCandidates} />
-          {saved === null ? (
-            <Loading />
-          ) : draft.length === 0 ? (
-            <EmptyState
-              text="当前项目还没有登记提供项"
-              hint={available.length > 0
-                ? '上面是从作者目录扫描到的资产，勾选即可登记。'
-                : `请先在上面列出的作者目录中创建资产（${authorDirs.join('、') || 'skills、commands、rules、mcp'}），再重新扫描。`}
+        {draft === null ? (
+          <Loading />
+        ) : multi ? (
+          <>
+            {products.map((product) => (
+              <ProductPanel
+                key={product.Name}
+                product={product}
+                editing={editing}
+                setEditing={setEditing}
+                candidates={(candidates || []).filter((item) => (item.Product || '') === product.Name)}
+                onUpdate={(value) => updateProduct(product.Name, value)}
+                onUpdateItems={(items) => updateProductItems(product.Name, items)}
+              />
+            ))}
+            {products.length === 0 && (
+              <Panel>
+                <EmptyState
+                  text="当前项目还没有产品声明"
+                  hint="写入 .dec/config.yaml 的 products 字段后，这里会按产品分组展示。"
+                />
+              </Panel>
+            )}
+          </>
+        ) : (
+          <Panel>
+            <AuthorRootField
+              value={draft.root}
+              savedDirs={draft.authorDirs}
+              pending={draft.root !== (saved?.root ?? draft.root)}
+              onCommit={(value) => {
+                const normalized = normalizeRoot(value)
+                setDraft((current) => current && {
+                  ...current,
+                  root: normalized,
+                  mappings: current.mappings.map((item) => ({
+                    ...item,
+                    Source: withRoot(stripRoot(item.Source, current.root), normalized),
+                  })),
+                })
+              }}
             />
-          ) : (
-            <div className="divide-y divide-line">
-              {draft.map((item, index) => (
-                <div key={`${index}-${item.Source}-${item.Name}`} className="px-4 py-3">
-                  {editing === index ? (
-                    <ProvideEditor
-                      value={item}
-                      onChange={(value) => update(index, value)}
-                      onDone={() => setEditing(null)}
-                    />
-                  ) : (
-                    <div className="flex items-center gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="font-mono text-xs font-medium text-ink">{item.Type}/{item.Name || '未命名'}</span>
-                          <Badge tone="quiet">{item.Visibility}</Badge>
-                          <Badge tone="quiet">{item.Plane}</Badge>
-                        </div>
-                        <p className="mt-1 truncate font-mono text-[11px] text-faint" title={item.Source}>
-                          {item.Source || '尚未填写来源'}{item.Target ? ` → ${item.Target}` : ''}
-                        </p>
-                      </div>
-                      <Button size="icon" variant="ghost" aria-label={`编辑 ${item.Name}`} onClick={() => setEditing(index)}>
-                        <Pencil className="size-3.5" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label={`删除 ${item.Name}`}
-                        onClick={() => {
-                          setDraft((items) => items.filter((_, itemIndex) => itemIndex !== index))
-                          setEditing(null)
-                        }}
-                      >
-                        <Trash2 className="size-3.5 text-bad" />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          <PanelFooter>
-            <ActionButton
-              spec={saveSpec}
-              disabled={!dirty || draft.some((item) => !item.Source.trim() || !item.Name.trim())}
-              action={() => invokeTyped(
-                'save_project_provides',
-                props.root,
-                'local',
-                { ProvidesRoot: root, Provides: providesPayload(draft) },
-                saveSpec.key,
-              )}
-              runningLabel="保存中…"
-              onSuccess={() => { void load(); void scan() }}
-            >
-              保存提供项
-            </ActionButton>
-            <span className="text-xs text-faint">{dirty ? '有未保存的改动' : `已配置 ${draft.length} 项`}</span>
-          </PanelFooter>
-        </Panel>
+            <CandidatePicker
+              candidates={(candidates || []).filter((item) => !item.Product)}
+              onAdd={(items) => updateMappings([...draft.mappings, ...items])}
+            />
+            {draft.mappings.length === 0 ? (
+              <EmptyState
+                text="当前项目还没有登记提供项"
+                hint={((candidates || []).filter((item) => !item.Product)).length > 0
+                  ? '上面是从作者目录扫描到的资产，勾选即可登记。'
+                  : `请先在上面列出的作者目录中创建资产（${draft.authorDirs.join('、') || 'skills、commands、rules、mcp'}），再重新扫描。`}
+              />
+            ) : (
+              <div className="divide-y divide-line">
+                {draft.mappings.map((item, index) => (
+                  <ProvideRow
+                    key={`${index}-${item.Source}-${item.Name}`}
+                    item={item}
+                    editing={editing === `single-${index}`}
+                    onEdit={() => setEditing(`single-${index}`)}
+                    onDone={() => setEditing(null)}
+                    onChange={(value) => updateMappings(draft.mappings.map((current, currentIndex) => currentIndex === index ? value : current))}
+                    onRemove={() => {
+                      updateMappings(draft.mappings.filter((_, currentIndex) => currentIndex !== index))
+                      setEditing(null)
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+            <PanelFooter>
+              <ActionButton
+                spec={saveSpec}
+                disabled={!dirty || invalid}
+                action={save}
+                runningLabel="保存中…"
+                onSuccess={() => { void load(); void scan() }}
+              >
+                保存提供项
+              </ActionButton>
+              <span className="text-xs text-faint">{dirty ? '有未保存的改动' : `已配置 ${draft.mappings.length} 项`}</span>
+            </PanelFooter>
+          </Panel>
+        )}
+        {multi && (
+          <Panel>
+            <PanelFooter>
+              <ActionButton
+                spec={saveSpec}
+                disabled={!dirty || invalid}
+                action={save}
+                runningLabel="保存中…"
+                onSuccess={() => { void load(); void scan() }}
+              >
+                保存提供项
+              </ActionButton>
+              <span className="text-xs text-faint">{dirty ? '有未保存的改动' : `已配置 ${totalCount} 项`}</span>
+            </PanelFooter>
+          </Panel>
+        )}
       </PageScroll>
     </Page>
+  )
+}
+
+// 单个产品的作者声明卡：root、tags、secrets_plane 与该产品的提供项列表。
+function ProductPanel(props: {
+  product: ProductDraft
+  editing: string | null
+  setEditing: (value: string | null) => void
+  candidates: Candidate[]
+  onUpdate: (value: ProductDraft) => void
+  onUpdateItems: (items: ProvideMapping[]) => void
+}) {
+  const { product } = props
+  const items = product.Items
+  const declared = new Set(items.map((item) => item.Source.toLowerCase()))
+  const available = props.candidates.filter((item) => !declared.has(item.Source.toLowerCase()))
+  return (
+    <Panel>
+      <div className="border-b border-line px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-sm font-medium text-ink">{product.Name || '未命名产品'}</span>
+          {product.IdentityOnly && <Badge tone="accent">身份型</Badge>}
+          <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-muted">
+            <Checkbox
+              aria-label={`${product.Name} 身份型产品`}
+              checked={product.IdentityOnly}
+              onChange={() => props.onUpdate({ ...product, IdentityOnly: !product.IdentityOnly })}
+            />
+            身份型（只发身份）
+          </label>
+        </div>
+        <div className="mt-2 grid gap-3 lg:grid-cols-3">
+          <Field label="作者目录（root）" hint="产品资产在仓库中的落点，相对仓根。">
+            <Input
+              value={product.Root}
+              aria-label={`${product.Name} 作者目录`}
+              onChange={(event) => props.onUpdate({ ...product, Root: normalizeRoot(event.target.value) })}
+            />
+          </Field>
+          <Field label="密钥平面" hint="global = 机器根 ~/.dec/secrets/<p>/；local = 项目 .secrets/<p>/。">
+            <Select
+              value={product.SecretsPlane || ''}
+              aria-label={`${product.Name} 密钥平面`}
+              onChange={(event) => props.onUpdate({ ...product, SecretsPlane: event.target.value })}
+            >
+              <option value="">未声明（迁移期）</option>
+              <option value="global">global（机器根）</option>
+              <option value="local">local（项目）</option>
+            </Select>
+          </Field>
+          <Field label="标签" hint="global = 新机器初始化时建议默认勾选。">
+            <div className="flex h-9 items-center gap-2">
+              <button
+                type="button"
+                aria-pressed={hasTag(product.Tags, PROJECT_TAG_GLOBAL)}
+                className={`rounded border px-2 py-0.5 text-xs ${hasTag(product.Tags, PROJECT_TAG_GLOBAL) ? 'border-accent bg-accent/10 text-accent' : 'border-line text-faint'}`}
+                onClick={() => props.onUpdate({ ...product, Tags: toggleTag(product.Tags, PROJECT_TAG_GLOBAL) })}
+              >
+                global
+              </button>
+            </div>
+          </Field>
+        </div>
+        <p className="mt-1.5 font-mono text-[11px] text-faint">
+          {(product.Root ? `${product.Root}/` : '') + 'skills/  commands/  rules/  mcp/'}
+        </p>
+      </div>
+      <CandidatePicker
+        candidates={available}
+        onAdd={(chosen) => {
+          props.onUpdateItems([...items, ...chosen.map(({ Origin: _o, Declared: _d, Product: _p, ...mapping }) => mapping)])
+          props.setEditing(null)
+        }}
+      />
+      {items.length === 0 ? (
+        <EmptyState
+          text={product.IdentityOnly ? '身份型产品：没有 Git 正文，密钥留在 Bitwarden 的同名项目下。' : '该产品还没有提供项'}
+          hint={available.length > 0
+            ? '上面是从产品作者目录扫描到的资产，勾选即可登记。'
+            : `请先在 ${product.Root || '仓库根'} 下的作者目录（skills、commands、rules、mcp）创建资产，再重新扫描。`}
+        />
+      ) : (
+        <div className="divide-y divide-line">
+          {items.map((item, index) => (
+            <ProvideRow
+              key={`${index}-${item.Source}-${item.Name}`}
+              item={{ ...item, Source: product.Root ? `${product.Root}/${item.Source}` : item.Source }}
+              editing={props.editing === `${product.Name}-${index}`}
+              onEdit={() => props.setEditing(`${product.Name}-${index}`)}
+              onDone={() => props.setEditing(null)}
+              onChange={(value) => props.onUpdateItems(items.map((current, currentIndex) => currentIndex === index
+                ? { ...value, Source: stripRoot(value.Source, product.Root) }
+                : current))}
+              onRemove={() => {
+                props.onUpdateItems(items.filter((_, currentIndex) => currentIndex !== index))
+                props.setEditing(null)
+              }}
+            />
+          ))}
+        </div>
+      )}
+      <PanelFooter>
+        <span className="text-xs text-faint">
+          {product.IdentityOnly ? '身份型，无提供项' : `已配置 ${items.length} 项`}
+        </span>
+      </PanelFooter>
+    </Panel>
   )
 }
 
@@ -300,7 +515,7 @@ function CandidatePicker(props: { candidates: Candidate[]; onAdd: (items: Candid
   return (
     <div className="border-b border-line bg-canvas/40 px-4 py-3">
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-xs font-medium text-ink">项目里发现 {props.candidates.length} 项可提供资产</span>
+        <span className="text-xs font-medium text-ink">发现 {props.candidates.length} 项可提供资产</span>
         <Button
           size="sm"
           variant="ghost"
@@ -336,6 +551,52 @@ function CandidatePicker(props: { candidates: Candidate[]; onAdd: (items: Candid
           </label>
         ))}
       </div>
+    </div>
+  )
+}
+
+function ProvideRow(props: {
+  item: ProvideMapping
+  editing: boolean
+  onEdit: () => void
+  onDone: () => void
+  onChange: (value: ProvideMapping) => void
+  onRemove: () => void
+}) {
+  if (props.editing) {
+    return (
+      <div className="px-4 py-3">
+        <ProvideEditor
+          value={props.item}
+          onChange={props.onChange}
+          onDone={props.onDone}
+        />
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-mono text-xs font-medium text-ink">{props.item.Type}/{props.item.Name || '未命名'}</span>
+          <Badge tone="quiet">{props.item.Visibility}</Badge>
+          <Badge tone="quiet">{props.item.Plane}</Badge>
+        </div>
+        <p className="mt-1 truncate font-mono text-[11px] text-faint" title={props.item.Source}>
+          {props.item.Source || '尚未填写来源'}{props.item.Target ? ` → ${props.item.Target}` : ''}
+        </p>
+      </div>
+      <Button size="icon" variant="ghost" aria-label={`编辑 ${props.item.Name}`} onClick={props.onEdit}>
+        <Pencil className="size-3.5" />
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        aria-label={`删除 ${props.item.Name}`}
+        onClick={props.onRemove}
+      >
+        <Trash2 className="size-3.5 text-bad" />
+      </Button>
     </div>
   )
 }
