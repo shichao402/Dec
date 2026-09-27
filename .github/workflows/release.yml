@@ -196,6 +196,15 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Cargo.lock 已入库，rust-cache 按 lockfile 哈希命中；命中时依赖增量
+      # 编译把 9~18 分钟的 console 构建压到 2~4 分钟。after-release 清理
+      # step 只在后缀 -release 的缓存键里，不影响本 workflow 复用。
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client/src-tauri
+          prefix-key: rust-cache-${{ runner.os }}
+
       - name: Build native Console
         shell: bash
         run: python scripts/build-console.py
