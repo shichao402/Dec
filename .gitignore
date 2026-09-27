@@ -76,6 +76,7 @@ client/src-tauri/resources/updater/*
 .cursor/mcp.json
 .cursor/skills/
 .codebuddy/skills/
+.with/
 
 # 临时文件
 resources/temp/*
