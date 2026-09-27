@@ -271,7 +271,7 @@ fn updater(app: &AppHandle, current: &str) -> Result<(Updater, String, Vec<Strin
         channel: channel.clone(),
         current_code: version_code(current)?,
         client_selectors: HashMap::from([
-            ("os".into(), std::env::consts::OS.into()),
+            ("os".into(), normalized_os().into()),
             ("arch".into(), normalized_arch().into()),
             ("component".into(), "console".into()),
             ("audience".into(), "user".into()),
@@ -295,6 +295,13 @@ fn updater(app: &AppHandle, current: &str) -> Result<(Updater, String, Vec<Strin
     match Updater::open(profile, runtime) {
         OpenResult::Opened { updater, .. } => Ok((*updater, channel, allowed_channels)),
         OpenResult::Failed(error) => Err(error_message(&error)),
+    }
+}
+
+fn normalized_os() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "darwin",
+        value => value,
     }
 }
 
@@ -534,7 +541,7 @@ fn spawn_installer(app: &AppHandle, package: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::version_code;
+    use super::{normalized_arch, normalized_os, version_code};
 
     #[test]
     fn semver_code_matches_relkit_strategy() {
@@ -547,5 +554,24 @@ mod tests {
         assert!(version_code("1.13").is_err());
         assert!(version_code("1.1000.0").is_err());
         assert!(version_code("latest").is_err());
+    }
+
+    #[test]
+    fn normalized_selectors_use_relkit_platform_names() {
+        // relkit selector 使用 GOOS 风格命名：darwin/linux/windows。
+        // macOS 上 std::env::consts::OS 为 "macos"，必须归一化为 "darwin"，
+        // 否则与 manifest 制品 selector（os=darwin）不匹配，自更新静默失败。
+        let expected_os = if cfg!(target_os = "macos") {
+            "darwin"
+        } else if cfg!(target_os = "windows") {
+            "windows"
+        } else {
+            "linux"
+        };
+        assert_eq!(normalized_os(), expected_os);
+        assert!(matches!(
+            normalized_arch(),
+            "amd64" | "arm64"
+        ));
     }
 }
