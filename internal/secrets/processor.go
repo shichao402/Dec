@@ -32,6 +32,9 @@ type Processor struct {
 	Template      string // temp 预填；空表示无
 	SourceModes   []SourceMode
 	DefaultSource SourceMode
+	// UserCreatable=false 表示该类型仅供程序链路使用（凭据请求通道写入），
+	// 不进任何人工创建表单（LocalAssetKinds / Remote 登记），人不手输。
+	UserCreatable bool
 }
 
 var registeredProcessors = []Processor{
@@ -42,6 +45,7 @@ var registeredProcessors = []Processor{
 		Label:         "note（任意路径）",
 		SourceModes:   []SourceMode{SourceTemp, SourcePath, SourcePicker},
 		DefaultSource: SourceTemp,
+		UserCreatable: true,
 	},
 	{
 		ID:            SecretTypeGCM,
@@ -51,6 +55,7 @@ var registeredProcessors = []Processor{
 		Template:      defaultGCMTemplate,
 		SourceModes:   []SourceMode{SourceTemp, SourcePath, SourcePicker},
 		DefaultSource: SourceTemp,
+		UserCreatable: true,
 	},
 	{
 		ID:            SecretTypeEnv,
@@ -60,6 +65,7 @@ var registeredProcessors = []Processor{
 		Template:      "# KEY=value\n",
 		SourceModes:   []SourceMode{SourceTemp, SourcePath, SourcePicker},
 		DefaultSource: SourceTemp,
+		UserCreatable: true,
 	},
 	{
 		ID:            SecretTypeSSHKey,
@@ -68,6 +74,21 @@ var registeredProcessors = []Processor{
 		Label:         ".sshkey（BW SSH Key Item）",
 		SourceModes:   []SourceMode{SourceGenerate, SourcePath, SourcePicker},
 		DefaultSource: SourceGenerate,
+		UserCreatable: true,
+	},
+	{
+		// ADR 0036：设备密码条目。正文两行 username: / password:，仅由凭据请求
+		// 通道经工具写入（UserCreatable=false），不提供 temp/path/picker 手输
+		// 来源、不进 Remote 登记表单；pull 语义与其他 note 一致（随产品 folder
+		// 同步落本机 secrets 根）。注册进 ParseTypePath 才能让同步 / 迁移链路
+		// 接受 .password/<alias> 条目，否则未知点目录硬失败会拒绝同步。
+		ID:            SecretTypePassword,
+		Dir:           TypeDirPassword,
+		SourceKind:    SourceKindNote,
+		Label:         ".password（设备密码，凭据通道专用）",
+		SourceModes:   nil,
+		DefaultSource: "",
+		UserCreatable: false,
 	},
 }
 
@@ -172,6 +193,9 @@ func (p Processor) NormalizeName(raw string) (string, error) {
 			return "", err
 		}
 		return CanonicalSSHKeyName(inst), nil
+	case SecretTypePassword:
+		// ADR 0036：.password 条目仅由凭据请求通道经工具写入，人不手输。
+		return "", fmt.Errorf(".password 条目由凭据请求通道写入，不支持手工登记")
 	default:
 		return raw, nil
 	}

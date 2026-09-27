@@ -30,6 +30,9 @@ func LocalAssetKinds() []LocalAssetKind {
 		{ID: "command", Label: "command（目录）"},
 	}
 	for _, p := range secrets.RegisteredProcessors() {
+		if !p.UserCreatable {
+			continue // ADR 0036：.password 等程序链路专用类型不进创建表单
+		}
 		out = append(out, LocalAssetKind{ID: string(p.ID), Label: p.Label, Sensitive: true})
 	}
 	return out
