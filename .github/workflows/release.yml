@@ -7,7 +7,7 @@
 #   RELKIT_AGENT_URL（可选，可写站点根或 /v1，默认 https://publish.firoyang.com/v1）
 # 手动触发：Actions → Release → Run workflow（按 version.json，默认 channel=dev）
 #
-# Console 只发两套人面安装包：Windows amd64、macOS Intel amd64（Apple Silicon 走 Rosetta）。
+# Console 发三套人面安装包：Windows amd64、macOS Intel amd64、macOS Apple Silicon arm64。
 # Tauri 必须在对应 OS 的 GitHub-hosted runner 上原生构建（不能从 Linux 交叉出 NSIS/DMG）。
 # 运行时套件仍在 Ubuntu 上 Go 交叉编译全平台，供 SSH 置备异平台目标。publish 把两类产物汇进同一次 relkit stage。
 
@@ -166,6 +166,8 @@ jobs:
             runner: windows-latest
           - name: darwin-amd64
             runner: macos-15-intel
+          - name: darwin-arm64
+            runner: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -267,7 +269,8 @@ jobs:
           missing=0
           for f in \
             dist/dec-console-windows-amd64.exe \
-            dist/dec-console-darwin-amd64.dmg
+            dist/dec-console-darwin-amd64.dmg \
+            dist/dec-console-darwin-arm64.dmg
           do
             if [ ! -f "$f" ]; then
               echo "缺少 Console 产物: $f"
