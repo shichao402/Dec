@@ -33,7 +33,7 @@ SSH 置备由**发起端**解析目标 `os/arch`：
 2. 缺失或校验失败时由发起端经 RUP 下载到临时目录，再 rename 发布缓存
 3. 经系统 SSH 把四个二进制流式推到目标临时目录，chmod 后 rename 到 `~/.dec/bin`
 
-目标机只需系统 SSH 服务端与 POSIX `sh`/核心文件工具，不需要 curl、bash 或公网访问。发起端异平台缓存未命中且无法访问 RUP 时，置备明确失败。跨平台运行时套件仍保留在签名 RUP manifest（`audience=runtime`），供发起端按需拉取。人类 browse 页一旦存在 `audience=user` 只展示 Console；旧 release 没有 audience 时保持原清单以免空页。该过滤须随 relkit-serve 发布端升级后才会在公网生效。
+目标机只需系统 SSH 服务端与 POSIX `sh`/核心文件工具，不需要 curl、bash 或公网访问。发起端异平台缓存未命中且无法访问 RUP 时，置备明确失败。跨平台运行时套件仍保留在签名 RUP manifest（`audience=runtime`），供发起端按需拉取。人类 browse 页一旦存在 `audience=user` 只展示 Console；旧 release 没有 audience 时保持原清单以免空页。该过滤已在 relkit-serve 发布端实施（`internal/browse` `humanArtifacts`），2026-09-27 随 relkit-agent 0.4.24+409d272 升级在公网生效。
 
 当前 relkit SDK 选择最高可达版本，不支持任意历史版本直取。缓存未命中时，只有 RUP 解析结果与 Console 钉死版本一致才下载；渠道已有更高版本则要求先更新 Console，或预先准备旧版本缓存。SSH 传输后优先用目标端 `sha256sum` / `shasum -a 256` 核对套件，无 hash 工具时明确降级为逐组件 `--version`；激活过程中保留旧文件并在失败时 best-effort 回滚。
 
@@ -47,7 +47,7 @@ SSH 置备由**发起端**解析目标 `os/arch`：
 
 GitHub Actions（`.github/workflows/release.yml`）每个 Console job 都准备 Go 与 relkit SDK，人面只编两套：`windows-latest` → `windows-amd64`，`macos-15-intel` → `darwin-amd64`（Intel 不能用已退役的 `macos-13`；Apple Silicon 用这份 Intel 包走 Rosetta）。不编 Linux Console，也不编 `darwin-arm64`。另用 Ubuntu 交叉编全平台 runtime artifact（含 Linux / arm64），供 SSH 置备异平台目标；publish job 汇进同一次 `relkit stage`。
 
-Tauri 安装包不能从 Linux 交叉出 NSIS/DMG。relkit-serve 人页 audience 过滤仍是发布端前置条件。
+Tauri 安装包不能从 Linux 交叉出 NSIS/DMG。relkit-serve 人页 audience 过滤已实施（2026-09-27）。
 
 ## 被否方案
 

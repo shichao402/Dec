@@ -41,7 +41,7 @@ GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触
 6. `relkit cas-put` 向 agent 申请唯一 ingest 的上传 URL：store 已有同 sha256 则跳过，否则 CI 直接 PUT；随后只上传 `staged.pb` + `release-policy.json`
 7. `POST /v1/publish` → 发布机从 CAS Promote、签名并写 relkit-store
 8. `stable` 的 GitHub Release **只挂** `dec-console-*`；运行时组件不进人面附件
-9. 人类 browse 页按 audience 过滤依赖 **relkit-serve 发布端**升级，不能靠 Dec 本地 stage 单方面完成
+9. 人类 browse 页按 audience 过滤已在 **relkit-serve 发布端**落地（`internal/browse` `humanArtifacts`，2026-09-27 随 relkit-agent 0.4.24+409d272 生效）；本地 stage 的 `audience=user/runtime` 标签是过滤的输入
 
 ## 签名密钥
 
