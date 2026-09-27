@@ -28,8 +28,12 @@ on:
           - stable
         default: dev
 
+# 全局串行：RUP 同版本 manifest/artifact 不可变要求发版互斥，且 stable 的
+# GitHub Release 步骤要向 main 提交 version.json 摘要，两个发版 run 并行
+# 会在摘要提交上互相打架（后到者 push 被拒）。代价是 dev/stable 连发时
+# 总耗时叠加，属可接受。
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 permissions:

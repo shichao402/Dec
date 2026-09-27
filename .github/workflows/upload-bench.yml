@@ -30,8 +30,10 @@ on:
           - single
         default: both
 
+# 并入 release 组：bench 与正式 Release 同 product 上传会 409，跨 workflow
+# 共享同一 group 才能真正互斥排队（bench 等 Release，或反之）。
 concurrency:
-  group: upload-bench
+  group: release
   cancel-in-progress: false
 
 permissions:
