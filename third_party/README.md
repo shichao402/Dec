@@ -8,13 +8,9 @@ checksum-pinned 的 `relkit-sdk-go.zip` 安装。版本由 `scripts/relkit.lock.
 
 CLI 与 updater 不进这个目录，它们装到 `tools/bin/`。
 
-`go.mod` 通过 replace 指向本目录：
-
-```
-replace go.firoyang.com/relkit => ./third_party/relkit
-```
-
-构建 / CI 会自动确保附件已安装；日常也可手动：
+Go SDK 已改为直接依赖 `github.com/shichao402/relkit`（见 go.mod），
+`third_party/relkit/` 下的 Go SDK 目录仅作为 lock 安装产物保留（Rust facade、
+TypeScript 绑定仍从本目录消费），Go 构建不再 replace 到这里。日常安装附件：
 
 ```bat
 python scripts\host\relkit_host.py install

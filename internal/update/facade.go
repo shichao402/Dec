@@ -13,9 +13,9 @@ import (
 
 	"github.com/shichao402/Dec/internal/config"
 	"github.com/shichao402/Dec/internal/repo"
-	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
-	"go.firoyang.com/relkit/sdk"
-	"go.firoyang.com/relkit/sdk/updaterfacade"
+	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	"github.com/shichao402/relkit/sdk"
+	"github.com/shichao402/relkit/sdk/updaterfacade"
 )
 
 func clientProfile() (*updaterv1.ClientProfile, error) {

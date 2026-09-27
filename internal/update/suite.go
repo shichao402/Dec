@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.firoyang.com/relkit/sdk"
+	"github.com/shichao402/relkit/sdk"
 )
 
 // SuiteComponents is the Dec runtime installed under ~/.dec/bin.

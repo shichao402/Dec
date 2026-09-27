@@ -88,10 +88,10 @@ python scripts/host/relkit_host.py install
 python scripts/host/relkit_host.py upgrade v0.3.22
 ```
 
-Go SDK 落到 `third_party/relkit/`，Rust facade 落到 `third_party/relkit/sdk/rust/`，TypeScript 绑定落到 `third_party/relkit/bindings/ts/`，CLI / updater 落到 `tools/bin/`。Tauri 与前端只 import 已 consume 的生成物；产品仓不生成 updater 协议代码。`go.mod` 使用：
+Go SDK 落到 `third_party/relkit/`，Rust facade 落到 `third_party/relkit/sdk/rust/`，TypeScript 绑定落到 `third_party/relkit/bindings/ts/`，CLI / updater 落到 `tools/bin/`。Tauri 与前端只 import 已 consume 的生成物；产品仓不生成 updater 协议代码。Go SDK 改为直接依赖（module path 已迁移）：
 
 ```
-replace go.firoyang.com/relkit => ./third_party/relkit
+require github.com/shichao402/relkit v0.4.24
 ```
 
-上游 release、commit 与附件哈希来自 `scripts/relkit.lock.json`（schema `relkit.consume/2`）。入口是 `scripts/host/relkit_host.py`，不要再跑根目录的 v1 `scripts/relkit_consume.py`。Go 模块路径是 `go.firoyang.com/relkit`（replace 到 `third_party/relkit`），不要 `go get` 该模块。
+上游 release、commit 与附件哈希来自 `scripts/relkit.lock.json`（schema `relkit.consume/2`）。入口是 `scripts/host/relkit_host.py`，不要再跑根目录的 v1 `scripts/relkit_consume.py`。Rust facade / TypeScript 绑定 / CLI / updater 仍由 lock 安装；Go 模块 `github.com/shichao402/relkit` 走 `go get` 即可，不再 replace 到 `third_party/relkit`。

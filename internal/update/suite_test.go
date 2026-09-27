@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	updaterv1 "go.firoyang.com/relkit/api/updater/v1"
-	"go.firoyang.com/relkit/sdk"
+	updaterv1 "github.com/shichao402/relkit/api/updater/v1"
+	"github.com/shichao402/relkit/sdk"
 )
 
 func TestSuiteComponentsHaveExplicitRoles(t *testing.T) {

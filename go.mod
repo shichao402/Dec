@@ -3,9 +3,10 @@ module github.com/shichao402/Dec
 go 1.26.3
 
 require (
-	go.firoyang.com/relkit v0.0.0-00010101000000-000000000000
 	github.com/gofrs/flock v0.13.0
+	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/shichao402/relkit v0.4.24
 	github.com/spf13/cobra v1.8.0
 	golang.org/x/sys v0.46.0
 	google.golang.org/grpc v1.83.0
@@ -14,7 +15,6 @@ require (
 )
 
 require (
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.16.0 // indirect
@@ -27,5 +27,3 @@ require (
 	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 )
-
-replace go.firoyang.com/relkit => ./third_party/relkit
