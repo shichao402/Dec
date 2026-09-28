@@ -1,6 +1,6 @@
 # 完成后自省
 
-唯一权威闸门：
+唯一权威闸门（在 **relkit 仓**运行；dec 仓已删除本地 Python 消费面）：
 
 `python scripts/host/relkit_host.py retrospect`
 

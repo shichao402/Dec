@@ -26,6 +26,10 @@
       "timeoutSeconds": 600
     }
   },
+  "release": {
+    "packScript": "scripts/pack-release-artifacts.py",
+    "manifest": "dist/release-artifacts.json"
+  },
   "publishTo": [
     "serve"
   ],

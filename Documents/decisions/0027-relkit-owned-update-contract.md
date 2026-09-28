@@ -12,7 +12,7 @@ Console 自更新曾同时维护 Go helper JSON、Tauri serde struct 与前端 T
 ## 决策
 
 1. 更新 IDL 只有 relkit 的 `proto/updater/v1/updater.proto`。Dec 的 `schema/` 只声明 Dec 配置与资产协议，不声明 updater 消息。
-2. 产品仓不执行 updater codegen。`relkit_host.py install` 按 lock 落下 Rust facade、TypeScript bindings 与 sidecar；Dec 只通过 path dependency / import 消费。
+2. 产品仓不执行 updater codegen。`relkit install`（Go CLI，module 通道）按 lock 落下 Rust facade、TypeScript bindings 与 sidecar；Dec 只通过 path dependency / import 消费。
 3. Tauri 把 Rust facade 的 canonical ProtoJSON 投影交给 WebView。前端用 lock 组件中的 `CheckResultSchema` / `StatusSnapshotSchema` 解析，再按五个 oneof 变体渲染；不手写 `CheckResult`、`UpdateAvailable` 或字段镜像。
 4. `CheckPolicy.after_success` / `after_failure`、`StatusSnapshot` 与引擎持久化状态负责节流和上次状态。Dec 不写 `console-update.json`，不计算下次检查时间。
 5. `currentVersion` 与 `canAutoInstall` 是本机壳事实，可与 canonical 结果一起返回，但不进入 updater IDL。

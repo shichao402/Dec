@@ -138,7 +138,7 @@ def prepare_runtime_resources(version: str, os_id: str, arch: str) -> Path:
     if not updater_source.is_file():
         raise SystemExit(
             f"missing lock-pinned updater sidecar: {updater_source}; "
-            "run python scripts/host/relkit_host.py install"
+            "run go run github.com/shichao402/relkit/cmd/relkit@v0.5.6 install"
         )
     shutil.copy2(updater_source, updater_dir / updater_name)
     return platform_dir
