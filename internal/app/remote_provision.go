@@ -494,7 +494,7 @@ if grep -Fqx -- "$line" "$ak"; then
   exit 0
 fi
 umask 177
-printf '%%s\n' "$line" >> "$ak"
+printf '%s\n' "$line" >> "$ak"
 chmod 600 "$ak"
 echo "installed"
 `
