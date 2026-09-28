@@ -13,10 +13,12 @@ import {
   loadSavedPassword,
   probeRemoteHost,
   provisionRemoteHost,
+  pullCredentialRequest,
   runOrWatchTyped,
   saveConnection,
   setConsoleUpdateChannel,
   stopService,
+  submitCredential,
 } from '@/lib/api'
 import { ActionCenter } from '@/components/action-feedback'
 import { ConsoleUpdatePanel } from '@/components/console-update-panel'
@@ -38,6 +40,7 @@ import {
   takeOpenIntent,
 } from '@/lib/open-intent'
 import { ConnectPage } from '@/pages/connect-page'
+import { CredentialPage, type CredentialRequestView } from '@/pages/credential-page'
 import { DeletePage } from '@/pages/delete-page'
 import { GlobalAssetsPage } from '@/pages/global-assets-page'
 import { OnboardingPage } from '@/pages/onboarding-page'
@@ -62,7 +65,7 @@ import type {
   SavedConnection,
 } from '@/lib/utils'
 
-type Screen = 'connect' | 'unlock' | 'console'
+type Screen = 'connect' | 'unlock' | 'credential' | 'console'
 
 const viewTitles: Record<View, string> = {
   overview: '概览',
@@ -117,6 +120,10 @@ export default function App() {
   const [rememberPassword, setRememberPassword] = useState(false)
   const [totp, setTotp] = useState('')
   const [need2fa, setNeed2fa] = useState(false)
+  // ADR 0036 凭据请求通道：unlock-local 唤起后先拉挂起请求，有则进凭据页。
+  const [credentialRequest, setCredentialRequest] = useState<CredentialRequestView | null>(null)
+  const [credentialBusy, setCredentialBusy] = useState(false)
+  const [credentialError, setCredentialError] = useState('')
   const openIntentBusy = useRef(false)
   const openIntentRerun = useRef(false)
   const handledUnlockFailure = useRef('')
@@ -249,6 +256,77 @@ export default function App() {
   }
   handleConnectRef.current = handleConnect
 
+  // 拉取挂起的凭据请求：有 pending 才切凭据页。连接断开或服务未起时静默
+  // 回落（PullCredentialRequest 在锁定态也放行，失败多半是尚未连接）。
+  async function maybeShowCredentialRequest() {
+    try {
+      const info = await pullCredentialRequest()
+      if (info.error) return
+      if (info.pending) {
+        setCredentialRequest({
+          request_id: info.request_id,
+          kind: info.kind,
+          prompt: info.prompt,
+          operation: info.operation,
+        })
+        setCredentialError('')
+        setScreen('credential')
+      }
+    } catch {
+      // 尚未连接到服务：不阻塞 unlock 流程。
+    }
+  }
+
+  async function handleCredentialSubmit(input: { secret: string; publicKey: string; approved: boolean }) {
+    const request = credentialRequest
+    if (!request) return
+    setCredentialBusy(true)
+    setCredentialError('')
+    try {
+      const result = await submitCredential({
+        requestId: request.request_id,
+        secret: input.secret,
+        publicKey: input.publicKey,
+        approved: input.approved,
+        canceled: false,
+      })
+      if (result.error) {
+        setCredentialError(result.error)
+        return
+      }
+      if (result.accepted) {
+        setCredentialRequest(null)
+        setScreen(!current?.id ? 'connect' : summary ? 'console' : 'unlock')
+      }
+    } catch (error) {
+      setCredentialError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCredentialBusy(false)
+    }
+  }
+
+  async function handleCredentialCancel() {
+    const request = credentialRequest
+    if (!request) return
+    setCredentialBusy(true)
+    setCredentialError('')
+    try {
+      await submitCredential({
+        requestId: request.request_id,
+        secret: '',
+        publicKey: '',
+        approved: false,
+        canceled: true,
+      })
+    } catch {
+      // 请求可能已被等待方清理，忽略。
+    } finally {
+      setCredentialRequest(null)
+      setCredentialBusy(false)
+      setScreen(!current?.id ? 'connect' : summary ? 'console' : 'unlock')
+    }
+  }
+
   useEffect(() => {
     const drainOpenIntents = async () => {
       if (openIntentBusy.current) {
@@ -266,6 +344,10 @@ export default function App() {
               const connections = await listConnections()
               setSaved(connections)
               await handleConnectRef.current(selectLocalConnection(connections), true)
+              // ADR 0036：解锁链路结束后再拉一次凭据请求——agent 工具可能在
+              // 连接建立前就已挂起请求，也可能在解锁后才挂起。两次拉取都
+              // 只读公开描述，无挂起时是幂等空操作。
+              await maybeShowCredentialRequest()
             }
             intent = await takeOpenIntent()
           }
@@ -622,6 +704,15 @@ export default function App() {
               updatePanel={consoleUpdatePanel}
             />
           )}
+          {screen === 'credential' && credentialRequest && (
+            <CredentialPage
+              request={credentialRequest}
+              onSubmit={handleCredentialSubmit}
+              onCancel={handleCredentialCancel}
+              busy={credentialBusy}
+              error={credentialError}
+            />
+          )}
           {consoleReady && summary && settings && !summary.Initialized && (
             <OnboardingPage
               deviceId={deviceId}
@@ -811,6 +902,7 @@ function buildCrumbs(input: {
   if (input.screen === 'connect') return ['Dec Console', '设备']
   const device = input.deviceLabel || 'Dec Console'
   if (input.screen === 'unlock') return [device, '解锁']
+  if (input.screen === 'credential') return [device, '凭据请求']
   if (input.onboarding) return [device, '初始化设备']
   if (input.view === 'project') {
     return [device, viewTitles.projects, input.project?.Label || input.project?.Name || '项目']

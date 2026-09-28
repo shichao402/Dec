@@ -152,6 +152,34 @@ export async function pingServer() {
   return invoke<PingInfo>('ping_server')
 }
 
+// ADR 0036 凭据请求通道：拉取挂起请求的公开描述（不含秘密）。
+export async function pullCredentialRequest() {
+  return invoke<{
+    pending: boolean
+    request_id: string
+    kind: number
+    prompt: string
+    operation: string
+    error: string
+  }>('pull_credential_request')
+}
+
+export async function submitCredential(input: {
+  requestId: string
+  secret: string
+  publicKey: string
+  approved: boolean
+  canceled: boolean
+}) {
+  return invoke<{ accepted: boolean; error: string }>('submit_credential', {
+    requestId: input.requestId,
+    secret: input.secret,
+    publicKey: input.publicKey,
+    approved: input.approved,
+    canceled: input.canceled,
+  })
+}
+
 export async function authenticate(
   email: string,
   password: string,

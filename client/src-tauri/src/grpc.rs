@@ -7,7 +7,8 @@ pub mod service {
 use self::service::v1::dec_service_client::DecServiceClient;
 use self::service::v1::{
     AuthenticateRequest, GetActiveOperationRequest, InvokeRequest, KeepAliveRequest, PingRequest,
-    RunOperationRequest, ShutdownRequest, WatchOperationRequest,
+    PullCredentialRequestRequest, RunOperationRequest, ShutdownRequest, SubmitCredentialRequest,
+    WatchOperationRequest,
 };
 use serde::{Deserialize, Serialize};
 use std::process::Child;
@@ -100,6 +101,23 @@ pub struct InvokeResult {
     pub error: String,
     #[serde(skip_serializing)]
     pub events: Vec<serde_json::Value>,
+}
+
+// ADR 0036 凭据请求通道：拉取结果只含公开描述，秘密永远不进这层结构。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CredentialRequestInfo {
+    pub pending: bool,
+    pub request_id: String,
+    pub kind: i32,
+    pub prompt: String,
+    pub operation: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CredentialSubmitResult {
+    pub accepted: bool,
+    pub error: String,
 }
 
 pub async fn connect_channel(
@@ -342,6 +360,50 @@ pub async fn active_operation(
             "startedAtUnixMs": op.started_at_unix_ms,
         })),
     }
+}
+
+// 拉取当前挂起的凭据请求描述（不含秘密）。Console 被唤起后先调它分流：
+// pending 时渲染凭据页，否则回落到原有解锁链路。
+pub async fn pull_credential_request(mut client: Svc) -> Result<CredentialRequestInfo, String> {
+    let resp = client
+        .pull_credential_request(Request::new(PullCredentialRequestRequest {}))
+        .await
+        .map_err(|e| e.to_string())?
+        .into_inner();
+    Ok(CredentialRequestInfo {
+        pending: resp.pending,
+        request_id: resp.request_id,
+        kind: resp.kind,
+        prompt: resp.prompt,
+        operation: resp.operation,
+        error: resp.error,
+    })
+}
+
+// 提交用户输入的凭据（或取消/拒绝）。秘密只在这一个调用里出现。
+pub async fn submit_credential(
+    mut client: Svc,
+    request_id: String,
+    secret: String,
+    public_key: String,
+    approved: bool,
+    canceled: bool,
+) -> Result<CredentialSubmitResult, String> {
+    let resp = client
+        .submit_credential(Request::new(SubmitCredentialRequest {
+            request_id,
+            secret,
+            public_key,
+            approved,
+            canceled,
+        }))
+        .await
+        .map_err(|e| e.to_string())?
+        .into_inner();
+    Ok(CredentialSubmitResult {
+        accepted: resp.accepted,
+        error: resp.error,
+    })
 }
 
 pub async fn run_operation(

@@ -1106,6 +1106,35 @@ async fn authenticate(
     Ok(result)
 }
 
+// ADR 0036 凭据请求通道：Console 被唤起后先拉挂起请求的公开描述（不含秘密），
+// 渲染对应控件；用户提交经 submit_credential 交还等待中的 agent 操作。
+#[tauri::command]
+async fn pull_credential_request(
+    state: State<'_, AppState>,
+) -> Result<grpc::CredentialRequestInfo, String> {
+    let client = {
+        let guard = state.session.lock().await;
+        guard.as_ref().ok_or("尚未连接")?.client_clone()
+    };
+    grpc::pull_credential_request(client).await
+}
+
+#[tauri::command]
+async fn submit_credential(
+    request_id: String,
+    secret: String,
+    public_key: String,
+    approved: bool,
+    canceled: bool,
+    state: State<'_, AppState>,
+) -> Result<grpc::CredentialSubmitResult, String> {
+    let client = {
+        let guard = state.session.lock().await;
+        guard.as_ref().ok_or("尚未连接")?.client_clone()
+    };
+    grpc::submit_credential(client, request_id, secret, public_key, approved, canceled).await
+}
+
 #[tauri::command]
 async fn invoke_method(
     app: AppHandle,
@@ -1259,6 +1288,8 @@ pub fn run() {
             stop_service,
             ping_server,
             authenticate,
+            pull_credential_request,
+            submit_credential,
             invoke_method,
             run_operation,
             get_active_operation,
