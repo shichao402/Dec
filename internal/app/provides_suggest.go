@@ -100,9 +100,7 @@ func SuggestProjectProvides(projectRoot string) (*ProvideCandidatesState, error)
 					scanAssetKind(projectRoot, dir, kind, func(candidate ProvideCandidate) {
 						// 扫描结果 source 相对仓根，产品声明的 source 相对产品 root；
 						// 折算后再比对与登记。
-						if product.Root != "" && strings.HasPrefix(candidate.Source, product.Root+"/") {
-							candidate.Source = strings.TrimPrefix(candidate.Source, product.Root+"/")
-						}
+						candidate.Source = trimProductRoot(candidate.Source, product.Root)
 						add(product.Name, product.Root, candidate)
 					})
 				}
@@ -140,6 +138,24 @@ func SuggestProjectProvides(projectRoot string) (*ProvideCandidatesState, error)
 
 func productKey(product string) string {
 	return strings.ToLower(product) + "\x00"
+}
+
+// trimProductRoot 把相对仓根的 source 折算成相对产品 root 的 source。
+// filepath.Rel 在 Windows 返回反斜杠路径，产品 root 与声明 source 用的都是正斜杠，
+// 因此先统一归一成正斜杠再比对；不是该产品子路径时返回归一后的原路径。
+func trimProductRoot(source, productRoot string) string {
+	source = filepath.ToSlash(source)
+	if productRoot == "" {
+		return source
+	}
+	root := strings.Trim(filepath.ToSlash(productRoot), "/")
+	if root == "" || root == "." {
+		return source
+	}
+	if prefix := root + "/"; strings.HasPrefix(source, prefix) {
+		return strings.TrimPrefix(source, prefix)
+	}
+	return source
 }
 
 type assetScanDir struct {

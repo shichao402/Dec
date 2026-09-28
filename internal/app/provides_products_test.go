@@ -89,7 +89,31 @@ func TestSuggestProjectProvidesScansProductRoots(t *testing.T) {
 	}
 }
 
-// 身份型产品（ADR 0034）：provides 为空、只发身份。load 必须原样带回，不能丢。
+// trimProductRoot 的跨平台回归：Windows 下 filepath.Rel 产出反斜杠 source，
+// 折算必须在 ToSlash 之后比对，否则候选 source 不折算、declared 全部误判 false。
+// 用真实反斜杠输入直接驱动，Linux CI 上同样必须命中。
+func TestTrimProductRootNormalizesSeparators(t *testing.T) {
+	cases := []struct {
+		source, root, want string
+	}{
+		{`cnb\skills\migrate-to-cnb`, `cnb`, "skills/migrate-to-cnb"},
+		{"cnb/skills/migrate-to-cnb", "cnb", "skills/migrate-to-cnb"},
+		{`cnb\skills\migrate-to-cnb`, "cnb/", "skills/migrate-to-cnb"},
+		{`forge-robot\commands\forge-robot`, `forge-robot`, "commands/forge-robot"},
+		{`other\skills\x`, "cnb", "other/skills/x"},
+		{"other/skills/x", "cnb", "other/skills/x"},
+		{"skills/root-level", "", "skills/root-level"},
+		{`cnb\cnb-ish`, "cnb", "cnb-ish"},
+		{`cnb-ish\skills\x`, "cnb", "cnb-ish/skills/x"},
+		{`cnb`, "cnb", "cnb"},
+		{`cnb\`, "cnb", ""},
+	}
+	for _, c := range cases {
+		if got := trimProductRoot(c.source, c.root); got != c.want {
+			t.Fatalf("trimProductRoot(%q, %q) = %q, want %q", c.source, c.root, got, c.want)
+		}
+	}
+}
 func TestLoadProjectProvidesKeepsIdentityProducts(t *testing.T) {
 	project := t.TempDir()
 	cfg := &types.ProjectConfig{
