@@ -4,9 +4,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
+
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 // Bug#1 回归：带口令私钥在无 TTY 的 dec-server 环境下，ssh-keygen -y 探测必须
@@ -19,9 +20,8 @@ func TestLoadSSHKeyMaterialFromPrivatePath_PassphraseFailsFast(t *testing.T) {
 	// 1. 生成带口令私钥。
 	dir := t.TempDir()
 	encPath := filepath.Join(dir, "id_enc")
-	cmd := exec.Command("ssh-keygen", "-t", "ed25519",
+	cmd := sysproc.Command("ssh-keygen", "-t", "ed25519",
 		"-N", "secret-passphrase-123", "-f", encPath)
-	cmd.SysProcAttr = hideSysProcAttrForTest()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("生成带口令私钥失败: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
@@ -43,10 +43,4 @@ func TestLoadSSHKeyMaterialFromPrivatePath_PassphraseFailsFast(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("探测挂死超过 30s：Bug#1 未修复（ssh-keygen 等待 stdin 输入）")
 	}
-}
-
-// hideSysProcAttrForTest 返回与 sysproc.Hide 等价的测试端属性（避免测试进程
-// 弹出控制台窗口；不引入对 windows 包的无条件依赖）。
-func hideSysProcAttrForTest() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{HideWindow: true}
 }

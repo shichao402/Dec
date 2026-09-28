@@ -141,14 +141,16 @@ func productKey(product string) string {
 }
 
 // trimProductRoot 把相对仓根的 source 折算成相对产品 root 的 source。
-// filepath.Rel 在 Windows 返回反斜杠路径，产品 root 与声明 source 用的都是正斜杠，
-// 因此先统一归一成正斜杠再比对；不是该产品子路径时返回归一后的原路径。
+// 产品 root 与声明 source 用的都是正斜杠；source 可能携带 Windows 形态的反斜杠
+// （filepath.Join 产物或用户手输），Linux CI 上 filepath.ToSlash 是 no-op，
+// 因此用无条件 ReplaceAll 归一，保证跨平台行为一致。不是该产品子路径时返回
+// 归一后的原路径。
 func trimProductRoot(source, productRoot string) string {
-	source = filepath.ToSlash(source)
+	source = strings.ReplaceAll(source, "\\", "/")
 	if productRoot == "" {
 		return source
 	}
-	root := strings.Trim(filepath.ToSlash(productRoot), "/")
+	root := strings.Trim(strings.ReplaceAll(productRoot, "\\", "/"), "/")
 	if root == "" || root == "." {
 		return source
 	}

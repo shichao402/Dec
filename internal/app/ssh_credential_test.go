@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/shichao402/Dec/internal/secrets"
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 // stubCredentialAsker 测试用凭据请求 stub。
@@ -290,7 +290,7 @@ func withTestSession(t *testing.T) {
 
 // runTestSSHKeygen 用系统 ssh-keygen 生成一把测试私钥。
 func runTestSSHKeygen(path string) (string, error) {
-	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "dec-test", "-f", path)
+	cmd := sysproc.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "dec-test", "-f", path)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
