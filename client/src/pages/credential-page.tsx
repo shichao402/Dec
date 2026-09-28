@@ -5,28 +5,31 @@ import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/feedback'
 import { Field, Input } from '@/components/ui/input'
 import { Panel, PanelBody } from '@/components/ui/panel'
+import {
+  CREDENTIAL_KIND_KEY_PASSPHRASE,
+  CREDENTIAL_KIND_LOGIN_PASSWORD,
+  CREDENTIAL_KIND_PRIVATE_KEY_MATERIAL,
+  credentialSubmitEnabled,
+  credentialSubmitLabel,
+  kindHasPublicKeyField,
+  kindIsConfirmOnly,
+  type CredentialRequestView,
+} from '@/lib/credential-request'
 
-export type CredentialRequestView = {
-  request_id: string
-  kind: number
-  prompt: string
-  operation: string
-}
+export type { CredentialRequestView }
 
-// kind 数值与 schema/service/v1/service.proto 的 CredentialRequestKind 对齐：
-// 1 登录密码 / 2 私钥口令 / 3 私钥材料 / 4 危险动作确认。
 const KIND_SPECS: Record<number, { title: string; icon: typeof KeyRound; hint: string }> = {
-  1: {
+  [CREDENTIAL_KIND_LOGIN_PASSWORD]: {
     title: '提供登录密码',
     icon: KeyRound,
     hint: '密码只交给本机 dec-server 进程内存，用于这一次密码登录，随后以库加密形式存入设备密码条目。',
   },
-  2: {
+  [CREDENTIAL_KIND_KEY_PASSPHRASE]: {
     title: '提供私钥口令',
     icon: KeyRound,
     hint: '口令仅在内存中用于解密校验；私钥去口令入库后以库加密为唯一保护。',
   },
-  3: {
+  [CREDENTIAL_KIND_PRIVATE_KEY_MATERIAL]: {
     title: '粘贴私钥',
     icon: FileKey,
     hint: '私钥材料只经进程内存流转入库，不会出现在对话转录或日志里。',
@@ -48,9 +51,10 @@ export function CredentialPage(props: {
   const spec = KIND_SPECS[props.request.kind]
   const [secret, setSecret] = useState('')
   const [publicKey, setPublicKey] = useState('')
-  const isConfirm = props.request.kind === 4
-  const isKeyMaterial = props.request.kind === 3
-  const canSubmit = isConfirm || secret.trim() !== ''
+  const canSubmit = credentialSubmitEnabled(props.request.kind, secret)
+  const submitLabel = credentialSubmitLabel(props.request.kind)
+  const showPublicKey = kindHasPublicKeyField(props.request.kind)
+  const showPasswordInput = !kindIsConfirmOnly(props.request.kind) && !showPublicKey
   const Icon = spec?.icon || KeyRound
   return (
     <Page>
@@ -79,8 +83,8 @@ export function CredentialPage(props: {
                   }
                 }}
               >
-                {!isConfirm && !isKeyMaterial && (
-                  <Field label={props.request.kind === 1 ? '登录密码' : '私钥口令'}>
+                {showPasswordInput && (
+                  <Field label={props.request.kind === CREDENTIAL_KIND_LOGIN_PASSWORD ? '登录密码' : '私钥口令'}>
                     <Input
                       type="password"
                       autoComplete="off"
@@ -89,7 +93,7 @@ export function CredentialPage(props: {
                     />
                   </Field>
                 )}
-                {isKeyMaterial && (
+                {showPublicKey && (
                   <>
                     <Field label="私钥正文" hint="OpenSSH 私钥全文（含 BEGIN/END 行）。">
                       <textarea
@@ -106,10 +110,10 @@ export function CredentialPage(props: {
                 )}
                 <div className="flex gap-2 pt-1">
                   <Button className="flex-1" type="submit" disabled={props.busy || !canSubmit}>
-                    {props.busy ? '提交中…' : isConfirm ? '批准' : '提交'}
+                    {props.busy ? '提交中…' : submitLabel}
                   </Button>
                   <Button type="button" variant="ghost" onClick={props.onCancel} disabled={props.busy}>
-                    {isConfirm ? '拒绝' : '取消'}
+                    {kindIsConfirmOnly(props.request.kind) ? '拒绝' : '取消'}
                   </Button>
                 </div>
               </form>

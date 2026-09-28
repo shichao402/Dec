@@ -32,6 +32,7 @@ import {
   rememberLastConnection,
   selectAutoConnectConnection,
 } from '@/lib/auto-connect'
+import { toCredentialRequestView, type CredentialRequestView } from '@/lib/credential-request'
 import { actionSpec, navView, resource, shortInstanceId, type View } from '@/lib/console'
 import { availableVersion, type ConsoleUpdateEnvelope } from '@/lib/console-update'
 import {
@@ -40,7 +41,7 @@ import {
   takeOpenIntent,
 } from '@/lib/open-intent'
 import { ConnectPage } from '@/pages/connect-page'
-import { CredentialPage, type CredentialRequestView } from '@/pages/credential-page'
+import { CredentialPage } from '@/pages/credential-page'
 import { DeletePage } from '@/pages/delete-page'
 import { GlobalAssetsPage } from '@/pages/global-assets-page'
 import { OnboardingPage } from '@/pages/onboarding-page'
@@ -261,14 +262,9 @@ export default function App() {
   async function maybeShowCredentialRequest() {
     try {
       const info = await pullCredentialRequest()
-      if (info.error) return
-      if (info.pending) {
-        setCredentialRequest({
-          request_id: info.request_id,
-          kind: info.kind,
-          prompt: info.prompt,
-          operation: info.operation,
-        })
+      const view = toCredentialRequestView(info)
+      if (view) {
+        setCredentialRequest(view)
         setCredentialError('')
         setScreen('credential')
       }
