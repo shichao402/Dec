@@ -175,6 +175,14 @@ def _impl_env_inspect_report(root: Path) -> dict[str, Any]:
                     "detail": "site.makers belongs in relkit-agent.json; product relkit.json may only carry title/description/homepage",
                 }
             )
+        if "sinks" in site:
+            findings.append(
+                {
+                    "severity": "error",
+                    "code": "product-site-sinks",
+                    "detail": "site.sinks belongs in relkit-agent.json; product relkit.json may only carry title/description/homepage",
+                }
+            )
         if site and not str(site.get("title") or "").strip():
             findings.append(
                 {

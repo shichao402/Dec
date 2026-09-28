@@ -115,7 +115,9 @@ def product_site_policy(root: Path, state: dict[str, Any], drift: list[str]) -> 
         drift.append("relkit.json site.title is required for the human release catalog")
         return
     if "makers" in site:
-        drift.append("relkit.json site.makers is forbidden; configure it once in relkit-agent.json")
+        drift.append("relkit.json site.makers is forbidden; configure site.sinks once in relkit-agent.json")
+    if "sinks" in site:
+        drift.append("relkit.json site.sinks is forbidden; site.sinks belongs in relkit-agent.json")
 
 
 def _entry_files(root: Path) -> list[Path]:

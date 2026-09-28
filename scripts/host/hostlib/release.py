@@ -913,7 +913,7 @@ def _impl_load_release_artifacts_manifest(
             )
         archives.append(
             {
-                "path": path.relative_to(root).as_posix(),
+                "path": path.relative_to(root.resolve()).as_posix(),
                 "absolute": str(path),
                 "role": role,
             }
@@ -922,13 +922,13 @@ def _impl_load_release_artifacts_manifest(
         "schema": RELEASE_ARTIFACTS_SCHEMA,
         "version": version,
         "install": {
-            "path": install_path.relative_to(root).as_posix(),
+            "path": install_path.relative_to(root.resolve()).as_posix(),
             "absolute": str(install_path),
             "kind": kind,
             "selectors": install_selectors,
         },
         "payload": {
-            "path": payload_path.relative_to(root).as_posix(),
+            "path": payload_path.relative_to(root.resolve()).as_posix(),
             "absolute": str(payload_path),
             "selectors": payload_selectors,
         },

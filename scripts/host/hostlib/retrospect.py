@@ -246,7 +246,7 @@ def _impl_retrospect_report(root: Path) -> dict[str, Any]:
         host_path,
         "remote sudo calls spell out /usr/local/bin, which sudoers secure_path excludes",
         (
-            "sudo invokes relkit-serve/relkit-agent by bare name"
+            "sudo invokes relkit-store/relkit-agent by bare name"
             if sudo_bare_name
             else f"remote binaries resolve to {SERVE_BIN} and {AGENT_BIN}"
         ),

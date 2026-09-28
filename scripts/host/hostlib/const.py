@@ -16,11 +16,11 @@ LOCK_SCHEMA = "relkit.consume/2"
 # importing hostlib at all; retrospect checks the two agree.
 MIN_PYTHON = (3, 9)
 
-DEFAULT_SERVE_DIR = "/etc/relkit-serve"
+DEFAULT_SERVE_DIR = "/etc/relkit-store"
 
 DEFAULT_AGENT_CONFIG = "/etc/relkit-agent/relkit-agent.json"
 
-SERVE_BIN = "/usr/local/bin/relkit-serve"
+SERVE_BIN = "/usr/local/bin/relkit-store"
 
 AGENT_BIN = "/usr/local/bin/relkit-agent"
 

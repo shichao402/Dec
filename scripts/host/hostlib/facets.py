@@ -74,8 +74,10 @@ class Component:
 
 
 COMPONENTS: tuple[Component, ...] = (
-    Component("serve", "host-binary", "serve", "", "", "", "files", (),
-              "./cmd/relkit-serve", "relkit-serve"),
+    Component("store", "host-binary", "store", "", "", "", "files", (),
+              "./cmd/relkit-store", "relkit-store"),
+    Component("console", "host-binary", "console", "", "", "", "files", (),
+              "./cmd/relkit-console", "relkit-console"),
     Component("agent", "host-binary", "agent", "", "", "", "files", (),
               "./cmd/relkit-agent", "relkit-agent"),
     Component(
@@ -126,12 +128,12 @@ COMPONENTS: tuple[Component, ...] = (
         ".", "third_party/relkit", "files",
         ("go.mod", "sdk", "api/updater/v1"), portable=True,
         detect=("go.mod",), updater_process="go",
-        import_signals=("go.firoyang.com/relkit/sdk",),
+        import_signals=("github.com/shichao402/relkit/sdk",),
         pack="go-deps",
         pack_files=("go.mod", "go.sum"),
         pack_exclude_suffixes=("_test.go",),
         go_entrypoints=("./sdk", "./sdk/updaterfacade"),
-        go_module="go.firoyang.com/relkit",
+        go_module="github.com/shichao402/relkit",
         host_api=("protocol", "facade"),
         facade_paths=("sdk/updaterfacade/facade.go",),
     ),
