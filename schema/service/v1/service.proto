@@ -15,6 +15,12 @@ service DecService {
   rpc RunOperation(RunOperationRequest) returns (stream RunOperationResponse);
   rpc GetActiveOperation(GetActiveOperationRequest) returns (GetActiveOperationResponse);
   rpc WatchOperation(WatchOperationRequest) returns (stream WatchOperationResponse);
+  // ADR 0036 凭据请求通道（阶段 B）：Agent 工具在操作中缺少凭据时，经服务挂起
+  // 请求并唤起 Console；Console 用 PullCredentialRequest 拉取当前挂起请求的
+  // 描述（不含秘密），渲染对应控件；用户填写后经 SubmitCredential 提交。
+  // 秘密字段只在服务进程内存流转，不落盘、不进日志、不进 argv。
+  rpc PullCredentialRequest(PullCredentialRequestRequest) returns (PullCredentialRequestResponse);
+  rpc SubmitCredential(SubmitCredentialRequest) returns (SubmitCredentialResponse);
 }
 
 message PingRequest {}
@@ -137,4 +143,49 @@ message WatchOperationResponse {
   bytes result_json = 4;
   string error = 5;
   bool done = 6;
+}
+
+// ---------- ADR 0036 凭据请求通道 ----------
+
+// CredentialRequestKind 决定 Console 渲染哪种凭据控件。
+enum CredentialRequestKind {
+  CREDENTIAL_REQUEST_KIND_UNSPECIFIED = 0;
+  // 登录密码（SSH 密码登录引导安装等）：单行密码输入框。
+  CREDENTIAL_REQUEST_KIND_LOGIN_PASSWORD = 1;
+  // 私钥口令：单行密码输入框（导入带 passphrase 的私钥时）。
+  CREDENTIAL_REQUEST_KIND_KEY_PASSPHRASE = 2;
+  // 私钥材料（存量导入）：私钥正文多行粘贴 + 公钥可选单行。
+  CREDENTIAL_REQUEST_KIND_PRIVATE_KEY_MATERIAL = 3;
+  // 危险动作确认：仅确认按钮，无输入框（如 rotate 触碰远端 authorized_keys）。
+  CREDENTIAL_REQUEST_KIND_CONFIRM = 4;
+}
+
+message PullCredentialRequestRequest {}
+
+message PullCredentialRequestResponse {
+  bool pending = 1;
+  string request_id = 2;
+  CredentialRequestKind kind = 3;
+  // 服务端生成的用户可读描述，如「为设备 dev-box 提供登录密码以安装 SSH 密钥」。
+  string prompt = 4;
+  // 来源操作名（dec_install_ssh_key 等），仅供 Console 展示。
+  string operation = 5;
+  string error = 6;
+}
+
+message SubmitCredentialRequest {
+  string request_id = 1;
+  // 秘密值（密码 / 口令 / 私钥正文）。仅内存流转。
+  string secret = 2;
+  // 私钥材料提交时的公钥（可选，服务端可自算校验）。
+  string public_key = 3;
+  // confirm 类请求的批准结果。
+  bool approved = 4;
+  // 用户在 Console 点「取消」：服务把 CANCELED 交还给等待方。
+  bool canceled = 5;
+}
+
+message SubmitCredentialResponse {
+  bool accepted = 1;
+  string error = 2;
 }

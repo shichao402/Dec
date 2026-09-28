@@ -38,6 +38,7 @@ type Server struct {
 	controlTokens    map[string]time.Time
 	controlTTL       time.Duration
 	broker           *operationBroker
+	credentials      *credentialBroker
 	presence         *presenceTracker
 	requestStop      func()
 	machineMu        sync.Mutex
@@ -117,6 +118,7 @@ func Run(ctx context.Context, version string) error {
 		version:       version,
 		instanceID:    fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().UnixMilli()),
 		broker:        newOperationBroker(),
+		credentials:   newCredentialBroker(),
 		listenToken:   token,
 		controlTokens: map[string]time.Time{},
 		controlTTL:    secrets.SessionTTL(),
@@ -299,6 +301,46 @@ func (s *Server) GetActiveOperation(_ context.Context, req *servicev1.GetActiveO
 	return &servicev1.GetActiveOperationResponse{Operation: s.broker.active(req.ProjectRoot)}, nil
 }
 
+// PullCredentialRequest 返回当前挂起的凭据请求描述（ADR 0036 阶段 B）。
+// Console 被 --unlock-local 同款 flag 唤起后先调本 RPC：pending 时渲染对应
+// 凭据控件，否则回落解锁页（兼容 0022 行为）。
+func (s *Server) PullCredentialRequest(context.Context, *servicev1.PullCredentialRequestRequest) (*servicev1.PullCredentialRequestResponse, error) {
+	if s.credentials == nil {
+		return &servicev1.PullCredentialRequestResponse{}, nil
+	}
+	id, kind, prompt, operation, ok := s.credentials.Pull()
+	if !ok {
+		return &servicev1.PullCredentialRequestResponse{}, nil
+	}
+	return &servicev1.PullCredentialRequestResponse{
+		Pending:    true,
+		RequestId:  id,
+		Kind:       kind,
+		Prompt:     prompt,
+		Operation:  operation,
+	}, nil
+}
+
+// SubmitCredential 接收用户经 Console 提交的凭据。秘密仅在内存流转。
+func (s *Server) SubmitCredential(_ context.Context, req *servicev1.SubmitCredentialRequest) (*servicev1.SubmitCredentialResponse, error) {
+	if s.credentials == nil {
+		return &servicev1.SubmitCredentialResponse{Error: "服务未启用凭据请求通道"}, nil
+	}
+	if req.GetRequestId() == "" {
+		return &servicev1.SubmitCredentialResponse{Error: "缺少 request_id"}, nil
+	}
+	err := s.credentials.Submit(req.GetRequestId(), credentialSubmission{
+		secret:    req.GetSecret(),
+		publicKey: req.GetPublicKey(),
+		approved:  req.GetApproved(),
+		canceled:  req.GetCanceled(),
+	})
+	if err != nil {
+		return &servicev1.SubmitCredentialResponse{Error: err.Error()}, nil
+	}
+	return &servicev1.SubmitCredentialResponse{Accepted: true}, nil
+}
+
 func (s *Server) WatchOperation(req *servicev1.WatchOperationRequest, stream grpc.ServerStreamingServer[servicev1.WatchOperationResponse]) error {
 	history, live, cancel, err := s.broker.subscribe(req.ProjectRoot, req.OperationId)
 	if err != nil {
@@ -332,7 +374,12 @@ const lockedRPCMessage = "dec-server 已锁定，请先通过 Authenticate 使�
 
 func methodAllowedWhenLocked(fullMethod string) bool {
 	switch fullMethod {
-	case servicev1.DecService_Ping_FullMethodName, servicev1.DecService_Authenticate_FullMethodName:
+	case servicev1.DecService_Ping_FullMethodName, servicev1.DecService_Authenticate_FullMethodName,
+		servicev1.DecService_PullCredentialRequest_FullMethodName, servicev1.DecService_SubmitCredential_FullMethodName:
+		// 凭据请求通道（ADR 0036）：Console 拉取挂起请求与提交凭据必须在锁定态
+		// 可用。挂起等待的操作往往正持有解锁前的执行上下文（如 SSH 密码引导
+		// 安装），且 Console 被唤起时服务可能尚未解锁，不能把这两个 RPC 挡在
+		// lockedRPCMessage 后面。
 		return true
 	default:
 		return false

@@ -48,6 +48,16 @@ func OpenUnlockLocal() error {
 	return launch(UnlockLocalFlag)
 }
 
+// OpenCredentialRequest 以与 unlock 相同的 flag 唤起 Console（ADR 0036 阶段 B，
+// 方案 1：共享唤起意图）。Console 启动后先调 PullCredentialRequest：有挂起凭据
+// 请求则渲染对应控件，无则回落解锁页。argv 永远不带业务参数与秘密。
+func OpenCredentialRequest() error {
+	if !Available() {
+		return ErrNonInteractive
+	}
+	return launch(UnlockLocalFlag)
+}
+
 func startInstalled(args ...string) error {
 	path, err := findConsoleExecutable()
 	if err != nil {

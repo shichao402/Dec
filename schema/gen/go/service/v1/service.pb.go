@@ -21,6 +21,66 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// CredentialRequestKind 决定 Console 渲染哪种凭据控件。
+type CredentialRequestKind int32
+
+const (
+	CredentialRequestKind_CREDENTIAL_REQUEST_KIND_UNSPECIFIED CredentialRequestKind = 0
+	// 登录密码（SSH 密码登录引导安装等）：单行密码输入框。
+	CredentialRequestKind_CREDENTIAL_REQUEST_KIND_LOGIN_PASSWORD CredentialRequestKind = 1
+	// 私钥口令：单行密码输入框（导入带 passphrase 的私钥时）。
+	CredentialRequestKind_CREDENTIAL_REQUEST_KIND_KEY_PASSPHRASE CredentialRequestKind = 2
+	// 私钥材料（存量导入）：私钥正文多行粘贴 + 公钥可选单行。
+	CredentialRequestKind_CREDENTIAL_REQUEST_KIND_PRIVATE_KEY_MATERIAL CredentialRequestKind = 3
+	// 危险动作确认：仅确认按钮，无输入框（如 rotate 触碰远端 authorized_keys）。
+	CredentialRequestKind_CREDENTIAL_REQUEST_KIND_CONFIRM CredentialRequestKind = 4
+)
+
+// Enum value maps for CredentialRequestKind.
+var (
+	CredentialRequestKind_name = map[int32]string{
+		0: "CREDENTIAL_REQUEST_KIND_UNSPECIFIED",
+		1: "CREDENTIAL_REQUEST_KIND_LOGIN_PASSWORD",
+		2: "CREDENTIAL_REQUEST_KIND_KEY_PASSPHRASE",
+		3: "CREDENTIAL_REQUEST_KIND_PRIVATE_KEY_MATERIAL",
+		4: "CREDENTIAL_REQUEST_KIND_CONFIRM",
+	}
+	CredentialRequestKind_value = map[string]int32{
+		"CREDENTIAL_REQUEST_KIND_UNSPECIFIED":          0,
+		"CREDENTIAL_REQUEST_KIND_LOGIN_PASSWORD":       1,
+		"CREDENTIAL_REQUEST_KIND_KEY_PASSPHRASE":       2,
+		"CREDENTIAL_REQUEST_KIND_PRIVATE_KEY_MATERIAL": 3,
+		"CREDENTIAL_REQUEST_KIND_CONFIRM":              4,
+	}
+)
+
+func (x CredentialRequestKind) Enum() *CredentialRequestKind {
+	p := new(CredentialRequestKind)
+	*p = x
+	return p
+}
+
+func (x CredentialRequestKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CredentialRequestKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_service_v1_service_proto_enumTypes[0].Descriptor()
+}
+
+func (CredentialRequestKind) Type() protoreflect.EnumType {
+	return &file_service_v1_service_proto_enumTypes[0]
+}
+
+func (x CredentialRequestKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CredentialRequestKind.Descriptor instead.
+func (CredentialRequestKind) EnumDescriptor() ([]byte, []int) {
+	return file_service_v1_service_proto_rawDescGZIP(), []int{0}
+}
+
 type PingRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1205,6 +1265,260 @@ func (x *WatchOperationResponse) GetDone() bool {
 	return false
 }
 
+type PullCredentialRequestRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullCredentialRequestRequest) Reset() {
+	*x = PullCredentialRequestRequest{}
+	mi := &file_service_v1_service_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullCredentialRequestRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullCredentialRequestRequest) ProtoMessage() {}
+
+func (x *PullCredentialRequestRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_service_v1_service_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullCredentialRequestRequest.ProtoReflect.Descriptor instead.
+func (*PullCredentialRequestRequest) Descriptor() ([]byte, []int) {
+	return file_service_v1_service_proto_rawDescGZIP(), []int{19}
+}
+
+type PullCredentialRequestResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Pending   bool                   `protobuf:"varint,1,opt,name=pending,proto3" json:"pending,omitempty"`
+	RequestId string                 `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Kind      CredentialRequestKind  `protobuf:"varint,3,opt,name=kind,proto3,enum=service.v1.CredentialRequestKind" json:"kind,omitempty"`
+	// 服务端生成的用户可读描述，如「为设备 dev-box 提供登录密码以安装 SSH 密钥」。
+	Prompt string `protobuf:"bytes,4,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	// 来源操作名（dec_install_ssh_key 等），仅供 Console 展示。
+	Operation     string `protobuf:"bytes,5,opt,name=operation,proto3" json:"operation,omitempty"`
+	Error         string `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullCredentialRequestResponse) Reset() {
+	*x = PullCredentialRequestResponse{}
+	mi := &file_service_v1_service_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullCredentialRequestResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullCredentialRequestResponse) ProtoMessage() {}
+
+func (x *PullCredentialRequestResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_service_v1_service_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullCredentialRequestResponse.ProtoReflect.Descriptor instead.
+func (*PullCredentialRequestResponse) Descriptor() ([]byte, []int) {
+	return file_service_v1_service_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *PullCredentialRequestResponse) GetPending() bool {
+	if x != nil {
+		return x.Pending
+	}
+	return false
+}
+
+func (x *PullCredentialRequestResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *PullCredentialRequestResponse) GetKind() CredentialRequestKind {
+	if x != nil {
+		return x.Kind
+	}
+	return CredentialRequestKind_CREDENTIAL_REQUEST_KIND_UNSPECIFIED
+}
+
+func (x *PullCredentialRequestResponse) GetPrompt() string {
+	if x != nil {
+		return x.Prompt
+	}
+	return ""
+}
+
+func (x *PullCredentialRequestResponse) GetOperation() string {
+	if x != nil {
+		return x.Operation
+	}
+	return ""
+}
+
+func (x *PullCredentialRequestResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type SubmitCredentialRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// 秘密值（密码 / 口令 / 私钥正文）。仅内存流转。
+	Secret string `protobuf:"bytes,2,opt,name=secret,proto3" json:"secret,omitempty"`
+	// 私钥材料提交时的公钥（可选，服务端可自算校验）。
+	PublicKey string `protobuf:"bytes,3,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	// confirm 类请求的批准结果。
+	Approved bool `protobuf:"varint,4,opt,name=approved,proto3" json:"approved,omitempty"`
+	// 用户在 Console 点「取消」：服务把 CANCELED 交还给等待方。
+	Canceled      bool `protobuf:"varint,5,opt,name=canceled,proto3" json:"canceled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitCredentialRequest) Reset() {
+	*x = SubmitCredentialRequest{}
+	mi := &file_service_v1_service_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitCredentialRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitCredentialRequest) ProtoMessage() {}
+
+func (x *SubmitCredentialRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_service_v1_service_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitCredentialRequest.ProtoReflect.Descriptor instead.
+func (*SubmitCredentialRequest) Descriptor() ([]byte, []int) {
+	return file_service_v1_service_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *SubmitCredentialRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequest) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequest) GetPublicKey() string {
+	if x != nil {
+		return x.PublicKey
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequest) GetApproved() bool {
+	if x != nil {
+		return x.Approved
+	}
+	return false
+}
+
+func (x *SubmitCredentialRequest) GetCanceled() bool {
+	if x != nil {
+		return x.Canceled
+	}
+	return false
+}
+
+type SubmitCredentialResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitCredentialResponse) Reset() {
+	*x = SubmitCredentialResponse{}
+	mi := &file_service_v1_service_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitCredentialResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitCredentialResponse) ProtoMessage() {}
+
+func (x *SubmitCredentialResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_service_v1_service_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitCredentialResponse.ProtoReflect.Descriptor instead.
+func (*SubmitCredentialResponse) Descriptor() ([]byte, []int) {
+	return file_service_v1_service_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *SubmitCredentialResponse) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+func (x *SubmitCredentialResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_service_v1_service_proto protoreflect.FileDescriptor
 
 const file_service_v1_service_proto_rawDesc = "" +
@@ -1296,7 +1610,33 @@ const file_service_v1_service_proto_rawDesc = "" +
 	"\vresult_json\x18\x04 \x01(\fR\n" +
 	"resultJson\x12\x14\n" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x12\x12\n" +
-	"\x04done\x18\x06 \x01(\bR\x04done2\x85\x05\n" +
+	"\x04done\x18\x06 \x01(\bR\x04done\"\x1e\n" +
+	"\x1cPullCredentialRequestRequest\"\xdb\x01\n" +
+	"\x1dPullCredentialRequestResponse\x12\x18\n" +
+	"\apending\x18\x01 \x01(\bR\apending\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x125\n" +
+	"\x04kind\x18\x03 \x01(\x0e2!.service.v1.CredentialRequestKindR\x04kind\x12\x16\n" +
+	"\x06prompt\x18\x04 \x01(\tR\x06prompt\x12\x1c\n" +
+	"\toperation\x18\x05 \x01(\tR\toperation\x12\x14\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\"\xa7\x01\n" +
+	"\x17SubmitCredentialRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
+	"\x06secret\x18\x02 \x01(\tR\x06secret\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x03 \x01(\tR\tpublicKey\x12\x1a\n" +
+	"\bapproved\x18\x04 \x01(\bR\bapproved\x12\x1a\n" +
+	"\bcanceled\x18\x05 \x01(\bR\bcanceled\"L\n" +
+	"\x18SubmitCredentialResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error*\xef\x01\n" +
+	"\x15CredentialRequestKind\x12'\n" +
+	"#CREDENTIAL_REQUEST_KIND_UNSPECIFIED\x10\x00\x12*\n" +
+	"&CREDENTIAL_REQUEST_KIND_LOGIN_PASSWORD\x10\x01\x12*\n" +
+	"&CREDENTIAL_REQUEST_KIND_KEY_PASSPHRASE\x10\x02\x120\n" +
+	",CREDENTIAL_REQUEST_KIND_PRIVATE_KEY_MATERIAL\x10\x03\x12#\n" +
+	"\x1fCREDENTIAL_REQUEST_KIND_CONFIRM\x10\x042\xd2\x06\n" +
 	"\n" +
 	"DecService\x129\n" +
 	"\x04Ping\x12\x17.service.v1.PingRequest\x1a\x18.service.v1.PingResponse\x12Q\n" +
@@ -1306,7 +1646,9 @@ const file_service_v1_service_proto_rawDesc = "" +
 	"\x06Invoke\x12\x19.service.v1.InvokeRequest\x1a\x1a.service.v1.InvokeResponse\x12S\n" +
 	"\fRunOperation\x12\x1f.service.v1.RunOperationRequest\x1a .service.v1.RunOperationResponse0\x01\x12c\n" +
 	"\x12GetActiveOperation\x12%.service.v1.GetActiveOperationRequest\x1a&.service.v1.GetActiveOperationResponse\x12Y\n" +
-	"\x0eWatchOperation\x12!.service.v1.WatchOperationRequest\x1a\".service.v1.WatchOperationResponse0\x01B>Z<github.com/shichao402/Dec/schema/gen/go/service/v1;servicev1b\x06proto3"
+	"\x0eWatchOperation\x12!.service.v1.WatchOperationRequest\x1a\".service.v1.WatchOperationResponse0\x01\x12l\n" +
+	"\x15PullCredentialRequest\x12(.service.v1.PullCredentialRequestRequest\x1a).service.v1.PullCredentialRequestResponse\x12]\n" +
+	"\x10SubmitCredential\x12#.service.v1.SubmitCredentialRequest\x1a$.service.v1.SubmitCredentialResponseB>Z<github.com/shichao402/Dec/schema/gen/go/service/v1;servicev1b\x06proto3"
 
 var (
 	file_service_v1_service_proto_rawDescOnce sync.Once
@@ -1320,57 +1662,68 @@ func file_service_v1_service_proto_rawDescGZIP() []byte {
 	return file_service_v1_service_proto_rawDescData
 }
 
-var file_service_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_service_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_service_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_service_v1_service_proto_goTypes = []any{
-	(*PingRequest)(nil),                // 0: service.v1.PingRequest
-	(*PingResponse)(nil),               // 1: service.v1.PingResponse
-	(*AuthenticateRequest)(nil),        // 2: service.v1.AuthenticateRequest
-	(*AuthenticateResponse)(nil),       // 3: service.v1.AuthenticateResponse
-	(*ShutdownRequest)(nil),            // 4: service.v1.ShutdownRequest
-	(*ShutdownResponse)(nil),           // 5: service.v1.ShutdownResponse
-	(*KeepAliveRequest)(nil),           // 6: service.v1.KeepAliveRequest
-	(*KeepAliveResponse)(nil),          // 7: service.v1.KeepAliveResponse
-	(*InvokeRequest)(nil),              // 8: service.v1.InvokeRequest
-	(*InvokeResponse)(nil),             // 9: service.v1.InvokeResponse
-	(*RunOperationRequest)(nil),        // 10: service.v1.RunOperationRequest
-	(*GetActiveOperationRequest)(nil),  // 11: service.v1.GetActiveOperationRequest
-	(*WatchOperationRequest)(nil),      // 12: service.v1.WatchOperationRequest
-	(*ActiveOperation)(nil),            // 13: service.v1.ActiveOperation
-	(*Progress)(nil),                   // 14: service.v1.Progress
-	(*OperationEvent)(nil),             // 15: service.v1.OperationEvent
-	(*RunOperationResponse)(nil),       // 16: service.v1.RunOperationResponse
-	(*GetActiveOperationResponse)(nil), // 17: service.v1.GetActiveOperationResponse
-	(*WatchOperationResponse)(nil),     // 18: service.v1.WatchOperationResponse
+	(CredentialRequestKind)(0),            // 0: service.v1.CredentialRequestKind
+	(*PingRequest)(nil),                   // 1: service.v1.PingRequest
+	(*PingResponse)(nil),                  // 2: service.v1.PingResponse
+	(*AuthenticateRequest)(nil),           // 3: service.v1.AuthenticateRequest
+	(*AuthenticateResponse)(nil),          // 4: service.v1.AuthenticateResponse
+	(*ShutdownRequest)(nil),               // 5: service.v1.ShutdownRequest
+	(*ShutdownResponse)(nil),              // 6: service.v1.ShutdownResponse
+	(*KeepAliveRequest)(nil),              // 7: service.v1.KeepAliveRequest
+	(*KeepAliveResponse)(nil),             // 8: service.v1.KeepAliveResponse
+	(*InvokeRequest)(nil),                 // 9: service.v1.InvokeRequest
+	(*InvokeResponse)(nil),                // 10: service.v1.InvokeResponse
+	(*RunOperationRequest)(nil),           // 11: service.v1.RunOperationRequest
+	(*GetActiveOperationRequest)(nil),     // 12: service.v1.GetActiveOperationRequest
+	(*WatchOperationRequest)(nil),         // 13: service.v1.WatchOperationRequest
+	(*ActiveOperation)(nil),               // 14: service.v1.ActiveOperation
+	(*Progress)(nil),                      // 15: service.v1.Progress
+	(*OperationEvent)(nil),                // 16: service.v1.OperationEvent
+	(*RunOperationResponse)(nil),          // 17: service.v1.RunOperationResponse
+	(*GetActiveOperationResponse)(nil),    // 18: service.v1.GetActiveOperationResponse
+	(*WatchOperationResponse)(nil),        // 19: service.v1.WatchOperationResponse
+	(*PullCredentialRequestRequest)(nil),  // 20: service.v1.PullCredentialRequestRequest
+	(*PullCredentialRequestResponse)(nil), // 21: service.v1.PullCredentialRequestResponse
+	(*SubmitCredentialRequest)(nil),       // 22: service.v1.SubmitCredentialRequest
+	(*SubmitCredentialResponse)(nil),      // 23: service.v1.SubmitCredentialResponse
 }
 var file_service_v1_service_proto_depIdxs = []int32{
-	15, // 0: service.v1.InvokeResponse.events:type_name -> service.v1.OperationEvent
-	14, // 1: service.v1.OperationEvent.progress:type_name -> service.v1.Progress
-	13, // 2: service.v1.RunOperationResponse.active:type_name -> service.v1.ActiveOperation
-	15, // 3: service.v1.RunOperationResponse.event:type_name -> service.v1.OperationEvent
-	13, // 4: service.v1.GetActiveOperationResponse.operation:type_name -> service.v1.ActiveOperation
-	13, // 5: service.v1.WatchOperationResponse.active:type_name -> service.v1.ActiveOperation
-	15, // 6: service.v1.WatchOperationResponse.event:type_name -> service.v1.OperationEvent
-	0,  // 7: service.v1.DecService.Ping:input_type -> service.v1.PingRequest
-	2,  // 8: service.v1.DecService.Authenticate:input_type -> service.v1.AuthenticateRequest
-	4,  // 9: service.v1.DecService.Shutdown:input_type -> service.v1.ShutdownRequest
-	6,  // 10: service.v1.DecService.KeepAlive:input_type -> service.v1.KeepAliveRequest
-	8,  // 11: service.v1.DecService.Invoke:input_type -> service.v1.InvokeRequest
-	10, // 12: service.v1.DecService.RunOperation:input_type -> service.v1.RunOperationRequest
-	11, // 13: service.v1.DecService.GetActiveOperation:input_type -> service.v1.GetActiveOperationRequest
-	12, // 14: service.v1.DecService.WatchOperation:input_type -> service.v1.WatchOperationRequest
-	1,  // 15: service.v1.DecService.Ping:output_type -> service.v1.PingResponse
-	3,  // 16: service.v1.DecService.Authenticate:output_type -> service.v1.AuthenticateResponse
-	5,  // 17: service.v1.DecService.Shutdown:output_type -> service.v1.ShutdownResponse
-	7,  // 18: service.v1.DecService.KeepAlive:output_type -> service.v1.KeepAliveResponse
-	9,  // 19: service.v1.DecService.Invoke:output_type -> service.v1.InvokeResponse
-	16, // 20: service.v1.DecService.RunOperation:output_type -> service.v1.RunOperationResponse
-	17, // 21: service.v1.DecService.GetActiveOperation:output_type -> service.v1.GetActiveOperationResponse
-	18, // 22: service.v1.DecService.WatchOperation:output_type -> service.v1.WatchOperationResponse
-	15, // [15:23] is the sub-list for method output_type
-	7,  // [7:15] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	16, // 0: service.v1.InvokeResponse.events:type_name -> service.v1.OperationEvent
+	15, // 1: service.v1.OperationEvent.progress:type_name -> service.v1.Progress
+	14, // 2: service.v1.RunOperationResponse.active:type_name -> service.v1.ActiveOperation
+	16, // 3: service.v1.RunOperationResponse.event:type_name -> service.v1.OperationEvent
+	14, // 4: service.v1.GetActiveOperationResponse.operation:type_name -> service.v1.ActiveOperation
+	14, // 5: service.v1.WatchOperationResponse.active:type_name -> service.v1.ActiveOperation
+	16, // 6: service.v1.WatchOperationResponse.event:type_name -> service.v1.OperationEvent
+	0,  // 7: service.v1.PullCredentialRequestResponse.kind:type_name -> service.v1.CredentialRequestKind
+	1,  // 8: service.v1.DecService.Ping:input_type -> service.v1.PingRequest
+	3,  // 9: service.v1.DecService.Authenticate:input_type -> service.v1.AuthenticateRequest
+	5,  // 10: service.v1.DecService.Shutdown:input_type -> service.v1.ShutdownRequest
+	7,  // 11: service.v1.DecService.KeepAlive:input_type -> service.v1.KeepAliveRequest
+	9,  // 12: service.v1.DecService.Invoke:input_type -> service.v1.InvokeRequest
+	11, // 13: service.v1.DecService.RunOperation:input_type -> service.v1.RunOperationRequest
+	12, // 14: service.v1.DecService.GetActiveOperation:input_type -> service.v1.GetActiveOperationRequest
+	13, // 15: service.v1.DecService.WatchOperation:input_type -> service.v1.WatchOperationRequest
+	20, // 16: service.v1.DecService.PullCredentialRequest:input_type -> service.v1.PullCredentialRequestRequest
+	22, // 17: service.v1.DecService.SubmitCredential:input_type -> service.v1.SubmitCredentialRequest
+	2,  // 18: service.v1.DecService.Ping:output_type -> service.v1.PingResponse
+	4,  // 19: service.v1.DecService.Authenticate:output_type -> service.v1.AuthenticateResponse
+	6,  // 20: service.v1.DecService.Shutdown:output_type -> service.v1.ShutdownResponse
+	8,  // 21: service.v1.DecService.KeepAlive:output_type -> service.v1.KeepAliveResponse
+	10, // 22: service.v1.DecService.Invoke:output_type -> service.v1.InvokeResponse
+	17, // 23: service.v1.DecService.RunOperation:output_type -> service.v1.RunOperationResponse
+	18, // 24: service.v1.DecService.GetActiveOperation:output_type -> service.v1.GetActiveOperationResponse
+	19, // 25: service.v1.DecService.WatchOperation:output_type -> service.v1.WatchOperationResponse
+	21, // 26: service.v1.DecService.PullCredentialRequest:output_type -> service.v1.PullCredentialRequestResponse
+	23, // 27: service.v1.DecService.SubmitCredential:output_type -> service.v1.SubmitCredentialResponse
+	18, // [18:28] is the sub-list for method output_type
+	8,  // [8:18] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_service_v1_service_proto_init() }
@@ -1383,13 +1736,14 @@ func file_service_v1_service_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_service_v1_service_proto_rawDesc), len(file_service_v1_service_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   19,
+			NumEnums:      1,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_service_v1_service_proto_goTypes,
 		DependencyIndexes: file_service_v1_service_proto_depIdxs,
+		EnumInfos:         file_service_v1_service_proto_enumTypes,
 		MessageInfos:      file_service_v1_service_proto_msgTypes,
 	}.Build()
 	File_service_v1_service_proto = out.File

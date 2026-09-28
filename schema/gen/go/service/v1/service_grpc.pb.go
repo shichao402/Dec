@@ -19,14 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DecService_Ping_FullMethodName               = "/service.v1.DecService/Ping"
-	DecService_Authenticate_FullMethodName       = "/service.v1.DecService/Authenticate"
-	DecService_Shutdown_FullMethodName           = "/service.v1.DecService/Shutdown"
-	DecService_KeepAlive_FullMethodName          = "/service.v1.DecService/KeepAlive"
-	DecService_Invoke_FullMethodName             = "/service.v1.DecService/Invoke"
-	DecService_RunOperation_FullMethodName       = "/service.v1.DecService/RunOperation"
-	DecService_GetActiveOperation_FullMethodName = "/service.v1.DecService/GetActiveOperation"
-	DecService_WatchOperation_FullMethodName     = "/service.v1.DecService/WatchOperation"
+	DecService_Ping_FullMethodName                  = "/service.v1.DecService/Ping"
+	DecService_Authenticate_FullMethodName          = "/service.v1.DecService/Authenticate"
+	DecService_Shutdown_FullMethodName              = "/service.v1.DecService/Shutdown"
+	DecService_KeepAlive_FullMethodName             = "/service.v1.DecService/KeepAlive"
+	DecService_Invoke_FullMethodName                = "/service.v1.DecService/Invoke"
+	DecService_RunOperation_FullMethodName          = "/service.v1.DecService/RunOperation"
+	DecService_GetActiveOperation_FullMethodName    = "/service.v1.DecService/GetActiveOperation"
+	DecService_WatchOperation_FullMethodName        = "/service.v1.DecService/WatchOperation"
+	DecService_PullCredentialRequest_FullMethodName = "/service.v1.DecService/PullCredentialRequest"
+	DecService_SubmitCredential_FullMethodName      = "/service.v1.DecService/SubmitCredential"
 )
 
 // DecServiceClient is the client API for DecService service.
@@ -44,6 +46,12 @@ type DecServiceClient interface {
 	RunOperation(ctx context.Context, in *RunOperationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RunOperationResponse], error)
 	GetActiveOperation(ctx context.Context, in *GetActiveOperationRequest, opts ...grpc.CallOption) (*GetActiveOperationResponse, error)
 	WatchOperation(ctx context.Context, in *WatchOperationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchOperationResponse], error)
+	// ADR 0036 凭据请求通道（阶段 B）：Agent 工具在操作中缺少凭据时，经服务挂起
+	// 请求并唤起 Console；Console 用 PullCredentialRequest 拉取当前挂起请求的
+	// 描述（不含秘密），渲染对应控件；用户填写后经 SubmitCredential 提交。
+	// 秘密字段只在服务进程内存流转，不落盘、不进日志、不进 argv。
+	PullCredentialRequest(ctx context.Context, in *PullCredentialRequestRequest, opts ...grpc.CallOption) (*PullCredentialRequestResponse, error)
+	SubmitCredential(ctx context.Context, in *SubmitCredentialRequest, opts ...grpc.CallOption) (*SubmitCredentialResponse, error)
 }
 
 type decServiceClient struct {
@@ -155,6 +163,26 @@ func (c *decServiceClient) WatchOperation(ctx context.Context, in *WatchOperatio
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DecService_WatchOperationClient = grpc.ServerStreamingClient[WatchOperationResponse]
 
+func (c *decServiceClient) PullCredentialRequest(ctx context.Context, in *PullCredentialRequestRequest, opts ...grpc.CallOption) (*PullCredentialRequestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PullCredentialRequestResponse)
+	err := c.cc.Invoke(ctx, DecService_PullCredentialRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *decServiceClient) SubmitCredential(ctx context.Context, in *SubmitCredentialRequest, opts ...grpc.CallOption) (*SubmitCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubmitCredentialResponse)
+	err := c.cc.Invoke(ctx, DecService_SubmitCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DecServiceServer is the server API for DecService service.
 // All implementations must embed UnimplementedDecServiceServer
 // for forward compatibility.
@@ -170,6 +198,12 @@ type DecServiceServer interface {
 	RunOperation(*RunOperationRequest, grpc.ServerStreamingServer[RunOperationResponse]) error
 	GetActiveOperation(context.Context, *GetActiveOperationRequest) (*GetActiveOperationResponse, error)
 	WatchOperation(*WatchOperationRequest, grpc.ServerStreamingServer[WatchOperationResponse]) error
+	// ADR 0036 凭据请求通道（阶段 B）：Agent 工具在操作中缺少凭据时，经服务挂起
+	// 请求并唤起 Console；Console 用 PullCredentialRequest 拉取当前挂起请求的
+	// 描述（不含秘密），渲染对应控件；用户填写后经 SubmitCredential 提交。
+	// 秘密字段只在服务进程内存流转，不落盘、不进日志、不进 argv。
+	PullCredentialRequest(context.Context, *PullCredentialRequestRequest) (*PullCredentialRequestResponse, error)
+	SubmitCredential(context.Context, *SubmitCredentialRequest) (*SubmitCredentialResponse, error)
 	mustEmbedUnimplementedDecServiceServer()
 }
 
@@ -203,6 +237,12 @@ func (UnimplementedDecServiceServer) GetActiveOperation(context.Context, *GetAct
 }
 func (UnimplementedDecServiceServer) WatchOperation(*WatchOperationRequest, grpc.ServerStreamingServer[WatchOperationResponse]) error {
 	return status.Error(codes.Unimplemented, "method WatchOperation not implemented")
+}
+func (UnimplementedDecServiceServer) PullCredentialRequest(context.Context, *PullCredentialRequestRequest) (*PullCredentialRequestResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PullCredentialRequest not implemented")
+}
+func (UnimplementedDecServiceServer) SubmitCredential(context.Context, *SubmitCredentialRequest) (*SubmitCredentialResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitCredential not implemented")
 }
 func (UnimplementedDecServiceServer) mustEmbedUnimplementedDecServiceServer() {}
 func (UnimplementedDecServiceServer) testEmbeddedByValue()                    {}
@@ -344,6 +384,42 @@ func _DecService_WatchOperation_Handler(srv interface{}, stream grpc.ServerStrea
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DecService_WatchOperationServer = grpc.ServerStreamingServer[WatchOperationResponse]
 
+func _DecService_PullCredentialRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PullCredentialRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DecServiceServer).PullCredentialRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DecService_PullCredentialRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DecServiceServer).PullCredentialRequest(ctx, req.(*PullCredentialRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DecService_SubmitCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DecServiceServer).SubmitCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DecService_SubmitCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DecServiceServer).SubmitCredential(ctx, req.(*SubmitCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DecService_ServiceDesc is the grpc.ServiceDesc for DecService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -370,6 +446,14 @@ var DecService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetActiveOperation",
 			Handler:    _DecService_GetActiveOperation_Handler,
+		},
+		{
+			MethodName: "PullCredentialRequest",
+			Handler:    _DecService_PullCredentialRequest_Handler,
+		},
+		{
+			MethodName: "SubmitCredential",
+			Handler:    _DecService_SubmitCredential_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
