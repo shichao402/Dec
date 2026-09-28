@@ -108,7 +108,7 @@ jobs:
 
       - name: Fetch relkit SDK
         shell: bash
-        run: go run github.com/shichao402/relkit/cmd/relkit@v0.5.6 install
+        run: go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 install
 
       - name: go test
         shell: bash
@@ -129,7 +129,7 @@ jobs:
 
       - name: Fetch relkit SDK
         shell: bash
-        run: go run github.com/shichao402/relkit/cmd/relkit@v0.5.6 install
+        run: go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 install
 
       - name: Build runtime suite
         shell: bash
@@ -186,7 +186,7 @@ jobs:
 
       - name: Fetch relkit SDK
         shell: bash
-        run: go run github.com/shichao402/relkit/cmd/relkit@v0.5.6 install
+        run: go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 install
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -276,7 +276,7 @@ jobs:
 
       - name: Fetch relkit
         shell: bash
-        run: go run github.com/shichao402/relkit/cmd/relkit@v0.5.6 install
+        run: go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 install
 
       - name: RUP stage and publish
         shell: bash
@@ -304,7 +304,7 @@ jobs:
           # `relkit ci release --execute` 进程内。协议头、idempotencyKey、
           # RELKIT_UPLOAD_PART_SIZE / RELKIT_UPLOAD_CONCURRENCY 语义与旧
           # bash 尾段一致（cas-put Go 实现内读同名 env）。
-          go run github.com/shichao402/relkit/cmd/relkit@v0.5.6 ci release --channel "$CHANNEL" --execute
+          go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 ci release --channel "$CHANNEL" --execute
 
       - name: GitHub Release
         shell: bash

@@ -79,13 +79,13 @@ RUP 限制：当前 SDK 的 chain 选择最高可达版本，不支持任意历�
 开发 / CI 通过 checksum-pinned 的 release 附件安装 relkit：
 
 ```
-go run github.com/shichao402/relkit/cmd/relkit@v0.5.6 install
+go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 install
 ```
 
 升 lock（在 relkit 打出对应 GitHub Release 之后）：
 
 ```
-go run github.com/shichao402/relkit/cmd/relkit@v0.5.6 upgrade vX.Y.Z
+go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 upgrade vX.Y.Z
 ```
 
 Go SDK 落到 `third_party/relkit/`，Rust facade 落到 `third_party/relkit/sdk/rust/`，TypeScript 绑定落到 `third_party/relkit/bindings/ts/`，CLI / updater 落到 `tools/bin/`。Tauri 与前端只 import 已 consume 的生成物；产品仓不生成 updater 协议代码。Go SDK 改为直接依赖（module path 已迁移）：

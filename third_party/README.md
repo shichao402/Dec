@@ -13,5 +13,5 @@ Go SDK 已改为直接依赖 `github.com/shichao402/relkit`（见 go.mod），
 TypeScript 绑定仍从本目录消费），Go 构建不再 replace 到这里。日常安装附件：
 
 ```bash
-go run github.com/shichao402/relkit/cmd/relkit@v0.5.6 install
+go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 install
 ```
