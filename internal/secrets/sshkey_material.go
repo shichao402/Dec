@@ -1,13 +1,21 @@
 package secrets
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/shichao402/Dec/internal/sysproc"
 )
+
+// sshProbeTimeout 是无口令私钥探测（ssh-keygen -y / -lf）的单命令超时。
+// 带口令私钥在无 TTY 环境下会等待输入；空 ASKPASS 已让其快速失败，此超时
+// 是最后一道安全网，防止任何形式的挂死滞留临时私钥文件。
+const sshProbeTimeout = 10 * time.Second
 
 // SSHKeyMaterial 是登记前已就绪的密钥素材（不含 Hosts）。
 type SSHKeyMaterial struct {
@@ -72,7 +80,7 @@ func LoadSSHKeyMaterialFromPrivatePath(privPath string) (SSHKeyMaterial, error) 
 	}
 	defer cleanup()
 
-	pubOut, err := sysproc.Command("ssh-keygen", "-y", "-f", securePath).CombinedOutput()
+	pubOut, err := sshProbeKeygen(securePath, "-y")
 	if err != nil {
 		return SSHKeyMaterial{}, fmt.Errorf("从私钥派生公钥失败: %w (%s)", err, strings.TrimSpace(string(pubOut)))
 	}
@@ -81,7 +89,7 @@ func LoadSSHKeyMaterialFromPrivatePath(privPath string) (SSHKeyMaterial, error) 
 		return SSHKeyMaterial{}, fmt.Errorf("派生公钥为空")
 	}
 
-	fpOut, err := sysproc.Command("ssh-keygen", "-lf", securePath).CombinedOutput()
+	fpOut, err := sshProbeKeygen(securePath, "-l")
 	if err != nil {
 		return SSHKeyMaterial{}, fmt.Errorf("计算 fingerprint 失败: %w (%s)", err, strings.TrimSpace(string(fpOut)))
 	}
@@ -94,6 +102,70 @@ func LoadSSHKeyMaterialFromPrivatePath(privPath string) (SSHKeyMaterial, error) 
 		PublicKey:      pub + "\n",
 		KeyFingerprint: fp,
 	}, nil
+}
+
+// sshProbeKeygen 在超时与空 ASKPASS 保护下执行 ssh-keygen 探测命令
+// （-f keypath 由本函数统一追加，调用方只传选项如 -y、-l）。
+//
+// Bug#1 修复：dec-server 后台进程无 TTY，ssh-keygen 遇带口令私钥时提示
+// "Enter passphrase" 并等待 stdin 输入，无人应答则永不返回 → CombinedOutput
+// 永不返回 → defer cleanup 不执行（私钥明文副本滞留 %TEMP%\dec-sshkey-load-*）
+// → 操作锁泄漏。
+//
+// 双重防护：
+//  1. SSH_ASKPASS_REQUIRE=force + 空 SSH_ASKPASS 脚本：强制 ssh-keygen 走
+//     ASKPASS 派生口令而非等 stdin，空脚本返回空口令 → ssh-keygen 立即
+//     校验失败返回 "incorrect passphrase" 错误。错误及时返回后，上层
+//     loadSSHKeyMaterialInteractive 才有机会转 AskKeyPassphrase 弹窗。
+//  2. sshProbeTimeout 超时包裹：任何未预期挂起兜底取消，defer cleanup
+//     必然执行，私钥临时文件必然清除。
+func sshProbeKeygen(securePath string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), sshProbeTimeout)
+	defer cancel()
+	cmd := sysproc.CommandContext(ctx, "ssh-keygen", append(args, "-f", securePath)...)
+	// 空输出 ASKPASS：任何口令提示都立刻得到空串，ssh-keygen 快速失败。
+	askpass, askpassCleanup, err := materializeEmptyAskpass()
+	if err != nil {
+		return nil, fmt.Errorf("准备空 ASKPASS 失败: %w", err)
+	}
+	defer askpassCleanup()
+	cmd.Env = append(os.Environ(),
+		"SSH_ASKPASS="+askpass,
+		"SSH_ASKPASS_REQUIRE=force",
+		"DISPLAY=:0",
+	)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("ssh-keygen 探测超时（%s，可能因私钥带口令挂起）", sshProbeTimeout)
+	}
+	return out, err
+}
+
+// materializeEmptyAskpass 生成一个输出空串的一次性 ASKPASS 脚本（Windows 用
+// .bat，unix 用 .sh），与 remote_provision 的 writeAskpassHelper 同构。ssh-keygen
+// 拿到空口令后立即校验失败返回错误，而非等待 stdin 输入。
+func materializeEmptyAskpass() (string, func(), error) {
+	dir, err := os.MkdirTemp("", "dec-askpass-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(dir, "askpass.bat")
+		body := "@echo off\r\necho.\r\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+		return path, cleanup, nil
+	}
+	path := filepath.Join(dir, "askpass.sh")
+	body := "#!/bin/sh\nprintf '\\n'\n"
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return path, cleanup, nil
 }
 
 // LoadSSHKeyMaterialWithPassphrase 从带口令的私钥文件加载材料：先复制到收紧
