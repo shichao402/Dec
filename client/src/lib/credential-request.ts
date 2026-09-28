@@ -50,6 +50,18 @@ export function credentialSubmitLabel(kind: number): string {
   return kindIsConfirmOnly(kind) ? '批准' : '提交'
 }
 
+// 来源操作 ID → 用户可读标签。prompt 本身已含完整说明，这里是兜底；
+// 未知 ID 原样展示（未来新增工具不致于显示成空）。
+const OPERATION_LABELS: Record<string, string> = {
+  dec_install_ssh_key: '安装 SSH 登录密钥（dec_install_ssh_key）',
+  dec_import_sshkey: '导入私钥到密码库（dec_import_sshkey）',
+  dec_rotate_ssh_key: '轮换 SSH 密钥（dec_rotate_ssh_key）',
+}
+
+export function operationLabel(operation: string): string {
+  return OPERATION_LABELS[operation] || operation
+}
+
 // 拉取结果转凭据页视图：pending 且请求 ID 非空才可渲染。
 export function toCredentialRequestView(info: {
   pending: boolean

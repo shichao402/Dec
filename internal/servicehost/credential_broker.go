@@ -44,10 +44,11 @@ type credentialSubmission struct {
 }
 
 const (
+	// defaultCredentialRequestTTL 的 5 分钟同时写进了 app 层两处凭据 prompt
+	// 与 Console 凭据页脚文案；调整这里需要同步三处文案。
 	defaultCredentialRequestTTL   = 5 * time.Minute
 	credentialRequestIDPrefix     = "cred-"
 )
-
 // ErrCredentialRequestPending 已有挂起请求，拒绝并发第二个。
 var ErrCredentialRequestPending = errors.New("已有一个凭据请求在等待用户，请先在 Console 中处理")
 

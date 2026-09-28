@@ -13,6 +13,7 @@ import {
   credentialSubmitLabel,
   kindHasPublicKeyField,
   kindIsConfirmOnly,
+  operationLabel,
   type CredentialRequestView,
 } from '@/lib/credential-request'
 
@@ -67,9 +68,9 @@ export function CredentialPage(props: {
                   <Icon className="size-4" />
                 </span>
                 <h1 className="text-lg font-semibold text-ink">{spec?.title || '凭据请求'}</h1>
-                <p className="text-xs leading-relaxed text-faint">{props.request.prompt}</p>
+                <p className="text-[13px] leading-relaxed text-muted">{props.request.prompt}</p>
                 {props.request.operation && (
-                  <p className="font-mono text-[11px] text-faint">来源操作 {props.request.operation}</p>
+                  <p className="font-mono text-[11px] text-faint">来源操作 {operationLabel(props.request.operation)}</p>
                 )}
               </div>
               <p className="text-[11px] leading-relaxed text-faint">{spec?.hint}</p>
@@ -120,7 +121,7 @@ export function CredentialPage(props: {
             </PanelBody>
           </Panel>
           <p className="mt-3 text-center text-[11px] leading-relaxed text-faint">
-            凭据只在 dec-server 进程内存中等待使用，不落盘、不进对话转录。
+            凭据只在 dec-server 进程内存中等待使用，不落盘、不进对话转录。请求 5 分钟内无人处理会自动超时，操作随之失败；点「取消」会明确告知 AI 你拒绝了本次请求。
           </p>
         </div>
       </div>

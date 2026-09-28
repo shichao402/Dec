@@ -9,6 +9,7 @@ import {
   kindHasPublicKeyField,
   kindHasSecretInput,
   kindIsConfirmOnly,
+  operationLabel,
   toCredentialRequestView,
 } from '@/lib/credential-request'
 
@@ -68,5 +69,18 @@ describe('toCredentialRequestView 拉取结果分流', () => {
   it('未知 kind 返回 null，不渲染异常控件', () => {
     expect(toCredentialRequestView({ ...base, kind: 0 })).toBeNull()
     expect(toCredentialRequestView({ ...base, kind: 99 })).toBeNull()
+  })
+})
+
+describe('operationLabel 来源操作标签', () => {
+  it('已知操作映射为可读标签', () => {
+    expect(operationLabel('dec_install_ssh_key')).toBe('安装 SSH 登录密钥（dec_install_ssh_key）')
+    expect(operationLabel('dec_import_sshkey')).toBe('导入私钥到密码库（dec_import_sshkey）')
+    expect(operationLabel('dec_rotate_ssh_key')).toBe('轮换 SSH 密钥（dec_rotate_ssh_key）')
+  })
+
+  it('未知操作原样显示', () => {
+    expect(operationLabel('dec_something_new')).toBe('dec_something_new')
+    expect(operationLabel('')).toBe('')
   })
 })

@@ -243,7 +243,7 @@ func InstallSSHKey(ctx context.Context, in InstallSSHKeyInput, reporter Reporter
 	}
 
 	// 2. 登录密码：BW 已存 .password/<alias> 自动填充；否则经凭据请求通道。
-	username, password, stored, err := resolveDevicePassword(ctx, client, target, alias, reporter)
+	username, password, stored, err := resolveDevicePassword(ctx, client, target, alias, sshTarget, reporter)
 	if err != nil {
 		return nil, err
 	}
@@ -352,8 +352,8 @@ func landDeviceSSHKey(target secrets.SyncTarget, key secrets.SSHKeyItem) (string
 }
 
 // resolveDevicePassword 解析登录密码：BW 已存 .password/<alias> 则自动填充；
-// 否则经凭据请求通道向用户要。
-func resolveDevicePassword(ctx context.Context, client secrets.Client, target secrets.SyncTarget, alias string, reporter Reporter) (username, password string, stored bool, err error) {
+// 否则经凭据请求通道向用户要。sshTarget 用于弹窗文案指明目标主机。
+func resolveDevicePassword(ctx context.Context, client secrets.Client, target secrets.SyncTarget, alias, sshTarget string, reporter Reporter) (username, password string, stored bool, err error) {
 	notePath := ".password/" + alias
 	if note, gerr := client.GetNote(ctx, target, notePath); gerr == nil && note != nil {
 		if u, p, perr := parseDevicePasswordNote(note.Content); perr == nil && strings.TrimSpace(p) != "" {
@@ -366,17 +366,22 @@ func resolveDevicePassword(ctx context.Context, client secrets.Client, target se
 		return "", "", false, fmt.Errorf("凭据请求通道不可用（headless）：请先在 BW 手工登记 %s 或在桌面环境重试", notePath)
 	}
 	u, p, aerr := credentialAsker.AskLoginPassword(ctx,
-		fmt.Sprintf("为设备 %s 提供登录密码（将写入 %s/.password/%s）", alias, target.Address, alias),
+		fmt.Sprintf("AI 正在给 SSH 主机 %s 安装 Dec 登录密钥（工具 dec_install_ssh_key，设备别名 %s）。需要这台机器上 %s 账号的登录密码，只用这一次，用于密码登录并追加公钥，之后 SSH 免密。密码会加密保存到密码库 %s/.password/%s，下次自动使用。5 分钟内不提交或点取消，本次安装将失败。",
+			sshTarget, alias, defaultSSHUser, target.Address, alias),
 		"dec_install_ssh_key")
 	if aerr != nil {
 		return "", "", false, aerr
 	}
 	username = strings.TrimSpace(u)
 	if username == "" {
-		username = "root"
+		username = defaultSSHUser
 	}
 	return username, p, false, nil
 }
+
+// defaultSSHUser 是凭据弹窗未提供用户名时的默认 SSH 账号（prompt 文案与
+// 实际登录账号必须一致，故抽为常量）。
+const defaultSSHUser = "root"
 
 // writeDevicePasswordNote 把设备密码写回 BW .password/<alias>。
 func writeDevicePasswordNote(ctx context.Context, client secrets.Client, target secrets.SyncTarget, alias, username, password string) error {
@@ -420,7 +425,8 @@ func loadSSHKeyMaterialInteractive(ctx context.Context, privPath string, reporte
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		passphrase, aerr := credentialAsker.AskKeyPassphrase(ctx,
-			fmt.Sprintf("私钥 %s 带口令，请提供口令（校验后去口令入库，库加密为唯一保护）", privPath),
+			fmt.Sprintf("AI 正在把私钥文件 %s 导入 Dec 密码库（工具 dec_import_sshkey）。这把私钥设置了口令，需要你输入口令解开它。口令只在内存里用于校验，校验通过后私钥会去掉口令入库，由密码库加密统一保护，口令本身不会被保存。输错可再试一次；5 分钟内不提交或点取消，本次导入将失败。",
+				privPath),
 			"dec_import_sshkey")
 		if aerr != nil {
 			return secrets.SSHKeyMaterial{}, aerr
