@@ -99,12 +99,15 @@ type listDeleteCandidatesParams struct {
 }
 
 type deleteItemInput struct {
-	Kind          string `json:"kind" jsonschema:"dec | secret | bundle"`
+	Kind          string `json:"kind" jsonschema:"dec | secret | ssh | bundle"`
 	Type          string `json:"type,omitempty"`
 	Name          string `json:"name,omitempty"`
 	Vault         string `json:"vault,omitempty"`
 	SecretPath    string `json:"secret_path,omitempty" jsonschema:"secret：项目根相对落地路径，同时就是 Bitwarden Note 名"`
-	SecretsBundle string `json:"secrets_bundle,omitempty" jsonschema:"secret：Bitwarden folder"`
+	SecretsBundle string `json:"secrets_bundle,omitempty" jsonschema:"secret/ssh：Bitwarden folder"`
+	SSHKeyName    string `json:"ssh_key_name,omitempty" jsonschema:"ssh：密钥逻辑名，如 .sshkey/deploy；候选列表 SSHKeyName 原样回传"`
+	DecBundleName string `json:"dec_bundle_name,omitempty" jsonschema:"ssh：本机 ~/.ssh/dec_<bundle>_<name> 的 bundle 段；候选列表 DecBundleName 原样回传"`
+	Partition     string `json:"partition,omitempty" jsonschema:"remote|local；候选列表 Partition 原样回传，决定只改远端还是只清本机"`
 	BundleName    string `json:"bundle_name,omitempty"`
 	ProjectName   string `json:"project_name,omitempty" jsonschema:"项目名；bundle_name 为兼容字段"`
 	Visibility    string `json:"visibility,omitempty" jsonschema:"项目资产象限：public|private"`

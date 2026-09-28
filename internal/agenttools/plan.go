@@ -306,6 +306,8 @@ func planDelete(arguments json.RawMessage) *PlanResult {
 		items = append(items, map[string]any{
 			"Kind": item.Kind, "Type": item.Type, "Name": item.Name, "Vault": item.Vault,
 			"SecretPath": item.SecretPath, "SecretsBundle": item.SecretsBundle,
+			"SSHKeyName": item.SSHKeyName, "DecBundleName": item.DecBundleName,
+			"Partition": item.Partition,
 			"BundleName": item.BundleName, "ProjectName": item.ProjectName,
 			"Visibility": types.AssetVisibility(item.Visibility),
 			"AssetPlane": types.AssetPlane(item.AssetPlane),

@@ -98,6 +98,49 @@ func TestPlan_DeleteRejectsBoth(t *testing.T) {
 	}
 }
 
+// 回归 issue #21：kind=ssh 条目必须把 SSHKeyName/DecBundleName/Partition
+// 透传进 delete RunOperation payload，否则服务端报「SSH Key 名称不能为空」。
+func TestPlan_DeleteSSHItemCarriesSSHKeyName(t *testing.T) {
+	plan := Plan("dec_delete", json.RawMessage(`{
+		"plane":"global","confirmed":true,
+		"items":[{"kind":"ssh","ssh_key_name":".sshkey/deploy","dec_bundle_name":"tencent-cloud","secrets_bundle":"tencent-cloud/private/global","partition":"remote"}]
+	}`))
+	if plan.Error != "" {
+		t.Fatal(plan.Error)
+	}
+	if plan.Shape != ShapeSingle || len(plan.Steps) != 1 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	step := plan.Steps[0]
+	if step.Kind != StepRun || step.Method != "delete" {
+		t.Fatalf("step = %+v", step)
+	}
+	var payload struct {
+		Items []map[string]any `json:"Items"`
+	}
+	if err := json.Unmarshal(step.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("items = %d", len(payload.Items))
+	}
+	item := payload.Items[0]
+	for _, key := range []string{"SSHKeyName", "DecBundleName", "Partition", "SecretsBundle", "Kind"} {
+		if item[key] == "" {
+			t.Fatalf("payload item 缺字段 %s: %+v", key, item)
+		}
+	}
+	if item["SSHKeyName"] != ".sshkey/deploy" {
+		t.Fatalf("SSHKeyName = %v", item["SSHKeyName"])
+	}
+	if item["DecBundleName"] != "tencent-cloud" {
+		t.Fatalf("DecBundleName = %v", item["DecBundleName"])
+	}
+	if item["Partition"] != "remote" {
+		t.Fatalf("Partition = %v", item["Partition"])
+	}
+}
+
 func TestPlan_LocalNeedsRoot(t *testing.T) {
 	plan := Plan("dec_status", json.RawMessage(`{}`))
 	if plan.Error == "" || !strings.Contains(plan.Error, "project_root") {
