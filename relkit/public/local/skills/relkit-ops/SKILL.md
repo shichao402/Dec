@@ -14,11 +14,11 @@ description: >
 
 判断不了就问人。不要手拼 SSH 写配置，不要编造命令输出。
 
-Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维 CLI。发布协议仍由它们实现；常驻进程仍要跑。产品 token 与开箱决策只经 host.py。
+Go 的 `relkit` / `relkit-store` / `relkit-agent` 不是人用的第二套运维 CLI。发布协议仍由它们实现；常驻进程仍要跑。产品 token 与开箱决策只经 host.py。
 
 **两轨 / Placement / 内部更新**的产品接入合同在同目录 [`host-update.md`](host-update.md)。改发布脚本、填 `InstallSpec`、决定某平台开不开 payload 时先读它；不要去 relkit 仓 docs 里另找一份平行指南。协议实现细节才回 relkit ADR 0013 / 0014。
 
-**箱子上的二进制**（空机 systemd、换 `relkit-agent` / `relkit-serve`）不在本 skill。那是 relkit 仓的 [`relkit-deploy`](../relkit-deploy/SKILL.md) 与 `python scripts/deploy/relkit.py`。现网箱 **agent + serve 固定配套**，缺 serve 不算升完。产品仓里若 `versionRelation=behind` 且 `onPublishRoute=true`，告诉用户先到 relkit 仓升远端，不要在本仓假装能 `upgrade --host`。
+**箱子上的二进制**（空机 systemd、换 `relkit-agent` / `relkit-store`）不在本 skill。那是 relkit 仓的 [`relkit-deploy`](../relkit-deploy/SKILL.md) 与 `python scripts/deploy/relkit.py`。现网箱 **agent + serve 固定配套**，缺 serve 不算升完。产品仓里若 `versionRelation=behind` 且 `onPublishRoute=true`，告诉用户先到 relkit 仓升远端，不要在本仓假装能 `upgrade --host`。
 
 ## 状态与缓存
 
@@ -48,7 +48,7 @@ Go 的 `relkit` / `relkit-serve` / `relkit-agent` 不是人用的第二套运维
 - host 脚本要求 Python ≥ 3.9（hostlib 导入期就会求值 PEP 585 泛型）。产品入口脚本不要接受或安装 3.8，否则闸门 `host-python-floor` 报 drift；CI 容器只装 3.8 时要改成装 3.9 以上。
 - `fake.release`：只跑 `relkit_host.py fake verify`。缺 staged 树时脚本自己 dummy stage + simulate，禁止手调 `relkit.exe stage`。本机无 COS/S3 发布密钥时仍应能 simulate（对着空远端 index 合并 dummy staged）。
 - `pack.ci`：产品仓声明 `relkit.json` `release.packScript`（产出 `relkit.release-artifacts/1`），CI 只调 `relkit_host.py ci release --channel <dev|stable> --execute`（需 `RELKIT_RELEASE_VIA_CI=1` + agent token）。蓝盾 PAC 认 `ci/build_*.yaml` + `scripts/ci_win_release.cmd`；GitHub Actions 仍可直接 `stage`/`cas-put`/`release --execute`。只 `install` 不够。产品源码调用 updater `apply` 时，CI 还必须出现 `--payload`；`internal-update-two-track` 会在用户点安装前拦住「只发完整安装轨」。宿主把 `UPDATE_CHANNEL` / `Runtime.channel` 写成编译期常量时，`publish-channel-no-client-consumer` 会把 `relkit.json` / CI 能发、客户端永远不会查的渠道报成 drift；`ci release` 发该渠道会直接失败。
-- Windows consume：开跑先做环境检查——优先 `%SystemRoot%\System32\curl.exe`（Schannel）；没有就装钉死的 curl-for-win 到 `.relkit/cache/tools/`（可用 `RELKIT_CURL_BOOTSTRAP_URL` 指内网镜像）；再不行用 PowerShell `Invoke-WebRequest`（同属 Schannel）。不跟 PATH 上的 Cygwin/Git OpenSSL curl；默认 fail-closed，`RELKIT_CONSUME_ALLOW_INSECURE=1` 才允许校验后的 insecure 回退。
+- Windows consume：开跑先做环境检查——优先 `%SystemRoot%\System32\curl.exe`（Schannel）；没有就装钉死的 curl-for-win 到 `.relkit/cache/tools/`（可用 `RELKIT_CURL_BOOTSTRAP_URL` 指内网镜像）；再不行用 PowerShell `Invoke-WebRequest`（同属 Schannel，并强制 `Tls12`，避免 Server 2016 默认协议过旧）。`host-scripts` 树哈希已与 lock 一致时跳过下载。不跟 PATH 上的 Cygwin/Git OpenSSL curl；默认 fail-closed，`RELKIT_CONSUME_ALLOW_INSECURE=1` 才允许校验后的 insecure 回退。
 - `updater.process`：封闭词由组件 registry 派生（当前 `rust` / `node` / `dart` / `go` / `other`），**不是** `rust-shell`。手写 DTO / `serde(default)` 吞缺键是 drift。产品源码出现 `RupUpdater` 或 `sdk.Updater` 也是 drift：升级宿主只许走 facade + sidecar。选择 `other` 时，`relkit.json` 必须声明存在的 `updater.entry`；存在 WebView 还必须声明 `updater.projection`。sidecar 名只能出现在声明入口（及 `sidecar.packScript`），projection 仍按满强度形状检测。
 - `updater.urlAllowlist` 是路径列表，只豁免这些路径中的 updater endpoint/base URL 文本；不豁免 sidecar 名、手写 `CheckResult` / `UpdateAvailable`、自声明 proto 或宽松反序列化。
 - agent 发布：`release --execute` 必须由 CI 设 `RELKIT_RELEASE_VIA_CI=1`；本地不要发。
