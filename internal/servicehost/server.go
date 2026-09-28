@@ -132,6 +132,8 @@ func Run(ctx context.Context, version string) error {
 	host.presence = newPresenceTracker(idleTimeout, func() {
 		host.requestStop()
 	})
+	// ADR 0036：注入凭据请求通道（broker → app.CredentialAsker）。
+	app.SetCredentialAsker(newBrokerCredentialAsker(host))
 
 	serverOpts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(host.unaryAuth()),

@@ -541,6 +541,24 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 			return nil, err
 		}
 		return app.ProvisionRemoteHost(ctx, in, reporter)
+	case "generate_sshkey":
+		var in app.GenerateSSHKeyInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.GenerateSSHKey(ctx, in, reporter)
+	case "import_sshkey":
+		var in app.ImportSSHKeyInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.ImportSSHKey(ctx, in, reporter)
+	case "install_ssh_key":
+		var in app.InstallSSHKeyInput
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.InstallSSHKey(ctx, in, reporter)
 	case "cleanup_local_installation":
 		var in app.LocalCleanupInput
 		if err := decode(payload, &in); err != nil {

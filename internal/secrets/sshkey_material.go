@@ -96,6 +96,48 @@ func LoadSSHKeyMaterialFromPrivatePath(privPath string) (SSHKeyMaterial, error) 
 	}, nil
 }
 
+// LoadSSHKeyMaterialWithPassphrase 从带口令的私钥文件加载材料：先复制到收紧
+// ACL 的临时文件，用口令去口令导出明文私钥（PEM 写临时文件），再派生公钥与
+// fingerprint。口令由调用方（凭据请求通道）提供，仅内存流转。
+func LoadSSHKeyMaterialWithPassphrase(privPath, passphrase string) (SSHKeyMaterial, error) {
+	privPath = strings.TrimSpace(privPath)
+	passphrase = strings.TrimSpace(passphrase)
+	if privPath == "" {
+		return SSHKeyMaterial{}, fmt.Errorf("私钥路径不能为空")
+	}
+	if passphrase == "" {
+		return SSHKeyMaterial{}, fmt.Errorf("私钥口令不能为空")
+	}
+	privBytes, err := os.ReadFile(privPath)
+	if err != nil {
+		return SSHKeyMaterial{}, fmt.Errorf("读取私钥失败: %w", err)
+	}
+
+	dir, err := os.MkdirTemp("", "dec-sshkey-pass-*")
+	if err != nil {
+		return SSHKeyMaterial{}, err
+	}
+	defer os.RemoveAll(dir)
+	encPath := filepath.Join(dir, "id_enc")
+	plainPath := filepath.Join(dir, "id_plain")
+	if err := writeSecureFile(encPath, privBytes, 0o600); err != nil {
+		return SSHKeyMaterial{}, fmt.Errorf("准备加密私钥临时文件失败: %w", err)
+	}
+
+	// ssh-keygen -p 原地去口令（-N "" 新空口令）。
+	out, err := sysproc.Command("ssh-keygen", "-p",
+		"-P", passphrase, "-N", "", "-f", encPath).CombinedOutput()
+	if err != nil {
+		return SSHKeyMaterial{}, fmt.Errorf("私钥口令校验失败: %w (%s)",
+			err, strings.TrimSpace(string(out)))
+	}
+	// 去口令结果落临时文件后加载完整材料。
+	if err := os.Rename(encPath, plainPath); err != nil {
+		return SSHKeyMaterial{}, err
+	}
+	return LoadSSHKeyMaterialFromPrivatePath(plainPath)
+}
+
 // materializeSecurePrivateKey 把私钥正文落到 ACL/mode 收紧的临时文件，供 ssh-keygen 读取。
 func materializeSecurePrivateKey(priv []byte) (path string, cleanup func(), err error) {
 	dir, err := os.MkdirTemp("", "dec-sshkey-load-*")

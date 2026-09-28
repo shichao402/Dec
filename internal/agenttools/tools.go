@@ -147,6 +147,24 @@ func catalog() []toolDef {
 				Owner:       OwnerServer,
 				Sample:      provisionRemoteParams{},
 			},
+			{
+				Name:        "dec_generate_sshkey",
+				Description: "本机 ssh-keygen 生成 ed25519 密钥并登记到 Bitwarden（生成 → 建 item → pull 落地 → 返回公钥与指纹，不回私钥）。产物挂产品 private/global 平面。",
+				Owner:       OwnerServer,
+				Sample:      generateSSHKeyParams{},
+			},
+			{
+				Name:        "dec_import_sshkey",
+				Description: "导入存量 SSH 私钥到 Bitwarden。参数只收文件路径，私钥材料与口令永不进 MCP 参数与转录；带口令私钥的口令经凭据请求通道（Console 弹窗）采集，校验后去口令入库。",
+				Owner:       OwnerServer,
+				Sample:      importSSHKeyParams{},
+			},
+			{
+				Name:        "dec_install_ssh_key",
+				Description: "密码引导安装：用登录密码 ssh 登录远端一次，把 Dec 标记公钥（# dec:<alias>）追加进 authorized_keys，之后该设备走 dec_provision_remote。密码经凭据请求通道采集，不进转录。若 BW 已存该设备密码（.password 条目），自动填充。",
+				Owner:       OwnerServer,
+				Sample:      installSSHKeyParams{},
+			},
 		}
 		toolIndex = make(map[string]toolDef, len(allTools))
 		for _, t := range allTools {

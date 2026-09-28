@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -476,6 +478,100 @@ func runSSHCommand(ctx context.Context, target RemoteTarget, command, script str
 	cmd.Stdin = strings.NewReader(script)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// passwordSSHAppendScript 是密码登录后执行的追加脚本：幂等（已含同一标记行则
+// 不重复追加）、原子（先写临时文件再 mv）、只追加带 # dec: 标记的新行，不触碰
+// 既有条目（ADR 0036 §3 标记化受限管理）。
+const passwordSSHAppendScript = `set -e
+line='__DEMarkerLine__'
+ak="$HOME/.ssh/authorized_keys"
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+touch "$ak"
+if grep -Fqx -- "$line" "$ak"; then
+  echo "already-installed"
+  exit 0
+fi
+umask 177
+printf '%%s\n' "$line" >> "$ak"
+chmod 600 "$ak"
+echo "installed"
+`
+
+// PasswordSSHAppendAuthorizedKey 用登录密码 ssh 登录一次，把标记公钥追加进
+// authorized_keys（ADR 0036 §3）。密码经 SSH_ASKPASS 在 dec-server 进程内喂给
+// ssh 子进程：GUI 已收到密码后进程内转交不在被否方案范围（被否的是拿 ASKPASS
+// 当用户交互通道）。密码不进 argv、不进日志。
+func PasswordSSHAppendAuthorizedKey(ctx context.Context, sshTarget, username, password, markerLine string) error {
+	target := RemoteTarget{Alias: strings.TrimSpace(sshTarget), User: strings.TrimSpace(username)}
+	if _, err := target.sshRef(); err != nil {
+		return fmt.Errorf("解析 ssh_target %q 失败: %w", sshTarget, err)
+	}
+	if strings.TrimSpace(markerLine) == "" {
+		return fmt.Errorf("markerLine 不能为空")
+	}
+	script := strings.ReplaceAll(passwordSSHAppendScript, "__DEMarkerLine__", markerLine)
+	askpass, cleanup, err := writeAskpassHelper(password)
+	if err != nil {
+		return fmt.Errorf("准备密码注入失败: %w", err)
+	}
+	defer cleanup()
+
+	args := []string{
+		"-o", "ConnectTimeout=10",
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "PreferredAuthentications=password,keyboard-interactive",
+		"-o", "PubkeyAuthentication=no",
+		"-o", "NumberOfPasswordPrompts=1",
+	}
+	if port := target.sshPort(); port > 0 {
+		args = append(args, "-p", strconv.Itoa(port))
+	}
+	args = append(args, target.sshDialTarget(), "sh -s")
+
+	cmd := sysproc.CommandContext(ctx, "ssh", args...)
+	cmd.Stdin = strings.NewReader(script)
+	cmd.Env = append(os.Environ(),
+		"SSH_ASKPASS="+askpass,
+		"SSH_ASKPASS_REQUIRE=force",
+		"DISPLAY=:0",
+	)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	if err != nil {
+		return fmt.Errorf("密码登录 %s 失败: %s", target.SSHDestination(), summarizeSSHError(output, err))
+	}
+	if !strings.Contains(output, "installed") && !strings.Contains(output, "already-installed") {
+		return fmt.Errorf("追加 authorized_keys 输出异常: %s", strings.TrimSpace(output))
+	}
+	return nil
+}
+
+// writeAskpassHelper 把密码写进一次性 ASKPASS 脚本（文件仅当前用户可读，用完即删）。
+// Windows 用 .bat 包装 echo；unix 用 sh。
+func writeAskpassHelper(password string) (string, func(), error) {
+	dir, err := os.MkdirTemp("", "dec-askpass-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(dir, "askpass.bat")
+		body := "@echo off\r\necho " + strings.ReplaceAll(password, "\r", "") + "\r\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+		return path, cleanup, nil
+	}
+	path := filepath.Join(dir, "askpass.sh")
+	body := "#!/bin/sh\nprintf '%s\\n' \"" + strings.ReplaceAll(password, "\"", "\\\"") + "\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return path, cleanup, nil
 }
 
 // summarizeSSHError 把 ssh 的多行输出压成一句可读原因。

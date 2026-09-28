@@ -145,6 +145,12 @@ func Plan(name string, arguments json.RawMessage) *PlanResult {
 		return planDelete(arguments)
 	case "dec_provision_remote":
 		return planProvisionRemote(arguments)
+	case "dec_generate_sshkey":
+		return planGenerateSSHKey(arguments)
+	case "dec_import_sshkey":
+		return planImportSSHKey(arguments)
+	case "dec_install_ssh_key":
+		return planInstallSSHKey(arguments)
 	default:
 		return planFail(name, fmt.Sprintf("工具 %s 未实现 Plan", name))
 	}
@@ -340,4 +346,79 @@ func planProvisionRemote(arguments json.RawMessage) *PlanResult {
 			}),
 		}},
 	}
+}
+
+// planGenerateSSHKey 编排 dec_generate_sshkey：一步 Run。
+func planGenerateSSHKey(arguments json.RawMessage) *PlanResult {
+	var in generateSSHKeyParams
+	if err := json.Unmarshal(arguments, &in); err != nil {
+		return planFail("dec_generate_sshkey", err.Error())
+	}
+	if strings.TrimSpace(in.Project) == "" {
+		return planFail("dec_generate_sshkey", "project 不能为空（设备密钥挂产品 private/global）")
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		return planFail("dec_generate_sshkey", "name 不能为空")
+	}
+	plane := strings.TrimSpace(in.Plane)
+	if plane == "" {
+		plane = "global"
+	}
+	if plane != "global" && plane != "local" {
+		return planFail("dec_generate_sshkey", "plane 只支持 local|global")
+	}
+	return singleRun("dec_generate_sshkey", "generate_sshkey", "", plane, map[string]any{
+		"Project": in.Project, "Name": in.Name, "Comment": in.Comment,
+	})
+}
+
+// planImportSSHKey 编排 dec_import_sshkey：一步 Run。
+func planImportSSHKey(arguments json.RawMessage) *PlanResult {
+	var in importSSHKeyParams
+	if err := json.Unmarshal(arguments, &in); err != nil {
+		return planFail("dec_import_sshkey", err.Error())
+	}
+	if strings.TrimSpace(in.Project) == "" {
+		return planFail("dec_import_sshkey", "project 不能为空")
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		return planFail("dec_import_sshkey", "name 不能为空")
+	}
+	if strings.TrimSpace(in.PrivateKeyPath) == "" {
+		return planFail("dec_import_sshkey", "private_key_path 不能为空（只收文件路径，不收私钥材料）")
+	}
+	plane := strings.TrimSpace(in.Plane)
+	if plane == "" {
+		plane = "global"
+	}
+	if plane != "global" && plane != "local" {
+		return planFail("dec_import_sshkey", "plane 只支持 local|global")
+	}
+	return singleRun("dec_import_sshkey", "import_sshkey", "", plane, map[string]any{
+		"Project": in.Project, "Name": in.Name, "PrivateKeyPath": in.PrivateKeyPath,
+	})
+}
+
+// planInstallSSHKey 编排 dec_install_ssh_key：一步 Run。
+func planInstallSSHKey(arguments json.RawMessage) *PlanResult {
+	var in installSSHKeyParams
+	if err := json.Unmarshal(arguments, &in); err != nil {
+		return planFail("dec_install_ssh_key", err.Error())
+	}
+	if strings.TrimSpace(in.Project) == "" {
+		return planFail("dec_install_ssh_key", "project 不能为空")
+	}
+	if strings.TrimSpace(in.Alias) == "" {
+		return planFail("dec_install_ssh_key", "alias 不能为空（authorized_keys 标记 # dec:<alias> 用它）")
+	}
+	if strings.TrimSpace(in.SSHTarget) == "" {
+		return planFail("dec_install_ssh_key", "ssh_target 不能为空")
+	}
+	if !in.Confirmed {
+		return planFail("dec_install_ssh_key", "confirmed 必须为 true：首次写远端 authorized_keys 属远程变更")
+	}
+	return singleRun("dec_install_ssh_key", "install_ssh_key", "", "global", map[string]any{
+		"Project": in.Project, "Alias": in.Alias, "Name": in.Name,
+		"SSHTarget": in.SSHTarget, "Confirmed": in.Confirmed,
+	})
 }
