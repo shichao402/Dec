@@ -6,7 +6,7 @@
     "dev"
   ],
   "codeStrategy": "semver",
-  "retainVersions": 1,
+  "retainVersions": 5,
   "signing": {
     "keyId": "dec-2026",
     "privateKeyPath": ".secrets/bundles/dec/keys/dec-2026.private.pb",
