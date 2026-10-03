@@ -13,12 +13,31 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 import zipfile
 from urllib.parse import urlencode
 
-import requests
-
 from auth import get_access_token
+
+
+def _api_get_json(url: str, headers: dict, timeout: int = 60) -> dict:
+    """标准库 GET，返回解析后的 JSON，非 2xx 抛 HTTPError。"""
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8", "replace"))
+
+
+def _download_to_file(url: str, output_path: str, headers: dict, timeout: int = 300) -> str:
+    """标准库流式下载，分块写入文件。"""
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout) as response, open(output_path, "wb") as f:
+        while True:
+            chunk = response.read(8192)
+            if not chunk:
+                break
+            f.write(chunk)
+    return output_path
 
 
 def get_headers(access_token: str) -> dict:
@@ -47,15 +66,8 @@ def download_log_from_stream(
     Returns:
         保存的文件路径
     """
-    response = requests.get(url, headers=headers, stream=True, timeout=timeout)
-    response.raise_for_status()
-
-    with open(output_path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-
-    return output_path
+    download_to_file = _download_to_file(url, output_path, headers, timeout=timeout)
+    return download_to_file
 
 
 def is_log_truncated(file_path: str) -> bool:
@@ -119,10 +131,7 @@ def get_full_log_download_url(
     print(f"检测到日志熔断，正在获取完整日志下载链接...")
     print(f"URL: {full_url}")
 
-    response = requests.get(full_url, headers=headers, timeout=60)
-    response.raise_for_status()
-
-    data = response.json()
+    data = _api_get_json(full_url, headers, timeout=60)
     if data.get("status") != 0:
         raise RuntimeError(f"获取完整日志 URL 失败: {data}")
 
@@ -156,13 +165,7 @@ def download_and_extract_zip(
     zip_path = os.path.join(output_dir, "full_log.zip")
 
     print(f"正在下载完整日志 zip 包...")
-    response = requests.get(url, headers=headers, stream=True, timeout=timeout)
-    response.raise_for_status()
-
-    with open(zip_path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
+    _download_to_file(url, zip_path, headers or {}, timeout=timeout)
 
     print(f"zip 包已下载: {zip_path}")
 
@@ -364,14 +367,13 @@ def main():
             auto_download_full=not args.no_auto_full,
         )
         print(f"\n最终输出: {result}")
-    except requests.exceptions.HTTPError as e:
+    except urllib.error.HTTPError as e:
         print(f"HTTP 请求失败: {e}", file=sys.stderr)
-        if e.response is not None:
-            try:
-                error_data = e.response.json()
-                print(f"响应内容: {json.dumps(error_data, indent=2, ensure_ascii=False)}", file=sys.stderr)
-            except Exception:
-                print(f"响应内容: {e.response.text}", file=sys.stderr)
+        try:
+            error_data = json.loads(e.read().decode("utf-8", "replace"))
+            print(f"响应内容: {json.dumps(error_data, indent=2, ensure_ascii=False)}", file=sys.stderr)
+        except Exception:
+            pass
         sys.exit(1)
     except Exception as e:
         print(f"错误: {e}", file=sys.stderr)

@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 import urllib.request
 import urllib.error
+import _deps  # noqa: F401  auto-installs PyYAML into skill-private lib/ when missing
 import yaml
 
 from auth import get_access_token

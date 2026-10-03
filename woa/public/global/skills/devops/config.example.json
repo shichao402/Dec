@@ -1,6 +1,8 @@
 {
-  "access_token": "",
+  "app_code": "",
+  "app_secret": "",
   "user_id": "",
+  "access_token": "",
   "hot_reload": true,
   "pipelines": []
 }

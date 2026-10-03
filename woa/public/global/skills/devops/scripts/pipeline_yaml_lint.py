@@ -26,6 +26,7 @@ import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
+import _deps  # noqa: F401  auto-installs PyYAML into skill-private lib/ when missing
 import yaml
 
 SCHEMA_FILENAME = "pipeline-yaml-schema.json"

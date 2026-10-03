@@ -5,6 +5,12 @@ description: 蓝盾（BK-CI，亦称蓝鲸 CI）DevOps 全能助手，覆盖项�
 
 # 蓝盾流水线全能助手
 
+## 环境要求
+
+- Python 3.8+（Windows / macOS / Linux 均可；自动换票的 `login.py` 需要 Windows 系统 Edge）。
+- 唯一第三方依赖 `PyYAML`：缺失时首次运行会自动安装到 skill 私有 `lib/` 目录（`pip install --target`），不触碰全局环境，无需任何手动步骤。
+- 其余全部为 Python 标准库（`urllib`/`json` 等），零额外安装。
+
 按意图只读 `references/` 下对应文件，禁止一次读完整个目录。路径相对 `references/`，文件名即该目录下的 `<名>.md`。
 
 ## 会话初始化与热更新

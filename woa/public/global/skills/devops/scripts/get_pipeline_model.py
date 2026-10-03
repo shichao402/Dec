@@ -12,11 +12,18 @@ Usage:
 import argparse
 import json
 import sys
+import urllib.error
+import urllib.request
 from urllib.parse import urlencode
 
-import requests
-
 from auth import get_access_token
+
+
+def _api_get(url: str, headers: dict, timeout: int = 60) -> dict:
+    """标准库实现的 GET 请求，返回解析后的 JSON，非 2xx 抛 HTTPError。"""
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8", "replace"))
 
 
 def get_headers(access_token: str) -> dict:
@@ -69,10 +76,7 @@ def fetch_build_detail(
     print(f"正在获取构建详情...")
     print(f"URL: {url}")
 
-    response = requests.get(url, headers=headers, timeout=60)
-    response.raise_for_status()
-
-    data = response.json()
+    data = _api_get(url, headers, timeout=60)
     if data.get("status") != 0:
         raise RuntimeError(f"获取构建详情失败: {data}")
 
@@ -475,14 +479,13 @@ def main():
             access_token=args.access_token,
             verbose=args.verbose,
         )
-    except requests.exceptions.HTTPError as e:
+    except urllib.error.HTTPError as e:
         print(f"HTTP 请求失败: {e}", file=sys.stderr)
-        if e.response is not None:
-            try:
-                error_data = e.response.json()
-                print(f"响应内容: {json.dumps(error_data, indent=2, ensure_ascii=False)}", file=sys.stderr)
-            except Exception:
-                print(f"响应内容: {e.response.text}", file=sys.stderr)
+        try:
+            error_data = json.loads(e.read().decode("utf-8", "replace"))
+            print(f"响应内容: {json.dumps(error_data, indent=2, ensure_ascii=False)}", file=sys.stderr)
+        except Exception:
+            pass
         sys.exit(1)
     except Exception as e:
         print(f"错误: {e}", file=sys.stderr)

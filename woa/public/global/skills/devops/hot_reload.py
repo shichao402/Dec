@@ -38,7 +38,7 @@ class LockBusy(RuntimeError):
 
 # 用户配置和 Knot 安装元数据永远不参与覆盖、删除和发布打包。
 PRESERVE_FILES = {"config.json"}
-PRESERVE_DIRS = {".knot"}
+PRESERVE_DIRS = {".knot", ".edge-profile", "lib"}
 
 
 def _log(message: str) -> None:
@@ -430,6 +430,16 @@ def _files_to_backup(current: dict[str, str], expected: dict[str, str]) -> list[
     installed = _read_manifest() or set()
     stale = _stale_files(current, expected)
     selected = (set(current) & (installed | set(expected))) | stale
+    if not installed:
+        # 首次更新没有清单时，上面的交集只剩 expected 命中的文件；
+        # 无清单回退判定为空的 stale 也可能漏文件。补上回退路径里
+        # 同样会处理的「ZIP 同目录下的既有文件」，保证备份完整、可回滚。
+        owned = {rel.split("/", 1)[0] for rel in expected if "/" in rel}
+        selected |= {
+            rel
+            for rel in current
+            if "/" in rel and rel.split("/", 1)[0] in owned
+        }
     return sorted(selected)
 
 
@@ -788,7 +798,7 @@ def _self_test() -> int:
             with zipfile.ZipFile(saved) as archive:
                 backed_up = set(archive.namelist())
                 check(
-                    archive.read(f"{SKILL_KEY}/SKILL.md") == b"# old\n",
+                    archive.read(f"{SKILL_KEY}/SKILL.md").replace(b"\r\n", b"\n") == b"# old\n",
                     "备份应是覆盖前的 SKILL.md",
                 )
                 check(

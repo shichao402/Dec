@@ -8,7 +8,7 @@
 https://bkrepo.woa.com/generic/bkdevops/static/skill/devops.zip
 ```
 
-不想自动更新时，在 `config.json` 写入 `"hot_reload": false`。`config.json` 和 `.knot/` 不会被覆盖或删除。
+不想自动更新时，在 `config.json` 写入 `"hot_reload": false`。`config.json`、`.knot/` 和 `.edge-profile/` 不会被覆盖或删除。
 
 `devops` skill 通过 BK-Repo 上的完整 ZIP 更新：检查远端版本、下载并校验 ZIP、解压到系统临时目录，再逐文件覆盖当前安装目录。BK-Repo 的 `X-Checksum-Sha256` 响应头直接作为版本号，不需要额外的版本接口。
 
