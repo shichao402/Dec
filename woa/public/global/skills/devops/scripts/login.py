@@ -236,10 +236,16 @@ def launch_edge(port: int, headless: bool) -> subprocess.Popen:
         "--no-first-run",
         "--no-default-browser-check",
         "--remote-allow-origins=*",
-        CONSOLE_URL,
+        # Minimal auth window: app mode strips tabs/address bar/toolbars,
+        # fixed 800x640, and extensions stay out (they may hijack/redirect
+        # the login page and break automated capture).
+        "--window-size=800,640",
+        "--disable-extensions",
     ]
     if headless:
-        cmd += ["--headless=new"]
+        cmd += ["--headless=new", CONSOLE_URL]
+    else:
+        cmd += [f"--app={CONSOLE_URL}"]
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
