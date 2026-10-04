@@ -45,6 +45,10 @@ description: 蓝盾（BK-CI，亦称蓝鲸 CI）DevOps 全能助手，覆盖项�
 
 `projectId` 为项目英文名；`pipelineId` 以 `p-` 开头；`buildId` 以 `b-` 开头；`elementId`/`tag` 以 `e-` 开头。构建 URL：`https://devops.woa.com/console/pipeline/{projectId}/{pipelineId}/detail/{buildId}`。
 
+## API 调用铁律
+
+调用任何蓝盾 v4 OpenAPI 前必须先查 `api/v4-user-apis.md`（端点字典：223 个 v4 用户态接口 + Stream 车道，含方法/路径/中文说明）。禁止猜接口路径、禁止按常见 RESTful 形态拼 URL 试探、禁止假设存在动态发现机制（不存在）。字典未覆盖的应用态 `v4_app_*`、v3 存量或参数详情，按字典末尾「查证入口」上 APIGW 文档中心按 `apiName` 查。
+
 ## 意图路由
 
 只打开当前意图需要的文件。
