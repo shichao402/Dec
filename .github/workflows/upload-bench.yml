@@ -10,8 +10,10 @@
 name: Upload bench
 
 # relkit 舰队统一版本（P1 原则）：与 release.yml 的 RELKIT_REF 保持一致。
+# lock 是 follow-latest 形态（P4）：此值是 bootstrap floor（认识 latest
+# 形态的最低 CLI 版本），不表达钉定版本。
 env:
-  RELKIT_REF: v0.5.17
+  RELKIT_REF: v0.5.20
 
 on:
   workflow_dispatch:
