@@ -9,6 +9,10 @@
 
 name: Upload bench
 
+# relkit 舰队统一版本（P1 原则）：与 release.yml 的 RELKIT_REF 保持一致。
+env:
+  RELKIT_REF: v0.5.17
+
 on:
   workflow_dispatch:
     inputs:
@@ -61,7 +65,7 @@ jobs:
 
       - name: Fetch relkit CLI
         shell: bash
-        run: go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 install
+        run: go run github.com/shichao402/relkit/cmd/relkit@$RELKIT_REF install
 
       - name: Build payload and CLI
         shell: bash

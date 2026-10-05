@@ -18,6 +18,11 @@
 - 弃选理由：SvnMergeTool 内网蓝盾 CI（git.woa.com + PAC 中央仓），本机不能直连生产环境网络，且历史卡点「ci release 仅支持单 install/payload」的解法（/2 manifest）虽已就位但双平台 drop 聚合仍需产品仓侧聚合脚本改造（见 relkit 决策日志 mem_fe723c_701444d），需用户拍板聚合位置；loom 两仓按计划明文「先盘后迁」，且 D:/workspace/Loom 工作区有用户进行中的 ADR-0050 工作（未提交），不动。
 - 状态：已定（选 cronkit）
 
+### C2-后记（2026-09-29 用户拍板，推翻原 C2）
+- 用户对齐时明确表态：「我是希望完全结构化」「不希望有特例」。/1 的字符串 selectors 与 /2 并存属特例，撤销原「维持 /1」决策。
+- 落地：cronkit package-release.mjs 升 `relkit.release-artifacts/2`（单 selectorGroup，selectors 为结构化 map，install/payload 显式 filename）；relkit 侧 loadReleaseArtifactsManifest 删除 /1 兼容分支（ciArtifactRefWire / parseSelectorsString / /1 归一化路径一并移除），/1 manifest 直接拒绝；测试 TestLoadReleaseArtifactsManifestSchema1Normalized 翻转为 RejectsSchema1。发布线全线唯一 /2，无 schema 分支。
+- 依据：dec 侧 pack 脚本已是 /2（scripts/pack-release-artifacts.py），cronkit 升 /2 后两仓发布面同构，无特例；「完全结构化、消灭字符串解析」全线统一（2026-09-29 用户拍板记录见本文件 C2-后记）。
+
 ### C2. pack 脚本：保留 package-release.mjs 的 /1 manifest（不升级到 /2）
 - 候选 A：维持 /1（Go CLI 已归一化读取）/ 候选 B：重写为 /2 结构化 selectorGroups
 - 实际：选 A。理由：cronkit 是单组产物（win-x64 install + payload + ci-only archive），/1 的「单 install/payload」形状就是它的真实形状，/2 的多组能力无增益；Go CLI loadReleaseArtifactsManifest 对 /1 有显式兼容分支并归一化为单 selectorGroup；pack 脚本无 Python 依赖（.mjs 用 node 执行），runReleasePackScript 原生支持。少做改动 = 少做信息推测 = 迁移面最小。
@@ -69,3 +74,20 @@
 - [x] 端到端 smoke：真实 serve 平面 check/download 全链 PASSED
 - [x] 决策日志终稿（本文件）
 - [ ] migration plan cronkit 行终态更新（relkit 仓，待提交）
+
+## 2026-09-29 追记：/2 统一演练（dev/v0.1.0+16）
+
+- 触发：用户拍板推翻 C2（「完全结构化、不希望有特例」），cronkit pack 升 /2 + relkit 侧 /1 兼容分支删除（详见 C2-后记）。
+- 提交：cronkit `d8f53ab`（pack /2）+ `30b20b4`（版本准备）；relkit `eec6ab7`（/1 分支删除）+ `be21cf1`（v0.5.8）。relkit Release run 36508446924 全绿（5m3s）。
+- 首轮 Release/Verify 双红：只改 VERSION.json 漏跑 `sync-version.mjs`，`check-version` 门禁拦下（Release 36508465811 / Verify 36508458151）——已提 issue shichao402/cronkit#1（bump 后需人工记得同步的结构性问题，建议 A bump 自动带同步 + B pre-commit 兜底 + C dist 清理旧 manifest）。
+- 修复：`5af3cb4` 补 version.ts 同步，tag 重指后 Release run 36508948859 全绿（6m34s）、Verify run 36508942245 全绿（5m34s）。
+- RUP 侧：publish `published 0.1.0+16 (code 16) on channel dev, sequence 4`；serve directory sequence 14；**serve 平面出现显式 filename 产物 `cronkit-0.1.0+16-win-x64-payload.zip`（/2 生效的直接证据，对比 +14 的 `…-relkit-payload.zip` 旧默认名）**；dev index 更新（+14 → +16 条目）；cas-put sha256 与 lock 校验链不变。
+- 端到端 smoke：先按 09-28 同款（stable 渠道）PASSED；另用临时 dev-渠道 smoke（脚本按 8 组 13 项原样改渠道，未入库）验证 0.1.0+16 /2 产物 check/download 全链 PASSED。
+- 遗留：cronkit `.dec/config.yaml` 的 `requires: relkit: latest` 与 `.cursor/skills/dec-relkit-*` 删除为用户本地 dec 工具变动，照旧未掺入本批提交。
+
+## 2026-09-29 追记：cronkit#1 修复（version.syncScript + 旧 manifest 清理）
+
+- 落地：relkit v0.5.9 新增可选 `relkit.json` `version.syncScript`（分派规则同 `release.packScript`），`relkit version set|bump` 写完 VERSION.json 自动执行；cronkit 侧声明 `scripts/sync-version.mjs`，另 `package-release.mjs` 开头清旧 `dist/release-artifacts.json`（防 staging 静默复用旧对应关系）。全仓 relkit 钉 v0.5.7→v0.5.9（7 文件）。
+- 验证：relkit v0.5.9 Release run 36510268146 全绿；cronkit `dev/v0.1.0+17`（commit 4948cfd，含 d042d9d 用户 smoke 两模式提交）Release run 36510978539 全绿，bump→sync 一步完成（无人工同步）；lock `upgrade v0.5.9` 后 directory-only smoke stable/dev 双渠道 15/15 PASS（真 serve 平面）。
+- issue shichao402/cronkit#1 已关闭（方案 A+C，B pre-commit 未做：bump 已自动化，忘跑环节不存在了）。
+- 教训：smoke 端口参数误传 0 会导致 sidecar 连不上本地 directory（`no usable directory/index source`），报错形态与签名失败相同——排查先看端口参数。
