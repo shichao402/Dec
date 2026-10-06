@@ -27,6 +27,10 @@ on:
           - dev
           - stable
         default: dev
+      allow_backfill:
+        description: Deliberately backfill a historical version (--allow-backfill)
+        type: boolean
+        default: false
 
 # 全局串行：RUP 同版本 manifest/artifact 不可变要求发版互斥，且 stable 的
 # GitHub Release 步骤要向 main 提交 version.json 摘要，两个发版 run 并行
@@ -311,7 +315,12 @@ jobs:
           # `relkit ci release --execute` 进程内。协议头、idempotencyKey、
           # RELKIT_UPLOAD_PART_SIZE / RELKIT_UPLOAD_CONCURRENCY 语义与旧
           # bash 尾段一致（cas-put Go 实现内读同名 env）。
-          go run github.com/shichao402/relkit/cmd/relkit@$RELKIT_REF ci release --channel "$CHANNEL" --execute
+          BACKFILL_ARGS=""
+          if [ "${{ github.event.inputs.allow_backfill }}" = "true" ]; then
+            BACKFILL_ARGS="--allow-backfill"
+            echo "allow_backfill=true：本次为刻意补发历史版本"
+          fi
+          go run github.com/shichao402/relkit/cmd/relkit@$RELKIT_REF ci release --channel "$CHANNEL" --execute $BACKFILL_ARGS
 
       - name: GitHub Release
         shell: bash
@@ -332,7 +341,13 @@ jobs:
           # 可能已抢先上 main（打 tag 的前提），本 run 的旧基线推送会
           # non-fast-forward 被拒；因此先暂存校验版，切到 main 最新基线
           # 覆写后提交推送（重跑时 main 已含摘要则幂等跳过）。
-          if ! git diff --quiet -- version.json; then
+          # backfill 补发历史版本时除外：main 的 version.json 已指向更新的
+          # 版本（如 117），此刻回写会把主干倒退成补发版本（116），install.sh
+          # 校验与后续发版基线全被污染；补发版本的 checksums 由 GitHub Release
+          # 附带产物文件承载，主干不动。
+          if [ "${{ github.event.inputs.allow_backfill }}" = "true" ]; then
+            echo "allow_backfill=true：跳过 version.json 摘要回写主干"
+          elif ! git diff --quiet -- version.json; then
             cp version.json /tmp/version-checksums.json
             git fetch origin main
             git checkout -f origin/main
@@ -347,7 +362,9 @@ jobs:
           fi
           if ! git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"; then
             # 基线已在上方 checkout origin/main（含摘要提交），tag 落在
-            # main 最新上，target 同样取 HEAD，不再用触发 commit 的旧基线
+            # main 最新上，target 同样取 HEAD，不再用触发 commit 的旧基线。
+            # backfill 时未 checkout main，tag 落在触发 ref（历史版本钉在
+            # 其发布时刻的基线上）。
             git tag "${VERSION}"
             git push origin "refs/tags/${VERSION}"
           fi
