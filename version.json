@@ -1,20 +1,20 @@
 {
   "version": "v1.13.121",
   "checksums": {
-    "dec-exec-darwin-amd64": "08108ab0ae22aa2733ccf0301a88b2f4356175335a83853ff29033f84b473799",
-    "dec-exec-darwin-arm64": "6e68859a92021e5a69a5bb37b2005455f8e0b9018e04464b971eee9c0c019db8",
-    "dec-exec-linux-amd64": "5a0e066c24826327a0d5cad8b24dc6c71292a077c1f44ad0c64290b29e725e1e",
-    "dec-exec-linux-arm64": "4a9e3c9a5b374b33f5b7d80fbbae7f9117937e4f1c59008ee2f6523010389098",
-    "dec-exec-windows-amd64.exe": "a6b5c7f65d3e205524299f316870c6d7c177da592b736a248baf319ada4580eb",
-    "dec-host-setup-darwin-amd64": "e890a0835b86b4c66c7416d9fc5a8b9dcfab3957168fb00132e327364bad8bed",
-    "dec-host-setup-darwin-arm64": "34fed63d36ff77fb851a1e9f60caf3c5762ae6c00265e82ed7d3456033424825",
-    "dec-host-setup-linux-amd64": "8afa6c7091be841c061fa742ce9c864b3575a692ff1a5243abb2a4562d5c2ceb",
-    "dec-host-setup-linux-arm64": "b0858ba3ce362611125c2c945bcfb82862c5418a9197837564446c52f8f0eb67",
-    "dec-host-setup-windows-amd64.exe": "ced1eff10466c67db10b91d5bee41b04bec1f9c09f7f682fa4d34ffaa95797df",
-    "dec-server-darwin-amd64": "4827635940013c9e4bb9480319e0972617cdc785e50b51d5c7d8bb3b356ad9ba",
-    "dec-server-darwin-arm64": "6ff937aac43449d7efa0150e5710f23b6806b77daba5e2bd938ebbe0a8110715",
-    "dec-server-linux-amd64": "c9d81d1aa707ca0c040c78fab9890b13193d95973de0f73445c129fee2fce0b9",
-    "dec-server-linux-arm64": "0c92898ed62e298c9552b289b6264566d0921065811b545580aa11af8139dfb7",
-    "dec-server-windows-amd64.exe": "30a2dad74470b9b7ab5e1a8e9bd2007d79ea3aafe138b9ec5aefdb8da6b62396"
+    "dec-exec-darwin-amd64": "2781b1155c96b90f61010e9f0e6672f940575edd8813a83ebcc2065c14e32b22",
+    "dec-exec-darwin-arm64": "789350a07268ad8d0eb99a860220a27f8f3c03abb16864ef07c7cbfa4a1650e6",
+    "dec-exec-linux-amd64": "e65c68e938ead9f2925e399825be9432c05f448b38ee0a29141fc3ca6da540c3",
+    "dec-exec-linux-arm64": "978348bc929507cd0971a9f1b3dfcbcee5139f28b64fe8e9696b0213bff2264e",
+    "dec-exec-windows-amd64.exe": "8146d131a178744df82c4afb410132015f29d17b23643e6b7cbf1607b5d22d09",
+    "dec-host-setup-darwin-amd64": "032cc28c0d8a0bc2f2f77086b4ebdf0c1c9b83a0331d5941b1e3cbc788f33651",
+    "dec-host-setup-darwin-arm64": "e23d6071ff7c9693b0b3d70adf8e9b5b5a5330ecded59e58217e127e2e1035da",
+    "dec-host-setup-linux-amd64": "959bd61951bd07a5eb6adceb5325b2828c7c03271b39ed31d13a704a8e4133d0",
+    "dec-host-setup-linux-arm64": "007da06cc140d7b47b888a11b453bbe0d6bf5f9533dfac1c93a1a048c0dcf1b6",
+    "dec-host-setup-windows-amd64.exe": "46c7c994a3eabfcde70e3660683e33cb6fea0dd0c4a4e71b553f5709953b00eb",
+    "dec-server-darwin-amd64": "c293152129b48bd49a18fda713eba37bbb3c590fbc8ac0f701c13643803cd472",
+    "dec-server-darwin-arm64": "c8957aec386cdd80fe621198310536e86ab157275ae5e1d80f2f688cb170cc39",
+    "dec-server-linux-amd64": "589e42b492c78a12265fde42d693cf2f4caefd8e0f4fe6c00757573d27a40f7b",
+    "dec-server-linux-arm64": "d4bfe5dcd50e7dfa534e28de908096e3c24a5042c0db42553c76c0a7d43506e2",
+    "dec-server-windows-amd64.exe": "adc841d422daf4743e5a773683d5cc13403005214e153892277acd81bcc1c834"
   }
 }
