@@ -328,13 +328,26 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # install.sh 从 main 取 version.json 校验摘要，故带 checksums 的
-          # version.json 必须先提交到主干。
+          # version.json 必须先提交到主干。连发时后一个 tag 的 bump commit
+          # 可能已抢先上 main（打 tag 的前提），本 run 的旧基线推送会
+          # non-fast-forward 被拒；因此先暂存校验版，切到 main 最新基线
+          # 覆写后提交推送（重跑时 main 已含摘要则幂等跳过）。
           if ! git diff --quiet -- version.json; then
-            git add version.json
-            git commit -m "chore: 发布 ${VERSION} 产物摘要"
-            git push origin HEAD:refs/heads/main
+            cp version.json /tmp/version-checksums.json
+            git fetch origin main
+            git checkout origin/main
+            cp /tmp/version-checksums.json version.json
+            if ! git diff --quiet -- version.json; then
+              git add version.json
+              git commit -m "chore: 发布 ${VERSION} 产物摘要"
+              git push origin HEAD:refs/heads/main
+            else
+              echo "main 已含 ${VERSION} 摘要，跳过回写"
+            fi
           fi
           if ! git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"; then
+            # 基线已在上方 checkout origin/main（含摘要提交），tag 落在
+            # main 最新上，target 同样取 HEAD，不再用触发 commit 的旧基线
             git tag "${VERSION}"
             git push origin "refs/tags/${VERSION}"
           fi
@@ -349,4 +362,5 @@ jobs:
             "${assets[@]}" \
             --repo "${GITHUB_REPOSITORY}" \
             --generate-notes \
-            --target "$(git rev-parse HEAD)"
+            --target "$(git rev-parse HEAD)" \
+            --title "${VERSION}"
