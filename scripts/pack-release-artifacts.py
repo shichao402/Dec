@@ -25,12 +25,16 @@ SCHEMA = "relkit.release-artifacts/2"
 DEFAULT_MANIFEST = "dist/release-artifacts.json"
 
 # 文件名后缀 → (os, arch)；与旧 bash 段的 case 分支一一对应。
+# dmg 是 macOS 安装包扩展名（dec-console-darwin-*.dmg），历史上漏登记
+# 导致两个 dmg 从未进入发布清单（Dec #22），此处显式补录。
 TARGET_SUFFIXES = [
     ("-windows-amd64.exe", "windows", "amd64"),
     ("-linux-amd64", "linux", "amd64"),
     ("-linux-arm64", "linux", "arm64"),
     ("-darwin-amd64", "darwin", "amd64"),
     ("-darwin-arm64", "darwin", "arm64"),
+    ("-darwin-amd64.dmg", "darwin", "amd64"),
+    ("-darwin-arm64.dmg", "darwin", "arm64"),
 ]
 
 
@@ -64,7 +68,11 @@ def main() -> int:
             continue
         target = resolve_target(name)
         if target is None:
-            continue
+            raise SystemExit(
+                "pack-release-artifacts: 无法解析产物目标平台: dist/%s\n"
+                "  命名约定为 dec-*-<os>-<arch>[.exe|.dmg]，漏登记的扩展名会静默丢产物"
+                "（Dec #22 教训），请扩充 TARGET_SUFFIXES。" % name
+            )
         os_name, arch = target
         component = component_of(name, os_name, arch)
         install_name = f"{component}.exe" if os_name == "windows" else component
@@ -119,7 +127,11 @@ def main() -> int:
             continue
         target = resolve_target(path.name)
         if target is None:
-            continue
+            raise SystemExit(
+                "pack-release-artifacts: 无法解析 Console 安装包目标平台: dist/%s\n"
+                "  命名约定为 dec-console-<os>-<arch>[.exe|.dmg]，漏登记的扩展名会静默丢产物"
+                "（Dec #22 教训），请扩充 TARGET_SUFFIXES。" % path.name
+            )
         os_name, arch = target
         groups.append(
             {
