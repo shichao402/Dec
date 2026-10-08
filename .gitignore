@@ -22,6 +22,10 @@ vendor/
 # 旧 CI 整仓 clone 落点，保留作防御
 /relkit/
 
+# relkit install 按 lock 物化的宿主脚本（ADR 0017，hostScriptsSha256 校验的
+# 运行时副本，never committed）——与其余消费仓同规则。
+scripts/host/
+
 # Go workspace file
 go.work
 
