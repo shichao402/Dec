@@ -48,7 +48,7 @@ permissions:
 # latest 形态的最低 CLI 版本，跟随目标由解析链给出（lock 声明 latest）。
 # follow 形态下 install/upgrade 自行解析真实版本，此处不再要求一致。
 env:
-  RELKIT_REF: v0.5.20
+  RELKIT_REF: v0.5.21
 
 jobs:
   prepare:
