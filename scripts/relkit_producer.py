@@ -108,6 +108,16 @@ def native_target() -> str:
     return f"{os_name}-{arch}" if os_name and arch else "unsupported"
 
 
+def release_code(version: str) -> int:
+    parts = version.removeprefix("v").split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        fail(f"version {version} must be vMAJOR.MINOR.PATCH")
+    value = int(parts[2])
+    if value <= 0:
+        fail(f"version {version} has no positive release code")
+    return value
+
+
 def main() -> None:
     try:
         input_document = json.load(sys.stdin)
@@ -247,6 +257,7 @@ def main() -> None:
         "resolutionDigest": input_document["resolutionDigest"],
         "product": input_document["product"],
         "version": version,
+        "releaseCode": release_code(version),
         "channel": input_document["channel"],
         "mergeIdentity": {
             "product": input_document["product"],

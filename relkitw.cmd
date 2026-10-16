@@ -6,7 +6,7 @@ set "PROJECT=%ROOT%relkit.project.json"
 set "RESOLUTION=%ROOT%.relkit\resolution.json"
 set "CANDIDATE=%RELKIT_CANDIDATE_DIGEST%"
 if not "%CANDIDATE%"=="" set "RESOLUTION=%ROOT%.relkit\candidate\resolution.json"
-set "RELKIT_EXPECTED_ROOT_FINGERPRINT=sha256:0aa49bbadde755ff8080b253635d1de132e8cd85acefae0584c06a983787017a"
+set "RELKIT_EXPECTED_ROOT_FINGERPRINT=sha256:8bcb6c24c9ce672f315f96eff446d9cee7edd2c6f3bfa113a3d4927f00199598"
 set "OPERATOR_HASH=db646a6927dfb1c0fbf68fa5a0643bbd3193b42ec0b80907c352db3d8abda8cc"
 
 if not "%RELKIT_BOOTSTRAP_CLI%"=="" (
