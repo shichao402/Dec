@@ -65,6 +65,9 @@
       "CI",
       "CARGO_HOME",
       "RUSTUP_HOME",
+      "INCLUDE",
+      "LIB",
+      "LIBPATH",
       "NPM_CONFIG_CACHE"
     ],
     "permissions": ["read-workspace", "write-out-dir", "exec-self"]
