@@ -63,6 +63,7 @@ if [ ! -x "${BOOTSTRAP:-}" ]; then
 fi
 
 export RELKIT_EXPECTED_ROOT_FINGERPRINT="$EXPECTED_ROOT"
+export RELKIT_PROJECT="$PROJECT"
 if [ "${RELKIT_REFRESH_RESOLUTION:-0}" = "1" ]; then
   if [ -n "$CANDIDATE" ]; then
     "$BOOTSTRAP" resolve --project "$PROJECT" --out "$RESOLUTION" --candidate "$CANDIDATE" --replace
