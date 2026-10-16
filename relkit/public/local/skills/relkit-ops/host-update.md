@@ -102,12 +102,23 @@ relkit-ops artifact-set pull（URL + archiveSha256）
 relkitw stage --artifact-set <artifact-set.json>
 relkitw release --version <version>
 relkitw release --version <version> --execute
-relkitw verify released --version <version> --channel <channel>
+relkitw verify released \
+  --resolution <同一 immutable-resolution.json> \
+  --version <version> --channel <channel> \
+  [--consumer <loopback-url>] [--directory <loopback-url>]
 ```
 
 产品 Job 只持 ArtifactSet 传输凭据，不持发布 endpoint/agent token；只有 Operator
 Job 持 `RELKIT_UPLOAD_TOKEN`。Operator 不改产品业务选择。整条事务必须使用同一
 resolution digest。candidate 使用独立身份与权限，不能发布 stable。
+
+正式验收从 bundle 安装后的 Runtime Bootstrap 发现 Product RUP Root；显式
+`--product-root` 只用于诊断，不能替代 bootstrap → wrapper → released-state 链路。
+`release --execute` 后若立即读回失败，先按同一 resolution 有界重试 verify；已提交则
+不得重发同一 immutable version，部分提交按 `partial-commit` / fix-forward 处理。
+
+完整 Candidate → Production、Agent policy、stable 与回滚顺序以
+[`cutover.md`](../../../docs/design/vnext/cutover.md) 为唯一 runbook。
 
 ## 6. 验收
 

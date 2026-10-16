@@ -120,7 +120,6 @@ relkitw release --version <version> --execute
 relkitw verify released \
   --resolution <immutable-resolution.json> \
   --version <version> --channel <channel> \
-  --product-root <product-rup-root.pb> \
   [--consumer <loopback-url>] [--directory <loopback-url>]
 ```
 
@@ -130,6 +129,10 @@ relkitw verify released \
 `RELKIT_RELEASE_VIA_CI=1`。Operator 不改产品业务选择。
 关键 artifact/manifest/index/directory/Runtime Profile 任一步失败都不得报告成功；
 网页投影失败可告警并重建。
+
+正式场景必须让 bundle 安装后的 Runtime Bootstrap 提供 Product RUP Root；显式
+`--product-root <product-rup-root.pb>` 只用于诊断旧环境变量或 mapping，不得成为唯一
+验收证据。公开 SDK 还必须解析控制面实际生成的 bootstrap 字节，不能只解析手写 fixture。
 
 `release --execute` 报错时不能直接假设“没有发布”。若日志显示已上传或可能已提交，
 先用同一 version/channel、immutable resolution 和匹配
