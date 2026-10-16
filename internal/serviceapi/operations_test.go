@@ -17,7 +17,7 @@ func startServer(t *testing.T) *API {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
-	go func() { served <- servicehost.Run(ctx, "test") }()
+	go func() { served <- servicehost.RunOnEphemeralPortsForTest(ctx, "test") }()
 	t.Cleanup(func() {
 		cancel()
 		select {

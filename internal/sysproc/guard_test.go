@@ -38,8 +38,8 @@ func TestNoDirectExecCommand(t *testing.T) {
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			// third_party 是 gitignore 的外部 sparse checkout，不是 Dec 的源码。
-			case ".git", "node_modules", "vendor", "target", "dist", "third_party":
+			// third_party 与 .relkit/components 都是外部物化树，不是 Dec 的源码。
+			case ".git", ".relkit", "node_modules", "vendor", "target", "dist", "third_party":
 				return filepath.SkipDir
 			}
 			return nil

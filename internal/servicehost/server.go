@@ -78,6 +78,16 @@ var (
 )
 
 func Run(ctx context.Context, version string) error {
+	return run(ctx, version, testGRPCListen, testMCPListen)
+}
+
+// RunOnEphemeralPortsForTest 启动完整服务，但只监听测试进程独占的随机回环端口。
+// 它避免跨包集成测试占用或碰撞生产固定端口。
+func RunOnEphemeralPortsForTest(ctx context.Context, version string) error {
+	return run(ctx, version, "127.0.0.1:0", "127.0.0.1:0")
+}
+
+func run(ctx context.Context, version, grpcListen, mcpListen string) error {
 	lock, err := service.AcquireServerLock()
 	if err != nil {
 		return err
@@ -93,8 +103,8 @@ func Run(ctx context.Context, version string) error {
 		return err
 	}
 	grpcAddr := listen.Addr
-	if testGRPCListen != "" {
-		grpcAddr = testGRPCListen
+	if grpcListen != "" {
+		grpcAddr = grpcListen
 	}
 	listener, err := listenFixed(grpcAddr)
 	if err != nil {
@@ -103,8 +113,8 @@ func Run(ctx context.Context, version string) error {
 	defer listener.Close()
 
 	mcpAddr := config.MCPListenAddr
-	if testMCPListen != "" {
-		mcpAddr = testMCPListen
+	if mcpListen != "" {
+		mcpAddr = mcpListen
 	}
 	mcpListener, err := listenFixed(mcpAddr)
 	if err != nil {
@@ -315,11 +325,11 @@ func (s *Server) PullCredentialRequest(context.Context, *servicev1.PullCredentia
 		return &servicev1.PullCredentialRequestResponse{}, nil
 	}
 	return &servicev1.PullCredentialRequestResponse{
-		Pending:    true,
-		RequestId:  id,
-		Kind:       kind,
-		Prompt:     prompt,
-		Operation:  operation,
+		Pending:   true,
+		RequestId: id,
+		Kind:      kind,
+		Prompt:    prompt,
+		Operation: operation,
 	}, nil
 }
 

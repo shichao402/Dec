@@ -4,23 +4,27 @@
 
 ## 要求
 
-- Node.js、Rust（stable）
+- Node.js、Go、Rust（stable）、Python 3.10+
 - Windows 需 WebView2
 - 本机连接会逐一检查运行时组件版本；缺失、版本不一致或低于 Console 时自动安装/升级，再拉起 `dec-server`
 
 ## 开发
 
 ```bash
-python scripts/build-console.py --prepare-runtime-only
+./relkitw doctor
+python3 scripts/build-console.py --prepare-runtime-only
 cd client
 npm install
 npm run tauri dev
 ```
 
-以上命令从仓库根目录执行。`--prepare-runtime-only` 只生成并保留当前平台的
+前三个命令从仓库根目录执行。`relkitw` 先验证 immutable resolution 并物化
+Go/Rust SDK 与 updater；不要从 PATH、源码 checkout 或宿主 lock 安装 Relkit。
+`--prepare-runtime-only` 只生成并保留当前平台的
 `src-tauri/resources/runtime/<os>-<arch>/`，不会打完整 Console 包；首次开发或版本变化后需重新运行。
-要把当前源码装成本机**开发用** Console，在仓库根运行 `python scripts/build-console.py --deploy`
+要把当前源码装成本机**开发用** Console，在仓库根运行 `python3 scripts/build-console.py --deploy`
 （覆盖安装，不是发版）。安装包内置同版本运行时套件，不要单独部署运行时。
+Windows 可把上述 `python3` 换成 `python`。
 给别人用的包走 CI / RUP，不要用本机覆盖安装代替。
 release 构建仍严格要求内置资源，只有 debug 模式会在资源尚未准备且现有本机运行时可直接连接时跳过缓存预热。
 

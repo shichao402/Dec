@@ -6,7 +6,6 @@ require (
 	github.com/gofrs/flock v0.13.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	github.com/shichao402/relkit v0.4.24
 	github.com/spf13/cobra v1.8.0
 	golang.org/x/sys v0.46.0
 	google.golang.org/grpc v1.83.0

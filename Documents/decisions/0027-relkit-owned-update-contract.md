@@ -3,7 +3,7 @@
 - **状态**：已接受（已实现）
 - **日期**：2026-09-15
 - **关联**：[0021](0021-console-owned-runtime.md)（谁执行更新）、[0023](0023-facade-capability-parity.md)（MCP 不对称）、relkit ADR 0010 / 0012
-- **影响范围**：`client/src-tauri/src/console_update.rs`、`client/src/lib/console-update.ts`、`third_party/relkit/`
+- **影响范围**：`client/src-tauri/src/console_update.rs`、`client/src/lib/console-update.ts`、`.relkit/components/sdk/`
 
 ## 问题
 
@@ -12,8 +12,11 @@ Console 自更新曾同时维护 Go helper JSON、Tauri serde struct 与前端 T
 ## 决策
 
 1. 更新 IDL 只有 relkit 的 `proto/updater/v1/updater.proto`。Dec 的 `schema/` 只声明 Dec 配置与资产协议，不声明 updater 消息。
-2. 产品仓不执行 updater codegen。`relkit install`（Go CLI，module 通道）按 lock 落下 Rust facade、TypeScript bindings 与 sidecar；Dec 只通过 path dependency / import 消费。
-3. Tauri 把 Rust facade 的 canonical ProtoJSON 投影交给 WebView。前端用 lock 组件中的 `CheckResultSchema` / `StatusSnapshotSchema` 解析，再按五个 oneof 变体渲染；不手写 `CheckResult`、`UpdateAvailable` 或字段镜像。
+2. 产品仓不执行 updater codegen。canonical wrapper 按 immutable resolution
+   物化 Rust/Go facade 与 sidecar；Dec 只通过 path dependency / Go modfile 消费。
+3. Tauri 把 Rust facade 的 canonical ProtoJSON 投影交给 WebView。前端用同一
+   distribution 的 generated bindings 解析，再按五个 oneof 变体渲染；不手写
+   `CheckResult`、`UpdateAvailable` 或字段镜像。
 4. `CheckPolicy.after_success` / `after_failure`、`StatusSnapshot` 与引擎持久化状态负责节流和上次状态。Dec 不写 `console-update.json`，不计算下次检查时间。
 5. `currentVersion` 与 `canAutoInstall` 是本机壳事实，可与 canonical 结果一起返回，但不进入 updater IDL。
 
@@ -29,6 +32,7 @@ Console 自更新曾同时维护 Go helper JSON、Tauri serde struct 与前端 T
 
 ## 结果
 
-- 改 relkit 字段或 oneof 后，Dec 前端在编译期暴露不匹配。
+- 改 relkit 字段或 oneof 后，conformance 与 Dec 构建在编译期暴露不匹配。
 - Rust 与 TypeScript 通过同一组 canonical ProtoJSON fixture 对齐。
 - Console 自更新不再依赖 Go helper，也不依赖当前连接的 `dec-server`。
+- endpoint、公钥、渠道和恢复入口只通过 verified Runtime Bootstrap 注入。

@@ -1,14 +1,10 @@
 package update
 
 import (
-	"bytes"
-	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -85,71 +81,38 @@ func TestUpdaterSelectsRuntimeAudience(t *testing.T) {
 	}
 }
 
-func TestEntryURLsPointAtUpdateInternalDomain(t *testing.T) {
-	urls := entryURLs()
-	if len(urls) != 1 {
-		t.Fatalf("entryURLs = %v", urls)
-	}
-	if !strings.Contains(urls[0], "update-internal.firoyang.com") {
-		t.Fatalf("primary entry = %q", urls[0])
-	}
-	for _, u := range urls {
-		if strings.Contains(u, "raw.firoyang.com") || strings.Contains(u, "raw2.firoyang.com") {
-			t.Fatalf("cos raw planes must be gone: %v", urls)
-		}
-	}
-}
-
-func TestEmbeddedRecoveryFromRelkitJSON(t *testing.T) {
-	help := embeddedRecovery()
-	if help == nil || help.Message == "" || len(help.Links) < 2 {
-		t.Fatalf("recovery: %+v", help)
-	}
-}
-
-func TestEmbeddedRelkitMatchesRootSSOT(t *testing.T) {
-	rootJSON, err := os.ReadFile(filepath.Join("..", "..", "relkit.json"))
+func TestClientProfileComesFromRuntimeBootstrap(t *testing.T) {
+	old := runtimeBootstrapBase64
+	t.Cleanup(func() { runtimeBootstrapBase64 = old })
+	digest := "sha256:" + strings.Repeat("a", 64)
+	source := fmt.Sprintf(`{
+		"schema":"relkit.runtime-bootstrap/1",
+		"resolutionDigest":%q,
+		"profileDigest":%q,
+		"rootFingerprint":"sha256:64eba24757a5e1574e6cabf8086284d90e5ff57ef0b821a50c3267263c3fd75d",
+		"profile":{
+			"product":"dec",
+			"allowedChannels":["dev","stable"],
+			"directoryBootstrap":{
+				"entryUrls":["https://update-internal.firoyang.com/directory/dec.pb"],
+				"recovery":{"message":"offline","links":[{"label":"release","url":"https://example.com/"}]}
+			},
+			"digest":%q
+		},
+		"trustedKeys":[{"keyId":"dec-2026","key":"zVkesjz/3BhLrZ9qCvSJN0OdrIsePL4+v6AI9CCtio4="}]
+	}`, digest, digest, digest)
+	runtimeBootstrapBase64 = base64.StdEncoding.EncodeToString([]byte(source))
+	profile, err := clientProfile()
 	if err != nil {
-		t.Fatalf("read repo-root relkit.json: %v (run tests from module root via go test ./internal/update/...)", err)
+		t.Fatal(err)
 	}
-	if !bytes.Equal(rootJSON, embeddedRelkitJSON) {
-		t.Fatal("internal/update/embed/relkit.json 与根目录 relkit.json 不一致；请运行: go generate ./internal/update")
+	if profile.GetProduct() != "dec" {
+		t.Fatalf("product = %q", profile.GetProduct())
 	}
-}
-
-func TestTrustedKeysFromEmbeddedRelkit(t *testing.T) {
-	keys, err := trustedKeys()
-	if err != nil {
-		t.Fatalf("trustedKeys: %v", err)
+	if got := profile.GetEntryUrls(); len(got) != 1 || !strings.Contains(got[0], "update-internal.firoyang.com") {
+		t.Fatalf("entry urls = %v", got)
 	}
-	pk, ok := keys[keyID]
-	if !ok {
-		t.Fatalf("missing keyId %q in TrustedKeys", keyID)
-	}
-	if len(pk) != ed25519.PublicKeySize {
-		t.Fatalf("public key length = %d", len(pk))
-	}
-
-	var root relkitFile
-	rootJSON, err := os.ReadFile(filepath.Join("..", "..", "relkit.json"))
-	if err != nil {
-		t.Fatalf("read repo-root relkit.json: %v", err)
-	}
-	if err := json.Unmarshal(rootJSON, &root); err != nil {
-		t.Fatalf("parse root relkit.json: %v", err)
-	}
-	var wantB64 string
-	for _, pkCfg := range root.Signing.PublicKeys {
-		if pkCfg.KeyID == keyID {
-			wantB64 = pkCfg.PublicKeyBase64
-			break
-		}
-	}
-	if wantB64 == "" {
-		t.Fatalf("root relkit.json missing publicKeys entry for %q", keyID)
-	}
-	gotB64 := base64.StdEncoding.EncodeToString(pk)
-	if gotB64 != wantB64 {
-		t.Fatalf("dec-2026 public key = %q, want %q from root relkit.json", gotB64, wantB64)
+	if profile.GetRecovery().GetMessage() != "offline" {
+		t.Fatalf("recovery = %+v", profile.GetRecovery())
 	}
 }

@@ -1,7 +1,6 @@
 package update
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -12,25 +11,7 @@ import (
 	"github.com/shichao402/Dec/internal/repo"
 )
 
-const (
-	productName = "dec"
-	channelName = "dev"
-	keyID       = "dec-2026"
-)
-
-func entryURLs() []string {
-	var cfg struct {
-		Directory struct {
-			EntryURLs []string `json:"entryUrls"`
-		} `json:"directory"`
-	}
-	if err := json.Unmarshal(embeddedRelkitJSON, &cfg); err == nil && len(cfg.Directory.EntryURLs) > 0 {
-		return append([]string(nil), cfg.Directory.EntryURLs...)
-	}
-	return []string{
-		"https://update-internal.firoyang.com/directory/dec.pb",
-	}
-}
+const channelName = "dev"
 
 func stateDir() (string, error) {
 	return repo.GetRootDir()

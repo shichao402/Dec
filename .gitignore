@@ -17,14 +17,9 @@
 # Dependency directories
 vendor/
 
-# relkit sparse-checkout（scripts/ensure_relkit_sparse）；保留 third_party/README.md
+# Retired pre-vNext materializations may remain in old checkouts.
 /third_party/relkit/
-# 旧 CI 整仓 clone 落点，保留作防御
-/relkit/
-
-# relkit install 按 lock 物化的宿主脚本（ADR 0017，hostScriptsSha256 校验的
-# 运行时副本，never committed）——与其余消费仓同规则。
-scripts/host/
+/tools/bin/
 
 # Go workspace file
 go.work
@@ -43,20 +38,15 @@ Thumbs.db
 # 开发根目录（开发时使用）
 .root/
 
-# 开箱决策要提交；其余都是可丢弃产物。父目录若整体排除，negate 子文件无效，
-# 所以这里用 .relkit/* 而不是 .relkit/。
+# Relkit vNext immutable resolution、已验签控制面与组件物化树。
 .relkit/*
-!.relkit/onboarding.json
 
-# relkit 往 scripts/host/ 装 python 脚本，跑一次就留字节码缓存。
 __pycache__/
 staged.tar.gz
 publish-req.json
 dist/
 logs/
 *.log
-relkit-bin
-relkit-bin.exe
 client/src-tauri/resources/runtime/*
 !client/src-tauri/resources/runtime/.gitkeep
 client/src-tauri/resources/updater/*
@@ -102,8 +92,3 @@ mise.local.toml
 # .relkit-keys/*.private.pb 为废弃本地路径，保留规则作防御；*.private.pb 防误提交。
 .relkit-keys/*.private.pb
 *.private.pb
-
-.relkit/cache/
-
-# 本地构建产物，不入库（relkit CLI 与 updater sidecar 二进制）
-tools/bin/

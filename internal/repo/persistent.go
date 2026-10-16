@@ -132,6 +132,12 @@ func worktreeHasCommit(worktreeDir string) bool {
 }
 
 func sameRepoPath(a, b string) bool {
+	if resolved, err := filepath.EvalSymlinks(a); err == nil {
+		a = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(b); err == nil {
+		b = resolved
+	}
 	a, b = filepath.Clean(a), filepath.Clean(b)
 	if runtime.GOOS == "windows" {
 		return strings.EqualFold(a, b)

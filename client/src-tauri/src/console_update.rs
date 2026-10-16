@@ -1,13 +1,10 @@
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
 use relkit_updater::proto::apply_result;
 use relkit_updater::proto::check_result;
 use relkit_updater::proto::download_result;
-use relkit_updater::proto::{
-    ApplyDisposition, CheckPolicy, ClientProfile, InstallSpec, Placement, RecoveryHelp,
-    RecoveryLink, Runtime, TrustedKey,
+use relkit_updater::proto::{ApplyDisposition, CheckPolicy, InstallSpec, Placement, Runtime};
+use relkit_updater::{
+    check_result_to_json, runtime_bootstrap_from_json, OpenResult, RuntimeBootstrap, Updater,
 };
-use relkit_updater::{check_result_to_json, OpenResult, Updater};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -39,47 +36,7 @@ struct PreferencesFile {
     update_channel: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RelkitConfig {
-    product: String,
-    default_channel: String,
-    channels: Vec<String>,
-    signing: SigningConfig,
-    directory: DirectoryConfig,
-    recovery: RecoveryConfig,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SigningConfig {
-    public_keys: Vec<PublicKeyConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PublicKeyConfig {
-    key_id: String,
-    public_key_base64: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DirectoryConfig {
-    entry_urls: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RecoveryConfig {
-    message: String,
-    links: Vec<RecoveryLinkConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RecoveryLinkConfig {
-    label: String,
-    url: String,
-}
+const DEFAULT_UPDATE_CHANNEL: &str = "stable";
 
 fn platform_id() -> &'static str {
     if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
@@ -137,9 +94,11 @@ fn version_code(version: &str) -> Result<i64, String> {
     Ok(parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2])
 }
 
-fn relkit_config() -> Result<RelkitConfig, String> {
-    serde_json::from_str(include_str!("../../../relkit.json"))
-        .map_err(|err| format!("解析内置更新配置失败: {err}"))
+fn runtime_bootstrap() -> Result<RuntimeBootstrap, String> {
+    let source = option_env!("DEC_RUNTIME_BOOTSTRAP_JSON")
+        .ok_or_else(|| "构建未注入 Relkit Runtime Profile".to_string())?;
+    runtime_bootstrap_from_json(source)
+        .map_err(|error| format!("解析 Relkit Runtime Profile 失败: {error}"))
 }
 
 fn preferences_path() -> Result<PathBuf, String> {
@@ -161,7 +120,8 @@ fn read_preferences_file() -> Result<PreferencesFile, String> {
 
 fn write_preferences_file(prefs: &PreferencesFile) -> Result<(), String> {
     let path = preferences_path()?;
-    let data = serde_json::to_string_pretty(prefs).map_err(|err| format!("序列化更新偏好失败: {err}"))?;
+    let data =
+        serde_json::to_string_pretty(prefs).map_err(|err| format!("序列化更新偏好失败: {err}"))?;
     std::fs::write(&path, data + "\n").map_err(|err| format!("写入更新偏好失败: {err}"))
 }
 
@@ -171,30 +131,38 @@ fn channel_allowed(channel: &str, allowed: &[String]) -> bool {
 }
 
 fn effective_channel() -> Result<String, String> {
-    let config = relkit_config()?;
+    let bootstrap = runtime_bootstrap()?;
+    let allowed = &bootstrap.client_profile.allowed_channels;
     let prefs = read_preferences_file()?;
     let saved = prefs.update_channel.trim();
-    if channel_allowed(saved, &config.channels) {
+    if channel_allowed(saved, allowed) {
         return Ok(saved.to_string());
     }
-    Ok(config.default_channel)
+    if channel_allowed(DEFAULT_UPDATE_CHANNEL, allowed) {
+        return Ok(DEFAULT_UPDATE_CHANNEL.to_string());
+    }
+    allowed
+        .first()
+        .cloned()
+        .ok_or_else(|| "Runtime Profile 未声明更新渠道".to_string())
 }
 
 pub fn get_prefs() -> Result<ConsoleUpdatePrefs, String> {
-    let config = relkit_config()?;
+    let bootstrap = runtime_bootstrap()?;
     Ok(ConsoleUpdatePrefs {
         update_channel: effective_channel()?,
-        allowed_channels: config.channels,
+        allowed_channels: bootstrap.client_profile.allowed_channels,
     })
 }
 
 pub fn set_channel(channel: &str) -> Result<ConsoleUpdatePrefs, String> {
-    let config = relkit_config()?;
+    let bootstrap = runtime_bootstrap()?;
+    let allowed_channels = bootstrap.client_profile.allowed_channels;
     let channel = channel.trim();
-    if !channel_allowed(channel, &config.channels) {
+    if !channel_allowed(channel, &allowed_channels) {
         return Err(format!(
             "无效更新渠道 {channel:?}（允许: {}）",
-            config.channels.join(", ")
+            allowed_channels.join(", ")
         ));
     }
     let mut prefs = read_preferences_file()?;
@@ -202,40 +170,15 @@ pub fn set_channel(channel: &str) -> Result<ConsoleUpdatePrefs, String> {
     write_preferences_file(&prefs)?;
     Ok(ConsoleUpdatePrefs {
         update_channel: channel.to_string(),
-        allowed_channels: config.channels,
+        allowed_channels,
     })
 }
 
 fn updater(app: &AppHandle, current: &str) -> Result<(Updater, String, Vec<String>), String> {
-    let config = relkit_config()?;
+    let bootstrap = runtime_bootstrap()?;
     let channel = effective_channel()?;
-    let allowed_channels = config.channels.clone();
-    let trusted_keys = config
-        .signing
-        .public_keys
-        .into_iter()
-        .map(|key| {
-            BASE64
-                .decode(&key.public_key_base64)
-                .map(|public_key| TrustedKey {
-                    key_id: key.key_id,
-                    public_key,
-                })
-                .map_err(|err| format!("解析更新公钥失败: {err}"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let recovery = RecoveryHelp {
-        message: config.recovery.message,
-        links: config
-            .recovery
-            .links
-            .into_iter()
-            .map(|link| RecoveryLink {
-                label: link.label,
-                url: link.url,
-            })
-            .collect(),
-    };
+    let profile = bootstrap.client_profile;
+    let allowed_channels = profile.allowed_channels.clone();
     let sidecar = sidecar_path(app)?;
     if !sidecar.is_file() {
         return Err(format!("Console 更新组件不存在：{}", sidecar.display()));
@@ -258,15 +201,6 @@ fn updater(app: &AppHandle, current: &str) -> Result<(Updater, String, Vec<Strin
                 .to_string_lossy()
                 .into_owned()
         });
-    let profile = ClientProfile {
-        product: config.product,
-        allowed_channels: allowed_channels.clone(),
-        entry_urls: config.directory.entry_urls,
-        index_urls: Vec::new(),
-        fallback_urls: Vec::new(),
-        trusted_keys,
-        recovery: Some(recovery),
-    };
     let runtime = Runtime {
         channel: channel.clone(),
         current_code: version_code(current)?,
@@ -569,9 +503,6 @@ mod tests {
             "linux"
         };
         assert_eq!(normalized_os(), expected_os);
-        assert!(matches!(
-            normalized_arch(),
-            "amd64" | "arm64"
-        ));
+        assert!(matches!(normalized_arch(), "amd64" | "arm64"));
     }
 }
