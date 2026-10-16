@@ -58,6 +58,18 @@ relkit-ops bundle install \
 Bundle 必须包含所选 distribution 的全部 component/release asset；缺一个摘要即失败。
 不得只塞一份 CLI 冒充完整离线供给。
 
+安装 Candidate bundle 时还必须显式授权独立候选根：
+
+```text
+relkit-ops bundle install \
+  --project relkit.project.json --project-root . \
+  --target <os-arch> --bundle <bundle-dir> \
+  --candidate-root-fingerprint <sha256:...> --json
+```
+
+缺少或不匹配该指纹必须失败；它不能从 bundle 自己推导，也不能复用为 stable
+发布授权。Production bundle 不需要该参数。
+
 ## 发布
 
 宿主 producer 只返回 `relkit.artifact-set/1`。产品 CI 固定到 merged ArtifactSet

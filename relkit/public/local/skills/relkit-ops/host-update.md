@@ -91,6 +91,10 @@ relkitw artifacts merge（汇总）
 上传 merged ArtifactSet
 ```
 
+Candidate bundle 的安装命令必须显式传入 Operator 分发的
+`--candidate-root-fingerprint`；缺少或不匹配即失败。该授权只允许 resolution
+中的非 stable 渠道，不得用产品仓变量覆盖 bundle 内的身份、Operator 或 Catalog。
+
 独立 Operator Job：
 
 ```text
