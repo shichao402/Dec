@@ -110,17 +110,18 @@ jobs:
           curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
           test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
           unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
-          candidate_args=()
+          install_args=(
+            bundle install
+            --bundle "$RUNNER_TEMP/relkit-bundle"
+            --project relkit.project.json
+            --project-root "$GITHUB_WORKSPACE"
+            --home "$RUNNER_TEMP/relkit-home"
+            --target linux-amd64
+          )
           if [ -n "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ]; then
-            candidate_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
+            install_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
           fi
-          "$RUNNER_TEMP/relkit-ops" bundle install \
-            --bundle "$RUNNER_TEMP/relkit-bundle" \
-            --project relkit.project.json \
-            --project-root "$GITHUB_WORKSPACE" \
-            --home "$RUNNER_TEMP/relkit-home" \
-            --target linux-amd64 \
-            "${candidate_args[@]}"
+          "$RUNNER_TEMP/relkit-ops" "${install_args[@]}"
           echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
       - name: go test
@@ -204,17 +205,18 @@ jobs:
           if [ "$RUNNER_OS" = macOS ]; then HASH="$(shasum -a 256 "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')"; else HASH="$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')"; fi
           test "$HASH" = "$BUNDLE_SHA256"
           unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
-          candidate_args=()
+          install_args=(
+            bundle install
+            --bundle "$RUNNER_TEMP/relkit-bundle"
+            --project relkit.project.json
+            --project-root "$GITHUB_WORKSPACE"
+            --home "$RUNNER_TEMP/relkit-home"
+            --target "${{ matrix.host_target }}"
+          )
           if [ -n "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ]; then
-            candidate_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
+            install_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
           fi
-          "$RUNNER_TEMP/relkit-ops" bundle install \
-            --bundle "$RUNNER_TEMP/relkit-bundle" \
-            --project relkit.project.json \
-            --project-root "$GITHUB_WORKSPACE" \
-            --home "$RUNNER_TEMP/relkit-home" \
-            --target "${{ matrix.host_target }}" \
-            "${candidate_args[@]}"
+          "$RUNNER_TEMP/relkit-ops" "${install_args[@]}"
           echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
       - name: Install signed Operator bundle (Windows)
@@ -316,17 +318,18 @@ jobs:
           curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
           test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
           unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
-          candidate_args=()
+          install_args=(
+            bundle install
+            --bundle "$RUNNER_TEMP/relkit-bundle"
+            --project relkit.project.json
+            --project-root "$GITHUB_WORKSPACE"
+            --home "$RUNNER_TEMP/relkit-home"
+            --target linux-amd64
+          )
           if [ -n "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ]; then
-            candidate_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
+            install_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
           fi
-          "$RUNNER_TEMP/relkit-ops" bundle install \
-            --bundle "$RUNNER_TEMP/relkit-bundle" \
-            --project relkit.project.json \
-            --project-root "$GITHUB_WORKSPACE" \
-            --home "$RUNNER_TEMP/relkit-home" \
-            --target linux-amd64 \
-            "${candidate_args[@]}"
+          "$RUNNER_TEMP/relkit-ops" "${install_args[@]}"
           echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
       - uses: actions/download-artifact@v4
@@ -407,17 +410,18 @@ jobs:
           curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
           test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
           unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
-          candidate_args=()
+          install_args=(
+            bundle install
+            --bundle "$RUNNER_TEMP/relkit-bundle"
+            --project relkit.project.json
+            --project-root "$GITHUB_WORKSPACE"
+            --home "$RUNNER_TEMP/relkit-home"
+            --target linux-amd64
+          )
           if [ -n "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ]; then
-            candidate_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
+            install_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
           fi
-          "$RUNNER_TEMP/relkit-ops" bundle install \
-            --bundle "$RUNNER_TEMP/relkit-bundle" \
-            --project relkit.project.json \
-            --project-root "$GITHUB_WORKSPACE" \
-            --home "$RUNNER_TEMP/relkit-home" \
-            --target linux-amd64 \
-            "${candidate_args[@]}"
+          "$RUNNER_TEMP/relkit-ops" "${install_args[@]}"
           echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
       - uses: actions/download-artifact@v4
