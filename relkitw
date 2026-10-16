@@ -64,6 +64,11 @@ fi
 
 export RELKIT_EXPECTED_ROOT_FINGERPRINT="$EXPECTED_ROOT"
 export RELKIT_PROJECT="$PROJECT"
+CANDIDATE_ROOT_FILE="$ROOT/.relkit/candidate-root-fingerprint"
+if [ -z "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ] && [ -f "$CANDIDATE_ROOT_FILE" ]; then
+  IFS= read -r RELKIT_CANDIDATE_ROOT_FINGERPRINT < "$CANDIDATE_ROOT_FILE"
+  export RELKIT_CANDIDATE_ROOT_FINGERPRINT
+fi
 if [ "${RELKIT_REFRESH_RESOLUTION:-0}" = "1" ]; then
   if [ -n "$CANDIDATE" ]; then
     "$BOOTSTRAP" resolve --project "$PROJECT" --out "$RESOLUTION" --candidate "$CANDIDATE" --replace
@@ -87,8 +92,10 @@ if [ -f "$GO_MODFILE" ]; then
 fi
 SELECTED="$ROOT/.relkit/components/bin/relkit"
 if [ ! -x "$SELECTED" ]; then
-  echo "relkitw: selected CLI was not materialized at $SELECTED" >&2
-  exit 2
+  # The current machine may be an operator/developer host outside the
+  # product's declared release targets. The verified bootstrap remains the
+  # control-plane CLI for that host.
+  SELECTED="$BOOTSTRAP"
 fi
 export RELKIT_CORE="$SELECTED"
 exec "$SELECTED" "$@"
