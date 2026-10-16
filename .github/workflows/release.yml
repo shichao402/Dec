@@ -225,12 +225,12 @@ jobs:
             throw "Operator bundle digest mismatch"
           }
           Expand-Archive -Path $archive -DestinationPath $bundle -Force
-          $home = Join-Path $env:RUNNER_TEMP "relkit-home"
+          $relkitHome = Join-Path $env:RUNNER_TEMP "relkit-home"
           & $ops bundle install --bundle $bundle --project relkit.project.json `
-            --project-root $env:GITHUB_WORKSPACE --home $home --target "${{ matrix.host_target }}" `
+            --project-root $env:GITHUB_WORKSPACE --home $relkitHome --target "${{ matrix.host_target }}" `
             --candidate-root-fingerprint $env:RELKIT_CANDIDATE_ROOT_FINGERPRINT
           if ($LASTEXITCODE -ne 0) { throw "Operator bundle install failed" }
-          "RELKIT_HOME=$home" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELKIT_HOME=$relkitHome" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Produce ArtifactSet (Unix)
         if: runner.os != 'Windows'
