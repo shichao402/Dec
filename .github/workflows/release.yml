@@ -124,6 +124,9 @@ jobs:
           ./relkitw doctor
           GOFLAGS="-modfile=.relkit/components/sdk/go/relkit.mod" go test ./...
 
+      - name: producer contract tests
+        run: python3 -m unittest scripts/test_relkit_producer.py
+
   build:
     name: ArtifactSet (${{ matrix.target }})
     needs: [prepare, test]
