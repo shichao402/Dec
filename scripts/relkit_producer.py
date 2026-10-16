@@ -109,10 +109,14 @@ def native_target() -> str:
 
 
 def release_code(version: str) -> int:
-    parts = version.removeprefix("v").split(".")
+    core = version.strip().removeprefix("v").split("-", 1)[0].split("+", 1)[0]
+    parts = core.split(".")
     if len(parts) != 3 or not all(part.isdigit() for part in parts):
         fail(f"version {version} must be vMAJOR.MINOR.PATCH")
-    value = int(parts[2])
+    numbers = [int(part) for part in parts]
+    if any(part > 999 for part in numbers):
+        fail(f"version {version} has a component outside 0..999")
+    value = numbers[0] * 1_000_000 + numbers[1] * 1_000 + numbers[2]
     if value <= 0:
         fail(f"version {version} has no positive release code")
     return value
