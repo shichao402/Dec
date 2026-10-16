@@ -10,6 +10,7 @@ if not "%CANDIDATE%"=="" set "RESOLUTION=%ROOT%.relkit\candidate\resolution.json
 set "RELKIT_EXPECTED_ROOT_FINGERPRINT=sha256:8bcb6c24c9ce672f315f96eff446d9cee7edd2c6f3bfa113a3d4927f00199598"
 set "RELKIT_PROJECT=%PROJECT%"
 set "OPERATOR_HASH=db646a6927dfb1c0fbf68fa5a0643bbd3193b42ec0b80907c352db3d8abda8cc"
+if "%RELKIT_CANDIDATE_ROOT_FINGERPRINT%"=="" if exist "%ROOT%.relkit\candidate-root-fingerprint" set /p RELKIT_CANDIDATE_ROOT_FINGERPRINT=<"%ROOT%.relkit\candidate-root-fingerprint"
 
 if not "%RELKIT_BOOTSTRAP_CLI%"=="" (
   set "BOOTSTRAP=%RELKIT_BOOTSTRAP_CLI%"
@@ -46,8 +47,8 @@ set "GO_MODFILE=%ROOT%.relkit\components\sdk\go\relkit.mod"
 if exist "%GO_MODFILE%" set "GOFLAGS=-modfile=.relkit\components\sdk\go\relkit.mod %GOFLAGS%"
 set "SELECTED=%ROOT%.relkit\components\bin\relkit.exe"
 if not exist "%SELECTED%" (
-  echo relkitw: selected CLI was not materialized at %SELECTED% 1>&2
-  exit /b 2
+  REM The current machine may be outside the product's release targets.
+  set "SELECTED=%BOOTSTRAP%"
 )
 set "RELKIT_CORE=%SELECTED%"
 "%SELECTED%" %*
