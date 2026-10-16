@@ -441,8 +441,32 @@ jobs:
           ./relkitw stage \
             --artifact-set dist/relkit-artifact-set/merged/artifact-set.json
           ./relkitw release --version "$VERSION"
-          ./relkitw release --version "$VERSION" --execute
-          ./relkitw verify released --version "$VERSION" --channel "$CHANNEL"
+          release_log="$RUNNER_TEMP/relkit-release-execute.log"
+          set +e
+          ./relkitw release --version "$VERSION" --execute 2>&1 | tee "$release_log"
+          release_rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$release_rc" -ne 0 ] && \
+             ! grep -Fq 'release commit could not be verified from consumer-visible backends' "$release_log"; then
+            exit "$release_rc"
+          fi
+
+          # v0.6.14 may have committed successfully before its immediate consumer
+          # readback observes the write. Never execute the immutable release again;
+          # verify the same resolution/version/channel with bounded retries instead.
+          verified=0
+          for delay in 0 2 5 10 20 30; do
+            if [ "$delay" -gt 0 ]; then sleep "$delay"; fi
+            if ./relkitw verify released --version "$VERSION" --channel "$CHANNEL"; then
+              verified=1
+              break
+            fi
+          done
+          if [ "$verified" -ne 1 ]; then
+            echo "release was not consumer-visible after bounded verification" >&2
+            if [ "$release_rc" -ne 0 ]; then exit "$release_rc"; fi
+            exit 1
+          fi
 
   stable-release:
     name: Stable GitHub Release
