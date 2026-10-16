@@ -127,29 +127,49 @@ stable 渠道。生产与 candidate 凭据、Catalog 和写权限不得共用。
 
 ## Candidate 认证与 Catalog 晋升
 
+先创建仓库外的不可复用工作目录（CI 使用 `${RUNNER_TEMP}`）；impact、report、Catalog/Profile
+快照不得写回源码 checkout，否则 clean-source 门禁必须失败。
+
 1. 用 production Catalog、candidate Catalog/Profile 和两套公开根生成 impact：
 
 ```text
-relkit-ops impact generate ... --risk <documentation|single-capability|contract|cross-cutting> --out impact.json
+relkit-ops impact generate ... \
+  --escape-registry conformance/production-escapes --repo-root . \
+  --risk <documentation|single-capability|contract|cross-cutting> \
+  --out <outside-repo-work-dir>/impact.json
 ```
 
 2. 用 ops 私有 fleet 登记选择 cohort/canary 并运行反向 CI：
 
 ```text
-relkit-ops certify --fleet <fleet.json> --impact impact.json --out certification.json --json
+relkit-ops certify \
+  --fleet <fleet.json> --impact <outside-repo-work-dir>/impact.json \
+  --escape-registry conformance/production-escapes --repo-root . \
+  --out <outside-repo-work-dir>/certification.json --json
 ```
 
 - 普通能力/合同变更：受影响 cohort 的固定 canary + 轮换样本。
 - 新能力：首个声明该能力的宿主临时 mandatory。
 - 签名、resolution、发布事务、协议、registry、IPC 等横切变更：`--full`，
   所有已登记活跃宿主。
+- 只有 Catalog 重算确认无组件或合同变化时才可使用 `documentation`；它默认可零宿主。
 - 某宿主声明的内网/外网 CI 任一路缺失，结果必须为 `skipped-unverified`，不能认证。
 
-3. 只有通过的 `relkit.certification-report/1` 才能晋升：
+`impact` 固定 Candidate commit，以及包含测试源码摘要的 regression coverage digest；
+`certify` 必须从同一干净 commit 重审、执行当前平台适用的回归并要求 digest 未漂移，
+再把结果写入 `relkit.certification-report/2`。Catalog 晋升时当前干净源码也必须仍是
+该 Candidate commit。报告绑定 fleet 摘要、宿主项目摘要和完整
+`requiredCi` 选择；晋升必须传入同一 fleet 重算，替换或裁剪均失败。只有该报告与当前
+registry 仍一致才能晋升：
 
 ```text
 relkit-ops catalog transition \
-  --state certified --certification-report certification.json ...
+  --state certified \
+  --fleet <fleet.json> \
+  --impact <outside-repo-work-dir>/impact.json \
+  --certification-report <outside-repo-work-dir>/certification.json \
+  --escape-registry conformance/production-escapes --repo-root . \
+  ...
 ```
 
 Candidate authority 本身不能签 certified Catalog。
@@ -178,6 +198,40 @@ relkit-ops rotate <credential-name> --inventory <inventory> --execute --json
 secret reference，禁止打印或提交 token。
 
 ## 收尾
+
+如果本次问题没有被现有自动化提前发现，不能只补说明或把 code 记为
+“已消化”。先分类：
+
+- `generic` / `agent`：在 Relkit 中创建中央 production escape 记录，关联已经会执行的
+  真实回归测试和 tracking issue/PR（已知 fix PR 可直接作为 tracking）；跨组件问题必须
+  有真实场景证据。
+- 产品专属：记录和回归留在宿主仓，不进入中央 registry。
+
+普通开发/review 对目标分支运行审计并真实执行证据；它允许尚未知的 merge
+commit/release，但不允许删除历史记录或缺测试：
+
+```text
+relkit-ops escape audit \
+  --registry conformance/production-escapes --repo-root . \
+  --baseline-ref origin/<base> --execute --json
+```
+
+release prep 在修复 merge 后补齐 closure；tag 构建对上一正式 tag 运行严格审计：
+
+```text
+relkit-ops escape audit \
+  --registry conformance/production-escapes --repo-root . \
+  --baseline-ref <previous-stable-tag> --release <vX.Y.Z> --json
+```
+
+中央记录的状态与校验均由 `relkit-ops` 推导，Skill 不复制 schema 或判定逻辑。
+平台限定证据只能在声明的平台执行；其他平台报告为 `deferred`，不能冒充已执行。
+登记 path 必须就是实际执行 symbol 的定义文件。Python/Node 是否通过由 runner 的结构化
+结果/事件及来源文件判定，Go 要求 package 内唯一声明；Rust 只接受直接 `tests/*.rs`
+中的无条件顶层测试，并以独立 target 精确执行。导入文件、同名 suite/测试或自行打印的
+“通过”文本无效。
+PR 的 Linux/Windows matrix 必须合起来覆盖全部声明平台。只有审计通过、回归随候选与
+发布门禁执行，且同类问题会在下一个无关宿主暴露前被拦住，才算完成沉淀。
 
 使用结构化输出复查：
 

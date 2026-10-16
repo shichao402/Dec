@@ -1,11 +1,12 @@
-# 完成后自省
+# Production escape 收尾入口
 
-自省分两段，缺一不可：
+按 `SKILL.md` 的「收尾」处理本次现有自动化未提前发现的问题。
 
-1. 按 `SKILL.md` 的「完成后」重读本次对话与人工验收，处理用户纠正、成功命令之后
-   才暴露的问题，以及 Agent 对范围的误解。
-2. 运行 `python scripts/host/relkit_host.py retrospect`；退出码为 0 后再运行
-   `python scripts/host/relkit_host.py status`，确认 `ops.retrospect` 为 `verified`。
+- 可跨宿主复现的 core/wrapper/ops 缺口进入 Relkit 中央
+  `conformance/production-escapes`，并关联真实可执行回归。
+- 产品业务专属问题与测试留在宿主仓。
+- Agent 误判修正 Skill；若同时暴露产品缺口，仍按前两类分别落地。
 
-机械命令只看文件和 `.relkit/cache/ops-journal.jsonl`，看不到对话；命令通过不能替代
-第一段。反过来，只做会话总结也不能替代机械命令。本文件只提供入口，不复制检查清单。
+不得再用 `.relkit/cache/ops-journal.jsonl`、`DIGESTED_ISSUE_CODES` 或
+`ops.retrospect=verified` 作为 vNext 完成证据。中央记录、候选认证和 stable release
+门禁均由 `relkit-ops` 执行；本文件不复制 schema 或判定逻辑。
