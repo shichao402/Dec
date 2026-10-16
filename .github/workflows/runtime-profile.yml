@@ -1,0 +1,53 @@
+name: Publish Relkit Runtime Profile
+
+on:
+  push:
+    tags:
+      - "relkit-profile/*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dec-runtime-profile
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Sign and publish
+    runs-on: ubuntu-latest
+    environment: relkit-operator
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install relkit-ops
+        env:
+          OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
+          OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$OPS_URL" && test -n "$OPS_SHA256"
+          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')" = "$OPS_SHA256"
+          chmod 755 "$RUNNER_TEMP/relkit-ops"
+
+      - name: Publish signed Runtime Profile
+        env:
+          RELKIT_AGENT_URL: ${{ secrets.RELKIT_AGENT_URL }}
+          RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$RELKIT_AGENT_URL" && test -n "$RELKIT_UPLOAD_TOKEN"
+          "$RUNNER_TEMP/relkit-ops" runtime-profile publish \
+            --project relkit.project.json \
+            --agent "$RELKIT_AGENT_URL" \
+            --to serve \
+            --out runtime-profile.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dec-runtime-profile
+          path: runtime-profile.json
+          if-no-files-found: error
+          retention-days: 30
