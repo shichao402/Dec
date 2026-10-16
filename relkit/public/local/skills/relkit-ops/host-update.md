@@ -88,7 +88,7 @@ payload 输入树不得含软链。macOS 完整 `.app` 的多版本切换必须�
 relkitw doctor
 relkitw artifacts produce（每 target）
 relkitw artifacts merge（汇总）
-上传 merged ArtifactSet
+relkit-ops artifact-set push（上传 merged ArtifactSet，记录 URL + archiveSha256）
 ```
 
 Candidate bundle 的安装命令必须显式传入 Operator 分发的
@@ -98,10 +98,15 @@ Candidate bundle 的安装命令必须显式传入 Operator 分发的
 独立 Operator Job：
 
 ```text
-stage → simulate → fake verify → publish → verify released
+relkit-ops artifact-set pull（URL + archiveSha256）
+relkitw stage --artifact-set <artifact-set.json>
+relkitw release --version <version>
+relkitw release --version <version> --execute
+relkitw verify released --version <version> --channel <channel>
 ```
 
-产品 Job 不持发布 endpoint/token；Operator 不改产品业务选择。五步必须使用同一
+产品 Job 只持 ArtifactSet 传输凭据，不持发布 endpoint/agent token；只有 Operator
+Job 持 `RELKIT_UPLOAD_TOKEN`。Operator 不改产品业务选择。整条事务必须使用同一
 resolution digest。candidate 使用独立身份与权限，不能发布 stable。
 
 ## 6. 验收

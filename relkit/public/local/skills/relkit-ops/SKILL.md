@@ -48,7 +48,7 @@ relkit-ops bootstrap provision --inventory <operator-inventory> --json
 relkit-ops bundle create \
   --project relkit.project.json \
   --resolution-bundle <resolution-bundle.json> \
-  --asset <sha256:path> --out <bundle-dir>
+  --asset <sha256:...=path> --out <bundle-dir>
 relkit-ops bundle verify --project relkit.project.json --bundle <bundle-dir> --json
 relkit-ops bundle install \
   --project relkit.project.json --project-root . \
@@ -56,7 +56,24 @@ relkit-ops bundle install \
 ```
 
 Bundle 必须包含所选 distribution 的全部 component/release asset；缺一个摘要即失败。
-不得只塞一份 CLI 冒充完整离线供给。
+不得只塞一份 CLI 冒充完整离线供给。安装会把目标平台的 `relkit` 与
+`relkit-ops` 一并放入项目 `.relkit/bootstrap/`，后续产品 Job 使用这份受信
+`relkit-ops` 传递 ArtifactSet，不继续依赖外部 bootstrap。
+
+Operator 将 Release 组件同步到内容寻址 mirror 时使用 core 命令，不复制宿主脚本：
+
+```text
+relkit-ops distribution mirror \
+  --distribution <relkit-distribution.json> \
+  --release-assets-base <immutable-release-download-base> \
+  --mirror-root <operator-mirror-root> --json
+```
+
+写凭据只从 `MIRRORS_USERNAME` / `MIRRORS_PASSWORD`（或显式改名后的 env 引用）
+读取。命令必须同步 distribution 的全部 component 和 `releaseAssets`，逐项校验
+上游摘要、写入 `blobs/<sha256>` 并读回校验；409 仅在
+读回字节摘要相同后视为幂等成功。Operator Profile 的 `sources.mirrors` 必须指向
+同一 root；不得在产品仓保存 mirror 地址或凭据。
 
 安装 Candidate bundle 时还必须显式授权独立候选根：
 
@@ -78,17 +95,30 @@ relkit-ops bundle install \
 ```text
 relkitw doctor
 relkitw artifacts produce / merge
-上传 merged ArtifactSet
+relkit-ops artifact-set push \
+  --project relkit.project.json \
+  --artifact-set <merged/artifact-set.json> \
+  --url <build-unique-immutable-url> --json
 ```
 
-独立 Operator Job 才执行：
+`push` 返回的 `archiveSha256` 和 URL 必须作为成对证据传给独立 Operator Job；
+URL 至少包含不可复用的 CI build identity，禁止覆盖另一次构建。Operator Job 先
+按摘要拉回：
 
 ```text
-stage → simulate → fake verify → publish → verify released
+relkit-ops artifact-set pull \
+  --project relkit.project.json --url <url> \
+  --sha256 <archiveSha256> --out-dir <new-dir> --json
+relkitw stage --artifact-set <new-dir/artifact-set.json>
+relkitw release --version <version>
+relkitw release --version <version> --execute
+relkitw verify released --version <version> --channel <channel>
 ```
 
 同一次发布只生成一次 immutable resolution，跨 Job 传递原文件。不得中途再次解析
-`latest`。产品 Job 不持 endpoint/token/签名私钥；Operator 不改产品业务选择。
+`latest`。产品 Job 只持 ArtifactSet 传输凭据，不持 endpoint/agent token/签名私钥；
+只有 Operator Job 可注入 `RELKIT_UPLOAD_TOKEN`，且必须设置
+`RELKIT_RELEASE_VIA_CI=1`。Operator 不改产品业务选择。
 关键 artifact/manifest/index/directory/Runtime Profile 任一步失败都不得报告成功；
 网页投影失败可告警并重建。
 
