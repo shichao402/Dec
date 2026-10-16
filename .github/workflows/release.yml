@@ -337,17 +337,86 @@ jobs:
               shutil.copy2(source, release / source.name)
           PY
 
-      - name: Create stable GitHub Release
+      - name: Upload stable Console installers
         if: needs.prepare.outputs.channel == 'stable'
-        uses: softprops/action-gh-release@v2
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ needs.prepare.outputs.version }}
+          name: dec-stable-installers
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 30
+
+  operator-publish:
+    name: Operator publish and verify
+    needs: [prepare, collect]
+    runs-on: ubuntu-latest
+    environment: relkit-operator
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install signed Operator bundle
+        env:
+          OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
+          OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
+          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
+          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$OPS_URL" && test -n "$OPS_SHA256"
+          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
+          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')" = "$OPS_SHA256"
+          chmod 755 "$RUNNER_TEMP/relkit-ops"
+          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
+          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
+          "$RUNNER_TEMP/relkit-ops" bundle install \
+            --bundle "$RUNNER_TEMP/relkit-bundle" \
+            --project relkit.project.json \
+            --project-root "$GITHUB_WORKSPACE" \
+            --home "$RUNNER_TEMP/relkit-home" \
+            --target linux-amd64
+          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: relkit-artifact-set-merged
+          path: dist/relkit-artifact-set/merged
+
+      - name: Publish and verify signed release
+        env:
+          RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
+          RELKIT_RELEASE_VIA_CI: "1"
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          set -euo pipefail
+          test -n "$RELKIT_UPLOAD_TOKEN"
+          ./relkitw stage \
+            --artifact-set dist/relkit-artifact-set/merged/artifact-set.json
+          ./relkitw release --version "$VERSION"
+          ./relkitw release --version "$VERSION" --execute
+          ./relkitw verify released --version "$VERSION" --channel "$CHANNEL"
+
+  stable-release:
+    name: Stable GitHub Release
+    if: needs.prepare.outputs.channel == 'stable'
+    needs: [prepare, collect, operator-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dec-stable-installers
+          path: release-assets
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: stable/${{ needs.prepare.outputs.version }}
           name: Release ${{ needs.prepare.outputs.version }}
           body: |
             Dec `${{ needs.prepare.outputs.version }}`
 
-            本页只提供 Console 人工安装包。RUP 发布由独立 Operator 消费本次
-            merged ArtifactSet，执行签名事务和 released-state 验证。
+            本页提供 Console 人工安装包；同一版本已通过独立 Operator 完成
+            RUP 发布和 released-state 验证。
           files: release-assets/*
           fail_on_unmatched_files: true
           generate_release_notes: true
