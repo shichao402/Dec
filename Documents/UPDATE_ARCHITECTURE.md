@@ -1,97 +1,96 @@
-# Dec 自更新架构（RUP + relkit-store）
+# Dec 更新架构（Relkit vNext）
 
-Console 自更新由 Tauri 壳调用 `third_party/relkit/sdk/rust` facade 与 lock-pinned `relkit-updater` sidecar；目标运行时套件的检查/下载仍使用 `go.firoyang.com/relkit/sdk`（`replace` 到 `third_party/relkit`）。发布走发布机 relkit-store（COS 已于 2026-09-26 退役清零）。
-终端用户只下载 Console；运行时套件是 Console 管理的目标端程序组。
+Dec 是 Relkit vNext 的 S3 样本：同一产品按 `os × arch × component × audience`
+选择运行时组件和 Console。宿主只声明能力并生产 ArtifactSet；部署事实、密钥和发布
+事务属于 `firoyang-public` Operator。
 
-## 两条客户端链
+## 单一控制面
 
-- 共同入口来自根目录 `relkit.json`：`https://update-internal.firoyang.com/directory/dec.pb`（协议读切面；旧 `raw.firoyang.com/rup/` 与 `publish` 读兼容面已于 2026-09-26 下线/收敛，存量 ≤1.13.92 客户端靠自然升级消化）
-- Console 壳用 `include_str!` 编入同一份 `relkit.json`；Go 运行时套件链通过 `go generate ./internal/update` 复制到 `internal/update/embed/`。后者只服务 `audience=runtime`，不是 Console 自更新入口
-- `CurrentCode` = `sdk.SemverCode(version)`（`v1.13.25` → `1013025`）
-- 默认 channel：`stable`；Console 设置页可改并落盘到本机壳偏好（`preferences.json`），检查与安装都跟所选渠道。发版仍由 `dev/v*` / `stable/v*` tag 决定
-- Console selectors：`os` / `arch` / `component=console` / `audience=user`；Tauri 直接 `Updater::open`、`check`、`download`，安装器启动、Windows `/S`、detach 与 relaunch 留在壳内
-- Tauri 只输出 relkit canonical ProtoJSON；前端从 `third_party/relkit/bindings/ts` import 生成的 `CheckResultSchema` / `StatusSnapshotSchema`，按 `upToDate`、`updateAvailable`、`fallbackRequired`、`throttled`、`failed` 五变体渲染
-- 运行时 selectors：`os` / `arch` / `component` / `audience=runtime`，component 为 `dec-server`、`dec-exec`、`dec-host-setup`
-- Console bundle：每个安装包只带同 `os/arch` 运行时套件和 `runtime-manifest.json`；首次连接/升级从 resources 校验后以临时文件 + rename 释放到 `~/.dec/bin`，同时缓存到 `~/.dec/runtime-cache/<version>/<os>-<arch>/`
-- SSH 置备：发起端按目标 `os/arch` 命中校验过的缓存则复用，否则请求签名 RUP；只有 RUP head 恰好等于 Console 钉死版本才下载。渠道已有更高版本时提示先更新 Console 或预置旧版本缓存
+仓库根的 `relkit.project.json` 声明：
 
-入口：
+- Linux/Windows/macOS 五个目标；
+- Go 与 Rust facade；
+- `dec` Runtime Profile 自订阅；
+- `component`、`audience` 两个额外 selector 维度；
+- producer 入口：`scripts/relkit_producer.mjs`（跨平台选择 Python 后执行
+  `scripts/relkit_producer.py`）。
 
-- Console **设置** 页（唯一用户面入口）
-- 更新由本机 Console 壳及其内置 `relkit-updater` sidecar 执行，不经过当前目标 `dec-server`；连接与解锁页复用更新面板，因此未连接也能操作
-- Console 启动时自动检查；`CheckPolicy.after_success=24h`、`after_failure=1h` 由引擎执行节流，只提示、不自动安装
-- 手动检查忽略节流；用户确认后才下载并启动安装包
+`relkitw` 验证签名 Catalog、Operator Profile、Runtime Profile 与 immutable
+resolution，再按 digest 物化 CLI、updater、Go SDK 和 Rust SDK。仓库不维护 Relkit
+版本、组件 URL、endpoint、公钥或 token。
 
-## 发布
+## 两条运行时链
 
-GitHub Actions（`.github/workflows/release.yml`）按 **relkit 渠道 tag** 触发，不再靠改 `version.json` 推 main 自动发版：
+Console 自更新：
 
-| Git tag | RUP channel | 额外动作 |
-|---------|-------------|---------|
-| `dev/vX.Y.Z` | `dev` | 仅 RUP |
-| `stable/vX.Y.Z` | `stable` | 另推裸 tag `vX.Y.Z`、GitHub Release |
+- Tauri 通过 `.relkit/components/sdk/rust` 的 canonical facade 调用 sidecar；
+- 构建脚本从 verified Runtime Bootstrap 注入目录入口、信任根、渠道和恢复信息；
+- selectors：`component=console,audience=user`。
 
-流程：
+运行时套件：
 
-1. 改 `version.json` 为 `vX.Y.Z`，提交并推 `main`
-2. 打渠道 tag 并推送（例：`git tag dev/vX.Y.Z && git push origin dev/vX.Y.Z`）
-3. GitHub Actions：Ubuntu 交叉编全平台运行时套件；Console 只在 `windows-latest` 与 `macos-15-intel` 上原生编两套人面安装包并内置同平台套件（不发 Linux / darwin-arm64 Console）
-4. `relkit stage --channel <dev|stable>` 把两类产物写入同一次 staged 树（无私钥）
-5. runtime 标 `audience=runtime`，Console 标 `audience=user`
-6. `relkit cas-put` 向 agent 申请唯一 ingest 的上传 URL：store 已有同 sha256 则跳过，否则 CI 直接 PUT；随后只上传 `staged.pb` + `release-policy.json`
-7. `POST /v1/publish` → 发布机从 CAS Promote、签名并写 relkit-store
-8. `stable` 的 GitHub Release **只挂** `dec-console-*`；运行时组件不进人面附件
-9. 人类 browse 页按 audience 过滤已在 **relkit-serve 发布端**落地（`internal/browse` `humanArtifacts`，2026-09-27 随 relkit-agent 0.4.24+409d272 生效）；本地 stage 的 `audience=user/runtime` 标签是过滤的输入
+- Go facade 从 linker 注入的同一 Runtime Bootstrap 构造 ClientProfile；
+- components：`dec-server`、`dec-exec`、`dec-host-setup`；
+- selectors：`component=<name>,audience=runtime`。
 
-## 签名密钥
+两条链都只消费 `relkit.runtime-bootstrap/1`，不得手写 endpoint、公钥或宽松 DTO。
 
-| 材料 | 位置 | 说明 |
-|------|------|------|
-| 公钥 | `relkit.json` → `signing.publicKeys[]`；编译内嵌于 `internal/update/embed/relkit.json` | **不要**放进 secrets / Bitwarden |
-| 私钥（本地 SSOT） | `.secrets/bundles/dec/keys/dec-2026.private.pb` | 相对 **含 `relkit.json` 的项目根**（relkit 用配置文件所在目录解析 `privateKeyPath`，与进程 cwd 无关）。仅本机应急 `relkit publish` 用 |
-| Bitwarden | folder `bundle/dec`，Note 名 `keys/dec-2026.private.pb` | pull 后落到上述本地路径 |
-| 私钥（发布机） | `/srv/relkit/dec/.relkit-keys/dec-2026.private.pb` | 产品自己的文件；`relkit-agent` 只读这一份。**不要**用共享环境变量 |
-| `bundle/relkit` 里的产品私钥 | **已迁走** | 产品身份不进 relkit 工具 bundle |
+## 构建
 
-- `.secrets/` 已 gitignore；**禁止**把私钥内容 commit 进 git。
-- `.env` **不用于** relkit 私钥。
-- **不要**设置 `RELKIT_PRIVATE_KEY` / `signing.privateKeyEnv`。
-- CI 只有 **该产品** 的 `RELKIT_UPLOAD_TOKEN`（无私钥；可选 `RELKIT_AGENT_URL`，可写站点根或 `/v1`，默认 `https://publish.firoyang.com/v1`）。放到 GitHub 仓库 Secrets。COS 凭据已随桶退役清零。同一 agent 上的每个产品各自一张 token；没有实例级 `RELKIT_AGENT_TOKEN`。
+Operator 先 provision bootstrap 或签名 offline bundle，开发机/CI 随后执行：
 
-## 与首次安装 / GitHub 的关系
-
-| 场景 | 路径 |
-|------|------|
-| 日常自更新（已装 RUP 客户端） | 只走 `https://updates.firoyang.com/`；失败时排查网络/代理，**不要**改跑 install 脚本 |
-| 全新安装 | [发布页](https://update.firoyang.com/dec.html) 下载当前平台 **Dec Console**（安装包内含同平台运行时套件） |
-| 本机首次连接/升级 | Console 从内置 resources 校验并原子释放运行时套件到 `~/.dec/bin/`，同时预热同平台缓存，不联网；较新运行时仍拒绝降级 |
-| SSH 置备 | 发起端按目标 os/arch 复用经摘要校验的 `runtime-cache`，缺则 RUP 下载到发起端缓存，再通过系统 SSH 推送；目标机不需要 curl、bash 或公网 |
-| GitHub Release | `stable` 上 Console 安装包的镜像备份，不挂运行时组件，也不是自更新逃生梯 |
-
-更老的、尚无 RUP 的 Dec：靠历史版本链跳到第一个含 RUP 的版本，而不是在失败提示里推销重装。
-
-离线边界：同平台套件由 Console 安装包保证；异平台在发起端无网且 `runtime-cache` 未命中时无法取得可信产物，置备会明确失败。缓存以 lock + 临时目录 + rename 防止并发读到半成品，并在每次命中时重验摘要。
-
-RUP 限制：当前 SDK 的 chain 选择最高可达版本，不支持任意历史版本直取。因此旧 Console 在缓存未命中且渠道已前移时不会下载 head 冒充旧版本，而是失败并要求更新 Console 或预先准备对应缓存。SSH 传输后优先在目标用 `sha256sum` / `shasum -a 256` 逐件复验；无 hash 工具时降级为四组件 `--version`，并在激活失败时 best-effort 回滚旧套件。
-
-## 本地依赖
-
-开发 / CI 通过 checksum-pinned 的 release 附件安装 relkit：
-
-```
-go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 install
+```bash
+./relkitw doctor
+./relkitw artifacts produce \
+  --version v1.2.3 \
+  --channel dev \
+  --target darwin-amd64
 ```
 
-升 lock（在 relkit 打出对应 GitHub Release 之后）：
+每个 target 独立生成一个 `relkit.artifact-set/1`：
 
-```
-go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 upgrade vX.Y.Z
+- 三个运行时 component 各有 installer + payload；
+- Windows/macOS 原生 runner 另生成 Console installer；
+- Linux 只生成运行时套件。
+
+五个 target 的 ArtifactSet 由 CI 系统传输，汇总 Job 用
+`relkitw artifacts merge` 合并。合并结果的 product、version、channel 和
+resolution digest 必须完全相同。
+
+Go 构建通过 `.relkit/components/sdk/go/relkit.mod` 使用物化 SDK；Rust 构建通过
+path dependency 使用物化 SDK。宿主 `go.mod`、Cargo 配置不负责钉 Relkit 版本。
+
+## 发布边界
+
+产品 CI 只生产和汇总 ArtifactSet。独立 Operator Job 拥有：
+
+- publish endpoint/backend 和上传凭据；
+- 产品签名私钥与 Runtime Profile 发布；
+- stage → simulate → fake → publish 的事务；
+- 多 backend 一致性、partial-commit 修复和 released-state 验证。
+
+`dev/v*` 与 `stable/v*` 仍决定 channel；stable 可另外创建 GitHub Release，且只展示
+Console installer。GitHub Release 不是 RUP 控制面。
+
+## 首次自订阅
+
+产品第一次 vNext 发布前还没有在线 Runtime Profile。Operator 使用产品私钥执行：
+
+```text
+relkit-ops runtime-profile create
 ```
 
-Go SDK 落到 `third_party/relkit/`，Rust facade 落到 `third_party/relkit/sdk/rust/`，TypeScript 绑定落到 `third_party/relkit/bindings/ts/`，CLI / updater 落到 `tools/bin/`。Tauri 与前端只 import 已 consume 的生成物；产品仓不生成 updater 协议代码。Go SDK 改为直接依赖（module path 已迁移）：
+生成首份签名 Profile 并放入 Operator inventory；之后 producer 才能获得 verified
+Runtime Bootstrap。真实私钥只存在于本机/Operator 私密配置，不提交仓库。
 
-```
-require github.com/shichao402/relkit v0.4.24
-```
+## 不变量
 
-上游 release、commit 与附件哈希来自 `scripts/relkit.lock.json`（schema `relkit.consume/3`）。入口是 relkit CLI（`go run github.com/shichao402/relkit/cmd/relkit@vX.Y.Z`），产品仓已删除 `scripts/host/` 全套 Python 消费面（ADR 0017 阶段 2a；lock 为 hostless 形态，不再钉 host-scripts）。Rust facade / TypeScript 绑定 / CLI / updater 仍由 lock 安装；Go 模块 `github.com/shichao402/relkit` 走 `go get` 即可，不再 replace 到 `third_party/relkit`。
+- Console、运行时套件和 updater 必须引用同一 resolution digest；
+- candidate resolution 不能产生 stable ArtifactSet；
+- 缺 Runtime Bootstrap、SDK、sidecar 或任一 selector 维度时构建失败；
+- 产品仓不能读取发布 token，Operator 仓不能改产品业务选择；
+- 发布任一关键步骤失败不得报告成功；
+- 用户端验签或协议不兼容时拒绝更新，并展示签名 Profile 中的恢复入口。
+
+历史 consume lock、`relkit.json`、`tools/bin` 与直接 `ci release` 流程已删除；相关事故
+只作为历史记录，不是当前操作入口。

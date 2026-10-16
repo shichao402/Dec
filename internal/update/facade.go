@@ -2,9 +2,7 @@ package update
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,70 +16,23 @@ import (
 	"github.com/shichao402/relkit/sdk/updaterfacade"
 )
 
+// Set by the canonical artifact producer with:
+// -X github.com/shichao402/Dec/internal/update.runtimeBootstrapBase64=<base64>.
+var runtimeBootstrapBase64 string
+
 func clientProfile() (*updaterv1.ClientProfile, error) {
-	keys, err := protoTrustedKeys()
+	if runtimeBootstrapBase64 == "" {
+		return nil, errors.New("Relkit Runtime Profile was not injected at build time")
+	}
+	raw, err := base64.StdEncoding.DecodeString(runtimeBootstrapBase64)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode Relkit runtime bootstrap: %w", err)
 	}
-	return &updaterv1.ClientProfile{
-		Product:         productName,
-		AllowedChannels: []string{"dev", "stable"},
-		EntryUrls:       entryURLs(),
-		TrustedKeys:     keys,
-		Recovery:        embeddedRecovery(),
-	}, nil
-}
-
-func protoTrustedKeys() ([]*updaterv1.TrustedKey, error) {
-	var cfg relkitFile
-	if err := json.Unmarshal(embeddedRelkitJSON, &cfg); err != nil {
-		return nil, fmt.Errorf("parse embedded relkit.json: %w", err)
+	bootstrap, err := sdk.RuntimeBootstrapFromJSON(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse Relkit runtime bootstrap: %w", err)
 	}
-	if len(cfg.Signing.PublicKeys) == 0 {
-		return nil, fmt.Errorf("embedded relkit.json has no signing.publicKeys")
-	}
-	out := make([]*updaterv1.TrustedKey, 0, len(cfg.Signing.PublicKeys))
-	haveRequired := false
-	for _, pk := range cfg.Signing.PublicKeys {
-		if pk.KeyID == "" {
-			return nil, fmt.Errorf("embedded public key missing keyId")
-		}
-		raw, err := base64.StdEncoding.DecodeString(pk.PublicKeyBase64)
-		if err != nil {
-			return nil, fmt.Errorf("decode public key %q: %w", pk.KeyID, err)
-		}
-		if len(raw) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("public key %q: invalid length %d", pk.KeyID, len(raw))
-		}
-		if pk.KeyID == keyID {
-			haveRequired = true
-		}
-		out = append(out, &updaterv1.TrustedKey{KeyId: pk.KeyID, PublicKey: raw})
-	}
-	if !haveRequired {
-		return nil, fmt.Errorf("embedded relkit.json missing required keyId %q", keyID)
-	}
-	return out, nil
-}
-
-func embeddedRecovery() *updaterv1.RecoveryHelp {
-	var cfg struct {
-		Recovery *struct {
-			Message string `json:"message"`
-			Links   []struct {
-				Label string `json:"label"`
-				URL   string `json:"url"`
-			} `json:"links"`
-		} `json:"recovery"`
-	}
-	if err := json.Unmarshal(embeddedRelkitJSON, &cfg); err != nil || cfg.Recovery == nil {
-		return nil
-	}
-	help := &updaterv1.RecoveryHelp{Message: cfg.Recovery.Message}
-	for _, link := range cfg.Recovery.Links {
-		help.Links = append(help.Links, &updaterv1.RecoveryLink{Label: link.Label, Url: link.URL})
-	}
-	return help
+	return bootstrap.ClientProfile, nil
 }
 
 func currentChannel() string {

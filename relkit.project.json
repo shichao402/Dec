@@ -1,0 +1,127 @@
+{
+  "schema": "relkit.project/1",
+  "product": "dec",
+  "channels": ["dev", "stable"],
+  "versionPolicy": {
+    "schema": "relkit.version-policy/1",
+    "targets": {
+      "linux-amd64": {
+        "mode": "in-place",
+        "allowInstallOnly": true,
+        "allowSwitch": true,
+        "allowRollback": true
+      },
+      "linux-arm64": {
+        "mode": "in-place",
+        "allowInstallOnly": true,
+        "allowSwitch": true,
+        "allowRollback": true
+      },
+      "windows-amd64": {
+        "mode": "in-place",
+        "allowInstallOnly": true,
+        "allowSwitch": true,
+        "allowRollback": true
+      },
+      "darwin-amd64": {
+        "mode": "in-place",
+        "allowInstallOnly": true,
+        "allowSwitch": true,
+        "allowRollback": true
+      },
+      "darwin-arm64": {
+        "mode": "in-place",
+        "allowInstallOnly": true,
+        "allowSwitch": true,
+        "allowRollback": true
+      }
+    }
+  },
+  "selectorDimensions": ["os", "arch", "component", "audience"],
+  "operatorRef": "firoyang-public",
+  "trustFingerprint": "sha256:8bcb6c24c9ce672f315f96eff446d9cee7edd2c6f3bfa113a3d4927f00199598",
+  "roles": ["publisher", "updater-host", "subscriber"],
+  "artifactProducer": {
+    "command": ["node", "scripts/relkit_producer.mjs"],
+    "extensionSchema": "relkit.extension/1",
+    "timeoutSeconds": 5400,
+    "envAllowlist": [
+      "PATH",
+      "RELKIT_CORE",
+      "PYTHON",
+      "GOFLAGS",
+      "GOPATH",
+      "GOMODCACHE",
+      "GOCACHE",
+      "GOPROXY",
+      "HOME",
+      "USERPROFILE",
+      "APPDATA",
+      "LOCALAPPDATA",
+      "SYSTEMROOT",
+      "SystemRoot",
+      "TEMP",
+      "TMP",
+      "CI",
+      "CARGO_HOME",
+      "RUSTUP_HOME",
+      "NPM_CONFIG_CACHE"
+    ],
+    "permissions": ["read-workspace", "write-out-dir", "exec-self"]
+  },
+  "runtimeProfilePublication": {
+    "rootFingerprint": "sha256:64eba24757a5e1574e6cabf8086284d90e5ff57ef0b821a50c3267263c3fd75d",
+    "rupSchemaSet": "rup.v2",
+    "recovery": {
+      "message": "Automatic updates are unavailable. Download an official Dec release and install it manually.",
+      "links": [
+        {
+          "label": "GitHub Releases",
+          "url": "https://github.com/shichao402/Dec/releases"
+        },
+        {
+          "label": "CNB Releases",
+          "url": "https://cnb.cool/shichao402/Dec/-/releases"
+        }
+      ]
+    }
+  },
+  "runtimeProfileSubscriptions": [
+    {
+      "productRef": "dec",
+      "rootFingerprint": "sha256:64eba24757a5e1574e6cabf8086284d90e5ff57ef0b821a50c3267263c3fd75d"
+    }
+  ],
+  "capabilityFingerprint": {
+    "osArch": [
+      "linux-amd64",
+      "linux-arm64",
+      "windows-amd64",
+      "darwin-amd64",
+      "darwin-arm64"
+    ],
+    "facades": ["go", "rust"],
+    "projections": ["typescript"],
+    "topology": "selectable-product-suite",
+    "subscriptions": ["dec"],
+    "requiredContracts": [
+      {
+        "domain": "publishProtocol",
+        "peer": "agent",
+        "min": 2,
+        "max": 3
+      },
+      {
+        "domain": "artifactSet",
+        "peer": "producer",
+        "id": "relkit.artifact-set/1"
+      },
+      {
+        "domain": "updaterIpc",
+        "peer": "facade",
+        "min": 3,
+        "max": 3
+      }
+    ]
+  }
+}

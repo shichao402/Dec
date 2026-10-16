@@ -33,7 +33,9 @@ Console / MCP 不写官方注册表。消费方改官方安装物时，从具体
 Console「更新」只做远端到本地：跨 Global / 项目多选官方 `requires`，预览后安装。
 个人 Git 与 Bitwarden 的写回位于对应项目页或 Global 资产页，不与更新混为双向同步。
 
-`scripts/relkit.lock.json` 是 relkit 产品锁，Dec 不读它来填 `requires`。跟宿主版本耦合的资产必须 `public/local`，不得放在 global。
+Relkit vNext 的工具选择由签名 Operator Profile 与 immutable resolution 决定，
+不进入 Dec 的 `requires`，也不再有宿主侧 `scripts/relkit.lock.json`。跟宿主版本
+耦合的 Dec 资产仍必须是 `public/local`，不得放在 global。
 
 ## 被否方案
 

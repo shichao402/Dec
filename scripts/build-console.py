@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CLIENT = ROOT / "client"
 TAURI = CLIENT / "src-tauri"
-DIST = ROOT / "dist"
+DIST = Path(os.environ.get("RELKIT_OUTPUT_DIR", ROOT / "dist"))
 RUNTIME_RESOURCES = TAURI / "resources" / "runtime"
 UPDATER_RESOURCES = TAURI / "resources" / "updater"
 RUNTIME_COMPONENTS = ("dec-server", "dec-exec", "dec-host-setup")
@@ -98,7 +98,19 @@ def prepare_runtime_resources(version: str, os_id: str, arch: str) -> Path:
     platform_dir.mkdir(parents=True)
     env = os.environ.copy()
     env.update({"GOOS": os_id, "GOARCH": arch, "CGO_ENABLED": "0"})
+    relkit_mod = ROOT / ".relkit" / "components" / "sdk" / "go" / "relkit.mod"
+    if relkit_mod.is_file() and "-modfile=" not in env.get("GOFLAGS", ""):
+        env["GOFLAGS"] = (
+            f"{env.get('GOFLAGS', '').strip()} -modfile={relkit_mod}"
+        ).strip()
     release = f"v{version}"
+    ldflags = f"-X main.Version={release}"
+    runtime_bootstrap = os.environ.get("DEC_RUNTIME_BOOTSTRAP_B64", "").strip()
+    if runtime_bootstrap:
+        ldflags += (
+            " -X github.com/shichao402/Dec/internal/update."
+            f"runtimeBootstrapBase64={runtime_bootstrap}"
+        )
     files: dict[str, str] = {}
     for component in RUNTIME_COMPONENTS:
         suffix = ".exe" if os_id == "windows" else ""
@@ -111,7 +123,7 @@ def prepare_runtime_resources(version: str, os_id: str, arch: str) -> Path:
                 "build",
                 "-trimpath",
                 "-ldflags",
-                f"-X main.Version={release}",
+                ldflags,
                 "-o",
                 str(output),
                 package,
@@ -134,11 +146,11 @@ def prepare_runtime_resources(version: str, os_id: str, arch: str) -> Path:
     updater_dir = UPDATER_RESOURCES / f"{os_id}-{arch}"
     updater_dir.mkdir(parents=True)
     updater_name = "relkit-updater.exe" if os_id == "windows" else "relkit-updater"
-    updater_source = ROOT / "tools/bin" / updater_name
+    updater_source = ROOT / ".relkit" / "components" / "bin" / updater_name
     if not updater_source.is_file():
         raise SystemExit(
-            f"missing lock-pinned updater sidecar: {updater_source}; "
-            "run go run github.com/shichao402/relkit/cmd/relkit@v0.5.7 install"
+            f"missing resolution-pinned updater sidecar: {updater_source}; "
+            "run ./relkitw materialize"
         )
     shutil.copy2(updater_source, updater_dir / updater_name)
     return platform_dir
@@ -217,20 +229,24 @@ def main() -> None:
     if args.deploy:
         args.skip_deps = True
     version = release_version()
-    sync_console_version(version)
-    os_id, arch, pattern, extension = target()
-    if args.prepare_runtime_only:
-        prepare_runtime_resources(version, os_id, arch)
-        print(RUNTIME_RESOURCES / f"{os_id}-{arch}")
-        return
-    npm = "npm.cmd" if platform.system().lower() == "windows" else "npm"
+    tracked_configs = (TAURI / "Cargo.toml", TAURI / "tauri.conf.json")
+    originals = {path: path.read_bytes() for path in tracked_configs}
     try:
+        sync_console_version(version)
+        os_id, arch, pattern, extension = target()
+        if args.prepare_runtime_only:
+            prepare_runtime_resources(version, os_id, arch)
+            print(RUNTIME_RESOURCES / f"{os_id}-{arch}")
+            return
+        npm = "npm.cmd" if platform.system().lower() == "windows" else "npm"
         prepare_runtime_resources(version, os_id, arch)
         if not args.skip_deps:
             subprocess.run([npm, "ci"], cwd=CLIENT, check=True)
         subprocess.run([npm, "run", "tauri", "build"], cwd=CLIENT, check=True)
     finally:
         clean_generated_resources()
+        for path, content in originals.items():
+            path.write_bytes(content)
     matches = sorted((TAURI / "target" / "release" / "bundle").glob(pattern))
     if len(matches) != 1:
         raise SystemExit(f"expected one Console installer matching {pattern}, got {matches}")

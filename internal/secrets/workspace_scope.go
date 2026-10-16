@@ -57,6 +57,9 @@ func canonicalProjectRoot(projectRoot string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("解析 projectRoot 失败: %w", err)
 	}
+	if resolved, resolveErr := filepath.EvalSymlinks(abs); resolveErr == nil {
+		abs = resolved
+	}
 	abs = filepath.Clean(abs)
 	if runtime.GOOS == "windows" {
 		abs = strings.ToLower(abs)

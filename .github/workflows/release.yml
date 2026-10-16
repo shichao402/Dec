@@ -1,15 +1,5 @@
-# Dec 按 relkit 渠道 tag 发版：
-#   git tag  dev/vX.Y.Z    && git push origin  dev/vX.Y.Z     → RUP channel=dev
-#   git tag  stable/vX.Y.Z && git push origin  stable/vX.Y.Z  → RUP channel=stable
-# 推送前请先把 version.json 改成对应 vX.Y.Z 并推到 main。
-# 密钥（仓库 Secrets）：
-#   RELKIT_UPLOAD_TOKEN（该产品上传凭据，必填才发 COS）
-#   RELKIT_AGENT_URL（可选，可写站点根或 /v1，默认 https://publish.firoyang.com/v1）
-# 手动触发：Actions → Release → Run workflow（按 version.json，默认 channel=dev）
-#
-# Console 发三套人面安装包：Windows amd64、macOS Intel amd64、macOS Apple Silicon arm64。
-# Tauri 必须在对应 OS 的 GitHub-hosted runner 上原生构建（不能从 Linux 交叉出 NSIS/DMG）。
-# 运行时套件仍在 Ubuntu 上 Go 交叉编译全平台，供 SSH 置备异平台目标。publish 把两类产物汇进同一次 relkit stage。
+# 产品流水线只生产、合并 ArtifactSet。RUP endpoint、上传 token、签名私钥和
+# publish transaction 只属于独立 Operator；本 workflow 不接触它们。
 
 name: Release
 
@@ -27,28 +17,12 @@ on:
           - dev
           - stable
         default: dev
-      allow_backfill:
-        description: Deliberately backfill a historical version (--allow-backfill)
-        type: boolean
-        default: false
-
-# 全局串行：RUP 同版本 manifest/artifact 不可变要求发版互斥，且 stable 的
-# GitHub Release 步骤要向 main 提交 version.json 摘要，两个发版 run 并行
-# 会在摘要提交上互相打架（后到者 push 被拒）。代价是 dev/stable 连发时
-# 总耗时叠加，属可接受。
 concurrency:
-  group: release
+  group: dec-artifacts-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
   contents: write
-
-# relkit 舰队统一版本（P1 原则）：全 workflow 单一版本引用，re-pin 只改这一行。
-# lock 是 follow-latest 形态（P4）：此值只表达 bootstrap floor——认识
-# latest 形态的最低 CLI 版本，跟随目标由解析链给出（lock 声明 latest）。
-# follow 形态下 install/upgrade 自行解析真实版本，此处不再要求一致。
-env:
-  RELKIT_REF: v0.5.21
 
 jobs:
   prepare:
@@ -117,68 +91,58 @@ jobs:
         with:
           go-version: "1.26.3"
 
-      - name: Fetch relkit SDK
-        shell: bash
-        run: go run github.com/shichao402/relkit/cmd/relkit@$RELKIT_REF install
-
-      - name: go test
-        shell: bash
-        run: go test ./...
-
-  runtime:
-    name: runtime
-    needs: [prepare, test]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.3"
-
-      - name: Fetch relkit SDK
-        shell: bash
-        run: go run github.com/shichao402/relkit/cmd/relkit@$RELKIT_REF install
-
-      - name: Build runtime suite
-        shell: bash
-        run: |
-          bash scripts/build.sh --all
-          bash scripts/build-ci-tools.sh
-
-      - name: Checksums
-        shell: bash
+      - name: Install signed Operator bundle
+        env:
+          OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
+          OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
+          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
+          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
         run: |
           set -euo pipefail
-          python3 scripts/gen_checksums.py dist version.json
-          cp version.json dist/dec-runtime-manifest.json
+          test -n "$OPS_URL" && test -n "$OPS_SHA256"
+          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
+          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')" = "$OPS_SHA256"
+          chmod 755 "$RUNNER_TEMP/relkit-ops"
+          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
+          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
+          "$RUNNER_TEMP/relkit-ops" bundle install \
+            --bundle "$RUNNER_TEMP/relkit-bundle" \
+            --project relkit.project.json \
+            --project-root "$GITHUB_WORKSPACE" \
+            --home "$RUNNER_TEMP/relkit-home" \
+            --target linux-amd64
+          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
-      - name: Upload runtime artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: runtime
-          if-no-files-found: error
-          path: |
-            dist/dec-*
-            dist/ci/dec-registry-*
-            version.json
+      - name: go test
+        run: |
+          ./relkitw doctor
+          GOFLAGS="-modfile=.relkit/components/sdk/go/relkit.mod" go test ./...
 
-  console:
-    name: console (${{ matrix.name }})
+  build:
+    name: ArtifactSet (${{ matrix.target }})
     needs: [prepare, test]
     runs-on: ${{ matrix.runner }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
-          - name: windows-amd64
+          - target: linux-amd64
+            runner: ubuntu-latest
+            host_target: linux-amd64
+          - target: linux-arm64
+            runner: ubuntu-latest
+            host_target: linux-amd64
+          - target: windows-amd64
             runner: windows-latest
-          - name: darwin-amd64
+            host_target: windows-amd64
+          - target: darwin-amd64
             runner: macos-15-intel
-          - name: darwin-arm64
+            host_target: darwin-amd64
+          - target: darwin-arm64
             runner: macos-15
+            host_target: darwin-arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -195,189 +159,264 @@ jobs:
           cache: npm
           cache-dependency-path: client/package-lock.json
 
-      - name: Fetch relkit SDK
-        shell: bash
-        run: go run github.com/shichao402/relkit/cmd/relkit@$RELKIT_REF install
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # Cargo.lock 已入库，rust-cache 按 lockfile 哈希命中；命中时依赖增量
-      # 编译把 9~18 分钟的 console 构建压到 2~4 分钟。after-release 清理
-      # step 只在后缀 -release 的缓存键里，不影响本 workflow 复用。
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: client/src-tauri
           prefix-key: rust-cache-${{ runner.os }}
 
-      - name: Build native Console
-        shell: bash
-        run: python scripts/build-console.py
+      - name: Install signed Operator bundle (Unix)
+        if: runner.os != 'Windows'
+        env:
+          OPS_URL: ${{ runner.os == 'macOS' && vars.RELKIT_OPS_DARWIN_URL || vars.RELKIT_OPS_LINUX_URL }}
+          OPS_SHA256: ${{ runner.os == 'macOS' && vars.RELKIT_OPS_DARWIN_SHA256 || vars.RELKIT_OPS_LINUX_SHA256 }}
+          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
+          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$OPS_URL" && test -n "$OPS_SHA256"
+          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
+          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
+          if [ "$RUNNER_OS" = macOS ]; then HASH="$(shasum -a 256 "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')"; else HASH="$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')"; fi
+          test "$HASH" = "$OPS_SHA256"
+          chmod 755 "$RUNNER_TEMP/relkit-ops"
+          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
+          if [ "$RUNNER_OS" = macOS ]; then HASH="$(shasum -a 256 "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')"; else HASH="$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')"; fi
+          test "$HASH" = "$BUNDLE_SHA256"
+          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
+          "$RUNNER_TEMP/relkit-ops" bundle install \
+            --bundle "$RUNNER_TEMP/relkit-bundle" \
+            --project relkit.project.json \
+            --project-root "$GITHUB_WORKSPACE" \
+            --home "$RUNNER_TEMP/relkit-home" \
+            --target "${{ matrix.host_target }}"
+          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
-      - name: Upload Console installer
+      - name: Install signed Operator bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          OPS_URL: ${{ vars.RELKIT_OPS_WINDOWS_URL }}
+          OPS_SHA256: ${{ vars.RELKIT_OPS_WINDOWS_SHA256 }}
+          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
+          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+        run: |
+          if (-not $env:OPS_URL -or -not $env:OPS_SHA256 -or
+              -not $env:BUNDLE_URL -or -not $env:BUNDLE_SHA256) {
+            throw "Relkit Operator bundle variables are not configured"
+          }
+          $ops = Join-Path $env:RUNNER_TEMP "relkit-ops.exe"
+          $archive = Join-Path $env:RUNNER_TEMP "relkit-bundle.zip"
+          $bundle = Join-Path $env:RUNNER_TEMP "relkit-bundle"
+          Invoke-WebRequest -UseBasicParsing $env:OPS_URL -OutFile $ops
+          if ((Get-FileHash $ops -Algorithm SHA256).Hash.ToLower() -ne $env:OPS_SHA256.ToLower()) {
+            throw "relkit-ops digest mismatch"
+          }
+          Invoke-WebRequest -UseBasicParsing $env:BUNDLE_URL -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLower() -ne $env:BUNDLE_SHA256.ToLower()) {
+            throw "Operator bundle digest mismatch"
+          }
+          Expand-Archive -Path $archive -DestinationPath $bundle -Force
+          $home = Join-Path $env:RUNNER_TEMP "relkit-home"
+          & $ops bundle install --bundle $bundle --project relkit.project.json `
+            --project-root $env:GITHUB_WORKSPACE --home $home --target "${{ matrix.host_target }}"
+          if ($LASTEXITCODE -ne 0) { throw "Operator bundle install failed" }
+          "RELKIT_HOME=$home" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Produce ArtifactSet (Unix)
+        if: runner.os != 'Windows'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          ./relkitw artifacts produce \
+            --version "$VERSION" \
+            --channel "$CHANNEL" \
+            --target "${{ matrix.target }}" \
+            --out-dir "dist/relkit-artifact-set/${{ matrix.target }}" \
+            --out "dist/relkit-artifact-set/${{ matrix.target }}/artifact-set.json"
+
+      - name: Produce ArtifactSet (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          .\relkitw.cmd artifacts produce `
+            --version $env:VERSION `
+            --channel $env:CHANNEL `
+            --target "${{ matrix.target }}" `
+            --out-dir "dist/relkit-artifact-set/${{ matrix.target }}" `
+            --out "dist/relkit-artifact-set/${{ matrix.target }}/artifact-set.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relkit-artifact-set-${{ matrix.target }}
+          path: dist/relkit-artifact-set/${{ matrix.target }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  collect:
+    name: Merge ArtifactSets
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install signed Operator bundle
+        env:
+          OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
+          OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
+          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
+          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$OPS_URL" && test -n "$OPS_SHA256"
+          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
+          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')" = "$OPS_SHA256"
+          chmod 755 "$RUNNER_TEMP/relkit-ops"
+          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
+          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
+          "$RUNNER_TEMP/relkit-ops" bundle install \
+            --bundle "$RUNNER_TEMP/relkit-bundle" \
+            --project relkit.project.json \
+            --project-root "$GITHUB_WORKSPACE" \
+            --home "$RUNNER_TEMP/relkit-home" \
+            --target linux-amd64
+          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: relkit-artifact-set-*
+          path: artifacts
+
+      - name: Merge and verify five ArtifactSets
+        run: |
+          ./relkitw artifacts merge \
+            --in artifacts/relkit-artifact-set-linux-amd64/artifact-set.json \
+            --in artifacts/relkit-artifact-set-linux-arm64/artifact-set.json \
+            --in artifacts/relkit-artifact-set-windows-amd64/artifact-set.json \
+            --in artifacts/relkit-artifact-set-darwin-amd64/artifact-set.json \
+            --in artifacts/relkit-artifact-set-darwin-arm64/artifact-set.json \
+            --out dist/relkit-artifact-set/merged/artifact-set.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relkit-artifact-set-merged
+          path: dist/relkit-artifact-set/merged/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Prepare stable Console installers
+        if: needs.prepare.outputs.channel == 'stable'
+        run: |
+          python3 - <<'PY'
+          import json, shutil
+          from pathlib import Path
+          root = Path("dist/relkit-artifact-set/merged")
+          doc = json.loads((root / "artifact-set.json").read_text())
+          release = Path("release-assets")
+          release.mkdir()
+          consoles = [
+              item for item in doc["artifacts"]
+              if item["kind"] == "installer"
+              and item["selectors"].get("component") == "console"
+              and item["selectors"].get("audience") == "user"
+          ]
+          if len(consoles) != 3:
+              raise SystemExit(f"expected three Console installers, got {len(consoles)}")
+          for item in consoles:
+              source = root / item["path"]
+              shutil.copy2(source, release / source.name)
+          PY
+
+      - name: Upload stable Console installers
+        if: needs.prepare.outputs.channel == 'stable'
         uses: actions/upload-artifact@v4
         with:
-          name: console-${{ matrix.name }}
-          path: dist/dec-console-*
+          name: dec-stable-installers
+          path: release-assets/
           if-no-files-found: error
+          retention-days: 30
 
-  publish:
-    name: publish
-    needs: [prepare, runtime, console]
+  operator-publish:
+    name: Operator publish and verify
+    needs: [prepare, collect]
     runs-on: ubuntu-latest
-    env:
-      RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
-      RELKIT_AGENT_URL: ${{ secrets.RELKIT_AGENT_URL }}
+    environment: relkit-operator
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.3"
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: collected
-
-      - name: Assemble dist/
-        shell: bash
+      - name: Install signed Operator bundle
+        env:
+          OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
+          OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
+          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
+          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
         run: |
           set -euo pipefail
-          mkdir -p dist
-          if [ -d collected/runtime/dist ]; then
-            cp -a collected/runtime/dist/. dist/
-          fi
-          if [ -f collected/runtime/version.json ]; then
-            cp collected/runtime/version.json version.json
-          fi
-          if [ ! -f dist/dec-runtime-manifest.json ] && [ -f version.json ]; then
-            cp version.json dist/dec-runtime-manifest.json
-          fi
-          for d in collected/console-*; do
-            [ -d "$d" ] || continue
-            if [ -d "$d/dist" ]; then
-              cp -a "$d/dist"/. dist/
-            else
-              cp -a "$d"/. dist/
-            fi
-          done
-          echo "assembled dist:"
-          ls -la dist
+          test -n "$OPS_URL" && test -n "$OPS_SHA256"
+          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
+          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')" = "$OPS_SHA256"
+          chmod 755 "$RUNNER_TEMP/relkit-ops"
+          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
+          test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
+          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
+          "$RUNNER_TEMP/relkit-ops" bundle install \
+            --bundle "$RUNNER_TEMP/relkit-bundle" \
+            --project relkit.project.json \
+            --project-root "$GITHUB_WORKSPACE" \
+            --home "$RUNNER_TEMP/relkit-home" \
+            --target linux-amd64
+          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
-          missing=0
-          for f in \
-            dist/dec-console-windows-amd64.exe \
-            dist/dec-console-darwin-amd64.dmg \
-            dist/dec-console-darwin-arm64.dmg
-          do
-            if [ ! -f "$f" ]; then
-              echo "缺少 Console 产物: $f"
-              missing=1
-            fi
-          done
-          if [ "$missing" -ne 0 ]; then
-            exit 1
-          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: relkit-artifact-set-merged
+          path: dist/relkit-artifact-set/merged
 
-      - name: Fetch relkit
-        shell: bash
-        run: go run github.com/shichao402/relkit/cmd/relkit@$RELKIT_REF install
-
-      - name: RUP stage and publish
-        shell: bash
+      - name: Publish and verify signed release
         env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
           RELKIT_RELEASE_VIA_CI: "1"
-          RELKIT_PYTHON: python3
-          RELKIT_UPLOAD_PART_SIZE: ${{ vars.RELKIT_UPLOAD_PART_SIZE }}
-          RELKIT_UPLOAD_CONCURRENCY: ${{ vars.RELKIT_UPLOAD_CONCURRENCY }}
-        run: |
-          set -euo pipefail
-          if [ -z "${RELKIT_UPLOAD_TOKEN:-}" ]; then
-            # 渠道 tag 已经推出去了，产物却进不了 RUP：这一步必须红，
-            # 否则「CI 全绿 + 什么都没发」只能靠翻日志才发现。
-            if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-              echo "RELKIT_UPLOAD_TOKEN 未配置，${GITHUB_REF_NAME} 无法发到 RUP"
-              exit 1
-            fi
-            echo "RELKIT_UPLOAD_TOKEN 未配置，非渠道 tag 触发，跳过 RUP 发布"
-            exit 0
-          fi
-          # 编组（release.packScript 产出 dist/release-artifacts.json /2）+
-          # stage + simulate + fake verify + cas-put + POST /publish 全在
-          # `relkit ci release --execute` 进程内。协议头、idempotencyKey、
-          # RELKIT_UPLOAD_PART_SIZE / RELKIT_UPLOAD_CONCURRENCY 语义与旧
-          # bash 尾段一致（cas-put Go 实现内读同名 env）。
-          BACKFILL_ARGS=""
-          if [ "${{ github.event.inputs.allow_backfill }}" = "true" ]; then
-            BACKFILL_ARGS="--allow-backfill"
-            echo "allow_backfill=true：本次为刻意补发历史版本"
-          fi
-          go run github.com/shichao402/relkit/cmd/relkit@$RELKIT_REF ci release --channel "$CHANNEL" --execute $BACKFILL_ARGS
-
-      - name: GitHub Release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.prepare.outputs.version }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
           set -euo pipefail
-          if [ "$CHANNEL" != "stable" ]; then
-            echo "channel=$CHANNEL，跳过 GitHub Release（仅 stable 推）"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # install.sh 从 main 取 version.json 校验摘要，故带 checksums 的
-          # version.json 必须先提交到主干。连发时后一个 tag 的 bump commit
-          # 可能已抢先上 main（打 tag 的前提），本 run 的旧基线推送会
-          # non-fast-forward 被拒；因此先暂存校验版，切到 main 最新基线
-          # 覆写后提交推送（重跑时 main 已含摘要则幂等跳过）。
-          # backfill 补发历史版本时除外：main 的 version.json 已指向更新的
-          # 版本（如 117），此刻回写会把主干倒退成补发版本（116），install.sh
-          # 校验与后续发版基线全被污染；补发版本的 checksums 由 GitHub Release
-          # 附带产物文件承载，主干不动。
-          if [ "${{ github.event.inputs.allow_backfill }}" = "true" ]; then
-            echo "allow_backfill=true：跳过 version.json 摘要回写主干"
-          elif ! git diff --quiet -- version.json; then
-            cp version.json /tmp/version-checksums.json
-            git fetch origin main
-            git checkout -f origin/main
-            cp /tmp/version-checksums.json version.json
-            if ! git diff --quiet -- version.json; then
-              git add version.json
-              git commit -m "chore: 发布 ${VERSION} 产物摘要"
-              git push origin HEAD:refs/heads/main
-            else
-              echo "main 已含 ${VERSION} 摘要，跳过回写"
-            fi
-          fi
-          if ! git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"; then
-            # 基线已在上方 checkout origin/main（含摘要提交），tag 落在
-            # main 最新上，target 同样取 HEAD，不再用触发 commit 的旧基线。
-            # backfill 时未 checkout main，tag 落在触发 ref（历史版本钉在
-            # 其发布时刻的基线上）。
-            git tag "${VERSION}"
-            git push origin "refs/tags/${VERSION}"
-          fi
-          # 人面与提供方 CI 工具挂 GitHub Release。运行时组件只走 RUP。
-          shopt -s nullglob
-          assets=(dist/dec-console-* dist/ci/dec-registry-*)
-          if [ "${#assets[@]}" -eq 0 ]; then
-            echo "没有 Console / CI 工具产物可挂到 GitHub Release"
-            exit 1
-          fi
-          gh release create "${VERSION}" \
-            "${assets[@]}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --generate-notes \
-            --target "$(git rev-parse HEAD)" \
-            --title "${VERSION}"
+          test -n "$RELKIT_UPLOAD_TOKEN"
+          ./relkitw stage \
+            --artifact-set dist/relkit-artifact-set/merged/artifact-set.json
+          ./relkitw release --version "$VERSION"
+          ./relkitw release --version "$VERSION" --execute
+          ./relkitw verify released --version "$VERSION" --channel "$CHANNEL"
+
+  stable-release:
+    name: Stable GitHub Release
+    if: needs.prepare.outputs.channel == 'stable'
+    needs: [prepare, collect, operator-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dec-stable-installers
+          path: release-assets
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: stable/${{ needs.prepare.outputs.version }}
+          name: Release ${{ needs.prepare.outputs.version }}
+          body: |
+            Dec `${{ needs.prepare.outputs.version }}`
+
+            本页提供 Console 人工安装包；同一版本已通过独立 Operator 完成
+            RUP 发布和 released-state 验证。
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
