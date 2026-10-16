@@ -24,6 +24,9 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  RELKIT_CANDIDATE_ROOT_FINGERPRINT: ${{ vars.RELKIT_CANDIDATE_ROOT_FINGERPRINT }}
+
 jobs:
   prepare:
     name: prepare
@@ -112,7 +115,8 @@ jobs:
             --project relkit.project.json \
             --project-root "$GITHUB_WORKSPACE" \
             --home "$RUNNER_TEMP/relkit-home" \
-            --target linux-amd64
+            --target linux-amd64 \
+            --candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT"
           echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
       - name: go test
@@ -192,7 +196,8 @@ jobs:
             --project relkit.project.json \
             --project-root "$GITHUB_WORKSPACE" \
             --home "$RUNNER_TEMP/relkit-home" \
-            --target "${{ matrix.host_target }}"
+            --target "${{ matrix.host_target }}" \
+            --candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT"
           echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
       - name: Install signed Operator bundle (Windows)
@@ -222,7 +227,8 @@ jobs:
           Expand-Archive -Path $archive -DestinationPath $bundle -Force
           $home = Join-Path $env:RUNNER_TEMP "relkit-home"
           & $ops bundle install --bundle $bundle --project relkit.project.json `
-            --project-root $env:GITHUB_WORKSPACE --home $home --target "${{ matrix.host_target }}"
+            --project-root $env:GITHUB_WORKSPACE --home $home --target "${{ matrix.host_target }}" `
+            --candidate-root-fingerprint $env:RELKIT_CANDIDATE_ROOT_FINGERPRINT
           if ($LASTEXITCODE -ne 0) { throw "Operator bundle install failed" }
           "RELKIT_HOME=$home" | Out-File -FilePath $env:GITHUB_ENV -Append
 
@@ -289,7 +295,8 @@ jobs:
             --project relkit.project.json \
             --project-root "$GITHUB_WORKSPACE" \
             --home "$RUNNER_TEMP/relkit-home" \
-            --target linux-amd64
+            --target linux-amd64 \
+            --candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT"
           echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
       - uses: actions/download-artifact@v4
@@ -375,7 +382,8 @@ jobs:
             --project relkit.project.json \
             --project-root "$GITHUB_WORKSPACE" \
             --home "$RUNNER_TEMP/relkit-home" \
-            --target linux-amd64
+            --target linux-amd64 \
+            --candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT"
           echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
       - uses: actions/download-artifact@v4
