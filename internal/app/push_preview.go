@@ -40,6 +40,54 @@ func PreviewPushProjectAssets(projectRoot string) (*PushProjectAssetsPreview, er
 	return PreviewPushWorkspaceAssets(NewWorkspace(WorkspaceProject, projectRoot))
 }
 
+// UploadPreview 描述 secrets 上行（dec_upload / push_secrets）前的本地摘要：
+// 不访问 Bitwarden 远端、不写任何东西，只报将涉及的 folder 与同步根内的本地文件。
+type UploadPreview struct {
+	SecretsTargetCount int
+	SecretsTargets     []string
+	ProjectSecretsName string
+	SkippedReason      string
+	BitwardenConfigured bool
+}
+
+// PreviewUploadWorkspaceSecrets 按平面预览 secrets 上行影响面（不写 Bitwarden 远端）。
+func PreviewUploadWorkspaceSecrets(workspace Workspace) (*UploadPreview, error) {
+	preview := &UploadPreview{}
+
+	projectConfig, err := loadWorkspaceBundleConfig(workspace)
+	if err != nil {
+		return nil, err
+	}
+
+	configured, err := secrets.IsConfigured()
+	if err != nil {
+		return nil, err
+	}
+	preview.BitwardenConfigured = configured
+
+	cfg, err := secrets.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	enabledBundles := consumedProjectNames(projectConfig, workspace.EffectivePlane())
+	plan, err := planWorkspaceSecretsSync(context.Background(), workspace, enabledBundles, cfg)
+	if err != nil {
+		return nil, err
+	}
+	preview.SecretsTargetCount = plan.Total
+	for _, target := range plan.Targets {
+		preview.SecretsTargets = append(preview.SecretsTargets, target.Address)
+	}
+	if len(plan.Targets) > 0 {
+		preview.ProjectSecretsName = plan.Targets[0].Address
+	}
+	if plan.Total == 0 {
+		preview.SkippedReason = "无已启用 bundle"
+	}
+	return preview, nil
+}
+
 // PreviewPushWorkspaceAssets 按平面预览 Push 影响面。
 func PreviewPushWorkspaceAssets(workspace Workspace) (*PushProjectAssetsPreview, error) {
 	preview := &PushProjectAssetsPreview{}

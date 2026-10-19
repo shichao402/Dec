@@ -31,6 +31,8 @@ func PushProjectAssets(ctx context.Context, projectRoot string, reporter Reporte
 }
 
 // PushWorkspacePersonalAssets 只写个人 Git 资产，不访问 Bitwarden。
+// SecretsSkippedReason 固定提示 secrets 未包含，防止旧习惯调用者
+// （issue #48 之前 dec_push 同时推两半）静默漏推 secrets。
 func PushWorkspacePersonalAssets(ctx context.Context, workspace Workspace, reporter Reporter) (*PushProjectAssetsResult, error) {
 	reporter = defaultReporter(reporter)
 	pushed, skipped, commit, err := pushDecBundles(ctx, workspace, reporter)
@@ -41,6 +43,7 @@ func PushWorkspacePersonalAssets(ctx context.Context, workspace Workspace, repor
 		DecPushedCount:   pushed,
 		DecSkippedReason: skipped,
 		VersionCommit:    commit,
+		SecretsSkippedReason: "仅推送个人 Git 资产；secrets 未包含，请用 dec_upload",
 	}, nil
 }
 

@@ -60,6 +60,36 @@ func TestPlan_BothPullSplitsPlanes(t *testing.T) {
 	}
 }
 
+// 回归 issue #48：dec_push 语义收窄为仅个人 Git 资产（push_personal），
+// secrets 上行拆至 dec_upload（push_secrets），preview 一一对应。
+func TestPlan_PushUploadSplitRouting(t *testing.T) {
+	cases := []struct {
+		tool   string
+		method string
+	}{
+		{"dec_push", "push_personal"},
+		{"dec_upload", "push_secrets"},
+		{"dec_preview_push", "preview_push"},
+		{"dec_preview_upload", "preview_upload"},
+	}
+	for _, tc := range cases {
+		plan := Plan(tc.tool, json.RawMessage(`{"project_root":"D:/work","plane":"local"}`))
+		if plan.Error != "" {
+			t.Fatalf("%s: %v", tc.tool, plan.Error)
+		}
+		if plan.Shape != ShapeSingle || len(plan.Steps) != 1 {
+			t.Fatalf("%s: %+v", tc.tool, plan)
+		}
+		step := plan.Steps[0]
+		if step.Kind != StepRun || step.Method != tc.method {
+			t.Fatalf("%s step = %+v, want method %s", tc.tool, step, tc.method)
+		}
+		if step.Plane != "local" || step.ProjectRoot != "D:/work" {
+			t.Fatalf("%s workspace = %+v", tc.tool, step)
+		}
+	}
+}
+
 func TestPlan_ProposeUpstreamUsesRunOperation(t *testing.T) {
 	plan := Plan("dec_propose_upstream", json.RawMessage(`{
 		"project_root":"D:/work",

@@ -1169,7 +1169,7 @@ func renderedHeader(info renderHeaderInfo) string {
 			root, root)
 	case renderHeaderOfficial:
 		return fmt.Sprintf("<!-- 本文件由 `dec pull` 从 Dec registry 的 %s/ 渲染生成，请勿直接编辑。\n"+
-			"     官方资产由提供方 CI 发布；临时改动用 Console「本地覆写」。禁止 Run 页 push / dec_push -->\n\n",
+			"     官方资产由提供方 CI 发布；临时改动用 Console「本地覆写」。禁止 Run 页 push / dec_push（密钥上行走 dec_upload） -->\n\n",
 			vault)
 	default:
 		return fmt.Sprintf("<!-- 本文件由 `dec pull` 从 .dec/cache/%s/ 渲染生成，请勿直接编辑。\n"+

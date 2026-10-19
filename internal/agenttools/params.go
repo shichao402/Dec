@@ -71,6 +71,11 @@ type pushParams struct {
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
 
+type uploadParams struct {
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
+	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
+}
+
 type proposeUpstreamParams struct {
 	ProjectRoot string `json:"project_root" jsonschema:"消费仓或草稿所在项目根"`
 	OriginRepo  string `json:"origin_repo" jsonschema:"提供方源仓 owner/name"`
@@ -83,6 +88,11 @@ type proposeUpstreamParams struct {
 }
 
 type previewPushParams struct {
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
+	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
+}
+
+type previewUploadParams struct {
 	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
 }
@@ -138,17 +148,17 @@ type generateSSHKeyParams struct {
 }
 
 type importSSHKeyParams struct {
-	ProjectRoot     string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 时必填；设备密钥走 global 平面时留空"`
-	Plane           string `json:"plane,omitempty" jsonschema:"作用平面：local|global。设备 SSH Key 挂产品 private/global，默认 global"`
-	Project         string `json:"project" jsonschema:"拥有该密钥的产品名（folder 名）"`
-	Name            string `json:"name" jsonschema:"密钥实例名，canonical 名 .sshkey/<name>"`
-	PrivateKeyPath  string `json:"private_key_path" jsonschema:"本机私钥文件路径（绝不接收私钥正文或口令参数）"`
+	ProjectRoot    string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 时必填；设备密钥走 global 平面时留空"`
+	Plane          string `json:"plane,omitempty" jsonschema:"作用平面：local|global。设备 SSH Key 挂产品 private/global，默认 global"`
+	Project        string `json:"project" jsonschema:"拥有该密钥的产品名（folder 名）"`
+	Name           string `json:"name" jsonschema:"密钥实例名，canonical 名 .sshkey/<name>"`
+	PrivateKeyPath string `json:"private_key_path" jsonschema:"本机私钥文件路径（绝不接收私钥正文或口令参数）"`
 }
 
 type installSSHKeyParams struct {
-	Project     string `json:"project" jsonschema:"密钥与密码归属的产品名（folder 名）"`
-	Alias       string `json:"alias" jsonschema:"设备别名；authorized_keys 标记 # dec:<alias> 用它"`
-	Name        string `json:"name,omitempty" jsonschema:"复用已有 .sshkey/<name> 条目时填；留空自动生成新钥"`
-	SSHTarget   string `json:"ssh_target" jsonschema:"系统 ssh 目标：Host 别名、user@host 或 host:port；密码登录用它"`
-	Confirmed   bool   `json:"confirmed" jsonschema:"首次写远端 authorized_keys 属远程变更，必须显式设为 true"`
+	Project   string `json:"project" jsonschema:"密钥与密码归属的产品名（folder 名）"`
+	Alias     string `json:"alias" jsonschema:"设备别名；authorized_keys 标记 # dec:<alias> 用它"`
+	Name      string `json:"name,omitempty" jsonschema:"复用已有 .sshkey/<name> 条目时填；留空自动生成新钥"`
+	SSHTarget string `json:"ssh_target" jsonschema:"系统 ssh 目标：Host 别名、user@host 或 host:port；密码登录用它"`
+	Confirmed bool   `json:"confirmed" jsonschema:"首次写远端 authorized_keys 属远程变更，必须显式设为 true"`
 }

@@ -583,6 +583,8 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		return app.PushWorkspaceSecretsOnly(ctx, workspace, reporter)
 	case "preview_push":
 		return app.PreviewPushWorkspaceAssets(workspace)
+	case "preview_upload":
+		return app.PreviewUploadWorkspaceSecrets(workspace)
 	case "prepare_repo_gcm_bootstrap":
 		var in struct {
 			RepoURL string

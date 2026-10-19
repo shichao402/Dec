@@ -451,7 +451,7 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 - **项目级落地产物**：`.dec/cache/`、`.cursor/` 等，由 pull 写入。cache 不是作者源。
 
 修改 `internal/assets/` 走源码 commit + release。提供方 `DecAssets` 随产品 `v*` / VERSION 由 CI 发布。
-消费方改提供方资产只有一条路：「本地覆写」+ `dec_propose_upstream` 提 Issue / PR，附脱敏来源经验。有 `provides` 的工作区禁止把正文 `dec_push` 进 personal。
+消费方改提供方资产只有一条路：「本地覆写」+ `dec_propose_upstream` 提 Issue / PR，附脱敏来源经验。有 `provides` 的工作区禁止把正文 `dec_push` 进 personal（`dec_push` 仅推个人 Git 资产；密钥上行走 `dec_upload`）。
 
 ### 4. 资产生命周期
 

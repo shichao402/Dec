@@ -15,6 +15,16 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 
 个人私仓是纯控制面：只管订阅哪些提供方，不存放提供方正文，也不记录贡献方式。提供方源仓彼此平级，改它们只有一条路：改动进 `.dec/overrides/`，再 `dec_propose_upstream` 提 Issue / PR，附上脱敏后的来源经验，由提供方仓统一整理合入。有 `provides` 的工作区禁止 `dec_push` 进私仓。
 
+## 三个上行/下行流（命名对照）
+
+「push」一词在 Dec 语境只指 Git 语义，secrets 上行一律叫 upload，避免与 git push 混淆：
+
+| 流 | 上行 | 下行 |
+|---|---|---|
+| 密钥（Bitwarden） | `dec_upload`（Console「提交密钥」） | `dec_pull` |
+| 个人 Git 资产（私仓） | `dec_push`（Console「写回个人资产」） | `dec_pull` |
+| 资产代码（源仓发布） | git push 源仓 → CI publish → registry | `dec_pull` |
+
 ## 何时使用
 
 ### 主动建议用户的场景
@@ -37,7 +47,7 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 
 4. **新增个人资产**
    - 只有真正的个人笔记才写私仓 / cache；优先 `dec-extract-asset` 判断目标提供方
-   - Console **同步** push 仅个人 Git + 密钥；Agent：`dec_push`
+   - Console **同步** 页分两个动作：写回个人资产（`dec_push`）与提交密钥（`dec_upload`）；Agent 同名工具
 
 5. **从当前项目沉淀已有能力**
    - 用 `dec-extract-asset`：抽象后提 Issue / PR，附脱敏来源经验
@@ -55,7 +65,7 @@ Dec 是个人 AI 知识仓库，用来积累和复用 Skills、Rules、MCP。用
 
 8. **命令尾部出现「Dec 资产已落后远端」**
    - 任意 `dec` 启动（pull/push 等同步类除外）可能在 stderr 打 freshness 提示
-   - 先看 cache 有没有未推本地改动：有则先 push 或 stash，再 pull
+   - 先看 cache 有没有未推本地改动：有则先 `dec_push`（个人 Git 资产）或 stash，再 pull
    - Console **同步** pull，或 Agent `dec_pull`
    - 再按第 7 条处理 IDE 输出 diff
    - 关键路径可先搁置；临时关闭：`DEC_FRESHNESS_CHECK=off`
@@ -76,7 +86,9 @@ MCP 不绑定某个仓库，固定打本机服务。先 `dec_console_status` / `
 | 可订阅项目（私仓 ∪ 官方已发布） | `dec_list_subscription_candidates` |
 | 改订阅 | `dec_set_requires`（整表覆盖，不支持 both；改完通常再 `dec_pull`） |
 | 拉取并渲染 | `dec_pull` |
-| 个人 Git / 密钥推回 | `dec_push`；官方路径禁止 |
+| 个人 Git 资产写回私仓 | `dec_push`（仅 Git；官方路径禁止；不发布到 registry） |
+| 密钥上传 Bitwarden | `dec_upload`（不是 git push；先 `dec_preview_upload` 确认范围） |
+| 预览写回范围 | `dec_preview_push`（Git 半）/ `dec_preview_upload`（密钥半），不写远端 |
 | 提交官方本地覆写 | `dec_propose_upstream` |
 | 私密资产元数据 | `dec_list_secrets`（绝不返回正文/密钥；带来源仓/仅密钥/疑似孤儿/声明密钥平面标注；Console 在同步页「密钥清单」） |
 | 删除候选 / 删除 | `dec_list_delete_candidates` / `dec_delete`（Console 在删除页） |
@@ -116,7 +128,7 @@ requires:
 - 旧的 `enabled_bundles` / `enabled_projects` 读到即折叠为 `requires{<名>: vault}`，不再写回；更早的 `available` / `enabled` 已移除
 - `ides` 不写则继承 Settings 全局列表
 - pull 会清掉不在本次启用目标集里的 cache / IDE 托管副本（secrets/SSH 仅在远端对照成功时 prune）
-- **新增本地 secret 必须先推到远端**：写完 `~/.dec/secrets/<产品>/…` 后，先 Console 同步 push 或 Agent `dec_push`，再执行 pull。pull 以远端 Bitwarden 为权威做 prune，本地新增但远端不存在的 secret 会被当孤儿清掉；push 完成后 pull 才安全。push/pull 超时不代表失败，用 `dec_list_secrets` 复核 `remote_exists` / 孤儿标注
+- **新增本地 secret 必须先上传远端**：写完 `~/.dec/secrets/<产品>/…` 后，先 Console 同步页「提交密钥」或 Agent `dec_upload`，再执行 pull。pull 以远端 Bitwarden 为权威做 prune，本地新增但远端不存在的 secret 会被当孤儿清掉；上传完成后 pull 才安全。上传/pull 超时不代表失败，用 `dec_list_secrets` 复核 `remote_exists` / 孤儿标注
 - Claude / Codex 分别使用 `.claude/`、`.codex/`（项目级与用户级同名目录）
 
 ## 占位符变量
@@ -156,10 +168,10 @@ name: my-skill
 目标 vault 路径由 Dec 派生。`provides` 只登记 Git 资产：secrets 由 `.secrets/<项目>`
 的 SyncTarget 规则同步，声明它反而写出第二套规则，配置校验会拒绝 `type: secret`。
 4. secret 类资产：先写本地（global 平面 `~/.dec/secrets/<产品>/…`，local 平面
-   `<project>/.secrets/…`），**必须**先 push 到 Bitwarden（Console 同步 / `dec_push`）
+   `<project>/.secrets/…`），**必须**先 `dec_upload` 上传 Bitwarden（Console 同步页「提交密钥」）
    再做后续 pull，否则会被 prune 当孤儿清掉
 5. 有占位符则补 vars
-6. Console **同步**；旧项目没有 provides 时才继续使用 cache push
+6. Console **同步**页分动作执行；旧项目没有 provides 时才继续使用 cache 写回
 
 不要把 cache 或 IDE 目录当新增来源。项目级托管输出可以单独提交，只要敏感值已抽到 vars。
 

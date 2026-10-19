@@ -82,7 +82,7 @@ description: >
 
 7. 完成后
    - 提供方：票据合入源仓后由 CI `publish-provides` 写入 registry，消费方再 `dec_pull`
-   - 个人：Console **同步** 页 push 私仓，或 Agent `dec_push`（`plane=local`）
+   - 个人：Console **同步** 页「写回个人资产」，或 Agent `dec_push`（`plane=local`，仅个人 Git 资产；密钥用 `dec_upload`）
    - 入口：Console 项目下级页「本地覆写」+ `dec_propose_upstream`
    - 回报：覆写路径 + Issue/PR URL；不要回报「已写入 ~/.cursor/skills」当作成功
 
@@ -113,7 +113,7 @@ description: >
 2. 识别要沉淀的本地资产来源并抽象成通用版本
 3. 从订阅面板或 `origin_repo` 确认上游仓
 4. 写入 `.dec/overrides/` + `dec_propose_upstream`，附脱敏来源经验
-5. 仅用户明确说「个人资产 / 私仓」时，才写 cache 再 `dec_push`
+5. 仅用户明确说「个人资产 / 私仓」时，才写 cache 再 `dec_push`（个人 Git 资产；涉及密钥文件用 `dec_upload`）
 
 ## 输出标准
 

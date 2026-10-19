@@ -126,9 +126,13 @@ func Plan(name string, arguments json.RawMessage) *PlanResult {
 	case "dec_pull":
 		return planPlanes(name, arguments, StepRun, "pull", nil)
 	case "dec_push":
-		return planPlanes(name, arguments, StepRun, "push", nil)
+		return planPlanes(name, arguments, StepRun, "push_personal", nil)
+	case "dec_upload":
+		return planPlanes(name, arguments, StepRun, "push_secrets", nil)
 	case "dec_preview_push":
 		return planPlanes(name, arguments, StepRun, "preview_push", nil)
+	case "dec_preview_upload":
+		return planPlanes(name, arguments, StepRun, "preview_upload", nil)
 	case "dec_list_secrets":
 		var in listSecretsParams
 		if err := json.Unmarshal(arguments, &in); err != nil {
@@ -307,7 +311,7 @@ func planDelete(arguments json.RawMessage) *PlanResult {
 			"Kind": item.Kind, "Type": item.Type, "Name": item.Name, "Vault": item.Vault,
 			"SecretPath": item.SecretPath, "SecretsBundle": item.SecretsBundle,
 			"SSHKeyName": item.SSHKeyName, "DecBundleName": item.DecBundleName,
-			"Partition": item.Partition,
+			"Partition":  item.Partition,
 			"BundleName": item.BundleName, "ProjectName": item.ProjectName,
 			"Visibility": types.AssetVisibility(item.Visibility),
 			"AssetPlane": types.AssetPlane(item.AssetPlane),

@@ -107,9 +107,15 @@ func catalog() []toolDef {
 			},
 			{
 				Name:        "dec_push",
-				Description: "把某平面的个人 Git 改动与 secrets 推回私仓 / Bitwarden（plane=local|global|both）。官方资产禁止 push，请用 dec_propose_upstream。",
+				Description: "仅把某平面的个人 Git 资产推回私仓（plane=local|global|both）。这是 Dec 同步，不是 git push，不会把任何资产发布到 registry。secrets 上传请用 dec_upload；官方资产走 dec_propose_upstream。",
 				Owner:       OwnerServer,
 				Sample:      pushParams{},
+			},
+			{
+				Name:        "dec_upload",
+				Description: "上传 secrets 到 Bitwarden（Dec 同步），不是 git push，不发布任何资产到 registry（plane=local|global|both）。只读本地 secrets 同步根，不碰个人 Git 资产。",
+				Owner:       OwnerServer,
+				Sample:      uploadParams{},
 			},
 			{
 				Name:        "dec_propose_upstream",
@@ -119,9 +125,15 @@ func catalog() []toolDef {
 			},
 			{
 				Name:        "dec_preview_push",
-				Description: "预览某平面 push 将涉及的 Dec 与 secrets 变更（plane=local|global|both，不写远端）。推之前先 preview 确认范围。",
+				Description: "预览某平面个人 Git 资产 push 将涉及的变更（plane=local|global|both，不写远端）。secrets 上行预览请用 dec_preview_upload。推之前先 preview 确认范围。",
 				Owner:       OwnerServer,
 				Sample:      previewPushParams{},
+			},
+			{
+				Name:        "dec_preview_upload",
+				Description: "预览某平面 secrets 上行（dec_upload）将涉及的变更（plane=local|global|both，不写 Bitwarden 远端）。上传前先 preview 确认范围。",
+				Owner:       OwnerServer,
+				Sample:      previewUploadParams{},
 			},
 			{
 				Name:        "dec_list_secrets",
