@@ -116,6 +116,7 @@ requires:
 - 旧的 `enabled_bundles` / `enabled_projects` 读到即折叠为 `requires{<名>: vault}`，不再写回；更早的 `available` / `enabled` 已移除
 - `ides` 不写则继承 Settings 全局列表
 - pull 会清掉不在本次启用目标集里的 cache / IDE 托管副本（secrets/SSH 仅在远端对照成功时 prune）
+- **新增本地 secret 必须先推到远端**：写完 `~/.dec/secrets/<产品>/…` 后，先 Console 同步 push 或 Agent `dec_push`，再执行 pull。pull 以远端 Bitwarden 为权威做 prune，本地新增但远端不存在的 secret 会被当孤儿清掉；push 完成后 pull 才安全。push/pull 超时不代表失败，用 `dec_list_secrets` 复核 `remote_exists` / 孤儿标注
 - Claude / Codex 分别使用 `.claude/`、`.codex/`（项目级与用户级同名目录）
 
 ## 占位符变量
@@ -154,8 +155,11 @@ name: my-skill
 
 目标 vault 路径由 Dec 派生。`provides` 只登记 Git 资产：secrets 由 `.secrets/<项目>`
 的 SyncTarget 规则同步，声明它反而写出第二套规则，配置校验会拒绝 `type: secret`。
-4. 有占位符则补 vars
-5. Console **同步**；旧项目没有 provides 时才继续使用 cache push
+4. secret 类资产：先写本地（global 平面 `~/.dec/secrets/<产品>/…`，local 平面
+   `<project>/.secrets/…`），**必须**先 push 到 Bitwarden（Console 同步 / `dec_push`）
+   再做后续 pull，否则会被 prune 当孤儿清掉
+5. 有占位符则补 vars
+6. Console **同步**；旧项目没有 provides 时才继续使用 cache push
 
 不要把 cache 或 IDE 目录当新增来源。项目级托管输出可以单独提交，只要敏感值已抽到 vars。
 
