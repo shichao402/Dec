@@ -1,8 +1,8 @@
 #!/bin/bash
 # Dec 发布准备脚本
 # 说明：版本号写入 version.json 并推 main 后，再打渠道 tag 触发 CNB：
-#   dev/vX.Y.Z     → RUP channel=dev
 #   stable/vX.Y.Z  → RUP channel=stable（另推 GitHub Release）
+# 只有 stable 一个发布渠道。
 # 用法：./scripts/release-yolo.sh [版本号]
 #       不传版本号时，仅执行本地测试与构建检查。
 #       传入版本号时，会先更新 version.json。
@@ -103,15 +103,14 @@ PY
     echo ""
     echo "   说明："
     echo "   - 发版由 GitHub Actions 监听渠道 tag（见 .github/workflows/release.yml），不再靠改 version.json 推 main 自动发"
-    echo "   - 开发渠道：dev/${target} → RUP channel=dev"
-    echo "   - 正式渠道：stable/${target} → RUP channel=stable + GitHub Release"
+    echo "   - 只有 stable 一个渠道：stable/${target} → RUP channel=stable + GitHub Release"
     echo ""
     if [ -n "$1" ]; then
         echo "   推荐命令："
         echo "   git add version.json <其他变更>"
         echo "   git commit -m \"chore: release ${target}\""
         echo "   git push origin main"
-        echo "   git tag \"dev/${target}\" && git push origin \"dev/${target}\"   # 或 stable/${target}"
+        echo "   git tag \"stable/${target}\" && git push origin \"stable/${target}\""
     else
         warn "本次未修改 version.json；发版前请先升版本，再推 main 并打渠道 tag。"
     fi

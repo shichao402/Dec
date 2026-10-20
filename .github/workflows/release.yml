@@ -6,7 +6,6 @@ name: Release
 on:
   push:
     tags:
-      - "dev/v*"
       - "stable/v*"
   workflow_dispatch:
     inputs:
@@ -14,9 +13,8 @@ on:
         description: RUP channel when not triggered by a channel tag
         type: choice
         options:
-          - dev
           - stable
-        default: dev
+        default: stable
 concurrency:
   group: dec-artifacts-${{ github.ref }}
   cancel-in-progress: false
@@ -42,21 +40,17 @@ jobs:
         id: meta
         shell: bash
         env:
-          RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'dev' }}
+          RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME:-}"
           case "$TAG" in
-            dev/*)
-              CHANNEL=dev
-              VERSION="${TAG#dev/}"
-              ;;
             stable/*)
               CHANNEL=stable
               VERSION="${TAG#stable/}"
               ;;
             *)
-              CHANNEL="${RELEASE_CHANNEL:-dev}"
+              CHANNEL="${RELEASE_CHANNEL:-stable}"
               VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
               echo "非渠道 tag 触发（ref=$TAG），使用 version.json=$VERSION channel=$CHANNEL"
               ;;
@@ -66,8 +60,8 @@ jobs:
             echo "无效版本号: $VERSION（期望 vMAJOR.MINOR.PATCH）"
             exit 1
           fi
-          if [[ "$CHANNEL" != "dev" && "$CHANNEL" != "stable" ]]; then
-            echo "无效渠道: $CHANNEL（期望 dev 或 stable）"
+          if [[ "$CHANNEL" != "stable" ]]; then
+            echo "无效渠道: $CHANNEL（只支持 stable）"
             exit 1
           fi
 
@@ -354,8 +348,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Prepare stable Console installers
-        if: needs.prepare.outputs.channel == 'stable'
+      - name: Prepare Console installers
         run: |
           python3 - <<'PY'
           import json, shutil
@@ -377,11 +370,10 @@ jobs:
               shutil.copy2(source, release / source.name)
           PY
 
-      - name: Upload stable Console installers
-        if: needs.prepare.outputs.channel == 'stable'
+      - name: Upload Console installers
         uses: actions/upload-artifact@v4
         with:
-          name: dec-stable-installers
+          name: dec-console-installers
           path: release-assets/
           if-no-files-found: error
           retention-days: 30
@@ -468,15 +460,14 @@ jobs:
             exit 1
           fi
 
-  stable-release:
-    name: Stable GitHub Release
-    if: needs.prepare.outputs.channel == 'stable'
+  github-release:
+    name: GitHub Release
     needs: [prepare, collect, operator-publish]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dec-stable-installers
+          name: dec-console-installers
           path: release-assets
       - uses: softprops/action-gh-release@v2
         with:

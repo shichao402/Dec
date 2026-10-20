@@ -92,7 +92,7 @@ func TestClientProfileComesFromRuntimeBootstrap(t *testing.T) {
 		"rootFingerprint":"sha256:64eba24757a5e1574e6cabf8086284d90e5ff57ef0b821a50c3267263c3fd75d",
 		"profile":{
 			"product":"dec",
-			"allowedChannels":["dev","stable"],
+			"allowedChannels":["stable"],
 			"directoryBootstrap":{
 				"entryUrls":["https://update-internal.firoyang.com/directory/dec.pb"],
 				"recovery":{"message":"offline","links":[{"label":"release","url":"https://example.com/"}]}

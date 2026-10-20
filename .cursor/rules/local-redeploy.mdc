@@ -7,7 +7,7 @@ alwaysApply: true
 
 改完代码要在**这台开发机**上生效：本地打一份 Console 装上去，覆盖现有安装。
 机器上永远只有一份。这是开发循环，**不是**发版：用户面安装包只走 GitHub Actions / RUP
-（`dev/v*`、`stable/v*` tag），不要因为本机已经能用就去打 tag 或改渠道。
+（`stable/v*` tag），不要因为本机已经能用就去打 tag 或改渠道。
 
 ```bash
 python scripts/build-console.py --deploy

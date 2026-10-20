@@ -11,7 +11,8 @@ import (
 	"github.com/shichao402/Dec/internal/repo"
 )
 
-const channelName = "dev"
+// 只有 stable 一个发布渠道；配置缺省时也必须落在这里，不能回落到已废除的 dev。
+const channelName = "stable"
 
 func stateDir() (string, error) {
 	return repo.GetRootDir()

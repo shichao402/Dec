@@ -1,7 +1,7 @@
 {
   "schema": "relkit.project/1",
   "product": "dec",
-  "channels": ["dev", "stable"],
+  "channels": ["stable"],
   "versionPolicy": {
     "schema": "relkit.version-policy/1",
     "targets": {

@@ -69,7 +69,7 @@ path dependency 使用物化 SDK。宿主 `go.mod`、Cargo 配置不负责钉 Re
 - stage → simulate → fake → publish 的事务；
 - 多 backend 一致性、partial-commit 修复和 released-state 验证。
 
-`dev/v*` 与 `stable/v*` 仍决定 channel；stable 可另外创建 GitHub Release，且只展示
+`stable/v*` 决定 channel，只保留这一个渠道；每次发布另外创建 GitHub Release，且只展示
 Console installer。GitHub Release 不是 RUP 控制面。
 
 ## 首次自订阅

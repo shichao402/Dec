@@ -40,7 +40,7 @@ export function ConsoleUpdatePanel(props: {
   const failed = kind?.case === 'failed' ? kind.value : null
   const channels = props.status?.allowedChannels?.length
     ? props.status.allowedChannels
-    : ['stable', 'dev']
+    : ['stable']
   const channel = props.status?.channel || channels[0]
   const panelRef = useRef<HTMLDivElement>(null)
   const [focused, setFocused] = useState(false)
@@ -81,28 +81,37 @@ export function ConsoleUpdatePanel(props: {
             <Badge tone="quiet">尚未完成检查</Badge>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-faint">更新渠道</span>
-          <Select
-            className="max-w-40"
-            value={channel}
-            disabled={!props.status}
-            onChange={(event) => {
-              const next = event.target.value
-              if (next === channel) return
-              void props.onChannelChange(next)
-            }}
-          >
-            {channels.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </Select>
-        </div>
+        {channels.length > 1 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-faint">更新渠道</span>
+            <Select
+              className="max-w-40"
+              value={channel}
+              disabled={!props.status}
+              onChange={(event) => {
+                const next = event.target.value
+                if (next === channel) return
+                void props.onChannelChange(next)
+              }}
+            >
+              {channels.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </Select>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-faint">
+            <span>更新渠道</span>
+            <Badge tone="quiet" className="font-mono">
+              {channel}
+            </Badge>
+          </div>
+        )}
         <p className="text-xs leading-relaxed text-faint">
           Console 启动时由更新引擎检查；成功后 24 小时内由引擎节流。只检查，不会自动安装。
-          默认渠道是 stable；可改并保存，检查与安装都跟所选渠道。
+          只发 stable 一个渠道，检查与安装都跟该渠道。
         </p>
         {props.error && <Notice tone="warn" text={`自动检查失败：${props.error}`} />}
         {failed?.error?.message && <Notice tone="warn" text={failed.error.message} />}

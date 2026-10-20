@@ -566,7 +566,7 @@ func GetSystemConfig() *SystemConfig {
 		UpdateBranch: defaultUpdateBranch,
 		EntryURLs:    []string{defaultEntryURL},
 		Product:      "dec",
-		Channel:      "dev",
+		Channel:      "stable",
 	}
 }
 

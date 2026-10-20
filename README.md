@@ -294,7 +294,7 @@ python scripts/build-console.py --deploy
 内置 `dec` MCP 是 URL `http://127.0.0.1:47654/mcp`，没有单独的 stdio 进程，也不带请求头。本机连接由服务直接放行。若 pull / 更新 / 删除让其它托管 MCP 条目在 `mcp.json` 里发生增删改，Console 会关 → 杀匹配进程 → 再开，并在结果区列出名字；IDE 若仍显示旧工具，再在 MCP 面板手动 Reload。
 
 给别人用的安装包只走 GitHub Actions 生成的 ArtifactSet，再由独立 Operator Job
-发布到 RUP（`dev/v*`、`stable/v*`）。只改 Go、还要从源码跑 Console UI 时，用上一节
+发布到 RUP（`stable/v*`）。只改 Go、还要从源码跑 Console UI 时，用上一节
 的 `--prepare-runtime-only` + `npm run tauri dev`，不必再打安装包。
 
 ### 运行测试
