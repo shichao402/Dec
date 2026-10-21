@@ -115,6 +115,10 @@ env 注入给子进程用独立程序 `dec-exec`，不经过 `dec-server`、不�
 
 项目：`<project>/.dec/config.yaml`。本机 global：`~/.dec/config.yaml`。两处都只有一张 `requires` 表。
 
+`requires` 由 `dec_set_requires` 写入（ADR 0029 规定的订阅唯一写入口），**不要手改 `config.yaml`**。手写会静默跳过 vault pin 拒绝、本仓项目排除、注册表是否已发布该项目的检查，以及 `NormalizeRequiresSpec` 规范化与 vars 模板生成：项目名拼错时 `requires` 照样留着，只在 `dec_pull` 时才报错，且错误信息指不回「名字拼错了」。
+
+下面是工具写入结果的形态示意，不是待填的编辑模板：
+
 ```yaml
 version: v2
 project_name: my-app   # 本仓项目：这个目录正在写 my-app，不进 requires
@@ -196,4 +200,4 @@ name: my-skill
 
 刚 pull 完且仓库跟踪 IDE 输出：先看 diff，再问是否单独 commit。
 
-**禁止**直接操作 `~/.dec/repo.git` 或手改托管 IDE 副本。Agent 用 MCP；真人用 Console。
+**禁止**直接操作 `~/.dec/repo.git`、手改托管 IDE 副本，或手改 `config.yaml` 里的 `requires`（含 `<project>/.dec/config.yaml` 与 `~/.dec/config.yaml`，改订阅只能用 `dec_set_requires`）。Agent 用 MCP；真人用 Console。
