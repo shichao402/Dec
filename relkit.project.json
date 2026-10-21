@@ -41,6 +41,11 @@
   "operatorRef": "firoyang-public",
   "trustFingerprint": "sha256:8bcb6c24c9ce672f315f96eff446d9cee7edd2c6f3bfa113a3d4927f00199598",
   "roles": ["publisher", "updater-host", "subscriber"],
+  "site": {
+    "title": "Dec",
+    "description": "个人 AI 知识仓库代理。",
+    "homepage": "https://cnb.cool/shichao402/Dec"
+  },
   "artifactProducer": {
     "command": ["node", "scripts/relkit_producer.mjs"],
     "extensionSchema": "relkit.extension/1",
