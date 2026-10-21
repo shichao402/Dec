@@ -89,6 +89,8 @@ export type DeviceSummary = {
   Projects: ManagedProject[]
 }
 
+export type LocalCleanupTier = 'light' | 'full'
+
 export type LocalCleanupItem = {
   Action: 'delete' | 'modify' | 'revoke'
   Category: string
@@ -97,15 +99,20 @@ export type LocalCleanupItem = {
 }
 
 export type LocalCleanupPreview = {
+  Tier: LocalCleanupTier
   Items: LocalCleanupItem[]
   Preserved: string[]
+  KeptByTier: LocalCleanupItem[]
 }
 
 export type LocalCleanupResult = {
+  Tier: LocalCleanupTier
   Deleted: string[]
   Modified: string[]
   Revoked: string[]
   Warnings: string[]
+  Preserved: string[]
+  NextAction: string
 }
 
 export type DirectoryListing = {

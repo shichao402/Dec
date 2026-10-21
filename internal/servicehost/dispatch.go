@@ -139,7 +139,17 @@ func dispatchInvokeWorkspace(ctx context.Context, method string, workspace app.W
 	case "load_device_summary":
 		return app.LoadDeviceSummary()
 	case "preview_local_cleanup":
-		return app.PreviewLocalCleanup()
+		var in struct {
+			Tier string `json:"Tier,omitempty"`
+		}
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		tier, err := app.ParseCleanupTier(in.Tier)
+		if err != nil {
+			return nil, err
+		}
+		return app.PreviewLocalCleanup(tier)
 	case "list_managed_projects":
 		return app.ListManagedProjectStates()
 	case "list_project_consumers":

@@ -92,6 +92,13 @@ func PullWorkspaceAssetsStrict(ctx context.Context, workspace Workspace, version
 func pullWorkspaceAssetsInternal(ctx context.Context, workspace Workspace, version string, reporter Reporter, strict bool) (*PullProjectAssetsResult, error) {
 	reporter = defaultReporter(reporter)
 	projectRoot := workspace.Root
+	// 轻量清理会删掉 repo.git 但保留配置。拉取一开始就按已保存的私仓地址把本地仓库补回来，
+	// 让「清理后拉取一次即恢复」成立，用户不需要重新填写 Repo URL。
+	if globalConfig, cfgErr := config.LoadGlobalConfig(); cfgErr == nil {
+		if err := repo.EnsureConnectedRepoMatches(globalConfig.RepoURL); err != nil {
+			emit(reporter, EventWarn, "pull.vault", fmt.Sprintf("恢复本地资产仓库失败：%v", err), nil)
+		}
+	}
 	mgr := config.NewProjectConfigManager(projectRoot)
 	projectConfig, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
@@ -168,6 +175,13 @@ func pullWorkspaceAssetsInternal(ctx context.Context, workspace Workspace, versi
 	}
 
 	createTx := func() (*repo.Transaction, error) {
+		// 轻量清理会删掉 repo.git 而保留配置，这里按已保存的私仓地址把本地仓库补回来，
+		// 让「清理后拉取一次即恢复」成立，用户不需要重新填写 Repo URL。
+		if globalConfig, cfgErr := config.LoadGlobalConfig(); cfgErr == nil {
+			if err := repo.EnsureConnectedRepoMatches(globalConfig.RepoURL); err != nil {
+				emit(reporter, EventWarn, "pull.vault", fmt.Sprintf("恢复本地资产仓库失败：%v", err), nil)
+			}
+		}
 		if strings.TrimSpace(version) != "" {
 			return repo.NewReadTransactionAt(version)
 		}

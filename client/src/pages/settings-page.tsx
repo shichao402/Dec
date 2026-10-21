@@ -19,8 +19,27 @@ import type {
   GlobalSettings,
   LocalCleanupPreview,
   LocalCleanupResult,
+  LocalCleanupTier,
   PingInfo,
 } from '@/lib/utils'
+
+const CLEANUP_TIER_OPTIONS: { value: LocalCleanupTier; label: string; hint: string }[] = [
+  {
+    value: 'light',
+    label: '轻量清理',
+    hint: '只清掉 Dec 写入 IDE 的资产、MCP 条目与缓存；配置、凭据、项目登记与 secret 都保留，清理后拉取一次即可恢复。',
+  },
+  {
+    value: 'full',
+    label: '彻底清理',
+    hint: '连配置与凭据一起清掉，之后需要重新填私仓地址、重新配 Git 凭据、重新导入项目。',
+  },
+]
+
+const CLEANUP_CONFIRM_PHRASE: Record<LocalCleanupTier, string> = {
+  light: '只清理资产',
+  full: '清理本机',
+}
 
 export function SettingsPage(props: {
   deviceId: string
@@ -45,6 +64,7 @@ export function SettingsPage(props: {
   const [diffTool, setDiffTool] = useState<'internal' | 'git'>(props.settings.DiffTool || 'internal')
   const [diffToolName, setDiffToolName] = useState(props.settings.DiffToolName || '')
   const [ides, setIDEs] = useState(props.settings.SelectedIDEs)
+  const [cleanupTier, setCleanupTier] = useState<LocalCleanupTier>('light')
   const [cleanupPreview, setCleanupPreview] = useState<LocalCleanupPreview | null>(null)
   const [cleanupConfirm, setCleanupConfirm] = useState('')
   const [cleanupResult, setCleanupResult] = useState<LocalCleanupResult | null>(null)
@@ -207,19 +227,56 @@ export function SettingsPage(props: {
           <Panel>
             <PanelHeader
               title="清理本机 Dec 资产"
-              description="移除 Dec 写入的 IDE 资产、MCP 条目、项目状态、secrets、SSH 与 Git 凭据配置；保留 Console、运行时四件套和当前服务。"
+              description="选择清理档位后再扫描与执行。Console、运行时套件和当前服务实例在任何档位下都不会被清理。"
             />
             <PanelBody className="space-y-3">
               <ActionFeedback actionKey={previewCleanupSpec.key} />
               <ActionFeedback actionKey={cleanupSpec.key} />
-              <Notice
-                tone="bad"
-                text="这是不可撤销操作。共享的 MCP、SSH 和 Git 配置只移除 Dec 条目，不会整份删除。远端 Git 与 Bitwarden 内容不受影响。"
-              />
+              <div className="space-y-2">
+                <span className="text-xs text-faint">清理档位</span>
+                <Select
+                  className="max-w-52"
+                  value={cleanupTier}
+                  onChange={(event) => {
+                    const next = event.target.value as LocalCleanupTier
+                    if (next === cleanupTier) return
+                    setCleanupTier(next)
+                    setCleanupPreview(null)
+                    setCleanupConfirm('')
+                    setCleanupResult(null)
+                  }}
+                >
+                  {CLEANUP_TIER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-xs leading-relaxed text-faint">
+                  {CLEANUP_TIER_OPTIONS.find((option) => option.value === cleanupTier)?.hint}
+                </p>
+              </div>
+              {cleanupTier === 'full' ? (
+                <Notice
+                  tone="bad"
+                  text="这是不可撤销操作。共享的 MCP、SSH 和 Git 配置只移除 Dec 条目，不会整份删除。远端 Git 与 Bitwarden 内容不受影响。"
+                />
+              ) : (
+                <Notice
+                  tone="warn"
+                  text="轻量清理只移除可重新拉取的产物：IDE 资产、MCP 中的 Dec 条目与各级缓存。本机配置、SSH 与 Git 凭据、项目登记、secret 与隔离区都会保留，清理后拉取一次即可恢复。"
+                />
+              )}
               <ActionButton
                 spec={previewCleanupSpec}
                 variant="outline"
-                action={() => invokeTyped<LocalCleanupPreview>('preview_local_cleanup', '', 'global', {}, previewCleanupSpec.key)}
+                action={() => invokeTyped<LocalCleanupPreview>(
+                  'preview_local_cleanup',
+                  '',
+                  'global',
+                  { Tier: cleanupTier },
+                  previewCleanupSpec.key,
+                )}
                 onSuccess={(preview) => {
                   setCleanupPreview(preview)
                   setCleanupConfirm('')
@@ -234,7 +291,11 @@ export function SettingsPage(props: {
                 <div className="space-y-3">
                   <div className="max-h-64 overflow-auto rounded-lg border border-line bg-canvas/60">
                     {cleanupPreview.Items.length === 0 ? (
-                      <p className="px-3 py-4 text-xs text-faint">没有发现可清理的 Dec 落点。</p>
+                      <p className="px-3 py-4 text-xs text-faint">
+                        {cleanupTier === 'light'
+                          ? '当前没有可清理的资产产物，配置与凭据本来也不会被这一档触碰。'
+                          : '没有发现可清理的 Dec 落点。'}
+                      </p>
                     ) : (
                       <ul className="divide-y divide-line">
                         {cleanupPreview.Items.map((item, index) => (
@@ -252,24 +313,39 @@ export function SettingsPage(props: {
                       </ul>
                     )}
                   </div>
-                  <p className="text-xs text-faint">保留：{cleanupPreview.Preserved.join(' · ')}</p>
+                  {cleanupTier === 'light' && cleanupPreview.KeptByTier?.length > 0 && (
+                    <div className="rounded-lg border border-line bg-canvas/60 px-3 py-2 text-xs">
+                      <p className="text-muted">本档位保留，改选彻底清理才会删除：</p>
+                      <ul className="mt-1 space-y-1">
+                        {cleanupPreview.KeptByTier.map((item, index) => (
+                          <li key={`${item.Category}:${item.Path}:${index}`} className="break-all font-mono text-faint">
+                            {item.Category} · {item.Path}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <p className="text-xs text-faint">
+                    两档都会保留：{cleanupPreview.Preserved.slice(0, 6).join(' · ')}
+                    {cleanupPreview.Preserved.length > 6 ? ` 等 ${cleanupPreview.Preserved.length} 项` : ''}
+                  </p>
                   {cleanupPreview.Items.length > 0 && (
                     <div className="space-y-2">
                       <Input
                         value={cleanupConfirm}
                         onChange={(event) => setCleanupConfirm(event.target.value)}
-                        placeholder="输入“清理本机”确认"
+                        placeholder={`输入“${CLEANUP_CONFIRM_PHRASE[cleanupTier]}”确认`}
                         className="max-w-64"
                       />
                       <ActionButton
                         spec={cleanupSpec}
-                        variant="destructive"
-                        disabled={cleanupConfirm !== '清理本机'}
+                        variant={cleanupTier === 'full' ? 'destructive' : 'outline'}
+                        disabled={cleanupConfirm !== CLEANUP_CONFIRM_PHRASE[cleanupTier]}
                         action={() => runTyped<LocalCleanupResult>(
                           'cleanup_local_installation',
                           '',
                           'global',
-                          { Confirmed: true },
+                          { Confirmed: true, Tier: cleanupTier },
                           cleanupSpec.key,
                         )}
                         onSuccess={async (result) => {
@@ -280,7 +356,7 @@ export function SettingsPage(props: {
                         }}
                       >
                         <Trash2 className="size-4" />
-                        清理本机
+                        {cleanupTier === 'light' ? '只清理资产' : '清理本机'}
                       </ActionButton>
                     </div>
                   )}
@@ -289,9 +365,15 @@ export function SettingsPage(props: {
               {cleanupResult && (
                 <div className="space-y-2 rounded-lg border border-line bg-canvas/60 px-3 py-2.5 text-xs text-muted">
                   <p>
-                    已删除 {cleanupResult.Deleted.length} 项，修改 {cleanupResult.Modified.length} 份共享配置，
-                    撤销 {cleanupResult.Revoked.length} 项凭据。
+                    {cleanupResult.Tier === 'light' ? '轻量清理' : '彻底清理'}完成：已删除 {cleanupResult.Deleted.length} 项，
+                    修改 {cleanupResult.Modified.length} 份共享配置，撤销 {cleanupResult.Revoked.length} 项凭据。
                   </p>
+                  {cleanupResult.Tier === 'light' && cleanupResult.Preserved?.length > 0 && (
+                    <p className="text-faint">
+                      本次保留 {cleanupResult.Preserved.length} 项手工积累内容，例如 {cleanupResult.Preserved.slice(0, 3).join(' · ')}。
+                    </p>
+                  )}
+                  {cleanupResult.NextAction && <p className="text-faint">{cleanupResult.NextAction}</p>}
                   {cleanupResult.Warnings.length > 0 && (
                     <WarningList title="仍需处理" items={cleanupResult.Warnings} />
                   )}

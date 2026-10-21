@@ -232,7 +232,9 @@ func EnsureConnectedRepoMatches(expectedURL string) error {
 		return err
 	}
 	if !connected {
-		return nil
+		// 本地 bare repo 不存在（例如刚做完轻量清理）：按已保存的地址重建，
+		// 让用户不需要重新填写 Repo URL 就能继续拉取。
+		return ConnectBare(trimmed)
 	}
 
 	currentURL, err := GetBareRemoteURL()
