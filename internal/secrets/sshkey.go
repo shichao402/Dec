@@ -567,6 +567,37 @@ func projectSSHKeyFileName(scopeID, decBundleName, keyName string) (string, erro
 	return "dec_project_" + scopeID + "_" + bundle + "_" + name, nil
 }
 
+// ProjectSSHKeyPrivatePath 返回 project 专属 SSH Key 私钥的绝对落地路径。
+// 公钥路径是在其后加 ".pub"。
+func ProjectSSHKeyPrivatePath(projectRoot, decBundleName, keyName string) (string, error) {
+	paths, err := ProjectCredentialScopePaths(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	fileBase, err := projectSSHKeyFileName(paths.ID, decBundleName, keyName)
+	if err != nil {
+		return "", err
+	}
+	sshDir, err := SSHDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(sshDir, fileBase), nil
+}
+
+// MachineSSHKeyPrivatePath 返回 machine 平面 SSH Key 私钥的绝对落地路径。
+func MachineSSHKeyPrivatePath(decBundleName, keyName string) (string, error) {
+	fileBase, err := SSHKeyFileName(decBundleName, keyName)
+	if err != nil {
+		return "", err
+	}
+	sshDir, err := SSHDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(sshDir, fileBase), nil
+}
+
 // ListProjectSSHKeyNames 列出指定工作区 / 项目的 project 专属密钥实例。
 func ListProjectSSHKeyNames(projectRoot, decBundleName string) ([]string, error) {
 	paths, err := ProjectCredentialScopePaths(projectRoot)

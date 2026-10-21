@@ -50,6 +50,13 @@ type PullProjectAssetsResult struct {
 	OrphanSSHKeys        []string
 	OrphanClearedBundles []string
 	OrphanReportedOnly   []string
+	// QuarantineBase 与 QuarantineRetention 描述本次剪枝的软删落点（需求 8.3）：
+	// 隔离区位置与保留期。空串表示本机未启用隔离区（异常态，调用方应告警）。
+	QuarantineBase      string `json:"quarantine_base,omitempty"`
+	QuarantineRetention string `json:"quarantine_retention,omitempty"`
+	// StrictRequested 为 true 表示本次 pull 采用「严格一致」语义（需求 8.2），
+	// 在输入与结果中都留下审计痕迹。
+	StrictRequested bool `json:"strict_requested,omitempty"`
 	// McpReload 是本轮因 mcp.json 条目增删改而执行关→杀→开的托管 MCP server 名。
 	// IDE 若未跟随配置重拉，人需在 MCP 面板手动 Reload 这些名字。
 	McpReload []string
@@ -66,8 +73,23 @@ func PullProjectAssets(ctx context.Context, projectRoot, version string, reporte
 	return PullWorkspaceAssets(ctx, NewWorkspace(WorkspaceProject, projectRoot), version, reporter)
 }
 
-// PullWorkspaceAssets 拉取并安装当前工作空间平面的公开资产与 secrets。
+// PullWorkspaceAssets 拉取并安装当前工作空间平面的公开资产与 secrets（默认宽松：仅隔离可重建条目）。
 func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
+	return pullWorkspaceAssetsInternal(ctx, workspace, version, reporter, false)
+}
+
+// PullWorkspaceAssetsStrict 以「本地与远端严格一致」语义执行 pull（需求 8.2）：
+// 对默认保护的条目也执行隔离。仍走隔离区软删，绝不硬删。调用方须在输入与结果里留下审计痕迹。
+func PullWorkspaceAssetsStrict(ctx context.Context, workspace Workspace, version string, reporter Reporter) (*PullProjectAssetsResult, error) {
+	result, err := pullWorkspaceAssetsInternal(ctx, workspace, version, reporter, true)
+	if err != nil {
+		return nil, err
+	}
+	result.StrictRequested = true
+	return result, nil
+}
+
+func pullWorkspaceAssetsInternal(ctx context.Context, workspace Workspace, version string, reporter Reporter, strict bool) (*PullProjectAssetsResult, error) {
 	reporter = defaultReporter(reporter)
 	projectRoot := workspace.Root
 	mgr := config.NewProjectConfigManager(projectRoot)
@@ -236,7 +258,7 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	if len(validAssets) == 0 {
 		result.SkippedReason = "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)
-		if err := applySecretsPull(ctx, result, workspace, enabledBundleNames, reporter); err != nil {
+		if err := applySecretsPull(ctx, result, workspace, enabledBundleNames, reporter, strict); err != nil {
 			result.NonFatalWarnings = append(result.NonFatalWarnings, err.Error())
 			emit(reporter, EventWarn, "pull.secrets", "Secrets 未同步（无公开资产可拉取）", nil)
 			return result, nil
@@ -317,7 +339,7 @@ func PullWorkspaceAssets(ctx context.Context, workspace Workspace, version strin
 	// 阶段 3：secrets 放在公开资产之后。Bitwarden 不可用（未解锁、网络故障）
 	// 不应连累已经就绪的 skill / rule / mcp，否则一次解锁失败会让整个项目看起来没装过资产。
 	// 契约：公开资产已落地时 secrets 失败 → result + NonFatalWarnings，error 为 nil。
-	if err := applySecretsPull(ctx, result, workspace, enabledBundleNames, reporter); err != nil {
+	if err := applySecretsPull(ctx, result, workspace, enabledBundleNames, reporter, strict); err != nil {
 		emit(reporter, EventWarn, "pull.secrets",
 			fmt.Sprintf("已安装 %d 个公开资产；Secrets 未同步", result.PulledCount), nil)
 		result.NonFatalWarnings = append(result.NonFatalWarnings, err.Error())
@@ -383,13 +405,13 @@ func applyAssetCleanup(result *PullProjectAssetsResult, workspace Workspace, ena
 	}
 }
 
-func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, workspace Workspace, enabledBundles []string, reporter Reporter) error {
+func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, workspace Workspace, enabledBundles []string, reporter Reporter, strict bool) error {
 	if workspace.EffectivePlane() == WorkspaceProject {
 		if err := secrets.EnsureSecretsGitignore(workspace.Root); err != nil {
 			emit(reporter, EventWarn, "pull.secrets", fmt.Sprintf("写入 .gitignore 失败: %v", err), nil)
 		}
 	}
-	secretsSummary, err := pullEnabledSecretsBundlesForWorkspace(ctx, workspace, enabledBundles, reporter)
+	secretsSummary, err := pullEnabledSecretsBundlesForWorkspace(ctx, workspace, enabledBundles, reporter, strict)
 	if secretsSummary != nil {
 		result.SecretsSkippedReason = secretsSummary.SkippedReason
 		result.SecretsNoteCount = secretsSummary.NoteCount
@@ -399,7 +421,21 @@ func applySecretsPull(ctx context.Context, result *PullProjectAssetsResult, work
 		result.OrphanClearedBundles = append(result.OrphanClearedBundles, secretsSummary.Orphans.ClearedBundles...)
 		result.OrphanReportedOnly = append(result.OrphanReportedOnly, secretsSummary.Orphans.ReportedOnly...)
 	}
+	fillQuarantineInfo(result)
 	return err
+}
+
+// fillQuarantineInfo 在结果中附上剪枝隔离区的位置与保留期（需求 8.3）。
+// 隔离区不可用时不停机：结果字段留空，事件里给出告警。
+func fillQuarantineInfo(result *PullProjectAssetsResult) {
+	store, err := mustPruneQuarantineStore()
+	if err != nil {
+		result.NonFatalWarnings = append(result.NonFatalWarnings,
+			fmt.Sprintf("剪枝隔离区不可用: %v", err))
+		return
+	}
+	result.QuarantineBase = store.Root()
+	result.QuarantineRetention = store.Retention().String()
 }
 
 func uniqueWorkspaceIDEs(workspace Workspace, ideNames []string) []ide.IDE {

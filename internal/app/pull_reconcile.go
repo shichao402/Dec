@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/prune"
 	"github.com/shichao402/Dec/internal/secrets"
 	"github.com/shichao402/Dec/internal/secrets/handler"
 )
@@ -32,12 +33,14 @@ func (r OrphanCleanupReport) totalRemoved() int {
 }
 
 // pruneOrphanSecretsForTarget 在一次成功的 Bitwarden PullBundle 之后，
-// 以远端 Note/SSH 列表为权威，删除本 SyncTarget 下多余的本地落地。
+// 以远端 Note/SSH 列表为权威，把本 SyncTarget 下多余的本地落地移入隔离区。
 //
 // 安全边界：
-//   - 只删 AbsolutePath(LocalRoot, noteRel) 落点（ScanSyncRoot 已约束在同步根内）
-//   - SSH 只删 ~/.ssh/dec_<owner>_* 命名约定的 Dec 托管密钥
+//   - 判定「可移走」要求路径形态属于远端派生类型且本机有派生登记，杜绝误删手工内容
+//   - 只处理 AbsolutePath(LocalRoot, noteRel) 落点（ScanSyncRoot 已约束在同步根内）
+//   - SSH 只处理 ~/.ssh/dec_<owner>_* 命名约定的 Dec 托管密钥
 //   - 调用方必须已成功取回远端列表；取回失败时不得调用
+//   - 隔离区不可用时中止剪枝并显式报错，绝不退化为永久删除
 func pruneOrphanSecretsForTarget(
 	ctx context.Context,
 	projectRoot string,
@@ -45,108 +48,44 @@ func pruneOrphanSecretsForTarget(
 	remoteNotes []secrets.SecureNote,
 	remoteKeys []secrets.SSHKeyLanding,
 	reporter Reporter,
+	strict bool,
 ) OrphanCleanupReport {
 	reporter = defaultReporter(reporter)
+	executor, execErr := DefaultPruneExecutor()
+	if execErr != nil {
+		emit(reporter, EventError, "pull.prune",
+			fmt.Sprintf("无法进入剪枝流程（隔离区不可用），已中止以保护数据: %v", execErr), nil)
+		return OrphanCleanupReport{}
+	}
 	report := OrphanCleanupReport{}
 
-	keepNotes := make(map[string]struct{}, len(remoteNotes))
-	for _, note := range remoteNotes {
-		rel := strings.TrimSpace(note.RelativePath)
-		if rel == "" {
-			continue
+	decision := DecideTargetPrune(projectRoot, target, remoteNotes, remoteKeys, PruneScope{Strict: strict})
+	if len(decision.Warnings) > 0 {
+		for _, w := range decision.Warnings {
+			report.ReportedOnly = append(report.ReportedOnly, w)
+			emit(reporter, EventWarn, "pull.reconcile", w, nil)
 		}
-		keepNotes[rel] = struct{}{}
+	}
+	// 仍存在的 handler 惰性条目：先 revoke，再进隔离区。
+	for _, item := range decision.Removable() {
+		if handler.Default().Find(handler.SourceNote, item.RelPath) != nil {
+			if !revokeDerivedHandler(ctx, projectRoot, target, item, reporter) {
+				report.ReportedOnly = append(report.ReportedOnly, item.DisplayPath+"（revoke 失败）")
+				continue
+			}
+		}
 	}
 
-	localNotes, scanErr := secrets.ScanSyncRoot(projectRoot, target)
-	if scanErr != nil {
-		emit(reporter, EventWarn, "pull.reconcile",
-			fmt.Sprintf("扫描本地 %s 失败（跳过 secrets 孤儿清理）: %v", target.LocalRoot, scanErr), nil)
-		return report
+	result := executor.Execute(ctx, decision.Removable(), reporter)
+	report.RemovedSecretPaths = append(report.RemovedSecretPaths, result.RemovedSecretPaths...)
+	report.RemovedSSHKeys = append(report.RemovedSSHKeys, result.RemovedSSHKeys...)
+	report.ReportedOnly = append(report.ReportedOnly, result.Warnings...)
+	for _, w := range result.Warnings {
+		emit(reporter, EventWarn, "pull.prune", w, nil)
 	}
-	for _, note := range localNotes {
-		if _, ok := keepNotes[note.RelativePath]; ok {
-			continue
-		}
-		if handler.Default().Find(handler.SourceNote, note.RelativePath) != nil {
-			abs, absErr := secrets.AbsolutePath(projectRoot, target, note.RelativePath)
-			if absErr != nil {
-				report.ReportedOnly = append(report.ReportedOnly, note.RelativePath+"（解析 revoke 路径失败）")
-				continue
-			}
-			content, readErr := os.ReadFile(abs)
-			if readErr != nil {
-				report.ReportedOnly = append(report.ReportedOnly, note.RelativePath+"（读取 revoke 正文失败）")
-				continue
-			}
-			if _, revokeErr := handler.RevokeNotes(ctx, nil, []handler.Item{{
-				Source:        handler.SourceNote,
-				Name:          note.RelativePath,
-				NoteContent:   string(content),
-				ProjectRoot:   projectRoot,
-				BundleName:    target.Name,
-				ProjectScoped: !secrets.IsMachinePlane(target.Plane),
-			}}); revokeErr != nil {
-				emit(reporter, EventWarn, "pull.reconcile",
-					fmt.Sprintf("撤销孤儿 handler %s 失败: %v", note.RelativePath, revokeErr), nil)
-				report.ReportedOnly = append(report.ReportedOnly, note.RelativePath+"（revoke 失败）")
-				continue
-			}
-		}
-		display, err := removeLocalSecureNoteFile(projectRoot, target, note.RelativePath)
-		if err != nil {
-			emit(reporter, EventWarn, "pull.reconcile",
-				fmt.Sprintf("删除孤儿 Secure Note 失败 %s: %v", note.RelativePath, err), nil)
-			report.ReportedOnly = append(report.ReportedOnly, note.RelativePath+"（删除失败）")
-			continue
-		}
-		report.RemovedSecretPaths = append(report.RemovedSecretPaths, display)
-		emit(reporter, EventInfo, "pull.reconcile",
-			fmt.Sprintf("已清理孤儿 Secure Note %s（远端已无）", display), nil)
-	}
-	if len(report.RemovedSecretPaths) > 0 {
+
+	if len(result.RemovedSecretPaths) > 0 {
 		_ = removeEmptySecretDirs(projectRoot, target)
-	}
-
-	owner := secretsOwnerForTarget(target)
-	keepKeys := make(map[string]struct{}, len(remoteKeys))
-	for _, key := range remoteKeys {
-		name := strings.TrimSpace(key.Name)
-		if name == "" {
-			continue
-		}
-		keepKeys[name] = struct{}{}
-	}
-	localKeyNames := listLocalSSHKeyNamesForBundle(owner)
-	if !secrets.IsMachinePlane(target.Plane) {
-		var listErr error
-		localKeyNames, listErr = secrets.ListProjectSSHKeyNames(projectRoot, owner)
-		if listErr != nil {
-			emit(reporter, EventWarn, "pull.reconcile",
-				fmt.Sprintf("列出 project SSH Key 失败: %v", listErr), nil)
-			return report
-		}
-	}
-	for _, keyName := range localKeyNames {
-		if _, ok := keepKeys[keyName]; ok {
-			continue
-		}
-		var err error
-		if secrets.IsMachinePlane(target.Plane) {
-			err = secrets.RemoveSSHKeyLanding(owner, keyName)
-		} else {
-			err = secrets.RemoveProjectSSHKeyLanding(projectRoot, owner, keyName)
-		}
-		if err != nil {
-			emit(reporter, EventWarn, "pull.reconcile",
-				fmt.Sprintf("删除孤儿 SSH Key %s 失败: %v", keyName, err), nil)
-			report.ReportedOnly = append(report.ReportedOnly, "~/.ssh/dec_"+owner+"_"+keyName+"（删除失败）")
-			continue
-		}
-		label := owner + "/" + keyName
-		report.RemovedSSHKeys = append(report.RemovedSSHKeys, label)
-		emit(reporter, EventInfo, "pull.reconcile",
-			fmt.Sprintf("已清理孤儿 SSH Key %s（远端已无）", label), nil)
 	}
 
 	sort.Strings(report.RemovedSecretPaths)
@@ -154,36 +93,36 @@ func pruneOrphanSecretsForTarget(
 	return report
 }
 
+// revokeDerivedHandler 撤销一条惰性 handler 条目的本地落地（数据库/环境注入）。
+// 返回是否成功撤销。
+func revokeDerivedHandler(ctx context.Context, projectRoot string, target secrets.SyncTarget, item PruneItem, reporter Reporter) bool {
+	content, readErr := os.ReadFile(item.AbsPath)
+	if readErr != nil {
+		emit(reporter, EventWarn, "pull.prune",
+			fmt.Sprintf("读取 revoke 正文失败 %s: %v", item.DisplayPath, readErr), nil)
+		return false
+	}
+	if _, revokeErr := handler.RevokeNotes(ctx, nil, []handler.Item{{
+		Source:        handler.SourceNote,
+		Name:          item.RelPath,
+		NoteContent:   string(content),
+		ProjectRoot:   item.ProjectRoot,
+		BundleName:    item.Bundle,
+		ProjectScoped: item.Plane != string(secrets.SyncPlaneMachine),
+	}}); revokeErr != nil {
+		emit(reporter, EventWarn, "pull.prune",
+			fmt.Sprintf("撤销孤儿 handler %s 失败: %v", item.DisplayPath, revokeErr), nil)
+		return false
+	}
+	return true
+}
+
 // secretsOwnerForTarget 返回 SSH Key 落地文件名里的归属段：项目名。
 func secretsOwnerForTarget(target secrets.SyncTarget) string {
 	return target.Name
 }
 
-func removeLocalSecureNoteFile(projectRoot string, target secrets.SyncTarget, noteRel string) (string, error) {
-	display, err := secrets.RootRelPath(target, noteRel)
-	if err != nil {
-		return "", err
-	}
-	abs, err := secrets.AbsolutePath(projectRoot, target, noteRel)
-	if err != nil {
-		return "", err
-	}
-	rootAbs, err := secrets.ResolveAbsDir(projectRoot, target)
-	if err != nil {
-		return "", err
-	}
-	cleanAbs := filepath.Clean(abs)
-	cleanRoot := filepath.Clean(rootAbs)
-	rel, relErr := filepath.Rel(cleanRoot, cleanAbs)
-	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("拒绝删除同步根外路径 %s", display)
-	}
-	if err := os.Remove(cleanAbs); err != nil && !os.IsNotExist(err) {
-		return "", err
-	}
-	return display, nil
-}
-
+// removeEmptySecretDirs 递归清空同步根下的空目录，只动子树内部。
 func removeEmptySecretDirs(projectRoot string, target secrets.SyncTarget) error {
 	rootAbs, err := secrets.ResolveAbsDir(projectRoot, target)
 	if err != nil {
@@ -212,6 +151,7 @@ func removeEmptySecretDirs(projectRoot string, target secrets.SyncTarget) error 
 // reconcileMissingVaultBundles 处理「本次启用、但 Git vault 已无目录」的包。
 // vault 缺失已确认 → 摘两平面 enabled + known；secrets/SSH 仅在 Bitwarden 本轮已确认空时删除，否则只报告。
 func reconcileMissingVaultBundles(
+	ctx context.Context,
 	workspace Workspace,
 	enabledBundles []string,
 	vaultPresent map[string]struct{},
@@ -253,29 +193,76 @@ func reconcileMissingVaultBundles(
 		}
 
 		if secretsConfirmed[name] {
-			// 远端已对照过：整目录清扫（幂等；单项孤儿可能已在 prune 阶段删掉）。
+			// 远端已对照过：整目录清扫走隔离区（幂等；单项孤儿可能已在 prune 阶段搬走）。
+			executor, execErr := DefaultPruneExecutor()
+			if execErr != nil {
+				emit(reporter, EventError, "pull.reconcile",
+					fmt.Sprintf("隔离区不可用，已中止清理 %q 以保护数据: %v", name, execErr), nil)
+				for _, dir := range localSecretBundleDirsForPlane(workspace, name) {
+					report.ReportedOnly = append(report.ReportedOnly, dir+"（隔离区不可用，未清理）")
+				}
+				continue
+			}
 			for _, dir := range localSecretBundleDirsForPlane(workspace, name) {
-				if _, err := os.Stat(dir); err != nil {
+				info, statErr := os.Stat(dir)
+				if statErr != nil || !info.IsDir() {
 					continue
 				}
-				if err := os.RemoveAll(dir); err != nil {
-					emit(reporter, EventWarn, "pull.reconcile",
-						fmt.Sprintf("删除本地 secrets 目录失败 %s: %v", dir, err), nil)
-					report.ReportedOnly = append(report.ReportedOnly, dir)
+				item := PruneItem{
+					Kind:        "dir",
+					AbsPath:     dir,
+					DisplayPath: dir,
+					RelPath:     filepath.Base(dir),
+					Bundle:      name,
+					Plane:       string(workspace.EffectivePlane()),
+					ProjectRoot: workspace.Root,
+					IsDir:       true,
+					Class:       PruneClassRebuildable,
+					Reason:      prune.ReasonDerivedBundle,
+					Detail:      "vault+Bitwarden 均已确认无该包，本地目录为派生落地",
+				}
+				if workspace.EffectivePlane() == WorkspaceUser {
+					item.ProjectRoot = ""
+					item.DisplayPath = "~/.dec/secrets/" + filepath.Base(dir)
+				}
+				result := executor.Execute(ctx, []PruneItem{item}, reporter)
+				if len(result.Warnings) > 0 {
+					report.ReportedOnly = append(report.ReportedOnly, result.Warnings...)
 					continue
 				}
-				report.RemovedSecretPaths = append(report.RemovedSecretPaths, dir)
-				emit(reporter, EventInfo, "pull.reconcile",
-					fmt.Sprintf("已删本地 secrets 同步根 %s（vault+Bitwarden 均已确认）", dir), nil)
+				report.RemovedSecretPaths = append(report.RemovedSecretPaths, result.RemovedSecretPaths...)
 			}
 			for _, keyName := range listLocalSSHKeyNamesForBundle(name) {
-				if err := secrets.RemoveSSHKeyLanding(name, keyName); err != nil {
-					emit(reporter, EventWarn, "pull.reconcile",
-						fmt.Sprintf("清理 SSH Key %s 失败: %v", keyName, err), nil)
-					report.ReportedOnly = append(report.ReportedOnly, "~/.ssh/dec_"+name+"_"+keyName)
+				// 逐条走隔离区，保持密钥对可恢复。
+				item := PruneItem{
+					Kind:        "ssh_key",
+					RelPath:     keyName,
+					DisplayPath: "~/.ssh/dec_" + name + "_" + keyName,
+					Bundle:      name,
+					Plane:       string(workspace.EffectivePlane()),
+					ProjectRoot: workspace.Root,
+					Class:       PruneClassRebuildable,
+					Reason:      prune.ReasonSSHLanding,
+					Detail:      "vault+Bitwarden 均已确认，本地为 Dec 托管落地",
+				}
+				if workspace.EffectivePlane() == WorkspaceUser {
+					item.ProjectRoot = ""
+					if priv, pErr := secrets.MachineSSHKeyPrivatePath(name, keyName); pErr == nil {
+						item.AbsPath = priv
+					}
+				} else if priv, pErr := secrets.ProjectSSHKeyPrivatePath(workspace.Root, name, keyName); pErr == nil {
+					item.AbsPath = priv
+				}
+				if item.AbsPath == "" {
+					report.ReportedOnly = append(report.ReportedOnly, "~/.ssh/dec_"+name+"_"+keyName+"（路径解析失败）")
 					continue
 				}
-				report.RemovedSSHKeys = append(report.RemovedSSHKeys, name+"/"+keyName)
+				result := executor.Execute(ctx, []PruneItem{item}, reporter)
+				if len(result.RemovedSSHKeys) == 0 {
+					report.ReportedOnly = append(report.ReportedOnly, result.Warnings...)
+					continue
+				}
+				report.RemovedSSHKeys = append(report.RemovedSSHKeys, result.RemovedSSHKeys...)
 			}
 			continue
 		}

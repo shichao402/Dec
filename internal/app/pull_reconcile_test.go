@@ -40,7 +40,7 @@ func TestPruneOrphanProjectGCMRevokesBeforeDeletingNote(t *testing.T) {
 	restore := handler.SetDefault(reg)
 	t.Cleanup(restore)
 
-	report := pruneOrphanSecretsForTarget(context.Background(), projectRoot, target, nil, nil, nil)
+	report := pruneOrphanSecretsForTarget(context.Background(), projectRoot, target, nil, nil, nil, false)
 	if len(report.RemovedSecretPaths) != 1 || len(report.ReportedOnly) != 0 {
 		t.Fatalf("report = %#v", report)
 	}

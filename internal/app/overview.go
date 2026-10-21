@@ -43,6 +43,10 @@ type ProjectOverview struct {
 	EnabledProjects  []string
 	RequiredProjects []string
 	Quadrants        map[string]int
+	// QuarantineBase / QuarantineRetention 反映当前剪枝软删策略（需求 8.4）。
+	QuarantineBase      string `json:"quarantine_base,omitempty"`
+	QuarantineRetention string `json:"quarantine_retention,omitempty"`
+	QuarantineCount     int    `json:"quarantine_count,omitempty"`
 }
 
 func LoadProjectOverview(projectRoot string) (*ProjectOverview, error) {
@@ -172,7 +176,22 @@ func LoadWorkspaceOverviewOpts(workspace Workspace, opts OverviewLoadOpts) (*Pro
 		return nil, fmt.Errorf("检查项目变量文件失败: %w", err)
 	}
 
+	fillOverviewQuarantine(overview)
 	return overview, nil
+}
+
+// fillOverviewQuarantine 在状态里附上剪枝软删策略与当前占用（需求 8.4）。
+// 隔离区不可用是系统异常，但状态查询不应因此失败。
+func fillOverviewQuarantine(overview *ProjectOverview) {
+	store, err := mustPruneQuarantineStore()
+	if err != nil {
+		return
+	}
+	overview.QuarantineBase = store.Root()
+	overview.QuarantineRetention = store.Retention().String()
+	if entries, listErr := store.List(true); listErr == nil {
+		overview.QuarantineCount = len(entries)
+	}
 }
 
 // ResolveProjectName 按优先级解析项目短名：

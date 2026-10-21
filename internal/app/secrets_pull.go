@@ -359,10 +359,10 @@ func warnUnignoredSecrets(projectRoot string, landingPaths []string, reporter Re
 // pullEnabledSecretsBundles 拉取全部 SyncTarget。
 // 停用包不清理；对本次成功对照过远端的启用 SyncTarget，会 prune 本地孤儿 Note/SSH。
 func pullEnabledSecretsBundles(ctx context.Context, projectRoot string, enabledBundles []string, reporter Reporter) (*secretsPullSummary, error) {
-	return pullEnabledSecretsBundlesForWorkspace(ctx, NewWorkspace(WorkspaceProject, projectRoot), enabledBundles, reporter)
+	return pullEnabledSecretsBundlesForWorkspace(ctx, NewWorkspace(WorkspaceProject, projectRoot), enabledBundles, reporter, false)
 }
 
-func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Workspace, enabledBundles []string, reporter Reporter) (*secretsPullSummary, error) {
+func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Workspace, enabledBundles []string, reporter Reporter, strict bool) (*secretsPullSummary, error) {
 	reporter = defaultReporter(reporter)
 	projectRoot := workspace.Root
 	summary := &secretsPullSummary{}
@@ -378,7 +378,7 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 			emitOrphanCleanupSummary(summary.Orphans, reporter)
 			return
 		}
-		missing := reconcileMissingVaultBundles(workspace, enabledBundles, vaultPresent, secretsConfirmed, reporter)
+		missing := reconcileMissingVaultBundles(ctx, workspace, enabledBundles, vaultPresent, secretsConfirmed, reporter)
 		summary.Orphans.merge(missing)
 		emitOrphanCleanupSummary(summary.Orphans, reporter)
 	}
@@ -594,7 +594,7 @@ func pullEnabledSecretsBundlesForWorkspace(ctx context.Context, workspace Worksp
 		}
 
 		// 远端列表已成功取回 → 以远端为权威 prune 本地孤儿（停用包不在 plan 内，不会误清）。
-		pruned := pruneOrphanSecretsForTarget(ctx, projectRoot, target, fetchedNotes[i], fetchedKeys[i], reporter)
+		pruned := pruneOrphanSecretsForTarget(ctx, projectRoot, target, fetchedNotes[i], fetchedKeys[i], reporter, strict)
 		summary.Orphans.merge(pruned)
 		secretsConfirmed[target.Name] = true
 

@@ -566,6 +566,14 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		}
 		return app.CleanupLocalInstallation(ctx, in, reporter)
 	case "pull":
+		var in struct {
+			Plane  string `json:"plane,omitempty"`
+			Strict bool   `json:"strict,omitempty"`
+		}
+		_ = decode(payload, &in)
+		if in.Strict {
+			return app.PullWorkspaceAssetsStrict(ctx, workspace, "", reporter)
+		}
 		return app.PullWorkspaceAssets(ctx, workspace, "", reporter)
 	case "update_official":
 		var in struct {
@@ -585,6 +593,29 @@ func dispatchOperationWorkspace(ctx context.Context, operation string, workspace
 		return app.PreviewPushWorkspaceAssets(workspace)
 	case "preview_upload":
 		return app.PreviewUploadWorkspaceSecrets(workspace)
+	case "preview_pull":
+		return app.PreviewPullWorkspaceAssets(workspace)
+	case "list_quarantine":
+		var in struct{ IncludeExpired bool }
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		return app.ListQuarantine(in.IncludeExpired)
+	case "restore_quarantine":
+		var in struct{ IDs []string }
+		if err := decode(payload, &in); err != nil {
+			return nil, err
+		}
+		restored, skipped, rErr := app.RestoreQuarantine(in.IDs)
+		if rErr != nil {
+			return nil, rErr
+		}
+		return map[string]any{
+			"restored": restored,
+			"skipped":  skipped,
+		}, nil
+	case "summarize_quarantine":
+		return app.SummarizeQuarantine()
 	case "prepare_repo_gcm_bootstrap":
 		var in struct {
 			RepoURL string

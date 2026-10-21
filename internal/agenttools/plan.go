@@ -133,6 +133,22 @@ func Plan(name string, arguments json.RawMessage) *PlanResult {
 		return planPlanes(name, arguments, StepRun, "preview_push", nil)
 	case "dec_preview_upload":
 		return planPlanes(name, arguments, StepRun, "preview_upload", nil)
+	case "dec_preview_pull":
+		return planPlanes(name, arguments, StepRun, "preview_pull", nil)
+	case "dec_list_quarantine":
+		var in listQuarantineParams
+		if err := json.Unmarshal(arguments, &in); err != nil {
+			return planFail(name, err.Error())
+		}
+		return singleRun(name, "list_quarantine", "", "local", map[string]any{"IncludeExpired": in.IncludeExpired})
+	case "dec_restore_quarantine":
+		var in restoreQuarantineParams
+		if err := json.Unmarshal(arguments, &in); err != nil {
+			return planFail(name, err.Error())
+		}
+		return singleRun(name, "restore_quarantine", "", "local", map[string]any{"IDs": in.IDs})
+	case "dec_summarize_quarantine":
+		return singleRun(name, "summarize_quarantine", "", "local", nil)
 	case "dec_list_secrets":
 		var in listSecretsParams
 		if err := json.Unmarshal(arguments, &in); err != nil {

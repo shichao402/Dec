@@ -136,6 +136,30 @@ func catalog() []toolDef {
 				Sample:      previewUploadParams{},
 			},
 			{
+				Name:        "dec_preview_pull",
+				Description: "预览某平面 pull（dec_pull）将把哪些本地孤儿移入隔离区（plane=local|global|both，无副作用：不写本地、不删文件）。拉取前先预览确认范围。",
+				Owner:       OwnerServer,
+				Sample:      previewPullParams{},
+			},
+			{
+				Name:        "dec_list_quarantine",
+				Description: "列出剪枝隔离区条目（路径、判定理由、移入与到期时间；不含密钥内容）。可包含已过保留期的条目。",
+				Owner:       OwnerServer,
+				Sample:      listQuarantineParams{},
+			},
+			{
+				Name:        "dec_restore_quarantine",
+				Description: "把隔离区条目恢复到原始路径。ids 留空恢复全部未过期条目；恢复目标已存在时不覆盖并报告冲突。",
+				Owner:       OwnerServer,
+				Sample:      restoreQuarantineParams{},
+			},
+			{
+				Name:        "dec_summarize_quarantine",
+				Description: "查看剪枝隔离区现状：条目数、占用、保留期与 7 天内即将到期的清单。",
+				Owner:       OwnerServer,
+				Sample:      emptyParams{},
+			},
+			{
 				Name:        "dec_list_secrets",
 				Description: "列出某平面私密资产元数据（路径、本地/远端存在性、来源仓 origin_repo、仅密钥 identity_only、疑似孤儿 orphan、声明密钥平面 declared_plane；plane=local|global|both）。绝不返回 token/密钥/正文。",
 				Owner:       OwnerServer,

@@ -64,6 +64,7 @@ type listSubscriptionCandidatesParams struct {
 type pullParams struct {
 	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
 	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
+	Strict      bool   `json:"strict,omitempty" jsonschema:"严格一致：对默认保护的本地条目也移入隔离区（仍可恢复）。默认 false（仅隔离可重建条目）。"`
 }
 
 type pushParams struct {
@@ -161,4 +162,17 @@ type installSSHKeyParams struct {
 	Name      string `json:"name,omitempty" jsonschema:"复用已有 .sshkey/<name> 条目时填；留空自动生成新钥"`
 	SSHTarget string `json:"ssh_target" jsonschema:"系统 ssh 目标：Host 别名、user@host 或 host:port；密码登录用它"`
 	Confirmed bool   `json:"confirmed" jsonschema:"首次写远端 authorized_keys 属远程变更，必须显式设为 true"`
+}
+
+type previewPullParams struct {
+	ProjectRoot string `json:"project_root,omitempty" jsonschema:"项目根；plane 为 local 或 both 时必填"`
+	Plane       string `json:"plane,omitempty" jsonschema:"作用平面：local|global|both（旧名 project|user）。留空默认 local。"`
+}
+
+type listQuarantineParams struct {
+	IncludeExpired bool `json:"include_expired,omitempty" jsonschema:"是否包含已过保留期的条目（默认 false）"`
+}
+
+type restoreQuarantineParams struct {
+	IDs []string `json:"ids,omitempty" jsonschema:"要恢复的隔离项 ID；留空恢复全部未过期条目"`
 }
