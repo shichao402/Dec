@@ -1,483 +1,293 @@
-# 产品流水线只生产、合并 ArtifactSet。RUP endpoint、上传 token、签名私钥和
-# publish transaction 只属于独立 Operator；本 workflow 不接触它们。
-
 name: Release
+
+# 发布与部署（需求 21）。
+#
+# 一个 tag 走完全程：交叉编译 → 发布清单 → GitHub Release → 部署到服务器。
+#
+# 三条硬约束来自需求，改动这个文件前先看：
+#
+#   1. 所有平台的二进制都在 Linux runner 上用 Go 交叉编译（需求 21.1）。
+#      免费套餐下私有仓库额度有限，macOS/Windows runner 的分钟数分别按
+#      10 倍和 2 倍计算，用它们构建纯属浪费。
+#   2. 部署只在 refs/tags/v* 上运行（需求 21.7）。免费套餐没有 environment
+#      保护规则，这条是本仓库唯一能拦“非 tag 触发部署”的闸门。
+#   3. 协议版本变了而要求版本没变时构建失败（需求 19.2）。反过来说，
+#      只改服务端时可以显式沿用上一个要求版本，不必让所有设备跟着升级。
 
 on:
   push:
     tags:
-      - "stable/v*"
-  workflow_dispatch:
-    inputs:
-      channel:
-        description: RUP channel when not triggered by a channel tag
-        type: choice
-        options:
-          - stable
-        default: stable
+      - "v*"
+
+# 同一时刻只允许一次发布在跑：两次并发部署会互相覆盖快照。
 concurrency:
-  group: dec-artifacts-${{ github.ref }}
+  group: dec-release
   cancel-in-progress: false
 
 permissions:
   contents: write
 
 env:
-  RELKIT_CANDIDATE_ROOT_FINGERPRINT: ${{ vars.RELKIT_CANDIDATE_ROOT_FINGERPRINT }}
+  GOFLAGS: -mod=mod
+  # go.work 指向本地 ../relkit，CI 上没有这个目录；关掉 workspace 用单模块构建。
+  GOWORK: "off"
+  CGO_ENABLED: "0"
 
 jobs:
-  prepare:
-    name: prepare
+  build:
+    name: 构建与发布
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
-      channel: ${{ steps.meta.outputs.channel }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Resolve version and channel
-        id: meta
-        shell: bash
-        env:
-          RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME:-}"
-          case "$TAG" in
-            stable/*)
-              CHANNEL=stable
-              VERSION="${TAG#stable/}"
-              ;;
-            *)
-              CHANNEL="${RELEASE_CHANNEL:-stable}"
-              VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
-              echo "非渠道 tag 触发（ref=$TAG），使用 version.json=$VERSION channel=$CHANNEL"
-              ;;
-          esac
-
-          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "无效版本号: $VERSION（期望 vMAJOR.MINOR.PATCH）"
-            exit 1
-          fi
-          if [[ "$CHANNEL" != "stable" ]]; then
-            echo "无效渠道: $CHANNEL（只支持 stable）"
-            exit 1
-          fi
-
-          FILE_VER=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
-          if [ "$FILE_VER" != "$VERSION" ]; then
-            echo "version.json ($FILE_VER) 与发布版本 ($VERSION) 不一致"
-            exit 1
-          fi
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION channel=$CHANNEL tag=$TAG"
-
-  test:
-    name: test
-    needs: prepare
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.3"
-
-      - name: Install signed Operator bundle
-        env:
-          OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
-          OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
-          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
-          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
-        run: |
-          set -euo pipefail
-          test -n "$OPS_URL" && test -n "$OPS_SHA256"
-          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
-          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
-          test "$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')" = "$OPS_SHA256"
-          chmod 755 "$RUNNER_TEMP/relkit-ops"
-          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
-          test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
-          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
-          install_args=(
-            bundle install
-            --bundle "$RUNNER_TEMP/relkit-bundle"
-            --project relkit.project.json
-            --project-root "$GITHUB_WORKSPACE"
-            --home "$RUNNER_TEMP/relkit-home"
-            --target linux-amd64
-          )
-          if [ -n "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ]; then
-            install_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
-          fi
-          "$RUNNER_TEMP/relkit-ops" "${install_args[@]}"
-          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
-
-      - name: go test
-        run: |
-          ./relkitw doctor
-          GOFLAGS="-modfile=.relkit/components/sdk/go/relkit.mod" go test ./...
-
-      - name: producer contract tests
-        run: python3 -m unittest scripts/test_relkit_producer.py
-
-  build:
-    name: ArtifactSet (${{ matrix.target }})
-    needs: [prepare, test]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-amd64
-            runner: ubuntu-latest
-            host_target: linux-amd64
-          - target: linux-arm64
-            runner: ubuntu-latest
-            host_target: linux-amd64
-          - target: windows-amd64
-            runner: windows-latest
-            host_target: windows-amd64
-          - target: darwin-amd64
-            runner: macos-15-intel
-            host_target: darwin-amd64
-          - target: darwin-arm64
-            runner: macos-15
-            host_target: darwin-arm64
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.3"
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup MSVC build tools
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-        with:
-          arch: x64
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: client/src-tauri
-          prefix-key: rust-cache-${{ runner.os }}
-
-      - name: Install signed Operator bundle (Unix)
-        if: runner.os != 'Windows'
-        env:
-          OPS_URL: ${{ runner.os == 'macOS' && vars.RELKIT_OPS_DARWIN_URL || vars.RELKIT_OPS_LINUX_URL }}
-          OPS_SHA256: ${{ runner.os == 'macOS' && vars.RELKIT_OPS_DARWIN_SHA256 || vars.RELKIT_OPS_LINUX_SHA256 }}
-          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
-          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
-        run: |
-          set -euo pipefail
-          test -n "$OPS_URL" && test -n "$OPS_SHA256"
-          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
-          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
-          if [ "$RUNNER_OS" = macOS ]; then HASH="$(shasum -a 256 "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')"; else HASH="$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')"; fi
-          test "$HASH" = "$OPS_SHA256"
-          chmod 755 "$RUNNER_TEMP/relkit-ops"
-          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
-          if [ "$RUNNER_OS" = macOS ]; then HASH="$(shasum -a 256 "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')"; else HASH="$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')"; fi
-          test "$HASH" = "$BUNDLE_SHA256"
-          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
-          install_args=(
-            bundle install
-            --bundle "$RUNNER_TEMP/relkit-bundle"
-            --project relkit.project.json
-            --project-root "$GITHUB_WORKSPACE"
-            --home "$RUNNER_TEMP/relkit-home"
-            --target "${{ matrix.host_target }}"
-          )
-          if [ -n "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ]; then
-            install_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
-          fi
-          "$RUNNER_TEMP/relkit-ops" "${install_args[@]}"
-          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
-
-      - name: Install signed Operator bundle (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          OPS_URL: ${{ vars.RELKIT_OPS_WINDOWS_URL }}
-          OPS_SHA256: ${{ vars.RELKIT_OPS_WINDOWS_SHA256 }}
-          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
-          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
-        run: |
-          if (-not $env:OPS_URL -or -not $env:OPS_SHA256 -or
-              -not $env:BUNDLE_URL -or -not $env:BUNDLE_SHA256) {
-            throw "Relkit Operator bundle variables are not configured"
-          }
-          $ops = Join-Path $env:RUNNER_TEMP "relkit-ops.exe"
-          $archive = Join-Path $env:RUNNER_TEMP "relkit-bundle.zip"
-          $bundle = Join-Path $env:RUNNER_TEMP "relkit-bundle"
-          Invoke-WebRequest -UseBasicParsing $env:OPS_URL -OutFile $ops
-          if ((Get-FileHash $ops -Algorithm SHA256).Hash.ToLower() -ne $env:OPS_SHA256.ToLower()) {
-            throw "relkit-ops digest mismatch"
-          }
-          Invoke-WebRequest -UseBasicParsing $env:BUNDLE_URL -OutFile $archive
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLower() -ne $env:BUNDLE_SHA256.ToLower()) {
-            throw "Operator bundle digest mismatch"
-          }
-          Expand-Archive -Path $archive -DestinationPath $bundle -Force
-          $relkitHome = Join-Path $env:RUNNER_TEMP "relkit-home"
-          $installArgs = @(
-            "bundle", "install",
-            "--bundle", $bundle,
-            "--project", "relkit.project.json",
-            "--project-root", $env:GITHUB_WORKSPACE,
-            "--home", $relkitHome,
-            "--target", "${{ matrix.host_target }}"
-          )
-          if ($env:RELKIT_CANDIDATE_ROOT_FINGERPRINT) {
-            $installArgs += @("--candidate-root-fingerprint", $env:RELKIT_CANDIDATE_ROOT_FINGERPRINT)
-          }
-          & $ops @installArgs
-          if ($LASTEXITCODE -ne 0) { throw "Operator bundle install failed" }
-          "RELKIT_HOME=$relkitHome" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Produce ArtifactSet (Unix)
-        if: runner.os != 'Windows'
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
-        run: |
-          ./relkitw artifacts produce \
-            --version "$VERSION" \
-            --channel "$CHANNEL" \
-            --target "${{ matrix.target }}" \
-            --out-dir "dist/relkit-artifact-set/${{ matrix.target }}" \
-            --out "dist/relkit-artifact-set/${{ matrix.target }}/artifact-set.json"
-
-      - name: Produce ArtifactSet (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
-        run: |
-          .\relkitw.cmd artifacts produce `
-            --version $env:VERSION `
-            --channel $env:CHANNEL `
-            --target "${{ matrix.target }}" `
-            --out-dir "dist/relkit-artifact-set/${{ matrix.target }}" `
-            --out "dist/relkit-artifact-set/${{ matrix.target }}/artifact-set.json"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: relkit-artifact-set-${{ matrix.target }}
-          path: dist/relkit-artifact-set/${{ matrix.target }}/
-          if-no-files-found: error
-          retention-days: 30
-
-  collect:
-    name: Merge ArtifactSets
-    needs: [prepare, build]
-    runs-on: ubuntu-latest
+      required: ${{ steps.meta.outputs.required }}
+      commit: ${{ steps.meta.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 需要完整历史来比较上一个 tag 与 HEAD 的差异，判断客户端有没有改动。
+          fetch-depth: 0
 
-      - name: Install signed Operator bundle
-        env:
-          OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
-          OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
-          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
-          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 校验 tag 格式
         run: |
           set -euo pipefail
-          test -n "$OPS_URL" && test -n "$OPS_SHA256"
-          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
-          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
-          test "$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')" = "$OPS_SHA256"
-          chmod 755 "$RUNNER_TEMP/relkit-ops"
-          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
-          test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
-          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
-          install_args=(
-            bundle install
-            --bundle "$RUNNER_TEMP/relkit-bundle"
-            --project relkit.project.json
-            --project-root "$GITHUB_WORKSPACE"
-            --home "$RUNNER_TEMP/relkit-home"
-            --target linux-amd64
-          )
-          if [ -n "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ]; then
-            install_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
+          tag="${GITHUB_REF_NAME}"
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "tag 必须形如 v1.2.3，实际 $tag" >&2
+            exit 1
           fi
-          "$RUNNER_TEMP/relkit-ops" "${install_args[@]}"
-          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
 
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: relkit-artifact-set-*
-          path: artifacts
-
-      - name: Merge and verify five ArtifactSets
+      - name: 计算版本与要求版本
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          ./relkitw artifacts merge \
-            --in artifacts/relkit-artifact-set-linux-amd64/artifact-set.json \
-            --in artifacts/relkit-artifact-set-linux-arm64/artifact-set.json \
-            --in artifacts/relkit-artifact-set-windows-amd64/artifact-set.json \
-            --in artifacts/relkit-artifact-set-darwin-amd64/artifact-set.json \
-            --in artifacts/relkit-artifact-set-darwin-arm64/artifact-set.json \
-            --out dist/relkit-artifact-set/merged/artifact-set.json
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          commit="$(git rev-parse HEAD)"
+          proto="$(grep -E '^const Version = ' internal/proto/proto.go | grep -oE '[0-9]+')"
+          test -n "$proto"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: relkit-artifact-set-merged
-          path: dist/relkit-artifact-set/merged/
-          if-no-files-found: error
-          retention-days: 30
+          # 上一个 release tag（按语义版本排序里最接近的那个）。
+          prev_tag="$(git tag --list 'v*' --sort=-v:refname | grep -vx "$tag" | head -n1 || true)"
 
-      - name: Prepare Console installers
+          required="$tag"
+          prev_required=""
+          prev_proto=""
+          if [ -n "$prev_tag" ]; then
+            # 上一个发布清单是协议版本与要求版本的唯一可信来源：
+            # 它是当时实际部署的内容，比仓库里的任何文件都准。
+            if gh release download "$prev_tag" --pattern release.json --dir "$RUNNER_TEMP/prev" 2>/dev/null; then
+              prev_proto="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("protocol",""))' "$RUNNER_TEMP/prev/release.json")"
+              prev_required="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("required_client",""))' "$RUNNER_TEMP/prev/release.json")"
+            fi
+          fi
+
+          # 客户端没改动就沿用上一个要求版本（需求 19.2）：
+          # 只修服务端时不该让所有设备都去下载一遍。
+          if [ -n "$prev_tag" ] && [ -n "$prev_required" ]; then
+            if git diff --quiet "$prev_tag"..HEAD -- cmd/dec-agent internal/agent internal/proto; then
+              required="$prev_required"
+              echo "客户端无改动，沿用要求版本 $required"
+            fi
+          fi
+
+          # 协议变了却没人升级要求版本，等于把不兼容的变更悄悄推给旧代理。
+          if [ -n "$prev_proto" ] && [ "$prev_proto" != "$proto" ] && [ "$required" = "$prev_required" ]; then
+            echo "协议版本从 $prev_proto 变为 $proto，但要求版本仍是 $required；请提升版本或修正协议" >&2
+            exit 1
+          fi
+
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+          echo "required=$required" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "protocol=$proto" >> "$GITHUB_OUTPUT"
+          echo "版本 $tag，要求代理版本 $required，协议 $proto，commit $commit"
+
+      - name: 测试
+        run: go test ./...
+
+      - name: 交叉编译
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
         run: |
+          set -euo pipefail
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ldflags="-s -w -X main.Version=$VERSION -X main.BuildTime=$built_at"
+          mkdir -p dist
+
+          # 服务端只有 Linux：它就跑在那一台机器上。
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "$ldflags" \
+              -o "dist/dec-cloud-linux-$arch" ./cmd/dec-cloud
+          done
+
+          # 客户端覆盖日常会用到的平台组合（需求 2.9 的通用二进制）。
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            os="${target%%/*}"
+            arch="${target##*/}"
+            out="dist/dec-agent-$os-$arch"
+            if [ "$os" = "windows" ]; then
+              out="$out.exe"
+            fi
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "$ldflags" \
+              -o "$out" ./cmd/dec-agent
+          done
+
+          ls -l dist
+
+      - name: 生成发布清单
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          REQUIRED: ${{ steps.meta.outputs.required }}
+          PROTOCOL: ${{ steps.meta.outputs.protocol }}
+        run: |
+          set -euo pipefail
           python3 - <<'PY'
-          import json, shutil
-          from pathlib import Path
-          root = Path("dist/relkit-artifact-set/merged")
-          doc = json.loads((root / "artifact-set.json").read_text())
-          release = Path("release-assets")
-          release.mkdir()
-          consoles = [
-              item for item in doc["artifacts"]
-              if item["kind"] == "installer"
-              and item["selectors"].get("component") == "console"
-              and item["selectors"].get("audience") == "user"
-          ]
-          if len(consoles) != 3:
-              raise SystemExit(f"expected three Console installers, got {len(consoles)}")
-          for item in consoles:
-              source = root / item["path"]
-              shutil.copy2(source, release / source.name)
+          import hashlib, json, os, pathlib
+
+          dist = pathlib.Path("dist")
+          files = []
+          for p in sorted(dist.iterdir()):
+              if not p.is_file() or p.name == "release.json":
+                  continue
+              stem = p.name
+              if stem.endswith(".exe"):
+                  stem = stem[:-4]
+              # dec-agent-<os>-<arch>
+              _, kind, os_name, arch = stem.split("-", 3)
+              data = p.read_bytes()
+              files.append({
+                  "name": p.name,
+                  "os": os_name,
+                  "arch": arch,
+                  "sha256": hashlib.sha256(data).hexdigest(),
+                  "size": len(data),
+              })
+
+          # 下载通道只列客户端：服务端二进制不该出现在公网下载页上。
+          files = [f for f in files if f["name"].startswith("dec-agent-")]
+          manifest = {
+              "version": os.environ["VERSION"],
+              "required_client": os.environ["REQUIRED"],
+              "protocol": int(os.environ["PROTOCOL"]),
+              "built_at": __import__("datetime").datetime.now(
+                  __import__("datetime").timezone.utc
+              ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "files": files,
+          }
+          pathlib.Path("dist/release.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+          )
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
           PY
 
-      - name: Upload Console installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: dec-console-installers
-          path: release-assets/
-          if-no-files-found: error
-          retention-days: 30
+      - name: 发布 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          REQUIRED: ${{ steps.meta.outputs.required }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+        run: |
+          set -euo pipefail
+          {
+            echo "版本 \`$VERSION\`"
+            echo
+            echo "- 要求代理版本：\`$REQUIRED\`"
+            echo "- commit：\`$COMMIT\`"
+            echo
+            echo "部署由本工作流自动完成；下载通道以服务端 \`/download\` 为准。"
+          } > notes.md
+          gh release create "$VERSION" dist/* \
+            --title "$VERSION" \
+            --notes-file notes.md \
+            --verify-tag
 
-  operator-publish:
-    name: Operator publish and verify
-    needs: [prepare, collect]
+  deploy:
+    name: 部署到服务器
+    needs: build
     runs-on: ubuntu-latest
-    environment: relkit-operator
+    # 需求 21.7：免费套餐没有 environment 保护规则，这条 if 是唯一的调用范围限制。
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install signed Operator bundle
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 取回发布产物
         env:
-          OPS_URL: ${{ vars.RELKIT_OPS_LINUX_URL }}
-          OPS_SHA256: ${{ vars.RELKIT_OPS_LINUX_SHA256 }}
-          BUNDLE_URL: ${{ vars.RELKIT_BUNDLE_URL }}
-          BUNDLE_SHA256: ${{ vars.RELKIT_BUNDLE_SHA256 }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
           set -euo pipefail
-          test -n "$OPS_URL" && test -n "$OPS_SHA256"
-          test -n "$BUNDLE_URL" && test -n "$BUNDLE_SHA256"
-          curl -fsSL "$OPS_URL" -o "$RUNNER_TEMP/relkit-ops"
-          test "$(sha256sum "$RUNNER_TEMP/relkit-ops" | awk '{print $1}')" = "$OPS_SHA256"
-          chmod 755 "$RUNNER_TEMP/relkit-ops"
-          curl -fsSL "$BUNDLE_URL" -o "$RUNNER_TEMP/relkit-bundle.zip"
-          test "$(sha256sum "$RUNNER_TEMP/relkit-bundle.zip" | awk '{print $1}')" = "$BUNDLE_SHA256"
-          unzip -q "$RUNNER_TEMP/relkit-bundle.zip" -d "$RUNNER_TEMP/relkit-bundle"
-          install_args=(
-            bundle install
-            --bundle "$RUNNER_TEMP/relkit-bundle"
-            --project relkit.project.json
-            --project-root "$GITHUB_WORKSPACE"
-            --home "$RUNNER_TEMP/relkit-home"
-            --target linux-amd64
+          mkdir -p dist
+          gh release download "$VERSION" --pattern '*' --dir dist
+          ls -l dist
+
+      - name: 组装部署包
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          REQUIRED: ${{ needs.build.outputs.required }}
+          COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          set -euo pipefail
+          mkdir -p payload
+          cp dist/dec-cloud-linux-amd64 payload/dec-cloud
+          cp dist/release.json payload/release.json
+          # 客户端二进制随服务端一起上传（需求 20.2）：服务端不主动去外部拉取。
+          mkdir -p payload/download
+          cp dist/dec-agent-* payload/download/
+
+          python3 - "$VERSION" "$REQUIRED" "$COMMIT" <<'PY'
+          import json, os, sys
+          version, required, commit = sys.argv[1:4]
+          json.dump(
+              {"version": version, "required": required, "commit": commit,
+               "tag": version},
+              open("payload/args.json", "w"),
+              ensure_ascii=False, indent=2,
           )
-          if [ -n "${RELKIT_CANDIDATE_ROOT_FINGERPRINT:-}" ]; then
-            install_args+=(--candidate-root-fingerprint "$RELKIT_CANDIDATE_ROOT_FINGERPRINT")
-          fi
-          "$RUNNER_TEMP/relkit-ops" "${install_args[@]}"
-          echo "RELKIT_HOME=$RUNNER_TEMP/relkit-home" >> "$GITHUB_ENV"
+          PY
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: relkit-artifact-set-merged
-          path: dist/relkit-artifact-set/merged
+          tar -C payload -cf payload.tar .
+          ls -l payload.tar
 
-      - name: Publish and verify signed release
+      - name: 配置 SSH
         env:
-          RELKIT_UPLOAD_TOKEN: ${{ secrets.RELKIT_UPLOAD_TOKEN }}
-          RELKIT_RELEASE_VIA_CI: "1"
-          VERSION: ${{ needs.prepare.outputs.version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          test -n "$RELKIT_UPLOAD_TOKEN"
-          ./relkitw stage \
-            --artifact-set dist/relkit-artifact-set/merged/artifact-set.json
-          ./relkitw release --version "$VERSION"
-          release_log="$RUNNER_TEMP/relkit-release-execute.log"
-          set +e
-          ./relkitw release --version "$VERSION" --execute 2>&1 | tee "$release_log"
-          release_rc=${PIPESTATUS[0]}
-          set -e
-          if [ "$release_rc" -ne 0 ] && \
-             ! grep -Fq 'release commit could not be verified from consumer-visible backends' "$release_log"; then
-            exit "$release_rc"
-          fi
+          test -n "$DEPLOY_KEY" || { echo "缺少 DEPLOY_SSH_KEY" >&2; exit 1; }
+          test -n "$KNOWN_HOSTS" || { echo "缺少 DEPLOY_KNOWN_HOSTS" >&2; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # 预置 host key（需求 21.6）：绝不自动接受未知的 host key。
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
-          # v0.6.14 may have committed successfully before its immediate consumer
-          # readback observes the write. Never execute the immutable release again;
-          # verify the same resolution/version/channel with bounded retries instead.
-          verified=0
-          for delay in 0 2 5 10 20 30; do
-            if [ "$delay" -gt 0 ]; then sleep "$delay"; fi
-            if ./relkitw verify released --version "$VERSION" --channel "$CHANNEL"; then
-              verified=1
-              break
-            fi
-          done
-          if [ "$verified" -ne 1 ]; then
-            echo "release was not consumer-visible after bounded verification" >&2
-            if [ "$release_rc" -ne 0 ]; then exit "$release_rc"; fi
-            exit 1
-          fi
-
-  github-release:
-    name: GitHub Release
-    needs: [prepare, collect, operator-publish]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dec-console-installers
-          path: release-assets
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: stable/${{ needs.prepare.outputs.version }}
-          name: Release ${{ needs.prepare.outputs.version }}
-          body: |
-            Dec `${{ needs.prepare.outputs.version }}`
-
-            本页提供 Console 人工安装包；同一版本已通过独立 Operator 完成
-            RUP 发布和 released-state 验证。
-          files: release-assets/*
-          fail_on_unmatched_files: true
-          generate_release_notes: true
+      - name: 执行部署
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST" || { echo "缺少 DEPLOY_HOST" >&2; exit 1; }
+          user="${DEPLOY_USER:-deploy}"
+          # 部署入口由 authorized_keys 的 command= 强制指定（需求 21.6），
+          # 这里的命令只是一个占位；参数与产物全部走 stdin 的 tar 流，
+          # 因此没有任何可以注入的位置。
+          ssh -i ~/.ssh/id_deploy \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes \
+              -o ServerAliveInterval=30 \
+              "$user@$DEPLOY_HOST" deploy < payload.tar

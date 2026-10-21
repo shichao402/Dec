@@ -70,11 +70,46 @@ type APIClient struct {
 	Token  string
 	HTTP   *http.Client
 
+	// userKey 非空时优先于进程全局 vault key。
+	// 云端需要在一台服务器上同时服务多次短生命周期会话，不能依赖进程单例；
+	// 旧路径不设置这个字段，行为与之前完全一致。
+	userKey []byte
+
 	snapshotMu sync.Mutex
 	folders    []bwFolder
 	foldersOK  bool
 	ciphers    []bwCipher
 	ciphersOK  bool
+}
+
+// vaultKey 返回本次调用应使用的 vault 密钥：实例级优先，其次进程全局。
+func (c *APIClient) vaultKey() []byte {
+	if c != nil && len(c.userKey) > 0 {
+		return c.userKey
+	}
+	return UserKey()
+}
+
+// SetVaultKey 给这个客户端实例绑定一份 vault 密钥，不影响进程全局状态。
+//
+// 云端为一台服务器上的多个短生命周期会话服务，必须能显式注入密钥；
+// 旧路径从不调用它，因此行为不变。
+func (c *APIClient) SetVaultKey(key []byte) {
+	if c == nil {
+		return
+	}
+	c.userKey = append([]byte(nil), key...)
+}
+
+// ClearVaultKey 清掉实例上的 vault 密钥。
+func (c *APIClient) ClearVaultKey() {
+	if c == nil {
+		return
+	}
+	for i := range c.userKey {
+		c.userKey[i] = 0
+	}
+	c.userKey = nil
 }
 
 // NewAPIClient 创建带 session 的 Vault API 客户端。
@@ -101,7 +136,7 @@ func (c *APIClient) httpClient() *http.Client {
 }
 
 func (c *APIClient) PullBundle(ctx context.Context, req PullBundleRequest) (*PullBundleResult, error) {
-	userKey := UserKey()
+	userKey := c.vaultKey()
 	if len(userKey) == 0 {
 		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
@@ -147,7 +182,7 @@ func (c *APIClient) PushBundle(ctx context.Context, req PushBundleRequest, notes
 	if err := RequireDeclared(req.Target); err != nil {
 		return nil, err
 	}
-	userKey := UserKey()
+	userKey := c.vaultKey()
 	if len(userKey) == 0 {
 		return nil, fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
@@ -209,7 +244,7 @@ func (c *APIClient) CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) e
 	if err := RequireDeclared(req.Target); err != nil {
 		return err
 	}
-	userKey := UserKey()
+	userKey := c.vaultKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
@@ -269,7 +304,7 @@ func (c *APIClient) DeleteSecureNote(ctx context.Context, req DeleteSecureNoteRe
 	if err != nil {
 		return err
 	}
-	userKey := UserKey()
+	userKey := c.vaultKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
@@ -311,7 +346,7 @@ func (c *APIClient) DeleteAddress(ctx context.Context, address string) error {
 	if types.IsValidPName(folderName) {
 		return fmt.Errorf("拒绝删除项目 folder %q", folderName)
 	}
-	userKey := UserKey()
+	userKey := c.vaultKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
@@ -385,7 +420,7 @@ func (c *APIClient) DeleteSSHKey(ctx context.Context, req DeleteSSHKeyRequest) e
 	if err != nil {
 		return err
 	}
-	userKey := UserKey()
+	userKey := c.vaultKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
@@ -417,7 +452,7 @@ func (c *APIClient) UpdateSSHKeyHosts(ctx context.Context, req UpdateSSHKeyHosts
 	if err := RequireDeclared(req.Target); err != nil {
 		return err
 	}
-	userKey := UserKey()
+	userKey := c.vaultKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
@@ -453,7 +488,7 @@ func (c *APIClient) RenameSecureNote(ctx context.Context, req RenameSecureNoteRe
 	if err := RequireDeclared(req.Target); err != nil {
 		return err
 	}
-	userKey := UserKey()
+	userKey := c.vaultKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}
@@ -499,7 +534,7 @@ func (c *APIClient) RenameSSHKey(ctx context.Context, req RenameSSHKeyRequest) e
 	if err := RequireDeclared(req.Target); err != nil {
 		return err
 	}
-	userKey := UserKey()
+	userKey := c.vaultKey()
 	if len(userKey) == 0 {
 		return fmt.Errorf("Bitwarden vault 密钥未就绪，请重新解锁")
 	}

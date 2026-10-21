@@ -8,9 +8,9 @@ import (
 
 // 点类型目录：统一识别与 BW 侧规范名前缀。
 const (
-	TypeDirGCM     = ".gcm"
-	TypeDirEnv     = ".env"
-	TypeDirSSHKey  = ".sshkey"
+	TypeDirGCM      = ".gcm"
+	TypeDirEnv      = ".env"
+	TypeDirSSHKey   = ".sshkey"
 	TypeDirPassword = ".password" // ADR 0036 设备密码条目目录
 )
 
@@ -18,10 +18,10 @@ const (
 type SecretTypeID string
 
 const (
-	SecretTypeGCM     SecretTypeID = "gcm"
-	SecretTypeEnv     SecretTypeID = "env"
-	SecretTypeSSHKey  SecretTypeID = "sshkey"
-	SecretTypePlain   SecretTypeID = "note" // 非点目录普通 Note
+	SecretTypeGCM      SecretTypeID = "gcm"
+	SecretTypeEnv      SecretTypeID = "env"
+	SecretTypeSSHKey   SecretTypeID = "sshkey"
+	SecretTypePlain    SecretTypeID = "note"     // 非点目录普通 Note
 	SecretTypePassword SecretTypeID = "password" // ADR 0036 设备密码（凭据通道专用）
 )
 
