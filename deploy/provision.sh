@@ -102,33 +102,11 @@ fi
 # 部署脚本放在只有 root 可写的路径：部署账户能执行但不能改。
 install -d -m 755 -o root -g root /usr/local/lib/dec-cloud
 
-# --- SSH 加固（需求 16.3a、21.6）----------------------------------------
-
-sshd_dropin=/etc/ssh/sshd_config.d/99-dec-cloud.conf
-mkdir -p /etc/ssh/sshd_config.d
-cat >"$sshd_dropin" <<EOF
-# Dec Cloud 的 SSH 基线。
-# 只允许公钥登录，禁止密码与 root 直接登录，并限制可登录的账号。
-PubkeyAuthentication yes
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PermitRootLogin no
-AllowUsers $DEPLOY_USER $OPS_USER
-X11Forwarding no
-AllowAgentForwarding no
-AllowTcpForwarding no
-MaxAuthTries 3
-EOF
-
-# 先验证配置再 reload：写坏了 sshd 配置比不加固更危险。
-if ! sshd -t; then
-  rm -f "$sshd_dropin"
-  die "sshd 配置校验失败，已移除本次写入的配置，未 reload"
-fi
-systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
-log "SSH 已加固：仅公钥登录，禁止 root，仅允许 $DEPLOY_USER 与 $OPS_USER"
-
 # --- authorized_keys ----------------------------------------------------
+#
+# 先写 key，再改 SSH 配置。顺序很重要：一旦 PermitRootLogin no 生效，
+# 只有这两个账号能进来；如果它们还没有 authorized_keys，就等于把门锁死
+# 而钥匙还没配好。已经建立的会话不受影响，但下一次连接就进不来了。
 #
 # 部署账户的 key 用 command= 锁死到部署入口（需求 21.6）：
 # 即使私钥泄漏，攻击者也只能触发一次部署，拿不到 shell。
@@ -153,6 +131,40 @@ if [ -n "$OPS_KEY" ]; then
   chmod 600 "$ops_home/.ssh/authorized_keys"
   log "运维账户 $OPS_USER 已配置公钥"
 fi
+
+# --- SSH 加固（需求 16.3a、21.6）----------------------------------------
+
+sshd_dropin=/etc/ssh/sshd_config.d/99-dec-cloud.conf
+mkdir -p /etc/ssh/sshd_config.d
+cat >"$sshd_dropin" <<EOF
+# Dec Cloud 的 SSH 基线。
+# 只允许公钥登录，禁止密码与 root 直接登录，并限制可登录的账号。
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+AllowUsers $DEPLOY_USER $OPS_USER
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding no
+MaxAuthTries 3
+EOF
+
+# 先验证配置再 reload：写坏了 sshd 配置比不加固更危险。
+if ! sshd -t; then
+  rm -f "$sshd_dropin"
+  die "sshd 配置校验失败，已移除本次写入的配置，未 reload"
+fi
+# 重载后确认 sshd 还活着。这条检查是给自己留退路：配置语法通过但语义
+# 有问题（比如把当前登录的账号漏在 AllowUsers 外）时，reload 之后新连接
+# 会被拒，已经建立的会话还在，但下一次就进不来了。
+systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true
+if ! systemctl is-active --quiet sshd 2>/dev/null && ! systemctl is-active --quiet ssh 2>/dev/null; then
+  rm -f "$sshd_dropin"
+  systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
+  die "sshd 重载后未在运行，已移除本次配置并尝试恢复"
+fi
+log "SSH 已加固：仅公钥登录，禁止 root，仅允许 $DEPLOY_USER 与 $OPS_USER"
 
 # --- sudo 权限 ----------------------------------------------------------
 #
@@ -187,9 +199,16 @@ APT::Periodic::Unattended-Upgrade "1";
 EOF
   systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 elif command -v dnf >/dev/null 2>&1; then
-  dnf install -y -q dnf-automatic fail2ban curl ca-certificates python3
-  sed -i 's/^apply_updates.*/apply_updates = yes/' /etc/dnf/automatic.conf
-  systemctl enable --now dnf-automatic.timer >/dev/null 2>&1 || true
+  # 区分必需与可选：curl/python3 是部署脚本的依赖，缺了必须失败；
+  # fail2ban 与 dnf-automatic 在部分最小化镜像里没有对应源，
+  # 一次装全部会让整条命令失败，进而让整个 provision 中断。
+  dnf install -y -q curl ca-certificates python3 || die "缺少必需包 curl/ca-certificates/python3"
+  dnf install -y -q dnf-automatic >/dev/null 2>&1 || log "dnf-automatic 不可用，跳过自动更新配置"
+  dnf install -y -q fail2ban >/dev/null 2>&1 || log "fail2ban 不可用，跳过"
+  if [ -f /etc/dnf/automatic.conf ]; then
+    sed -i 's/^apply_updates.*/apply_updates = yes/' /etc/dnf/automatic.conf
+    systemctl enable --now dnf-automatic.timer >/dev/null 2>&1 || true
+  fi
 fi
 log "已开启自动安全更新"
 

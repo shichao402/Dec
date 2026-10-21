@@ -423,4 +423,23 @@ on_exit() {
 }
 trap on_exit EXIT
 
+# 生产上这个脚本以 root 运行（要写 /opt、/var/lib 并操作 systemd）。
+#
+# 这里不硬性要求 uid=0，而是检查目标目录是否可写：判断的是同一件事，
+# 但不会把测试沙箱（用 DEC_*_DIR 指到临时目录）也一并挡掉。
+# 提前判定而不是让每条命令各自报错，否则会在解包阶段看到一堆
+# “Permission denied”，误以为是部署包的问题。
+for d in "$APP_DIR" "$DATA_DIR"; do
+  parent="$d"
+  while [ ! -d "$parent" ]; do
+    parent="$(dirname "$parent")"
+  done
+  if [ ! -w "$parent" ]; then
+    fail "无权写入 ${parent}（uid=$(id -u)），需要以 root 执行"
+    exit 1
+  fi
+done
+# 判断在 trap 之后，所以这里也要把 RECORDED 置位，避免写出一条无意义的记录。
+RECORDED=1
+
 main "$@"
