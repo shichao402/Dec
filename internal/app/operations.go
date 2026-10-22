@@ -268,7 +268,8 @@ func pullWorkspaceAssetsInternal(ctx context.Context, workspace Workspace, versi
 
 	applyAssetCleanup(result, workspace, validAssets, projectIDEs, reporter)
 
-	enabledBundleNames := consumedProjectNames(&pullConfig, workspace.EffectivePlane())
+	// secrets 拉取用含 vault pin 的名单；consumedProjectNames 只用于判断是否有公开资产。
+	enabledBundleNames := secretsBundleNames(&pullConfig, workspace.EffectivePlane())
 	if len(validAssets) == 0 {
 		result.SkippedReason = "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
 		emit(reporter, EventInfo, "pull.prepare", result.SkippedReason, nil)

@@ -34,8 +34,10 @@ func TestPullProjectAssets_ReportsMissingEnabledBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	if result.SkippedReason != "未订阅任何项目" {
-		t.Fatalf("SkippedReason = %q, vault pin 不再安装私仓项目", result.SkippedReason)
+	// vault pin 只贡献 secrets，不安装私仓项目资产：没有 Git 资产可拉取，但仍走 secrets。
+	const want = "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
+	if result.SkippedReason != want {
+		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, want)
 	}
 	if result.PulledCount != 0 {
 		t.Fatalf("PulledCount = %d, 期望 0", result.PulledCount)
@@ -65,7 +67,8 @@ func TestPullProjectAssets_SkipReasonWhenAllBundlesMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	if result.SkippedReason != "未订阅任何项目" {
-		t.Fatalf("SkippedReason = %q, vault pin 不再安装私仓项目", result.SkippedReason)
+	const want = "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
+	if result.SkippedReason != want {
+		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, want)
 	}
 }

@@ -70,7 +70,8 @@ func PreviewUploadWorkspaceSecrets(workspace Workspace) (*UploadPreview, error) 
 		return nil, err
 	}
 
-	enabledBundles := consumedProjectNames(projectConfig, workspace.EffectivePlane())
+	// secrets 预览与真实 push 必须用同一份名单，否则预览数与实际执行数会不一致。
+	enabledBundles := secretsBundleNames(projectConfig, workspace.EffectivePlane())
 	plan, err := planWorkspaceSecretsSync(context.Background(), workspace, enabledBundles, cfg)
 	if err != nil {
 		return nil, err

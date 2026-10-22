@@ -17,10 +17,28 @@ const (
 	Branch = "registry"
 	// TagPrefix 避免和 Dec 产品 tag v* 撞名。
 	TagPrefix = "registry/"
-	// DefaultURL 是官方注册表仓库。
-	DefaultURL = "https://github.com/shichao402/Dec.git"
+	// DefaultURL 是官方注册表仓库的地址。
+	//
+	// 这里刻意不写死具体地址（需求 22.5）：私有化之后仓库地址本身也是
+	// 不该出现在代码里的信息，而且测试需要能把它指到本地 bare 仓库，
+	// 否则单元测试会去克隆真实私有仓库——CI 上没有凭据，只能失败。
+	// 部署时用 DEC_REGISTRY_URL 指定。
+	DefaultURL = ""
 	yankFile   = "yanked.yaml"
 )
+
+// RegistryURL 返回注册表仓库地址：显式传入优先，其次环境变量，最后内置默认。
+//
+// 单独开一个函数是因为调用方有八处，把回落逻辑抄八遍迟早会漂。
+func RegistryURL(explicit string) string {
+	if v := strings.TrimSpace(explicit); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("DEC_REGISTRY_URL")); v != "" {
+		return v
+	}
+	return DefaultURL
+}
 
 // Tag 返回 registry/<project>/<version>。
 func Tag(project, version string) (string, error) {

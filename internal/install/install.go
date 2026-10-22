@@ -39,10 +39,7 @@ func Official(ctx context.Context, opts Options) ([]Resolved, error) {
 	if len(req) == 0 {
 		return nil, nil
 	}
-	url := strings.TrimSpace(opts.RegistryURL)
-	if url == "" {
-		url = registry.DefaultURL
-	}
+	url := registry.RegistryURL(opts.RegistryURL)
 	env := registry.TokenEnv(opts.GitToken)
 	tags, err := registry.ListRemoteTags(ctx, url, env)
 	if err != nil {
@@ -92,10 +89,7 @@ func Status(ctx context.Context, opts Options) ([]StatusItem, error) {
 	if len(req) == 0 {
 		return nil, nil
 	}
-	url := strings.TrimSpace(opts.RegistryURL)
-	if url == "" {
-		url = registry.DefaultURL
-	}
+	url := registry.RegistryURL(opts.RegistryURL)
 	env := registry.TokenEnv(opts.GitToken)
 	tags, err := registry.ListRemoteTags(ctx, url, env)
 	if err != nil {

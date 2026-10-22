@@ -63,8 +63,14 @@ name: another-workflow
 	if err != nil {
 		t.Fatalf("PullProjectAssets() 失败: %v", err)
 	}
-	if result.SkippedReason != "未订阅任何项目" {
-		t.Fatalf("SkippedReason = %q, vault pin 不再构成订阅", result.SkippedReason)
+	// vault pin 不构成私仓项目订阅（无公开资产可装），但 secrets 仍要同步，
+	// 因此跳过原因说的是「没有可拉取的 Git 资产」，而不是「未订阅任何项目」。
+	const want = "没有有效的已启用 Git 资产可拉取（仍尝试同步 secrets）"
+	if result.SkippedReason != want {
+		t.Fatalf("SkippedReason = %q, 期望 %q", result.SkippedReason, want)
+	}
+	if result.PulledCount != 0 {
+		t.Fatalf("PulledCount = %d, 期望 0", result.PulledCount)
 	}
 }
 

@@ -28,10 +28,7 @@ func Yank(ctx context.Context, opts YankOptions) error {
 	if err != nil {
 		return err
 	}
-	url := strings.TrimSpace(opts.RegistryURL)
-	if url == "" {
-		url = registry.DefaultURL
-	}
+	url := registry.RegistryURL(opts.RegistryURL)
 	work, err := os.MkdirTemp("", "dec-registry-yank-*")
 	if err != nil {
 		return err
@@ -94,10 +91,7 @@ func Purge(ctx context.Context, opts PurgeOptions) error {
 	if strings.TrimSpace(opts.Confirm) != tag {
 		return fmt.Errorf("purge 必须 --confirm %s", tag)
 	}
-	url := strings.TrimSpace(opts.RegistryURL)
-	if url == "" {
-		url = registry.DefaultURL
-	}
+	url := registry.RegistryURL(opts.RegistryURL)
 	work, err := os.MkdirTemp("", "dec-registry-purge-*")
 	if err != nil {
 		return err

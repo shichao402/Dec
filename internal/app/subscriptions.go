@@ -338,10 +338,7 @@ var officialSnapshotProjects map[string]registry.ProjectSnapshot
 // officialHeadSnapshots 读 registry 分支顶端的产品目录。版本号仍来自 tag；
 // 这里补源仓和资产名单，订阅行才知道发布的是哪个仓里的哪些文件。
 func officialHeadSnapshots(ctx context.Context, registryURL string) map[string]registry.ProjectSnapshot {
-	url := strings.TrimSpace(registryURL)
-	if url == "" {
-		url = registry.DefaultURL
-	}
+	url := registry.RegistryURL(registryURL)
 	env := registry.TokenEnv(os.Getenv("DEC_REGISTRY_TOKEN"))
 	sha := registryHeadSHA(ctx, url, env)
 	if sha == "" {
@@ -389,10 +386,7 @@ func registryHeadSHA(ctx context.Context, url string, env []string) string {
 
 // officialPublishedVersions 列出注册表里每个项目的最新已发布版本。连不上时返回空表。
 func officialPublishedVersions(ctx context.Context, registryURL string) map[string]string {
-	url := strings.TrimSpace(registryURL)
-	if url == "" {
-		url = registry.DefaultURL
-	}
+	url := registry.RegistryURL(registryURL)
 	tags, err := registry.ListRemoteTags(ctx, url, registry.TokenEnv(os.Getenv("DEC_REGISTRY_TOKEN")))
 	if err != nil {
 		return nil
@@ -427,6 +421,9 @@ func officialPublishedProjects(ctx context.Context, reporter Reporter) map[strin
 // consumedProjectNames 返回本工作区实际消费的项目名：官方 requires，
 // 加上项目平面的本仓项目（它的公开资产与 secrets 同样落地本工作区）。
 // 它替代了改名前散落各处的 enabled_bundles / enabled_projects（ADR 0029）。
+//
+// 注意：vault pin（RequiresVault）不在此列。它不是「项目」，不安装任何私仓项目资产；
+// 需要 secrets 的调用方应另外用 secretsBundleNames 取得「官方 requires + vault requires」。
 func consumedProjectNames(cfg *types.ProjectConfig, plane WorkspacePlane) []string {
 	if cfg == nil {
 		return nil
@@ -440,6 +437,31 @@ func consumedProjectNames(cfg *types.ProjectConfig, plane WorkspacePlane) []stri
 		}
 	}
 	for _, name := range cfg.Requires.OfficialProjects() {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+// secretsBundleNames 返回本工作区 secrets 同步涉及的 bundle 名：
+// 官方 requires（可能同时带 secrets）+ vault requires（只有 secrets）+ 项目平面的本仓项目。
+//
+// 与 consumedProjectNames 的差别只有 vault pin 一项。secrets 拉取/推送必须用这个函数，
+// 否则「订阅了 vault 包却从不同步 secrets」——这是 2026-10 修复的真实缺陷。
+func secretsBundleNames(cfg *types.ProjectConfig, plane WorkspacePlane) []string {
+	if cfg == nil {
+		return nil
+	}
+	base := consumedProjectNames(cfg, plane)
+	seen := make(map[string]struct{}, len(base)+len(cfg.Requires))
+	for _, name := range base {
+		seen[name] = struct{}{}
+	}
+	out := append([]string(nil), base...)
+	for _, name := range cfg.Requires.VaultProjects() {
 		if _, ok := seen[name]; ok {
 			continue
 		}

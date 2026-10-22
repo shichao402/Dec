@@ -74,6 +74,9 @@ client/src-tauri/resources/updater/*
 .codebuddy/skills/
 .with/
 
+# Go 构建/模块缓存（scripts/goenv.sh 把它们收进项目内）
+.cache/
+
 # 临时文件
 resources/temp/*
 !resources/temp/.gitkeep

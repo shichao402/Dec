@@ -62,10 +62,7 @@ func Publish(ctx context.Context, opts Options) (*Result, error) {
 	if len(products) == 0 {
 		return nil, fmt.Errorf("没有可发布的产品")
 	}
-	url := strings.TrimSpace(opts.RegistryURL)
-	if url == "" {
-		url = registry.DefaultURL
-	}
+	url := registry.RegistryURL(opts.RegistryURL)
 
 	work, err := os.MkdirTemp("", "dec-registry-publish-*")
 	if err != nil {

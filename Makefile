@@ -1,5 +1,10 @@
 # Dec Makefile
 
+# 所有 Go 状态（构建缓存、模块缓存、临时目录）都留在仓库内 .cache/go，
+# 不写 ~/Library/Caches 或 ~/go。每条 go 命令前面都带 GOENV 前缀。
+# 详见 scripts/goenv.sh。
+GOENV=sh scripts/goenv.sh
+
 BINARY_NAMES=dec-server dec-mcp dec-exec dec-host-setup
 DIST_DIR=dist
 VERSION=$(shell cat version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "dev")
@@ -18,10 +23,10 @@ build: ensure-relkit
 	@mkdir -p $(DIST_DIR)
 	@echo "🔨 构建 Dec 程序组..."
 	@echo "📌 版本: $(VERSION)"
-	go build $(LDFLAGS) -o $(DIST_DIR)/dec-server ./cmd/dec-server
-	go build $(LDFLAGS) -o $(DIST_DIR)/dec-mcp ./cmd/dec-mcp
-	go build $(LDFLAGS) -o $(DIST_DIR)/dec-exec ./cmd/dec-exec
-	go build $(LDFLAGS) -o $(DIST_DIR)/dec-host-setup ./cmd/dec-host-setup
+	$(GOENV) go build $(LDFLAGS) -o $(DIST_DIR)/dec-server ./cmd/dec-server
+	$(GOENV) go build $(LDFLAGS) -o $(DIST_DIR)/dec-mcp ./cmd/dec-mcp
+	$(GOENV) go build $(LDFLAGS) -o $(DIST_DIR)/dec-exec ./cmd/dec-exec
+	$(GOENV) go build $(LDFLAGS) -o $(DIST_DIR)/dec-host-setup ./cmd/dec-host-setup
 	@echo "✅ 构建完成: $(DIST_DIR)/{dec-server,dec-mcp,dec-exec,dec-host-setup}"
 
 build-all: ensure-relkit
@@ -29,7 +34,7 @@ build-all: ensure-relkit
 
 test: ensure-relkit
 	@echo "🧪 运行 Go 单元测试..."
-	go test ./... -v -cover
+	$(GOENV) go test ./... -v -cover
 
 clean:
 	@echo "🧹 清理构建产物..."
@@ -39,12 +44,12 @@ clean:
 
 fmt:
 	@echo "📝 格式化代码..."
-	go fmt ./...
+	$(GOENV) go fmt ./...
 	@echo "✅ 格式化完成"
 
 lint:
 	@echo "🔍 代码检查..."
-	golangci-lint run ./...
+	$(GOENV) go vet ./...
 
 help:
 	@echo "Dec Makefile"

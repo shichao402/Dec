@@ -46,7 +46,8 @@ func PushWorkspaceSecretsBundles(ctx context.Context, workspace Workspace, repor
 	if err != nil {
 		return nil, err
 	}
-	enabledBundles := consumedProjectNames(projectConfig, workspace.EffectivePlane())
+	// secrets 同步必须包含 vault pin：它没有公开资产，但 secrets 由本工作区消费。
+	enabledBundles := secretsBundleNames(projectConfig, workspace.EffectivePlane())
 
 	cfg, err := secrets.LoadConfig()
 	if err != nil {

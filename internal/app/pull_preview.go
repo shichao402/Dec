@@ -19,13 +19,22 @@ func PreviewPullWorkspaceAssets(workspace Workspace) (*PullPreview, error) {
 	return previewPullForWorkspace(ctx, workspace, enabledBundles, nil)
 }
 
-// consumedProjectNamesForWorkspace 读取工作区配置的启用 bundle 名单。
+// consumedProjectNamesForWorkspace 读取工作区配置的启用 bundle 名单（项目语义，不含 vault pin）。
 func consumedProjectNamesForWorkspace(workspace Workspace) []string {
 	projectConfig, err := loadWorkspaceBundleConfig(workspace)
 	if err != nil {
 		return nil
 	}
 	return consumedProjectNames(projectConfig, workspace.EffectivePlane())
+}
+
+// secretsBundleNamesForWorkspace 读取工作区 secrets 同步涉及的 bundle 名单（含 vault pin）。
+func secretsBundleNamesForWorkspace(workspace Workspace) []string {
+	projectConfig, err := loadWorkspaceBundleConfig(workspace)
+	if err != nil {
+		return nil
+	}
+	return secretsBundleNames(projectConfig, workspace.EffectivePlane())
 }
 
 // PullPreviewChange 描述一次 pull 预览里的一条「将执行」的剪枝明细。
