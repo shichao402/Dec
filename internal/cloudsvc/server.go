@@ -369,6 +369,12 @@ func (s *Server) webhookURL() (string, error) {
 	}
 	raw, err := s.secrets.GetSecret(key, name)
 	if err != nil {
+		// 没配过 webhook 是全新安装的正常状态，不是错误。
+		// 这里返回 err 会让每条告警都往日志里刷一行失败，
+		// 而告警本身其实已经通过设备通道送出去了。
+		if errors.Is(err, ssot.ErrNotFound) {
+			return "", nil
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(raw)), nil
