@@ -33,7 +33,9 @@ DATA_DIR="${DEC_DATA_DIR:-/var/lib/dec-cloud}"
 APP_DIR="${DEC_APP_DIR:-/opt/dec-cloud}"
 SNAP_DIR="${DEC_SNAP_DIR:-$APP_DIR/snapshots}"
 SERVICE="${DEC_SERVICE:-dec-cloud}"
-HEALTH_URL="${DEC_HEALTH_URL:-https://127.0.0.1/healthz}"
+# 健康检查必须走域名：服务端证书是 ACME 签的，无 SNI 的握手会被拒。
+# 域名取 DEC_HEALTH_URL；脚本内部用 --resolve 把它钉到 127.0.0.1。
+HEALTH_URL="${DEC_HEALTH_URL:-https://dec.firoyang.com/healthz}"
 HEALTH_RETRIES="${DEC_HEALTH_RETRIES:-30}"
 HEALTH_INTERVAL="${DEC_HEALTH_INTERVAL:-2}"
 # 保留几份快照。够回滚就行，不无限堆积。
@@ -154,12 +156,17 @@ verify_github_release() {
 
 # wait_health 轮询健康检查，直到服务端报告的版本等于期望版本。
 #
-# 用 -k 是刻意的：证书由服务自己通过 ACME 申请，本机直连 127.0.0.1 时
-# 主机名对不上。这里要判断的是“进程活着、版本对了、能应答”，不是证书链。
+# 必须带域名访问，不能直接打 https://127.0.0.1：服务端用 ACME 自动签证书，
+# 没有 SNI 的握手会直接失败（acme/autocert: missing server name），
+# 表现为「健康检查 30 次全部无响应」然后误回滚——真实踩过。
+# --resolve 把域名钉到回环，既拿到正确证书又不出公网。
+#
+# 用 -k 是刻意的：本机判据是「进程活着、版本对了、能应答」，不是证书链。
 wait_health() {
-  local want="$1" i body got
+  local want="$1" i body got host
+  host="$(printf '%s' "$HEALTH_URL" | sed -e 's|^https\?://||' -e 's|/.*$||' -e 's|:.*$||')"
   for i in $(seq 1 "$HEALTH_RETRIES"); do
-    body="$(curl -fsSk --max-time 5 "$HEALTH_URL" 2>/dev/null || true)"
+    body="$(curl -fsSk --max-time 5 --resolve "${host}:443:127.0.0.1" "$HEALTH_URL" 2>/dev/null || true)"
     if [ -n "$body" ]; then
       got="$(printf '%s' "$body" | tr -d '\n' | sed -n 's/.*"server_version":"\([^"]*\)".*/\1/p')"
       if [ "$got" = "$want" ]; then
