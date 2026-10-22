@@ -33,6 +33,9 @@ SERVICE_NAME="dec-cloud"
 ROOT_KEY_DIR="${DEC_ROOT_KEY_DIR:-/etc/dec-cloud}"
 DATA_DIR="/var/lib/dec-cloud"
 APP_DIR="/opt/dec-cloud"
+# 部署入口：authorized_keys 的 command= 与 sudoers 都指向这一个路径，
+# 只改一处就会两边不一致，所以集中定义。
+ENTRY_PATH="/usr/local/lib/${SERVICE_NAME}/${SERVICE_NAME}-deploy.sh"
 
 log()  { printf '[provision] %s\n' "$*"; }
 die()  { printf '[provision] 失败：%s\n' "$*" >&2; exit 1; }
@@ -115,7 +118,7 @@ deploy_home="/home/$DEPLOY_USER"
 install -d -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" "$deploy_home/.ssh"
 if [ -n "$DEPLOY_KEY" ]; then
   {
-    printf 'command="/usr/local/lib/dec-cloud/%s",no-pty,no-port-forwarding,' "$SERVICE_NAME-deploy.sh"
+    printf 'command="sudo -n %s",no-pty,no-port-forwarding,' "$ENTRY_PATH"
     printf 'no-agent-forwarding,no-X11-forwarding,restrict %s\n' "$DEPLOY_KEY"
   } >"$deploy_home/.ssh/authorized_keys"
   chown "$DEPLOY_USER:$DEPLOY_USER" "$deploy_home/.ssh/authorized_keys"
@@ -180,9 +183,13 @@ chmod 440 /etc/sudoers.d/90-dec-cloud-ops
 visudo -cf /etc/sudoers.d/90-dec-cloud-ops >/dev/null || die "sudoers 校验失败"
 
 cat >/etc/sudoers.d/91-dec-cloud-deploy <<EOF
-# 部署账户只被允许重启与查看本服务；实际部署走 authorized_keys 的 command=。
-$DEPLOY_USER ALL=(root) NOPASSWD: /bin/systemctl restart $SERVICE_NAME, \\
-    /bin/systemctl status $SERVICE_NAME, /bin/systemctl is-active $SERVICE_NAME
+# 部署账户只能以 root 执行部署入口本身：入口要写 $APP_DIR 与 $DATA_DIR，
+# 以普通用户跑会在「初始化」步骤就被拒（真实踩过）。
+# 入口仍是唯一入口：authorized_keys 的 command= 锁死到它，agent 转发与 PTY 全关，
+# 因此即便私钥泄漏，攻击面也只是「触发一次部署」，不是「拿到 root shell」。
+$DEPLOY_USER ALL=(root) NOPASSWD: $ENTRY_PATH, \\
+    /bin/systemctl restart $SERVICE_NAME, /bin/systemctl status $SERVICE_NAME, \\
+    /bin/systemctl is-active $SERVICE_NAME
 EOF
 chmod 440 /etc/sudoers.d/91-dec-cloud-deploy
 visudo -cf /etc/sudoers.d/91-dec-cloud-deploy >/dev/null || die "sudoers 校验失败"
@@ -270,7 +277,8 @@ chmod 750 "$DATA_DIR"
 cat <<EOF
 
 [provision] 完成。下一步：
-  1. 安装部署入口：install -m 755 dec-cloud-deploy.sh /usr/local/lib/dec-cloud/$SERVICE_NAME-deploy.sh
+  1. 安装部署入口（必须 root 所有、755，且不能有 group/other 写权限——它由 sudo 以 root 执行）：
+     install -m 755 -o root -g root dec-cloud-deploy.sh $ENTRY_PATH
   2. 填 GitHub 只读 token：echo '<token>' > $ROOT_KEY_DIR/github-token && chmod 600 $ROOT_KEY_DIR/github-token
      （fine-grained token，只给 shichao402/Dec 的 Contents: Read 权限）
   3. 首次启动：systemctl start $SERVICE_NAME

@@ -2,9 +2,13 @@
 # Dec Cloud 服务器端部署入口（需求 21.2、21.3、21.5、21.6、21.7、21.8）。
 #
 # 这个脚本是 CI 唯一能执行的东西：部署账户的 authorized_keys 里用
-#   command="/usr/local/lib/dec-cloud/dec-cloud-deploy",no-port-forwarding,no-agent-forwarding,no-pty
+#   command="sudo -n /usr/local/lib/dec-cloud/dec-cloud-deploy.sh",no-port-forwarding,no-agent-forwarding,no-pty
 # 把它写死，任何别的命令都进不来（需求 21.6）。因此它不解析任何命令行参数，
 # 全部输入来自 stdin 的 tar 流，没有可以注入的位置。
+#
+# 为什么要 sudo：脚本要写 /opt/dec-cloud（快照、二进制）与 /var/lib/dec-cloud
+# （维护标记、部署记录），这些都是 root 或服务账号所有。部署账户本身没有
+# 任何其他 sudo 权限，sudoers 只放行这一个脚本路径。
 #
 # tar 流里必须有：
 #
