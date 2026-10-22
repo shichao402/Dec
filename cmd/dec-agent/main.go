@@ -272,6 +272,10 @@ func cmdInitialize(args []string) error {
 	if pw == "" {
 		pw = os.Getenv("DEC_BW_PASSWORD")
 	}
+	c, err := collectCreds(*email, pw, *totp)
+	if err != nil {
+		return err
+	}
 	dir := mustState()
 	cfg, err := agent.LoadConfig(dir)
 	if err != nil {
@@ -293,7 +297,7 @@ func cmdInitialize(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	res, err := agent.Initialize(ctx, client, store, agent.EnrollInput{
-		Email: *email, Password: pw, TOTP: *totp, DeviceName: *name,
+		Email: c.Email, Password: c.Password, TOTP: c.TOTP, DeviceName: *name,
 	})
 	if err != nil {
 		return err
@@ -339,8 +343,12 @@ func cmdEnroll(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	c, err := collectCreds(*email, pw, *totp)
+	if err != nil {
+		return err
+	}
 	res, err := agent.Enroll(ctx, client, store, agent.EnrollInput{
-		Email: *email, Password: pw, TOTP: *totp, DeviceName: *name, Kind: *kind,
+		Email: c.Email, Password: c.Password, TOTP: c.TOTP, DeviceName: *name, Kind: *kind,
 	})
 	if err != nil {
 		return err
@@ -387,8 +395,12 @@ func cmdRecover(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	c, err := collectCreds(*email, pw, *totp)
+	if err != nil {
+		return err
+	}
 	res, err := agent.Recover(ctx, client, store, agent.EnrollInput{
-		Email: *email, Password: pw, TOTP: *totp, DeviceName: *name,
+		Email: c.Email, Password: c.Password, TOTP: c.TOTP, DeviceName: *name,
 	})
 	if err != nil {
 		return err
