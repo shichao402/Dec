@@ -11,6 +11,34 @@ import (
 
 // 登记与恢复（需求 10、11、18.3 至 18.9）。
 
+// mInitialize 完成首次初始化（需求 10.1、10.2）。
+//
+// 这是全新服务上唯一的入口：生成根密钥、写入 Bitwarden 冷备并读回校验、
+// 登记第一台设备，全部成功后入口永久关闭。之后的设备一律走 mEnroll。
+//
+// 它必须免证书：此刻还没有任何设备身份，也没有根密钥。
+// 但「没有证书」不等于「谁都能调」——真正的门是 Bitwarden 主密码 + 2FA，
+// 加上失败次数限制与冷却（在 Bootstrapper 内），以及每次尝试都留痕告警。
+func (s *Server) mInitialize(r *http.Request, req *proto.Request, payload any) *proto.Response {
+	in, ok := payload.(*proto.EnrollBeginRequest)
+	if !ok {
+		return proto.Fail(req.ID, proto.ErrInvalid, "initialize 载荷类型错误")
+	}
+	resp, err := s.boot.Initialize(r.Context(), *in)
+	if err != nil {
+		// 初始化失败必须告警：要么是用户填错了，要么是有人在试。
+		s.record(r, audit.EventEnroll, ssot.Device{}, req, "初始化失败", err.Error(), false)
+		s.raise(alert.KindEnroll, "初始化失败", err.Error())
+		return failFromError(req.ID, err)
+	}
+	s.record(r, audit.EventEnroll, ssot.Device{ID: resp.DeviceID}, req,
+		"初始化完成 "+resp.DeviceID, "已生成根密钥并写入冷备", true)
+	s.raise(alert.KindEnroll, "服务已完成初始化", resp.DeviceID)
+	s.NotifyChanged()
+	s.triggerBackup()
+	return okPayload(req.ID, resp)
+}
+
 // mEnroll 登记新设备。
 //
 // 这是给非第一台设备发放身份的唯一入口：必须提供 Bitwarden 主密码与 2FA。

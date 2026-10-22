@@ -207,6 +207,17 @@ func (c *Client) Ack(ctx context.Context, in proto.AckRequest) error {
 	return c.call(ctx, proto.MethodAck, proto.SourceAgent, in, &out, false)
 }
 
+// Initialize 提交首次初始化请求（需求 10.1）。
+//
+// 免证书是必须的：这一步之前没有任何设备身份，也没有根密钥。
+func (c *Client) Initialize(ctx context.Context, in proto.EnrollBeginRequest) (*proto.EnrollBeginResponse, error) {
+	var out proto.EnrollBeginResponse
+	if err := c.call(ctx, proto.MethodInitialize, proto.SourceEnroll, in, &out, true); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // Enroll 提交登记请求（需求 18.4）。
 func (c *Client) Enroll(ctx context.Context, in proto.EnrollBeginRequest) (*proto.EnrollBeginResponse, error) {
 	var out proto.EnrollBeginResponse

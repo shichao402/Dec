@@ -92,6 +92,62 @@ func Enroll(ctx context.Context, client *Client, store *IdentityStore, in Enroll
 	}, nil
 }
 
+// Initialize 完成首次初始化：生成根密钥、写 Bitwarden 冷备并登记第一台设备（需求 10.1）。
+//
+// 与 Enroll 的区别只在服务端走哪条路：全新服务还没有根密钥，enroll 必然失败，
+// 必须用 initialize 从零建立。客户端这一侧的动作完全一样——生成密钥对、
+// 把凭据和公钥发过去、保存拿回来的证书。
+func Initialize(ctx context.Context, client *Client, store *IdentityStore, in EnrollInput) (*EnrollResult, error) {
+	if in.Email == "" || in.Password == "" {
+		return nil, fmt.Errorf("需要 Bitwarden 邮箱与主密码")
+	}
+	if store.Has() {
+		return nil, fmt.Errorf("本机已有设备身份，如需重新初始化请先清除")
+	}
+	privPEM, pubPEM, err := GenerateKeyPair()
+	if err != nil {
+		return nil, err
+	}
+	osName, arch := OSArch()
+	name := strings.TrimSpace(in.DeviceName)
+	if name == "" {
+		name, _ = os.Hostname()
+	}
+	resp, err := client.Initialize(ctx, proto.EnrollBeginRequest{
+		Email:           in.Email,
+		Password:        in.Password,
+		TOTP:            in.TOTP,
+		DevicePublicKey: pubPEM,
+		DeviceName:      name,
+		OS:              osName,
+		Arch:            arch,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.DeviceID == "" || resp.Certificate == "" {
+		return nil, fmt.Errorf("服务端返回的初始化结果不完整")
+	}
+	id := &Identity{
+		DeviceID: resp.DeviceID,
+		CertPEM:  resp.Certificate,
+		KeyPEM:   privPEM,
+		NotAfter: resp.CertNotAfter,
+	}
+	if _, err := id.TLSCertificate(); err != nil {
+		return nil, err
+	}
+	if err := store.Save(id); err != nil {
+		return nil, err
+	}
+	return &EnrollResult{
+		DeviceID:  resp.DeviceID,
+		NotAfter:  resp.CertNotAfter,
+		IsFirst:   resp.IsFirst,
+		ServerURL: client.BaseURL(),
+	}, nil
+}
+
 // Recover 在恢复模式下取回根密钥并重新登记（需求 11）。
 func Recover(ctx context.Context, client *Client, store *IdentityStore, in EnrollInput) (*EnrollResult, error) {
 	if in.Email == "" || in.Password == "" {

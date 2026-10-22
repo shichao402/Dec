@@ -10,13 +10,16 @@ import (
 //
 // 这个测试的存在本身就是约束：如果某次改动想把 list_assets 之类的方法塞进
 // VersionMethods，测试会失败，迫使人先想清楚要不要提升协议版本
-// （需求 19.7：上报版本和获取要求版本必须永远可用；登记和恢复同理，
+// （需求 19.7：上报版本和获取要求版本必须永远可用；初始化、登记和恢复同理，
 // 否则一台未登记的旧代理会彻底无法接入）。
 func TestVersionMethodsStable(t *testing.T) {
 	want := map[Method]bool{
-		MethodHello:   true,
-		MethodEnroll:  true,
-		MethodRecover: true,
+		MethodHello: true,
+		// initialize 必须永久可用：全新服务只有它能建立根密钥。
+		// 把它移出清单，会让「刚部署完的服务端」无法接入任何设备。
+		MethodInitialize: true,
+		MethodEnroll:     true,
+		MethodRecover:    true,
 	}
 	if len(VersionMethods) != len(want) {
 		t.Fatalf("VersionMethods 数量变化: %d，期望 %d", len(VersionMethods), len(want))
@@ -24,6 +27,11 @@ func TestVersionMethodsStable(t *testing.T) {
 	for m := range want {
 		if !VersionMethods[m] {
 			t.Fatalf("VersionMethods 缺少 %s", m)
+		}
+	}
+	for m := range VersionMethods {
+		if !want[m] {
+			t.Fatalf("VersionMethods 多出 %s，新增方法要先确认它真的永不破坏兼容", m)
 		}
 	}
 }

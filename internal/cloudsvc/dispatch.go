@@ -137,6 +137,8 @@ func (s *Server) run(r *http.Request, req *proto.Request, payload any, dev ssot.
 	case proto.MethodAck:
 		return s.mAck(req, payload, dev)
 
+	case proto.MethodInitialize:
+		return s.mInitialize(r, req, payload)
 	case proto.MethodEnroll:
 		return s.mEnroll(r, req, payload)
 	case proto.MethodRecover:
@@ -228,6 +230,8 @@ func failFromError(id string, err error) *proto.Response {
 		code = proto.ErrRateLimited
 	case errors.Is(err, identity.ErrBootstrapClosed):
 		code = proto.ErrBootstrapClosed
+	case errors.Is(err, identity.ErrRecoveryRequired):
+		code = proto.ErrNotInitialized
 	case errors.Is(err, identity.ErrCertRevoked), errors.Is(err, identity.ErrCertExpired),
 		errors.Is(err, identity.ErrCertInvalid):
 		code = proto.ErrUnauthorized

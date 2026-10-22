@@ -29,6 +29,13 @@ const (
 	MethodAck Method = "ack"
 	// MethodEnroll 登记新设备。这是无设备证书可访问的方法之一（需求 18.4）。
 	MethodEnroll Method = "enroll"
+	// MethodInitialize 首次初始化：生成根密钥、写 Bitwarden 冷备并登记第一台设备。
+	//
+	// 它和 enroll 是两件事，不能合并：全新服务上还没有根密钥，
+	// enroll 会因「根密钥未加载」直接失败；而 recover 又要求 Bitwarden 里
+	// 已存在可用的冷备。只有 initialize 负责从零建立这套东西，
+	// 并且完成后入口永久关闭（需求 10.1、10.2）。
+	MethodInitialize Method = "initialize"
 	// MethodRecover 恢复模式下取回根密钥并登记第一台设备（需求 11）。
 	MethodRecover Method = "recover"
 	// MethodWriteAsset 同步写入资产（需求 7）。
@@ -130,6 +137,12 @@ const (
 	ErrMaintenance ErrorCode = "maintenance"
 	// ErrBootstrapClosed 表示初始化入口已关闭（需求 10.3）。
 	ErrBootstrapClosed ErrorCode = "bootstrap_closed"
+	// ErrNotInitialized 表示服务还没完成初始化，必须先走 initialize。
+	//
+	// 它必须是独立错误码而不是 internal：全新部署上先调 enroll 是
+	// 完全可预期的操作顺序错误，代理应据此提示「先执行 dec-agent initialize」，
+	// 而不是让用户去翻服务端日志找“内部错误”。
+	ErrNotInitialized ErrorCode = "not_initialized"
 	// ErrRateLimited 表示触发失败次数限制或冷却（需求 10.7、18.6）。
 	ErrRateLimited ErrorCode = "rate_limited"
 	// ErrInternal 表示服务端内部错误。

@@ -67,6 +67,12 @@ type Config struct {
 	// 覆盖的位置。把数据目录整体快照、而根密钥另行放在快照之外，是最省事
 	// 的满足方式，所以路径必须能从数据目录里拆出来。
 	RootKeyPath string
+
+	// VaultFactory 覆盖默认的 Bitwarden 访问实现，仅供测试替换。
+	//
+	// 生产必须留空：真实的冷备只能写进用户自己的 Bitwarden，
+	// 允许外部注入等于给「悄悄把根密钥写到别处」留了后门。
+	VaultFactory identity.VaultFactory
 }
 
 // Server 是云端服务。
@@ -146,6 +152,7 @@ func New(cfg Config) (*Server, error) {
 		CA:          ca,
 		Registry:    reg,
 		RootKeyPath: cfg.RootKeyPath,
+		Vault:       cfg.VaultFactory,
 	})
 	if err != nil {
 		return nil, err

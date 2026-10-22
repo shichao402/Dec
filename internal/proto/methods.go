@@ -18,16 +18,18 @@ var (
 // 任何版本的代理都必须能调用它们，以保证旧代理总能收到更新提示、
 // 也保证未登记的代理总能完成登记。
 var VersionMethods = map[Method]bool{
-	MethodHello:   true,
-	MethodEnroll:  true,
-	MethodRecover: true,
+	MethodHello:      true,
+	MethodInitialize: true,
+	MethodEnroll:     true,
+	MethodRecover:    true,
 }
 
 // NoCertMethods 是无需设备证书即可访问的方法（需求 16.3 的例外清单）。
 // 下载和健康检查走普通 HTTP 路径，不经过这套协议，因此不在这里。
 var NoCertMethods = map[Method]bool{
-	MethodEnroll:  true,
-	MethodRecover: true,
+	MethodInitialize: true,
+	MethodEnroll:     true,
+	MethodRecover:    true,
 }
 
 // OptionalCertMethods 是证书可选的协议方法（需求 19.7）。
@@ -45,6 +47,7 @@ var methods = map[Method]func() any{
 	MethodHello:            func() any { return &HelloRequest{} },
 	MethodSync:             func() any { return &SyncRequest{} },
 	MethodAck:              func() any { return &AckRequest{} },
+	MethodInitialize:       func() any { return &EnrollBeginRequest{} },
 	MethodEnroll:           func() any { return &EnrollBeginRequest{} },
 	MethodRecover:          func() any { return &RecoverRequest{} },
 	MethodWriteAsset:       func() any { return &AssetPayload{} },

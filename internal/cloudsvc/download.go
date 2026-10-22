@@ -122,10 +122,15 @@ func (s *Server) handleDownloadIndex(w http.ResponseWriter, r *http.Request) {
 		b.WriteString("<h2>用命令行下载</h2>")
 		b.WriteString("<p>建议用 <code>curl</code> 下载，避免浏览器给文件打上隔离标记：</p>")
 		for _, f := range files {
-			fmt.Fprintf(&b, "<pre>curl -fLO https://%s/download/%s\nchmod +x %s\nmv %s &lt;安装位置&gt;\nsudo &lt;安装位置&gt;/%s --install-agent</pre>",
-				htmlEscape(host), htmlEscape(f.Name), htmlEscape(f.Name), htmlEscape(f.Name), htmlEscape(f.Name))
+			// 命令必须与代理真实子命令一致：注册系统服务是 `install`，不是 `--install-agent`。
+			// 写错的后果是用户照着敲一遍，得到一句「未知命令」，然后卡在第一步。
+			fmt.Fprintf(&b, "<pre>curl -fLO https://%s/download/%s\nchmod +x %s\nsudo mv %s /usr/local/bin/dec-agent\n"+
+				"dec-agent configure --url https://%s\ndec-agent install\ndec-agent initialize</pre>",
+				htmlEscape(host), htmlEscape(f.Name), htmlEscape(f.Name), htmlEscape(f.Name), htmlEscape(host))
 			break
 		}
+		b.WriteString("<p class=\"muted\">第一台设备用 <code>initialize</code>（会生成根密钥并写入 Bitwarden 冷备）；")
+		b.WriteString("此后新增设备用 <code>enroll</code>，两者都需要 Bitwarden 主密码与二次验证码。</p>")
 
 		b.WriteString("<h2>被系统拦截时</h2>")
 		b.WriteString("<p>客户端二进制不做代码签名（本项目只有一个使用者，签名与公证的成本远大于收益）。</p>")

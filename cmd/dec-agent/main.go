@@ -7,6 +7,7 @@
 //
 //	dec-agent run         以服务方式运行（前台进程，由系统服务托管）
 //	dec-agent configure   配置服务地址
+//	dec-agent initialize  首次初始化（生成根密钥、写冷备、登记第一台设备）
 //	dec-agent enroll      在 CLI 里登记（无桌面环境）
 //	dec-agent recover     在 CLI 里恢复（无桌面环境）
 //	dec-agent status      打印状态
@@ -54,6 +55,8 @@ func main() {
 		err = cmdRun(args)
 	case "configure":
 		err = cmdConfigure(args)
+	case "initialize":
+		err = cmdInitialize(args)
 	case "enroll":
 		err = cmdEnroll(args)
 	case "recover":
@@ -86,6 +89,7 @@ func usage() {
 
   dec-agent run          以后台常驻方式运行
   dec-agent configure    配置服务地址
+  dec-agent initialize   首次初始化（生成根密钥并登记第一台设备）
   dec-agent enroll       在 CLI 里登记设备
   dec-agent recover      在 CLI 里恢复（服务端进入恢复模式时）
   dec-agent status       打印当前状态
@@ -247,6 +251,55 @@ func configure(dir string, store *agent.IdentityStore, cfg *agent.Config, url st
 			return err
 		}
 	}
+	return nil
+}
+
+// cmdInitialize 完成首次初始化（需求 10.1）。
+//
+// 这是全新服务上第一台设备的入口，也是唯一会生成根密钥的地方。
+// 完成后服务端的初始化入口永久关闭，后续设备只能走 enroll。
+func cmdInitialize(args []string) error {
+	fs := flag.NewFlagSet("initialize", flag.ExitOnError)
+	email := fs.String("email", "", "Bitwarden 邮箱")
+	password := fs.String("password", "", "Bitwarden 主密码（建议用环境变量 DEC_BW_PASSWORD）")
+	totp := fs.String("totp", "", "两步验证码")
+	name := fs.String("name", "", "设备名")
+	insecure := fs.Bool("insecure", false, "跳过 TLS 校验（仅本机调试）")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	pw := *password
+	if pw == "" {
+		pw = os.Getenv("DEC_BW_PASSWORD")
+	}
+	dir := mustState()
+	cfg, err := agent.LoadConfig(dir)
+	if err != nil {
+		return err
+	}
+	if cfg.ServerURL == "" {
+		return fmt.Errorf("先执行 dec-agent configure --url https://...")
+	}
+	store := agent.NewIdentityStore(dir)
+	client, err := agent.NewClient(agent.ClientOptions{
+		BaseURL:  cfg.ServerURL,
+		Version:  Version,
+		Identity: store.Load2,
+		Insecure: *insecure,
+	})
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	res, err := agent.Initialize(ctx, client, store, agent.EnrollInput{
+		Email: *email, Password: pw, TOTP: *totp, DeviceName: *name,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("初始化完成：设备 %s，证书到期 %s\n", res.DeviceID, res.NotAfter.Format(time.RFC3339))
+	fmt.Println("根密钥已生成并写入 Bitwarden 冷备，初始化入口已永久关闭。")
 	return nil
 }
 
