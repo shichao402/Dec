@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -177,6 +178,51 @@ func TestDeployRecordRollbackAudited(t *testing.T) {
 	}
 }
 
+// TestDeployRecordConsumeIsConcurrencySafe 固定「后台轮询 + 主动调用」并发下的行为。
+//
+// watchDeploy 每秒轮询一次，运维工具与测试也会直接调 syncDeployFiles。
+// 没有互斥时两边会同时拿到同一份 pending.json，各自写一条审计；
+// 更糟的是读到对方写了一半的内容，被当成坏文件删掉，审计直接丢失。
+// CI 上真实出现过：TestDeployRecordRollbackAudited 偶发「应写入一条部署审计」。
+func TestDeployRecordConsumeIsConcurrencySafe(t *testing.T) {
+	const rounds = 30
+	for i := 0; i < rounds; i++ {
+		h := newHarness(t, "1.0.0")
+		writeDeployRecord(t, h.dir, deployRecord{
+			Version: "v1.14.0", Tag: "v1.14.0",
+			Commit: "0123456789abcdef0123456789abcdef01234567",
+			Result: "ok",
+		})
+
+		var wg sync.WaitGroup
+		for j := 0; j < 8; j++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				h.srv.syncDeployFiles()
+			}()
+		}
+		wg.Wait()
+
+		entries, err := h.srv.audit.Read(time.Now().UTC())
+		if err != nil {
+			t.Fatalf("第 %d 轮读审计失败: %v", i, err)
+		}
+		n := 0
+		for _, e := range entries {
+			if e.Event == audit.EventDeploy && e.Subject == "v1.14.0" {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Fatalf("第 %d 轮部署审计应为 1 条，实际 %d 条", i, n)
+		}
+		if _, err := os.Stat(deployRecordPath(h.dir)); !os.IsNotExist(err) {
+			t.Fatalf("第 %d 轮部署记录应被清除，实际 err=%v", i, err)
+		}
+	}
+}
+
 // TestDeployRecordBadJSONIsCleared 验证坏记录不会每轮重试。
 //
 // 内容坏了是脚本的 bug，但服务端如果一直重试同一条坏数据，
@@ -253,6 +299,10 @@ func (h *harness) health() map[string]any {
 }
 
 // writeDeployRecord 写出一份部署记录。
+//
+// 必须原子写：生产环境的部署脚本也是「先写临时文件再 rename」，
+// 因为服务端每秒都在轮询这个文件。用 os.WriteFile 直接写会先截断后写，
+// 轮询正好落在中间就读到空内容，被当成坏文件删掉，审计就丢了。
 func writeDeployRecord(t *testing.T, dataDir string, rec deployRecord) {
 	t.Helper()
 	if err := prepareDeployDir(dataDir); err != nil {
@@ -262,7 +312,12 @@ func writeDeployRecord(t *testing.T, dataDir string, rec deployRecord) {
 	if err != nil {
 		t.Fatalf("序列化部署记录失败: %v", err)
 	}
-	if err := os.WriteFile(deployRecordPath(dataDir), raw, 0o640); err != nil {
-		t.Fatalf("写部署记录失败: %v", err)
+	path := deployRecordPath(dataDir)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o640); err != nil {
+		t.Fatalf("写部署记录临时文件失败: %v", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatalf("落盘部署记录失败: %v", err)
 	}
 }
