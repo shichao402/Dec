@@ -28,9 +28,17 @@ OPS_USER="${DEC_OPS_USER:-decops}"
 DEPLOY_USER="${DEC_DEPLOY_USER:-deploy}"
 SERVICE_USER="${DEC_SERVICE_USER:-dec}"
 SERVICE_NAME="dec-cloud"
-# 根密钥目录单独放在 /etc 下：数据目录（/var/lib/dec-cloud）会被整体快照，
-# /etc 不在里面，因此根密钥天然不进快照（需求 16.5、21.5）。
-ROOT_KEY_DIR="${DEC_ROOT_KEY_DIR:-/etc/dec-cloud}"
+# 配置目录：放 github-token 这类只该 root 读的东西，root 所有。
+# 根密钥刻意放在数据目录之外，因为数据目录会被整体快照（需求 16.5、21.5）。
+CONF_DIR="${DEC_CONF_DIR:-/etc/dec-cloud}"
+# 根密钥目录：单独一层，归属服务账号。
+#
+# 为什么必须单独一两层、且归属服务账号：写根密钥用的是「临时文件 + rename」
+# 的原子写，要求目录本身可写——只给文件写权限不够。而配置目录里躺着
+# github-token（root:root 0600），不能让服务账号能在那层建文件，
+# 否则它可以先把 token 文件 rename 走再伪造一个。两者的写权限要求直接冲突，
+# 所以分成两个目录。
+ROOT_KEY_DIR="${DEC_ROOT_KEY_DIR:-$CONF_DIR/secret}"
 DATA_DIR="/var/lib/dec-cloud"
 APP_DIR="/opt/dec-cloud"
 # 部署入口：authorized_keys 的 command= 与 sudoers 都指向这一个路径，
@@ -94,13 +102,16 @@ install -d -m 755 -o root -g root "$APP_DIR"
 install -d -m 755 -o root -g root "$APP_DIR/snapshots"
 # 数据目录归属服务账号；部署账户只通过部署脚本间接写入。
 install -d -m 750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR"
-# 根密钥目录：root 所有、服务账号可读，别的账号进不来。
-install -d -m 750 -o root -g "$SERVICE_USER" "$ROOT_KEY_DIR"
+# 配置目录：root 所有，服务账号只读不能写。
+# github-token 就放在这里，服务账号拿不到写权限，也就没法替换它。
+install -d -m 750 -o root -g "$SERVICE_USER" "$CONF_DIR"
+# 根密钥目录：归属服务账号（原子写要求目录可写），但 700 挡住其他账号。
+install -d -m 700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$ROOT_KEY_DIR"
 # 部署脚本要向 GitHub 核对 tag 真实性（需求 21.7），token 只给 root 读。
 # 这里只建空占位并锁权限，值由人填——把 token 写进脚本或仓库都等于泄露。
-if [ ! -f "$ROOT_KEY_DIR/github-token" ]; then
-  install -m 600 -o root -g root /dev/null "$ROOT_KEY_DIR/github-token"
-  log "已创建 $ROOT_KEY_DIR/github-token 占位，需填入只读 token（见部署文档）"
+if [ ! -f "$CONF_DIR/github-token" ]; then
+  install -m 600 -o root -g root /dev/null "$CONF_DIR/github-token"
+  log "已创建 $CONF_DIR/github-token 占位，需填入只读 token（见部署文档）"
 fi
 # 部署脚本放在只有 root 可写的路径：部署账户能执行但不能改。
 install -d -m 755 -o root -g root /usr/local/lib/dec-cloud
@@ -256,6 +267,7 @@ RestartSec=5s
 TimeoutStopSec=30s
 
 # 加固：只允许写数据目录与根密钥目录。
+# 配置目录（github-token 所在）刻意不在可写清单里：服务账号只需要读它。
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -279,7 +291,7 @@ cat <<EOF
 [provision] 完成。下一步：
   1. 安装部署入口（必须 root 所有、755，且不能有 group/other 写权限——它由 sudo 以 root 执行）：
      install -m 755 -o root -g root dec-cloud-deploy.sh $ENTRY_PATH
-  2. 填 GitHub 只读 token：echo '<token>' > $ROOT_KEY_DIR/github-token && chmod 600 $ROOT_KEY_DIR/github-token
+  2. 填 GitHub 只读 token：echo '<token>' > $CONF_DIR/github-token && chmod 600 $CONF_DIR/github-token
      （fine-grained token，只给 shichao402/Dec 的 Contents: Read 权限）
   3. 首次启动：systemctl start $SERVICE_NAME
   4. 初始化需要 Bitwarden 主密码与 2FA，必须由本人操作（需求 10.1）

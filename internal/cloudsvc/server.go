@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -136,6 +137,12 @@ func New(cfg Config) (*Server, error) {
 	if cfg.RootKeyPath == "" {
 		cfg.RootKeyPath = rootKeyPath(cfg.DataDir)
 	}
+	// 启动自检：根密钥目录必须可写。
+	//
+	// 这里的失败代价很高——用户得先输入主密码和二次验证码，走完整条初始化
+	// 才发现目录不可写，然后重来。检查一下只是 open(2) 的代价，
+	// 却能把「部署目录权限配错」这类问题在启动日志里直接点明。
+	checkRootKeyWritable(cfg.RootKeyPath)
 
 	dataDir := cfg.DataDir
 	store, err := ssot.Open(storeDir(dataDir))
@@ -238,6 +245,32 @@ func downloadDir(dataDir string) string { return dataDir + "/download" }
 
 // auditDir 是审计仓库目录。与 SSOT 仓库并列，但独立成库（需求 15.3）。
 func auditDir(dataDir string) string { return dataDir + "/audit" }
+
+// checkRootKeyWritable 在启动时检查根密钥目录是否可写，只告警不阻断。
+//
+// 不阻断是有意的：已经初始化过的服务只需要读根密钥，目录不可写完全能正常跑。
+// 而没初始化过的服务如果目录不可写，用户会在输入完主密码和验证码之后才看到
+// 一句 permission denied——所以这里提前说清楚，但不该让服务起不来。
+func checkRootKeyWritable(rootKeyPath string) {
+	dir := filepath.Dir(rootKeyPath)
+	// 目录可能还不存在，Initialize 会自己建；这里只测最接近的真实目录。
+	for d := dir; d != "" && d != "/" && d != "."; d = filepath.Dir(d) {
+		if _, err := os.Stat(d); err == nil {
+			dir = d
+			break
+		}
+	}
+	f, err := os.CreateTemp(dir, ".writecheck-*")
+	if err != nil {
+		log.Printf("[cloud] 警告：根密钥目录 %s 不可写（%v）。"+
+			"初始化会失败——写根密钥用「临时文件 + rename」的原子写，要求目录本身可写，"+
+			"且该目录应归属服务账号。已初始化的服务不受影响。", dir, err)
+		return
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+}
 
 // requiredVersionFile 是发布清单里要求版本落成的文件。
 //

@@ -104,11 +104,15 @@ func WriteRootKey(path string, key *Key, createdAt time.Time, rotatedFrom string
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("创建根密钥目录失败: %w", err)
+		return fmt.Errorf("创建根密钥目录 %s 失败: %w", dir, err)
 	}
+	// 写密钥用的是「临时文件 + rename」原子写，因此要求目录本身可写，
+	// 只给文件写权限是不够的。目录不可写时错误信息必须点出这一点，
+	// 否则运维只看到一句 permission denied，无从下手。
 	tmp, err := os.CreateTemp(dir, ".rootkey-*")
 	if err != nil {
-		return fmt.Errorf("创建临时文件失败: %w", err)
+		return fmt.Errorf("创建临时文件失败（目录 %s 需要可写：原子写要用临时文件 + rename，"+
+			"该目录应归属服务账号且不与他人共用）: %w", dir, err)
 	}
 	tmpName := tmp.Name()
 	defer func() {

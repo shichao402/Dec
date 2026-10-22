@@ -12,10 +12,12 @@ Dec Cloud 只有一台服务器。这份文档说明它怎么搭起来、怎么�
 |------|------|------|
 | 服务端二进制 | `/opt/dec-cloud/dec-cloud` | 只有部署脚本 |
 | 数据目录 | `/var/lib/dec-cloud` | 服务进程 |
-| 根密钥 | `/etc/dec-cloud/root.key` | 服务进程，只在初始化时写一次 |
+| 根密钥 | `/etc/dec-cloud/secret/root.key` | 服务进程，只在初始化时写一次 |
 | 部署入口 | `/usr/local/lib/dec-cloud/dec-cloud-deploy.sh` | 只有 root |
 
 根密钥刻意放在数据目录之外：数据目录会被整体快照，`/etc` 不在里面，所以根密钥天然不进快照（需求 16.5、21.5）。部署脚本每次打完快照都会自检一遍，发现快照里有 `root.key` 就删掉并告警。
+
+根密钥单独占一层 `/etc/dec-cloud/secret`，这一层归属服务账号且 700。原因是写密钥用的是「临时文件 + rename」原子写，要求目录本身可写，而 `/etc/dec-cloud` 那层还躺着 `github-token`（`root:root` 0600），不能让服务账号能在那层建文件。两个写权限要求直接冲突，只能分层。
 
 ## 三个账号
 
@@ -104,7 +106,14 @@ git push origin v1.0.0
 
 部署完成后服务是起来了，但还没初始化。这一步需要 Bitwarden 主密码和 2FA，只能由本人完成——Agent 和 CI 都不该碰。
 
-在本机装代理，按提示输入主密码与动态码，根密钥会在服务端生成并落到 `/etc/dec-cloud/root.key`（0600），同时写入 Bitwarden 作为冷备。
+在本机装代理，然后执行（按提示输入主密码与动态码；主密码不会回显，也不进 shell 历史）：
+
+```
+dec-agent configure --url https://dec.firoyang.com
+dec-agent initialize --email <你的 Bitwarden 邮箱>
+```
+
+根密钥会在服务端生成并落到 `/etc/dec-cloud/secret/root.key`（0600，目录 700 归属服务账号），同时以加密形式写入 Bitwarden 的 `_dec-cloud` 目录作为冷备，写完立刻读回校验。校验不过会回滚本地文件并报错，不会留下「有密钥但没备份」的状态。成功后初始化入口永久关闭，后续设备只能走 `dec-agent enroll`。
 
 ## 发版
 
