@@ -83,6 +83,8 @@ type Server struct {
 
 	// maintenance 表示服务正在部署，代理应进入离线降级（需求 21.4）。
 	maintenance atomic.Bool
+	// deployMu 串行化部署协作文件的消费：后台轮询与主动调用会同时发生。
+	deployMu sync.Mutex
 	// backupCheckedAt 是冷备最后一次校验成功的时间，由冷备模块写入（需求 10.5）。
 	backupMu        sync.RWMutex
 	backupCheckedAt map[string]time.Time

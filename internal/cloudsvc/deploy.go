@@ -204,17 +204,39 @@ func (s *Server) syncDeployFiles() {
 //
 // 先读再删：记不进审计就把文件留着，下一轮还会再试。
 // 反过来先删后读，一次写审计失败就会让这次部署彻底没有记录。
+//
+// 两个并发点必须挡住，否则会出现「读到半截 JSON，当成坏文件删掉」：
+//   - watchDeploy 每秒轮询一次，测试与运维工具也可能主动调用 syncDeployFiles；
+//   - 部署脚本在写 pending.json 的同时，轮询可能正好读到写了一半的内容。
+//
+// 因此：进程内用互斥串行化；跨进程用「先 rename 到私有名再读」，
+// rename 在同一文件系统上是原子的——读到的要么完整，要么文件根本不在。
 func (s *Server) consumeDeployRecord() {
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+
 	path := deployRecordPath(s.cfg.DataDir)
-	raw, err := os.ReadFile(path)
+	own := path + ".consuming"
+	if err := os.Rename(path, own); err != nil {
+		// 文件不在是常态：本轮没有待处理的部署。
+		if !os.IsNotExist(err) {
+			s.logf("接管部署记录失败: %v", err)
+		}
+		return
+	}
+	// 无论后续成败，私有副本都不该留下；审计写失败时把它放回原处等下一轮。
+	restore := func() { _ = os.Rename(own, path) }
+
+	raw, err := os.ReadFile(own)
 	if err != nil {
+		restore()
 		return
 	}
 	var rec deployRecord
 	if err := json.Unmarshal(raw, &rec); err != nil {
 		// 内容坏了也要清掉，否则每一轮都会重试同一条坏数据。
 		s.logf("部署记录解析失败: %v", err)
-		_ = os.Remove(path)
+		_ = os.Remove(own)
 		return
 	}
 	if s.audit != nil {
@@ -228,13 +250,14 @@ func (s *Server) consumeDeployRecord() {
 		}); err != nil {
 			// 审计写不进去就保留文件，下轮重试。
 			s.logf("写部署审计失败: %v", err)
+			restore()
 			return
 		}
 	}
 	if !rec.OK() && s.alerts != nil {
 		s.alerts.Raise(alert.KindDeploy, "部署失败", rec.summary())
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(own); err != nil && !os.IsNotExist(err) {
 		s.logf("清除部署记录失败: %v", err)
 		return
 	}
