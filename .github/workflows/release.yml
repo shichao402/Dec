@@ -102,6 +102,17 @@ jobs:
             exit 1
           fi
 
+          # 要求版本不得倒退。
+          # 「客户端无改动就沿用上一个要求版本」是常态，但如果这次 tag 本身比上一个
+          # 要求版本更新，沿用就会得到更旧的要求版本——被版本对齐拦下的设备会
+          # 一直停在旧要求上。2026-10 的真实情况：v2.0.2 之后连续几次发布都在
+          # 沿用 v2.0.2，required_client 始终没有随版本前进。
+          if [ -n "$prev_required" ] && [ "$(printf '%s\n%s\n' "$prev_required" "$required" | sort -V | head -n1)" = "$required" ] \
+             && [ "$required" != "$prev_required" ]; then
+            echo "要求版本倒退：上一个 ${prev_required}，本次 ${required}" >&2
+            exit 1
+          fi
+
           echo "version=$tag" >> "$GITHUB_OUTPUT"
           echo "required=$required" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
