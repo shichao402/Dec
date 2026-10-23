@@ -133,6 +133,10 @@ func cmdRun(args []string) error {
 	insecure := fs.Bool("insecure", false, "跳过 TLS 校验（仅本机调试）")
 	port := fs.Int("port", 8787, "本机页面端口")
 	name := fs.String("name", "", "上报给服务端的设备名")
+	// 宿主配置是全局的，不随状态目录隔离。用自定义状态目录跑第二个实例
+	// （调试、验证、并行测试）时，它会按自己的端口改写 ~/.claude.json 等
+	// 文件，把正在用的那个实例的条目顶掉。这个开关让这类实例只读不写。
+	noHostSync := fs.Bool("no-host-sync", false, "不写入 IDE 的 MCP 配置（隔离实例用）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -267,12 +271,19 @@ func cmdRun(args []string) error {
 	// 把本机 MCP 条目写进已安装的宿主（需求 2.1、2.4）。
 	// 端口是这次实际监听出来的地址，不是用户传的 --port：端口被占用时
 	// 系统会换一个，条目必须指向真正能连上的那个。
-	for _, res := range agent.SyncHosts(addr) {
-		switch res.Status {
-		case agent.HostFailed:
-			logf("写入 %s 的 MCP 配置失败: %s", res.Name, res.Reason)
-		case agent.HostWritten:
-			logf("已写入 %s 的 MCP 配置: %s", res.Name, res.Path)
+	//
+	// 只有默认服役实例才写：宿主配置是全局的，隔离实例（自定义状态目录的
+	// 调试副本）按自己的端口改写它，会把正在用的那个实例的条目顶掉。
+	if *noHostSync || !agent.IsPrimaryStateDir(dir) {
+		logf("已跳过写入宿主 MCP 配置（非默认实例或显式关闭）")
+	} else {
+		for _, res := range agent.SyncHosts(addr) {
+			switch res.Status {
+			case agent.HostFailed:
+				logf("写入 %s 的 MCP 配置失败: %s", res.Name, res.Reason)
+			case agent.HostWritten:
+				logf("已写入 %s 的 MCP 配置: %s", res.Name, res.Path)
+			}
 		}
 	}
 
