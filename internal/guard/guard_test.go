@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -327,6 +328,83 @@ func TestTestEnvStaysIsolated(t *testing.T) {
 	// 必须核对「生产库没有测试残留」：隔离漏了只有这一步能发现。
 	if !strings.Contains(content, "/var/lib/dec-cloud/ssot/assets") {
 		t.Error("test-e2e.sh 必须核对生产库没有测试残留，否则隔离失效时无人发现")
+	}
+}
+
+// TestProductionDeployOnlyThroughCI 守住「生产只能经 CI 部署」这条约定。
+//
+// 本地把二进制推到生产会绕开三道闸门：tag 与 commit 的真实性核对、发布清单
+// 一致性校验、健康检查失败后的自动回滚。绕过去之后，生产上跑的东西与
+// GitHub 上的 tag 之间没有可验证的对应关系，出事时无法回答「这是哪个版本」。
+//
+// 所以这条约定不能只写在文档里：仓库里一旦出现「本地直连生产」的部署脚本，
+// 就应该让构建失败。
+func TestProductionDeployOnlyThroughCI(t *testing.T) {
+	root := repoRoot(t)
+
+	// 部署入口必须由 CI 经 SSH 调用，且真实性与回滚必须在同一条链路里。
+	wfPath := filepath.Join(root, ".github", "workflows", "release.yml")
+	wf, err := os.ReadFile(wfPath)
+	if err != nil {
+		t.Fatalf("读 %s 失败: %v", wfPath, err)
+	}
+	workflow := string(wf)
+	for _, want := range []string{
+		"refs/tags/v",               // 只有 tag 能触发部署
+		"StrictHostKeyChecking=yes", // 不接受未知 host key
+		"payload.tar",               // 产物走 stdin，不给参数注入留位置
+	} {
+		if !strings.Contains(workflow, want) {
+			t.Errorf("release.yml 缺少 %q，CI 部署链路不完整", want)
+		}
+	}
+
+	// 服务器侧必须核对 tag 真实性；这是部署私钥泄露时唯一的防线。
+	entryPath := filepath.Join(root, "deploy", "dec-cloud-deploy.sh")
+	entry, err := os.ReadFile(entryPath)
+	if err != nil {
+		t.Fatalf("读 %s 失败: %v", entryPath, err)
+	}
+	for _, want := range []string{
+		"verify_github_release", // 向 GitHub 核对 tag 与 commit
+		"github-token",          // 用只读 token 核对
+	} {
+		if !strings.Contains(string(entry), want) {
+			t.Errorf("dec-cloud-deploy.sh 缺少 %q，无法核对部署包真实性", want)
+		}
+	}
+
+	// 反向检查：scripts/ 与 Makefile 里不该出现直连生产的部署路径。
+	// 验收脚本可以 SSH 到生产做只读检查，所以只拦「上传并替换二进制」这类动作。
+	uploadPatterns := []string{
+		"scp .*dec-cloud.*dec.firoyang.com",
+		"rsync .*dec-cloud.*dec.firoyang.com",
+		"install -m 755 .*dec-cloud /opt/dec-cloud",
+	}
+	scriptDirs := []string{filepath.Join(root, "scripts"), filepath.Join(root, "deploy")}
+	for _, dir := range scriptDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".sh") {
+				continue
+			}
+			// 部署入口本身就是要被上传到服务器的文件，不算本地部署。
+			if e.Name() == "dec-cloud-deploy.sh" || e.Name() == "provision.sh" {
+				continue
+			}
+			body, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err != nil {
+				continue
+			}
+			for _, pat := range uploadPatterns {
+				if regexp.MustCompile(pat).Match(body) {
+					t.Errorf("%s 出现疑似「本地部署到生产」的写法（匹配 %q）；生产只能由 CI 部署", e.Name(), pat)
+				}
+			}
+		}
 	}
 }
 
