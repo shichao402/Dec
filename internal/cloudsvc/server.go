@@ -496,9 +496,16 @@ func (s *Server) deviceFrom(r *http.Request) (ssot.Device, error) {
 	return dev, nil
 }
 
-// aligned 报告代理版本是否与服务端要求版本一致（需求 19.4）。
+// aligned 报告代理版本是否达到服务端要求版本（需求 19.4）。
+//
+// 要求版本的语义是「最低可用版本」，不是「必须精确等于」：发布只改服务端时
+// CI 会沿用上一个要求版本（需求 19.2），若按精确相等判定，已升级到新版本的
+// 代理反而会判成不对齐而被拒绝服务。
 func (s *Server) aligned(v string) bool {
-	return v == "" || v == s.cfg.RequiredVersion
+	if v == "" {
+		return true
+	}
+	return compareVersion(v, s.cfg.RequiredVersion) >= 0
 }
 
 // logf 是统一日志出口，便于后续接入审计与告警。
