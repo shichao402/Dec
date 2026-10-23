@@ -33,7 +33,7 @@
 12. 服务器的 SSH（22 端口）对公网开放，CI 直接通过公网 SSH 部署，不引入 Tailscale、WireGuard 或 self-hosted runner。SSH 的安全通过只允许公钥登录和专用受限的部署账户来保证。
 13. 本次重构后，Dec 不再是公开项目，代码改为托管在 GitHub 上的私有仓库（见需求 22）。代码不公开可以减少攻击者可利用的信息，但它只是附加收益，SHALL NOT 被当作安全边界，安全仍以已定决策 10 为准。
 14. 本次是断代升级，新系统不兼容旧架构。官方资产与提供方机制、registry、`publish.firoyang.com`、`DecPersonalDevKit`、`dec-source-private` 全部废弃，不并入，也不作为上游。新系统建成、服务搭好之后，存量内容由 Agent 通过新系统的写入链路协助迁移（见需求 17），迁移完成后旧内容彻底删除。
-15. 服务端域名为 `dec.firoyang.com`。TLS 证书由服务端通过 ACME 的 TLS-ALPN-01 方式自动向 Let's Encrypt 申请和续期，走的是 443 端口，因此不需要额外开放 80 端口。
+15. 服务端域名为 `dec.firoyang.com`。TLS 证书由服务端通过 ACME 的 TLS-ALPN-01 方式自动向 Let's Encrypt 申请和续期，走的是 443 端口，因此不需要额外开放 80 端口。公网 443 由 nginx 持有，以 SNI 透传（不终止 TLS）方式转发到 dec-cloud 的回环高位端口 `127.0.0.1:8443`。
 16. 管理面只做 Web，并且只通过本机代理访问。本期不做 Android 端，告警改走企业微信机器人和代理的系统通知（需求 12）。
 17. 技术栈使用 Go：复用 `internal/secrets` 里的 Bitwarden API，以及现有渲染和 vars 模块中仍然适用的部分，其余按断代升级的原则重写。
 18. SSH 远端机器一律作为“只接收设备”，各自安装代理。

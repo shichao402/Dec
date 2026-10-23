@@ -25,7 +25,8 @@ import (
 // 两种来源：
 //
 //  1. 生产：ACME TLS-ALPN-01 自动申请与续期 dec.firoyang.com 的证书。
-//     走 443 端口上的 ALPN 挑战，不需要额外的 80 端口（需求 16.3 只开放 443 与 22）。
+//     走 ALPN 挑战，不需要额外的 80 端口。公网 443 由 nginx 持有，按 SNI 原样
+//     透传 TLS 流到本服务的回环高位端口，acme-tls/1 握手与设备证书都不经 nginx 解密。
 //  2. 调试：AcceptAny 时用自签证书，只在 127.0.0.1 上使用。
 
 // loadOrCreateCA 加载或创建服务端身份 CA。

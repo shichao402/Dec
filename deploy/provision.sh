@@ -48,6 +48,8 @@ CONF_DIR="${DEC_CONF_DIR:-/etc/dec-cloud}"
 ROOT_KEY_DIR="${DEC_ROOT_KEY_DIR:-$CONF_DIR/secret}"
 DATA_DIR="/var/lib/dec-cloud"
 APP_DIR="/opt/dec-cloud"
+# dec-cloud 只监听回环高位端口；公网 443 由 nginx 按 SNI 透传过来。
+LISTEN_ADDR="${DEC_LISTEN_ADDR:-127.0.0.1:8443}"
 # 部署入口：authorized_keys 的 command= 与 sudoers 都指向这一个路径，
 # 只改一处就会两边不一致，所以集中定义。
 ENTRY_PATH="/usr/local/lib/${SERVICE_NAME}/${SERVICE_NAME}-deploy.sh"
@@ -277,11 +279,11 @@ Wants=network-online.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
-# 服务端要持有 443，因此需要 CAP_NET_BIND_SERVICE。
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# 只监听回环高位端口，公网 443 归 nginx（stream + ssl_preread 按 SNI 透传，不终止 TLS）。
+# 不需要绑定低位端口，因此不授予任何 capability。
+CapabilityBoundingSet=
 NoNewPrivileges=yes
-ExecStart=$APP_DIR/dec-cloud -data-dir $DATA_DIR -listen :443 -domain $DOMAIN -root-key $ROOT_KEY_DIR/root.key
+ExecStart=$APP_DIR/dec-cloud -data-dir $DATA_DIR -listen $LISTEN_ADDR -domain $DOMAIN -root-key $ROOT_KEY_DIR/root.key
 Restart=on-failure
 RestartSec=5s
 # 部署脚本会 stop/start，给数据迁移留出时间。

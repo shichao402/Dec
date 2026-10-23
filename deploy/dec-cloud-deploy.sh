@@ -34,8 +34,21 @@ APP_DIR="${DEC_APP_DIR:-/opt/dec-cloud}"
 SNAP_DIR="${DEC_SNAP_DIR:-$APP_DIR/snapshots}"
 SERVICE="${DEC_SERVICE:-dec-cloud}"
 # 健康检查必须走域名：服务端证书是 ACME 签的，无 SNI 的握手会被拒。
-# 域名取 DEC_HEALTH_URL；脚本内部用 --resolve 把它钉到 127.0.0.1。
+# 域名取 DEC_HEALTH_URL；脚本内部用 --connect-to 把它直连到本机 dec-cloud 的
+# 回环监听地址（DEC_LISTEN_ADDR），绕过 nginx，判据只针对 dec-cloud 自身。
 HEALTH_URL="${DEC_HEALTH_URL:-https://dec.firoyang.com/healthz}"
+# 监听地址不写死：从线上 systemd 单元的 -listen 推导。本脚本不改写单元，
+# 单元由 provision.sh 管；若写死 8443，单元还停在旧端口时新版本会被健康检查误判并回滚。
+# 推导不到才用默认值。":443" 这类只有端口的写法补成 127.0.0.1。
+LISTEN_ADDR="${DEC_LISTEN_ADDR:-}"
+if [ -z "$LISTEN_ADDR" ]; then
+  LISTEN_ADDR="$(systemctl cat "$SERVICE" 2>/dev/null | sed -n 's/^ExecStart=.*-listen[ =]\([^ ]*\).*/\1/p' | tail -n 1)"
+fi
+case "$LISTEN_ADDR" in
+  "") LISTEN_ADDR="127.0.0.1:8443" ;;
+  :*) LISTEN_ADDR="127.0.0.1$LISTEN_ADDR" ;;
+  0.0.0.0:*) LISTEN_ADDR="127.0.0.1:${LISTEN_ADDR#0.0.0.0:}" ;;
+esac
 HEALTH_RETRIES="${DEC_HEALTH_RETRIES:-30}"
 HEALTH_INTERVAL="${DEC_HEALTH_INTERVAL:-2}"
 # 保留几份快照。够回滚就行，不无限堆积。
@@ -159,14 +172,15 @@ verify_github_release() {
 # 必须带域名访问，不能直接打 https://127.0.0.1：服务端用 ACME 自动签证书，
 # 没有 SNI 的握手会直接失败（acme/autocert: missing server name），
 # 表现为「健康检查 30 次全部无响应」然后误回滚——真实踩过。
-# --resolve 把域名钉到回环，既拿到正确证书又不出公网。
+# --connect-to 保留 URL 里的域名（SNI 正确、拿到正确证书），但 TCP 直连本机
+# dec-cloud 的回环端口，不出公网也不经过 nginx。
 #
 # 用 -k 是刻意的：本机判据是「进程活着、版本对了、能应答」，不是证书链。
 wait_health() {
   local want="$1" i body got host
   host="$(printf '%s' "$HEALTH_URL" | sed -e 's|^https\?://||' -e 's|/.*$||' -e 's|:.*$||')"
   for i in $(seq 1 "$HEALTH_RETRIES"); do
-    body="$(curl -fsSk --max-time 5 --resolve "${host}:443:127.0.0.1" "$HEALTH_URL" 2>/dev/null || true)"
+    body="$(curl -fsSk --max-time 5 --connect-to "${host}:443:${LISTEN_ADDR}" "$HEALTH_URL" 2>/dev/null || true)"
     if [ -n "$body" ]; then
       got="$(printf '%s' "$body" | tr -d '\n' | sed -n 's/.*"server_version":"\([^"]*\)".*/\1/p')"
       if [ "$got" = "$want" ]; then
