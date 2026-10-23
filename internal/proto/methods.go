@@ -51,7 +51,7 @@ var methods = map[Method]func() any{
 	MethodEnroll:           func() any { return &EnrollBeginRequest{} },
 	MethodRecover:          func() any { return &RecoverRequest{} },
 	MethodWriteAsset:       func() any { return &AssetPayload{} },
-	MethodDeleteAsset:      func() any { return &AssetPayload{} },
+	MethodDeleteAsset:      func() any { return &DeleteAssetRequest{} },
 	MethodPutSecret:        func() any { return &SecretPayload{} },
 	MethodDeleteSecret:     func() any { return &SecretDeleteRequest{} },
 	MethodReadSecret:       func() any { return &ReadSecretRequest{} },

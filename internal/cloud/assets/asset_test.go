@@ -515,8 +515,9 @@ func TestSecretsDeliveredTo(t *testing.T) {
 	}
 }
 
-func TestDeleteAsset(t *testing.T) {
-	w, _ := newTestWriter(t)
+// 写入一个含两个条目的 bundle，供删除测试复用。
+func seedTwoItems(t *testing.T, w *Writer) {
+	t.Helper()
 	if _, err := w.WriteAsset(WriteAssetInput{
 		Bundle: "woa",
 		Files: []AssetFile{
@@ -538,19 +539,13 @@ items:
 	}); err != nil {
 		t.Fatalf("WriteAsset: %v", err)
 	}
+}
 
-	out, err := w.DeleteAsset(WriteAssetInput{
-		Bundle: "woa",
-		Files:  []AssetFile{{Path: "b.md", Content: []byte("b")}},
-		Manifest: []byte(`name: woa
-items:
-  - kind: rule
-    path: b.md
-    name: b
-    planes: [user]
-`),
-		Author: author(),
-	}, "a.md")
+func TestDeleteAsset(t *testing.T) {
+	w, _ := newTestWriter(t)
+	seedTwoItems(t, w)
+
+	out, err := w.DeleteAsset(DeleteAssetInput{Bundle: "woa", Path: "a.md", Author: author()})
 	if err != nil {
 		t.Fatalf("DeleteAsset: %v", err)
 	}
@@ -561,9 +556,121 @@ items:
 	if err != nil {
 		t.Fatalf("ReadBundleFiles: %v", err)
 	}
+	var paths []string
 	for _, f := range files {
-		if f.Path == "a.md" {
+		paths = append(paths, f.Path)
+	}
+	for _, p := range paths {
+		if p == "a.md" {
 			t.Fatal("a.md 应已删除")
+		}
+	}
+	// 只删目标条目，b.md 与其 manifest 条目必须原样保留。
+	found := false
+	for _, p := range paths {
+		if p == "b.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("b.md 不应被删除，实际文件: %v", paths)
+	}
+}
+
+// TestDeleteAssetOnlyRemovesTargetItem 锁定“精确删除”语义。
+//
+// 这条测试防的是曾经的实现：删除走整包替换，调用方不传内容时
+// 会把整个 bundle 静默清空。现在删一个条目必须只剩那一个条目消失。
+func TestDeleteAssetOnlyRemovesTargetItem(t *testing.T) {
+	w, _ := newTestWriter(t)
+	seedTwoItems(t, w)
+
+	if _, err := w.DeleteAsset(DeleteAssetInput{Bundle: "woa", Path: "a.md", Author: author()}); err != nil {
+		t.Fatalf("DeleteAsset: %v", err)
+	}
+
+	m, err := w.ReadManifest("woa")
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if len(m.Items) != 1 {
+		t.Fatalf("应只剩 1 个条目，实际 %d: %+v", len(m.Items), m.Items)
+	}
+	if m.Items[0].Path != "b.md" || m.Items[0].Name != "b" {
+		t.Fatalf("保留的条目错误: %+v", m.Items[0])
+	}
+
+	got, err := w.ReadBundleFiles("woa")
+	if err != nil {
+		t.Fatalf("ReadBundleFiles: %v", err)
+	}
+	var content string
+	for _, f := range got {
+		if f.Path == "b.md" {
+			content = string(f.Content)
+		}
+	}
+	if content != "b" {
+		t.Fatalf("b.md 应仍存在且内容为 b，实际 %q", content)
+	}
+}
+
+// TestDeleteAssetMissingItem 锁定“删不存在的条目必须报错”。
+//
+// 曾经的实现对不存在的名字返回成功并把整个 bundle 清空，
+// 名字打错和删成功根本无法区分。
+func TestDeleteAssetMissingItem(t *testing.T) {
+	w, _ := newTestWriter(t)
+	seedTwoItems(t, w)
+
+	_, err := w.DeleteAsset(DeleteAssetInput{Bundle: "woa", Path: "zzz.md", Author: author()})
+	if !errors.Is(err, ssot.ErrNotFound) {
+		t.Fatalf("期望 ssot.ErrNotFound，实际 %v", err)
+	}
+	// 失败不应产生任何改动。
+	m, err := w.ReadManifest("woa")
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if len(m.Items) != 2 {
+		t.Fatalf("失败后条目数应仍是 2，实际 %d", len(m.Items))
+	}
+}
+
+func TestDeleteAssetRejectsEmptyPath(t *testing.T) {
+	w, _ := newTestWriter(t)
+	seedTwoItems(t, w)
+
+	if _, err := w.DeleteAsset(DeleteAssetInput{Bundle: "woa", Path: "  ", Author: author()}); !errors.Is(err, ErrSchema) {
+		t.Fatalf("空路径应被拒绝，实际 %v", err)
+	}
+}
+
+func TestDeleteAssetRejectsPathTraversal(t *testing.T) {
+	w, _ := newTestWriter(t)
+	seedTwoItems(t, w)
+
+	if _, err := w.DeleteAsset(DeleteAssetInput{Bundle: "woa", Path: "../x.md", Author: author()}); err == nil {
+		t.Fatal("越界路径应被拒绝")
+	}
+}
+
+// TestDeleteAssetSkillRemovesWholeDir 锁定 skill 条目按目录删除。
+func TestDeleteAssetSkillRemovesWholeDir(t *testing.T) {
+	w, _ := newTestWriter(t)
+	if _, err := w.WriteAsset(WriteAssetInput{Bundle: "woa", Files: skillFiles(), Author: author()}); err != nil {
+		t.Fatalf("WriteAsset: %v", err)
+	}
+	if _, err := w.DeleteAsset(DeleteAssetInput{Bundle: "woa", Path: "demo", Author: author()}); err != nil {
+		t.Fatalf("DeleteAsset: %v", err)
+	}
+	files, err := w.ReadBundleFiles("woa")
+	if err != nil {
+		t.Fatalf("ReadBundleFiles: %v", err)
+	}
+	for _, f := range files {
+		if strings.HasPrefix(f.Path, "demo/") {
+			t.Fatalf("skill 目录下的文件应全部删除，仍有 %s", f.Path)
 		}
 	}
 }

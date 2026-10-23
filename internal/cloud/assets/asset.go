@@ -48,12 +48,24 @@ func NewWriter(store *ssot.Store) *Writer { return &Writer{store: store} }
 type WriteAssetInput struct {
 	Bundle string
 	// Files 是这条 bundle 下的全部文件，路径相对 assets/<bundle>/。
+	// 这是整体替换语义：未出现在 Files 里的旧文件会被删除。
 	Files []AssetFile
-	// Delete 是显式删除的条目路径。整 bundle 替换的语义下，
-	// 未出现在 Files 里的旧文件同样会被删除，Delete 用于在 manifest 里表达“我知道它没了”。
-	Delete []string
 	// Manifest 是调用方给出的 manifest。为空时由服务端按 Files 推断。
 	Manifest []byte
+	// BaseRevision 用于乐观并发控制。
+	BaseRevision string
+	Message      string
+	Author       ssot.Author
+}
+
+// DeleteAssetInput 是一次资产条目删除请求。
+//
+// 与 WriteAssetInput 的区别是它不接收文件内容：删除只需要路径，
+// 剩余内容由服务端从当前 SSOT 读出，调用方无法因为少传而误删别的条目。
+type DeleteAssetInput struct {
+	Bundle string
+	// Path 是要删除的条目路径，必须与 manifest 里的 path 一致。
+	Path string
 	// BaseRevision 用于乐观并发控制。
 	BaseRevision string
 	Message      string
@@ -87,7 +99,7 @@ func (w *Writer) WriteAsset(in WriteAssetInput) (*WriteAssetOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	manifest, err := parseManifest(in.Bundle, in.Manifest, files, in.Delete)
+	manifest, err := parseManifest(in.Bundle, in.Manifest, files)
 	if err != nil {
 		return nil, err
 	}
@@ -143,44 +155,87 @@ func (w *Writer) WriteAsset(in WriteAssetInput) (*WriteAssetOutput, error) {
 
 // DeleteAsset 从 bundle 中移除一个条目。
 //
-// 删除同样是同步的：改 manifest、删文件、提交、触发下发。
-func (w *Writer) DeleteAsset(in WriteAssetInput, itemPath string) (*WriteAssetOutput, error) {
+// 与 WriteAsset 的整包替换不同，这里是精确删除：事务内读出当前 manifest，
+// 摘掉 Path 匹配的那一条，删掉它名下的文件，其余条目与文件原样保留。
+// 传递性上也不存在「少给了内容就误删」的可能，因为调用方本来就不传内容。
+//
+// 条目不存在时返回 ssot.ErrNotFound，而不是静默提交一个空改动：
+// 静默成功会让「删错名字」看起来像「删成功了」。
+func (w *Writer) DeleteAsset(in DeleteAssetInput) (*WriteAssetOutput, error) {
 	if err := ssot.ValidateBundle(in.Bundle); err != nil {
 		return nil, err
+	}
+	itemPath := strings.TrimSpace(in.Path)
+	if itemPath == "" {
+		return nil, fmt.Errorf("%w: 条目路径不能为空", ErrSchema)
 	}
 	if err := ssot.SafeRelPath(itemPath); err != nil {
 		return nil, err
 	}
 
-	files := in.Files
-	manifest, err := parseManifest(in.Bundle, in.Manifest, files, in.Delete)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateManifest(manifest, files); err != nil {
-		return nil, err
-	}
-
+	var (
+		commit   string
+		manifest ssot.BundleManifest
+	)
 	revision, err := w.store.Update(in.Author, func(tx *ssot.Tx) (string, error) {
 		if err := tx.EnsureRevision(in.BaseRevision); err != nil {
 			return "", err
 		}
-		if err := checkEntryConflicts(tx, in.Bundle, manifest); err != nil {
+		dir := ssot.AssetDir(in.Bundle)
+		current, err := ssot.ReadYAML[ssot.BundleManifest](tx.Store(), path.Join(dir, ssot.FileManifest))
+		if err != nil {
 			return "", err
 		}
-		if err := replaceBundle(tx, in.Bundle, files, manifest); err != nil {
+
+		// 找出目标条目；同时确认它确实存在于当前 manifest 里。
+		var target *ssot.ManifestItem
+		kept := make([]ssot.ManifestItem, 0, len(current.Items))
+		for i := range current.Items {
+			if current.Items[i].Path == itemPath {
+				target = &current.Items[i]
+				continue
+			}
+			kept = append(kept, current.Items[i])
+		}
+		if target == nil {
+			return "", fmt.Errorf("%w: bundle %q 里没有条目 %q",
+				ssot.ErrNotFound, in.Bundle, itemPath)
+		}
+
+		// 删文件：skill 条目删整个目录，其余删单文件。
+		// 只删这个条目自己名下的路径，不碰其它条目。
+		if target.Kind == ssot.KindSkill {
+			if err := tx.DeleteDir(path.Join(dir, target.Path)); err != nil {
+				return "", err
+			}
+		} else {
+			if err := tx.DeleteFile(path.Join(dir, target.Path)); err != nil {
+				return "", err
+			}
+		}
+
+		// 写回摘掉该条目后的 manifest。
+		manifest = current
+		manifest.Items = kept
+		manifestBytes, err := yaml.Marshal(manifest)
+		if err != nil {
+			return "", fmt.Errorf("序列化 manifest 失败: %w", err)
+		}
+		if err := tx.WriteFile(path.Join(dir, ssot.FileManifest), manifestBytes, 0o600); err != nil {
 			return "", err
 		}
+
 		msg := in.Message
 		if msg == "" {
 			msg = fmt.Sprintf("删除资产 %s/%s", in.Bundle, itemPath)
 		}
+		commit = ""
 		return msg, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &WriteAssetOutput{Bundle: in.Bundle, Revision: revision, Manifest: manifest}, nil
+	return &WriteAssetOutput{Bundle: in.Bundle, Revision: revision, Commit: commit, Manifest: manifest}, nil
 }
 
 // ReadManifest 读取某个 bundle 的 manifest。
@@ -272,7 +327,10 @@ func normalizeFiles(files []AssetFile) ([]AssetFile, error) {
 }
 
 // parseManifest 解析调用方提供的 manifest；为空时按文件推断。
-func parseManifest(bundle string, raw []byte, files []AssetFile, deleted []string) (ssot.BundleManifest, error) {
+//
+// 这个函数只负责解析与补全，不参与“删什么”的决策：整体替换语义下，
+// 删除已经由“文件列表里没有它”表达了。
+func parseManifest(bundle string, raw []byte, files []AssetFile) (ssot.BundleManifest, error) {
 	var m ssot.BundleManifest
 	if len(raw) > 0 {
 		dec := yaml.NewDecoder(bytes.NewReader(raw))

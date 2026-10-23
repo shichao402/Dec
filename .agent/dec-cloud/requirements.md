@@ -131,10 +131,11 @@
 1. 资产写入 SHALL 使用独立于读取下发的同步请求入口，由管理面和 Agent（MCP）共用。请求内容是按规定目录结构组织的 bundle 和 manifest（目标资产、操作类型、base revision）。
 2. 客户端 SHALL 先在本地做格式和 schema 预校验，不通过就不发请求，并给出明确原因。
 3. 云端 SHALL 在同一个请求内按固定流程依次执行：schema 校验、命名校验、密钥引用完整性校验（被引用的密钥必须存在）、疑似明文密钥扫描、提交 commit。任何一步失败 SHALL 使整个请求失败且不产生 commit，并返回失败的步骤和原因。
-4. 写入语义 SHALL 是按 bundle 整体替换，删除通过 manifest 里的显式操作声明。同一个请求重复执行 SHALL 结果一致。
-5. IF 请求的 base revision 落后于当前 SSOT 版本 THEN 云端 SHALL 拒绝请求并返回最新 revision，SHALL NOT 静默覆盖。
-6. 云端 SHALL 对资产和密钥写入共用一把锁、串行处理。
-7. WHEN 请求成功 THEN 云端 SHALL 在响应里返回新的 revision，并立即按需求 4.2 下发到所有受影响的设备。
+4. 写入语义 SHALL 是按 bundle 整体替换：提交后该 bundle 的内容与请求里给出的条目集合完全一致，未出现的旧条目会被删除。同一个请求重复执行 SHALL 结果一致。
+5. 删除单个条目 SHALL 通过独立的删除请求表达，请求只包含 bundle 与条目路径。云端 SHALL 在事务内读出当前 manifest，仅移除路径匹配的条目及其名下文件，其余条目 SHALL NOT 受影响。IF 该路径在 manifest 中不存在 THEN 云端 SHALL 返回 not_found，SHALL NOT 静默成功。
+6. IF 请求的 base revision 落后于当前 SSOT 版本 THEN 云端 SHALL 拒绝请求并返回最新 revision，SHALL NOT 静默覆盖。
+7. 云端 SHALL 对资产和密钥写入共用一把锁、串行处理。
+8. WHEN 请求成功 THEN 云端 SHALL 在响应里返回新的 revision，并立即按需求 4.2 下发到所有受影响的设备。
 
 ### 需求 8：Dec 自有的密钥管理
 

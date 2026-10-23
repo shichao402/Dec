@@ -396,12 +396,33 @@ type EnrollBeginResponse struct {
 type RecoverRequest = EnrollBeginRequest
 
 // AssetPayload 是资产写入的条目内容。
+//
+// 写入语义是「按 bundle 整体替换」：提交后这个 bundle 的目录内容与
+// Items 加 Manifest 完全一致，未出现在 Items 里的旧文件会被删除。
+// 所以这里没有「删除哪些条目」的字段——删除靠「不传该条目」表达，
+// 需要按路径删单条时用 delete_asset（DeleteAssetRequest）。
 type AssetPayload struct {
-	Bundle string      `json:"bundle"`
-	Items  []AssetItem `json:"items"`
-	// Delete 是本次显式要删除的条目路径。
-	Delete   []string `json:"delete,omitempty"`
-	Manifest []byte   `json:"manifest,omitempty"`
+	Bundle string `json:"bundle"`
+	// Items 是这个 bundle 下的全部文件，不是增量补丁。
+	// 少传一个文件，就等于删掉它。
+	Items []AssetItem `json:"items"`
+	// Manifest 是调用方给出的 manifest，为空时服务端按 Items 推断。
+	Manifest []byte `json:"manifest,omitempty"`
+	// BaseRevision 用于乐观并发控制，空表示允许覆盖。
+	BaseRevision string `json:"base_revision,omitempty"`
+	// Message 是提交说明，写进 commit。
+	Message string `json:"message,omitempty"`
+}
+
+// DeleteAssetRequest 删除 bundle 里的一个条目。
+//
+// 删除只需要指明删哪一个：服务端在事务内读出当前 manifest，
+// 摘掉匹配的条目并删除它名下的文件，其余条目与文件保持不变。
+// 调用方不需要回传剩余内容，因此不存在「传少了就把别人删掉」的风险。
+type DeleteAssetRequest struct {
+	Bundle string `json:"bundle"`
+	// Path 是要删除的条目路径，必须与 manifest 里的 path 完全一致。
+	Path string `json:"path"`
 	// BaseRevision 用于乐观并发控制，空表示允许覆盖。
 	BaseRevision string `json:"base_revision,omitempty"`
 	// Message 是提交说明，写进 commit。

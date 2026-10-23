@@ -39,7 +39,6 @@ func (s *Server) mWriteAsset(req *proto.Request, payload any, dev ssot.Device) *
 	out, err := s.assets.WriteAsset(assets.WriteAssetInput{
 		Bundle:       in.Bundle,
 		Files:        files,
-		Delete:       in.Delete,
 		Manifest:     in.Manifest,
 		BaseRevision: in.BaseRevision,
 		Message:      in.Message,
@@ -62,28 +61,28 @@ func (s *Server) mWriteAsset(req *proto.Request, payload any, dev ssot.Device) *
 }
 
 // mDeleteAsset 删除一个资产条目（需求 7.4）。
+//
+// 只接受条目路径，不接受「删完之后的全部内容」：剩余内容由服务端自己读，
+// 调用方少传内容不会导致误删，传错路径会得到 not_found 而不是静默成功。
 func (s *Server) mDeleteAsset(req *proto.Request, payload any, dev ssot.Device) *proto.Response {
-	in, ok := payload.(*proto.AssetPayload)
+	in, ok := payload.(*proto.DeleteAssetRequest)
 	if !ok {
 		return proto.Fail(req.ID, proto.ErrInvalid, "delete_asset 载荷类型错误")
 	}
 	if err := requireWrite(req.Source, dev); err != nil {
 		return proto.Fail(req.ID, proto.ErrForbidden, err.Error())
 	}
-	// 删除用 manifest 表达：调用方给出删完之后的 manifest 与剩余文件。
-	// 这样删除和写入共用一条链路，不存在“删了但 manifest 没改”的中间态。
-	var itemPath string
-	if len(in.Delete) > 0 {
-		itemPath = in.Delete[0]
+	itemPath := strings.TrimSpace(in.Path)
+	if itemPath == "" {
+		return proto.Fail(req.ID, proto.ErrInvalid, "path 不能为空")
 	}
-	out, err := s.assets.DeleteAsset(assets.WriteAssetInput{
+	out, err := s.assets.DeleteAsset(assets.DeleteAssetInput{
 		Bundle:       in.Bundle,
-		Delete:       in.Delete,
-		Manifest:     in.Manifest,
+		Path:         itemPath,
 		BaseRevision: in.BaseRevision,
 		Message:      in.Message,
 		Author:       authorOf(req.Source, dev),
-	}, itemPath)
+	})
 	if err != nil {
 		return failFromError(req.ID, err)
 	}
