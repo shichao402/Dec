@@ -47,8 +47,13 @@ type Service struct {
 	// 就一起没了，而冷备却是齐的。审计的价值在于"发生过什么"，它必须有自己的
 	// 上界，不能让"有没有人改东西"决定它多久上趟远端。
 	//
-	// 取 5 分钟：比 24 小时兜底短两个数量级，又不至于让这台 1 核 1G 的机器
-	// 频繁做 SSH 往返（无变更时每个仓库一次 fetch 就返回）。
+	// 为什么是 30 分钟而不是更短（2026-10-24 生产 OOM 的教训）：
+	// 每次推送都要把工作树里累积的改动做成新 commit，而审计是"每天一个 jsonl
+	// 持续追加"，git 存的是文件全量快照——提交越频繁，仓库长得越快。实测这批
+	// 记录约 147KB/commit（已压缩），5 分钟一次就是 42MB/天、1.2GB/月，
+	// 40G 盘撑不过一个月；而且 go-git 推送前要把松散对象重新打包，
+	// 52MB 的松散对象在 1G 内存的机器上直接把进程顶到 OOM（anon-rss 754MB 被杀）。
+	// 30 分钟是这两个方向的折中：一天 48 次，远端最多滞后半小时。
 	auditTick time.Duration
 	// debounce 是提交后合并推送的延迟：连续写入只推一次。
 	debounce time.Duration
@@ -76,10 +81,11 @@ type Options struct {
 	Reporter     Reporter
 	// DailyTick 是兜底周期，默认 24 小时。
 	DailyTick time.Duration
-	// AuditTick 是审计的独立推送周期，默认 5 分钟。
+	// AuditTick 是审计的独立推送周期，默认 30 分钟。
 	//
 	// 单独给审计一条周期，理由见 Service.auditTick 的注释：
-	// 只读事件不产生内容变更，不会触发 Trigger。
+	// 只读事件不产生内容变更，不会触发 Trigger；但周期也不能太密，
+	// 每次推送都会新增一个全量快照 commit。
 	AuditTick time.Duration
 	// Debounce 是提交后合并窗口，默认 5 秒。
 	Debounce time.Duration
@@ -97,7 +103,8 @@ func NewService(opts Options) *Service {
 		opts.DailyTick = 24 * time.Hour
 	}
 	if opts.AuditTick <= 0 {
-		opts.AuditTick = 5 * time.Minute
+		// 见 Service.auditTick：再密就会让审计仓库按天膨胀上千兆。
+		opts.AuditTick = 30 * time.Minute
 	}
 	if opts.Debounce <= 0 {
 		opts.Debounce = 5 * time.Second

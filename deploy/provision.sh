@@ -384,9 +384,42 @@ ProtectHome=yes
 PrivateTmp=yes
 ReadWritePaths=$DATA_DIR $ROOT_KEY_DIR
 
+# 内存上限：留出余量给内核与 sshd，超了让服务自己被杀，别拖垮整机。
+#
+# 2026-10-24 的实际故障：推送审计时 go-git 要把松散对象重新打包，
+# dec-cloud 的 anon-rss 涨到 754MB，在 956MB 的机器上触发全局 OOM，
+# 整机失去响应（ping 通、SSH 与 HTTPS 全不通），只能走云 API 重启。
+# 单独设上限的意义不是"不 OOM"，而是把伤害限制在这个 unit 里：
+# 它被杀后 Restart=on-failure 会拉起，sshd 还有内存可用，人还进得去。
+MemoryMax=600M
+
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# --- swap ---------------------------------------------------------------
+#
+# 为什么需要：这台 1G 内存的机器上，git 打包对象是内存尖峰的最大来源
+# （见上面 MemoryMax 的注释）。有 swap 时内核可以把冷页换出去，
+# 打包进程不至于直接被 OOM 杀掉；没有 swap 时 956MB 里只要出现 700MB 级别的
+# 匿名页，全机就悬了。
+#
+# 必须写 fstab：2026-10-24 那次事故的善后里手工建了 /swapfile，
+# 但没写 fstab，机器一重启 swap 就没了——下一次同样的推送又会 OOM。
+SWAP_FILE="/swapfile"
+if [ ! -f "$SWAP_FILE" ]; then
+  fallocate -l 2G "$SWAP_FILE" || dd if=/dev/zero of="$SWAP_FILE" bs=1M count=2048 status=none
+  chmod 600 "$SWAP_FILE"
+  mkswap "$SWAP_FILE" >/dev/null
+  log "已创建 $SWAP_FILE（2G）"
+fi
+if ! grep -qE "^[[:space:]]*$SWAP_FILE[[:space:]]" /etc/fstab; then
+  printf '%s none swap sw 0 0\n' "$SWAP_FILE" >>/etc/fstab
+  log "已把 $SWAP_FILE 写入 /etc/fstab（重启后仍生效）"
+fi
+if ! swapon --show=NAME --noheadings 2>/dev/null | grep -qx "$SWAP_FILE"; then
+  swapon "$SWAP_FILE" && log "已启用 swap：$SWAP_FILE"
+fi
 
 systemctl daemon-reload
 systemctl enable $SERVICE_NAME >/dev/null 2>&1 || true

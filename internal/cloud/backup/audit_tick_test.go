@@ -119,13 +119,15 @@ func TestAuditTickOnlyPushesAudit(t *testing.T) {
 	}
 }
 
-// TestAuditTickDefault 验证默认周期是 5 分钟而不是 24 小时。
+// TestAuditTickDefault 验证默认周期是 30 分钟而不是 24 小时或 5 分钟。
 //
-// 这个断言看着脆（改个常量就红），但它锁的是一个判断而不是数字：
-// 审计的上界必须比每日兜底短得多，否则"机器坏了审计全丢"这个缺口会回来。
+// 这个断言看着脆（改个常量就红），但它锁的是两个判断而不是数字：
+// 太接近每日兜底，"纯读窗口里的审计要等一天"这个缺口会回来；
+// 太密则每次推送都新增一个全量快照 commit，仓库按天膨胀，
+// 打包松散对象还会在小内存机器上触发 OOM（2026-10-24 实际发生过）。
 func TestAuditTickDefault(t *testing.T) {
 	svc := NewService(Options{})
-	if svc.auditTick != 5*time.Minute {
-		t.Fatalf("审计默认周期 = %v，期望 5m；若确要改，请先想清楚纯读窗口的审计还要不要在当天上远端", svc.auditTick)
+	if svc.auditTick != 30*time.Minute {
+		t.Fatalf("审计默认周期 = %v，期望 30m；改小前请先算一遍仓库日增量与打包内存", svc.auditTick)
 	}
 }
