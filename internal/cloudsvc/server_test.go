@@ -559,7 +559,12 @@ func TestDownloadWhitelist(t *testing.T) {
 // TestDownloadIndex 验证索引页可访问并包含版本信息。
 func TestDownloadIndex(t *testing.T) {
 	h := newHarness(t, "1.0.0")
-	rel := release{Version: "3.1.4", RequiredClient: "3.1.4", Protocol: proto.Version}
+	rel := release{Version: "3.1.4", RequiredClient: "3.1.4", Protocol: proto.Version,
+		// 托盘放在前面：同平台同架构排序相等，命令示例绝不能取到托盘。
+		Files: []releaseFile{
+			{Name: "dec-tray-darwin-arm64", OS: "darwin", Arch: "arm64"},
+			{Name: "dec-agent-darwin-arm64", OS: "darwin", Arch: "arm64"},
+		}}
 	raw, _ := json.Marshal(rel)
 	if err := os.WriteFile(releaseManifestPath(h.dir), raw, 0o644); err != nil {
 		t.Fatalf("写入清单失败: %v", err)
@@ -579,8 +584,18 @@ func TestDownloadIndex(t *testing.T) {
 		t.Fatalf("状态码 %d，期望 200", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "3.1.4") {
+	page := string(body)
+	if !strings.Contains(page, "3.1.4") {
 		t.Fatalf("索引页应包含版本 3.1.4")
+	}
+	if !strings.Contains(page, "<code>dec-tray-darwin-arm64</code>") {
+		t.Fatalf("下载列表应包含托盘文件")
+	}
+	if !strings.Contains(page, "/download/dec-agent-darwin-arm64") {
+		t.Fatalf("命令示例应下载代理")
+	}
+	if strings.Contains(page, "/download/dec-tray-") {
+		t.Fatalf("命令示例不应把托盘当成代理安装")
 	}
 }
 

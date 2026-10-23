@@ -40,6 +40,11 @@ func main() {
 		auditURL    = flag.String("audit-url", "", "审计仓库地址（需求 15.3），留空则不推送")
 		auditKey    = flag.String("audit-key", "", "审计仓库 deploy key 路径")
 		webhook     = flag.String("webhook-secret", "wecom-alert-webhook", "存放企业微信 webhook 的密钥名")
+		localDomain = flag.String("local-tls-domain", "local.dec.firoyang.com", "指向 127.0.0.1 的本机子域")
+		localZone   = flag.String("local-tls-zone", "firoyang.com", "本机子域所在的 DNSPod 主域名")
+		localSecret = flag.String("local-tls-secret", "dnspod-token", "存放 DNSPod API Token 的密钥名；为空则不签发本机证书")
+		acmeDir     = flag.String("acme-directory", "", "本机证书 ACME 目录地址；为空取 Let's Encrypt 生产环境")
+		acmeEmail   = flag.String("acme-email", "", "ACME 账户联系邮箱")
 		rootKey     = flag.String("root-key", "", "根密钥文件路径；为空时取 <data-dir>/root.key，生产上建议放在不参与磁盘快照的位置")
 		showVersion = flag.Bool("version", false, "打印版本后退出")
 	)
@@ -67,6 +72,11 @@ func main() {
 		AuditURL:        *auditURL,
 		AuditKey:        *auditKey,
 		WebhookSecret:   *webhook,
+		LocalTLSDomain:  *localDomain,
+		LocalTLSZone:    *localZone,
+		LocalTLSSecret:  *localSecret,
+		ACMEDirectory:   *acmeDir,
+		ACMEEmail:       *acmeEmail,
 		RootKeyPath:     *rootKey,
 	})
 	if err != nil {

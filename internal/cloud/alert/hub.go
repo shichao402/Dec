@@ -40,6 +40,8 @@ const (
 	KindRenderSecret Kind = "render_secret"
 	// KindDeploy 部署失败或回滚（需求 21.3）。
 	KindDeploy Kind = "deploy"
+	// KindLocalTLS 本机证书 local.dec.firoyang.com 签发或续期失败（agent-tray-access 需求 4.8）。
+	KindLocalTLS Kind = "local_tls"
 )
 
 // Alert 是一条告警。
@@ -283,7 +285,7 @@ func (h *Hub) seqID() string {
 func Kinds() []Kind {
 	out := []Kind{
 		KindRecovery, KindEnroll, KindBackupFailed,
-		KindRemoteRewritten, KindRenderSecret, KindDeploy,
+		KindRemoteRewritten, KindRenderSecret, KindDeploy, KindLocalTLS,
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out

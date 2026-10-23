@@ -31,6 +31,7 @@ import (
 	"github.com/shichao402/Dec/internal/cloud/backup"
 	"github.com/shichao402/Dec/internal/cloud/crypt"
 	"github.com/shichao402/Dec/internal/cloud/identity"
+	"github.com/shichao402/Dec/internal/cloud/localcert"
 	"github.com/shichao402/Dec/internal/cloud/render"
 	"github.com/shichao402/Dec/internal/cloud/ssot"
 	"github.com/shichao402/Dec/internal/proto"
@@ -61,6 +62,17 @@ type Config struct {
 	AuditKey string
 	// WebhookSecret 是存放企业微信 webhook 的密钥名（需求 12.1）。
 	WebhookSecret string
+
+	// LocalTLSDomain 是指向 127.0.0.1 的本机子域，留空取 local.dec.firoyang.com。
+	LocalTLSDomain string
+	// LocalTLSZone 是该子域所在、托管在 DNSPod 上的主域名。
+	LocalTLSZone string
+	// LocalTLSSecret 是存放 DNSPod API Token 的密钥名；为空表示不签发本机证书。
+	LocalTLSSecret string
+	// ACMEDirectory 是签发本机证书用的 ACME 目录地址，留空取 Let's Encrypt 生产环境。
+	ACMEDirectory string
+	// ACMEEmail 是 ACME 账户联系邮箱，可空。
+	ACMEEmail string
 
 	// RootKeyPath 是根密钥文件路径。留空取 <DataDir>/root.key。
 	//
@@ -114,6 +126,8 @@ type Server struct {
 	limiter *rateLimiter
 	// secrets 用于取 webhook 地址（需求 12.1）。
 	secrets *assets.Writer
+	// localTLS 管理 local.dec.firoyang.com 证书（agent-tray-access 需求 4.4）。
+	localTLS *localcert.Manager
 }
 
 // New 构造服务端，完成目录准备与各层装配。
@@ -230,6 +244,9 @@ func New(cfg Config) (*Server, error) {
 		Reporter: s,
 	})
 	s.backup.Start(ctx)
+	// 本机证书：后台周期检查并续期，未配置凭据时只记一次日志。
+	s.localTLS = s.newLocalTLS()
+	go s.localTLS.Run(ctx)
 	// 部署协作文件由脚本跨进程写入，只能轮询跟进（需求 21.2、21.8）。
 	s.syncDeployFiles()
 	go s.watchDeploy(ctx)

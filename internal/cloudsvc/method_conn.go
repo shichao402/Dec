@@ -55,10 +55,14 @@ func (s *Server) mSync(r *http.Request, req *proto.Request, payload any, dev sso
 		return failFromError(req.ID, err)
 	}
 	resp.Alerts = s.pendingAlerts(dev.ID)
+	resp.LocalTLS = s.localTLSFor(in.LocalTLSSerial)
 	hasWork := resp.Batch != nil && (len(resp.Batch.Files) > 0 || len(resp.Batch.Deletes) > 0)
-	if hasWork {
+	if hasWork || resp.LocalTLS != nil {
 		s.notify.MarkDevice(dev.ID, time.Now())
-		s.recordSync(dev, *in, resp)
+		if hasWork {
+			s.recordSync(dev, *in, resp)
+		}
+		s.recordLocalTLS(dev, resp.LocalTLS)
 		return okPayload(req.ID, resp)
 	}
 
@@ -92,9 +96,11 @@ func (s *Server) mSync(r *http.Request, req *proto.Request, payload any, dev sso
 		return failFromError(req.ID, err)
 	}
 	again.Alerts = s.pendingAlerts(dev.ID)
+	again.LocalTLS = s.localTLSFor(in.LocalTLSSerial)
 	if again.Batch != nil && (len(again.Batch.Files) > 0 || len(again.Batch.Deletes) > 0) {
 		s.recordSync(dev, *in, again)
 	}
+	s.recordLocalTLS(dev, again.LocalTLS)
 	return okPayload(req.ID, again)
 }
 

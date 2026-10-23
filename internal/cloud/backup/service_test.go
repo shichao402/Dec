@@ -46,6 +46,24 @@ func (f *fakeReporter) counts() (failed, rewrite, checked int) {
 	return len(f.failed), len(f.rewrite), len(f.checkeds)
 }
 
+// startForTest 启动服务，并在测试清理时等循环真正退出。
+//
+// 只 defer cancel 不够：远端分支一出现测试就返回，推送协程可能还在写
+// refs，t.TempDir 的删除会和它撞上（偶发 "directory not empty"）。
+// t.Cleanup 后进先出，这里注册得比 TempDir 晚，所以先于删目录执行。
+func startForTest(t *testing.T, ctx context.Context, cancel context.CancelFunc, svc *Service) {
+	t.Helper()
+	svc.Start(ctx)
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-svc.done:
+		case <-time.After(5 * time.Second):
+			t.Error("推送循环 5 秒内未退出")
+		}
+	})
+}
+
 // TestPauseStopsPush 验证暂停期间不推送。
 func TestPauseStopsPush(t *testing.T) {
 	r := newRemote(t)
@@ -60,8 +78,7 @@ func TestPauseStopsPush(t *testing.T) {
 		DailyTick:    time.Hour,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	svc.Start(ctx)
+	startForTest(t, ctx, cancel, svc)
 
 	svc.Pause()
 	svc.Trigger()
@@ -97,8 +114,7 @@ func TestPushFailureReported(t *testing.T) {
 		DailyTick:    time.Hour,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	svc.Start(ctx)
+	startForTest(t, ctx, cancel, svc)
 	svc.Trigger()
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -123,8 +139,7 @@ func TestNoTargetIsSilent(t *testing.T) {
 		DailyTick: time.Hour,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	svc.Start(ctx)
+	startForTest(t, ctx, cancel, svc)
 	svc.Trigger()
 	time.Sleep(80 * time.Millisecond)
 
@@ -137,8 +152,7 @@ func TestNoTargetIsSilent(t *testing.T) {
 func TestTriggerAfterStopIgnored(t *testing.T) {
 	svc := NewService(Options{Debounce: time.Millisecond, DailyTick: time.Hour})
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	svc.Start(ctx)
+	startForTest(t, ctx, cancel, svc)
 	svc.Stop()
 	// 不应 panic，也不应阻塞。
 	svc.Trigger()

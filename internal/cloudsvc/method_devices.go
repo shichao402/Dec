@@ -92,6 +92,8 @@ func (s *Server) mRevokeDevice(req *proto.Request, payload any, dev ssot.Device)
 	if err != nil {
 		return failFromError(req.ID, err)
 	}
+	// 本机证书私钥分发给了所有设备，吊销后必须换钥（agent-tray-access 需求 4.6）。
+	s.markLocalTLSRekey(in.DeviceID)
 	s.NotifyChanged()
 	// 吊销是最关键的高危操作：必须留痕，并且立刻反映到冷备（需求 18.11）。
 	s.recordRevision(nil, audit.EventRevoke, dev, req, in.DeviceID,

@@ -122,6 +122,10 @@ func (s *Server) handleDownloadIndex(w http.ResponseWriter, r *http.Request) {
 		b.WriteString("<h2>用命令行下载</h2>")
 		b.WriteString("<p>建议用 <code>curl</code> 下载，避免浏览器给文件打上隔离标记：</p>")
 		for _, f := range files {
+			// 示例只针对代理：托盘文件也在列表里，取到它会教用户把托盘装成 dec-agent。
+			if !strings.HasPrefix(f.Name, "dec-agent-") {
+				continue
+			}
 			// 命令必须与代理真实子命令一致：注册系统服务是 `install`，不是 `--install-agent`。
 			// 写错的后果是用户照着敲一遍，得到一句「未知命令」，然后卡在第一步。
 			fmt.Fprintf(&b, "<pre>curl -fLO https://%s/download/%s\nchmod +x %s\nsudo mv %s /usr/local/bin/dec-agent\n"+
@@ -129,6 +133,8 @@ func (s *Server) handleDownloadIndex(w http.ResponseWriter, r *http.Request) {
 				htmlEscape(host), htmlEscape(f.Name), htmlEscape(f.Name), htmlEscape(f.Name), htmlEscape(host))
 			break
 		}
+		b.WriteString("<p>托盘图标（macOS、Windows）：把同平台的 <code>dec-tray-*</code> 下载到 <code>dec-agent</code> ")
+		b.WriteString("所在目录，再执行 <code>dec-agent install</code>，会一并注册登录自启动。没有托盘文件时代理照常工作。</p>")
 		b.WriteString("<p class=\"muted\">第一台设备用 <code>initialize</code>（会生成根密钥并写入 Bitwarden 冷备）；")
 		b.WriteString("此后新增设备用 <code>enroll</code>，两者都需要 Bitwarden 主密码与二次验证码。</p>")
 
