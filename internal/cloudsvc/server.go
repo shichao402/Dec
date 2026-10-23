@@ -60,6 +60,11 @@ type Config struct {
 	AuditURL string
 	// AuditKey 是审计仓库 deploy key 的路径。
 	AuditKey string
+	// KnownHosts 是校验推送目标主机密钥的 known_hosts 文件路径。
+	//
+	// 为空时用 go-git 的默认查找（~/.ssh/known_hosts 与 /etc/ssh/ssh_known_hosts）。
+	// 生产上显式指定：服务账号一般没有自己的 ~/.ssh，默认路径必然落空。
+	KnownHosts string
 	// WebhookSecret 是存放企业微信 webhook 的密钥名（需求 12.1）。
 	WebhookSecret string
 
@@ -228,18 +233,20 @@ func New(cfg Config) (*Server, error) {
 	})
 	s.backup = backup.NewService(backup.Options{
 		BackupTarget: backup.Target{
-			Name:    "冷备",
-			Dir:     store.Dir(),
-			URL:     cfg.BackupURL,
-			KeyPath: cfg.BackupKey,
-			Branch:  "main",
+			Name:       "冷备",
+			Dir:        store.Dir(),
+			URL:        cfg.BackupURL,
+			KeyPath:    cfg.BackupKey,
+			Branch:     "main",
+			KnownHosts: cfg.KnownHosts,
 		},
 		AuditTarget: backup.Target{
-			Name:    "审计",
-			Dir:     al.Dir(),
-			URL:     cfg.AuditURL,
-			KeyPath: cfg.AuditKey,
-			Branch:  "main",
+			Name:       "审计",
+			Dir:        al.Dir(),
+			URL:        cfg.AuditURL,
+			KeyPath:    cfg.AuditKey,
+			Branch:     "main",
+			KnownHosts: cfg.KnownHosts,
 		},
 		Reporter: s,
 	})

@@ -49,6 +49,13 @@ type Target struct {
 	Branch string
 	// Passphrase 是 deploy key 的口令，通常为空。
 	Passphrase string
+	// KnownHosts 是用于校验推送目标主机密钥的文件路径。
+	//
+	// 显式给出而不是依赖 SSH_KNOWN_HOSTS 环境变量：服务由 systemd 拉起，
+	// 环境变量要靠 EnvironmentFile 传导，多一层不透明的耦合；而且 go-git 在
+	// 环境变量指向的文件不存在时会直接失败，错误信息与「密钥不对」难区分。
+	// 留空则退回 go-git 的默认查找（~/.ssh/known_hosts 等）。
+	KnownHosts string
 }
 
 // Pusher 把一个本地仓库推到远端。
@@ -209,9 +216,9 @@ func (p *Pusher) branch() string {
 // 远端是本地路径（测试、或同机镜像）时不需要任何认证，返回 nil 交给传输层。
 // 远端是 SSH 地址时才读 deploy key。
 //
-// 主机密钥不跳过校验：go-git 默认读 ~/.ssh/known_hosts 与 /etc/ssh/ssh_known_hosts，
-// 部署脚本负责先把 github.com 的公钥写进去（需求 15.2）。
-// 这里刻意不设置 HostKeyCallback，让它保持默认的 known_hosts 校验。
+// 主机密钥一律校验，不跳过：部署密钥泄露时这是唯一的防线（需求 15.2）。
+// 优先用 Target.KnownHosts 指定的文件；没指定时保持 go-git 的默认行为
+// （读 ~/.ssh/known_hosts 与 /etc/ssh/ssh_known_hosts）。
 func (p *Pusher) auth() (transport.AuthMethod, error) {
 	if !needsAuth(p.Target.URL) {
 		return nil, nil
@@ -231,6 +238,13 @@ func (p *Pusher) auth() (transport.AuthMethod, error) {
 	user, err := ssh.NewPublicKeys("git", key, p.Target.Passphrase)
 	if err != nil {
 		return nil, fmt.Errorf("解析部署密钥失败: %w", err)
+	}
+	if p.Target.KnownHosts != "" {
+		cb, err := ssh.NewKnownHostsCallback(p.Target.KnownHosts)
+		if err != nil {
+			return nil, fmt.Errorf("读取 known_hosts %s 失败: %w", p.Target.KnownHosts, err)
+		}
+		user.HostKeyCallback = cb
 	}
 	p.user = user
 	return p.user, nil
