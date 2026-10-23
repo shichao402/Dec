@@ -65,6 +65,8 @@ func main() {
 		err = cmdStatus(args)
 	case "projects":
 		err = cmdProjects(args)
+	case "mcp-config":
+		err = cmdMCPConfig(args)
 	case "install":
 		err = cmdInstall(args)
 	case "uninstall":
@@ -94,6 +96,7 @@ func usage() {
   dec-agent recover      在 CLI 里恢复（服务端进入恢复模式时）
   dec-agent status       打印当前状态
   dec-agent projects     列出本机项目登记
+  dec-agent mcp-config   打印本机 MCP 条目与各宿主的写入状态
   dec-agent install      注册为系统服务
   dec-agent uninstall    卸载并清理
   dec-agent version      打印版本
@@ -164,11 +167,21 @@ func cmdRun(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// MCP 服务（需求 1）：协议层在本地完成，每次调用转发给云端，来源固定为 mcp。
+	mcpHandler := agent.NewMCPHandler(agent.MCPServer{
+		ServerVersion: Version,
+		Status:        syncer.Status,
+		Call: func(ctx context.Context, m proto.Method, payload json.RawMessage) (json.RawMessage, error) {
+			return callRemote(ctx, syncer.Client(), m, proto.SourceMCP, payload)
+		},
+	})
+
 	// 本机页面与管理面转发（需求 2.10、13.1）。
 	loop := agent.NewLoopback(agent.LoopbackOptions{
 		Port:   *port,
 		Logf:   logf,
 		Status: syncer.Status,
+		MCP:    mcpHandler,
 		Call: func(r *http.Request, m, src string, payload json.RawMessage) (json.RawMessage, error) {
 			return callRemote(ctx, syncer.Client(), proto.Method(m), proto.Source(src), payload)
 		},
@@ -200,6 +213,19 @@ func cmdRun(args []string) error {
 		return err
 	}
 	defer loop.Close()
+
+	// 把本机 MCP 条目写进已安装的宿主（需求 2.1、2.4）。
+	// 端口是这次实际监听出来的地址，不是用户传的 --port：端口被占用时
+	// 系统会换一个，条目必须指向真正能连上的那个。
+	for _, res := range agent.SyncHosts(addr) {
+		switch res.Status {
+		case agent.HostFailed:
+			logf("写入 %s 的 MCP 配置失败: %s", res.Name, res.Reason)
+		case agent.HostWritten:
+			logf("已写入 %s 的 MCP 配置: %s", res.Name, res.Path)
+		}
+	}
+
 	logf("代理已启动，版本 %s，服务地址 %s，本机页面 http://%s", Version, cfg.ServerURL, addr)
 
 	if err := syncer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -499,6 +525,46 @@ func cmdProjects(args []string) error {
 	return fmt.Errorf("未知子命令: %s", args[0])
 }
 
+// cmdMCPConfig 打印本机 MCP 条目与各宿主的写入状态（需求 2.6）。
+//
+// 排查「Agent 里看不到 Dec」时最常问的三个问题都能在这里找到答案：
+// 条目长什么样、写到了哪个文件、为什么某个宿主没有写。
+func cmdMCPConfig(args []string) error {
+	fs := flag.NewFlagSet("mcp-config", flag.ExitOnError)
+	port := fs.Int("port", 8787, "本机页面端口，用于拼出条目里的地址")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	fmt.Println("本机 MCP 入口:")
+	fmt.Printf("  %s\n", agent.MCPServerURL(fmt.Sprintf("127.0.0.1:%d", *port)))
+	fmt.Println()
+	fmt.Println("宿主状态:")
+
+	results := agent.InspectHosts()
+	written := 0
+	for _, res := range results {
+		fmt.Printf("  %-8s %s  %s\n", res.Name, res.Status, res.Path)
+		switch res.Status {
+		case agent.HostWritten:
+			written++
+			for _, line := range strings.Split(strings.TrimSpace(res.Entry), "\n") {
+				fmt.Printf("           %s\n", strings.TrimSpace(line))
+			}
+		default:
+			if res.Reason != "" {
+				fmt.Printf("           原因：%s\n", res.Reason)
+			}
+		}
+	}
+	fmt.Println()
+	if written == 0 {
+		fmt.Println("没有任何宿主已写入 `dec` 条目。代理启动时会自动写入；")
+		fmt.Println("如果宿主配置目录不存在，说明对应的 IDE 还没装，这是预期行为。")
+	}
+	return nil
+}
+
 // cmdInstall 注册系统服务。
 func cmdInstall(args []string) error {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
@@ -564,6 +630,17 @@ func cmdUninstall(args []string) error {
 	}
 	if res.RemoteNotified {
 		fmt.Println("已通知云端注销这台设备。")
+	}
+
+	// 从各宿主里移除 `dec` 条目（需求 2.5）：卸载后 IDE 里留一条连不上的
+	// MCP 服务器，用户每次打开 Agent 都会看到一个连接失败的错误。
+	for _, hr := range agent.RemoveHosts() {
+		switch hr.Status {
+		case agent.HostRemoved:
+			fmt.Printf("已从 %s 移除 dec 条目\n", hr.Name)
+		case agent.HostFailed:
+			fmt.Fprintf(os.Stderr, "  从 %s 移除失败: %s\n", hr.Name, hr.Reason)
+		}
 	}
 	return nil
 }

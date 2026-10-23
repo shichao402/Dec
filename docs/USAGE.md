@@ -48,13 +48,79 @@ https://dec.firoyang.com
 
 项目根目录的 `./dec` 是旧版 v1.13.146，能跑 `config`、`push`、`pull`、`search`，但它操作的是一个已经不存在的系统。不要用它。
 
-判断当前跑的是不是新一代，看这一条：
+判定当前跑的是不是新一代，看这一条：
 
 ```bash
 curl -s http://127.0.0.1:8787/api/status
 ```
 
 有 `server_url`、`device_id`、`aligned` 这些字段，说明新一代在正常工作。
+
+---
+
+## 二点五、MCP：让 Agent 直接读写 Dec
+
+`dec-agent` 在 `http://127.0.0.1:8787/mcp` 上提供标准 MCP（Streamable HTTP）入口。Claude Code、Codex、Cursor 这些 Agent 只要配置了这一个地址，就能自己读写你的资产与密钥元数据，不需要你手动点管理面。
+
+### 自动接入，不用手改配置
+
+代理每次启动都会把一条名为 `dec` 的内置条目写进本机已安装宿主的用户级配置：
+
+| 宿主 | 配置文件 |
+|---|---|
+| Claude Code | `~/.claude.json` |
+| Codex | `~/.codex/config.toml` |
+| Cursor | `~/.cursor/mcp.json` |
+
+三条规则，都是为了不弄坏你已有的东西：
+
+- 只覆盖 `dec` 这一条，其它 MCP 服务器原样保留，连键顺序都不动。
+- 宿主目录不存在就跳过，不替你创建 `~/.claude` 之类的空目录。
+- 端口变了，下一轮启动会把地址更新成新端口。
+
+### 排查命令
+
+```bash
+dec-agent mcp-config
+```
+
+它会打印当前条目内容、写到哪个文件、以及每个宿主的状态（已写入 / 已跳过 / 失败）和原因。Agent 里看不到 Dec 时先跑这条。
+
+常见情况：
+
+- 显示「配置目录不存在」：对应 IDE 没装，这是预期行为。
+- 显示「已跳过：配置里没有 dec 条目」：代理还没 restart 过。重启 `com.dec.agent` 后再看。
+- 显示「失败」：多数是配置文件本身不是合法 JSON（手工编辑漏了逗号）。代理不会覆盖坏文件，按提示修好再重启。
+
+### 工具清单
+
+| 工具 | 作用 | 副作用 |
+|---|---|---|
+| `dec_status` | 云端版本、协议版本、是否维护中、当前 revision | 无 |
+| `dec_list_assets` | 列出所有 bundle 与条目 | 无 |
+| `dec_read_asset` | 读一个 bundle 的完整内容 | 无 |
+| `dec_write_asset` | 整体替换一个 bundle | 立即推送 + 进审计 |
+| `dec_delete_asset_item` | 按路径删一个条目 | 立即推送 + 进审计 |
+| `dec_list_secrets` | 列出密钥元数据 | 无 |
+| `dec_put_secret` | 写入或更新密钥值 | 立即推送 + 进审计 |
+| `dec_delete_secret` | 删除密钥 | 立即推送 + 进审计 |
+| `dec_history` | 查资产或密钥的改动历史 | 无 |
+| `dec_list_projects` | 列出项目登记 | 无 |
+| `dec_put_project` | 新增或修改项目登记 | 进审计 |
+| `dec_delete_project` | 删除项目登记 | 进审计 |
+| `dec_list_subscriptions` | 查看设备订阅了哪些 bundle | 无 |
+| `dec_set_subscriptions` | 整体替换设备订阅 | 立即推送 |
+
+### 限权：本地清单只是第一道限制
+
+以下能力**不提供**给 MCP，而且不是「藏起来」而是服务端直接拒绝：
+
+- 读密钥明文
+- 设备管理（登记、吊销、改设备类型）
+- 回滚到某个历史版本
+- 轮换根密钥
+
+代理里的工具清单只是减少误用的第一道门，真正的边界在服务端：即便有人绕过清单直接发请求，服务端也会按来源 `mcp` 拒绝这些操作。反过来说，写入是允许的——因为写入会进 git 历史、能再写一次覆盖，风险可控。
 
 ---
 
