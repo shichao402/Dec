@@ -1,5 +1,19 @@
 # Dec
 
+> ## 注意：本文档描述的是旧一代架构，已废弃
+>
+> Dec 已完成断代升级。下面写的 Console、`client/`、`dec-server`、registry、
+> `provides`、`.dec/cache` 等，全部不再使用（见已定决策 14）。
+>
+> **当前架构的使用说明见 [docs/USAGE.md](../USAGE.md)。**
+>
+> 日常入口：浏览器打开 `http://127.0.0.1:8787/admin`。
+>
+> 旧一代残留产物可用 `scripts/purge-legacy-dec.sh`（macOS）或
+> `scripts/purge-legacy-dec.ps1`（Windows）清理，默认预演、保护新架构。
+>
+> 本文档保留仅作为历史参考，不代表当前实现。
+
 Dec 是一个个人 AI 知识仓库工具。
 
 它把你在 Cursor、CodeBuddy 等 IDE 中积累的 Skills、Rules、MCP 配置统一保存到一个个人仓库（Git 仓库）里。然后你可以在不同项目中快速获取这些资产，实现跨项目、跨机器复用自己的 AI 资产，而不是在每个仓库里重复维护一份。
@@ -37,7 +51,7 @@ Dec 的解决方案：
 ### 2. 消费配置 `requires`
 
 写在消费仓 `.dec/config.yaml`（提交进该仓）。本机 global 平面写在 `~/.dec/config.yaml`。
-这是唯一的消费声明，见 [ADR 0029](Documents/decisions/0029-single-consumer-requires.md)。
+这是唯一的消费声明，见 [ADR 0029](decisions/0029-single-consumer-requires.md)。
 
 ```yaml
 requires:
@@ -69,7 +83,7 @@ Dec 部署出来的资产会以 `dec-` 前缀命名，例如：
 | Claude | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 
-更详细的使用语义见 `internal/assets/dec/SKILL.md`，实现与存储结构见 [Documents/ARCHITECTURE.md](Documents/ARCHITECTURE.md)。
+更详细的使用语义见 `internal/assets/dec/SKILL.md`，实现与存储结构见 [docs/history/ARCHITECTURE.md](ARCHITECTURE.md)。
 
 Codex MCP 写入 `.codex/config.toml` 的 `[mcp_servers.<name>]` 段。
 
@@ -278,7 +292,7 @@ Operator 需先 provision Relkit bootstrap；`relkitw` 验证签名 resolution �
 Go/Rust SDK 与 updater。随后构建命令只编译并保留当前平台的 Tauri runtime
 resources，不打完整安装包。要求 Node.js、Go、Rust stable、Python 3.10+；
 Windows 需要 WebView2（Windows 命令中的 `python3` 可换成 `python`）。
-细节见 [client/README.md](client/README.md)。
+细节见 [client/README.md](../../client/README.md)。
 
 ### 开发期本机安装
 
@@ -314,15 +328,24 @@ go test ./...
 
 ## 项目文档
 
-- [Documents/ARCHITECTURE.md](Documents/ARCHITECTURE.md) — 架构设计、vault 结构与模块说明
-- [Documents/BUNDLE-SECRETS-MODEL.md](Documents/BUNDLE-SECRETS-MODEL.md) — Dec bundle 与 Bitwarden secrets bundle 同构模型
-- [Documents/TUI_ARCHITECTURE.md](Documents/TUI_ARCHITECTURE.md) — TUI 已卸下；人机入口见 Console
-- [client/README.md](client/README.md) — 桌面管理客户端
-- [schema/dec/v1/README.md](schema/dec/v1/README.md) — Dec 配置 Protobuf schema
-- [schema/secrets/v1/README.md](schema/secrets/v1/README.md) — Secrets bundle Protobuf schema
-- [Documents/decisions/0022-console-bitwarden-unlock.md](Documents/decisions/0022-console-bitwarden-unlock.md) — Console Bitwarden 人工认证决策
+当前架构：
+
+- [docs/USAGE.md](../USAGE.md) — 使用说明：入口、管理面逐页说明、验证方法、断代清理
+
+历史归档（描述已废弃的旧一代架构，仅供追溯）：
+
+- [docs/history/README.md](README.md) — 归档说明与新旧架构对照
+- [docs/history/ARCHITECTURE.md](ARCHITECTURE.md) — 旧架构设计、vault 结构与模块说明
+- [docs/history/BUNDLE-SECRETS-MODEL.md](BUNDLE-SECRETS-MODEL.md) — 旧 bundle 与 Bitwarden secrets bundle 同构模型
+- [decisions/](decisions/README.md) — 37 份旧一代 ADR，记录取舍依据
+
+参考：
+
+- [client/README.md](../../client/README.md) — 旧桌面客户端（已不再作为人机入口）
+- [schema/dec/v1/README.md](../../schema/dec/v1/README.md) — Dec 配置 Protobuf schema
+- [schema/secrets/v1/README.md](../../schema/secrets/v1/README.md) — Secrets bundle Protobuf schema
+- `.agent/dec-cloud/requirements.md` — 当前架构的需求与已定决策
 - `internal/assets/dec/SKILL.md` — Dec Skill 的完整使用说明
-- `internal/assets/dec-extract-asset/SKILL.md` — 把当前项目能力沉淀为 Dec 资产的内置 Skill
 
 ## 许可证
 

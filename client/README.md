@@ -50,7 +50,7 @@ Console，由它提交给目标服务，远端主机无需桌面。远端无桌�
 
 Bitwarden session、vault/user key、TOTP 与 2FA 中间态均不得落盘；用户明确保存的主密码
 只能进入上述系统凭据库或 `dec-server` 进程内存（进程退出即消失）。测试必须注入认证协调桩，禁止启动或聚焦真实 Console。详见
-[ADR 0022](../Documents/decisions/0022-console-bitwarden-unlock.md)。
+[ADR 0022](../docs/history/decisions/0022-console-bitwarden-unlock.md)。
 
 远程直连必须使用由系统信任根校验的 TLS；若服务只监听 loopback，使用 SSH 隧道。连接成功后的完整流程是：
 
@@ -64,8 +64,8 @@ Bitwarden session、vault/user key、TOTP 与 2FA 中间态均不得落盘；用
 `dec-server` 是一机单例。Console 与目标运行时必须版本相等：旧 Console 拒绝控制新服务；
 新 Console 连接本机或已置备 SSH 设备时，会先停旧服务、按自身版本升级完整运行时套件并重连。
 TLS 直连没有安装通道，版本不等时需改用 SSH。远端与本机生命周期一致——空闲即退出，
-连接时按需拉起，不需要配置常驻服务。见 [ADR 0019](../Documents/decisions/0019-remote-provisioning.md)
-和 [ADR 0021](../Documents/decisions/0021-console-owned-runtime.md)。
+连接时按需拉起，不需要配置常驻服务。见 [ADR 0019](../docs/history/decisions/0019-remote-provisioning.md)
+和 [ADR 0021](../docs/history/decisions/0021-console-owned-runtime.md)。
 
 ## 界面结构
 

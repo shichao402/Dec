@@ -342,7 +342,7 @@ session 的有效期取本机 `session_timeout`（默认 4 小时）：到期即
 session、vault/user key、主密码、TOTP、临时密钥与 2FA 中间态均不得落盘；允许保存的
 设备信任材料仅为 `deviceIdentifier` 与 `two_factor_remember`。详见
 [0022](decisions/0022-console-bitwarden-unlock.md)、[ARCHITECTURE.md](./ARCHITECTURE.md)
-与 [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)。
+与 [.cursor/rules/bitwarden-auth.mdc](../../.cursor/rules/bitwarden-auth.mdc)。
 
 首次连接 HTTPS / SSH 私仓存在特殊自举路径（[0011](decisions/0011-private-repo-gcm-bootstrap.md)）：
 仅在 Git 明确认定认证失败且用户确认后（恰好一条匹配 `.gcm` 时自动 Apply），服务不依赖 bundle manifest，直接枚举 Bitwarden
@@ -373,6 +373,6 @@ session、vault/user key、主密码、TOTP、临时密钥与 2FA 中间态均�
 - [decisions/0034-bw-belonging-annotation.md](decisions/0034-bw-belonging-annotation.md)
 - [research/secrets-ci-centralization.md](./research/secrets-ci-centralization.md)：CI / 机器身份 / PM vs SM（调研，非正式决策）
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
-- [.cursor/rules/bitwarden-auth.mdc](../.cursor/rules/bitwarden-auth.mdc)
-- [.cursor/rules/bundle-secrets-mirror.mdc](../.cursor/rules/bundle-secrets-mirror.mdc)
-- [schema/secrets/v1/README.md](../schema/secrets/v1/README.md)
+- [.cursor/rules/bitwarden-auth.mdc](../../.cursor/rules/bitwarden-auth.mdc)
+- [.cursor/rules/bundle-secrets-mirror.mdc](../../.cursor/rules/bundle-secrets-mirror.mdc)
+- [schema/secrets/v1/README.md](../../schema/secrets/v1/README.md)

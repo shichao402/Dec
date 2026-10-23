@@ -122,7 +122,7 @@ Duo：OpenBao Login MFA **官方支持**（自托管 OpenBao 出网调 Duo 云�
 ## 9. 相关
 
 - [BUNDLE-SECRETS-MODEL.md](../BUNDLE-SECRETS-MODEL.md)  
-- [bitwarden-auth.mdc](../../.cursor/rules/bitwarden-auth.mdc)  
+- [bitwarden-auth.mdc](../../../.cursor/rules/bitwarden-auth.mdc)  
 - [ROADMAP.md](../ROADMAP.md)（本机 Login with Device）  
 - OpenBao：[seal](https://openbao.org/docs/concepts/seal/)、[AppRole](https://openbao.org/docs/auth/approle/)、[Duo MFA](https://openbao.org/docs/api/secret/identity/mfa/duo/)  
 - Bitwarden：[Log in with device](https://bitwarden.com/help/log-in-with-device/)、[SM access tokens](https://bitwarden.com/help/access-tokens/)  

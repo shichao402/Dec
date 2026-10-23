@@ -4,14 +4,14 @@
 
 用户侧说明以以下文档为准：
 
-- [README.md](../README.md)：项目概览与快速开始
+- [README.md](../../README.md)：项目概览与快速开始
 - [BUNDLE-SECRETS-MODEL.md](./BUNDLE-SECRETS-MODEL.md)：项目四象限与 Bitwarden private secrets
 - [ROADMAP.md](./ROADMAP.md)：尚未排期的意向
 - [research/secrets-ci-centralization.md](./research/secrets-ci-centralization.md)：密钥源唯一与 CI 下放调研（2026-08）
 - [TUI_ARCHITECTURE.md](./TUI_ARCHITECTURE.md)：TUI 已卸下（ADR 0020）
-- [client/README.md](../client/README.md)：桌面 Console（人机入口）
-- [schema/dec/v1/README.md](../schema/dec/v1/README.md)：Dec 配置 Protobuf schema
-- [schema/secrets/v1/README.md](../schema/secrets/v1/README.md)：Secrets bundle Protobuf schema
+- [client/README.md](../../client/README.md)：桌面 Console（人机入口）
+- [schema/dec/v1/README.md](../../schema/dec/v1/README.md)：Dec 配置 Protobuf schema
+- [schema/secrets/v1/README.md](../../schema/secrets/v1/README.md)：Secrets bundle Protobuf schema
 - `internal/assets/dec/SKILL.md`：Dec Skill 的完整使用说明
 
 ## 概览
@@ -229,7 +229,7 @@ flowchart TD
 
 订阅是初始化之后的独立动作：在 Console 项目页 / Global 资产页勾选保存写 `requires`。
 
-不在 Console 外暴露 `dec init` 等 CLI 子命令；与 [Console 优先](../.cursor/rules/console-first.mdc) 一致。
+不在 Console 外暴露 `dec init` 等 CLI 子命令；与 [Console 优先](../../.cursor/rules/console-first.mdc) 一致。
 
 ## 目录结构
 

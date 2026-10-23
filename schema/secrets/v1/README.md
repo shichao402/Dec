@@ -2,12 +2,12 @@
 
 Protobuf 是 Bitwarden **secrets bundle** 绑定声明的 schema 真相源；运行时 wire format 为 YAML（`~/.dec/secrets/config.yaml`），secret 明文不进 Git。
 
-相关文档：[BUNDLE-SECRETS-MODEL.md](../../Documents/BUNDLE-SECRETS-MODEL.md) · [0002 SyncTarget ADR](../../Documents/decisions/0002-secrets-synctarget-root.md) · [ARCHITECTURE.md](../../Documents/ARCHITECTURE.md)
+相关文档：[BUNDLE-SECRETS-MODEL.md](../../../docs/history/BUNDLE-SECRETS-MODEL.md) · [0002 SyncTarget ADR](../../../docs/history/decisions/0002-secrets-synctarget-root.md) · [ARCHITECTURE.md](../../../docs/history/ARCHITECTURE.md)
 
 **Bitwarden 认证状态不进 schema、不进磁盘**：session、vault/user key 与 2FA 中间态仅在
 相关进程内存中保存。Console Authenticate 是唯一人工入口；本机交互 MCP 可拉起/聚焦
 Console 并等待，远端无桌面与 CI 返回结构化错误。见
-[ADR 0022](../../Documents/decisions/0022-console-bitwarden-unlock.md)。
+[ADR 0022](../../../docs/history/decisions/0022-console-bitwarden-unlock.md)。
 
 ## 核心模型：SyncTarget + 存储根分离
 
@@ -33,7 +33,7 @@ Bitwarden folder: vikunja
 - Pull 后落到 `<project>/.secrets/bundles/vikunja/.env/vikunja.env`，**不进** `.dec/cache/`。
 - 环境变量只认 `.env/*.env`；由独立 `dec-exec` 按 bundle 注入。
 - **SSH Key**：Item 名 `.sshkey/<实例>`，落地 `~/.ssh/dec_<bundle>_<实例>`；有 hosts 时更新 Dec 管理 `~/.ssh/config` 区块。
-- **点类型目录**（[0005](../../Documents/decisions/0005-secrets-machine-handlers.md)）：`.gcm/` / `.sshkey/` / `.env/` 决定识别与处理；如 `.gcm/cnb.yaml` → GCM handler。同一张表也是 Remote 登记的同级 Processor（各自声明来源与 Bitwarden Writer）。
+- **点类型目录**（[0005](../../../docs/history/decisions/0005-secrets-machine-handlers.md)）：`.gcm/` / `.sshkey/` / `.env/` 决定识别与处理；如 `.gcm/cnb.yaml` → GCM handler。同一张表也是 Remote 登记的同级 Processor（各自声明来源与 Bitwarden Writer）。
 
 **Invariant**：`.dec/` 树与 `.secrets/` 树 **不得相交**；`.secrets/` 须被 `.gitignore` 忽略。
 
