@@ -160,13 +160,18 @@ func (s *Server) markLocalTLSRekey(deviceID string) {
 		s.logf("标记本机证书换钥失败: %v", err)
 		return
 	}
-	if s.localTLS.Enabled() {
-		go func() {
-			if _, err := s.localTLS.RenewIfNeeded(s.ctx); err != nil && !errors.Is(err, context.Canceled) {
-				s.logf("吊销后换钥签发失败，将由后台重试: %v", err)
-			}
-		}()
+	if !s.localTLS.Enabled() {
+		return
 	}
+	// 注册到 s.bg：这个协程会写 SSOT，必须在 closeAll 返回前结束，
+	// 否则会和数据目录的删除/替换撞上（见 Server.bg 的注释）。
+	s.bg.Add(1)
+	go func() {
+		defer s.bg.Done()
+		if _, err := s.localTLS.RenewIfNeeded(s.ctx); err != nil && !errors.Is(err, context.Canceled) {
+			s.logf("吊销后换钥签发失败，将由后台重试: %v", err)
+		}
+	}()
 }
 
 // loadOrCreateACMEKey 加载或生成 ACME 账户密钥（P-256，0600）。

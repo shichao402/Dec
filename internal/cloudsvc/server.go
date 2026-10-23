@@ -123,6 +123,14 @@ type Server struct {
 	// ctx 是服务生命周期，用于后台协程。
 	ctx    context.Context
 	cancel context.CancelFunc
+	// bg 跟踪临时后台协程（目前只有吊销后的换钥签发）。
+	//
+	// 为什么要等它们：它们写的是同一个 SSOT 仓库，而 closeAll 之后数据目录
+	// 可能被删除（测试里是 t.TempDir）、也可能被下一次部署替换。不等的话，
+	// 一个还在跑 go-git 的协程会和删除/替换撞上，报出
+	// "rename .../tmp_obj_xxx -> .../objects/95/...: no such file or directory"
+	// 这种看着像数据损坏、实际只是收尾竞态的错误。
+	bg sync.WaitGroup
 
 	httpSrv *http.Server
 	// download 是客户端二进制下载目录，由部署上传。
@@ -542,10 +550,16 @@ func trimMethod(p string) string {
 }
 
 // closeAll 用于测试收尾与进程退出。
+//
+// 顺序有意义：先取消上下文让后台协程知道该停，再等它们真正退回，
+// 最后才关 HTTP 与推送调度。反过来做，后台协程可能在 HTTP 已关、
+// 数据目录正在被清理时还在写 SSOT。
 func (s *Server) closeAll() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+	// 等的是"已经启动的临时协程"，它们都在收到取消后尽快返回。
+	s.bg.Wait()
 	if s.backup != nil {
 		s.backup.Stop()
 	}

@@ -118,7 +118,7 @@ func TestSyncWithoutLocalTLSConfigured(t *testing.T) {
 
 func TestRevokeRotatesLocalTLSKey(t *testing.T) {
 	h := newHarnessWithRootKey(t, "1.0.0")
-	calls := withLocalTLS(t, h)
+	withLocalTLS(t, h)
 	adminCert := h.registerDevice("dev-admin", "Admin")
 	cert := h.registerDevice("dev-a", "MacBook")
 	first := h.syncWith(cert, proto.SyncRequest{}).LocalTLS
@@ -135,19 +135,26 @@ func TestRevokeRotatesLocalTLSKey(t *testing.T) {
 	}
 
 	// 吊销后后台立即换钥重签。
+	//
+	// 不能只等 calls>=2：那个计数在签发函数内部就自增了，早于证书写进 SSOT。
+	// 于是这里可能在"已经签好"和"还没落盘"之间读到旧证书，偶发失败。
+	// 要等的是能观察到的最终状态——序列号真的变了。
 	deadline := time.Now().Add(5 * time.Second)
-	for calls.Load() < 2 && time.Now().Before(deadline) {
+	var cur *localcert.Cert
+	for time.Now().Before(deadline) {
+		c, err := h.srv.localTLS.Current()
+		if err == nil && c != nil && c.Serial != first.Serial {
+			cur = c
+			break
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if calls.Load() < 2 {
-		t.Fatal("吊销后应触发换钥签发")
+	if cur == nil {
+		c, err := h.srv.localTLS.Current()
+		t.Fatalf("吊销后应换钥重签并在 5 秒内落盘，当前: %+v err=%v", c, err)
 	}
-	cur, err := h.srv.localTLS.Current()
-	if err != nil || cur == nil {
-		t.Fatalf("Current: %v", err)
-	}
-	if cur.Serial == first.Serial || string(cur.KeyPEM) == first.KeyPEM {
-		t.Fatal("换钥后序列号与私钥都应改变")
+	if string(cur.KeyPEM) == first.KeyPEM {
+		t.Fatal("换钥后私钥应改变")
 	}
 
 	// 其余设备下一轮拿到新证书。
