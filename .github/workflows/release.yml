@@ -34,8 +34,61 @@ env:
   CGO_ENABLED: "0"
 
 jobs:
+  # macOS 托盘是唯一一个必须在 macOS 上构建的产物，这是对需求 21.1
+  # 「SHALL NOT 使用 macOS runner」的一处有意例外，原因无法回避：
+  # 托盘链接 AppKit，Linux runner 上没有 macOS SDK，Go 的交叉编译在这里帮不上忙。
+  #
+  # 该例外只覆盖 dec-tray，其余全部产物（服务端、代理）仍由 Linux runner
+  # 交叉编译；job 内只做 Rust 构建，不开服务、不部署，缓存命中后约 2–3 分钟。
+  # 需求 7.3 要求下载通道提供 macOS 产物时也必须提供同平台托盘，
+  # 两条约束不能同时满足，取舍以「用户能真正用上」为准。
+  tray-macos:
+    name: 构建 macOS 托盘
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: 缓存托盘构建
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tray/target
+          key: tray-macos-${{ hashFiles('tray/Cargo.lock') }}
+
+      - name: 构建 macOS 托盘
+        env:
+          # 版本号来自 tag：与 dec-agent 同源（需求 7.3）。
+          DEC_TRAY_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cd tray
+          cargo test --locked -q
+          for arch in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --locked --release --target "$arch"
+          done
+          cd ..
+          cp tray/target/aarch64-apple-darwin/release/dec-tray dist/dec-tray-darwin-arm64
+          cp tray/target/x86_64-apple-darwin/release/dec-tray dist/dec-tray-darwin-amd64
+          file dist/dec-tray-darwin-*
+
+      - name: 上传托盘产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: tray-macos
+          path: dist/dec-tray-darwin-*
+          if-no-files-found: error
+
   build:
     name: 构建与发布
+    needs: tray-macos
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -125,6 +178,14 @@ jobs:
 
       - name: 测试
         run: go test ./...
+
+      # macOS 托盘在独立 job 里构建（原因见 tray-macos job 的注释），
+      # 这里取回后与 Windows 托盘一起进入发布清单与下载通道。
+      - name: 取回 macOS 托盘
+        uses: actions/download-artifact@v4
+        with:
+          name: tray-macos
+          path: dist
 
       - name: 交叉编译
         env:

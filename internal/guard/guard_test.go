@@ -501,11 +501,79 @@ func TestReleaseArtifactNamesUnchanged(t *testing.T) {
 		{"托盘版本取自 tag", "DEC_TRAY_VERSION: ${{ steps.meta.outputs.version }}"},
 		{"发布清单包含托盘", `"dec-tray-"`},
 		{"部署包带上托盘", "cp dist/dec-tray-* payload/download/"},
+		// 需求 7.3 要求下载通道的 macOS 产物必须配套托盘；托盘链接 AppKit，
+		// 只能在 macOS 上构建。这条例外必须被限制住，否则会有人顺手把其他
+		// 产物挪到 macOS runner 上，打穿需求 21.1 的额度约束。
+		{"macOS 托盘产物名", "dist/dec-tray-darwin-arm64"},
+		{"macOS 托盘另一个架构", "dist/dec-tray-darwin-amd64"},
 	}
 	for _, c := range checks {
 		if !strings.Contains(content, c.needle) {
 			t.Errorf("release.yml 缺少%s，实际写的是 %q", c.why, c.needle)
 		}
+	}
+}
+
+// TestMacOSRunnerOnlyForTray 守住「macOS runner 只用于托盘」这条边界。
+//
+// 需求 21.1 规定全部产物在 Linux runner 上构建，理由是私有仓库的
+// macOS runner 按 10 倍计费。唯一无法回避的例外是托盘：它链接 AppKit，
+// Linux 上没有 macOS SDK。这里检查 release.yml 里每一个使用 macOS runner
+// 的 job 都只构建托盘，防止例外被扩大。
+func TestMacOSRunnerOnlyForTray(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatalf("读 release.yml 失败: %v", err)
+	}
+
+	// 按 job 切分：行首两空格缩进且以冒号结尾的是 job 名。
+	jobs := map[string][]string{}
+	jobName := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		isJobHead := strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") &&
+			strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ")
+		if isJobHead {
+			jobName = strings.TrimSuffix(trimmed, ":")
+			jobs[jobName] = nil
+			continue
+		}
+		if jobName != "" {
+			jobs[jobName] = append(jobs[jobName], line)
+		}
+	}
+
+	usedMacOS := false
+	for name, lines := range jobs {
+		// 注释里提到 dec-agent 是正常的（说明例外范围），只检查真正执行的语句。
+		var code []string
+		for _, line := range lines {
+			if t := strings.TrimSpace(line); strings.HasPrefix(t, "#") {
+				continue
+			}
+			code = append(code, line)
+		}
+		body := strings.Join(code, "\n")
+		if !strings.Contains(body, "runs-on: macos") {
+			continue
+		}
+		usedMacOS = true
+		// 托盘之外的产物出现在 macOS runner 上就是违规。
+		for _, forbidden := range []string{"dec-cloud", "dec-agent"} {
+			if strings.Contains(body, forbidden) {
+				t.Errorf("job %q 使用了 macOS runner 却在构建 %s；"+
+					"需求 21.1 要求全部产物在 Linux runner 上交叉编译，"+
+					"macOS runner 只允许用于构建托盘", name, forbidden)
+			}
+		}
+		if !strings.Contains(body, "dec-tray") {
+			t.Errorf("job %q 使用了 macOS runner 但没有构建托盘，"+
+				"这不符合唯一的例外场景", name)
+		}
+	}
+	if !usedMacOS {
+		t.Log("当前没有 job 使用 macOS runner；若托盘已能跨平台构建，这条测试可以删除")
 	}
 }
 
