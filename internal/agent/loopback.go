@@ -31,6 +31,13 @@ type LoopbackOptions struct {
 	Status func() Status
 	// Call 转发一次协议调用，src 决定服务端的权限判定。
 	Call func(r *http.Request, m string, src string, payload json.RawMessage) (json.RawMessage, error)
+	// MCP 是 /mcp 的处理入口（需求 1.1）。
+	//
+	// 这里交出去的是完整的 http.Handler，而不是一个「转发一次 JSON」的回调：
+	// MCP 是有状态的协议（会话、SSE 流、通知），只靠一个 JSON 进 JSON 出
+	// 的函数无法表达握手与流式响应。协议层由官方 SDK 实现，本包只负责
+	// 把它挂在正确的路径上，并确保 Host 与 Origin 守卫仍然在外层。
+	MCP http.Handler
 	// Enroll 处理登记。
 	Enroll func(r *http.Request, in LoopbackEnrollInput) (*EnrollResult, error)
 	// Recover 处理恢复。
@@ -105,8 +112,23 @@ func (l *Loopback) Handler() http.Handler {
 	mux.HandleFunc("/api/recover", l.handleRecover)
 	mux.HandleFunc("/api/projects", l.handleProjects)
 	mux.HandleFunc("/api/call", l.handleCall)
-	mux.HandleFunc("/mcp", l.handleMCP)
+	mux.Handle("/mcp", l.handleMCP())
 	return l.guard(mux)
+}
+
+// handleMCP 返回 /mcp 的处理器（需求 1.1、1.9）。
+//
+// 协议由官方 SDK 的 Streamable HTTP handler 实现，本地完成 initialize 与
+// notifications/initialized，不再把它们转发给云端的 initialize（首次初始化）方法。
+// Host 与 Origin 守卫在 guard 里包在整个 mux 外层，因此这里同样生效：
+// 不带 Origin 头的本机客户端能连，带外部 Origin 的请求会被 403。
+func (l *Loopback) handleMCP() http.Handler {
+	if l.opts.MCP != nil {
+		return l.opts.MCP
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "mcp 未启用", http.StatusNotImplemented)
+	})
 }
 
 // guard 做 Host 与 Origin 校验（需求 2.10）。
@@ -356,37 +378,6 @@ func (l *Loopback) handleCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := l.opts.Call(r, in.Method, string(protoSourceAdmin), in.Payload)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(out)
-}
-
-// handleMCP 是 MCP 入口（需求 13.1）。
-//
-// 这里不实现完整的 MCP 协议，只提供一个 JSON-RPC 形状的转发：
-// 来源固定为 mcp 这条约束必须在这一层就成立，否则后面很容易在工具
-// 实现里忘掉。
-func (l *Loopback) handleMCP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var in struct {
-		Method  string          `json:"method"`
-		Payload json.RawMessage `json:"payload,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, "bad json", http.StatusBadRequest)
-		return
-	}
-	if l.opts.Call == nil {
-		http.Error(w, "unsupported", http.StatusNotImplemented)
-		return
-	}
-	out, err := l.opts.Call(r, in.Method, string(protoSourceMCP), in.Payload)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return

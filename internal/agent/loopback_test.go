@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -90,26 +91,38 @@ func TestLoopbackRejectsForeignOrigin(t *testing.T) {
 	}
 }
 
-func TestLoopbackSourceIsFixedByEntry(t *testing.T) {
+// TestLoopbackCallSourceIsFixedByEntry 验证调用方在 body 里写什么来源都不算数。
+//
+// 来源由路径决定：/api/call 固定 admin，MCP 入口固定 mcp（后者在
+// cmd/dec-agent 接线时写死，由 MCP 协议层测试覆盖）。这里要守住的是
+// 「普通 JSON 不能被当成一次自带来源的转发」这条线。
+func TestLoopbackCallSourceIsFixedByEntry(t *testing.T) {
 	var got []string
+	mcp := NewMCPHandler(MCPServer{
+		ServerVersion: "test",
+		Call: func(ctx context.Context, m proto.Method, payload json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{"ok":true}`), nil
+		},
+	})
 	l := newTestLoopback(t, LoopbackOptions{
 		Call: func(r *http.Request, m, src string, payload json.RawMessage) (json.RawMessage, error) {
 			got = append(got, m+"@"+src)
 			return json.RawMessage(`{"ok":true}`), nil
 		},
+		MCP: mcp,
 	})
 	port := l.port()
 
-	// 调用方在 body 里写什么来源都不算数：来源由路径决定。
 	body := `{"method":"write_asset","source":"admin","payload":{"bundle":"woa"}}`
 	if rec := callWith(t, l, "/api/call", "127.0.0.1:"+port, "", body); rec.Code != http.StatusOK {
 		t.Fatalf("管理面转发应通过，得到 %d：%s", rec.Code, rec.Body.String())
 	}
-	if rec := callWith(t, l, "/mcp", "127.0.0.1:"+port, "", body); rec.Code != http.StatusOK {
-		t.Fatalf("MCP 入口应通过，得到 %d：%s", rec.Code, rec.Body.String())
+	// MCP 入口只认 MCP 报文：把管理面的请求体丢过来不该被当成一次转发。
+	if rec := callWith(t, l, "/mcp", "127.0.0.1:"+port, "", body); rec.Code == http.StatusOK {
+		t.Fatalf("MCP 入口不应把普通 JSON 当成一次转发，得到 %d：%s", rec.Code, rec.Body.String())
 	}
 
-	want := []string{"write_asset@admin", "write_asset@mcp"}
+	want := []string{"write_asset@admin"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("来源判定 %v，期望 %v", got, want)
 	}
