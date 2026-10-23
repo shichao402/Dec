@@ -179,7 +179,8 @@ func (l *Log) Append(e Entry) error {
 	}
 	line = append(line, '\n')
 
-	rel := filepath.Join("events", e.At.Format("2006-01"), e.At.Format("2006-01-02")+".jsonl")
+	rel := filepath.Join("events", e.At.Format("2006-01"),
+		e.At.Format("2006-01-02T15")+".hour.jsonl")
 	full := filepath.Join(l.dir, rel)
 	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
 		return fmt.Errorf("创建审计子目录失败: %w", err)
@@ -294,26 +295,53 @@ func joinDetail(a, b string) string {
 // Read 读取某一天的审计记录。
 //
 // 只用于测试与排查，不对外暴露：审计是给人看的档案，不是查询接口。
+//
+// 按小时分片后，一天的数据散在多个文件里，这里合并返回；
+// 同时兼容 2026-10-24 之前的按天文件（events/YYYY-MM/YYYY-MM-DD.jsonl）。
 func (l *Log) Read(day time.Time) ([]Entry, error) {
-	rel := filepath.Join("events", day.Format("2006-01"), day.Format("2006-01-02")+".jsonl")
-	data, err := os.ReadFile(filepath.Join(l.dir, rel))
+	dir := filepath.Join(l.dir, "events", day.Format("2006-01"))
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	var out []Entry
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	dayPrefix := day.UTC().Format("2006-01-02")
+	// 收集要读的文件：当天的小时分片，以及可能存在的旧按天文件。
+	var files []string
+	for _, de := range entries {
+		if de.IsDir() {
 			continue
 		}
-		var e Entry
-		if err := json.Unmarshal([]byte(line), &e); err != nil {
-			return nil, fmt.Errorf("解析审计记录失败: %w", err)
+		name := de.Name()
+		if name == dayPrefix+".jsonl" || strings.HasPrefix(name, dayPrefix+"T") {
+			files = append(files, filepath.Join(dir, name))
 		}
-		out = append(out, e)
+	}
+	// 文件名按小时字典序排列，天然就是时间顺序。
+	sort.Strings(files)
+
+	var out []Entry
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			var e Entry
+			if err := json.Unmarshal([]byte(line), &e); err != nil {
+				return nil, fmt.Errorf("解析审计记录失败: %w", err)
+			}
+			out = append(out, e)
+		}
 	}
 	return out, nil
 }

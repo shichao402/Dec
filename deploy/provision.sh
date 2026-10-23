@@ -384,14 +384,17 @@ ProtectHome=yes
 PrivateTmp=yes
 ReadWritePaths=$DATA_DIR $ROOT_KEY_DIR
 
-# 内存上限：留出余量给内核与 sshd，超了让服务自己被杀，别拖垮整机。
+# 内存软上限：超过后内核强制回收缓存、把冷页换到 swap，而不是直接杀掉进程。
 #
 # 2026-10-24 的实际故障：推送审计时 go-git 要把松散对象重新打包，
 # dec-cloud 的 anon-rss 涨到 754MB，在 956MB 的机器上触发全局 OOM，
 # 整机失去响应（ping 通、SSH 与 HTTPS 全不通），只能走云 API 重启。
-# 单独设上限的意义不是"不 OOM"，而是把伤害限制在这个 unit 里：
-# 它被杀后 Restart=on-failure 会拉起，sshd 还有内存可用，人还进得去。
-MemoryMax=600M
+#
+# 这里刻意用 MemoryHigh 而不是 MemoryMax：打包峰值就是这个量级，
+# 设一个更低的硬限会让每一次正常推送都被杀，服务永远推不上去。
+# 软限的作用是让内核在逼近时优先回收与换出，而不是等到全局 OOM
+# 把整台机器（包括 sshd）一起拖下水。
+MemoryHigh=700M
 
 [Install]
 WantedBy=multi-user.target

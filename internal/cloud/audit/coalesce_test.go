@@ -103,7 +103,7 @@ func TestRecordsSurviveWithoutCommit(t *testing.T) {
 	}
 
 	// 不 Flush，直接从文件读：模拟提交窗口内进程被强杀。
-	rel := filepath.Join("events", at.Format("2006-01"), at.Format("2006-01-02")+".jsonl")
+	rel := filepath.Join("events", at.Format("2006-01"), at.Format("2006-01-02T15")+".hour.jsonl")
 	data, err := os.ReadFile(filepath.Join(dir, rel))
 	if err != nil {
 		t.Fatalf("记录应已写入工作树文件: %v", err)

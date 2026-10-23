@@ -191,12 +191,12 @@ func TestFilesIncludeEvents(t *testing.T) {
 	}
 	found := false
 	for _, f := range files {
-		if strings.Contains(f, "2026-10-21.jsonl") {
+		if strings.Contains(f, "2026-10-21T") && strings.HasSuffix(f, ".hour.jsonl") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("审计文件应在仓库树里，实际 %v", files)
+		t.Fatalf("审计文件应在仓库树里（按小时分片），实际 %v", files)
 	}
 }
 
@@ -224,10 +224,10 @@ func TestMonthPartition(t *testing.T) {
 		t.Fatalf("读取文件列表失败: %v", err)
 	}
 	joined := strings.Join(files, "\n")
-	if !strings.Contains(joined, "events/2026-10/2026-10-31.jsonl") {
+	if !strings.Contains(joined, "events/2026-10/2026-10-31T23.hour.jsonl") {
 		t.Fatalf("缺少 10 月文件: %s", joined)
 	}
-	if !strings.Contains(joined, "events/2026-11/2026-11-01.jsonl") {
+	if !strings.Contains(joined, "events/2026-11/2026-11-01T01.hour.jsonl") {
 		t.Fatalf("缺少 11 月文件: %s", joined)
 	}
 }
