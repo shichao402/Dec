@@ -303,7 +303,83 @@ func TestSyncUpdatesPort(t *testing.T) {
 	}
 }
 
-// TestRemoveHostsRemovesOnlyDec 验证移除只删 dec（需求 2.5）。
+// TestInspectHostsReportsThreeStates 验证 mcp-config 读到的状态三种语义（需求 2.6）。
+//
+// `dec-agent mcp-config` 是排障入口，它给出的结论只有三种：
+// 已写入（配置里有 dec）、已跳过（目录/文件不存在或没有条目）、失败（配置坏了）。
+// 这三种必须能区分开，否则用户看到「没写」时不知道该装 IDE 还是修 JSON/TOML。
+func TestInspectHostsReportsThreeStates(t *testing.T) {
+	home := t.TempDir()
+
+	// cursor：目录与文件都在，且已经写入 dec 条目 → 已写入
+	cursorDir := filepath.Join(home, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
+		t.Fatalf("准备 cursor 目录失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cursorDir, "mcp.json"),
+		[]byte(`{"mcpServers":{"dec":{"url":"http://127.0.0.1:8787/mcp"}}}`), 0o644); err != nil {
+		t.Fatalf("准备 cursor 配置失败: %v", err)
+	}
+
+	// claude：目录在、配置也在，但没有 mcpServers → 已跳过
+	// 注意 Claude 的用户级 MCP 配置在 ~/.claude.json，~/.claude 只是数据目录。
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("准备 claude 目录失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"theme":"dark"}`), 0o644); err != nil {
+		t.Fatalf("准备 claude 配置失败: %v", err)
+	}
+
+	// codex：目录不存在 → 已跳过，且原因要指到目录
+	// 这是「IDE 没装」的正常情况，必须与「配置坏了」区分开。
+
+	// 失败状态另起一个家目录：同一个家目录里既要「目录不存在」又要「解析失败」
+	// 得靠不同宿主，而 DefaultHosts 只有三个宿主，塞不下第四个状态。
+	badHome := t.TempDir()
+	badDir := filepath.Join(badHome, ".cursor")
+	if err := os.MkdirAll(badDir, 0o755); err != nil {
+		t.Fatalf("准备坏配置目录失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, "mcp.json"), []byte(`{"mcpServers":`), 0o644); err != nil {
+		t.Fatalf("准备坏配置失败: %v", err)
+	}
+
+	byName := map[string]HostResult{}
+	for _, res := range inspectHosts(DefaultHosts(home)) {
+		byName[res.Name] = res
+	}
+
+	if got := byName["cursor"]; got.Status != HostWritten || !strings.Contains(got.Entry, "8787") {
+		t.Fatalf("cursor 应为已写入且带出条目内容，实际 %v entry=%q reason=%q",
+			got.Status, got.Entry, got.Reason)
+	}
+	if got := byName["claude"]; got.Status != HostSkipped || !strings.Contains(got.Reason, "没有 dec 条目") {
+		t.Fatalf("claude 应为已跳过并说明没有条目，实际 %v reason=%q", got.Status, got.Reason)
+	}
+	if got := byName["codex"]; got.Status != HostSkipped || !strings.Contains(got.Reason, "配置目录不存在") {
+		t.Fatalf("codex 应为已跳过并说明目录不存在，实际 %v reason=%q", got.Status, got.Reason)
+	}
+
+	var bad *HostResult
+	badResults := inspectHosts(DefaultHosts(badHome))
+	for i := range badResults {
+		if badResults[i].Name == "cursor" {
+			bad = &badResults[i]
+		}
+	}
+	if bad == nil || bad.Status != HostFailed {
+		t.Fatalf("坏 JSON 应报告失败，实际 %+v", badResults)
+	}
+
+	// 读操作不能顺手改文件：坏 JSON 必须原样留在那里。
+	data, err := os.ReadFile(filepath.Join(badDir, "mcp.json"))
+	if err != nil || string(data) != `{"mcpServers":` {
+		t.Fatalf("InspectHosts 不应修改配置文件，实际 %q err=%v", data, err)
+	}
+}
+
+// TestRemoveHostsRemovesOnlyDec 验证移除只删 `dec`（需求 2.5）。
 func TestRemoveHostsRemovesOnlyDec(t *testing.T) {
 	home := t.TempDir()
 	cursorDir := filepath.Join(home, ".cursor")

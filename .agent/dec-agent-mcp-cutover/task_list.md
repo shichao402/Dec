@@ -26,9 +26,16 @@
 
 ## 4. 真实链路验收
 
-- [ ] 4.1 编写 MCP 验收客户端与 `scripts/acceptance.sh`
-- [ ] 4.2 发布新版本并对生产执行验收
+- [x] 4.1 编写 MCP 验收客户端与 `scripts/acceptance.sh`
+- [x] 4.2 发布新版本并对生产执行验收
 
 ## 验收标准对照
 
-待 4.2 补齐。
+完整对照表见 [requirements.md](requirements.md) 末尾的「验收对照表」，每条标准都指向一项脚本检查或一个具名测试。
+
+发布与验收记录（2026-10-23）：
+
+- `v2.1.3` 经 CI 发布，`dec-cloud` 部署成功，`required_client` 同步到 `v2.1.3`
+- 本机代理升级到 `v2.1.3`，`aligned: true`
+- `scripts/acceptance.sh` 退出码 0，16 项检查全部 PASS，无残留
+- `/mcp` 握手已本地完成（不再出现 `bootstrap_closed`），外部 Origin 返回 403

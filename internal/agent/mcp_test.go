@@ -14,6 +14,51 @@ import (
 	"github.com/shichao402/Dec/internal/proto"
 )
 
+// hasChinese 报告 s 里是否含有汉字。
+//
+// 用码点区间判断而不是正则：只要有一个汉字就算中文描述，剩下的英文术语
+// （`bundle`、`revision`）本来就是必须保留的原文。
+func hasChinese(s string) bool {
+	for _, r := range s {
+		if r >= 0x4e00 && r <= 0x9fff {
+			return true
+		}
+	}
+	return false
+}
+
+// readOnlyTools 是明确没有副作用的工具（需求 1.7）。
+//
+// 剩下的工具都会写云端：要么立即推送给在线设备，要么只进审计。
+var readOnlyTools = map[string]bool{
+	"dec_status":             true,
+	"dec_list_assets":        true,
+	"dec_read_asset":         true,
+	"dec_list_secrets":       true,
+	"dec_history":            true,
+	"dec_list_projects":      true,
+	"dec_list_subscriptions": true,
+}
+
+// checkSideEffectNoted 检查描述里是否交代了副作用（需求 1.7）。
+//
+// 只读工具要明确说「只读」或「无副作用」，写入工具要说清推送与审计——
+// AI 客户端只会读这段文字来决定要不要先确认，写漏了就等于把判断责任
+// 推给了人。「只读」与「无副作用」是同一件事的不同说法，都算写了。
+func checkSideEffectNoted(name, desc string) error {
+	if readOnlyTools[name] {
+		if !strings.Contains(desc, "无副作用") && !strings.Contains(desc, "只读") {
+			return errors.New(name + " 是只读工具，描述里应写明「只读」或「无副作用」: " + desc)
+		}
+		return nil
+	}
+	// 写入类：必须提到推送或审计，二选一即可（项目登记只进审计、不推送）。
+	if strings.Contains(desc, "推送") || strings.Contains(desc, "审计") {
+		return nil
+	}
+	return errors.New(name + " 是写入工具，描述里应写明推送或审计副作用: " + desc)
+}
+
 // fakeCloud 记录代理转发出去的每一次调用，并按预设返回结果。
 type fakeCloud struct {
 	mu    sync.Mutex
@@ -136,8 +181,25 @@ func TestMCPToolsList(t *testing.T) {
 		if strings.TrimSpace(tool.Description) == "" {
 			t.Errorf("%s 缺少描述", name)
 		}
+		// 需求 1.7：描述必须是中文，并写明副作用。AI 客户端只会读这段文字来
+		// 判断该不该调用，英文或只写「写入资产」等于没写副作用。
+		if !hasChinese(tool.Description) {
+			t.Errorf("%s 的描述不是中文: %q", name, tool.Description)
+		}
+		if err := checkSideEffectNoted(name, tool.Description); err != nil {
+			t.Error(err)
+		}
 		if tool.InputSchema == nil {
 			t.Errorf("%s 缺少输入 schema", name)
+		}
+	}
+
+	// 需求 1.4 点名要求写资产的描述写明整体替换语义。
+	if tool, ok := got["dec_write_asset"]; ok {
+		for _, needle := range []string{"整体替换", "删除"} {
+			if !strings.Contains(tool.Description, needle) {
+				t.Errorf("dec_write_asset 的描述没有写明整体替换语义（缺 %q）: %q", needle, tool.Description)
+			}
 		}
 	}
 

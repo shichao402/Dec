@@ -240,6 +240,90 @@ func TestNoOrphanDeferralComments(t *testing.T) {
 	}
 }
 
+// TestLegacyFinalTagExists 守住断代前的存档标签（需求 3.1）。
+//
+// 旧代码只通过 git 历史保留，`legacy-final` 是那个存档点。标签丢了，
+// 「想知道上一代长什么样」就只剩翻 commit 猜，所以把它变成会失败的检查。
+func TestLegacyFinalTagExists(t *testing.T) {
+	root := repoRoot(t)
+	cmd := sysproc.Command("git", "tag", "--list", "legacy-final")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git tag 执行失败: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "legacy-final" {
+		t.Fatalf("缺少 legacy-final 标签，旧代码没有存档点；应执行 git tag legacy-final <断代前提交>")
+	}
+}
+
+// TestMakefileOnlyBuildsNewGeneration 守住 Makefile 只面向新一代二进制（需求 3.4）。
+//
+// 断代后 Makefile 里如果还留着 `go build ./cmd/dec-server`，`make build`
+// 会直接失败，但更糟的情况是它指向一个已经改名成旧路径的新包，静默构建出
+// 没人用的产物。这里直接检查 Makefile 里出现的 cmd/ 路径。
+func TestMakefileOnlyBuildsNewGeneration(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("读 Makefile 失败: %v", err)
+	}
+	content := string(data)
+	for _, legacy := range legacyPackages {
+		if !strings.HasPrefix(legacy, modulePath+"/cmd/") {
+			continue
+		}
+		name := strings.TrimPrefix(legacy, modulePath+"/")
+		if strings.Contains(content, "./"+name) {
+			t.Errorf("Makefile 仍在构建已删除的入口: %s", name)
+		}
+	}
+	for _, want := range []string{"./cmd/dec-cloud", "./cmd/dec-agent"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("Makefile 缺少新一代入口: %s", want)
+		}
+	}
+}
+
+// requiredArtifacts 是发布产物里客户端必须有的平台组合（需求 3.7）。
+//
+// 断代不该改变产物名：设备端的自更新按 `dec-agent-<os>-<arch>` 拼名字，
+// 少一个平台就等于那批设备再也升不上来。
+var requiredArtifacts = []string{
+	"dec-agent-darwin/amd64",
+	"dec-agent-darwin/arm64",
+	"dec-agent-linux/amd64",
+	"dec-agent-linux/arm64",
+	"dec-agent-windows/amd64",
+	"dec-agent-windows/arm64",
+	"dec-cloud-linux/amd64",
+	"dec-cloud-linux/arm64",
+}
+
+// TestReleaseArtifactNamesUnchanged 守住 CI 产物名不变（需求 3.7）。
+//
+// 直接解析 release.yml 里的构建循环：产物名是在 shell 里拼出来的，
+// 光看 yml 结构看不出最终名字，所以检查拼名字的那几条语句是否还在。
+func TestReleaseArtifactNamesUnchanged(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatalf("读 release.yml 失败: %v", err)
+	}
+	content := string(data)
+	checks := []struct{ why, needle string }{
+		{"客户端产物名前缀", `out="dist/dec-agent-$os-$arch"`},
+		{"Windows 加 .exe 后缀", `out="$out.exe"`},
+		{"服务端产物名", `-o "dist/dec-cloud-linux-$arch"`},
+		{"客户端平台组合", "darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64"},
+	}
+	for _, c := range checks {
+		if !strings.Contains(content, c.needle) {
+			t.Errorf("release.yml 缺少%s，实际写的是 %q", c.why, c.needle)
+		}
+	}
+}
+
 // repoRoot 向上找 go.mod 作为仓库根。
 func repoRoot(t *testing.T) string {
 	t.Helper()
