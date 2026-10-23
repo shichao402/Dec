@@ -49,7 +49,7 @@ ROOT_KEY_DIR="${DEC_ROOT_KEY_DIR:-$CONF_DIR/secret}"
 DATA_DIR="/var/lib/dec-cloud"
 APP_DIR="/opt/dec-cloud"
 # dec-cloud 只监听回环高位端口；公网 443 由 nginx 按 SNI 透传过来。
-LISTEN_ADDR="${DEC_LISTEN_ADDR:-127.0.0.1:8443}"
+LISTEN_ADDR="${DEC_LISTEN_ADDR:-127.0.0.1:8444}"
 # 部署入口：authorized_keys 的 command= 与 sudoers 都指向这一个路径，
 # 只改一处就会两边不一致，所以集中定义。
 ENTRY_PATH="/usr/local/lib/${SERVICE_NAME}/${SERVICE_NAME}-deploy.sh"

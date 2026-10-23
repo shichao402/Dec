@@ -38,14 +38,14 @@ SERVICE="${DEC_SERVICE:-dec-cloud}"
 # 回环监听地址（DEC_LISTEN_ADDR），绕过 nginx，判据只针对 dec-cloud 自身。
 HEALTH_URL="${DEC_HEALTH_URL:-https://dec.firoyang.com/healthz}"
 # 监听地址不写死：从线上 systemd 单元的 -listen 推导。本脚本不改写单元，
-# 单元由 provision.sh 管；若写死 8443，单元还停在旧端口时新版本会被健康检查误判并回滚。
+# 单元由 provision.sh 管；若写死端口，单元还停在旧端口时新版本会被健康检查误判并回滚。
 # 推导不到才用默认值。":443" 这类只有端口的写法补成 127.0.0.1。
 LISTEN_ADDR="${DEC_LISTEN_ADDR:-}"
 if [ -z "$LISTEN_ADDR" ]; then
   LISTEN_ADDR="$(systemctl cat "$SERVICE" 2>/dev/null | sed -n 's/^ExecStart=.*-listen[ =]\([^ ]*\).*/\1/p' | tail -n 1)"
 fi
 case "$LISTEN_ADDR" in
-  "") LISTEN_ADDR="127.0.0.1:8443" ;;
+  "") LISTEN_ADDR="127.0.0.1:8444" ;;
   :*) LISTEN_ADDR="127.0.0.1$LISTEN_ADDR" ;;
   0.0.0.0:*) LISTEN_ADDR="127.0.0.1:${LISTEN_ADDR#0.0.0.0:}" ;;
 esac

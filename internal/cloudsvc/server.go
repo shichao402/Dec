@@ -40,7 +40,7 @@ import (
 type Config struct {
 	// Domain 是服务域名，用于证书申请与下载索引页里的示例命令。
 	Domain string
-	// Listen 是监听地址，例如 "127.0.0.1:8443"（公网 443 由 nginx SNI 透传）。
+	// Listen 是监听地址，例如 "127.0.0.1:8444"（公网 443 由 nginx SNI 透传）。
 	Listen string
 	// DataDir 是数据根目录，下面有 ssot、state、certs 等子目录。
 	DataDir string

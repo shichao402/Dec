@@ -3,7 +3,7 @@
 // 它把整台机器变成一个可控的 SSOT：资产、密钥、设备身份都在这里，
 // 各终端只运行超薄代理，把渲染结果落到本机。
 //
-// 部署要点（见部署文档）：dec-cloud 只监听回环高位端口（默认 127.0.0.1:8443），
+// 部署要点（见部署文档）：dec-cloud 只监听回环高位端口（默认 127.0.0.1:8444），
 // 公网 443 由 nginx 持有，nginx 用 stream + ssl_preread 按 SNI 把 dec 域名的
 // 原始 TLS 流透传过来（不终止 TLS）。因此设备证书认证与 ACME TLS-ALPN-01
 // 挑战都仍由 dec-cloud 自己完成。nginx 若改成终止 TLS，所有设备都会变成未认证。
@@ -31,7 +31,7 @@ var (
 func main() {
 	var (
 		dataDir     = flag.String("data-dir", defaultDataDir(), "数据目录（仓库、状态、证书、根密钥都在这里）")
-		listen      = flag.String("listen", "127.0.0.1:8443", "监听地址；生产上由 nginx 在 443 按 SNI 透传到这里")
+		listen      = flag.String("listen", "127.0.0.1:8444", "监听地址；生产上由 nginx 在 443 按 SNI 透传到这里")
 		domain      = flag.String("domain", "dec.firoyang.com", "对外域名，用于 ACME 证书")
 		required    = flag.String("required-version", "", "要求的代理版本；为空时取服务端版本")
 		acceptAny   = flag.Bool("accept-any", false, "调试用：使用自签证书，绝不用于生产")

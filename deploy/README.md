@@ -47,7 +47,7 @@ GOWORK=off go build ./... && GOWORK=off go test ./...
 |---|---|---|
 | 数据目录 | `/var/lib/dec-cloud` | `/opt/dec-cloud-test/<slot>/data` |
 | 根密钥 | `/etc/dec-cloud/secret/root.key` | `/opt/dec-cloud-test/<slot>/secret/root.key` |
-| 端口 | `127.0.0.1:8443`（只回环，公网 443 由 nginx SNI 透传） | `127.0.0.1:18443`（只回环） |
+| 端口 | `127.0.0.1:8444`（只回环，公网 443 由 nginx SNI 透传） | `127.0.0.1:18443`（只回环） |
 | 单元名 | `dec-cloud` | `dec-cloud-test` / `dec-agent-test` |
 
 ```bash
@@ -77,9 +77,11 @@ SSH 的登录策略不由本项目的脚本决定。`provision.sh` 默认一行 
 
 ### 1. 准备服务器
 
-一台 Linux（amd64 或 arm64），域名 A 记录指向它。安全组只开 22 和 443。443 由 nginx 持有，dec-cloud 只监听 `127.0.0.1:8443`。
+一台 Linux（amd64 或 arm64），域名 A 记录指向它。安全组只开 22 和 443。443 由 nginx 持有，dec-cloud 只监听 `127.0.0.1:8444`。
 
-nginx 必须用 `stream` 模块 + `ssl_preread` 按 SNI 把 `dec.firoyang.com` 的原始 TLS 流透传到 `127.0.0.1:8443`，**不能终止 TLS**：设备身份靠 TLS 客户端证书，ACME 证书也由 dec-cloud 自己用 TLS-ALPN-01 在这条连接上申请续期，nginx 一旦解密，两者都会失效。nginx 自己的其他 HTTPS 站点改为监听回环端口，作为 `ssl_preread` 的 default 后端。
+参考配置见 [nginx/stream-sni.conf](nginx/stream-sni.conf)（线上 `/etc/nginx/stream-sni.conf` 的副本，由 nginx.conf 顶层 include）。dec-cloud 的端口改动时，这份配置的 map 要同步。
+
+nginx 必须用 `stream` 模块 + `ssl_preread` 按 SNI 把 `dec.firoyang.com` 的原始 TLS 流透传到 `127.0.0.1:8444`，**不能终止 TLS**：设备身份靠 TLS 客户端证书，ACME 证书也由 dec-cloud 自己用 TLS-ALPN-01 在这条连接上申请续期，nginx 一旦解密，两者都会失效。nginx 自己的其他 HTTPS 站点改为监听回环端口，作为 `ssl_preread` 的 default 后端。
 
 ### 2. 建账号与目录
 

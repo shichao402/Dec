@@ -24,8 +24,8 @@ func TestCloudListensBehindNginx(t *testing.T) {
 	}
 
 	main := read("cmd/dec-cloud/main.go")
-	if !strings.Contains(main, `flag.String("listen", "127.0.0.1:8443"`) {
-		t.Error("dec-cloud 的 -listen 默认值必须是 127.0.0.1:8443（公网 443 归 nginx）")
+	if !strings.Contains(main, `flag.String("listen", "127.0.0.1:8444"`) {
+		t.Error("dec-cloud 的 -listen 默认值必须是 127.0.0.1:8444（公网 443 归 nginx）")
 	}
 
 	prov := read("deploy/provision.sh")
@@ -35,8 +35,8 @@ func TestCloudListensBehindNginx(t *testing.T) {
 	if strings.Contains(prov, "-listen :443") {
 		t.Error("provision.sh 的 ExecStart 仍在监听 :443，会与 nginx 冲突")
 	}
-	if !strings.Contains(prov, `LISTEN_ADDR="${DEC_LISTEN_ADDR:-127.0.0.1:8443}"`) {
-		t.Error("provision.sh 的默认监听地址必须是 127.0.0.1:8443")
+	if !strings.Contains(prov, `LISTEN_ADDR="${DEC_LISTEN_ADDR:-127.0.0.1:8444}"`) {
+		t.Error("provision.sh 的默认监听地址必须是 127.0.0.1:8444")
 	}
 
 	deploy := read("deploy/dec-cloud-deploy.sh")
@@ -48,7 +48,7 @@ func TestCloudListensBehindNginx(t *testing.T) {
 	}
 
 	// 测试实例不能和生产撞端口。
-	if strings.Contains(read("deploy/test-e2e.sh"), `SERVER_PORT="8443"`) {
-		t.Error("test-e2e.sh 的测试实例不能使用生产端口 8443")
+	if strings.Contains(read("deploy/test-e2e.sh"), `SERVER_PORT="8444"`) {
+		t.Error("test-e2e.sh 的测试实例不能使用生产端口 8444")
 	}
 }
