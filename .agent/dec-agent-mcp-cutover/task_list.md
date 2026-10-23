@@ -42,6 +42,16 @@
 - 线上链路模式 `deploy/test-e2e.sh --reset`：退出码 0，链路 13 项 + 隔离核对 11 项全部 PASS
 - 线上只读实测：`/mcp` 与 `/admin` 在公网均为 404（入口只在代理回环上）；15 个协议方法无证书一律 `unauthorized`；旧版本调用返回 `version_mismatch` 并带出要求版本
 
+后续三个版本都由 CI 单一路径发布并部署，每个都修了一个真实缺陷：
+
+- `v2.1.4`：CI 两个阻断问题。`actions/checkout` 默认不拉 tag，导致「上一个发布 tag」查不到、required 退化成当前 tag，同时守卫测试误报标签丢失；补 `fetch-tags: true`。其后 `legacy-final` 只存在本地、从未推远端，测试从「跳过」变成真正失败，补一次推送。
+- `v2.1.5`：退出维护的并发竞态。`syncDeployFiles` 先读文件再写内存，两步之间若 `SetMaintenance(false)` 已删文件并置 false，就会被旧事实改回 true，表现为「退出维护偶发失效」。两者改用同一把 `deployMu`，并拆出 `consumeDeployRecordLocked` 防重入死锁；新增并发回归测试，去掉锁后第 0 次循环即失败。
+- `v2.1.6`：`aligned` 用精确相等判定 required。只改服务端的发布会沿用上一个 required（需求 19.2），于是升级到新版本的代理反被判成不对齐、设备直接不可用。改为比较版本号，不低于 required 即对齐；非法格式返回 0 保持宽松。同步修正线上验收里「要求版本必须等于服务端版本」的旧断言——这条会在每次服务端发布后必然失败，把正常状态报成缺陷。
+
+`v2.1.6` 发布后实测：生产 `pending.json` 为 `v2.1.6` / commit `eb614c6` / `result=ok` / `rolled_back=false`；`healthz` 报 `server_version=v2.1.6`、`required_client=v2.1.4`；本机代理升级到 `v2.1.6` 后 `aligned=true`、`last_error` 为空；本机模式 16 项、线上只读模式 38 项全部通过。
+
+部署路径已收敛为唯一一条：正式发布只能 `git tag v2.x.y && git push origin v2.x.y` 走 CI。本地只做构建、测试与本机验收；`TestProductionDeployOnlyThroughCI` 会检查工作流里有 `refs/tags/v`、`StrictHostKeyChecking=yes`、`payload.tar`，部署入口有 tag 真实性核对，且 `scripts/`、`deploy/` 下没有任何脚本直接往生产机上装二进制。
+
 三种模式验的是三件事：本机模式证明「这台机器能用」，线上只读模式证明「服务器那台机器是对的」，线上链路模式证明「线上真的能跑通完整链路」。MCP 入口只在代理里，云端不提供 `/mcp`。
 
 测试环境与生产同机但完全隔离：独立数据目录 `/opt/dec-cloud-test/<slot>/data`、独立根密钥、端口只监听 `127.0.0.1:18443`、独立 systemd 单元。测试用 Bitwarden 专用账号（2FA 关闭，凭据在 `.secrets/dec/integration/bitwarden.yaml`），其根密钥冷备与生产互不可见。正式部署不用测试账号，生产初始化的主密码与 2FA 由本人当场输入。
