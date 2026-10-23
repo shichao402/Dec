@@ -140,8 +140,8 @@ func installLaunchd(bin string, opts ServiceOptions) error {
 </dict>
 </plist>
 `, launchdLabel, xmlEscape(bin), xmlEscape(opts.StateDir),
-		xmlEscape(filepath.Join(opts.LogDir, "agent.log")),
-		xmlEscape(filepath.Join(opts.LogDir, "agent.err.log")))
+		xmlEscape(filepath.Join(opts.LogDir, LogFileName)),
+		xmlEscape(filepath.Join(opts.LogDir, LogFileName)))
 	if err := writeFileAtomic(p, []byte(plist), 0o644); err != nil {
 		return err
 	}
@@ -170,12 +170,14 @@ After=network-online.target
 Type=simple
 ExecStart=%s run
 Environment=DEC_AGENT_STATE=%s
+StandardOutput=append:%s
+StandardError=append:%s
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=default.target
-`, bin, opts.StateDir)
+`, bin, opts.StateDir, filepath.Join(opts.LogDir, LogFileName), filepath.Join(opts.LogDir, LogFileName))
 	if err := writeFileAtomic(p, []byte(unit), 0o644); err != nil {
 		return err
 	}
@@ -191,13 +193,55 @@ WantedBy=default.target
 	return nil
 }
 
-// installWindowsTask 用计划任务注册。
+// installWindowsTask 用计划任务注册并立即启动。
+//
+// 以前用 `schtasks /TR "set DEC_AGENT_STATE=... && bin run"`：/TR 不经 cmd.exe，
+// `set` 不是可执行文件，任务根本起不来；且默认 72 小时执行时限会结束常驻进程。
+// 改为 XML 定义，与托盘任务共用生成逻辑。
 func installWindowsTask(bin string, opts ServiceOptions) error {
-	_ = runQuiet("schtasks", "/Delete", "/TN", windowsTask, "/F")
-	// ONLOGON 保证登录即启动；/RL LIMITED 避免要管理员权限。
-	cmd := fmt.Sprintf(`set DEC_AGENT_STATE=%s && "%s" run`, opts.StateDir, bin)
-	return runQuiet("schtasks", "/Create", "/TN", windowsTask,
-		"/TR", cmd, "/SC", "ONLOGON", "/RL", "LIMITED", "/F")
+	cmd, args := windowsExec(bin, []string{"run"}, opts.StateDir)
+	x := windowsTaskXML("Dec 代理", cmd, args, windowsUserID())
+	if err := registerWindowsTask(windowsTask, x, opts.StateDir); err != nil {
+		return err
+	}
+	return runQuiet("schtasks", "/Run", "/TN", windowsTask)
+}
+
+// RestartService 重启已注册的系统服务（agent-tray-access 需求 3.3）。
+//
+// 用各平台的「重启」原语而不是 kill 进程：launchd 的 kickstart -k、
+// systemd 的 restart、Windows 计划任务的 end+run。服务没注册时返回错误，
+// 由调用方（托盘）提示用户先安装。
+func RestartService() error {
+	switch runtime.GOOS {
+	case "darwin":
+		// kickstart -k 先杀掉再按 plist 重新拉起；需要 gui 域 + uid。
+		target := fmt.Sprintf("gui/%d/%s", os.Getuid(), launchdLabel)
+		return runQuiet("launchctl", "kickstart", "-k", target)
+	case "linux":
+		return runQuiet("systemctl", "--user", "restart", systemdUnit)
+	case "windows":
+		_ = runQuiet("schtasks", "/End", "/TN", windowsTask)
+		return runQuiet("schtasks", "/Run", "/TN", windowsTask)
+	}
+	return fmt.Errorf("不支持的平台: %s", runtime.GOOS)
+}
+
+// StartService 启动已注册但未运行的系统服务。
+//
+// 与 RestartService 的区别是不强杀：代理已经在跑时是无副作用的空操作，
+// 适合托盘发现「未运行」后点「启动」。
+func StartService() error {
+	switch runtime.GOOS {
+	case "darwin":
+		target := fmt.Sprintf("gui/%d/%s", os.Getuid(), launchdLabel)
+		return runQuiet("launchctl", "kickstart", target)
+	case "linux":
+		return runQuiet("systemctl", "--user", "start", systemdUnit)
+	case "windows":
+		return runQuiet("schtasks", "/Run", "/TN", windowsTask)
+	}
+	return fmt.Errorf("不支持的平台: %s", runtime.GOOS)
 }
 
 // plistPath 返回 launchd 定义路径。

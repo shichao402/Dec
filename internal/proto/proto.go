@@ -294,6 +294,9 @@ type SyncRequest struct {
 	// 服务端在没有差异时挂起这个请求，直到内容变更或超时。
 	// 0 表示立即返回，代理首次连接时用它做全量对账。
 	WaitSeconds int `json:"wait_seconds,omitempty"`
+	// LocalTLSSerial 是设备当前持有的本机证书序列号，空表示没有（agent-tray-access 需求 4.5）。
+	// 云端只在它与当前证书不一致时下发证书。追加字段，旧服务端忽略。
+	LocalTLSSerial string `json:"local_tls_serial,omitempty"`
 }
 
 // LocalProject 是代理侧的项目登记投影。
@@ -331,6 +334,20 @@ type SyncResponse struct {
 	// 代理下一轮把这些哈希填进请求的 Manifest 即可。代理因此不需要任何本地清单，
 	// 重启后也只需等一轮就能恢复对账。追加字段，旧代理想象成空即可。
 	Checks []ManifestEntry `json:"checks,omitempty"`
+	// LocalTLS 是需要落盘的本机证书（agent-tray-access 需求 4.5）。
+	//
+	// 只在设备持有的序列号与云端不一致时出现。它不走普通落点：证书与私钥
+	// 落在代理自己的状态目录里，不进入任何 IDE 或项目目录。追加字段，旧代理忽略。
+	LocalTLS *LocalTLSBundle `json:"local_tls,omitempty"`
+}
+
+// LocalTLSBundle 是下发给设备的本机证书。
+type LocalTLSBundle struct {
+	Domain   string    `json:"domain"`
+	Serial   string    `json:"serial"`
+	NotAfter time.Time `json:"not_after"`
+	CertPEM  string    `json:"cert_pem"`
+	KeyPEM   string    `json:"key_pem"`
 }
 
 // Alert 是一条下发给设备的告警。

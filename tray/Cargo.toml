@@ -1,0 +1,40 @@
+[package]
+name = "dec-tray"
+version = "0.0.0"
+edition = "2021"
+description = "Dec 代理的托盘组件：读回环 /api/status 画图标，双击打开管理面"
+publish = false
+
+# 版本号不在这里维护：发布时由 CI 通过 DEC_TRAY_VERSION 环境变量注入，
+# 与 dec-agent 来自同一个 tag（agent-tray-access 需求 7.3）。
+
+[[bin]]
+name = "dec-tray"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+
+# 托盘与事件循环只在有托盘的平台上编译；Linux 没有默认托盘依赖（GTK），
+# 那里 dec-tray 直接退出，不影响代理（需求 6.3、7.4）。
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+tray-icon = "0.26"
+tao = "0.37"
+ureq = { version = "2", default-features = false }
+open = "5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent"] }
+objc2 = "0.6"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+notify-rust = "4"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

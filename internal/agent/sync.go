@@ -45,6 +45,10 @@ type Options struct {
 	Logf func(format string, args ...any)
 	// Insecure 仅用于本机调试。
 	Insecure bool
+	// LocalTLS 是本机证书存储，为空表示不接收证书（agent-tray-access 需求 4.5）。
+	LocalTLS *LocalTLSStore
+	// OnLocalTLS 在新证书落盘后调用，用于热加载 HTTPS。
+	OnLocalTLS func()
 }
 
 // Notifier 是系统通知接口，便于在无桌面环境下降级为空实现。
@@ -75,6 +79,8 @@ type Syncer struct {
 	requiredVer string
 	maintenance bool
 	syncedRev   string
+	// lastLoggedErr 是上一次写入日志的同步失败原因，用于去重。
+	lastLoggedErr string
 }
 
 // NewSyncer 构造同步器。
@@ -210,12 +216,16 @@ func (s *Syncer) Run(ctx context.Context) error {
 		err := s.tick(ctx)
 		if err == nil {
 			backoff = time.Second
+			s.mu.Lock()
+			s.lastLoggedErr = ""
+			s.mu.Unlock()
 			continue
 		}
 		if ctx.Err() != nil {
 			return nil
 		}
 		s.setErr(err)
+		s.logSyncFailure(err)
 		// 版本不对齐与身份被拒都不该高频重试：它们需要人处理。
 		if errors.Is(err, ErrNotAligned) {
 			s.notifyVersionMismatch()
@@ -308,6 +318,9 @@ func (s *Syncer) syncOnce(ctx context.Context) error {
 		Projects:    LocalProjects(projects),
 		WaitSeconds: int(s.opts.LongPoll / time.Second),
 	}
+	if s.opts.LocalTLS != nil {
+		in.LocalTLSSerial = s.opts.LocalTLS.Serial()
+	}
 
 	// 长轮询会挂起最多 LongPoll 秒。这期间如果用户在本机改了落点，
 	// 等满超时才上报就等于“改动要等半分钟才被记录”，所以挂一个监听：
@@ -336,6 +349,9 @@ func (s *Syncer) syncOnce(ctx context.Context) error {
 	s.mu.Lock()
 	s.checks = resp.Checks
 	s.mu.Unlock()
+
+	// 本机证书与资产下发互不影响：落盘失败只记日志，下一轮会重新下发。
+	s.applyLocalTLS(resp.LocalTLS)
 
 	if resp.Batch == nil {
 		s.markOK("")
@@ -466,6 +482,41 @@ func (s *Syncer) setErr(err error) {
 	s.mu.Lock()
 	s.lastErr = err
 	s.mu.Unlock()
+}
+
+// applyLocalTLS 落盘云端下发的本机证书（agent-tray-access 需求 4.5）。
+func (s *Syncer) applyLocalTLS(b *proto.LocalTLSBundle) {
+	if b == nil || s.opts.LocalTLS == nil {
+		return
+	}
+	if err := s.opts.LocalTLS.Save(b); err != nil {
+		s.opts.Logf("落盘本机证书失败（序列号 %s）: %v", b.Serial, err)
+		return
+	}
+	s.opts.Logf("本机证书已更新：%s，序列号 %s，到期 %s", b.Domain, b.Serial, b.NotAfter.Format(time.RFC3339))
+	if s.opts.OnLocalTLS != nil {
+		s.opts.OnLocalTLS()
+	}
+}
+
+// logSyncFailure 记一条同步失败日志（需求 5.4）：原因与当前 revision，时间由日志出口加。
+//
+// 同一原因连续出现只记第一次，避免离线时每次退避重试都刷一行；
+// 原因变化或恢复后再次失败会重新记录。
+func (s *Syncer) logSyncFailure(err error) {
+	s.mu.Lock()
+	rev := s.syncedRev
+	msg := err.Error()
+	repeat := msg == s.lastLoggedErr
+	s.lastLoggedErr = msg
+	s.mu.Unlock()
+	if repeat {
+		return
+	}
+	if rev == "" {
+		rev = "（尚未同步）"
+	}
+	s.opts.Logf("同步失败: %s（revision %s）", msg, rev)
 }
 
 // setMaintenance 记录维护状态。

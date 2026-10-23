@@ -22,11 +22,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -136,6 +138,16 @@ func cmdRun(args []string) error {
 	}
 
 	dir := mustState()
+
+	// 日志只写一个文件（需求 5.1）。服务方式运行时 stdout/stderr 被重定向到
+	// 同一文件，不能再回显，否则每行写两遍；只有前台在终端里跑才回显。
+	logOpts := agent.LogFileOptions{Path: agent.LogPath(dir)}
+	if isTerminal(os.Stderr) {
+		logOpts.Echo = os.Stderr
+	}
+	logSink = agent.OpenLogFile(logOpts)
+	defer logSink.Close()
+
 	cfg, err := agent.LoadConfig(dir)
 	if err != nil {
 		return err
@@ -149,6 +161,9 @@ func cmdRun(args []string) error {
 	}
 
 	store := agent.NewIdentityStore(dir)
+	tlsStore := agent.NewLocalTLSStore(dir)
+	// https 在回环入口建好后才构造；同步器回调通过闭包间接引用它。
+	var https *agent.HTTPS
 	syncer, err := agent.NewSyncer(agent.Options{
 		ServerURL:       cfg.ServerURL,
 		Version:         Version,
@@ -160,6 +175,12 @@ func cmdRun(args []string) error {
 		LongPoll:        30 * time.Second,
 		Heartbeat:       10 * time.Minute,
 		DisconnectAlert: 30 * time.Minute,
+		LocalTLS:        tlsStore,
+		OnLocalTLS: func() {
+			if https != nil {
+				https.Reload()
+			}
+		},
 	}, store)
 	if err != nil {
 		return err
@@ -182,10 +203,17 @@ func cmdRun(args []string) error {
 
 	// 本机页面与管理面转发（需求 2.10、13.1）。
 	loop := agent.NewLoopback(agent.LoopbackOptions{
-		Port:   *port,
-		Logf:   logf,
-		Status: syncer.Status,
-		MCP:    mcpHandler,
+		Port:    *port,
+		Logf:    logf,
+		LogPath: agent.LogPath(dir),
+		Status:  syncer.Status,
+		MCP:     mcpHandler,
+		TLS: func() agent.TLSStatus {
+			if https == nil {
+				return agent.TLSStatus{State: agent.TLSNone}
+			}
+			return https.Status()
+		},
 		Call: func(r *http.Request, m, src string, payload json.RawMessage) (json.RawMessage, error) {
 			return callRemote(ctx, syncer.Client(), proto.Method(m), proto.Source(src), payload)
 		},
@@ -217,6 +245,24 @@ func cmdRun(args []string) error {
 		return err
 	}
 	defer loop.Close()
+	if err := agent.WriteAddrFile(dir, addr); err != nil {
+		logf("写入监听地址文件失败（托盘将按默认端口查找）: %v", err)
+	}
+
+	// 本机 HTTPS（agent-tray-access 需求 4.7）：与回环 HTTP 共用同一处理器与守卫，
+	// 实际端口登记进 Host 白名单。没有证书时不监听，HTTP 入口不受影响。
+	_, httpPortStr, _ := net.SplitHostPort(addr)
+	httpPort, _ := strconv.Atoi(httpPortStr)
+	https = agent.NewHTTPS(agent.HTTPSOptions{
+		Store:    tlsStore,
+		Handler:  loop.Handler(),
+		HTTPPort: httpPort,
+		OnListen: func(p string) { loop.SetExtraPorts(p) },
+		Notifier: &agent.SystemNotifier{Logf: logf},
+		Logf:     logf,
+	})
+	go https.Run(ctx, 6*time.Hour)
+	defer https.Close()
 
 	// 把本机 MCP 条目写进已安装的宿主（需求 2.1、2.4）。
 	// 端口是这次实际监听出来的地址，不是用户传的 --port：端口被占用时
@@ -636,6 +682,8 @@ func cmdMCPConfig(args []string) error {
 func cmdInstall(args []string) error {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
 	bin := fs.String("binary", "", "代理可执行文件路径，默认取当前进程")
+	trayBin := fs.String("tray", "", "dec-tray 路径，默认在代理可执行文件旁边查找")
+	noTray := fs.Bool("no-tray", false, "不安装托盘图标")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -656,7 +704,37 @@ func cmdInstall(args []string) error {
 		return err
 	}
 	fmt.Println("系统服务已注册并启动。")
+	installTray(path, *trayBin, *noTray, dir)
 	return nil
+}
+
+// installTray 装托盘登录项。任何失败都只告警：代理已经装好，
+// 托盘只是可见性组件，不能让它拖垮安装（需求 7.4）。
+func installTray(agentBin, trayBin string, skip bool, dir string) {
+	switch {
+	case skip:
+		return
+	case !agent.TraySupported():
+		fmt.Println("当前平台没有托盘组件，已跳过。")
+		return
+	}
+	if trayBin == "" {
+		p, err := agent.FindTrayBinary(agentBin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "警告：%v，托盘图标未安装（代理不受影响）。\n", err)
+			return
+		}
+		trayBin = p
+	}
+	if err := agent.InstallTray(agent.TrayOptions{
+		BinaryPath: trayBin,
+		StateDir:   dir,
+		LogDir:     filepath.Join(dir, "logs"),
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "警告：安装托盘图标失败: %v（代理不受影响）\n", err)
+		return
+	}
+	fmt.Printf("托盘图标已安装并设为登录自启动：%s\n", trayBin)
 }
 
 // cmdUninstall 卸载。
@@ -668,6 +746,9 @@ func cmdUninstall(args []string) error {
 	}
 	dir := mustState()
 	if !*keepService {
+		if err := agent.UninstallTray(); err != nil {
+			logf("移除托盘登录项失败: %v", err)
+		}
 		if err := agent.UninstallService(); err != nil {
 			logf("移除系统服务失败: %v", err)
 		}
@@ -746,9 +827,25 @@ func rawPayload(p json.RawMessage) any {
 	return p
 }
 
+// logSink 是 run 模式下的日志文件；其它子命令为空，直接写 stderr。
+var logSink *agent.LogFile
+
 // logf 是统一日志出口。
 func logf(format string, args ...any) {
+	if logSink != nil {
+		logSink.Printf(format, args...)
+		return
+	}
 	fmt.Fprintf(os.Stderr, "[dec-agent] "+format+"\n", args...)
+}
+
+// isTerminal 报告 f 是否连着终端：前台手动运行时日志同时回显到终端。
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 // fallback 返回第一个非空值。
