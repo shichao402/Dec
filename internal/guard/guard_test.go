@@ -374,6 +374,73 @@ func TestProductionDeployOnlyThroughCI(t *testing.T) {
 		}
 	}
 
+	// 可选运行参数必须走 EnvironmentFile，不能硬编码进 ExecStart。
+	//
+	// 硬编码的后果不是「不能用」，而是「改一次配置要重跑 provision.sh」——
+	// 那是重建机器用的脚本，副作用远大于改一个地址。这里守住两条：
+	//   1. 单元里有 EnvironmentFile 且允许文件缺失（行首 -）；
+	//   2. ExecStart 通过 $DEC_EXTRA_ARGS 承接可选参数。
+	provPath := filepath.Join(root, "deploy", "provision.sh")
+	prov, err := os.ReadFile(provPath)
+	if err != nil {
+		t.Fatalf("读 %s 失败: %v", provPath, err)
+	}
+	for _, want := range []string{
+		"EnvironmentFile=-$ENV_FILE", // 允许文件缺失，未配置时照常启动
+		`\$DEC_EXTRA_ARGS`,           // ExecStart 里保留展开位置
+		`if [ ! -f "$ENV_FILE" ]`,    // 已有配置不被重跑覆盖
+	} {
+		if !strings.Contains(string(prov), want) {
+			t.Errorf("provision.sh 缺少 %q，可选参数无法在不重跑 provisioning 的情况下调整", want)
+		}
+	}
+	// 反向：ExecStart 里不该直接出现这些可选参数名。
+	for _, forbidden := range []string{
+		"-backup-url $", "-audit-url $", "-local-tls-secret $",
+	} {
+		if strings.Contains(string(prov), forbidden) {
+			t.Errorf("provision.sh 的 ExecStart 硬编码了可选参数 %q；"+
+				"它们应通过 $DEC_EXTRA_ARGS 由 EnvironmentFile 提供", forbidden)
+		}
+	}
+
+	// 部署脚本从 ExecStart 推导 listen 时必须只认第一个 -listen。
+	//
+	// ExecStart 现在末尾可能带 $DEC_EXTRA_ARGS，展开后参数变多。若用贪婪匹配，
+	// 某个额外参数值里恰好出现 "-listen" 就会取到错误地址，健康检查随即误判、
+	// 触发回滚。
+	if !strings.Contains(string(entry), `[[:space:]]-listen[ =]`) {
+		t.Error("dec-cloud-deploy.sh 提取 -listen 时未锚定空白边界，" +
+			"额外参数值里出现 -listen 会误匹配")
+	}
+
+	// 推送目标的主机密钥必须写死并显式传参，不能靠运行时 ssh-keyscan。
+	//
+	// 首次连接就去抓公钥等于不做校验（TOFU）：攻击者只要在那一次抢先应答
+	// 就能冒充 GitHub，冷备与审计仓库随后会把明文历史推给对手。写死的代价
+	// 是换钥时要改脚本，那是极低频且可观测的事件。
+	for _, want := range []string{
+		"[ssh.github.com]:443 ssh-ed25519", // 443 端口的公钥条目
+		"github.com ssh-ed25519",           // 22 端口的公钥条目
+		"-known-hosts $KNOWN_HOSTS_FILE",   // 由单元显式传参，不依赖环境变量隐式传导
+	} {
+		if !strings.Contains(string(prov), want) {
+			t.Errorf("provision.sh 缺少 %q，推送目标主机密钥校验可能被绕过", want)
+		}
+	}
+	// 反向检查要排除注释行：脚本注释里正是在解释为什么不用 ssh-keyscan。
+	// 注意只看行首为 # 的行，行内 # 不做处理（shell 里行内 # 未必是注释）。
+	var provCode []string
+	for _, line := range strings.Split(string(prov), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		provCode = append(provCode, line)
+	}
+	if strings.Contains(strings.Join(provCode, "\n"), "ssh-keyscan") {
+		t.Error("provision.sh 使用了 ssh-keyscan；首次抓取公钥等于不做校验")
+	}
+
 	// 反向检查：scripts/ 与 Makefile 里不该出现直连生产的部署路径。
 	// 验收脚本可以 SSH 到生产做只读检查，所以只拦「上传并替换二进制」这类动作。
 	uploadPatterns := []string{

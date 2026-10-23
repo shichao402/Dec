@@ -40,9 +40,14 @@ HEALTH_URL="${DEC_HEALTH_URL:-https://dec.firoyang.com/healthz}"
 # 监听地址不写死：从线上 systemd 单元的 -listen 推导。本脚本不改写单元，
 # 单元由 provision.sh 管；若写死端口，单元还停在旧端口时新版本会被健康检查误判并回滚。
 # 推导不到才用默认值。":443" 这类只有端口的写法补成 127.0.0.1。
+#
+# 只取第一个 -listen：ExecStart 末尾可能通过 $DEC_EXTRA_ARGS 带上冷备、审计等
+# 可选参数，它们某个值里万一出现 "-listen" 字样，贪婪匹配会取到错误的值。
 LISTEN_ADDR="${DEC_LISTEN_ADDR:-}"
 if [ -z "$LISTEN_ADDR" ]; then
-  LISTEN_ADDR="$(systemctl cat "$SERVICE" 2>/dev/null | sed -n 's/^ExecStart=.*-listen[ =]\([^ ]*\).*/\1/p' | tail -n 1)"
+  LISTEN_ADDR="$(systemctl cat "$SERVICE" 2>/dev/null \
+    | sed -n 's/^ExecStart=.*[[:space:]]-listen[ =]\([^[:space:]]*\).*/\1/p' \
+    | tail -n 1)"
 fi
 case "$LISTEN_ADDR" in
   "") LISTEN_ADDR="127.0.0.1:8444" ;;

@@ -267,7 +267,92 @@ EOF
   log "fail2ban 已启用（sshd，10 分钟内 3 次失败封 1 小时）"
 fi
 
+# --- 冷备/审计的 SSH 前置条件（需求 15.2）-------------------------------
+#
+# 推送用 go-git，它按 known_hosts 校验主机密钥，不跳过。所以必须事先把
+# GitHub 的主机公钥落盘，否则第一次推送会因 unknown host 失败。
+#
+# 为什么固定用 ssh.github.com:443 而不是 github.com:22：云服务器出方向常被
+# 出口策略拦掉 22，443 通常放行；GitHub 在 443 上提供同一套 SSH 服务，
+# 且主机公钥与 22 端口完全相同（同一把 ed25519 key）。
+#
+# 主机公钥写死在这里而不是运行时 ssh-keyscan：首次运行就去抓公钥等于
+# 第一次连接不做校验（TOFU），攻击者只要在那一次抢先应答就能冒充。
+# 写死的代价是 GitHub 换钥时要改脚本，但那是极低频且可观测的事件。
+
+DEC_KEYS_DIR="$CONF_DIR/keys"
+install -d -m 750 -o root -g "$SERVICE_USER" "$DEC_KEYS_DIR"
+
+KNOWN_HOSTS_FILE="$CONF_DIR/known_hosts"
+cat >"$KNOWN_HOSTS_FILE" <<'KHEOF'
+# GitHub 的主机公钥（Ed25519，ssh.github.com:443 与 github.com:22 相同）。
+# 由 provision.sh 写入，供 dec-cloud 推送冷备与审计时校验。
+[ssh.github.com]:443 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+KHEOF
+chown root:root "$KNOWN_HOSTS_FILE"
+chmod 644 "$KNOWN_HOSTS_FILE"
+log "已写入 GitHub 主机公钥到 $KNOWN_HOSTS_FILE"
+
 # --- systemd 单元 -------------------------------------------------------
+#
+# 可选运行参数（冷备/审计仓库地址、本机证书签发）走 EnvironmentFile 而不是
+# 直接写进 ExecStart，理由有三个：
+#
+#   1. 部署脚本从 ExecStart 里 sed 提取 -listen 来推导回环地址。ExecStart 越短
+#      越不会被误匹配，也不会因为参数顺序变动而失效。
+#   2. 这些东西改的是「往哪儿备份、用哪个密钥名」，属于运维操作，不该为了
+#      改一个地址去重跑 provision.sh（那是重建机器用的，副作用大）。
+#   3. 环境文件是可选的：不存在时服务照常启动，功能各自关闭（冷备不推送、
+#      本机证书不签发），符合「没配置就降级」的既有约定。
+#
+# 文件里只放非机密内容（仓库地址、密钥名、路径）。真正的机密（DNSPod 凭据、
+# 企业微信 webhook）在 Dec 的密钥库里，由根密钥加密，不落在这个文件里。
+
+ENV_FILE="/etc/dec-cloud/service.env"
+# 模板只在文件不存在时写入：重跑 provision.sh 不能覆盖线上已经填好的值。
+if [ ! -f "$ENV_FILE" ]; then
+  cat >"$ENV_FILE" <<'ENVEOF'
+# Dec Cloud 可选运行参数。改完执行：
+#   sudo systemctl restart dec-cloud
+#
+# 只有一个变量 DEC_EXTRA_ARGS，所有可选启动参数写在它里面（同一行）。
+# 留空即全部关闭，服务行为与没有这个文件时一致。
+#
+# 全部打开的样子（把注释去掉并按自己的仓库/密钥名改）：
+#
+# DEC_EXTRA_ARGS="-backup-url git@github.com:you/dec-backup.git -backup-key /etc/dec-cloud/keys/backup_deploy -audit-url git@github.com:you/dec-audit.git -audit-key /etc/dec-cloud/keys/audit_deploy -local-tls-domain local.dec.firoyang.com -local-tls-zone firoyang.com -local-tls-secret dnspod-token"
+#
+# 各项含义：
+#   -backup-url   冷备仓库地址（需求 15.1）；留空不推送冷备
+#   -backup-key   冷备仓库的 deploy key 私钥路径
+#   -audit-url    审计仓库地址（需求 15.3）；留空不推送审计
+#   -audit-key    审计仓库的 deploy key 私钥路径
+#   -local-tls-domain  指向 127.0.0.1 的本机子域
+#   -local-tls-zone    该子域所在的 DNSPod 主域名
+#   -local-tls-secret  Dec 密钥库里存放 DNS 凭据的密钥名；留空则关闭签发
+#
+# 机密（DNS 凭据、企业微信 webhook）一律在 Dec 密钥库里，由根密钥加密，
+# 不写在这个文件里。这里只有仓库地址与文件路径。
+#
+# 推送目标的主机密钥校验文件不走这个文件，而是由 systemd 单元直接传
+# -known-hosts $CONF_DIR/known_hosts（由 provision.sh 写入 GitHub 公钥）。
+# 走环境变量 SSH_KNOWN_HOSTS 也能生效，但那是隐式约定：服务由 systemd 拉起，
+# 多一层传导就多一处"为什么没生效"的可能。
+
+DEC_EXTRA_ARGS=""
+ENVEOF
+  chown root:root "$ENV_FILE"
+  chmod 640 "$ENV_FILE"
+  chgrp "$SERVICE_USER" "$ENV_FILE"
+  log "已写入可选参数模板 $ENV_FILE（DEC_EXTRA_ARGS 为空，未启用任何可选功能）"
+else
+  # 已有文件不改内容，只校正权限：可能有人手动改过权限。
+  chown root:root "$ENV_FILE"
+  chmod 640 "$ENV_FILE"
+  chgrp "$SERVICE_USER" "$ENV_FILE"
+  log "保留已有的 $ENV_FILE"
+fi
 
 cat >/etc/systemd/system/$SERVICE_NAME.service <<EOF
 [Unit]
@@ -283,7 +368,10 @@ Group=$SERVICE_USER
 # 不需要绑定低位端口，因此不授予任何 capability。
 CapabilityBoundingSet=
 NoNewPrivileges=yes
-ExecStart=$APP_DIR/dec-cloud -data-dir $DATA_DIR -listen $LISTEN_ADDR -domain $DOMAIN -root-key $ROOT_KEY_DIR/root.key
+# 可选参数从这个文件读；文件缺失或变量为空都不影响启动。
+# 行首的 "-" 表示文件不存在时也算正常，不报错。
+EnvironmentFile=-$ENV_FILE
+ExecStart=$APP_DIR/dec-cloud -data-dir $DATA_DIR -listen $LISTEN_ADDR -domain $DOMAIN -root-key $ROOT_KEY_DIR/root.key -known-hosts $KNOWN_HOSTS_FILE \$DEC_EXTRA_ARGS
 Restart=on-failure
 RestartSec=5s
 # 部署脚本会 stop/start，给数据迁移留出时间。
@@ -319,4 +407,6 @@ cat <<EOF
   3. 首次启动：systemctl start $SERVICE_NAME
   4. 初始化需要 Bitwarden 主密码与 2FA，必须由本人操作（需求 10.1）
   5. 根密钥位置：$ROOT_KEY_DIR/root.key（不在 $DATA_DIR 里，因此不进快照）
+  6. 可选功能（冷备、审计、本机证书）在 $ENV_FILE 里配置，
+     填好后 systemctl restart $SERVICE_NAME 生效；该文件不会被 provision.sh 覆盖。
 EOF

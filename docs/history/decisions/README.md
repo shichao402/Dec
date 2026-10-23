@@ -58,3 +58,4 @@
 | [0035](0035-product-secrets-plane-declaration.md) | 产品密钥平面声明：secrets_plane 进产品定义，路径降级为校验对象 | 已接受（草案） |
 | [0036](0036-ssh-credential-lifecycle.md) | SSH 凭证生命周期与凭据请求通道 | 已接受（草案） |
 | [0037](0037-dec-push-upload-split.md) | `dec_push` 语义拆分与 `dec_upload` 引入 | 已接受 |
+| [0038](0038-deploy-optional-args.md) | 部署单元的可选参数走 EnvironmentFile | 已接受（已实现） |
