@@ -28,8 +28,9 @@ type Reporter interface {
 // 触发时机：
 //
 //  1. 每次 commit 后 —— 由业务层调用 Trigger，内部合并成一次推送。
-//  2. 每天一次 —— 兜底，防止某次触发因为进程重启而漏掉。
-//  3. 部署期间暂停 —— 部署中的 commit 可能随后被回滚，推上去只会污染冷备。
+//  2. 每 auditTick 一次 —— 审计自己的节奏，不依赖是否有人改内容。
+//  3. 每天一次 —— 兜底，防止某次触发因为进程重启而漏掉。
+//  4. 部署期间暂停 —— 部署中的 commit 可能随后被回滚，推上去只会污染冷备。
 type Service struct {
 	backup Pusher
 	audit  Pusher
@@ -37,6 +38,18 @@ type Service struct {
 
 	// dailyTick 是兜底推送周期，测试里可以调小。
 	dailyTick time.Duration
+	// auditTick 是审计的独立推送周期。
+	//
+	// 为什么审计不能只跟着 Trigger 走：Trigger 只在内容变更后调用
+	// （见 cloudsvc.recordRevision），而审计里最该留痕的一批事件恰恰不产生
+	// 内容变更——密钥明文查看（secret.read）、下发（sync）、登记尝试、客户端下载。
+	// 只靠 Trigger 的话，一整天只读不写的窗口里这些记录全躺在本地，机器一坏
+	// 就一起没了，而冷备却是齐的。审计的价值在于"发生过什么"，它必须有自己的
+	// 上界，不能让"有没有人改东西"决定它多久上趟远端。
+	//
+	// 取 5 分钟：比 24 小时兜底短两个数量级，又不至于让这台 1 核 1G 的机器
+	// 频繁做 SSH 往返（无变更时每个仓库一次 fetch 就返回）。
+	auditTick time.Duration
 	// debounce 是提交后合并推送的延迟：连续写入只推一次。
 	debounce time.Duration
 
@@ -63,6 +76,11 @@ type Options struct {
 	Reporter     Reporter
 	// DailyTick 是兜底周期，默认 24 小时。
 	DailyTick time.Duration
+	// AuditTick 是审计的独立推送周期，默认 5 分钟。
+	//
+	// 单独给审计一条周期，理由见 Service.auditTick 的注释：
+	// 只读事件不产生内容变更，不会触发 Trigger。
+	AuditTick time.Duration
 	// Debounce 是提交后合并窗口，默认 5 秒。
 	Debounce time.Duration
 	// FlushAudit 在推送审计仓库前调用，把待提交的记录落成 commit。
@@ -78,6 +96,9 @@ func NewService(opts Options) *Service {
 	if opts.DailyTick <= 0 {
 		opts.DailyTick = 24 * time.Hour
 	}
+	if opts.AuditTick <= 0 {
+		opts.AuditTick = 5 * time.Minute
+	}
 	if opts.Debounce <= 0 {
 		opts.Debounce = 5 * time.Second
 	}
@@ -86,6 +107,7 @@ func NewService(opts Options) *Service {
 		audit:      Pusher{Target: opts.AuditTarget},
 		report:     opts.Reporter,
 		dailyTick:  opts.DailyTick,
+		auditTick:  opts.AuditTick,
 		debounce:   opts.Debounce,
 		flushAudit: opts.FlushAudit,
 		wake:       make(chan struct{}, 1),
@@ -167,6 +189,8 @@ func (s *Service) loop(ctx context.Context) {
 	defer close(s.done)
 	ticker := time.NewTicker(s.dailyTick)
 	defer ticker.Stop()
+	auditTicker := time.NewTicker(s.auditTick)
+	defer auditTicker.Stop()
 
 	// debounce 用一次性定时器，避免连续写入时反复重置一个长 ticker。
 	var timer *time.Timer
@@ -207,6 +231,15 @@ func (s *Service) loop(ctx context.Context) {
 			if !paused {
 				s.flush(ctx)
 			}
+		case <-auditTicker.C:
+			// 审计按自己的周期上趟远端，不等人改内容（见 auditTick 的注释）。
+			// 这里只推审计：冷备没变过，多推一次只是白跑一趟 fetch。
+			s.mu.Lock()
+			paused := s.paused
+			s.mu.Unlock()
+			if !paused {
+				s.pushAuditOnly(ctx)
+			}
 		case <-ticker.C:
 			s.mu.Lock()
 			paused := s.paused
@@ -223,8 +256,23 @@ func (s *Service) loop(ctx context.Context) {
 // 两个仓库独立失败：审计推不上去不应该阻止冷备继续工作，
 // 反过来也一样。每次失败都单独告警。
 func (s *Service) flush(ctx context.Context) {
+	s.flushBoth(ctx, true)
+}
+
+// pushAuditOnly 只推送审计仓库。
+func (s *Service) pushAuditOnly(ctx context.Context) {
+	s.flushBoth(ctx, false)
+}
+
+// flushBoth 执行一次推送。
+//
+// withBackup 为 false 时跳过冷备：审计的独立周期不该顺带把没变化的冷备
+// 再推一遍，那只会多一次无谓的网络往返。
+func (s *Service) flushBoth(ctx context.Context, withBackup bool) {
 	s.mu.Lock()
 	if s.running || s.closed {
+		// 已经有一次推送在跑。让正在跑的那次带上本轮内容即可：
+		// 待提交的审计记录留在工作树里，下一次周期会重新看到它们。
 		s.mu.Unlock()
 		return
 	}
@@ -237,7 +285,9 @@ func (s *Service) flush(ctx context.Context) {
 	}()
 
 	var firstErr error
-	s.pushOne(ctx, "冷备", "backup", &s.backup, &firstErr)
+	if withBackup {
+		s.pushOne(ctx, "冷备", "backup", &s.backup, &firstErr)
+	}
 	// 审计仓库按时间窗合并提交，窗口内的记录还在工作树里；
 	// 推送前先冲一次，否则推上去的会缺最近几秒。
 	if s.flushAudit != nil {

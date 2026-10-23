@@ -60,3 +60,4 @@
 | [0037](0037-dec-push-upload-split.md) | `dec_push` 语义拆分与 `dec_upload` 引入 | 已接受 |
 | [0038](0038-deploy-optional-args.md) | 部署单元的可选参数走 EnvironmentFile | 已接受（已实现） |
 | [0039](0039-audit-commit-coalescing.md) | 审计提交按时间窗合并，冷备推送前冲写 | 已接受（已实现） |
+| [0040](0040-audit-push-cadence.md) | 审计有自己的推送节奏，不再等"有人改内容" | 已接受（已实现） |
