@@ -85,6 +85,10 @@ jobs:
           name: tray-macos
           path: dist/dec-tray-darwin-*
           if-no-files-found: error
+          # 只用于同一次运行的 build job 取回，成品在 GitHub Release 里。
+          # 默认 90 天保留期会让这些中间产物堆积到撞上仓库的存储配额
+          # （私有仓库的 artifact 存储与 Actions 分钟数共享免费额度）。
+          retention-days: 1
 
   build:
     name: 构建与发布
