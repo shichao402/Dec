@@ -265,16 +265,41 @@ jobs:
           key: tray-win-${{ hashFiles('tray/Cargo.lock') }}
 
       - name: 构建 Windows 托盘
+        # 失败或超时都不阻断发布，理由同 tray-macos job 的 if 注释：
+        # 少一个平台的托盘是可接受的降级，服务端发不出去才是全局故障。
+        #
+        # 2026-10-23 v2.1.10 实测：这一步在 GitHub 公共 runner 上卡了 25 分钟
+        # 没有任何输出（历史上只要 2 分钟），大概率卡在 apt-get 连 Debian 源。
+        # 卡住的 job 不会自己失败，只会一直占着 concurrency 组，把发布无限期挂住，
+        # 所以必须给它一个上限。
+        timeout-minutes: 12
+        continue-on-error: true
         env:
           DEC_TRAY_VERSION: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq mingw-w64
+          # 收紧密钥与网络超时：公共 runner 上 apt 源偶发无响应，
+          # 默认重试会一直等下去。
+          sudo apt-get -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 update -qq
+          sudo apt-get -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 install -y -qq mingw-w64
           rustup target add x86_64-pc-windows-gnu
           (cd tray && cargo test --locked -q && cargo build --locked --release --target x86_64-pc-windows-gnu)
           cp tray/target/x86_64-pc-windows-gnu/release/dec-tray.exe dist/dec-tray-windows-amd64.exe
           ls -l dist/dec-tray-*
+
+      - name: 检查 Windows 托盘是否建成
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          if ls dist/dec-tray-windows-* >/dev/null 2>&1; then
+            ls -l dist/dec-tray-windows-*
+          else
+            echo "::warning::本次发布没有 Windows 托盘产物，继续发布其余产物"
+          fi
 
       - name: 生成发布清单
         env:
