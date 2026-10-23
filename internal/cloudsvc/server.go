@@ -115,6 +115,14 @@ type Server struct {
 
 	// audit 是只追加审计日志（需求 15.3）。冷备未配置时仍然记本地。
 	audit *audit.Log
+	// syncLogMu 保护 syncLogged。
+	syncLogMu sync.Mutex
+	// syncLogged 记录"这台设备最近一次记录过的下发内容指纹"。
+	//
+	// 只用于给 sync 审计降噪：同一台设备、同一组内容在短时间内重复下发
+	// （长轮询超时、代理重启、对账 bug 导致的重写循环）只记第一条，
+	// 否则真正的异常会被大量同质记录淹掉。
+	syncLogged map[string]time.Time
 	// alerts 是告警中心（需求 12）。
 	alerts *alert.Hub
 	// backup 是冷备与审计的推送调度（需求 15.1）。
