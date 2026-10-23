@@ -78,7 +78,11 @@ func (s *Server) issueLocalCert(ctx context.Context, domain string) (*localcert.
 	if err != nil {
 		return nil, err
 	}
-	dns := &localcert.DNSPod{Token: token, Zone: s.cfg.LocalTLSZone}
+	dns, kind, err := localcert.DNSPodFor(token, s.cfg.LocalTLSZone)
+	if err != nil {
+		return nil, fmt.Errorf("%w：密钥 %q %v", localcert.ErrNotConfigured, s.cfg.LocalTLSSecret, err)
+	}
+	s.logf("本机证书签发使用 %s 凭据", kind)
 	// 需求 4.3：local 子域必须指向 127.0.0.1。凭据只有云端能解密，部署脚本
 	// 拿不到，所以放在这里：每次签发、续期都顺手校正一次，记录被误删或被
 	// 泛解析覆盖时会自愈。失败不阻断签发——证书照样有用，只是解析需要人看。
