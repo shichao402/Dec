@@ -66,6 +66,21 @@ type Store struct {
 	head   string
 }
 
+// InitRepo 初始化一个工作树仓库，并把初始分支设为 main。
+//
+// 为什么不用 git.PlainInit：它的默认分支是 master（go-git 不读
+// init.defaultBranch）。本地仓库叫 master、远端仓库叫 main 时，推送要么
+// 找不到分支，要么在远端另起一条 master，与默认分支分叉——两种结果都让
+// 冷备看起来"配好了"，实际上什么也没备上去。
+//
+// 显式对齐到 main 是唯一不依赖环境配置的写法：远端仓库由 GitHub 创建，
+// 默认分支就是 main。
+func InitRepo(dir string) (*git.Repository, error) {
+	return git.PlainInitWithOptions(dir, &git.PlainInitOptions{
+		InitOptions: git.InitOptions{DefaultBranch: plumbing.NewBranchReferenceName("main")},
+	})
+}
+
 // Open 打开或初始化一个 SSOT 仓库。
 //
 // 首次打开时创建初始 commit，让 revision 从第一刻起就有意义。
@@ -75,7 +90,7 @@ func Open(dir string) (*Store, error) {
 	}
 	repo, err := git.PlainOpen(dir)
 	if errors.Is(err, git.ErrRepositoryNotExists) {
-		repo, err = git.PlainInit(dir, false)
+		repo, err = InitRepo(dir)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("打开 SSOT 仓库失败: %w", err)

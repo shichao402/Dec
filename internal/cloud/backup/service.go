@@ -49,6 +49,9 @@ type Service struct {
 	// stopped 关闭后不再接受 Trigger。
 	closed bool
 
+	// flushAudit 在推送审计仓库前把待提交记录落成 commit。
+	flushAudit func() error
+
 	wake chan struct{}
 	done chan struct{}
 }
@@ -62,6 +65,12 @@ type Options struct {
 	DailyTick time.Duration
 	// Debounce 是提交后合并窗口，默认 5 秒。
 	Debounce time.Duration
+	// FlushAudit 在推送审计仓库前调用，把待提交的记录落成 commit。
+	//
+	// 审计按时间窗合并提交（见 audit.CommitWindow），窗口内的记录还在工作树里；
+	// 推送只看已提交内容，不先冲一次就会漏掉最近几秒的审计。
+	// 用回调而不是直接依赖 audit 包：backup 是底层能力，不该反向依赖上层。
+	FlushAudit func() error
 }
 
 // NewService 构造冷备服务。
@@ -73,13 +82,14 @@ func NewService(opts Options) *Service {
 		opts.Debounce = 5 * time.Second
 	}
 	return &Service{
-		backup:    Pusher{Target: opts.BackupTarget},
-		audit:     Pusher{Target: opts.AuditTarget},
-		report:    opts.Reporter,
-		dailyTick: opts.DailyTick,
-		debounce:  opts.Debounce,
-		wake:      make(chan struct{}, 1),
-		done:      make(chan struct{}),
+		backup:     Pusher{Target: opts.BackupTarget},
+		audit:      Pusher{Target: opts.AuditTarget},
+		report:     opts.Reporter,
+		dailyTick:  opts.DailyTick,
+		debounce:   opts.Debounce,
+		flushAudit: opts.FlushAudit,
+		wake:       make(chan struct{}, 1),
+		done:       make(chan struct{}),
 	}
 }
 
@@ -228,6 +238,13 @@ func (s *Service) flush(ctx context.Context) {
 
 	var firstErr error
 	s.pushOne(ctx, "冷备", "backup", &s.backup, &firstErr)
+	// 审计仓库按时间窗合并提交，窗口内的记录还在工作树里；
+	// 推送前先冲一次，否则推上去的会缺最近几秒。
+	if s.flushAudit != nil {
+		if err := s.flushAudit(); err != nil {
+			s.fail("audit", fmt.Errorf("审计冲写失败: %w", err), &firstErr)
+		}
+	}
 	s.pushOne(ctx, "审计", "audit", &s.audit, &firstErr)
 
 	s.mu.Lock()

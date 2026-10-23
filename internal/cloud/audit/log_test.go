@@ -146,7 +146,11 @@ func TestAppendCommit(t *testing.T) {
 	}
 }
 
-// TestHeadAdvances 验证每条记录都产生一个 commit。
+// TestHeadAdvances 验证提交后 head 前进。
+//
+// 2026-10-23 起提交按时间窗合并（见 CommitWindow），Append 不再每次都 commit，
+// 所以这里显式 Flush 一次再断言。窗口内的记录仍在工作树里、已 fsync 落盘，
+// 只是还没记进历史。
 func TestHeadAdvances(t *testing.T) {
 	dir := t.TempDir()
 	log, err := Open(dir)
@@ -158,8 +162,11 @@ func TestHeadAdvances(t *testing.T) {
 	if err := log.Append(Entry{At: at, Event: EventBootstrap, OK: true}); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
+	if err := log.Flush(); err != nil {
+		t.Fatalf("冲写失败: %v", err)
+	}
 	if log.Head() == first {
-		t.Fatal("写入后 head 应前进")
+		t.Fatal("冲写后 head 应前进")
 	}
 }
 
@@ -173,6 +180,10 @@ func TestFilesIncludeEvents(t *testing.T) {
 	at := time.Date(2026, 10, 21, 14, 0, 0, 0, time.UTC)
 	if err := log.Append(Entry{At: at, Event: EventDeploy, OK: true}); err != nil {
 		t.Fatalf("写入失败: %v", err)
+	}
+	// 提交按窗口合并，Files 读的是已提交的树，先冲写一次。
+	if err := log.Flush(); err != nil {
+		t.Fatalf("冲写失败: %v", err)
 	}
 	files, err := log.Files()
 	if err != nil {
@@ -203,6 +214,10 @@ func TestMonthPartition(t *testing.T) {
 	}
 	if err := log.Append(Entry{At: nov, Event: EventSync, OK: true}); err != nil {
 		t.Fatalf("写入 11 月失败: %v", err)
+	}
+	// 同上：Files 读已提交的树。
+	if err := log.Flush(); err != nil {
+		t.Fatalf("冲写失败: %v", err)
 	}
 	files, err := log.Files()
 	if err != nil {

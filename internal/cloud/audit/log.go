@@ -107,7 +107,28 @@ type Log struct {
 	mu sync.Mutex
 	// pending 累计尚未提交的条数，用于合并提交。
 	pending int
+	// lastCommit 是上一次提交的时间，用于按时间窗合并。
+	lastCommit time.Time
 }
+
+// CommitWindow 是审计提交的合并窗口。
+//
+// 来历（2026-10-23 生产故障）：最初每条记录都单独 commit，理由是"即使下一秒
+// 机器被砸了也已经记下来了"。这个理由本身没错，但它把 commit 当成了持久化手段，
+// 而持久化其实在图前一步——记录先 fsync 到工作树文件才提交。真正的代价是仓库
+// 体积：一次 MCP 会话就能产生几万条记录，76,350 个 commit 把 .git 撑到 5.7G，
+// 占满 40G 系统盘后机器卡死、SSH 与 HTTPS 全部无响应。
+//
+// 所以改成按时间窗合并提交：记录仍然逐条 fsync（进程崩溃不丢数据），
+// 提交攒够一个窗口或攒够 CommitBatch 条再做一次。审计的可读性不受影响——
+// 记录本身带秒级时间戳，不依赖 commit 分隔。
+const CommitWindow = 5 * time.Second
+
+// CommitBatch 是触发提交的条数阈值。
+//
+// 高流量时不必等满一个窗口：条数到了就提交，避免积压太多未提交内容
+// 让"最近发生了什么"在 git 历史里看不到。
+const CommitBatch = 200
 
 // Open 打开或初始化审计仓库。
 func Open(dir string) (*Log, error) {
@@ -116,12 +137,20 @@ func Open(dir string) (*Log, error) {
 	}
 	repo, err := git.PlainOpen(dir)
 	if err != nil {
-		repo, err = git.PlainInit(dir, false)
+		// 与 SSOT 共用同一个初始化函数：两边分支名必须一致，
+		// 否则审计仓库会推到一个远端不存在的分支上（见 ssot.InitRepo 的注释）。
+		repo, err = ssot.InitRepo(dir)
 		if err != nil {
 			return nil, fmt.Errorf("初始化审计仓库失败: %w", err)
 		}
 	}
-	return &Log{dir: dir, repo: repo}, nil
+	l := &Log{dir: dir, repo: repo}
+	// 启动时先清掉上次进程留下的未提交改动：它们已经在工作树里，
+	// 补一次提交即可，不必等新记录来触发。
+	if err := l.commitPending(); err != nil {
+		return nil, err
+	}
+	return l, nil
 }
 
 // Dir 返回审计仓库路径。
@@ -130,10 +159,12 @@ func (l *Log) Dir() string { return l.dir }
 // Repo 返回底层仓库，供冷备推送使用。
 func (l *Log) Repo() *git.Repository { return l.repo }
 
-// Append 追加一条记录并提交。
+// Append 追加一条记录。
 //
-// 单条即提交：审计的价值在于“即使下一秒机器被砸了，也已经记下来了”。
-// 为了减少 commit 数量而攒批，会让审计出现一个可被利用的空窗。
+// 记录本身逐条 fsync 到工作树文件后就返回，不在这里做 commit：
+// 落盘（fsync）才是"机器被砸也不丢"的保证，commit 只是把改动记进历史。
+// 提交按 CommitWindow / CommitBatch 合并，避免每条一个 commit 把仓库撑爆
+// （见 CommitWindow 的注释里那次生产故障）。
 func (l *Log) Append(e Entry) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -169,28 +200,76 @@ func (l *Log) Append(e Entry) error {
 		return err
 	}
 
-	// 提交：把当天文件加进索引。
+	l.pending++
+	// 窗口未到、条数也没攒够，就先不提交。
+	if l.pending < CommitBatch && time.Since(l.lastCommit) < CommitWindow {
+		return nil
+	}
+	return l.commitPending()
+}
+
+// Flush 立即提交待提交的记录。
+//
+// 冷备推送前必须调用：推送只看到已提交的内容，窗口期内的记录还在工作树里，
+// 直接推会漏。平时不必显式调用，Append 会按窗口自己提交。
+func (l *Log) Flush() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.commitPending()
+}
+
+// commitPending 把工作树里累积的改动提交一次。
+//
+// 调用方需持有 l.mu（Open 里是单线程，无需加锁）。
+func (l *Log) commitPending() error {
 	wt, err := l.repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("读取审计工作树失败: %w", err)
 	}
-	if _, err := wt.Add(rel); err != nil {
-		return fmt.Errorf("暂存审计文件失败: %w", err)
+	status, err := wt.Status()
+	if err != nil {
+		return fmt.Errorf("读取审计状态失败: %w", err)
 	}
-	_, err = wt.Commit(fmt.Sprintf("审计 %s %s", e.Event, e.Subject), &git.CommitOptions{
+	if status.IsClean() {
+		// 没有可提交的改动（例如刚启动、上次已经提交过）。
+		l.pending = 0
+		l.lastCommit = time.Now()
+		return nil
+	}
+	// 按状态里实际变化的文件逐个加入：合并提交时无法预先知道这期间动过哪几个
+	// 按日期分文件，交给状态自己算。AddGlob 在目录尚不存在时会报
+	// "glob pattern did not match any files"，不适合这里。
+	set := map[string]struct{}{}
+	for path := range status {
+		set[path] = struct{}{}
+	}
+	for path := range set {
+		if _, err := wt.Add(path); err != nil {
+			return fmt.Errorf("暂存审计文件 %s 失败: %w", path, err)
+		}
+	}
+	n := l.pending
+	if n < 1 {
+		n = 1
+	}
+	_, err = wt.Commit(fmt.Sprintf("审计 %d 条", n), &git.CommitOptions{
 		Author: &object.Signature{
 			Name:  "dec-cloud",
 			Email: "cloud@dec.local",
-			When:  e.At,
+			When:  time.Now().UTC(),
 		},
 	})
 	if err != nil {
 		// 内容相同（例如同一秒同一事件）时没有可提交的变更，不算失败。
 		if strings.Contains(err.Error(), "clean") {
+			l.pending = 0
+			l.lastCommit = time.Now()
 			return nil
 		}
 		return fmt.Errorf("提交审计记录失败: %w", err)
 	}
+	l.pending = 0
+	l.lastCommit = time.Now()
 	return nil
 }
 

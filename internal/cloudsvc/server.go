@@ -237,7 +237,6 @@ func New(cfg Config) (*Server, error) {
 			Dir:        store.Dir(),
 			URL:        cfg.BackupURL,
 			KeyPath:    cfg.BackupKey,
-			Branch:     "main",
 			KnownHosts: cfg.KnownHosts,
 		},
 		AuditTarget: backup.Target{
@@ -245,10 +244,10 @@ func New(cfg Config) (*Server, error) {
 			Dir:        al.Dir(),
 			URL:        cfg.AuditURL,
 			KeyPath:    cfg.AuditKey,
-			Branch:     "main",
 			KnownHosts: cfg.KnownHosts,
 		},
-		Reporter: s,
+		Reporter:   s,
+		FlushAudit: al.Flush,
 	})
 	s.backup.Start(ctx)
 	// 本机证书：后台周期检查并续期，未配置凭据时只记一次日志。
