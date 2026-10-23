@@ -72,6 +72,14 @@ type DeleteAssetInput struct {
 	Author       ssot.Author
 }
 
+// DeleteBundleInput 是删除整个 bundle 的输入。
+type DeleteBundleInput struct {
+	Bundle       string
+	BaseRevision string
+	Message      string
+	Author       ssot.Author
+}
+
 // AssetFile 是一个待写入的资产文件。
 type AssetFile struct {
 	Path       string
@@ -236,6 +244,37 @@ func (w *Writer) DeleteAsset(in DeleteAssetInput) (*WriteAssetOutput, error) {
 		return nil, err
 	}
 	return &WriteAssetOutput{Bundle: in.Bundle, Revision: revision, Commit: commit, Manifest: manifest}, nil
+}
+
+// DeleteBundle 删除整个 bundle。
+//
+// 与 DeleteAsset 的差别是范围：DeleteAsset 摘掉一条条目，留下 manifest
+// 与其它条目；这里把 bundle 目录连同 manifest 一起删掉，列表里随即消失。
+//
+// 目录本身是删除的最小单位，所以不需要先读 manifest：少读一次就少一次
+// 与并发写入交错的机会。bundle 不存在时照常提交，不报错——「确保它不存在」
+// 与「它刚刚被人删了」对调用方是同一个结果，重复清理应当是幂等的。
+func (w *Writer) DeleteBundle(in DeleteBundleInput) (*WriteAssetOutput, error) {
+	if err := ssot.ValidateBundle(in.Bundle); err != nil {
+		return nil, err
+	}
+	revision, err := w.store.Update(in.Author, func(tx *ssot.Tx) (string, error) {
+		if err := tx.EnsureRevision(in.BaseRevision); err != nil {
+			return "", err
+		}
+		if err := tx.DeleteDir(ssot.AssetDir(in.Bundle)); err != nil {
+			return "", err
+		}
+		msg := in.Message
+		if msg == "" {
+			msg = fmt.Sprintf("删除资产 %s", in.Bundle)
+		}
+		return msg, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &WriteAssetOutput{Bundle: in.Bundle, Revision: revision}, nil
 }
 
 // ReadManifest 读取某个 bundle 的 manifest。

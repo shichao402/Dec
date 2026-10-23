@@ -42,6 +42,13 @@ const (
 	MethodWriteAsset Method = "write_asset"
 	// MethodDeleteAsset 删除一个资产条目（需求 7.4）。
 	MethodDeleteAsset Method = "delete_asset"
+	// MethodDeleteBundle 删除整个资产 bundle。
+	//
+	// delete_asset 只能摘掉一个条目，bundle 目录与 manifest 仍然在，
+	// 列表里照样看得到。真正把一个 bundle 清掉（例如验收用的临时
+	// bundle、或者彻底作废的一批资产）需要独立的方法，否则只能留下
+	// 一个空壳，看起来像"还在"。
+	MethodDeleteBundle Method = "delete_bundle"
 	// MethodPutSecret 写入或更新密钥（需求 8）。
 	MethodPutSecret Method = "put_secret"
 	// MethodDeleteSecret 删除密钥（需求 8.4）。
@@ -423,6 +430,18 @@ type DeleteAssetRequest struct {
 	Bundle string `json:"bundle"`
 	// Path 是要删除的条目路径，必须与 manifest 里的 path 完全一致。
 	Path string `json:"path"`
+	// BaseRevision 用于乐观并发控制，空表示允许覆盖。
+	BaseRevision string `json:"base_revision,omitempty"`
+	// Message 是提交说明，写进 commit。
+	Message string `json:"message,omitempty"`
+}
+
+// DeleteBundleRequest 删除整个 bundle。
+//
+// 只给 bundle 名：条目清单由服务端自己读，调用方少传内容不会误删，
+// 也不会因为漏传某个条目而留下孤儿文件。
+type DeleteBundleRequest struct {
+	Bundle string `json:"bundle"`
 	// BaseRevision 用于乐观并发控制，空表示允许覆盖。
 	BaseRevision string `json:"base_revision,omitempty"`
 	// Message 是提交说明，写进 commit。

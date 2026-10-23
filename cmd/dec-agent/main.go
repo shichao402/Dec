@@ -31,6 +31,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shichao402/Dec/internal/acceptance"
 	"github.com/shichao402/Dec/internal/agent"
 	"github.com/shichao402/Dec/internal/proto"
 )
@@ -67,6 +68,8 @@ func main() {
 		err = cmdProjects(args)
 	case "mcp-config":
 		err = cmdMCPConfig(args)
+	case "acceptance":
+		err = cmdAcceptance(args)
 	case "install":
 		err = cmdInstall(args)
 	case "uninstall":
@@ -97,6 +100,7 @@ func usage() {
   dec-agent status       打印当前状态
   dec-agent projects     列出本机项目登记
   dec-agent mcp-config   打印本机 MCP 条目与各宿主的写入状态
+  dec-agent acceptance   对运行中的代理跑一遍真实链路验收（会临时写入并清理）
   dec-agent install      注册为系统服务
   dec-agent uninstall    卸载并清理
   dec-agent version      打印版本
@@ -523,6 +527,67 @@ func cmdProjects(args []string) error {
 		return agent.SaveProjects(dir, out)
 	}
 	return fmt.Errorf("未知子命令: %s", args[0])
+}
+
+// cmdAcceptance 跑一遍真实链路验收（需求 4.1）。
+//
+// 它是 scripts/acceptance.sh 的实体：脚本负责找到二进制与参数，
+// 这里负责按顺序检查并逐项打印结论。退出码非 0 表示有检查未通过。
+func cmdAcceptance(args []string) error {
+	fs := flag.NewFlagSet("acceptance", flag.ExitOnError)
+	base := fs.String("url", "http://127.0.0.1:8787", "本机代理地址")
+	bundle := fs.String("bundle", "", "临时 bundle 名，默认按时间戳生成")
+	projectPath := fs.String("project", "", "临时项目目录，默认建在用户目录下的临时路径")
+	timeout := fs.Duration("timeout", 90*time.Second, "单步等待下发落地的上限")
+	keep := fs.Bool("keep", false, "即使全部通过也保留测试数据，便于人工观察")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *bundle == "" {
+		*bundle = "dec-acceptance-" + time.Now().UTC().Format("20060102-150405")
+	}
+	if *projectPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		*projectPath = filepath.Join(home, ".dec-acceptance", *bundle)
+	}
+
+	fmt.Printf("Dec 真实链路验收\n  代理：%s\n  临时 bundle：%s\n  临时项目：%s\n",
+		*base, *bundle, *projectPath)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	res, err := acceptance.Run(ctx, acceptance.Options{
+		BaseURL:     *base,
+		Bundle:      *bundle,
+		ProjectPath: *projectPath,
+		Timeout:     *timeout,
+		Keep:        *keep,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Println()
+	if len(res.Residue) > 0 {
+		fmt.Println("残留项（需要人工处理）：")
+		for _, item := range res.Residue {
+			fmt.Printf("  - %s\n", item)
+		}
+		fmt.Println()
+	}
+	if n := res.Failed(); n > 0 {
+		return fmt.Errorf("验收未通过：%d 项检查失败", n)
+	}
+	if len(res.Residue) > 0 {
+		return errors.New("检查全部通过，但仍有残留项")
+	}
+	fmt.Println("验收通过：所有检查项均通过，且没有留下测试资产。")
+	return nil
 }
 
 // cmdMCPConfig 打印本机 MCP 条目与各宿主的写入状态（需求 2.6）。

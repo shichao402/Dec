@@ -259,7 +259,7 @@ func (s *Server) mSetSubscriptions(req *proto.Request, payload any, dev ssot.Dev
 	if !ok {
 		return proto.Fail(req.ID, proto.ErrInvalid, "set_subscriptions 载荷类型错误")
 	}
-	if err := requireDeviceAdmin(req.Source); err != nil {
+	if err := requireDeviceSelfOrAdmin(req.Source, dev, in.DeviceID); err != nil {
 		return proto.Fail(req.ID, proto.ErrForbidden, err.Error())
 	}
 	updated, err := s.proj.SetSubscriptions(in.DeviceID, in.Bundles, authorOf(req.Source, dev))

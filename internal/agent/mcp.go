@@ -84,12 +84,13 @@ const instructions = `Dec 是用户的个人资产与密钥仓库。你通过这
 // registerTools 注册最小工具集（需求 1.4）。
 func registerTools(srv *mcp.Server, opts MCPServer) {
 	// 状态
-	addTool(srv, toolStatus(), opts)
+	addTool(srv, toolStatus(opts), opts)
 	// 资产
 	addTool(srv, toolListAssets(), opts)
 	addTool(srv, toolReadAsset(), opts)
 	addTool(srv, toolWriteAsset(), opts)
 	addTool(srv, toolDeleteAssetItem(), opts)
+	addTool(srv, toolDeleteBundle(), opts)
 	// 密钥（只有元数据，没有明文）
 	addTool(srv, toolListSecrets(), opts)
 	addTool(srv, toolPutSecret(), opts)
@@ -252,17 +253,29 @@ func objProp(desc string, props map[string]any, required ...string) map[string]a
 
 // 以下每个 toolXxx 返回一个工具定义。
 
-func toolStatus() toolSpec {
+func toolStatus(opts MCPServer) toolSpec {
 	return toolSpec{
-		method: proto.MethodStatus,
+		// 这里转发 hello 而不是 status：status 含根密钥 ID、初始化入口开关这类
+		// 服务端内部信息，服务端对 mcp 来源一律拒绝（已定决策 12）。hello 返回
+		// 的是同一批对外可见的状态——服务端版本、要求版本、协议版本、维护中、
+		// 是否对齐——而且它本来就允许带证书调用，不需要额外开放权限。
+		method: proto.MethodHello,
 		tool: &mcp.Tool{
 			Name: "dec_status",
-			Description: "查询云端状态：服务端版本、协议版本、是否维护中、当前 SSOT revision、" +
-				"初始化入口是否还开着、是否处于恢复模式。只读，无副作用。" +
+			Description: "查询服务端对外状态：服务端版本、要求的代理版本、协议版本、是否维护中、" +
+				"本机代理是否已与服务端对齐、本机登记的设备 ID。只读，无副作用。" +
 				"写入前先用它确认服务端不在维护中。",
 			InputSchema: objectSchema(map[string]any{}),
 		},
-		build: emptyPayload,
+		build: func(json.RawMessage) (json.RawMessage, error) {
+			// 代理版本取自本机，不接受调用方指定：aligned 是「本机与服务端是否对齐」
+			// 的结论，让调用方自己填版本等于让它给自己打分。
+			ver := ""
+			if opts.Status != nil {
+				ver = opts.Status().Version
+			}
+			return json.Marshal(proto.HelloRequest{AgentVersion: ver})
+		},
 	}
 }
 
@@ -344,6 +357,28 @@ func toolDeleteAssetItem() toolSpec {
 		},
 		build: func(args json.RawMessage) (json.RawMessage, error) {
 			return passThrough(args, &proto.DeleteAssetRequest{})
+		},
+	}
+}
+
+func toolDeleteBundle() toolSpec {
+	return toolSpec{
+		method: proto.MethodDeleteBundle,
+		tool: &mcp.Tool{
+			Name: "dec_delete_bundle",
+			Description: "删除整个资产 bundle（目录与 manifest 一起删除，列表里随即消失）。" +
+				"副作用：立即提交并推送给该用户所有在线设备，进入审计与历史；订阅了这个 bundle 的设备" +
+				"会在下一次对账里收到删除指令，落点被清理。bundle 不存在时同样返回成功，便于重复清理。" +
+				"只删一个条目用 dec_delete_asset_item；把 bundle 缩减到只剩几条用 dec_write_asset。" +
+				"这是不可逆的：删空之后要恢复只能靠历史里的 commit。",
+			InputSchema: objectSchema(map[string]any{
+				"bundle":        strProp("要删除的 bundle 名称，例如 relkit"),
+				"base_revision": strProp("期望的当前 revision，用于乐观并发控制，留空表示允许覆盖"),
+				"message":       strProp("提交说明，写进 git commit"),
+			}, "bundle"),
+		},
+		build: func(args json.RawMessage) (json.RawMessage, error) {
+			return passThrough(args, &proto.DeleteBundleRequest{})
 		},
 	}
 }

@@ -148,6 +148,8 @@ func (s *Server) run(r *http.Request, req *proto.Request, payload any, dev ssot.
 		return s.mWriteAsset(req, payload, dev)
 	case proto.MethodDeleteAsset:
 		return s.mDeleteAsset(req, payload, dev)
+	case proto.MethodDeleteBundle:
+		return s.mDeleteBundle(req, payload, dev)
 	case proto.MethodListAssets:
 		return s.mListAssets(req, dev)
 	case proto.MethodReadAsset:
@@ -273,6 +275,25 @@ func requireDeviceAdmin(src proto.Source) error {
 		return fmt.Errorf("来源 %s 不能管理设备", src)
 	}
 	return nil
+}
+
+// requireDeviceSelfOrAdmin 检查来源能否修改指定设备的订阅。
+//
+// 订阅列表只决定「这台设备自己消费哪些 bundle」，不涉及别的设备，也不涉及
+// 任何密钥，所以允许来自设备自身的 MCP / admin / hostcli 修改自己的订阅：
+// AI 帮用户把某个 bundle 加进本机订阅是日常用法，全拦住会让 dec_set_subscriptions
+// 这个工具变成永远调不通的摆设。
+//
+// 但跨设备一律拒绝：一条提示注入不该能把另一台机器的订阅改掉（吊销、改类型
+// 这类真正的设备管理仍然只走 requireDeviceAdmin）。
+func requireDeviceSelfOrAdmin(src proto.Source, dev ssot.Device, target string) error {
+	if identity.CanManageDevices(src) {
+		return nil
+	}
+	if target != "" && target == dev.ID {
+		return nil
+	}
+	return fmt.Errorf("来源 %s 只能修改本机设备（%s）的订阅，不能修改 %q 的订阅", src, dev.ID, target)
 }
 
 // waitBudget 把请求里的等待秒数折算成时长，并夹到上限。

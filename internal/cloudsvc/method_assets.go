@@ -97,6 +97,39 @@ func (s *Server) mDeleteAsset(req *proto.Request, payload any, dev ssot.Device) 
 	})
 }
 
+// mDeleteBundle 删除整个 bundle。
+//
+// 与 mDeleteAsset 共用写权限判定：能删一条就能删整包，二者没有额外的
+// 权限差异。副作用同样是「立即提交并推送」——订阅了这个 bundle 的设备
+// 会在下一次对账里收到删除指令，落点被清理。
+func (s *Server) mDeleteBundle(req *proto.Request, payload any, dev ssot.Device) *proto.Response {
+	in, ok := payload.(*proto.DeleteBundleRequest)
+	if !ok {
+		return proto.Fail(req.ID, proto.ErrInvalid, "delete_bundle 载荷类型错误")
+	}
+	if err := requireWrite(req.Source, dev); err != nil {
+		return proto.Fail(req.ID, proto.ErrForbidden, err.Error())
+	}
+	out, err := s.assets.DeleteBundle(assets.DeleteBundleInput{
+		Bundle:       in.Bundle,
+		BaseRevision: in.BaseRevision,
+		Message:      in.Message,
+		Author:       authorOf(req.Source, dev),
+	})
+	if err != nil {
+		return failFromError(req.ID, err)
+	}
+	s.NotifyChanged()
+	s.recordRevision(nil, audit.EventAssetDelete, dev, req, in.Bundle,
+		"删除整个 bundle", out.Revision, true)
+	return okPayload(req.ID, &proto.AssetResult{
+		Bundle:   out.Bundle,
+		Revision: out.Revision,
+		Commit:   out.Commit,
+		Pushed:   true,
+	})
+}
+
 // BundleInfo 是管理面看到的 bundle 概要。
 type BundleInfo struct {
 	Name    string   `json:"name"`

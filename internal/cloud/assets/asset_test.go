@@ -674,3 +674,71 @@ func TestDeleteAssetSkillRemovesWholeDir(t *testing.T) {
 		}
 	}
 }
+
+// TestDeleteBundle 验证整包删除后列表里不再出现（需求 4.1 的“确认无残留”）。
+//
+// 这条测试防的是“只剩空壳”这种情况：write_asset 传空 items 会先删目录
+// 再立刻写回 manifest，于是 bundle 目录仍然在，ListBundles 照样列出，
+// 验收脚本就会看到自己刚“删掉”的测试资产还挂在列表里。
+func TestDeleteBundle(t *testing.T) {
+	w, _ := newTestWriter(t)
+	seedTwoItems(t, w)
+
+	if _, err := w.DeleteBundle(DeleteBundleInput{Bundle: "woa", Author: author()}); err != nil {
+		t.Fatalf("DeleteBundle: %v", err)
+	}
+
+	bundles, err := w.ListBundles()
+	if err != nil {
+		t.Fatalf("ListBundles: %v", err)
+	}
+	for _, b := range bundles {
+		if b == "woa" {
+			t.Fatalf("删除后列表里不应再有 woa，实际 %v", bundles)
+		}
+	}
+	if _, err := w.ReadManifest("woa"); !errors.Is(err, ssot.ErrNotFound) {
+		t.Fatalf("删除后读 manifest 应返回 not_found，实际 %v", err)
+	}
+}
+
+// TestDeleteBundleIsIdempotent 验证重复删除同一个 bundle 仍然成功。
+//
+// 验收脚本的清理钩子会在失败路径上再删一次，因此“删一个已经不在的 bundle”
+// 必须是幂等的：把它当错误只会让清理本身也失败，真正的残留反而被掩盖。
+func TestDeleteBundleIsIdempotent(t *testing.T) {
+	w, _ := newTestWriter(t)
+	seedTwoItems(t, w)
+
+	for i := 0; i < 2; i++ {
+		if _, err := w.DeleteBundle(DeleteBundleInput{Bundle: "woa", Author: author()}); err != nil {
+			t.Fatalf("第 %d 次删除应成功: %v", i+1, err)
+		}
+	}
+}
+
+// TestDeleteBundleLeavesOtherBundles 验证整包删除不影响别的 bundle。
+func TestDeleteBundleLeavesOtherBundles(t *testing.T) {
+	w, _ := newTestWriter(t)
+	seedTwoItems(t, w)
+	if _, err := w.WriteAsset(WriteAssetInput{Bundle: "relkit", Files: skillFiles(), Author: author()}); err != nil {
+		t.Fatalf("WriteAsset: %v", err)
+	}
+
+	if _, err := w.DeleteBundle(DeleteBundleInput{Bundle: "woa", Author: author()}); err != nil {
+		t.Fatalf("DeleteBundle: %v", err)
+	}
+	if _, err := w.ReadManifest("relkit"); err != nil {
+		t.Fatalf("relkit 不应受影响: %v", err)
+	}
+}
+
+// TestDeleteBundleRejectsBadName 验证非法 bundle 名被拒绝。
+func TestDeleteBundleRejectsBadName(t *testing.T) {
+	w, _ := newTestWriter(t)
+	for _, name := range []string{"", "../woa", "woa/../relkit"} {
+		if _, err := w.DeleteBundle(DeleteBundleInput{Bundle: name, Author: author()}); err == nil {
+			t.Fatalf("bundle 名 %q 应被拒绝", name)
+		}
+	}
+}

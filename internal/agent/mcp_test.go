@@ -121,7 +121,7 @@ func TestMCPToolsList(t *testing.T) {
 
 	want := []string{
 		"dec_status",
-		"dec_list_assets", "dec_read_asset", "dec_write_asset", "dec_delete_asset_item",
+		"dec_list_assets", "dec_read_asset", "dec_write_asset", "dec_delete_asset_item", "dec_delete_bundle",
 		"dec_list_secrets", "dec_put_secret", "dec_delete_secret",
 		"dec_history",
 		"dec_list_projects", "dec_put_project", "dec_delete_project",
@@ -150,6 +150,44 @@ func TestMCPToolsList(t *testing.T) {
 		if _, ok := got[name]; ok {
 			t.Errorf("工具清单不应包含 %s", name)
 		}
+	}
+}
+
+// TestMCPStatusForwardsHello 验证状态工具转发的是 hello（需求 1.4、1.8）。
+//
+// status 含根密钥 ID 与初始化入口开关，服务端对 mcp 来源一律拒绝
+// （见 internal/cloudsvc/permission_test.go 的 TestMCPCannotSeeStatus）。
+// 如果这里退回转发 status，工具在清单里却必然报 forbidden，
+// 就是“标记完成但其实用不了”。
+func TestMCPStatusForwardsHello(t *testing.T) {
+	cloud := &fakeCloud{}
+	session := newTestSession(t, MCPServer{
+		Call:   cloud.call,
+		Status: func() Status { return Status{DeviceID: "dev-1", Version: "v1.2.3", Aligned: true} },
+	})
+
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "dec_status", Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("调用失败: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("工具返回错误: %s", contentText(res))
+	}
+	calls := cloud.recorded()
+	if len(calls) != 1 {
+		t.Fatalf("应转发 1 次，实际 %d 次", len(calls))
+	}
+	if calls[0].Method != proto.MethodHello {
+		t.Fatalf("dec_status 应转发 hello，实际 %s", calls[0].Method)
+	}
+	var in proto.HelloRequest
+	if err := json.Unmarshal(calls[0].Payload, &in); err != nil {
+		t.Fatalf("载荷不是合法的 HelloRequest: %v\n%s", err, calls[0].Payload)
+	}
+	if in.AgentVersion != "v1.2.3" {
+		t.Fatalf("agent_version 应取本机版本 v1.2.3，实际 %q", in.AgentVersion)
 	}
 }
 

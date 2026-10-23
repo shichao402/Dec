@@ -96,11 +96,12 @@ dec-agent mcp-config
 
 | 工具 | 作用 | 副作用 |
 |---|---|---|
-| `dec_status` | 云端版本、协议版本、是否维护中、当前 revision | 无 |
+| `dec_status` | 服务端版本、要求的代理版本、协议版本、是否维护中、本机是否已对齐 | 无 |
 | `dec_list_assets` | 列出所有 bundle 与条目 | 无 |
 | `dec_read_asset` | 读一个 bundle 的完整内容 | 无 |
-| `dec_write_asset` | 整体替换一个 bundle | 立即推送 + 进审计 |
+| `dec_write_asset` | 整体替换一个 bundle（少传的条目即删除） | 立即推送 + 进审计 |
 | `dec_delete_asset_item` | 按路径删一个条目 | 立即推送 + 进审计 |
+| `dec_delete_bundle` | 删除整个 bundle（目录与 manifest 一起删） | 立即推送 + 进审计，不可逆 |
 | `dec_list_secrets` | 列出密钥元数据 | 无 |
 | `dec_put_secret` | 写入或更新密钥值 | 立即推送 + 进审计 |
 | `dec_delete_secret` | 删除密钥 | 立即推送 + 进审计 |
@@ -109,7 +110,9 @@ dec-agent mcp-config
 | `dec_put_project` | 新增或修改项目登记 | 进审计 |
 | `dec_delete_project` | 删除项目登记 | 进审计 |
 | `dec_list_subscriptions` | 查看设备订阅了哪些 bundle | 无 |
-| `dec_set_subscriptions` | 整体替换设备订阅 | 立即推送 |
+| `dec_set_subscriptions` | 整体替换设备订阅（只能改本机设备） | 立即推送 |
+
+`dec_status` 返回的是对外可见状态，不含根密钥 ID、初始化入口开关这类服务端内部信息，也不含 revision。要看 revision 用 `dec_list_assets` 或 `dec_read_asset`。
 
 ### 限权：本地清单只是第一道限制
 
@@ -119,8 +122,11 @@ dec-agent mcp-config
 - 设备管理（登记、吊销、改设备类型）
 - 回滚到某个历史版本
 - 轮换根密钥
+- 修改**其他**设备的订阅
 
 代理里的工具清单只是减少误用的第一道门，真正的边界在服务端：即便有人绕过清单直接发请求，服务端也会按来源 `mcp` 拒绝这些操作。反过来说，写入是允许的——因为写入会进 git 历史、能再写一次覆盖，风险可控。
+
+订阅是唯一一处「设备管理」里放开给 MCP 的部分：订阅列表只决定这台设备自己消费哪些 bundle，不涉及别的设备也不涉及密钥，所以允许设备改自己的订阅（AI 帮你把某个 bundle 加进本机订阅是日常用法）。跨设备调 `dec_set_subscriptions` 会被拒。
 
 ---
 

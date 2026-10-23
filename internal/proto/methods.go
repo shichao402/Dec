@@ -52,6 +52,7 @@ var methods = map[Method]func() any{
 	MethodRecover:          func() any { return &RecoverRequest{} },
 	MethodWriteAsset:       func() any { return &AssetPayload{} },
 	MethodDeleteAsset:      func() any { return &DeleteAssetRequest{} },
+	MethodDeleteBundle:     func() any { return &DeleteBundleRequest{} },
 	MethodPutSecret:        func() any { return &SecretPayload{} },
 	MethodDeleteSecret:     func() any { return &SecretDeleteRequest{} },
 	MethodReadSecret:       func() any { return &ReadSecretRequest{} },

@@ -151,7 +151,6 @@ func TestMCPCannotManageDevices(t *testing.T) {
 	}{
 		{"吊销设备", proto.MethodRevokeDevice, &proto.RevokeRequest{DeviceID: "dev-b"}},
 		{"改设备类型", proto.MethodSetDeviceKind, &proto.SetDeviceKindRequest{DeviceID: "dev-b", Kind: "receiver"}},
-		{"改订阅", proto.MethodSetSubscriptions, &proto.SetSubscriptionsRequest{DeviceID: "dev-b", Bundles: []string{"woa"}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -163,6 +162,44 @@ func TestMCPCannotManageDevices(t *testing.T) {
 				t.Fatalf("错误码为 %q，期望 forbidden", resp.Code)
 			}
 		})
+	}
+}
+
+// TestMCPCanSetOwnSubscriptions 验证 MCP 能改本机设备的订阅。
+//
+// 订阅列表只决定这台设备自己消费哪些 bundle，不涉及别的设备与任何密钥。
+// 把它一并归入“设备管理”会让 dec_set_subscriptions 这个工具永远调不通——
+// 工具在清单里却必然报 forbidden，正是本次要杜绝的“标记完成但其实用不了”。
+func TestMCPCanSetOwnSubscriptions(t *testing.T) {
+	h := newHarness(t, "1.0.0")
+	cert := h.registerDevice("dev-a", "MacBook")
+
+	resp := h.postTLS(mcpRequest(t, proto.MethodSetSubscriptions, &proto.SetSubscriptionsRequest{
+		DeviceID: "dev-a",
+		Bundles:  []string{"woa"},
+	}), cert)
+	if !resp.OK {
+		t.Fatalf("MCP 应能改本机订阅，实际失败: %s", resp.Error)
+	}
+}
+
+// TestMCPCannotSetOtherDeviceSubscriptions 验证 MCP 改不了别的设备的订阅。
+//
+// 跨设备修改是真正的设备管理：一条提示注入不该能把另一台机器的订阅换掉。
+func TestMCPCannotSetOtherDeviceSubscriptions(t *testing.T) {
+	h := newHarness(t, "1.0.0")
+	cert := h.registerDevice("dev-a", "MacBook")
+	h.registerDevice("dev-b", "NUC")
+
+	resp := h.postTLS(mcpRequest(t, proto.MethodSetSubscriptions, &proto.SetSubscriptionsRequest{
+		DeviceID: "dev-b",
+		Bundles:  []string{"woa"},
+	}), cert)
+	if resp.OK {
+		t.Fatal("MCP 来源不应修改其它设备的订阅")
+	}
+	if resp.Code != proto.ErrForbidden {
+		t.Fatalf("错误码为 %q，期望 forbidden", resp.Code)
 	}
 }
 
