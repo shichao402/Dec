@@ -10,10 +10,12 @@ package backup
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"testing"
 
+	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/skeema/knownhosts"
 	"golang.org/x/crypto/ssh"
 )
@@ -100,3 +102,58 @@ type fakeNetAddr string
 
 func (f fakeNetAddr) Network() string { return "tcp" }
 func (f fakeNetAddr) String() string  { return string(f) }
+
+// TestAuthPinsHostKeyAlgorithm 确认认证对象显式限定了 ed25519 主机密钥算法。
+//
+// 这条看着琐碎，但它是 2026-10-23 生产故障的直接原因：Go 的 ssh 客户端
+// 默认把 rsa-sha2-256/512 排在 ed25519 前面，GitHub 两种都提供，协商结果
+// 常落到 RSA；而 known_hosts 里按 GitHub 公布的内容只写了 ed25519 条目，
+// 校验随即报 "knownhosts: key mismatch"，看上去像被中间人劫持。
+// contains 断言比「跑一次真实握手」稳定，且能在离线 CI 拦住回归。
+func TestAuthPinsHostKeyAlgorithm(t *testing.T) {
+	_, line := testPubKey(t)
+	kh := writeKnownHosts(t, "[ssh.github.com]:443", line)
+
+	// 生成一把临时私钥供 NewPublicKeys 解析。
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("生成私钥失败: %v", err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatalf("序列化私钥失败: %v", err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "deploy_key")
+	if err := os.WriteFile(keyPath, pemEncode(t, block), 0o600); err != nil {
+		t.Fatalf("写私钥失败: %v", err)
+	}
+
+	p := &Pusher{Target: Target{
+		Name:       "冷备",
+		URL:        "ssh://git@ssh.github.com:443/owner/repo.git",
+		KeyPath:    keyPath,
+		KnownHosts: kh,
+	}}
+	auth, err := p.auth()
+	if err != nil {
+		t.Fatalf("构造认证失败: %v", err)
+	}
+	pk, ok := auth.(*gitssh.PublicKeys)
+	if !ok {
+		t.Fatalf("认证类型应为 *ssh.PublicKeys，实际 %T", auth)
+	}
+	if len(pk.HostKeyAlgorithms) != 1 || pk.HostKeyAlgorithms[0] != ssh.KeyAlgoED25519 {
+		t.Errorf("主机密钥算法应限定为 [%s]，实际 %v；"+
+			"不限定会协商到 RSA，与只含 ed25519 的 known_hosts 冲突而报 key mismatch",
+			ssh.KeyAlgoED25519, pk.HostKeyAlgorithms)
+	}
+	if pk.HostKeyCallback == nil {
+		t.Error("主机密钥回调为空：等于关掉了主机身份校验")
+	}
+}
+
+// pemEncode 把私钥块编码成 PEM 文本。
+func pemEncode(t *testing.T, block *pem.Block) []byte {
+	t.Helper()
+	return pem.EncodeToMemory(block)
+}

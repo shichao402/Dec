@@ -22,6 +22,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	xcrypto "golang.org/x/crypto/ssh"
 )
 
 // 推送结果分类，用于决定是否告警。
@@ -139,7 +140,7 @@ func (p *Pusher) Push(ctx context.Context, repo *git.Repository) (*Outcome, erro
 	}
 
 	fetchErr := repo.FetchContext(ctx, &git.FetchOptions{
-		Auth:     auth,
+		Auth:       auth,
 		RemoteName: "origin",
 		RefSpecs: []config.RefSpec{
 			config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branch, branch)),
@@ -245,6 +246,16 @@ func (p *Pusher) auth() (transport.AuthMethod, error) {
 			return nil, fmt.Errorf("读取 known_hosts %s 失败: %w", p.Target.KnownHosts, err)
 		}
 		user.HostKeyCallback = cb
+		// 只接受 ed25519 主机密钥。
+		//
+		// 这不是画蛇添足：Go 的 ssh 客户端默认把 rsa-sha2-* 排在 ed25519 前面，
+		// GitHub 同时提供多种类型，协商结果常常是 RSA，而 known_hosts 里只写了
+		// ed25519（GitHub 公布的密钥、以及我们写死的那一条），于是校验直接报
+		// "knownhosts: key mismatch"——看着像被中间人劫持，实际只是算法挑错了。
+		//
+		// 用 openssh 的 ssh -T 测同一个地址是通的，因为它按 known_hosts 里已有
+		// 的类型挑选算法；Go 不会，必须显式限定。
+		user.HostKeyAlgorithms = []string{xcrypto.KeyAlgoED25519}
 	}
 	p.user = user
 	return p.user, nil
