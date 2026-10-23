@@ -55,6 +55,61 @@ func TestMaintenanceMarkerSurvivesRestart(t *testing.T) {
 //
 // 只改内存不删文件，下次重启又会莫名其妙进入维护状态，
 // 而且部署脚本无法判断究竟有没有生效。
+// TestMaintenanceConcurrentWithWatch 固定「退出维护不会被后台轮询改回去」。
+//
+// 背景：CI 上偶发过一次失败——SetMaintenance(false) 之后 Maintenance() 仍是 true。
+// 根因是 syncDeployFiles 会「读文件 → 写内存」：它读到「标记文件还在」之后、
+// 写内存之前，如果 SetMaintenance(false) 删完文件并置了 false，
+// 就会被轮询用读到的旧事实改回 true。
+//
+// 这不是测试环境问题：真部署时脚本先删标记、进程随后被健康检查确认，
+// 中间正好是轮询窗口。退出维护失败会表现为「部署成功了但服务停在维护态」。
+func TestMaintenanceConcurrentWithWatch(t *testing.T) {
+	h := newHarness(t, "1.0.0")
+
+	// 先把标记文件建出来，让轮询有机会读到「在维护」。
+	h.srv.SetMaintenance(true)
+
+	// 两个 goroutine 反复拉锯：一个反复进出维护，一个反复按文件同步。
+	// 加了锁之后，退出维护的结果必须稳定为 false。
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				h.srv.syncDeployFiles()
+			}
+		}
+	}()
+
+	for i := 0; i < 200; i++ {
+		h.srv.SetMaintenance(true)
+		h.srv.SetMaintenance(false)
+		if h.srv.Maintenance() {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("第 %d 次循环：退出维护后内存状态仍是 true（后台轮询覆盖了新状态）", i)
+		}
+	}
+	close(stop)
+	wg.Wait()
+
+	// 收尾：内存与文件必须一致，否则重启后状态会莫名其妙地变。
+	if _, err := os.Stat(maintenancePath(h.dir)); !os.IsNotExist(err) {
+		t.Fatalf("退出维护后标记文件应已删除，实际 err=%v", err)
+	}
+	if h.srv.Maintenance() {
+		t.Fatal("最终状态应为非维护")
+	}
+}
+
+// TestMaintenanceMarkerRemovedOnExit 守住退出维护时标记文件与内存同时清掉。
 func TestMaintenanceMarkerRemovedOnExit(t *testing.T) {
 	h := newHarness(t, "1.0.0")
 

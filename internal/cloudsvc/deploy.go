@@ -131,6 +131,12 @@ func (s *Server) initMaintenanceState() {
 // 内存标记与标记文件同时改：文件是跨进程、跨重启的唯一事实来源，
 // 只改内存会出现“管理面和部署脚本看到的状态不一致”。
 func (s *Server) SetMaintenance(on bool) {
+	// 必须与后台轮询互斥：syncDeployFiles 会「读文件 → 写内存」，
+	// 若它读到「文件还在」之后、写内存之前，这里刚删完文件并置 false，
+	// 就会被它用读到的旧事实改回 true，退出维护变成偶发失效。
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+
 	s.maintenance.Store(on)
 	if on {
 		if err := os.MkdirAll(deployDir(s.cfg.DataDir), 0o750); err != nil {
@@ -170,6 +176,11 @@ func (s *Server) watchDeploy(ctx context.Context) {
 
 // syncDeployFiles 按文件现状对齐内存状态，并消费部署记录。
 func (s *Server) syncDeployFiles() {
+	// 与 SetMaintenance 共用一把锁：两者都会读文件、写内存状态，
+	// 不加锁就会出现「读到旧文件事实、覆盖掉刚写入的新状态」。
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+
 	dataDir := s.cfg.DataDir
 
 	// 维护状态：文件在即维护。只看文件，不反向写文件，
@@ -197,10 +208,20 @@ func (s *Server) syncDeployFiles() {
 		}
 	}
 
-	s.consumeDeployRecord()
+	s.consumeDeployRecordLocked()
 }
 
 // consumeDeployRecord 读取并清除部署记录，写审计、必要时告警（需求 21.8）。
+//
+// 外部调用走这里；syncDeployFiles 已经持锁，必须调 consumeDeployRecordLocked，
+// 否则会在同一 goroutine 上二次加锁而死锁。
+func (s *Server) consumeDeployRecord() {
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+	s.consumeDeployRecordLocked()
+}
+
+// consumeDeployRecordLocked 是 consumeDeployRecord 的无锁实现，调用方必须已持 deployMu。
 //
 // 先读再删：记不进审计就把文件留着，下一轮还会再试。
 // 反过来先删后读，一次写审计失败就会让这次部署彻底没有记录。
@@ -211,10 +232,7 @@ func (s *Server) syncDeployFiles() {
 //
 // 因此：进程内用互斥串行化；跨进程用「先 rename 到私有名再读」，
 // rename 在同一文件系统上是原子的——读到的要么完整，要么文件根本不在。
-func (s *Server) consumeDeployRecord() {
-	s.deployMu.Lock()
-	defer s.deployMu.Unlock()
-
+func (s *Server) consumeDeployRecordLocked() {
 	path := deployRecordPath(s.cfg.DataDir)
 	own := path + ".consuming"
 	if err := os.Rename(path, own); err != nil {
