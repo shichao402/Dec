@@ -89,7 +89,16 @@ need "healthz 协议版本" "1" "$(jget "$health" protocol)"
 need "healthz 未处于维护" "False" "$(jget "$health" maintenance)"
 srv_version=$(jget "$health" server_version)
 required=$(jget "$health" required_client)
-need "服务端版本与要求版本一致" "$srv_version" "$required"
+# required 的语义是「最低可用版本」，不是「必须等于服务端版本」：只改服务端的
+# 发布会让 CI 沿用上一个 required（需求 19.2），两者本来就不该相等。这里验的是
+# required 不高于服务端版本——反过来说，required 更高就等于把所有代理都挡在门外。
+if [ -z "$required" ] || [ -z "$srv_version" ]; then
+	bad "要求版本不高于服务端版本" "没有取到值（required=${required:-空} server=${srv_version:-空}）"
+elif [ "$(printf '%s\n%s\n' "$required" "$srv_version" | sort -V | head -n1)" = "$required" ]; then
+	ok "要求版本不高于服务端版本" "required=${required} server=${srv_version}"
+else
+	bad "要求版本不高于服务端版本" "required=${required} 高于 server=${srv_version}，会让所有代理被判不对齐"
+fi
 info "服务端版本" "${srv_version:-未取到}"
 
 # hello 是唯一允许无证书调用的方法：它是「未登记的新机器也能问出要求版本」的入口。
