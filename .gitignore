@@ -100,3 +100,6 @@ mise.local.toml
 
 # Rust 托盘构建产物
 /tray/target/
+
+# COS 探针脚本含真实 SecretId 与预签名 URL，不入库（2026-10-23 转公开前移除）
+cos-probe.sh
