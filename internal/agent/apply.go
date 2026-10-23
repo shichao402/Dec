@@ -26,8 +26,6 @@ import (
 const (
 	// entryPrefix 是 Dec 在共享配置文件里托管条目的统一前缀。
 	entryPrefix = "dec-"
-	// managedNotice 是写进落点的说明（需求 6.4）。
-	managedNotice = "由 Dec 管理，本地修改会被覆盖；要改请改云端。"
 	// decEntryComment 是 JSON 里无法加注释时的替代：用保留键承载说明。
 	noticeKey = "_dec_notice"
 )
@@ -103,11 +101,15 @@ func (w *Writer) writeOne(full string, f proto.File) (string, error) {
 
 	switch f.Format {
 	case proto.FormatWhole:
-		content := w.withNotice(full, f.Content, f.Secret)
-		if err := writeFileAtomic(full, []byte(content), mode); err != nil {
+		// 直接写 Content，不再拼说明行：说明已由服务端渲染时写入。
+		//
+		// 代理在这里加一行，会让"写下的字节"比"收到的字节"多一行，
+		// 于是代理按写下的内容算哈希、服务端按下发的内容算哈希，
+		// 两侧永远不等，每次对账都判成差异并重发（2026-10 的重写循环）。
+		if err := writeFileAtomic(full, []byte(f.Content), mode); err != nil {
 			return "", err
 		}
-		return hashOf([]byte(content)), nil
+		return hashOf([]byte(f.Content)), nil
 
 	case proto.FormatJSONKey:
 		if !strings.HasPrefix(f.Key, entryPrefix) {
@@ -181,28 +183,15 @@ func (w *Writer) removeEmptyParents(full string) {
 	}
 }
 
-// withNotice 给整文件落点加一条“由 Dec 管理”的说明（需求 6.4）。
+// withNotice 只做幂等保护，不再拼说明行。
 //
-// 选择把说明写在文件里而不是只写在目录里：用户打开的就是这个文件，
-// 提示必须出现在他看到内容的地方。对含密钥的文件，说明本身不含任何敏感信息。
+// 说明行由服务端渲染时写进 Content（见 render.RenderDevice）。代理这里
+// 保留一层兜底：若收到的是旧服务端下发的内容（不含说明），代理也不会补，
+// 因为补了就会让"写下的字节"与"收到的字节"不一致，回到重写循环。
+//
+// 换句话说：这里存在的唯一目的是让人看到"说明行不在这里加"这句话有个落点，
+// 而不是留一个可以再加一行的地方。
 func (w *Writer) withNotice(full, content string, secret bool) string {
-	ext := strings.ToLower(filepath.Ext(full))
-	switch ext {
-	case ".json":
-		// JSON 不能加注释，且内容可能是被整体覆盖的配置文件，
-		// 往里塞额外键会改变语义，所以只对“非共享”文件加。
-		return content
-	case ".md", ".mdc", ".txt", ".yaml", ".yml", "":
-		if strings.Contains(content, managedNotice) {
-			return content
-		}
-		if secret {
-			// 含密钥的文件不写说明：内容是 env 或密钥模板，
-			// 多一行注释可能被某些解析器当成变量。
-			return content
-		}
-		return "<!-- " + managedNotice + " -->\n" + content
-	}
 	return content
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/shichao402/Dec/internal/cloud/assets"
 	"github.com/shichao402/Dec/internal/cloud/crypt"
 	"github.com/shichao402/Dec/internal/cloud/ssot"
+	"github.com/shichao402/Dec/internal/notice"
 	"github.com/shichao402/Dec/internal/proto"
 )
 
@@ -151,7 +152,8 @@ items:
 	if !ok {
 		t.Fatalf("缺少 SKILL.md 的下发项，实际 ID：%v", keysOf(byID))
 	}
-	if skillMD.File.Content != "# Demo\n" {
+	// 说明行由服务端渲染时写入（需求 6.4），代理不再补。
+	if want := "<!-- " + notice.Text + " -->\n# Demo\n"; skillMD.File.Content != want {
 		t.Fatalf("SKILL.md 内容错误: %q", skillMD.File.Content)
 	}
 	// 两个平面 × 五种宿主 = 10 个落点。
@@ -480,7 +482,7 @@ items:
 	if resp.Batch == nil || len(resp.Batch.Files) != 1 {
 		t.Fatalf("被本地改动时应重新下发，实际 %+v", resp.Batch)
 	}
-	if resp.Batch.Files[0].Content != "cloud\n" {
+	if want := "<!-- " + notice.Text + " -->\ncloud\n"; resp.Batch.Files[0].Content != want {
 		t.Fatalf("应下发云端内容，实际 %q", resp.Batch.Files[0].Content)
 	}
 	if len(resp.Overrides) != 1 {
@@ -652,7 +654,7 @@ items:
 	if len(out.Files) != 1 {
 		t.Fatalf("应有一条下发")
 	}
-	want := "id=dev-1 os=darwin arch=arm64 name=测试机 dev-1\n"
+	want := "<!-- " + notice.Text + " -->\nid=dev-1 os=darwin arch=arm64 name=测试机 dev-1\n"
 	if out.Files[0].File.Content != want {
 		t.Fatalf("变量替换错误:\n got %q\nwant %q", out.Files[0].File.Content, want)
 	}

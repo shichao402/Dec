@@ -8,6 +8,7 @@ import (
 	"github.com/shichao402/Dec/internal/cloud/assets"
 	"github.com/shichao402/Dec/internal/cloud/crypt"
 	"github.com/shichao402/Dec/internal/cloud/ssot"
+	"github.com/shichao402/Dec/internal/notice"
 	"github.com/shichao402/Dec/internal/proto"
 )
 
@@ -260,6 +261,12 @@ func (r *Renderer) RenderDevice(dev ssot.Device) (*Rendered, error) {
 				if pf.Secret {
 					pf.Mode = 0o600
 				}
+				// 说明行在这里加，而不是在代理落盘时加（需求 6.4）。
+				//
+				// 代理加说明会让它的"写下内容"比"收到内容"多一行：代理按写下的
+				// 字节算哈希，服务端按未加说明的字节算哈希，两个值永远不等，
+				// 每次对账都判成差异并重发，形成无限重写循环。
+				pf.Content = notice.Apply(p.rel, pf.Content, pf.Secret, pf.Format)
 
 				if prev, dup := seenID[pf.ID]; dup {
 					alerts = append(alerts, Alert{

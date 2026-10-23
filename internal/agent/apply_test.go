@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shichao402/Dec/internal/notice"
 	"github.com/shichao402/Dec/internal/proto"
 )
 
@@ -24,12 +25,14 @@ func applyOne(t *testing.T, home string, f proto.File) *WriteResult {
 	return res
 }
 
-func TestApplyWholeFileAndNotice(t *testing.T) {
+func TestApplyWholeFileWritesExactBytes(t *testing.T) {
 	home := testHome(t)
+	// 服务端下发的内容里已经带说明行（render 层负责加，见 internal/notice）。
+	sent := "<!-- " + notice.Text + " -->\n# style\n"
 	res := applyOne(t, home, proto.File{
 		ID:      "asset:woa:style",
 		Targets: []proto.Target{{Plan: proto.PlanUser, Root: "cursor", Path: "rules/style.md"}},
-		Content: "# style\n",
+		Content: sent,
 		Format:  proto.FormatWhole,
 	})
 	path := filepath.Join(home, ".cursor", "rules", "style.md")
@@ -37,11 +40,10 @@ func TestApplyWholeFileAndNotice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取落点失败: %v", err)
 	}
-	if !strings.Contains(string(data), managedNotice) {
-		t.Fatalf("整文件落点应带管理说明，实际内容：%q", data)
-	}
-	if !strings.Contains(string(data), "# style") {
-		t.Fatalf("原始内容丢失：%q", data)
+	// 落盘必须与下发逐字节一致：代理多写或少写一个字节，
+	// 它算出的哈希就会与服务端的期望哈希不同，对账永远不收敛。
+	if string(data) != sent {
+		t.Fatalf("落盘内容应与下发内容完全一致\n下发: %q\n实际: %q", sent, data)
 	}
 	if res.Hash == "" {
 		t.Fatal("回执哈希不应为空")
@@ -53,6 +55,28 @@ func TestApplyWholeFileAndNotice(t *testing.T) {
 	}
 	if again != res.Hash {
 		t.Fatalf("回执哈希 %q 与现场哈希 %q 不一致", res.Hash, again)
+	}
+}
+
+// 代理不再自己加说明：收到什么就写什么。
+//
+// 这条是回归测试。曾经代理在落盘时补一行说明，于是"写下的字节"比
+// "收到的字节"多一行，两侧哈希永远不等，每次对账都重发，单台设备把
+// 审计刷到 8.4 万条、.git 涨到 63M。
+func TestApplyDoesNotInjectNotice(t *testing.T) {
+	home := testHome(t)
+	applyOne(t, home, proto.File{
+		ID:      "asset:woa:plain",
+		Targets: []proto.Target{{Plan: proto.PlanUser, Root: "cursor", Path: "rules/plain.md"}},
+		Content: "# plain\n",
+		Format:  proto.FormatWhole,
+	})
+	data, err := os.ReadFile(filepath.Join(home, ".cursor", "rules", "plain.md"))
+	if err != nil {
+		t.Fatalf("读取落点失败: %v", err)
+	}
+	if strings.Contains(string(data), notice.Text) {
+		t.Fatalf("代理不应注入说明行，实际内容：%q", data)
 	}
 }
 
@@ -75,7 +99,7 @@ func TestApplySecretFileMode0600(t *testing.T) {
 	}
 	// 含密钥的文件不写管理说明：多一行注释可能被解析器当成变量。
 	data, _ := os.ReadFile(path)
-	if strings.Contains(string(data), managedNotice) {
+	if strings.Contains(string(data), notice.Text) {
 		t.Fatalf("含密钥文件不应写入说明：%q", data)
 	}
 }

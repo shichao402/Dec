@@ -61,3 +61,5 @@
 | [0038](0038-deploy-optional-args.md) | 部署单元的可选参数走 EnvironmentFile | 已接受（已实现） |
 | [0039](0039-audit-commit-coalescing.md) | 审计提交按时间窗合并，冷备推送前冲写 | 已接受（已实现） |
 | [0040](0040-audit-push-cadence.md) | 审计有自己的推送节奏，不再等"有人改内容" | 已接受（已实现） |
+| [0041](0041-notice-rendered-by-server.md) | 说明行由服务端渲染时写入，代理只落字节 | 已接受（已实现） |
+| [0042](0042-sync-audit-dedup.md) | sync 审计按内容指纹降噪，密钥下发不降噪 | 已接受（已实现） |
