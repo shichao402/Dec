@@ -79,16 +79,29 @@ jobs:
           cp tray/target/x86_64-apple-darwin/release/dec-tray dist/dec-tray-darwin-amd64
           file dist/dec-tray-darwin-*
 
-      - name: 上传托盘产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: tray-macos
-          path: dist/dec-tray-darwin-*
-          if-no-files-found: error
-          # 只用于同一次运行的 build job 取回，成品在 GitHub Release 里。
-          # 默认 90 天保留期会让这些中间产物堆积到撞上仓库的存储配额
-          # （私有仓库的 artifact 存储与 Actions 分钟数共享免费额度）。
-          retention-days: 1
+      - name: 上传托盘产物到草稿 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # 为什么不走 upload-artifact：
+          # 私有仓库的 artifact 存储与 Actions 分钟数共享免费额度，一旦被历史
+          # 中间产物占满，连一个 200 KB 的托盘都传不上去，整个发布链卡死，而且
+          # 用量要 6–12 小时才重算，等不到。Release 附件属于另一套配额，且这些
+          # 二进制本来就是要进 Release 的，等于省掉一次搬运。
+          #
+          # 用草稿状态：此刻只有托盘的半成品，不能让下载页看到一个不完整的版本。
+          # build job 会把其余产物补齐，最后一步再把草稿转正。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/dec-tray-darwin-* --clobber
+          else
+            gh release create "$TAG" dist/dec-tray-darwin-* \
+              --draft \
+              --title "$TAG" \
+              --notes "构建中，由 release.yml 自动发布，请勿手改。"
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[].name'
 
   build:
     name: 构建与发布
@@ -185,11 +198,16 @@ jobs:
 
       # macOS 托盘在独立 job 里构建（原因见 tray-macos job 的注释），
       # 这里取回后与 Windows 托盘一起进入发布清单与下载通道。
+      # 走 Release 附件而不是 artifact：理由见 tray-macos job 的上传步骤。
       - name: 取回 macOS 托盘
-        uses: actions/download-artifact@v4
-        with:
-          name: tray-macos
-          path: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$VERSION" --pattern 'dec-tray-darwin-*' --dir dist
+          ls -l dist/dec-tray-darwin-*
 
       - name: 交叉编译
         env:
@@ -306,10 +324,18 @@ jobs:
             echo
             echo "部署由本工作流自动完成；下载通道以服务端 \`/download\` 为准。"
           } > notes.md
-          gh release create "$VERSION" dist/* \
-            --title "$VERSION" \
-            --notes-file notes.md \
-            --verify-tag
+          # 托盘产物在 tray-macos job 里建成了草稿 Release，这里把其余产物补上
+          # 再转正。若草稿不存在（比如托盘 job 被跳过），退回直接创建。
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/* --clobber
+            gh release edit "$VERSION" --draft=false --notes-file notes.md
+          else
+            gh release create "$VERSION" dist/* \
+              --title "$VERSION" \
+              --notes-file notes.md \
+              --verify-tag
+          fi
+          gh release view "$VERSION" --json isDraft,assets --jq '{draft: .isDraft, assets: [.assets[].name]}'
 
   deploy:
     name: 部署到服务器
