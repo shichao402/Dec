@@ -83,7 +83,7 @@ type Outcome struct {
 // 单独抽出来是因为“部署前确认远端没被改写”和“推送”是两件事，
 // 前者不该顺带产生一次推送。
 func (p *Pusher) Check(repo *git.Repository) (remoteHead string, err error) {
-	branch := p.branch()
+	branch := p.branchOf(repo)
 	remoteRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", branch), false)
 	if err != nil {
 		// 还没有远端跟踪引用：要么远端为空，要么还没 fetch 过。
@@ -132,7 +132,7 @@ func (p *Pusher) Push(ctx context.Context, repo *git.Repository) (*Outcome, erro
 	if err != nil {
 		return nil, err
 	}
-	branch := p.branch()
+	branch := p.branchOf(repo)
 
 	// Push 自带远端对齐：调用方只需要给 Target，不必记得先 EnsureRemote。
 	if err := p.EnsureRemote(repo); err != nil {
@@ -210,6 +210,27 @@ func (p *Pusher) branch() string {
 		return p.Target.Branch
 	}
 	return "main"
+}
+
+// branchOf 返回仓库当前 HEAD 的分支名，取不到时回退到 branch()。
+//
+// 为什么要跟随本地 HEAD 而不是固定 "main"：
+// SSOT 与审计仓库都由 go-git 的 PlainInit 初始化，它的默认分支是 master
+// （go-git 不读 init.defaultBranch）。固定的 "main" 在这些仓库里根本不存在，
+// fetch 的 refspec 指向一个空分支，随后 push 会以
+// "src refspec main does not match any" 失败——而日志里只会看到一句
+// "推送失败"，很难联想到分支名。
+//
+// 远端沿用同一个名字：冷备与审计是这两个本地仓库的镜像，分支名不必另立规矩。
+func (p *Pusher) branchOf(repo *git.Repository) string {
+	head, err := repo.Head()
+	if err != nil {
+		return p.branch()
+	}
+	if head.Name().IsBranch() {
+		return head.Name().Short()
+	}
+	return p.branch()
 }
 
 // auth 惰性构建认证。
