@@ -38,7 +38,10 @@
 - `v2.1.3` 经 CI 发布，`dec-cloud` 部署成功，`required_client` 同步到 `v2.1.3`
 - 本机代理升级到 `v2.1.3`，`aligned: true`
 - 本机模式 `scripts/acceptance.sh`：退出码 0，16 项全部 PASS，无残留
-- 线上模式 `scripts/acceptance.sh --remote`：退出码 0，39 项全部 PASS，无残留
-- 线上实测：`/mcp` 与 `/admin` 在公网均为 404（入口只在代理回环上）；15 个协议方法无证书一律 `unauthorized`；旧版本调用返回 `version_mismatch` 并带出要求版本
+- 线上只读模式 `scripts/acceptance.sh --remote`：退出码 0，39 项全部 PASS
+- 线上链路模式 `deploy/test-e2e.sh --reset`：退出码 0，链路 13 项 + 隔离核对 11 项全部 PASS
+- 线上只读实测：`/mcp` 与 `/admin` 在公网均为 404（入口只在代理回环上）；15 个协议方法无证书一律 `unauthorized`；旧版本调用返回 `version_mismatch` 并带出要求版本
 
-两种模式验的是两件不同的事：本机模式证明「这台机器能用」，线上模式证明「服务器那台机器是对的」。MCP 入口只在代理里，云端不提供 `/mcp`，所以完整链路必须有代理才能跑。
+三种模式验的是三件事：本机模式证明「这台机器能用」，线上只读模式证明「服务器那台机器是对的」，线上链路模式证明「线上真的能跑通完整链路」。MCP 入口只在代理里，云端不提供 `/mcp`。
+
+测试环境与生产同机但完全隔离：独立数据目录 `/opt/dec-cloud-test/<slot>/data`、独立根密钥、端口只监听 `127.0.0.1:18443`、独立 systemd 单元。测试用 Bitwarden 专用账号（2FA 关闭，凭据在 `.secrets/dec/integration/bitwarden.yaml`），其根密钥冷备与生产互不可见。正式部署不用测试账号，生产初始化的主密码与 2FA 由本人当场输入。

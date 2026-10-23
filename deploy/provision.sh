@@ -1,7 +1,7 @@
 #!/bin/bash
 # Dec Cloud 服务器声明式配置（需求 16.1、16.2、16.3a、16.5、21.6）。
 #
-# 一条命令从零重建服务器：账号、目录、权限、SSH 加固、fail2ban、
+# 一条命令从零重建服务器：账号、目录、权限、fail2ban、
 # 自动安全更新、systemd 单元、部署账户的受限入口。
 #
 # 用法（在服务器上以 root 执行）：
@@ -9,6 +9,8 @@
 #   ./provision.sh --domain dec.firoyang.com \
 #                  --deploy-key "ssh-ed25519 AAAA... ci@github" \
 #                  --ops-key    "ssh-ed25519 AAAA... me@laptop"
+#
+#   只有额外传 --harden-ssh 才会收紧 sshd；默认一行 sshd 配置都不写。
 #
 # 幂等：重复执行只是把状态收敛到声明，不会重复创建或破坏已有数据。
 #
@@ -18,6 +20,9 @@
 #     任何脚本预先放置密钥都会绕过 Bitwarden 冷备的写入与读回校验。
 #   - 不申请证书。证书由服务自己用 TLS-ALPN-01 取得（需求 7）。
 #   - 不配置任何 Dec 业务数据。资产与密钥一律走协议写入链路。
+#   - 不改动机器上的全局 SSH 登录策略。这台机器不专属 Dec，可能还跑着
+#     别的服务、也有别的人要登录；AllowUsers 是白名单，写进去就把名单
+#     外的账号（包括 root）全锁在门外。需要收紧时显式传 --harden-ssh。
 
 set -euo pipefail
 
@@ -28,6 +33,8 @@ OPS_USER="${DEC_OPS_USER:-decops}"
 DEPLOY_USER="${DEC_DEPLOY_USER:-deploy}"
 SERVICE_USER="${DEC_SERVICE_USER:-dec}"
 SERVICE_NAME="dec-cloud"
+# SSH 加固是 opt-in：这台机器不专属 Dec，全局登录策略不该由部署脚本决定。
+HARDEN_SSH=0
 # 配置目录：放 github-token 这类只该 root 读的东西，root 所有。
 # 根密钥刻意放在数据目录之外，因为数据目录会被整体快照（需求 16.5、21.5）。
 CONF_DIR="${DEC_CONF_DIR:-/etc/dec-cloud}"
@@ -49,7 +56,7 @@ log()  { printf '[provision] %s\n' "$*"; }
 die()  { printf '[provision] 失败：%s\n' "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 }
 
@@ -58,6 +65,7 @@ while [ $# -gt 0 ]; do
     --domain)     DOMAIN="${2:-}"; shift 2 ;;
     --deploy-key) DEPLOY_KEY="${2:-}"; shift 2 ;;
     --ops-key)    OPS_KEY="${2:-}"; shift 2 ;;
+    --harden-ssh) HARDEN_SSH=1; shift ;;   # 只有显式要求才收紧 sshd
     -h|--help)    usage ;;
     *)            die "未知参数 $1" ;;
   esac
@@ -146,17 +154,25 @@ if [ -n "$OPS_KEY" ]; then
   log "运维账户 $OPS_USER 已配置公钥"
 fi
 
-# --- SSH 加固（需求 16.3a、21.6）----------------------------------------
+# --- SSH 加固（opt-in，需求 16.3a、21.6）--------------------------------
+#
+# 默认什么都不做。原因：这台机器不专属 Dec，AllowUsers 是白名单语义——
+# 一旦写进去，名单外的账号（root、其他服务的运维号、以后加的人）全部
+# 登录不了。部署脚本没有资格替机器主人决定谁能登录。
+#
+# 需要收紧的独占机器，显式传 --harden-ssh。即便如此也只写 dropin，
+# 不改 /etc/ssh/sshd_config 本体，方便随时整文件删掉回滚。
 
-sshd_dropin=/etc/ssh/sshd_config.d/99-dec-cloud.conf
-mkdir -p /etc/ssh/sshd_config.d
-cat >"$sshd_dropin" <<EOF
-# Dec Cloud 的 SSH 基线。
-# 只允许公钥登录，禁止密码与 root 直接登录，并限制可登录的账号。
+if [ "$HARDEN_SSH" -eq 1 ]; then
+  sshd_dropin=/etc/ssh/sshd_config.d/99-dec-cloud.conf
+  mkdir -p /etc/ssh/sshd_config.d
+  cat >"$sshd_dropin" <<EOF
+# Dec Cloud 的 SSH 基线（由 provision.sh --harden-ssh 写入）。
+# 只允许公钥登录，禁止密码，并限制可登录的账号。
+# 删除本文件并 reload sshd 即可完全回滚。
 PubkeyAuthentication yes
 PasswordAuthentication no
 KbdInteractiveAuthentication no
-PermitRootLogin no
 AllowUsers $DEPLOY_USER $OPS_USER
 X11Forwarding no
 AllowAgentForwarding no
@@ -164,21 +180,26 @@ AllowTcpForwarding no
 MaxAuthTries 3
 EOF
 
-# 先验证配置再 reload：写坏了 sshd 配置比不加固更危险。
-if ! sshd -t; then
-  rm -f "$sshd_dropin"
-  die "sshd 配置校验失败，已移除本次写入的配置，未 reload"
+  # 先验证配置再 reload：写坏了 sshd 配置比不加固更危险。
+  if ! sshd -t; then
+    rm -f "$sshd_dropin"
+    die "sshd 配置校验失败，已移除本次写入的配置，未 reload"
+  fi
+  # 重载后确认 sshd 还活着。这条检查是给自己留退路：配置语法通过但语义
+  # 有问题（比如把当前登录的账号漏在 AllowUsers 外）时，reload 之后新连接
+  # 会被拒，已经建立的会话还在，但下一次就进不来了。
+  systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true
+  if ! systemctl is-active --quiet sshd 2>/dev/null && ! systemctl is-active --quiet ssh 2>/dev/null; then
+    rm -f "$sshd_dropin"
+    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
+    die "sshd 重载后未在运行，已移除本次配置并尝试恢复"
+  fi
+  log "SSH 已加固：仅公钥登录，仅允许 $DEPLOY_USER 与 $OPS_USER"
+else
+  # 不加固也要提醒一句：账号建好了，能用什么方式登录取决于机器现有策略。
+  log "跳过 SSH 加固（未传 --harden-ssh）。$DEPLOY_USER 与 $OPS_USER 的登录方式沿用机器现有 sshd 策略"
+  log "  确需收紧时显式加 --harden-ssh；root 及其他账号的登录不受本脚本影响"
 fi
-# 重载后确认 sshd 还活着。这条检查是给自己留退路：配置语法通过但语义
-# 有问题（比如把当前登录的账号漏在 AllowUsers 外）时，reload 之后新连接
-# 会被拒，已经建立的会话还在，但下一次就进不来了。
-systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true
-if ! systemctl is-active --quiet sshd 2>/dev/null && ! systemctl is-active --quiet ssh 2>/dev/null; then
-  rm -f "$sshd_dropin"
-  systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
-  die "sshd 重载后未在运行，已移除本次配置并尝试恢复"
-fi
-log "SSH 已加固：仅公钥登录，禁止 root，仅允许 $DEPLOY_USER 与 $OPS_USER"
 
 # --- sudo 权限 ----------------------------------------------------------
 #

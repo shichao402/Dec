@@ -19,6 +19,29 @@ Dec Cloud 只有一台服务器。这份文档说明它怎么搭起来、怎么�
 
 根密钥单独占一层 `/etc/dec-cloud/secret`，这一层归属服务账号且 700。原因是写密钥用的是「临时文件 + rename」原子写，要求目录本身可写，而 `/etc/dec-cloud` 那层还躺着 `github-token`（`root:root` 0600），不能让服务账号能在那层建文件。两个写权限要求直接冲突，只能分层。
 
+## 测试环境
+
+生产之外另有一套隔离实例，用来跑完整链路验收（登记设备、写 bundle、落地、清理）。
+它与生产在同一台机器上，但四条边界都不重叠：
+
+| | 生产 | 测试 |
+|---|---|---|
+| 数据目录 | `/var/lib/dec-cloud` | `/opt/dec-cloud-test/<slot>/data` |
+| 根密钥 | `/etc/dec-cloud/secret/root.key` | `/opt/dec-cloud-test/<slot>/secret/root.key` |
+| 端口 | `:443`（对外） | `127.0.0.1:18443`（只回环） |
+| 单元名 | `dec-cloud` | `dec-cloud-test` / `dec-agent-test` |
+
+```bash
+# 在服务器上，准备好两个 Linux 二进制后：
+sudo DEC_BW_PASSWORD='<测试账号主密码>' bash deploy/test-e2e.sh --reset
+```
+
+测试实例用 `--accept-any` 自签证书，不申请 ACME——它没有域名，也不该占用生产的证书流程。
+测试账号是 Bitwarden 的专用账户（2FA 关闭），凭据在 `.secrets/dec/integration/bitwarden.yaml`（gitignored）；
+它的根密钥冷备与生产完全独立，两边互不可见。
+
+正式部署**不使用**测试账号：生产初始化需要真实账号的主密码与 2FA，由本人当场输入。
+
 ## 三个账号
 
 | 账号 | 用途 | 权限 |
@@ -27,7 +50,9 @@ Dec Cloud 只有一台服务器。这份文档说明它怎么搭起来、怎么�
 | `deploy` | CI 部署 | `authorized_keys` 用 `command=` 锁死到部署脚本，拿不到 shell |
 | `decops` | 人肉运维 | 唯一有通用 sudo 的普通账号 |
 
-SSH 只允许公钥登录，禁止密码、禁止 root 直接登录，只允许 `deploy` 和 `decops` 两个账号（`AllowUsers`）。
+SSH 的登录策略不由本项目的脚本决定。`provision.sh` 默认一行 `sshd` 配置都不写——这台机器不专属 Dec，`AllowUsers` 是白名单语义，写进去就把名单外的账号全锁在外面，包括 root 和其他服务的运维号。只有显式传 `--harden-ssh` 才会写那份 dropin（禁密码、禁转发、限定账号），且只写 `/etc/ssh/sshd_config.d/99-dec-cloud.conf`，删掉该文件再 reload 即可完整回滚。
+
+部署依赖的是 `deploy` 与 `decops` 两个账号各自的 `authorized_keys`，与全局登录策略无关。root 能否登录沿用机器原有配置，长期可用。
 
 ## 首次部署
 
@@ -46,9 +71,9 @@ sudo ./provision.sh \
   --ops-key    "ssh-ed25519 AAAA... me@laptop"
 ```
 
-脚本是幂等的，重复跑只是把状态收敛到声明。它会做这些事：建三个账号、建目录与权限、写 SSH 加固 dropin（写坏会自己回滚并退出）、配 fail2ban、开自动安全更新、写 systemd 单元。
+脚本是幂等的，重复跑只是把状态收敛到声明。它会做这些事：建三个账号、建目录与权限、配 fail2ban、开自动安全更新、写 systemd 单元。
 
-它刻意不做两件事：不写 `root.key`（根密钥只能由服务在初始化流程里生成），不申请证书（证书由服务自己取）。
+它刻意不做三件事：不写 `root.key`（根密钥只能由服务在初始化流程里生成），不申请证书（证书由服务自己取），不改动全局 SSH 登录策略。第三点尤其重要——这台机器可能还跑着别的服务，`AllowUsers` 一写就把名单外的账号全锁死。如果你的机器确实只跑 Dec，可以加 `--harden-ssh` 显式收紧。
 
 ### 3. 安装部署入口
 

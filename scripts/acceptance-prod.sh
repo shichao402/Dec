@@ -145,10 +145,14 @@ sshd=$(sudo -n sshd -T 2>/dev/null)
 if [ -z "$sshd" ]; then
 	info "sshd 有效配置" "跳过（读不到，需要免密 sudo）"
 else
-	need "禁止 root 直接登录" "no" "$(printf '%s' "$sshd" | awk '/^permitrootlogin /{print $2}')"
+	# 这台机器不专属 Dec，provision 默认不写 sshd 配置，也不该由部署脚本
+	# 决定谁能登录。所以这里不断言 root 与 AllowUsers，只确认两件与 Dec
+	# 自身安全相关的事：公钥可用、密码不可用。
+	need "公钥登录已开启" "yes" "$(printf '%s' "$sshd" | awk '/^pubkeyauthentication /{print $2}')"
 	need "禁止密码登录" "no" "$(printf '%s' "$sshd" | awk '/^passwordauthentication /{print $2}')"
+	info "root 登录策略" "$(printf '%s' "$sshd" | awk '/^permitrootlogin /{print $2}' | sed 's/^$/未设置（默认 prohibit-password）/')"
 	allow=$(printf '%s' "$sshd" | awk '/^allowusers /{print $2}' | sort -u | tr '\n' ' ' | sed 's/ *$//')
-	need "只允许受控账号登录" "decops deploy" "$allow"
+	info "AllowUsers" "${allow:-未设置（不限制账号）}"
 fi
 
 # ---------------------------------------------------------------- 六、数据

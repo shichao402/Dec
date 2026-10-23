@@ -281,6 +281,55 @@ func TestProdAcceptanceStaysReadOnly(t *testing.T) {
 	}
 }
 
+// TestTestEnvStaysIsolated 守住线上验收的隔离约束。
+//
+// 跑完整链路要登记设备、写根密钥冷备、写测试 bundle。只要有一个变量
+// 指到生产目录或生产端口，这条链路就会在真实资产库里留下测试数据，
+// 而这种事故在跑之前完全看不出来。所以把隔离条件写成会失败的检查。
+func TestTestEnvStaysIsolated(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, "deploy", "test-e2e.sh")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读 %s 失败: %v（线上验收是需求 4.2 的交付物）", path, err)
+	}
+	content := string(data)
+
+	// 隔离的四个维度必须都由脚本自己声明，不能靠外部恰好没配。
+	for _, want := range []string{
+		"/opt/dec-cloud-test", // 测试根目录，与生产 /var/lib/dec-cloud 分开
+		"-listen 127.0.0.1",   // 只监听回环，绝不对外
+		"-accept-any",         // 自签证书：测试实例没有域名，也不该申请证书
+		"dec-cloud-$SLOT",     // 独立单元名
+		"dec-agent-$SLOT",     // 独立单元名
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("test-e2e.sh 缺少隔离要素 %q", want)
+		}
+	}
+
+	// 生产路径只能出现在「反例拦截」与「事后核对」里，不能作为默认值。
+	// 这里检查的是默认值赋值：DATA_DIR/KEY_DIR 不能指向生产。
+	for _, bad := range []string{
+		`DATA_DIR="/var/lib/dec-cloud`,
+		`KEY_DIR="/etc/dec-cloud`,
+	} {
+		if strings.Contains(content, bad) {
+			t.Errorf("test-e2e.sh 把测试目录指向了生产：%s", bad)
+		}
+	}
+
+	// 443 是生产端口，测试实例用它就会把生产顶掉。
+	if strings.Contains(content, `SERVER_PORT="443"`) {
+		t.Error("test-e2e.sh 的测试实例不能使用 443")
+	}
+
+	// 必须核对「生产库没有测试残留」：隔离漏了只有这一步能发现。
+	if !strings.Contains(content, "/var/lib/dec-cloud/ssot/assets") {
+		t.Error("test-e2e.sh 必须核对生产库没有测试残留，否则隔离失效时无人发现")
+	}
+}
+
 // TestLegacyFinalTagExists 守住断代前的存档标签（需求 3.1）。
 //
 // 旧代码只通过 git 历史保留，`legacy-final` 是那个存档点。标签丢了，

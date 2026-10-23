@@ -540,6 +540,7 @@ func cmdAcceptance(args []string) error {
 	projectPath := fs.String("project", "", "临时项目目录，默认建在用户目录下的临时路径")
 	timeout := fs.Duration("timeout", 90*time.Second, "单步等待下发落地的上限")
 	keep := fs.Bool("keep", false, "即使全部通过也保留测试数据，便于人工观察")
+	skipHosts := fs.Bool("skip-hosts", false, "跳过「各宿主 dec 条目」检查（服务器上没有 IDE 时用）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -567,6 +568,7 @@ func cmdAcceptance(args []string) error {
 		ProjectPath: *projectPath,
 		Timeout:     *timeout,
 		Keep:        *keep,
+		SkipHosts:   *skipHosts,
 	})
 	if err != nil {
 		return err
