@@ -106,6 +106,15 @@ jobs:
   build:
     name: 构建与发布
     needs: tray-macos
+    # 托盘失败不阻断发布。
+    #
+    # 2026-10 macOS runner 额度耗尽时，GitHub 连 runner 都不派（runner_id 为 0），
+    # tray-macos 立刻失败，于是整个 build 与 deploy 全部 skipped——一个只会构建
+    # 托盘的 job 把服务端发布也一起卡死了。托盘的缺失是可以独立接受的降级：
+    # 下载通道少一个工具有人会发现，服务端发不出去则是全局故障。
+    #
+    # 这里只放宽「失败也继续」，不改成 always()：被手动取消时仍应停止整条链。
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -206,8 +215,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          gh release download "$VERSION" --pattern 'dec-tray-darwin-*' --dir dist
-          ls -l dist/dec-tray-darwin-*
+          # 托盘缺失是允许的降级（见 build job 的 if 注释）：本次发布就不带
+          # macOS 托盘，其余产物照常发布。这里用 || true 而不是让整步失败。
+          if gh release download "$VERSION" --pattern 'dec-tray-darwin-*' --dir dist 2>/dev/null; then
+            ls -l dist/dec-tray-darwin-*
+          else
+            echo "::warning::本次发布没有 macOS 托盘产物（tray-macos job 未成功），继续发布其余产物"
+          fi
 
       - name: 交叉编译
         env:
