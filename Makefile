@@ -5,36 +5,38 @@
 # 详见 scripts/goenv.sh。
 GOENV=sh scripts/goenv.sh
 
-BINARY_NAMES=dec-server dec-mcp dec-exec dec-host-setup
+# 断代后只剩两个二进制（需求 3.4）：云端服务端与本机代理。
+BINARY_NAMES=dec-cloud dec-agent
 DIST_DIR=dist
 VERSION=$(shell cat version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "dev")
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
-.PHONY: all build build-all test clean fmt lint help ensure-relkit
+.PHONY: all build test vet clean fmt lint install help
 
 all: build
 
-# go.mod replace → ./third_party/relkit；缺失时 sparse-checkout。
-ensure-relkit:
-	@python3 scripts/ensure_relkit_sparse.py --sdk-only --allow-stale
-
-build: ensure-relkit
+build:
 	@mkdir -p $(DIST_DIR)
 	@echo "🔨 构建 Dec 程序组..."
 	@echo "📌 版本: $(VERSION)"
-	$(GOENV) go build $(LDFLAGS) -o $(DIST_DIR)/dec-server ./cmd/dec-server
-	$(GOENV) go build $(LDFLAGS) -o $(DIST_DIR)/dec-mcp ./cmd/dec-mcp
-	$(GOENV) go build $(LDFLAGS) -o $(DIST_DIR)/dec-exec ./cmd/dec-exec
-	$(GOENV) go build $(LDFLAGS) -o $(DIST_DIR)/dec-host-setup ./cmd/dec-host-setup
-	@echo "✅ 构建完成: $(DIST_DIR)/{dec-server,dec-mcp,dec-exec,dec-host-setup}"
+	$(GOENV) go build $(LDFLAGS) -o $(DIST_DIR)/dec-cloud ./cmd/dec-cloud
+	$(GOENV) go build $(LDFLAGS) -o $(DIST_DIR)/dec-agent ./cmd/dec-agent
+	@echo "✅ 构建完成: $(DIST_DIR)/{dec-cloud,dec-agent}"
 
-build-all: ensure-relkit
-	@./scripts/build.sh --all
-
-test: ensure-relkit
+test:
 	@echo "🧪 运行 Go 单元测试..."
-	$(GOENV) go test ./... -v -cover
+	$(GOENV) go test ./...
+
+vet:
+	@echo "🔍 代码检查..."
+	$(GOENV) go vet ./...
+
+install: build
+	@echo "📦 安装 dec-agent..."
+	@install -d "$$HOME/.local/bin"
+	@install -m 0755 $(DIST_DIR)/dec-agent "$$HOME/.local/bin/dec-agent"
+	@echo "✅ 已安装到 ~/.local/bin/dec-agent"
 
 clean:
 	@echo "🧹 清理构建产物..."
@@ -55,17 +57,14 @@ help:
 	@echo "Dec Makefile"
 	@echo ""
 	@echo "构建目标："
-	@echo "  make build           - 构建当前平台版本"
-	@echo "  make build-all       - 构建全部平台版本"
+	@echo "  make build           - 构建当前平台的 dec-cloud 与 dec-agent"
+	@echo "  make install         - 构建并安装 dec-agent 到 ~/.local/bin"
 	@echo ""
 	@echo "测试目标："
 	@echo "  make test            - 运行 Go 单元测试"
-	@echo ""
-	@echo "本机部署（唯一入口，不经 make）："
-	@echo "  python scripts/build-console.py --skip-deps   # 打 Console 安装包并覆盖安装"
+	@echo "  make vet             - 运行 go vet"
 	@echo ""
 	@echo "其他目标："
-	@echo "  make ensure-relkit   - sparse-checkout relkit → third_party/relkit"
 	@echo "  make clean           - 清理构建产物"
 	@echo "  make fmt             - 格式化 Go 代码"
-	@echo "  make lint            - 运行 golangci-lint"
+	@echo "  make lint            - 运行 go vet"

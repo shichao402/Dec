@@ -9,15 +9,13 @@ import (
 )
 
 // 允许直接调 os/exec 的文件：包装器自身、本守卫（正文含被检测的字面量），
-// 以及需要用户看见窗口的入口。internal/service/client.go 自行设置
-// detachedProcessAttributes()。
+// 以及需要用户看见窗口的入口。
 var directExecAllowed = map[string]bool{
 	"internal/sysproc/sysproc.go":            true,
 	"internal/sysproc/guard_test.go":         true,
 	"internal/consoleopen/launch_windows.go": true,
 	"internal/consoleopen/launch_unix.go":    true,
 	"internal/editor/editor.go":              true,
-	"internal/service/client.go":             true,
 }
 
 // TestNoDirectExecCommand 守住「Windows 上不弹控制台窗口」这条线。

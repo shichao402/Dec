@@ -367,8 +367,8 @@ func (l *Loopback) handleCall(w http.ResponseWriter, r *http.Request) {
 // handleMCP 是 MCP 入口（需求 13.1）。
 //
 // 这里不实现完整的 MCP 协议，只提供一个 JSON-RPC 形状的转发：
-// 真正面向 Agent 的工具清单在 M5 阶段接上，但来源固定为 mcp 这条约束
-// 必须在这一层就成立，否则后面很容易在工具实现里忘掉。
+// 来源固定为 mcp 这条约束必须在这一层就成立，否则后面很容易在工具
+// 实现里忘掉。
 func (l *Loopback) handleMCP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

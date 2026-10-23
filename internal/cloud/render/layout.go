@@ -43,7 +43,7 @@ const (
 	FileMCP = "mcp.json"
 )
 
-// allHosts 是服务端认识的宿主。名字必须与代理侧 internal/ide 注册的名字一致，
+// allHosts 是服务端认识的宿主。名字必须与代理侧 internal/agent 的宿主表一致，
 // 否则代理无法把宿主名展开成目录。
 var allHosts = []string{"cursor", "claude", "codebuddy", "codex", "with"}
 
