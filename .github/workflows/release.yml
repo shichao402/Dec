@@ -46,6 +46,10 @@ jobs:
         with:
           # 需要完整历史来比较上一个 tag 与 HEAD 的差异，判断客户端有没有改动。
           fetch-depth: 0
+          # actions/checkout 默认不拉 tag。少了它有两处会静默出错：
+          # 「上一个发布 tag」查不到，required 就退化成当前 tag；
+          # 守卫测试会因为看不到 legacy-final 而误报标签丢失。
+          fetch-tags: true
 
       - uses: actions/setup-go@v5
         with:

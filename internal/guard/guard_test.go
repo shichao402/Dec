@@ -336,15 +336,27 @@ func TestTestEnvStaysIsolated(t *testing.T) {
 // 「想知道上一代长什么样」就只剩翻 commit 猜，所以把它变成会失败的检查。
 func TestLegacyFinalTagExists(t *testing.T) {
 	root := repoRoot(t)
-	cmd := sysproc.Command("git", "tag", "--list", "legacy-final")
+	cmd := sysproc.Command("git", "tag", "--list")
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git tag 执行失败: %v", err)
 	}
-	if strings.TrimSpace(string(out)) != "legacy-final" {
-		t.Fatalf("缺少 legacy-final 标签，旧代码没有存档点；应执行 git tag legacy-final <断代前提交>")
+	all := strings.Fields(string(out))
+
+	// 先区分「没拉 tags」和「标签丢了」。浅克隆或 checkout 没带 fetch-tags 时
+	// 一个 tag 都看不到，这时候报「标签丢失」会把人引向错误的修复方向——
+	// 实际要改的是 CI 的 checkout 配置。
+	if len(all) == 0 {
+		t.Skip("这个检出没有任何 tag（浅克隆或未拉取 tags），无法判断 legacy-final 是否存在；CI 需 fetch-tags: true")
 	}
+
+	for _, name := range all {
+		if name == "legacy-final" {
+			return
+		}
+	}
+	t.Fatalf("缺少 legacy-final 标签，旧代码没有存档点；应执行 git tag legacy-final <断代前提交>")
 }
 
 // TestMakefileOnlyBuildsNewGeneration 守住 Makefile 只面向新一代二进制（需求 3.4）。
