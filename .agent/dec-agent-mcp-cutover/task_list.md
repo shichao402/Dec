@@ -37,5 +37,8 @@
 
 - `v2.1.3` 经 CI 发布，`dec-cloud` 部署成功，`required_client` 同步到 `v2.1.3`
 - 本机代理升级到 `v2.1.3`，`aligned: true`
-- `scripts/acceptance.sh` 退出码 0，16 项检查全部 PASS，无残留
-- `/mcp` 握手已本地完成（不再出现 `bootstrap_closed`），外部 Origin 返回 403
+- 本机模式 `scripts/acceptance.sh`：退出码 0，16 项全部 PASS，无残留
+- 线上模式 `scripts/acceptance.sh --remote`：退出码 0，39 项全部 PASS，无残留
+- 线上实测：`/mcp` 与 `/admin` 在公网均为 404（入口只在代理回环上）；15 个协议方法无证书一律 `unauthorized`；旧版本调用返回 `version_mismatch` 并带出要求版本
+
+两种模式验的是两件不同的事：本机模式证明「这台机器能用」，线上模式证明「服务器那台机器是对的」。MCP 入口只在代理里，云端不提供 `/mcp`，所以完整链路必须有代理才能跑。

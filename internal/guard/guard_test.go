@@ -240,6 +240,47 @@ func TestNoOrphanDeferralComments(t *testing.T) {
 	}
 }
 
+// TestProdAcceptanceStaysReadOnly 守住线上验收脚本的只读承诺（需求 4.2）。
+//
+// 这个脚本在生产服务器上执行，权限比本机模式大得多。一旦有人图省事
+// 加一条写操作（例如「顺手清理一下残留」），下次跑验收就可能删掉真实资产。
+// 因此把「只允许 hello 这一处写」变成会失败的检查，而不是靠人记得。
+func TestProdAcceptanceStaysReadOnly(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, "scripts", "acceptance-prod.sh")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读 %s 失败: %v（线上验收是需求 4.2 的交付物，不能缺失）", path, err)
+	}
+	content := string(data)
+
+	// 写类方法一个都不许被调用：出现 call <方法名> 即意味着脚本会改生产数据。
+	// hello 不在这个名单里——它只更新「这台机器最后一次在线时间」。
+	// 注意这里检查的是 call 形式而不是裸名字：脚本会把这些方法名放进
+	// 「无证书必须被拒」的循环里逐个断言 unauthorized，那是在验证它们调不动，
+	// 与「调用它们」是相反的两件事。
+	forbidden := []string{
+		"write_asset", "delete_asset", "delete_bundle", "put_secret",
+		"delete_secret", "put_project", "delete_project",
+		"set_subscriptions", "revoke_device", "rotate_root_key",
+		"set_device_kind", "read_secret", "initialize", "recover", "enroll",
+	}
+	for _, m := range forbidden {
+		if strings.Contains(content, "call "+m+" ") || strings.Contains(content, "$(call "+m+" ") {
+			t.Errorf("线上验收脚本调用了写类方法 %q，它必须在生产上保持只读", m)
+		}
+	}
+
+	// 只读承诺得写进脚本本身，跑的人一眼能看到边界。
+	if !strings.Contains(content, "只读") {
+		t.Error("线上验收脚本应明确写出「只读」承诺，否则跑的人无法判断边界")
+	}
+	// 残留检查是这个脚本存在的理由之一：没有它，验收写完东西没人发现。
+	if !strings.Contains(content, "dec-acceptance") {
+		t.Error("线上验收脚本应检查 dec-acceptance 前缀的残留 bundle")
+	}
+}
+
 // TestLegacyFinalTagExists 守住断代前的存档标签（需求 3.1）。
 //
 // 旧代码只通过 git 历史保留，`legacy-final` 是那个存档点。标签丢了，
