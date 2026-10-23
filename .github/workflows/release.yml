@@ -155,6 +155,30 @@ jobs:
 
           ls -l dist
 
+      # 托盘 dec-tray 是 Rust 工程（tray/），与 dec-agent 同一 tag（agent-tray-access 需求 7.3）。
+      # Windows 版用 mingw 在 Linux 上交叉编译，不需要 Windows runner（需求 21.1）。
+      # 只出 amd64：Windows on ARM 能以仿真方式运行 x64 程序，托盘不值得多一条工具链。
+      - name: 缓存托盘构建
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tray/target
+          key: tray-win-${{ hashFiles('tray/Cargo.lock') }}
+
+      - name: 构建 Windows 托盘
+        env:
+          DEC_TRAY_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mingw-w64
+          rustup target add x86_64-pc-windows-gnu
+          (cd tray && cargo test --locked -q && cargo build --locked --release --target x86_64-pc-windows-gnu)
+          cp tray/target/x86_64-pc-windows-gnu/release/dec-tray.exe dist/dec-tray-windows-amd64.exe
+          ls -l dist/dec-tray-*
+
       - name: 生成发布清单
         env:
           VERSION: ${{ steps.meta.outputs.version }}
@@ -184,8 +208,8 @@ jobs:
                   "size": len(data),
               })
 
-          # 下载通道只列客户端：服务端二进制不该出现在公网下载页上。
-          files = [f for f in files if f["name"].startswith("dec-agent-")]
+          # 下载通道只列客户端（代理与托盘）：服务端二进制不该出现在公网下载页上。
+          files = [f for f in files if f["name"].startswith(("dec-agent-", "dec-tray-"))]
           manifest = {
               "version": os.environ["VERSION"],
               "required_client": os.environ["REQUIRED"],
@@ -259,6 +283,7 @@ jobs:
           # 客户端二进制随服务端一起上传（需求 20.2）：服务端不主动去外部拉取。
           mkdir -p payload/download
           cp dist/dec-agent-* payload/download/
+          cp dist/dec-tray-* payload/download/ 2>/dev/null || echo "本次发布没有托盘产物"
 
           python3 - "$VERSION" "$REQUIRED" "$COMMIT" <<'PY'
           import json, os, sys

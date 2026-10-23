@@ -97,3 +97,6 @@ mise.local.toml
 # .relkit-keys/*.private.pb 为废弃本地路径，保留规则作防御；*.private.pb 防误提交。
 .relkit-keys/*.private.pb
 *.private.pb
+
+# Rust 托盘构建产物
+/tray/target/

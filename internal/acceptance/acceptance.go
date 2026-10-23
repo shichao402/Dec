@@ -119,6 +119,9 @@ type runner struct {
 	wrote bool
 	// projectsBackup 是本机项目登记的原始内容，清理时原样写回。
 	projectsBackup []byte
+	// logPath 与 logSnap 用于验证日志只写单文件（agent-tray-access 需求 5.1）。
+	logPath string
+	logSnap map[string]fileStamp
 }
 
 // run 是主流程，返回 error 表示无法继续。
@@ -129,6 +132,9 @@ func (r *runner) run(ctx context.Context) error {
 	if err := r.checkStatus(ctx); err != nil {
 		return err
 	}
+	// 本机入口（agent-tray-access）：失败只记 FAIL，不阻断后面的 MCP 链路——
+	// 证书没下发不影响资产同步，一并跑完才能一次看到全部问题。
+	r.checkAccess(ctx)
 	if r.opts.SkipHosts {
 		// 没有 IDE 的机器（服务器）跳过这一项，但要说清楚是跳过而不是通过，
 		// 否则日志会让人以为「MCP 条目已经写好了」。
@@ -157,6 +163,8 @@ func (r *runner) run(ctx context.Context) error {
 	if err := r.checkDeleteAndClean(ctx); err != nil {
 		return err
 	}
+	// 放在最后：前面的 MCP 写删会让代理产生日志，此时比对才有意义。
+	r.checkSingleLog()
 	return nil
 }
 

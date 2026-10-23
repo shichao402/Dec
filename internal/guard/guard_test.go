@@ -496,6 +496,11 @@ func TestReleaseArtifactNamesUnchanged(t *testing.T) {
 		{"Windows 加 .exe 后缀", `out="$out.exe"`},
 		{"服务端产物名", `-o "dist/dec-cloud-linux-$arch"`},
 		{"客户端平台组合", "darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64"},
+		// agent-tray-access 需求 7.3：托盘与代理同一 tag 构建，并进入下载通道。
+		{"Windows 托盘产物", "dist/dec-tray-windows-amd64.exe"},
+		{"托盘版本取自 tag", "DEC_TRAY_VERSION: ${{ steps.meta.outputs.version }}"},
+		{"发布清单包含托盘", `"dec-tray-"`},
+		{"部署包带上托盘", "cp dist/dec-tray-* payload/download/"},
 	}
 	for _, c := range checks {
 		if !strings.Contains(content, c.needle) {

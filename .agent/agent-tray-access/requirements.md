@@ -35,9 +35,21 @@
 | 系统命令轮询（`osascript` 模拟） | 零依赖，与 `notify.go` 一致 | 无法常驻图标，只能弹通知，做不到「点开有菜单」 | 否决 |
 | 独立原生助手进程 | 主程序保持纯 Go 单文件；助手按平台用原生语言写，可单独分发与卸载 | 多一个进程、多一份构建产物、需定义二者通信方式 | 采纳 |
 
-采纳独立助手，意味着需求 1 的托盘由一个小型原生程序承担，它从代理的回环接口读取状态、通过命令行或 HTTP 触发代理动作。这也解释了为何需求 7 要求托盘是「可选组件」：没装它，代理依然完整可用。
+采纳独立助手，意味着托盘由一个小型程序 `dec-tray` 承担，它从代理的回环接口读取状态，通过 HTTP 触发代理动作。主程序 `dec-agent` 不依赖它；但在 macOS 与 Windows 上，`dec-tray` 是默认安装、默认随登录启动的标准组件，不是可选项。
 
-macOS 侧用 Swift 调 `NSStatusBar`；Windows 侧用 PowerShell 的 `NotifyIcon`（沿用 `notify.go` 已验证的写法）或一个极小的 .NET 程序；Linux 侧先检测 `AppIndicator` 是否可用，不可用则跳过。
+两个平台共用一套 Rust 实现（2026-10-23 用户决策：Rust 只写托盘，`dec-agent` 与 `dec-cloud` 保持 Go，协议仍由同一份 Go 源码定义）：
+
+- 工程位于 `tray/`，用 `tray-icon` + `tao` 处理图标、菜单与事件循环；macOS 上 Rust 直接链接 AppKit，不经 CGO，主程序 `CGO_ENABLED=0` 不受影响。
+- 托盘只读 `/api/status`、调用系统服务命令，不引用 `internal/proto`，因此不产生 Go/Rust 双份协议。
+- 构建：Windows 产物在 Linux runner 上用 mingw-w64 交叉编译（目标 `x86_64-pc-windows-gnu`），符合"只用 Linux runner"的约束。macOS 产物需要 macOS SDK 才能链接 AppKit，Linux runner 无法直接产出，CI 方案待定（候选：托盘单独破例用 macOS runner、osxcross、本地构建后上传为 release 资产）。
+- Linux：不在本期强制范围，`dec-tray` 在 Linux 上直接跳过并正常退出。
+
+### 关于托盘交互的说明
+
+双击打开管理面是本期的核心交互。
+
+- Windows：通知区域图标原生区分单击、双击和右键。约定为双击打开管理面，右键弹出菜单。
+- macOS：菜单栏图标默认单击就弹菜单，没有双击的概念。要支持双击，图标不能直接挂菜单，而要自己处理点击事件：双击打开管理面，单击要等一个系统双击间隔（约 0.25 秒）确认不是双击后再弹菜单，右键或 Control 单击立即弹菜单。代价是单击弹菜单会有这段可感知的延迟。
 
 ### 关于「用 dec.firoyang.com 访问本机」的说明
 
@@ -55,26 +67,47 @@ macOS 侧用 Swift 调 `NSStatusBar`；Windows 侧用 PowerShell 的 `NotifyIcon
 | 有效证书 | 浏览器绿锁，无警告 |
 | 跨平台一致 | Windows 与 macOS 行为相同，配置随 DNS 走 |
 
-代价有两项，需要正视：
+本期正式采用 `local.dec.firoyang.com`，具体安排如下：
 
-- 证书有效期 90 天，续期依赖 DNSPod API 凭据在本机可用。凭据需以受限方式存放，且续期失败要有前置告警，否则会出现「某天突然打不开」。
-- 这条公网记录会暴露「该子域指向回环」这一事实。它不泄漏任何内容，因为解析到的是访问者自己的机器，但这属于可选行为，默认不应开启。
+- 证书由云端集中管理，不在每台设备上各自申请。DNSPod API 凭据作为云端密钥存放，云端用 DNS-01 签发并续期 `local.dec.firoyang.com` 证书，再经现有设备通道把证书和私钥下发给已登记设备。这样设备上不需要任何 DNSPod 凭据，新设备登记后自动可用。
+- 证书私钥会分发到所有已登记设备。按已定决策 10，已登记设备本就可信，所以这在现有信任模型之内。设备吊销后，下一次续期时应换新私钥。
+- 「无端口号」意味着代理要在 `127.0.0.1:443` 上额外监听 HTTPS。macOS 10.14 起与 Windows 都允许普通用户绑定 443。如果 443 被占用，就退回 `https://local.dec.firoyang.com:<端口>`，并在托盘提示里写明实际地址。
+- 这条公网记录会公开「该子域指向回环」这一事实，但不泄漏任何内容，因为解析到的是访问者自己的机器。
 
-因此需求 4 分三层：默认层用 `*.localhost`（零配置、零证书）；推荐层用自有子域指向回环（需一次性 DNS 配置与自动续期）；保守层完全不动 DNS，只靠托盘菜单一键跳转。三层都不影响回环的唯一性与 Host 校验。
+因此访问方式有三种，互不冲突：托盘双击（最常用，零记忆）、`https://local.dec.firoyang.com`（好记，有证书）、`http://dec.localhost:<端口>`（兜底，零依赖）。三种都只在回环上，Host 校验规则保持不变。
 
 ## 需求
 
+### 不在本期范围：放开回环绑定
+
+本期明确不把代理监听地址从 `127.0.0.1` 改为 `0.0.0.0` 或局域网地址。理由：
+
+- 现有身份模型是「登记时用一次 Bitwarden 主密码加 2FA 鉴定身份，之后用设备证书做信任」，日常使用不再需要 Bitwarden。这套模型的前提是「能连上本机页面的只有本机进程」。
+- 本机页面的 `/api/call` 不需要任何凭据，且固定以 `admin` 来源转发，包括 `read_secret`、`rotate_root_key`、`revoke_device` 等高危方法。一旦对外监听，同网段任何人都等同于以本人身份操作。
+- 若要对外监听，必须另建一套认证（自建会话或每次走 Bitwarden），这正是现有设计想避免的成本。
+
+跨设备管理的需求由「每台设备各装代理、各自访问自己的回环页面」满足。本期要解决的只是回环页面的可见性与可达性：托盘图标、无需记端口的入口、好记的地址。
+
+### 不在本期范围：托盘一键更新
+
+本期托盘不提供「下载并替换代理二进制」的能力。版本不对齐时，托盘只做两件事：图标显示异常态，悬停提示与菜单状态里写明「需要更新到版本 X」和下载地址。更新仍按需求 19.3 由用户手动完成，之后可用托盘的「重启代理」让新版本生效。
+
 ### 需求 1
 
-**用户故事：** 作为一名在本机使用 Dec 的用户，我希望在系统托盘（macOS 菜单栏）看到代理的图标，以便随时知道它存在且正在运行。
+**用户故事：** 作为一名在 macOS 和 Windows 上使用 Dec 的用户，我希望在托盘区域（macOS 菜单栏、Windows 通知区域）看到代理图标，并能双击直接打开管理面，以便随时知道它在运行，也不用记任何地址。
 
 #### 验收标准
 
-1. WHEN 代理服务启动并完成初始化 THEN 系统 SHALL 在托盘区域显示代理图标。
-2. WHEN 用户点击托盘图标 THEN 系统 SHALL 展示菜单，至少包含「打开管理面」「查看状态」「退出」三项。
-3. WHEN 用户选择「退出」 THEN 系统 SHALL 停止代理进程，且 SHALL NOT 因服务保活机制被立即重新拉起。
-4. IF 运行环境不支持托盘（如无图形界面的服务器） THEN 系统 SHALL 跳过托盘初始化且不影响同步主循环。
-5. IF 托盘助手进程异常退出 THEN 代理主进程 SHALL 保持运行并记录一次告警日志。
+1. WHEN 用户在 macOS 或 Windows 上登录系统 THEN 系统 SHALL 自动启动托盘组件并显示代理图标，无需用户手动操作。
+2. WHEN 用户双击托盘图标 THEN 系统 SHALL 用默认浏览器打开管理面。
+3. WHEN 用户在 Windows 上右键托盘图标，或在 macOS 上单击、右键或 Control 单击图标 THEN 系统 SHALL 展示菜单，至少包含「打开管理面」「查看状态」「查看日志」「重启代理」「退出」五项。
+4. WHEN 用户在 macOS 上单击图标 THEN 系统 SHALL 在系统双击间隔内未收到第二次点击后再弹出菜单，SHALL NOT 在双击时先弹出菜单。
+5. WHEN 用户选择「退出」 THEN 系统 SHALL 同时停止托盘组件与代理进程，且 SHALL NOT 被服务保活机制立即重新拉起，直到下次登录或用户手动启动。
+6. IF 代理进程未运行 THEN 托盘图标 SHALL 呈现「未运行」状态，菜单 SHALL 提供「启动代理」项。
+7. IF 托盘组件异常退出 THEN 代理主进程 SHALL 保持运行，且托盘组件 SHALL 由登录项保活机制重新拉起。
+8. WHEN 用户选择「重启代理」 THEN 托盘组件 SHALL 通过系统服务管理器重启代理（macOS 用 `launchctl kickstart -k`，Windows 用计划任务的结束再启动），SHALL NOT 依赖代理自身的 HTTP 接口，以保证代理卡死时也能重启。
+9. WHEN 重启代理进行中 THEN 托盘组件 SHALL 自身保持运行，图标 SHALL 显示「重启中」，并在代理重新响应状态接口后恢复正常态。
+10. IF 代理在重启后 30 秒内仍未响应 THEN 系统 SHALL 将图标置为异常态，并通过系统通知提示用户查看日志。
 
 ### 需求 2
 
@@ -90,13 +123,13 @@ macOS 侧用 Swift 调 `NSStatusBar`；Windows 侧用 PowerShell 的 `NotifyIcon
 
 ### 需求 3
 
-**用户故事：** 作为一名不想记端口号的用户，我希望从托盘菜单一步打开管理面，以便不必手动拼接 URL。
+**用户故事：** 作为一名不想记端口号的用户，我希望双击托盘图标或选菜单项就能打开管理面，以便不必手动拼接 URL。
 
 #### 验收标准
 
-1. WHEN 用户选择托盘菜单中的「打开管理面」 THEN 系统 SHALL 使用系统默认浏览器打开代理当前监听地址下的管理面页面。
-2. WHEN 代理监听端口因参数或冲突而改变 THEN 托盘菜单打开的地址 SHALL 自动使用实际端口，SHALL NOT 使用写死的 8787。
-3. WHEN 管理面已在浏览器中打开 AND 用户再次选择「打开管理面」 THEN 系统 SHALL 聚焦已有标签页而不是重复新建。
+1. WHEN 用户双击托盘图标或选择「打开管理面」 THEN 系统 SHALL 用默认浏览器打开管理面，且两种操作 SHALL 打开同一地址。
+2. WHEN `https://local.dec.firoyang.com` 可用（证书有效且代理在 443 上监听） THEN 系统 SHALL 优先打开该地址；IF 不可用 THEN 系统 SHALL 退回代理当前实际监听的回环地址。
+3. WHEN 代理监听端口因参数或冲突而改变 THEN 打开的地址 SHALL 使用实际端口，SHALL NOT 使用写死的 8787。
 4. IF 浏览器启动失败 THEN 系统 SHALL 给出可见提示，并在提示中给出可手工复制的地址。
 
 ### 需求 4
@@ -105,13 +138,15 @@ macOS 侧用 Swift 调 `NSStatusBar`；Windows 侧用 PowerShell 的 `NotifyIcon
 
 #### 验收标准
 
-1. WHEN 代理启动 THEN 系统 SHALL 在回环地址上接受 `*.localhost` 形式的 Host 头，使 `http://dec.localhost:<端口>` 可直接打开本机页面，无需任何配置。
-2. WHEN 请求的 Host 头为 `*.localhost` 形式 THEN 系统 SHALL 执行与 `127.0.0.1` 完全相同的端口与 Origin 校验，SHALL NOT 放宽防 DNS rebinding 的判定。
-3. WHEN 代理启动完成 THEN 系统 SHALL 在托盘提示与管理面概览中展示当前可用地址，且 SHALL 区分「可直接访问」与「需先完成一次性配置」两类。
-4. IF 用户启用自有域名子域访问 THEN 系统 SHALL 支持将该子域解析到 `127.0.0.1` 并在本机以 HTTPS 提供服务，且 SHALL 提供 DNS-01 方式的证书自动签发与续期。
-5. WHEN 启用自有域名子域访问 THEN 系统 SHALL 在启用前明确列出三项代价：需要 DNSPod API 凭据、证书 90 天需自动续期、该记录会公开指向回环地址。
-6. IF 证书续期失败或距到期不足 14 天 THEN 系统 SHALL 通过托盘图标与系统通知发出告警，SHALL NOT 静默降级为不可访问。
-7. WHEN 上述任一种访问方式均未配置 THEN 系统 SHALL 仍保证托盘菜单可一步打开管理面，使用户无需记忆端口。
+1. WHEN 代理启动 THEN 系统 SHALL 在回环地址上接受 `*.localhost` 形式的 Host 头，使 `http://dec.localhost:<端口>` 无需任何配置即可打开本机页面。
+2. WHEN 请求的 Host 头为 `*.localhost` 或 `local.dec.firoyang.com` THEN 系统 SHALL 执行与 `127.0.0.1` 完全相同的端口与 Origin 校验，除这两类之外的域名 SHALL 继续拒绝，以防 DNS rebinding。
+3. WHEN 部署本功能 THEN 系统 SHALL 在 DNSPod 上存在一条 `local.dec.firoyang.com` 指向 `127.0.0.1` 的 A 记录。
+4. WHEN 云端运行 THEN 云端 SHALL 用 DNS-01 方式为 `local.dec.firoyang.com` 签发证书，并在到期前 30 天自动续期；DNSPod API 凭据 SHALL 作为云端密钥存放，SHALL NOT 下发到设备。
+5. WHEN 证书签发或续期完成 THEN 云端 SHALL 经现有设备通道把证书与私钥下发给已登记设备，代理收到后 SHALL 无需重启即生效。
+6. WHEN 有设备被吊销 THEN 云端 SHALL 在下一次续期时更换私钥。
+7. WHEN 代理持有有效证书 THEN 代理 SHALL 在 `127.0.0.1:443` 上额外提供 HTTPS；IF 443 被占用 THEN 代理 SHALL 在原端口上同时提供 HTTPS，并在托盘提示与管理面概览中写明实际地址。
+8. IF 设备上的证书距到期不足 14 天或下发失败 THEN 系统 SHALL 通过托盘图标与系统通知告警，且 `http://dec.localhost:<端口>` 与托盘双击 SHALL 继续可用。
+9. WHEN 代理启动完成 THEN 系统 SHALL 在托盘提示与管理面概览中展示当前所有可用地址。
 
 ### 需求 5
 
@@ -131,8 +166,8 @@ macOS 侧用 Swift 调 `NSStatusBar`；Windows 侧用 PowerShell 的 `NotifyIcon
 
 #### 验收标准
 
-1. WHEN 代理在 Windows 上启动 THEN 系统 SHALL 在通知区域显示图标，其菜单项与 macOS 版本保持一致。
-2. WHEN 用户在任一平台上选择相同菜单项 THEN 系统 SHALL 执行语义等价的操作。
+1. WHEN 代理在 macOS 或 Windows 上安装 THEN 系统 SHALL 同时提供托盘组件，两端的图标状态、双击行为与菜单项 SHALL 保持一致。
+2. WHEN 用户在任一平台上执行相同操作 THEN 系统 SHALL 执行语义等价的动作，平台差异只允许体现在弹出菜单的手势上（见需求 1.3、1.4）。
 3. WHEN 代理在 Linux 上运行 AND 桌面环境支持托盘 THEN 系统 SHALL 提供图标；IF 不支持 THEN 系统 SHALL 跳过且不报错退出。
 4. WHEN 托盘组件在任一平台不可用 THEN 代理的同步、回环页面与 MCP 入口 SHALL 全部保持可用。
 
@@ -142,8 +177,10 @@ macOS 侧用 Swift 调 `NSStatusBar`；Windows 侧用 PowerShell 的 `NotifyIcon
 
 #### 验收标准
 
-1. WHEN 构建发布产物 THEN 主程序 SHALL 保持 `CGO_ENABLED=0` 的单文件形态，托盘能力 SHALL 以独立可选组件形式提供。
-2. WHEN 用户未安装托盘组件 THEN 代理 SHALL 正常启动并运行，SHALL NOT 因缺少组件而失败。
-3. WHEN 用户执行卸载 THEN 系统 SHALL 一并清理托盘组件与其自启动项，SHALL NOT 残留快捷方式或登录项。
-4. WHEN 托盘组件需要随登录启动 THEN 系统 SHALL 使用与代理相同的用户级机制，SHALL NOT 要求管理员权限。
-5. WHEN 新增或修改回环 Host 校验规则 THEN 系统 SHALL 有对应的单元测试覆盖 `127.0.0.1`、`localhost`、`*.localhost` 与非法域名四种输入。
+1. WHEN 构建发布产物 THEN 主程序 `dec-agent` SHALL 保持 `CGO_ENABLED=0` 的单文件形态，托盘能力 SHALL 由独立的 `dec-tray` 提供。
+2. WHEN 用户在 macOS 或 Windows 上执行 `dec-agent install` THEN 系统 SHALL 默认一并安装 `dec-tray` 并注册登录自启动，SHALL NOT 要求用户另外操作。
+3. WHEN 服务端下载通道提供 macOS 与 Windows 产物 THEN 系统 SHALL 同时提供对应平台的 `dec-tray`，且版本 SHALL 与 `dec-agent` 来自同一 tag。
+4. IF `dec-tray` 缺失或无法启动 THEN `dec-agent` SHALL 正常运行，SHALL NOT 因此失败。
+5. WHEN 用户执行卸载 THEN 系统 SHALL 一并清理 `dec-tray` 与其自启动项，SHALL NOT 残留快捷方式或登录项。
+6. WHEN `dec-tray` 注册自启动 THEN 系统 SHALL 使用用户级机制，SHALL NOT 要求管理员权限。
+7. WHEN 新增或修改回环 Host 校验规则 THEN 系统 SHALL 有单元测试覆盖 `127.0.0.1`、`localhost`、`*.localhost`、`local.dec.firoyang.com` 与非法域名五种输入。
