@@ -1,8 +1,6 @@
 package cloudsvc
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"time"
@@ -131,24 +129,16 @@ func (s *Server) pendingAlerts(deviceID string) []proto.Alert {
 
 // recordSync 记一条下发审计（需求 15.3 明确要求覆盖下发）。
 //
-// 只记数量与 revision，不记文件内容：审计要回答“推了什么给哪台机器”，
+// 只记数量与 revision，不记文件内容：审计要回答"推了什么给哪台机器"，
 // 内容本身已经在 SSOT 的那个 commit 里了。
 //
-// 同一台设备、同一组内容在短时间内反复下发时只记第一条。幂等重发本身是
-// 正常行为（长轮询超时、代理重启都会触发），但它和"对账 bug 导致无限重写"
-// 在日志里长得一模一样——2026-10 那次故障正是被 8.4 万条这样的记录淹掉的，
-// 真正有用的信息（每小时多出几千条）反而没人看见。降噪之后，同一签名
-// 只在达到时间间隔时再记一条，量级差异一眼可见。
+// 幂等重发（长轮询超时、代理重启）会重复走到这里，但它不再需要在这里手工降噪：
+// sync 属于访问级事件，由 audit.Log 按 (设备, 来源) 每小时限量放行并聚合计数
+// （见 internal/cloud/audit/aggregate.go）。把降噪放在日志层而不是这里，
+// 是为了让所有访问级事件共用同一条有界规则，不必每个调用点各写一份。
 func (s *Server) recordSync(dev ssot.Device, in proto.SyncRequest, resp *proto.SyncResponse) {
 	detail := fmt.Sprintf("下发 %d 个文件、删除 %d 个", len(resp.Batch.Files), len(resp.Batch.Deletes))
 	subject := resp.Batch.Revision
-
-	sig := syncSignature(dev.ID, resp.Batch)
-	if s.suppressSync(sig) {
-		// 被降噪：仍然要把密钥下发记下来，那是安全追溯用的，不能省。
-		s.recordSecretDelivery(dev, resp)
-		return
-	}
 
 	if err := s.audit.Append(audit.Entry{
 		Event:    audit.EventSync,
@@ -181,54 +171,6 @@ func (s *Server) recordSecretDelivery(dev ssot.Device, resp *proto.SyncResponse)
 	}); err != nil {
 		s.logf("写审计失败: %v", err)
 	}
-}
-
-// syncSignature 是"这次下发的内容"的指纹。
-//
-// 用文件 ID 与内容哈希拼成，不参与降噪的字段（revision）刻意排除：
-// 幂等重发的 revision 可能因为别的设备写入而变，但它推的内容完全相同，
-// 在审计里属于同一条记录。
-func syncSignature(deviceID string, b *proto.Batch) string {
-	h := sha256.New()
-	fmt.Fprintf(h, "%s\n", deviceID)
-	for _, f := range b.Files {
-		fmt.Fprintf(h, "F %s %x %s\n", f.ID, sha256.Sum256([]byte(f.Content)), f.Key)
-	}
-	for _, f := range b.Deletes {
-		fmt.Fprintf(h, "D %s\n", f.ID)
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
-
-// syncQuiet 是同一签名重复下发的最小记录间隔。
-//
-// 30 分钟：正常使用下（改资产、装新设备）不会在半小时内重复推同一批内容，
-// 所以这个间隔不会掩盖真实操作；而故障级重写（每秒一轮）会在日志里留下
-// 每小时两条的痕迹——足以看出问题，又不至于把日志刷爆。
-const syncQuiet = 30 * time.Minute
-
-// suppressSync 报告这次下发是否应当跳过审计。
-func (s *Server) suppressSync(sig string) bool {
-	now := time.Now()
-	s.syncLogMu.Lock()
-	defer s.syncLogMu.Unlock()
-	if s.syncLogged == nil {
-		s.syncLogged = map[string]time.Time{}
-	}
-	// 顺手清理过期条目：设备数量很少，但服务可能连续运行几个月，
-	// 不清会随内容变化无限增长。
-	if len(s.syncLogged) > 512 {
-		for k, at := range s.syncLogged {
-			if now.Sub(at) > syncQuiet*4 {
-				delete(s.syncLogged, k)
-			}
-		}
-	}
-	if last, ok := s.syncLogged[sig]; ok && now.Sub(last) < syncQuiet {
-		return true
-	}
-	s.syncLogged[sig] = now
-	return false
 }
 
 // hasSecretFiles 报告下发里是否含密钥。

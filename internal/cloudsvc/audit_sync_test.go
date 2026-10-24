@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shichao402/Dec/internal/proto"
+	"github.com/shichao402/Dec/internal/cloud/audit"
 )
 
 // sync 审计降噪的边界测试。
@@ -13,126 +13,176 @@ import (
 // sync 记录，真正有用的信息被淹没。降噪的目的不是"少记日志"，
 // 而是让"每轮都重发"这种异常在日志量级上就看得出来。
 //
-// 所以这些用例要守住的不是"能少记"，而是"不能多记也不能少记"：
-// 内容变了必须记，设备不同必须记，只是时间过去了同一批内容还是不必记。
-
-// TestSyncSignatureIgnoresRevision 验证同一批内容的指纹与 revision 无关。
+// 降噪已经从"按内容指纹 + 30 分钟静默期"改为日志层的按小时分桶聚合
+// （见 internal/cloud/audit/aggregate.go、ADR 0043）。换掉的原因：
+// 指纹方案在"内容每轮都变"的故障后期会完全失效，而按小时分桶是有界的，
+// 上限只由配置决定，与请求量无关。
 //
-// 幂等重发时 revision 可能因为别的设备写入而变，但推出去的内容完全相同。
-// 如果指纹里带了 revision，降噪就失效了——故障场景下每轮 revision 都可能
-// 不同，日志会照旧被刷爆。
-func TestSyncSignatureIgnoresRevision(t *testing.T) {
-	a := &proto.Batch{
-		Revision: "rev-1",
-		Files:    []proto.File{{ID: "asset:core:a.md", Content: "x", Key: ""}},
-	}
-	b := &proto.Batch{
-		Revision: "rev-2",
-		Files:    []proto.File{{ID: "asset:core:a.md", Content: "x", Key: ""}},
-	}
-	if syncSignature("dev-1", a) != syncSignature("dev-1", b) {
-		t.Fatal("只差 revision 的两批内容应视为同一指纹")
+// 这里守三条不变量：
+//  1. 同一设备一小时内的重复下发，落盘条数是常数上限，不随请求数增长；
+//  2. 被聚合掉的条数必须以 count 留下，量级信号不能丢；
+//  3. 跨设备不合并——"这份内容送到过哪些机器"必须还能回答。
+
+// syncEntry 构造一条下发审计记录。
+func syncEntry(at time.Time, device string) audit.Entry {
+	return audit.Entry{
+		At:       at,
+		Event:    audit.EventSync,
+		DeviceID: device,
+		Source:   "agent",
+		Subject:  "rev-1",
+		Detail:   "下发 3 个文件、删除 0 个",
+		OK:       true,
 	}
 }
 
-// TestSyncSignatureDistinguishes 验证指纹对真正该区分的维度敏感。
-func TestSyncSignatureDistinguishes(t *testing.T) {
-	base := &proto.Batch{
-		Files: []proto.File{{ID: "asset:core:a.md", Content: "x"}},
-	}
-	baseSig := syncSignature("dev-1", base)
+// TestSyncAuditIsBoundedPerHour 验证高频下发不会把审计刷爆。
+//
+// 这是那次故障的直接回归测试：一秒一轮、跑一小时是 3600 次下发，
+// 但审计里必须只剩常数条（放行阈值 + 一条汇总）。
+func TestSyncAuditIsBoundedPerHour(t *testing.T) {
+	agg := audit.NewAccessAggregator()
+	hour := time.Date(2026, 10, 23, 21, 0, 0, 0, time.UTC)
 
-	cases := map[string]string{
-		"内容变了": syncSignature("dev-1", &proto.Batch{
-			Files: []proto.File{{ID: "asset:core:a.md", Content: "y"}},
-		}),
-		"文件变了": syncSignature("dev-1", &proto.Batch{
-			Files: []proto.File{{ID: "asset:core:b.md", Content: "x"}},
-		}),
-		"设备变了": syncSignature("dev-2", base),
-		"多了删除": syncSignature("dev-1", &proto.Batch{
-			Files:   []proto.File{{ID: "asset:core:a.md", Content: "x"}},
-			Deletes: []proto.File{{ID: "asset:core:old.md"}},
-		}),
+	const requests = 3600
+	emitted := 0
+	var summaries []audit.Entry
+	for i := 0; i < requests; i++ {
+		at := hour.Add(time.Duration(i) * time.Second)
+		d := agg.Offer(syncEntry(at, "dev-a"))
+		if d.Emit {
+			emitted++
+		}
+		summaries = append(summaries, d.Summaries...)
 	}
-	for name, got := range cases {
-		if got == baseSig {
-			t.Fatalf("%s 之后指纹不应相同", name)
+
+	if emitted > audit.MaxAccessRecordsPerHour {
+		t.Fatalf("%d 次下发放行了 %d 条，超过上限 %d",
+			requests, emitted, audit.MaxAccessRecordsPerHour)
+	}
+	if emitted == 0 {
+		t.Fatal("至少应放行一条：完全静默会让审计看不出这台设备在对账")
+	}
+	// 同一小时内的聚合不会在中途产出汇总（只有跨小时才结算），
+	// 所以这里应当没有汇总记录。
+	if len(summaries) != 0 {
+		t.Fatalf("同一小时内不应产生跨小时汇总，实际 %d 条", len(summaries))
+	}
+
+	// 关停时把剩余计数补成汇总，条数必须对得上：放行 + 聚合 = 总请求数。
+	left := agg.Take()
+	totalSuppressed := 0
+	for _, s := range left {
+		totalSuppressed += s.Count
+	}
+	if emitted+totalSuppressed != requests {
+		t.Fatalf("放行 %d + 聚合 %d = %d，与请求数 %d 不符（有记录被静默丢弃）",
+			emitted, totalSuppressed, emitted+totalSuppressed, requests)
+	}
+}
+
+// TestSyncAuditSummaryCarriesCount 验证聚合条数会以 count 留下。
+//
+// 这是"量级信号不能丢"的落点：一万条合并成一条之后，
+// 事后仍要能看出这是一万次而不是一次。
+func TestSyncAuditSummaryCarriesCount(t *testing.T) {
+	agg := audit.NewAccessAggregator()
+	hour := time.Date(2026, 10, 23, 21, 0, 0, 0, time.UTC)
+
+	// 先填满本小时的放行额度。
+	for i := 0; i < audit.MaxAccessRecordsPerHour; i++ {
+		agg.Offer(syncEntry(hour.Add(time.Duration(i)*time.Second), "dev-a"))
+	}
+	// 再多来 500 条，全部应被聚合。
+	const extra = 500
+	for i := 0; i < extra; i++ {
+		agg.Offer(syncEntry(hour.Add(time.Duration(i)*time.Millisecond), "dev-a"))
+	}
+
+	left := agg.Take()
+	if len(left) != 1 {
+		t.Fatalf("应合并成 1 条汇总，实际 %d 条", len(left))
+	}
+	if left[0].Count != extra {
+		t.Fatalf("汇总应记录 %d 条，实际 %d", extra, left[0].Count)
+	}
+	if left[0].Event != audit.EventSync || left[0].DeviceID != "dev-a" {
+		t.Fatalf("汇总应保留事件与设备信息，实际 %+v", left[0])
+	}
+}
+
+// TestSyncAuditSeparatesDevices 验证聚合按设备隔离。
+//
+// 同一份内容推给两台设备是两条独立的事实，合并会直接毁掉
+// "这份内容送到过哪些机器"这个取证能力。
+func TestSyncAuditSeparatesDevices(t *testing.T) {
+	agg := audit.NewAccessAggregator()
+	hour := time.Date(2026, 10, 23, 21, 0, 0, 0, time.UTC)
+
+	// 把 dev-a 的额度用满。
+	for i := 0; i < audit.MaxAccessRecordsPerHour; i++ {
+		agg.Offer(syncEntry(hour, "dev-a"))
+	}
+	// dev-b 的第一条必须仍然放行：它不应该被 dev-a 的用量影响。
+	d := agg.Offer(syncEntry(hour, "dev-b"))
+	if !d.Emit {
+		t.Fatal("dev-b 首次下发应放行，不应被 dev-a 的聚合影响")
+	}
+}
+
+// TestSyncAuditReopensNextHour 验证跨小时重新放行。
+//
+// 降噪不能变成"这台设备以后永远不再记"：每天正常对账都应该留下痕迹，
+// 否则审计里看不出设备还活着。
+func TestSyncAuditReopensNextHour(t *testing.T) {
+	agg := audit.NewAccessAggregator()
+	hour := time.Date(2026, 10, 23, 21, 0, 0, 0, time.UTC)
+
+	for i := 0; i < audit.MaxAccessRecordsPerHour; i++ {
+		agg.Offer(syncEntry(hour, "dev-a"))
+	}
+	if d := agg.Offer(syncEntry(hour, "dev-a")); d.Emit {
+		t.Fatal("本小时额度已满，不应继续放行")
+	}
+
+	// 进入下一小时：应重新放行，并把上一小时的聚合计数结算成汇总。
+	next := hour.Add(time.Hour)
+	d := agg.Offer(syncEntry(next, "dev-a"))
+	if !d.Emit {
+		t.Fatal("新的一小时应重新放行")
+	}
+	if len(d.Summaries) != 1 {
+		t.Fatalf("跨小时应结算出 1 条汇总，实际 %d 条", len(d.Summaries))
+	}
+	if d.Summaries[0].Count != 1 {
+		t.Fatalf("上小时被聚合 1 条，汇总应记 1，实际 %d", d.Summaries[0].Count)
+	}
+	// 汇总必须落在上一小时的分片里，否则跨小时的计数会写进错误文件。
+	if got := d.Summaries[0].At.Truncate(time.Hour); !got.Equal(hour) {
+		t.Fatalf("汇总应落在 %s，实际 %s", hour, got)
+	}
+}
+
+// TestSyncAuditIgnoresRevisionForBucketing 验证 revision 变化不会让计数桶增殖。
+//
+// 这是旧指纹方案失效的那个场景：故障后期每轮下发的 revision 都可能不同。
+// 如果聚合键带上 revision，每个新 revision 都会开一个新桶，
+// 降噪等于没有。
+func TestSyncAuditIgnoresRevisionForBucketing(t *testing.T) {
+	agg := audit.NewAccessAggregator()
+	hour := time.Date(2026, 10, 23, 21, 0, 0, 0, time.UTC)
+
+	emitted := 0
+	for i := 0; i < 1000; i++ {
+		e := syncEntry(hour, "dev-a")
+		// 每轮 revision 都不同，模拟内容持续变化的失控场景。
+		e.Subject = "rev-" + time.Duration(i).String()
+		if agg.Offer(e).Emit {
+			emitted++
 		}
 	}
-}
-
-// TestSuppressSyncDedupes 验证同一签名在时间窗内只放行第一次。
-func TestSuppressSyncDedupes(t *testing.T) {
-	s := &Server{}
-	b := &proto.Batch{Files: []proto.File{{ID: "asset:core:a.md", Content: "x"}}}
-	sig := syncSignature("dev-1", b)
-
-	if s.suppressSync(sig) {
-		t.Fatal("第一次下发应记审计")
-	}
-	if !s.suppressSync(sig) {
-		t.Fatal("窗口内重复下发应被降噪")
-	}
-	if !s.suppressSync(sig) {
-		t.Fatal("窗口内第三次下发仍应被降噪")
-	}
-}
-
-// TestSuppressSyncReopensAfterQuiet 验证窗口过去之后重新记录。
-//
-// 这条很重要：降噪不能变成"永久只记一次"。设备每天正常对账一次，
-// 每天都该留一条痕迹，否则审计里会看不出这台设备还活着。
-func TestSuppressSyncReopensAfterQuiet(t *testing.T) {
-	s := &Server{}
-	sig := "sig"
-	// 直接放入一条已经过期的记录，模拟时间流逝。
-	s.syncLogged = map[string]time.Time{sig: time.Now().Add(-syncQuiet - time.Minute)}
-
-	if s.suppressSync(sig) {
-		t.Fatal("超过静默期后应重新记录")
-	}
-}
-
-// TestSuppressSyncDifferentDevices 验证降噪按设备隔离。
-//
-// 同一个内容推给两台设备是两条独立的事实，审计要能回答
-// "这份内容送到过哪些机器"，合并会直接毁掉这个能力。
-func TestSuppressSyncDifferentDevices(t *testing.T) {
-	s := &Server{}
-	b := &proto.Batch{Files: []proto.File{{ID: "asset:core:a.md", Content: "x"}}}
-
-	if s.suppressSync(syncSignature("dev-1", b)) {
-		t.Fatal("dev-1 首次应记录")
-	}
-	if s.suppressSync(syncSignature("dev-2", b)) {
-		t.Fatal("dev-2 首次应记录，不应被 dev-1 的记录影响")
-	}
-}
-
-// TestSuppressSyncPrunesStale 验证过期条目会被清理。
-//
-// 服务可能连续运行几个月，内容指纹随内容变化不断新增，
-// 不清理会让这张表无限增长——正是这次故障的另一种形状。
-func TestSuppressSyncPrunesStale(t *testing.T) {
-	s := &Server{}
-	old := time.Now().Add(-syncQuiet * 8)
-	s.syncLogged = map[string]time.Time{}
-	for i := 0; i < 600; i++ {
-		s.syncLogged[string(rune('a'+i%26))+string(rune('a'+i/26))] = old
-	}
-	// 触发一次写入，顺带清理。
-	s.suppressSync("fresh")
-
-	if len(s.syncLogged) > 600 {
-		t.Fatalf("过期条目应被清理，实际 %d 条", len(s.syncLogged))
-	}
-	for sig, at := range s.syncLogged {
-		if sig == "fresh" {
-			continue
-		}
-		if time.Since(at) > syncQuiet*4 {
-			t.Fatalf("超期条目 %q 仍留在表中", sig)
-		}
+	if emitted > audit.MaxAccessRecordsPerHour {
+		t.Fatalf("revision 变化时放行了 %d 条，超过上限 %d：聚合键不应包含 revision",
+			emitted, audit.MaxAccessRecordsPerHour)
 	}
 }

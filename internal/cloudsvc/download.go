@@ -213,6 +213,10 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	// 下载记为审计但不告警（需求 20.4 明确不为此告警）：
 	// 这是公网端点，把它做成告警只会让人很快开始忽略所有告警。
+	//
+	// 这是唯一一条由公网匿名请求触发的审计，所以它必须是访问级：
+	// 同一 IP、同一文件的重复下载由日志层按小时聚合（见 audit/aggregate.go），
+	// 既满足"访问记入审计"，又不会让一次爬取就把审计仓库撑大。
 	if s.audit != nil {
 		if err := s.audit.Append(audit.Entry{
 			Event:    audit.EventDownload,

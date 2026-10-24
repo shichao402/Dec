@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -94,6 +95,12 @@ type Entry struct {
 	OK bool `json:"ok"`
 	// RemoteIP 是请求来源地址，便于事后判断是不是同一处发起。
 	RemoteIP string `json:"remote_ip,omitempty"`
+	// Count 表示这条记录代表了多少次同类事件。
+	//
+	// 为 0 或 1 时是普通记录；大于 1 说明它是聚合后的汇总（见 aggregate.go）。
+	// 用 omitempty 保证绝大多数记录不会多出一个字段，
+	// 同时在读日志的人眼里一眼能看出"这条是汇总"。
+	Count int `json:"count,omitempty"`
 }
 
 // Log 是审计日志。
@@ -109,6 +116,16 @@ type Log struct {
 	pending int
 	// lastCommit 是上一次提交的时间，用于按时间窗合并。
 	lastCommit time.Time
+	// access 是传输与访问类事件的聚合器（ADR 0043）。
+	//
+	// 只有这类事件会被聚合：它们描述"同一份东西又送了一次"，
+	// 频率由网络和 bug 决定，不由业务决定。
+	access *AccessAggregator
+	// dropped 统计因落盘失败而未写入的条数，供管理面观察。
+	//
+	// 审计写失败不阻断业务（见 Server.record 的取舍），所以这些记录确实丢了；
+	// 记下数量至少能让"审计有洞"这件事被看见，而不是静默。
+	dropped atomic.Int64
 }
 
 // CommitWindow 是审计提交的合并窗口。
@@ -144,7 +161,7 @@ func Open(dir string) (*Log, error) {
 			return nil, fmt.Errorf("初始化审计仓库失败: %w", err)
 		}
 	}
-	l := &Log{dir: dir, repo: repo}
+	l := &Log{dir: dir, repo: repo, access: NewAccessAggregator()}
 	// 启动时先清掉上次进程留下的未提交改动：它们已经在工作树里，
 	// 补一次提交即可，不必等新记录来触发。
 	if err := l.commitPending(); err != nil {
@@ -161,6 +178,13 @@ func (l *Log) Repo() *git.Repository { return l.repo }
 
 // Append 追加一条记录。
 //
+// 是否落盘由事件级别决定（见 tier.go、ADR 0043）：
+//
+//   - 安全级与事实级：无条件逐条写入。这两级的频率由人的操作和业务提交决定，
+//     天然有界，任何限额都不作用于它们。
+//   - 访问级：先过聚合器，同一 (事件, 设备, 来源, 对象) 每小时最多写
+//     MaxAccessRecordsPerHour 条，超出的累计成一条带 count 的汇总。
+//
 // 记录本身逐条 fsync 到工作树文件后就返回，不在这里做 commit：
 // 落盘（fsync）才是"机器被砸也不丢"的保证，commit 只是把改动记进历史。
 // 提交按 CommitWindow / CommitBatch 合并，避免每条一个 commit 把仓库撑爆
@@ -173,8 +197,30 @@ func (l *Log) Append(e Entry) error {
 		e.At = time.Now().UTC()
 	}
 	e.At = e.At.UTC().Truncate(time.Second)
+
+	if e.Event.Tier() == TierAccess {
+		decision := l.access.Offer(e)
+		// 先把上一小时积压的汇总补上：它们代表已经发生、还没落盘的事实，
+		// 丢掉就无法还原"被聚合了多少条"。
+		for _, sum := range decision.Summaries {
+			l.writeEntry(sum)
+		}
+		if !decision.Emit {
+			return nil
+		}
+	}
+	return l.writeEntry(e)
+}
+
+// writeEntry 把一条记录写进工作树文件并 fsync。调用方需持有 l.mu。
+//
+// 失败只累计 dropped 计数、不向上传播：审计是旁路，不能因为磁盘满
+// 就让用户的写入操作失败（那会造成"数据没存上，但你以为存上了"）。
+// 这与 Server.record 的取舍一致，只是把"静默丢"变成"可数的丢"。
+func (l *Log) writeEntry(e Entry) error {
 	line, err := json.Marshal(e)
 	if err != nil {
+		l.dropped.Add(1)
 		return fmt.Errorf("序列化审计记录失败: %w", err)
 	}
 	line = append(line, '\n')
@@ -183,21 +229,26 @@ func (l *Log) Append(e Entry) error {
 		e.At.Format("2006-01-02T15")+".hour.jsonl")
 	full := filepath.Join(l.dir, rel)
 	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+		l.dropped.Add(1)
 		return fmt.Errorf("创建审计子目录失败: %w", err)
 	}
 	f, err := os.OpenFile(full, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		l.dropped.Add(1)
 		return fmt.Errorf("打开审计文件失败: %w", err)
 	}
 	if _, err := f.Write(line); err != nil {
 		f.Close()
+		l.dropped.Add(1)
 		return fmt.Errorf("写入审计记录失败: %w", err)
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
+		l.dropped.Add(1)
 		return fmt.Errorf("同步审计文件失败: %w", err)
 	}
 	if err := f.Close(); err != nil {
+		l.dropped.Add(1)
 		return err
 	}
 
@@ -209,13 +260,47 @@ func (l *Log) Append(e Entry) error {
 	return l.commitPending()
 }
 
+// Dropped 返回因写入失败而丢失的记录数。
+//
+// 这些记录确实不在审计里了。暴露出来是为了让管理面能显示"审计有洞"，
+// 而不是让丢失静默发生。
+func (l *Log) Dropped() int64 { return l.dropped.Load() }
+
+// Suppressed 返回当前所有尚未落盘的聚合计数，供关停前落盘。
+//
+// 服务退出前必须调用 Flush，它会先把这个计数落盘再提交；
+// 否则最后一次汇总会随进程一起消失。
+func (l *Log) Suppressed() []Entry {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.access.Take()
+}
+
 // Flush 立即提交待提交的记录。
 //
-// 冷备推送前必须调用：推送只看到已提交的内容，窗口期内的记录还在工作树里，
-// 直接推会漏。平时不必显式调用，Append 会按窗口自己提交。
+// 只做 git 提交，不结算聚合计数。原因是 Flush 会被周期性调用（冷备推送前、
+// 部署前），如果它每次都把 suppressed 结算成一条汇总，那么在"每写一条就 Flush"
+// 的场景下，每条被抑制的记录都会变成一条 count=1 的汇总记录重新写回文件——
+// 聚合等于没做（2026-10-24 的测试实测：200 次下发仍落盘 200 条）。
+//
+// 聚合计数有两个正确的结算时机：小时切换（Offer 内部自动结算上一小时）
+// 和进程退出（Close）。两者之间不需要中间的落盘点。
 func (l *Log) Flush() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.commitPending()
+}
+
+// Close 是进程退出前的收尾：把本小时的聚合计数结算成汇总，再提交。
+//
+// 这是唯一需要显式结算聚合的时机：进程一退出，内存里的 suppressed 就没了，
+// 不落盘的话"这段时间有多少条被聚合"会永久丢失，量级信号也就断了。
+func (l *Log) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, sum := range l.access.Take() {
+		l.writeEntry(sum)
+	}
 	return l.commitPending()
 }
 

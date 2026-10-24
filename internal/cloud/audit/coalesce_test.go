@@ -29,9 +29,12 @@ func TestCommitCoalescing(t *testing.T) {
 	const n = 500
 	at := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 	for i := 0; i < n; i++ {
+		// 用业务事实级事件而不是 sync：这里的命题是"提交合并生效且一条不丢"，
+		// 而 sync 属于访问级，会被 audit 按小时聚合减量（见 aggregate.go），
+		// 用它会把这个测试变成在验证聚合规则，偏离原本要守的东西。
 		if err := log.Append(Entry{
 			At:    at.Add(time.Duration(i) * time.Millisecond),
-			Event: EventSync,
+			Event: EventAssetWrite,
 			OK:    true,
 		}); err != nil {
 			t.Fatalf("第 %d 条写入失败: %v", i, err)

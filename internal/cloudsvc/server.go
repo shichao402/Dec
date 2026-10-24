@@ -574,6 +574,13 @@ func (s *Server) closeAll() {
 	if s.httpSrv != nil {
 		_ = s.httpSrv.Close()
 	}
+	// 审计最后收尾：把聚合器里还没落盘的计数写成汇总记录再提交。
+	// 顺序放在 httpSrv 之后，保证没有请求还在往里写。
+	if s.audit != nil {
+		if err := s.audit.Close(); err != nil {
+			s.logf("审计收尾失败: %v", err)
+		}
+	}
 }
 
 // rootKeyOf 返回当前根密钥，供需要它的方法使用。
