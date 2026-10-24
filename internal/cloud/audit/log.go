@@ -117,6 +117,17 @@ type Log struct {
 	pending int
 	// lastCommit 是上一次提交的时间，用于按时间窗合并。
 	lastCommit time.Time
+	// commitWindow 是提交合并窗口，默认 CommitWindow。
+	//
+	// 做成字段而非直接用常量：这个值直接决定仓库体积——git 存的是文件快照，
+	// 提交越密，同一个小时文件被重复存越多份。它需要能按实测校准
+	// （见 TestMeasureAnnualGrowth），也需要测试能调小以免等待。
+	commitWindow time.Duration
+	// curHour 是当前正在追加的小时分片标识（形如 2006-01-02T15）。
+	//
+	// 它只用于判断"这条记录有没有跨到新的一个小时文件"——跨了就提交一次，
+	// 让上一小时定稿进历史，避免同一个文件被反复快照（见 CommitWindow）。
+	curHour string
 	// access 是传输与访问类事件的聚合器（ADR 0043）。
 	//
 	// 只有这类事件会被聚合：它们描述"同一份东西又送了一次"，
@@ -136,24 +147,40 @@ type Log struct {
 	gcRunning bool
 }
 
-// CommitWindow 是审计提交的合并窗口。
+// CommitWindow 是未提交记录的最大滞留时长，用于兜底。
 //
-// 来历（2026-10-23 生产故障）：最初每条记录都单独 commit，理由是"即使下一秒
-// 机器被砸了也已经记下来了"。这个理由本身没错，但它把 commit 当成了持久化手段，
-// 而持久化其实在图前一步——记录先 fsync 到工作树文件才提交。真正的代价是仓库
-// 体积：一次 MCP 会话就能产生几万条记录，76,350 个 commit 把 .git 撑到 5.7G，
-// 占满 40G 系统盘后机器卡死、SSH 与 HTTPS 全部无响应。
+// 主策略不是时间窗，而是"按小时收口"（见 writeEntry）：审计按小时分片，
+// 一个小时文件在跨入下一小时时提交一次，此后就不再变化，因此只会被 git
+// 快照一次。这才是符合"文件快照"这一存储特性的粒度。
 //
-// 所以改成按时间窗合并提交：记录仍然逐条 fsync（进程崩溃不丢数据），
-// 提交攒够一个窗口或攒够 CommitBatch 条再做一次。审计的可读性不受影响——
-// 记录本身带秒级时间戳，不依赖 commit 分隔。
-const CommitWindow = 5 * time.Second
+// 为什么不能用"每 N 秒提交一次"：记录间隔通常大于任何小窗口，
+// 于是每条记录都会各自触发一次提交，同一个小时文件被反复快照。
+// 2026-10-24 实测（TestMeasureAnnualGrowth）：
+//
+//	每小时提交 1440 次 → 体积是数据的 4.1 倍，每年 354 MB
+//	每小时提交 2 次   → 1.2 倍，每年 104 MB
+//	每小时提交 1 次   → 1.1 倍，每年 96 MB
+//
+// 线上也能直接看到：events/2026-10/2026-10-23T20.hour.jsonl 被提交了 594 次，
+// 而它当前只有 660 KB。2026-10-23 那次 5.7G 的 .git 正是这样堆出来的。
+//
+// 这个常量留作兜底：万一因为时钟异常或"小时内持续有写入"导致一直没跨小时，
+// 也不至于无限期不提交。取 2 小时，比一个分片周期长，正常路径永远碰不到它。
+const CommitWindow = 2 * time.Hour
 
 // CommitBatch 是触发提交的条数阈值。
 //
-// 高流量时不必等满一个窗口：条数到了就提交，避免积压太多未提交内容
-// 让"最近发生了什么"在 git 历史里看不到。
+// 与"按小时收口"的关系：主策略管"同一小时文件不要反复快照"，
+// 这一条管"别让单次提交太大、别让未提交内容堆积太久"。
+// 高峰时段（例如一次故障刷出几千条）会按批提交，不必等满一小时。
 const CommitBatch = 200
+
+// commitBatchForTest 让实验能单独隔离"按小时收口"这一策略。
+//
+// 生产代码始终读 CommitBatch；只有 measure_growth_test.go 会改它。
+// 用一个包级变量而不是给 Log 加字段：这个值不该成为运行时配置，
+// 它只是为了让实验能排除兜底路径的干扰。
+var commitBatchForTest = CommitBatch
 
 // Open 打开或初始化审计仓库。
 func Open(dir string) (*Log, error) {
@@ -169,7 +196,7 @@ func Open(dir string) (*Log, error) {
 			return nil, fmt.Errorf("初始化审计仓库失败: %w", err)
 		}
 	}
-	l := &Log{dir: dir, repo: repo, access: NewAccessAggregator()}
+	l := &Log{dir: dir, repo: repo, access: NewAccessAggregator(), commitWindow: CommitWindow}
 	// 启动时先清掉上次进程留下的未提交改动：它们已经在工作树里，
 	// 补一次提交即可，不必等新记录来触发。
 	if err := l.commitPending(); err != nil {
@@ -233,6 +260,26 @@ func (l *Log) Append(e Entry) error {
 // 就让用户的写入操作失败（那会造成"数据没存上，但你以为存上了"）。
 // 这与 Server.record 的取舍一致，只是把"静默丢"变成"可数的丢"。
 func (l *Log) writeEntry(e Entry) error {
+	hour := e.At.Format("2006-01-02T15")
+
+	// 按小时收口：先判断这条记录有没有跨进新的一个小时文件。
+	// 跨了就把上一小时提交掉——它此刻是完整定稿的，这一份快照之后不会再变。
+	//
+	// 为什么要"先提交再写"而不是"先写再提交"：如果先写，新小时文件里已经有
+	// 一条记录了，这次提交就会把它一并快照进去；等下个小时收口时它又会被
+	// 完整快照一次。每份文件都被存两遍，白白放大一倍。
+	//
+	// 为什么不在"当前小时还在增长时"提交：git 存的是文件快照，
+	// 同一个文件每提交一次就多存一份完整副本。实测（见 CommitWindow 注释）：
+	// 每小时提交 1440 次时仓库是数据的 4.1 倍、每年 354 MB；
+	// 每小时提交一次时是 1.1 倍、每年 96 MB。
+	if l.curHour != "" && l.curHour != hour {
+		// 提交失败不阻断写入：记录还没写，这里失败只是"上一小时晚点进历史"，
+		// 内容仍在工作树里，下一次收口会一起带上。
+		_ = l.commitPending()
+	}
+	l.curHour = hour
+
 	line, err := json.Marshal(e)
 	if err != nil {
 		l.dropped.Add(1)
@@ -240,8 +287,7 @@ func (l *Log) writeEntry(e Entry) error {
 	}
 	line = append(line, '\n')
 
-	rel := filepath.Join("events", e.At.Format("2006-01"),
-		e.At.Format("2006-01-02T15")+".hour.jsonl")
+	rel := filepath.Join("events", e.At.Format("2006-01"), hour+".hour.jsonl")
 	full := filepath.Join(l.dir, rel)
 	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
 		l.dropped.Add(1)
@@ -268,8 +314,10 @@ func (l *Log) writeEntry(e Entry) error {
 	}
 
 	l.pending++
-	// 窗口未到、条数也没攒够，就先不提交。
-	if l.pending < CommitBatch && time.Since(l.lastCommit) < CommitWindow {
+
+	// 兜底两点：批量到阈值就提交（避免高峰时段攒太多），
+	// 以及长时间没跨小时时也给一个上界（时钟异常、只写同一小时等）。
+	if l.pending < commitBatchForTest && time.Since(l.lastCommit) < l.commitWindow {
 		return nil
 	}
 	return l.commitPending()
