@@ -16,8 +16,8 @@ description: >
 - 为本仓 Release 交叉编译（`build`）
 
 产品仓开箱、resolution/bundle、注册/轮换/吊销 token **不要用本 skill**，统一走
-[`relkit-ops`](../relkit-ops/SKILL.md)。`scripts/host/relkit_host.py` 只服务冻结的 v0.5
-旧控制面，不得用于 vNext 新接入或生产切换。
+[`relkit-ops`](../relkit-ops/SKILL.md)。产品仓物化的 Python host 控制面
+（`scripts/host/relkit_host.py`）已随 ADR 0019 §1 删除，不存在可用副本。
 
 ## 入口
 
