@@ -24,6 +24,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/shichao402/Dec/internal/cloud/ssot"
+	"github.com/shichao402/Dec/internal/sysproc"
 )
 
 // Event 是审计事件的类型。
@@ -464,6 +465,113 @@ func (l *Log) Head() string {
 		return ""
 	}
 	return ref.Hash().String()
+}
+
+// gcMinLooseObjects 是触发 gc 的松散对象数阈值。
+//
+// 低于这个数不值得动：gc 本身要重写整个 packfile，几百个松散对象的回收收益
+// 抵不上它的开销。2000 是个折中：按每小时一个提交、每个提交若干对象估算，
+// 大约对应几天到几周的积累，既不会让松散对象长期堆着，也不会每天白跑。
+const gcMinLooseObjects = 2000
+
+// Gc 回收松散对象，控制仓库体积。
+//
+// 为什么需要它：审计是只追加的，定期 commit 会产生大量松散对象。
+// 松散对象本身很小，但它们不会自动合并——git 的自动 gc 阈值（默认 6700）
+// 在高频提交下可能长期达不到，也可能在某个时刻突然被触发并长时间占用磁盘。
+// 主动按天做一次，代价可预期。
+//
+// 为什么用外部 git 命令而不是 go-git：读源码可知，go-git 的 RepackObjects
+// 只做"把已有 pack 重打一遍再删旧 pack"，完全不碰松散对象；而它的
+// packfile 编码器需要自己往 .git/objects/pack 里写头部与索引，
+// 拼错就会写坏仓库。gc 是低频维护动作，调用系统 git 反而更可靠，
+// 代价只是部署机需要装 git（实际必然有，CI 与服务器都在用）。
+//
+// 失败只返回错误、不 panic：gc 是维护动作，不该影响审计写入。
+func (l *Log) Gc() error { return l.gcAt(gcMinLooseObjects) }
+
+// gcAt 在松散对象数达到 min 时执行一次回收。
+//
+// min 抽成参数只为可测：验证「达到阈值就会真的收」不该要求测试造 2000 个对象，
+// 那既慢又依赖环境。生产只通过 Gc 调用，阈值仍是 gcMinLooseObjects。
+func (l *Log) gcAt(min int) error {
+	// 只在锁内做「提交」与「数对象」这两件必须串行的事（都要读工作树与索引）。
+	if err := l.Flush(); err != nil {
+		return err
+	}
+	count, err := l.LooseObjects()
+	if err != nil {
+		return err
+	}
+	// 太少就不做：打包有固定开销，几百个对象的回收收益抵不上。
+	if count < min {
+		return nil
+	}
+	return l.gcUnlocked()
+}
+
+// gcUnlocked 执行一次回收。调用方不得持有 l.mu。
+//
+// 为什么不能在锁内跑：git gc 要把整个对象库重新打包，仓库越大越慢。
+// 而 l.mu 是所有审计写入（也就所有业务写入）的必经之路——在 1G 内存的机器上
+// 让一次 gc 压着这把锁，等于给整个服务加一次时长不可控的停顿。
+//
+// 并发安全性：git gc 只动 .git，不碰工作树；它自身用 gc.pid 互斥，
+// 与正常 commit 并发是 git 支持的场景。所以放开锁是安全的。
+// 另外这里刻意不用 --prune=now：宽限期是 git 对「刚创建、尚未被引用」的
+// 对象（正在写入的 tree/blob）的保护，取消它去多回收几个字节不值得冒这个险。
+// 审计只追加，本来也没什么不可达对象。
+func (l *Log) gcUnlocked() error {
+	// 经 sysproc 创建子进程：dec-cloud 以脱离控制台的方式常驻，
+	// 直接用 os/exec 在 Windows 上会弹出控制台窗口（见 sysproc 包注释）。
+	cmd := sysproc.Command("git", "-c", "gc.auto=0", "gc", "--quiet")
+	cmd.Dir = l.dir
+	// 显式给身份，避免在没有全局配置的环境里因缺 user.name 失败。
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=dec-cloud", "GIT_AUTHOR_EMAIL=cloud@dec.local",
+		"GIT_COMMITTER_NAME=dec-cloud", "GIT_COMMITTER_EMAIL=cloud@dec.local",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("回收审计仓库对象失败: %w（输出: %s）", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// looseObjectCount 统计 objects 目录下的松散对象文件数量。
+//
+// 松散对象存放在 objects/<两位十六进制>/<38 位十六进制> 里，
+// info 与 pack 是特殊目录，不算对象。
+func looseObjectCount(objectsDir string) (int, error) {
+	entries, err := os.ReadDir(objectsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("读取对象目录失败: %w", err)
+	}
+	total := 0
+	for _, de := range entries {
+		if !de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if name == "info" || name == "pack" || len(name) != 2 {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(objectsDir, name))
+		if err != nil {
+			continue
+		}
+		total += len(files)
+	}
+	return total, nil
+}
+
+// LooseObjects 返回当前松散对象数量，供管理面与测试观察仓库健康度。
+func (l *Log) LooseObjects() (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return looseObjectCount(filepath.Join(l.dir, ".git", "objects"))
 }
 
 // Author 构造审计用的作者信息。

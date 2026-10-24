@@ -232,8 +232,21 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, full)
 }
 
-// clientIP 取客户端 IP，用 RemoteAddr 而不信任任何转发头：
-// 服务端前面没有反代，转发头只会被伪造。
+// clientIP 取客户端 IP。
+//
+// 已知局限（2026-10-24 线上核实）：生产拓扑是
+// 公网 443 → nginx stream(ssl_preread + PROXY protocol) → 127.0.0.1:8445（剥掉 PROXY 头）
+// → dec-cloud 127.0.0.1:8444。
+// 因为 dec-cloud 不解析 PROXY 头，PROXY 头在 8445 那一跳就被剥掉了，
+// 所以这里拿到的永远是 127.0.0.1，而不是真实公网来源。
+//
+// 为什么仍然只用 RemoteAddr、不信任转发头：dec-cloud 前面只有这一层本机 nginx，
+// 它没有设置任何 X-Forwarded-For；此时若去信任转发头，等于让公网请求
+// 自己声明来源地址，那比"地址不准"更糟——审计里会出现伪造的 IP。
+//
+// 要恢复真实来源，正确做法是让 dec-cloud 解析 PROXY protocol（去掉 8445 那一跳）。
+// 在此之前，审计里的 remote_ip 对经由公网进入的请求没有取证价值，
+// 判断来源只能依赖设备 ID 和设备证书。
 func clientIP(r *http.Request) string {
 	host := r.RemoteAddr
 	if i := strings.LastIndex(host, ":"); i > 0 {

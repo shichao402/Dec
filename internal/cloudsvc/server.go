@@ -264,6 +264,7 @@ func New(cfg Config) (*Server, error) {
 		},
 		Reporter:   s,
 		FlushAudit: al.Flush,
+		GcAudit:    al.Gc,
 	})
 	s.backup.Start(ctx)
 	// 本机证书：后台周期检查并续期，未配置凭据时只记一次日志。
