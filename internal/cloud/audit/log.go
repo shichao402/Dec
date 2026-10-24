@@ -127,6 +127,13 @@ type Log struct {
 	// 审计写失败不阻断业务（见 Server.record 的取舍），所以这些记录确实丢了；
 	// 记下数量至少能让"审计有洞"这件事被看见，而不是静默。
 	dropped atomic.Int64
+	// gcRunning 表示此刻有 gc 在跑，期间不提交。
+	//
+	// gc 会删掉旧 pack，而提交要读 HEAD tree 里的对象；两者撞在一起时，
+	// 提交会用到一个正在被删除的 pack（go-git 的索引缓存不会自己更新）。
+	// 记录本身仍然逐条 fsync 到工作树文件，只是攒着不 commit，
+	// 等 gc 结束换新句柄后由下一次提交一起带上，没有数据损失。
+	gcRunning bool
 }
 
 // CommitWindow 是审计提交的合并窗口。
@@ -175,7 +182,14 @@ func Open(dir string) (*Log, error) {
 func (l *Log) Dir() string { return l.dir }
 
 // Repo 返回底层仓库，供冷备推送使用。
-func (l *Log) Repo() *git.Repository { return l.repo }
+//
+// 句柄会在 gc 之后被替换（见 reopenRepo），所以这里必须持锁读取，
+// 否则可能拿到正在被替换的指针。
+func (l *Log) Repo() *git.Repository {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.repo
+}
 
 // Append 追加一条记录。
 //
@@ -309,6 +323,11 @@ func (l *Log) Close() error {
 //
 // 调用方需持有 l.mu（Open 里是单线程，无需加锁）。
 func (l *Log) commitPending() error {
+	// gc 正在重写对象库：此刻提交会用到一个正在被删除的 pack。
+	// 记录已经在工作树里（已 fsync），攒到 gc 结束后的下一次提交即可。
+	if l.gcRunning {
+		return nil
+	}
 	wt, err := l.repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("读取审计工作树失败: %w", err)
@@ -522,6 +541,17 @@ func (l *Log) gcAt(min int) error {
 // 对象（正在写入的 tree/blob）的保护，取消它去多回收几个字节不值得冒这个险。
 // 审计只追加，本来也没什么不可达对象。
 func (l *Log) gcUnlocked() error {
+	// 标记 gc 进行中，让并发的 commit 让路（见 Log.gcRunning）。
+	// 只置标记、不持锁：持锁就回到了"gc 压着写入"的老问题。
+	l.mu.Lock()
+	l.gcRunning = true
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		l.gcRunning = false
+		l.mu.Unlock()
+	}()
+
 	// 经 sysproc 创建子进程：dec-cloud 以脱离控制台的方式常驻，
 	// 直接用 os/exec 在 Windows 上会弹出控制台窗口（见 sysproc 包注释）。
 	cmd := sysproc.Command("git", "-c", "gc.auto=0", "gc", "--quiet")
@@ -534,7 +564,38 @@ func (l *Log) gcUnlocked() error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("回收审计仓库对象失败: %w（输出: %s）", err, strings.TrimSpace(string(out)))
 	}
-	return nil
+	// gc 删掉了旧 pack，必须换掉手里的仓库句柄（原因见 reopenRepo）。
+	return l.reopenRepo()
+}
+
+// reopenRepo 重新打开仓库，丢弃旧的 pack 索引缓存。
+//
+// 这是个真实踩到的坑，不是保险措施：go-git 的 ObjectStorage 在首次访问时把
+// pack 列表与索引缓存进内存（requireIndex 只在 index 为 nil 时才重建），
+// 而 git gc 会把旧 pack 整个删掉、写成新 pack。Log 持有的句柄是进程级长寿命的，
+// gc 之后它缓存里指向的 pack 文件已经不存在，下一次 commit 读 HEAD tree 就会
+// 报 "object not found"。
+//
+// 更糟的是这条失败会被静默吞掉：commitPending 的错误经 writeEntry 归入
+// dropped 计数，业务照常返回成功，而审计从此再也不会前进。
+// TestGcKeepsRepositoryUsable 就是对着这个场景写的回归测试。
+//
+// go-git 有针对这种情况的 Reindex()，但它只清 index、不清 packList 与
+// packfile 句柄（见 ObjectStorage 的字段），仍然可能读到已删除的 pack。
+// 重新 PlainOpen 一次最彻底，代价只在每天一次 gc 之后发生一次。
+func (l *Log) reopenRepo() error {
+	repo, err := git.PlainOpen(l.dir)
+	if err != nil {
+		return fmt.Errorf("gc 后重新打开审计仓库失败: %w", err)
+	}
+	l.mu.Lock()
+	l.repo = repo
+	// 换好句柄、清掉 gc 标记之后补一次提交：gc 期间攒下的记录
+	// 一直在工作树里（已 fsync），此时才第一次有机会进历史。
+	l.gcRunning = false
+	err = l.commitPending()
+	l.mu.Unlock()
+	return err
 }
 
 // looseObjectCount 统计 objects 目录下的松散对象文件数量。

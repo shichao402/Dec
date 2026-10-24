@@ -110,6 +110,32 @@ ADR 0042 曾用"内容指纹 + 30 分钟静默期"降噪。这个方向对但不
 
 回收失败只上报、不中断后续周期：这次没收成，明天还会再试。
 
+### 六、gc 之后必须换掉仓库句柄，否则审计会静默停摆
+
+这是实现过程中实测到的一个缺陷，也是最值得记下来的一条：
+
+`git gc` 会删掉旧 pack、写成新 pack。而 `Log` 持有的 go-git 仓库句柄是进程级
+长寿命的，它的 `ObjectStorage` 在首次访问时把 pack 列表与索引缓存进内存
+（`requireIndex` 只在 `index == nil` 时才重建）。gc 之后，缓存里指向的 pack
+文件已经不存在，下一次 commit 读 HEAD tree 就报 `object not found`。
+
+真正危险的是这条失败会被静默吞掉：`commitPending` 的错误经 `writeEntry`
+归入 `Dropped()` 计数，业务照常返回成功，而审计从此再也不会前进。
+换句话说，一个用来"维护仓库健康"的动作，差点让审计永久失效——
+而且没有任何显式报错。
+
+修法两层：
+
+- `gcUnlocked` 成功后调 `reopenRepo()` 重新 `PlainOpen`，丢弃全部 pack 缓存。
+  go-git 有 `Reindex()`，但它只清 index、不清 `packList` 与 packfile 句柄，
+  仍可能读到已删除的 pack，所以不用它。
+- gc 期间置 `gcRunning`，让 `commitPending` 直接返回。期间的记录照旧逐条
+  fsync（数据不丢），只是在工作树里攒着，gc 结束换好句柄后由下一次提交一起带上。
+  这样避免了"提交正好撞上正在被删除的 pack"这个竞态窗口。
+
+`TestGcKeepsRepositoryUsable`、`TestGcThenDropAllCaches`、
+`TestWritesDuringGcAreKept`、`TestFlushDuringGcDoesNotFail` 四条测试锁住这一层。
+
 ## 影响
 
 - 正常使用完全不受影响。一台设备一小时对账 10 次、偶尔下载客户端，
