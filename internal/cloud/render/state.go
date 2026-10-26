@@ -337,8 +337,15 @@ func (r *Renderer) Sync(dev ssot.Device, req proto.SyncRequest) (*proto.SyncResp
 		if seen && cur.Hash == f.Hash && cur.Format == f.File.Format && cur.Key == f.File.Key {
 			continue
 		}
-		// 本地有内容、且与上次落地哈希不同 → 被本地改过，会被覆盖。
-		if seen && cur.Hash != "" {
+		// 走到这里说明落点与期望不一致，本次会用期望内容覆盖。
+		// 只要代理报上来的哈希和上次落地的哈希不同，就说明是本地改过，
+		// 记一条覆盖事件（需求 6.2）。
+		//
+		// 空哈希不能当成「没改」跳过。代理用空哈希表达「我保证不了这个条目
+		// 的状态」（ADR 0047）：多落点里只要有一份和别的不同就报空。以前这里
+		// 用 cur.Hash != "" 做前置条件，结果多落点被改时覆盖照样发生，审计里
+		// 却一条记录都没有——改了没人知道，比完全不检测更危险。
+		if seen {
 			if prev, ok := state.Files[f.File.ID]; ok && prev.Hash != cur.Hash {
 				overrides = append(overrides, proto.Override{
 					ID:         f.File.ID,

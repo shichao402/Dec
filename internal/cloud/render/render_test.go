@@ -993,3 +993,83 @@ items:
 		t.Fatalf("删除应使用代理上报的现场路径，实际 %+v", got)
 	}
 }
+
+// TestSyncRecordsOverrideWhenHashUnreported 覆盖 ADR 0047 的连带回归：
+// 多落点条目只要有一份被改，代理就报空哈希；覆盖必须照样发生，
+// 也必须在审计里留下一条记录。空哈希不能被当成「没改」。
+func TestSyncRecordsOverrideWhenHashUnreported(t *testing.T) {
+	f := newFixture(t)
+	f.writeBundle(t, "woa", []assets.AssetFile{
+		{Path: "a.mdc", Content: []byte("cloud\n")},
+	}, `name: woa
+items:
+  - kind: rule
+    path: a.mdc
+    name: rule-a
+    planes: [user]
+`)
+	f.registerDevice(t, dev("dev-1", "woa"))
+	d := dev("dev-1", "woa")
+
+	first, err := f.render.Sync(d, proto.SyncRequest{})
+	if err != nil {
+		t.Fatalf("首次 Sync: %v", err)
+	}
+	sent := first.Batch.Files[0]
+	goodHash := ssot.SumHex([]byte(sent.Content))
+	paths := []string{"/p/.cursor/a.mdc", "/p/.with/a.mdc"}
+	if err := f.render.States().RecordAck("dev-1", first.Batch.Revision, []proto.AckResult{
+		{ID: sent.ID, OK: true, Hash: goodHash, Paths: paths},
+	}); err != nil {
+		t.Fatalf("RecordAck: %v", err)
+	}
+
+	// 代理报空哈希：多落点里有一份被改过，它保证不了这一条的状态。
+	resp, err := f.render.Sync(d, proto.SyncRequest{
+		Revision: first.Batch.Revision,
+		Manifest: []proto.ManifestEntry{{
+			ID: sent.ID, Hash: "", Paths: paths,
+			Format: sent.Format, Key: sent.Key,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("二次 Sync: %v", err)
+	}
+	if resp.Batch == nil || len(resp.Batch.Files) != 1 {
+		t.Fatalf("空哈希应触发补发，实际 %+v", resp.Batch)
+	}
+	if len(resp.Overrides) != 1 {
+		t.Fatalf("空哈希也必须记一条覆盖事件，实际 %d 条", len(resp.Overrides))
+	}
+	if resp.Overrides[0].ID != sent.ID {
+		t.Fatalf("覆盖事件条目错误: %+v", resp.Overrides[0])
+	}
+	if len(resp.Overrides[0].Paths) != len(paths) {
+		t.Fatalf("覆盖事件应带上代理上报的全部落点，实际 %+v", resp.Overrides[0].Paths)
+	}
+}
+
+// TestSyncFirstTimeEmptyHashIsNotOverride 首次下发就报空哈希时不该记覆盖：
+// 那不是「被本地改过」，只是这一条还没有落地记录。
+func TestSyncFirstTimeEmptyHashIsNotOverride(t *testing.T) {
+	f := newFixture(t)
+	f.writeBundle(t, "woa", []assets.AssetFile{
+		{Path: "a.mdc", Content: []byte("cloud\n")},
+	}, `name: woa
+items:
+  - kind: rule
+    path: a.mdc
+    name: rule-a
+    planes: [user]
+`)
+	f.registerDevice(t, dev("dev-1", "woa"))
+	d := dev("dev-1", "woa")
+
+	first, err := f.render.Sync(d, proto.SyncRequest{})
+	if err != nil {
+		t.Fatalf("首次 Sync: %v", err)
+	}
+	if len(first.Overrides) != 0 {
+		t.Fatalf("首次下发不应有覆盖记录，实际 %+v", first.Overrides)
+	}
+}
