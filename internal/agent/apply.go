@@ -28,6 +28,12 @@ const (
 	entryPrefix = "dec-"
 	// decEntryComment 是 JSON 里无法加注释时的替代：用保留键承载说明。
 	noticeKey = "_dec_notice"
+	// mcpServersKey 是各 JSON 宿主放 MCP 服务器定义的容器键。
+	//
+	// 这个键不是 Dec 自己的约定，是宿主要求：cursor / claude / codebuddy /
+	// with 都只读这个对象下的键。写到文件顶层的条目是合法 JSON，
+	// 只是永远没人读，所以这个错误只能靠人来发现，必须在写的地方守住。
+	mcpServersKey = "mcpServers"
 )
 
 // ErrNotAllowed 表示落点不在白名单内（需求 2.3）。
@@ -221,8 +227,11 @@ func HashFile(full string, format proto.Format, key string) (string, error) {
 
 // managedOnly 从 JSON 内容里提取 Dec 管理的条目并序列化成稳定字节。
 //
-// key 为空表示“任意 dec- 前缀的键”，用于计算 json_key 落点的整体哈希。
+// key 为空表示“mcpServers 下任意 dec- 前缀的键”，用于计算 json_key 落点的整体哈希。
 // 排序后再序列化，保证同样的内容得到同样的哈希，不受原始键顺序影响。
+//
+// 只看 mcpServers：顶层不属于 Dec 的地盘，用户在那里放什么（包括其它工具的
+// 配置）都不该被算成“Dec 落点被改”，否则每一次用户改动都会报一次漂移。
 func managedOnly(full string, data []byte, key string) []byte {
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
@@ -230,8 +239,15 @@ func managedOnly(full string, data []byte, key string) []byte {
 		// 也不会因为解析失败而把落点当成“不存在”。
 		return data
 	}
+	servers := map[string]json.RawMessage{}
+	if raw, ok := root[mcpServersKey]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &servers); err != nil {
+			// mcpServers 结构坏了：按原始字节算，让漂移被发现。
+			return data
+		}
+	}
 	out := map[string]json.RawMessage{}
-	for k, v := range root {
+	for k, v := range servers {
 		if k == noticeKey {
 			continue
 		}
@@ -277,6 +293,11 @@ func marshalSorted(m map[string]json.RawMessage) []byte {
 //
 // 只动目标键，其它键按原始字节回写：这样用户自己的 MCP 配置即使格式很怪，
 // 也不会因为我们的反序列化而变形。文件不存在时新建。
+//
+// 条目必须落在 mcpServers 容器里。这个位置不是可选风格：四个 JSON 宿主
+// （cursor / claude / codebuddy / with）都只读 mcpServers 下的键，写在顶层
+// 的文件仍然是合法 JSON，所以不报错、不告警，只是那条 MCP 永远不会被加载
+// ——失败是静默的，比写坏文件更难发现。
 func mergeJSONKey(full, key, value string) ([]byte, error) {
 	existing, err := readFileOrEmpty(full)
 	if err != nil {
@@ -290,12 +311,31 @@ func mergeJSONKey(full, key, value string) ([]byte, error) {
 			return nil, fmt.Errorf("%w: %q 不是合法 JSON，拒绝改写", ErrNotAllowed, full)
 		}
 	}
+
+	servers := map[string]json.RawMessage{}
+	if raw, ok := root[mcpServersKey]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &servers); err != nil {
+			// mcpServers 存在但不是对象：这是用户的文件坏了。
+			// 覆盖它会连带丢掉里面原有的服务器定义，所以同样拒绝。
+			return nil, fmt.Errorf("%w: %q 的 mcpServers 不是 JSON 对象，拒绝改写", ErrNotAllowed, full)
+		}
+	}
+
 	// 值必须是合法 JSON：云端给的是单条目对象。
 	var probe any
 	if err := json.Unmarshal([]byte(value), &probe); err != nil {
 		return nil, fmt.Errorf("%w: 条目内容不是合法 JSON", ErrNotAllowed)
 	}
-	root[key] = json.RawMessage(value)
+	servers[key] = json.RawMessage(value)
+
+	inner, err := json.Marshal(servers)
+	if err != nil {
+		return nil, fmt.Errorf("序列化 mcpServers 失败: %w", err)
+	}
+	root[mcpServersKey] = inner
+	// 顺手清掉旧版本误写在顶层的同名键，否则宿主读不到它、人却看得见，
+	// 排查时会被当成“已经写了”。
+	delete(root, key)
 	return marshalIndentJSON(root), nil
 }
 
@@ -335,6 +375,9 @@ func marshalIndentJSON(m map[string]json.RawMessage) []byte {
 }
 
 // removeJSONKey 从共享 JSON 配置文件里删掉一个键。
+//
+// 与 mergeJSONKey 对称：只认 mcpServers 里的键。旧版本曾把条目写到顶层，
+// 那种残留在卸载时也要清掉，否则文件里会一直留着一个没人读的键。
 func removeJSONKey(full, key string) error {
 	existing, err := readFileOrEmpty(full)
 	if err != nil || len(existing) == 0 {
@@ -344,18 +387,59 @@ func removeJSONKey(full, key string) error {
 	if err := json.Unmarshal(existing, &root); err != nil {
 		return fmt.Errorf("%w: %q 不是合法 JSON，拒绝改写", ErrNotAllowed, full)
 	}
-	if _, ok := root[key]; !ok {
-		return nil
+
+	changed := false
+	// 顶层残留：旧版本写错位置的键。
+	if _, ok := root[key]; ok {
+		delete(root, key)
+		changed = true
 	}
-	delete(root, key)
-	// 只剩没有 Dec 托管条目时，把整个文件删掉，避免留下空壳。
-	// 但必须先确认里面没有别人的键。
-	for k := range root {
-		if k != noticeKey {
-			return writeFileAtomic(full, marshalIndentJSON(root), 0o644)
+
+	servers := map[string]json.RawMessage{}
+	if raw, ok := root[mcpServersKey]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &servers); err != nil {
+			return fmt.Errorf("%w: %q 的 mcpServers 不是 JSON 对象，拒绝改写", ErrNotAllowed, full)
+		}
+		if _, ok := servers[key]; ok {
+			delete(servers, key)
+			inner, err := json.Marshal(servers)
+			if err != nil {
+				return fmt.Errorf("序列化 mcpServers 失败: %w", err)
+			}
+			root[mcpServersKey] = inner
+			changed = true
 		}
 	}
-	return os.Remove(full)
+	if !changed {
+		return nil
+	}
+
+	// 只剩空壳时把整个文件删掉，避免留下无意义的空配置。
+	// 但必须先确认里面没有别人的键：mcpServers 已经清空时不算别人的。
+	onlyEmptyServers := true
+	for k, v := range root {
+		if k == noticeKey {
+			continue
+		}
+		if k == mcpServersKey {
+			var left map[string]json.RawMessage
+			if err := json.Unmarshal(v, &left); err != nil {
+				onlyEmptyServers = false
+				break
+			}
+			if len(left) != 0 {
+				onlyEmptyServers = false
+				break
+			}
+			continue
+		}
+		onlyEmptyServers = false
+		break
+	}
+	if onlyEmptyServers {
+		return os.Remove(full)
+	}
+	return writeFileAtomic(full, marshalIndentJSON(root), 0o644)
 }
 
 // VerifyWithin 校验一个绝对路径是否在允许的落脚范围内，供删除回执使用。

@@ -167,6 +167,34 @@ def to_payload(b):
     }
 
 
+def build_agents_board():
+    """迁移 agents-board 的 skill；mcp 条目暂不迁。
+
+    mcp 条目内容是一个启动脚本的绝对路径：
+
+        node ${workspaceFolder}/.dec/cache/agents-board/skills/agents-board/mcp/run.mjs
+
+    旧系统由 Console 在写 MCP 配置时把 ${workspaceFolder} 展开成本机绝对路径，
+    所以同一份条目内容能落到不同 IDE 的配置文件里。新系统没有这一步：
+    MCP 条目渲染成 json_key 后，四个宿主的 mcp.json 收到的是同一串字节，
+    而它们的 skills 目录各不相同（.cursor / .claude / .codebuddy /
+    .bg-agent/config-with-app），不存在一个对四个宿主都成立的公共路径。
+    设备变量里也只有 id/name/os/arch，没有家目录。
+
+    写一个错的路径进去，等于往四个宿主的配置里塞一条启动就会失败的 MCP 条目，
+    所以这里只迁 skill，把 mcp 条目留作待解决的缺口。
+    """
+    return build_bundle(
+        "agents-board",
+        [("skill", "skills/agents-board", "agents-board",
+          read_tree(SOURCE_PRIVATE, "agents-board/public/global/skills/agents-board"),
+          ["user"], None)],
+        f"{SOURCE_PRIVATE} agents-board/public/global/skills/agents-board",
+        "原 bundle：agents-board（dec-source-private）。\n"
+        "未迁 mcp 条目：新系统无法按宿主/设备展开脚本路径，见迁移脚本注释。",
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
@@ -219,7 +247,7 @@ def main():
                 ("skill", "skills/issue-handler", "issue-handler",
                  read_tree(DEVKIT, "agents/issue-handler/skills/issue-handler"),
                  ["user"], None),
-                ("rule", "rules/issue-handler.mdc", "issue-handler",
+                ("rule", "rules/issue-handler.mdc", "issue-handler-rule",
                  [("issue-handler.mdc",
                    read_file(DEVKIT, "agents/issue-handler/rules/issue-handler.mdc"), False)],
                  ["user"], None),
@@ -238,8 +266,14 @@ def main():
                  read_tree(DEVKIT, "woa/skills/gongfeng"), ["user"], None),
                 ("skill", "skills/mirror-upload", "mirror-upload",
                  read_tree(DEVKIT, "woa/skills/mirror-upload"), ["user"], None),
+                # MCP 条目里只有一个远端 URL，不含本机路径，可以直接迁。
+                # 条目名必须与 skill 的 gongfeng 区分（服务端禁止同名），
+                # 因此落进 mcp.json 的键是 dec-gongfeng-mcp 而不是旧的 dec-gongfeng。
+                ("mcp", "mcp/gongfeng.json", "gongfeng-mcp",
+                 [("gongfeng.json", read_file(DEVKIT, "woa/mcp/gongfeng.json"), False)],
+                 ["user"], None),
             ],
-            f"{DEVKIT} woa/skills/",
+            f"{DEVKIT} woa/skills/ 与 woa/mcp/gongfeng.json",
             "原 bundle：woa（DecPersonalDevKit）",
         ))
 
@@ -251,6 +285,9 @@ def main():
             f"{DEVKIT} tencent-cloud/skills/tencent-cloud",
             "原 bundle：tencent-cloud（DecPersonalDevKit）",
         ))
+
+    if args.bundle in (None, "agents-board"):
+        plan.append(build_agents_board())
 
     if not plan:
         print("没有匹配的 bundle", file=sys.stderr)

@@ -132,16 +132,118 @@ func TestApplyJSONKeyKeepsOthers(t *testing.T) {
 	if err := json.Unmarshal(data, &root); err != nil {
 		t.Fatalf("结果不是合法 JSON: %v\n%s", err, data)
 	}
-	if _, ok := root["dec-demo"]; !ok {
-		t.Fatalf("托管条目未写入：%s", data)
+	// 托管条目必须在 mcpServers 里：写进顶层是合法 JSON，但宿主读不到，
+	// 失败是静默的，所以这条断言不能只检查“文件里出现过这个键”。
+	var servers map[string]json.RawMessage
+	if err := json.Unmarshal(root[mcpServersKey], &servers); err != nil {
+		t.Fatalf("mcpServers 结构被破坏: %v\n%s", err, data)
+	}
+	if _, ok := servers["dec-demo"]; !ok {
+		t.Fatalf("托管条目未写进 mcpServers：%s", data)
+	}
+	if _, ok := root["dec-demo"]; ok {
+		t.Fatalf("条目不应出现在文件顶层：%s", data)
 	}
 	// 用户自己的键必须原样保留。
 	var mine map[string]any
-	if err := json.Unmarshal(root["mcpServers"], &mine); err != nil {
+	if err := json.Unmarshal(servers["mine"], &mine); err != nil {
 		t.Fatalf("用户条目结构被破坏: %v", err)
 	}
-	if _, ok := mine["mine"]; !ok {
-		t.Fatalf("用户条目丢失：%s", data)
+	if mine["command"] != "x" {
+		t.Fatalf("用户条目内容被改：%v", mine)
+	}
+}
+
+// TestApplyJSONKeyCreatesContainerWhenMissing 覆盖配置文件里还没有 mcpServers 的情形。
+//
+// claude 与 codebuddy 的用户级配置常常是个空对象或只有别的字段，
+// 这时要自己建 mcpServers，而不是把键丢在顶层。
+func TestApplyJSONKeyCreatesContainerWhenMissing(t *testing.T) {
+	home := testHome(t)
+	dir := filepath.Join(home, ".cursor")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("建目录失败: %v", err)
+	}
+	path := filepath.Join(dir, FileMCP)
+	if err := os.WriteFile(path, []byte(`{"theme":"dark"}`), 0o644); err != nil {
+		t.Fatalf("写入前置文件失败: %v", err)
+	}
+
+	applyOne(t, home, proto.File{
+		ID:      "asset:woa:demo",
+		Targets: []proto.Target{{Plan: proto.PlanUser, Root: "cursor", Path: FileMCP}},
+		Content: `{"url":"https://example.com/mcp"}`,
+		Format:  proto.FormatJSONKey,
+		Key:     "dec-demo",
+	})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读取失败: %v", err)
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatalf("结果不是合法 JSON: %v\n%s", err, data)
+	}
+	var servers map[string]json.RawMessage
+	if err := json.Unmarshal(root[mcpServersKey], &servers); err != nil {
+		t.Fatalf("mcpServers 未创建: %v\n%s", err, data)
+	}
+	if _, ok := servers["dec-demo"]; !ok {
+		t.Fatalf("托管条目未写进 mcpServers：%s", data)
+	}
+	// 用户的其它字段要原样留着。
+	var theme string
+	if err := json.Unmarshal(root["theme"], &theme); err != nil || theme != "dark" {
+		t.Fatalf("用户字段丢失: %v\n%s", err, data)
+	}
+}
+
+// TestApplyJSONKeyMovesLegacyTopLevelKey 覆盖旧版本写错位置的键会被搬进容器。
+//
+// 2026-10 之前的版本把条目写在顶层，那条 MCP 从来没被宿主加载过。
+// 升上来之后，同名键必须被搬进 mcpServers，而不是留一份在顶层。
+func TestApplyJSONKeyMovesLegacyTopLevelKey(t *testing.T) {
+	home := testHome(t)
+	dir := filepath.Join(home, ".cursor")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("建目录失败: %v", err)
+	}
+	path := filepath.Join(dir, FileMCP)
+	legacy := `{"dec-demo":{"url":"https://old"},"mcpServers":{"dec":{"url":"http://127.0.0.1:8787/mcp"}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("写入前置文件失败: %v", err)
+	}
+
+	applyOne(t, home, proto.File{
+		ID:      "asset:woa:demo",
+		Targets: []proto.Target{{Plan: proto.PlanUser, Root: "cursor", Path: FileMCP}},
+		Content: `{"url":"https://new"}`,
+		Format:  proto.FormatJSONKey,
+		Key:     "dec-demo",
+	})
+
+	data, _ := os.ReadFile(path)
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatalf("结果不是合法 JSON: %v\n%s", err, data)
+	}
+	if _, ok := root["dec-demo"]; ok {
+		t.Fatalf("顶层残留未清理：%s", data)
+	}
+	var servers map[string]json.RawMessage
+	if err := json.Unmarshal(root[mcpServersKey], &servers); err != nil {
+		t.Fatalf("mcpServers 结构被破坏: %v\n%s", err, data)
+	}
+	if _, ok := servers["dec"]; !ok {
+		t.Fatalf("代理自己的 dec 条目被误删：%s", data)
+	}
+	var entry struct{ URL string }
+	if err := json.Unmarshal(servers["dec-demo"], &entry); err != nil {
+		t.Fatalf("条目内容损坏: %v", err)
+	}
+	if entry.URL != "https://new" {
+		t.Fatalf("条目未更新为新内容: %q", entry.URL)
 	}
 }
 
@@ -195,7 +297,7 @@ func TestHashIgnoresUserKeys(t *testing.T) {
 		t.Fatalf("建目录失败: %v", err)
 	}
 	path := filepath.Join(dir, FileMCP)
-	base := `{"dec-a":{"command":"x"},"mine":{"command":"y"}}`
+	base := `{"mcpServers":{"dec-a":{"command":"x"},"mine":{"command":"y"}}}`
 	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
@@ -205,7 +307,7 @@ func TestHashIgnoresUserKeys(t *testing.T) {
 	}
 
 	// 用户新增一个自己的 MCP：不应影响托管条目的哈希。
-	changed := `{"dec-a":{"command":"x"},"mine":{"command":"y"},"other":{"command":"z"}}`
+	changed := `{"mcpServers":{"dec-a":{"command":"x"},"mine":{"command":"y"},"other":{"command":"z"}}}`
 	if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
@@ -217,8 +319,21 @@ func TestHashIgnoresUserKeys(t *testing.T) {
 		t.Fatalf("用户键变化不应改变托管哈希：%q -> %q", before, after)
 	}
 
+	// 用户在文件顶层放自己的配置，同样不该被算成漂移。
+	withTop := `{"theme":"dark","mcpServers":{"dec-a":{"command":"x"},"mine":{"command":"y"}}}`
+	if err := os.WriteFile(path, []byte(withTop), 0o644); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	topChanged, err := HashFile(path, proto.FormatJSONKey, "dec-a")
+	if err != nil {
+		t.Fatalf("计算哈希失败: %v", err)
+	}
+	if topChanged != before {
+		t.Fatalf("顶层非托管字段不应影响哈希：%q -> %q", before, topChanged)
+	}
+
 	// 托管条目自己变了，必须被发现。
-	broken := `{"dec-a":{"command":"CHANGED"},"mine":{"command":"y"}}`
+	broken := `{"mcpServers":{"dec-a":{"command":"CHANGED"},"mine":{"command":"y"}}}`
 	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
@@ -274,7 +389,7 @@ func TestRemoveJSONKeyKeepsUserContent(t *testing.T) {
 		t.Fatalf("建目录失败: %v", err)
 	}
 	path := filepath.Join(dir, FileMCP)
-	content := `{"dec-a":{"command":"x"},"mine":{"command":"y"}}`
+	content := `{"mcpServers":{"dec-a":{"command":"x"},"mine":{"command":"y"}}}`
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
@@ -293,6 +408,36 @@ func TestRemoveJSONKeyKeepsUserContent(t *testing.T) {
 	}
 }
 
+// TestRemoveJSONKeyCleansLegacyTopLevel 覆盖旧版本写在顶层的键能被卸载清掉。
+//
+// 否则用户卸载后，配置文件里会留着一个永远不生效的 dec- 键，
+// 下次装回来还会让人以为它一直在。
+func TestRemoveJSONKeyCleansLegacyTopLevel(t *testing.T) {
+	home := testHome(t)
+	dir := filepath.Join(home, ".cursor")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("建目录失败: %v", err)
+	}
+	path := filepath.Join(dir, FileMCP)
+	legacy := `{"dec-a":{"command":"x"},"mcpServers":{"mine":{"command":"y"}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	if err := removeJSONKey(path, "dec-a"); err != nil {
+		t.Fatalf("删除键失败: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("文件不应被删除: %v", err)
+	}
+	if strings.Contains(string(data), "dec-a") {
+		t.Fatalf("顶层残留未清掉：%s", data)
+	}
+	if !strings.Contains(string(data), "mine") {
+		t.Fatalf("用户键被误删：%s", data)
+	}
+}
+
 func TestRemoveJSONKeyDropsEmptyFile(t *testing.T) {
 	home := testHome(t)
 	dir := filepath.Join(home, ".cursor")
@@ -300,7 +445,7 @@ func TestRemoveJSONKeyDropsEmptyFile(t *testing.T) {
 		t.Fatalf("建目录失败: %v", err)
 	}
 	path := filepath.Join(dir, FileMCP)
-	if err := os.WriteFile(path, []byte(`{"dec-a":{"command":"x"}}`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"dec-a":{"command":"x"}}}`), 0o644); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
 	if err := removeJSONKey(path, "dec-a"); err != nil {
@@ -308,5 +453,25 @@ func TestRemoveJSONKeyDropsEmptyFile(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("只剩空容器时应删掉文件，err=%v", err)
+	}
+}
+
+// TestRemoveJSONKeyKeepsFileWithUserServers 覆盖还有用户自己的 MCP 时不能删文件。
+func TestRemoveJSONKeyKeepsFileWithUserServers(t *testing.T) {
+	home := testHome(t)
+	dir := filepath.Join(home, ".cursor")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("建目录失败: %v", err)
+	}
+	path := filepath.Join(dir, FileMCP)
+	if err := os.WriteFile(path,
+		[]byte(`{"mcpServers":{"dec-a":{"command":"x"},"mine":{"command":"y"}}}`), 0o644); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	if err := removeJSONKey(path, "dec-a"); err != nil {
+		t.Fatalf("删除键失败: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("还有用户条目时不该删文件: %v", err)
 	}
 }

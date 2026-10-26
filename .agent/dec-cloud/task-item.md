@@ -132,7 +132,17 @@
   - 端到端验证：下发、离线降级、本地改动覆盖、版本拦截、冷备推送、告警
   - _需求：实施约定 1、3，10.1、21.1_
 - [ ] 12.2 存量迁移与旧系统下线
-  > 状态（2026-10-26 更新）：旧更新组件已从生产机彻底下线——三个 systemd 服务停止并禁用、单元文件删除，nginx 三个旧站点配置移出 `conf.d`（备份在 `/root/nginx-retired`），`/srv/relkit`、`/srv/releases`、`/etc/relkit-*`、`/usr/local/bin/relkit*` 全删，`/root/.relkit-admin-cred` 已删，配置归档在 `/root/relkit-removal-backup.tar.gz`。云端 bundle 经业务链路删除（rev `f35b55c`），仓库内 79 个旧 tag 本地与远端一并清除，GitHub `relkit-operator` environment 与 10 个 `RELKIT_*` 变量已删。**尚未迁移**：`DecPersonalDevKit`、`dec-source-private` 的存量内容还没写入新系统；`publish.firoyang.com` 与 `/Applications/dec-console.app` 域名/应用仍在（前者已无后端，后者是本机应用）。
+  > 状态（2026-10-26 更新）：旧更新组件已从生产机彻底下线——三个 systemd 服务停止并禁用、单元文件删除，nginx 三个旧站点配置移出 `conf.d`（备份在 `/root/nginx-retired`），`/srv/relkit`、`/srv/releases`、`/etc/relkit-*`、`/usr/local/bin/relkit*` 全删，`/root/.relkit-admin-cred` 已删，配置归档在 `/root/relkit-removal-backup.tar.gz`。云端 bundle 经业务链路删除（rev `f35b55c`），仓库内 79 个旧 tag 本地与远端一并清除，GitHub `relkit-operator` environment 与 10 个 `RELKIT_*` 变量已删。
+  >
+  > **资产迁移已完成**：7 个 bundle、185 个文件全部写入，commit 均带来源（原仓库路径 + 原 bundle 名）。清单：`agent-dev-playbook`(3 skill)、`agents-board`(1 skill)、`cnb`(1 skill)、`forge-robot`(1 rule + 1 skill)、`issue-handler`(1 rule + 1 skill)、`tencent-cloud`(1 skill)、`woa`(3 skill)。设备 `dev-27e7e7cad7a71eb8` 订阅 7 个 bundle，下发对齐，五宿主均有落点。
+  >
+  > **密钥迁移已完成**：13 条写入云端，云端共 14 条。六个 `.env` 来源 9 条（cnb-token、github-token、tencent-cloud-secret-id/key、edgeone-pages-api-token、civitai-apikey、jetbrains-publishtoken、vsce-pat、jetbrains-publish-token）；两份非 `.env` 来源 4 条（`vsx-publish/release.config.json` 的 rider/vscode/openvsx 三个令牌，`cnb/.gcm/cnb_agent.yaml` 的 git 密码）。核对确认 `release.config.json` 的 `vscode.pat` 与 `.env` 的 `VSCE_PAT` 是不同值、两个 JetBrains 令牌也不同，所以按来源分开命名而不按变量名去重。
+  >
+  > **已知缺口（需决策）**：`agents-board` 的 MCP 条目没迁。它的条内容是 `node ${workspaceFolder}/.dec/cache/agents-board/skills/agents-board/mcp/run.mjs`，旧系统由 Console 在写 MCP 配置时把 `${workspaceFolder}` 展开成该宿主自己的绝对路径；新系统 MCP 条目渲染成 `json_key` 后四个宿主收到同一串字节，而它们的 skills 目录各不相同（`.cursor`/`.claude`/`.codebuddy`/`.bg-agent/config-with-app`），设备变量也只有 id/name/os/arch，没有家目录。写进去只会得到四个宿主都启动失败的条目，所以只迁了 skill。
+  >
+  > **尚未迁移**：`dec-source-private` 其余 17 个产品只有空 `dec.yaml` 清单，无可迁内容；`relkit/public/*/skills/` 下 5 个文件按用户此前指示「relkit 的东西可以从本项目彻底剔除」，不迁。
+  >
+  > **新旧仍同机并存**：本机 `~/.dec`（474M）与 `/Applications/dec-console.app` 仍在运行，`dec-server` 与 `dec-console` 两个进程活着；旧系统渲染的 `dec-` 前缀落点未清（`.cursor` 11 个 skill + 1 rule，`.bg-agent/config-with-app` 11 个 skill + 1 rule）。需求 17.5 要求切换时先卸载旧版再装新代理，这一步还没做。
   - 由 Agent 读取 `DecPersonalDevKit`、`dec-source-private` 和本机旧落点的内容，经 MCP 写入新系统，commit 记录来源；密钥直接读取后走常规写入
   - 先在第一台设备上验证，其中 `dec-tencent-cloud` 要验证可用；然后逐台卸载旧组件并切换到新代理
   - 列出待删除清单，由用户逐项确认后，删除旧仓库、registry、`publish.firoyang.com`、公开 Release 和 Bitwarden 旧条目，保留 `_dec-cloud`
