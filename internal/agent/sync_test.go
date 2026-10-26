@@ -296,6 +296,59 @@ func TestSyncReportsMissingPathAsEmptyHash(t *testing.T) {
 	}
 }
 
+func TestSyncReportsDivergentCopiesAsEmptyHash(t *testing.T) {
+	// 一份资产同时落在多个宿主目录，只要其中任意一份被本地改过，
+	// 就必须上报空哈希让云端补发。曾经的实现只保留循环里最后一次读到的
+	// 哈希，于是「第一份被改、最后一份没动」会被判成一致，被改的那一份
+	// 永远纠正不回来——2026-10-26 在 relkit 的 .cursor 副本上实测复现。
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.md")
+	last := filepath.Join(dir, "last.md")
+	if err := os.WriteFile(first, []byte("tampered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(last, []byte("expected\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries := []proto.ManifestEntry{{
+		ID:     "asset:woa:style",
+		Format: proto.FormatWhole,
+		Paths:  []string{first, last},
+	}}
+	got := BuildManifest(entries)
+	if len(got) != 1 {
+		t.Fatalf("条目数 %d", len(got))
+	}
+	if got[0].Hash != "" {
+		t.Fatalf("多落点内容不一致时应上报空哈希，实际 %q", got[0].Hash)
+	}
+}
+
+func TestSyncReportsConsistentCopiesWithHash(t *testing.T) {
+	// 一致的多个副本仍然要正常给出哈希，否则每轮都会无谓重发。
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.md")
+	b := filepath.Join(dir, "b.md")
+	body := []byte("same\n")
+	for _, p := range []string{a, b} {
+		if err := os.WriteFile(p, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries := []proto.ManifestEntry{{
+		ID:     "asset:woa:style",
+		Format: proto.FormatWhole,
+		Paths:  []string{a, b},
+	}}
+	got := BuildManifest(entries)
+	if len(got) != 1 {
+		t.Fatalf("条目数 %d", len(got))
+	}
+	if got[0].Hash == "" {
+		t.Fatal("内容一致的多个落点不应上报空哈希")
+	}
+}
+
 func TestSyncNotAlignedSkipsWrite(t *testing.T) {
 	fs := &fakeServer{hello: proto.HelloResponse{
 		ServerVersion:   "2.0.0",

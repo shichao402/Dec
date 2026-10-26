@@ -67,3 +67,4 @@
 | [0044](0044-proxy-protocol-real-ip.md) | 服务端解析 PROXY protocol，恢复真实来源地址 | 已接受（服务端已实现，nginx 待改） |
 | [0045](0045-public-repo-not-private.md) | 代码仓库保持公开，改为守住「仓库里不能有真东西」 | 已接受（需求 22 已按此改写） |
 | [0046](0046-deploy-secret-in-environment.md) | 部署凭据收进 production environment，作用域由平台裁决 | 已接受（已实现并实测） |
+| [0047](0047-multi-path-hash-compare.md) | 多落点哈希必须全量比对，不看最后一份 | 已接受（代理侧已修，待发版） |

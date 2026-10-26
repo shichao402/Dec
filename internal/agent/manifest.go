@@ -64,23 +64,32 @@ func BuildManifest(entries []proto.ManifestEntry) []proto.ManifestEntry {
 			Key:    e.Key,
 			Paths:  e.Paths,
 		}
-		// 多落点条目：所有落点内容一致，取第一个能读到的哈希即可。
-		// 有任一落点缺失都上报空哈希，让云端补发，而不是假装完整。
+		// 多落点条目：所有落点内容必须一致，否则上报空哈希让云端补发。
+		// 只取最后一份的值是不行的——它会把「第一份被改过、最后一份没动」
+		// 判成一致，于是被改的那一份永远不会被纠正回来。一份资产同时落到
+		// .cursor/.claude/.codex/.with 等五个目录时，这种漏检是常态而非巧合。
 		var hash string
-		missing := false
-		for _, p := range e.Paths {
+		inconsistent := false
+		for i, p := range e.Paths {
 			h, err := HashFile(p, e.Format, e.Key)
 			if err != nil {
-				missing = true
+				inconsistent = true
 				break
 			}
 			if h == "" {
-				missing = true
+				inconsistent = true
 				break
 			}
-			hash = h
+			if i == 0 {
+				hash = h
+				continue
+			}
+			if h != hash {
+				inconsistent = true
+				break
+			}
 		}
-		if missing {
+		if inconsistent {
 			cur.Hash = ""
 		} else {
 			cur.Hash = hash
