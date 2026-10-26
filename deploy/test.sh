@@ -93,6 +93,8 @@ SH
   # 现有安装：旧版本二进制、发布清单与根密钥。
   printf 'old-binary\n' >"$ENV_DIR/app/dec-cloud"
   chmod 755 "$ENV_DIR/app/dec-cloud"
+  printf 'old-emergency\n' >"$ENV_DIR/app/dec-emergency"
+  chmod 755 "$ENV_DIR/app/dec-emergency"
   printf '{"version":"v1.0.0","required_client":"v1.0.0","protocol":1,"files":[]}\n' \
     >"$ENV_DIR/data/release.json"
   printf 'v1.0.0\n' >"$ENV_DIR/data/required-version"
@@ -111,6 +113,8 @@ mkpayload() {
   stage="$(mktemp -d)"
   printf 'new-binary-%s\n' "$version" >"$stage/dec-cloud"
   chmod 755 "$stage/dec-cloud"
+  printf 'new-emergency-%s\n' "$version" >"$stage/dec-emergency"
+  chmod 755 "$stage/dec-emergency"
   printf '{"version":"%s","required_client":"%s","protocol":1,"files":[]}\n' \
     "$version" "$required" >"$stage/release.json"
   mkdir -p "$stage/download"
@@ -146,6 +150,7 @@ else
   bad "正常部署应成功"
 fi
 check "服务端二进制已替换" '[ "$(cat "$DEC_APP_DIR/dec-cloud")" = "new-binary-v1.1.0" ]'
+check "应急命令已替换" '[ "$(cat "$DEC_APP_DIR/dec-emergency")" = "new-emergency-v1.1.0" ]'
 check "发布清单已更新" 'grep -q v1.1.0 "$DEC_DATA_DIR/release.json"'
 check "要求版本已写入" '[ "$(cat "$DEC_DATA_DIR/required-version")" = "v1.1.0" ]'
 check "客户端二进制已更新" '[ "$(cat "$DEC_DATA_DIR/download/dec-agent-linux-amd64")" = "new-agent-v1.1.0" ]'
@@ -167,6 +172,7 @@ else
   ok "健康检查失败时脚本应返回非零"
 fi
 check "已回滚到旧二进制" '[ "$(cat "$DEC_APP_DIR/dec-cloud")" = "old-binary" ]'
+check "已回滚应急命令" '[ "$(cat "$DEC_APP_DIR/dec-emergency")" = "old-emergency" ]'
 check "已回滚发布清单" 'grep -q v1.0.0 "$DEC_DATA_DIR/release.json"'
 # 旧版本健健康检查通过时应该退出维护：停在维护等于用一次失败部署换来一次停机。
 check "回滚成功后已退出维护" '[ ! -e "$DEC_DATA_DIR/deploy/maintenance" ]'

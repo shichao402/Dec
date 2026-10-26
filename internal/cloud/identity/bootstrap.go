@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,37 @@ type Bootstrapper struct {
 // 只读访问器：部署与测试都需要确认“根密钥到底在哪”，
 // 但没有任何调用方应该改它——改了就等于丢密钥。
 func (b *Bootstrapper) RootKeyPath() string { return b.rootKeyPath }
+
+// readCheck 读取 git 里的根密钥校验值。
+//
+// 尚未记录时返回零值与 false：这既覆盖“全新服务”，
+// 也覆盖“本次改动之前就上线、仓库里还没有这个文件”的历史数据。
+// 两种情况都必须能正常启动，不能因为缺一个校验文件就拒绝服务。
+func (b *Bootstrapper) readCheck() (ssot.RootKeyCheck, bool, error) {
+	check, err := ssot.ReadJSON[ssot.RootKeyCheck](b.store, ssot.FileRootKeyCheck)
+	if err != nil {
+		if errors.Is(err, ssot.ErrNotFound) {
+			return ssot.RootKeyCheck{}, false, nil
+		}
+		return ssot.RootKeyCheck{}, false, err
+	}
+	return check, true, nil
+}
+
+// writeCheck 把当前根密钥的 key id 与摘要写入 git（需求 9.3）。
+func (b *Bootstrapper) writeCheck(key *crypt.Key, createdAt time.Time, rotatedFrom string, author ssot.Author) error {
+	check := ssot.RootKeyCheck{
+		SchemaVersion: ssot.SchemaVersion,
+		KeyID:         key.ID(),
+		Digest:        key.Digest(),
+		CreatedAt:     createdAt.UTC(),
+		RotatedFrom:   rotatedFrom,
+	}
+	_, err := b.store.Update(author, func(tx *ssot.Tx) (string, error) {
+		return "记录根密钥校验值 " + key.ID(), tx.WriteJSON(ssot.FileRootKeyCheck, check)
+	})
+	return err
+}
 
 // VaultFactory 创建一个 Bitwarden 短生命周期会话。
 type VaultFactory func() (Vault, error)
@@ -112,6 +144,18 @@ func (b *Bootstrapper) LoadOrEnterRecovery() error {
 
 	key, keyErr := crypt.LoadRootKey(b.rootKeyPath)
 	if keyErr == nil {
+		// 文件能解析还不够：必须与 git 里记录的校验值一致（需求 9.3）。
+		//
+		// 少了这一步，把另一份根密钥文件拷进来也能“正常启动”，
+		// 然后所有密文静默解不开——那正是校验值要防的事。
+		if err := b.verifyAgainstCheck(key); err != nil {
+			key.Wipe()
+			b.mu.Lock()
+			b.recoveryMode = initialized
+			b.bootstrapOpen = !initialized
+			b.mu.Unlock()
+			return nil
+		}
 		b.setKey(key)
 		b.mu.Lock()
 		b.recoveryMode = false
@@ -129,6 +173,28 @@ func (b *Bootstrapper) LoadOrEnterRecovery() error {
 	// 没有任何设备时，初始化入口打开；这也覆盖了“初始化做到一半失败”的重试。
 	b.bootstrapOpen = !initialized
 	b.mu.Unlock()
+	return nil
+}
+
+// verifyAgainstCheck 核对本地根密钥与 git 里的校验值。
+//
+// 没有记录时放行：那是本功能上线前的历史仓库，或者初始化写到一半。
+// 有记录就必须完全一致，key id 与材料摘要两项都要对。
+func (b *Bootstrapper) verifyAgainstCheck(key *crypt.Key) error {
+	check, ok, err := b.readCheck()
+	if err != nil {
+		return err
+	}
+	if !ok || check.KeyID == "" {
+		return nil
+	}
+	if check.KeyID != key.ID() {
+		return fmt.Errorf("%w: git 记录的 key id 是 %s，本地文件是 %s",
+			crypt.ErrRootKeyCorrupt, check.KeyID, key.ID())
+	}
+	if check.Digest != "" && check.Digest != key.Digest() {
+		return fmt.Errorf("%w: 本地根密钥材料与 git 记录的摘要不一致", crypt.ErrRootKeyCorrupt)
+	}
 	return nil
 }
 
@@ -250,6 +316,12 @@ func (b *Bootstrapper) Initialize(ctx context.Context, req proto.EnrollBeginRequ
 	b.bootstrapOpen = false
 	b.recoveryMode = false
 	b.mu.Unlock()
+
+	// 4. 记录校验值。放在最后：它代表“这把钥匙已经可用且已备份”，
+	// 提前写会让一次失败的初始化在 git 里留下指向不存在根密钥的记录。
+	if err := b.writeCheck(key, createdAt, "", ssot.Author{Name: "cloud", Source: string(proto.SourceEnroll)}); err != nil {
+		return nil, err
+	}
 
 	return &proto.EnrollBeginResponse{
 		DeviceID:     deviceID,
@@ -402,6 +474,14 @@ func (b *Bootstrapper) Recover(ctx context.Context, req proto.RecoverRequest) (*
 	b.setKey(key)
 	b.failures.reset()
 
+	// 恢复成功后重写校验值：重建的服务器上 git 是克隆来的，
+	// 校验值本来就在，但改写一次可以把“这次恢复用的就是这把钥匙”
+	// 明确记进历史，也顺带修复校验值缺失的历史仓库。
+	if err := b.writeCheck(key, createdAt, rotatedFrom,
+		ssot.Author{Name: "cloud", Source: string(proto.SourceEnroll)}); err != nil {
+		return nil, err
+	}
+
 	deviceID, err := newDeviceID()
 	if err != nil {
 		return nil, err
@@ -442,11 +522,12 @@ func (b *Bootstrapper) Recover(ctx context.Context, req proto.RecoverRequest) (*
 	}, nil
 }
 
-// fetchRootKey 列出冷备里的全部根密钥条目，取最新的那份。
+// fetchRootKey 按 git 记录的 key id 取回根密钥（需求 11.2、11.3）。
 //
-// 取最新的理由是：轮换后旧根密钥只用于解旧密文，新会话应当用新根密钥；
-// 但当前 git 里若记录的 key id 明确指向某个旧密钥（revision 尚未重新加密完），
-// 上层会据 key id 拒绝，因此这里只负责取出候选。
+// 早期实现是“取最新的一条”，那样在轮换过的仓库里会挑错：
+// 最新条目未必是当前在用的那把，用错钥匙启动的后果是所有旧密文都解不开，
+// 而且因为能“成功启动”，问题会拖到第一次读密钥才暴露。
+// 现在必须按 key id 精确匹配，取不到就拒绝恢复并列出候选供排查。
 func (b *Bootstrapper) fetchRootKey(ctx context.Context, req proto.RecoverRequest) (*crypt.Key, time.Time, string, error) {
 	vault, err := b.vault()
 	if err != nil {
@@ -464,18 +545,45 @@ func (b *Bootstrapper) fetchRootKey(ctx context.Context, req proto.RecoverReques
 	if err != nil {
 		return nil, time.Time{}, "", err
 	}
+
+	// 目标 key id 来自 git。缺失说明这个仓库从没记录过（本功能之前初始化的），
+	// 这时退化为“取最新一条”并允许成功——否则历史仓库永远无法恢复。
+	check, hasCheck, err := b.readCheck()
+	if err != nil {
+		return nil, time.Time{}, "", err
+	}
+	wantID := ""
+	if hasCheck {
+		wantID = check.KeyID
+	}
+
 	if len(notes) == 0 {
+		// 冷备整个空掉是最糟的情形，错误信息必须直接给出该去哪找什么条目，
+		// 否则用户只知道“恢复失败”，无从判断是自己删错了还是登录错账户。
+		if wantID != "" {
+			return nil, time.Time{}, "", fmt.Errorf(
+				"Bitwarden 里没有任何根密钥冷备条目，但 git 记录当前根密钥为 %s，应存在 %s/%s",
+				wantID, ssot.FolderRootKey, wantID)
+		}
 		return nil, time.Time{}, "", fmt.Errorf("Bitwarden 里没有根密钥冷备条目")
 	}
 
 	var best *crypt.Key
 	var bestCreated time.Time
 	var bestRotated string
-	for _, content := range notes {
+	var available []string
+
+	for name, content := range notes {
 		key, created, rotated, err := crypt.ParseRootKeyPayload([]byte(content))
 		if err != nil {
 			continue
 		}
+		if wantID != "" && key.ID() != wantID {
+			available = append(available, name)
+			key.Wipe()
+			continue
+		}
+		// 有明确目标时只会命中一条；退化路径下取创建时间最新的一条。
 		if best == nil || created.After(bestCreated) {
 			if best != nil {
 				best.Wipe()
@@ -485,28 +593,44 @@ func (b *Bootstrapper) fetchRootKey(ctx context.Context, req proto.RecoverReques
 			key.Wipe()
 		}
 	}
+
 	if best == nil {
+		if wantID != "" {
+			sort.Strings(available)
+			return nil, time.Time{}, "", fmt.Errorf(
+				"git 记录当前根密钥为 %s，但 Bitwarden 里找不到 %s/%s（现有条目：%s）",
+				wantID, ssot.FolderRootKey, wantID, strings.Join(available, ", "))
+		}
 		return nil, time.Time{}, "", fmt.Errorf("Bitwarden 里的根密钥冷备条目都无法解析")
+	}
+	// 校验摘要：key id 对得上但材料不对，说明冷备条目被改过，
+	// 这种情况下宁可拒绝，也不要用一把来历不明的钥匙覆盖本地文件。
+	if hasCheck && check.Digest != "" && check.Digest != best.Digest() {
+		best.Wipe()
+		return nil, time.Time{}, "", fmt.Errorf("冷备条目 %s/%s 的材料摘要与 git 记录不一致", ssot.FolderRootKey, wantID)
 	}
 	return best, bestCreated, bestRotated, nil
 }
 
-// listRootKeyNotes 取回冷备 folder 下全部条目内容。
-func listRootKeyNotes(ctx context.Context, vault Vault) ([]string, error) {
+// listRootKeyNotes 取回冷备 folder 下的根密钥条目，保留条目名。
+//
+// 需要条目名而不只是内容：恢复要按 key id 精确定位，
+// 并在取不到时把现有条目列给用户排查（需求 11.3）。
+func listRootKeyNotes(ctx context.Context, vault Vault) (map[string]string, error) {
 	lister, ok := vault.(interface {
 		ListNotes(ctx context.Context, folder string) (map[string]string, error)
 	})
 	if !ok {
 		return nil, fmt.Errorf("Bitwarden 会话不支持列出条目")
 	}
-	notes, err := lister.ListNotes(ctx, ssot.DirRootKeyBackup)
+	all, err := lister.ListNotes(ctx, ssot.DirRootKeyBackup)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(notes))
-	for name, content := range notes {
+	out := make(map[string]string, len(all))
+	for name, content := range all {
 		if strings.HasPrefix(name, ssot.FolderRootKey+"/") {
-			out = append(out, content)
+			out[name] = content
 		}
 	}
 	return out, nil
@@ -552,6 +676,13 @@ func (b *Bootstrapper) Rotate(ctx context.Context, req proto.RotateRequest, reke
 		return nil, err
 	}
 	if err := crypt.WriteRootKey(b.rootKeyPath, newKey, createdAt, oldKey.ID()); err != nil {
+		newKey.Wipe()
+		return nil, err
+	}
+
+	// 切换完成后再写校验值：写到这一步说明新密钥已备份、已落盘、已能解全部密文。
+	if err := b.writeCheck(newKey, createdAt, oldKey.ID(),
+		ssot.Author{Name: "cloud", Source: string(proto.SourceAdmin)}); err != nil {
 		newKey.Wipe()
 		return nil, err
 	}

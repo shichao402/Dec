@@ -1,6 +1,7 @@
 package cloudsvc
 
 import (
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -303,7 +304,7 @@ func (s *Server) mOverrides(req *proto.Request, payload any, dev ssot.Device) *p
 // mRotate 轮换根密钥（需求 9.4）。
 //
 // 要求当场提供 Bitwarden 凭据：轮换会重写冷备，必须证明是账户主人。
-func (s *Server) mRotate(req *proto.Request, payload any, dev ssot.Device) *proto.Response {
+func (s *Server) mRotate(r *http.Request, req *proto.Request, payload any, dev ssot.Device) *proto.Response {
 	in, ok := payload.(*proto.RotateRequest)
 	if !ok {
 		return proto.Fail(req.ID, proto.ErrInvalid, "rotate_root_key 载荷类型错误")
@@ -312,7 +313,9 @@ func (s *Server) mRotate(req *proto.Request, payload any, dev ssot.Device) *prot
 		return proto.Fail(req.ID, proto.ErrForbidden, "该来源不能轮换根密钥")
 	}
 	author := authorOf(req.Source, dev)
-	resp, err := s.boot.Rotate(nil, *in, func(oldKey, newKey *crypt.Key) (int, error) {
+	// 轮换要访问 Bitwarden，必须带真实 context：传 nil 会让 HTTP 客户端 panic，
+	// 并且请求被取消（客户端断开、部署中停服）时无法中断这次高危操作。
+	resp, err := s.boot.Rotate(r.Context(), *in, func(oldKey, newKey *crypt.Key) (int, error) {
 		return s.assets.Rekey(oldKey, newKey, author)
 	})
 	if err != nil {

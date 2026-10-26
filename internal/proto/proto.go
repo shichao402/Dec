@@ -142,6 +142,12 @@ const (
 	ErrInUse ErrorCode = "in_use"
 	// ErrMaintenance 表示服务处于维护状态（需求 21.4）。
 	ErrMaintenance ErrorCode = "maintenance"
+	// ErrRecoveryMode 表示服务处于恢复模式，只开放恢复接口（需求 9.4）。
+	//
+	// 与 maintenance 分开是有必要的：维护是“过一会儿就好”，
+	// 恢复模式是“根密钥丢了，必须有人拿 Bitwarden 主密码走恢复流程”，
+	// 代理据此提示完全不同的话术，绝不能只当作稍后重试。
+	ErrRecoveryMode ErrorCode = "recovery_mode"
 	// ErrBootstrapClosed 表示初始化入口已关闭（需求 10.3）。
 	ErrBootstrapClosed ErrorCode = "bootstrap_closed"
 	// ErrNotInitialized 表示服务还没完成初始化，必须先走 initialize。

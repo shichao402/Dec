@@ -21,6 +21,13 @@ const (
 	FileDevices  = DirConfig + "/devices.json"
 	FileProjects = DirConfig + "/projects.json"
 	FileManifest = "manifest.yaml"
+	// FileRootKeyCheck 记录当前根密钥的 key id 与校验值（需求 9.3、11.2）。
+	//
+	// 它只放 key id 与材料摘要，绝不放密钥本身：这个文件进 git、进冷备，
+	// 而需求 9.2 明令根密钥本身不得进入这两处。有它的价值在于
+	// 服务器重建后能回答“当前该用哪一把根密钥”，否则只能从一堆
+	// root-key/<key-id> 冷备条目里挑一个最新的——挑错了就会解不开旧密文。
+	FileRootKeyCheck = DirConfig + "/rootkey.json"
 
 	// NamespaceCloud 是 Dec Cloud 服务端自己占用的 bundle 命名空间，
 	// 用户资产不得使用，以免与冷备、审计等内置内容冲突。
@@ -167,6 +174,26 @@ type DeviceTable struct {
 type ProjectTable struct {
 	SchemaVersion int       `json:"schema_version"`
 	Projects      []Project `json:"projects"`
+}
+
+// RootKeyCheck 是 config/rootkey.json 的结构（需求 9.3、11.2）。
+//
+// 它回答两个问题：当前该用哪把根密钥，以及本地那把钥匙是不是它。
+// 恢复时按 KeyID 去冷备里取对应条目，取不到就拒绝恢复（需求 11.3），
+// 而不是拿“最新的一条”凑合——轮换过的历史里，最新未必是当前在用的那把。
+type RootKeyCheck struct {
+	SchemaVersion int `json:"schema_version"`
+	// KeyID 是当前根密钥的 key id。
+	KeyID string `json:"key_id"`
+	// Digest 是根密钥材料的 SHA-256，用于确认本地文件没被换成另一把钥匙。
+	//
+	// 它不是密钥派生：只知道摘要无法还原 256 位随机材料，
+	// 所以放进 git 不会降低根密钥的保密性。
+	Digest string `json:"digest"`
+	// CreatedAt 是这把根密钥的生成时间。
+	CreatedAt time.Time `json:"created_at"`
+	// RotatedFrom 是轮换前的 key id；首次生成时为空。
+	RotatedFrom string `json:"rotated_from,omitempty"`
 }
 
 // SchemaVersion 是当前配置文件的结构版本。

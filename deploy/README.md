@@ -298,6 +298,31 @@ sudo rm -f /var/lib/dec-cloud/deploy/maintenance
 
 `deploy/` 目录的属主必须和服务端进程一致，否则服务端写不了标记，管理面切换维护会静默失败、只剩内存状态。`provision.sh` 建目录时按服务账号 chown，部署脚本每次写文件前也会再 chown 一次。
 
+## 应急命令 dec-emergency
+
+最后手段，只在 Bitwarden 也不可用时用（需求 18.12）。日常吊销设备走管理面，登记新设备走代理的登记流程。
+
+它随部署包一起装到 `/opt/dec-cloud/dec-emergency`，不需要额外安装步骤。
+
+```bash
+# 先看清现状：吊销前核对 ID 没抄错，签发前确认 ID 没被占用
+sudo -u dec /opt/dec-cloud/dec-emergency devices
+
+# 吊销一台设备（立即生效，不需要它在线配合）
+sudo -u dec /opt/dec-cloud/dec-emergency revoke mac-office 设备丢失
+
+# 为一台新机器的公钥直接签发证书
+sudo -u dec /opt/dec-cloud/dec-emergency issue-cert spare-laptop ./spare.pub 备用笔记本
+```
+
+必须用 `sudo -u dec`，不要用 `sudo`。它以服务账户身份写 SSOT 仓库，用 root 跑虽然会成功，但这次提交写出的对象归 root 所有，之后服务端自己就再也提交不了了。程序会检查这一点并直接拒绝。
+
+签发出来的设备固定是「只接收设备」：能收下发，不能写资产、不能看明文、不能管设备。绕过 Bitwarden 的 2FA 签出的身份不该具备管理能力。需要管理能力时，用这台机器连上之后再走一次正常的 `dec-agent enroll`。
+
+已登记的设备不允许借这条路重签，因为重签会换掉序列号使原证书立即失效，等于在用户不知情时踢掉一台正在用的设备。
+
+它不需要根密钥，因此在服务器处于恢复模式（根密钥丢失）时照常可用，那正是最可能需要它的时候。
+
 ## 手工验证
 
 改过部署脚本之后，跑一遍：

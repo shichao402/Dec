@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -63,10 +64,27 @@ var legacyPackages = []string{
 	modulePath + "/schema/gen/go/service/v1",
 }
 
-// newGenCommands 是断代后仅剩的两个入口（需求 3.4）。
+// newGenCommands 是断代后仅剩的入口（需求 3.4、18.12）。
+//
+// dec-emergency 同样是新一代程序：需求 18.12 要求服务器本机保留
+// 吊销设备与签发证书的管理命令，作为 Bitwarden 也不可用时的最后手段。
+// 它与旧架构无关，不是断代时该清掉的残留，因此列在这里。
 var newGenCommands = []string{
 	"./cmd/dec-cloud",
 	"./cmd/dec-agent",
+	"./cmd/dec-emergency",
+}
+
+// newGenCommandNames 是 newGenCommands 的目录名形式，供目录比对使用。
+//
+// 由 newGenCommands 推导而不是另写一份：两处清单分开维护时，
+// 加了一个入口却漏改另一处，会让这个守卫测试自己变成错误的来源。
+func newGenCommandNames() map[string]bool {
+	names := make(map[string]bool, len(newGenCommands))
+	for _, cmd := range newGenCommands {
+		names[strings.TrimPrefix(cmd, "./cmd/")] = true
+	}
+	return names
 }
 
 // TestNoLegacyDependencies 守住依赖图里不出现已删除的包（需求 3.5）。
@@ -134,14 +152,14 @@ func TestLegacyPackagesGone(t *testing.T) {
 	}
 }
 
-// TestOnlyNewGenerationCommands 守住 cmd/ 下只剩两个入口（需求 3.2、3.4）。
+// TestOnlyNewGenerationCommands 守住 cmd/ 下只剩新一代入口（需求 3.2、3.4、18.12）。
 func TestOnlyNewGenerationCommands(t *testing.T) {
 	root := repoRoot(t)
 	entries, err := os.ReadDir(filepath.Join(root, "cmd"))
 	if err != nil {
 		t.Fatalf("读 cmd 目录失败: %v", err)
 	}
-	want := map[string]bool{"dec-agent": true, "dec-cloud": true}
+	want := newGenCommandNames()
 	var got []string
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -153,8 +171,18 @@ func TestOnlyNewGenerationCommands(t *testing.T) {
 		}
 	}
 	if len(got) != len(want) {
-		t.Fatalf("cmd/ 下应只有 dec-agent 与 dec-cloud，实际 %v", got)
+		t.Fatalf("cmd/ 下应只有 %v，实际 %v", sortedNames(want), got)
 	}
+}
+
+// sortedNames 返回清单的稳定顺序，仅用于失败时的可读输出。
+func sortedNames(set map[string]bool) []string {
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // deferralMarkers 是没有主的推迟注释特征。

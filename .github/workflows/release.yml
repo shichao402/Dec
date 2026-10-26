@@ -237,6 +237,10 @@ jobs:
           for arch in amd64 arm64; do
             GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "$ldflags" \
               -o "dist/dec-cloud-linux-$arch" ./cmd/dec-cloud
+            # 应急命令与 dec-cloud 同架构、同 tag（需求 18.12）。
+            # 它只在服务器本机跑，因此也只出 Linux 版本，不进客户端下载通道。
+            GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "$ldflags" \
+              -o "dist/dec-emergency-linux-$arch" ./cmd/dec-emergency
           done
 
           # 客户端覆盖日常会用到的平台组合（需求 2.9 的通用二进制）。
@@ -413,6 +417,9 @@ jobs:
           set -euo pipefail
           mkdir -p payload
           cp dist/dec-cloud-linux-amd64 payload/dec-cloud
+          # 应急命令随服务端一起部署（需求 18.12）。它不进 download/：
+          # 那是给代理的下载通道，应急命令只在服务器本机使用。
+          cp dist/dec-emergency-linux-amd64 payload/dec-emergency
           cp dist/release.json payload/release.json
           # 客户端二进制随服务端一起上传（需求 20.2）：服务端不主动去外部拉取。
           mkdir -p payload/download

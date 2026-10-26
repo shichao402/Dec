@@ -213,6 +213,9 @@ snapshot() {
   if [ -x "$APP_DIR/dec-cloud" ]; then
     cp -p "$APP_DIR/dec-cloud" "$dir/dec-cloud"
   fi
+  if [ -x "$APP_DIR/dec-emergency" ]; then
+    cp -p "$APP_DIR/dec-emergency" "$dir/dec-emergency"
+  fi
   if [ -f "$DATA_DIR/release.json" ]; then
     cp -p "$DATA_DIR/release.json" "$dir/release.json"
   fi
@@ -245,6 +248,9 @@ restore() {
 
   if [ -f "$dir/dec-cloud" ]; then
     install -m 755 "$dir/dec-cloud" "$APP_DIR/dec-cloud"
+  fi
+  if [ -f "$dir/dec-emergency" ]; then
+    install -m 755 "$dir/dec-emergency" "$APP_DIR/dec-emergency"
   fi
   if [ -f "$dir/release.json" ]; then
     install -m 644 "$dir/release.json" "$DATA_DIR/release.json"
@@ -401,6 +407,11 @@ main() {
     rollback "上传服务端二进制失败" "$SNAP"
     return 1
   fi
+  # 应急命令与 dec-cloud 同装一处，由同一个部署包带来（需求 18.12）。
+  if ! install -m 755 "$WORK/dec-emergency" "$APP_DIR/dec-emergency.new"; then
+    rollback "上传应急命令失败" "$SNAP"
+    return 1
+  fi
   rm -rf "$DATA_DIR/download.new"
   mkdir -p "$DATA_DIR/download.new"
   if [ -d "$WORK/download" ]; then
@@ -411,6 +422,7 @@ main() {
 
   # 切换：所有 .new 就位后才逐个改名，尽量缩短半成品窗口。
   mv "$APP_DIR/dec-cloud.new" "$APP_DIR/dec-cloud"
+  mv "$APP_DIR/dec-emergency.new" "$APP_DIR/dec-emergency"
   mv "$DATA_DIR/release.json.new" "$DATA_DIR/release.json"
   mv "$DATA_DIR/required-version.new" "$DATA_DIR/required-version"
   rm -rf "$DATA_DIR/download"

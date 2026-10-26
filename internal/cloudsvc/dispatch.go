@@ -100,6 +100,22 @@ func (s *Server) dispatch(r *http.Request, req *proto.Request) *proto.Response {
 		return resp
 	}
 
+	// 4.5 恢复模式：根密钥不在，所有密文都打不开，业务接口必须一律拒绝（需求 9.4）。
+	//
+	// 只放行 hello 与恢复。hello 要放行是因为代理得能问出「服务在恢复模式」，
+	// 否则它只会看到一连串 unauthorized 而不知道要去做恢复。
+	// 这一步必须排在身份校验之前：恢复模式下服务端可能已经换了 CA
+	// （服务器重建时 certs/ 一起没了），旧证书本来就验不过，
+	// 先拦在这里才能给出准确原因，而不是把它误报成设备不存在。
+	if s.boot.State().RecoveryMode {
+		switch req.Method {
+		case proto.MethodHello, proto.MethodRecover:
+		default:
+			return proto.Fail(id, proto.ErrRecoveryMode,
+				"服务处于恢复模式（根密钥缺失），请先完成根密钥恢复")
+		}
+	}
+
 	// 5. 身份。免证书方法跳过；证书可选方法尽力取身份，取不到也放行。
 	var dev ssot.Device
 	if !proto.NoCertMethods[req.Method] {
@@ -191,7 +207,7 @@ func (s *Server) run(r *http.Request, req *proto.Request, payload any, dev ssot.
 		return s.mOverrides(req, payload, dev)
 
 	case proto.MethodRotateRootKey:
-		return s.mRotate(req, payload, dev)
+		return s.mRotate(r, req, payload, dev)
 
 	case proto.MethodStatus:
 		return s.mStatus(req, dev)

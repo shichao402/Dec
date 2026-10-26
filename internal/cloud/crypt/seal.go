@@ -12,6 +12,7 @@ package crypt
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -103,6 +104,19 @@ func (k *Key) Wipe() {
 	for i := range k.material {
 		k.material[i] = 0
 	}
+}
+
+// Digest 返回根密钥材料的 SHA-256 摘要（十六进制）。
+//
+// 用途是让 git 里能记一个用来核对本地文件的校验值（需求 9.3）。
+// 摘要不可逆：256 位随机材料的 SHA-256 无法被还原成材料本身，
+// 因此把它写进会同步到冷备仓库的配置文件，不违反需求 9.2。
+func (k *Key) Digest() string {
+	if k == nil {
+		return ""
+	}
+	sum := sha256.Sum256(k.material[:])
+	return hex.EncodeToString(sum[:])
 }
 
 // Sealed 是一条密文。它可以被序列化进 git，不含任何可解出明文的材料。
