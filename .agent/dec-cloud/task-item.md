@@ -97,7 +97,7 @@
   - _需求：14.1、14.2、14.3、18.2、18.11、19.6、11.5_
 
 - [ ] 11. 发布与部署流水线
-  > 状态（2026-10-26 核对）：tag 触发 CI 部署可用；`tray-macos` 属于 21.1 的托盘例外，不算违背；部署 secret（DEPLOY_*）仍是仓库级、`release.yml` 未引用 environment，不满足新版 21.7；生产机加固（禁止 root 登录、fail2ban、自动安全更新）与 provision.sh 声明不一致，用户 2026-10-26 决定暂不处理，不列入待办；安全组未核实。deploy 账户 command= 限定已在位。
+  > 状态（2026-10-26 核对）：tag 触发 CI 部署可用；`tray-macos` 属于 21.1 的托盘例外，不算违背；部署 secret（DEPLOY_*）已于 2026-10-26 迁到 `production` environment，仓库级同名项已删除，`release.yml` 的 deploy job 已声明 `environment: production`，符合 21.7；生产机加固（禁止 root 登录、fail2ban、自动安全更新）与 provision.sh 声明不一致，用户 2026-10-26 决定暂不处理，不列入待办；安全组未核实。deploy 账户 command= 限定已在位。
   - 编写 `release.yml`：只在 `v*` tag 上触发；在 Linux runner 上交叉编译服务端和全部客户端；生成发布清单（带要求版本，协议版本变化但要求版本没变时构建失败）和 GitHub Release
   - 编写服务器端部署入口脚本：校验 tag 和 commit 是否真实存在；依次执行进入维护、停服、快照、上传、启动和迁移、健康检查、退出维护；失败时整体回滚并告警；不动根密钥文件；部署前后暂停和恢复冷备推送
   - 用声明式方式描述服务器配置：服务账户、目录、systemd、SSH 只允许公钥登录且禁止 root 登录、fail2ban、自动安全更新、不进入快照的根密钥路径；配置专用部署账户，`authorized_keys` 用 `command=` 限定只能执行入口脚本，CI 预置 known_hosts
