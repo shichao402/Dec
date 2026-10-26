@@ -134,11 +134,11 @@
 - [ ] 12.2 存量迁移与旧系统下线
   > 状态（2026-10-26 更新）：旧更新组件已从生产机彻底下线——三个 systemd 服务停止并禁用、单元文件删除，nginx 三个旧站点配置移出 `conf.d`（备份在 `/root/nginx-retired`），`/srv/relkit`、`/srv/releases`、`/etc/relkit-*`、`/usr/local/bin/relkit*` 全删，`/root/.relkit-admin-cred` 已删，配置归档在 `/root/relkit-removal-backup.tar.gz`。云端 bundle 经业务链路删除（rev `f35b55c`），仓库内 79 个旧 tag 本地与远端一并清除，GitHub `relkit-operator` environment 与 10 个 `RELKIT_*` 变量已删。
   >
-  > **资产迁移已完成**：7 个 bundle、185 个文件全部写入，commit 均带来源（原仓库路径 + 原 bundle 名）。清单：`agent-dev-playbook`(3 skill)、`agents-board`(1 skill)、`cnb`(1 skill)、`forge-robot`(1 rule + 1 skill)、`issue-handler`(1 rule + 1 skill)、`tencent-cloud`(1 skill)、`woa`(3 skill)。设备 `dev-27e7e7cad7a71eb8` 订阅 7 个 bundle，下发对齐，五宿主均有落点。
+  > **资产迁移已完成**：7 个 bundle、185 个文件全部写入，commit 均带来源（原仓库路径 + 原 bundle 名）。清单：`agent-dev-playbook`(3 skill)、`cnb`(1 skill)、`forge-robot`(1 rule + 1 skill)、`issue-handler`(1 rule + 1 skill)、`tencent-cloud`(1 skill)、`woa`(3 skill)。设备 `dev-27e7e7cad7a71eb8` 订阅 7 个 bundle，下发对齐，五宿主均有落点。其中 `agents-board` 后按用户要求整体删除，见下。
   >
   > **密钥迁移已完成**：13 条写入云端，云端共 14 条。六个 `.env` 来源 9 条（cnb-token、github-token、tencent-cloud-secret-id/key、edgeone-pages-api-token、civitai-apikey、jetbrains-publishtoken、vsce-pat、jetbrains-publish-token）；两份非 `.env` 来源 4 条（`vsx-publish/release.config.json` 的 rider/vscode/openvsx 三个令牌，`cnb/.gcm/cnb_agent.yaml` 的 git 密码）。核对确认 `release.config.json` 的 `vscode.pat` 与 `.env` 的 `VSCE_PAT` 是不同值、两个 JetBrains 令牌也不同，所以按来源分开命名而不按变量名去重。
   >
-  > **已知缺口（需决策）**：`agents-board` 的 MCP 条目没迁。它的条内容是 `node ${workspaceFolder}/.dec/cache/agents-board/skills/agents-board/mcp/run.mjs`，旧系统由 Console 在写 MCP 配置时把 `${workspaceFolder}` 展开成该宿主自己的绝对路径；新系统 MCP 条目渲染成 `json_key` 后四个宿主收到同一串字节，而它们的 skills 目录各不相同（`.cursor`/`.claude`/`.codebuddy`/`.bg-agent/config-with-app`），设备变量也只有 id/name/os/arch，没有家目录。写进去只会得到四个宿主都启动失败的条目，所以只迁了 skill。
+  > **`agents-board` 已整体删除（2026-10-26，用户决定放弃）**：用户原话「agents-board 的 MCP 条目可以放弃，和他相关的资产彻底删了也没关系，到时候让项目重新提供就是了」。已删除的范围：云端 bundle 全部 7 个文件（含未迁移的 `mcp/server.ts`、`mcp/run.mjs`）、本机设备订阅、五个宿主落点（`.cursor` / `.claude` / `.codebuddy` / `.bg-agent/config-with-app` / `.codex`）。`migrate.py` 里的 `build_agents_board()` 一并移除，避免下次跑迁移又把它装回来。原缺口（`${workspaceFolder}` 无法按宿主展开脚本路径）随之作废，不再是待办。
   >
   > **尚未迁移**：`dec-source-private` 其余 17 个产品只有空 `dec.yaml` 清单，无可迁内容；`relkit/public/*/skills/` 下 5 个文件按用户此前指示「relkit 的东西可以从本项目彻底剔除」，不迁。
   >
