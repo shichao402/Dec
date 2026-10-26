@@ -1,12 +1,15 @@
 package agent
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/shichao402/Dec/internal/notice"
 	"github.com/shichao402/Dec/internal/proto"
 )
 
@@ -114,6 +117,14 @@ func LocalProjects(projects []Project) []proto.LocalProject {
 //
 // 用于“云端不知道某个条目的路径”时的兜底：比如项目被移出登记后，
 // 残留文件需要能被找出来删掉。只扫类别目录，不扫宿主根。
+//
+// 必须按说明行判定“是不是 Dec 写的”，不能把目录下的文件一律当自己的。
+// skills/ 与 rules/ 是用户和 Dec 共用的目录：用户放进去的 skill、自己写的
+// 规则就躺在同一层，按目录扫等于把用户的文件一起删掉。卸载是不可逆操作，
+// 这种误删没有任何补救余地。
+//
+// 没有说明行不等于一定不是 Dec 写的（.yaml/.env 与含密钥文件不加说明），
+// 但那些条目云端记着绝对路径，走核对清单就能删干净，不依赖这里兜底。
 func ScanManaged(dir string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
@@ -126,6 +137,10 @@ func ScanManaged(dir string) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
+		ours, err := managedByNotice(p)
+		if err != nil || !ours {
+			return nil
+		}
 		out = append(out, p)
 		return nil
 	})
@@ -134,6 +149,24 @@ func ScanManaged(dir string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// managedByNotice 报告文件是否带 Dec 的说明行。
+//
+// 只读文件开头一段：说明行一定在文件最前面（或 front matter 之后），
+// 不必把整个文件读进内存。
+func managedByNotice(p string) (bool, error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	head := make([]byte, 4096)
+	n, err := f.Read(head)
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+	return bytes.Contains(head[:n], []byte(notice.Text)), nil
 }
 
 // SkillDirName 从落点相对路径里取出 skill 目录名，供上报清单展示。

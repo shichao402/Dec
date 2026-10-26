@@ -570,4 +570,3 @@ func (r *Renderer) allProjects() ([]ssot.Project, error) {
 	}
 	return table.Projects, nil
 }
-
