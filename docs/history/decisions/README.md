@@ -67,4 +67,4 @@
 | [0045](0045-public-repo-not-private.md) | 代码仓库保持公开，改为守住「仓库里不能有真东西」 | 已接受（需求 22 已按此改写） |
 | [0046](0046-deploy-secret-in-environment.md) | 部署凭据收进 production environment，作用域由平台裁决 | 已接受（已实现并实测） |
 | [0047](0047-multi-path-hash-compare.md) | 多落点哈希必须全量比对，不看最后一份 | 已接受（v2.1.21 已发版，真机验证通过） |
-| [0048](0048-empty-hash-still-records-override.md) | 空哈希也必须记一条覆盖事件 | 已接受（待发版） |
+| [0048](0048-empty-hash-still-records-override.md) | 空哈希也必须记一条覆盖事件 | 已接受（v2.1.22～v2.1.24 逐层修完，真机验证通过） |
