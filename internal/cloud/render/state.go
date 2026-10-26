@@ -217,6 +217,16 @@ func (s *StateStore) RecordPlan(deviceID string, files []proto.File) error {
 //
 // 同一条目重复检测到同样的本地哈希时只保留一条：代理未回执前每次对账都会
 // 重新检测到同一次改动，重复记录只会污染管理面。
+//
+// 空哈希是例外，不能按哈希值去重。代理用空哈希表达「多落点里有一份与别的
+// 不同，我保证不了这条的状态」（ADR 0047），它不带任何改动指纹：两次完全不
+// 同的本地改动都会报成同一个 ""。拿哈希值判重就等于认定「这个条目这辈子只
+// 会被改一次」，第二次及以后的覆盖全部静默丢掉——文件被覆盖回基线，审计里
+// 却一条都没有，比完全不检测更危险（ADR 0048）。
+//
+// 所以空哈希只在极短窗口内去重，用来吸收同一轮对账内的重复检测：长轮询被
+// 唤醒后 mSync 会再算一次 Sync，两次判断在毫秒级内完成，那确实是一次改动。
+// 窗口取得很小是刻意的——宁可多记一条，也不能把一次真实覆盖记成没发生。
 func (s *StateStore) AddOverrides(deviceID string, overrides []proto.Override) error {
 	if len(overrides) == 0 {
 		return nil
@@ -227,24 +237,35 @@ func (s *StateStore) AddOverrides(deviceID string, overrides []proto.Override) e
 	if err != nil {
 		return err
 	}
-	last := make(map[string]string, len(st.Overrides))
-	for _, o := range st.Overrides {
-		last[o.ID] = o.Hash
+	// last 记每个条目最近一条覆盖记录的哈希与时间，用于判重。
+	type lastSeen struct {
+		hash string
+		at   time.Time
 	}
+	last := make(map[string]lastSeen, len(st.Overrides))
+	for _, o := range st.Overrides {
+		last[o.ID] = lastSeen{hash: o.Hash, at: o.DetectedAt}
+	}
+	now := time.Now().UTC()
 	added := 0
 	for _, o := range overrides {
-		// 必须用 ok 判断这条记录在不在，不能只比哈希值。
-		// map 取不存在的键返回零值 ""，而空哈希（多落点不一致，ADR 0047/0048）
-		// 也正好是 ""。只比值得话，每条空哈希覆盖都会被当成「已经记过了」
-		// 静默丢掉——症状是文件被覆盖了、审计里却什么都没有。
-		if prev, ok := last[o.ID]; ok && prev == o.Hash {
-			continue
-		}
 		if o.DetectedAt.IsZero() {
-			o.DetectedAt = time.Now().UTC()
+			o.DetectedAt = now
+		}
+		prev, seen := last[o.ID]
+		if seen {
+			if o.Hash != "" {
+				// 非空哈希就是改动指纹，值相同即同一次改动。
+				if prev.hash == o.Hash {
+					continue
+				}
+			} else if prev.hash == "" && o.DetectedAt.Sub(prev.at) < emptyHashDedupWindow {
+				// 空哈希：只压掉同一轮对账内的重复判断。
+				continue
+			}
 		}
 		st.Overrides = append(st.Overrides, o)
-		last[o.ID] = o.Hash
+		last[o.ID] = lastSeen{hash: o.Hash, at: o.DetectedAt}
 		added++
 	}
 	if added == 0 {
@@ -258,6 +279,13 @@ func (s *StateStore) AddOverrides(deviceID string, overrides []proto.Override) e
 
 // maxOverrides 是每台设备保留的覆盖记录条数。
 const maxOverrides = 200
+
+// emptyHashDedupWindow 是空哈希覆盖记录的去重窗口。
+//
+// 只覆盖「同一轮对账内被算了两遍」这一种重复（mSync 在长轮询被唤醒后会
+// 再调一次 Sync，两次之间是毫秒级）。超过这个窗口就认为是新的一次本地改动
+// 并如实记录：空哈希不含改动指纹，宁可多记也不能漏记（ADR 0048）。
+const emptyHashDedupWindow = 2 * time.Second
 
 // Overrides 返回一台设备的覆盖记录，最近的在前面。
 func (s *StateStore) Overrides(deviceID string) ([]proto.Override, error) {

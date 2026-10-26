@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shichao402/Dec/internal/cloud/assets"
 	"github.com/shichao402/Dec/internal/cloud/crypt"
@@ -1126,5 +1127,71 @@ func TestAddOverridesKeepsEmptyHash(t *testing.T) {
 	}
 	if got[0].Hash != "sha256:abc" {
 		t.Fatalf("最近的记录应在最前面，实际 %q", got[0].Hash)
+	}
+}
+
+// TestAddOverridesEmptyHashTwiceNotDeduplicated 覆盖第二个空哈希陷阱：
+// 空哈希不是改动指纹，两次不同的本地改动都会报成同一个 ""。
+// 如果按哈希值判重，第二次及以后的覆盖会被当成「已经记过了」静默丢掉，
+// 症状是文件被覆盖回基线、审计里却一条都没有（ADR 0048 第三处根因）。
+func TestAddOverridesEmptyHashTwiceNotDeduplicated(t *testing.T) {
+	store, err := NewStateStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStateStore: %v", err)
+	}
+	const id = "asset:woa:a.mdc"
+	paths := []string{"/p/.cursor/a.mdc", "/p/.with/a.mdc"}
+
+	// 第一次本地改动：多落点不一致，代理报空哈希。
+	first := time.Now().UTC()
+	if err := store.AddOverrides("dev-1", []proto.Override{
+		{ID: id, Hash: "", Paths: paths, DetectedAt: first},
+	}); err != nil {
+		t.Fatalf("AddOverrides: %v", err)
+	}
+
+	// 隔了几分钟又改了一次，代理仍然只能报空哈希（它不知道哪一份不同）。
+	// 这是完全不同的一次改动，必须留下第二条记录。
+	if err := store.AddOverrides("dev-1", []proto.Override{
+		{ID: id, Hash: "", Paths: paths, DetectedAt: first.Add(5 * time.Minute)},
+	}); err != nil {
+		t.Fatalf("AddOverrides: %v", err)
+	}
+
+	got, err := store.Overrides("dev-1")
+	if err != nil {
+		t.Fatalf("Overrides: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("两次不同的改动都报空哈希时必须各记一条，实际 %d 条", len(got))
+	}
+}
+
+// TestAddOverridesEmptyHashSameRoundDeduplicated 反向锁住去重窗口：
+// 同一轮对账里 Sync 被算了两遍（长轮询被唤醒后 mSync 会再算一次），
+// 这两次是毫秒级的同一件事，不能记成两条。
+func TestAddOverridesEmptyHashSameRoundDeduplicated(t *testing.T) {
+	store, err := NewStateStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStateStore: %v", err)
+	}
+	const id = "asset:woa:a.mdc"
+	paths := []string{"/p/.cursor/a.mdc", "/p/.with/a.mdc"}
+	at := time.Now().UTC()
+
+	for i := 0; i < 2; i++ {
+		if err := store.AddOverrides("dev-1", []proto.Override{
+			{ID: id, Hash: "", Paths: paths, DetectedAt: at.Add(time.Duration(i) * 50 * time.Millisecond)},
+		}); err != nil {
+			t.Fatalf("AddOverrides: %v", err)
+		}
+	}
+
+	got, err := store.Overrides("dev-1")
+	if err != nil {
+		t.Fatalf("Overrides: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("同一轮对账内的重复判断应被去重，实际 %d 条", len(got))
 	}
 }
