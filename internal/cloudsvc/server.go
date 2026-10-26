@@ -51,6 +51,17 @@ type Config struct {
 	RequiredVersion string
 	// AcceptAny 允许在没有 TLS 的情况下启动，仅用于本机调试与测试。
 	AcceptAny bool
+	// ProxyProtocol 表示监听口前面有 nginx 用 PROXY protocol 传真实来源。
+	//
+	// 生产环境需要它：nginx 在公网 443 那一跳附加了 PROXY 头，但中间的
+	// 127.0.0.1:8445 只做字节转发、把那个头剥掉了，于是 dec-cloud 看到的
+	// RemoteAddr 永远是 127.0.0.1。这不只是审计里 remote_ip 没取证价值——
+	// 更要紧的是下载限流按 IP 分桶（每分钟 30 次），所有公网请求共用一个桶，
+	// 任意一个爬虫都能把正常用户的额度刷光。
+	//
+	// 只允许配合回环监听使用（见 New 的校验）：公网直连时若能自报来源，
+	// 伪造 IP 就比"地址不准"更糟。
+	ProxyProtocol bool
 
 	// BackupURL 是冷备仓库地址（需求 15.1）。为空表示不推送。
 	BackupURL string
@@ -155,6 +166,17 @@ type Server struct {
 func New(cfg Config) (*Server, error) {
 	if cfg.DataDir == "" {
 		return nil, errors.New("缺少数据目录")
+	}
+	// PROXY protocol 只信任本机转发者，所以必须配合回环监听。
+	//
+	// 放开这个组合没有好处：公网直连时客户端可以自己声明来源 IP，
+	// 那样限流能按伪造 IP 无限绕过、审计里也会出现伪造地址，
+	// 比"来源不准"更糟。生产拓扑里 dec-cloud 永远只监听 127.0.0.1，
+	// 由本机 nginx 转发，所以这条约束不会挡住正常部署。
+	if cfg.ProxyProtocol {
+		if err := requireLoopbackListen(cfg.Listen); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.ServerVersion == "" {
 		cfg.ServerVersion = "dev"
@@ -460,6 +482,9 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("监听 %s 失败: %w", s.cfg.Listen, err)
 	}
+	// 前面有 nginx 用 PROXY protocol 传来源时要解开它：否则 RemoteAddr
+	// 恒为 127.0.0.1，限流会退化成"全公网共用一个桶"（见 Config.ProxyProtocol）。
+	ln = newProxyProtocolListener(ln, s.cfg.ProxyProtocol)
 
 	errCh := make(chan error, 1)
 	go func() {

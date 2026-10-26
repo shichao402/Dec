@@ -234,19 +234,22 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 // clientIP 取客户端 IP。
 //
-// 已知局限（2026-10-24 线上核实）：生产拓扑是
-// 公网 443 → nginx stream(ssl_preread + PROXY protocol) → 127.0.0.1:8445（剥掉 PROXY 头）
-// → dec-cloud 127.0.0.1:8444。
-// 因为 dec-cloud 不解析 PROXY 头，PROXY 头在 8445 那一跳就被剥掉了，
-// 所以这里拿到的永远是 127.0.0.1，而不是真实公网来源。
+// 生产拓扑是
 //
-// 为什么仍然只用 RemoteAddr、不信任转发头：dec-cloud 前面只有这一层本机 nginx，
-// 它没有设置任何 X-Forwarded-For；此时若去信任转发头，等于让公网请求
-// 自己声明来源地址，那比"地址不准"更糟——审计里会出现伪造的 IP。
+//	公网 443 → nginx stream(ssl_preread + PROXY protocol) → 127.0.0.1:8445
+//	→ 剥掉 PROXY 头 → dec-cloud 127.0.0.1:8444
 //
-// 要恢复真实来源，正确做法是让 dec-cloud 解析 PROXY protocol（去掉 8445 那一跳）。
-// 在此之前，审计里的 remote_ip 对经由公网进入的请求没有取证价值，
-// 判断来源只能依赖设备 ID 和设备证书。
+// 中间的 8445 那一跳会剥掉 PROXY 头，所以历史上这里拿到的永远是 127.0.0.1。
+// 开启 Config.ProxyProtocol 后（生产已开启），listener 层会解开 PROXY 头
+// 并把真实来源填进 RemoteAddr，这里就能拿到公网 IP。
+//
+// 但仍然只认 RemoteAddr、不看转发头。理由是两者性质不同：
+// PROXY protocol 头由 nginx 在 TCP 层写入，客户端无法越过它伪造；
+// 而 X-Forwarded-For 只是一行 HTTP 头，公网请求可以自己写任何值，
+// 信任它等于让请求者自报来源——那比"地址不准"更糟，限流会被直接绕过。
+//
+// 什么时候会退化成 127.0.0.1：未经 nginx 的本机直连（调试、健康检查），
+// 以及 nginx 用 LOCAL 命令发起的连接。这些场景本来就没有真实来源可言。
 func clientIP(r *http.Request) string {
 	host := r.RemoteAddr
 	if i := strings.LastIndex(host, ":"); i > 0 {

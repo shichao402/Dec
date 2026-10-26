@@ -64,3 +64,4 @@
 | [0041](0041-notice-rendered-by-server.md) | 说明行由服务端渲染时写入，代理只落字节 | 已接受（已实现） |
 | [0042](0042-sync-audit-dedup.md) | sync 审计按内容指纹降噪，密钥下发不降噪 | 已被 0043 取代 |
 | [0043](0043-audit-tiers.md) | 审计按事件级别分级，访问类事件有界聚合 | 已接受（已实现） |
+| [0044](0044-proxy-protocol-real-ip.md) | 服务端解析 PROXY protocol，恢复真实来源地址 | 已接受（服务端已实现，nginx 待改） |

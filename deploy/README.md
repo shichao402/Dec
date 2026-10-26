@@ -83,6 +83,19 @@ SSH 的登录策略不由本项目的脚本决定。`provision.sh` 默认一行 
 
 nginx 必须用 `stream` 模块 + `ssl_preread` 按 SNI 把 `dec.firoyang.com` 的原始 TLS 流透传到 `127.0.0.1:8444`，**不能终止 TLS**：设备身份靠 TLS 客户端证书，ACME 证书也由 dec-cloud 自己用 TLS-ALPN-01 在这条连接上申请续期，nginx 一旦解密，两者都会失效。nginx 自己的其他 HTTPS 站点改为监听回环端口，作为 `ssl_preread` 的 default 后端。
 
+#### 来源 IP 与 PROXY protocol（有顺序要求）
+
+`dec-cloud` 从 v2.1.19 起在 listener 层解析 PROXY protocol（`-proxy-protocol`，默认开启），因此能拿到真实公网来源。这不只是审计取证问题：下载限流按 IP 分桶（每分钟 30 次），在开启之前所有公网请求都呈现为 `127.0.0.1`，共用一个桶，任意爬虫都能把正常用户的额度刷光。
+
+开启需要两步，**顺序不能反**：
+
+1. 先部署带解析的服务端。它对不带 PROXY 头的连接完全兼容，所以在 nginx 还没改之前不会有任何影响。
+2. 再把 `/etc/nginx/stream-sni.conf` 里 `127.0.0.1:8445` 那一跳改成 `proxy_protocol on`（配置见仓库内同名文件），`nginx -t && systemctl reload nginx`。
+
+反过来做会立刻造成全站不可用：旧服务端不认识这个文本前缀，TLS 握手会直接失败，所有设备同时断连。
+
+`-proxy-protocol` 只允许配合回环监听使用，启动时会校验；监听在 `0.0.0.0` 或公网地址时会拒绝启动。理由是公网直连时客户端可以自报来源 IP，那样限流能被无限绕过、审计里也会出现伪造地址，比"地址不准"更糟。
+
 ### 2. 建账号与目录
 
 先把 `provision.sh` 传上去，然后：

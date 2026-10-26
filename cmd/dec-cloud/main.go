@@ -35,6 +35,7 @@ func main() {
 		domain      = flag.String("domain", "dec.firoyang.com", "对外域名，用于 ACME 证书")
 		required    = flag.String("required-version", "", "要求的代理版本；为空时取服务端版本")
 		acceptAny   = flag.Bool("accept-any", false, "调试用：使用自签证书，绝不用于生产")
+		proxyProto  = flag.Bool("proxy-protocol", true, "解析前置 nginx 传来的 PROXY protocol；只在回环监听时允许，生产必须开启")
 		backupURL   = flag.String("backup-url", "", "冷备仓库地址（需求 15.1），留空则不推送")
 		backupKey   = flag.String("backup-key", "", "冷备仓库 deploy key 路径")
 		auditURL    = flag.String("audit-url", "", "审计仓库地址（需求 15.3），留空则不推送")
@@ -68,6 +69,7 @@ func main() {
 		ServerVersion:   Version,
 		RequiredVersion: *required,
 		AcceptAny:       *acceptAny,
+		ProxyProtocol:   *proxyProto,
 		BackupURL:       *backupURL,
 		BackupKey:       *backupKey,
 		AuditURL:        *auditURL,
