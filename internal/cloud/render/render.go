@@ -287,7 +287,27 @@ func (r *Renderer) RenderDevice(dev ssot.Device) (*Rendered, error) {
 				}
 				seenID[pf.ID] = bundle
 
-				files = append(files, File{File: pf, Hash: ssot.SumHex([]byte(pf.Content))})
+				// 哈希口径必须与代理一致，否则每一轮对账都会误判为漂移。
+				//
+				// json_key 条目不能直接哈希 pf.Content：那是条目在源文件里的
+				// 原始字节（带缩进换行），代理落盘后读回来的是容器里紧凑
+				// 序列化的字节，两者永远不相等，drift 会长期恒为正。
+				// 所以这类条目一律按「规范化后的语义」算，见 proto.NormalizeJSONEntry。
+				hash := ""
+				if pf.Format == proto.FormatJSONKey {
+					norm, err := proto.NormalizeJSONEntry([]byte(pf.Content))
+					if err != nil {
+						// 给空哈希会在下一轮被当成漂移无限重发，
+						// 不如当场报出来，让人看见是哪条内容有问题。
+						alerts = append(alerts, Alert{ID: p.id, Reason: err.Error()})
+						continue
+					}
+					hash = ssot.SumHex(norm)
+				} else {
+					hash = ssot.SumHex([]byte(pf.Content))
+				}
+
+				files = append(files, File{File: pf, Hash: hash})
 			}
 		}
 	}

@@ -69,4 +69,5 @@
 | [0047](0047-multi-path-hash-compare.md) | 多落点哈希必须全量比对，不看最后一份 | 已接受（v2.1.21 已发版，真机验证通过） |
 | [0048](0048-empty-hash-still-records-override.md) | 空哈希也必须记一条覆盖事件 | 已接受（v2.1.22～v2.1.24 逐层修完，真机验证通过） |
 | [0049](0049-uninstall-must-not-delete-user-files.md) | 卸载不得删用户自己的文件，兜底扫描只认说明行 | 已接受（待发版） |
-| [0050](0050-mcp-entry-must-nest-in-mcpservers.md) | MCP 条目必须落进 mcpServers 容器，写在顶层等于静默失效 | 已接受（待发版） |
+| [0050](0050-mcp-entry-must-nest-in-mcpservers.md) | MCP 条目必须落进 mcpServers 容器，写在顶层等于静默失效 | 已接受（v2.1.27 已发版，真机验证通过） |
+| [0051](0051-json-key-hash-canonical-form.md) | json_key 条目按规范化语义算哈希，两侧不各算各的落盘字节 | 已接受（待发版） |

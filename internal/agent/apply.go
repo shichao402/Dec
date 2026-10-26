@@ -128,8 +128,10 @@ func (w *Writer) writeOne(full string, f proto.File) (string, error) {
 		if err := writeFileAtomic(full, merged, mode); err != nil {
 			return "", err
 		}
-		// 哈希只算 Dec 管理的条目（需求 6.3）。
-		return hashOf(managedOnly(full, merged, "")), nil
+		// 回执哈希必须与“下一轮对账读回来的哈希”完全同口径，否则
+		// 服务端记下的落地哈希与代理上报的现场哈希不一致，
+		// 每轮都会被判成本地改动（需求 6.3）。
+		return HashFile(full, proto.FormatJSONKey, f.Key)
 	}
 	return "", fmt.Errorf("%w: 未知的落盘格式 %q", ErrNotAllowed, f.Format)
 }
@@ -209,8 +211,13 @@ func hashOf(data []byte) string {
 
 // HashFile 读取落点并计算哈希，用于上报本地清单（需求 2.1 的第五个原语）。
 //
-// json_key 格式的落点只算 Dec 管理的条目：文件里其它键由用户维护，
+// json_key 格式的落点只算 Dec 管理的那个条目：文件里其它键由用户维护，
 // 把它们算进哈希会让每一次用户改动都被误判成“Dec 落点被改”。
+//
+// 条目按规范化后的语义算（proto.NormalizeJSONEntry），不带容器外壳。
+// 服务端渲染同一份内容时用同一个函数，两侧因此可以逐字节对齐。
+// 早期版本这里算的是「容器内全部 dec- 前缀条目」的序列化结果，
+// 与服务端算的「单个条目原始字节」口径不同，导致 drift 长期恒为 1。
 func HashFile(full string, format proto.Format, key string) (string, error) {
 	data, err := os.ReadFile(full)
 	if err != nil {
@@ -220,73 +227,38 @@ func HashFile(full string, format proto.Format, key string) (string, error) {
 		return "", err
 	}
 	if format == proto.FormatJSONKey && key != "" {
-		return hashOf(managedOnly(full, data, key)), nil
+		entry, ok := managedEntry(full, data, key)
+		if !ok {
+			// 文件在、但条目没了：返回空哈希表示“我保证不了这条的状态”。
+			// 服务端据此补发，而不是把它当成“内容一致”跳过。
+			return "", nil
+		}
+		norm, err := proto.NormalizeJSONEntry(entry)
+		if err != nil {
+			return "", err
+		}
+		return hashOf(norm), nil
 	}
 	return hashOf(data), nil
 }
 
-// managedOnly 从 JSON 内容里提取 Dec 管理的条目并序列化成稳定字节。
+// managedEntry 从 JSON 内容里取出指定键的条目原始字节。
 //
-// key 为空表示“mcpServers 下任意 dec- 前缀的键”，用于计算 json_key 落点的整体哈希。
-// 排序后再序列化，保证同样的内容得到同样的哈希，不受原始键顺序影响。
-//
-// 只看 mcpServers：顶层不属于 Dec 的地盘，用户在那里放什么（包括其它工具的
-// 配置）都不该被算成“Dec 落点被改”，否则每一次用户改动都会报一次漂移。
-func managedOnly(full string, data []byte, key string) []byte {
+// 只看 mcpServers：顶层不属于 Dec 的地盘，用户在那里放什么
+// （包括其它工具的配置）都不该被算成“Dec 落点被改”。
+func managedEntry(full string, data []byte, key string) ([]byte, bool) {
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
-		// 不是 JSON 就按原始字节算：这样至少能发现文件被改动，
-		// 也不会因为解析失败而把落点当成“不存在”。
-		return data
+		return nil, false
 	}
 	servers := map[string]json.RawMessage{}
 	if raw, ok := root[mcpServersKey]; ok && len(raw) > 0 {
 		if err := json.Unmarshal(raw, &servers); err != nil {
-			// mcpServers 结构坏了：按原始字节算，让漂移被发现。
-			return data
+			return nil, false
 		}
 	}
-	out := map[string]json.RawMessage{}
-	for k, v := range servers {
-		if k == noticeKey {
-			continue
-		}
-		if key != "" {
-			if k == key {
-				out[k] = v
-			}
-			continue
-		}
-		if strings.HasPrefix(k, entryPrefix) {
-			out[k] = v
-		}
-	}
-	return marshalSorted(out)
-}
-
-// marshalSorted 按键名排序序列化，保证哈希稳定。
-func marshalSorted(m map[string]json.RawMessage) []byte {
-	if len(m) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var buf bytes.Buffer
-	buf.WriteByte('{')
-	for i, k := range keys {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-		kb, _ := json.Marshal(k)
-		buf.Write(kb)
-		buf.WriteByte(':')
-		buf.Write(m[k])
-	}
-	buf.WriteByte('}')
-	return buf.Bytes()
+	entry, ok := servers[key]
+	return entry, ok
 }
 
 // mergeJSONKey 把一个键合并进共享 JSON 配置文件（需求 6.3）。
