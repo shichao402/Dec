@@ -1,7 +1,7 @@
 # 实施计划：Dec Cloud
 
-- [ ] 1. 仓库公开与泄露排查、新代码骨架
-  > 状态（2026-10-26 核对）：骨架、私有的 dec-cloud-backup 与 dec-cloud-audit 已完成，`shichao402/Dec` 为公开（符合 ADR 0045）；历史泄露排查已完成并落档（见下）；部署 environment 保护规则未启用（见第 11 项）。
+- [x] 1. 仓库公开与泄露排查、新代码骨架
+  > 状态（2026-10-26 完成）：骨架、私有的 dec-cloud-backup 与 dec-cloud-audit 已完成，`shichao402/Dec` 为公开（符合 ADR 0045）；历史泄露排查已完成并落档（见下）；部署 environment 保护规则已启用并实测（`production` 为 `v*` tag 策略，见第 11 项）。
   >
   > 泄露排查结论（2026-10-26）：全历史 1168 提交、4 分支、514 tag 扫描完毕，**没有真实凭据泄露，无需轮换**。私钥块 9 处全是 `fake`/`PRIV`/`SECRET` 等测试占位；唯一 `ghp_` 命中是明文扫描功能的测试输入；`BW_PASSWORD` 全是 `<测试账号主密码>` 之类占位；全历史无任何 `ssh user@host` 登录命令；`.secrets/` 从未被 git 跟踪；无真实 `.env` 被提交。唯一发现是真实公网 IP `43.161.239.208`（生产机地址）明文存在于 `agent-tray-access/requirements.md:19,58` 与 ADR 0044:98，判定可接受——该地址任何人解析 `dec.firoyang.com` 即可得到，写进文档不增加暴露面。详见 [credential-leak-audit.md](../../../docs/history/research/credential-leak-audit.md)。
   >
