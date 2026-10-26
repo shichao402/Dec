@@ -142,7 +142,13 @@
   >
   > **尚未迁移**：`dec-source-private` 其余 17 个产品只有空 `dec.yaml` 清单，无可迁内容；`relkit/public/*/skills/` 下 5 个文件按用户此前指示「relkit 的东西可以从本项目彻底剔除」，不迁。
   >
-  > **新旧仍同机并存**：本机 `~/.dec`（474M）与 `/Applications/dec-console.app` 仍在运行，`dec-server` 与 `dec-console` 两个进程活着；旧系统渲染的 `dec-` 前缀落点未清（`.cursor` 11 个 skill + 1 rule，`.bg-agent/config-with-app` 11 个 skill + 1 rule）。需求 17.5 要求切换时先卸载旧版再装新代理，这一步还没做。
+  > **本机旧系统已清理（2026-10-26）**：`dec-server` 与 `dec-console` 进程停止，`/Applications/dec-console.app` 删除，22 个 `dec-` 前缀 skill 与 2 个 `dec-issue-handler.mdc` 删除（保留 `dec-extract-asset`），`DecPersonalDevKit` 与 `dec-source-private` 两个旧仓库删除，`~/.dec` 从 474M 清到 36K 但保留目录（`RootDec = .dec` 是新系统 env 类条目的落点根，不能整删）。`com.dec.agent.plist` / `com.dec.tray.plist` 指向新代理，属于保留项，此前误列为旧系统启动项已纠正。
+  >
+  > **relkit 剔除已复核**：`go.mod` / `go.sum` 无依赖，Go 源码无 import，`git log` 里 `e4f4468` 已移除整套组件体系与桌面 Console；仓库内除 `task-item.md` 本段历史叙述外无任何 relkit 引用。本地 `~/workspace/relkit`（817M）与远端仓库均按用户要求原样保留。`publish.firoyang.com` 域名按用户要求保留不动。
+  >
+  > **drift=1 已定位并修复（ADR 0051，e9c19a9）**：根因不是 relkit 残留，而是 `json_key` 条目的哈希口径两侧不对称——服务端算条目在源文件里的原始字节（带缩进），代理算落盘后容器里的紧凑字节，永不可能相等，所以每轮对账都误判漂移并重发。新增 `proto.NormalizeJSONEntry` 作为两侧唯一口径，服务端与代理都按规范化语义算；删掉原来算「容器内全部 dec- 前缀条目」的 `managedOnly`（它本身也错：多个托管条目会互相牵动）。补 5 条双端一致性断言 + 1 条真实链路 MCP 收敛断言，反向验证两侧各改回旧口径都会让测试失败。
+  >
+  > **尚未迁移**：`dec-source-private` 其余 17 个产品只有空 `dec.yaml` 清单，无可迁内容；`relkit/public/*/skills/` 下 5 个文件按用户此前指示「relkit 的东西可以从本项目彻底剔除」，不迁。
   - 由 Agent 读取 `DecPersonalDevKit`、`dec-source-private` 和本机旧落点的内容，经 MCP 写入新系统，commit 记录来源；密钥直接读取后走常规写入
   - 先在第一台设备上验证，其中 `dec-tencent-cloud` 要验证可用；然后逐台卸载旧组件并切换到新代理
   - 列出待删除清单，由用户逐项确认后，删除旧仓库、registry、`publish.firoyang.com`、公开 Release 和 Bitwarden 旧条目，保留 `_dec-cloud`
