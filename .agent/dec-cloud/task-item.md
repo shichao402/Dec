@@ -117,7 +117,7 @@
   - 端到端验证：下发、离线降级、本地改动覆盖、版本拦截、冷备推送、告警
   - _需求：实施约定 1、3，10.1、21.1_
 - [ ] 12.2 存量迁移与旧系统下线
-  > 状态（2026-10-26 核对）：未开始。云端只有一个旧 bundle；publish.firoyang.com、/Applications/dec-console.app、~/.dec 仍在。旧更新组件的三个 systemd 服务仍在生产机运行（agent / console / store），nginx 里还有 3 个相关站点配置，需一并下线。
+  > 状态（2026-10-26 更新）：旧更新组件已从生产机彻底下线——三个 systemd 服务停止并禁用、单元文件删除，nginx 三个旧站点配置移出 `conf.d`（备份在 `/root/nginx-retired`），`/srv/relkit`、`/srv/releases`、`/etc/relkit-*`、`/usr/local/bin/relkit*` 全删，`/root/.relkit-admin-cred` 已删，配置归档在 `/root/relkit-removal-backup.tar.gz`。云端 bundle 经业务链路删除（rev `f35b55c`），仓库内 79 个旧 tag 本地与远端一并清除，GitHub `relkit-operator` environment 与 10 个 `RELKIT_*` 变量已删。**尚未迁移**：`DecPersonalDevKit`、`dec-source-private` 的存量内容还没写入新系统；`publish.firoyang.com` 与 `/Applications/dec-console.app` 域名/应用仍在（前者已无后端，后者是本机应用）。
   - 由 Agent 读取 `DecPersonalDevKit`、`dec-source-private` 和本机旧落点的内容，经 MCP 写入新系统，commit 记录来源；密钥直接读取后走常规写入
   - 先在第一台设备上验证，其中 `dec-tencent-cloud` 要验证可用；然后逐台卸载旧组件并切换到新代理
   - 列出待删除清单，由用户逐项确认后，删除旧仓库、registry、`publish.firoyang.com`、公开 Release 和 Bitwarden 旧条目，保留 `_dec-cloud`
