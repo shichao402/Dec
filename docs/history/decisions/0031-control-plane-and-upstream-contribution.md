@@ -10,7 +10,7 @@
 
 0026 把作者源定为提供方仓 `provides` / `DecAssets/`。0028 规定官方字节只经 CI 写入 registry，本机不得把 `provides` 项目 `dec_push` 进个人私仓。0029 用 `requires` 的 pin 区分 registry 与私仓。
 
-个人知识仓（如 `agent-dev-playbook`）与 `relkit` 同为提供方源仓，差别只是维护者对前者有 Git 写权限。这让人想给它开一条捷径：在 personal 里标记「我能直写这个提供方」，Agent 据此改源仓 `DecAssets/`、跳过 PR。
+个人知识仓（如 `agent-dev-playbook`）与 `my-skills` 同为提供方源仓，差别只是维护者对前者有 Git 写权限。这让人想给它开一条捷径：在 personal 里标记「我能直写这个提供方」，Agent 据此改源仓 `DecAssets/`、跳过 PR。
 
 捷径不成立。写权限是「这台机器上这个人此刻」的偶然属性：同一个提供方，有 clone 的机器能直写，没 clone 的机器只能提 PR，于是同一条沉淀指令在不同机器上落到不同地方。更糟的是落点降级只能静默——标记说 direct、本机却没有源仓时，写入会掉回 `~/.dec/cache`，正是 0028 要禁的位置。
 
@@ -20,7 +20,7 @@
 
 1. **控制面（personal / `repo_url`）**：只记录订阅哪些提供方，以及真正的个人 Git 资产与密钥归属。项目 stub 是 `<name>/dec.yaml`，只有 `name` / `title` / `tags` / `depends_on` 一类配置。**不存放提供方资产正文，也不记录贡献方式。**
 2. **分发面（registry）**：只读快照。`latest` / `v*` pin 只从这里安装。
-3. **提供方源仓**：彼此平级（`relkit`、`AgentDevPlaybook`、…）。作者源是 `DecAssets/` + `provides`，CI `publish-provides` 写入 registry。
+3. **提供方源仓**：彼此平级（`my-skills`、`AgentDevPlaybook`、…）。作者源是 `DecAssets/` + `provides`，CI `publish-provides` 写入 registry。
 
 提供方身份写在 registry 快照 `<project>/provider.yaml` 的 `origin_repo`，发布时从源仓 git remote 或显式字段取。消费方只读，用它定位上游仓。
 
@@ -29,7 +29,7 @@
 ```yaml
 requires:
   agent-dev-playbook: latest
-  relkit: latest
+  my-skills: latest
 ```
 
 **贡献口径只有一条**：改动进 `.dec/overrides/`，再由 `dec_propose_upstream` 提 Issue / PR，连同脱敏后的来源经验一并提交，由提供方仓统一整理合入。维护者自己有写权限时，在提供方仓里正常开 PR 或直接改——那是 Git 的事，Dec 不为此增加标记或落点分支。

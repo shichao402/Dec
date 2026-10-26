@@ -179,7 +179,6 @@ var deferralMarkers = []string{
 // skipDirs 是不属于本仓库源码的目录。
 var skipDirs = map[string]bool{
 	".git":         true,
-	".relkit":      true,
 	".cache":       true,
 	"node_modules": true,
 	"vendor":       true,

@@ -49,7 +49,7 @@ environment 的部署分支策略存在 GitHub 设置里，在仓库之外，由
 
 - 部署凭据的可用范围从「整仓库任意 workflow、任意分支」收窄到「`production` environment 且 ref 匹配 `v*` 标签」。
 - 打 tag 发布流程不变，发布耗时不变，多出的只是 environment secret 的一次性配置。
-- 仓库级只保留三个与部署无关的 secret（`CNB_TOKEN`、`RELKIT_AGENT_URL`、`RELKIT_UPLOAD_TOKEN`），它们服务于其他 workflow。
+- 仓库级只保留与部署无关的 secret（如 `CNB_TOKEN`），它们服务于其他 workflow。
 - 部署失败或回滚的告警路径未受影响，仍在部署入口脚本内。
 
 ## 未采纳的方案

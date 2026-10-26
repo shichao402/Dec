@@ -16,7 +16,7 @@
 #   curl -fsSL http://<host>:<port>/purge-legacy-dec.sh | bash
 #   curl -fsSL http://<host>:<port>/purge-legacy-dec.sh | bash -s -- --apply
 #
-# 判定依据：旧架构落点带 dec- 前缀，新架构不带（如 relkit-ops），互不冲突。
+# 判定依据：旧架构落点带 dec- 前缀，新架构不带，互不冲突。
 #
 set -uo pipefail
 

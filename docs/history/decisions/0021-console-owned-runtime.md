@@ -1,6 +1,6 @@
 # 0021 — Console 独占用户分发与目标运行时
 
-- **状态**：已接受（连接与发布协议已实施；GitHub Actions 原生 GUI runner 已接入；同平台运行时套件内置 + SSH 推送已接入。relkit-serve 人页按 audience 过滤仍待发布端升级）
+- **状态**：已被 vNext 断代取代（Console 已移除，用户面改为「云端 SSOT + 超薄代理」）。原文保留作历史记录
 - **日期**：2026-09-01
 - **关联**：[0018](0018-instance-lock-and-console.md)、[0019](0019-remote-provisioning.md)、[0020](0020-retire-tui.md)
 - **影响范围**：Console 连接、版本门闩、目标端运行时套件、RUP artifact audience、人类发布页
@@ -11,7 +11,7 @@
 
 用户面自更新与目标运行时分成两条所有权链：
 
-- **Console 自更新**由本机 Tauri 壳直接调用 lock-pinned `sdk-rust` facade 与同 SHA `relkit-updater` sidecar。设置页未连接、未解锁时也可检查和安装；`dec-server` 不暴露自更新 RPC，也不参与检查。
+- **Console 自更新**由本机 Tauri 壳直接调用 lock-pinned `sdk-rust` facade 与同 SHA 的第三方更新 sidecar。设置页未连接、未解锁时也可检查和安装；`dec-server` 不暴露自更新 RPC，也不参与检查。
 - **目标运行时对齐**仍由发起端按已安装 Console 的版本释放或下载 `audience=runtime` 套件，再推送到本机或 SSH 目标。目标 `dec-server` 不自检、自升。
 
 同一次发布的 Console 与所有运行时组件使用同一 SemVer。每个程序都必须支持 `--version`，套件只有在逐组件版本相同后才视为完整。连接只允许版本相等：
@@ -33,21 +33,21 @@ SSH 置备由**发起端**解析目标 `os/arch`：
 2. 缺失或校验失败时由发起端经 RUP 下载到临时目录，再 rename 发布缓存
 3. 经系统 SSH 把四个二进制流式推到目标临时目录，chmod 后 rename 到 `~/.dec/bin`
 
-目标机只需系统 SSH 服务端与 POSIX `sh`/核心文件工具，不需要 curl、bash 或公网访问。发起端异平台缓存未命中且无法访问 RUP 时，置备明确失败。跨平台运行时套件仍保留在签名 RUP manifest（`audience=runtime`），供发起端按需拉取。人类 browse 页一旦存在 `audience=user` 只展示 Console；旧 release 没有 audience 时保持原清单以免空页。该过滤已在 relkit-serve 发布端实施（`internal/browse` `humanArtifacts`），2026-09-27 随 relkit-agent 0.4.24+409d272 升级在公网生效。
+目标机只需系统 SSH 服务端与 POSIX `sh`/核心文件工具，不需要 curl、bash 或公网访问。发起端异平台缓存未命中且无法访问 RUP 时，置备明确失败。跨平台运行时套件仍保留在签名 RUP manifest（`audience=runtime`），供发起端按需拉取。人类 browse 页一旦存在 `audience=user` 只展示 Console；旧 release 没有 audience 时保持原清单以免空页。该过滤由当时的发布端实施（`internal/browse` `humanArtifacts`），2026-09-27 在公网生效。
 
-当前 relkit SDK 选择最高可达版本，不支持任意历史版本直取。缓存未命中时，只有 RUP 解析结果与 Console 钉死版本一致才下载；渠道已有更高版本则要求先更新 Console，或预先准备旧版本缓存。SSH 传输后优先用目标端 `sha256sum` / `shasum -a 256` 核对套件，无 hash 工具时明确降级为逐组件 `--version`；激活过程中保留旧文件并在失败时 best-effort 回滚。
+当时所用更新 SDK 只选择最高可达版本，不支持任意历史版本直取。缓存未命中时，只有 RUP 解析结果与 Console 钉死版本一致才下载；渠道已有更高版本则要求先更新 Console，或预先准备旧版本缓存。SSH 传输后优先用目标端 `sha256sum` / `shasum -a 256` 核对套件，无 hash 工具时明确降级为逐组件 `--version`；激活过程中保留旧文件并在失败时 best-effort 回滚。
 
 ## 构建边界
 
 `scripts/build-console.py` 在原生 Windows / macOS 节点：
 
-1. 为当前平台编译同 os/arch 运行时套件并写入 Tauri resources，同时生成摘要清单；把 consume 安装的 lock-pinned `relkit-updater` sidecar 一并放进更新 resources
+1. 为当前平台编译同 os/arch 运行时套件并写入 Tauri resources，同时生成摘要清单；把 consume 安装的 lock-pinned 第三方更新 sidecar 一并放进更新 resources
 2. 构建 Console 安装包，归一化为 `dist/dec-console-<os>-<arch>.<ext>`
 3. 构建结束清理生成资源；二进制不纳入仓库
 
-GitHub Actions（`.github/workflows/release.yml`）每个 Console job 都准备 Go 与 relkit SDK，人面只编两套：`windows-latest` → `windows-amd64`，`macos-15-intel` → `darwin-amd64`（Intel 不能用已退役的 `macos-13`；Apple Silicon 用这份 Intel 包走 Rosetta）。不编 Linux Console，也不编 `darwin-arm64`。另用 Ubuntu 交叉编全平台 runtime artifact（含 Linux / arm64），供 SSH 置备异平台目标；publish job 汇进同一次 `relkit stage`。
+GitHub Actions（`.github/workflows/release.yml`）每个 Console job 都准备 Go 与当时的更新 SDK，人面只编两套：`windows-latest` → `windows-amd64`，`macos-15-intel` → `darwin-amd64`（Intel 不能用已退役的 `macos-13`；Apple Silicon 用这份 Intel 包走 Rosetta）。不编 Linux Console，也不编 `darwin-arm64`。另用 Ubuntu 交叉编全平台 runtime artifact（含 Linux / arm64），供 SSH 置备异平台目标；publish job 汇进同一次发布。
 
-Tauri 安装包不能从 Linux 交叉出 NSIS/DMG。relkit-serve 人页 audience 过滤已实施（2026-09-27）。
+Tauri 安装包不能从 Linux 交叉出 NSIS/DMG。
 
 ## 被否方案
 

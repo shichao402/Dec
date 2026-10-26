@@ -258,7 +258,7 @@ func TestMCPForwardsWithMCPPayload(t *testing.T) {
 	cloud := &fakeCloud{
 		reply: map[proto.Method]func(json.RawMessage) (json.RawMessage, error){
 			proto.MethodReadAsset: func(json.RawMessage) (json.RawMessage, error) {
-				return json.RawMessage(`{"bundle":"relkit","files":[]}`), nil
+				return json.RawMessage(`{"bundle":"my-skills","files":[]}`), nil
 			},
 		},
 	}
@@ -266,7 +266,7 @@ func TestMCPForwardsWithMCPPayload(t *testing.T) {
 
 	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "dec_read_asset",
-		Arguments: map[string]any{"bundle": "relkit"},
+		Arguments: map[string]any{"bundle": "my-skills"},
 	})
 	if err != nil {
 		t.Fatalf("调用工具失败: %v", err)
@@ -282,7 +282,7 @@ func TestMCPForwardsWithMCPPayload(t *testing.T) {
 	if calls[0].Method != proto.MethodReadAsset {
 		t.Fatalf("转发的方法应为 read_asset，实际 %s", calls[0].Method)
 	}
-	if !strings.Contains(string(calls[0].Payload), `"bundle":"relkit"`) {
+	if !strings.Contains(string(calls[0].Payload), `"bundle":"my-skills"`) {
 		t.Fatalf("载荷没有带到云端: %s", calls[0].Payload)
 	}
 }
@@ -307,7 +307,7 @@ func TestMCPWriteAssetPayload(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			args := map[string]any{
-				"bundle": "relkit",
+				"bundle": "my-skills",
 				"items": []any{
 					map[string]any{"path": "skills/a/SKILL.md", "content": c.content, "base64": c.b64},
 				},
@@ -352,7 +352,7 @@ func TestMCPBannedToolNotCallable(t *testing.T) {
 	session := newTestSession(t, MCPServer{Call: cloud.call})
 
 	_, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "dec_read_secret", Arguments: map[string]any{"name": "relkit/github-token"},
+		Name: "dec_read_secret", Arguments: map[string]any{"name": "my-skills/github-token"},
 	})
 	if err == nil {
 		t.Fatal("调用被禁的工具应当失败")

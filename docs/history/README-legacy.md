@@ -42,7 +42,7 @@ Dec 的解决方案：
 
 | 存储 | 写谁 | 装什么 |
 |------|------|--------|
-| **注册表** | 提供方 CI → Dec 仓 orphan 分支 `registry`，tag `registry/<项目>/<v>` | relkit 等已发布的项目 |
+| **注册表** | 提供方 CI → Dec 仓 orphan 分支 `registry`，tag `registry/<项目>/<v>` | 已发布的项目 |
 | **个人私仓** | 人 `git push` / Console 对私仓提交 | 你自己要留的 Git 资产 |
 | **Bitwarden** | Console 认证后由 `dec-server` | 密钥，不进任何 Git |
 
@@ -55,7 +55,7 @@ Dec 的解决方案：
 
 ```yaml
 requires:
-  relkit: v0.3.20       # 订阅版本：固定在这一版
+  my-skills: v0.3.20    # 订阅版本：固定在这一版
   tencent-cloud: latest # 订阅版本：跟随注册表最新 tag
 ```
 
@@ -249,7 +249,7 @@ repo_url: https://github.com/<user>/<your-repo>
 registry_url: https://github.com/shichao402/Dec.git
 
 requires:
-  relkit: latest
+  my-skills: latest
 
 ides:
   - cursor
@@ -281,16 +281,12 @@ ides:
 ```bash
 git clone https://github.com/shichao402/Dec.git
 cd Dec
-./relkitw doctor
-python3 scripts/build-console.py --prepare-runtime-only
 cd client
 npm install
 npm run tauri dev
 ```
 
-Operator 需先 provision Relkit bootstrap；`relkitw` 验证签名 resolution 并物化
-Go/Rust SDK 与 updater。随后构建命令只编译并保留当前平台的 Tauri runtime
-resources，不打完整安装包。要求 Node.js、Go、Rust stable、Python 3.10+；
+构建命令只编译并保留当前平台的 Tauri runtime resources，不打完整安装包。要求 Node.js、Go、Rust stable、Python 3.10+；
 Windows 需要 WebView2（Windows 命令中的 `python3` 可换成 `python`）。
 细节见 [client/README.md](../../client/README.md)。
 

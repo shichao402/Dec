@@ -27,7 +27,7 @@ Console 里看不到、也无法订阅。四份声明同名不同义，等于没
 
 ```yaml
 requires:
-  relkit: latest        # 官方注册表，跟随最新已发布 tag
+  my-skills: latest     # 官方注册表，跟随最新已发布 tag
   tencent-cloud: v0.2.1 # 官方注册表，钉死
   my-notes: vault       # 个人私仓，跟随私仓 HEAD
 ```

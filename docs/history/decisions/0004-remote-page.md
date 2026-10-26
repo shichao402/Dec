@@ -11,7 +11,7 @@
 用户需要一个统一入口去浏览与管理**全部**远端平面上的东西，而不是「当前工作区能看见的子集」：
 
 - Dec Git vault：全量 bundles（不分 scope）
-- Bitwarden：全部 `bundle/*` + 全部裸 folder（relkit / MyQuant / Dec 等）
+- Bitwarden：全部 `bundle/*` + 全部裸 folder（如 MyQuant / Dec 等）
 - 删除若把「改远端」与「清本地」绑成同一事务，容易误伤本机或误以为只清了本地
 
 旧 **Delete** 页只能做「列 + 删」；编辑 Secure Note / SSH Hosts、以及新增空 Note，都不适合挤在 Confirm 流程里。继续新增独立 Vault 总览页会碎片化（用户已反对）。

@@ -721,22 +721,22 @@ func TestDeleteBundleIsIdempotent(t *testing.T) {
 func TestDeleteBundleLeavesOtherBundles(t *testing.T) {
 	w, _ := newTestWriter(t)
 	seedTwoItems(t, w)
-	if _, err := w.WriteAsset(WriteAssetInput{Bundle: "relkit", Files: skillFiles(), Author: author()}); err != nil {
+	if _, err := w.WriteAsset(WriteAssetInput{Bundle: "my-skills", Files: skillFiles(), Author: author()}); err != nil {
 		t.Fatalf("WriteAsset: %v", err)
 	}
 
 	if _, err := w.DeleteBundle(DeleteBundleInput{Bundle: "woa", Author: author()}); err != nil {
 		t.Fatalf("DeleteBundle: %v", err)
 	}
-	if _, err := w.ReadManifest("relkit"); err != nil {
-		t.Fatalf("relkit 不应受影响: %v", err)
+	if _, err := w.ReadManifest("my-skills"); err != nil {
+		t.Fatalf("其它 bundle 不应受影响: %v", err)
 	}
 }
 
 // TestDeleteBundleRejectsBadName 验证非法 bundle 名被拒绝。
 func TestDeleteBundleRejectsBadName(t *testing.T) {
 	w, _ := newTestWriter(t)
-	for _, name := range []string{"", "../woa", "woa/../relkit"} {
+	for _, name := range []string{"", "../woa", "woa/../my-skills"} {
 		if _, err := w.DeleteBundle(DeleteBundleInput{Bundle: name, Author: author()}); err == nil {
 			t.Fatalf("bundle 名 %q 应被拒绝", name)
 		}

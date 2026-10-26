@@ -41,13 +41,12 @@
 | [0018](0018-instance-lock-and-console.md) | 实例锁定与管理客户端 | 已接受（已实现） |
 | [0019](0019-remote-provisioning.md) | 远端设备自动置备（SSH provisioning） | 已接受（已实现；真机与发布验收未完） |
 | [0020](0020-retire-tui.md) | 卸下 TUI，Console 为人机入口 | 已接受（已实现） |
-| [0021](0021-console-owned-runtime.md) | Console 独占用户分发与目标运行时 | 已接受（连接与发布协议已实现；发布基础设施待接入） |
+| [0021](0021-console-owned-runtime.md) | Console 独占用户分发与目标运行时 | 已被 vNext 断代取代（Console 已移除） |
 | [0022](0022-console-bitwarden-unlock.md) | Console 统一承载 Bitwarden 人工解锁 | 已接受；部分取代 0008、0018 的旧解锁叙事 |
 | [0023](0023-facade-capability-parity.md) | 门面能力口径：Console 覆盖人面能力，MCP 扩展需登记 | 已接受（已实现） |
 | [0024](0024-vault-delete-to-trash.md) | 远端删除移入保险库回收站，不永久删除 | 已接受（已实现） |
 | [0025](0025-mcp-console-gateway.md) | MCP 经唯一 Console 网关代理，不再直连 dec-server | 已被 0032 取代 |
 | [0026](0026-project-provides-and-sync-worktree.md) | 项目作者源映射与可恢复同步工作副本 | 发版 / 本机推柜段已被 [0028](0028-official-registry-and-install.md) 取代；`provides` 作者源映射仍有效 |
-| [0027](0027-relkit-owned-update-contract.md) | 更新契约只由 relkit 声明 | 已接受（已实现） |
 | [0028](0028-official-registry-and-install.md) | 官方注册表、安装器与个人私仓 | 已接受 |
 | [0029](0029-single-consumer-requires.md) | 消费声明唯一化：`requires` + 提供方 `depends_on` | 已接受 |
 | [0030](0030-agent-tools-thin-shell.md) | Agent 工具清单与编排下移，dec-mcp 零业务知识 | 清单与 Plan 仍有效；壳与网关已被 0032 取代 |

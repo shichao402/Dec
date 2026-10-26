@@ -302,7 +302,7 @@ func toolReadAsset() toolSpec {
 				"写入是整体替换语义，所以改任何文件之前都要先读整个 bundle，" +
 				"否则回写时会把你没读到的那几条删掉。只读，无副作用。",
 			InputSchema: objectSchema(map[string]any{
-				"bundle": strProp("bundle 名称，例如 relkit"),
+				"bundle": strProp("bundle 名称，例如 my-skills"),
 			}, "bundle"),
 		},
 		build: func(args json.RawMessage) (json.RawMessage, error) {
@@ -322,7 +322,7 @@ func toolWriteAsset() toolSpec {
 				"manifest 建议原样回传 dec_read_asset 拿到的那份，否则服务端会按文件树重新推断 plane 与 host 声明。" +
 				"只想删某一条时改用 dec_delete_asset_item，它不会波及其他条目。",
 			InputSchema: objectSchema(map[string]any{
-				"bundle": strProp("bundle 名称，例如 relkit"),
+				"bundle": strProp("bundle 名称，例如 my-skills"),
 				"items": objProp("这个 bundle 下的全部文件，不是增量补丁。少传一个就等于删掉它。",
 					map[string]any{
 						"path":       strProp("相对 bundle 根的文件路径，例如 skills/foo/SKILL.md"),
@@ -333,7 +333,7 @@ func toolWriteAsset() toolSpec {
 				"manifest": strProp("manifest.yaml 原文。留空时服务端按 items 推断，会丢掉原有的 plane/host 声明"),
 				"base_revision": strProp("期望的当前 revision，用于乐观并发控制：与服务端不一致时写入被拒绝并返回最新 revision。" +
 					"留空表示允许覆盖，可能覆盖别人刚做的改动"),
-				"message": strProp("提交说明，写进 git commit，例如「补充 relkit 的 release 流程」"),
+				"message": strProp("提交说明，写进 git commit，例如「补充 my-skills 的 release 流程」"),
 			}, "bundle", "items"),
 		},
 		build: buildWriteAsset,
@@ -372,7 +372,7 @@ func toolDeleteBundle() toolSpec {
 				"只删一个条目用 dec_delete_asset_item；把 bundle 缩减到只剩几条用 dec_write_asset。" +
 				"这是不可逆的：删空之后要恢复只能靠历史里的 commit。",
 			InputSchema: objectSchema(map[string]any{
-				"bundle":        strProp("要删除的 bundle 名称，例如 relkit"),
+				"bundle":        strProp("要删除的 bundle 名称，例如 my-skills"),
 				"base_revision": strProp("期望的当前 revision，用于乐观并发控制，留空表示允许覆盖"),
 				"message":       strProp("提交说明，写进 git commit"),
 			}, "bundle"),
@@ -405,7 +405,7 @@ func toolPutSecret() toolSpec {
 				"并进入审计与历史；随后推送给所有在线设备。写入后无法读回明文，只能覆盖。" +
 				"如果只是改说明而不改值，请改用其它方式，不要用占位值覆盖真实密钥。",
 			InputSchema: objectSchema(map[string]any{
-				"name":  strProp("密钥名称，例如 relkit/github-token"),
+				"name":  strProp("密钥名称，例如 my-skills/github-token"),
 				"value": strProp("明文值。写入后不可读回"),
 				"notes": strProp("给人看的说明，不要包含明文"),
 				"refs": objProp("这条密钥被哪些 bundle 条目引用，用于下发时替换 {{secret:...}} 占位符。留空表示暂不被引用。",

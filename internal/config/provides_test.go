@@ -269,19 +269,19 @@ func TestSingleProductTopLevelSecretsPlane(t *testing.T) {
 	root := t.TempDir()
 	mgr := NewProjectConfigManager(root)
 	if err := mgr.SaveProjectConfig(&types.ProjectConfig{
-		ProjectName:  "relkit",
+		ProjectName:  "my-skills",
 		SecretsPlane: types.AssetPlaneGlobal,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	authors, err := AuthorProducts(&types.ProjectConfig{ProjectName: "relkit", SecretsPlane: types.AssetPlaneGlobal})
+	authors, err := AuthorProducts(&types.ProjectConfig{ProjectName: "my-skills", SecretsPlane: types.AssetPlaneGlobal})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if authors[0].SecretsPlane != types.AssetPlaneGlobal {
 		t.Fatalf("author = %#v", authors[0])
 	}
-	err = mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "relkit", SecretsPlane: "regional"})
+	err = mgr.SaveProjectConfig(&types.ProjectConfig{ProjectName: "my-skills", SecretsPlane: "regional"})
 	if err == nil {
 		t.Fatal("期望拒绝顶层非法 secrets_plane")
 	}
@@ -289,21 +289,21 @@ func TestSingleProductTopLevelSecretsPlane(t *testing.T) {
 
 func TestAuthorProductsFoldsSingleProjectWithoutRewriting(t *testing.T) {
 	cfg := &types.ProjectConfig{
-		ProjectName:  "relkit",
+		ProjectName:  "my-skills",
 		ProvidesRoot: "DecAssets",
 		Provides: map[string]types.ProjectProvide{
-			"relkit-ops": validProvide("DecAssets/skills/relkit-ops", "relkit-ops"),
+			"my-skills-ops": validProvide("DecAssets/skills/my-skills-ops", "my-skills-ops"),
 		},
 	}
 	authors, err := AuthorProducts(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(authors) != 1 || authors[0].Name != "relkit" || authors[0].Root != "DecAssets" {
+	if len(authors) != 1 || authors[0].Name != "my-skills" || authors[0].Root != "DecAssets" {
 		t.Fatalf("authors = %#v", authors)
 	}
-	if authors[0].Provides["relkit-ops"].Source != "DecAssets/skills/relkit-ops" {
-		t.Fatalf("source = %q", authors[0].Provides["relkit-ops"].Source)
+	if authors[0].Provides["my-skills-ops"].Source != "DecAssets/skills/my-skills-ops" {
+		t.Fatalf("source = %q", authors[0].Provides["my-skills-ops"].Source)
 	}
 	if len(cfg.Products) != 0 {
 		t.Fatal("单产品仓不应被改写成 products")

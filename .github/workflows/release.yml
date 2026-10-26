@@ -30,7 +30,7 @@ permissions:
 
 env:
   GOFLAGS: -mod=mod
-  # go.work 指向本地 ../relkit，CI 上没有这个目录；关掉 workspace 用单模块构建。
+  # go.work 是本地开发用的（CI 上按单模块构建更可控）。
   GOWORK: "off"
   CGO_ENABLED: "0"
 

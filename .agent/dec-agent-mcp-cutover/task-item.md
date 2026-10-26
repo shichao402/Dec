@@ -57,7 +57,7 @@
 - [ ] 4. 真实链路验收
 - [ ] 4.1 编写 MCP 验收客户端与 `scripts/acceptance.sh`
   - 基于官方 SDK 写一个小客户端（放在 `cmd/` 以外的验收目录），由脚本调用
-  - 依次检查：`/admin` 返回 200；`/api/status` 显示 `aligned: true`；各宿主都有 `dec` 条目；握手；`tools/list` 包含全部预期工具，且不含被禁工具；状态；列出资产；读取 relkit
+  - 依次检查：`/admin` 返回 200；`/api/status` 显示 `aligned: true`；各宿主都有 `dec` 条目；握手；`tools/list` 包含全部预期工具，且不含被禁工具；状态；列出资产；读取一个已有资产
   - 写入临时 bundle `dec-acceptance-<时间戳>`，订阅到一个临时测试项目，确认文件已落到本地，再删除 bundle，确认落点已清理
   - 用 trap 保证中途失败也会清理，并打印残留项
   - _需求：4.1、4.2、4.3_

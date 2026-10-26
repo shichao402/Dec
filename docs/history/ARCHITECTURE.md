@@ -179,7 +179,7 @@ ides:                  # 可选：机器级 IDE 覆盖
   - cursor
 
 requires:
-  relkit: latest        # 订阅版本：跟随注册表最新 tag
+  my-skills: latest     # 订阅版本：跟随注册表最新 tag
   tencent-cloud: v0.2.1 # 订阅版本：固定在这一版
 ```
 
@@ -496,7 +496,7 @@ Console **设置** 页连接远端仓库到本地 `repo.git` bare repo 缓存。
 - 唯一用户面入口：Console **设置** 页；连接与解锁页复用同一 Console 更新面板，因此无需先连接服务（启动时自动检查；手动检查 → 确认 → 下载替换）
 - 连接 SSH / TLS 远端时仍只更新本机 Console，不经目标服务 RPC
 - 无 `dec update` CLI
-- 壳侧实现见 `client/src-tauri/src/console_update.rs`；WebView import relkit 生成绑定（[0027](decisions/0027-relkit-owned-update-contract.md)）；`internal/update/` 只保留目标运行时套件下载与校验。详见 [UPDATE_ARCHITECTURE.md](./UPDATE_ARCHITECTURE.md)
+- 旧一代 Console 与它依赖的第三方更新组件已随 vNext 断代一并移除；更新改由 GitHub CI 统一构建部署
 
 #### 远端设备置备与按需拉起（Console / MCP）
 

@@ -177,10 +177,12 @@ if sudo -n test -d /var/lib/dec-cloud/ssot/assets 2>/dev/null; then
 	else
 		bad "没有验收残留 bundle" "残留：$residue"
 	fi
-	if printf '%s\n' "$bundles" | tr ' ' '\n' | grep -qx 'relkit'; then
-		ok "真实资产 relkit 仍在" "—"
+	# 不盯具体 bundle 名：资产由用户自己决定，验收只保证目录可读、
+	# 且没有本次跑出来的残留。生产上有没有内容不是这项检查的职责。
+	if [ -n "$bundles" ]; then
+		ok "资产目录可读且有内容" "—"
 	else
-		bad "真实资产 relkit 仍在" "列表里找不到 relkit"
+		info "资产目录可读但为空" "空仓库不是缺陷"
 	fi
 else
 	bad "资产目录可读" "读不到 /var/lib/dec-cloud/ssot/assets"

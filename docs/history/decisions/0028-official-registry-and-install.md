@@ -2,7 +2,7 @@
 
 - **状态**：已接受；消费声明段被 [0029](0029-single-consumer-requires.md) 细化；个人私仓作为纯控制面见 [0031](0031-control-plane-and-upstream-contribution.md)
 - **日期**：2026-09-16
-- **关联**：[0016](0016-p-four-quadrant-model.md)、[0023](0023-facade-capability-parity.md)、[0026](0026-project-provides-and-sync-worktree.md)（发版与本机推柜段被本决策取代）、[0027](0027-relkit-owned-update-contract.md)
+- **关联**：[0016](0016-p-four-quadrant-model.md)、[0023](0023-facade-capability-parity.md)、[0026](0026-project-provides-and-sync-worktree.md)（发版与本机推柜段被本决策取代）
 - **影响范围**：`internal/registry`、`internal/publish`、`internal/install`、`internal/contribute`、`cmd/dec-registry`、消费仓 `.dec/config.yaml` 的 `requires`
 
 ## 问题
@@ -17,7 +17,7 @@
 2. **个人私仓**：`repo_url`。控制面（订阅身份）以及**真正的个人 Git 资产**；提供方正文不写进这里。
 3. **密钥**：Bitwarden。不进任何 Git。
 
-消费声明只有一张 `requires` 表（项目 → `latest` 或精确 `v*`），写在 `.dec/config.yaml` 或本机 `~/.dec/config.yaml`。没有 pin 字段，没有 semver range，不再接受 `requires: [relkit]` 列表。
+消费声明只有一张 `requires` 表（项目 → `latest` 或精确 `v*`），写在 `.dec/config.yaml` 或本机 `~/.dec/config.yaml`。没有 pin 字段，没有 semver range，不再接受 `requires: [my-skills]` 这种列表写法。
 
 `install` 是纯函数：按 `requires` + 个人启用列表重画 IDE 目录。`.dec/cache` 只按 tag 下载，改它无效。已发布 tag 的字节不可改；撤回用 yank / purge，只由提供方 CI 执行。
 
@@ -33,9 +33,9 @@ Console / MCP 不写官方注册表。消费方改官方安装物时，从具体
 Console「更新」只做远端到本地：跨 Global / 项目多选官方 `requires`，预览后安装。
 个人 Git 与 Bitwarden 的写回位于对应项目页或 Global 资产页，不与更新混为双向同步。
 
-Relkit vNext 的工具选择由签名 Operator Profile 与 immutable resolution 决定，
-不进入 Dec 的 `requires`，也不再有宿主侧 `scripts/relkit.lock.json`。跟宿主版本
-耦合的 Dec 资产仍必须是 `public/local`，不得放在 global。
+第三方更新组件的工具选择曾由它自己的签名 Profile 与不可变解析决定，
+不进入 Dec 的 `requires`。这套体系已随 vNext 断代移除，更新改由 CI 统一构建部署。
+跟宿主版本耦合的 Dec 资产仍必须是 `public/local`，不得放在 global。
 
 ## 被否方案
 

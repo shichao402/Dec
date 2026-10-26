@@ -19,10 +19,6 @@
 # Dependency directories
 vendor/
 
-# Retired pre-vNext materializations may remain in old checkouts.
-/third_party/relkit/
-/tools/bin/
-
 # Go workspace file
 go.work
 
@@ -39,9 +35,6 @@ Thumbs.db
 
 # 开发根目录（开发时使用）
 .root/
-
-# Relkit vNext immutable resolution、已验签控制面与组件物化树。
-.relkit/*
 
 __pycache__/
 staged.tar.gz
@@ -93,9 +86,7 @@ Documents/temp/*
 .config/
 mise.local.toml
 
-# relkit 签名私钥：SSOT 在 .secrets/bundles/relkit/keys/（已由上方 .secrets/ 整树忽略）。
-# .relkit-keys/*.private.pb 为废弃本地路径，保留规则作防御；*.private.pb 防误提交。
-.relkit-keys/*.private.pb
+# 密钥私钥文件防误提交
 *.private.pb
 
 # Rust 托盘构建产物

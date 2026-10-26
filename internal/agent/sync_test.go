@@ -300,7 +300,7 @@ func TestSyncReportsDivergentCopiesAsEmptyHash(t *testing.T) {
 	// 一份资产同时落在多个宿主目录，只要其中任意一份被本地改过，
 	// 就必须上报空哈希让云端补发。曾经的实现只保留循环里最后一次读到的
 	// 哈希，于是「第一份被改、最后一份没动」会被判成一致，被改的那一份
-	// 永远纠正不回来——2026-10-26 在 relkit 的 .cursor 副本上实测复现。
+	// 永远纠正不回来——2026-10-26 在一个多落点资产的 .cursor 副本上实测复现。
 	dir := t.TempDir()
 	first := filepath.Join(dir, "first.md")
 	last := filepath.Join(dir, "last.md")

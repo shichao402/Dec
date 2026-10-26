@@ -62,7 +62,7 @@ Dec Cloud 的生产链路已经切到新架构（CI 只构建 `dec-cloud` 与 `d
 
 #### 验收标准
 
-1. 仓库 SHALL 提供 `scripts/acceptance.sh`，用真实的 MCP 客户端（基于官方 SDK 写的小程序或现成 CLI）对本机运行中的代理执行：握手、`tools/list`、状态查询、列出资产、读取 relkit、写入一个临时测试 bundle、确认它落地、再删除该 bundle 并确认落点清理干净。
+1. 仓库 SHALL 提供 `scripts/acceptance.sh`，用真实的 MCP 客户端（基于官方 SDK 写的小程序或现成 CLI）对本机运行中的代理执行：握手、`tools/list`、状态查询、列出资产、读取一个已有资产、写入一个临时测试 bundle、确认它落地、再删除该 bundle 并确认落点清理干净。
 2. 验收脚本 SHALL 针对生产云端运行，结束后 SHALL 不留下任何测试资产。IF 中途失败 THEN 脚本 SHALL 尝试清理，并打印残留项。
 3. 脚本 SHALL 同时检查管理面 `/admin` 可访问、`/api/status` 显示 `aligned: true`，并检查需求 2 中各宿主的 `dec` 条目存在。
 4. 本需求的每条验收标准 SHALL 对应验收脚本中的一项检查，或者对应一个具名测试。IF 某条标准两者都没有对应 THEN 该条 SHALL 视为未完成。
@@ -115,7 +115,7 @@ Dec Cloud 的生产链路已经切到新架构（CI 只构建 `dec-cloud` 与 `d
 
 | 标准 | 对应项 | 类型 |
 |---|---|---|
-| 4.1 提供 `scripts/acceptance.sh`，跑完整链路 | 脚本本身；步骤「MCP 握手」「tools/list 含全部预期工具」「dec_status」「dec_list_assets」「读取 relkit」「写入临时 bundle」「临时 bundle 落地本机」「删除临时 bundle」「临时 bundle 已从列表消失」「落点已清理」 | 脚本 |
+| 4.1 提供 `scripts/acceptance.sh`，跑完整链路 | 脚本本身；步骤「MCP 握手」「tools/list 含全部预期工具」「dec_status」「dec_list_assets」「读取一个已有资产」「写入临时 bundle」「临时 bundle 落地本机」「删除临时 bundle」「临时 bundle 已从列表消失」「落点已清理」 | 脚本 |
 | 4.2 针对生产运行，结束不留测试资产，失败也清理并打印残留 | 本机模式：`cleanup` 无论成败都执行。线上模式：`scripts/acceptance-prod.sh` 只读查生产；完整链路在 `deploy/test-e2e.sh` 的隔离实例上跑，跑完核对测试实例与生产库都没有 `dec-acceptance` 残留 | 脚本 |
 | 4.3 检查 `/admin`、`/api/status` 的 `aligned: true`、各宿主 `dec` 条目 | 本机模式：步骤「/admin 可访问」「代理已登记且 aligned」「各宿主 dec 条目」。线上模式：确认 `/admin` 与 `/mcp` 在公网返回 404（它们只应存在于代理回环），`hello` 的 `aligned` 为 true | 脚本 |
 | 4.4 每条标准都要有对应检查，否则视为未完成 | 本表 | 本文档 |

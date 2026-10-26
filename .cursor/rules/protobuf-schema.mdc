@@ -1,6 +1,6 @@
 ---
 description: schema/ 下 Protobuf 为 Dec 配置与资产声明的 schema 真相源
-globs: schema/**/*.proto, internal/types/**/*.go, internal/config/**/*.go, internal/app/**/*.go
+globs: schema/**/*.proto, internal/types/**/*.go, internal/config/**/*.go, internal/cloud/**/*.go
 alwaysApply: false
 ---
 

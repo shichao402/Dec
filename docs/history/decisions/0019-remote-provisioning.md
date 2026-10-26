@@ -95,7 +95,7 @@ SSH 凭据只存**引用**（`~/.ssh/config` 别名或 Dec 管理的 `.sshkey` �
 - **SSH 客户端**：走系统 `ssh` 命令（`exec.CommandContext`），**不引入** `golang.org/x/crypto/ssh`。与 Console 的 `connect_ssh` 复用同一条信任链（`~/.ssh/config`、ssh-agent、known_hosts），Dec 不接管主机校验与密钥管理，`go.mod` 无新增依赖。
 - **SSH 参数**：固定 `BatchMode=yes`（禁交互，否则目标机要求口令时置备静默挂死）、`ConnectTimeout=10`、`StrictHostKeyChecking=accept-new`。
 - **目标端依赖**：探测与文件激活均用 POSIX `sh` 和核心文件工具；不要求 bash、curl 或 tar，因此没有新增 tar blocker。`git` 仍是后续 Vault 同步的置备前置。
-- **RUP 历史版本限制**：当前 relkit chain 会选择最高可达版本，没有按任意历史版本直接解析的 SDK API。`CurrentCode=ConsoleCode-1` 只让 Console 版本成为候选，不能保证选中它；若渠道已有更高 head，发起端拒绝下载并提示先更新 Console，或预先准备该版本缓存。绝不以更高版本冒充钉死版本。
+- **RUP 历史版本限制**：当时的更新链会选择最高可达版本，没有按任意历史版本直接解析的 SDK API。`CurrentCode=ConsoleCode-1` 只让 Console 版本成为候选，不能保证选中它；若渠道已有更高 head，发起端拒绝下载并提示先更新 Console，或预先准备该版本缓存。绝不以更高版本冒充钉死版本。
 - **传输后校验与回滚**：目标有 `sha256sum` 或 `shasum -a 256` 时逐件核对发起端摘要；两者都没有时降级为逐组件 `--version` 校验并明确警告。全部 stage 校验通过后才备份旧运行时套件并激活；任一步失败按已安装/已备份清单 best-effort 回滚，避免留下混合版本。
 - **离线边界**：同平台缓存由 Console bundle 预热；异平台在发起端无网且缓存未命中时明确失败，目标机是否联网不影响置备。
 - **存活判定用 `kill -0`，不用「文件存在」**：`run/server.json` 只在正常退出时清理，进程被 `kill -9` 后会残留。仅看文件存在会误判为运行中，从而跳过拉起、去连一个没人监听的端口。

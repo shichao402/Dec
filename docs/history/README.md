@@ -13,7 +13,7 @@ Dec 已完成断代升级（见 `.agent/dec-cloud/requirements.md` 已定决策 
 | 资产组织 | `provides` 作者源映射 + public/private × global/local 四象限 | bundle，无官方与个人之分 |
 | 密钥 | Bitwarden runtime 依赖 | 根密钥加密后与资产同在服务端 git |
 | 分发 | registry + `publish.firoyang.com` | 服务端自身下载通道 |
-| 更新 | Relkit vNext 组件体系 | GitHub CI 统一构建部署 |
+| 更新 | 第三方更新组件体系 | GitHub CI 统一构建部署 |
 
 旧架构的代码仍在仓库里（`client/`、`internal/app`、`internal/secrets` 等），但不再作为产品方向。`internal/secrets` 中的 Bitwarden API 实现被复用为根密钥冷备，其余部分按决策 17 重写。
 
@@ -21,7 +21,7 @@ Dec 已完成断代升级（见 `.agent/dec-cloud/requirements.md` 已定决策 
 
 `decisions/` 里的 37 份 ADR 记录了大量取舍依据：为什么废除 `pkg/`、为什么 MCP 改 Streamable HTTP、为什么远端删除进回收站、为什么必须归属已声明的 SyncTarget。这些「当初为什么这么选、否掉了什么」在日后重遇同类问题时仍有参考价值，属于决策记录该保留的东西。
 
-其余文档（`ARCHITECTURE.md`、`BUNDLE-SECRETS-MODEL.md`、`ROADMAP.md`、`TUI_ARCHITECTURE.md`、`UPDATE_ARCHITECTURE.md`、`research/`、`examples/`、`_pending/`）保留原文是为了在追溯 ADR 时能对上当时的语境。
+其余文档（`ARCHITECTURE.md`、`BUNDLE-SECRETS-MODEL.md`、`ROADMAP.md`、`TUI_ARCHITECTURE.md`、`research/`、`examples/`）保留原文是为了在追溯 ADR 时能对上当时的语境。
 
 ## 使用须知
 

@@ -9,5 +9,3 @@ version: v2
 layout_version: 1
 project_name: dec
 provides_root: DecAssets
-requires:
-  relkit: latest

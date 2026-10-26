@@ -7,7 +7,7 @@
   项目内 .dec 与落点 / IDE 里的 dec-* 条目。
   新架构（dec-agent + %USERPROFILE%\.dec-agent）被硬编码保护，一步不碰。
 
-  判定依据：旧架构落点带 dec- 前缀，新架构不带（如 relkit-ops），互不冲突。
+  判定依据：旧架构落点带 dec- 前缀，新架构不带，互不冲突。
 
   本脚本刻意不使用 param() 块。
   原因：通过 irm <url> | iex 执行时无法传参数，且 param() 会让脚本被当作

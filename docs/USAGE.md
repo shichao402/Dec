@@ -76,7 +76,7 @@ https://dec.firoyang.com
 | 二进制 | `~/.dec/bin/dec-server`、`dec-exec`、`dec-mcp` | `~/.local/bin/dec-agent` |
 | 状态目录 | `~/.dec/` | `~/.dec-agent/` |
 | 系统服务 | 由 Console 拉起 | `com.dec.agent`（launchd） |
-| 落点命名 | `dec-<名字>` | 无前缀，如 `relkit-ops` |
+| 落点命名 | `dec-<名字>` | 无前缀，直接用资产名 |
 
 项目根目录的 `./dec` 是旧版 v1.13.146，能跑 `config`、`push`、`pull`、`search`，但它操作的是一个已经不存在的系统。不要用它。
 
@@ -325,7 +325,7 @@ curl -fsSL http://192.168.x.x:8765/purge-legacy-dec.sh | bash
 - `~/.dec-agent/`（新代理状态）
 - `~/Library/LaunchAgents/com.dec.agent.plist`（新代理服务）
 - `~/.local/bin/dec-agent`（新代理二进制）
-- 各项目 IDE 目录里不带 `dec-` 前缀的条目（如 `relkit-ops`）
+- 各项目 IDE 目录里不带 `dec-` 前缀的条目（旧系统留下的资产副本）
 
 判定依据是新旧两代的落点命名规则不同：旧带 `dec-` 前缀，新不带。这个差异已被实测验证。
 

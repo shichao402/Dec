@@ -1,65 +1,47 @@
 ---
-description: Dec 以桌面 Console 为第一人机入口；不要恢复 TUI 或用户面 CLI 子命令
+description: Dec Cloud 的第一人机入口是本机管理面，不恢复桌面 Console、TUI 或用户面 CLI 子命令
 alwaysApply: true
 ---
 
-# Console 优先
+# 管理面优先
 
-Dec 的用户交互以 **桌面管理客户端**（`client/`，Tauri Console）为第一入口。终端 TUI（`internal/tui/`）与 `dec` CLI 均已移除。
+vNext 断代之后，Dec 的人机入口是**浏览器打开的本机管理面**，由 `dec-agent` 在
+`127.0.0.1:8787` 提供、经设备证书转发到云端 `dec-cloud` 执行。旧的 Tauri 桌面
+Console（`client/`）、`dec-server`、`internal/app` 与终端 TUI 已随断代整体删除，
+不要在仓库里恢复它们。
 
 ## 设计原则
 
-- 新功能先设计 Console 页面 / 连接与初始化流，再实现 `internal/app/` 业务逻辑。
-- **不要新增**独立 Cobra 用户面子命令（pull、config、push 等均在 Console）。
-- **不要恢复** Bubble Tea TUI、根 `dec` CLI 或 `dec --global` / `dec --user` 终端平面入口。本机 / 项目平面由 Console 连接后在目标 `dec-server` 上操作。
-- 每个运行时程序自行支持 `--version`。Agent MCP 是 `dec-server` 上的 Streamable HTTP（`127.0.0.1:47654/mcp`）；env 注入与目标机置备分别使用 `dec-exec`、`dec-host-setup`。后者是非用户面的单用途工具。
-- Secrets / Bitwarden / SSH / env 部署等操作通过 Console 触达（设置、更新、项目、远端设备）。
-- **更新**：按 `requires` 从官方 registry 安装；只做远端到本地。个人 Git / Bitwarden 写回位于项目 / Global 资产页。
-- **`dec-exec`**（独立程序）：按 bundle 作用域读取 `.secrets/**/.env/*.env` 并启动子进程，供 MCP / Agent 运行时注入；不经过 `dec-server`、不碰 session，也不是用户面 secrets 管理入口。
-- **服务 / 门面**：`dec-server` 是一机单例业务服务。Console 是人机入口，经 gRPC 连 `127.0.0.1:47653`。Agent 经 Streamable HTTP 连同一进程的 `127.0.0.1:47654/mcp`，不跟随 Console 的 SSH 会话，也不负责拉起服务。
-- **唯一人工认证入口**：Bitwarden 主密码、TOTP 与设备登录确认只在 Console Authenticate 中收集；服务端不得打开临时认证页面，CLI/MCP 不得提示或接收主密码。
-- **缺 session 协调**：本机 `dec-server` 在缺主密码时打开 Console 并等待；远端无桌面、CI、测试与其他非交互上下文返回结构化错误，不得自动弹 Console。MCP URL 后面没有进程就是连接失败，不由 MCP 去拉起 Console。
-- **跨页异步 IO**：慢 IO 跟 Shell 生命周期走，不跟当前页；切页禁止打断在飞请求；独立 busy 信号 + 防重复 + gen 丢弃过期结果（见 `client/README.md` 与 ADR 0018）。
-- **按平面分流**：本机平面的 `Workspace.Root` 为空，**没有**项目配置 / `project_name` / vault project 推断。空 projectRoot 会让 `.dec/` 退化成相对服务 cwd 的路径并覆盖 `~/.dec/config.yaml`（ADR 0015）。
-- **结构化结果优先于事件区**：结果里已有结论（跳过原因、被拒 bundle、缺失 bundle）必须渲染在结果区；事件区只留最近十余条，靠它承载告警等于不告警。
+- 新功能先设计管理面页面，再在 `internal/cloud/...` 与 `internal/cloudsvc/...`
+  里实现业务逻辑；页面只做展示与触发，判定一律在服务端。
+- **不要新增**独立 Cobra 用户面子命令。用户面操作走管理面，Agent 面走 MCP。
+- **不要恢复** Bubble Tea TUI、`dec-server`、`internal/app` 或 `client/`。
+- 管理面只做 Web，并且只经本机代理访问（需求 16）。它不监听公网端口，
+  也不做登录、密码或客户端证书——能打开页面本身就等价于「本人在本机」。
+- 高危操作（吊销设备、轮换根密钥、删除资产、回滚）在管理面必须二次确认，
+  并且全部记入审计。
+- 结构化结果优先于事件区：结果里有结论（被拒原因、跳过原因、残留项）必须
+  渲染在结果区，别只丢进事件流。
 
-## Console 页与能力映射
+## 三个入口的分工
 
-| 用户操作 | Console 入口 |
-|----|----|
-| 本机 / SSH 远端 / 置备 | **连接** 页 |
-| Bitwarden 人工认证 | **认证** 页（Console Authenticate） |
-| 绑定项目资产树、新建本地资产 | **项目** 页 |
-| 官方资产本地覆写（预览修改、关联源仓 PR/Issue） | **项目** 页 → 下级页「本地覆写」 |
-| 登记本项目对外提供的 Git 资产 | **项目** 页 → 下级页「我提供的资产」 |
-| Global 资产 / 推荐 Global 标签 | **Global 资产** 页 |
-| 官方 requires 多选预览 / 安装（Global 与项目） | **更新** 页 |
-| 个人 Git / Bitwarden 写回 | **项目 / Global 资产** 页 |
-| 查看有哪些密钥文件（只读元数据） | **项目 / Global 资产** 页「密钥清单」 |
-| 删除远端资产 / 密钥、清理本机落地 | **删除** 页 |
-| Console 更新（连接 / 解锁页也复用）；仓库、Bitwarden、IDE、vars、重启服务 | **设置** 页 |
-| 未初始化 | 引导 |
+| 角色 | 入口 | 说明 |
+|---|---|---|
+| 人 | 管理面 `127.0.0.1:8787/admin` | 唯一人机入口，经托盘双击或直接访问 |
+| Agent | MCP `127.0.0.1:8787/mcp` | 服务端按来源限权，不给明文与设备管理 |
+| 自动化 | CI | 只经 GitHub Actions 部署，不经管理面 |
 
-若 Console 尚未覆盖某能力，在代码中留 `TODO(console)` 并在对应页面引导，而不是恢复 CLI 子命令或 TUI。
-
-**门面能力口径**（ADR 0023）：一项能力归哪个门面看**谁在用**。人会用的能力必须在 Console 有入口，
-不因「MCP 已经能做」而免除；只为免交互自动化存在的参数（如 `plane=both`）允许 MCP 独有，但必须登记
-在 ADR 0023 的扩展表里。**没登记的差异算缺口**，不是默认合法。
-
-Console 自更新是本机壳能力：Tauri 直连 lock-pinned relkit Rust facade / sidecar，未连接、未解锁也可操作，禁止经 `dec-server` RPC。MCP 不提供 check/install，只指向 Console；这是 ADR 0023 登记过的不对称。
-
-## 非交互环境
-
-- Agent 通过本机 Streamable HTTP 调用本机 `dec-server`；CI 内部代码仍可直连服务 API；env 注入用 `dec-exec`。远端设备由 Console 的 SSH 会话操作。**不要**假设存在 `dec pull` 等用户面子命令。
+`local.dec.firoyang.com` 与 `dec.localhost` 只是同一页面的另外两个地址，
+不是第二套入口。
 
 ## 反例
 
 ```go
-// ❌ 新增用户-facing 子命令
-RootCmd.AddCommand(&cobra.Command{Use: "sync", ...})
+// ❌ 恢复用户面子命令
+RootCmd.AddCommand(&cobra.Command{Use: "pull", ...})
 
-// ❌ 再加一套终端 TUI
-tui.Run(...)
+// ❌ 把管理面做成需要登录的服务
+mux.Handle("/admin", requireSession(handler))
 
-// ✅ 在 Console 绑定动作，经 gRPC 调 dec-server → internal/app
+// ✅ 在管理面加页面 → 转发到云端 dec-cloud 执行
 ```

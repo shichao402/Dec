@@ -83,7 +83,7 @@
 - [ ] 9.1 代理核心
   > 状态（2026-10-26 核对）：在用；本地改动覆盖已实测（发现并修复多落点哈希漏检缺陷，ADR 0047，待发版）；离线降级（需求 5）、版本拦截提示、卸载命令（2.11）未实测。
   >
-  > 本地改动覆盖实测（2026-10-26）：对 relkit 的 `relkit-ops/SKILL.md` 做篡改实验。该资产同时落 5 个宿主目录。改 `.cursor` 副本（路径列表第 4 个）后等 25 秒**未被还原**；改 `.with` 副本（列表最后一个）25 秒内被自动覆盖。根因是 `BuildManifest` 循环里 `hash = h` 没有 break，只保留最后一个路径的哈希，导致「前面副本被改、最后副本没动」被判成一致。已改为全量比对，任一副本不同即上报空哈希，并补 `TestSyncReportsDivergentCopiesAsEmptyHash` 回归测试。全部 24 个包测试通过。
+  > 本地改动覆盖实测（2026-10-26）：对一个同时落 5 个宿主目录的资产做篡改实验（当时用的是仓库里体量最大的那个 SKILL.md）。改 `.cursor` 副本（路径列表第 4 个）后等 25 秒**未被还原**；改 `.with` 副本（列表最后一个）25 秒内被自动覆盖。根因是 `BuildManifest` 循环里 `hash = h` 没有 break，只保留最后一个路径的哈希，导致「前面副本被改、最后副本没动」被判成一致。已改为全量比对，任一副本不同即上报空哈希，并补 `TestSyncReportsDivergentCopiesAsEmptyHash` 回归测试。全部 24 个包测试通过。
   - 首次运行时配置服务地址，严格做 TLS 校验，不使用 TOFU；在系统凭据库中生成设备密钥对，不可用时退回 0600 文件；修改服务地址时清除原有身份
   - 实现固定原语和内置白名单：用户平面落点，以及已登记项目根目录加 IDE 目录模式；越界请求拒绝并上报
   - 落盘：含密钥的文件权限设为 0600；共享配置文件只改带 `dec-` 前缀的条目，哈希也只按这些条目计算；在落点标注“由 Dec 管理”
@@ -117,7 +117,7 @@
   - 端到端验证：下发、离线降级、本地改动覆盖、版本拦截、冷备推送、告警
   - _需求：实施约定 1、3，10.1、21.1_
 - [ ] 12.2 存量迁移与旧系统下线
-  > 状态（2026-10-26 核对）：未开始。云端仅 relkit 一个 bundle；publish.firoyang.com、/Applications/dec-console.app、~/.dec 仍在。
+  > 状态（2026-10-26 核对）：未开始。云端只有一个旧 bundle；publish.firoyang.com、/Applications/dec-console.app、~/.dec 仍在。旧更新组件的三个 systemd 服务仍在生产机运行（agent / console / store），nginx 里还有 3 个相关站点配置，需一并下线。
   - 由 Agent 读取 `DecPersonalDevKit`、`dec-source-private` 和本机旧落点的内容，经 MCP 写入新系统，commit 记录来源；密钥直接读取后走常规写入
   - 先在第一台设备上验证，其中 `dec-tencent-cloud` 要验证可用；然后逐台卸载旧组件并切换到新代理
   - 列出待删除清单，由用户逐项确认后，删除旧仓库、registry、`publish.firoyang.com`、公开 Release 和 Bitwarden 旧条目，保留 `_dec-cloud`

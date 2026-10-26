@@ -7,34 +7,34 @@ import (
 )
 
 func TestNormalizeRequiresSpec(t *testing.T) {
-	got, err := NormalizeRequiresSpec(RequiresSpec{"relkit": "", "tencent-cloud": "v0.1.0"})
+	got, err := NormalizeRequiresSpec(RequiresSpec{"my-skills": "", "tencent-cloud": "v0.1.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["relkit"] != RequiresLatest || got["tencent-cloud"] != "v0.1.0" {
+	if got["my-skills"] != RequiresLatest || got["tencent-cloud"] != "v0.1.0" {
 		t.Fatalf("%#v", got)
 	}
 	if _, err := NormalizeRequiresSpec(RequiresSpec{"Bad": "v1"}); err == nil {
 		t.Fatal("expected error")
 	}
-	if _, err := NormalizeRequiresSpec(RequiresSpec{"relkit": "1.0"}); err == nil {
+	if _, err := NormalizeRequiresSpec(RequiresSpec{"my-skills": "1.0"}); err == nil {
 		t.Fatal("expected v prefix")
 	}
 	if _, err := NormalizeRequiresSpec(RequiresSpec{"notes": RequiresVault}); err == nil {
 		t.Fatal("vault pin is not a subscription")
 	}
-	stored, err := NormalizeStoredRequires(RequiresSpec{"notes": RequiresVault, "relkit": RequiresLatest})
+	stored, err := NormalizeStoredRequires(RequiresSpec{"notes": RequiresVault, "my-skills": RequiresLatest})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored["notes"] != RequiresVault || stored["relkit"] != RequiresLatest {
+	if stored["notes"] != RequiresVault || stored["my-skills"] != RequiresLatest {
 		t.Fatalf("stored = %#v", stored)
 	}
 }
 
 func TestDropVaultPins(t *testing.T) {
-	got := RequiresSpec{"relkit": RequiresLatest, "notes": RequiresVault, "dec": RequiresVault}.DropVaultPins()
-	if len(got) != 1 || got["relkit"] != RequiresLatest {
+	got := RequiresSpec{"my-skills": RequiresLatest, "notes": RequiresVault, "dec": RequiresVault}.DropVaultPins()
+	if len(got) != 1 || got["my-skills"] != RequiresLatest {
 		t.Fatalf("drop = %#v", got)
 	}
 	if (RequiresSpec{"notes": RequiresVault}).DropVaultPins() != nil {
@@ -53,14 +53,14 @@ func TestAddVaultProjectsKeepsExistingLatestPin(t *testing.T) {
 }
 
 func TestFoldPublishedVaultPins(t *testing.T) {
-	published := map[string]struct{}{"relkit": {}, "playbook": {}}
+	published := map[string]struct{}{"my-skills": {}, "playbook": {}}
 	got := RequiresSpec{
-		"relkit":   RequiresVault,
+		"my-skills":   RequiresVault,
 		"playbook": "v0.2.0",
 		"notes":    RequiresVault,
 		"dec":      RequiresVault,
 	}.FoldPublishedVaultPins(published, "dec")
-	if got["relkit"] != RequiresLatest {
+	if got["my-skills"] != RequiresLatest {
 		t.Fatalf("已发布项目的 vault pin 应收成 latest，got %#v", got)
 	}
 	if got["playbook"] != "v0.2.0" || got["notes"] != RequiresVault || got["dec"] != RequiresVault {
@@ -76,7 +76,7 @@ func TestRequiresSpecRejectsYAMLList(t *testing.T) {
 	var cfg struct {
 		Requires RequiresSpec `yaml:"requires"`
 	}
-	if err := yaml.Unmarshal([]byte("requires:\n  - relkit\n"), &cfg); err == nil {
+	if err := yaml.Unmarshal([]byte("requires:\n  - my-skills\n"), &cfg); err == nil {
 		t.Fatal("expected list rejection")
 	}
 }

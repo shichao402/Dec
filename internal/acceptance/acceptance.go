@@ -154,7 +154,7 @@ func (r *runner) run(ctx context.Context) error {
 	if err := r.checkListAssets(ctx); err != nil {
 		return err
 	}
-	if err := r.checkReadRelkit(ctx); err != nil {
+	if err := r.checkReadAsset(ctx); err != nil {
 		return err
 	}
 	if err := r.checkWriteAndLand(ctx); err != nil {
@@ -452,25 +452,40 @@ func (r *runner) checkListAssets(ctx context.Context) error {
 	return nil
 }
 
-// checkReadRelkit 读取 relkit（需求 4.1 明确要求读这个 bundle）。
+// checkReadAsset 读一个真实存在的 bundle（需求 4.1）。
 //
-// 只在服务端确实有这个 bundle 时才读。全新的测试实例上没有 relkit，
-// 那不是缺陷；生产上有，就必须读通，而且要确认正文里没有私钥明文。
-func (r *runner) checkReadRelkit(ctx context.Context) error {
-	out, errMsg := r.callTool(ctx, "dec_read_asset", map[string]any{"bundle": "relkit"})
+// 不盯具体某个 bundle 的名字：全新测试实例可能是空仓库，那不是缺陷。
+// 有 bundle 就挑第一个读通，并确认正文里没有私钥明文——读取链路和
+// 「密钥不解密」这两件事跟 bundle 叫什么无关。
+func (r *runner) checkReadAsset(ctx context.Context) error {
+	out, errMsg := r.callTool(ctx, "dec_list_assets", map[string]any{})
 	if errMsg != "" {
-		// 区分「不存在」与「读取失败」：前者是空仓库的正常情形，后者才是问题。
-		if strings.Contains(errMsg, "不存在") || strings.Contains(errMsg, "not found") {
-			r.step("读取 relkit", true, "服务端没有 relkit（空仓库），跳过内容校验")
-			return nil
-		}
-		r.step("读取 relkit", false, errMsg)
-		return errors.New("读取 relkit 失败：" + errMsg)
+		r.step("读取资产", false, errMsg)
+		return errors.New("dec_list_assets 失败：" + errMsg)
 	}
-	files, _ := out["files"].([]any)
+	bundles, _ := out["bundles"].([]any)
+	var target string
+	for _, b := range bundles {
+		if m, ok := b.(map[string]any); ok {
+			if n, ok := m["name"].(string); ok && n != "" {
+				target = n
+				break
+			}
+		}
+	}
+	if target == "" {
+		r.step("读取资产", true, "空仓库，跳过内容校验")
+		return nil
+	}
+	got, errMsg := r.callTool(ctx, "dec_read_asset", map[string]any{"bundle": target})
+	if errMsg != "" {
+		r.step("读取资产", false, errMsg)
+		return errors.New("读取 " + target + " 失败：" + errMsg)
+	}
+	files, _ := got["files"].([]any)
 	if len(files) == 0 {
-		r.step("读取 relkit", false, "没有读到任何文件")
-		return errors.New("relkit 内容为空")
+		r.step("读取资产", false, target+" 没有读到任何文件")
+		return errors.New(target + " 内容为空")
 	}
 	// 正文里不能出现明文密钥：占位符应当保持原样（需求 1.5）。
 	for _, f := range files {
@@ -479,11 +494,11 @@ func (r *runner) checkReadRelkit(ctx context.Context) error {
 			continue
 		}
 		if c, ok := m["content"].(string); ok && strings.Contains(c, "PRIVATE KEY-----") {
-			r.step("读取 relkit", false, "返回内容里出现了疑似私钥明文")
-			return errors.New("relkit 内容里出现私钥明文")
+			r.step("读取资产", false, "返回内容里出现了疑似私钥明文")
+			return errors.New(target + " 内容里出现私钥明文")
 		}
 	}
-	r.step("读取 relkit", true, fmt.Sprintf("%d 个文件", len(files)))
+	r.step("读取资产", true, fmt.Sprintf("%s：%d 个文件", target, len(files)))
 	return nil
 }
 

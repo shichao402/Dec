@@ -62,7 +62,7 @@ func TestSaveAndLoadRequiresMap(t *testing.T) {
 	projectRoot := t.TempDir()
 	mgr := NewProjectConfigManager(projectRoot)
 	cfg := &types.ProjectConfig{
-		Requires: types.RequiresSpec{"relkit": "v0.3.20", "tencent-cloud": "latest"},
+		Requires: types.RequiresSpec{"my-skills": "v0.3.20", "tencent-cloud": "latest"},
 	}
 	if err := mgr.SaveProjectConfig(cfg); err != nil {
 		t.Fatal(err)
@@ -71,14 +71,14 @@ func TestSaveAndLoadRequiresMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Requires["relkit"] != "v0.3.20" || loaded.Requires["tencent-cloud"] != "latest" {
+	if loaded.Requires["my-skills"] != "v0.3.20" || loaded.Requires["tencent-cloud"] != "latest" {
 		t.Fatalf("%#v", loaded.Requires)
 	}
 	raw, err := os.ReadFile(filepath.Join(projectRoot, ".dec", "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "- relkit") {
+	if strings.Contains(string(raw), "- my-skills") {
 		t.Fatalf("requires 不应再写成列表:\n%s", raw)
 	}
 }

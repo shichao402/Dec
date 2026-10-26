@@ -1,70 +1,46 @@
 ---
-description: Bitwarden 认证约束 — Console 是唯一人工入口，敏感认证状态只在内存
-globs: schema/secrets/**, internal/secrets/**, internal/app/**/*.go, client/**/*.tsx, docs/history/**
+description: Bitwarden 只作根密钥冷备，唯一人工入口是初始化与恢复界面，凭据用完即清
+globs: schema/secrets/**, internal/secrets/**, internal/cloud/**/*.go, internal/cloudsvc/**/*.go, docs/history/**
 alwaysApply: true
 ---
 
-# Bitwarden 认证
+# Bitwarden 冷备约束
 
-Dec 通过 Bitwarden API 访问 **secrets bundle**。认证设计见 `docs/history/BUNDLE-SECRETS-MODEL.md`「Bitwarden 认证」一节。
+vNext 断代后，密钥不再存 Bitwarden：密钥按值加密后和资产一起存在云端的 git SSOT 里
+（需求 8）。Bitwarden **只剩一个用途**——根密钥的冷备（需求 10.6），为此才保留
+`internal/secrets` 的 API 实现。
 
-## Session 存储（硬约束）
+## 唯一两个人工作用点
 
-- Bitwarden session **仅在本机单例 `dec-server` 进程内存**中保存；服务进程退出即失效。Console / MCP 门面共享服务 session，但拿不到 session 明文。
-- **禁止**将 session 持久化到磁盘：`~/.dec/secrets/session`、`BW_SESSION` 文件、或任何 env/配置文件形式的 session 缓存均不允许。
-- 不存在 `~/.dec/secrets/state.json` 之类的本地同步状态文件（已删除，见 `docs/history/decisions/0001-secrets-landing-path.md`），不要为了缓存 session 而重新引入。
-- `dec-server` 内已有**未过期** session → 直接复用；云端 session 提前失效时先尝试保留主密码的静默重解锁；本机解锁有效期到点后是否静默重解锁由 `auto_reunlock_on_timeout` 决定。不能静默恢复时，交互环境由 Console Authenticate 承载人工认证。
-- 解锁有效期由本机 `~/.dec/config.yaml` 的 `session_timeout` 决定（默认 `DefaultSessionTTL` = **4 小时**，Console 设置页可改）。**到期即作废内存凭据，云端 access_token 是否仍然有效不作数**；反过来云端提前失效（401）也不等有效期，立即清 session 并重认证一次。
-- session、vault/user key、TOTP、临时密钥、challenge 与 2FA 中间态均不得落盘、写日志或进入 operation 结果；完成、取消、超时或进程退出后清除。
+1. **初始化**：首次部署时，在第一台设备的代理界面输入主密码与 2FA，服务生成根密钥、
+   写入本地文件、登录 Bitwarden 把根密钥存到 `_dec-cloud/root-key/<key-id>`，
+   读回比对确认写入成功，然后登出并清除凭据。之后初始化入口永久关闭。
+2. **恢复**：服务器重建时从 `_dec-cloud` 取回根密钥。
 
-## 保留主密码与静默重解锁
+除这两处之外，系统里没有任何地方需要 Bitwarden。
 
-- Console 勾选「保存主密码」时，`Authenticate` 带 `retain_password=1`，`dec-server` 才在**进程内存**保留主密码（`internal/secrets/retain.go`）。云端 session 在有效期内失效时自行重登录；有效期到点后是否重登录由 `auto_reunlock_on_timeout` 控制（默认开启，Console 设置页可关）。
-- `auto_reunlock_on_timeout=false` 时，有效期到点必须回到 Console Authenticate 人工确认；主密码可以预填，但不得自动提交。该开关不影响有效期内对云端 401 的一次静默恢复。
-- 保留的主密码同样**禁止落盘**、写日志或进入 operation 结果；进程退出即消失，重启后必须重新人工解锁。磁盘上的那份只存在 Console 侧的系统凭据库，由用户勾选控制。
-- 未勾选保存 → 服务端不保留任何主密码，缺 session 的行为与过去一致。
-- 静默重解锁连续失败到 `retainedFailureLimit` 次，或 remember token 失效重新要 2FA 时，丢弃保留的主密码并回落人工认证；不得无限重试逼近账号锁定。
+## 硬约束
 
-## 开发 / Agent 程序化解锁
-
-- 新进程需要 Bitwarden API 时，可设置环境变量 **`DEC_BW_PASSWORD`**（主密码，**仅当前进程**，禁止写入代码、配置或磁盘）。
-- 配合 `~/.dec/secrets/device.json` 中的 `two_factor_remember` 令牌，可在无人工输入、无 2FA 的情况下建立 session。
-- **未设置** `DEC_BW_PASSWORD` 或 remember token 失效 / 仍需 2FA 时，本机桌面交互上下文转由 Console；远端无桌面、CI 与其他非交互上下文返回结构化认证错误。
-- Agent / CI 若需程序化解锁，须在**首次拉起 `dec-server` 的门面环境**中设置 `DEC_BW_PASSWORD`；门面不会把密码经 RPC 传给已运行的服务。
-- 集成 / live 测试把凭据放在 `.secrets/dec/integration/bitwarden.yaml`（gitignored），由 `TestMain` 调 `secrets.ApplyIntegrationAuth` 注入进程环境。
-
-## 测试禁止自动拉起 Console（硬约束）
-
-- **测试绝不能自动启动或聚焦真实 Console，也不能等待人工输入**。
-- 单测覆盖认证协调时必须注入 Console 协调器桩，显式覆盖成功、取消、超时和不可交互分支。
-- 测试拉起的子进程必须传 `DEC_NO_CONSOLE_LAUNCH=1`；缺 session 时应返回结构化错误，不得用桌面检测猜测可交互。
-- 不得新增“测试中强制允许真实 Console”的环境变量开关；真机手工验证在非测试进程中进行。
-
-## 设备信任（允许落盘）
-
-- `~/.dec/secrets/device.json` 可持久化 **deviceIdentifier**（UUID）与 **two_factor_remember** 令牌（按 email 索引）。
-- 上述内容用于「记住此设备」跳过 2FA，**不是** access token / session；重启 Dec 后仍需 Console 人工认证或 `DEC_BW_PASSWORD` 程序化认证。
-- 禁止在 device.json 或任何配置中存储主密码、access_token、refresh_token。
-
-## Console Authenticate（唯一人工入口）
-
-需要 Bitwarden API 且进程内无 session 时：
-
-1. 本机交互 MCP 拉起尚未运行的 Console，或聚焦已运行的 Console，并等待认证结果。
-2. Console 是主密码、TOTP 与设备登录确认的唯一人工 UI，通过 `Authenticate` 驱动目标服务认证。
-3. 同一目标的并发缺 session 请求共享一次认证协调；成功后唤醒并重试，取消/超时返回结构化错误。
-4. 远端无桌面、CI、测试及明确非交互上下文不得拉起 Console，直接返回以 `CONSOLE_UNLOCK_REQUIRED` / `CONSOLE_UNLOCK_UNAVAILABLE` 开头的结构化错误。
-5. 管理远端设备时由操作者当前 Console 收集输入并提交给远端服务；远端主机本身不需要桌面。
-
-**不要**新增 `dec unlock`、`dec secrets login` 等 CLI 子命令；**不要**在终端、MCP 参数或服务端临时页面中收集主密码。
-
-## Console-first
-
-- 认证由 `dec-server` 中的 `internal/app` 调用链在 pull secrets bundle 等操作时按需请求；Console 负责人工输入与状态呈现。
-- 设置页配置 Bitwarden 连接信息；认证页处理缺 session 的人工流程。
+- 主密码与 2FA **SHALL NOT** 出现在终端提示、MCP 参数、日志、operation 结果或
+  任何落盘文件里。
+- 主密码用字节数组接收，用完覆写；access token、vault key 同样用完即清。
+  服务 SHALL NOT 持久保存任何 Bitwarden 凭据（需求 10.3）。
+- **不要**新增 `dec unlock`、`dec secrets login` 之类的 CLI 子命令，也不要
+  在管理面之外另开一个收集主密码的页面。
+- 云端 SHALL NOT 在任何自动流程里删除或改写 `_dec-cloud` folder（需求 10.8）。
+  冷备只增不改；迁移完成后清理旧条目时也要保留这个 folder。
+- 根密钥轮换（需求 9.5）要更新冷备副本，但历史 commit 里的旧密文不重写。
 
 ## 实现落点
 
-- Console / 门面认证协调器：拉起或聚焦 Console、等待认证结果、区分交互与非交互上下文
-- `internal/secrets/`：`dec-server` 进程内 session 缓存与 Bitwarden API 客户端
-- Console 同步：pull 流程在 secrets 步骤前检查/等待 session；Note 内容落地到 **`.secrets/` SyncTarget 根**（不进 `.dec/cache/`）
+- `internal/secrets/`：复用 `IdentityClient` 的 Prelogin/Login 与 2FA、`vaultkey`
+  解密、`APIClient` 的条目读写。不引入 `bw` CLI。
+- 冷备写入后必须读回比对，比对失败要报错而不是当作成功。
+- 根密钥文件以 0600 存在服务器本地、不进 git 也不进冷备；启动时自动加载，
+  缺失或校验失败进入恢复模式（需求 9.4）。
+
+## 测试禁止真实登录
+
+- 单元测试**绝不能**发起真实 Bitwarden 登录，也不得等待人工输入。
+- 覆盖认证流程时注入假客户端，显式覆盖成功、2FA 失败、密码错误和网络错误分支。
+- 不得新增「测试中允许真实登录」的环境变量开关；真机验证在测试进程之外手工做。

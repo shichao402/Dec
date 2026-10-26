@@ -36,9 +36,9 @@ func TestNoDirectExecCommand(t *testing.T) {
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			// third_party 与 .relkit/components 都是外部物化树，不是 Dec 的源码。
+			// third_party 是外部物化树，不是 Dec 的源码。
 			// .cache 是 scripts/goenv.sh 把 Go 构建/模块缓存收进项目后的位置，同样不是源码。
-			case ".git", ".relkit", ".cache", "node_modules", "vendor", "target", "dist", "third_party":
+			case ".git", ".cache", "node_modules", "vendor", "target", "dist", "third_party":
 				return filepath.SkipDir
 			}
 			return nil
