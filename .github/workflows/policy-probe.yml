@@ -13,4 +13,4 @@ jobs:
     environment: production
     steps:
       - name: 走到这里说明策略没有拦住
-        run: echo "REACHED: production environment 未拦截本次引用"
+        run: echo "REACHED production environment 未拦截本次引用"
