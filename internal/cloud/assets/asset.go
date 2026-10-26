@@ -566,6 +566,16 @@ func checkEntryConflicts(tx *ssot.Tx, bundle string, manifest ssot.BundleManifes
 //
 // 这一道检查的目的不是“证明没有密钥”，而是拦住最常见的误操作：
 // 把 token、私钥、连接串直接写进资产。真正的安全边界仍是服务端本身。
+//
+// 规则必须容忍两类常见误报，否则正常的资产会被挡住，用户只能改写内容或
+// 绕过检查——两种结果都比漏一个启发式判断更糟（迁移存量时就撞上了）：
+//
+//   - CI 的模板变量写法 `https://${{settings.token.user}}:${{settings.token.pass}}@host`，
+//     密码段是变量名不是值。排除 $ { } 三个字符即可放行。
+//   - 文档与代码里的字段说明，例如类型映射表 `"password": "vuex-input"`、
+//     帮助文案 `cdb_account_password: "修改密码请用控制台"`。
+//     真实密钥不含空格；纯小写标识符是字段名或类型名，不是密钥。
+//     这两条在 matchesPlaintext 里用后置判断排除——Go 的 RE2 不支持负向前瞻。
 var plaintextPatterns = []struct {
 	name string
 	re   *regexp.Regexp
@@ -575,21 +585,68 @@ var plaintextPatterns = []struct {
 	{"OpenAI/Anthropic 风格密钥", regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`)},
 	{"GitHub 令牌", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{30,}\b`)},
 	{"Slack 令牌", regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{10,}\b`)},
-	{"带密码的连接串", regexp.MustCompile(`(?i)\b[a-z]+://[^\s/:@]+:[^\s/@]{6,}@`)},
-	{"内联私钥字段", regexp.MustCompile(`(?i)"?(private_key|api_secret|client_secret|password)"?\s*[:=]\s*"[^"]{8,}"`)},
+	{"带密码的连接串", regexp.MustCompile(`(?i)\b[a-z]+://[^\s/:@${}]+:[^\s/@${}]{6,}@`)},
+	{"内联私钥字段", regexp.MustCompile(`(?i)"?(private_key|api_secret|client_secret|password)"?\s*[:=]\s*"([^"]{8,})"`)},
+}
+
+// notASecretValue 判断一段值看起来不像密钥，用于压掉文档与代码里的误报。
+//
+//   - 含空白：`修改密码请用控制台或 CDB API（...）` 这类是说明文字。
+//     配置文件里的真实口令不含空格，这是启发式判断，不是绝对规则。
+//   - 短、全小写、只含字母与 - _：`vuex-input` 这类是字段名或类型名。
+//     含数字就不算——`abcdefgh12345678` 这种看着就像口令。
+//
+// 真实口令几乎必然含大写、数字、符号中的至少一种，两种情况都不会命中。
+func notASecretValue(v string) bool {
+	if strings.ContainsAny(v, " \t\r\n") {
+		return true
+	}
+	if len(v) > 24 {
+		return false
+	}
+	for _, r := range v {
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // scanForPlaintextSecrets 扫描资产内容里的疑似明文密钥（需求 7.3）。
 func scanForPlaintextSecrets(files []AssetFile) error {
 	for _, f := range files {
 		for _, p := range plaintextPatterns {
-			if loc := p.re.FindIndex(f.Content); loc != nil {
-				return fmt.Errorf("%w: %s 中疑似包含%s（位置 %d），请改为密钥引用",
-					ErrPlaintextSecret, f.Path, p.name, loc[0])
+			loc := p.re.FindSubmatchIndex(f.Content)
+			if loc == nil {
+				continue
 			}
+			// 内联字段的第二个捕获组是值本身：值不像密钥就跳过这一处，
+			// 继续往后找该规则的下一次命中。
+			if p.name == "内联私钥字段" && !findInlineSecret(f.Content, p.re) {
+				continue
+			}
+			return fmt.Errorf("%w: %s 中疑似包含%s（位置 %d），请改为密钥引用",
+				ErrPlaintextSecret, f.Path, p.name, loc[0])
 		}
 	}
 	return nil
+}
+
+// findInlineSecret 在内容里找一处「值确实像密钥」的内联字段。
+func findInlineSecret(content []byte, re *regexp.Regexp) bool {
+	for _, loc := range re.FindAllSubmatchIndex(content, -1) {
+		if len(loc) < 6 || loc[4] < 0 {
+			return true
+		}
+		if !notASecretValue(string(content[loc[4]:loc[5]])) {
+			return true
+		}
+	}
+	return false
 }
 
 // checkSecretRefs 校验资产里引用的密钥都存在（需求 7.2）。
