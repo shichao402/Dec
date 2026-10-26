@@ -31,7 +31,8 @@ stream server，成立它的原因很具体：dec-cloud 早期不认识 PROXY �
 
 ## 决策
 
-让 dec-cloud 在 listener 层解析 PROXY protocol，nginx 在 8445 那一跳重新附加它。
+让 dec-cloud 在 listener 层解析 PROXY protocol；nginx 在 443 那一跳写入头之后，
+**8445 只做纯字节透传**，不消费、也不重新生成这个头。
 
 具体做法：
 
@@ -39,6 +40,8 @@ stream server，成立它的原因很具体：dec-cloud 早期不认识 PROXY �
   包装成一个 `net.Listener`，在首次访问连接时解头，把来源地址填进 `RemoteAddr`。
 - `Config.ProxyProtocol` 控制开关，命令行 `-proxy-protocol`，**默认开启**。
 - 只在监听回环地址时允许开启，启动时校验（`requireLoopbackListen`）。
+- nginx 的 8445 段写成 `listen 127.0.0.1:8445;` + `proxy_pass 127.0.0.1:8444;`，
+  不带任何 `proxy_protocol` 指令。
 
 ## 为什么不是别的方案
 
@@ -53,7 +56,10 @@ SNI 分流的 map、8445 的 server 块、systemd 单元里的端口引用，以
 
 **在 8445 用 `proxy_protocol` 但保持剥掉。** 那是现状，问题依旧。
 
-## 两个实现细节，都是踩过的坑
+**在 8445 写 `proxy_protocol on` 让 nginx「重新附加」头。** 这是最初的设计，
+实测证明理解错了 nginx 的语义，见下面第 3 条。
+
+## 三个实现细节，都是踩过的坑
 
 ### 1. `RemoteAddr` 也必须触发解析，不能只挂在 `Read` 上
 
@@ -73,10 +79,51 @@ SNI 分流的 map、8445 的 server 块、systemd 单元里的端口引用，以
 所以"没有头"不是错误：`Peek` 前 12 字节既不匹配 v2 签名、也不是 `PROXY `，
 就当普通 TLS 字节流继续。`TestNoHeaderPassesThrough` 守住这条。
 
+### 3. nginx 的 `proxy_protocol` 是「消费 / 重新生成」，不是「透传」
+
+这是最贵的一个坑，因为它看起来完全合理：443 已经附了头，8445 只要再附一次就能送到
+8444。按这个理解写出来的配置是：
+
+```nginx
+server {
+    listen 127.0.0.1:8445 proxy_protocol;   # 错
+    proxy_protocol on;                      # 错
+    proxy_pass 127.0.0.1:8444;
+}
+```
+
+实测（tcpdump，2026-10-26）结果与预期相反：
+
+```
+8445 入口：（从 443 传来）PROXY TCP4 43.161.239.208 10.5.0.9 40812 443
+8444 入口：（8445 发给上游）PROXY TCP4 127.0.0.1 127.0.0.1 47670 8445
+```
+
+两条语义各自独立，且都不是透传：
+
+- `listen ... proxy_protocol` 让 nginx 在**这一跳消费**掉进来的头，头被吃掉后就没了。
+- `proxy_protocol on` 让 nginx 向上游**重新生成**一个头，来源填的是它此刻的对端，
+  也就是本机地址。
+
+于是真实来源在两处同时丢失，服务端解析出来的永远是 `127.0.0.1`。正确写法是两条都不写，
+让 443 写入的字节原封不动流到 8444：
+
+```nginx
+server {
+    listen 127.0.0.1:8445;
+    proxy_pass 127.0.0.1:8444;
+}
+```
+
+改完的验证方法：抓 8444 入口的包，头里的源地址应当是真实公网 IP、两个端口是
+`<客户端端口> 443`（而不是 `<端口> 8445`）；再看审计里新产生的 `download` 记录，
+`remote_ip` 应等于客户端出口 IP。两条都对才算真的生效——只看"服务能起来"会漏掉这个坑，
+因为错误的配置下服务一样正常，只是地址悄悄变成了本机。
+
 ## 部署顺序（不可反）
 
 1. 先部署带解析的服务端。它对不带头连接完全兼容，nginx 未改时无影响。
-2. 再改 nginx 的 8445 为 `proxy_protocol on`，reload。
+2. 再改 nginx 的 8445 为纯字节透传（不带 `proxy_protocol`），reload。
 
 反过来的话，旧服务端会收到不认识的文本前缀，TLS 握手失败，所有设备同时断连。
 这个顺序已写进 `deploy/README.md`。

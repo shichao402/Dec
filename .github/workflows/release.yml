@@ -7,10 +7,11 @@ name: Release
 # 三条硬约束来自需求，改动这个文件前先看：
 #
 #   1. 所有平台的二进制都在 Linux runner 上用 Go 交叉编译（需求 21.1）。
-#      免费套餐下私有仓库额度有限，macOS/Windows runner 的分钟数分别按
-#      10 倍和 2 倍计算，用它们构建纯属浪费。
-#   2. 部署只在 refs/tags/v* 上运行（需求 21.7）。免费套餐没有 environment
-#      保护规则，这条是本仓库唯一能拦“非 tag 触发部署”的闸门。
+#      代码仓库是公开仓库，Actions 分钟数不受私有仓库额度限制，但 macOS/Windows
+#      runner 的分钟数分别按 10 倍和 2 倍计算且排队更久，用它们构建纯属浪费。
+#   2. 部署只在 refs/tags/v* 上运行（需求 21.7）。这条 if 是第二道闸门；第一道
+#      是 production environment 的部署分支策略，只放行 v* 标签，且部署凭据只
+#      存在于该 environment。策略存在 GitHub 设置里，改这个文件绕不过去。
 #   3. 协议版本变了而要求版本没变时构建失败（需求 19.2）。反过来说，
 #      只改服务端时可以显式沿用上一个要求版本，不必让所有设备跟着升级。
 
@@ -380,7 +381,10 @@ jobs:
     name: 部署到服务器
     needs: build
     runs-on: ubuntu-latest
-    # 需求 21.7：免费套餐没有 environment 保护规则，这条 if 是唯一的调用范围限制。
+    # 需求 21.7：部署凭据只存在于 production environment，且该 environment 的部署
+    # 分支策略只放行 v* 标签。策略存在 GitHub 设置里而不是这个文件里，改这个文件
+    # 无法绕过它。下面这条 if 是第二道限制，不是唯一的一道。
+    environment: production
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4

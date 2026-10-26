@@ -13,7 +13,7 @@
 - Bitwarden 不再是运行时依赖，只作为根密钥的冷备：初始化时存入一份，服务器重建时取回。
 - 所有通道都是单向的。读取链路从云端到设备，本地副本只读。写入链路是独立的同步请求，直接进云端，不经过本地文件。
 - 资产和密钥都在 Dec 自己的界面里管理。
-- GitHub 私有仓库只用作冷备和审计归档。
+- 代码仓库保持公开，冷备仓库和审计仓库保持私有（里面是加密后的真实资产和审计记录，属于运行数据）；正因代码人人可见，密钥和真实服务器信息一律不进仓库。
 
 本产品只有一个用户，就是作者本人。因此不设账户和角色体系：已登记的设备就是“我”，设备全丢时用 Bitwarden 主密码和 2FA 证明身份（见需求 18）。
 
@@ -31,13 +31,12 @@
 10. 信任模型：服务端失陷视同所有已登记设备失陷。服务端本来就能通过 MCP 配置等落点让设备执行命令，给客户端签名改变不了这一点，所以客户端不做签名，也不设发布密钥。服务端及其部署链路（GitHub 账户、CI 部署凭据）的安全由用户自行保证。
 11. 发布与部署由 GitHub CI 在打 release tag 时完成：服务端和全部客户端从同一个 tag 构建，部署期间停服，不做无中断部署。
 12. 服务器的 SSH（22 端口）对公网开放，CI 直接通过公网 SSH 部署，不引入 Tailscale、WireGuard 或 self-hosted runner。SSH 的安全通过只允许公钥登录和专用受限的部署账户来保证。
-13. 本次重构后，Dec 不再是公开项目，代码改为托管在 GitHub 上的私有仓库（见需求 22）。代码不公开可以减少攻击者可利用的信息，但它只是附加收益，SHALL NOT 被当作安全边界，安全仍以已定决策 10 为准。
-14. 本次是断代升级，新系统不兼容旧架构。官方资产与提供方机制、registry、`publish.firoyang.com`、`DecPersonalDevKit`、`dec-source-private` 全部废弃，不并入，也不作为上游。新系统建成、服务搭好之后，存量内容由 Agent 通过新系统的写入链路协助迁移（见需求 17），迁移完成后旧内容彻底删除。
+13. 代码仓库 `shichao402/Dec` 保持 GitHub 公开仓库（见需求 22）。公开不改变信任模型：安全仍以已定决策 10 为准，代码可见性既不是防线，也不承担保密职责。结论因此反过来——既然代码和提交历史任何人都能检索，密钥、真实公网地址、服务器地址和部署参数 SHALL NOT 出现在仓库里，一律走仓库外的配置（需求 22.2、22.4）。14. 本次是断代升级，新系统不兼容旧架构。官方资产与提供方机制、registry、`publish.firoyang.com`、`DecPersonalDevKit`、`dec-source-private` 全部废弃，不并入，也不作为上游。新系统建成、服务搭好之后，存量内容由 Agent 通过新系统的写入链路协助迁移（见需求 17），迁移完成后旧内容彻底删除。
 15. 服务端域名为 `dec.firoyang.com`。TLS 证书由服务端通过 ACME 的 TLS-ALPN-01 方式自动向 Let's Encrypt 申请和续期，走的是 443 端口，因此不需要额外开放 80 端口。公网 443 由 nginx 持有，以 SNI 透传（不终止 TLS）方式转发到 dec-cloud 的回环高位端口 `127.0.0.1:8444`。
 16. 管理面只做 Web，并且只通过本机代理访问。本期不做 Android 端，告警改走企业微信机器人和代理的系统通知（需求 12）。
 17. 技术栈使用 Go：复用 `internal/secrets` 里的 Bitwarden API，以及现有渲染和 vars 模块中仍然适用的部分，其余按断代升级的原则重写。
 18. SSH 远端机器一律作为“只接收设备”，各自安装代理。
-19. 资产冷备和审计日志都放在 GitHub 私有仓库。账户是免费套餐，私有仓库用不了分支保护和 environment 保护规则，因此用需求 15 和需求 21.7 中的等效措施代替。
+19. 资产冷备和审计日志都放在 GitHub 私有仓库，与代码仓库分开。代码仓库公开而这两个仓库私有，只因为其中含加密后的真实资产和审计记录。账户是免费套餐：私有仓库用不了分支保护，用需求 15.2 的等效措施代替；公开仓库可以开启分支保护与 environment 保护规则，需求 21.7 因此改为直接启用它们。
 20. 不做高危操作的跨设备确认，也不按项目划分写入范围。
 
 ## 需求
@@ -68,7 +67,7 @@
 5. 代理 SHALL 没有原生图形界面，交互只通过回环地址上的本机页面、CLI 和系统通知完成。代理以系统服务形式常驻（macOS 用 launchd，Windows 用服务或计划任务，Linux 用 systemd user service 加 linger）。
 6. 代理与云端之间的协议 SHALL 带版本号。由于所有代理强制与服务端要求版本对齐（需求 19），云端 SHALL NOT 为多个代理版本维持兼容，只需保证版本握手方法永不改变（需求 19.7）。
 7. 代理 SHALL NOT 自更新，版本由服务端统一规定、用户手动更新，流程见需求 19。
-8. 代理 SHALL NOT 做签名校验，也 SHALL NOT 依赖安装脚本。用户从服务端下载通道（需求 20）下载二进制，下载后直接运行；首次运行时在本机页面或 CLI 里配置服务地址。私有仓库的 GitHub Release 只作备用，需要登录 GitHub 才能下载。
+8. 代理 SHALL NOT 做签名校验，也 SHALL NOT 依赖安装脚本。用户从服务端下载通道（需求 20）下载二进制，下载后直接运行；首次运行时在本机页面或 CLI 里配置服务地址。公开仓库的 GitHub Release 只作备用下载路径，内容与服务端下载通道一致，但可能不是当前要求版本，以服务端下载通道为准。
 9. 代理 SHALL 是通用二进制，SHALL NOT 内嵌任何服务地址、密钥或凭据。代理在本机只保存两样状态：服务地址，以及设备身份（设备私钥和设备证书）。服务器重建后不需要重新分发代理。
 10. 回环入口 SHALL 只绑定 `127.0.0.1`，并且只做两项不增加使用摩擦的检查：Host 头必须是 `127.0.0.1:<端口>` 或 `localhost:<端口>`，用来防 DNS rebinding；请求如果带了 Origin 头，必须是代理自己的地址，否则拒绝，用来防其他网页跨站调用。系统 SHALL NOT 为回环入口设置会话 token、一次性链接或 CSRF token，MCP 入口也不需要 token。本机进程被视为可信，因为本机失陷就等于这台设备失陷。
 11. 代理 SHALL 提供卸载命令：清理所有由 Dec 管理的落点和条目、删除本机设备身份，并在在线时通知云端注销这台设备。
@@ -229,7 +228,7 @@
 #### 验收标准
 
 1. WHEN 仓库产生新 commit THEN 云端 SHALL 异步推送到冷备仓库 `shichao402/dec-cloud-backup`（GitHub 私有仓库），并每天定时补推一次兜底。部署期间（需求 21.2）SHALL 暂停推送，直到健康检查通过后再恢复，以免把之后可能被回滚的数据迁移 commit 推到冷备。
-2. 免费套餐下私有仓库无法开启分支保护，因此改用以下等效措施：推送凭据 SHALL 是只绑定这一个仓库的 deploy key；云端 SHALL NOT force-push；每次推送前，云端 SHALL 先 fetch 远端，并确认远端 head 是本地历史的祖先。IF 远端历史被改写 THEN 云端 SHALL 停止推送并告警，SHALL NOT 用本地历史覆盖远端，由用户判断原因后再处理。
+2. 冷备和审计仓库是私有仓库，免费套餐下私有仓库无法开启分支保护，因此改用以下等效措施：推送凭据 SHALL 是只绑定这一个仓库的 deploy key；云端 SHALL NOT force-push；每次推送前，云端 SHALL 先 fetch 远端，并确认远端 head 是本地历史的祖先。IF 远端历史被改写 THEN 云端 SHALL 停止推送并告警，SHALL NOT 用本地历史覆盖远端，由用户判断原因后再处理。这条限制只作用于这两个私有仓库，不涉及已公开的代码仓库。
 3. 审计日志（资产写入、密钥写入与明文查看、下发、设备登记与吊销、根密钥加载与轮换、初始化与恢复、部署）SHALL 以只追加的方式推送到独立私有仓库 `shichao402/dec-cloud-audit`，使用该仓库专用的 deploy key，并遵守与 15.2 相同的推送规则。已知的局限是：如果服务器失陷，攻击者可以用这把 deploy key 改写审计仓库，此时 GitHub 仓库 Activity 中留下的 force-push 记录是剩下的取证线索。
 4. 冷备或审计推送失败时 SHALL 告警（需求 12）。
 
@@ -316,27 +315,29 @@
 
 #### 验收标准
 
-1. WHEN 推送 release tag THEN GitHub CI SHALL 从该 tag 构建服务端和全部客户端，生成 GitHub Release（含发布清单和全部二进制），然后执行部署。所有平台的二进制 SHALL 在 Linux runner 上用 Go 交叉编译，SHALL NOT 使用 macOS 或 Windows runner。免费套餐下私有仓库的 Actions 额度有限，这两种 runner 的分钟数分别按 10 倍和 2 倍计算。
+1. WHEN 推送 release tag THEN GitHub CI SHALL 从该 tag 构建服务端和全部客户端，生成 GitHub Release（含发布清单和全部二进制），然后执行部署。所有平台的二进制 SHALL 在 Linux runner 上用 Go 交叉编译，SHALL NOT 使用 macOS 或 Windows runner。唯一例外是托盘（链接 AppKit，Linux 上无 macOS SDK），它允许使用 macOS runner，且该 runner SHALL 只用于构建托盘。代码仓库是公开仓库，Actions 分钟数不受私有仓库额度限制，但仍 SHALL 控制用量：macOS runner 按 10 倍分钟计费且排队更久，不得用于 Linux 可完成的工作。
 2. 部署 SHALL 按固定顺序执行：服务进入维护状态并停服 → 快照当前服务端版本、客户端二进制和数据 → 上传新服务端和新客户端二进制 → 启动（包括必要的数据迁移）→ 健康检查 → 退出维护状态。
 3. IF 任何一步失败或健康检查不通过 THEN 部署 SHALL 回滚到快照中的服务端版本、客户端二进制、要求版本和数据，并告警。
 4. WHILE 服务处于维护状态 THEN 代理 SHALL 按需求 5 离线降级。重连后，云端 SHALL 按需求 19.4 判断版本是否对齐。
 5. 部署 SHALL NOT 改动根密钥文件。git 数据和设备登记表只允许由启动时的数据迁移修改，并且 SHALL 包含在步骤 2 的快照里。
 6. CI SHALL 通过公网 SSH 连接服务器，使用专用部署账户和专用密钥，不复用用户本人的运维密钥。部署账户 SHALL 只拥有部署所需的权限：写入发布目录、执行部署脚本、重启 Dec 服务，SHALL NOT 拥有通用 sudo 权限。部署账户的 SSH 公钥 SHALL 在 `authorized_keys` 中用 `command=` 限定只能执行部署入口脚本。服务器的 SSH host key 指纹 SHALL 预先写入 CI 的 known_hosts，CI SHALL NOT 自动接受未知的 host key。
-7. 部署凭据 SHALL 是专用的部署身份，存放在仓库级 Actions secret 中。免费套餐下私有仓库无法用 environment 保护规则限制 secret 的使用范围，因此改用以下等效措施：部署 job SHALL 只在 `refs/tags/v*` 上运行；部署入口脚本 SHALL 校验上传的发布清单中的 tag 和 commit 与 GitHub 上真实存在的 release tag 一致；仓库 SHALL NOT 添加其他协作者，也 SHALL NOT 启用会运行外部 PR 代码的触发器。由于部署会替换服务端二进制，部署凭据实际上等同于服务器的完全控制权，因此 GitHub 账户 SHALL 开启 2FA，这是已定决策 10 中“用户自行保证安全”的一部分。
+7. 部署凭据 SHALL 是专用的部署身份，存放在 Actions environment secret 中，SHALL NOT 存为仓库级 secret。代码仓库是公开仓库，因此 SHALL 启用 environment 保护规则来限制这个 secret 的使用范围：部署 SHALL 只允许在 `refs/tags/v*` 上引用该 environment。此外，部署入口脚本 SHALL 校验上传的发布清单中的 tag 和 commit 与 GitHub 上真实存在的 release tag 一致；仓库 SHALL NOT 添加其他协作者，也 SHALL NOT 启用会运行外部 PR 代码的触发器。由于部署会替换服务端二进制，部署凭据实际上等同于服务器的完全控制权，因此 GitHub 账户 SHALL 开启 2FA，这是已定决策 10 中“用户自行保证安全”的一部分。
 8. 每次部署 SHALL 记入审计日志，内容包括版本、tag、commit、结果和是否回滚。
 
-### 需求 22：代码仓库私有化
+### 需求 22：代码仓库公开与信息公开边界
 
-**用户故事：** 作为作者，我希望重构后的 Dec 只是我个人的私有项目，代码不公开，减少攻击者能利用的信息，也不再承担公开项目的维护义务。
+**用户故事：** 作为作者，我希望重构后的 Dec 代码保持公开，可以被检索和审阅；同时，正因为代码和提交历史人人可见，密钥、真实服务器地址和部署参数都不能出现在仓库里。
 
 #### 验收标准
 
-1. Dec 的代码仓库 `shichao402/Dec`（服务端、代理、CI 配置）SHALL 设为 GitHub 私有仓库。冷备仓库 `dec-cloud-backup` 和审计仓库 `dec-cloud-audit`（需求 15）SHALL 同样是私有仓库，并且与代码仓库分开。`DecPersonalDevKit` 和 `dec-source-private` SHALL NOT 在新系统中继续使用，迁移完成后按需求 17.6 删除。
-2. 私有化 SHALL 在新架构开始实际开发之前完成：新架构的第一行代码提交之前，代码仓库就必须已经是私有的。新架构的代码 SHALL NOT 出现在任何公开仓库中。
-3. 私有化之前，SHALL 对现有公开历史做一次泄露排查：扫描历史 commit 中的密钥、内部域名、服务器地址等敏感信息。排查出的密钥 SHALL 一律视为已泄露并轮换，SHALL NOT 依赖改写历史来补救，因为公开期间的历史可能已被 fork 或克隆。
-4. 现有面向公开用户的发布物，包括公开 Release、安装脚本、对外文档、registry 和 `publish.firoyang.com`，SHALL 按需求 17.6 彻底删除，不保留归档。
-5. 服务端、部署配置和代码中 SHALL NOT 硬编码服务地址、密钥或私有网络信息。私有化只是附加防线，即使代码泄露也不应直接暴露这些信息。
-6. GitHub 账户是免费套餐（2026-10-21 已核实），私有仓库用不了分支保护和 environment 保护规则。需求 15.2 和需求 21.7 已改为等效措施，SHALL NOT 悄悄放弃这两项保护。
+1. Dec 的代码仓库 `shichao402/Dec`（服务端、代理、CI 配置）SHALL 保持 GitHub 公开仓库。冷备仓库 `dec-cloud-backup` 和审计仓库 `dec-cloud-audit`（需求 15）SHALL 保持私有，并且与代码仓库分开：这两个仓库装的是加密后的真实资产和审计记录，属于运行数据，不是代码。`DecPersonalDevKit` 和 `dec-source-private` SHALL NOT 在新系统中继续使用，迁移完成后按需求 17.6 删除。
+2. 由于提交历史对所有人可检索，仓库中 SHALL NOT 出现任何真实凭据（根密钥、deploy key、Actions secret、Bitwarden 凭据、webhook 地址）、真实公网 IP 或服务器登录信息。这些一律通过 GitHub Actions secret、服务器本地文件和仓库外的配置提供。CI 日志 SHALL NOT 回显出这些值。
+3. 公开之前，SHALL 对现有历史做一次泄露排查：扫描历史 commit 中的密钥、内部域名、服务器地址等敏感信息。排查出的密钥 SHALL 一律视为已泄露并轮换，SHALL NOT 依赖改写历史来补救，因为公开期间的历史可能已被 fork 或克隆。
+4. 历史中已经存在的服务端域名 `dec.firoyang.com` 与回环地址（`127.0.0.1`、`0.0.0.0`）不构成泄露，允许保留在代码和文档中：域名本身是公开信息（证书透明日志里可查），回环地址不指向任何真实主机。但真实公网 IP、SSH 端口转发细节、服务器上的绝对路径和账户名 SHALL NOT 写入仓库。
+5. 现有面向公开用户的发布物，包括公开 Release、安装脚本、对外文档、registry 和 `publish.firoyang.com`，SHALL 按需求 17.6 彻底删除，不保留归档。公开仓库的 GitHub Release SHALL 只发布二进制和发布清单，SHALL NOT 附带任何环境配置。
+6. 公开仓库 SHALL 开启 GitHub 免费套餐在公开仓库下可用的两项原生保护：`main` 分支保护与部署用的 environment 保护规则（需求 21.7）。分支保护的范围 SHALL 是最小必要的一组，只禁止强制推送和删除分支，SHALL NOT 要求 PR 评审、SHALL NOT 要求状态检查，因此单人直接推 `main` 的日常流程不受影响。分支保护 SHALL 覆盖管理员（`enforce_admins=true`）：GitHub 默认把管理员排除在保护之外，不打开这一项等于没开。开启后强推已被禁止，但改写历史仍 SHALL NOT 被当作凭据泄漏的补救手段（第 3 条），因为公开期间的历史可能已被 fork 或克隆，阻塞强推只能防止「以后被覆盖」，不能收回「已经流出去的内容」。
+7. 公开仓库 SHALL NOT 接受会执行外部 PR 代码的触发器。`pull_request_target` 和带写权限的 `workflow_run` SHALL NOT 用于任何持有 secret 的 job。仓库 SHALL NOT 添加其他协作者。
+8. 公开不改变信任模型（已定决策 10、13）：代码可见性 SHALL NOT 被当作安全边界，SHALL NOT 因此放松任何鉴权、加密或审计要求。服务端、部署链路和 GitHub 账户的安全由用户自行保证。
 
 ### 需求 23：资产模型与订阅
 

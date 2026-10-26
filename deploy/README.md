@@ -90,9 +90,15 @@ nginx 必须用 `stream` 模块 + `ssl_preread` 按 SNI 把 `dec.firoyang.com` �
 开启需要两步，**顺序不能反**：
 
 1. 先部署带解析的服务端。它对不带 PROXY 头的连接完全兼容，所以在 nginx 还没改之前不会有任何影响。
-2. 再把 `/etc/nginx/stream-sni.conf` 里 `127.0.0.1:8445` 那一跳改成 `proxy_protocol on`（配置见仓库内同名文件），`nginx -t && systemctl reload nginx`。
+2. 再把 `/etc/nginx/stream-sni.conf` 里 `127.0.0.1:8445` 那一跳改成**纯字节透传**（配置见仓库内同名文件），`nginx -t && systemctl reload nginx`。
 
-反过来做会立刻造成全站不可用：旧服务端不认识这个文本前缀，TLS 握手会直接失败，所有设备同时断连。
+第二步的细节容易写错，这里说清：8445 只需要 `listen 127.0.0.1:8445;` + `proxy_pass 127.0.0.1:8444;`，**既不能写 `listen ... proxy_protocol`，也不能写 `proxy_protocol on`**。
+
+- 写 `listen ... proxy_protocol` 会让 nginx 在这一跳消费掉 443 写好的头，真实来源就此消失；
+- 写 `proxy_protocol on` 会让 nginx 向上游重新生成一个头，用的是本机对端地址，真实来源同样消失；
+- 两者同时写等于"消费再重新生成"，抓包看到的是 `PROXY TCP4 127.0.0.1 127.0.0.1 <port> 8445`，而不是真实客户端地址。这一点在 2026-10-26 实测确认过，别按直觉改。
+
+反过来做（先改 nginx、后部署服务端）会立刻造成全站不可用：旧服务端不认识这个文本前缀，TLS 握手会直接失败，所有设备同时断连。
 
 `-proxy-protocol` 只允许配合回环监听使用，启动时会校验；监听在 `0.0.0.0` 或公网地址时会拒绝启动。理由是公网直连时客户端可以自报来源 IP，那样限流能被无限绕过、审计里也会出现伪造地址，比"地址不准"更糟。
 
@@ -124,7 +130,7 @@ sudo chown root:root /usr/local/lib/dec-cloud/dec-cloud-deploy.sh
 
 ### 4. 填 GitHub 只读 token
 
-部署脚本要向 GitHub 核对「这个 tag 真的存在，而且指向这个 commit」（需求 21.7）。偷到部署私钥的人可以伪造任意部署包，但只要那个 tag 在 GitHub 上不存在，部署就会在改动任何文件之前停下。这是私有仓库用不了 environment 保护规则时的等效措施。
+部署脚本要向 GitHub 核对「这个 tag 真的存在，而且指向这个 commit」（需求 21.7）。偷到部署私钥的人可以伪造任意部署包，但只要那个 tag 在 GitHub 上不存在，部署就会在改动任何文件之前停下。代码仓库是公开仓库，部署 secret 已放进只允许 `refs/tags/v*` 的 environment；这层 tag 与 commit 的一致性校验是独立的第二道防线，不依赖 environment 规则。
 
 建一个 fine-grained token，只给它 `shichao402/Dec` 的 Contents: Read：
 
@@ -135,9 +141,15 @@ sudo chmod 600 /etc/dec-cloud/github-token
 
 文件权限必须是 0600 且属主 root。`provision.sh` 会建好空占位，这里只填值。
 
-### 5. 配置 GitHub secrets
+### 5. 配置 GitHub environment 与 secrets
 
-仓库 → Settings → Secrets and variables → Actions，加四个 secret：
+部署凭据不放仓库级 secret，而是放进名为 `production` 的 environment（需求 21.7）。原因是 `DEPLOY_SSH_KEY` 能登录生产机、部署动作会替换服务端二进制，它等价于服务器控制权；仓库级 secret 的含义是「仓库里任何 workflow、任何分支都能引用它」，而 environment 可以限定「只有哪些 ref 能拿到它」。
+
+仓库 → Settings → Environments → New environment，名称填 `production`，然后：
+
+**Deployment branch rules** 选 `Selected branches and tags`，添加一条规则：类型 `tag`，模式 `v*`。这条规则存在 GitHub 设置里，不在仓库文件中，改 workflow 文件绕不过去。公开仓库在免费套餐下可以设置这一项（私有仓库不行，会提示需要升级）。
+
+**Environment secrets** 加四个：
 
 | Secret | 内容 |
 |--------|------|
@@ -146,13 +158,20 @@ sudo chmod 600 /etc/dec-cloud/github-token
 | `DEPLOY_HOST` | 服务器地址，例如 `dec.firoyang.com` |
 | `DEPLOY_USER` | `deploy` |
 
-`DEPLOY_KNOWN_HOSTS` 不能靠首次连接自动接受——那等于把中间人攻击的门留着。在自己的机器上取：
+用命令行等价操作：
 
 ```bash
-ssh-keyscan -t ed25519 dec.firoyang.com
+gh secret set DEPLOY_SSH_KEY    --env production < ~/.ssh/dec_cloud_deploy
+ssh-keyscan -t ed25519 dec.firoyang.com | gh secret set DEPLOY_KNOWN_HOSTS --env production
+printf 'dec.firoyang.com' | gh secret set DEPLOY_HOST --env production
+printf 'deploy'           | gh secret set DEPLOY_USER --env production
 ```
 
-把输出原样贴进 secret。工作流用 `StrictHostKeyChecking=yes`，host key 对不上直接失败。
+录完 SHALL 删掉同名的仓库级 secret，否则 environment 里的这份形同虚设——job 不挂 environment 时仍能从仓库级取到。检查用 `gh secret list` 与 `gh api repos/{owner}/{repo}/actions/secrets`。
+
+`DEPLOY_KNOWN_HOSTS` 不能靠首次连接自动接受——那等于把中间人攻击的门留着。工作流用 `StrictHostKeyChecking=yes`，host key 对不上直接失败。
+
+**验证迁移是否生效**：`gh api repos/{owner}/{repo}/environments/production/deployment-branch-policies` 应返回 `v*`/`tag`；`gh api repos/{owner}/{repo}/actions/secrets` 不应再出现四个 `DEPLOY_*`。
 
 ### 6. 打第一个 tag
 

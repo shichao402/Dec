@@ -65,3 +65,4 @@
 | [0042](0042-sync-audit-dedup.md) | sync 审计按内容指纹降噪，密钥下发不降噪 | 已被 0043 取代 |
 | [0043](0043-audit-tiers.md) | 审计按事件级别分级，访问类事件有界聚合 | 已接受（已实现） |
 | [0044](0044-proxy-protocol-real-ip.md) | 服务端解析 PROXY protocol，恢复真实来源地址 | 已接受（服务端已实现，nginx 待改） |
+| [0045](0045-public-repo-not-private.md) | 代码仓库保持公开，改为守住「仓库里不能有真东西」 | 已接受（需求 22 已按此改写） |

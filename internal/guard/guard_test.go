@@ -583,10 +583,10 @@ func TestReleaseArtifactNamesUnchanged(t *testing.T) {
 
 // TestMacOSRunnerOnlyForTray 守住「macOS runner 只用于托盘」这条边界。
 //
-// 需求 21.1 规定全部产物在 Linux runner 上构建，理由是私有仓库的
-// macOS runner 按 10 倍计费。唯一无法回避的例外是托盘：它链接 AppKit，
-// Linux 上没有 macOS SDK。这里检查 release.yml 里每一个使用 macOS runner
-// 的 job 都只构建托盘，防止例外被扩大。
+// 需求 21.1 规定除托盘外的产物都在 Linux runner 上构建。代码仓库是公开的，
+// Actions 分钟数不受私有仓库额度限制，但 macOS runner 仍按 10 倍计费且排队更久，
+// 唯一无法回避的例外是托盘：它链接 AppKit，Linux 上没有 macOS SDK。这里检查
+// release.yml 里每一个使用 macOS runner 的 job 都只构建托盘，防止例外被扩大。
 func TestMacOSRunnerOnlyForTray(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
