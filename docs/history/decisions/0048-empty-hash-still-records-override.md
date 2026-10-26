@@ -74,11 +74,54 @@ if seen {
 **在代理侧先自己覆盖，再上报新哈希。** 违反需求 6.1（代理不保存下发清单、
 不做双向同步），也违反需求 5.2（本地落点只是只读缓存）。不做。
 
+## 第二处根因：去重时的 map 零值陷阱
+
+只去掉 `cur.Hash != ""` 还不够。改完发 v2.1.22 上线后重测，记录仍然不出现。
+真正把记录吞掉的是 `AddOverrides` 的去重：
+
+```go
+last := make(map[string]string, len(st.Overrides))
+for _, o := range st.Overrides {
+    last[o.ID] = o.Hash
+}
+for _, o := range overrides {
+    if last[o.ID] == o.Hash {   // ← 这里
+        continue
+    }
+    ...
+}
+```
+
+`last` 用 `o.ID` 建索引，取不存在的键返回零值 `""`。空哈希也正好是 `""`。
+所以「这个条目从来没被记录过」和「这个条目记过一条空哈希」在比较时完全等价，
+第一条空哈希覆盖必然被当成重复丢掉。非空哈希没有这个问题，因为零值 `""`
+不可能等于一个真实的 sha256 值。
+
+改成用 `ok` 判断存在性：
+
+```go
+if prev, ok := last[o.ID]; ok && prev == o.Hash {
+    continue
+}
+```
+
+## 两个根因为什么同时存在
+
+`cur.Hash != ""` 和 `last[o.ID] == o.Hash` 都写在「空哈希只可能是删除回执」
+的年代。删除回执的空哈希根本不会走到这两处：删除的条目在 `RecordAck` 里
+就被从 `state.Files` 移除了，`want.Files` 里也不会再有它。所以这两个空哈希
+判断在当时是死代码，写的时候不用想清楚它的语义。0047 给空哈希赋予新含义后，
+死代码变成了活的地雷，而且两处都踩了。
+
 ## 验证
 
-- `TestSyncRecordsOverrideWhenHashUnreported`：空哈希触发补发时必须有覆盖记录，
-  且记录要带上代理上报的全部落点。旧实现下这条会失败。
-- `TestSyncFirstTimeEmptyHashIsNotOverride`：首次下发就报空哈希不该有覆盖记录，
+- `TestSyncRecordsOverrideWhenHashUnreported`：空哈希补发必须有覆盖记录，
+  且记录带上代理上报的全部落点。旧实现下失败。
+- `TestSyncFirstTimeEmptyHashIsNotOverride`：首次下发就报空哈希不该有记录，
   防止修复过头。
-- 真机实测（2026-10-26）：五落点条目改 `.cursor` 与 `.with` 两份，
-  40 秒内全部被覆盖回基线，哈希一致，无篡改残留。
+- `TestAddOverridesKeepsEmptyHash`：首次空哈希必须落库、重复的同样空哈希
+  才去重、哈希变化要新增。实测把去重改回旧写法，这条立刻报
+  「空哈希的首次覆盖必须记下来，实际 0 条」。
+- 真机实测（2026-10-26，v2.1.23）：五落点条目改 `.claude` 那份，
+  服务端 `state/<device>.json` 的 `overrides` 新增一条。
+

@@ -233,7 +233,11 @@ func (s *StateStore) AddOverrides(deviceID string, overrides []proto.Override) e
 	}
 	added := 0
 	for _, o := range overrides {
-		if last[o.ID] == o.Hash {
+		// 必须用 ok 判断这条记录在不在，不能只比哈希值。
+		// map 取不存在的键返回零值 ""，而空哈希（多落点不一致，ADR 0047/0048）
+		// 也正好是 ""。只比值得话，每条空哈希覆盖都会被当成「已经记过了」
+		// 静默丢掉——症状是文件被覆盖了、审计里却什么都没有。
+		if prev, ok := last[o.ID]; ok && prev == o.Hash {
 			continue
 		}
 		if o.DetectedAt.IsZero() {

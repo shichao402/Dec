@@ -1073,3 +1073,58 @@ items:
 		t.Fatalf("首次下发不应有覆盖记录，实际 %+v", first.Overrides)
 	}
 }
+
+// TestAddOverridesKeepsEmptyHash 覆盖去重逻辑的空哈希陷阱：
+// map 取不存在的键返回零值 ""，而空哈希（多落点不一致）也正好是 ""。
+// 如果只比哈希值，第一条空哈希覆盖会被当成「已经记过了」直接丢掉。
+func TestAddOverridesKeepsEmptyHash(t *testing.T) {
+	store, err := NewStateStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStateStore: %v", err)
+	}
+
+	// 第一次：空哈希，之前没有任何记录。
+	if err := store.AddOverrides("dev-1", []proto.Override{
+		{ID: "asset:woa:a.mdc", Hash: "", Paths: []string{"/p/a.mdc"}},
+	}); err != nil {
+		t.Fatalf("AddOverrides: %v", err)
+	}
+	got, err := store.Overrides("dev-1")
+	if err != nil {
+		t.Fatalf("Overrides: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("空哈希的首次覆盖必须记下来，实际 %d 条", len(got))
+	}
+
+	// 第二次：同样的空哈希，这次才该被去重掉。
+	if err := store.AddOverrides("dev-1", []proto.Override{
+		{ID: "asset:woa:a.mdc", Hash: "", Paths: []string{"/p/a.mdc"}},
+	}); err != nil {
+		t.Fatalf("AddOverrides: %v", err)
+	}
+	got, err = store.Overrides("dev-1")
+	if err != nil {
+		t.Fatalf("Overrides: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("重复的同样空哈希应被去重，实际 %d 条", len(got))
+	}
+
+	// 第三次：非空哈希是新的改动，要新增一条。
+	if err := store.AddOverrides("dev-1", []proto.Override{
+		{ID: "asset:woa:a.mdc", Hash: "sha256:abc", Paths: []string{"/p/a.mdc"}},
+	}); err != nil {
+		t.Fatalf("AddOverrides: %v", err)
+	}
+	got, err = store.Overrides("dev-1")
+	if err != nil {
+		t.Fatalf("Overrides: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("哈希变化应新增一条，实际 %d 条", len(got))
+	}
+	if got[0].Hash != "sha256:abc" {
+		t.Fatalf("最近的记录应在最前面，实际 %q", got[0].Hash)
+	}
+}
