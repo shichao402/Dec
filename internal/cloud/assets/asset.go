@@ -246,6 +246,150 @@ func (w *Writer) DeleteAsset(in DeleteAssetInput) (*WriteAssetOutput, error) {
 	return &WriteAssetOutput{Bundle: in.Bundle, Revision: revision, Commit: commit, Manifest: manifest}, nil
 }
 
+// ErrEditMismatch 表示 old_string 在文件里不是恰好出现一次。
+//
+// 单独成一个错误而不是混进 ErrSchema：调用方（通常是 AI）拿到它应该
+// 重新读文件、给出更长更唯一的上下文，而不是去怀疑 manifest 写错了。
+var ErrEditMismatch = errors.New("edit target mismatch")
+
+// EditFileInput 是一次单文件编辑请求。
+type EditFileInput struct {
+	Bundle string
+	// Path 是相对 bundle 根的文件路径，例如 skills/foo/SKILL.md。
+	Path string
+	// OldString 必须在文件里恰好出现一次。
+	OldString string
+	// NewString 是替换后的文本，可以为空（表示删掉这段）。
+	NewString string
+	// BaseRevision 用于乐观并发控制，空表示允许覆盖。
+	BaseRevision string
+	Message      string
+	Author       ssot.Author
+}
+
+// EditFileOutput 是编辑结果。
+type EditFileOutput struct {
+	Bundle   string
+	Path     string
+	Revision string
+}
+
+// EditFile 修改 bundle 里一个已存在文件的一段文本（ADR 0053）。
+//
+// 它存在的理由是把「读全量 → 改一处 → 整包写回」这件容易出错的事固化在
+// 服务端：调用方只说改哪个文件、哪段换成什么，不传其余文件，也不传
+// manifest，所以不可能因为少传一个文件而删掉它，也不可能因为 manifest
+// 回传错了而悄悄改掉下发范围。
+//
+// 刻意不支持的事：新增文件、改 manifest.yaml、按正则或多处替换。这些都是
+// 结构性改动，仍然走 WriteAsset，由调用方显式给出全部内容。
+func (w *Writer) EditFile(in EditFileInput) (*EditFileOutput, error) {
+	if err := ssot.ValidateBundle(in.Bundle); err != nil {
+		return nil, err
+	}
+	rel := strings.TrimSpace(in.Path)
+	if rel == "" {
+		return nil, fmt.Errorf("%w: path 不能为空", ErrSchema)
+	}
+	if err := ssot.SafeRelPath(rel); err != nil {
+		return nil, err
+	}
+	if rel == ssot.FileManifest {
+		return nil, fmt.Errorf("%w: manifest.yaml 是结构声明，不能用单文件编辑修改；请用 dec_write_asset 整体写入", ErrSchema)
+	}
+	if in.OldString == "" {
+		return nil, fmt.Errorf("%w: old_string 不能为空；要整体替换文件请用 dec_write_asset", ErrEditMismatch)
+	}
+	if in.OldString == in.NewString {
+		return nil, fmt.Errorf("%w: old_string 与 new_string 相同，没有任何改动", ErrEditMismatch)
+	}
+
+	revision, err := w.store.Update(in.Author, func(tx *ssot.Tx) (string, error) {
+		if err := tx.EnsureRevision(in.BaseRevision); err != nil {
+			return "", err
+		}
+		dir := ssot.AssetDir(in.Bundle)
+		manifest, err := ssot.ReadYAML[ssot.BundleManifest](tx.Store(), path.Join(dir, ssot.FileManifest))
+		if err != nil {
+			if errors.Is(err, ssot.ErrNotFound) {
+				return "", fmt.Errorf("%w: bundle %q 不存在", ssot.ErrNotFound, in.Bundle)
+			}
+			return "", err
+		}
+		if !ownedByItem(manifest, rel) {
+			return "", fmt.Errorf("%w: bundle %q 里没有文件 %q（新增文件请用 dec_write_asset）",
+				ssot.ErrNotFound, in.Bundle, rel)
+		}
+		full := path.Join(dir, rel)
+		old, err := tx.ReadFile(full)
+		if err != nil {
+			if errors.Is(err, ssot.ErrNotFound) {
+				return "", fmt.Errorf("%w: bundle %q 里没有文件 %q（新增文件请用 dec_write_asset）",
+					ssot.ErrNotFound, in.Bundle, rel)
+			}
+			return "", err
+		}
+		switch n := bytes.Count(old, []byte(in.OldString)); n {
+		case 1:
+		case 0:
+			return "", fmt.Errorf("%w: old_string 在 %s 里没有出现；请先用 dec_read_asset 读出当前内容，逐字复制要改的那段", ErrEditMismatch, rel)
+		default:
+			return "", fmt.Errorf("%w: old_string 在 %s 里出现了 %d 次；请带上更多上下文让它只匹配一处", ErrEditMismatch, rel, n)
+		}
+		updated := bytes.Replace(old, []byte(in.OldString), []byte(in.NewString), 1)
+
+		// 与 WriteAsset 相同的内容校验：不允许写进明文密钥，引用的密钥必须存在。
+		files := []AssetFile{{Path: rel, Content: updated}}
+		if err := scanForPlaintextSecrets(files); err != nil {
+			return "", err
+		}
+		live, err := secretNamesTx(tx)
+		if err != nil {
+			return "", err
+		}
+		if err := checkSecretRefs(files, live); err != nil {
+			return "", err
+		}
+
+		// 保留原来的可执行位：编辑一个脚本不应该顺手把它降级成普通文件。
+		mode := fs.FileMode(fs0600)
+		if isExecutable(tx.Store().Dir(), full) {
+			mode = 0o700
+		}
+		if err := tx.WriteFile(full, updated, mode); err != nil {
+			return "", err
+		}
+		msg := in.Message
+		if msg == "" {
+			msg = fmt.Sprintf("编辑资产 %s/%s", in.Bundle, rel)
+		}
+		return msg, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &EditFileOutput{Bundle: in.Bundle, Path: rel, Revision: revision}, nil
+}
+
+// ownedByItem 报告文件是否属于 manifest 里的某个条目。
+//
+// 只允许编辑条目名下的文件：bundle 目录里不属于任何条目的文件不会被下发，
+// 编辑它等于做了一次看不到效果的修改，与「改了没生效」是同一类坑。
+func ownedByItem(m ssot.BundleManifest, rel string) bool {
+	for _, item := range m.Items {
+		if item.Kind == ssot.KindSkill {
+			if strings.HasPrefix(rel, item.Path+"/") {
+				return true
+			}
+			continue
+		}
+		if rel == item.Path {
+			return true
+		}
+	}
+	return false
+}
+
 // DeleteBundle 删除整个 bundle。
 //
 // 与 DeleteAsset 的差别是范围：DeleteAsset 摘掉一条条目，留下 manifest

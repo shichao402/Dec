@@ -334,7 +334,7 @@ func (r *runner) checkTools(ctx context.Context) error {
 
 	want := []string{
 		"dec_status",
-		"dec_list_assets", "dec_read_asset", "dec_write_asset",
+		"dec_list_assets", "dec_read_asset", "dec_edit_asset_file", "dec_write_asset",
 		"dec_delete_asset_item", "dec_delete_bundle",
 		"dec_list_secrets", "dec_put_secret", "dec_delete_secret",
 		"dec_history",

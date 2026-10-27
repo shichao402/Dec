@@ -130,6 +130,41 @@ func (s *Server) mDeleteBundle(req *proto.Request, payload any, dev ssot.Device)
 	})
 }
 
+// mEditAssetFile 修改 bundle 里单个文件的一段文本（ADR 0053）。
+//
+// 权限与 write_asset 相同：能整体写一个 bundle，就能改其中一个文件。
+// 副作用也相同：提交后立刻推送，并进审计。
+func (s *Server) mEditAssetFile(req *proto.Request, payload any, dev ssot.Device) *proto.Response {
+	in, ok := payload.(*proto.EditAssetFileRequest)
+	if !ok {
+		return proto.Fail(req.ID, proto.ErrInvalid, "edit_asset_file 载荷类型错误")
+	}
+	if err := requireWrite(req.Source, dev); err != nil {
+		return proto.Fail(req.ID, proto.ErrForbidden, err.Error())
+	}
+	out, err := s.assets.EditFile(assets.EditFileInput{
+		Bundle:       in.Bundle,
+		Path:         in.Path,
+		OldString:    in.OldString,
+		NewString:    in.NewString,
+		BaseRevision: in.BaseRevision,
+		Message:      in.Message,
+		Author:       authorOf(req.Source, dev),
+	})
+	if err != nil {
+		return failFromError(req.ID, err)
+	}
+	s.NotifyChanged()
+	s.recordRevision(nil, audit.EventAssetWrite, dev, req, in.Bundle,
+		"编辑 "+out.Path+"："+in.Message, out.Revision, true)
+	return okPayload(req.ID, &proto.EditAssetFileResult{
+		Bundle:   out.Bundle,
+		Path:     out.Path,
+		Revision: out.Revision,
+		Pushed:   true,
+	})
+}
+
 // BundleInfo 是管理面看到的 bundle 概要。
 type BundleInfo struct {
 	Name    string   `json:"name"`

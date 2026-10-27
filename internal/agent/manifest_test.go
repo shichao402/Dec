@@ -35,12 +35,16 @@ func TestScanManagedKeepsUserFiles(t *testing.T) {
 	frontMatter := filepath.Join(dir, "cursor-style.mdc")
 	writeFile(t, frontMatter, "---\ndescription: d\n---\n<!-- "+notice.Text+" -->\n# 内容\n")
 
+	// 新版说明行带定位信息（ADR 0053），卸载扫描同样要认领它。
+	located := filepath.Join(dir, "located.md")
+	writeFile(t, located, "<!-- "+notice.Line(notice.Locator{Bundle: "woa", Path: "skills/x/SKILL.md"})+" -->\n# 内容\n")
+
 	got, err := ScanManaged(dir)
 	if err != nil {
 		t.Fatalf("ScanManaged: %v", err)
 	}
 
-	want := map[string]bool{ours: true, frontMatter: true}
+	want := map[string]bool{ours: true, frontMatter: true, located: true}
 	if len(got) != len(want) {
 		t.Fatalf("只应扫出 Dec 写的 %d 个文件，实际 %d 个: %v", len(want), len(got), got)
 	}

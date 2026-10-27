@@ -266,7 +266,8 @@ func (r *Renderer) RenderDevice(dev ssot.Device) (*Rendered, error) {
 				// 代理加说明会让它的"写下内容"比"收到内容"多一行：代理按写下的
 				// 字节算哈希，服务端按未加说明的字节算哈希，两个值永远不等，
 				// 每次对账都判成差异并重发，形成无限重写循环。
-				pf.Content = notice.Apply(p.rel, pf.Content, pf.Secret, pf.Format)
+				pf.Content = notice.Apply(p.rel, pf.Content, pf.Secret, pf.Format,
+					notice.Locator{Bundle: bundle, Path: p.src})
 
 				if prev, dup := seenID[pf.ID]; dup {
 					alerts = append(alerts, Alert{

@@ -49,6 +49,13 @@ const (
 	// bundle、或者彻底作废的一批资产）需要独立的方法，否则只能留下
 	// 一个空壳，看起来像"还在"。
 	MethodDeleteBundle Method = "delete_bundle"
+	// MethodEditAssetFile 修改 bundle 里单个文件的一段文本（ADR 0053）。
+	//
+	// write_asset 是整体替换，调用方必须回传全部文件与 manifest，少传就是删除。
+	// 这对管理面没问题（前端代码固化了读全量再写回），对 AI 却是一个需要
+	// 自己组织的多步操作，容易漏传。edit_asset_file 把这几步固化在服务端：
+	// 调用方只给文件路径和替换片段，其余内容由服务端在事务内原样保留。
+	MethodEditAssetFile Method = "edit_asset_file"
 	// MethodPutSecret 写入或更新密钥（需求 8）。
 	MethodPutSecret Method = "put_secret"
 	// MethodDeleteSecret 删除密钥（需求 8.4）。
@@ -485,6 +492,31 @@ type DeleteAssetRequest struct {
 	BaseRevision string `json:"base_revision,omitempty"`
 	// Message 是提交说明，写进 commit。
 	Message string `json:"message,omitempty"`
+}
+
+// EditAssetFileRequest 修改 bundle 里一个已存在文件的一段文本。
+//
+// OldString 必须在文件里恰好出现一次，否则拒绝（不猜测改哪一处）。
+// 不能用来新增文件或修改 manifest.yaml，那些是结构性改动，走 write_asset。
+type EditAssetFileRequest struct {
+	Bundle string `json:"bundle"`
+	// Path 是相对 bundle 根的文件路径，例如 skills/foo/SKILL.md。
+	Path      string `json:"path"`
+	OldString string `json:"old_string"`
+	NewString string `json:"new_string"`
+	// BaseRevision 用于乐观并发控制，空表示允许覆盖。
+	BaseRevision string `json:"base_revision,omitempty"`
+	// Message 是提交说明，写进 commit。
+	Message string `json:"message,omitempty"`
+}
+
+// EditAssetFileResult 是单文件编辑的结果。
+type EditAssetFileResult struct {
+	Bundle   string `json:"bundle"`
+	Path     string `json:"path"`
+	Revision string `json:"revision"`
+	// Pushed 表示已触发下发，正常情况总是 true（需求 7.1）。
+	Pushed bool `json:"pushed"`
 }
 
 // DeleteBundleRequest 删除整个 bundle。

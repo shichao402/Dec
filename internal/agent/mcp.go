@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -76,7 +77,9 @@ const instructions = `Dec 是用户的个人资产与密钥仓库。你通过这
 
 边界：
 - 你读不到密钥明文，也看不到设备表、回滚与根密钥轮换相关的任何操作。这些不是被隐藏，而是被禁止。
-- 写入是整体替换语义：一个 bundle 提交后，它的内容就等于你这次给出的条目集合，少给的条目会被删除。改单个文件前先读取整个 bundle。
+- 修改已有文件的内容，一律用 dec_edit_asset_file：只给文件路径和替换片段，其余文件与 manifest 由服务端原样保留。落点副本开头的「由 Dec 管理」说明行会写明该填的 bundle 与 path，照抄即可。
+- 不要直接编辑本机上的副本（~/.claude/skills 等目录下的文件），也不要编辑任何看起来像源的本地目录：副本会在下次对账被覆盖，本地目录不会被 Dec 读取，两种改法都不会生效。
+- dec_write_asset 是整体替换语义，只用于新建 bundle、增删文件或改 manifest 这类结构性改动：一个 bundle 提交后，它的内容就等于你这次给出的条目集合，少给的条目会被删除。
 - 每次写入都会立即推送到该用户所有在线设备，并进入 git 审计与历史。写完不能悄悄撤回，只能再写一次。
 - 删除单个条目请用 dec_delete_asset_item，它只按路径删一条，不会波及其他条目。
 - 本地工具清单只是第一道限制，服务端会再判定一次权限。被拒绝时错误信息里会写明原因。`
@@ -88,6 +91,7 @@ func registerTools(srv *mcp.Server, opts MCPServer) {
 	// 资产
 	addTool(srv, toolListAssets(), opts)
 	addTool(srv, toolReadAsset(), opts)
+	addTool(srv, toolEditAssetFile(), opts)
 	addTool(srv, toolWriteAsset(), opts)
 	addTool(srv, toolDeleteAssetItem(), opts)
 	addTool(srv, toolDeleteBundle(), opts)
@@ -112,6 +116,8 @@ type toolSpec struct {
 	method proto.Method
 	// build 把 MCP 的原始参数整理成云端要的载荷。
 	build func(args json.RawMessage) (json.RawMessage, error)
+	// post 可选，把云端返回整理成给模型看的形式。不设则原样返回。
+	post func(out json.RawMessage) (json.RawMessage, error)
 }
 
 // addTool 把一个工具定义挂到服务上。
@@ -133,6 +139,11 @@ func addTool(srv *mcp.Server, spec toolSpec, opts MCPServer) {
 		out, err := opts.Call(ctx, spec.method, payload)
 		if err != nil {
 			return toolError(explainCallError(err)), nil
+		}
+		if spec.post != nil {
+			if out, err = spec.post(out); err != nil {
+				return toolError(fmt.Sprintf("整理云端返回失败：%v", err)), nil
+			}
 		}
 		return toolResult(out), nil
 	})
@@ -301,14 +312,86 @@ func toolReadAsset() toolSpec {
 			Name: "dec_read_asset",
 			Description: "读取一个资产 bundle 的完整内容：manifest 原文、条目声明与全部文件正文。" +
 				"返回的正文里密钥仍然是 {{secret:...}} 占位符，不会出现明文。" +
-				"写入是整体替换语义，所以改任何文件之前都要先读整个 bundle，" +
-				"否则回写时会把你没读到的那几条删掉。只读，无副作用。",
+				"manifest 与文本文件直接返回原文；二进制文件的 content 是 base64，并带 base64=true，" +
+				"与 dec_write_asset 的入参格式一致，可以原样回传。只读，无副作用。",
 			InputSchema: objectSchema(map[string]any{
 				"bundle": strProp("bundle 名称，例如 my-skills"),
 			}, "bundle"),
 		},
 		build: func(args json.RawMessage) (json.RawMessage, error) {
 			return passThrough(args, &proto.ReadAssetRequest{})
+		},
+		post: textReadAsset,
+	}
+}
+
+// textReadAsset 把 read_asset 的返回整理成与 dec_write_asset 入参对称的形式。
+//
+// 云端协议里 manifest 与文件内容是 []byte，JSON 里是 base64。管理面前端会
+// 自己解码，但模型不会：它照「manifest 原样回传」把 base64 串写回去，
+// 结果是 manifest 解析失败或被重新推断，下发范围被悄悄改掉。这里在 MCP
+// 层解码成原文，只有真正的二进制才保留 base64 并显式标注。
+func textReadAsset(out json.RawMessage) (json.RawMessage, error) {
+	var in proto.ReadAssetResponse
+	if err := json.Unmarshal(out, &in); err != nil {
+		return nil, err
+	}
+	type file struct {
+		Path       string `json:"path"`
+		Content    string `json:"content"`
+		Executable bool   `json:"executable,omitempty"`
+		Base64     bool   `json:"base64,omitempty"`
+	}
+	resp := struct {
+		Bundle   string             `json:"bundle"`
+		Revision string             `json:"revision"`
+		Manifest string             `json:"manifest,omitempty"`
+		Items    []proto.AssetEntry `json:"items"`
+		Files    []file             `json:"files"`
+	}{
+		Bundle:   in.Bundle,
+		Revision: in.Revision,
+		Manifest: string(in.Manifest),
+		Items:    in.Items,
+		Files:    make([]file, 0, len(in.Files)),
+	}
+	for _, f := range in.Files {
+		item := file{Path: f.Path, Executable: f.Executable}
+		if utf8.Valid(f.Content) {
+			item.Content = string(f.Content)
+		} else {
+			item.Content = base64.StdEncoding.EncodeToString(f.Content)
+			item.Base64 = true
+		}
+		resp.Files = append(resp.Files, item)
+	}
+	return json.Marshal(resp)
+}
+
+func toolEditAssetFile() toolSpec {
+	return toolSpec{
+		method: proto.MethodEditAssetFile,
+		tool: &mcp.Tool{
+			Name: "dec_edit_asset_file",
+			Description: "修改云端某个 bundle 里一个已存在文件的一段文本，这是修改 skill、rule 等资产内容的首选方式。" +
+				"副作用：立即提交到云端 git 并推送给所有在线设备，进入审计与历史。" +
+				"只需给出 bundle、文件路径、要替换的原文和新文本；其余文件与 manifest 由服务端原样保留，" +
+				"不会因为少传而删掉任何东西。old_string 必须在文件里恰好出现一次，" +
+				"出现 0 次或多次都会被拒绝，此时先用 dec_read_asset 读出原文，带上更多上下文再试。" +
+				"落点副本开头的「由 Dec 管理」说明行里写着该文件对应的 bundle 与 path。" +
+				"不能新增文件、不能改 manifest.yaml，这些结构性改动用 dec_write_asset。",
+			InputSchema: objectSchema(map[string]any{
+				"bundle":     strProp("bundle 名称，例如 relkit"),
+				"path":       strProp("相对 bundle 根的文件路径，例如 skills/relkit-ops/SKILL.md（与说明行里的 path 相同）"),
+				"old_string": strProp("要被替换的原文，必须逐字一致且在文件中只出现一次"),
+				"new_string": strProp("替换后的文本；为空表示删除这段"),
+				"base_revision": strProp("期望的当前 revision，用于乐观并发控制：与服务端不一致时拒绝写入。" +
+					"留空表示允许覆盖"),
+				"message": strProp("提交说明，写进 git commit，例如「修正 relkit-ops 的升级步骤」"),
+			}, "bundle", "path", "old_string", "new_string"),
+		},
+		build: func(args json.RawMessage) (json.RawMessage, error) {
+			return passThrough(args, &proto.EditAssetFileRequest{})
 		},
 	}
 }
@@ -320,7 +403,8 @@ func toolWriteAsset() toolSpec {
 			Name: "dec_write_asset",
 			Description: "整体替换一个资产 bundle 的内容。副作用：写入立即提交到云端 git 并推送给该用户所有在线设备，" +
 				"同时进入审计与历史，写入后不能悄悄撤回。语义是整体替换——items 里没出现的旧条目会被删除，" +
-				"所以要么先 dec_read_asset 拿全量再改一处，要么明确知道自己在缩减这个 bundle。" +
+				"只改已有文件的内容时不要用它，改用 dec_edit_asset_file。" +
+				"用它时要么先 dec_read_asset 拿全量再改，要么明确知道自己在缩减这个 bundle。" +
 				"manifest 建议原样回传 dec_read_asset 拿到的那份，否则服务端会按文件树重新推断 plane 与 host 声明。" +
 				"只想删某一条时改用 dec_delete_asset_item，它不会波及其他条目。",
 			InputSchema: objectSchema(map[string]any{

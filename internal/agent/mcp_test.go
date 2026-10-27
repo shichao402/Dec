@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -166,7 +167,7 @@ func TestMCPToolsList(t *testing.T) {
 
 	want := []string{
 		"dec_status",
-		"dec_list_assets", "dec_read_asset", "dec_write_asset", "dec_delete_asset_item", "dec_delete_bundle",
+		"dec_list_assets", "dec_read_asset", "dec_edit_asset_file", "dec_write_asset", "dec_delete_asset_item", "dec_delete_bundle",
 		"dec_list_secrets", "dec_put_secret", "dec_delete_secret",
 		"dec_history",
 		"dec_list_projects", "dec_put_project", "dec_delete_project",
@@ -476,4 +477,88 @@ func contentText(res *mcp.CallToolResult) string {
 		}
 	}
 	return sb.String()
+}
+
+// dec_edit_asset_file 只转发路径与替换片段，不带任何其余文件或 manifest（ADR 0053）。
+func TestMCPEditAssetFileForwardsMinimalPayload(t *testing.T) {
+	cloud := &fakeCloud{
+		reply: map[proto.Method]func(json.RawMessage) (json.RawMessage, error){
+			proto.MethodEditAssetFile: func(json.RawMessage) (json.RawMessage, error) {
+				return json.RawMessage(`{"bundle":"relkit","path":"skills/relkit-ops/SKILL.md","revision":"abc","pushed":true}`), nil
+			},
+		},
+	}
+	session := newTestSession(t, MCPServer{Call: cloud.call})
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "dec_edit_asset_file",
+		Arguments: map[string]any{
+			"bundle": "relkit", "path": "skills/relkit-ops/SKILL.md",
+			"old_string": "旧", "new_string": "新", "message": "m",
+		},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("调用失败: %v %s", err, contentText(res))
+	}
+	calls := cloud.recorded()
+	if len(calls) != 1 || calls[0].Method != proto.MethodEditAssetFile {
+		t.Fatalf("应转发一次 edit_asset_file，实际 %+v", calls)
+	}
+	var in map[string]any
+	if err := json.Unmarshal(calls[0].Payload, &in); err != nil {
+		t.Fatalf("载荷非法: %v", err)
+	}
+	for _, k := range []string{"items", "manifest"} {
+		if _, ok := in[k]; ok {
+			t.Fatalf("载荷不应带 %s：%s", k, calls[0].Payload)
+		}
+	}
+	if in["old_string"] != "旧" || in["new_string"] != "新" || in["path"] != "skills/relkit-ops/SKILL.md" {
+		t.Fatalf("字段映射错误：%s", calls[0].Payload)
+	}
+}
+
+// dec_read_asset 返回原文而不是 base64，与 dec_write_asset 的入参对称；
+// 二进制保留 base64 并显式标注。
+func TestMCPReadAssetReturnsText(t *testing.T) {
+	bin := []byte{0xff, 0xfe, 0x00}
+	resp, _ := json.Marshal(proto.ReadAssetResponse{
+		Bundle: "b", Revision: "r",
+		Manifest: []byte("name: b\n"),
+		Files: []proto.AssetItem{
+			{Path: "skills/x/SKILL.md", Content: []byte("# 中文正文\n")},
+			{Path: "skills/x/blob", Content: bin},
+		},
+	})
+	cloud := &fakeCloud{
+		reply: map[proto.Method]func(json.RawMessage) (json.RawMessage, error){
+			proto.MethodReadAsset: func(json.RawMessage) (json.RawMessage, error) { return resp, nil },
+		},
+	}
+	session := newTestSession(t, MCPServer{Call: cloud.call})
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "dec_read_asset", Arguments: map[string]any{"bundle": "b"},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("调用失败: %v %s", err, contentText(res))
+	}
+	var out struct {
+		Manifest string `json:"manifest"`
+		Files    []struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+			Base64  bool   `json:"base64"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal([]byte(contentText(res)), &out); err != nil {
+		t.Fatalf("返回非法: %v", err)
+	}
+	if out.Manifest != "name: b\n" {
+		t.Fatalf("manifest 应为原文，实际 %q", out.Manifest)
+	}
+	if out.Files[0].Content != "# 中文正文\n" || out.Files[0].Base64 {
+		t.Fatalf("文本文件应为原文：%+v", out.Files[0])
+	}
+	if !out.Files[1].Base64 || out.Files[1].Content != base64.StdEncoding.EncodeToString(bin) {
+		t.Fatalf("二进制应保留 base64 并标注：%+v", out.Files[1])
+	}
 }

@@ -127,8 +127,9 @@ dec-agent mcp-config
 |---|---|---|
 | `dec_status` | 服务端版本、要求的代理版本、协议版本、是否维护中、本机是否已对齐 | 无 |
 | `dec_list_assets` | 列出所有 bundle 与条目 | 无 |
-| `dec_read_asset` | 读一个 bundle 的完整内容 | 无 |
-| `dec_write_asset` | 整体替换一个 bundle（少传的条目即删除） | 立即推送 + 进审计 |
+| `dec_read_asset` | 读一个 bundle 的完整内容（文本直接返回原文） | 无 |
+| `dec_edit_asset_file` | 改已有文件的一段文本，其余文件与 manifest 原样保留。改 skill、rule 内容用这个 | 立即推送 + 进审计 |
+| `dec_write_asset` | 整体替换一个 bundle（少传的条目即删除），只用于新建或增删文件、改 manifest | 立即推送 + 进审计 |
 | `dec_delete_asset_item` | 按路径删一个条目 | 立即推送 + 进审计 |
 | `dec_delete_bundle` | 删除整个 bundle（目录与 manifest 一起删） | 立即推送 + 进审计，不可逆 |
 | `dec_list_secrets` | 列出密钥元数据 | 无 |

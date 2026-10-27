@@ -183,6 +183,8 @@ func (s *Server) run(r *http.Request, req *proto.Request, payload any, dev ssot.
 		return s.mDeleteAsset(req, payload, dev)
 	case proto.MethodDeleteBundle:
 		return s.mDeleteBundle(req, payload, dev)
+	case proto.MethodEditAssetFile:
+		return s.mEditAssetFile(req, payload, dev)
 	case proto.MethodListAssets:
 		return s.mListAssets(req, dev)
 	case proto.MethodReadAsset:
@@ -254,6 +256,8 @@ func failFromError(id string, err error) *proto.Response {
 	case errors.Is(err, assets.ErrPlaintextSecret):
 		code = proto.ErrInvalid
 	case errors.Is(err, assets.ErrSchema):
+		code = proto.ErrInvalid
+	case errors.Is(err, assets.ErrEditMismatch):
 		code = proto.ErrInvalid
 	case errors.Is(err, render.ErrBadProject):
 		code = proto.ErrInvalid

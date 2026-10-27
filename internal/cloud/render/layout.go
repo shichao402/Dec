@@ -123,6 +123,9 @@ type piece struct {
 	rel string
 	// raw 是原始字节，密钥与变量还没替换。
 	raw []byte
+	// src 是这份内容在 bundle 里的源文件路径（相对 bundle 根），
+	// 写进说明行，告诉读到副本的人去哪里改（ADR 0053）。
+	src string
 	// forceSecret 表示与内容无关、天然含密钥的落点（env）。
 	forceSecret bool
 }
@@ -151,6 +154,7 @@ func piecesOf(bundle string, item ssot.ManifestItem, files map[string][]byte) ([
 				id:  id + "/" + name[len(prefix):],
 				rel: DirSkills + "/" + item.Name + "/" + name[len(prefix):],
 				raw: files[name],
+				src: name,
 			})
 		}
 		return out, nil
@@ -164,6 +168,7 @@ func piecesOf(bundle string, item ssot.ManifestItem, files map[string][]byte) ([
 			id:  id,
 			rel: DirRules + "/" + baseName(item.Path),
 			raw: raw,
+			src: item.Path,
 		}}, nil
 
 	case ssot.KindMCP:
@@ -176,6 +181,7 @@ func piecesOf(bundle string, item ssot.ManifestItem, files map[string][]byte) ([
 			id:  id,
 			rel: FileMCP,
 			raw: raw,
+			src: item.Path,
 		}}, nil
 
 	case ssot.KindEnv:
@@ -187,6 +193,7 @@ func piecesOf(bundle string, item ssot.ManifestItem, files map[string][]byte) ([
 			id:          id,
 			rel:         DirEnv + "/" + item.Name,
 			raw:         raw,
+			src:         item.Path,
 			forceSecret: true,
 		}}, nil
 	}

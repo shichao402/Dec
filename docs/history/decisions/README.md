@@ -72,3 +72,4 @@
 | [0050](0050-mcp-entry-must-nest-in-mcpservers.md) | MCP 条目必须落进 mcpServers 容器，写在顶层等于静默失效 | 已接受（v2.1.27 已发版，真机验证通过） |
 | [0051](0051-json-key-hash-canonical-form.md) | json_key 条目按规范化语义算哈希，两侧不各算各的落盘字节 | 已接受（待发版） |
 | [0052](0052-server-ca-in-bitwarden.md) | 服务端 CA 私钥只在本机与 Bitwarden，不进 git，缺失时不静默重建 | 已接受（实现中） |
+| [0053](0053-edit-asset-via-fixed-tool.md) | 改资产内容走固化工具 dec_edit_asset_file，说明行写明 bundle 与 path | 已接受（待发版） |

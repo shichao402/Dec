@@ -19,7 +19,40 @@ import (
 )
 
 // Text 是说明行的正文。不含任何敏感信息，可以出现在含密钥文件之外的一切落点。
+//
+// 它同时是「这个文件归 Dec 管」的识别标记：卸载扫描（agent.ScanManaged）与
+// Apply 的幂等判断都按「是否包含 Text」来认。所以定位信息只能追加在 Text 之后，
+// 不能改动 Text 本身，否则旧版本写下的落点会突然不被认领。
 const Text = "由 Dec 管理，本地修改会被覆盖；要改请改云端。"
+
+// Locator 指明一个落点在云端的源：哪个 bundle 下的哪个文件。
+//
+// 有了它，说明行就能直接写出修改指令（调哪个工具、填什么参数），
+// 读到这份副本的 AI 不必自己推断源在哪里，也就不会去改本地副本或某个
+// 看起来像源的旧目录（ADR 0053）。
+type Locator struct {
+	Bundle string
+	// Path 是相对 bundle 根的文件路径，与 dec_edit_asset_file 的 path 参数一致。
+	Path string
+}
+
+// EditTool 是说明行里指名的固化修改工具。
+const EditTool = "dec_edit_asset_file"
+
+// Line 返回说明行正文（不含注释符号）。定位信息不全时退回只有 Text 的形式。
+func Line(loc Locator) string {
+	if loc.Bundle == "" || loc.Path == "" || !safeInComment(loc.Bundle) || !safeInComment(loc.Path) {
+		return Text
+	}
+	return Text + "修改方法：调用 MCP 工具 " + EditTool +
+		"（bundle=" + loc.Bundle + "，path=" + loc.Path + "），或在 Dec 管理面的资产页编辑；不要改这份副本。"
+}
+
+// safeInComment 拒绝会提前结束注释或打断单行注释的字符。
+// bundle 与路径在写入时已经校验过，这里是防御性的第二道。
+func safeInComment(s string) bool {
+	return !strings.Contains(s, "-->") && !strings.ContainsAny(s, "\r\n")
+}
 
 // syntax 返回某个落点适用的注释写法。
 //
@@ -53,7 +86,7 @@ func Applies(rel string, secret bool, format proto.Format) bool {
 }
 
 // Apply 在内容前面加上说明行，已经加过就原样返回（幂等）。
-func Apply(rel, content string, secret bool, format proto.Format) string {
+func Apply(rel, content string, secret bool, format proto.Format, loc Locator) string {
 	if !Applies(rel, secret, format) {
 		return content
 	}
@@ -63,7 +96,7 @@ func Apply(rel, content string, secret bool, format proto.Format) string {
 		return content
 	}
 	prefix, suffix, _ := syntax(rel)
-	line := prefix + Text + suffix + "\n"
+	line := prefix + Line(loc) + suffix + "\n"
 	if pl := strings.ToLower(path.Ext(rel)); pl == ".mdc" || pl == ".md" {
 		// front matter 必须留在文件第一行，否则规则的前置声明失效。
 		if out, ok := insertAfterFrontMatter(content, line); ok {
