@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/shichao402/Dec/internal/sysproc"
+	"gopkg.in/yaml.v3"
 )
 
 // modulePath 是本仓库的模块路径。
@@ -358,6 +359,42 @@ func TestTestEnvStaysIsolated(t *testing.T) {
 	}
 }
 
+// TestDeletingTagIsNotRelease 守住「删 tag 不等于发版」。
+//
+// 删除 tag 同样会产生 push 事件，而 github.ref 仍是 refs/tags/<那个 tag>。
+// 只按前缀判断的话，清理一个 v1.4.1 就会被当成「发布 v1.4.1」，
+// 把当年的旧二进制装到生产机上——清理历史本来是最安全的操作，
+// 在这个漏洞下反而成了最危险的。production environment 的分支策略
+// 同样只认 v* 前缀，拦不住这种情况，所以必须在 job 上显式排除。
+//
+// 三个 job 都要排除：任意一个漏掉，删除时都会真的跑起来。
+func TestDeletingTagIsNotRelease(t *testing.T) {
+	root := repoRoot(t)
+	wfPath := filepath.Join(root, ".github", "workflows", "release.yml")
+	wf, err := os.ReadFile(wfPath)
+	if err != nil {
+		t.Fatalf("读 %s 失败: %v", wfPath, err)
+	}
+
+	var doc struct {
+		Jobs map[string]struct {
+			If string `yaml:"if"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(wf, &doc); err != nil {
+		t.Fatalf("解析 %s 失败: %v", wfPath, err)
+	}
+	if len(doc.Jobs) == 0 {
+		t.Fatal("release.yml 里没有 job，解析可能失败")
+	}
+	for name, job := range doc.Jobs {
+		if !strings.Contains(job.If, "!github.event.deleted") {
+			t.Errorf("job %s 的 if 没有排除删除事件，删 tag 会被当成发版（当前: %q）",
+				name, job.If)
+		}
+	}
+}
+
 // TestProductionDeployOnlyThroughCI 守住「生产只能经 CI 部署」这条约定。
 //
 // 本地把二进制推到生产会绕开三道闸门：tag 与 commit 的真实性核对、发布清单
@@ -380,6 +417,7 @@ func TestProductionDeployOnlyThroughCI(t *testing.T) {
 		"refs/tags/v",               // 只有 tag 能触发部署
 		"StrictHostKeyChecking=yes", // 不接受未知 host key
 		"payload.tar",               // 产物走 stdin，不给参数注入留位置
+		"!github.event.deleted",     // 删 tag 不是发布，见下面 TestDeletingTagIsNotRelease
 	} {
 		if !strings.Contains(workflow, want) {
 			t.Errorf("release.yml 缺少 %q，CI 部署链路不完整", want)

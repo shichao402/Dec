@@ -46,6 +46,13 @@ jobs:
   tray-macos:
     name: 构建 macOS 托盘
     runs-on: macos-latest
+    # 删除 tag 同样会产生 push 事件（需求 21.7 的另一面）。
+    #
+    # 没有这一条，清理历史 tag 会把旧代码当成新发布：github.ref 仍然是
+    # refs/tags/v1.4.1，下面的 deploy 条件 startsWith(refs/tags/v) 照样成立，
+    # 而 environment 的部署策略也只认 v* 前缀，两道闸门都拦不住。
+    # 结果是把 2024 年的服务端二进制装到生产机上。
+    if: ${{ !github.event.deleted }}
     steps:
       - uses: actions/checkout@v4
 
@@ -115,7 +122,9 @@ jobs:
     # 下载通道少一个工具有人会发现，服务端发不出去则是全局故障。
     #
     # 这里只放宽「失败也继续」，不改成 always()：被手动取消时仍应停止整条链。
-    if: ${{ !cancelled() }}
+    #
+    # 同时排除删除事件：删除 tag 也会产生 push（见 tray-macos 处的说明）。
+    if: ${{ !cancelled() && !github.event.deleted }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -389,7 +398,13 @@ jobs:
     # 分支策略只放行 v* 标签。策略存在 GitHub 设置里而不是这个文件里，改这个文件
     # 无法绕过它。下面这条 if 是第二道限制，不是唯一的一道。
     environment: production
-    if: startsWith(github.ref, 'refs/tags/v')
+    # 只在新 tag 上部署，不在删除 tag 时部署。
+    #
+    # github.event.deleted 这一条是必需的，不能只靠 startsWith：删除 v1.4.1
+    # 时 github.ref 依然是 refs/tags/v1.4.1，前缀判断照样成立，而 environment
+    # 的分支策略同样只认 v* 前缀。两道闸门会把「清理历史」误判成「发布旧版本」，
+    # 把当年的旧二进制装到生产机上。
+    if: ${{ !github.event.deleted && startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v4
 
