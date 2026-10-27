@@ -1,136 +1,163 @@
-# 宿主更新接入合同（Relkit vNext）
+# 宿主更新接入合同
 
-本文只说明宿主负责的声明、制品和运行时接线。版本选择、签名数据、发布事务、
-endpoint 与密钥由 Relkit core / Operator 负责，宿主不得复制实现。
+本文只讲宿主自己负责的部分：项目声明、取工具、出制品、内嵌 bootstrap、接引擎、
+发布。版本选择、签名、发布事务、服务端点与密钥都在服务器与引擎里，宿主不复制。
 
-## 1. 项目声明
+权威依据是 [`docs/architecture.md`](../../../docs/architecture.md) 与
+[ADR 0023](../../../docs/adr/0023-desktop-updater-epoch.md)。本文与它们冲突时以它们为准，
+并回来修本文。
 
-仓库根的 `relkit.project.json` 声明：
+## 思路
 
-- product、channels、目标 `os-arch` 与 selector dimensions；
-- 角色：publisher、updater-host、subscriber、updater-projection；
-- `in-place` 或 `library` 版本策略；
-- facade / projection 与所需协议合同；
-- artifact producer 命令；
-- Runtime Profile 发布或订阅的 product ref + root fingerprint。
+上一代让每个宿主自己持有 resolution、`relkitw`、lock、指纹和 Candidate bundle，
+再由各语言 SDK 各自解析协议。结果是同一套规则在五六个地方各实现一遍，任何一处
+漂移都表现为“修了又坏”。
 
-不得声明 Relkit 版本、CLI/SDK URL、服务 endpoint、Token、SSH、机器目录、mirror
-凭据或“已完成步骤”。这些来自已签名 Operator Profile 和 immutable resolution。
+断代后反过来：服务器是唯一事实源，引擎 `relkit-updater` 是唯一状态机。宿主只回答
+“我是谁、找哪台服务器、信哪把钥匙”，其余全部由服务器签名文档和引擎决定。所以下面
+每一节都在描述宿主**不需要**做的事比需要做的事多，这是有意的。
 
-接入后只提交项目声明、生成的 `relkitw` / `relkitw.cmd`、producer 与产品代码。
+## 1. 宿主持有什么
 
-## 2. Runtime Bootstrap
+只有四样：服务器地址、服务器根公钥（公钥本身，OpenSSH 单行）、产品名、token。
+前三样写在仓库根的 `relkit.project.json`；token 明文只在 CI 密钥里，仓库另提交一份
+凭据清单 `relkit.custody.json`（schema `relkit.custody-manifest/1`），只登记 keyId 与
+承载 token 的环境变量名，不含任何密钥。
 
-updater-host 或 subscriber 不手写 `ClientProfile` 中的入口 URL、公钥、渠道与恢复链接。
-Resolver 验证签名 Runtime Profile 后，为 producer 提供
-`relkit.runtime-bootstrap/1`：
+`relkit.project.json`（schema `relkit.project/1`）允许的字段只有：
 
-- `resolutionDigest` 必须等于本次 resolution；
-- profile product 必须等于订阅 product；
-- trusted keys 必须非空且匹配项目钉定的 root fingerprint。
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `product` | 是 | 产品 id |
+| `server` | 是 | 服务器写面地址，例如 `http://publish.devcloud.woa.com` |
+| `rootPublicKey` | 是 | 服务器根公钥，`/v1/tools/root.pub` 原样内容 |
+| `channels` | 否 | 支持的渠道 |
+| `selectorDimensions` | 否 | 产物选择维度 |
+| `artifactProducer` | 否 | 出 ArtifactSet 的命令与 env allowlist |
+| `versionProvider` | 否 | 出产品版本的命令，缺省读 `VERSION.json` |
+| `site` | 否 | 人页声明，省略即不发 |
 
-producer 把 verified bootstrap 注入应用；应用只通过各语言 canonical helper
-`runtime_bootstrap_from_json`（或等价正式 API）构造 profile。缺失、摘要不符、产品不符
-或签名不可信时构建失败，不允许回退到仓内常量或环境变量拼 URL。
+读到其他字段直接报错，没有兼容路径。`operatorRef`、`trustFingerprint`、`roles`、
+`requiredContracts`、`runtimeProfileSubscriptions`、`facades`、`versionPolicy` 等
+全部已删除。
 
-首次自订阅产品尚无在线 Profile 时，由 Operator 用产品私钥创建并纳入 inventory；
-私钥只在 Operator 私密配置中。
+宿主仓库**不提交**：`relkitw`、`relkit.lock.json`、`.relkit/` 下的 resolution 与指纹、
+任何 relkit 二进制、版本号或组件摘要。
 
-## 3. ArtifactSet producer
+根公钥怎么拿：在面板注册产品后，用服务器的 `/v1/tools/root.pub` 内容。根公钥随
+服务器实例而定，内网与外网各一把，不能混用。
 
-Core 向 producer 的 stdin 传 `relkit.artifact-producer-input/1`，至少包含：
+## 2. 取工具
 
-- product、version、channel、target；
-- immutable resolution digest；
-- 独占 output directory；
-- 已验证的 Runtime Bootstrap 集合。
+宿主与 CI 都不持有 relkit 二进制。需要工具时固定三步：
 
-producer 只构建文件并在 stdout 返回一个 `relkit.artifact-set/1`。它不得：
+1. `GET <server>/v1/tools/current/<component>/<platform>` 与其 `/signature`；
+2. 用构建机自带的 `ssh-keygen -Y verify -n relkit-tool` 对照根公钥验签；
+3. 验签通过才执行。
 
-- 写 staged/index/directory、签名或 backend；
-- 读取发布 endpoint、Token 或私钥；
-- 再解析 latest 或下载另一套 Relkit；
-- 修改 project、resolution 或 resolution bundle。
+失败立即失败，不降级到 GitHub、mirrors 或其他来源。
 
-每个 artifact 声明 id、相对 path、kind、platform、selectors、摘要和大小。
-内部更新 payload 通过 `relations.payloadOf` 指向同 selector 组的 installer；某平台只有
-installer 合法，不为凑对称伪造 payload。
-
-多平台 Job 各自产一个 ArtifactSet，汇总只执行 `relkit artifacts merge`。merge
-要求 product、version、channel 与 resolution digest 完全一致，并校验文件摘要、
-selector 维度与 payload 关系。
-
-## 4. updater 运行时
-
-- 唯一状态机是 resolution 物化的 `relkit-updater`。
-- 宿主只调用正式 facade 的 open/check/download/apply/status。
-- UI 只解析同一 distribution 物化的 projection。
-- 禁止手写 CheckResult、InstallSpec、事件 DTO、payload 解压或第二套 apply。
-- facade 与 sidecar 的 Updater IPC 窗口由 distribution 合同验证，不由宿主填版本。
-
-版本策略：
-
-- `in-place`：在 install root 内原子应用；是否需退出以 plan 的
-  `requires_host_exit` 为准。
-- `library`：写入 versions 目录并切换 active 指针；宿主 launcher 负责按项目 pin
-  选择版本。retain、rollback、switch 必须在项目声明允许后才可达。
-
-`preserve` 只保护用户数据；删除集合由前一基线、当前文件表和 preserve 计算。
-payload 输入树不得含软链。macOS 完整 `.app` 的多版本切换必须经 LaunchServices，
-不能直接 exec `Contents/MacOS`。
-
-## 5. 产品 CI 与 Operator
-
-产品 CI：
+现役宿主用自己仓库里的 `scripts/relkit_tool.py` 实现这三步：
 
 ```text
-安装签名 offline bundle / 使用 provisioned bootstrap
-relkitw doctor
-relkitw artifacts produce（每 target）
-relkitw artifacts merge（汇总）
-relkit-ops artifact-set push（上传 merged ArtifactSet，记录 URL + archiveSha256）
+python3 scripts/relkit_tool.py --component cli --platform <os-arch> --out-dir .relkit-tools
 ```
 
-Candidate bundle 的安装命令必须显式传入 Operator 分发的
-`--candidate-root-fingerprint`；缺少或不匹配即失败。该授权只允许 resolution
-中的非 stable 渠道，不得用产品仓变量覆盖 bundle 内的身份、Operator 或 Catalog。
+relkit 仓库里的同一三步参考实现，新宿主可以直接用，也可以照它写自己的版本：
 
-独立 Operator Job：
+- Windows：[`scripts/ci/relkit-tool-verify.ps1`](../../../scripts/ci/relkit-tool-verify.ps1)
+- Linux / macOS：[`scripts/ci/relkit-tool-verify.sh`](../../../scripts/ci/relkit-tool-verify.sh)
+
+参考实现的输入全是环境变量：
 
 ```text
-relkit-ops artifact-set pull（URL + archiveSha256）
-relkitw stage --artifact-set <artifact-set.json>
-relkitw release --version <version>
-relkitw release --version <version> --execute
-relkitw verify released \
-  --resolution <同一 immutable-resolution.json> \
-  --version <version> --channel <channel> \
-  [--consumer <loopback-url>] [--directory <loopback-url>]
+RELKIT_SERVER            服务器地址（同 relkit.project.json 的 server）
+RELKIT_ROOT_PUBLIC_KEY   根公钥行
+RELKIT_TOOL              cli | updater | ops
+RELKIT_PLATFORM          windows-amd64 | darwin-arm64 | linux-amd64
+RELKIT_TOOL_DIR          可选，下载目录
 ```
 
-产品 Job 只持 ArtifactSet 传输凭据，不持发布 endpoint/agent token；只有 Operator
-Job 持 `RELKIT_UPLOAD_TOKEN`。Operator 不改产品业务选择。整条事务必须使用同一
-resolution digest。candidate 使用独立身份与权限，不能发布 stable。
+成功时 stdout 只有一行：已验签工具的路径。不管用哪种实现，取工具代码里都不能出现
+版本号、文件名或摘要，这样 relkit 发版才不需要改宿主的 CI。
 
-正式验收从 bundle 安装后的 Runtime Bootstrap 发现 Product RUP Root；显式
-`--product-root` 只用于诊断，不能替代 bootstrap → wrapper → released-state 链路。
-`release --execute` 后若立即读回失败，先按同一 resolution 有界重试 verify；已提交则
-不得重发同一 immutable version，部分提交按 `partial-commit` / fix-forward 处理。
+## 3. 出制品（ArtifactSet）
 
-完整 Candidate → Production、Agent policy、stable 与回滚顺序以
-[`cutover.md`](../../../docs/design/vnext/cutover.md) 为唯一 runbook。
+```text
+<cli> artifacts produce --version <v> --channel <dev|stable> --target <os-arch> --out <dir>/artifact-set.json
+<cli> artifacts merge --in <A> --in <B> --out <merged>/artifact-set.json
+```
 
-## 6. 验收
+`<cli>` 是上一步取回的 `cli` 工具。`produce` 调用 `artifactProducer` 声明的命令，
+producer 只构建文件并返回 `relkit.artifact-set/1`，不得写签名文档、不得读 token。
+
+每个 artifact 声明 id、相对 path、kind、platform、selectors、摘要和大小。内部更新
+payload 用 `relations.payloadOf` 指向同 selector 组的 installer；payload 文件表由
+`<cli> payload build --tree <dir> --out <zip>` 产出（ADR 0013）。
+
+`merge` 要求 product、version、channel 完全一致，任一不同即失败。
+
+## 4. Runtime Bootstrap
+
+自带更新面的宿主（例如 SvnMergeTool）构建时生成一份 bootstrap 并内嵌进应用：
+
+```text
+<cli> bootstrap build --project relkit.project.json --out <path>
+```
+
+产出 `relkit.runtime-bootstrap/2`：内嵌这台服务器的根公钥，以及由同一把根签名的
+Runtime Profile。bootstrap 本身不签名，是构建输入，不是信任对象。
+
+宿主只把 bootstrap 原文交给引擎，不解析它。只在启动器里做更新的产品（Loom）不产出
+bootstrap。
+
+## 5. 接引擎
+
+`relkit-updater` 是唯一引擎。宿主与它之间唯一的契约是 `api/updater/v1` 帧 IPC
+（4 字节大端长度前缀 + protobuf，当前基线 4）。各语言只有薄客户端：
+
+| 宿主 | 语言 | 薄客户端 |
+| --- | --- | --- |
+| SvnMergeTool | Dart | `sdk/dart/lib/src/updater_facade.dart` |
+| Loom-Launcher | Rust | `sdk/rust/src/lib.rs` |
+| Loom | TypeScript | `bindings/ts`（仅生成类型） |
+
+宿主只做 open / check / download / apply 这几个调用，并把事件交给 UI。安装放置由
+`InstallSpec.placement` 声明，引擎负责原子替换、整包安装程序交接与 `DeleteInstalled`。
+
+薄客户端**不**解析 bootstrap、index、manifest，不验签、不算摘要、不比较版本、不管理
+安装目录。发现客户端开始做这些，就是架构被破坏，应删除而不是补齐。
+
+## 6. 发布
+
+产品 CI 每个平台只做到 ArtifactSet 为止，不持 token。平台之间用普通文件传输交换
+ArtifactSet 目录（不引入任何 relkit 子命令）。
+
+汇总后由持 token 的 job 在**同一工作区**完成：
+
+```text
+<cli> stage --artifact-set <merged>/artifact-set.json
+<cli> release --version <v>              # 计划，只读
+<cli> release --version <v> --execute    # 需要 RELKIT_RELEASE_VIA_CI=1
+```
+
+stage 以 `artifact-set.json` 所在目录为产物根逐字节校验，所以 stage 与 release 不能拆到
+两个 job。`--execute` 的 token 从凭据清单（宿主仓库的 `relkit.custody.json`）按 keyId 读取：
+清单路径由 `--custody <path>` 或环境变量 `RELKIT_CUSTODY_MANIFEST` 指定，清单里只登记
+keyId 与承载 token 的环境变量名，不存 token 值；清单只有一个 token 条目时自动选用。
+编排里不出现 token 值。
+
+版本号不珍贵：发错的版本用面板或 `relkit-agent unpublish` 撤下，然后发更高版本；
+被撤的号不复用。
+
+## 7. 验收
 
 接入完成至少证明：
 
-1. `inspect --json` 能解释 Operator、distribution、resolution 与来源；
-2. `doctor` 验证 project、bundle、Profile 与 anti-rollback watermark；
-3. 缺 Runtime Profile、组件或 selector 时以稳定诊断码失败；
-4. producer 输出可独立校验，跨平台 merge 后摘要仍正确；
-5. facade conformance 与所属代表性场景（S1/S2/S3）通过；
-6. 仓内没有 consume lock、Python host/onboarding、复制 wrapper、真实 secret，
-   也没有产品名特判进入 Relkit core。
-
-只组合既有能力的新宿主不得修改 Relkit core；真·新能力必须同时增加合同、独立测试、
-组合测试和至少一个端到端场景。
+1. 仓库里只有 `relkit.project.json`、`relkit.custody.json`（只含 keyId 与环境变量名）、
+   取工具脚本、producer 与产品代码，没有 relkit 二进制、版本号、摘要、lock、resolution
+   或真实 secret；
+2. CI 从服务器取到工具，换错根公钥时验签失败；
+3. `artifacts produce` / `merge` 的输出可独立校验；
+4. 一次 `release --execute` 后，已装旧版本的应用经引擎检查到新版本并完成安装；
+5. 宿主代码里没有解析协议文档或决定版本的逻辑。

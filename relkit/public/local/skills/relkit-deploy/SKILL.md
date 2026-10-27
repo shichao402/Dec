@@ -1,72 +1,90 @@
 ---
 name: relkit-deploy
 description: >
-  relkit 仓装机、交叉编译、升级已有 relkit-agent / relkit-store 二进制。
-  工作区有 scripts/deploy/relkit.py 时使用；产品开箱、token、lock 走 relkit-ops。
+  relkit 仓的服务部署：空机首装、换 relkit-agent / relkit-store / relkit-console
+  二进制、交叉编译、向服务器发布工具。工作区有 scripts/deploy/relkit.py 时使用；
+  产品注册、token、宿主接入走 relkit-ops。
 ---
 
 # relkit 服务部署
 
 ## 何时使用
 
-当前仓库是 **relkit 本仓**（存在 `scripts/deploy/relkit.py`），且任务是：
+当前仓库是 relkit 本仓（存在 `scripts/deploy/relkit.py`），且任务是：
 
-- 空机首装 systemd `relkit-agent` / `relkit-store`
-- 已有箱子换二进制（`upgrade --plan` / `--apply`）
-- 为本仓 Release 交叉编译（`build`）
+- 空机首装 `relkit-store` / `relkit-agent` / `relkit-console` 三个 systemd 服务；
+- 已有服务器换二进制（`upgrade --plan` / `--apply`）；
+- 为 Release 交叉编译（`build`）；
+- 向服务器发布 relkit 工具（`tools publish`；`upgrade` 默认已包含）。
 
-产品仓开箱、resolution/bundle、注册/轮换/吊销 token **不要用本 skill**，统一走
-[`relkit-ops`](../relkit-ops/SKILL.md)。产品仓物化的 Python host 控制面
-（`scripts/host/relkit_host.py`）已随 ADR 0019 §1 删除，不存在可用副本。
+产品注册、token 签发轮换吊销、宿主接入**不用**本 skill，走
+[`relkit-ops`](../relkit-ops/SKILL.md)。
+
+## 拓扑
+
+一台服务器三个进程，内网与外网同构，只有地址和根密钥实例不同：
+
+| 进程 | 监听 | 职责 |
+| --- | --- | --- |
+| `relkit-store` | `127.0.0.1:8080`（外网）/ `:8080` | 数据面 |
+| `relkit-agent` | `127.0.0.1:8787` | 发布、签名、产品与 token API、工具分发 |
+| `relkit-console` | `127.0.0.1:8081` / `:8081` | 管理面板，经 `tree` 适配器读 store |
+
+| Host | 连接 | 域名 |
+| --- | --- | --- |
+| 内网 | `ssh -p 36000 root@update.devcloud.woa.com` | `publish` 写面 + 面板、`update-internal` 协议读面、`update` 人页 |
+| 外网 | `ssh publish.firoyang.com` | `publish.firoyang.com`、`update-internal.firoyang.com`、`update.firoyang.com` |
+
+拓扑图的唯一来源是 [`docs/design/topology.md`](../../../docs/design/topology.md)。
 
 ## 入口
 
-只跑 `python scripts/deploy/relkit.py`（仓库根；Linux 可用 `python3`）。细节以 [`scripts/deploy/README.md`](../../../scripts/deploy/README.md) 和该脚本 `--help` 为准。
+只跑 `python scripts/deploy/relkit.py`（仓库根）。参数以该脚本 `--help` 和
+[`scripts/deploy/README.md`](../../../scripts/deploy/README.md) 为准。
 
-ADR 0016 拆分后的两个专用入口：
+首装（空机）：
 
-- 现网仍在跑 `relkit-serve.service` 的盒子：先 `migrate-serve --host <Host> --store-binary dist/relkit-store-linux-amd64` 一步迁到 `relkit-store.service`，之后才可走 `upgrade`。
-- 面板独立 unit：`install console --binary dist/relkit-console-linux-amd64 --dir <发布树> --state-dir <agent state>`；迁移盒子自动继承树里的 `.relkit-serve-admin.json` 操作员账户，不重发 bootstrap。
+```text
+relkit.py install serve   --binary dist/relkit-store-linux-amd64 ...
+relkit.py install agent   --binary dist/relkit-agent-linux-amd64 --product-root <发布树父目录> ...
+relkit.py install console --binary dist/relkit-console-linux-amd64 [--agent <agent URL>]
+```
 
-不要手拼 SSH 写配置，不要用腾讯云 TAT / MCP 代跑命令，不要编造命令输出。Go 的 `relkit` / `relkit-agent` / `relkit-store` 不是人用的第二套装机 CLI。
+`--product-root` 必填，没有默认值（内网 `/data/relkit`，外网 `/srv/relkit`）。console
+从配置的 `tree` 适配器读发布树，不再接受 `--dir` / `--state-dir`。
+
+仍在跑 `relkit-serve.service` 的老服务器先 `migrate-serve` 迁到 `relkit-store.service`，
+之后才可走 `upgrade`。
+
+不要手拼 SSH 写配置，不要用腾讯云 TAT / MCP 代跑命令，不要编造命令输出。
 
 ## 升级闸门
 
-1. 确认能 `ssh <Host>`（Host 来自 `~/.ssh/config`，由 `dec pull` 落地）。
+1. 确认能 `ssh <Host>`。Windows 上用 Git 自带的 `ssh.exe`（System32 版连外网会被
+   重置），并在仓库外的目录执行命令，避免 SSH 配置里的 `NUL` 在仓库里生成文件。
 2. 先 `--plan`，把脱敏探测、本机 HEAD、协议窗口给用户看。
-3. 用户确认后再 `--apply`。不要把 `--stage-only` 说成升级完成。
-4. 工作区脏则停止，除非用户明确 `--allow-dirty`。默认从当前干净 HEAD 构建，stamp 读 `VERSION.json`；只有用户明确要求才 `--unsafe-from-dist`。不要传 `--version`。
-5. **agent + serve 是固定配套**：现网箱必须两个进程都在。缺哪个先 `install` 那个，再 `upgrade`（不要 `--agent-only` / `--serve-only`）。`--agent-only` / `--serve-only` 只留给临时抢救，不是现网拓扑。
-6. 公网站点配置属于 `/etc/relkit-agent/relkit-agent.json` 顶层 `site.sinks[]`（`makers`/`backend`/`directory`，ADR 0015；旧 `site.makers` 加载时等价展开，已 deprecated），不能下沉到产品 profile。升级后检查 `curl -fsS http://127.0.0.1:8787/-/site` 只返回脱敏 readiness；若配置或模板有变化，执行 `sudo relkit-agent site-rebuild -config /etc/relkit-agent/relkit-agent.json`。这不发布产品版本。
+3. 再 `--apply`。不要把 `--stage-only` 说成升级完成。
+4. 工作区脏则停止，除非用户明确 `--allow-dirty`。默认从当前干净 HEAD 构建，版本读
+   `VERSION.json`；只有用户明确要求才 `--unsafe-from-dist`。
+5. 三个进程一起升。console 配置有旧键时，`upgrade` 会一次性迁移成 `tree` 适配器并
+   带上 cookie 密钥，新二进制直接拒绝旧配置，所以 console 只能走 `upgrade`。
+6. `upgrade` 会回填 agent 配置的 `productRootParent`（取已注册产品的共同父目录），
+   有分歧时在输出中说明。
+7. 工具 URL 由 agent 配置的 `publicURL` 签发（内网 `http://publish.devcloud.woa.com`，
+   外网 `https://publish.firoyang.com`）。
+8. 升级后检查三个服务 `active`、`/-/health`，以及各域名主入口。
 
-## 与 vNext 控制面切换的边界
+## 根密钥
 
-`relkit.py upgrade` 只原子替换 agent/store 二进制，不会自动改变
-Distribution Root、Catalog、Operator Profile 或 candidate/production lane。完整顺序是：
-
-1. `relkit.py upgrade --plan`，确认后 `--apply`。
-2. 用 `relkit-ops agent policy` 执行 `plan → execute + 唯一备份`。
-3. 重启/reload agent，检查 `/-/health`；失败立即恢复备份并再次重启。
-4. 宿主 CI 改用对应 production bundle；stable 前移除 Candidate Root 授权。
-
-公网与内网 deployment 分别执行并保留证据，不能用一个认证域的健康检查代替另一个。
-逐步发布和读回语义见
-[`first-production-rollout.md`](../../../docs/design/vnext/first-production-rollout.md)。
-
-现网别名：
-
-| Host | 跑什么 | upgrade |
-|---|---|---|
-| `publish.firoyang.com` | 外网 agent 控制面 + serve 操作面（数据面已在本机 store） | 两个都升；不要 `--agent-only`；不要改 profile URL |
-| `update.devcloud.woa.com` | 内网 agent + store 数据面（同机另有 `publish.devcloud.woa.com` / `update-internal.devcloud.woa.com` vhost，2026-10-19 三域名同构拆分） | 两个都升；agent 配置须有 `publicURL=http://publish.devcloud.woa.com` |
+每台服务器一把根，私钥只在该服务器与离线备份。部署前后用托管自检确认归属，规范见
+[`docs/guide/trust-root-custody.md`](../../../docs/guide/trust-root-custody.md)。私钥找不到时先
+跑自检，不要直接生成新根：换根会让已装应用全部失去信任链。
 
 ## 禁止
 
-- 用 example JSON 覆盖现网配置
-- 打印 token 或带 `sig=` 的 URL
-- upgrade 默默 `--rotate-token`（token 只经 `relkit-ops rotate`）
-- 重跑 `install` 来升级已有实例
-- 把 `scripts/deploy/` 打进产品 lock 或拷进产品仓
-
-升完 agent 后，发版必须使用当前 Operator Profile 与 immutable resolution 声明兼容的
-publisher；`exact` 部署使用该完整 distribution，不能只凭 tag 名猜测兼容性。
+- 用 example JSON 覆盖现网配置；
+- 打印 token 或带 `sig=` 的 URL；
+- 重跑 `install` 来升级已有实例；
+- 把 `scripts/deploy/` 拷进产品仓；
+- 用 `robocopy /MIR` 或任何镜像删除命令清理仓库里的杂项文件（会把整个仓库当作镜像
+  目标清空）。
