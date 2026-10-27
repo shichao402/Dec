@@ -45,21 +45,7 @@ func main() {
 		rootKey     = flag.String("root-key", "", "根密钥文件路径；为空时取 <data-dir>/root.key，生产上建议放在不参与磁盘快照的位置")
 		showVersion = flag.Bool("version", false, "打印版本后退出")
 	)
-	// 本机证书功能已整体删除（2026-10-27）。这几个参数只认不用，保留一个版本，
-	// 让生产 service.env 里遗留的 DEC_EXTRA_ARGS 不至于让新版起不来；
-	// 下个版本连同这段一起删掉。
-	deprecated := []string{"local-tls-domain", "local-tls-zone", "local-tls-secret", "acme-directory", "acme-email"}
-	for _, name := range deprecated {
-		flag.String(name, "", "已废弃，忽略")
-	}
 	flag.Parse()
-	flag.Visit(func(f *flag.Flag) {
-		for _, name := range deprecated {
-			if f.Name == name {
-				fmt.Fprintf(os.Stderr, "dec-cloud: 参数 -%s 已废弃并被忽略，请从 DEC_EXTRA_ARGS 中删除\n", name)
-			}
-		}
-	})
 
 	if *showVersion {
 		fmt.Printf("dec-cloud %s (%s)\n", Version, BuildTime)
