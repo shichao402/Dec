@@ -152,7 +152,9 @@
   >
   > **应急命令已补齐（需求 18.12）**：新增 `internal/cloud/emergency` + `cmd/dec-emergency`，只做吊销设备与签发证书两件事，不导出根密钥、不联网、不常驻。吊销签发的设备固定为"只接收设备"（绕过 2FA 的身份不该有管理能力），已登记设备拒绝重签。以 `sudo -u dec` 运行有强制检查：用 root 跑会静默把仓库对象改成 root 所有，之后服务再也提交不了，程序直接拒绝。随部署包安装到 `/opt/dec-cloud/dec-emergency`，已纳入 CI 构建、快照与回滚。守卫测试的 `cmd/` 入口白名单同步加入该入口（它是新一代程序，不是断代残留）。
   >
-  > **待用户确认的下线清单（三项，均未执行）**：① 旧公开 Release 153 个（184 个里 119 个 `v1.*`、5 个 `stable/v1.13.*`、27 个 `test-v1.*` 与 registry、2 个 relkit-candidate）及大量 `dev/v1.13.*` 旧 tag；② Bitwarden 旧 Dec 密钥条目（需用户输入主密码 + 2FA，当前 `bw` 状态 unauthenticated，保留 `_dec-cloud`）；③ 生产机 `/opt/dec-cloud/snapshots/` 历史快照 2 份共 303M（`KEEP_SNAPSHOTS=2` 会自动轮换，可选人工清理含已废弃资产的旧快照）。
+  > **下线清单执行结果（2026-10-27）**：① 旧公开 Release 已全部删除，153 个（119 个 `v1.*`、5 个 `stable/v1.13.*`、26 个 `test-v1.*`、1 个 `registry`、2 个 relkit-candidate）；远端与本地旧 tag 一并清理，409 个非 `v2.*` tag 全部删除，现存 34 个 v2.* tag（含 3 个无 Release 的 `v2.0.0`/`v2.0.3`/`v2.1.9`），Release 剩 31 个。② Bitwarden 旧条目用户自行处理，保留 `_dec-cloud`。③ 生产机快照未清理：操作时 SSH 已被 fail2ban 封禁（provision.sh 配置为 10 分钟内 3 次失败封 1 小时），且 `KEEP_SNAPSHOTS=2` 会在下次发布会自动轮换掉旧快照，无需人工介入。
+  >
+  > **删除过程中发现并修复的 CI 漏洞**：删除 tag 同样产生 push 事件，`github.ref` 仍是 `refs/tags/<那个 tag>`，deploy job 的 `startsWith(github.ref, 'refs/tags/v')` 与 production environment 的 v* 分支策略都会放行删除事件。158 个待删 tag 指向的提交里含旧版 `release.yml`，清理历史会把当年的旧二进制装到生产机。已在三个 job 加 `!github.event.deleted`，并用 `TestDeletingTagIsNotRelease` 逐 job 断言。删除期间另外临时禁用了 Release workflow 双保险，删完已恢复 active。
   >
   > **待与用户讨论的需求矛盾**：需求 11.6 要求"服务器重建只需冷备仓库和根密钥两样东西即可恢复服务端身份"，但 `internal/cloudsvc/tls.go` 明确写 CA 私钥"不进仓库、不进冷备"，意味着重建后 CA 会变、所有既有设备证书立即失效；需求 9.5 的轮换又要求"重新加密服务端身份私钥"，暗示它应该在仓库里被加密保存。当前实现是明文存本地 `certs/ca.key`。两处需要定夺。
   - 由 Agent 读取 `DecPersonalDevKit`、`dec-source-private` 和本机旧落点的内容，经 MCP 写入新系统，commit 记录来源；密钥直接读取后走常规写入
