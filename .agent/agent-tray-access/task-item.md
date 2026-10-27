@@ -1,5 +1,7 @@
 # 实施计划：代理可见性与本机访问入口
 
+> 2026-10-27 变更：`local.dec.firoyang.com` 域名、本机证书与本机 HTTPS 已整体删除，改为托盘内唯一的「Dec 管理面」窗口（wry WebView，复用原打开面板的 admin_url）；回环默认端口由 8787 改为 43679。下文涉及域名、证书、443 与 8787 的条目均已作废，仅供追溯。
+
 - [ ] 1. 日志合并与轮转
    - 在 `internal/agent` 新增日志写入器：同一文件 `logs/agent.log`，超过阈值轮转并保留最近若干份；目录不可写时退回 stderr 继续运行
    - `cmd/dec-agent/main.go` 的 `logf` 改走该写入器；`service.go` 中 launchd plist 的 stdout 与 stderr 指向同一文件，systemd、Windows 计划任务同步调整

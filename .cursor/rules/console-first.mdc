@@ -6,7 +6,7 @@ alwaysApply: true
 # 管理面优先
 
 vNext 断代之后，Dec 的人机入口是**浏览器打开的本机管理面**，由 `dec-agent` 在
-`127.0.0.1:8787` 提供、经设备证书转发到云端 `dec-cloud` 执行。旧的 Tauri 桌面
+`127.0.0.1:43679` 提供、经设备证书转发到云端 `dec-cloud` 执行。旧的 Tauri 桌面
 Console（`client/`）、`dec-server`、`internal/app` 与终端 TUI 已随断代整体删除，
 不要在仓库里恢复它们。
 
@@ -27,12 +27,12 @@ Console（`client/`）、`dec-server`、`internal/app` 与终端 TUI 已随断�
 
 | 角色 | 入口 | 说明 |
 |---|---|---|
-| 人 | 管理面 `127.0.0.1:8787/admin` | 唯一人机入口，经托盘双击或直接访问 |
-| Agent | MCP `127.0.0.1:8787/mcp` | 服务端按来源限权，不给明文与设备管理 |
+| 人 | 管理面 `127.0.0.1:43679/admin` | 唯一人机入口，经托盘双击或直接访问 |
+| Agent | MCP `127.0.0.1:43679/mcp` | 服务端按来源限权，不给明文与设备管理 |
 | 自动化 | CI | 只经 GitHub Actions 部署，不经管理面 |
 
-`local.dec.firoyang.com` 与 `dec.localhost` 只是同一页面的另外两个地址，
-不是第二套入口。
+托盘双击打开的「Dec 管理面」窗口与 `dec.localhost` 都只是同一页面的另外两个打开方式，
+不是第二套入口。不再使用 `local.dec.firoyang.com` 域名与本机 HTTPS。
 
 ## 反例
 

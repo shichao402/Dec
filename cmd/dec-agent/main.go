@@ -23,13 +23,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -135,7 +133,7 @@ func mustState() string {
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	insecure := fs.Bool("insecure", false, "跳过 TLS 校验（仅本机调试）")
-	port := fs.Int("port", 8787, "本机页面端口")
+	port := fs.Int("port", agent.DefaultPort, "本机页面端口")
 	name := fs.String("name", "", "上报给服务端的设备名")
 	// 宿主配置是全局的，不随状态目录隔离。用自定义状态目录跑第二个实例
 	// （调试、验证、并行测试）时，它会按自己的端口改写 ~/.claude.json 等
@@ -169,9 +167,6 @@ func cmdRun(args []string) error {
 	}
 
 	store := agent.NewIdentityStore(dir)
-	tlsStore := agent.NewLocalTLSStore(dir)
-	// https 在回环入口建好后才构造；同步器回调通过闭包间接引用它。
-	var https *agent.HTTPS
 	syncer, err := agent.NewSyncer(agent.Options{
 		ServerURL:       cfg.ServerURL,
 		Version:         Version,
@@ -183,12 +178,6 @@ func cmdRun(args []string) error {
 		LongPoll:        30 * time.Second,
 		Heartbeat:       10 * time.Minute,
 		DisconnectAlert: 30 * time.Minute,
-		LocalTLS:        tlsStore,
-		OnLocalTLS: func() {
-			if https != nil {
-				https.Reload()
-			}
-		},
 	}, store)
 	if err != nil {
 		return err
@@ -216,12 +205,6 @@ func cmdRun(args []string) error {
 		LogPath: agent.LogPath(dir),
 		Status:  syncer.Status,
 		MCP:     mcpHandler,
-		TLS: func() agent.TLSStatus {
-			if https == nil {
-				return agent.TLSStatus{State: agent.TLSNone}
-			}
-			return https.Status()
-		},
 		Call: func(r *http.Request, m, src string, payload json.RawMessage) (json.RawMessage, error) {
 			return callRemote(ctx, syncer.Client(), proto.Method(m), proto.Source(src), payload)
 		},
@@ -264,21 +247,6 @@ func cmdRun(args []string) error {
 	if err := agent.WriteAddrFile(dir, addr); err != nil {
 		logf("写入监听地址文件失败（托盘将按默认端口查找）: %v", err)
 	}
-
-	// 本机 HTTPS（agent-tray-access 需求 4.7）：与回环 HTTP 共用同一处理器与守卫，
-	// 实际端口登记进 Host 白名单。没有证书时不监听，HTTP 入口不受影响。
-	_, httpPortStr, _ := net.SplitHostPort(addr)
-	httpPort, _ := strconv.Atoi(httpPortStr)
-	https = agent.NewHTTPS(agent.HTTPSOptions{
-		Store:    tlsStore,
-		Handler:  loop.Handler(),
-		HTTPPort: httpPort,
-		OnListen: func(p string) { loop.SetExtraPorts(p) },
-		Notifier: &agent.SystemNotifier{Logf: logf},
-		Logf:     logf,
-	})
-	go https.Run(ctx, 6*time.Hour)
-	defer https.Close()
 
 	// 把本机 MCP 条目写进已安装的宿主（需求 2.1、2.4）。
 	// 端口是这次实际监听出来的地址，不是用户传的 --port：端口被占用时
@@ -675,7 +643,7 @@ func cmdProjects(args []string) error {
 // 这里负责按顺序检查并逐项打印结论。退出码非 0 表示有检查未通过。
 func cmdAcceptance(args []string) error {
 	fs := flag.NewFlagSet("acceptance", flag.ExitOnError)
-	base := fs.String("url", "http://127.0.0.1:8787", "本机代理地址")
+	base := fs.String("url", "http://127.0.0.1:43679", "本机代理地址")
 	bundle := fs.String("bundle", "", "临时 bundle 名，默认按时间戳生成")
 	projectPath := fs.String("project", "", "临时项目目录，默认建在用户目录下的临时路径")
 	timeout := fs.Duration("timeout", 90*time.Second, "单步等待下发落地的上限")
@@ -738,7 +706,7 @@ func cmdAcceptance(args []string) error {
 // 条目长什么样、写到了哪个文件、为什么某个宿主没有写。
 func cmdMCPConfig(args []string) error {
 	fs := flag.NewFlagSet("mcp-config", flag.ExitOnError)
-	port := fs.Int("port", 8787, "本机页面端口，用于拼出条目里的地址")
+	port := fs.Int("port", agent.DefaultPort, "本机页面端口，用于拼出条目里的地址")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

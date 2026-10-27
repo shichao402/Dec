@@ -10,8 +10,8 @@
 
 | | 旧一代（已废弃） | 当前 |
 |---|---|---|
-| 人机入口 | Tauri Console | 浏览器 `http://127.0.0.1:8787/admin` |
-| 本机服务 | `dec-server` gRPC 47653 + MCP 47654 | `dec-agent` HTTP 8787 |
+| 人机入口 | Tauri Console | 托盘窗口，或浏览器 `http://127.0.0.1:43679/admin` |
+| 本机服务 | `dec-server` gRPC 47653 + MCP 47654 | `dec-agent` HTTP 43679 |
 | 资产组织 | `provides` 映射 + 四象限 | bundle |
 | 密钥 | Bitwarden 运行时依赖 | 根密钥加密后与资产同存服务端 git |
 | 云端 | 无 | `https://dec.firoyang.com` |
@@ -21,7 +21,7 @@
 ### 管理面
 
 ```
-http://127.0.0.1:8787/admin
+http://127.0.0.1:43679/admin
 ```
 
 本机 `dec-agent` 提供页面，每次操作由它带设备证书转发到云端。共有六个页面：概览、设备、资产、密钥、历史、项目。
@@ -31,7 +31,7 @@ http://127.0.0.1:8787/admin
 ### 确认代理在跑
 
 ```bash
-curl -s http://127.0.0.1:8787/api/status
+curl -s http://127.0.0.1:43679/api/status
 ```
 
 返回里有 `server_url`、`device_id`、`aligned`，说明连接正常。`aligned` 为 `false` 时收不到下发，需要按提示更新代理。

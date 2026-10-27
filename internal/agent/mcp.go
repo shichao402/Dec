@@ -148,7 +148,7 @@ func checkReady(opts MCPServer) error {
 	}
 	st := opts.Status()
 	if st.DeviceID == "" {
-		return errors.New("这台设备还没有登记：先执行 dec-agent enroll（或打开 http://127.0.0.1:8787/admin 登记），再重试")
+		return errors.New("这台设备还没有登记：先执行 dec-agent enroll（或打开 http://127.0.0.1:43679/admin 登记），再重试")
 	}
 	// 先判对齐再判维护：版本不对齐时代理按心跳（10 分钟）才再握手，
 	// 期间维护标志可能停在部署那一刻的 true，先报它会把“该升级代理”误说成“等部署”。

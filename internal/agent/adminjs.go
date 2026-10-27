@@ -145,13 +145,9 @@ async function loadOverview() {
     html += row('当前 revision', s.revision);
     if (s.last_error) html += row('最近错误', s.last_error, 'bad');
     (s.urls || []).forEach(function (u) {
-      const label = u.kind === 'local-domain' ? '访问地址（证书）' : (u.kind === 'localhost' ? '访问地址（localhost）' : '访问地址（回环）');
+      const label = u.kind === 'localhost' ? '访问地址（localhost）' : '访问地址（回环）';
       html += row(label, u.available ? u.url : (u.url + '（' + (u.reason || '不可用') + '）'), u.available ? 'ok' : 'bad');
     });
-    if (s.tls && s.tls.state && s.tls.state !== 'none') {
-      const ok = s.tls.state === 'ok';
-      html += row('本机证书', s.tls.state + (s.tls.not_after ? '，到期 ' + when(s.tls.not_after) : ''), ok ? 'ok' : 'bad');
-    }
     if (s.log_path) html += row('日志文件', s.log_path);
     $('local').innerHTML = html;
     if (!s.device_id) {

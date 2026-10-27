@@ -25,7 +25,7 @@ const (
 	// trayWindowsTask 是 Windows 托盘的计划任务名。
 	trayWindowsTask = "DecTray"
 	// AddrFileName 记录代理本次实际监听的回环地址，托盘据此找到代理
-	// （需求 3.3：端口因参数改变时不能写死 8787）。
+	// （需求 3.3：端口因参数改变时不能写死默认端口）。
 	AddrFileName = "agent.addr"
 )
 

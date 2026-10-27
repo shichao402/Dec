@@ -35,7 +35,7 @@ func TestUpsertJSONOnlyTouchesDec(t *testing.T) {
 		t.Fatalf("准备文件失败: %v", err)
 	}
 
-	if err := upsertJSONEntry(path, "cursor", "http://127.0.0.1:8787/mcp"); err != nil {
+	if err := upsertJSONEntry(path, "cursor", "http://127.0.0.1:43679/mcp"); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestUpsertJSONOnlyTouchesDec(t *testing.T) {
 	if cmd := servers["zeta"].(map[string]any)["command"]; cmd != "node" {
 		t.Fatalf("zeta 条目被改动: %v", servers["zeta"])
 	}
-	if url := servers["dec"].(map[string]any)["url"]; url != "http://127.0.0.1:8787/mcp" {
+	if url := servers["dec"].(map[string]any)["url"]; url != "http://127.0.0.1:43679/mcp" {
 		t.Fatalf("dec 条目未更新: %v", servers["dec"])
 	}
 	if got["otherSetting"] != true {
@@ -77,7 +77,7 @@ func TestUpsertJSONOnlyTouchesDec(t *testing.T) {
 func TestDeleteJSONOnlyRemovesDec(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	original := `{"mcpServers":{"alpha":{"url":"https://a"},"dec":{"url":"http://127.0.0.1:8787/mcp"},"zeta":{"command":"x"}}}`
+	original := `{"mcpServers":{"alpha":{"url":"https://a"},"dec":{"url":"http://127.0.0.1:43679/mcp"},"zeta":{"command":"x"}}}`
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatalf("准备文件失败: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestUpsertJSONCreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
 
-	if err := upsertJSONEntry(path, "cursor", "http://127.0.0.1:8787/mcp"); err != nil {
+	if err := upsertJSONEntry(path, "cursor", "http://127.0.0.1:43679/mcp"); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -124,7 +124,7 @@ func TestUpsertJSONCreatesFile(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("写出来的不是合法 JSON: %v\n%s", err, data)
 	}
-	if got.MCPServers["dec"].URL != "http://127.0.0.1:8787/mcp" {
+	if got.MCPServers["dec"].URL != "http://127.0.0.1:43679/mcp" {
 		t.Fatalf("dec 条目内容不对: %+v", got.MCPServers)
 	}
 }
@@ -149,7 +149,7 @@ key = "value"
 		t.Fatalf("准备文件失败: %v", err)
 	}
 
-	if err := upsertTOMLEntry(path, "http://127.0.0.1:8787/mcp"); err != nil {
+	if err := upsertTOMLEntry(path, "http://127.0.0.1:43679/mcp"); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
 
@@ -168,7 +168,7 @@ key = "value"
 	if !strings.Contains(text, `[mcp_servers.alpha]`) || !strings.Contains(text, `url = "https://alpha.example.com/mcp"`) {
 		t.Fatalf("alpha 表被改动:\n%s", text)
 	}
-	if !strings.Contains(text, `url = "http://127.0.0.1:8787/mcp"`) {
+	if !strings.Contains(text, `url = "http://127.0.0.1:43679/mcp"`) {
 		t.Fatalf("dec 表未更新:\n%s", text)
 	}
 	if strings.Contains(text, "47654") {
@@ -192,7 +192,7 @@ func TestUpsertTOMLAppendsWhenMissing(t *testing.T) {
 		t.Fatalf("准备文件失败: %v", err)
 	}
 
-	if err := upsertTOMLEntry(path, "http://127.0.0.1:8787/mcp"); err != nil {
+	if err := upsertTOMLEntry(path, "http://127.0.0.1:43679/mcp"); err != nil {
 		t.Fatalf("写入失败: %v", err)
 	}
 	data, _ := os.ReadFile(path)
@@ -203,7 +203,7 @@ func TestUpsertTOMLAppendsWhenMissing(t *testing.T) {
 	if !strings.Contains(text, "[mcp_servers.dec]") {
 		t.Fatalf("dec 表没有追加:\n%s", text)
 	}
-	if !strings.Contains(text, `url = "http://127.0.0.1:8787/mcp"`) {
+	if !strings.Contains(text, `url = "http://127.0.0.1:43679/mcp"`) {
 		t.Fatalf("地址不对:\n%s", text)
 	}
 }
@@ -218,7 +218,7 @@ func TestDeleteTOMLRemovesOnlyDec(t *testing.T) {
 url = "https://alpha.example.com/mcp"
 
 [mcp_servers.dec]
-url = "http://127.0.0.1:8787/mcp"
+url = "http://127.0.0.1:43679/mcp"
 
 [other]
 key = "value"
@@ -252,7 +252,7 @@ func TestSyncSkipsMissingHosts(t *testing.T) {
 		t.Fatalf("准备目录失败: %v", err)
 	}
 
-	results := syncHosts(DefaultHosts(home), "http://127.0.0.1:8787/mcp")
+	results := syncHosts(DefaultHosts(home), "http://127.0.0.1:43679/mcp")
 	byName := map[string]HostResult{}
 	for _, r := range results {
 		byName[r.Name] = r
@@ -284,7 +284,7 @@ func TestSyncUpdatesPort(t *testing.T) {
 	}
 
 	hosts := DefaultHosts(home)
-	syncHosts(hosts, "http://127.0.0.1:8787/mcp")
+	syncHosts(hosts, "http://127.0.0.1:43679/mcp")
 	syncHosts(hosts, "http://127.0.0.1:9001/mcp")
 
 	data, err := os.ReadFile(filepath.Join(cursorDir, "mcp.json"))
@@ -292,7 +292,7 @@ func TestSyncUpdatesPort(t *testing.T) {
 		t.Fatalf("读回失败: %v", err)
 	}
 	text := string(data)
-	if strings.Contains(text, "8787") {
+	if strings.Contains(text, "43679") {
 		t.Fatalf("旧端口没有被替换:\n%s", text)
 	}
 	if !strings.Contains(text, "9001") {
@@ -317,7 +317,7 @@ func TestInspectHostsReportsThreeStates(t *testing.T) {
 		t.Fatalf("准备 cursor 目录失败: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cursorDir, "mcp.json"),
-		[]byte(`{"mcpServers":{"dec":{"url":"http://127.0.0.1:8787/mcp"}}}`), 0o644); err != nil {
+		[]byte(`{"mcpServers":{"dec":{"url":"http://127.0.0.1:43679/mcp"}}}`), 0o644); err != nil {
 		t.Fatalf("准备 cursor 配置失败: %v", err)
 	}
 
@@ -350,7 +350,7 @@ func TestInspectHostsReportsThreeStates(t *testing.T) {
 		byName[res.Name] = res
 	}
 
-	if got := byName["cursor"]; got.Status != HostWritten || !strings.Contains(got.Entry, "8787") {
+	if got := byName["cursor"]; got.Status != HostWritten || !strings.Contains(got.Entry, "43679") {
 		t.Fatalf("cursor 应为已写入且带出条目内容，实际 %v entry=%q reason=%q",
 			got.Status, got.Entry, got.Reason)
 	}
@@ -387,7 +387,7 @@ func TestRemoveHostsRemovesOnlyDec(t *testing.T) {
 		t.Fatalf("准备目录失败: %v", err)
 	}
 	path := filepath.Join(cursorDir, "mcp.json")
-	original := `{"mcpServers":{"alpha":{"url":"https://a"},"dec":{"url":"http://127.0.0.1:8787/mcp"}}}`
+	original := `{"mcpServers":{"alpha":{"url":"https://a"},"dec":{"url":"http://127.0.0.1:43679/mcp"}}}`
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatalf("准备文件失败: %v", err)
 	}
@@ -420,12 +420,12 @@ func TestRemoveHostsRemovesOnlyDec(t *testing.T) {
 //
 // Claude Code 的 HTTP 传输必须显式声明 type，只给 url 会被当作未知类型。
 func TestClaudeEntryHasType(t *testing.T) {
-	entry := entryFor("claude", "http://127.0.0.1:8787/mcp")
+	entry := entryFor("claude", "http://127.0.0.1:43679/mcp")
 	if entry["type"] != "http" {
 		t.Fatalf("claude 条目应带 type=http，实际 %+v", entry)
 	}
 	// Cursor 多写不认识的字段会在它自己的 UI 里显示成未知配置。
-	if _, ok := entryFor("cursor", "http://127.0.0.1:8787/mcp")["type"]; ok {
+	if _, ok := entryFor("cursor", "http://127.0.0.1:43679/mcp")["type"]; ok {
 		t.Fatal("cursor 条目不应带 type")
 	}
 }
@@ -442,7 +442,7 @@ func TestUpsertJSONRejectsBrokenFile(t *testing.T) {
 		t.Fatalf("准备文件失败: %v", err)
 	}
 
-	if err := upsertJSONEntry(path, "cursor", "http://127.0.0.1:8787/mcp"); err == nil {
+	if err := upsertJSONEntry(path, "cursor", "http://127.0.0.1:43679/mcp"); err == nil {
 		t.Fatal("坏 JSON 应报错而不是覆盖")
 	}
 	data, _ := os.ReadFile(path)

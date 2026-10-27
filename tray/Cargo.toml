@@ -2,7 +2,7 @@
 name = "dec-tray"
 version = "0.0.0"
 edition = "2021"
-description = "Dec 代理的托盘组件：读回环 /api/status 画图标，双击打开管理面"
+description = "Dec 代理的托盘组件：读回环 /api/status 画图标，双击打开管理面窗口"
 publish = false
 
 # 版本号不在这里维护：发布时由 CI 通过 DEC_TRAY_VERSION 环境变量注入，
@@ -22,6 +22,8 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 tray-icon = "0.26"
 tao = "0.37"
+# 管理面窗口：macOS 用系统 WKWebView，Windows 用 WebView2，都不随包带浏览器内核。
+wry = { version = "0.57", default-features = false }
 ureq = { version = "2", default-features = false }
 open = "5"
 

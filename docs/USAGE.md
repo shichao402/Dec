@@ -10,20 +10,18 @@
 
 ### 管理面（日常操作都在这）
 
-最省事的是双击托盘图标（下一节）。直接用浏览器的话，有三个地址，打开的是同一个页面：
+最省事的是双击托盘图标（下一节），会打开一个独立的「Dec 管理面」窗口。窗口全局只有一个，再次双击只会把它调到前面，不会开第二个。
 
-| 地址 | 什么时候用 |
+也可以直接用浏览器打开，两个地址是同一个页面：
+
+| 地址 | 说明 |
 |---|---|
-| `https://local.dec.firoyang.com/admin` | 好记、有正规证书，首选 |
-| `http://dec.localhost:8787/admin` | 证书还没下发或过期时的兜底，不依赖任何配置 |
-| `http://127.0.0.1:8787/admin` | 最原始的地址，永远可用 |
+| `http://127.0.0.1:43679/admin` | 回环地址，永远可用 |
+| `http://dec.localhost:43679/admin` | 由浏览器强制解析到本机（RFC 6761），不经过 DNS |
 
-三个地址都只落在本机回环上，外部访问不到，所以不需要登录、密码或客户端证书。
+两个地址都只落在本机回环上，外部访问不到，所以不需要登录、密码或客户端证书。端口 43679 是默认值，用 `--port` 改过之后以托盘提示和管理面「概览」上显示的为准。
 
-- `local.dec.firoyang.com` 是一条公网 DNS 记录，在任何设备上都解析到 `127.0.0.1`，也就是"你自己这台机器"。它的证书由云端签发并自动下发到每台设备，过期前会自动续期。如果 443 端口被别的程序占用，地址会变成 `https://local.dec.firoyang.com:8787`，以托盘提示和管理面「概览」上显示的为准。
-- `dec.localhost` 由浏览器强制解析到本机（RFC 6761），不经过 DNS。
-
-这个页面由本机的 `dec-agent` 进程提供。浏览器里的每次点击，都由 `dec-agent` 带着设备证书转发给云端 `https://dec.firoyang.com`，真正干活的是云端。
+这个页面由本机的 `dec-agent` 进程提供。页面里的每次点击，都由 `dec-agent` 带着设备证书转发给云端 `https://dec.firoyang.com`，真正干活的是云端。
 
 ### 托盘图标
 
@@ -32,17 +30,16 @@
 | 图标 | 含义 |
 |---|---|
 | 绿 | 在线且与云端对齐 |
-| 黄 | 本机证书需关注（快到期、已过期或签发失败）；`dec.localhost` 地址仍可用 |
 | 红 | 同步出错、版本未对齐，或重启后 30 秒内没恢复 |
 | 紫 | 云端维护中 |
 | 蓝色空心环 | 正在重启代理 |
 | 灰 | 代理没在跑 |
 
-同时有多种问题时只显示最要紧的一种，顺序是：维护 > 同步出错 > 版本未对齐 > 证书 > 正常。鼠标悬停可以看到具体原因和当前访问地址。证书问题会额外弹一次系统通知，同一个问题不会反复弹。
+同时有多种问题时只显示最要紧的一种，顺序是：维护 > 同步出错 > 版本未对齐 > 正常。鼠标悬停可以看到具体原因和当前访问地址。
 
 操作：
 
-- 双击：打开管理面（自动选当前可用的最佳地址）。
+- 双击：打开管理面窗口；窗口已开着时把它调到前面。窗口里点到外部链接会交给系统浏览器打开。关掉窗口不影响代理和托盘。
 - macOS 单击，或 Windows 右键：弹出菜单。菜单里可以查看状态、查看日志、重启代理（代理没在跑时显示为"启动代理"）、退出托盘。
 - macOS 上按住 Control 再单击，可以不等双击判定、立即弹出菜单。
 
@@ -53,7 +50,7 @@
 ### 根页面
 
 ```
-http://127.0.0.1:8787/
+http://127.0.0.1:43679/
 ```
 
 只显示代理自身的连接状态，是排障用的。日常操作走 `/admin`。
@@ -72,7 +69,7 @@ https://dec.firoyang.com
 
 | | 旧一代（已废弃） | 新一代（当前） |
 |---|---|---|
-| 人机入口 | Console 桌面应用 | 浏览器打开 `127.0.0.1:8787/admin` |
+| 人机入口 | Console 桌面应用 | 浏览器打开 `127.0.0.1:43679/admin` |
 | 二进制 | `~/.dec/bin/dec-server`、`dec-exec`、`dec-mcp` | `~/.local/bin/dec-agent` |
 | 状态目录 | `~/.dec/` | `~/.dec-agent/` |
 | 系统服务 | 由 Console 拉起 | `com.dec.agent`（launchd） |
@@ -83,7 +80,7 @@ https://dec.firoyang.com
 判定当前跑的是不是新一代，看这一条：
 
 ```bash
-curl -s http://127.0.0.1:8787/api/status
+curl -s http://127.0.0.1:43679/api/status
 ```
 
 有 `server_url`、`device_id`、`aligned` 这些字段，说明新一代在正常工作。
@@ -92,7 +89,7 @@ curl -s http://127.0.0.1:8787/api/status
 
 ## 二点五、MCP：让 Agent 直接读写 Dec
 
-`dec-agent` 在 `http://127.0.0.1:8787/mcp` 上提供标准 MCP（Streamable HTTP）入口。Claude Code、Codex、Cursor 这些 Agent 只要配置了这一个地址，就能自己读写你的资产与密钥元数据，不需要你手动点管理面。
+`dec-agent` 在 `http://127.0.0.1:43679/mcp` 上提供标准 MCP（Streamable HTTP）入口。Claude Code、Codex、Cursor 这些 Agent 只要配置了这一个地址，就能自己读写你的资产与密钥元数据，不需要你手动点管理面。
 
 ### 自动接入，不用手改配置
 
@@ -221,7 +218,7 @@ dec-agent mcp-config
 ### 第一步：确认云端收到了
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/api/call \
+curl -s -X POST http://127.0.0.1:43679/api/call \
   -H 'Content-Type: application/json' \
   -d '{"method":"list_assets","payload":{}}'
 ```
@@ -231,7 +228,7 @@ curl -s -X POST http://127.0.0.1:8787/api/call \
 ### 第二步：确认 commit 生成了
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/api/call \
+curl -s -X POST http://127.0.0.1:43679/api/call \
   -H 'Content-Type: application/json' \
   -d '{"method":"history","payload":{"kind":"asset","id":"<bundle名>"}}'
 ```
@@ -337,7 +334,7 @@ curl -fsSL http://192.168.x.x:8765/purge-legacy-dec.sh | bash
 launchctl kickstart -k gui/$(id -u)/com.dec.agent
 ```
 
-然后访问 `http://127.0.0.1:8787/admin` 确认管理面仍然正常，`drift` 为 0。
+然后访问 `http://127.0.0.1:43679/admin` 确认管理面仍然正常，`drift` 为 0。
 
 ---
 
@@ -345,7 +342,7 @@ launchctl kickstart -k gui/$(id -u)/com.dec.agent
 
 ### 管理面打不开
 
-先换个地址试：`https://local.dec.firoyang.com/admin` 打不开时，用 `http://dec.localhost:8787/admin`，再不行用 `http://127.0.0.1:8787/admin`。三个都打不开，说明代理没在跑：
+先换个地址试：托盘窗口打不开时，用浏览器访问 `http://127.0.0.1:43679/admin`，再不行用 `http://dec.localhost:43679/admin`。都打不开，说明代理没在跑：
 
 ```bash
 launchctl list | grep dec.agent
@@ -356,10 +353,6 @@ launchctl list | grep dec.agent
 ```bash
 launchctl load ~/Library/LaunchAgents/com.dec.agent.plist
 ```
-
-### https 地址打不开，但 dec.localhost 能开
-
-本机证书还没下发，或已过期。托盘会变黄并给出原因，管理面「概览」也会提示。证书由云端签发和续期，本机不用做什么；长时间不恢复时把托盘提示的原因发给维护者。这期间用 `http://dec.localhost:8787/admin` 不受影响。
 
 ### 托盘图标不见了
 
@@ -380,7 +373,7 @@ launchctl kickstart -k gui/$(id -u)/com.dec.tray
 代理活着但连不上云端。查 `last_error`：
 
 ```bash
-curl -s http://127.0.0.1:8787/api/status
+curl -s http://127.0.0.1:43679/api/status
 ```
 
 常见原因是版本未对齐（`aligned: false`），或设备证书过期。

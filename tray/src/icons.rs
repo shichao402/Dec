@@ -1,6 +1,6 @@
 //! 托盘图标：运行时画出来的 RGBA 圆点，不依赖图片资源文件。
 //!
-//! 六种状态用颜色区分（需求 2.1、4.8）；「重启中」画空心环，和其余实心状态在
+//! 五种状态用颜色区分（需求 2.1）；「重启中」画空心环，和其余实心状态在
 //! 形状上也能分开，色弱用户不必只靠颜色判断。
 
 use crate::state::IconState;
@@ -11,8 +11,6 @@ const SIZE: u32 = 32;
 fn color(state: IconState) -> [u8; 3] {
     match state {
         IconState::Ok => [0x2e, 0xa0, 0x43],
-        // 黄色专给证书提醒；维护改用紫色，免得两种「不是故障」的状态在菜单栏里分不清。
-        IconState::Warning => [0xf2, 0xc0, 0x1d],
         IconState::Error => [0xd7, 0x3a, 0x49],
         IconState::Maintenance => [0x8b, 0x5c, 0xf6],
         IconState::Restarting => [0x3b, 0x82, 0xf6],

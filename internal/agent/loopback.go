@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -14,8 +13,8 @@ import (
 //
 // 只绑 127.0.0.1，只做两项不增加使用摩擦的检查：
 //
-//  1. Host 头的主机名必须是 127.0.0.1、localhost、*.localhost 或
-//     local.dec.firoyang.com，端口必须是代理自己监听的端口，防 DNS rebinding；
+//  1. Host 头的主机名必须是 127.0.0.1、localhost 或 *.localhost，
+//     端口必须是代理自己监听的端口，防 DNS rebinding；
 //  2. 请求带了 Origin 头时必须是代理自己的地址，防其他网页跨站调用。
 //
 // 不设 token、不设一次性链接、不设 CSRF token：本机进程被视为可信，
@@ -56,8 +55,6 @@ type LoopbackOptions struct {
 	Logf func(format string, args ...any)
 	// LogPath 是日志文件路径，供托盘「查看日志」使用（agent-tray-access 需求 5.3）。
 	LogPath string
-	// TLS 返回本机 HTTPS 状态，nil 表示未启用 HTTPS。
-	TLS func() TLSStatus
 }
 
 // LoopbackEnrollInput 是页面提交的登记参数。
@@ -76,9 +73,6 @@ type Loopback struct {
 	addr string
 	srv  *http.Server
 	ln   net.Listener
-
-	mu         sync.Mutex
-	extraPorts []string
 }
 
 // NewLoopback 构造回环服务。
@@ -160,21 +154,15 @@ func (l *Loopback) guard(next http.Handler) http.Handler {
 	})
 }
 
-// LocalDomain 是指向 127.0.0.1 的自有子域（agent-tray-access 需求 4）。
-//
-// 它在公网 DNS 上解析到回环，证书由云端签发下发。接受它不会放宽
-// DNS rebinding 防护：攻击者控制的域名不在白名单里，照样被拒。
-const LocalDomain = "local.dec.firoyang.com"
-
 // allowedHostname 报告主机名是否属于本机入口。
 //
-// 白名单固定为四类：127.0.0.1、localhost、*.localhost、LocalDomain。
+// 白名单固定为三类：127.0.0.1、localhost、*.localhost。
 // *.localhost 按 RFC 6761 只能解析到回环，浏览器也会强制如此，
 // 所以接受它与接受 localhost 等价。比较不区分大小写，并去掉末尾的根点。
 func allowedHostname(h string) bool {
 	h = strings.TrimSuffix(strings.ToLower(h), ".")
 	switch {
-	case h == loopbackHost, h == "localhost", h == LocalDomain:
+	case h == loopbackHost, h == "localhost":
 		return true
 	case strings.HasSuffix(h, ".localhost"):
 		label := strings.TrimSuffix(h, ".localhost")
@@ -191,72 +179,29 @@ func allowedHostname(h string) bool {
 	return false
 }
 
-// SetExtraPorts 登记回环 HTTP 端口之外、同样由本代理监听的端口（如 HTTPS 的 443）。
-//
-// 这些端口上的请求也走同一个 guard，Host 头里的端口必须属于已登记集合之一。
-func (l *Loopback) SetExtraPorts(ports ...string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.extraPorts = append([]string(nil), ports...)
-}
-
-// portAllowed 报告端口是否属于本代理的监听端口。
-func (l *Loopback) portAllowed(p string) bool {
-	if p != "" && p == l.port() {
-		return true
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for _, x := range l.extraPorts {
-		if x == p {
-			return true
-		}
-	}
-	return false
-}
-
 // hostOK 校验 Host 头。
 //
 // 主机名必须在 allowedHostname 白名单内，端口必须是自己监听的端口。
 // 网页把攻击者域名解析到 127.0.0.1（DNS rebinding）时，浏览器带的 Host
-// 是那个域名，不在白名单里，因此进不来。
-//
-// 不带端口的 Host 只在本代理监听 443 时接受（HTTPS 默认端口，浏览器会省略）；
-// 不接受隐含的 80，因为代理从不监听 80。
+// 是那个域名，不在白名单里，因此进不来。代理只监听一个高位端口，
+// Host 不带端口（隐含 80/443）一律拒绝。
 func (l *Loopback) hostOK(host string) bool {
 	if host == "" || l.port() == "" {
 		return false
 	}
 	h, p, err := net.SplitHostPort(host)
-	if err != nil {
-		if strings.Contains(host, ":") {
-			return false
-		}
-		h, p = host, "443"
-	}
-	if !l.portAllowed(p) {
+	if err != nil || p != l.port() {
 		return false
 	}
 	return allowedHostname(h)
 }
 
-// originOK 校验 Origin 头。
-//
-// 接受 http 与 https 两种 scheme：本机页面可能经 HTTP 回环端口，
-// 也可能经 https://local.dec.firoyang.com 打开。https 且省略端口时按 443 判定。
+// originOK 校验 Origin 头。本机页面只经 HTTP 回环端口打开。
 func (l *Loopback) originOK(origin string) bool {
-	switch {
-	case strings.HasPrefix(origin, "http://"):
-		rest := strings.TrimPrefix(origin, "http://")
-		if _, _, err := net.SplitHostPort(rest); err != nil {
-			// http 省略端口意味着 80，代理不监听 80。
-			return false
-		}
-		return l.hostOK(rest)
-	case strings.HasPrefix(origin, "https://"):
-		return l.hostOK(strings.TrimPrefix(origin, "https://"))
+	if !strings.HasPrefix(origin, "http://") {
+		return false
 	}
-	return false
+	return l.hostOK(strings.TrimPrefix(origin, "http://"))
 }
 
 // port 返回监听端口。

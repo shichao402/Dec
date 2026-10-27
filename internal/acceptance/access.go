@@ -16,12 +16,11 @@ import (
 	"github.com/shichao402/Dec/internal/agent"
 )
 
-// 本机入口验收（agent-tray-access 需求 4.3、4.7、4.9、5.1）。
+// 本机入口验收（agent-tray-access 需求 4.1、5.1）。
 //
-// 三种访问方式各验一遍，而且都要真的发请求：
+// 两种访问方式各验一遍，而且都要真的发请求：
 //
-//   - https://local.dec.firoyang.com：走真实 DNS 与系统证书链，
-//     证明「记录指向 127.0.0.1 + 证书已下发 + HTTPS 在听」三件事同时成立；
+//   - admin_url：托盘窗口加载的就是它，必须真能打开管理面；
 //   - http://dec.localhost:<端口>：解析由浏览器按 RFC 6761 强制落到回环，
 //     这里同样钉到回环，验的是代理的 Host 白名单真的放行了它；
 //   - 日志：只写 logs/agent.log（及其轮转文件）。
@@ -33,12 +32,6 @@ type accessStatus struct {
 	URLs     []agent.AccessURL `json:"urls"`
 	AdminURL string            `json:"admin_url"`
 	LogPath  string            `json:"log_path"`
-	TLS      struct {
-		State    string    `json:"state"`
-		Addr     string    `json:"addr"`
-		NotAfter time.Time `json:"not_after"`
-		Error    string    `json:"error"`
-	} `json:"tls"`
 }
 
 // fileStamp 是日志目录里一个文件的大小与修改时间。
@@ -47,7 +40,7 @@ type fileStamp struct {
 	mtime time.Time
 }
 
-// checkAccess 依次验证证书、两种域名访问，并给日志目录拍快照。
+// checkAccess 依次验证两种访问地址，并给日志目录拍快照。
 func (r *runner) checkAccess(ctx context.Context) {
 	r.section("一（续）、本机入口")
 	code, body, err := r.get(ctx, "/api/status")
@@ -67,72 +60,33 @@ func (r *runner) checkAccess(ctx context.Context) {
 	}
 	r.step("本机入口字段", true, "首选 "+st.AdminURL)
 
-	r.checkCert(st)
-	r.checkLocalDomain(ctx, st)
+	r.checkAdminURL(ctx, st)
 	r.checkDotLocalhost(ctx, st)
 
 	r.logPath = st.LogPath
 	r.logSnap = snapshotLogs(st.LogPath)
 }
 
-// checkCert 验证证书已下发且未临近到期（需求 4.5、4.8）。
-func (r *runner) checkCert(st accessStatus) {
-	switch agent.TLSState(st.TLS.State) {
-	case agent.TLSOK:
-		r.step("本机证书已下发", true, "到期 "+st.TLS.NotAfter.Local().Format("2006-01-02"))
-	case agent.TLSExpiring:
-		r.step("本机证书已下发", false, "将于 "+st.TLS.NotAfter.Local().Format("2006-01-02")+" 到期，云端续期未生效")
-	default:
-		detail := "状态 " + st.TLS.State
-		if st.TLS.Error != "" {
-			detail += "：" + st.TLS.Error
-		}
-		r.step("本机证书已下发", false, detail+"（检查云端密钥 dnspod-token 与管理面告警）")
-	}
-}
-
-// checkLocalDomain 用真实 DNS 与系统证书链访问 local 子域（需求 4.3、4.7）。
-func (r *runner) checkLocalDomain(ctx context.Context, st accessStatus) {
-	var target string
-	for _, u := range st.URLs {
-		if u.Kind == "local-domain" {
-			target = u.URL
-			if !u.Available {
-				r.step("https local 子域可访问", false, target+" 不可用："+u.Reason)
-				return
-			}
-		}
-	}
-	if target == "" {
-		r.step("https local 子域可访问", false, "status 未给出 local 子域地址")
+// checkAdminURL 验证 admin_url 指向回环且真能打开管理面。
+//
+// 托盘窗口与「打开管理面」都直接加载这个地址，它错了用户就进不去。
+func (r *runner) checkAdminURL(ctx context.Context, st accessStatus) {
+	base, ok := strings.CutSuffix(st.AdminURL, "/admin")
+	if !ok || !strings.HasPrefix(base, "http://127.0.0.1:") {
+		r.step("管理面地址可访问", false, "admin_url 不是回环地址："+st.AdminURL)
 		return
 	}
-
-	// 先单独验解析：记录错了与证书错了是两类问题，分开报才知道该去哪修。
-	addrs, err := net.DefaultResolver.LookupHost(ctx, agent.LocalDomain)
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	got, err := fetchDeviceID(ctx, client, base+"/api/status")
 	if err != nil {
-		r.step("local 子域解析到回环", false, err.Error())
-		return
-	}
-	for _, a := range addrs {
-		if ip := net.ParseIP(a); ip == nil || !ip.IsLoopback() {
-			r.step("local 子域解析到回环", false, "解析结果含非回环地址 "+strings.Join(addrs, ","))
-			return
-		}
-	}
-	r.step("local 子域解析到回环", true, strings.Join(addrs, ","))
-
-	// 默认客户端：系统证书链 + 真实 SNI，与浏览器打开时的条件一致。
-	got, err := fetchDeviceID(ctx, http.DefaultClient, target+"/api/status")
-	if err != nil {
-		r.step("https local 子域可访问", false, err.Error())
+		r.step("管理面地址可访问", false, err.Error())
 		return
 	}
 	if got != st.DeviceID {
-		r.step("https local 子域可访问", false, "应答来自别的进程（device_id="+got+"）")
+		r.step("管理面地址可访问", false, "应答来自别的进程（device_id="+got+"）")
 		return
 	}
-	r.step("https local 子域可访问", true, target)
+	r.step("管理面地址可访问", true, st.AdminURL)
 }
 
 // checkDotLocalhost 验证 http://dec.localhost:<端口> 可访问（需求 4.1）。

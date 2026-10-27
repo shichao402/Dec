@@ -3,7 +3,8 @@
 //! 独立小进程，与代理只通过回环 /api/status 和系统服务命令松耦合：
 //! 托盘挂了代理照跑，代理没跑托盘显示「未运行」。
 //!
-//! 交互：双击打开管理面；Windows 右键、macOS 单击/右键/Control+单击弹菜单。
+//! 交互：双击打开管理面窗口；Windows 右键、macOS 单击/右键/Control+单击弹菜单。
+//! 管理面窗口全局唯一，加载代理回环地址上的 /admin，关闭即销毁。
 //! macOS 菜单栏没有原生双击，单击要等一个系统双击间隔确认不是双击后才弹菜单。
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -14,6 +15,8 @@ mod state;
 mod actions;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod icons;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod window;
 
 fn version() -> &'static str {
     option_env!("DEC_TRAY_VERSION").unwrap_or("dev")
@@ -40,14 +43,15 @@ mod app {
     use std::time::{Duration, Instant};
 
     use chrono::Utc;
-    use tao::event::{Event, StartCause};
-    use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
+    use tao::event::{Event, StartCause, WindowEvent};
+    use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
     use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
     use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
     use crate::actions;
     use crate::icons;
     use crate::state::{IconState, Notice, Status, Tracker, View};
+    use crate::window::{self, AdminWindow};
 
     const POLL: Duration = Duration::from_secs(3);
 
@@ -118,6 +122,12 @@ mod app {
         proxy: EventLoopProxy<UserEvent>,
         /// macOS：第一次左键抬起后等第二击的截止时间（需求 1.4）。
         pending_click: Option<Instant>,
+        /// 管理面窗口，同一时间最多一个。
+        admin: Option<AdminWindow>,
+        /// 托盘只有一个菜单栏图标、没有主窗口；macOS 上窗口打开期间需要
+        /// 应用菜单承载「编辑」快捷键，否则 WebView 里的复制粘贴失效。
+        #[cfg(target_os = "macos")]
+        app_menu: Option<Menu>,
     }
 
     impl App {
@@ -148,19 +158,47 @@ mod app {
                         "Dec 代理重启后未恢复",
                         "已等待 30 秒仍连不上代理，请从菜单「查看日志」排查。",
                     ),
-                    Notice::Cert(msg) => actions::notify("Dec 本机证书需关注", &msg),
                 }
             }
         }
 
-        fn open_admin(&self) {
+        /// 打开管理面窗口；已经开着就拉到前面，不会出现第二个。
+        fn open_admin(&mut self, target: &EventLoopWindowTarget<UserEvent>) {
             let v = self.tracker.last();
             if !v.reachable || v.admin_url.is_empty() {
                 actions::notify("无法打开管理面", "代理未就绪，请先确认代理在运行。");
                 return;
             }
-            if actions::open_target(&v.admin_url).is_err() {
-                actions::notify("打开浏览器失败", &format!("请手动访问：{}", v.admin_url));
+            if let Some(w) = self.admin.as_mut() {
+                w.focus(&v.admin_url);
+                mac::activate(target);
+                return;
+            }
+            match window::open(target, &v.admin_url) {
+                Ok(w) => {
+                    #[cfg(target_os = "macos")]
+                    {
+                        if self.app_menu.is_none() {
+                            self.app_menu = Some(mac::app_menu());
+                        }
+                    }
+                    self.admin = Some(w);
+                    mac::show_in_dock(target, true);
+                    mac::activate(target);
+                }
+                Err(e) => {
+                    // 窗口起不来（如 Windows 缺 WebView2 运行时）时退回浏览器，入口不能断。
+                    eprintln!("dec-tray: {e}");
+                    if actions::open_target(&v.admin_url).is_err() {
+                        actions::notify("打开管理面失败", &format!("请手动访问：{}", v.admin_url));
+                    }
+                }
+            }
+        }
+
+        fn close_admin(&mut self, target: &EventLoopWindowTarget<UserEvent>) {
+            if self.admin.take().is_some() {
+                mac::show_in_dock(target, false);
             }
         }
 
@@ -192,10 +230,10 @@ mod app {
             });
         }
 
-        fn on_menu(&mut self, id: &MenuId) -> bool {
+        fn on_menu(&mut self, id: &MenuId, target: &EventLoopWindowTarget<UserEvent>) -> bool {
             let it = &self.items;
             if id == it.open.id() {
-                self.open_admin();
+                self.open_admin(target);
             } else if id == it.status.id() {
                 self.show_status();
             } else if id == it.log.id() {
@@ -221,10 +259,10 @@ mod app {
             }
         }
 
-        fn on_tray(&mut self, ev: TrayIconEvent) {
+        fn on_tray(&mut self, ev: TrayIconEvent, target: &EventLoopWindowTarget<UserEvent>) {
             match ev {
                 #[cfg(target_os = "windows")]
-                TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => self.open_admin(),
+                TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => self.open_admin(target),
                 TrayIconEvent::Click {
                     button: MouseButton::Left,
                     button_state: MouseButtonState::Up,
@@ -234,7 +272,7 @@ mod app {
                         self.pending_click = None;
                         self.show_menu();
                     } else if self.pending_click.take().is_some() {
-                        self.open_admin();
+                        self.open_admin(target);
                     } else {
                         self.pending_click = Some(Instant::now() + mac::double_click_interval());
                     }
@@ -243,7 +281,7 @@ mod app {
             }
         }
 
-        fn flush_pending_click(&mut self) {
+        fn flush_pending_click(&mut self, _target: &EventLoopWindowTarget<UserEvent>) {
             if self.pending_click.is_some_and(|d| Instant::now() >= d) {
                 self.pending_click = None;
                 self.show_menu();
@@ -255,6 +293,56 @@ mod app {
     mod mac {
         use objc2_app_kit::{NSEvent, NSEventModifierFlags};
         use std::time::Duration;
+        use tao::event_loop::EventLoopWindowTarget;
+        use tao::platform::macos::{ActivationPolicy, EventLoopWindowTargetExtMacOS};
+        use tray_icon::menu::{Menu, PredefinedMenuItem, Submenu};
+
+        /// 窗口打开时临时进入 Dock 与 Cmd+Tab，关掉后退回只在菜单栏。
+        /// 一直是 Accessory 的话，窗口会被别的应用盖住且切不回来。
+        pub fn show_in_dock<T>(target: &EventLoopWindowTarget<T>, show: bool) {
+            target.set_activation_policy_at_runtime(if show {
+                ActivationPolicy::Regular
+            } else {
+                ActivationPolicy::Accessory
+            });
+        }
+
+        /// 把应用切到前台：从菜单栏图标唤起时 macOS 不会自动激活。
+        pub fn activate<T>(target: &EventLoopWindowTarget<T>) {
+            target.show_application();
+        }
+
+        /// 应用菜单：Cmd+C/V/X/A/Z 与 Cmd+W/Q 都靠它生效。
+        pub fn app_menu() -> Menu {
+            let menu = Menu::new();
+            let app = Submenu::with_items(
+                "Dec",
+                true,
+                &[
+                    &PredefinedMenuItem::hide(None),
+                    &PredefinedMenuItem::separator(),
+                    &PredefinedMenuItem::close_window(Some("关闭窗口")),
+                ],
+            )
+            .expect("应用菜单");
+            let edit = Submenu::with_items(
+                "编辑",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(None),
+                    &PredefinedMenuItem::redo(None),
+                    &PredefinedMenuItem::separator(),
+                    &PredefinedMenuItem::cut(None),
+                    &PredefinedMenuItem::copy(None),
+                    &PredefinedMenuItem::paste(None),
+                    &PredefinedMenuItem::select_all(None),
+                ],
+            )
+            .expect("编辑菜单");
+            let _ = menu.append_items(&[&app, &edit]);
+            menu.init_for_nsapp();
+            menu
+        }
 
         pub fn double_click_interval() -> Duration {
             let secs = NSEvent::doubleClickInterval();
@@ -269,6 +357,9 @@ mod app {
     #[cfg(not(target_os = "macos"))]
     mod mac {
         use std::time::Duration;
+        use tao::event_loop::EventLoopWindowTarget;
+        pub fn show_in_dock<T>(_: &EventLoopWindowTarget<T>, _: bool) {}
+        pub fn activate<T>(_: &EventLoopWindowTarget<T>) {}
         pub fn double_click_interval() -> Duration {
             Duration::from_millis(250)
         }
@@ -325,9 +416,12 @@ mod app {
             poke,
             proxy,
             pending_click: None,
+            admin: None,
+            #[cfg(target_os = "macos")]
+            app_menu: None,
         };
 
-        event_loop.run(move |event, _, control_flow| {
+        event_loop.run(move |event, target, control_flow| {
             match event {
                 // macOS 要求托盘在事件循环启动后再创建。
                 Event::NewEvents(StartCause::Init) => {
@@ -348,9 +442,15 @@ mod app {
                     }
                 }
                 Event::UserEvent(UserEvent::Polled(st)) => app.on_polled(st),
-                Event::UserEvent(UserEvent::Tray(ev)) => app.on_tray(ev),
+                Event::UserEvent(UserEvent::Tray(ev)) => app.on_tray(ev, target),
+                Event::WindowEvent { window_id, event: WindowEvent::CloseRequested, .. }
+                    if app.admin.as_ref().is_some_and(|w| w.id() == window_id) =>
+                {
+                    app.close_admin(target);
+                }
                 Event::UserEvent(UserEvent::Menu(ev)) => {
-                    if app.on_menu(&ev.id) {
+                    if app.on_menu(&ev.id, target) {
+                        app.admin = None;
                         app.tray = None;
                         *control_flow = ControlFlow::Exit;
                         return;
@@ -361,7 +461,7 @@ mod app {
                 }
                 _ => {}
             }
-            app.flush_pending_click();
+            app.flush_pending_click(target);
             *control_flow = match app.pending_click {
                 Some(deadline) => ControlFlow::WaitUntil(deadline),
                 None => ControlFlow::Wait,

@@ -19,7 +19,7 @@
 #   scripts/acceptance.sh --remote                 # 对生产服务器做线上验收
 #   scripts/acceptance.sh --remote --host decops@dec.firoyang.com
 #   scripts/acceptance.sh --binary ./dec-agent
-#   scripts/acceptance.sh --url http://127.0.0.1:8787
+#   scripts/acceptance.sh --url http://127.0.0.1:43679
 #   scripts/acceptance.sh --keep                   # 保留测试数据，便于人工观察
 #
 # 退出码：
@@ -29,7 +29,7 @@
 #   3  检查通过但有残留项
 set -uo pipefail
 
-BASE_URL="http://127.0.0.1:8787"
+BASE_URL="http://127.0.0.1:43679"
 BINARY=""
 BUNDLE=""
 PROJECT=""

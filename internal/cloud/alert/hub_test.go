@@ -214,7 +214,7 @@ func TestPendingEmptyDevice(t *testing.T) {
 // 类别是合并的依据，随意增删会让“合并”突然失效或把不相关的事合并在一起。
 func TestKindsStable(t *testing.T) {
 	want := []Kind{
-		KindBackupFailed, KindDeploy, KindEnroll, KindLocalTLS,
+		KindBackupFailed, KindDeploy, KindEnroll,
 		KindRecovery, KindRemoteRewritten, KindRenderSecret,
 	}
 	got := Kinds()

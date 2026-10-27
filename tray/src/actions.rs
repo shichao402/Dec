@@ -10,7 +10,7 @@ use std::time::Duration;
 use crate::state::Status;
 
 /// 代理回环地址。优先读代理落盘的 `agent.addr`（实际监听地址，需求 3.3），
-/// 其次 DEC_AGENT_PORT，最后 127.0.0.1:8787。每次轮询都重读，代理换端口重启后自动跟上。
+/// 其次 DEC_AGENT_PORT，最后 127.0.0.1:43679。每次轮询都重读，代理换端口重启后自动跟上。
 /// 地址文件只认回环主机，防止被改写成外部地址把托盘引到别处。
 pub fn agent_addr() -> String {
     if let Some(addr) = state_dir()
@@ -24,7 +24,7 @@ pub fn agent_addr() -> String {
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
         .filter(|p| *p > 0)
-        .unwrap_or(8787);
+        .unwrap_or(43679);
     format!("127.0.0.1:{port}")
 }
 

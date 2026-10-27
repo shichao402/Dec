@@ -461,7 +461,7 @@ func TestProductionDeployOnlyThroughCI(t *testing.T) {
 	}
 	// 反向：ExecStart 里不该直接出现这些可选参数名。
 	for _, forbidden := range []string{
-		"-backup-url $", "-audit-url $", "-local-tls-secret $",
+		"-backup-url $", "-audit-url $",
 	} {
 		if strings.Contains(string(prov), forbidden) {
 			t.Errorf("provision.sh 的 ExecStart 硬编码了可选参数 %q；"+

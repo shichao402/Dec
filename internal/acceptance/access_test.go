@@ -97,15 +97,23 @@ func TestCheckDotLocalhostPinsLoopback(t *testing.T) {
 	}
 }
 
-func TestCheckCertStates(t *testing.T) {
-	for state, want := range map[string]bool{"ok": true, "expiring": false, "none": false, "error": false} {
-		r := &runner{opts: Options{Log: io.Discard}, res: &Result{}}
-		var st accessStatus
-		st.TLS.State = state
-		st.TLS.NotAfter = time.Now().Add(30 * 24 * time.Hour)
-		r.checkCert(st)
-		if r.res.Steps[0].Passed != want {
-			t.Errorf("state=%s 期望 passed=%v", state, want)
+func TestCheckAdminURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"device_id":"dev-1"}`)
+	}))
+	defer srv.Close()
+
+	r := &runner{opts: Options{Log: io.Discard}, res: &Result{}}
+	r.checkAdminURL(context.Background(), accessStatus{DeviceID: "dev-1", AdminURL: srv.URL + "/admin"})
+	if s := r.res.Steps[0]; !s.Passed {
+		t.Fatalf("应通过：%+v", s)
+	}
+
+	for _, admin := range []string{"https://local.dec.firoyang.com/admin", "http://dec.localhost:1/admin", ""} {
+		r = &runner{opts: Options{Log: io.Discard}, res: &Result{}}
+		r.checkAdminURL(context.Background(), accessStatus{DeviceID: "dev-1", AdminURL: admin})
+		if r.res.Steps[0].Passed {
+			t.Fatalf("admin_url=%q 不是回环地址，应失败", admin)
 		}
 	}
 }

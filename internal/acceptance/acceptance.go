@@ -28,7 +28,7 @@ import (
 
 // Options 是一次验收的参数。
 type Options struct {
-	// BaseURL 是本机代理的回环地址，例如 http://127.0.0.1:8787。
+	// BaseURL 是本机代理的回环地址，例如 http://127.0.0.1:43679。
 	BaseURL string
 	// Bundle 是本次验收使用的临时 bundle 名。必须在开始时随机生成，
 	// 避免与真实资产同名，也避免两次验收互相干扰。

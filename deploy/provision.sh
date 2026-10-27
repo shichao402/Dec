@@ -296,7 +296,7 @@ log "已写入 GitHub 主机公钥到 $KNOWN_HOSTS_FILE"
 
 # --- systemd 单元 -------------------------------------------------------
 #
-# 可选运行参数（冷备/审计仓库地址、本机证书签发）走 EnvironmentFile 而不是
+# 可选运行参数（冷备/审计仓库地址）走 EnvironmentFile 而不是
 # 直接写进 ExecStart，理由有三个：
 #
 #   1. 部署脚本从 ExecStart 里 sed 提取 -listen 来推导回环地址。ExecStart 越短
@@ -304,10 +304,10 @@ log "已写入 GitHub 主机公钥到 $KNOWN_HOSTS_FILE"
 #   2. 这些东西改的是「往哪儿备份、用哪个密钥名」，属于运维操作，不该为了
 #      改一个地址去重跑 provision.sh（那是重建机器用的，副作用大）。
 #   3. 环境文件是可选的：不存在时服务照常启动，功能各自关闭（冷备不推送、
-#      本机证书不签发），符合「没配置就降级」的既有约定。
+#      审计不推送），符合「没配置就降级」的既有约定。
 #
-# 文件里只放非机密内容（仓库地址、密钥名、路径）。真正的机密（DNSPod 凭据、
-# 企业微信 webhook）在 Dec 的密钥库里，由根密钥加密，不落在这个文件里。
+# 文件里只放非机密内容（仓库地址、密钥名、路径）。真正的机密（企业微信
+# webhook）在 Dec 的密钥库里，由根密钥加密，不落在这个文件里。
 
 ENV_FILE="/etc/dec-cloud/service.env"
 # 模板只在文件不存在时写入：重跑 provision.sh 不能覆盖线上已经填好的值。
@@ -321,18 +321,15 @@ if [ ! -f "$ENV_FILE" ]; then
 #
 # 全部打开的样子（把注释去掉并按自己的仓库/密钥名改）：
 #
-# DEC_EXTRA_ARGS="-backup-url git@github.com:you/dec-backup.git -backup-key /etc/dec-cloud/keys/backup_deploy -audit-url git@github.com:you/dec-audit.git -audit-key /etc/dec-cloud/keys/audit_deploy -local-tls-domain local.dec.firoyang.com -local-tls-zone firoyang.com -local-tls-secret dnspod-token"
+# DEC_EXTRA_ARGS="-backup-url git@github.com:you/dec-backup.git -backup-key /etc/dec-cloud/keys/backup_deploy -audit-url git@github.com:you/dec-audit.git -audit-key /etc/dec-cloud/keys/audit_deploy"
 #
 # 各项含义：
 #   -backup-url   冷备仓库地址（需求 15.1）；留空不推送冷备
 #   -backup-key   冷备仓库的 deploy key 私钥路径
 #   -audit-url    审计仓库地址（需求 15.3）；留空不推送审计
 #   -audit-key    审计仓库的 deploy key 私钥路径
-#   -local-tls-domain  指向 127.0.0.1 的本机子域
-#   -local-tls-zone    该子域所在的 DNSPod 主域名
-#   -local-tls-secret  Dec 密钥库里存放 DNS 凭据的密钥名；留空则关闭签发
 #
-# 机密（DNS 凭据、企业微信 webhook）一律在 Dec 密钥库里，由根密钥加密，
+# 机密（企业微信 webhook）一律在 Dec 密钥库里，由根密钥加密，
 # 不写在这个文件里。这里只有仓库地址与文件路径。
 #
 # 推送目标的主机密钥校验文件不走这个文件，而是由 systemd 单元直接传
@@ -443,6 +440,6 @@ cat <<EOF
   3. 首次启动：systemctl start $SERVICE_NAME
   4. 初始化需要 Bitwarden 主密码与 2FA，必须由本人操作（需求 10.1）
   5. 根密钥位置：$ROOT_KEY_DIR/root.key（不在 $DATA_DIR 里，因此不进快照）
-  6. 可选功能（冷备、审计、本机证书）在 $ENV_FILE 里配置，
+  6. 可选功能（冷备、审计）在 $ENV_FILE 里配置，
      填好后 systemctl restart $SERVICE_NAME 生效；该文件不会被 provision.sh 覆盖。
 EOF
