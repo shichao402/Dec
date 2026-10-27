@@ -102,6 +102,11 @@ SH
   printf 'old-agent\n' >"$ENV_DIR/data/download/dec-agent-linux-amd64"
   printf 'ROOTKEY-SECRET\n' >"$ENV_DIR/data/root.key"
   chmod 600 "$ENV_DIR/data/root.key"
+  # 服务端 CA 私钥与证书（ADR 0052）：私钥不得进快照，证书可以。
+  mkdir -p "$ENV_DIR/data/certs"
+  printf 'CA-KEY-CURRENT\n' >"$ENV_DIR/data/certs/ca.key"
+  printf 'CA-CERT\n' >"$ENV_DIR/data/certs/ca.crt"
+  chmod 600 "$ENV_DIR/data/certs/ca.key"
   mkdir -p "$ENV_DIR/data/ssot" "$ENV_DIR/data/state"
   printf 'ssot\n' >"$ENV_DIR/data/ssot/HEAD"
 }
@@ -160,6 +165,9 @@ check "部署记录结果为 ok" 'grep -q "\"result\": \"ok\"" "$DEC_DATA_DIR/de
 check "根密钥未被改动" '[ "$(cat "$DEC_DATA_DIR/root.key")" = "ROOTKEY-SECRET" ]'
 check "快照里没有根密钥" '[ -z "$(find "$DEC_SNAP_DIR" -name root.key -print -quit)" ]'
 check "快照存在且含二进制" '[ -n "$(find "$DEC_SNAP_DIR" -name dec-cloud -print -quit)" ]'
+check "快照里没有 CA 私钥" '[ -z "$(find "$DEC_SNAP_DIR" -name ca.key -print -quit)" ]'
+check "快照里保留 CA 证书" '[ -n "$(find "$DEC_SNAP_DIR" -name ca.crt -print -quit)" ]'
+check "CA 私钥未被改动" '[ "$(cat "$DEC_DATA_DIR/certs/ca.key")" = "CA-KEY-CURRENT" ]'
 cleanup_env
 
 # 2. 健康检查不通过：回滚到旧版本，维护标记保留，记录为回滚。
@@ -349,6 +357,28 @@ else
   ok "缺少 GitHub token 应拒绝"
 fi
 check "拒绝缺 token 时未改二进制" '[ "$(cat "$DEC_APP_DIR/dec-cloud")" = "old-binary" ]'
+cleanup_env
+
+# 6f. 回滚不得用快照里的旧 CA 私钥覆盖当前那份，部署后还要清掉历史快照里的私钥（ADR 0052）。
+newenv
+# 预置一份"规则上线前"的旧快照：里面带着旧 CA 私钥与根密钥。
+legacy="$DEC_SNAP_DIR/20000101T000000Z"
+mkdir -p "$legacy/data/certs"
+printf 'old-binary\n' >"$legacy/dec-cloud"
+printf 'CA-KEY-STALE\n' >"$legacy/data/certs/ca.key"
+printf 'ROOTKEY-STALE\n' >"$legacy/data/root.key"
+mkpayload "v1.6.0" "$ENV_DIR/payload.tar"
+export FAKE_HEALTH_BODY='{"ok":false,"server_version":"v1.6.0","required_client":"v1.6.0","protocol":1,"maintenance":true}'
+"$SCRIPT" <"$ENV_DIR/payload.tar" >/dev/null 2>&1 || true
+check "部署后历史快照里的 CA 私钥已清除" '[ ! -e "$legacy/data/certs/ca.key" ]'
+check "部署后历史快照里的根密钥已清除" '[ ! -e "$legacy/data/root.key" ]'
+# 回滚路径：快照里即便有私钥，也不能写回数据目录。
+newsnap="$(ls -1dt "$DEC_SNAP_DIR"/* | head -1)"
+printf 'CA-KEY-STALE\n' >"$newsnap/data/certs/ca.key"
+mkpayload "v1.6.1" "$ENV_DIR/payload.tar"
+export FAKE_HEALTH_BODY='{"ok":false,"server_version":"v1.0.0","required_client":"v1.0.0","protocol":1,"maintenance":true}'
+"$SCRIPT" <"$ENV_DIR/payload.tar" >/dev/null 2>&1 || true
+check "回滚不覆盖当前 CA 私钥" '[ "$(cat "$DEC_DATA_DIR/certs/ca.key")" = "CA-KEY-CURRENT" ]'
 cleanup_env
 
 # 7. 只保留最近两份快照。

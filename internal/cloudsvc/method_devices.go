@@ -43,6 +43,7 @@ func (s *Server) mDevices(req *proto.Request, dev ssot.Device) *proto.Response {
 			ReportedVersion: d.ReportedVersion,
 			CertNotAfter:    d.CertNotAfter,
 			UserBundles:     d.UserBundles,
+			NeedsReenroll:   d.NeedsReenroll,
 		}
 		if at, ok := seen[d.ID]; ok {
 			info.Online = now.Sub(at) < onlineWindow

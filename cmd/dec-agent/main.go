@@ -10,6 +10,7 @@
 //	dec-agent initialize  首次初始化（生成根密钥、写冷备、登记第一台设备）
 //	dec-agent enroll      在 CLI 里登记（无桌面环境）
 //	dec-agent recover     在 CLI 里恢复（无桌面环境）
+//	dec-agent reenroll    服务端 CA 重建后用原设备密钥重新登记
 //	dec-agent status      打印状态
 //	dec-agent projects    管理本机项目登记
 //	dec-agent install     注册系统服务
@@ -64,6 +65,8 @@ func main() {
 		err = cmdEnroll(args)
 	case "recover":
 		err = cmdRecover(args)
+	case "reenroll":
+		err = cmdReenroll(args)
 	case "status":
 		err = cmdStatus(args)
 	case "projects":
@@ -98,7 +101,8 @@ func usage() {
   dec-agent configure    配置服务地址
   dec-agent initialize   首次初始化（生成根密钥并登记第一台设备）
   dec-agent enroll       在 CLI 里登记设备
-  dec-agent recover      在 CLI 里恢复（服务端进入恢复模式时）
+  dec-agent recover      在 CLI 里恢复（服务端根密钥或 CA 缺失时）
+  dec-agent reenroll     用本机原设备密钥重新登记（服务端 CA 重建后）
   dec-agent status       打印当前状态
   dec-agent projects     列出本机项目登记
   dec-agent mcp-config   打印本机 MCP 条目与各宿主的写入状态
@@ -226,8 +230,16 @@ func cmdRun(args []string) error {
 				Email: in.Email, Password: in.Password, TOTP: in.TOTP, DeviceName: in.Device,
 			})
 		},
-		Recover: func(r *http.Request, in agent.LoopbackEnrollInput) (*agent.EnrollResult, error) {
-			return agent.Recover(ctx, syncer.Client(), store, agent.EnrollInput{
+		Recover: func(r *http.Request, in agent.LoopbackEnrollInput) (*agent.RecoverOutcome, error) {
+			return agent.Recover(ctx, syncer.Client(), store, agent.RecoverInput{
+				EnrollInput: agent.EnrollInput{
+					Email: in.Email, Password: in.Password, TOTP: in.TOTP, DeviceName: in.Device,
+				},
+				DeclareCALost: in.DeclareCALost,
+			})
+		},
+		Reenroll: func(r *http.Request, in agent.LoopbackEnrollInput) (*agent.EnrollResult, error) {
+			return agent.Reenroll(ctx, syncer.Client(), store, agent.EnrollInput{
 				Email: in.Email, Password: in.Password, TOTP: in.TOTP, DeviceName: in.Device,
 			})
 		},
@@ -454,6 +466,7 @@ func cmdRecover(args []string) error {
 	password := fs.String("password", "", "Bitwarden 主密码（建议用环境变量 DEC_BW_PASSWORD）")
 	totp := fs.String("totp", "", "两步验证码")
 	name := fs.String("name", "", "设备名")
+	declareLost := fs.Bool("declare-ca-lost", false, "确认服务端 CA 已无法从 Bitwarden 找回，同意重建（所有设备需重新登记）")
 	insecure := fs.Bool("insecure", false, "跳过 TLS 校验（仅本机调试）")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -486,14 +499,84 @@ func cmdRecover(args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := agent.Recover(ctx, client, store, agent.EnrollInput{
-		Email: c.Email, Password: c.Password, TOTP: c.TOTP, DeviceName: *name,
+	res, err := agent.Recover(ctx, client, store, agent.RecoverInput{
+		EnrollInput: agent.EnrollInput{
+			Email: c.Email, Password: c.Password, TOTP: c.TOTP, DeviceName: *name,
+		},
+		DeclareCALost: *declareLost,
+	})
+	if err != nil {
+		if agent.CodeOf(err) == proto.ErrCANotInBackup {
+			return fmt.Errorf("%w\n\n若确认这份 CA 已无法找回，加 --declare-ca-lost 重试：将生成新 CA，所有已登记设备都需要重新登记", err)
+		}
+		return err
+	}
+	printRecoverOutcome(res)
+	return nil
+}
+
+// cmdReenroll 用本机原设备密钥重新登记（服务端 CA 重建后，ADR 0052）。
+func cmdReenroll(args []string) error {
+	fs := flag.NewFlagSet("reenroll", flag.ExitOnError)
+	email := fs.String("email", "", "Bitwarden 邮箱")
+	password := fs.String("password", "", "Bitwarden 主密码（建议用环境变量 DEC_BW_PASSWORD）")
+	totp := fs.String("totp", "", "两步验证码")
+	insecure := fs.Bool("insecure", false, "跳过 TLS 校验（仅本机调试）")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	pw := *password
+	if pw == "" {
+		pw = os.Getenv("DEC_BW_PASSWORD")
+	}
+	dir := mustState()
+	cfg, err := agent.LoadConfig(dir)
+	if err != nil {
+		return err
+	}
+	if cfg.ServerURL == "" {
+		return fmt.Errorf("先执行 dec-agent configure --url https://...")
+	}
+	store := agent.NewIdentityStore(dir)
+	client, err := agent.NewClient(agent.ClientOptions{
+		BaseURL:  cfg.ServerURL,
+		Version:  Version,
+		Identity: store.Load2,
+		Insecure: *insecure,
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("恢复成功：设备 %s，证书到期 %s\n", res.DeviceID, res.NotAfter.Format(time.RFC3339))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	c, err := collectCreds(*email, pw, *totp)
+	if err != nil {
+		return err
+	}
+	res, err := agent.Reenroll(ctx, client, store, agent.EnrollInput{
+		Email: c.Email, Password: c.Password, TOTP: c.TOTP,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("重新登记成功：设备 %s（沿用原设备，订阅保留），证书到期 %s\n", res.DeviceID, res.NotAfter.Format(time.RFC3339))
 	return nil
+}
+
+// printRecoverOutcome 打印恢复取回了什么，以及接下来要不要重新登记。
+func printRecoverOutcome(res *agent.RecoverOutcome) {
+	if res.RootKeyRestored {
+		fmt.Println("根密钥已从 Bitwarden 取回。")
+	}
+	if res.CARestored {
+		fmt.Println("服务端 CA 已从 Bitwarden 取回，已登记设备无需重新登记。")
+	}
+	if res.CARebuilt {
+		fmt.Printf("服务端 CA 已重建，%d 台设备需要重新登记（在各设备上执行 dec-agent reenroll）。\n", res.ReenrollDevices)
+	}
+	if res.Enrolled {
+		fmt.Printf("本机设备 %s 证书已更新，到期 %s\n", res.DeviceID, res.NotAfter.Format(time.RFC3339))
+	}
 }
 
 // cmdStatus 打印状态。

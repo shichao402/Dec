@@ -38,6 +38,30 @@ func GenerateKeyPair() (privPEM, pubPEM string, err error) {
 	return privPEM, pubPEM, nil
 }
 
+// PublicKeyFromPrivate 从 PEM 私钥导出 PEM 公钥。
+//
+// 用于"带着原设备密钥重新登记"：服务端 CA 重建后，同一把设备公钥再登记一次，
+// 服务端会沿用原设备 ID，订阅与项目登记原样保留（ADR 0052）。
+func PublicKeyFromPrivate(privPEM string) (string, error) {
+	block, _ := pem.Decode([]byte(privPEM))
+	if block == nil {
+		return "", fmt.Errorf("设备私钥无法解析")
+	}
+	keyAny, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("设备私钥无法解析: %w", err)
+	}
+	key, ok := keyAny.(*ecdsa.PrivateKey)
+	if !ok {
+		return "", fmt.Errorf("设备私钥类型不支持")
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return "", fmt.Errorf("编码公钥失败: %w", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})), nil
+}
+
 // TLSCertificate 把身份转成 TLS 客户端证书。
 func (id *Identity) TLSCertificate() (tls.Certificate, error) {
 	if id == nil || id.CertPEM == "" || id.KeyPEM == "" {

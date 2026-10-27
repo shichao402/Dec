@@ -727,3 +727,44 @@ func repoRoot(t *testing.T) string {
 		dir = parent
 	}
 }
+
+// TestServerCAPrivateKeyStaysOutOfSnapshots 守住"服务端 CA 私钥只在本机与 Bitwarden"（ADR 0052）。
+//
+// 部署快照与回滚都碰数据目录，最容易在这里多出一份明文：
+// 快照带着 ca.key，回滚时就会把旧 CA 写回来，新登记的设备随之全部失效。
+// 两处排除规则只要少一处，这条测试就失败。
+func TestServerCAPrivateKeyStaysOutOfSnapshots(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "deploy", "dec-cloud-deploy.sh"))
+	if err != nil {
+		t.Fatalf("读部署脚本失败: %v", err)
+	}
+	script := string(data)
+	if n := strings.Count(script, "--exclude='./certs/ca.key'"); n < 2 {
+		t.Errorf("部署脚本应在快照与回滚两处排除 certs/ca.key，实际 %d 处", n)
+	}
+	if !strings.Contains(script, "purge_snapshot_secrets") {
+		t.Error("部署脚本应清理历史快照中残留的私钥")
+	}
+
+	// 仓库里不得出现任何 ca.key 文件：私钥一旦提交，公开仓库的历史就收不回来了。
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "node_modules", ".cache", "target":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() == "ca.key" {
+			t.Errorf("仓库里出现了服务端 CA 私钥文件: %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("遍历仓库失败: %v", err)
+	}
+}

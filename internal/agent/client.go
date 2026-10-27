@@ -31,6 +31,12 @@ var (
 	ErrIdentityRejected = errors.New("设备身份被拒绝")
 	// ErrMaintenance 表示服务端处于维护状态。
 	ErrMaintenance = errors.New("服务端维护中")
+	// ErrServerCAPending 表示服务端 CA 待恢复（ADR 0052）：需要有人在本机页面做恢复。
+	ErrServerCAPending = errors.New("服务端 CA 待恢复")
+	// ErrServerRecovery 表示服务端根密钥缺失，处于恢复模式。
+	ErrServerRecovery = errors.New("服务端处于恢复模式")
+	// ErrServerIdentityReset 表示服务端 CA 已重建，本机证书来自旧 CA，需要重新登记。
+	ErrServerIdentityReset = errors.New("服务端身份已重置，需要重新登记")
 )
 
 // Client 是协议客户端。
@@ -227,9 +233,9 @@ func (c *Client) Enroll(ctx context.Context, in proto.EnrollBeginRequest) (*prot
 	return &out, nil
 }
 
-// Recover 在恢复模式下取回根密钥并重新登记（需求 11）。
-func (c *Client) Recover(ctx context.Context, in proto.RecoverRequest) (*proto.EnrollBeginResponse, error) {
-	var out proto.EnrollBeginResponse
+// Recover 在恢复模式下取回缺失的根密钥与服务端 CA（需求 11、ADR 0052）。
+func (c *Client) Recover(ctx context.Context, in proto.RecoverRequest) (*proto.RecoverResponse, error) {
+	var out proto.RecoverResponse
 	if err := c.call(ctx, proto.MethodRecover, proto.SourceEnroll, in, &out, true); err != nil {
 		return nil, err
 	}
@@ -362,6 +368,12 @@ func errorFromResponse(resp *proto.Response) error {
 		return fmt.Errorf("%w: %s", ErrIdentityRejected, resp.Error)
 	case proto.ErrMaintenance:
 		return fmt.Errorf("%w: %s", ErrMaintenance, resp.Error)
+	case proto.ErrCAPendingRestore:
+		return fmt.Errorf("%w: %s", ErrServerCAPending, resp.Error)
+	case proto.ErrDeviceNeedsReenroll:
+		return fmt.Errorf("%w: %s", ErrServerIdentityReset, resp.Error)
+	case proto.ErrRecoveryMode:
+		return fmt.Errorf("%w: %s", ErrServerRecovery, resp.Error)
 	}
 	return &protoError{code: resp.Code, msg: resp.Error}
 }
@@ -393,6 +405,15 @@ func CodeOf(err error) proto.ErrorCode {
 	}
 	if errors.Is(err, ErrIdentityRejected) {
 		return proto.ErrUnauthorized
+	}
+	if errors.Is(err, ErrServerCAPending) {
+		return proto.ErrCAPendingRestore
+	}
+	if errors.Is(err, ErrServerIdentityReset) {
+		return proto.ErrDeviceNeedsReenroll
+	}
+	if errors.Is(err, ErrServerRecovery) {
+		return proto.ErrRecoveryMode
 	}
 	if errors.Is(err, ErrMaintenance) {
 		return proto.ErrMaintenance

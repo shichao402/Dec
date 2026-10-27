@@ -82,6 +82,21 @@ pre { background: #f6f7f9; border: 1px solid #e5e7eb; border-radius: 8px; paddin
     <p class="hint">凭据只用于向服务端证明身份，用完即弃，不会保存在本机。</p>
   </div>
 
+  <div class="card" id="recoverCard" style="display:none">
+    <h2 id="recoverTitle">服务端需要恢复</h2>
+    <p class="hint" id="recoverHint"></p>
+    <label for="remail">Bitwarden 邮箱</label>
+    <input id="remail" autocomplete="username">
+    <label for="rpassword">主密码</label>
+    <input id="rpassword" type="password" autocomplete="current-password">
+    <label for="rtotp">两步验证码（如已开启）</label>
+    <input id="rtotp" autocomplete="one-time-code">
+    <button id="recoverBtn" onclick="recover(false)">从 Bitwarden 恢复</button>
+    <button id="declareBtn" class="ghost" style="display:none" onclick="recover(true)">宣告 CA 丢失并重建</button>
+    <button id="reenrollBtn" style="display:none" onclick="reenroll()">重新登记本机</button>
+    <p class="hint">凭据只用于向服务端证明身份，用完即弃，不会保存在本机。</p>
+  </div>
+
   <div class="card">
     <h2>项目</h2>
     <div id="projects"><div class="row"><span class="k">加载中</span></div></div>
@@ -128,10 +143,13 @@ async function refresh() {
     html += row('维护中', s.maintenance ? '是' : '否', s.maintenance ? 'bad' : 'ok');
     html += row('最近对账', s.last_sync ? new Date(s.last_sync).toLocaleString() : '—');
     html += row('当前 revision', s.revision);
+    if (s.ca_state) html += row('服务端 CA', s.ca_state === 'ready' ? '正常' : s.ca_state, s.ca_state === 'ready' ? 'ok' : 'bad');
+    if (s.ca_backup_pending) html += row('CA 备份', '尚未写入 Bitwarden', 'bad');
     if (s.last_error) html += row('最近错误', s.last_error, 'bad');
     $('status').innerHTML = html;
     if (s.server_url) $('url').value = s.server_url;
     $('enrollCard').style.display = s.device_id ? 'none' : 'block';
+    showRecover(s);
   } catch (e) {
     $('status').innerHTML = row('读取状态失败', String(e), 'bad');
   }
@@ -169,6 +187,76 @@ async function enroll() {
     alert('登记成功。');
     refresh();
   } catch (e) { alert('登记失败：' + e.message); }
+}
+
+// showRecover 按服务端状态与最近错误码决定显示哪个恢复入口（ADR 0052）。
+let caNotInBackup = false;
+function showRecover(s) {
+  const code = s.error_code || '';
+  const reenroll = code === 'device_needs_reenroll';
+  const restore = code === 'server_ca_pending_restore' || code === 'recovery_mode' ||
+    (s.ca_state && s.ca_state !== 'ready');
+  $('recoverCard').style.display = (reenroll || restore || caNotInBackup) ? 'block' : 'none';
+  $('reenrollBtn').style.display = reenroll ? 'inline-block' : 'none';
+  $('recoverBtn').style.display = reenroll ? 'none' : 'inline-block';
+  $('declareBtn').style.display = caNotInBackup ? 'inline-block' : 'none';
+  if (reenroll) {
+    $('recoverTitle').textContent = '服务端身份已重置';
+    $('recoverHint').textContent = '服务端 CA 已重建，本机证书失效。重新登记会沿用原设备和全部订阅，本机已有文件不受影响。';
+  } else if (caNotInBackup) {
+    $('recoverTitle').textContent = 'Bitwarden 里找不到服务端 CA';
+    $('recoverHint').textContent = '确认无法找回时可宣告丢失：将生成新 CA，所有已登记设备都需要重新登记（订阅保留）。';
+  } else {
+    $('recoverTitle').textContent = '服务端需要恢复';
+    $('recoverHint').textContent = '服务端缺少根密钥或 CA 私钥，需要用 Bitwarden 主密码和两步验证码取回。本机已有文件保持不变。';
+  }
+}
+
+function recoverCreds() {
+  return {
+    email: $('remail').value.trim(),
+    password: $('rpassword').value,
+    totp: $('rtotp').value.trim()
+  };
+}
+
+function clearRecoverCreds() {
+  $('rpassword').value = '';
+  $('rtotp').value = '';
+}
+
+async function recover(declare) {
+  if (declare && !confirm('确定宣告服务端 CA 丢失？\n\n将生成新 CA，所有已登记设备都需要重新登记（订阅保留）。此操作不可撤销。')) return;
+  const body = recoverCreds();
+  body.declare_ca_lost = !!declare;
+  try {
+    const r = await fetch('/api/recover', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      if (data.code === 'server_ca_not_in_backup') { caNotInBackup = true; refresh(); }
+      throw new Error(data.error || ('HTTP ' + r.status));
+    }
+    caNotInBackup = false;
+    clearRecoverCreds();
+    const msg = [];
+    if (data.root_key_restored) msg.push('根密钥已取回');
+    if (data.ca_restored) msg.push('服务端 CA 已取回，设备无需重新登记');
+    if (data.ca_rebuilt) msg.push('服务端 CA 已重建，' + data.reenroll_devices + ' 台设备需要重新登记');
+    if (data.enrolled) msg.push('本机证书已更新');
+    alert('恢复完成：' + (msg.join('；') || '无变化'));
+    refresh();
+  } catch (e) { alert('恢复失败：' + e.message); }
+}
+
+async function reenroll() {
+  try {
+    await postJSON('/api/reenroll', recoverCreds());
+    clearRecoverCreds();
+    alert('重新登记成功，原设备与订阅已保留。');
+    refresh();
+  } catch (e) { alert('重新登记失败：' + e.message); }
 }
 
 refresh();

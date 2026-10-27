@@ -55,6 +55,8 @@ type Env struct {
 	Registry *identity.Registry
 	CA       *identity.CA
 	Audit    *audit.Log
+	// caErr 是 CA 不可用的原因；只有签发证书需要 CA。
+	caErr error
 	// AuditWarn 收到审计写入或打开失败的通知。
 	//
 	// 应急场景下「把设备吊销掉」比「审计一定写成功」更重要，
@@ -90,15 +92,15 @@ func Open(dataDir string) (*Env, error) {
 	if err != nil {
 		return nil, fmt.Errorf("打开 SSOT 仓库失败: %w", err)
 	}
-	ca, err := loadCA(filepath.Join(abs, certSubdir))
-	if err != nil {
-		return nil, err
-	}
+	// CA 缺失不阻止打开：吊销只改登记表，不需要 CA（ADR 0052）。
+	// 服务端 CA 丢失、等待从 Bitwarden 恢复的时候，恰恰最需要能吊销设备。
+	ca, caErr := loadCA(filepath.Join(abs, certSubdir), store)
 
 	env := &Env{
 		Store:    store,
 		Registry: identity.NewRegistry(store),
 		CA:       ca,
+		caErr:    caErr,
 	}
 	auditLog, auditErr := audit.Open(filepath.Join(abs, auditSubdir))
 	if auditErr != nil {
@@ -123,21 +125,28 @@ func (e *Env) Close() error {
 	return nil
 }
 
-// loadCA 读取服务端身份。
+// loadCA 读取服务端身份，并与 git 记录的指纹核对（ADR 0052）。
 //
-// 与 cloudsvc 的 loadOrCreateCA 的关键区别：**这里不创建**。
-// 应急命令跑到一个没有身份的目录上，说明数据目录指错了；
-// 此时自动生成新 CA 会签出一批连不上任何地方的证书，还覆盖掉排查线索。
-func loadCA(dir string) (*identity.CA, error) {
-	keyPEM, keyErr := os.ReadFile(filepath.Join(dir, "ca.key"))
-	certPEM, certErr := os.ReadFile(filepath.Join(dir, "ca.crt"))
-	if keyErr != nil || certErr != nil {
-		return nil, fmt.Errorf("读取服务端身份失败（目录 %s）："+
-			"应急命令不会生成新的 CA，请确认数据目录是否正确", dir)
-	}
-	ca, err := identity.LoadCA(keyPEM, certPEM)
+// 与服务端启动时的判定共用 identity.LoadLocalCA，但**这里绝不创建**：
+// 应急命令跑到一个没有身份的目录上，要么数据目录指错了，要么 CA 正等着
+// 从 Bitwarden 恢复；此时自动生成新 CA 会签出一批连不上任何地方的证书，
+// 还覆盖掉排查线索。
+//
+// 指纹也要核对：本机 CA 与 git 记录不一致时签出来的证书，
+// 服务端启动后会判为不一致而拒绝业务，签了等于白签。
+func loadCA(dir string, store *ssot.Store) (*identity.CA, error) {
+	ca, err := identity.LoadLocalCA(dir)
 	if err != nil {
-		return nil, fmt.Errorf("加载服务端身份失败: %w", err)
+		return nil, fmt.Errorf("服务端身份不可用（目录 %s）: %w", dir, err)
+	}
+	if ca == nil {
+		return nil, fmt.Errorf("本机没有服务端 CA 私钥（目录 %s）：应急命令不会生成新的 CA；"+
+			"请确认数据目录，或先用 dec-agent recover 从 Bitwarden 取回 CA", dir)
+	}
+	if rec, ok, rerr := identity.ReadCARecord(store); rerr == nil && ok {
+		if fp := identity.CAFingerprint(ca); fp != rec.Fingerprint {
+			return nil, fmt.Errorf("本机服务端 CA 指纹 %s 与 git 记录 %s 不一致，拒绝用它签发", fp, rec.Fingerprint)
+		}
 	}
 	return ca, nil
 }
@@ -186,6 +195,9 @@ func (e *Env) IssueCert(deviceID, pubKeyPEM, name string) (*identity.Issued, sso
 	}
 	if pubKeyPEM == "" {
 		return nil, ssot.Device{}, errors.New("必须提供设备公钥（PEM）")
+	}
+	if e.CA == nil {
+		return nil, ssot.Device{}, fmt.Errorf("无法签发证书: %w", e.caErr)
 	}
 	pub, err := identity.ParsePublicKey([]byte(pubKeyPEM))
 	if err != nil {

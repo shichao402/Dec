@@ -116,6 +116,19 @@ func (s *Server) dispatch(r *http.Request, req *proto.Request) *proto.Response {
 		}
 	}
 
+	// 4.6 服务端 CA 不可用：设备证书没法校验，也没法签发（ADR 0052）。
+	//
+	// 与根密钥恢复模式一样排在身份校验之前：否则代理看到的只是
+	// "设备未登记"之类的误导信息，不知道该去做 CA 恢复。
+	if st := s.boot.CAStatus(); st.State != identity.CAReady {
+		switch req.Method {
+		case proto.MethodHello, proto.MethodRecover:
+		default:
+			return proto.Fail(id, proto.ErrCAPendingRestore,
+				"服务端 CA 不可用（"+st.Detail+"），请先在本机页面或 dec-agent recover 完成恢复")
+		}
+	}
+
 	// 5. 身份。免证书方法跳过；证书可选方法尽力取身份，取不到也放行。
 	var dev ssot.Device
 	if !proto.NoCertMethods[req.Method] {
@@ -129,6 +142,10 @@ func (s *Server) dispatch(r *http.Request, req *proto.Request) *proto.Response {
 		default:
 			// 恢复模式下的设备可能已经没有有效证书，但改设备类型这类操作本身不需要设备证书，
 			// 它只在 SourceAdmin/HostCLI 下放行，见各方法内部的权限检查。
+			if errors.Is(err, ErrNeedsReenroll) {
+				return proto.Fail(id, proto.ErrDeviceNeedsReenroll,
+					"服务端 CA 已重建，本机证书已失效：请用 dec-agent reenroll 或本机页面重新登记（沿用原设备与订阅）")
+			}
 			return proto.Fail(id, proto.ErrUnauthorized, err.Error())
 		}
 	}
@@ -250,6 +267,10 @@ func failFromError(id string, err error) *proto.Response {
 		code = proto.ErrBootstrapClosed
 	case errors.Is(err, identity.ErrRecoveryRequired):
 		code = proto.ErrNotInitialized
+	case errors.Is(err, identity.ErrCANotInBackup):
+		code = proto.ErrCANotInBackup
+	case errors.Is(err, identity.ErrCAUnavailable):
+		code = proto.ErrCAPendingRestore
 	case errors.Is(err, identity.ErrCertRevoked), errors.Is(err, identity.ErrCertExpired),
 		errors.Is(err, identity.ErrCertInvalid):
 		code = proto.ErrUnauthorized

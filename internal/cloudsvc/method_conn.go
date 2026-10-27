@@ -30,6 +30,7 @@ func (s *Server) mHello(req *proto.Request, payload any, dev ssot.Device) *proto
 		s.notify.MarkDevice(dev.ID, time.Now())
 	}
 
+	ca := s.boot.CAStatus()
 	return okPayload(req.ID, &proto.HelloResponse{
 		ServerVersion:   s.cfg.ServerVersion,
 		RequiredVersion: s.cfg.RequiredVersion,
@@ -37,6 +38,8 @@ func (s *Server) mHello(req *proto.Request, payload any, dev ssot.Device) *proto
 		Maintenance:     s.maintenance.Load(),
 		Aligned:         aligned,
 		DeviceID:        dev.ID,
+		CAState:         string(ca.State),
+		CABackupPending: ca.BackupPending,
 	})
 }
 
@@ -220,6 +223,10 @@ func (s *Server) mStatus(req *proto.Request, dev ssot.Device) *proto.Response {
 		Revision:        s.render.CurrentRevision(),
 		RootKeyID:       st.KeyID,
 	}
+	ca := s.boot.CAStatus()
+	out.CAState = string(ca.State)
+	out.CAFingerprint = ca.Fingerprint
+	out.CABackupPending = ca.BackupPending
 	s.backupMu.RLock()
 	bt, ok := s.backupCheckedAt["backup"]
 	if ok {

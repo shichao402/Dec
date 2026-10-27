@@ -9,15 +9,11 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"math/big"
-	"os"
 	"path/filepath"
 	"time"
 
 	"golang.org/x/crypto/acme/autocert"
-
-	"github.com/shichao402/Dec/internal/cloud/identity"
 )
 
 // TLS 与 CA 证书的管理。
@@ -29,49 +25,11 @@ import (
 //     透传 TLS 流到本服务的回环高位端口，acme-tls/1 握手与设备证书都不经 nginx 解密。
 //  2. 调试：AcceptAny 时用自签证书，只在 127.0.0.1 上使用。
 
-// loadOrCreateCA 加载或创建服务端身份 CA。
+// 服务端 CA（签发与校验设备证书）不在这里管理。
 //
-// CA 私钥只在本机文件里（0600），不进仓库、不进冷备：
-// 它签发的只是设备证书，丢了就重新登记全部设备，不影响任何资产与密钥。
-func loadOrCreateCA(dir string) (*identity.CA, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("创建证书目录失败: %w", err)
-	}
-	keyPath := filepath.Join(dir, "ca.key")
-	certPath := filepath.Join(dir, "ca.crt")
-
-	keyPEM, keyErr := os.ReadFile(keyPath)
-	certPEM, certErr := os.ReadFile(certPath)
-	if keyErr == nil && certErr == nil {
-		ca, err := identity.LoadCA(keyPEM, certPEM)
-		if err != nil {
-			return nil, fmt.Errorf("加载 CA 失败: %w", err)
-		}
-		return ca, nil
-	}
-	if keyErr != nil && !errors.Is(keyErr, os.ErrNotExist) {
-		return nil, keyErr
-	}
-	if certErr != nil && !errors.Is(certErr, os.ErrNotExist) {
-		return nil, certErr
-	}
-
-	ca, err := identity.NewCA()
-	if err != nil {
-		return nil, err
-	}
-	newKey, err := ca.KeyPEM()
-	if err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(keyPath, newKey, 0o600); err != nil {
-		return nil, fmt.Errorf("写入 CA 私钥失败: %w", err)
-	}
-	if err := os.WriteFile(certPath, ca.CertPEM(), 0o600); err != nil {
-		return nil, fmt.Errorf("写入 CA 证书失败: %w", err)
-	}
-	return ca, nil
-}
+// 它的私钥只存在服务器本机 certs/ca.key 与 Bitwarden 两处，git 只记证书与指纹；
+// 缺失时绝不静默重建，而是进入恢复模式等用户从 Bitwarden 取回（ADR 0052）。
+// 判定与读写见 identity.ResolveCA，运行期由 Bootstrapper 持有。
 
 // tlsConfig 准备服务端 TLS 配置。
 //

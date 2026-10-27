@@ -204,8 +204,10 @@ wait_health() {
 # snapshot 备份当前版本、发布清单、客户端二进制与数据（需求 21.2）。
 #
 # 排除项：
-#   root.key   根密钥，绝不出现在快照里（需求 21.5）
-#   deploy/    协作状态，回滚它没有意义
+#   root.key       根密钥，绝不出现在快照里（需求 21.5）
+#   certs/ca.key   服务端 CA 私钥，只在本机与 Bitwarden（ADR 0052）；
+#                  留在快照里既多一份明文，回滚还会把旧 CA 带回来
+#   deploy/        协作状态，回滚它没有意义
 snapshot() {
   local dir="$1"
   mkdir -p "$dir/data"
@@ -228,20 +230,42 @@ snapshot() {
 
   tar -C "$DATA_DIR" \
     --exclude='./root.key' \
+    --exclude='./certs/ca.key' \
     --exclude='./deploy' \
     -cf - . | tar -C "$dir/data" -xf -
 
-  # 自检：快照里出现根密钥说明 exclude 写错了，这里兜住。
-  if [ -e "$dir/data/root.key" ]; then
-    rm -f "$dir/data/root.key"
-    log "警告：快照里出现根密钥副本，已删除（请检查排除规则）"
-  fi
+  # 自检：快照里出现根密钥或 CA 私钥说明 exclude 写错了，这里兜住。
+  local secret
+  for secret in root.key certs/ca.key; do
+    if [ -e "$dir/data/$secret" ]; then
+      rm -f "$dir/data/$secret"
+      log "警告：快照里出现 ${secret} 副本，已删除（请检查排除规则）"
+    fi
+  done
+}
+
+# purge_snapshot_secrets 清掉历史快照里残留的私钥（ADR 0052）。
+#
+# 本规则上线前生成的快照带着 certs/ca.key 明文，每次部署顺手扫一遍，
+# 不必依赖快照轮转把它们自然淘汰。
+purge_snapshot_secrets() {
+  local d secret
+  for d in "$SNAP_DIR"/*; do
+    [ -d "$d/data" ] || continue
+    for secret in root.key certs/ca.key; do
+      if [ -e "$d/data/$secret" ]; then
+        rm -f "$d/data/$secret"
+        log "已清除历史快照 $(basename "$d") 中的 ${secret}"
+      fi
+    done
+  done
 }
 
 # restore 把快照写回去（需求 21.3）。
 #
 # 数据目录用快照内容覆盖，但不删除快照里没有的文件：
-# root.key 本来就不在快照里，覆盖式解包不会碰到它。
+# root.key 与 certs/ca.key 本来就不在快照里，覆盖式解包不会碰到它们，
+# 回滚后用的仍是当前那份 CA（ADR 0052）。
 restore() {
   local dir="$1"
   log "回滚：恢复服务端二进制、发布清单与数据"
@@ -267,7 +291,11 @@ restore() {
   fi
 
   if [ -d "$dir/data" ]; then
-    tar -C "$dir/data" -cf - . | tar -C "$DATA_DIR" -xf -
+    # 旧快照可能还带着私钥，解包时显式排除，绝不让它覆盖当前那份。
+    tar -C "$dir/data" \
+      --exclude='./root.key' \
+      --exclude='./certs/ca.key' \
+      -cf - . | tar -C "$DATA_DIR" -xf -
   fi
 }
 
@@ -446,6 +474,7 @@ main() {
   write_record "ok" false ""
 
   prune_snapshots "$KEEP_SNAPSHOTS"
+  purge_snapshot_secrets
 
   log "部署完成：${TAG}"
   return 0

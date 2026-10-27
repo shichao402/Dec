@@ -351,13 +351,16 @@ func TestRecoverRestoresRootKey(t *testing.T) {
 	b.recoveryMode = true
 	b.mu.Unlock()
 
-	req := enrollReq(t)
-	resp, err := b.Recover(context.Background(), req)
+	res, err := b.Recover(context.Background(), recoverReq(t))
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if resp.DeviceID == "" || resp.DeviceID == first.DeviceID {
-		t.Fatalf("恢复应登记新设备: %+v", resp)
+	if !res.RootKeyRestored {
+		t.Fatal("应报告根密钥已取回")
+	}
+	resp := res.Enrolled
+	if resp == nil || resp.DeviceID == "" || resp.DeviceID == first.DeviceID {
+		t.Fatalf("用新设备密钥恢复应登记新设备: %+v", resp)
 	}
 	restored := b.RootKey()
 	if restored == nil {
@@ -382,7 +385,7 @@ func TestRecoverWithoutBackup(t *testing.T) {
 	b.mu.Lock()
 	b.recoveryMode = true
 	b.mu.Unlock()
-	if _, err := b.Recover(context.Background(), enrollReq(t)); err == nil {
+	if _, err := b.Recover(context.Background(), recoverReq(t)); err == nil {
 		t.Fatal("没有冷备时恢复应失败")
 	}
 }

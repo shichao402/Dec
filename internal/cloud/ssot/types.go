@@ -28,6 +28,12 @@ const (
 	// 服务器重建后能回答“当前该用哪一把根密钥”，否则只能从一堆
 	// root-key/<key-id> 冷备条目里挑一个最新的——挑错了就会解不开旧密文。
 	FileRootKeyCheck = DirConfig + "/rootkey.json"
+	// FileServerCA 记录服务端 CA 的公开部分与备份状态（ADR 0052）。
+	//
+	// 只放证书与指纹，绝不放私钥：私钥只在服务器本机 certs/ca.key 与
+	// Bitwarden 的 _dec-cloud/server-ca/<指纹> 两处。这个文件存在的意义是
+	// 服务器重建后能回答"原来的 CA 是哪一份"，恢复时据此精确取条目并校验。
+	FileServerCA = DirConfig + "/server-ca.json"
 
 	// NamespaceCloud 是 Dec Cloud 服务端自己占用的 bundle 命名空间，
 	// 用户资产不得使用，以免与冷备、审计等内置内容冲突。
@@ -38,6 +44,17 @@ const (
 	DirRootKeyBackup = "_dec-cloud"
 	// FolderRootKey 是保留 folder 下的条目前缀：root-key/<key-id>。
 	FolderRootKey = "root-key"
+	// FolderServerCA 是保留 folder 下服务端 CA 私钥的条目前缀：server-ca/<指纹>。
+	FolderServerCA = "server-ca"
+)
+
+// 服务端 CA 的备份状态。
+const (
+	// CABackupPending 表示 CA 已在用，但 Bitwarden 里还没有它的副本。
+	// 只出现在两种情况：本功能上线前就存在的 CA，以及全新部署首次初始化之前。
+	CABackupPending = "pending"
+	// CABackupBitwarden 表示 Bitwarden 里已有读回校验通过的副本。
+	CABackupBitwarden = "bitwarden"
 )
 
 // AssetKind 是资产类型。
@@ -146,6 +163,28 @@ type Device struct {
 	LastSeen *time.Time `json:"last_seen,omitempty"`
 	// UserBundles 是这台设备用户平面订阅的 bundle。
 	UserBundles []string `json:"user_bundles,omitempty"`
+	// NeedsReenroll 表示签发它的服务端 CA 已被宣告丢失并重建（ADR 0052）。
+	//
+	// 这台设备的旧证书已经验不过了，但记录不删：同一把设备公钥重新登记时
+	// 沿用原设备 ID 重新签证书，订阅与项目登记原样保留。
+	NeedsReenroll bool `json:"needs_reenroll,omitempty"`
+}
+
+// ServerCARecord 是 config/server-ca.json 的结构（ADR 0052）。
+type ServerCARecord struct {
+	SchemaVersion int `json:"schema_version"`
+	// Fingerprint 是 CA 证书 DER 的 SHA-256（十六进制），也是 Bitwarden 条目名的后缀。
+	Fingerprint string `json:"fingerprint"`
+	// CertPEM 是 CA 证书，公开信息。
+	CertPEM string `json:"cert_pem"`
+	// BackupState 是 CABackupPending 或 CABackupBitwarden。
+	BackupState string `json:"backup_state"`
+	// CreatedAt 是这份 CA 被首次记录的时间。
+	CreatedAt time.Time `json:"created_at"`
+	// BackedUpAt 是写入 Bitwarden 并读回校验通过的时间。
+	BackedUpAt *time.Time `json:"backed_up_at,omitempty"`
+	// ReplacedFingerprint 是宣告丢失前那份 CA 的指纹，首份为空。
+	ReplacedFingerprint string `json:"replaced_fingerprint,omitempty"`
 }
 
 // Project 是项目登记：某台设备上的某个项目根目录订阅了哪些 bundle。

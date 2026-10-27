@@ -148,30 +148,120 @@ func Initialize(ctx context.Context, client *Client, store *IdentityStore, in En
 	}, nil
 }
 
-// Recover 在恢复模式下取回根密钥并重新登记（需求 11）。
-func Recover(ctx context.Context, client *Client, store *IdentityStore, in EnrollInput) (*EnrollResult, error) {
+// RecoverOutcome 是恢复的结果。
+type RecoverOutcome struct {
+	EnrollResult
+	// Enrolled 表示本机拿到了新证书（首次登记或用原密钥重新登记）。
+	Enrolled        bool
+	RootKeyRestored bool
+	CARestored      bool
+	CARebuilt       bool
+	ReenrollDevices int
+}
+
+// Recover 在恢复模式下取回缺失的根密钥与服务端 CA（需求 11、ADR 0052）。
+//
+// 本机已有设备身份时沿用原设备密钥：服务端 CA 能从 Bitwarden 取回，
+// 原证书本来就有效，只需 RestoreOnly；CA 被宣告丢失重建时，
+// 用原密钥重新登记会接回原设备 ID 与全部订阅。
+// 只有本机没有身份时才生成新密钥。
+func Recover(ctx context.Context, client *Client, store *IdentityStore, in RecoverInput) (*RecoverOutcome, error) {
 	if in.Email == "" || in.Password == "" {
 		return nil, fmt.Errorf("需要 Bitwarden 邮箱与主密码")
-	}
-	privPEM, pubPEM, err := GenerateKeyPair()
-	if err != nil {
-		return nil, err
 	}
 	osName, arch := OSArch()
 	name := strings.TrimSpace(in.DeviceName)
 	if name == "" {
 		name, _ = os.Hostname()
 	}
-	// 恢复时旧身份可能还在文件里，先清掉：新证书会替换它。
-	if err := store.Clear(); err != nil {
-		return nil, err
+
+	privPEM, pubPEM := "", ""
+	existing, _ := store.Load()
+	if existing != nil && existing.KeyPEM != "" {
+		pub, err := PublicKeyFromPrivate(existing.KeyPEM)
+		if err != nil {
+			return nil, err
+		}
+		privPEM, pubPEM = existing.KeyPEM, pub
+	} else {
+		p1, p2, err := GenerateKeyPair()
+		if err != nil {
+			return nil, err
+		}
+		privPEM, pubPEM = p1, p2
 	}
+
 	resp, err := client.Recover(ctx, proto.RecoverRequest{
 		Email:           in.Email,
 		Password:        in.Password,
 		TOTP:            in.TOTP,
 		DevicePublicKey: pubPEM,
 		DeviceName:      name,
+		OS:              osName,
+		Arch:            arch,
+		DeclareCALost:   in.DeclareCALost,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &RecoverOutcome{
+		RootKeyRestored: resp.RootKeyRestored,
+		CARestored:      resp.CARestored,
+		CARebuilt:       resp.CARebuilt,
+		ReenrollDevices: resp.ReenrollDevices,
+	}
+	out.ServerURL = client.BaseURL()
+	if resp.EnrollBeginResponse != nil && resp.Certificate != "" {
+		id := &Identity{
+			DeviceID: resp.DeviceID,
+			CertPEM:  resp.Certificate,
+			KeyPEM:   privPEM,
+			NotAfter: resp.CertNotAfter,
+		}
+		if _, err := id.TLSCertificate(); err != nil {
+			return nil, err
+		}
+		if err := store.Save(id); err != nil {
+			return nil, err
+		}
+		out.Enrolled = true
+		out.DeviceID = resp.DeviceID
+		out.NotAfter = resp.CertNotAfter
+		out.IsFirst = resp.IsFirst
+	}
+	return out, nil
+}
+
+// RecoverInput 是恢复请求。
+type RecoverInput struct {
+	EnrollInput
+	// DeclareCALost 表示用户已确认服务端 CA 无法找回，同意重建（ADR 0052）。
+	DeclareCALost bool
+}
+
+// Reenroll 用本机原设备密钥重新登记（服务端 CA 重建后，ADR 0052）。
+//
+// 与 Enroll 的区别：不要求本机没有身份，也不生成新密钥。
+// 服务端识别到同一把公钥，会沿用原设备 ID，订阅与项目登记原样保留。
+func Reenroll(ctx context.Context, client *Client, store *IdentityStore, in EnrollInput) (*EnrollResult, error) {
+	if in.Email == "" || in.Password == "" {
+		return nil, fmt.Errorf("需要 Bitwarden 邮箱与主密码")
+	}
+	existing, err := store.Load()
+	if err != nil || existing == nil || existing.KeyPEM == "" {
+		return nil, fmt.Errorf("本机没有原设备密钥，请改用普通登记")
+	}
+	pubPEM, err := PublicKeyFromPrivate(existing.KeyPEM)
+	if err != nil {
+		return nil, err
+	}
+	osName, arch := OSArch()
+	resp, err := client.Enroll(ctx, proto.EnrollBeginRequest{
+		Email:           in.Email,
+		Password:        in.Password,
+		TOTP:            in.TOTP,
+		DevicePublicKey: pubPEM,
+		DeviceName:      strings.TrimSpace(in.DeviceName),
 		OS:              osName,
 		Arch:            arch,
 	})
@@ -181,8 +271,11 @@ func Recover(ctx context.Context, client *Client, store *IdentityStore, in Enrol
 	id := &Identity{
 		DeviceID: resp.DeviceID,
 		CertPEM:  resp.Certificate,
-		KeyPEM:   privPEM,
+		KeyPEM:   existing.KeyPEM,
 		NotAfter: resp.CertNotAfter,
+	}
+	if _, err := id.TLSCertificate(); err != nil {
+		return nil, err
 	}
 	if err := store.Save(id); err != nil {
 		return nil, err
@@ -190,7 +283,6 @@ func Recover(ctx context.Context, client *Client, store *IdentityStore, in Enrol
 	return &EnrollResult{
 		DeviceID:  resp.DeviceID,
 		NotAfter:  resp.CertNotAfter,
-		IsFirst:   resp.IsFirst,
 		ServerURL: client.BaseURL(),
 	}, nil
 }

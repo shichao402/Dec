@@ -72,13 +72,16 @@ type Syncer struct {
 	// lastOK 是最后一次成功对账的时间，用于断连告警。
 	lastOK time.Time
 	// 状态展示。
-	lastErr     error
-	lastSync    time.Time
-	aligned     bool
-	serverVer   string
-	requiredVer string
-	maintenance bool
-	syncedRev   string
+	lastErr error
+	// caState 与 caBackupPending 来自 hello，只用于展示。
+	caState         string
+	caBackupPending bool
+	lastSync        time.Time
+	aligned         bool
+	serverVer       string
+	requiredVer     string
+	maintenance     bool
+	syncedRev       string
 	// lastLoggedErr 是上一次写入日志的同步失败原因，用于去重。
 	lastLoggedErr string
 }
@@ -177,6 +180,11 @@ type Status struct {
 	LastError     string
 	Revision      string
 	DownloadURL   string
+	// CAState 与 CABackupPending 来自最近一次 hello（ADR 0052）。
+	CAState         string
+	CABackupPending bool
+	// ErrorCode 是最近一次错误的协议错误码，本机页面据此决定显示哪个恢复入口。
+	ErrorCode string
 }
 
 // Status 返回状态快照。
@@ -184,18 +192,21 @@ func (s *Syncer) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := Status{
-		ServerURL:     s.client.BaseURL(),
-		Version:       s.opts.Version,
-		Aligned:       s.aligned,
-		ServerVersion: s.serverVer,
-		RequiredVer:   s.requiredVer,
-		Maintenance:   s.maintenance,
-		LastSync:      s.lastSync,
-		Revision:      s.syncedRev,
-		DownloadURL:   s.client.DownloadURL(),
+		ServerURL:       s.client.BaseURL(),
+		Version:         s.opts.Version,
+		Aligned:         s.aligned,
+		ServerVersion:   s.serverVer,
+		RequiredVer:     s.requiredVer,
+		Maintenance:     s.maintenance,
+		LastSync:        s.lastSync,
+		Revision:        s.syncedRev,
+		DownloadURL:     s.client.DownloadURL(),
+		CAState:         s.caState,
+		CABackupPending: s.caBackupPending,
 	}
 	if s.lastErr != nil {
 		st.LastError = s.lastErr.Error()
+		st.ErrorCode = string(CodeOf(s.lastErr))
 	}
 	if id, err := s.identity.Load(); err == nil {
 		st.DeviceID = id.DeviceID
@@ -234,7 +245,9 @@ func (s *Syncer) Run(ctx context.Context) error {
 			}
 			continue
 		}
-		if errors.Is(err, ErrIdentityRejected) || errors.Is(err, ErrNoIdentity) {
+		if errors.Is(err, ErrIdentityRejected) || errors.Is(err, ErrNoIdentity) ||
+			errors.Is(err, ErrServerIdentityReset) || errors.Is(err, ErrServerCAPending) ||
+			errors.Is(err, ErrServerRecovery) {
 			s.notifyIdentityProblem(err)
 			if !sleepCtx(ctx, s.opts.Heartbeat) {
 				return nil
@@ -296,6 +309,8 @@ func (s *Syncer) hello(ctx context.Context) (*proto.HelloResponse, error) {
 	s.aligned = out.Aligned
 	s.serverVer = out.ServerVersion
 	s.requiredVer = out.RequiredVersion
+	s.caState = out.CAState
+	s.caBackupPending = out.CABackupPending
 	s.maintenance = out.Maintenance
 	s.mu.Unlock()
 	return out, nil
@@ -563,7 +578,17 @@ func (s *Syncer) notifyIdentityProblem(err error) {
 	}
 	title := "Dec 代理未登记"
 	body := "请打开本机页面完成设备登记。"
-	if errors.Is(err, ErrIdentityRejected) {
+	switch {
+	case errors.Is(err, ErrServerIdentityReset):
+		title = "Dec 服务端身份已重置"
+		body = "服务端 CA 已重建，需要重新登记（沿用原设备与订阅）：打开本机页面或执行 dec-agent reenroll。本机已有文件保持不变。"
+	case errors.Is(err, ErrServerCAPending):
+		title = "Dec 服务端 CA 待恢复"
+		body = "服务端 CA 私钥缺失，需要从 Bitwarden 恢复：打开本机页面或执行 dec-agent recover。本机已有文件保持不变。"
+	case errors.Is(err, ErrServerRecovery):
+		title = "Dec 服务端处于恢复模式"
+		body = "服务端根密钥缺失，需要从 Bitwarden 恢复：打开本机页面或执行 dec-agent recover。"
+	case errors.Is(err, ErrIdentityRejected):
 		title = "Dec 设备身份被拒绝"
 		body = "设备可能已被吊销或证书已过期，请在服务端确认后重新登记。"
 	}

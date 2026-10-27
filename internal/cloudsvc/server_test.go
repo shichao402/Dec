@@ -153,7 +153,7 @@ func (h *harness) registerDevice(id, name string) *tls.Certificate {
 	if err != nil {
 		h.t.Fatalf("生成设备密钥失败: %v", err)
 	}
-	ca := h.srv.ca
+	ca := h.srv.boot.CurrentCA()
 	issued, err := ca.SignDevice(id, &key.PublicKey, time.Now().Add(24*time.Hour))
 	if err != nil {
 		h.t.Fatalf("签发设备证书失败: %v", err)
@@ -290,7 +290,7 @@ func TestUnregisteredDeviceRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("生成密钥失败: %v", err)
 	}
-	issued, err := h.srv.ca.SignDevice("ghost", &key.PublicKey, time.Now().Add(time.Hour))
+	issued, err := h.srv.boot.CurrentCA().SignDevice("ghost", &key.PublicKey, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("签发证书失败: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestReceiverDeviceCannotWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("生成密钥失败: %v", err)
 	}
-	issued, err := h.srv.ca.SignDevice("dev-r", &key.PublicKey, time.Now().Add(time.Hour))
+	issued, err := h.srv.boot.CurrentCA().SignDevice("dev-r", &key.PublicKey, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("签发证书失败: %v", err)
 	}

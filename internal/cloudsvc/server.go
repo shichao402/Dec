@@ -13,6 +13,7 @@ package cloudsvc
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log"
@@ -109,7 +110,6 @@ type Server struct {
 	cfg    Config
 	store  *ssot.Store
 	reg    *identity.Registry
-	ca     *identity.CA
 	boot   *identity.Bootstrapper
 	assets *assets.Writer
 	render *render.Renderer
@@ -206,14 +206,11 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	ca, err := loadOrCreateCA(certDir(dataDir))
-	if err != nil {
-		return nil, err
-	}
 	reg := identity.NewRegistry(store)
+	// 服务端 CA 由 Bootstrapper 判定并持有：缺失时进入恢复模式，绝不静默重建（ADR 0052）。
 	boot, err := identity.NewBootstrapper(identity.Options{
 		Store:       store,
-		CA:          ca,
+		CADir:       certDir(dataDir),
 		Registry:    reg,
 		RootKeyPath: cfg.RootKeyPath,
 		Vault:       cfg.VaultFactory,
@@ -249,7 +246,6 @@ func New(cfg Config) (*Server, error) {
 		cfg:             cfg,
 		store:           store,
 		reg:             reg,
-		ca:              ca,
 		boot:            boot,
 		assets:          writer,
 		secrets:         writer,
@@ -511,12 +507,18 @@ func (s *Server) Run(ctx context.Context) error {
 // 只暴露最少信息：可用性、版本、维护状态。不暴露设备数、revision 等内部状态，
 // 因为这是公网端点。
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	// CA 状态与"备份待补"必须公开可见（ADR 0052）：服务端 CA 不可用时，
+	// 已登记设备全部连不上，只有健康检查还能告诉人发生了什么。
+	// 只报状态枚举，不报指纹或原因细节。
+	ca := s.boot.CAStatus()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":              !s.maintenance.Load(),
-		"server_version":  s.cfg.ServerVersion,
-		"required_client": s.cfg.RequiredVersion,
-		"protocol":        proto.Version,
-		"maintenance":     s.maintenance.Load(),
+		"ok":                !s.maintenance.Load(),
+		"server_version":    s.cfg.ServerVersion,
+		"required_client":   s.cfg.RequiredVersion,
+		"protocol":          proto.Version,
+		"maintenance":       s.maintenance.Load(),
+		"ca_state":          string(ca.State),
+		"ca_backup_pending": ca.BackupPending,
 	})
 }
 
@@ -526,7 +528,19 @@ var (
 	ErrNoDevice = errors.New("no device identity")
 	// ErrVersionOut 表示版本不对齐，只允许版本相关方法（需求 19.4）。
 	ErrVersionOut = errors.New("version mismatch")
+	// ErrNeedsReenroll 表示设备证书来自已重建前的旧 CA，需要重新登记（ADR 0052）。
+	ErrNeedsReenroll = errors.New("device needs reenroll")
 )
+
+// unverifiedDeviceID 读取证书声明的设备 ID，不做任何校验。
+//
+// 只用来挑选提示文案：拿到的 ID 不授予任何权限，请求照样被拒。
+func unverifiedDeviceID(leaf *x509.Certificate) string {
+	if leaf == nil || len(leaf.DNSNames) == 0 {
+		return ""
+	}
+	return leaf.DNSNames[0]
+}
 
 // deviceFrom 从 TLS 对端证书解析设备身份并与登记表交叉校验。
 //
@@ -540,8 +554,19 @@ func (s *Server) deviceFrom(r *http.Request) (ssot.Device, error) {
 	leaf := r.TLS.PeerCertificates[0]
 	leafPEM := pemEncodeCert(leaf.Raw)
 
-	deviceID, serial, _, err := s.ca.VerifyDevice(leafPEM, time.Now())
+	ca := s.boot.CurrentCA()
+	if ca == nil {
+		return ssot.Device{}, fmt.Errorf("%w: %v", ErrNoDevice, identity.ErrCAUnavailable)
+	}
+	deviceID, serial, _, err := ca.VerifyDevice(leafPEM, time.Now())
 	if err != nil {
+		// 证书不是当前 CA 签的，但证书里的设备 ID 正好在"等待重新登记"名单上：
+		// 这就是服务端 CA 重建后的旧设备（ADR 0052），给它一个能看懂的原因。
+		if id := unverifiedDeviceID(leaf); id != "" {
+			if d, derr := s.reg.Device(id); derr == nil && d.NeedsReenroll && !d.Revoked {
+				return ssot.Device{}, fmt.Errorf("%w: 设备 %s", ErrNeedsReenroll, id)
+			}
+		}
 		return ssot.Device{}, fmt.Errorf("%w: %v", ErrNoDevice, err)
 	}
 	dev, err := s.reg.Device(deviceID)

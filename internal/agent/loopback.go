@@ -42,8 +42,10 @@ type LoopbackOptions struct {
 	MCP http.Handler
 	// Enroll 处理登记。
 	Enroll func(r *http.Request, in LoopbackEnrollInput) (*EnrollResult, error)
-	// Recover 处理恢复。
-	Recover func(r *http.Request, in LoopbackEnrollInput) (*EnrollResult, error)
+	// Recover 处理恢复（根密钥与服务端 CA，ADR 0052）。
+	Recover func(r *http.Request, in LoopbackEnrollInput) (*RecoverOutcome, error)
+	// Reenroll 用本机原设备密钥重新登记（服务端 CA 重建后）。
+	Reenroll func(r *http.Request, in LoopbackEnrollInput) (*EnrollResult, error)
 	// Projects 返回本机项目登记。
 	Projects func() []Project
 	// SaveProjects 保存项目登记。
@@ -64,6 +66,8 @@ type LoopbackEnrollInput struct {
 	Password string `json:"password"`
 	TOTP     string `json:"totp,omitempty"`
 	Device   string `json:"device_name,omitempty"`
+	// DeclareCALost 仅恢复时使用：用户确认服务端 CA 无法找回（ADR 0052）。
+	DeclareCALost bool `json:"declare_ca_lost,omitempty"`
 }
 
 // Loopback 是本机 HTTP 服务。
@@ -119,6 +123,7 @@ func (l *Loopback) Handler() http.Handler {
 	mux.HandleFunc("/api/configure", l.handleConfigure)
 	mux.HandleFunc("/api/enroll", l.handleEnroll)
 	mux.HandleFunc("/api/recover", l.handleRecover)
+	mux.HandleFunc("/api/reenroll", l.handleReenroll)
 	mux.HandleFunc("/api/projects", l.handleProjects)
 	mux.HandleFunc("/api/call", l.handleCall)
 	mux.Handle("/mcp", l.handleMCP())
@@ -311,17 +316,20 @@ func (l *Loopback) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	st := l.opts.Status()
 	for k, v := range map[string]any{
-		"server_url":     st.ServerURL,
-		"version":        st.Version,
-		"device_id":      st.DeviceID,
-		"aligned":        st.Aligned,
-		"server_version": st.ServerVersion,
-		"required":       st.RequiredVer,
-		"maintenance":    st.Maintenance,
-		"last_sync":      st.LastSync,
-		"last_error":     st.LastError,
-		"revision":       st.Revision,
-		"download_url":   st.DownloadURL,
+		"server_url":        st.ServerURL,
+		"version":           st.Version,
+		"device_id":         st.DeviceID,
+		"aligned":           st.Aligned,
+		"server_version":    st.ServerVersion,
+		"required":          st.RequiredVer,
+		"maintenance":       st.Maintenance,
+		"last_sync":         st.LastSync,
+		"last_error":        st.LastError,
+		"revision":          st.Revision,
+		"download_url":      st.DownloadURL,
+		"ca_state":          st.CAState,
+		"ca_backup_pending": st.CABackupPending,
+		"error_code":        st.ErrorCode,
 	} {
 		out[k] = v
 	}
@@ -397,7 +405,41 @@ func (l *Loopback) handleRecover(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := l.opts.Recover(r, in)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": err.Error(),
+			"code":  string(CodeOf(err)),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device_id":         res.DeviceID,
+		"not_after":         res.NotAfter,
+		"enrolled":          res.Enrolled,
+		"root_key_restored": res.RootKeyRestored,
+		"ca_restored":       res.CARestored,
+		"ca_rebuilt":        res.CARebuilt,
+		"reenroll_devices":  res.ReenrollDevices,
+	})
+}
+
+// handleReenroll 用本机原设备密钥重新登记（服务端 CA 重建后，ADR 0052）。
+func (l *Loopback) handleReenroll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var in LoopbackEnrollInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if l.opts.Reenroll == nil {
+		http.Error(w, "unsupported", http.StatusNotImplemented)
+		return
+	}
+	res, err := l.opts.Reenroll(r, in)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "code": string(CodeOf(err))})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

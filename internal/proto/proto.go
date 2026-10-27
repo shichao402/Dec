@@ -158,6 +158,16 @@ const (
 	ErrNotInitialized ErrorCode = "not_initialized"
 	// ErrRateLimited 表示触发失败次数限制或冷却（需求 10.7、18.6）。
 	ErrRateLimited ErrorCode = "rate_limited"
+	// ErrCAPendingRestore 表示服务端 CA 私钥缺失，需要从 Bitwarden 恢复（ADR 0052）。
+	//
+	// 与 recovery_mode 分开：后者说的是根密钥。两者可能同时发生，也可能只缺一样，
+	// 代理要据此告诉用户"恢复后设备是否还要重新登记"。
+	ErrCAPendingRestore ErrorCode = "server_ca_pending_restore"
+	// ErrCANotInBackup 表示 Bitwarden 里找不到对应的 CA 条目。
+	// 用户只剩两个选择：换账户重试，或显式宣告 CA 丢失并重建。
+	ErrCANotInBackup ErrorCode = "server_ca_not_in_backup"
+	// ErrDeviceNeedsReenroll 表示这台设备的证书来自已被宣告丢失的旧 CA，必须重新登记。
+	ErrDeviceNeedsReenroll ErrorCode = "device_needs_reenroll"
 	// ErrInternal 表示服务端内部错误。
 	ErrInternal ErrorCode = "internal"
 )
@@ -204,6 +214,10 @@ type HelloResponse struct {
 	Aligned bool `json:"aligned"`
 	// DeviceID 回显，便于代理确认自己登记的是哪台设备。
 	DeviceID string `json:"device_id"`
+	// CAState 是服务端 CA 状态：ready / needs_restore / mismatch（ADR 0052）。
+	CAState string `json:"ca_state,omitempty"`
+	// CABackupPending 表示服务端 CA 还没写进 Bitwarden。
+	CABackupPending bool `json:"ca_backup_pending,omitempty"`
 }
 
 // Op 是下发操作的类型。代理只有这两种原语（需求 2.2）。
@@ -423,7 +437,38 @@ type EnrollBeginResponse struct {
 
 // RecoverRequest 是恢复模式下的恢复请求，结构与登记相同，
 // 区别在于服务端会先从 Bitwarden 取回根密钥写回本地文件，再签发证书。
-type RecoverRequest = EnrollBeginRequest
+type RecoverRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	TOTP     string `json:"totp,omitempty"`
+	// DevicePublicKey 是发起恢复的设备公钥。RestoreOnly 时可空。
+	DevicePublicKey string `json:"device_public_key,omitempty"`
+	DeviceName      string `json:"device_name,omitempty"`
+	OS              string `json:"os,omitempty"`
+	Arch            string `json:"arch,omitempty"`
+	// RestoreOnly 只取回缺失的根密钥与服务端 CA，不登记任何设备（ADR 0052）。
+	//
+	// CA 从 Bitwarden 取回后，已登记设备的证书本来就有效，
+	// 再登记一台新设备只会多出一条重复记录。
+	RestoreOnly bool `json:"restore_only,omitempty"`
+	// DeclareCALost 表示用户确认服务端 CA 已无法找回，同意重建（ADR 0052）。
+	//
+	// 只在 Bitwarden 里找不到对应 CA 条目时才生效；找得到就一定用找到的那份。
+	// 重建后所有已登记设备都要重新登记，所以必须显式确认。
+	DeclareCALost bool `json:"declare_ca_lost,omitempty"`
+}
+
+// RecoverResponse 描述一次恢复取回了什么（ADR 0052）。
+//
+// 嵌入登记结果：恢复时顺带登记了设备则带证书，RestoreOnly 时为空。
+// 用指针嵌入，旧代理按 EnrollBeginResponse 解析时字段名不变，仍能读到证书。
+type RecoverResponse struct {
+	*EnrollBeginResponse
+	RootKeyRestored bool `json:"root_key_restored,omitempty"`
+	CARestored      bool `json:"ca_restored,omitempty"`
+	CARebuilt       bool `json:"ca_rebuilt,omitempty"`
+	ReenrollDevices int  `json:"reenroll_devices,omitempty"`
+}
 
 // AssetPayload 是资产写入的条目内容。
 //
@@ -598,6 +643,8 @@ type DeviceInfo struct {
 	UserBundles     []string   `json:"user_bundles,omitempty"`
 	// Drift 是与云端期望状态的差异条数。
 	Drift int `json:"drift"`
+	// NeedsReenroll 表示签发它的 CA 已重建，需要重新登记（ADR 0052）。
+	NeedsReenroll bool `json:"needs_reenroll,omitempty"`
 }
 
 // StatusResponse 是服务状态的快照，管理面首屏就用它。
@@ -611,4 +658,8 @@ type StatusResponse struct {
 	Revision        string     `json:"revision"`
 	BackupCheckedAt *time.Time `json:"backup_checked_at,omitempty"`
 	RootKeyID       string     `json:"root_key_id,omitempty"`
+	// CAState、CAFingerprint、CABackupPending 描述服务端 CA（ADR 0052）。
+	CAState         string `json:"ca_state,omitempty"`
+	CAFingerprint   string `json:"ca_fingerprint,omitempty"`
+	CABackupPending bool   `json:"ca_backup_pending,omitempty"`
 }

@@ -153,17 +153,59 @@ func TestOpenDoesNotCreateCA(t *testing.T) {
 		t.Fatalf("准备 SSOT 仓库失败: %v", err)
 	}
 
-	_, err := Open(dir)
+	// CA 缺失不阻止打开：吊销不需要 CA（ADR 0052）。
+	env := openEnv(t, dir)
+	_, pubPEM := newDeviceKey(t)
+	_, _, err := env.IssueCert("rescue", pubPEM, "")
 	if err == nil {
-		t.Fatal("缺少服务端身份时应当报错")
+		t.Fatal("缺少服务端身份时签发应当报错")
 	}
-	if !strings.Contains(err.Error(), "不会生成新的 CA") {
-		t.Fatalf("错误信息应说明不会生成 CA，实际: %v", err)
+	if !strings.Contains(err.Error(), "不会生成新的 CA") || !strings.Contains(err.Error(), "recover") {
+		t.Fatalf("错误应说明不会生成 CA，并指向恢复流程，实际: %v", err)
 	}
 
 	// 关键断言：目录里不能凭空多出 ca.key。
 	if _, statErr := os.Stat(filepath.Join(dir, certSubdir, "ca.key")); !os.IsNotExist(statErr) {
 		t.Fatalf("不应创建 ca.key，stat 结果: %v", statErr)
+	}
+}
+
+// TestRevokeWorksWhileCAMissing 服务端 CA 丢失、等待恢复时，吊销必须照常可用。
+func TestRevokeWorksWhileCAMissing(t *testing.T) {
+	dir := newDataDir(t)
+	env := openEnv(t, dir)
+	seedDevice(t, env, "mac-lost", "丢失的 Mac", ssot.DeviceMine)
+	if err := env.Close(); err != nil {
+		t.Fatalf("关闭: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, certSubdir, "ca.key")); err != nil {
+		t.Fatalf("删除 ca.key: %v", err)
+	}
+	env2 := openEnv(t, dir)
+	if _, err := env2.RevokeDevice("mac-lost", "CA 丢失期间吊销"); err != nil {
+		t.Fatalf("CA 缺失时吊销应成功: %v", err)
+	}
+}
+
+// TestIssueCertRejectsMismatchedCA 本机 CA 与 git 记录不一致时拒绝签发。
+func TestIssueCertRejectsMismatchedCA(t *testing.T) {
+	dir := newDataDir(t)
+	store, err := ssot.Open(filepath.Join(dir, ssotSubdir))
+	if err != nil {
+		t.Fatalf("打开仓库: %v", err)
+	}
+	other := mustNewCA(t)
+	if err := identity.WriteCARecord(store, ssot.ServerCARecord{
+		Fingerprint: identity.CAFingerprint(other),
+		CertPEM:     string(other.CertPEM()),
+		BackupState: ssot.CABackupBitwarden,
+	}, "记录另一份 CA", ssot.Author{Name: "t", Source: "admin"}); err != nil {
+		t.Fatalf("写记录: %v", err)
+	}
+	env := openEnv(t, dir)
+	_, pubPEM := newDeviceKey(t)
+	if _, _, err := env.IssueCert("rescue", pubPEM, ""); err == nil || !strings.Contains(err.Error(), "不一致") {
+		t.Fatalf("指纹不一致时应拒绝签发，实际 %v", err)
 	}
 }
 

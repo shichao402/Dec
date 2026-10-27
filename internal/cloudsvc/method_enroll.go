@@ -1,7 +1,9 @@
 package cloudsvc
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/shichao402/Dec/internal/cloud/alert"
 	"github.com/shichao402/Dec/internal/cloud/audit"
@@ -66,22 +68,45 @@ func (s *Server) mEnroll(r *http.Request, req *proto.Request, payload any) *prot
 	return okPayload(req.ID, resp)
 }
 
-// mRecover 在恢复模式下取回根密钥并登记设备（需求 11）。
+// mRecover 在恢复模式下取回缺失的根密钥与服务端 CA（需求 11、ADR 0052）。
+//
+// 一次主密码 + 2FA 取回全部缺失项。服务端 CA 在 Bitwarden 里找不到时，
+// 不会自作主张重建：返回 server_ca_not_in_backup，由用户显式宣告丢失后重试。
 func (s *Server) mRecover(r *http.Request, req *proto.Request, payload any) *proto.Response {
 	in, ok := payload.(*proto.RecoverRequest)
 	if !ok {
 		return proto.Fail(req.ID, proto.ErrInvalid, "recover 载荷类型错误")
 	}
-	resp, err := s.boot.Recover(r.Context(), *in)
+	res, err := s.boot.Recover(r.Context(), *in)
 	if err != nil {
 		s.record(r, audit.EventRecover, ssot.Device{}, req, "恢复失败", err.Error(), false)
-		s.raise(alert.KindRecovery, "根密钥恢复失败", err.Error())
+		s.raise(alert.KindRecovery, "恢复失败", err.Error())
 		return failFromError(req.ID, err)
 	}
-	s.record(r, audit.EventRecover, ssot.Device{ID: resp.DeviceID}, req,
-		"恢复成功 "+resp.DeviceID, "根密钥已取回", true)
-	s.raise(alert.KindRecovery, "根密钥已恢复", resp.DeviceID)
+	devID := ""
+	if res.Enrolled != nil {
+		devID = res.Enrolled.DeviceID
+	}
+	var parts []string
+	if res.RootKeyRestored {
+		parts = append(parts, "根密钥已从 Bitwarden 取回")
+	}
+	if res.CARestored {
+		parts = append(parts, "服务端 CA 已从 Bitwarden 取回，已登记设备无需重新登记")
+	}
+	if res.CARebuilt {
+		parts = append(parts, fmt.Sprintf("服务端 CA 宣告丢失并已重建，%d 台设备需要重新登记", res.ReenrollDevices))
+	}
+	detail := strings.Join(parts, "；")
+	s.record(r, audit.EventRecover, ssot.Device{ID: devID}, req, "恢复成功 "+devID, detail, true)
+	s.raise(alert.KindRecovery, "恢复完成", detail)
 	s.NotifyChanged()
 	s.triggerBackup()
-	return okPayload(req.ID, resp)
+	return okPayload(req.ID, &proto.RecoverResponse{
+		EnrollBeginResponse: res.Enrolled,
+		RootKeyRestored:     res.RootKeyRestored,
+		CARestored:          res.CARestored,
+		CARebuilt:           res.CARebuilt,
+		ReenrollDevices:     res.ReenrollDevices,
+	})
 }
