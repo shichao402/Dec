@@ -120,6 +120,63 @@ func TestReadAssetKeepsSecretPlaceholder(t *testing.T) {
 	}
 }
 
+// TestReadAssetRevisionWorksAsBase 验证 read_asset 给出的 revision 可以直接
+// 回传给 edit_asset_file 做乐观并发（ADR 0053）。
+//
+// 以前这里返回的是 manifest.yaml 里的 revision 字段，通常为空，调用方
+// 读完拿不到可用的 base，乐观并发形同虚设。
+func TestReadAssetRevisionWorksAsBase(t *testing.T) {
+	h := newHarness(t, "1.0.0")
+	cert := h.registerDevice("dev-a", "MacBook")
+
+	write := &proto.Request{ID: "w1", Protocol: proto.Version, Method: proto.MethodWriteAsset, Source: proto.SourceAdmin}
+	if err := write.EncodePayload(&proto.AssetPayload{
+		Bundle:  "woa",
+		Items:   []proto.AssetItem{{Path: "demo/SKILL.md", Content: []byte("# demo\nold line\n")}},
+		Message: "初始内容",
+	}); err != nil {
+		t.Fatalf("构造载荷失败: %v", err)
+	}
+	if resp := h.postTLS(write, cert); !resp.OK {
+		t.Fatalf("写入失败: %s", resp.Error)
+	}
+
+	read := &proto.Request{ID: "r1", Protocol: proto.Version, Method: proto.MethodReadAsset, Source: proto.SourceAdmin}
+	if err := read.EncodePayload(&proto.ReadAssetRequest{Bundle: "woa"}); err != nil {
+		t.Fatalf("构造载荷失败: %v", err)
+	}
+	resp := h.postTLS(read, cert)
+	if !resp.OK {
+		t.Fatalf("读取失败: %s", resp.Error)
+	}
+	var out proto.ReadAssetResponse
+	if err := json.Unmarshal(resp.Payload, &out); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if out.Revision == "" {
+		t.Fatal("read_asset 应返回非空 revision")
+	}
+
+	edit := func(id, oldS, newS string) *proto.Response {
+		req := &proto.Request{ID: id, Protocol: proto.Version, Method: proto.MethodEditAssetFile, Source: proto.SourceAdmin}
+		if err := req.EncodePayload(&proto.EditAssetFileRequest{
+			Bundle: "woa", Path: "demo/SKILL.md",
+			OldString: oldS, NewString: newS, BaseRevision: out.Revision,
+		}); err != nil {
+			t.Fatalf("构造载荷失败: %v", err)
+		}
+		return h.postTLS(req, cert)
+	}
+	if resp := edit("e1", "old line", "new line"); !resp.OK {
+		t.Fatalf("用读到的 revision 编辑应成功: %s", resp.Error)
+	}
+	// 同一个 base 再写一次：中间已经有了新提交，必须被拒。
+	resp = edit("e2", "new line", "newer line")
+	if resp.OK {
+		t.Fatal("base_revision 过期时编辑应被拒绝")
+	}
+}
+
 // TestReadAssetRejectsEmptyBundle 验证空 bundle 名被拒绝。
 func TestReadAssetRejectsEmptyBundle(t *testing.T) {
 	h := newHarness(t, "1.0.0")

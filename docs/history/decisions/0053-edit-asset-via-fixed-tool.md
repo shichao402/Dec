@@ -61,3 +61,14 @@ AI 只能走后两条，它们都要求模型自己组织一次整体替换，�
 - 发版后说明行文案变化，所有带说明行的落点会被重写一次。覆盖判定只比较代理上报
   哈希与上次落地哈希，未被本地改动的落点两者相等，不会误记覆盖事件。
 - MCP 工具清单从 15 个变为 16 个，测试与 `dec-agent acceptance` 的期望清单同步更新。
+- `read_asset` 的 `revision` 改为仓库 HEAD（读文件之前取），与 `base_revision` 的比较
+  对象一致。此前返回的是 manifest.yaml 里的 revision 字段，通常为空，读完拿不到可用的
+  base，乐观并发形同虚设。
+
+## 验证（2026-10-27，v2.1.33 生产）
+
+通过代理 `/mcp` 端点按 MCP 协议调用：`dec_read_asset relkit` 返回 manifest 与 SKILL.md
+原文；多次匹配、零匹配、改 manifest.yaml 三种请求均被拒且不产生提交；对
+`skills/relkit-ops/SKILL.md` 做一处唯一替换后得到 commit 81d7367（source=mcp），
+claude、codebuddy、codex、cursor、With 五个落点全部更新，说明行带
+`bundle=relkit，path=skills/relkit-ops/SKILL.md`，设备 drift 为 0，未新增覆盖记录。

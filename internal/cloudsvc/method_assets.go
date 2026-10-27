@@ -155,8 +155,11 @@ func (s *Server) mEditAssetFile(req *proto.Request, payload any, dev ssot.Device
 		return failFromError(req.ID, err)
 	}
 	s.NotifyChanged()
-	s.recordRevision(nil, audit.EventAssetWrite, dev, req, in.Bundle,
-		"编辑 "+out.Path+"："+in.Message, out.Revision, true)
+	detail := "编辑 " + out.Path
+	if msg := strings.TrimSpace(in.Message); msg != "" {
+		detail += "：" + msg
+	}
+	s.recordRevision(nil, audit.EventAssetWrite, dev, req, in.Bundle, detail, out.Revision, true)
 	return okPayload(req.ID, &proto.EditAssetFileResult{
 		Bundle:   out.Bundle,
 		Path:     out.Path,
@@ -227,6 +230,11 @@ func (s *Server) mReadAsset(req *proto.Request, payload any, dev ssot.Device) *p
 	if bundle == "" {
 		return proto.Fail(req.ID, proto.ErrInvalid, "bundle 不能为空")
 	}
+	// revision 取仓库 HEAD，与写入时 base_revision 的比较对象（Tx.EnsureRevision）
+	// 一致。必须在读文件之前取：中间若有别的写入，调用方回传的旧 HEAD 只会让
+	// 写入被拒，不会让它基于过期内容成功。manifest.yaml 里的 revision 字段
+	// 通常为空，不能拿来做乐观并发。
+	head := s.assets.CurrentRevision()
 	manifest, err := s.assets.ReadManifest(bundle)
 	if err != nil {
 		return failFromError(req.ID, err)
@@ -237,7 +245,7 @@ func (s *Server) mReadAsset(req *proto.Request, payload any, dev ssot.Device) *p
 	}
 	out := &proto.ReadAssetResponse{
 		Bundle:   bundle,
-		Revision: manifest.Revision,
+		Revision: head,
 		Items:    make([]proto.AssetEntry, 0, len(manifest.Items)),
 		Files:    make([]proto.AssetItem, 0, len(files)),
 	}
