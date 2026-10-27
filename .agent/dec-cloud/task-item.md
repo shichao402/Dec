@@ -156,7 +156,11 @@
   >
   > **删除过程中发现并修复的 CI 漏洞**：删除 tag 同样产生 push 事件，`github.ref` 仍是 `refs/tags/<那个 tag>`，deploy job 的 `startsWith(github.ref, 'refs/tags/v')` 与 production environment 的 v* 分支策略都会放行删除事件。158 个待删 tag 指向的提交里含旧版 `release.yml`，清理历史会把当年的旧二进制装到生产机。已在三个 job 加 `!github.event.deleted`，并用 `TestDeletingTagIsNotRelease` 逐 job 断言。删除期间另外临时禁用了 Release workflow 双保险，删完已恢复 active。
   >
-  > **待与用户讨论的需求矛盾**：需求 11.6 要求"服务器重建只需冷备仓库和根密钥两样东西即可恢复服务端身份"，但 `internal/cloudsvc/tls.go` 明确写 CA 私钥"不进仓库、不进冷备"，意味着重建后 CA 会变、所有既有设备证书立即失效；需求 9.5 的轮换又要求"重新加密服务端身份私钥"，暗示它应该在仓库里被加密保存。当前实现是明文存本地 `certs/ca.key`。两处需要定夺。
+  > **服务端 CA 私钥方案已定并做完生产演练（ADR 0052，2026-10-27）**：原记录的需求矛盾（11.6 与 tls.go 注释冲突）按用户意见定为"CA 私钥只在服务器本机 `certs/ca.key` 与 Bitwarden `_dec-cloud/server-ca/<指纹>`，不进 git、冷备、快照；git 只记 `config/server-ca.json`（证书与指纹）"。`ca.key` 缺失时服务端不再静默重建，而是进入 `needs_restore`，门禁只放行 hello 与 recover。v2.1.29 上线后两次生产演练均通过：
+  > - 演练一（宣告丢失）：粉碎旧 CA `24cfd042…` → `needs_restore` → `dec-agent recover --declare-ca-lost` → 重建为 `464623f0…`，写入 Bitwarden 并读回校验 → Mac 用原密钥重新登记，设备 ID `dev-27e7e7cad7a71eb8` 与 6 个订阅保留。
+  > - 演练二（从 Bitwarden 恢复）：粉碎 `464623f0…` → `dec-agent recover` → 按指纹取回，指纹不变，`ready`。
+  >
+  > 演练暴露的问题与处理：① 代理 `Recover` 没设 `RestoreOnly`，演练二本应只取回 CA，却顺手重签了设备证书（SSOT 多出一条"重新登记"），已修为"已有身份且未宣告丢失 → RestoreOnly"，反向验证生效；② 服务端恢复后，后台代理要等 10 分钟心跳才重连，CA 待恢复/恢复模式改为 15 秒探测；③ MCP 在"版本不对齐 + 残留维护标志"时误报"维护中"，改为先判对齐；④ 服务器部署入口不随 CI 更新，v2.1.29 首次部署后快照仍含 `ca.key`，已手工安装新入口并粉碎快照中的私钥；⑤ 删除旧 classic PAT 时，冷备与审计仓库的 deploy key 被连带删除，推送失败，已用服务器现有私钥重新登记；⑥ 以 root 跑 git 把 SSOT `.git/index` 改成 root 所有，导致第一次恢复写入失败，已改回。
   - 由 Agent 读取 `DecPersonalDevKit`、`dec-source-private` 和本机旧落点的内容，经 MCP 写入新系统，commit 记录来源；密钥直接读取后走常规写入
   - 先在第一台设备上验证，其中 `dec-tencent-cloud` 要验证可用；然后逐台卸载旧组件并切换到新代理
   - 列出待删除清单，由用户逐项确认后，删除旧仓库、registry、`publish.firoyang.com`、公开 Release 和 Bitwarden 旧条目，保留 `_dec-cloud`

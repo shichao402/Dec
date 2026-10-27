@@ -177,7 +177,8 @@ func Recover(ctx context.Context, client *Client, store *IdentityStore, in Recov
 
 	privPEM, pubPEM := "", ""
 	existing, _ := store.Load()
-	if existing != nil && existing.KeyPEM != "" {
+	hasIdentity := existing != nil && existing.KeyPEM != ""
+	if hasIdentity {
 		pub, err := PublicKeyFromPrivate(existing.KeyPEM)
 		if err != nil {
 			return nil, err
@@ -191,6 +192,12 @@ func Recover(ctx context.Context, client *Client, store *IdentityStore, in Recov
 		privPEM, pubPEM = p1, p2
 	}
 
+	// 已有身份、又没宣告丢失：CA 只会从 Bitwarden 原样取回，本机证书继续有效，
+	// 不该顺手再签一张——那会白白作废原证书、在 SSOT 里多出一条“重新登记”。
+	// 取不到 CA 时服务端会报 ErrCANotInBackup，用户再带 --declare-ca-lost 重来，
+	// 那条路径才需要用原密钥重新登记。
+	restoreOnly := hasIdentity && !in.DeclareCALost
+
 	resp, err := client.Recover(ctx, proto.RecoverRequest{
 		Email:           in.Email,
 		Password:        in.Password,
@@ -200,6 +207,7 @@ func Recover(ctx context.Context, client *Client, store *IdentityStore, in Recov
 		OS:              osName,
 		Arch:            arch,
 		DeclareCALost:   in.DeclareCALost,
+		RestoreOnly:     restoreOnly,
 	})
 	if err != nil {
 		return nil, err

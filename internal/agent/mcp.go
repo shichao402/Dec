@@ -150,15 +150,17 @@ func checkReady(opts MCPServer) error {
 	if st.DeviceID == "" {
 		return errors.New("这台设备还没有登记：先执行 dec-agent enroll（或打开 http://127.0.0.1:8787/admin 登记），再重试")
 	}
-	if st.Maintenance {
-		return errors.New("服务端正在部署（维护中），此刻的写入不会被接受；稍后重试，或用 dec_status 确认")
-	}
+	// 先判对齐再判维护：版本不对齐时代理按心跳（10 分钟）才再握手，
+	// 期间维护标志可能停在部署那一刻的 true，先报它会把“该升级代理”误说成“等部署”。
 	if !st.Aligned {
 		required := st.RequiredVer
 		if required == "" {
 			required = "服务端要求的新版本"
 		}
 		return fmt.Errorf("代理版本与服务端要求不一致：本机 %s，服务端要求 %s。请先升级代理（管理面会给出下载地址）", st.Version, required)
+	}
+	if st.Maintenance {
+		return errors.New("服务端正在部署（维护中），此刻的写入不会被接受；稍后重试，或用 dec_status 确认")
 	}
 	return nil
 }
@@ -349,8 +351,8 @@ func toolDeleteAssetItem() toolSpec {
 				"只影响路径完全匹配的那一条，其余条目与文件保持不变（不同于 dec_write_asset 的整体替换）。" +
 				"路径不存在时返回 not_found，不会静默成功。",
 			InputSchema: objectSchema(map[string]any{
-				"bundle": strProp("bundle 名称"),
-				"path":   strProp("要删除的条目路径，必须与 manifest 里的 path 完全一致，例如 skills/foo"),
+				"bundle":        strProp("bundle 名称"),
+				"path":          strProp("要删除的条目路径，必须与 manifest 里的 path 完全一致，例如 skills/foo"),
 				"base_revision": strProp("期望的当前 revision，用于乐观并发控制，留空表示允许覆盖"),
 				"message":       strProp("提交说明，写进 git commit"),
 			}, "bundle", "path"),
@@ -625,12 +627,12 @@ func decodeItemContent(content string, isBase64 bool) ([]byte, error) {
 // buildPutSecret 整理密钥写入载荷。
 func buildPutSecret(args json.RawMessage) (json.RawMessage, error) {
 	var in struct {
-		Name         string           `json:"name"`
-		Value        string           `json:"value"`
-		Notes        string           `json:"notes,omitempty"`
+		Name         string            `json:"name"`
+		Value        string            `json:"value"`
+		Notes        string            `json:"notes,omitempty"`
 		Refs         []proto.SecretRef `json:"refs,omitempty"`
-		BaseRevision string           `json:"base_revision,omitempty"`
-		Message      string           `json:"message,omitempty"`
+		BaseRevision string            `json:"base_revision,omitempty"`
+		Message      string            `json:"message,omitempty"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, err

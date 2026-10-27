@@ -249,7 +249,13 @@ func (s *Syncer) Run(ctx context.Context) error {
 			errors.Is(err, ErrServerIdentityReset) || errors.Is(err, ErrServerCAPending) ||
 			errors.Is(err, ErrServerRecovery) {
 			s.notifyIdentityProblem(err)
-			if !sleepCtx(ctx, s.opts.Heartbeat) {
+			// CA 待恢复、恢复模式是服务端状态：任何一台设备完成恢复就解除，
+			// 本机不需要做任何事。按心跳等 10 分钟会让人以为恢复没生效。
+			wait := s.opts.Heartbeat
+			if (errors.Is(err, ErrServerCAPending) || errors.Is(err, ErrServerRecovery)) && wait > serverRecoveryPoll {
+				wait = serverRecoveryPoll
+			}
+			if !sleepCtx(ctx, wait) {
 				return nil
 			}
 			continue
@@ -268,6 +274,9 @@ func (s *Syncer) Run(ctx context.Context) error {
 
 // timeoutCap 是退避上限。
 const timeoutCap = 2 * time.Minute
+
+// serverRecoveryPoll 是服务端处于 CA 待恢复或恢复模式时的探测间隔。
+const serverRecoveryPoll = 15 * time.Second
 
 // tick 完成一轮握手与对账。
 func (s *Syncer) tick(ctx context.Context) error {

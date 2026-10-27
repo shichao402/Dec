@@ -109,6 +109,9 @@ func TestRecoverReusesExistingDeviceKey(t *testing.T) {
 	if len(cloud.gotPubs) != 1 || cloud.gotPubs[0] != wantPub {
 		t.Fatal("恢复应发送本机原设备公钥")
 	}
+	if !cloud.gotReq[0].RestoreOnly {
+		t.Fatal("本机已有身份且未宣告丢失时应只取回（RestoreOnly），不重新登记")
+	}
 	if !out.CARestored || out.Enrolled {
 		t.Fatalf("只取回 CA 时不应改动本机身份: %+v", out)
 	}
@@ -133,8 +136,29 @@ func TestRecoverPassesDeclareFlag(t *testing.T) {
 	if len(cloud.gotReq) != 1 || !cloud.gotReq[0].DeclareCALost {
 		t.Fatal("DeclareCALost 未传给服务端")
 	}
+	if cloud.gotReq[0].RestoreOnly {
+		t.Fatal("本机没有身份时恢复必须顺带登记，不能 RestoreOnly")
+	}
 	if !out.CARebuilt || out.ReenrollDevices != 2 {
 		t.Fatalf("应带回重建结果: %+v", out)
+	}
+}
+
+// TestRecoverDeclareLostWithIdentityReenrolls 宣告丢失时 CA 会重建，原证书作废，
+// 即使本机已有身份也必须顺带用原密钥重新登记。
+func TestRecoverDeclareLostWithIdentityReenrolls(t *testing.T) {
+	store := NewIdentityStore(t.TempDir())
+	_ = store.Save(selfSignedIdentity(t, "dev-1"))
+	cloud := &caFakeCloud{recoverResp: proto.RecoverResponse{CARebuilt: true, ReenrollDevices: 1}}
+	srv := cloud.server(t)
+	if _, err := Recover(context.Background(), caTestClient(t, srv, store), store, RecoverInput{
+		EnrollInput:   EnrollInput{Email: "me@example.com", Password: "pw"},
+		DeclareCALost: true,
+	}); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(cloud.gotReq) != 1 || cloud.gotReq[0].RestoreOnly {
+		t.Fatal("宣告丢失时必须重新登记，不能 RestoreOnly")
 	}
 }
 

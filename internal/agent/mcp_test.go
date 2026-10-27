@@ -386,6 +386,13 @@ func TestMCPErrorMessages(t *testing.T) {
 			wantWord: "维护中",
 		},
 		{
+			// 部署瞬间握手会同时拿到“维护中”与“版本不对齐”，之后代理按心跳才再握手，
+			// 维护标志会残留。此时该说的是升级代理，不是等部署。
+			name:     "不对齐且残留维护标志",
+			status:   Status{DeviceID: "dev-1", Version: "v1.0.0", RequiredVer: "v1.0.1", Aligned: false, Maintenance: true},
+			wantWord: "版本与服务端要求不一致",
+		},
+		{
 			name:     "云端拒绝",
 			status:   Status{DeviceID: "dev-1", Version: "v1.0.0", Aligned: true},
 			callErr:  errors.New("forbidden: 来源 mcp 不能读密钥明文"),
