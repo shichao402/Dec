@@ -58,7 +58,7 @@ Distribution Root、Catalog、Operator Profile 或 candidate/production lane。�
 | Host | 跑什么 | upgrade |
 |---|---|---|
 | `publish.firoyang.com` | 外网 agent 控制面 + serve 操作面（数据面已在本机 store） | 两个都升；不要 `--agent-only`；不要改 profile URL |
-| `update.devcloud.woa.com` | 内网 agent + store 数据面（同机另有 `publish.devcloud.woa.com` / `update-internal.devcloud.woa.com` vhost，2026-10-19 三域名同构拆分） | 两个都升；不要传 `--public-base-url`（会改掉 loom 的 `https://…`） |
+| `update.devcloud.woa.com` | 内网 agent + store 数据面（同机另有 `publish.devcloud.woa.com` / `update-internal.devcloud.woa.com` vhost，2026-10-19 三域名同构拆分） | 两个都升；agent 配置须有 `publicURL=http://publish.devcloud.woa.com` |
 
 ## 禁止
 
