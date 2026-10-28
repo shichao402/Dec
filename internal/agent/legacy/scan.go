@@ -605,16 +605,20 @@ func tomlHeader(line string) ([]string, bool) {
 
 // shellRCLines 返回旧版安装脚本追加的行（需求：H03）。
 func shellRCLines(path string) []string {
-	return matchLines(path, func(line string) bool {
-		t := strings.TrimSpace(line)
-		if t == "# Dec" {
-			return true
-		}
-		if strings.HasPrefix(t, "#") {
-			return false
-		}
-		return strings.Contains(t, "/.dec/bin") || strings.Contains(t, "/.decs/bin")
-	})
+	return matchLines(path, isShellRCLine)
+}
+
+// isShellRCLine 判断一行是否是旧版安装脚本追加的。扫描与执行共用，
+// 执行时按当前内容重新认定，不依赖扫描时的行号。
+func isShellRCLine(line string) bool {
+	t := strings.TrimSpace(line)
+	if t == "# Dec" {
+		return true
+	}
+	if strings.HasPrefix(t, "#") {
+		return false
+	}
+	return strings.Contains(t, "/.dec/bin") || strings.Contains(t, "/.decs/bin")
 }
 
 // gitIncludeLines 返回 ~/.gitconfig 里指向旧版 Git 片段的行。
