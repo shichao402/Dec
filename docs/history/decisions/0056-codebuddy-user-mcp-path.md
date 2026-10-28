@@ -30,4 +30,9 @@
 ## 验证
 
 单测锁定：用户级/项目级 MCP 落点解析、启动登记写入 `~/.codebuddy/mcp.json`、
-其它条目原样保留、不在家目录生成 `.mcp.json`。真机验证待发版后补记。
+其它条目原样保留、不在家目录生成 `.mcp.json`。
+
+真机（2026-10-28，v2.1.37）：本机代理升级重启后 `dec-agent mcp-config` 显示 codebuddy
+「已写入」`~/.codebuddy/mcp.json`；同文件里出现下发的 `dec-gongfeng-mcp`，原有
+`devops-prod-pipeline-streamable` 不变。旧 `~/.mcp.json` 只剩 Dec 写的那一条，已手工
+移除，对账后未被重建。
