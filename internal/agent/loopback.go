@@ -55,6 +55,9 @@ type LoopbackOptions struct {
 	Logf func(format string, args ...any)
 	// LogPath 是日志文件路径，供托盘「查看日志」使用（agent-tray-access 需求 5.3）。
 	LogPath string
+	// LegacyScan 执行一次只读的旧版残留扫描（legacy-cleanup 需求 3.1），为空表示不提供。
+	// 返回值直接序列化给页面；包类型不出现在这里，免得 agent 包反向依赖 legacy。
+	LegacyScan func() (any, error)
 }
 
 // LoopbackEnrollInput 是页面提交的登记参数。
@@ -120,6 +123,7 @@ func (l *Loopback) Handler() http.Handler {
 	mux.HandleFunc("/api/reenroll", l.handleReenroll)
 	mux.HandleFunc("/api/projects", l.handleProjects)
 	mux.HandleFunc("/api/call", l.handleCall)
+	mux.HandleFunc("/api/tools/legacy/scan", l.handleLegacyScan)
 	mux.Handle("/mcp", l.handleMCP())
 	return l.guard(mux)
 }
@@ -257,6 +261,26 @@ func (l *Loopback) handleAdminJS(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStatus 返回状态（需求 19.5 的“本机页面提示”）。
+// handleLegacyScan 返回旧版残留的只读扫描结果（legacy-cleanup 需求 3.1）。
+//
+// 只读，不改任何文件，所以用 GET；执行清理另有接口（任务 6）。
+func (l *Loopback) handleLegacyScan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if l.opts.LegacyScan == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "未启用"})
+		return
+	}
+	out, err := l.opts.LegacyScan()
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (l *Loopback) handleStatus(w http.ResponseWriter, r *http.Request) {
 	out := l.localInfo()
 	if l.opts.Status == nil {

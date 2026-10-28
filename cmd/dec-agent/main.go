@@ -34,6 +34,7 @@ import (
 
 	"github.com/shichao402/Dec/internal/acceptance"
 	"github.com/shichao402/Dec/internal/agent"
+	"github.com/shichao402/Dec/internal/agent/legacy"
 	"github.com/shichao402/Dec/internal/proto"
 )
 
@@ -238,6 +239,32 @@ func cmdRun(args []string) error {
 			return nil
 		},
 		Configure: func(url string) error { return configure(dir, store, cfg, url) },
+		LegacyScan: func() (any, error) {
+			checks, ok := syncer.Checks()
+			if !ok {
+				return nil, legacy.ErrExpectedUnknown
+			}
+			home, err := agent.HomeDir()
+			if err != nil {
+				return nil, err
+			}
+			ps, _ := agent.LoadProjects(dir)
+			roots := make([]string, 0, len(ps))
+			for _, p := range ps {
+				roots = append(roots, p.Path)
+			}
+			var self []string
+			if exe, err := os.Executable(); err == nil {
+				self = append(self, exe)
+			}
+			return legacy.Scan(legacy.Input{
+				Home:           home,
+				StateDir:       dir,
+				Projects:       roots,
+				Expected:       legacy.NewExpected(checks),
+				ExtraProtected: self,
+			})
+		},
 	})
 	addr, err := loop.Start()
 	if err != nil {

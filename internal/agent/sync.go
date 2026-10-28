@@ -139,6 +139,19 @@ func (s *Syncer) SetProjects(projects []Project) {
 // 它持有服务地址、版本号与身份来源，重建一个会和主循环的状态脱节。
 func (s *Syncer) Client() *Client { return s.client }
 
+// Checks 返回上一轮云端给出的核对清单，即云端当前为本设备期望的全部落点。
+//
+// ok 为 false 表示还没有成功对账过：此时清单为空不代表“没有期望条目”，
+// 调用方不能拿它当排除面（legacy-cleanup 需求 2.3.1）。
+func (s *Syncer) Checks() (entries []proto.ManifestEntry, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastOK.IsZero() {
+		return nil, false
+	}
+	return append([]proto.ManifestEntry(nil), s.checks...), true
+}
+
 // home 返回生效的用户目录。
 func (o Options) home() (string, error) {
 	if o.HomeDir != "" {
