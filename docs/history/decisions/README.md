@@ -75,4 +75,4 @@
 | [0053](0053-edit-asset-via-fixed-tool.md) | 改资产内容走固化工具 dec_edit_asset_file，说明行写明 bundle 与 path | 已接受（v2.1.33 已发版，v2.1.34 补 revision，真机验证通过） |
 | [0054](0054-with-in-startup-host-sync.md) | 代理启动登记 dec 条目覆盖 With，更新地址时保留用户的 disabled 开关 | 已接受（v2.1.35 已发版，真机验证通过） |
 | [0055](0055-mcp-entry-renamed-dec-vault.md) | 内置 MCP 入口改名 dec_vault，避开项目名与 dec- 托管前缀，自动迁移旧条目 | 已接受（v2.1.36 已发版，真机验证通过） |
-| [0056](0056-codebuddy-user-mcp-path.md) | CodeBuddy 用户级 MCP 落点改为 ~/.codebuddy/mcp.json，并纳入启动登记 | 已接受（待发版） |
+| [0056](0056-codebuddy-user-mcp-path.md) | CodeBuddy 用户级 MCP 落点改为 ~/.codebuddy/mcp.json，并纳入启动登记 | 已接受（v2.1.37 已发版，真机验证通过） |
