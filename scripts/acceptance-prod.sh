@@ -196,6 +196,38 @@ else
 	bad "审计仓库有提交" "读不到提交历史"
 fi
 
+# 凭据明文（credential-landing 需求 8.4）：私钥与项目 secret 只能以密文进 SSOT。
+# 本机验收（acceptance.sh）会写一对临时私钥和一个以固定前缀开头的 secret，
+# 前缀与 internal/acceptance/credential.go 的 PlaintextMarker 必须一致。
+# 只搜文本：certs/ 下的 ca.key 是合法私钥，不在扫描范围内；.git 对象是压缩的，交给 git log -G。
+plain_re='BEGIN [A-Z ]*PRIVATE KEY|DEC-ACCEPTANCE-PLAINTEXT-'
+data=/var/lib/dec-cloud
+plain_files=$(for d in ssot state audit; do
+	sudo -n test -d "$data/$d" 2>/dev/null || continue
+	sudo -n grep -rIlE --exclude-dir=.git "$plain_re" "$data/$d" 2>/dev/null
+done | sed "s#^$data/##" | tr '\n' ' ' | sed 's/ *$//')
+if [ -z "$plain_files" ]; then
+	ok "数据目录无明文凭据" "ssot、state、audit 工作树"
+else
+	bad "数据目录无明文凭据" "命中：$plain_files"
+fi
+plain_commits=""
+for d in ssot audit; do
+	hits=$(sudo -n git -c safe.directory="$data/$d" -C "$data/$d" log --all -E -G"$plain_re" --format=%h 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
+	[ -n "$hits" ] && plain_commits="$plain_commits $d:$hits"
+done
+if [ -z "$plain_commits" ]; then
+	ok "git 历史无明文凭据" "ssot、audit 全部提交"
+else
+	bad "git 历史无明文凭据" "命中提交：${plain_commits# }"
+fi
+secret_residue=$(sudo -n ls "$data/ssot/secrets" 2>/dev/null | grep '^dec-acceptance' | tr '\n' ' ' | sed 's/ *$//')
+if [ -z "$secret_residue" ]; then
+	ok "没有验收残留密钥" "—"
+else
+	bad "没有验收残留密钥" "残留：$secret_residue"
+fi
+
 # ---------------------------------------------------------------- 七、分发
 echo
 echo "七、分发完整性"

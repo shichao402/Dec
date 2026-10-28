@@ -122,6 +122,8 @@ type runner struct {
 	// logPath 与 logSnap 用于验证日志只写单文件（agent-tray-access 需求 5.1）。
 	logPath string
 	logSnap map[string]fileStamp
+	// cred 是凭据落点验收的状态，跑过才非 nil。
+	cred *credRun
 }
 
 // run 是主流程，返回 error 表示无法继续。
@@ -163,6 +165,8 @@ func (r *runner) run(ctx context.Context) error {
 	if err := r.checkDeleteAndClean(ctx); err != nil {
 		return err
 	}
+	// 凭据落点：复用临时项目，失败只记 FAIL，不阻断后面的日志检查。
+	r.checkCredentials(ctx)
 	// 放在最后：前面的 MCP 写删会让代理产生日志，此时比对才有意义。
 	r.checkSingleLog()
 	return nil
@@ -633,8 +637,8 @@ func (r *runner) registerTempProject(ctx context.Context) error {
 // 顺序是「云端 → 本机代理 → 磁盘」：先让云端不再期望这些内容，
 // 代理才会收到删除指令；反过来先删磁盘会让云端记录与实际不一致。
 //
-// 只回收自己造出来的东西。设备订阅不在其中——清单里写了什么就恢复成什么，
-// 绝不能用「清空」当默认值：那会把用户真实的订阅一起抹掉。
+// 只回收自己造出来的东西。设备订阅只有凭据验收会动：改之前先备份，
+// 清理时按备份原样写回，绝不能用「清空」当默认值：那会把用户真实的订阅一起抹掉。
 func (r *runner) cleanup(ctx context.Context) {
 	if r.session == nil {
 		// 握手都没成功，什么也没写进去。
@@ -642,6 +646,10 @@ func (r *runner) cleanup(ctx context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 	defer cancel()
+
+	// 0. 凭据验收的产物：临时凭据 bundle、设备订阅、临时密钥。
+	// 必须在删项目之前：项目平面的 secret 要靠项目登记才能下发删除。
+	r.cleanupCredentials(ctx)
 
 	// 1. 删掉临时 bundle（即使主流程已经删过，这里再删一次也应当成功）。
 	if _, errMsg := r.callTool(ctx, "dec_delete_bundle", map[string]any{
