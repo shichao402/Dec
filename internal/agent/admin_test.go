@@ -145,6 +145,31 @@ func TestAdminJSEscapesRenderedContent(t *testing.T) {
 	}
 }
 
+// TestAdminPageWrapsLongText 验证长路径不会把表格撑出卡片。
+//
+// 覆盖记录里的落点是一组绝对路径，其中没有任何空格，浏览器默认不换行。
+// 少了下面的约束，表格会横向溢出、盖住右侧内容，而页面本身不会报任何错。
+func TestAdminPageWrapsLongText(t *testing.T) {
+	l := newTestLoopback(t, LoopbackOptions{})
+	body := getPath(t, l, "/admin").Body.String()
+
+	for _, rule := range []string{"overflow-wrap:", "td.paths", ".pathline"} {
+		if !strings.Contains(body, rule) {
+			t.Fatalf("表格缺少长文本换行约束：%s", rule)
+		}
+	}
+	// 表头可以保持不换行，正文的 td 却必须允许断行，否则长路径只能撑破布局。
+	if strings.Contains(body, "td { padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }") {
+		t.Fatal("td 恢复了没有换行约束的写法")
+	}
+
+	// 落点必须一行一个，用顿号连成一串等于放弃所有断行机会。
+	body = funcBody(t, adminJS, "loadDevices")
+	if !strings.Contains(body, "pathline") {
+		t.Fatal("覆盖记录的落点应逐行渲染")
+	}
+}
+
 // TestAdminRoutesShareGuard 验证管理面同样受 Host 校验保护。
 //
 // 管理面是最敏感的一块，如果它能被 DNS rebinding 打进来，

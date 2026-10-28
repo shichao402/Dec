@@ -267,8 +267,12 @@ async function loadDevices() {
     } else {
       let html = '<table><thead><tr><th>条目</th><th>落点</th><th>发现时间</th></tr></thead><tbody>';
       for (const x of list) {
-        html += '<tr><td class="mono">' + esc(x.id) + '</td><td class="mono">' +
-          esc((x.paths || []).join('、')) + '</td><td>' + esc(when(x.detected_at)) + '</td></tr>';
+        // 落点是一组绝对路径，必须一行一个：用顿号连成一串时，
+        // 没有断行机会的长路径会把表格撑出卡片外。
+        const paths = (x.paths || [])
+          .map((p) => '<span class="pathline">' + esc(p) + '</span>').join('');
+        html += '<tr><td class="mono">' + esc(x.id) + '</td><td class="mono paths">' +
+          paths + '</td><td class="nowrap">' + esc(when(x.detected_at)) + '</td></tr>';
       }
       html += '</tbody></table>';
       $('overrides').innerHTML = html;

@@ -43,7 +43,10 @@ h2 { font-size:16px; margin:0 0 4px; }
 .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
 table { width:100%; border-collapse:collapse; font-size:13px; }
 th { text-align:left; color:var(--mut); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
-td { padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+td { padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere; }
+td.nowrap { white-space:nowrap; }
+td.paths { word-break:break-all; }
+.pathline { display:block; }
 tr:last-child td { border-bottom:0; }
 .mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
 button.act { background:var(--bg); border:1px solid var(--line); color:var(--txt); font:inherit; font-size:12px; padding:4px 10px; border-radius:6px; cursor:pointer; }
