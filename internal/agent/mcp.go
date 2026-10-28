@@ -40,7 +40,7 @@ type MCPServer struct {
 func NewMCPServer(opts MCPServer) *mcp.Server {
 	name := opts.ServerName
 	if name == "" {
-		name = "dec"
+		name = mcpEntryName
 	}
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    name,

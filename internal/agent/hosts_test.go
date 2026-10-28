@@ -20,7 +20,7 @@ func TestUpsertJSONOnlyTouchesDec(t *testing.T) {
     "alpha": {
       "url": "https://alpha.example.com/mcp"
     },
-    "dec": {
+    "dec_vault": {
       "url": "http://127.0.0.1:47654/mcp"
     },
     "zeta": {
@@ -58,8 +58,8 @@ func TestUpsertJSONOnlyTouchesDec(t *testing.T) {
 	if cmd := servers["zeta"].(map[string]any)["command"]; cmd != "node" {
 		t.Fatalf("zeta 条目被改动: %v", servers["zeta"])
 	}
-	if url := servers["dec"].(map[string]any)["url"]; url != "http://127.0.0.1:43679/mcp" {
-		t.Fatalf("dec 条目未更新: %v", servers["dec"])
+	if url := servers["dec_vault"].(map[string]any)["url"]; url != "http://127.0.0.1:43679/mcp" {
+		t.Fatalf("dec 条目未更新: %v", servers["dec_vault"])
 	}
 	if got["otherSetting"] != true {
 		t.Fatalf("顶层其它字段被改动: %v", got)
@@ -67,8 +67,8 @@ func TestUpsertJSONOnlyTouchesDec(t *testing.T) {
 
 	// 键顺序必须保持：alpha 在 dec 之前，dec 在 zeta 之前。
 	text := string(data)
-	if !(strings.Index(text, `"alpha"`) < strings.Index(text, `"dec"`) &&
-		strings.Index(text, `"dec"`) < strings.Index(text, `"zeta"`)) {
+	if !(strings.Index(text, `"alpha"`) < strings.Index(text, `"dec_vault"`) &&
+		strings.Index(text, `"dec_vault"`) < strings.Index(text, `"zeta"`)) {
 		t.Fatalf("键顺序被打乱:\n%s", text)
 	}
 }
@@ -77,7 +77,7 @@ func TestUpsertJSONOnlyTouchesDec(t *testing.T) {
 func TestDeleteJSONOnlyRemovesDec(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
-	original := `{"mcpServers":{"alpha":{"url":"https://a"},"dec":{"url":"http://127.0.0.1:43679/mcp"},"zeta":{"command":"x"}}}`
+	original := `{"mcpServers":{"alpha":{"url":"https://a"},"dec_vault":{"url":"http://127.0.0.1:43679/mcp"},"zeta":{"command":"x"}}}`
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatalf("准备文件失败: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestDeleteJSONOnlyRemovesDec(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("写出来的不是合法 JSON: %v", err)
 	}
-	if _, ok := got.MCPServers["dec"]; ok {
+	if _, ok := got.MCPServers["dec_vault"]; ok {
 		t.Fatal("dec 条目应已移除")
 	}
 	if len(got.MCPServers) != 2 {
@@ -124,7 +124,7 @@ func TestUpsertJSONCreatesFile(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("写出来的不是合法 JSON: %v\n%s", err, data)
 	}
-	if got.MCPServers["dec"].URL != "http://127.0.0.1:43679/mcp" {
+	if got.MCPServers["dec_vault"].URL != "http://127.0.0.1:43679/mcp" {
 		t.Fatalf("dec 条目内容不对: %+v", got.MCPServers)
 	}
 }
@@ -139,7 +139,7 @@ model = "gpt-5"
 [mcp_servers.alpha]
 url = "https://alpha.example.com/mcp"
 
-[mcp_servers.dec]
+[mcp_servers.dec_vault]
 url = "http://127.0.0.1:47654/mcp"
 
 [other]
@@ -178,7 +178,7 @@ key = "value"
 		t.Fatalf("其它表被改动:\n%s", text)
 	}
 	// dec 表只能出现一次。
-	if n := strings.Count(text, "[mcp_servers.dec]"); n != 1 {
+	if n := strings.Count(text, "[mcp_servers.dec_vault]"); n != 1 {
 		t.Fatalf("dec 表出现 %d 次:\n%s", n, text)
 	}
 }
@@ -200,7 +200,7 @@ func TestUpsertTOMLAppendsWhenMissing(t *testing.T) {
 	if !strings.Contains(text, "model = \"gpt-5\"") {
 		t.Fatalf("原有内容被丢掉:\n%s", text)
 	}
-	if !strings.Contains(text, "[mcp_servers.dec]") {
+	if !strings.Contains(text, "[mcp_servers.dec_vault]") {
 		t.Fatalf("dec 表没有追加:\n%s", text)
 	}
 	if !strings.Contains(text, `url = "http://127.0.0.1:43679/mcp"`) {
@@ -217,7 +217,7 @@ func TestDeleteTOMLRemovesOnlyDec(t *testing.T) {
 [mcp_servers.alpha]
 url = "https://alpha.example.com/mcp"
 
-[mcp_servers.dec]
+[mcp_servers.dec_vault]
 url = "http://127.0.0.1:43679/mcp"
 
 [other]
@@ -232,7 +232,7 @@ key = "value"
 	}
 	data, _ := os.ReadFile(path)
 	text := string(data)
-	if strings.Contains(text, "[mcp_servers.dec]") {
+	if strings.Contains(text, "[mcp_servers.dec_vault]") {
 		t.Fatalf("dec 表应已移除:\n%s", text)
 	}
 	if !strings.Contains(text, "[mcp_servers.alpha]") {
@@ -298,7 +298,7 @@ func TestSyncUpdatesPort(t *testing.T) {
 	if !strings.Contains(text, "9001") {
 		t.Fatalf("新端口没有写入:\n%s", text)
 	}
-	if n := strings.Count(text, `"dec"`); n != 1 {
+	if n := strings.Count(text, `"dec_vault"`); n != 1 {
 		t.Fatalf("dec 条目出现 %d 次:\n%s", n, text)
 	}
 }
@@ -317,7 +317,7 @@ func TestInspectHostsReportsThreeStates(t *testing.T) {
 		t.Fatalf("准备 cursor 目录失败: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cursorDir, "mcp.json"),
-		[]byte(`{"mcpServers":{"dec":{"url":"http://127.0.0.1:43679/mcp"}}}`), 0o644); err != nil {
+		[]byte(`{"mcpServers":{"dec_vault":{"url":"http://127.0.0.1:43679/mcp"}}}`), 0o644); err != nil {
 		t.Fatalf("准备 cursor 配置失败: %v", err)
 	}
 
@@ -354,7 +354,7 @@ func TestInspectHostsReportsThreeStates(t *testing.T) {
 		t.Fatalf("cursor 应为已写入且带出条目内容，实际 %v entry=%q reason=%q",
 			got.Status, got.Entry, got.Reason)
 	}
-	if got := byName["claude"]; got.Status != HostSkipped || !strings.Contains(got.Reason, "没有 dec 条目") {
+	if got := byName["claude"]; got.Status != HostSkipped || !strings.Contains(got.Reason, "没有 dec_vault 条目") {
 		t.Fatalf("claude 应为已跳过并说明没有条目，实际 %v reason=%q", got.Status, got.Reason)
 	}
 	if got := byName["codex"]; got.Status != HostSkipped || !strings.Contains(got.Reason, "配置目录不存在") {
@@ -387,7 +387,7 @@ func TestRemoveHostsRemovesOnlyDec(t *testing.T) {
 		t.Fatalf("准备目录失败: %v", err)
 	}
 	path := filepath.Join(cursorDir, "mcp.json")
-	original := `{"mcpServers":{"alpha":{"url":"https://a"},"dec":{"url":"http://127.0.0.1:43679/mcp"}}}`
+	original := `{"mcpServers":{"alpha":{"url":"https://a"},"dec_vault":{"url":"http://127.0.0.1:43679/mcp"}}}`
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatalf("准备文件失败: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestRemoveHostsRemovesOnlyDec(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("写出来的不是合法 JSON: %v", err)
 	}
-	if _, ok := got.MCPServers["dec"]; ok {
+	if _, ok := got.MCPServers["dec_vault"]; ok {
 		t.Fatal("dec 条目应已移除")
 	}
 	if _, ok := got.MCPServers["alpha"]; !ok {
@@ -462,7 +462,7 @@ func TestSyncHostsIncludesWith(t *testing.T) {
 		t.Fatalf("准备目录失败: %v", err)
 	}
 	path := filepath.Join(dir, "mcp_config.json")
-	original := `{"mcpServers":{"other":{"url":"https://o"},"dec":{"disabled":true,"url":"http://127.0.0.1:8787/mcp","transportType":"streamable-http"}}}`
+	original := `{"mcpServers":{"other":{"url":"https://o"},"dec_vault":{"disabled":true,"url":"http://127.0.0.1:8787/mcp","transportType":"streamable-http"}}}`
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatalf("准备文件失败: %v", err)
 	}
@@ -488,7 +488,7 @@ func TestSyncHostsIncludesWith(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("解析失败: %v\n%s", err, data)
 	}
-	dec := got.MCPServers["dec"]
+	dec := got.MCPServers["dec_vault"]
 	if dec["url"] != "http://127.0.0.1:43679/mcp" || dec["transportType"] != "streamable-http" {
 		t.Fatalf("with 的 dec 条目不对: %v", dec)
 	}
@@ -510,5 +510,96 @@ func TestUpsertJSONDoesNotAddDisabled(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if strings.Contains(string(data), "disabled") {
 		t.Fatalf("不应写入 disabled:\n%s", data)
+	}
+}
+
+// TestUpsertJSONMigratesLegacyName 验证旧名 dec 迁到 dec_vault（ADR 0055）。
+//
+// 只写新名不删旧名，宿主里会剩一条地址过期的 dec，AI 看到两个同类入口，
+// 其中一个永远连不上。旧条目的 disabled 也要继承，改名不等于重新启用。
+func TestUpsertJSONMigratesLegacyName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp_config.json")
+	original := `{"mcpServers":{"alpha":{"url":"https://a"},"dec":{"disabled":true,"url":"http://old/mcp"},"dec-woa":{"url":"https://w"}}}`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatalf("准备文件失败: %v", err)
+	}
+	if err := upsertJSONEntry(path, "with", "http://127.0.0.1:43679/mcp"); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	var got struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("解析失败: %v\n%s", err, data)
+	}
+	if _, ok := got.MCPServers["dec"]; ok {
+		t.Fatalf("旧名 dec 应已移除:\n%s", data)
+	}
+	nv := got.MCPServers["dec_vault"]
+	if nv["url"] != "http://127.0.0.1:43679/mcp" || nv["disabled"] != true {
+		t.Fatalf("dec_vault 条目不对（应继承 disabled）: %v", nv)
+	}
+	// 云端下发的 dec- 托管条目与用户条目都不能被波及。
+	if got.MCPServers["dec-woa"]["url"] != "https://w" || got.MCPServers["alpha"]["url"] != "https://a" {
+		t.Fatalf("其它条目被改动:\n%s", data)
+	}
+}
+
+// TestUpsertTOMLMigratesLegacyName 验证 Codex 的 [mcp_servers.dec] 被换成新表。
+func TestUpsertTOMLMigratesLegacyName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	original := "model = \"gpt-5\"\n\n[mcp_servers.dec]\nurl = \"http://old/mcp\"\n\n[other]\nkey = \"value\"\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatalf("准备文件失败: %v", err)
+	}
+	if err := upsertTOMLEntry(path, "http://127.0.0.1:43679/mcp"); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	text := string(data)
+	if strings.Contains(text, "[mcp_servers.dec]") || strings.Contains(text, "http://old/mcp") {
+		t.Fatalf("旧表应已移除:\n%s", text)
+	}
+	if strings.Count(text, "[mcp_servers.dec_vault]") != 1 || !strings.Contains(text, `url = "http://127.0.0.1:43679/mcp"`) {
+		t.Fatalf("新表不对:\n%s", text)
+	}
+	if !strings.Contains(text, "[other]") || !strings.Contains(text, `model = "gpt-5"`) {
+		t.Fatalf("其它内容被改动:\n%s", text)
+	}
+}
+
+// TestDeleteRemovesLegacyName 验证卸载同时删新旧两个名字，不留连不上的条目。
+func TestDeleteRemovesLegacyName(t *testing.T) {
+	dir := t.TempDir()
+	jsonPath := filepath.Join(dir, "mcp.json")
+	if err := os.WriteFile(jsonPath, []byte(`{"mcpServers":{"dec":{"url":"http://old"},"mine":{"url":"https://m"}}}`), 0o644); err != nil {
+		t.Fatalf("准备文件失败: %v", err)
+	}
+	if err := deleteJSONEntry(jsonPath); err != nil {
+		t.Fatalf("移除失败: %v", err)
+	}
+	data, _ := os.ReadFile(jsonPath)
+	if strings.Contains(string(data), `"dec"`) || !strings.Contains(string(data), `"mine"`) {
+		t.Fatalf("JSON 移除结果不对:\n%s", data)
+	}
+
+	tomlPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(tomlPath, []byte("[mcp_servers.dec]\nurl = \"http://old\"\n\n[mcp_servers.dec_vault]\nurl = \"http://new\"\n\n[other]\nk = 1\n"), 0o644); err != nil {
+		t.Fatalf("准备文件失败: %v", err)
+	}
+	if err := deleteTOMLEntry(tomlPath); err != nil {
+		t.Fatalf("移除失败: %v", err)
+	}
+	data, _ = os.ReadFile(tomlPath)
+	if strings.Contains(string(data), "mcp_servers.dec") || !strings.Contains(string(data), "[other]") {
+		t.Fatalf("TOML 移除结果不对:\n%s", data)
+	}
+}
+
+// TestEntryNameOutsideManagedPrefix 守住命名约束：内置入口不能落进 dec- 托管前缀。
+func TestEntryNameOutsideManagedPrefix(t *testing.T) {
+	if strings.HasPrefix(mcpEntryName, entryPrefix) {
+		t.Fatalf("内置入口名 %q 落进了托管前缀 %q，会被同名下发覆盖并计入托管哈希", mcpEntryName, entryPrefix)
 	}
 }

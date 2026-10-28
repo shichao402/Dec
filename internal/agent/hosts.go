@@ -23,9 +23,17 @@ import (
 //  2. 不替宿主创建目录。没装 Claude 的机器上凭空造一个 ~/.claude 会让人
 //     以为装过（需求 2.3）。
 const (
-	// mcpEntryName 是所有宿主里统一使用的条目名。
-	mcpEntryName = "dec"
+	// mcpEntryName 是所有宿主里统一使用的条目名（ADR 0055）。
+	//
+	// 不叫 dec：和项目名一样，自然语言里「用 dec 改」分不清是改仓库还是调工具。
+	// 也不能叫 dec-xxx：dec- 是云端下发 MCP 条目的托管前缀（ssot.EntryKey），
+	// 落进那个命名空间会被同名下发覆盖，还会被算进托管条目哈希。
+	mcpEntryName = "dec_vault"
 )
+
+// legacyEntryNames 是旧版本用过的条目名。写入新名时一并移除，卸载时也删，
+// 否则宿主里会留下一条地址过期、连不上的旧条目。
+var legacyEntryNames = []string{"dec"}
 
 // hostFormat 是配置文件的格式。
 type hostFormat int
@@ -33,7 +41,7 @@ type hostFormat int
 const (
 	// formatJSON 是 JSON 对象，条目放在 mcpServers 下。
 	formatJSON hostFormat = iota
-	// formatTOML 是 TOML，条目是 [mcp_servers.dec] 表。
+	// formatTOML 是 TOML，条目是 [mcp_servers.dec_vault] 表。
 	formatTOML
 )
 
@@ -55,7 +63,7 @@ type HostStatus int
 const (
 	// HostWritten 表示已写入或已是最新。
 	HostWritten HostStatus = iota
-	// HostRemoved 表示已移除 `dec` 条目。
+	// HostRemoved 表示已移除 `dec_vault` 条目。
 	HostRemoved HostStatus = iota
 	// HostSkipped 表示宿主没安装，主动跳过。
 	HostSkipped
@@ -70,7 +78,7 @@ type HostResult struct {
 	Status HostStatus
 	// Reason 说明跳过或失败的原因。
 	Reason string
-	// Entry 是当前文件里 `dec` 条目的内容，用于 mcp-config 打印。
+	// Entry 是当前文件里 `dec_vault` 条目的内容，用于 mcp-config 打印。
 	Entry string
 }
 
@@ -115,7 +123,7 @@ func MCPServerURL(addr string) string {
 	return "http://" + addr + "/mcp"
 }
 
-// syncHosts 把 `dec` 条目写进每个已安装宿主的配置（需求 2.1、2.2、2.4）。
+// syncHosts 把 `dec_vault` 条目写进每个已安装宿主的配置（需求 2.1、2.2、2.4）。
 func syncHosts(hosts []Host, url string) []HostResult {
 	out := make([]HostResult, 0, len(hosts))
 	for _, h := range hosts {
@@ -148,7 +156,7 @@ func syncHosts(hosts []Host, url string) []HostResult {
 	return out
 }
 
-// removeHosts 从每个宿主的配置里移除 `dec` 条目（需求 2.5）。
+// removeHosts 从每个宿主的配置里移除 `dec_vault` 条目（需求 2.5）。
 func removeHosts(hosts []Host) []HostResult {
 	out := make([]HostResult, 0, len(hosts))
 	for _, h := range hosts {
@@ -186,7 +194,7 @@ func removeHosts(hosts []Host) []HostResult {
 	return out
 }
 
-// inspectHosts 读出每个宿主当前的 `dec` 条目，不做任何修改。
+// inspectHosts 读出每个宿主当前的 `dec_vault` 条目，不做任何修改。
 func inspectHosts(hosts []Host) []HostResult {
 	out := make([]HostResult, 0, len(hosts))
 	for _, h := range hosts {
@@ -212,7 +220,7 @@ func inspectHosts(hosts []Host) []HostResult {
 		}
 		if entry == "" {
 			res.Status = HostSkipped
-			res.Reason = "配置里没有 dec 条目"
+			res.Reason = "配置里没有 dec_vault 条目"
 			out = append(out, res)
 			continue
 		}
@@ -232,7 +240,7 @@ func readEntry(h Host) string {
 	return entry
 }
 
-// readEntryFor 按格式读出 `dec` 条目。
+// readEntryFor 按格式读出 `dec_vault` 条目。
 func readEntryFor(h Host) (string, error) {
 	data, err := os.ReadFile(h.Path)
 	if err != nil {
@@ -264,9 +272,9 @@ func readEntryFor(h Host) (string, error) {
 	return "", nil
 }
 
-// upsertJSONEntry 在 JSON 配置里写入或替换 `dec` 条目。
+// upsertJSONEntry 在 JSON 配置里写入或替换 `dec_vault` 条目。
 //
-// 只替换 mcpServers.dec 这一项，其它条目原样保留，连顺序都不动：
+// 只替换 mcpServers.dec_vault 这一项，其它条目原样保留，连顺序都不动：
 // 配置文件常常是用户手工编辑的，整体重排会让人以为改坏了。
 func upsertJSONEntry(path, hostName, url string) error {
 	fields := entryFor(hostName, url)
@@ -288,9 +296,19 @@ func upsertJSONEntry(path, hostName, url string) error {
 		}
 		servers = inner
 	}
-	// 用户在宿主界面里关掉了 dec（With 等宿主写成 disabled:true），
+	// 用户在宿主界面里关掉了 dec_vault（With 等宿主写成 disabled:true），
 	// 代理只负责把地址改对，不能借更新之机把它重新打开。
-	if old, ok := servers.get(mcpEntryName); ok {
+	old, ok := servers.get(mcpEntryName)
+	for _, legacy := range legacyEntryNames {
+		if raw, found := servers.get(legacy); found {
+			if !ok {
+				// 新名还没写过：开关状态从旧条目继承，改名不等于重新启用。
+				old, ok = raw, true
+			}
+			servers.delete(legacy)
+		}
+	}
+	if ok {
 		var prev map[string]json.RawMessage
 		if json.Unmarshal(old, &prev) == nil {
 			if v, ok := prev["disabled"]; ok {
@@ -311,7 +329,7 @@ func upsertJSONEntry(path, hostName, url string) error {
 	return atomicWrite(path, indentJSON(root.encode()))
 }
 
-// deleteJSONEntry 从 JSON 配置里移除 `dec` 条目。
+// deleteJSONEntry 从 JSON 配置里移除 `dec_vault` 条目。
 func deleteJSONEntry(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -329,17 +347,23 @@ func deleteJSONEntry(path string) error {
 	if err != nil {
 		return nil
 	}
-	if !servers.delete(mcpEntryName) {
+	removed := servers.delete(mcpEntryName)
+	for _, legacy := range legacyEntryNames {
+		if servers.delete(legacy) {
+			removed = true
+		}
+	}
+	if !removed {
 		return nil
 	}
 	root.set("mcpServers", servers.encode())
 	return atomicWrite(path, indentJSON(root.encode()))
 }
 
-// upsertTOMLEntry 在 TOML 配置里写入或替换 [mcp_servers.dec] 表。
+// upsertTOMLEntry 在 TOML 配置里写入或替换 [mcp_servers.dec_vault] 表。
 //
 // 用文本级替换而不是解析再序列化：TOML 库会把用户的注释与缩进重排一遍，
-// 而那正是「只改 dec 这一条」要避免的（需求 2.2）。
+// 而那正是「只改 dec_vault 这一条」要避免的（需求 2.2）。
 func upsertTOMLEntry(path, url string) error {
 	data, err := readOrEmpty(path)
 	if err != nil {
@@ -349,6 +373,11 @@ func upsertTOMLEntry(path, url string) error {
 		"[mcp_servers." + mcpEntryName + "]",
 		`url = ` + tomlString(url),
 	}
+	for _, legacy := range legacyEntryNames {
+		if data, err = replaceTOMLSection(data, legacy, nil); err != nil {
+			return err
+		}
+	}
 	out, err := replaceTOMLSection(data, mcpEntryName, section)
 	if err != nil {
 		return err
@@ -356,7 +385,7 @@ func upsertTOMLEntry(path, url string) error {
 	return atomicWrite(path, out)
 }
 
-// deleteTOMLEntry 移除 [mcp_servers.dec] 表。
+// deleteTOMLEntry 移除 [mcp_servers.dec_vault] 表。
 func deleteTOMLEntry(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -365,6 +394,11 @@ func deleteTOMLEntry(path string) error {
 	out, err := replaceTOMLSection(data, mcpEntryName, nil)
 	if err != nil {
 		return err
+	}
+	for _, legacy := range legacyEntryNames {
+		if out, err = replaceTOMLSection(out, legacy, nil); err != nil {
+			return err
+		}
 	}
 	return atomicWrite(path, out)
 }
@@ -469,7 +503,7 @@ func tomlSectionBody(data []byte, name string) string {
 	return strings.Join(body, "\n")
 }
 
-// entryFor 返回某个宿主的 `dec` 条目内容。
+// entryFor 返回某个宿主的 `dec_vault` 条目内容。
 //
 // Claude 需要显式声明 type=http 才知道这是 HTTP 传输；Cursor 用 url 即可，
 // 多写一个它不认识的字段只会在它自己的 UI 里显示成未知配置。

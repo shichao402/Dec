@@ -144,8 +144,8 @@ func TestMCPHandshakeIsLocal(t *testing.T) {
 	// Connect 内部已完成 initialize 与 notifications/initialized。
 	if got := session.InitializeResult(); got == nil {
 		t.Fatal("客户端没有拿到 initialize 结果")
-	} else if got.ServerInfo == nil || got.ServerInfo.Name != "dec" {
-		t.Fatalf("serverInfo 应为 dec，实际 %+v", got.ServerInfo)
+	} else if got.ServerInfo == nil || got.ServerInfo.Name != "dec_vault" {
+		t.Fatalf("serverInfo 应为 dec_vault，实际 %+v", got.ServerInfo)
 	}
 	if n := len(cloud.recorded()); n != 0 {
 		t.Fatalf("握手阶段不应转发任何调用给云端，实际转发了 %d 次: %+v", n, cloud.recorded())

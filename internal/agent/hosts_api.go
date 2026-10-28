@@ -7,7 +7,7 @@ import (
 
 // 宿主同步的对外入口（需求 2）。
 
-// SyncHosts 把 `dec` 条目写入所有已安装宿主的用户级 MCP 配置。
+// SyncHosts 把 `dec_vault` 条目写入所有已安装宿主的用户级 MCP 配置。
 //
 // 代理启动时调用一次，端口变化时再调用一次（需求 2.4）：
 // 这两个时机覆盖了「用户新装了 Cursor」与「本机端口被占用后改用别的端口」
@@ -24,7 +24,7 @@ func SyncHosts(addr string) []HostResult {
 	return syncHosts(DefaultHosts(home), MCPServerURL(addr))
 }
 
-// RemoveHosts 从所有宿主里移除 `dec` 条目（需求 2.5）。
+// RemoveHosts 从所有宿主里移除 `dec_vault` 条目（需求 2.5）。
 func RemoveHosts() []HostResult {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -37,7 +37,7 @@ func RemoveHosts() []HostResult {
 	return removeHosts(DefaultHosts(home))
 }
 
-// InspectHosts 读出所有宿主当前的 `dec` 条目，不做修改（需求 2.6）。
+// InspectHosts 读出所有宿主当前的 `dec_vault` 条目，不做修改（需求 2.6）。
 func InspectHosts() []HostResult {
 	home, err := os.UserHomeDir()
 	if err != nil {

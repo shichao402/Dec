@@ -41,7 +41,7 @@ type Options struct {
 	Timeout time.Duration
 	// Keep 为 true 时即使全部通过也保留测试数据，便于人工观察。
 	Keep bool
-	// SkipHosts 为 true 时跳过「各宿主 dec 条目」检查。
+	// SkipHosts 为 true 时跳过「各宿主 dec_vault 条目」检查。
 	//
 	// 只在确实没有 IDE 的机器上使用（例如服务器）：那台机器上不存在
 	// ~/.cursor / ~/.claude / ~/.codex，写不出条目不是缺陷。默认 false，
@@ -138,7 +138,7 @@ func (r *runner) run(ctx context.Context) error {
 	if r.opts.SkipHosts {
 		// 没有 IDE 的机器（服务器）跳过这一项，但要说清楚是跳过而不是通过，
 		// 否则日志会让人以为「MCP 条目已经写好了」。
-		r.step("各宿主 dec 条目", true, "已跳过（--skip-hosts，这台机器没有 IDE）")
+		r.step("各宿主 dec_vault 条目", true, "已跳过（--skip-hosts，这台机器没有 IDE）")
 	} else if err := r.checkHosts(ctx); err != nil {
 		return err
 	}
@@ -245,14 +245,14 @@ func (r *runner) checkStatus(ctx context.Context) error {
 	return nil
 }
 
-// checkHosts 确认各宿主的 dec 条目存在（需求 4.3）。
+// checkHosts 确认各宿主的 dec_vault 条目存在（需求 4.3）。
 //
 // 只在宿主确实装了的时候要求有条目：没装 Cursor 的机器上不可能有 ~/.cursor，
 // 那不是缺陷。判定口径与 dec-agent mcp-config 一致。
 func (r *runner) checkHosts(ctx context.Context) error {
 	results := agent.InspectHosts()
 	if len(results) == 0 {
-		r.step("各宿主 dec 条目", false, "没有识别到任何宿主")
+		r.step("各宿主 dec_vault 条目", false, "没有识别到任何宿主")
 		return errors.New("没有识别到任何宿主")
 	}
 	var written, skipped, failed []string
@@ -272,18 +272,18 @@ func (r *runner) checkHosts(ctx context.Context) error {
 		}
 	}
 	if len(failed) > 0 {
-		r.step("各宿主 dec 条目", false, strings.Join(failed, "; "))
+		r.step("各宿主 dec_vault 条目", false, strings.Join(failed, "; "))
 		return errors.New("有宿主的条目写入失败：" + strings.Join(failed, "; "))
 	}
 	if len(written) == 0 {
-		r.step("各宿主 dec 条目", false, "没有任何宿主写入成功")
+		r.step("各宿主 dec_vault 条目", false, "没有任何宿主写入成功")
 		return errors.New("没有任何宿主写入 dec 条目")
 	}
 	detail := "已写入 " + strings.Join(written, ",")
 	if len(skipped) > 0 {
 		detail += "；已跳过 " + strings.Join(skipped, ",")
 	}
-	r.step("各宿主 dec 条目", true, detail)
+	r.step("各宿主 dec_vault 条目", true, detail)
 	return nil
 }
 
@@ -313,9 +313,9 @@ func (r *runner) connect(ctx context.Context) error {
 	if init.ServerInfo != nil {
 		name = init.ServerInfo.Name
 	}
-	if name != "dec" {
-		r.step("MCP 握手", false, "serverInfo 名称应为 dec，实际 "+name)
-		return errors.New("serverInfo 名称不是 dec")
+	if name != "dec_vault" {
+		r.step("MCP 握手", false, "serverInfo 名称应为 dec_vault，实际 "+name)
+		return errors.New("serverInfo 名称不是 dec_vault")
 	}
 	r.step("MCP 握手", true, fmt.Sprintf("serverInfo=%s protocol=%s", name, init.ProtocolVersion))
 	return nil
@@ -521,7 +521,7 @@ items:
     planes: [project]
 `, r.opts.Bundle)
 	args := map[string]any{
-		"bundle":  r.opts.Bundle,
+		"bundle":   r.opts.Bundle,
 		"manifest": manifest,
 		"items": []any{
 			map[string]any{"path": "acceptance.md", "content": marker + "\n"},

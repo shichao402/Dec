@@ -648,7 +648,7 @@ func cmdAcceptance(args []string) error {
 	projectPath := fs.String("project", "", "临时项目目录，默认建在用户目录下的临时路径")
 	timeout := fs.Duration("timeout", 90*time.Second, "单步等待下发落地的上限")
 	keep := fs.Bool("keep", false, "即使全部通过也保留测试数据，便于人工观察")
-	skipHosts := fs.Bool("skip-hosts", false, "跳过「各宿主 dec 条目」检查（服务器上没有 IDE 时用）")
+	skipHosts := fs.Bool("skip-hosts", false, "跳过「各宿主 dec_vault 条目」检查（服务器上没有 IDE 时用）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -734,7 +734,7 @@ func cmdMCPConfig(args []string) error {
 	}
 	fmt.Println()
 	if written == 0 {
-		fmt.Println("没有任何宿主已写入 `dec` 条目。代理启动时会自动写入；")
+		fmt.Println("没有任何宿主已写入 `dec_vault` 条目。代理启动时会自动写入；")
 		fmt.Println("如果宿主配置目录不存在，说明对应的 IDE 还没装，这是预期行为。")
 	}
 	return nil
@@ -842,12 +842,12 @@ func cmdUninstall(args []string) error {
 		fmt.Println("已通知云端注销这台设备。")
 	}
 
-	// 从各宿主里移除 `dec` 条目（需求 2.5）：卸载后 IDE 里留一条连不上的
+	// 从各宿主里移除 `dec_vault` 条目（需求 2.5）：卸载后 IDE 里留一条连不上的
 	// MCP 服务器，用户每次打开 Agent 都会看到一个连接失败的错误。
 	for _, hr := range agent.RemoveHosts() {
 		switch hr.Status {
 		case agent.HostRemoved:
-			fmt.Printf("已从 %s 移除 dec 条目\n", hr.Name)
+			fmt.Printf("已从 %s 移除 dec_vault 条目\n", hr.Name)
 		case agent.HostFailed:
 			fmt.Fprintf(os.Stderr, "  从 %s 移除失败: %s\n", hr.Name, hr.Reason)
 		}

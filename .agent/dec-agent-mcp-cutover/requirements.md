@@ -35,11 +35,11 @@ Dec Cloud 的生产链路已经切到新架构（CI 只构建 `dec-cloud` 与 `d
 
 #### 验收标准
 
-1. 代理 SHALL 把一个名为 `dec`、指向本机 `/mcp` 的内置 MCP 条目写入本机已安装 Agent 宿主（Claude、Codex、Cursor、With）的用户级 MCP 配置。
+1. 代理 SHALL 把一个名为 `dec_vault`（旧名 `dec`，见 ADR 0055）、指向本机 `/mcp` 的内置 MCP 条目写入本机已安装 Agent 宿主（Claude、Codex、Cursor、With）的用户级 MCP 配置。
 2. 写入时 SHALL 只覆盖 `dec` 这一条，SHALL NOT 改动配置文件中的其他条目（需求 6.3）。
 3. IF 某个宿主的用户级配置目录不存在 THEN 代理 SHALL 跳过该宿主，SHALL NOT 为其创建目录。
 4. WHEN 代理的监听端口变化 THEN 内置条目 SHALL 在下一轮同步中更新为新地址。
-5. WHEN 执行 `dec-agent uninstall` THEN 代理 SHALL 移除所有宿主中的 `dec` 条目。
+5. WHEN 执行 `dec-agent uninstall` THEN 代理 SHALL 移除所有宿主中的 `dec_vault` 条目。
 6. 代理 SHALL 提供 `dec-agent mcp-config` 命令，用来打印当前条目内容与已写入的宿主列表，方便排查。
 
 ### 需求 3：源码断代
@@ -64,7 +64,7 @@ Dec Cloud 的生产链路已经切到新架构（CI 只构建 `dec-cloud` 与 `d
 
 1. 仓库 SHALL 提供 `scripts/acceptance.sh`，用真实的 MCP 客户端（基于官方 SDK 写的小程序或现成 CLI）对本机运行中的代理执行：握手、`tools/list`、状态查询、列出资产、读取一个已有资产、写入一个临时测试 bundle、确认它落地、再删除该 bundle 并确认落点清理干净。
 2. 验收脚本 SHALL 针对生产云端运行，结束后 SHALL 不留下任何测试资产。IF 中途失败 THEN 脚本 SHALL 尝试清理，并打印残留项。
-3. 脚本 SHALL 同时检查管理面 `/admin` 可访问、`/api/status` 显示 `aligned: true`，并检查需求 2 中各宿主的 `dec` 条目存在。
+3. 脚本 SHALL 同时检查管理面 `/admin` 可访问、`/api/status` 显示 `aligned: true`，并检查需求 2 中各宿主的 `dec_vault` 条目存在。
 4. 本需求的每条验收标准 SHALL 对应验收脚本中的一项检查，或者对应一个具名测试。IF 某条标准两者都没有对应 THEN 该条 SHALL 视为未完成。
 5. 代码中 SHALL NOT 出现“后续阶段再接上”这类没有对应任务的推迟注释。确实需要推迟的项目 SHALL 列入本文档的“不在本次范围”一节。
 
@@ -80,7 +80,7 @@ Dec Cloud 的生产链路已经切到新架构（CI 只构建 `dec-cloud` 与 `d
 |---|---|---|
 | 1.1 Streamable HTTP 完成 initialize / notifications/initialized / tools/list / tools/call | `TestMCPHandshakeIsLocal`（本地完成握手）；脚本检查「MCP 握手」 | 具名测试 + 脚本 |
 | 1.2 用官方 SDK 而非手写 JSON-RPC | `internal/agent/mcp.go` 只经由 `mcp.NewServer` / `mcp.NewStreamableHTTPHandler` 构造；`TestMCPHandshakeIsLocal` 用 `mcp.NewClient` 连入，握手成功即证明协议由 SDK 实现 | 具名测试 |
-| 1.3 握手本地完成、不转发云端 initialize | `TestMCPHandshakeIsLocal`；脚本检查「MCP 握手」返回 `serverInfo=dec` | 具名测试 + 脚本 |
+| 1.3 握手本地完成、不转发云端 initialize | `TestMCPHandshakeIsLocal`；脚本检查「MCP 握手」返回 `serverInfo=dec_vault` | 具名测试 + 脚本 |
 | 1.4 最小工具集（状态/列资产/读资产/写资产并写明「少传条目即删除」/按路径删条目/列密钥元数据/写密钥/删密钥/历史/项目登记/订阅） | `TestMCPToolsList`（逐项校验名称与描述关键词，含写资产的整体替换语义）；脚本检查「tools/list 含全部预期工具」 | 具名测试 + 脚本 |
 | 1.5 不含明文读密钥 / 设备管理 / 回滚 / 轮换根密钥；清单外名称返回 MCP 错误且不转发 | `TestMCPBannedToolNotCallable`、`TestMCPToolsList` 的黑名单断言；脚本检查「被禁工具不可见」 | 具名测试 + 脚本 |
 | 1.6 转发来源固定 `mcp` | `TestMCPForwardsWithMCPPayload`、`TestMCPWriteAssetPayload` | 具名测试 |
@@ -92,12 +92,12 @@ Dec Cloud 的生产链路已经切到新架构（CI 只构建 `dec-cloud` 与 `d
 
 | 标准 | 对应项 | 类型 |
 |---|---|---|
-| 2.1 把 `dec` 条目写入 Claude / Codex / Cursor 用户级配置 | `TestUpsertJSONCreatesFile`、`TestUpsertTOMLAppendsWhenMissing`；脚本检查「各宿主 dec 条目」 | 具名测试 + 脚本 |
+| 2.1 把 `dec_vault` 条目写入 Claude / Codex / Cursor 用户级配置 | `TestUpsertJSONCreatesFile`、`TestUpsertTOMLAppendsWhenMissing`；脚本检查「各宿主 dec_vault 条目」 | 具名测试 + 脚本 |
 | 2.2 只覆盖 `dec` 一条，不动其他条目 | `TestUpsertJSONOnlyTouchesDec`、`TestUpsertTOMLOnlyTouchesDec` | 具名测试 |
 | 2.3 配置目录不存在则跳过，不创建目录 | `TestSyncSkipsMissingHosts` | 具名测试 |
 | 2.4 端口变化下一轮更新 | `TestSyncUpdatesPort` | 具名测试 |
-| 2.5 `uninstall` 移除所有宿主 `dec` 条目 | `TestRemoveHostsRemovesOnlyDec`、`TestDeleteJSONOnlyRemovesDec`、`TestDeleteTOMLRemovesOnlyDec` | 具名测试 |
-| 2.6 提供 `dec-agent mcp-config` | `TestInspectHostsReportsThreeStates`（命令的全部判断逻辑即 `InspectHosts` 的三态输出）；命令本体见 `cmd/dec-agent/main.go` 的 `cmdMCPConfig`，本轮由脚本「各宿主 dec 条目」从外部验证 | 具名测试 + 脚本 |
+| 2.5 `uninstall` 移除所有宿主 `dec_vault` 条目 | `TestRemoveHostsRemovesOnlyDec`、`TestDeleteJSONOnlyRemovesDec`、`TestDeleteTOMLRemovesOnlyDec` | 具名测试 |
+| 2.6 提供 `dec-agent mcp-config` | `TestInspectHostsReportsThreeStates`（命令的全部判断逻辑即 `InspectHosts` 的三态输出）；命令本体见 `cmd/dec-agent/main.go` 的 `cmdMCPConfig`，本轮由脚本「各宿主 dec_vault 条目」从外部验证 | 具名测试 + 脚本 |
 
 ### 需求 3：源码断代
 
@@ -117,7 +117,7 @@ Dec Cloud 的生产链路已经切到新架构（CI 只构建 `dec-cloud` 与 `d
 |---|---|---|
 | 4.1 提供 `scripts/acceptance.sh`，跑完整链路 | 脚本本身；步骤「MCP 握手」「tools/list 含全部预期工具」「dec_status」「dec_list_assets」「读取一个已有资产」「写入临时 bundle」「临时 bundle 落地本机」「删除临时 bundle」「临时 bundle 已从列表消失」「落点已清理」 | 脚本 |
 | 4.2 针对生产运行，结束不留测试资产，失败也清理并打印残留 | 本机模式：`cleanup` 无论成败都执行。线上模式：`scripts/acceptance-prod.sh` 只读查生产；完整链路在 `deploy/test-e2e.sh` 的隔离实例上跑，跑完核对测试实例与生产库都没有 `dec-acceptance` 残留 | 脚本 |
-| 4.3 检查 `/admin`、`/api/status` 的 `aligned: true`、各宿主 `dec` 条目 | 本机模式：步骤「/admin 可访问」「代理已登记且 aligned」「各宿主 dec 条目」。线上模式：确认 `/admin` 与 `/mcp` 在公网返回 404（它们只应存在于代理回环），`hello` 的 `aligned` 为 true | 脚本 |
+| 4.3 检查 `/admin`、`/api/status` 的 `aligned: true`、各宿主 `dec_vault` 条目 | 本机模式：步骤「/admin 可访问」「代理已登记且 aligned」「各宿主 dec_vault 条目」。线上模式：确认 `/admin` 与 `/mcp` 在公网返回 404（它们只应存在于代理回环），`hello` 的 `aligned` 为 true | 脚本 |
 | 4.4 每条标准都要有对应检查，否则视为未完成 | 本表 | 本文档 |
 | 4.5 不得有无对应任务的推迟注释 | `TestNoOrphanDeferralComments` | 具名测试 |
 
