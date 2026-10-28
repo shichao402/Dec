@@ -296,6 +296,9 @@ func cmdRun(args []string) error {
 
 	logf("代理已启动，版本 %s，服务地址 %s，本机页面 http://%s", Version, cfg.ServerURL, addr)
 
+	// 旧版残留归档的保留期（.agent/legacy-cleanup 需求 6.1）：启动时清一次，之后每天一次。
+	go legacy.RunRetention(ctx, dir, 24*time.Hour, logf)
+
 	if err := syncer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}

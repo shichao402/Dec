@@ -360,6 +360,7 @@ func addTree(tw *tar.Writer, m *Manifest, idx int, it Item) error {
 			if err := addFile(tw, &e, p, info); err != nil {
 				return err
 			}
+			m.Bytes += e.Size
 		default:
 			e.Type = EntryOther
 		}
@@ -391,6 +392,7 @@ func addFragment(tw *tar.Writer, m *Manifest, idx int, it Item) error {
 	if err := addFile(tw, &e, it.Path, info); err != nil {
 		return err
 	}
+	m.Bytes += e.Size
 	m.Entries = append(m.Entries, e)
 	return nil
 }
