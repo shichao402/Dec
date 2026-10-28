@@ -28,3 +28,10 @@
 
 CodeBuddy 的用户级 MCP 位置本机没有实物可核对，这次不加，避免凭猜测写进别人的
 配置文件。
+
+## 验证（2026-10-28，v2.1.35）
+
+本机代理升到 v2.1.35 重启后，`dec-agent mcp-config` 显示 with「已写入」；With 的
+`dec` 条目地址从旧的 `127.0.0.1:8787` 改为当前 `127.0.0.1:43679`，`disabled:false`
+与 `transportType` 保留，其余 6 个条目逐项不变。With 无需重启即重新加载，工具清单
+出现 `dec_edit_asset_file`，`dec_status` 返回 aligned=true。
