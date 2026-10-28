@@ -45,6 +45,8 @@ type Result struct {
 	Items   []ItemResult `json:"items"`
 	// Listed 是只列出、不处理的凭据（需求 2.6、5.4）。
 	Listed []Item `json:"listed,omitempty"`
+	// Repos 是项目仓库的自动提交结果（需求 8）。
+	Repos []RepoResult `json:"repos,omitempty"`
 }
 
 // Failed 报告是否有失败项。
@@ -61,6 +63,7 @@ func (r *Result) Failed() bool {
 type ExecOptions struct {
 	Now   func() time.Time
 	Procs Processes
+	Git   GitOptions
 }
 
 // Execute 按扫描结果执行清理：先归档并校验，再逐项删除（需求 3.2、4.2、4.5、5.1–5.3）。
@@ -107,6 +110,7 @@ func Execute(stateDir string, report *Report, opts ExecOptions) (*Result, error)
 		}
 		res.Items = append(res.Items, r)
 	}
+	res.Repos = commitProjects(res, opts.Git)
 	return res, nil
 }
 
