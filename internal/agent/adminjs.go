@@ -1138,7 +1138,7 @@ function renderLegacyScan(v) {
   }
   if (listed.length) {
     html += '<h3 style="margin-top:16px">仅列出，不会删除</h3>';
-    html += '<p class="sub" style="margin:0 0 10px">旧版留下、但可能还在用的凭据。新系统还不能接管它们，删掉会让正在用的链路断掉，请确认不再需要后自行处理。</p>';
+    html += '<p class="sub" style="margin:0 0 10px">旧版留下、但可能还在用的凭据：钥匙串里的 Git 凭据无法归档；SSH 与项目 .secrets 只在新系统还没接管那个位置时出现在这里，接管后不在云端期望里的会转入上面的清理。请确认不再需要后自行处理。</p>';
     html += legacyTable(listed, false);
   }
   if ((v.skipped || []).length) {

@@ -258,7 +258,7 @@ func TestProjectsUnion(t *testing.T) {
 	mustHit(t, r, filepath.Join(oldOnly, ".dec/vars.yaml"), RuleProjectDec, ActionDelete)
 }
 
-// 仍可能在用的旧版凭据只列出，不进入删除与归档（需求 2.6）。
+// 新系统尚未接管 ~/.ssh 与项目 .secrets 时，旧版凭据只列出，不进入删除与归档（需求 2.6）。
 func TestCredentialsOnlyListed(t *testing.T) {
 	f := newFixture(t)
 	key := f.write(f.h(".ssh/dec_github_github_commit"), "KEY")
@@ -285,6 +285,82 @@ func TestCredentialsOnlyListed(t *testing.T) {
 	}
 	if !r.Empty() {
 		t.Fatal("只剩凭据时应报告为没有需要清理的旧版残留")
+	}
+}
+
+// 接管之后，~/.ssh 下不在 E1 里的 dec_* 与片段归档删除，期望落点不动（credential-landing 需求 7.1）。
+func TestSSHAfterTakeover(t *testing.T) {
+	f := newFixture(t)
+	keep := f.write(f.h(".ssh/dec_cloud_deploy"), "KEY")
+	keepPub := f.write(f.h(".ssh/dec_cloud_deploy.pub"), "PUB")
+	stale := f.write(f.h(".ssh/dec_old_key"), "OLD")
+	frag := f.write(f.h(".ssh/config.d/dec.conf"), "Host x")
+	proj := f.write(f.h(".ssh/config.d/dec-project-a.conf"), "Host y")
+	mine := f.write(f.h(".ssh/id_ed25519"), "MINE")
+	cfg := f.write(f.h(".ssh/config"), "Include config.d/dec.conf\n# BEGIN DEC MANAGED\nInclude config.d/dec.conf\n# END DEC MANAGED\nHost other\n  Include config.d/dec-project-a.conf\n")
+
+	r := f.scan([]proto.ManifestEntry{
+		{ID: "k", Paths: []string{keep}},
+		{ID: "p", Paths: []string{keepPub}},
+		{ID: "f", Paths: []string{frag}},
+		{ID: "c", Paths: []string{cfg}, Format: proto.FormatManagedBlock},
+	})
+	mustHit(t, r, stale, RuleSSH, ActionDelete)
+	mustHit(t, r, proj, RuleSSH, ActionDelete)
+	it := mustHit(t, r, cfg, RuleSSHInclude, ActionStrip)
+	if len(it.Entries) != 2 || !strings.HasPrefix(it.Entries[0], "1: ") || !strings.HasPrefix(it.Entries[1], "6: ") {
+		t.Fatalf("应只命中托管块之外的两行 Include，实际 %v", it.Entries)
+	}
+	for _, p := range []string{keep, keepPub, frag, mine} {
+		mustMiss(t, r, p)
+	}
+	for _, it := range r.Items {
+		if it.Group == GroupCredential {
+			t.Fatalf("接管后不应再有 ssh 凭据只列出：%+v", it)
+		}
+	}
+}
+
+// 没有托管块时块外 Include 是唯一入口，不能删（credential-landing 需求 7.2）。
+func TestSSHIncludeKeptWithoutBlock(t *testing.T) {
+	f := newFixture(t)
+	key := f.write(f.h(".ssh/dec_cloud_deploy"), "KEY")
+	cfg := f.write(f.h(".ssh/config"), "Include config.d/dec.conf\n# BEGIN DEC MANAGED\nHost x\n")
+	r := f.scan([]proto.ManifestEntry{{ID: "k", Paths: []string{key}}})
+	if _, ok := find(r, cfg); ok {
+		t.Fatalf("托管块不完整时不应处理 config：%v", paths(r))
+	}
+}
+
+// 接管之后，.secrets 下不在 E1 里的对象归档删除；.gitignore 与期望落点保留（credential-landing 需求 7.3）。
+func TestProjectSecretsAfterTakeover(t *testing.T) {
+	f := newFixture(t)
+	ign := f.write(f.p(".secrets/.gitignore"), "*\n")
+	keep := f.write(f.p(".secrets/app/config.yaml"), "s")
+	sibling := f.write(f.p(".secrets/app/old.yaml"), "o")
+	staleDir := f.write(f.p(".secrets/legacy/deep/token"), "t")
+	top := f.write(f.p(".secrets/stray.json"), "{}")
+
+	r := f.scan([]proto.ManifestEntry{{ID: "s", Paths: []string{keep}}}, f.project)
+	mustHit(t, r, sibling, RuleProjectSecrets, ActionDelete)
+	mustHit(t, r, f.p(".secrets/legacy"), RuleProjectSecrets, ActionDelete)
+	mustHit(t, r, top, RuleProjectSecrets, ActionDelete)
+	mustMiss(t, r, keep)
+	mustMiss(t, r, ign)
+	if _, ok := find(r, staleDir); ok {
+		t.Fatal("整棵不含期望落点的子树应作为一项删除，不应逐个列文件")
+	}
+	if _, ok := find(r, f.p(".secrets")); ok {
+		t.Fatal(".secrets 本身不应出现")
+	}
+}
+
+// E1 拿不到时仍拒绝扫描（credential-landing 需求 7.4）。
+func TestCredentialScanNeedsExpected(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.h(".ssh/dec_old"), "K")
+	if _, err := Scan(Input{Home: f.home}); !errors.Is(err, ErrExpectedUnknown) {
+		t.Fatalf("应拒绝，实际 %v", err)
 	}
 }
 

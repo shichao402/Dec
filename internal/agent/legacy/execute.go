@@ -241,6 +241,8 @@ func stripItem(it Item, entries []ArchiveEntry) ItemResult {
 	switch {
 	case it.Rule == RuleShellRC:
 		out, removed = stripShellRC(data)
+	case it.Rule == RuleSSHInclude:
+		out, removed = stripSSHIncludes(data)
 	case strings.HasSuffix(it.Path, ".toml"):
 		out, removed = stripTOMLServers(data, it.Entries)
 	default:

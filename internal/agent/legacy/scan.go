@@ -420,7 +420,7 @@ func (s *scanner) scanUser() {
 	if names := gcmNames(filepath.Join(decHome, "secrets")); len(names) > 0 {
 		s.addList(RuleGCM, filepath.Join(decHome, "secrets"), "", names...)
 	}
-	// H13
+	// H13、H15
 	s.scanSSH()
 }
 
@@ -446,31 +446,113 @@ func (s *scanner) scanHostAssets(root, project string, userPlane bool) {
 	}
 }
 
+// scanSSH 处理 H13、H15（credential-landing 需求 7.1、7.2）。
+//
+// ~/.ssh 尚未被新系统接管时（E1 里没有它下面的落点），这些文件仍可能在用，
+// 只按凭据列出；接管之后，不在 E1 里的才是残留。
 func (s *scanner) scanSSH() {
 	ssh := filepath.Join(s.in.Home, ".ssh")
-	var keys []string
+	managed := s.takenOver(ssh)
+	var cands []string
 	for _, name := range readDirNames(ssh) {
-		if !strings.HasPrefix(name, "dec_") {
-			continue
+		if strings.HasPrefix(name, "dec_") {
+			cands = append(cands, filepath.Join(ssh, name))
 		}
-		p := filepath.Join(ssh, name)
+	}
+	for _, name := range readDirNames(filepath.Join(ssh, "config.d")) {
+		if name == "dec.conf" || (strings.HasPrefix(name, "dec-project-") && strings.HasSuffix(name, ".conf")) {
+			cands = append(cands, filepath.Join(ssh, "config.d", name))
+		}
+	}
+	for _, p := range cands {
 		if s.in.Expected.paths[p] {
 			continue
 		}
-		keys = append(keys, p)
+		if !managed {
+			s.addCredential(RuleSSH, p, "", notTakenOver)
+			continue
+		}
+		s.addDelete(RuleSSH, p, "")
 	}
-	for _, p := range keys {
-		s.addList(RuleSSH, p, "")
+	cfg := filepath.Join(ssh, "config")
+	if managed {
+		if data, err := os.ReadFile(cfg); err == nil {
+			if _, removed := stripSSHIncludes(data); len(removed) > 0 {
+				s.addStrip(RuleSSHInclude, cfg, "", removed)
+			}
+		}
+		return
 	}
-	s.addList(RuleSSH, filepath.Join(ssh, "config.d", "dec.conf"), "")
-	for _, name := range readDirNames(filepath.Join(ssh, "config.d")) {
-		if strings.HasPrefix(name, "dec-project-") && strings.HasSuffix(name, ".conf") {
-			s.addList(RuleSSH, filepath.Join(ssh, "config.d", name), "")
+	if lines := sshIncludeLines(cfg); len(lines) > 0 {
+		s.addCredential(RuleSSH, cfg, "", append([]string{notTakenOver}, lines...)...)
+	}
+}
+
+// notTakenOver 是尚未接管的凭据根下文件的提示。
+const notTakenOver = "新系统尚未接管这个位置，接管后再清"
+
+// takenOver 报告 E1 里是否已有落在 root 之下的路径，即新系统已经接管了这个根。
+func (s *scanner) takenOver(root string) bool { return s.expectedWithin(root) }
+
+// addCredential 把一个尚未接管的凭据只列出，归入「仍可能在用的凭据」组。
+func (s *scanner) addCredential(rule, path, project string, entries ...string) {
+	if _, err := os.Lstat(path); err != nil {
+		return
+	}
+	s.report.Items = append(s.report.Items, Item{
+		Rule: rule, Group: GroupCredential, Action: ActionList,
+		Path: path, Project: project, Entries: entries,
+	})
+}
+
+// scanSecrets 处理 P06（credential-landing 需求 7.3）：.secrets 下不在 E1 里的对象归档删除。
+//
+// 整个子树都不含期望落点的，按一项整体删除，免得留下一串空目录；
+// .secrets 本身与 .secrets/.gitignore 是新系统写的，保留。
+func (s *scanner) scanSecrets(project string) {
+	secrets := filepath.Join(project, ".secrets")
+	if info, err := os.Lstat(secrets); err != nil || !info.IsDir() {
+		if err == nil {
+			s.addCredential(RuleProjectSecrets, secrets, project, "不是目录，无法判断")
+		}
+		return
+	}
+	if !s.takenOver(secrets) {
+		entries := []string{notTakenOver}
+		entries = append(entries, gcmNames(secrets)...)
+		s.addCredential(RuleProjectSecrets, secrets, project, entries...)
+		return
+	}
+	var walk func(dir string)
+	walk = func(dir string) {
+		for _, name := range readDirNames(dir) {
+			p := filepath.Join(dir, name)
+			if dir == secrets && name == ".gitignore" {
+				continue
+			}
+			if s.in.Expected.paths[p] {
+				continue
+			}
+			if s.expectedWithin(p) {
+				if info, err := os.Lstat(p); err == nil && info.IsDir() {
+					walk(p)
+				}
+				continue
+			}
+			s.addDelete(RuleProjectSecrets, p, project)
 		}
 	}
-	if lines := sshIncludeLines(filepath.Join(ssh, "config")); len(lines) > 0 {
-		s.addList(RuleSSH, filepath.Join(ssh, "config"), "", lines...)
+	walk(secrets)
+}
+
+// expectedWithin 报告 E1 里是否有路径位于 dir 之下（不含 dir 本身）。
+func (s *scanner) expectedWithin(dir string) bool {
+	for p := range s.in.Expected.paths {
+		if p != dir && within(p, dir) {
+			return true
+		}
 	}
+	return false
 }
 
 func (s *scanner) scanProject(project string) {
@@ -493,10 +575,7 @@ func (s *scanner) scanProject(project string) {
 		s.addStrip(RuleProjectMCP, p, project, s.legacyMCPKeys(p, false))
 	}
 	// P06
-	secrets := filepath.Join(project, ".secrets")
-	entries := []string{"可能仍被项目运行时读取"}
-	entries = append(entries, gcmNames(secrets)...)
-	s.addList(RuleProjectSecrets, secrets, project, entries...)
+	s.scanSecrets(project)
 }
 
 // legacyMCPKeys 返回一份 MCP 配置里的旧版条目名。
@@ -630,20 +709,60 @@ func gitIncludeLines(path string) []string {
 
 // sshIncludeLines 返回 ~/.ssh/config 里引入旧版片段的 Include 行。
 func sshIncludeLines(path string) []string {
-	return matchLines(path, func(line string) bool {
-		f := strings.Fields(line)
-		if len(f) < 2 || !strings.EqualFold(f[0], "include") {
-			return false
+	return matchLines(path, isSSHInclude)
+}
+
+// isSSHInclude 判断一行是否引入旧版 SSH 片段（config.d/dec.conf 或 dec-project-*.conf）。
+func isSSHInclude(line string) bool {
+	f := strings.Fields(line)
+	if len(f) < 2 || !strings.EqualFold(f[0], "include") {
+		return false
+	}
+	for _, v := range f[1:] {
+		v = filepath.ToSlash(strings.Trim(v, `"'`))
+		base := v[strings.LastIndex(v, "/")+1:]
+		if strings.Contains(v, "config.d/") && (base == "dec.conf" || strings.HasPrefix(base, "dec-project-")) {
+			return true
 		}
-		for _, v := range f[1:] {
-			v = filepath.ToSlash(strings.Trim(v, `"'`))
-			base := v[strings.LastIndex(v, "/")+1:]
-			if strings.Contains(v, "config.d/") && (base == "dec.conf" || strings.HasPrefix(base, "dec-project-")) {
-				return true
+	}
+	return false
+}
+
+// stripSSHIncludes 删掉 ~/.ssh/config 托管块之外的旧版 Include 行（H15）。
+//
+// 只有托管块完整存在时才动：块里已经有新系统写的 Include，块外那行才是重复的残留。
+// 没有块、块不完整都原样返回，不删任何行。扫描与执行共用，执行时按当前内容重新认定。
+func stripSSHIncludes(data []byte) ([]byte, []string) {
+	lines := splitKeepEOL(data)
+	begin, end := -1, -1
+	for i, line := range lines {
+		switch strings.TrimSpace(line) {
+		case proto.BlockBegin:
+			if begin < 0 {
+				begin = i
+			}
+		case proto.BlockEnd:
+			if begin >= 0 && end < 0 {
+				end = i
 			}
 		}
-		return false
-	})
+	}
+	if begin < 0 || end < 0 {
+		return data, nil
+	}
+	var buf strings.Builder
+	var removed []string
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		if (i < begin || i > end) && isSSHInclude(strings.TrimRight(line, "\r\n")) {
+			removed = append(removed, fmt.Sprintf("%d: %s", i+1, strings.TrimSpace(line)))
+			continue
+		}
+		buf.WriteString(line)
+	}
+	return []byte(buf.String()), removed
 }
 
 // matchLines 返回命中的行，带行号，便于用户核对。

@@ -29,6 +29,8 @@ const (
 	GroupLegacy Group = "legacy"
 	// GroupCredential 是旧版留下、但仍可能在用的凭据（需求 2.6）。
 	// 新系统还没有对应的落盘能力，删掉会让正在用的链路直接断掉，所以只列出。
+	// SSH 与项目 .secrets 由新系统接管后转成普通规则（credential-landing 需求 7）；
+	// 某个根尚未接管时，扫描仍把那里的文件按本组只列出。
 	GroupCredential Group = "credential"
 )
 
@@ -56,6 +58,7 @@ const (
 	RuleGCM           = "H12"
 	RuleSSH           = "H13"
 	RuleDecSecrets    = "H14"
+	RuleSSHInclude    = "H15"
 
 	RuleProjectDec      = "P01"
 	RuleProjectInternal = "P02"
@@ -78,14 +81,15 @@ var Rules = []Rule{
 	{RuleUserMCP, "用户级 MCP 配置里的旧版 dec / dec-* 条目", ActionStrip, GroupLegacy},
 	{RuleGitFragments, "旧版项目 Git 凭据片段（~/.config/dec/gitconfig.d 与 ~/.gitconfig 中的 includeIf）", ActionList, GroupCredential},
 	{RuleGCM, "Git Credential Manager 中的旧版凭据（无法归档）", ActionList, GroupCredential},
-	{RuleSSH, "旧版 SSH 密钥与配置片段（~/.ssh/dec_*、config.d/dec*.conf）", ActionList, GroupCredential},
+	{RuleSSH, "不在云端期望里的 SSH 密钥与配置片段（~/.ssh/dec_*、config.d/dec*.conf）", ActionDelete, GroupLegacy},
 	{RuleDecSecrets, "旧版本机 secret 落地（~/.dec/secrets）", ActionList, GroupCredential},
+	{RuleSSHInclude, "~/.ssh/config 托管块之外的裸 Include config.d/dec*.conf 行", ActionStrip, GroupLegacy},
 
 	{RuleProjectDec, "项目 .dec 下的旧版条目（config.yaml、vars.yaml、cache、overrides 等）", ActionDelete, GroupLegacy},
 	{RuleProjectInternal, "项目里已移除宿主的目录（.claude-internal、.codex-internal）", ActionDelete, GroupLegacy},
 	{RuleProjectHost, "项目宿主目录里旧版渲染的 dec-* 条目与失效软链接", ActionDelete, GroupLegacy},
 	{RuleProjectMCP, "项目 MCP 配置里的旧版 dec-* 条目", ActionStrip, GroupLegacy},
-	{RuleProjectSecrets, "项目 .secrets 目录（旧版 secret 落地）", ActionList, GroupCredential},
+	{RuleProjectSecrets, "项目 .secrets 下不在云端期望里的文件（.gitignore 除外）", ActionDelete, GroupLegacy},
 }
 
 // RuleByID 按编号取规则。

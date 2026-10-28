@@ -285,6 +285,19 @@ func TestExecuteSymlinkNotFollowed(t *testing.T) {
 	}
 }
 
+// H15 只删托管块之外的旧版 Include，块内与用户的行原样保留。
+func TestStripSSHIncludes(t *testing.T) {
+	in := "Include config.d/dec.conf\r\n# BEGIN DEC MANAGED\nInclude config.d/dec.conf\n# END DEC MANAGED\nHost a\n  Include ~/.ssh/config.d/dec-project-x.conf\n  Include other.conf\n"
+	out, removed := stripSSHIncludes([]byte(in))
+	want := "# BEGIN DEC MANAGED\nInclude config.d/dec.conf\n# END DEC MANAGED\nHost a\n  Include other.conf\n"
+	if string(out) != want || len(removed) != 2 {
+		t.Fatalf("结果不对：%q %v", out, removed)
+	}
+	if out, removed := stripSSHIncludes([]byte("Include config.d/dec.conf\n")); len(removed) != 0 || string(out) != "Include config.d/dec.conf\n" {
+		t.Fatal("没有托管块时不应删任何行")
+	}
+}
+
 func TestStripJSONServers(t *testing.T) {
 	cases := []struct {
 		name, in, want string
