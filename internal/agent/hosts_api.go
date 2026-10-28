@@ -50,7 +50,7 @@ func InspectHosts() []HostResult {
 	return inspectHosts(DefaultHosts(home))
 }
 
-// MCPConfigPaths 返回三个宿主的配置文件路径，供文档与排障对照。
+// MCPConfigPaths 返回各宿主的配置文件路径，供文档与排障对照。
 func MCPConfigPaths() []HostResult {
 	return InspectHosts()
 }

@@ -100,12 +100,14 @@ curl -s http://127.0.0.1:43679/api/status
 | Claude Code | `~/.claude.json` |
 | Codex | `~/.codex/config.toml` |
 | Cursor | `~/.cursor/mcp.json` |
+| With | `~/.bg-agent/config-with-app/mcp_config.json` |
 
 三条规则，都是为了不弄坏你已有的东西：
 
 - 只覆盖 `dec` 这一条，其它 MCP 服务器原样保留，连键顺序都不动。
 - 宿主目录不存在就跳过，不替你创建 `~/.claude` 之类的空目录。
 - 端口变了，下一轮启动会把地址更新成新端口。
+- 你在宿主里把 `dec` 关掉了（`disabled: true`），更新地址时保持关闭，不会被悄悄打开。
 
 ### 排查命令
 

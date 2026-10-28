@@ -12,7 +12,7 @@ import (
 
 // 本机 Agent 宿主的 MCP 自动接入（需求 2）。
 //
-// 目标只有一件事：让 Claude、Codex、Cursor 打开就能用上 Dec，不用用户自己
+// 目标只有一件事：让 Claude、Codex、Cursor、With 打开就能用上 Dec，不用用户自己
 // 记端口、改配置。因此代理每次启动都把自己写成 `dec` 这一条 MCP 服务器，
 // 端口变了下一轮同步就更新（需求 2.4）。
 //
@@ -74,7 +74,7 @@ type HostResult struct {
 	Entry string
 }
 
-// DefaultHosts 返回三个宿主的用户级配置位置（需求 2.1）。
+// DefaultHosts 返回各宿主的用户级配置位置（需求 2.1；With 见 ADR 0054）。
 //
 // home 由调用方给出，测试可以指向临时目录。
 func DefaultHosts(home string) []Host {
@@ -97,6 +97,14 @@ func DefaultHosts(home string) []Host {
 			Name:   "cursor",
 			Dir:    filepath.Join(home, ".cursor"),
 			Path:   filepath.Join(home, ".cursor", "mcp.json"),
+			Format: formatJSON,
+		},
+		{
+			// With 桌面端的用户级配置目录与 MCP 文件，与 host.go 落点表一致。
+			// 漏了它，代理一换端口 With 就连不上 dec（ADR 0054）。
+			Name:   "with",
+			Dir:    filepath.Join(home, ".bg-agent", "config-with-app"),
+			Path:   filepath.Join(home, ".bg-agent", "config-with-app", "mcp_config.json"),
 			Format: formatJSON,
 		},
 	}
@@ -261,10 +269,7 @@ func readEntryFor(h Host) (string, error) {
 // 只替换 mcpServers.dec 这一项，其它条目原样保留，连顺序都不动：
 // 配置文件常常是用户手工编辑的，整体重排会让人以为改坏了。
 func upsertJSONEntry(path, hostName, url string) error {
-	entry, err := json.Marshal(entryFor(hostName, url))
-	if err != nil {
-		return err
-	}
+	fields := entryFor(hostName, url)
 
 	data, err := readOrEmpty(path)
 	if err != nil {
@@ -282,6 +287,23 @@ func upsertJSONEntry(path, hostName, url string) error {
 			return errors.New("配置里的 mcpServers 不是 JSON 对象，未做修改")
 		}
 		servers = inner
+	}
+	// 用户在宿主界面里关掉了 dec（With 等宿主写成 disabled:true），
+	// 代理只负责把地址改对，不能借更新之机把它重新打开。
+	if old, ok := servers.get(mcpEntryName); ok {
+		var prev map[string]json.RawMessage
+		if json.Unmarshal(old, &prev) == nil {
+			if v, ok := prev["disabled"]; ok {
+				var b bool
+				if json.Unmarshal(v, &b) == nil {
+					fields["disabled"] = b
+				}
+			}
+		}
+	}
+	entry, err := json.Marshal(fields)
+	if err != nil {
+		return err
 	}
 	servers.set(mcpEntryName, entry)
 	root.set("mcpServers", servers.encode())
@@ -453,8 +475,13 @@ func tomlSectionBody(data []byte, name string) string {
 // 多写一个它不认识的字段只会在它自己的 UI 里显示成未知配置。
 func entryFor(hostName, url string) map[string]any {
 	entry := map[string]any{"url": url}
-	if hostName == "claude" {
+	switch hostName {
+	case "claude":
 		entry["type"] = "http"
+	case "with":
+		// With 用 transportType 区分传输方式（现有条目即为此写法），
+		// 代理的 /mcp 是 streamable HTTP。
+		entry["transportType"] = "streamable-http"
 	}
 	return entry
 }

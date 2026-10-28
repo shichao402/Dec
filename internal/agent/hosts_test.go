@@ -335,7 +335,7 @@ func TestInspectHostsReportsThreeStates(t *testing.T) {
 	// 这是「IDE 没装」的正常情况，必须与「配置坏了」区分开。
 
 	// 失败状态另起一个家目录：同一个家目录里既要「目录不存在」又要「解析失败」
-	// 得靠不同宿主，而 DefaultHosts 只有三个宿主，塞不下第四个状态。
+	// 得靠不同宿主，而这个测试只准备了三个宿主的目录，塞不下第四个状态。
 	badHome := t.TempDir()
 	badDir := filepath.Join(badHome, ".cursor")
 	if err := os.MkdirAll(badDir, 0o755); err != nil {
@@ -448,5 +448,67 @@ func TestUpsertJSONRejectsBrokenFile(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if string(data) != broken {
 		t.Fatalf("文件被改动了:\n%s", data)
+	}
+}
+
+// TestSyncHostsIncludesWith 验证启动登记覆盖 With（ADR 0054）。
+//
+// 以前 DefaultHosts 只有 claude/codex/cursor，代理换端口后 With 里的 dec
+// 条目一直指向旧地址，With 拿到的工具清单停在旧会话。
+func TestSyncHostsIncludesWith(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".bg-agent", "config-with-app")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("准备目录失败: %v", err)
+	}
+	path := filepath.Join(dir, "mcp_config.json")
+	original := `{"mcpServers":{"other":{"url":"https://o"},"dec":{"disabled":true,"url":"http://127.0.0.1:8787/mcp","transportType":"streamable-http"}}}`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatalf("准备文件失败: %v", err)
+	}
+
+	var with *HostResult
+	results := syncHosts(DefaultHosts(home), "http://127.0.0.1:43679/mcp")
+	for i := range results {
+		if results[i].Name == "with" {
+			with = &results[i]
+		}
+	}
+	if with == nil || with.Status != HostWritten {
+		t.Fatalf("with 应已写入，实际 %+v", with)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读回失败: %v", err)
+	}
+	var got struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("解析失败: %v\n%s", err, data)
+	}
+	dec := got.MCPServers["dec"]
+	if dec["url"] != "http://127.0.0.1:43679/mcp" || dec["transportType"] != "streamable-http" {
+		t.Fatalf("with 的 dec 条目不对: %v", dec)
+	}
+	// 用户关掉的开关不能被代理悄悄打开。
+	if dec["disabled"] != true {
+		t.Fatalf("disabled 应保留为 true: %v", dec)
+	}
+	if got.MCPServers["other"]["url"] != "https://o" {
+		t.Fatalf("其它条目被改动: %v", got.MCPServers)
+	}
+}
+
+// TestUpsertJSONDoesNotAddDisabled 验证原条目没有 disabled 时不凭空加上。
+func TestUpsertJSONDoesNotAddDisabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	if err := upsertJSONEntry(path, "with", "http://127.0.0.1:43679/mcp"); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "disabled") {
+		t.Fatalf("不应写入 disabled:\n%s", data)
 	}
 }

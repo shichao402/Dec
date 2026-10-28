@@ -35,7 +35,7 @@ Dec Cloud 的生产链路已经切到新架构（CI 只构建 `dec-cloud` 与 `d
 
 #### 验收标准
 
-1. 代理 SHALL 把一个名为 `dec`、指向本机 `/mcp` 的内置 MCP 条目写入本机已安装 Agent 宿主（Claude、Codex、Cursor）的用户级 MCP 配置。
+1. 代理 SHALL 把一个名为 `dec`、指向本机 `/mcp` 的内置 MCP 条目写入本机已安装 Agent 宿主（Claude、Codex、Cursor、With）的用户级 MCP 配置。
 2. 写入时 SHALL 只覆盖 `dec` 这一条，SHALL NOT 改动配置文件中的其他条目（需求 6.3）。
 3. IF 某个宿主的用户级配置目录不存在 THEN 代理 SHALL 跳过该宿主，SHALL NOT 为其创建目录。
 4. WHEN 代理的监听端口变化 THEN 内置条目 SHALL 在下一轮同步中更新为新地址。
