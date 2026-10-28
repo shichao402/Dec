@@ -84,6 +84,8 @@ type Alert struct {
 	ID string
 	// Reason 是可读原因。
 	Reason string
+	// Root 只在「代理版本过低」告警里填，是代理不支持的落点根。
+	Root string
 }
 
 // Rendered 是一台设备的完整期望状态。

@@ -270,7 +270,11 @@ async function loadDevices() {
         const kind = x.kind === 'mine' ? '我的设备' : '只接收';
         const state = x.revoked ? '<span class="bad">已吊销</span>'
           : (x.online ? '<span class="ok">在线</span>' : '<span class="warn">离线</span>');
-        const drift = x.drift > 0 ? '<span class="warn">' + x.drift + ' 条</span>' : '—';
+        let drift = x.drift > 0 ? '<span class="warn">' + x.drift + ' 条</span>' : '—';
+        if (x.too_old > 0) {
+          // 代理不认识 ssh/secrets 根：这些条目不会下发，升级代理后自动补上。
+          drift += ' <span class="tag bad" title="代理版本过低，不支持凭据落点根">' + x.too_old + ' 条待升级</span>';
+        }
         // 未对齐的设备拿不到下发，所以这一列要显眼：它是“为什么这台机器没更新”的答案。
         let align = '—';
         if (x.reported_version && required) {
@@ -297,6 +301,7 @@ async function loadDevices() {
       html += '</tbody></table>';
       $('devices').innerHTML = html;
     }
+    $('credSlots').innerHTML = credSlotsTable(list);
   } catch (e) {
     $('devices').innerHTML = err('读取设备失败：' + e.message);
   }
@@ -343,6 +348,27 @@ async function loadDevices() {
   } catch (e) {
     $('overrides').innerHTML = err('读取覆盖记录失败：' + e.message);
   }
+}
+
+// credSlotsTable 列出每台设备 ssh、secrets 两个根的落点状态（credential-landing 需求 8.2）。
+//
+// 只有位置与状态，没有内容：服务端本来就不在这里返回内容。
+function credSlotsTable(list) {
+  const text = { landed: '已落地', drift: '待重发', pending: '未落地', rejected: '被拒', too_old: '代理过旧' };
+  const cls = { landed: 'ok', drift: 'warn', pending: 'warn', rejected: 'bad', too_old: 'bad' };
+  let rows = '';
+  for (const x of list) {
+    for (const c of (x.credentials || [])) {
+      const paths = (c.paths || []).map((p) => '<span class="pathline">' + esc(p) + '</span>').join('');
+      rows += '<tr><td>' + esc(x.name || x.id) + '</td><td>' + esc(c.root) + '</td><td class="mono paths">' +
+        (paths || '<span class="mono">' + esc(c.id) + '</span>') + '</td><td><span class="tag ' +
+        (cls[c.status] || '') + '">' + esc(text[c.status] || c.status) + '</span></td><td>' +
+        esc(c.reason || '') + '</td></tr>';
+    }
+  }
+  if (!rows) return empty('还没有 ssh 或 secrets 落点。');
+  return '<table><thead><tr><th>设备</th><th>根</th><th>落点</th><th>状态</th><th>原因</th></tr></thead><tbody>' +
+    rows + '</tbody></table>';
 }
 
 function setKind(id, kind, name) {
@@ -421,11 +447,11 @@ async function openBundle(name) {
 
     let html = '';
     if ((a.items || []).length) {
-      html += '<table><thead><tr><th>条目</th><th>类型</th><th>路径</th><th>平面</th></tr></thead><tbody>';
+      html += '<table><thead><tr><th>条目</th><th>类型</th><th>路径</th><th>平面</th><th>落点</th></tr></thead><tbody>';
       for (const it of a.items) {
         html += '<tr><td class="mono">' + esc(it.name) + '</td><td>' + esc(it.kind) +
           '</td><td class="mono">' + esc(it.path) + '</td><td>' +
-          esc((it.planes || []).join('、')) + '</td></tr>';
+          esc((it.planes || []).join('、')) + '</td><td>' + fileSlotCell(it, a.files || []) + '</td></tr>';
       }
       html += '</tbody></table>';
     }
@@ -454,6 +480,64 @@ async function openBundle(name) {
     $('assetDetail').innerHTML = err('读取内容失败：' + e.message);
     $('assetEditor').style.display = 'none';
   }
+}
+
+// fileSlotCell 给 file 条目显示落点、格式与是否含密钥（credential-landing 需求 8.1）。
+//
+// 是否含密钥按与服务端相同的口径判断：内容引用了密钥，或者是 ssh 根下的私钥。
+function fileSlotCell(it, files) {
+  if (it.kind !== 'file') return '—';
+  const base = it.root === 'ssh' ? '~/.ssh/' : '<项目>/.secrets/';
+  const f = files.find((x) => x.path === it.path);
+  const body = f ? decode(f.content) : '';
+  const privKey = it.root === 'ssh' && /^dec_[^/]+$/.test(it.target || '') && !/\.pub$/.test(it.target || '');
+  let html = '<span class="mono">' + esc(base + (it.target || '')) + '</span>';
+  if (it.format === 'managed_block') html += ' <span class="tag">托管块</span>';
+  if (privKey || body.indexOf('{{secret:') >= 0) html += ' <span class="tag warn">含密钥</span>';
+  return html;
+}
+
+// addFileItem 在当前 bundle 里新增一条凭据文件（ssh 或 secrets 根）。
+//
+// 含密钥的文件只写密钥占位符，明文放在密钥页：资产文件里出现私钥会被服务端拒绝。
+function addFileItem() {
+  if (!currentAsset || !currentBundle) return;
+  confirmDo('新增凭据文件', 'ssh 根落在 ~/.ssh（私钥用 dec_ 开头，config 只写托管块）；' +
+    'secrets 根落在每个订阅项目的 .secrets 目录。写入会立刻下发。', async () => {
+    const root = $('fiRoot').value;
+    const target = ($('fiTarget').value || '').trim();
+    const secret = ($('fiSecret').value || '').trim();
+    const content = $('fiContent').value || '';
+    if (!target) throw new Error('目标路径不能为空');
+    if (!secret && !content) throw new Error('需要填密钥名或内容');
+    const name = (root + '-' + target).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').slice(0, 64);
+    const path = 'files/' + root + '/' + target;
+    if ((currentAsset.files || []).some((f) => f.path === path)) throw new Error('这个落点已经存在');
+    let manifest = decode(currentAsset.manifest) || ('name: ' + currentBundle + '\nitems: []\n');
+    manifest = manifest.replace(/^items:\s*\[\]\s*$/m, 'items:');
+    if (!/\n$/.test(manifest)) manifest += '\n';
+    manifest += '  - kind: file\n    path: ' + path + '\n    name: ' + name +
+      '\n    planes: [' + (root === 'ssh' ? 'user' : 'project') + ']\n    root: ' + root +
+      '\n    target: ' + target + '\n' +
+      (root === 'ssh' && target === 'config' ? '    format: managed_block\n' : '');
+    const files = (currentAsset.files || []).map((f) => ({ path: f.path, content: f.content, executable: !!f.executable }));
+    files.push({ path: path, content: encode(secret ? '{{secret:' + secret + '}}' : content) });
+    await api('write_asset', {
+      bundle: currentBundle,
+      items: files,
+      manifest: encode(manifest),
+      message: '管理面新增凭据文件 ' + root + '/' + target
+    });
+    await openBundle(currentBundle);
+    await loadBundles();
+  }, {
+    okText: '写入并下发',
+    extraHTML: '<label for="fiRoot">落点根</label><select id="fiRoot"><option value="ssh">ssh（~/.ssh）</option>' +
+      '<option value="secrets">secrets（项目 .secrets）</option></select>' +
+      '<label for="fiTarget">目标路径</label><input id="fiTarget" placeholder="例如 dec_github、config.d/dec.conf、relkit/token.json">' +
+      '<label for="fiSecret">密钥名（含密钥时填，内容留空）</label><input id="fiSecret" placeholder="例如 ssh-dec-github">' +
+      '<label for="fiContent">内容（不含密钥时填）</label><textarea id="fiContent"></textarea>'
+  });
 }
 
 // showAssetFile 把选中的文件内容填进编辑框。

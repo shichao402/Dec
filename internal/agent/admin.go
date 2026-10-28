@@ -105,6 +105,7 @@ dialog::backdrop { background:rgba(0,0,0,.4); }
     <h2>设备</h2>
     <p class="sub">设备身份是客户端证书，吊销立即生效，不依赖设备在线。版本未对齐的设备不会收到下发。</p>
     <div class="card"><div id="devices"></div></div>
+    <div class="card"><h3>凭据落点（ssh / secrets）</h3><div id="credSlots"></div></div>
     <div class="card"><h3>吊销后的轮换清单</h3><div id="rotation"></div></div>
     <div class="card"><h3>本地改动覆盖记录</h3><div id="overrides"></div></div>
   </section>
@@ -124,6 +125,7 @@ dialog::backdrop { background:rgba(0,0,0,.4); }
         <div class="toolbar" style="margin:0 0 4px">
           <select id="assetFile" style="flex:1"></select>
           <button class="act" onclick="addAssetFile()">新增文件</button>
+          <button class="act" onclick="addFileItem()">新增凭据文件</button>
         </div>
         <label for="assetContent">内容</label>
         <textarea id="assetContent"></textarea>

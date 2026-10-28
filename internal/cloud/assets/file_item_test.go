@@ -24,8 +24,8 @@ func writeFileItem(t *testing.T, w *Writer, extra string) error {
 
 func TestFileItemAcceptsValidSlots(t *testing.T) {
 	cases := map[string]string{
-		"ssh 公钥":    "    planes: [user]\n    root: ssh\n    target: dec_github.pub\n",
-		"ssh 片段":    "    planes: [user]\n    root: ssh\n    target: config.d/dec.conf\n    mode: 420\n",
+		"ssh 公钥":     "    planes: [user]\n    root: ssh\n    target: dec_github.pub\n",
+		"ssh 片段":     "    planes: [user]\n    root: ssh\n    target: config.d/dec.conf\n    mode: 420\n",
 		"ssh config": "    planes: [user]\n    root: ssh\n    target: config\n    format: managed_block\n",
 		"项目 secret":  "    planes: [project]\n    root: secrets\n    target: prod/app.env\n",
 	}

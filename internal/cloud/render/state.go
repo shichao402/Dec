@@ -39,6 +39,8 @@ type fileState struct {
 	AppliedAt time.Time `json:"applied_at"`
 	// ProjectIDs 是这条文件涉及的设备内部目标（项目平面用），用于订阅变更后判断影响面。
 	Revision string `json:"revision,omitempty"`
+	// Error 是代理最近一次写入失败的原因，成功落地后清空（credential-landing 需求 8.2）。
+	Error string `json:"error,omitempty"`
 }
 
 // deviceState 是一台设备的下发状态。
@@ -172,7 +174,12 @@ func (s *StateStore) RecordAck(deviceID, revision string, results []proto.AckRes
 	now := time.Now().UTC()
 	for _, res := range results {
 		if !res.OK {
-			// 失败的结果不更新状态：下次对账仍然会补发。
+			// 失败的结果不更新落地哈希：下次对账仍然会补发。
+			// 只记下原因供管理面展示；已不在状态里的条目不为它新建记录。
+			if prev, ok := st.Files[res.ID]; ok {
+				prev.Error = truncateReason(res.Error)
+				st.Files[res.ID] = prev
+			}
 			continue
 		}
 		if res.Hash == "" {
@@ -185,6 +192,7 @@ func (s *StateStore) RecordAck(deviceID, revision string, results []proto.AckRes
 		prev.Paths = res.Paths
 		prev.AppliedAt = now
 		prev.Revision = revision
+		prev.Error = ""
 		st.Files[res.ID] = prev
 	}
 	st.Revision = revision

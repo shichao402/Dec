@@ -204,6 +204,58 @@ func TestRenderFileSlotConflict(t *testing.T) {
 	}
 }
 
+func TestCredentialStatus(t *testing.T) {
+	f := newFixture(t)
+	seedCredBundle(t, f)
+	d := dev("dev-1", "creds")
+	first, err := f.render.Sync(d, proto.SyncRequest{Roots: []string{proto.RootSSH}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var acks []proto.AckResult
+	for _, file := range first.Batch.Files {
+		switch file.Targets[0].Path {
+		case "dec_github":
+			acks = append(acks, proto.AckResult{ID: file.ID, OK: false, Error: strings.Repeat("拒", 400)})
+		case "dec_github.pub":
+			acks = append(acks, proto.AckResult{ID: file.ID, OK: true, Hash: ssot.SumHex([]byte(file.Content)), Paths: []string{"/h/.ssh/dec_github.pub"}})
+		}
+	}
+	if err := f.render.States().RecordAck("dev-1", first.Batch.Revision, acks); err != nil {
+		t.Fatal(err)
+	}
+	want, err := f.render.RenderReported(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slots, err := f.render.States().CredentialStatus("dev-1", want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]proto.CredentialSlot{}
+	for _, s := range slots {
+		got[s.Root+":"+s.Status] = s
+		if strings.Contains(s.Reason, "BEGIN") {
+			t.Fatal("状态里不应出现内容")
+		}
+	}
+	if len(slots) != 4 {
+		t.Fatalf("应有 4 条凭据落点，实际 %+v", slots)
+	}
+	if s, ok := got["ssh:rejected"]; !ok || len([]rune(s.Reason)) > maxReasonLen+1 {
+		t.Fatalf("私钥应为被拒且原因被截断: %+v", s)
+	}
+	if s := got["ssh:landed"]; s.Paths[0] != "/h/.ssh/dec_github.pub" {
+		t.Fatalf("公钥应已落地并带实际路径: %+v", s)
+	}
+	if s := got["ssh:pending"]; s.Paths[0] != "~/.ssh/config" {
+		t.Fatalf("config 应未落地: %+v", s)
+	}
+	if _, ok := got["secrets:too_old"]; !ok {
+		t.Fatalf("项目 secret 应标代理过旧: %+v", slots)
+	}
+}
+
 func TestRecordRootsSkipsUnchanged(t *testing.T) {
 	f := newFixture(t)
 	s := f.render.States()

@@ -672,8 +672,30 @@ type DeviceInfo struct {
 	Drift int `json:"drift"`
 	// TooOld 是因代理版本过低、不支持其落点根而未下发的条目数。
 	TooOld int `json:"too_old,omitempty"`
+	// Roots 是代理最近一次上报的额外落点根（ssh、secrets）。
+	Roots []string `json:"roots,omitempty"`
+	// Credentials 是 ssh、secrets 两个根下每个条目的落点状态，不含内容（credential-landing 需求 8.2）。
+	Credentials []CredentialSlot `json:"credentials,omitempty"`
 	// NeedsReenroll 表示签发它的 CA 已重建，需要重新登记（ADR 0052）。
 	NeedsReenroll bool `json:"needs_reenroll,omitempty"`
+}
+
+// 凭据落点状态取值。
+const (
+	SlotLanded   = "landed"   // 已落地，与云端一致
+	SlotDrift    = "drift"    // 已落地过，但现场或云端内容变了，等待重发
+	SlotPending  = "pending"  // 还没有落地记录
+	SlotRejected = "rejected" // 代理拒绝写入，Reason 是原因
+	SlotTooOld   = "too_old"  // 代理版本过低，没有下发
+)
+
+// CredentialSlot 是一个凭据条目在一台设备上的落点状态。只描述位置与状态，从不带内容。
+type CredentialSlot struct {
+	ID     string   `json:"id"`
+	Root   string   `json:"root"`
+	Paths  []string `json:"paths,omitempty"`
+	Status string   `json:"status"`
+	Reason string   `json:"reason,omitempty"`
 }
 
 // StatusResponse 是服务状态的快照，管理面首屏就用它。

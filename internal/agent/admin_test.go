@@ -90,6 +90,7 @@ func TestAdminJSConfirmsEveryWrite(t *testing.T) {
 		"revoke":              "revoke_device",
 		"openNewBundle":       "write_asset",
 		"addAssetFile":        "newFilePath",
+		"addFileItem":         "write_asset",
 		"saveAssetFile":       "write_asset",
 		"revealSecret":        "read_secret",
 		"editSecret":          "put_secret",

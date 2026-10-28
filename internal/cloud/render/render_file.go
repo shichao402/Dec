@@ -95,7 +95,7 @@ func filterRoots(want *Rendered, roots []string) *Rendered {
 			}
 		}
 		if missing != "" {
-			out.Alerts = append(out.Alerts, Alert{ID: f.File.ID, Reason: ReasonAgentTooOld + "：" + missing})
+			out.Alerts = append(out.Alerts, Alert{ID: f.File.ID, Reason: ReasonAgentTooOld + "：" + missing, Root: missing})
 			continue
 		}
 		out.Files = append(out.Files, f)
@@ -157,6 +157,73 @@ func (s *StateStore) Roots(deviceID string) ([]string, error) {
 		return nil, err
 	}
 	return append([]string(nil), st.Roots...), nil
+}
+
+// maxReasonLen 限制状态里保存的失败原因长度：原因来自代理，不能让它把状态文件撑大。
+const maxReasonLen = 300
+
+func truncateReason(s string) string {
+	r := []rune(s)
+	if len(r) <= maxReasonLen {
+		return s
+	}
+	return string(r[:maxReasonLen]) + "…"
+}
+
+// slotPaths 在没有落地记录时给出可读的落点描述（相对根），不含任何内容。
+func slotPaths(f proto.File) []string {
+	var out []string
+	for _, t := range f.Targets {
+		switch t.Root {
+		case proto.RootSSH:
+			out = append(out, "~/.ssh/"+t.Path)
+		case proto.RootSecrets:
+			out = append(out, "<"+t.ProjectID+">/.secrets/"+t.Path)
+		}
+	}
+	return out
+}
+
+// CredentialStatus 列出 ssh、secrets 两个根下每个条目在设备上的落点状态（需求 8.2）。
+//
+// want 必须是按设备上报的落点根过滤后的结果（RenderReported），
+// 这样版本过低的条目以告警形式出现，能如实标成 too_old。
+func (s *StateStore) CredentialStatus(deviceID string, want *Rendered) ([]proto.CredentialSlot, error) {
+	st, err := s.Load(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	var out []proto.CredentialSlot
+	for _, f := range want.Files {
+		roots := credentialRootsOf(f.File)
+		if len(roots) == 0 {
+			continue
+		}
+		prev, ok := st.Files[f.File.ID]
+		slot := proto.CredentialSlot{ID: f.File.ID, Root: roots[0], Paths: slotPaths(f.File)}
+		if ok && len(prev.Paths) > 0 {
+			slot.Paths = append([]string(nil), prev.Paths...)
+		}
+		switch {
+		case ok && prev.Error != "":
+			slot.Status, slot.Reason = proto.SlotRejected, prev.Error
+		case ok && prev.Hash == f.Hash:
+			slot.Status = proto.SlotLanded
+		case ok && prev.Hash != "":
+			slot.Status = proto.SlotDrift
+		default:
+			slot.Status = proto.SlotPending
+		}
+		out = append(out, slot)
+	}
+	for _, a := range want.Alerts {
+		if a.Root == "" {
+			continue
+		}
+		out = append(out, proto.CredentialSlot{ID: a.ID, Root: a.Root, Status: proto.SlotTooOld, Reason: a.Reason})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
 }
 
 func equalStrings(a, b []string) bool {

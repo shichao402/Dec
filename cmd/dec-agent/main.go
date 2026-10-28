@@ -618,7 +618,39 @@ func cmdStatus(args []string) error {
 			fmt.Printf("  %s  %s\n", p.ID, p.Path)
 		}
 	}
+	printCredentialStatus(projects)
 	return nil
+}
+
+// printCredentialStatus 打印 ssh、secrets 两个落点根的现场状态，不输出内容。
+func printCredentialStatus(projects []agent.Project) {
+	fmt.Printf("凭据落点根: %s\n", strings.Join(agent.CredentialRoots(), "、"))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Printf("凭据落点: 读不到用户目录（%v）\n", err)
+		return
+	}
+	slots, err := agent.LocalCredentialStatus(home, projects)
+	if err != nil {
+		fmt.Printf("凭据落点: 扫描失败（%v）\n", err)
+		return
+	}
+	if len(slots) == 0 {
+		fmt.Println("凭据落点: 无")
+		return
+	}
+	fmt.Println("凭据落点（与云端是否一致、被拒原因见管理面设备页）:")
+	for _, s := range slots {
+		state := "正常"
+		if len(s.Issues) > 0 {
+			state = strings.Join(s.Issues, "；")
+		}
+		mode := ""
+		if s.Mode != 0 {
+			mode = fmt.Sprintf(" %04o", s.Mode)
+		}
+		fmt.Printf("  [%s] %s%s  %s\n", s.Root, s.Path, mode, state)
+	}
 }
 
 // cmdProjects 管理项目登记。
