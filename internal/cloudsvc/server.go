@@ -432,6 +432,9 @@ func (s *Server) Handler() http.Handler {
 	// 客户端下载：无证书可访问（需求 20）。
 	mux.HandleFunc("/download/", s.handleDownload)
 	mux.HandleFunc("/download", s.handleDownloadIndex)
+	// 根路径就是安装指引：新设备接入的第一站，不该是 404。
+	// 它和 /download 是同一个页面，只是让人直接敲域名也能到。
+	mux.HandleFunc("/", s.handleRoot)
 	// 协议入口：单一端点，方法由 payload 里的 method 决定。
 	mux.HandleFunc("/api", s.handleAPI)
 	mux.HandleFunc("/api/", s.handleAPI)

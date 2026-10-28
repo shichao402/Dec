@@ -67,7 +67,23 @@ func (s *Server) loadRelease() *release {
 	return &r
 }
 
-// handleDownloadIndex 是无证书可访问的下载索引页（需求 20.1）。
+// handleRoot 把域名根路径接到安装指引页。
+//
+// 注册的是 "/" 这个 catch-all 模式，所以必须先排除其他路径再把请求转给
+// 下载页：否则任何拼错的地址都会返回 200，让人以为端点存在。
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	s.handleDownloadIndex(w, r)
+}
+
+// handleDownloadIndex 是无证书可访问的安装指引页（需求 20.1、20.6）。
+//
+// 它是这个域名下唯一的公开页面，也是任何一台新设备接入的第一站，
+// 所以内容按「照抄就能装好」组织：每个平台一条完整命令块，从下载一直
+// 走到登记。只列文件、让用户自己拼命令，等于把出错机会留给第一次接入的人。
 func (s *Server) handleDownloadIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -88,66 +104,143 @@ func (s *Server) handleDownloadIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	var b strings.Builder
 	b.WriteString("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
-	b.WriteString("<title>Dec Cloud 客户端下载</title>")
+	b.WriteString("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
+	b.WriteString("<title>Dec Cloud 安装指引</title>")
 	b.WriteString("<style>body{font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;")
-	b.WriteString("max-width:760px;margin:40px auto;padding:0 20px;color:#222}")
+	b.WriteString("max-width:820px;margin:40px auto;padding:0 20px;color:#222}")
 	b.WriteString("code,pre{background:#f4f4f5;border-radius:4px}code{padding:2px 5px}")
-	b.WriteString("pre{padding:12px;overflow-x:auto}table{border-collapse:collapse;width:100%}")
+	b.WriteString("pre{padding:12px;overflow-x:auto;white-space:pre-wrap;word-break:break-all}")
+	b.WriteString("table{border-collapse:collapse;width:100%}")
 	b.WriteString("th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #eee}")
-	b.WriteString("h1{font-size:20px}h2{font-size:15px;margin-top:28px}")
-	b.WriteString(".muted{color:#888}</style></head><body>")
-	b.WriteString("<h1>Dec Cloud 客户端下载</h1>")
+	b.WriteString("h1{font-size:20px}h2{font-size:15px;margin-top:32px;padding-top:8px;border-top:1px solid #eee}")
+	b.WriteString("h3{font-size:14px;margin-top:20px}.muted{color:#888}")
+	b.WriteString(".step{color:#888;margin-right:6px}</style></head><body>")
+	b.WriteString("<h1>Dec Cloud 安装指引</h1>")
 
 	if rel == nil {
 		b.WriteString("<p class=\"muted\">尚未上传发布清单。请先完成一次正式部署。</p>")
-	} else {
-		fmt.Fprintf(&b, "<p>当前要求版本：<code>%s</code>", htmlEscape(rel.RequiredClient))
-		fmt.Fprintf(&b, "<span class=\"muted\">（服务端 %s，协议 %d，构建于 %s）</span></p>",
-			htmlEscape(rel.Version), rel.Protocol, htmlEscape(rel.BuiltAt))
-
-		b.WriteString("<h2>下载</h2><table><tr><th>平台</th><th>架构</th><th>文件</th><th>大小</th></tr>")
-		files := append([]releaseFile(nil), rel.Files...)
-		sort.Slice(files, func(i, j int) bool {
-			if files[i].OS != files[j].OS {
-				return files[i].OS < files[j].OS
-			}
-			return files[i].Arch < files[j].Arch
-		})
-		for _, f := range files {
-			fmt.Fprintf(&b, "<tr><td>%s</td><td>%s</td><td><code>%s</code></td><td>%s</td></tr>",
-				htmlEscape(f.OS), htmlEscape(f.Arch), htmlEscape(f.Name), humanSize(f.Size))
-		}
-		b.WriteString("</table>")
-
-		b.WriteString("<h2>用命令行下载</h2>")
-		b.WriteString("<p>建议用 <code>curl</code> 下载，避免浏览器给文件打上隔离标记：</p>")
-		for _, f := range files {
-			// 示例只针对代理：托盘文件也在列表里，取到它会教用户把托盘装成 dec-agent。
-			if !strings.HasPrefix(f.Name, "dec-agent-") {
-				continue
-			}
-			// 命令必须与代理真实子命令一致：注册系统服务是 `install`，不是 `--install-agent`。
-			// 写错的后果是用户照着敲一遍，得到一句「未知命令」，然后卡在第一步。
-			fmt.Fprintf(&b, "<pre>curl -fLO https://%s/download/%s\nchmod +x %s\nsudo mv %s /usr/local/bin/dec-agent\n"+
-				"dec-agent configure --url https://%s\ndec-agent install\ndec-agent initialize</pre>",
-				htmlEscape(host), htmlEscape(f.Name), htmlEscape(f.Name), htmlEscape(f.Name), htmlEscape(host))
-			break
-		}
-		b.WriteString("<p>托盘图标（macOS、Windows）：把同平台的 <code>dec-tray-*</code> 下载到 <code>dec-agent</code> ")
-		b.WriteString("所在目录，再执行 <code>dec-agent install</code>，会一并注册登录自启动。没有托盘文件时代理照常工作。</p>")
-		b.WriteString("<p class=\"muted\">第一台设备用 <code>initialize</code>（会生成根密钥并写入 Bitwarden 冷备）；")
-		b.WriteString("此后新增设备用 <code>enroll</code>，两者都需要 Bitwarden 主密码与二次验证码。</p>")
-
-		b.WriteString("<h2>被系统拦截时</h2>")
-		b.WriteString("<p>客户端二进制不做代码签名（本项目只有一个使用者，签名与公证的成本远大于收益）。</p>")
-		b.WriteString("<p>macOS Gatekeeper：用 <code>curl</code> 下载后，在 Finder 里右键 → 打开，")
-		b.WriteString("或执行 <code>xattr -d com.apple.quarantine 文件名</code>。</p>")
-		b.WriteString("<p>Windows SmartScreen：点击“更多信息”→“仍要运行”。</p>")
+		b.WriteString("</body></html>")
+		_, _ = w.Write([]byte(b.String()))
+		return
 	}
+
+	// 可选平台取自清单本身：清单里没有的组合不该出现在指引里，
+	// 否则用户照着命令敲会拿到 404。
+	have := map[string]bool{}
+	for _, f := range rel.Files {
+		have[f.OS+"/"+f.Arch] = true
+	}
+	find := func(prefix, osName, arch string) string {
+		for _, f := range rel.Files {
+			if f.OS == osName && f.Arch == arch && strings.HasPrefix(f.Name, prefix) {
+				return f.Name
+			}
+		}
+		return ""
+	}
+
+	fmt.Fprintf(&b, "<p>当前要求版本：<code>%s</code>", htmlEscape(rel.RequiredClient))
+	fmt.Fprintf(&b, "<span class=\"muted\">（服务端 %s，协议 %d，构建于 %s）</span></p>",
+		htmlEscape(rel.Version), rel.Protocol, htmlEscape(rel.BuiltAt))
+	b.WriteString("<p>代理必须与服务端要求版本一致，不一致时会被拦住并提示更新。")
+	b.WriteString("下载二进制后直接运行，不需要签名文件，也不需要安装包。</p>")
+
+	// 安装路径写用户目录：不需要 sudo，与代理自己的状态目录同属当前用户，
+	// 卸载和升级都不会留下需要提权才能删的残留。
+	binDir := "~/.local/bin"
+	agentName := "dec-agent"
+
+	b.WriteString("<h2>macOS 与 Linux</h2>")
+	if arm := find("dec-agent-", "darwin", "arm64"); arm != "" {
+		b.WriteString("<h3>macOS（Apple Silicon）</h3>")
+		writeUnixSteps(&b, host, arm, binDir, agentName)
+	}
+	if amd := find("dec-agent-", "darwin", "amd64"); amd != "" {
+		b.WriteString("<h3>macOS（Intel）</h3>")
+		writeUnixSteps(&b, host, amd, binDir, agentName)
+	}
+	if arm := find("dec-agent-", "linux", "arm64"); arm != "" {
+		b.WriteString("<h3>Linux（arm64）</h3>")
+		writeUnixSteps(&b, host, arm, binDir, agentName)
+	}
+	if amd := find("dec-agent-", "linux", "amd64"); amd != "" {
+		b.WriteString("<h3>Linux（amd64）</h3>")
+		writeUnixSteps(&b, host, amd, binDir, agentName)
+	}
+
+	b.WriteString("<h2>Windows</h2>")
+	if have["windows/amd64"] || have["windows/arm64"] {
+		b.WriteString("<p>在 PowerShell 里执行。脚本会判定架构、下载并校验、登记设备、注册计划任务，")
+		b.WriteString("装到 <code>%LOCALAPPDATA%\\Programs\\dec</code>，不需要管理员权限：</p>")
+		b.WriteString("<pre>iwr -useb https://raw.githubusercontent.com/shichao402/Dec/main/scripts/install-agent.ps1 | iex</pre>")
+		b.WriteString("<p class=\"muted\">也可以手工安装：下载对应架构的 <code>dec-agent-windows-*.exe</code>，")
+		b.WriteString("重命名为 <code>dec-agent.exe</code>，然后依次执行 ")
+		b.WriteString("<code>dec-agent configure --url https://" + htmlEscape(host) + "</code>、<code>dec-agent enroll --name win-desktop</code>、<code>dec-agent install</code>。</p>")
+	}
+
+	b.WriteString("<h2>登记</h2>")
+	b.WriteString("<p>第一台设备用 <code>initialize</code>，会生成根密钥并写入 Bitwarden 冷备；")
+	b.WriteString("此后新增设备一律用 <code>enroll</code>。两者都需要 Bitwarden 邮箱、主密码与两步验证码。</p>")
+	b.WriteString("<p class=\"muted\">上面的 macOS 与 Linux 命令块已包含 <code>enroll</code>。")
+	b.WriteString("如果这台设备是本服务的第一台设备，把 <code>enroll</code> 换成 <code>initialize</code>。</p>")
+
+	b.WriteString("<h2>确认装好了</h2>")
+	b.WriteString("<pre>curl -s http://127.0.0.1:43679/api/status</pre>")
+	b.WriteString("<p>返回里有 <code>server_url</code>、<code>device_id</code>、<code>aligned</code> 就说明连上了。")
+	b.WriteString("<code>aligned</code> 为 <code>false</code> 表示代理版本与服务端要求不符，需要按上面的指引重装当前要求版本。</p>")
+	b.WriteString("<p>管理面在 <code>http://127.0.0.1:43679/admin</code>，由本机代理提供，不经过公网。</p>")
+
+	b.WriteString("<h2>全部产物</h2>")
+	b.WriteString("<table><tr><th>平台</th><th>架构</th><th>文件</th><th>大小</th></tr>")
+	files := append([]releaseFile(nil), rel.Files...)
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].OS != files[j].OS {
+			return files[i].OS < files[j].OS
+		}
+		if files[i].Arch != files[j].Arch {
+			return files[i].Arch < files[j].Arch
+		}
+		return files[i].Name < files[j].Name
+	})
+	for _, f := range files {
+		fmt.Fprintf(&b, "<tr><td>%s</td><td>%s</td><td><code>%s</code></td><td>%s</td></tr>",
+			htmlEscape(f.OS), htmlEscape(f.Arch), htmlEscape(f.Name), humanSize(f.Size))
+	}
+	b.WriteString("</table>")
+	b.WriteString("<p class=\"muted\">托盘（<code>dec-tray-*</code>）放在 <code>dec-agent</code> 同目录，")
+	b.WriteString("<code>dec-agent install</code> 会一并注册登录自启动。没有托盘文件时代理照常工作。</p>")
+
+	b.WriteString("<h2>被系统拦截时</h2>")
+	b.WriteString("<p>客户端二进制不做代码签名（本项目只有一个使用者，签名与公证的成本远大于收益）。</p>")
+	b.WriteString("<p>macOS Gatekeeper：用 <code>curl</code> 下载后，在 Finder 里右键 → 打开，")
+	b.WriteString("或执行 <code>xattr -d com.apple.quarantine 文件名</code>。</p>")
+	b.WriteString("<p>Windows SmartScreen：点击“更多信息”→“仍要运行”。</p>")
+
+	b.WriteString("<h2>卸载</h2>")
+	b.WriteString("<pre>dec-agent uninstall</pre>")
+	b.WriteString("<p>会移除系统服务、登录项、所有 Dec 管理的落点与本机设备身份，并在在线时通知云端注销这台设备。</p>")
 
 	b.WriteString("<p class=\"muted\">只保留当前与上一个要求版本。</p>")
 	b.WriteString("</body></html>")
 	_, _ = w.Write([]byte(b.String()))
+}
+
+// writeUnixSteps 写出一段 macOS/Linux 的安装命令。
+//
+// 每行都用 \n 单独拼，而不是塞进一个长模板串：这些命令是要被照抄的，
+// 一旦被 HTML 折成一行就不可读了。
+func writeUnixSteps(b *strings.Builder, host, file, binDir, agentName string) {
+	dl := "https://" + host + "/download/" + file
+	fmt.Fprintf(b, "<pre>mkdir -p %s\n", binDir)
+	fmt.Fprintf(b, "curl -fLo %s/%s %s\n", binDir, agentName, dl)
+	fmt.Fprintf(b, "chmod +x %s/%s\n", binDir, agentName)
+	// 用绝对路径调用，避免用户 PATH 里还没有 binDir 时下一步就失败。
+	fmt.Fprintf(b, "%s/%s configure --url https://%s\n", binDir, agentName, host)
+	fmt.Fprintf(b, "%s/%s enroll --name \"$(hostname)\"\n", binDir, agentName)
+	fmt.Fprintf(b, "%s/%s install</pre>\n", binDir, agentName)
+	b.WriteString("<p class=\"muted\">不需要 <code>sudo</code>：代理和它的状态目录都归当前用户。")
+	b.WriteString("如果 <code>" + binDir + "</code> 不在 <code>PATH</code> 里，把这一行加到 shell 配置文件：")
+	b.WriteString("<code>export PATH=\"$HOME/.local/bin:$PATH\"</code>。</p>")
 }
 
 // handleDownload 提供单个文件（需求 20.1）。

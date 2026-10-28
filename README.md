@@ -20,15 +20,13 @@
 
 ### 安装代理
 
-下载页 `https://dec.firoyang.com/download` 列出当前要求版本与全部产物，装哪台机器就在那台机器上跑：
+任何一台新设备，浏览器直接打开 `https://dec.firoyang.com` 就是安装指引：当前要求版本、各平台可直接照抄的命令块、登记方式、装完怎么确认。`/download` 是同一个页面。
 
-macOS / Linux 与 Windows 用的是同一套流程，只是承载脚本的方式不同。Windows 的 PowerShell 脚本随仓库分发：
+macOS 与 Linux 按页面给出的命令逐条执行 `curl` 取二进制、`configure` 填服务地址、`install` 注册自启、`initialize` 或 `enroll` 登记身份。Windows 的 PowerShell 脚本随仓库分发，页面也给出入口：
 
 ```powershell
 iwr -useb https://raw.githubusercontent.com/shichao402/Dec/main/scripts/install-agent.ps1 | iex
 ```
-
-macOS 与 Linux 按下载页给出的命令逐条执行：`curl -fLO` 取二进制、`configure` 填服务地址、`install` 注册自启、`initialize` 或 `enroll` 登记身份。
 
 Windows 脚本把这几步串成一次执行：判定架构、比对本机与服务端要求的版本、下载代理与托盘并校验 sha256、写入用户级 PATH、登记设备、注册计划任务、最后确认代理在线。登记那一步需要 Bitwarden 邮箱、主密码和两步验证码。
 

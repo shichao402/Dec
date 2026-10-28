@@ -893,3 +893,105 @@ func TestInstallScriptDownloadsRealArtifacts(t *testing.T) {
 		t.Error("release.yml 里的 Windows 托盘产物名与安装脚本期望的 dec-tray-windows-amd64.exe 不一致")
 	}
 }
+
+// TestInstallGuideMatchesCLI 守住公网安装指引页与 CLI 的一致性。
+//
+// download.go 里的安装指引是唯一一处会被人"照着敲"的命令集合，而它
+// 只是拼字符串：CLI 改了子命令名或 flag 之后，页面照样渲染 200，只是
+// 用户抄下来的命令全部报「未知命令」。这条测试把页面里出现的每个
+// dec-agent 子命令与 --flag 都拿去 main.go 核对。
+func TestInstallGuideMatchesCLI(t *testing.T) {
+	root := repoRoot(t)
+	pageData, err := os.ReadFile(filepath.Join(root, "internal", "cloudsvc", "download.go"))
+	if err != nil {
+		t.Fatalf("读下载页实现失败: %v", err)
+	}
+	page := string(pageData)
+	mainData, err := os.ReadFile(filepath.Join(root, "cmd", "dec-agent", "main.go"))
+	if err != nil {
+		t.Fatalf("读 dec-agent 入口失败: %v", err)
+	}
+	mainGo := string(mainData)
+
+	dispatched := map[string]bool{}
+	for _, m := range regexp.MustCompile(`case "([a-z][a-z-]*)":`).FindAllStringSubmatch(mainGo, -1) {
+		dispatched[m[1]] = true
+	}
+	// 页面里形如 `dec-agent <sub>` 或 `<agentName> <sub>` 的调用。
+	// 变量形式用于按平台拼命令的那两行。
+	subRe := regexp.MustCompile(`(?:dec-agent|%s) ([a-z][a-z-]+)`)
+	seen := map[string]bool{}
+	for _, m := range subRe.FindAllStringSubmatch(page, -1) {
+		// format verb 与普通单词混在一起，只认真正注册过的子命令名；
+		// 未知名字仍然要报错，否则改名不会被发现。
+		if m[1] == "s" || m[1] == "d" {
+			continue
+		}
+		seen[m[1]] = true
+	}
+	if len(seen) == 0 {
+		t.Fatal("下载页里没有解析到任何 dec-agent 子命令，正则可能已与实现脱节")
+	}
+	for sub := range seen {
+		if !dispatched[sub] {
+			t.Errorf("安装指引里出现了 dec-agent %s，但 main.go 的分派里没有这个子命令；"+
+				"用户照抄会得到「未知命令」", sub)
+		}
+	}
+
+	// flag 同样要核对：子命令对、flag 名写错时，CLI 会直接退出并报
+	// 「flag provided but not defined」，而这正是最容易漏掉的一类。
+	registered := map[string]bool{}
+	for _, m := range regexp.MustCompile(`fs\.(?:String|Bool|Int)\("([a-z][a-z-]*)"`).FindAllStringSubmatch(mainGo, -1) {
+		registered[m[1]] = true
+	}
+	// 页面里紧跟子命令出现的 `--xxx`。只取下载页，不取 README 或脚本。
+	flagRe := regexp.MustCompile(`--([a-z][a-z-]+)`)
+	checked := 0
+	for _, m := range flagRe.FindAllStringSubmatch(page, -1) {
+		name := m[1]
+		// 页面里出现的 -- 也可能是 HTML 注释残留，只认已注册的与已知错误名。
+		if registered[name] {
+			checked++
+			continue
+		}
+		// 未注册的长 flag 一律报错：页面里不该出现 CLI 不认的参数。
+		checked++
+		t.Errorf("安装指引传了 --%s，但 dec-agent 从未注册这个 flag；"+
+			"用户照抄会在第一步就失败", name)
+	}
+	if checked == 0 {
+		t.Error("安装指引里没有解析到任何 --flag，正则可能已与实现脱节")
+	}
+
+	// 端口与路径是页面里最容易被写错、又不会报错的部分：写错了页面照常
+	// 返回 200，只是告诉用户去连一个不存在的端口。
+	for _, needle := range []string{"127.0.0.1:43679/api/status", "127.0.0.1:43679/admin"} {
+		if !strings.Contains(page, needle) {
+			t.Errorf("安装指引应包含 %s，否则用户无法确认安装结果", needle)
+		}
+	}
+	if !strings.Contains(mainGo, "43679") && !strings.Contains(page, "43679") {
+		t.Error("代理端口 43679 在页面与 CLI 里都不见了")
+	}
+}
+
+// TestDownloadPageStaysCertificateFree 守住「安装指引页必须无需设备证书」。
+//
+// 这个页面存在的全部意义是新设备在还没有身份时能读到它。一旦哪天有人
+// 把它挪到需要证书的 mux 分支下，页面本身不会报错，只会对所有未登记
+// 设备返回 unauthorized——而这恰好是把人挡在门外的第一步。
+func TestDownloadPageStaysCertificateFree(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "cloudsvc", "server.go"))
+	if err != nil {
+		t.Fatalf("读路由注册失败: %v", err)
+	}
+	src := string(data)
+	for _, route := range []string{`mux.HandleFunc("/download", s.handleDownloadIndex)`,
+		`mux.HandleFunc("/", s.handleRoot)`} {
+		if !strings.Contains(src, route) {
+			t.Errorf("路由注册缺少 %s；安装指引与根路径都必须可无证书访问", route)
+		}
+	}
+}

@@ -502,11 +502,11 @@ func TestDownloadWhitelist(t *testing.T) {
 		t.Fatalf("写入测试文件失败: %v", err)
 	}
 	rel := release{
-		Version:         "1.0.0",
-		RequiredClient:  "1.0.0",
-		Protocol:        proto.Version,
-		BuiltAt:         time.Now().UTC().Format(time.RFC3339),
-		Files:           []releaseFile{{Name: "dec-agent-darwin-arm64", OS: "darwin", Arch: "arm64", Size: 6}},
+		Version:        "1.0.0",
+		RequiredClient: "1.0.0",
+		Protocol:       proto.Version,
+		BuiltAt:        time.Now().UTC().Format(time.RFC3339),
+		Files:          []releaseFile{{Name: "dec-agent-darwin-arm64", OS: "darwin", Arch: "arm64", Size: 6}},
 	}
 	raw, err := json.Marshal(rel)
 	if err != nil {
@@ -556,14 +556,16 @@ func TestDownloadWhitelist(t *testing.T) {
 	}
 }
 
-// TestDownloadIndex 验证索引页可访问并包含版本信息。
+// TestDownloadIndex 验证安装指引页可访问并包含版本与各平台安装命令。
 func TestDownloadIndex(t *testing.T) {
 	h := newHarness(t, "1.0.0")
 	rel := release{Version: "3.1.4", RequiredClient: "3.1.4", Protocol: proto.Version,
-		// 托盘放在前面：同平台同架构排序相等，命令示例绝不能取到托盘。
+		// 托盘放在前面：同平台同架构排序相等，安装命令绝不能取到托盘。
 		Files: []releaseFile{
 			{Name: "dec-tray-darwin-arm64", OS: "darwin", Arch: "arm64"},
 			{Name: "dec-agent-darwin-arm64", OS: "darwin", Arch: "arm64"},
+			{Name: "dec-agent-linux-amd64", OS: "linux", Arch: "amd64"},
+			{Name: "dec-agent-windows-amd64.exe", OS: "windows", Arch: "amd64"},
 		}}
 	raw, _ := json.Marshal(rel)
 	if err := os.WriteFile(releaseManifestPath(h.dir), raw, 0o644); err != nil {
@@ -588,14 +590,50 @@ func TestDownloadIndex(t *testing.T) {
 	if !strings.Contains(page, "3.1.4") {
 		t.Fatalf("索引页应包含版本 3.1.4")
 	}
-	if !strings.Contains(page, "<code>dec-tray-darwin-arm64</code>") {
-		t.Fatalf("下载列表应包含托盘文件")
-	}
+	// 每个平台都要给出可照抄的命令块，而不是只列文件名。
 	if !strings.Contains(page, "/download/dec-agent-darwin-arm64") {
-		t.Fatalf("命令示例应下载代理")
+		t.Fatalf("应给出 macOS arm64 的下载地址")
 	}
-	if strings.Contains(page, "/download/dec-tray-") {
-		t.Fatalf("命令示例不应把托盘当成代理安装")
+	if !strings.Contains(page, "/download/dec-agent-linux-amd64") {
+		t.Fatalf("应给出 Linux amd64 的下载地址")
+	}
+	// 命令块必须走到登记那一步，否则用户下载完不知道下一步做什么。
+	if !strings.Contains(page, "configure --url") || !strings.Contains(page, "enroll --name") {
+		t.Fatalf("安装命令应包含 configure 与 enroll")
+	}
+	// 托盘不能出现在可照抄的命令里，否则会教用户把托盘当成代理安装。
+	if strings.Contains(page, "curl -fLo ~/.local/bin/dec-agent https://") &&
+		strings.Contains(page, "dec-tray") {
+		if strings.Contains(page, "/download/dec-tray-") {
+			t.Fatalf("安装命令不应把托盘当成代理")
+		}
+	}
+	if !strings.Contains(page, "install-agent.ps1") {
+		t.Fatalf("Windows 应给出安装脚本入口")
+	}
+
+	// 根路径是同一个页面：新设备接入的第一站不该是 404。
+	root, err := ts.Client().Get(ts.URL + "/")
+	if err != nil {
+		t.Fatalf("请求根路径失败: %v", err)
+	}
+	defer root.Body.Close()
+	if root.StatusCode != http.StatusOK {
+		t.Fatalf("根路径状态码 %d，期望 200", root.StatusCode)
+	}
+	rootBody, _ := io.ReadAll(root.Body)
+	if !strings.Contains(string(rootBody), "3.1.4") {
+		t.Fatalf("根路径应渲染安装指引页")
+	}
+
+	// "/" 是 catch-all 模式，未匹配路径仍必须 404，否则拼错的地址看起来像存在。
+	nf, err := ts.Client().Get(ts.URL + "/no-such-page")
+	if err != nil {
+		t.Fatalf("请求未知路径失败: %v", err)
+	}
+	defer nf.Body.Close()
+	if nf.StatusCode != http.StatusNotFound {
+		t.Fatalf("未知路径状态码 %d，期望 404", nf.StatusCode)
 	}
 }
 
@@ -693,9 +731,9 @@ func TestLimiter(t *testing.T) {
 // TestHumanSize 验证大小格式化。
 func TestHumanSize(t *testing.T) {
 	cases := map[int64]string{
-		512:              "512 B",
-		2048:             "2.0 KB",
-		5 * 1024 * 1024:  "5.0 MB",
+		512:             "512 B",
+		2048:            "2.0 KB",
+		5 * 1024 * 1024: "5.0 MB",
 	}
 	for in, want := range cases {
 		if got := humanSize(in); got != want {
