@@ -69,12 +69,28 @@ const (
 	KindMCP AssetKind = "mcp"
 	// KindEnv 是环境变量模板，渲染时用密钥填充。
 	KindEnv AssetKind = "env"
+	// KindFile 是落到凭据根（~/.ssh、<项目>/.secrets）的单个文件
+	// （.agent/credential-landing 需求 4）。内容整份存为一个文件，
+	// 敏感内容用 {{secret:名称}} 引用密钥。
+	KindFile AssetKind = "file"
+)
+
+// file 条目可用的落点根，名字与 proto.RootSSH / proto.RootSecrets 一致。
+const (
+	FileRootSSH     = "ssh"
+	FileRootSecrets = "secrets"
+)
+
+// file 条目可用的落盘格式，名字与 proto.FormatWhole / proto.FormatManagedBlock 一致。
+const (
+	FileFormatWhole        = "whole"
+	FileFormatManagedBlock = "managed_block"
 )
 
 // Valid 报告资产类型是否受支持。
 func (k AssetKind) Valid() bool {
 	switch k {
-	case KindSkill, KindRule, KindMCP, KindEnv:
+	case KindSkill, KindRule, KindMCP, KindEnv, KindFile:
 		return true
 	}
 	return false
@@ -102,6 +118,17 @@ type ManifestItem struct {
 	Planes []Plane `yaml:"planes" json:"planes"`
 	// Host 是 mcp 类型的可选渲染目标，例如 cursor、codebuddy。空表示全部已启用宿主。
 	Host []string `yaml:"host,omitempty" json:"host,omitempty"`
+
+	// 以下字段只用于 file 类型。
+
+	// Root 是落点根：ssh（用户平面 ~/.ssh）或 secrets（项目平面 <项目>/.secrets）。
+	Root string `yaml:"root,omitempty" json:"root,omitempty"`
+	// Target 是相对落点根的路径，例如 dec_github_main、config.d/dec.conf、relkit/token.json。
+	Target string `yaml:"target,omitempty" json:"target,omitempty"`
+	// Mode 是可选的显式权限（如 0o600），0 表示按落点类型推断。代理对私钥一律 0600。
+	Mode uint32 `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// Format 是落盘方式：whole（默认）或 managed_block（只用于 ssh 根的 config）。
+	Format string `yaml:"format,omitempty" json:"format,omitempty"`
 }
 
 // Plane 是落点平面。

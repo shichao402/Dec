@@ -52,6 +52,9 @@ type deviceState struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Overrides 是最近若干条覆盖记录，供管理面展示（需求 6.2）。
 	Overrides []proto.Override `json:"overrides,omitempty"`
+	// Roots 是代理最近一次对账上报的额外落点根（credential-landing 需求 4.5），
+	// 供管理面在不发起对账的情况下判断哪些条目因代理版本过低没有下发。
+	Roots []string `json:"roots,omitempty"`
 }
 
 // StateStore 管理设备下发状态。
@@ -346,7 +349,10 @@ func (s *StateStore) clear(deviceID string) error {
 //  4. 上回下发过、本次不再期望的条目下发删除，路径取自状态里记录的绝对路径，
 //     因为代理不保存下发清单（需求 5.2）。
 func (r *Renderer) Sync(dev ssot.Device, req proto.SyncRequest) (*proto.SyncResponse, error) {
-	want, err := r.RenderDevice(dev)
+	if err := r.states.RecordRoots(dev.ID, req.Roots); err != nil {
+		return nil, err
+	}
+	want, err := r.RenderFor(dev, req.Roots)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +393,13 @@ func (r *Renderer) Sync(dev ssot.Device, req proto.SyncRequest) (*proto.SyncResp
 				})
 			}
 		}
-		files = append(files, f.File)
+		out := f.File
+		// 首次接管（credential-landing 需求 5.3）：云端从没记下过这个凭据条目的
+		// 落地哈希，代理现场若已有不同内容，要先归档再覆盖。
+		if len(credentialRootsOf(out)) > 0 && state.Files[out.ID].Hash == "" {
+			out.Adopt = true
+		}
+		files = append(files, out)
 	}
 
 	// 需要删除的条目：上回服务端下发过，本次不再期望。

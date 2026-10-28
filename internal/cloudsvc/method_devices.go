@@ -53,7 +53,8 @@ func (s *Server) mDevices(req *proto.Request, dev ssot.Device) *proto.Response {
 		// 漂移条数：把渲染结果与状态比一次。渲染失败（例如根密钥未加载）时
 		// 不算漂移，避免恢复模式下满屏红色。
 		if !d.Revoked {
-			if want, rerr := s.render.RenderDevice(d); rerr == nil {
+			if want, rerr := s.render.RenderReported(d); rerr == nil {
+				info.TooOld = want.TooOld()
 				if drift, derr := s.render.States().Drift(d.ID, want); derr == nil {
 					info.Drift = drift
 				}

@@ -30,6 +30,7 @@ type testEnv struct {
 	assets *assets.Writer
 	render *render.Renderer
 	home   string
+	key    *crypt.Key
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -56,7 +57,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatalf("建测试主目录失败: %v", err)
 	}
-	return &testEnv{store: store, assets: assets.NewWriter(store), render: r, home: home}
+	return &testEnv{store: store, assets: assets.NewWriter(store), render: r, home: home, key: key}
 }
 
 func (e *testEnv) writeBundle(t *testing.T, name string, files []assets.AssetFile, manifest string) {

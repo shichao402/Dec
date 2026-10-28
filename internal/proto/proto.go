@@ -275,6 +275,10 @@ type File struct {
 	Format Format `json:"format"`
 	// Key 在 json_key 格式下是要写入的键名，必须是 dec- 前缀。
 	Key string `json:"key,omitempty"`
+	// Adopt 表示云端还没有这个条目的落地记录，这是首次接管
+	// （.agent/credential-landing 需求 5）。代理遇到现场已有不同内容时
+	// 先归档再覆盖。只对凭据根生效；追加字段，老代理忽略。
+	Adopt bool `json:"adopt,omitempty"`
 }
 
 // Format 是落盘方式。
@@ -321,6 +325,11 @@ type SyncRequest struct {
 	// 服务端在没有差异时挂起这个请求，直到内容变更或超时。
 	// 0 表示立即返回，代理首次连接时用它做全量对账。
 	WaitSeconds int `json:"wait_seconds,omitempty"`
+	// Roots 是代理在内置宿主之外额外支持的落点根（ssh、secrets）。
+	//
+	// 云端只向上报了对应根的代理渲染这类条目（.agent/credential-landing 需求 4.5）：
+	// 老代理不认识这些根，收到只会逐条写入失败。追加字段，老代理不带即视为空。
+	Roots []string `json:"roots,omitempty"`
 }
 
 // LocalProject 是代理侧的项目登记投影。
@@ -393,6 +402,9 @@ type AckResult struct {
 	Hash string `json:"hash,omitempty"`
 	// Paths 是实际写入的绝对路径，用于审计与吊销后的轮换清单（需求 18.11）。
 	Paths []string `json:"paths,omitempty"`
+	// Notes 是不阻断写入但需要留痕的说明，例如「已归档后覆盖」、
+	// .secrets/.gitignore 内容不符。服务端写进审计；追加字段，老服务端忽略。
+	Notes []string `json:"notes,omitempty"`
 }
 
 // AckResponse 是空结构，保留字段以便未来追加。
@@ -658,6 +670,8 @@ type DeviceInfo struct {
 	UserBundles     []string   `json:"user_bundles,omitempty"`
 	// Drift 是与云端期望状态的差异条数。
 	Drift int `json:"drift"`
+	// TooOld 是因代理版本过低、不支持其落点根而未下发的条目数。
+	TooOld int `json:"too_old,omitempty"`
 	// NeedsReenroll 表示签发它的 CA 已重建，需要重新登记（ADR 0052）。
 	NeedsReenroll bool `json:"needs_reenroll,omitempty"`
 }

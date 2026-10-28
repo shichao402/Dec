@@ -174,6 +174,8 @@ func (r *Renderer) RenderDevice(dev ssot.Device) (*Rendered, error) {
 	seenID := map[string]string{}
 	// seenKey 检出 json_key 落点上的键冲突。
 	seenKey := map[string]string{}
+	// seenSlot 检出 file 条目在同一设备同一落点上的冲突（credential-landing 需求 4.6）。
+	seenSlot := map[string]string{}
 
 	for _, bundle := range order {
 		u := uses[bundle]
@@ -261,13 +263,28 @@ func (r *Renderer) RenderDevice(dev ssot.Device) (*Rendered, error) {
 				if pf.Secret {
 					pf.Mode = 0o600
 				}
-				// 说明行在这里加，而不是在代理落盘时加（需求 6.4）。
-				//
-				// 代理加说明会让它的"写下内容"比"收到内容"多一行：代理按写下的
-				// 字节算哈希，服务端按未加说明的字节算哈希，两个值永远不等，
-				// 每次对账都判成差异并重发，形成无限重写循环。
-				pf.Content = notice.Apply(p.rel, pf.Content, pf.Secret, pf.Format,
-					notice.Locator{Bundle: bundle, Path: p.src})
+				isFile := item.Kind == ssot.KindFile
+				if isFile {
+					if err := shapeFileItem(&pf, item); err != nil {
+						alerts = append(alerts, Alert{ID: p.id, Reason: err.Error()})
+						continue
+					}
+					if conflict := firstSlotConflict(seenSlot, pf); conflict != "" {
+						alerts = append(alerts, Alert{ID: pf.ID, Reason: conflict})
+						continue
+					}
+				} else {
+					// 说明行在这里加，而不是在代理落盘时加（需求 6.4）。
+					//
+					// 代理加说明会让它的"写下内容"比"收到内容"多一行：代理按写下的
+					// 字节算哈希，服务端按未加说明的字节算哈希，两个值永远不等，
+					// 每次对账都判成差异并重发，形成无限重写循环。
+					//
+					// file 条目一律不加（credential-landing 需求 4.4）：私钥、json、xml
+					// 插进一行注释就坏了，托管块本身已经写明归属。
+					pf.Content = notice.Apply(p.rel, pf.Content, pf.Secret, pf.Format,
+						notice.Locator{Bundle: bundle, Path: p.src})
+				}
 
 				if prev, dup := seenID[pf.ID]; dup {
 					alerts = append(alerts, Alert{
@@ -287,7 +304,11 @@ func (r *Renderer) RenderDevice(dev ssot.Device) (*Rendered, error) {
 					}
 				}
 				seenID[pf.ID] = bundle
-
+				if isFile {
+					for _, t := range pf.Targets {
+						seenSlot[pathSlot(t)] = pf.ID
+					}
+				}
 				// 哈希口径必须与代理一致，否则每一轮对账都会误判为漂移。
 				//
 				// json_key 条目不能直接哈希 pf.Content：那是条目在源文件里的

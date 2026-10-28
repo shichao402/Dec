@@ -17,6 +17,7 @@ import (
 
 	"github.com/shichao402/Dec/internal/cloud/assets"
 	"github.com/shichao402/Dec/internal/cloud/ssot"
+	"github.com/shichao402/Dec/internal/proto"
 )
 
 // 落点相对路径约定。
@@ -81,6 +82,9 @@ func hostsFor(item ssot.ManifestItem) ([]string, error) {
 	case ssot.KindEnv:
 		// env 是 Dec 自有的文件，不跟随任何 IDE。
 		return []string{RootDec}, nil
+	case ssot.KindFile:
+		// file 落到固定的凭据根，宿主就是根本身（ssh / secrets）。
+		return []string{item.Root}, nil
 	}
 
 	base := allHosts
@@ -195,6 +199,20 @@ func piecesOf(bundle string, item ssot.ManifestItem, files map[string][]byte) ([
 			raw:         raw,
 			src:         item.Path,
 			forceSecret: true,
+		}}, nil
+
+	case ssot.KindFile:
+		raw, ok := files[item.Path]
+		if !ok {
+			return nil, fmt.Errorf("%w: file 条目 %q 的内容文件缺失", assets.ErrSchema, item.Path)
+		}
+		return []piece{{
+			id:  id,
+			rel: item.Target,
+			raw: raw,
+			src: item.Path,
+			// 私钥按路径判定为密钥（需求 4.4），与内容里有没有 {{secret:}} 无关。
+			forceSecret: item.Root == proto.RootSSH && proto.IsSSHPrivateKey(item.Target),
 		}}, nil
 	}
 	return nil, fmt.Errorf("%w: 条目 %q 的类型 %q 不受支持", assets.ErrSchema, item.Path, item.Kind)

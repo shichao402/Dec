@@ -90,6 +90,7 @@ func (s *Server) mSync(r *http.Request, req *proto.Request, payload any, dev sso
 		Revision: in.Revision,
 		Manifest: in.Manifest,
 		Projects: in.Projects,
+		Roots:    in.Roots,
 	})
 	if err != nil {
 		return failFromError(req.ID, err)
@@ -196,7 +197,28 @@ func (s *Server) mAck(req *proto.Request, payload any, dev ssot.Device) *proto.R
 		}
 	}
 	s.notify.MarkDevice(dev.ID, time.Now())
+	s.recordAckNotes(dev, in)
 	return okPayload(req.ID, &proto.AckResponse{Revision: s.render.CurrentRevision()})
+}
+
+// recordAckNotes 把回执里的说明（如「已归档后覆盖」）记进审计（credential-landing 需求 5.2）。
+//
+// 只有凭据落点首次接管和少数告警会带说明，量级是一次迁移几条，不需要降噪。
+func (s *Server) recordAckNotes(dev ssot.Device, in *proto.AckRequest) {
+	for _, res := range in.Results {
+		for _, note := range res.Notes {
+			if err := s.audit.Append(audit.Entry{
+				Event:    audit.EventOverride,
+				DeviceID: dev.ID,
+				Source:   string(proto.SourceAgent),
+				Subject:  res.ID,
+				Detail:   note,
+				OK:       res.OK,
+			}); err != nil {
+				s.logf("写审计失败: %v", err)
+			}
+		}
+	}
 }
 
 // mStatus 返回服务状态快照，管理面首屏用它（需求 14.1）。

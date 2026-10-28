@@ -592,6 +592,7 @@ func validateManifest(m ssot.BundleManifest, files []AssetFile) error {
 	}
 	seenPath := map[string]bool{}
 	seenName := map[string]bool{}
+	seenSlot := map[string]bool{}
 	for _, item := range m.Items {
 		if !item.Kind.Valid() {
 			return fmt.Errorf("%w: 条目 %q 的类型 %q 不受支持", ErrSchema, item.Path, item.Kind)
@@ -618,6 +619,19 @@ func validateManifest(m ssot.BundleManifest, files []AssetFile) error {
 			if !p.Valid() {
 				return fmt.Errorf("%w: 条目 %q 的平面 %q 不受支持", ErrSchema, item.Path, p)
 			}
+		}
+		if item.Kind == ssot.KindFile {
+			if err := validateFileItem(item); err != nil {
+				return err
+			}
+			slot := item.Root + "|" + item.Target
+			if seenSlot[slot] {
+				return fmt.Errorf("%w: 条目 %q 与本 bundle 另一条目落到同一位置 %s/%s",
+					ErrSchema, item.Path, item.Root, item.Target)
+			}
+			seenSlot[slot] = true
+		} else if item.Root != "" || item.Target != "" || item.Format != "" || item.Mode != 0 {
+			return fmt.Errorf("%w: 条目 %q 不是 file 类型，不能声明 root/target/format/mode", ErrSchema, item.Path)
 		}
 		// 条目在文件树里必须真的存在。
 		if item.Kind == ssot.KindSkill {

@@ -124,6 +124,9 @@ func (r *Resolver) Resolve(t proto.Target) (string, error) {
 		// 删除下发用绝对路径表达（云端在删除时只能引用它上次记下的绝对路径）。
 		return r.checkAbsolute(t.Path)
 	}
+	if isCredentialRoot(t.Root) {
+		return r.resolveCredential(t)
+	}
 	dirs, ok := hosts[t.Root]
 	if !ok {
 		return "", fmt.Errorf("%w: 宿主 %q 不在白名单内", ErrNotAllowed, t.Root)

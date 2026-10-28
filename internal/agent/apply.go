@@ -49,6 +49,8 @@ type WriteResult struct {
 	Hash string
 	// Secret 标记内容含密钥。
 	Secret bool
+	// Warnings 是不阻断写入、但需要让人知道的情况（如 .secrets/.gitignore 内容不符）。
+	Warnings []string
 }
 
 // Writer 负责把下发内容落到本机。
@@ -56,6 +58,8 @@ type Writer struct {
 	resolver *Resolver
 	// home 是用户目录，用于给整文件落点加说明。
 	home string
+	// stateDir 是首次接管归档使用的代理状态目录，见 SetArchiveDir。
+	stateDir string
 }
 
 // NewWriter 构造落盘器。
@@ -78,6 +82,23 @@ func (w *Writer) Apply(f proto.File) (*WriteResult, error) {
 		full, err := w.resolver.Resolve(t)
 		if err != nil {
 			return nil, err
+		}
+		if kind := classifyTarget(t); kind != credNone {
+			projectRoot := ""
+			if t.Plan == proto.PlanProject {
+				projectRoot = w.resolver.projects[t.ProjectID]
+			}
+			hash, warn, err := w.writeCredential(full, kind, f, projectRoot)
+			res.Warnings = append(res.Warnings, warn...)
+			if err != nil {
+				return nil, err
+			}
+			paths = append(paths, full)
+			lastHash = hash
+			continue
+		}
+		if f.Format == proto.FormatManagedBlock {
+			return nil, fmt.Errorf("%w: %s 格式只能用于 ssh 根的 config", ErrNotAllowed, proto.FormatManagedBlock)
 		}
 		hash, err := w.writeOne(full, f)
 		if err != nil {
@@ -158,10 +179,25 @@ func (w *Writer) Remove(f proto.File) (*WriteResult, error) {
 			paths = append(paths, full)
 			continue
 		}
+		if f.Format == proto.FormatManagedBlock {
+			if classifyTarget(t) != credSSHConfig {
+				continue
+			}
+			if err := removeManagedBlock(full); err != nil {
+				return nil, err
+			}
+			paths = append(paths, full)
+			continue
+		}
 		if err := os.Remove(full); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("删除 %q 失败: %w", full, err)
 		}
-		w.removeEmptyParents(full)
+		switch classifyTarget(t) {
+		case credProjectSecret:
+			removeEmptySecretsParents(full)
+		case credNone:
+			w.removeEmptyParents(full)
+		}
 		paths = append(paths, full)
 	}
 	sort.Strings(paths)
@@ -238,6 +274,9 @@ func HashFile(full string, format proto.Format, key string) (string, error) {
 			return "", err
 		}
 		return hashOf(norm), nil
+	}
+	if format == proto.FormatManagedBlock {
+		return hashManagedBlock(data)
 	}
 	return hashOf(data), nil
 }

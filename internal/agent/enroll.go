@@ -382,8 +382,18 @@ func (w *Writer) removeByPaths(e proto.ManifestEntry) error {
 			}
 			continue
 		}
+		if e.Format == proto.FormatManagedBlock {
+			if err := removeManagedBlock(p); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return err
+		}
+		if strings.Contains(filepath.ToSlash(p), "/"+secretsDir+"/") {
+			removeEmptySecretsParents(p)
+			continue
 		}
 		w.removeEmptyParents(p)
 	}

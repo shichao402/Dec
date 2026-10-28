@@ -116,11 +116,13 @@ func NewSyncer(opts Options, id *IdentityStore) (*Syncer, error) {
 		return nil, err
 	}
 	resolver := NewResolver(home, nil)
+	writer := NewWriter(resolver, home)
+	writer.SetArchiveDir(opts.StateDir)
 	return &Syncer{
 		opts:     opts,
 		client:   client,
 		identity: id,
-		writer:   NewWriter(resolver, home),
+		writer:   writer,
 		resolver: resolver,
 	}, nil
 }
@@ -173,6 +175,7 @@ func (s *Syncer) rebuildResolver() {
 	s.mu.Lock()
 	s.resolver = resolver
 	s.writer = NewWriter(resolver, home)
+	s.writer.SetArchiveDir(s.opts.StateDir)
 	s.mu.Unlock()
 }
 
@@ -350,6 +353,7 @@ func (s *Syncer) syncOnce(ctx context.Context) error {
 		Manifest:    manifest,
 		Projects:    LocalProjects(projects),
 		WaitSeconds: int(s.opts.LongPoll / time.Second),
+		Roots:       CredentialRoots(),
 	}
 
 	// 长轮询会挂起最多 LongPoll 秒。这期间如果用户在本机改了落点，
@@ -469,11 +473,15 @@ func (s *Syncer) applyBatch(b proto.Batch) ([]proto.AckResult, string) {
 			})
 			continue
 		}
+		for _, w := range res.Warnings {
+			s.opts.Logf("写入 %s 告警: %s", f.ID, w)
+		}
 		results = append(results, proto.AckResult{
 			ID:    res.ID,
 			OK:    true,
 			Hash:  res.Hash,
 			Paths: res.Paths,
+			Notes: res.Warnings,
 		})
 	}
 	for _, f := range b.Deletes {
