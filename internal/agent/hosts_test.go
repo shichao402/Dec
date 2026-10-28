@@ -501,6 +501,49 @@ func TestSyncHostsIncludesWith(t *testing.T) {
 	}
 }
 
+// TestSyncHostsIncludesCodeBuddy 验证启动登记覆盖 CodeBuddy，且写的是
+// ~/.codebuddy/mcp.json 而不是家目录下的 .mcp.json（ADR 0056）。
+func TestSyncHostsIncludesCodeBuddy(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".codebuddy")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("准备目录失败: %v", err)
+	}
+	path := filepath.Join(dir, "mcp.json")
+	original := `{"mcpServers":{"other":{"transportType":"streamable-http","url":"https://o"}}}`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatalf("准备文件失败: %v", err)
+	}
+
+	var cb *HostResult
+	results := syncHosts(DefaultHosts(home), "http://127.0.0.1:43679/mcp")
+	for i := range results {
+		if results[i].Name == "codebuddy" {
+			cb = &results[i]
+		}
+	}
+	if cb == nil || cb.Status != HostWritten || cb.Path != path {
+		t.Fatalf("codebuddy 应写入 %s，实际 %+v", path, cb)
+	}
+	data, _ := os.ReadFile(path)
+	var got struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("解析失败: %v\n%s", err, data)
+	}
+	dec := got.MCPServers["dec_vault"]
+	if dec["url"] != "http://127.0.0.1:43679/mcp" || dec["transportType"] != "streamable-http" {
+		t.Fatalf("codebuddy 的条目不对: %v", dec)
+	}
+	if got.MCPServers["other"]["url"] != "https://o" {
+		t.Fatalf("其它条目被改动: %v", got.MCPServers)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".mcp.json")); err == nil {
+		t.Fatalf("不应在家目录写 .mcp.json")
+	}
+}
+
 // TestUpsertJSONDoesNotAddDisabled 验证原条目没有 disabled 时不凭空加上。
 func TestUpsertJSONDoesNotAddDisabled(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")

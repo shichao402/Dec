@@ -121,6 +121,21 @@ func TestResolveMCPOnlyForJSONHosts(t *testing.T) {
 	if _, err := r.Resolve(proto.Target{Plan: proto.PlanUser, Root: "codex", Path: FileMCP}); err == nil {
 		t.Fatal("codex 的 MCP 落点应被拒绝")
 	}
+
+	// CodeBuddy 用户级读 ~/.codebuddy/mcp.json，不是 ~/.mcp.json（ADR 0056）。
+	got, err = r.Resolve(proto.Target{Plan: proto.PlanUser, Root: "codebuddy", Path: FileMCP})
+	if err != nil || got != filepath.Join(home, ".codebuddy", "mcp.json") {
+		t.Fatalf("codebuddy 用户级 MCP 落点 %q err=%v", got, err)
+	}
+	proj := filepath.Join(home, "work", "cb")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatalf("建项目目录失败: %v", err)
+	}
+	got, err = NewResolver(home, []Project{{ID: "p1", Path: proj}}).Resolve(
+		proto.Target{Plan: proto.PlanProject, ProjectID: "p1", Root: "codebuddy", Path: FileMCP})
+	if err != nil || got != filepath.Join(proj, ".mcp.json") {
+		t.Fatalf("codebuddy 项目级 MCP 落点 %q err=%v", got, err)
+	}
 }
 
 func TestResolveAbsoluteOnlyForDelete(t *testing.T) {

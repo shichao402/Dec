@@ -53,7 +53,9 @@ type hostDirs struct {
 var hosts = map[string]hostDirs{
 	"cursor":    {userDir: ".cursor", projectDir: ".cursor", jsonKey: true},
 	"claude":    {userDir: ".claude", projectDir: ".claude", jsonKey: true},
-	"codebuddy": {userDir: ".codebuddy", projectDir: ".codebuddy", userMCP: ".mcp.json", projectMCP: ".mcp.json", jsonKey: true},
+	// CodeBuddy 用户级 MCP 在 ~/.codebuddy/mcp.json（默认规则即可，ADR 0056）；
+	// 项目级才是项目根的 .mcp.json。
+	"codebuddy": {userDir: ".codebuddy", projectDir: ".codebuddy", projectMCP: ".mcp.json", jsonKey: true},
 	"codex":     {userDir: ".codex", projectDir: ".codex", projectMCP: ".codex/config.toml"},
 	"with": {
 		userDir:    filepath.Join(".bg-agent", "config-with-app"),

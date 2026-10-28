@@ -12,7 +12,7 @@ import (
 
 // 本机 Agent 宿主的 MCP 自动接入（需求 2）。
 //
-// 目标只有一件事：让 Claude、Codex、Cursor、With 打开就能用上 Dec，不用用户自己
+// 目标只有一件事：让 Claude、Codex、Cursor、With、CodeBuddy 打开就能用上 Dec，不用用户自己
 // 记端口、改配置。因此代理每次启动都把自己写成 `dec` 这一条 MCP 服务器，
 // 端口变了下一轮同步就更新（需求 2.4）。
 //
@@ -113,6 +113,13 @@ func DefaultHosts(home string) []Host {
 			Name:   "with",
 			Dir:    filepath.Join(home, ".bg-agent", "config-with-app"),
 			Path:   filepath.Join(home, ".bg-agent", "config-with-app", "mcp_config.json"),
+			Format: formatJSON,
+		},
+		{
+			// CodeBuddy 用户级 MCP 是 ~/.codebuddy/mcp.json，与 host.go 落点表一致（ADR 0056）。
+			Name:   "codebuddy",
+			Dir:    filepath.Join(home, ".codebuddy"),
+			Path:   filepath.Join(home, ".codebuddy", "mcp.json"),
 			Format: formatJSON,
 		},
 	}
@@ -512,8 +519,8 @@ func entryFor(hostName, url string) map[string]any {
 	switch hostName {
 	case "claude":
 		entry["type"] = "http"
-	case "with":
-		// With 用 transportType 区分传输方式（现有条目即为此写法），
+	case "with", "codebuddy":
+		// With 与 CodeBuddy 都用 transportType 区分传输方式（各自现有条目即为此写法），
 		// 代理的 /mcp 是 streamable HTTP。
 		entry["transportType"] = "streamable-http"
 	}
