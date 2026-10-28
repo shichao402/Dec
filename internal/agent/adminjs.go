@@ -83,6 +83,8 @@ function confirmDo(title, body, fn, opts) {
   ok.className = 'pri' + (o.danger ? ' hot' : '');
   // 换掉节点而不是改 onclick，避免上一次的处理器残留下来执行了别的事。
   const fresh = ok.cloneNode(true);
+  // 上一次成功后按钮停在禁用态，克隆会把它带过来；不复位的话同一页面的第二次确认永远点不了。
+  fresh.disabled = false;
   ok.parentNode.replaceChild(fresh, ok);
   fresh.addEventListener('click', async () => {
     fresh.disabled = true;
@@ -126,6 +128,9 @@ function show(page) {
   if (page === 'secrets') loadSecrets();
   if (page === 'history') loadHistory();
   if (page === 'projects') loadProjects();
+  if (page === 'tools') loadTools();
+  // 残留提示只在打开概览时扫一次，不随 10 秒轮询（legacy-cleanup 需求 3.4）。
+  if (page === 'overview') loadLegacyHint();
 }
 
 // ---------- 连接状态 ----------
@@ -931,6 +936,255 @@ async function postJSON(path, body) {
   try { data = await r.json(); } catch (e) {}
   if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
   return data;
+}
+
+// ---------- 工具：旧版残留清理 ----------
+
+// legacyView 是最近一次扫描结果。执行时只回传它的指纹，代理自己重扫并比对，
+// 页面不传任何路径：删什么只由代理的扫描决定，页面只能说「就是我看到的这份」。
+let legacyView = null;
+let legacyHintLoaded = false;
+
+function sizeText(n) {
+  n = Number(n || 0);
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+  return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+}
+
+async function getJSON(path) {
+  const r = await fetch(path, { headers: { 'Accept': 'application/json' } });
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
+}
+
+function loadTools() {
+  if (legacyView) renderLegacyScan(legacyView);
+  else $('legacyScan').innerHTML = empty('点「扫描」查看这台机器上的旧版残留。扫描只读，不会改任何文件。');
+  loadLegacyArchives();
+}
+
+// loadLegacyHint 在概览页提示有残留（需求 3.4）。每次打开页面只扫一次，
+// 不放进 10 秒轮询；只提示、只给链接，从不自动执行清理。
+async function loadLegacyHint() {
+  if (legacyHintLoaded) return;
+  legacyHintLoaded = true;
+  try {
+    const v = await getJSON('/api/tools/legacy/scan');
+    legacyView = v;
+    renderLegacyHint(v);
+  } catch (e) {
+    // 还没对账等情况下扫不了，概览上不提示即可；工具页会显示原因。
+    $('legacyHint').innerHTML = '';
+  }
+}
+
+function renderLegacyHint(v) {
+  const n = (v.items || []).filter((x) => x.action !== 'list').length;
+  if (!v || v.empty || !n) { $('legacyHint').innerHTML = ''; return; }
+  $('legacyHint').innerHTML = '<div class="banner">发现 ' + esc(n) + ' 项旧版 Dec 残留（约 ' +
+    esc(sizeText(v.archive_bytes)) + '）。 <button class="act" onclick="show(&quot;tools&quot;)">去工具页查看</button></div>';
+}
+
+async function scanLegacy() {
+  $('legacyResult').innerHTML = '';
+  $('legacyScan').innerHTML = empty('正在扫描…');
+  try {
+    legacyView = await getJSON('/api/tools/legacy/scan');
+    $('legacyScanAt').textContent = '扫描于 ' + new Date().toLocaleTimeString();
+    renderLegacyScan(legacyView);
+    renderLegacyHint(legacyView);
+  } catch (e) {
+    legacyView = null;
+    $('legacyScan').innerHTML = err('扫描失败：' + e.message);
+  }
+}
+
+function legacyGroups(v, wantList) {
+  const groups = [];
+  const by = {};
+  for (const it of (v.items || [])) {
+    if ((it.action === 'list') !== wantList) continue;
+    if (!by[it.rule]) {
+      by[it.rule] = { rule: it.rule, title: ((v.rules || {})[it.rule] || {}).title || it.rule, items: [], size: 0 };
+      groups.push(by[it.rule]);
+    }
+    by[it.rule].items.push(it);
+    by[it.rule].size += Number(it.size || 0);
+  }
+  return groups;
+}
+
+function legacyPathLine(it) {
+  let s = esc(it.path);
+  if (it.action === 'strip' && (it.entries || []).length) {
+    s += ' <span class="sub" style="margin:0">只删其中：' + esc(it.entries.join('、')) + '</span>';
+  } else if (it.action === 'list' && (it.entries || []).length) {
+    s += ' <span class="sub" style="margin:0">' + esc(it.entries.join('；')) + '</span>';
+  }
+  return '<span class="pathline">' + s + '</span>';
+}
+
+function legacyTable(groups, withSize) {
+  let html = '<table><thead><tr><th>规则</th><th>说明</th><th>条目</th>' + (withSize ? '<th>体积</th>' : '') +
+    '<th>路径</th></tr></thead><tbody>';
+  for (const g of groups) {
+    html += '<tr><td class="mono nowrap">' + esc(g.rule) + '</td><td>' + esc(g.title) + '</td><td class="nowrap">' +
+      esc(g.items.length) + '</td>' + (withSize ? '<td class="nowrap">' + esc(sizeText(g.size)) + '</td>' : '') +
+      '<td class="mono paths">' + g.items.map(legacyPathLine).join('') + '</td></tr>';
+  }
+  return html + '</tbody></table>';
+}
+
+function renderLegacyScan(v) {
+  let html = '';
+  const del = legacyGroups(v, false);
+  const listed = legacyGroups(v, true);
+  if (v.empty || !del.length) {
+    html += empty('未发现旧版残留。');
+  } else {
+    const n = del.reduce((a, g) => a + g.items.length, 0);
+    html += '<p class="sub" style="margin:0 0 10px">共 ' + esc(n) + ' 项，归档前约 ' + esc(sizeText(v.archive_bytes)) +
+      '。扫描范围包括 ' + esc((v.projects || []).length) + ' 个项目。</p>';
+    html += legacyTable(del, true);
+    html += '<div class="toolbar" style="margin-top:12px"><button class="pri hot" onclick="runLegacyCleanup()">归档并清理</button></div>';
+  }
+  if (listed.length) {
+    html += '<h3 style="margin-top:16px">仅列出，不会删除</h3>';
+    html += '<p class="sub" style="margin:0 0 10px">旧版留下、但可能还在用的凭据。新系统还不能接管它们，删掉会让正在用的链路断掉，请确认不再需要后自行处理。</p>';
+    html += legacyTable(listed, false);
+  }
+  if ((v.skipped || []).length) {
+    html += '<details style="margin-top:12px"><summary class="sub">被排除的 ' + esc(v.skipped.length) +
+      ' 项（属于新系统或受保护，不会动）</summary><table><tbody>';
+    for (const s of v.skipped) {
+      html += '<tr><td class="mono nowrap">' + esc(s.rule) + '</td><td class="mono paths">' + esc(s.path) +
+        '</td><td>' + esc(s.reason) + '</td></tr>';
+    }
+    html += '</tbody></table></details>';
+  }
+  for (const w of (v.warnings || [])) html += '<div class="warn" style="margin-top:8px">' + esc(w) + '</div>';
+  $('legacyScan').innerHTML = html;
+}
+
+// runLegacyCleanup 一次确认后执行（需求 3.2）。
+function runLegacyCleanup() {
+  const v = legacyView;
+  if (!v) return;
+  const n = (v.items || []).filter((x) => x.action !== 'list').length;
+  confirmDo('归档并清理旧版残留',
+    '将清理上面列出的 ' + n + ' 项（约 ' + sizeText(v.archive_bytes) + '）。先整体压缩归档并校验，校验通过才删除；归档保留 365 天，可还原。' +
+    '项目里被 git 跟踪的文件会自动提交，能快进时推送。如果确认前残留有变化，会要求重新扫描。',
+    async () => {
+      const res = await postJSON('/api/tools/legacy/execute', { fingerprint: v.fingerprint });
+      legacyView = null;
+      $('legacyScan').innerHTML = '';
+      renderLegacyResult(res);
+      $('legacyHint').innerHTML = '';
+      loadLegacyArchives();
+    }, { danger: true, okText: '归档并清理' });
+}
+
+const LEGACY_STATUS = { deleted: ['已删除', 'ok'], stripped: ['已删条目', 'ok'], skipped: ['已跳过', 'warn'], failed: ['失败', 'bad'] };
+const REPO_STATUS = { pushed: ['已提交并推送', 'ok'], committed: ['已提交未推送', 'warn'], skipped: ['未提交', 'bad'] };
+
+function renderLegacyResult(res) {
+  if (res.empty) { $('legacyResult').innerHTML = empty('未发现旧版残留，没有产生归档。'); return; }
+  let html = '<h3 style="margin-top:16px">清理结果</h3>';
+  if (res.archive) html += row('归档', res.archive.id);
+  html += '<table><thead><tr><th>结果</th><th>路径</th><th>说明</th></tr></thead><tbody>';
+  for (const r of (res.items || [])) {
+    const st = LEGACY_STATUS[r.status] || [r.status, ''];
+    let note = r.reason || '';
+    if ((r.removed || []).length) note += (note ? '；' : '') + '删掉：' + r.removed.join('、');
+    if ((r.stopped || []).length) note += (note ? '；' : '') + '先结束了进程：' + r.stopped.join('、');
+    html += '<tr><td class="nowrap"><span class="tag ' + st[1] + '">' + esc(st[0]) + '</span></td><td class="mono paths">' +
+      esc(r.item.path) + '</td><td>' + esc(note || '—') + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  if ((res.repos || []).length) {
+    html += '<h3 style="margin-top:16px">项目仓库</h3><table><thead><tr><th>仓库</th><th>结果</th><th>说明</th></tr></thead><tbody>';
+    for (const rr of res.repos) {
+      const st = REPO_STATUS[rr.status] || [rr.status, ''];
+      let note = esc(rr.reason || (rr.commit ? '提交 ' + rr.commit.slice(0, 12) : '—'));
+      for (const x of (rr.excluded || [])) note += '<span class="pathline">未放进提交：' + esc(x) + '</span>';
+      for (const m of (rr.manual || [])) note += '<span class="pathline mono">' + esc(m) + '</span>';
+      html += '<tr><td class="mono paths">' + esc(rr.repo) + '</td><td class="nowrap"><span class="tag ' + st[1] + '">' +
+        esc(st[0]) + '</span></td><td>' + note + '</td></tr>';
+    }
+    html += '</tbody></table>';
+  }
+  $('legacyResult').innerHTML = html;
+}
+
+async function loadLegacyArchives() {
+  try {
+    const d = await getJSON('/api/tools/legacy/archives');
+    const list = d.archives || [];
+    if (!list.length) { $('legacyArchives').innerHTML = empty('还没有清理归档。'); return; }
+    let html = '<table><thead><tr><th>时间</th><th>条目</th><th>原始体积</th><th>压缩后</th><th>到期</th><th></th></tr></thead><tbody>';
+    for (const a of list) {
+      const id = esc(a.id);
+      html += '<tr><td class="nowrap">' + esc(when(a.created_at)) + '<span class="pathline mono">' + id + '</span></td><td>' +
+        esc(a.items) + '</td><td class="nowrap">' + esc(sizeText(a.bytes)) + '</td><td class="nowrap">' +
+        esc(sizeText(a.compressed_size)) + '</td><td class="nowrap">' + esc(when(a.expires_at)) + '</td><td class="nowrap">';
+      if (a.problem) {
+        html += '<span class="bad">' + esc(a.problem) + '</span> ';
+      } else {
+        html += '<button class="act" onclick="openLegacyArchive(&quot;' + id + '&quot;)">查看</button> ' +
+          '<button class="act" onclick="restoreLegacy(&quot;' + id + '&quot;)">整份还原</button> ';
+      }
+      html += '<button class="danger" onclick="deleteLegacyArchive(&quot;' + id + '&quot;)">删除</button></td></tr>';
+    }
+    $('legacyArchives').innerHTML = html + '</tbody></table>';
+  } catch (e) {
+    $('legacyArchives').innerHTML = err('读取归档失败：' + e.message);
+  }
+}
+
+async function openLegacyArchive(id) {
+  try {
+    const a = await getJSON('/api/tools/legacy/archive?id=' + encodeURIComponent(id));
+    let html = '<h3 style="margin-top:16px">归档 ' + esc(id) + '</h3><table><thead><tr><th>规则</th><th>路径</th><th></th></tr></thead><tbody>';
+    (a.items || []).forEach((it, i) => {
+      html += '<tr><td class="mono nowrap">' + esc(it.rule) + '</td><td class="mono paths">' + legacyPathLine(it) +
+        '</td><td><button class="act" onclick="restoreLegacy(&quot;' + esc(id) + '&quot;,' + i + ')">还原</button></td></tr>';
+    });
+    $('legacyArchive').innerHTML = html + '</tbody></table>';
+  } catch (e) {
+    $('legacyArchive').innerHTML = err('读取归档失败：' + e.message);
+  }
+}
+
+// restoreLegacy 还原整份（index 省略）或一项（需求 6.3）。
+function restoreLegacy(id, index) {
+  const one = typeof index === 'number';
+  confirmDo(one ? '还原这一项' : '整份还原归档',
+    '原路径已存在时不会覆盖，会写到旁边的 .restored-<时间戳>；改过条目的配置文件总是写到旁边，请对比后自行合并。项目里的文件还原后不会自动提交。',
+    async () => {
+      const res = await postJSON('/api/tools/legacy/restore', { id: id, indexes: one ? [index] : [] });
+      let html = '<h3 style="margin-top:16px">还原结果</h3><table><tbody>';
+      for (const r of (res.items || [])) {
+        let note = r.ok ? (r.renamed ? '原路径已存在，写到了旁边' : '已还原') : (r.reason || '失败');
+        for (const x of (r.notes || [])) note += '；' + x;
+        html += '<tr><td class="nowrap"><span class="tag ' + (r.ok ? 'ok' : 'bad') + '">' + (r.ok ? '成功' : '失败') +
+          '</span></td><td class="mono paths">' + esc(r.dest || r.item.path) + '</td><td>' + esc(note) + '</td></tr>';
+      }
+      $('legacyArchive').innerHTML = html + '</tbody></table>';
+    }, { okText: '还原' });
+}
+
+// deleteLegacyArchive 立即删除一份归档（需求 6.4）。
+function deleteLegacyArchive(id) {
+  confirmDo('删除归档', '删除后这份归档里的文件就再也不能还原了。到期的归档会自动删除，一般不需要手动删。',
+    async () => {
+      await postJSON('/api/tools/legacy/delete', { id: id });
+      $('legacyArchive').innerHTML = '';
+      await loadLegacyArchives();
+    }, { danger: true, okText: '删除' });
 }
 
 // ---------- 启动 ----------

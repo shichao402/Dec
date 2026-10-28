@@ -199,6 +199,35 @@ func cmdRun(args []string) error {
 		},
 	})
 
+	legacyScan := func() (*legacy.Report, error) {
+		checks, ok := syncer.Checks()
+		if !ok {
+			return nil, legacy.ErrExpectedUnknown
+		}
+		home, err := agent.HomeDir()
+		if err != nil {
+			return nil, err
+		}
+		ps, _ := agent.LoadProjects(dir)
+		roots := make([]string, 0, len(ps))
+		for _, p := range ps {
+			roots = append(roots, p.Path)
+		}
+		var self []string
+		if exe, err := os.Executable(); err == nil {
+			self = append(self, exe)
+		}
+		return legacy.Scan(legacy.Input{
+			Home:           home,
+			StateDir:       dir,
+			Projects:       roots,
+			Expected:       legacy.NewExpected(checks),
+			ExtraProtected: self,
+		})
+	}
+	// 工具页的旧版残留清理（.agent/legacy-cleanup 需求 1、3、6、8）。
+	legacySvc := &legacy.Service{StateDir: dir, ScanFn: legacyScan, Logf: logf}
+
 	// 本机页面与管理面转发（需求 2.10、13.1）。
 	loop := agent.NewLoopback(agent.LoopbackOptions{
 		Port:    *port,
@@ -239,31 +268,13 @@ func cmdRun(args []string) error {
 			return nil
 		},
 		Configure: func(url string) error { return configure(dir, store, cfg, url) },
-		LegacyScan: func() (any, error) {
-			checks, ok := syncer.Checks()
-			if !ok {
-				return nil, legacy.ErrExpectedUnknown
-			}
-			home, err := agent.HomeDir()
-			if err != nil {
-				return nil, err
-			}
-			ps, _ := agent.LoadProjects(dir)
-			roots := make([]string, 0, len(ps))
-			for _, p := range ps {
-				roots = append(roots, p.Path)
-			}
-			var self []string
-			if exe, err := os.Executable(); err == nil {
-				self = append(self, exe)
-			}
-			return legacy.Scan(legacy.Input{
-				Home:           home,
-				StateDir:       dir,
-				Projects:       roots,
-				Expected:       legacy.NewExpected(checks),
-				ExtraProtected: self,
-			})
+		Legacy: &agent.LegacyTools{
+			Scan:          func() (any, error) { return legacySvc.Scan() },
+			Execute:       func(fp string) (any, error) { return legacySvc.Execute(fp) },
+			Archives:      func() (any, error) { return legacySvc.Archives() },
+			Archive:       func(id string) (any, error) { return legacySvc.Archive(id) },
+			Restore:       func(id string, idx []int) (any, error) { return legacySvc.Restore(id, idx) },
+			DeleteArchive: legacySvc.DeleteArchive,
 		},
 	})
 	addr, err := loop.Start()

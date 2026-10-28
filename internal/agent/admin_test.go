@@ -86,21 +86,24 @@ func TestAdminPageIsSelfContained(t *testing.T) {
 // 因为这是唯一能在此层发现“新加了一个写按钮但忘了确认”的方式。
 func TestAdminJSConfirmsEveryWrite(t *testing.T) {
 	writes := map[string]string{
-		"setKind":            "set_device_kind",
-		"revoke":             "revoke_device",
-		"openNewBundle":      "write_asset",
-		"addAssetFile":       "newFilePath",
-		"saveAssetFile":      "write_asset",
-		"revealSecret":       "read_secret",
-		"editSecret":         "put_secret",
-		"openSecretForm":     "put_secret",
-		"removeSecret":       "delete_secret",
-		"rollback":           "rollback",
-		"addLocalProject":    "/api/projects",
-		"removeLocalProject": "/api/projects",
-		"addCloudProject":    "put_project",
-		"removeCloudProject": "delete_project",
-		"editSubscriptions":  "set_subscriptions",
+		"setKind":             "set_device_kind",
+		"revoke":              "revoke_device",
+		"openNewBundle":       "write_asset",
+		"addAssetFile":        "newFilePath",
+		"saveAssetFile":       "write_asset",
+		"revealSecret":        "read_secret",
+		"editSecret":          "put_secret",
+		"openSecretForm":      "put_secret",
+		"removeSecret":        "delete_secret",
+		"rollback":            "rollback",
+		"addLocalProject":     "/api/projects",
+		"removeLocalProject":  "/api/projects",
+		"addCloudProject":     "put_project",
+		"removeCloudProject":  "delete_project",
+		"editSubscriptions":   "set_subscriptions",
+		"runLegacyCleanup":    "/api/tools/legacy/execute",
+		"restoreLegacy":       "/api/tools/legacy/restore",
+		"deleteLegacyArchive": "/api/tools/legacy/delete",
 	}
 	for fn, method := range writes {
 		body := funcBody(t, adminJS, fn)
@@ -142,7 +145,8 @@ func TestAdminJSSecretNeverListed(t *testing.T) {
 func TestAdminJSEscapesRenderedContent(t *testing.T) {
 	// 资产名、密钥名、提交说明都来自用户自己写的内容，
 	// 直接拼进 innerHTML 会被一个引号搞坏页面结构。
-	for _, fn := range []string{"loadBundles", "loadSecrets", "loadDevices", "loadHistory", "loadProjects"} {
+	for _, fn := range []string{"loadBundles", "loadSecrets", "loadDevices", "loadHistory", "loadProjects",
+		"renderLegacyScan", "renderLegacyResult", "renderLegacyHint", "loadLegacyArchives", "openLegacyArchive", "legacyPathLine"} {
 		body := funcBody(t, adminJS, fn)
 		if body == "" {
 			t.Fatalf("找不到函数 %s", fn)
@@ -276,4 +280,44 @@ func funcBody(t *testing.T, src, name string) string {
 		}
 	}
 	return ""
+}
+
+// TestAdminConfirmReenables 锁住确认框按钮的复位：成功后按钮停在禁用态，
+// 下次 cloneNode 会把禁用一并复制，同一页面的第二次确认就再也点不了。
+func TestAdminConfirmReenables(t *testing.T) {
+	body := funcBody(t, adminJS, "confirmDo")
+	clone := strings.Index(body, "ok.cloneNode(true)")
+	reset := strings.Index(body, "fresh.disabled = false;")
+	if clone < 0 || reset < clone || reset > strings.Index(body, "addEventListener") {
+		t.Fatal("confirmDo 克隆确认按钮后应先复位 disabled")
+	}
+}
+
+// TestAdminLegacyToolsSafety 锁住工具页旧版残留清理的三条页面约束。
+func TestAdminLegacyToolsSafety(t *testing.T) {
+	// 执行只回传指纹，不把任何路径交给代理：删什么只由代理重扫决定（需求 3.2）。
+	run := funcBody(t, adminJS, "runLegacyCleanup")
+	if !strings.Contains(run, "postJSON('/api/tools/legacy/execute', { fingerprint: v.fingerprint })") {
+		t.Fatal("执行请求应只带扫描指纹")
+	}
+	// 概览只提示、不执行，也不放进 10 秒轮询（需求 3.4）。
+	hint := funcBody(t, adminJS, "loadLegacyHint") + funcBody(t, adminJS, "renderLegacyHint")
+	if strings.Contains(hint, "execute") || strings.Contains(hint, "runLegacyCleanup") {
+		t.Fatal("概览提示不应触发清理")
+	}
+	if !strings.Contains(hint, "legacyHintLoaded") {
+		t.Fatal("概览提示应每次打开页面只扫一次")
+	}
+	start := adminJS[strings.Index(adminJS, "---------- 启动 ----------"):]
+	if strings.Contains(start[strings.Index(start, "setInterval("):], "Legacy") {
+		t.Fatal("残留扫描不应放进轮询")
+	}
+	// 工具分区以独立卡片接入（需求 1.1、1.3）。
+	l := newTestLoopback(t, LoopbackOptions{})
+	body := getPath(t, l, "/admin").Body.String()
+	for _, want := range []string{`data-page="tools"`, `id="page-tools"`, `id="tool-legacy"`, `id="legacyHint"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("页面缺少 %s", want)
+		}
+	}
 }

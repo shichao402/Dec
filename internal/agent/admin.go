@@ -85,6 +85,7 @@ dialog::backdrop { background:rgba(0,0,0,.4); }
       <button data-page="secrets">密钥</button>
       <button data-page="history">历史</button>
       <button data-page="projects">项目</button>
+      <button data-page="tools">工具</button>
     </nav>
     <span id="conn" class="tag" title="正在读取本机状态">检查中</span>
   </div>
@@ -95,6 +96,7 @@ dialog::backdrop { background:rgba(0,0,0,.4); }
   <section id="page-overview" class="on">
     <h2>概览</h2>
     <p class="sub">内容以云端为准，这台机器只负责落盘与转发。</p>
+    <div id="legacyHint"></div>
     <div class="card"><h3>本地代理</h3><div id="local"></div></div>
     <div class="card"><h3>云端服务</h3><div id="cloud"></div></div>
   </section>
@@ -181,6 +183,23 @@ dialog::backdrop { background:rgba(0,0,0,.4); }
         <select id="subDevice" style="width:auto" onchange="loadSubscriptions()"></select>
       </div>
       <div id="subscriptions"></div>
+    </div>
+  </section>
+
+  <section id="page-tools">
+    <h2>工具</h2>
+    <p class="sub">一次性的本机运维动作。只在这台机器上执行，不经云端。</p>
+    <div class="card" id="tool-legacy">
+      <h3>旧版残留清理</h3>
+      <p class="sub" style="margin:0 0 12px">找出旧版 Dec 留在这台机器和已登记项目里的文件与配置条目。删除前整体压缩归档，保留 365 天，可整份或单项还原。项目里被 git 跟踪的文件删掉后会自动提交，能快进时推送。</p>
+      <div class="toolbar"><button class="pri" onclick="scanLegacy()">扫描</button><span id="legacyScanAt" class="sub" style="margin:0"></span></div>
+      <div id="legacyScan"></div>
+      <div id="legacyResult"></div>
+    </div>
+    <div class="card" id="tool-legacy-archives">
+      <h3>清理归档</h3>
+      <div id="legacyArchives"></div>
+      <div id="legacyArchive"></div>
     </div>
   </section>
 </main>
