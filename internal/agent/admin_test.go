@@ -51,6 +51,14 @@ func TestAdminPageServed(t *testing.T) {
 	if !strings.Contains(js.Body.String(), "function api(") {
 		t.Fatal("脚本内容异常")
 	}
+
+	// 页面与脚本都内嵌在二进制里，随版本一起变。允许缓存就会出现
+	// “升级了但浏览器还在跑旧脚本”，症状与新装的版本完全对不上。
+	for _, path := range []string{"/admin", "/admin.js"} {
+		if cc := getPath(t, l, path).Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+			t.Fatalf("%s 缺少 no-store，得到 %q", path, cc)
+		}
+	}
 }
 
 // TestAdminPageIsSelfContained 验证页面不依赖任何外部资源。
@@ -167,6 +175,44 @@ func TestAdminPageWrapsLongText(t *testing.T) {
 	body = funcBody(t, adminJS, "loadDevices")
 	if !strings.Contains(body, "pathline") {
 		t.Fatal("覆盖记录的落点应逐行渲染")
+	}
+}
+
+// TestAdminConnTagIsLive 验证右上角连接状态是活的，不是写死的文案。
+//
+// 这里曾经是一个真实的 bug：`#conn` 只写了初始文案「连接中」，脚本里从没有
+// 任何地方更新它，于是无论代理是否正常，右上角永远停在「连接中」。
+// 这个用例锁住三件事：脚本里有 refreshConn、启动时会调用它、且它读的是
+// /api/status（页面是代理自己发的，这是唯一能反映云端可达性的来源）。
+func TestAdminConnTagIsLive(t *testing.T) {
+	if !strings.Contains(adminJS, "function refreshConn(") {
+		t.Fatal("脚本里没有 refreshConn，状态标签无人更新")
+	}
+	body := funcBody(t, adminJS, "refreshConn")
+	for _, want := range []string{"/api/status", "last_sync", "setConn("} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("refreshConn 里没有用到 %s", want)
+		}
+	}
+
+	// 启动阶段必须刷一次：否则首屏要等满一个轮询周期才有正确状态。
+	start := adminJS[strings.Index(adminJS, "---------- 启动 ----------"):]
+	if !strings.Contains(start, "refreshConn()") {
+		t.Fatal("启动时没有调用 refreshConn")
+	}
+	// 状态标签常驻页头，不能只在概览页才更新。
+	i := strings.Index(start, "setInterval(")
+	if i < 0 {
+		t.Fatal("找不到轮询定时器")
+	}
+	if !strings.Contains(start[i:], "refreshConn()") {
+		t.Fatal("定时器里没有刷新连接状态")
+	}
+
+	// 页面初始文案不能是「连接中」这种永远成立的描述：脚本没跑起来时，
+	// 它必须一眼就能看出是“还没读到”，而不是“正在连”。
+	if strings.Contains(adminHTML, ">连接中<") {
+		t.Fatal("页头仍是写死的「连接中」")
 	}
 }
 

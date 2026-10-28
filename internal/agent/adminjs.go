@@ -128,6 +128,64 @@ function show(page) {
   if (page === 'projects') loadProjects();
 }
 
+// ---------- 连接状态 ----------
+
+// conn 是右上角的连接状态。判定只看本机代理给的 /api/status：
+// 代理活着才发得出这个页面，所以这个标签唯一要表达的事是“代理能不能连上云端”。
+//
+// 用 last_sync 的新鲜度而不是 last_error 做主要判据：
+// 空闲时长轮询超时也算一轮成功对账，last_sync 会一直前进；
+// 而错误一旦被下一轮成功覆盖就会消失，只看它会让断连迟迟不显现。
+const SYNC_STALE_MS = 3 * 60 * 1000;
+
+function setConn(text, cls, title) {
+  const el = $('conn');
+  el.textContent = text;
+  el.className = 'tag' + (cls ? ' ' + cls : '');
+  el.title = title || text;
+}
+
+// syncAge 返回最近一次成功对账距今多久，以及这个时间是否可信。
+//
+// 刚启动时 last_sync 是 Go 的零值（0001-01-01），它既不是“很久没连上”，
+// 也不是有效时间：这一轮对账还没跑完。把它当成过期会让每次重启都先报一次
+// 假故障，所以这里显式区分“没有时间”和“时间太旧”。
+function syncAge(v) {
+  if (!v) return null;
+  const t = new Date(v).getTime();
+  if (isNaN(t) || new Date(v).getFullYear() < 2000) return null;
+  return Date.now() - t;
+}
+
+// 阈值取 3 分钟：正常节奏是长轮询 30 秒一轮，退避上限 2 分钟，
+// 超过 3 分钟没有任何一轮成功，才是真的连不上。
+async function refreshConn() {
+  try {
+    const r = await fetch('/api/status', { headers: { 'Accept': 'application/json' } });
+    const s = await r.json();
+    const age = syncAge(s.last_sync);
+    if (!s.device_id) {
+      setConn('未登记', 'warn', '这台机器还没有登记设备身份');
+    } else if (!s.aligned) {
+      setConn('需更新', 'bad', '代理 ' + (s.version || '?') +
+        ' 与服务端要求的 ' + (s.required || '?') + ' 不一致');
+    } else if (s.maintenance) {
+      setConn('维护中', 'warn', '服务端正在部署，此时不能写入');
+    } else if (s.last_error) {
+      setConn('连接异常', 'bad', s.last_error);
+    } else if (age === null) {
+      setConn('连接中', '', '代理已启动，正在完成第一轮对账');
+    } else if (age > SYNC_STALE_MS) {
+      setConn('连接异常', 'bad', '已经超过 3 分钟没有成功对账');
+    } else {
+      setConn('已连接', 'ok', '代理与服务端正常，最近对账 ' + when(s.last_sync));
+    }
+  } catch (e) {
+    // 页面是代理自己发的：取不到 /api/status 说明代理正在重启或已经退出。
+    setConn('代理未响应', 'bad', e.message);
+  }
+}
+
 // ---------- 概览 ----------
 
 async function loadOverview() {
@@ -883,7 +941,10 @@ document.querySelectorAll('#nav button').forEach((b) => {
 $('assetFile').addEventListener('change', showAssetFile);
 
 show('overview');
+refreshConn();
 setInterval(() => {
+  // 连接状态属于整个页面（右上角常驻），不能只在概览页才更新。
+  refreshConn();
   if ($('page-overview').classList.contains('on')) loadOverview();
 }, 10000);
 `

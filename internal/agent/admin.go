@@ -60,6 +60,9 @@ input, textarea, select { width:100%; padding:7px 10px; border:1px solid var(--l
 textarea { min-height:120px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
 .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
 .tag { display:inline-block; font-size:11px; padding:1px 7px; border-radius:20px; background:var(--bg); border:1px solid var(--line); color:var(--mut); }
+.tag.ok { color:var(--ok); border-color:currentColor; }
+.tag.bad { color:var(--bad); border-color:currentColor; }
+.tag.warn { color:var(--warn); border-color:currentColor; }
 .mask { font-family:ui-monospace, monospace; color:var(--mut); letter-spacing:.15em; }
 .empty { color:var(--mut); padding:18px 0; text-align:center; font-size:13px; }
 .err { color:var(--bad); font-size:13px; }
@@ -83,7 +86,7 @@ dialog::backdrop { background:rgba(0,0,0,.4); }
       <button data-page="history">历史</button>
       <button data-page="projects">项目</button>
     </nav>
-    <span id="conn" class="tag">连接中</span>
+    <span id="conn" class="tag" title="正在读取本机状态">检查中</span>
   </div>
 </header>
 <main>

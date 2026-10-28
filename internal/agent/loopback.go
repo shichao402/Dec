@@ -236,6 +236,8 @@ func (l *Loopback) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// 页面内容随二进制一起升级，缓存住就等于升级后人还看着旧页面。
+	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write([]byte(adminHTML))
 }
 
@@ -249,6 +251,8 @@ func (l *Loopback) handleAdminJS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	// 脚本与二进制同版本，缓存住会出现“页面已更新、脚本还是旧的”这种半套状态。
+	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write([]byte(adminJS))
 }
 
