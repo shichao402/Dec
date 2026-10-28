@@ -408,8 +408,8 @@ my-app/
 | IDE | Skills | Rules | MCP |
 |---|---|---|---|
 | Cursor | `.cursor/skills/` | `.cursor/rules/` | `.cursor/mcp.json` |
-| CodeBuddy | `.codebuddy/skills/` | `.codebuddy/rules/` | `.mcp.json` |
-| Claude | `.claude/skills/` | `.claude/rules/` | `.claude/mcp.json` |
+| CodeBuddy | `.codebuddy/skills/` | `.codebuddy/rules/` | 用户级 `~/.codebuddy/mcp.json`，项目级 `.mcp.json` |
+| Claude | `.claude/skills/` | `.claude/rules/` | 用户级 `~/.claude.json` 顶层 `mcpServers`，项目级 `.mcp.json` |
 | Codex | `.codex/skills/` | `.codex/rules/` | `.codex/config.toml` |
 | With | `.with/skills/`（用户平面：`~/.bg-agent/config-with-app/skills/`） | `.with/rules/`（用户平面同根 `rules/`，仅为对称约定：macOS 实测 With 未读取该目录，规则走 Knot 插件动态挂载） | `.with/mcp_config.json`（用户平面同根 `mcp_config.json`） |
 

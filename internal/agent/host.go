@@ -51,8 +51,17 @@ type hostDirs struct {
 // Codex 的 MCP 配置是 TOML，协议层没有 TOML 段合并，所以 jsonKey 为 false，
 // 它不会收到 mcp.json 类型的下发（云端 render 层的 jsonKeyHosts 与此一致）。
 var hosts = map[string]hostDirs{
-	"cursor":    {userDir: ".cursor", projectDir: ".cursor", jsonKey: true},
-	"claude":    {userDir: ".claude", projectDir: ".claude", jsonKey: true},
+	"cursor": {userDir: ".cursor", projectDir: ".cursor", jsonKey: true},
+	// Claude Code 的用户级 MCP 在 ~/.claude.json 顶层 mcpServers，项目级在项目根
+	// 的 .mcp.json；~/.claude 只是它的数据目录（skills/rules 仍在那里）。
+	// 之前两处都按默认规则推成了 <dir>/mcp.json，Claude 根本不读那个文件（ADR 0057）。
+	"claude": {
+		userDir:    ".claude",
+		projectDir: ".claude",
+		userMCP:    ".claude.json",
+		projectMCP: ".mcp.json",
+		jsonKey:    true,
+	},
 	// CodeBuddy 用户级 MCP 在 ~/.codebuddy/mcp.json（默认规则即可，ADR 0056）；
 	// 项目级才是项目根的 .mcp.json。
 	"codebuddy": {userDir: ".codebuddy", projectDir: ".codebuddy", projectMCP: ".mcp.json", jsonKey: true},

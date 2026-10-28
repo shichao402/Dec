@@ -138,6 +138,43 @@ func TestResolveMCPOnlyForJSONHosts(t *testing.T) {
 	}
 }
 
+// TestResolveClaudeMCPPath 锁住 Claude Code 的两级 MCP 落点（ADR 0057）。
+//
+// Claude Code 的用户级 MCP 在 ~/.claude.json 顶层，项目级在项目根的 .mcp.json；
+// ~/.claude 只是它的数据目录。按默认规则推成 <dir>/mcp.json 时文件依然合法、
+// 哈希依然对得上，只是 Claude 永远读不到那条 MCP——ADR 0050 与 0056 是同一类静默失败。
+func TestResolveClaudeMCPPath(t *testing.T) {
+	home := testHome(t)
+	r := NewResolver(home, nil)
+
+	got, err := r.Resolve(proto.Target{Plan: proto.PlanUser, Root: "claude", Path: FileMCP})
+	if err != nil {
+		t.Fatalf("claude 用户级 MCP 落点应可解析: %v", err)
+	}
+	if got != filepath.Join(home, ".claude.json") {
+		t.Fatalf("claude 用户级 MCP 落点 %q，期望 %q", got, filepath.Join(home, ".claude.json"))
+	}
+
+	proj := filepath.Join(home, "work", "demo")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatalf("建项目目录失败: %v", err)
+	}
+	got, err = NewResolver(home, []Project{{ID: "p1", Path: proj}}).Resolve(
+		proto.Target{Plan: proto.PlanProject, ProjectID: "p1", Root: "claude", Path: FileMCP})
+	if err != nil {
+		t.Fatalf("claude 项目级 MCP 落点应可解析: %v", err)
+	}
+	if got != filepath.Join(proj, ".mcp.json") {
+		t.Fatalf("claude 项目级 MCP 落点 %q，期望 %q", got, filepath.Join(proj, ".mcp.json"))
+	}
+
+	// skills/rules 仍然落在 ~/.claude 下，修正 MCP 落点不能连带改掉它们。
+	got, err = r.Resolve(proto.Target{Plan: proto.PlanUser, Root: "claude", Path: "skills/demo/SKILL.md"})
+	if err != nil || got != filepath.Join(home, ".claude", "skills", "demo", "SKILL.md") {
+		t.Fatalf("claude 用户级 skill 落点 %q err=%v", got, err)
+	}
+}
+
 func TestResolveAbsoluteOnlyForDelete(t *testing.T) {
 	home := testHome(t)
 	r := NewResolver(home, nil)
