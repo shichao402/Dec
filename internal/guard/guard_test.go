@@ -768,3 +768,128 @@ func TestServerCAPrivateKeyStaysOutOfSnapshots(t *testing.T) {
 		t.Fatalf("遍历仓库失败: %v", err)
 	}
 }
+
+// TestInstallScriptMatchesCLI 守住 Windows 一键安装脚本与 CLI 的一致性。
+//
+// scripts/install-agent.ps1 是 windows 上唯一的安装入口，但它是一份独立的
+// 文本：CLI 改子命令名或 flag 之后，脚本不会跟着报错，只会在用户机器上
+// 跑到一半才失败（例如 `--tray` 改名后，用户看到「flag provided but not
+// defined」，二进制已经下载完了）。这条测试把脚本里引用的每个子命令和
+// flag 都拿去 cmd/dec-agent/main.go 里核对。
+//
+// 只静态比对字符串，不执行脚本：本机是 macOS，CI 也不在 Windows 上跑
+// PowerShell，能守住的范围就是「名字对得上」。
+func TestInstallScriptMatchesCLI(t *testing.T) {
+	root := repoRoot(t)
+
+	scriptPath := filepath.Join(root, "scripts", "install-agent.ps1")
+	scriptData, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("读安装脚本失败: %v", err)
+	}
+	script := string(scriptData)
+
+	mainData, err := os.ReadFile(filepath.Join(root, "cmd", "dec-agent", "main.go"))
+	if err != nil {
+		t.Fatalf("读 dec-agent 入口失败: %v", err)
+	}
+	mainGo := string(mainData)
+
+	// 脚本里所有 `& $agentExe <sub> ...` 形式的调用。
+	subRe := regexp.MustCompile(`&\s*\$agentExe\s+([a-z][a-z-]*)`)
+	subs := map[string]bool{}
+	for _, m := range subRe.FindAllStringSubmatch(script, -1) {
+		subs[m[1]] = true
+	}
+	if len(subs) == 0 {
+		t.Fatal("安装脚本里没有找到任何 $agentExe 调用，正则可能已经与脚本写法脱节")
+	}
+
+	// main.go 里 switch 分派的子命令集合。
+	dispatched := map[string]bool{}
+	for _, m := range regexp.MustCompile(`case "([a-z][a-z-]*)":`).FindAllStringSubmatch(mainGo, -1) {
+		dispatched[m[1]] = true
+	}
+
+	for sub := range subs {
+		if !dispatched[sub] {
+			t.Errorf("安装脚本调用了 dec-agent %s，但 main.go 的分派里没有这个子命令；"+
+				"脚本会在用户机器上失败", sub)
+		}
+	}
+
+	// 脚本里每个 `--flag` 都必须在 main.go 的 flag 注册里出现过。
+	// 只查长 flag：单横线的短选项本项目没有用。
+	flagRe := regexp.MustCompile(`--([a-z][a-z-]+)`)
+	registered := map[string]bool{}
+	for _, m := range regexp.MustCompile(`fs\.(?:String|Bool|Int)\("([a-z][a-z-]*)"`).FindAllStringSubmatch(mainGo, -1) {
+		registered[m[1]] = true
+	}
+	// PowerShell 自身的参数与脚本自定义的说明性短横线不算 CLI flag。
+	systemFlags := map[string]bool{
+		"NoProfile": true, "UseBasicParsing": true, "OutFile": true,
+		"AsSecureString": true, "Algorithm": true, "Force": true,
+	}
+	for _, m := range flagRe.FindAllStringSubmatch(script, -1) {
+		name := m[1]
+		if systemFlags[name] || registered[name] {
+			continue
+		}
+		t.Errorf("安装脚本传了 --%s，但 dec-agent 从未注册这个 flag；"+
+			"用户会在下载完二进制之后才遇到「flag provided but not defined」", name)
+	}
+}
+
+// TestInstallScriptDownloadsRealArtifacts 守住脚本请求的产物名确实会被发布。
+//
+// release.yml 里产物名是 `dist/dec-agent-$os-$arch`（Windows 追加 .exe），
+// 脚本按 `dec-agent-windows-amd64.exe` 拼接 URL。两者一旦有一边改了命名，
+// 下载页仍然是 200，只是 404 掉产物：用户拿到的是「下载失败」，而不是
+// 一个指向真正问题的错误。这条测试把命名对齐变成可校验的约束。
+func TestInstallScriptDownloadsRealArtifacts(t *testing.T) {
+	root := repoRoot(t)
+
+	scriptData, err := os.ReadFile(filepath.Join(root, "scripts", "install-agent.ps1"))
+	if err != nil {
+		t.Fatalf("读安装脚本失败: %v", err)
+	}
+	script := string(scriptData)
+
+	wfData, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatalf("读 release.yml 失败: %v", err)
+	}
+	wf := string(wfData)
+
+	// 发布通道必须包含脚本会去取的每一个平台组合。
+	// 脚本拼的是 /download/dec-agent-$platform.exe，platform 只可能是
+	// windows-amd64 或 windows-arm64。
+	for _, arch := range []string{"windows/amd64", "windows/arm64"} {
+		if !strings.Contains(wf, arch) {
+			t.Errorf("release.yml 的客户端平台组合里没有 %s，但安装脚本会按它拼下载地址", arch)
+		}
+	}
+
+	// 脚本给 Windows 产物拼了 .exe 后缀，构建端必须也加。
+	if !strings.Contains(script, "dec-agent-$platform.exe") {
+		t.Error("安装脚本没有使用 dec-agent-$platform.exe 形式的下载地址，请确认产物名约定")
+	}
+	if !strings.Contains(wf, `out="$out.exe"`) {
+		t.Error("release.yml 不再给 Windows 产物加 .exe 后缀，安装脚本的下载地址会 404")
+	}
+
+	// 脚本依赖下载响应里的摘要头做完整性校验，服务端必须真的设置它。
+	srvData, err := os.ReadFile(filepath.Join(root, "internal", "cloudsvc", "download.go"))
+	if err != nil {
+		t.Fatalf("读下载实现失败: %v", err)
+	}
+	if !strings.Contains(string(srvData), "X-Checksum-SHA256") {
+		t.Error("服务端不再返回 X-Checksum-SHA256，安装脚本会退化成「跳过完整性校验」")
+	}
+
+	// 脚本把托盘当可选组件，所以发布通道里托盘缺失不算错；
+	// 但它一旦出现，名字必须是脚本要找的那个。
+	if strings.Contains(wf, "dec-tray-windows") && !strings.Contains(wf, "dec-tray-windows-amd64") {
+		t.Error("release.yml 里的 Windows 托盘产物名与安装脚本期望的 dec-tray-windows-amd64.exe 不一致")
+	}
+}

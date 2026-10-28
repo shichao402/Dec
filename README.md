@@ -18,6 +18,32 @@
 
 ## 快速开始
 
+### 安装代理
+
+下载页 `https://dec.firoyang.com/download` 列出当前要求版本与全部产物，装哪台机器就在那台机器上跑：
+
+macOS / Linux 与 Windows 用的是同一套流程，只是承载脚本的方式不同。Windows 的 PowerShell 脚本随仓库分发：
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/shichao402/Dec/main/scripts/install-agent.ps1 | iex
+```
+
+macOS 与 Linux 按下载页给出的命令逐条执行：`curl -fLO` 取二进制、`configure` 填服务地址、`install` 注册自启、`initialize` 或 `enroll` 登记身份。
+
+Windows 脚本把这几步串成一次执行：判定架构、比对本机与服务端要求的版本、下载代理与托盘并校验 sha256、写入用户级 PATH、登记设备、注册计划任务、最后确认代理在线。登记那一步需要 Bitwarden 邮箱、主密码和两步验证码。
+
+代理装在用户级位置，不需要管理员权限：
+
+| 平台 | 二进制 | 自启方式 |
+|---|---|---|
+| macOS | `~/.local/bin/dec-agent` | launchd `com.dec.agent.plist` |
+| Linux | `~/.local/bin/dec-agent` | systemd 用户单元 `dec-agent.service` |
+| Windows | `%LOCALAPPDATA%\Programs\dec\dec-agent.exe` | 计划任务 `DecAgent` |
+
+卸载用 `dec-agent uninstall`。二进制不签名，Windows 首次运行会在 SmartScreen 拦一下，点「更多信息 → 仍要运行」。
+
+第一台设备用 `initialize`（生成根密钥并写入 Bitwarden 冷备），此后新增设备用 `enroll`。服务端已经初始化过，新机器一律走 `enroll`。
+
 ### 管理面
 
 ```
