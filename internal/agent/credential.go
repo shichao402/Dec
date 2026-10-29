@@ -115,3 +115,37 @@ func classifyTarget(t proto.Target) credentialKind {
 	}
 	return credNone
 }
+
+// classifyAbsolute 按本机绝对路径归类凭据落点。
+//
+// 云端的删除指令只带上次记下的绝对路径，不带 Root（见 render.Plan），
+// 只看 Root 会把它们全当成普通文件：项目 secret 删完留下空目录，
+// ~/.ssh/config 托管块干脆不删。所以 Root 为空时按路径落在哪里来判断。
+func (r *Resolver) classifyAbsolute(full string) credentialKind {
+	full = filepath.Clean(full)
+	sshBase := filepath.Join(r.home, sshDir)
+	if isWithin(sshBase, full) && full != filepath.Clean(sshBase) {
+		rel, err := filepath.Rel(sshBase, full)
+		if err != nil {
+			return credNone
+		}
+		rel = filepath.ToSlash(rel)
+		switch {
+		case rel == proto.SSHConfigPath:
+			return credSSHConfig
+		case !proto.ValidSSHPath(rel):
+			return credNone
+		case proto.IsSSHPrivateKey(rel):
+			return credSSHPrivate
+		default:
+			return credSSHPublic
+		}
+	}
+	for _, root := range r.projects {
+		base := filepath.Join(root, secretsDir)
+		if isWithin(base, full) && full != filepath.Clean(base) {
+			return credProjectSecret
+		}
+	}
+	return credNone
+}

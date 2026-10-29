@@ -485,3 +485,74 @@ func TestTrackedByGitRefusesUnreadableIndex(t *testing.T) {
 		t.Fatalf("读不懂的索引应返回错误，由调用方拒绝写入")
 	}
 }
+
+// 云端的删除指令只带绝对路径、不带 Root（render.Plan），下面两条按这个真实格式验证。
+func absDelete(id, full string, format proto.Format) proto.File {
+	return proto.File{ID: id, Targets: []proto.Target{{Plan: proto.PlanUser, Path: full}}, Format: format}
+}
+
+func TestRemoveAbsoluteProjectSecretCleansDirs(t *testing.T) {
+	_, project, w := credEnv(t)
+	tgt := secretTarget("acceptance/token.json")
+	if _, err := w.Apply(proto.File{ID: "s", Targets: []proto.Target{tgt}, Content: "{}", Format: proto.FormatWhole}); err != nil {
+		t.Fatal(err)
+	}
+	full := filepath.Join(project, ".secrets", "acceptance", "token.json")
+	if _, err := w.Remove(absDelete("s", full, proto.FormatWhole)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(full); !os.IsNotExist(err) {
+		t.Fatalf("文件应被删除")
+	}
+	if _, err := os.Stat(filepath.Dir(full)); !os.IsNotExist(err) {
+		t.Fatalf("变空的子目录应被清掉（需求 2.6）")
+	}
+	if _, err := os.Stat(filepath.Join(project, ".secrets", ".gitignore")); err != nil {
+		t.Fatalf(".secrets/.gitignore 应保留: %v", err)
+	}
+}
+
+func TestRemoveAbsoluteSSHConfigBlock(t *testing.T) {
+	home, _, w := credEnv(t)
+	p := filepath.Join(home, ".ssh", "config")
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("Host mine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Apply(proto.File{
+		ID: "c", Targets: []proto.Target{sshTarget("config")}, Content: "Include config.d/dec.conf\n", Format: proto.FormatManagedBlock,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Remove(absDelete("c", p, proto.FormatManagedBlock)); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	if string(data) != "Host mine\n" {
+		t.Fatalf("托管块应被删除，只剩用户内容：%q", data)
+	}
+}
+
+func TestClassifyAbsolute(t *testing.T) {
+	home, project, w := credEnv(t)
+	r := w.resolver
+	cases := map[string]credentialKind{
+		filepath.Join(home, ".ssh", "config"):                      credSSHConfig,
+		filepath.Join(home, ".ssh", "dec_a"):                       credSSHPrivate,
+		filepath.Join(home, ".ssh", "dec_a.pub"):                   credSSHPublic,
+		filepath.Join(home, ".ssh", "config.d", "dec.conf"):        credSSHPublic,
+		filepath.Join(home, ".ssh", "known_hosts"):                 credNone,
+		filepath.Join(home, ".ssh"):                                credNone,
+		filepath.Join(project, ".secrets", "a", "b.json"):          credProjectSecret,
+		filepath.Join(project, ".secrets"):                         credNone,
+		filepath.Join(project, ".cursor", "rules", "x.mdc"):        credNone,
+		filepath.Join(home, "workspace", "other", ".secrets", "x"): credNone,
+	}
+	for p, want := range cases {
+		if got := r.classifyAbsolute(p); got != want {
+			t.Errorf("classifyAbsolute(%q) = %d, want %d", p, got, want)
+		}
+	}
+}

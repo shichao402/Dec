@@ -172,6 +172,11 @@ func (w *Writer) Remove(f proto.File) (*WriteResult, error) {
 			// 这种情况跳过而不是报错：目标本来就不该存在。
 			continue
 		}
+		kind := classifyTarget(t)
+		if kind == credNone && t.Root == "" {
+			// 删除指令只带绝对路径，按落点位置归类（见 classifyAbsolute）。
+			kind = w.resolver.classifyAbsolute(full)
+		}
 		if f.Format == proto.FormatJSONKey && f.Key != "" {
 			if err := removeJSONKey(full, f.Key); err != nil {
 				return nil, err
@@ -180,7 +185,7 @@ func (w *Writer) Remove(f proto.File) (*WriteResult, error) {
 			continue
 		}
 		if f.Format == proto.FormatManagedBlock {
-			if classifyTarget(t) != credSSHConfig {
+			if kind != credSSHConfig {
 				continue
 			}
 			if err := removeManagedBlock(full); err != nil {
@@ -192,7 +197,7 @@ func (w *Writer) Remove(f proto.File) (*WriteResult, error) {
 		if err := os.Remove(full); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("删除 %q 失败: %w", full, err)
 		}
-		switch classifyTarget(t) {
+		switch kind {
 		case credProjectSecret:
 			removeEmptySecretsParents(full)
 		case credNone:
