@@ -1239,3 +1239,32 @@ func TestDownloadPageStaysCertificateFree(t *testing.T) {
 		}
 	}
 }
+
+// TestReleaseManifestSignedAndShipped 守住自动更新的信任链（ADR 0058）。
+//
+// 少了任何一环，自动更新都会静默失效而不是报错：清单没签名或签名没进
+// 下载目录，每台设备都会拿不到 .sig、永远停在旧版本。
+func TestReleaseManifestSignedAndShipped(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatalf("读 release.yml 失败: %v", err)
+	}
+	wf := string(data)
+	for _, c := range []struct{ needle, why string }{
+		{"secrets.RELEASE_SIGNING_KEY", "签名私钥来源"},
+		{"go run ./tools/release-sign dist/release.json", "签名步骤"},
+		{"test -n \"$DEC_RELEASE_SIGNING_KEY\"", "缺 Secret 时失败而不是跳过"},
+		{"payload/download/", "清单与签名进入下载目录"},
+		{"release.json.sig", "签名文件随部署包上线"},
+	} {
+		if !strings.Contains(wf, c.needle) {
+			t.Errorf("release.yml 缺少%s（%q）", c.why, c.needle)
+		}
+	}
+	sign := strings.Index(wf, "go run ./tools/release-sign")
+	gen := strings.Index(wf, "dist/release.json\").write_text")
+	if gen < 0 || sign < gen {
+		t.Error("签名步骤必须在生成发布清单之后：签的是最终字节")
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shichao402/Dec/internal/cloud/audit"
+	relsig "github.com/shichao402/Dec/internal/release"
 )
 
 // 客户端下载通道（需求 20）。
@@ -292,6 +293,13 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// 签名的发布清单（ADR 0058）：代理每小时来取一次，判断要不要自动更新。
+	// 它不在清单的 files 里（清单不能列出自己），单独放行；也不记审计——
+	// 每台设备每小时一次的轮询写进审计只会淹没真正的下载记录。
+	if name == relsig.ManifestName || name == relsig.SignatureName {
+		s.serveReleaseMeta(w, r, name)
+		return
+	}
 	// 只提供发布清单里声明过的文件：目录里可能有临时文件或残留，
 	// 白名单比黑名单可靠。
 	rel := s.loadRelease()
@@ -352,6 +360,35 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.ServeFile(w, r, full)
+}
+
+// serveReleaseMeta 原样输出下载目录里的 release.json 或其签名。
+//
+// 必须是部署时放进下载目录的那份原始字节：签名针对的是字节，
+// 服务端重新序列化一次就会让所有代理验签失败。
+func (s *Server) serveReleaseMeta(w http.ResponseWriter, r *http.Request, name string) {
+	data, err := os.ReadFile(filepath.Join(s.downloadDir, name))
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "读取文件失败", http.StatusInternalServerError)
+		return
+	}
+	ct := "application/json; charset=utf-8"
+	if name == relsig.SignatureName {
+		ct = "text/plain; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	if r.Method == http.MethodHead {
+		return
+	}
+	if _, err := w.Write(data); err != nil {
+		s.logf("写发布清单失败: %v", err)
+	}
 }
 
 // clientIP 取客户端 IP。

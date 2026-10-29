@@ -77,3 +77,4 @@
 | [0055](0055-mcp-entry-renamed-dec-vault.md) | 内置 MCP 入口改名 dec_vault，避开项目名与 dec- 托管前缀，自动迁移旧条目 | 已接受（v2.1.36 已发版，真机验证通过） |
 | [0056](0056-codebuddy-user-mcp-path.md) | CodeBuddy 用户级 MCP 落点改为 ~/.codebuddy/mcp.json，并纳入启动登记 | 已接受（v2.1.37 已发版，真机验证通过） |
 | [0057](0057-claude-mcp-path.md) | Claude 的 MCP 落点改为 ~/.claude.json（用户级）与项目根 .mcp.json（项目级） | 已接受（本机真机验证通过，待发版） |
+| [0058](0058-agent-auto-update.md) | 代理静默自动更新：ed25519 签名清单、防降级、两段式替换（推翻需求 19.3） | 已接受（待发版） |

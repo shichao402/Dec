@@ -229,3 +229,34 @@ func TestBackupTriggeredOnWrite(t *testing.T) {
 		t.Fatalf("未配置远端时不应记录错误: %v", err)
 	}
 }
+
+// TestReleaseMetaServedRaw 验证签名清单原样放行、不记审计（ADR 0058），
+// 同时白名单之外的文件仍然 404。
+func TestReleaseMetaServedRaw(t *testing.T) {
+	h := newHarness(t, "1.0.0")
+	dl := filepath.Join(h.dir, "download")
+	if err := os.MkdirAll(dl, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("{\"version\":\"1.0.0\",  \"files\":[]}\n")
+	os.WriteFile(filepath.Join(dl, "release.json"), raw, 0o644)
+	os.WriteFile(filepath.Join(dl, "release.json.sig"), []byte("c2ln\n"), 0o644)
+	os.WriteFile(filepath.Join(dl, "stray.bin"), []byte("x"), 0o644)
+	os.WriteFile(releaseManifestPath(h.dir), raw, 0o644)
+
+	if got := h.download("/download/release.json"); got != 200 {
+		t.Fatalf("release.json 应 200，实际 %d", got)
+	}
+	if got := h.download("/download/release.json.sig"); got != 200 {
+		t.Fatalf("release.json.sig 应 200，实际 %d", got)
+	}
+	if got := h.download("/download/stray.bin"); got != 404 {
+		t.Fatalf("未声明文件应 404，实际 %d", got)
+	}
+	items, _ := h.srv.Audit().Read(time.Now().UTC())
+	for _, it := range items {
+		if it.Event == audit.EventDownload {
+			t.Fatalf("清单轮询不应记审计: %+v", it)
+		}
+	}
+}

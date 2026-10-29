@@ -14,7 +14,8 @@ import (
 // 同步主循环（需求 2.4、4.2、5.1、5.4、6.2、19.5）。
 //
 // 代理的全部在线行为都在这里：握手、对账、落地、回执、长轮询。
-// 没有自更新，没有本地清单，也没有任何“把本地改动推回云端”的路径。
+// 没有本地清单，也没有任何“把本地改动推回云端”的路径。
+// 自动更新在 update.go（ADR 0058），这里只在版本不对齐时通过 OnNotAligned 叫醒它。
 
 // Options 是代理运行参数。
 type Options struct {
@@ -45,6 +46,10 @@ type Options struct {
 	Logf func(format string, args ...any)
 	// Insecure 仅用于本机调试。
 	Insecure bool
+	// OnNotAligned 非空时，版本不对齐交给它处理（自动更新，ADR 0058），
+	// 不再弹「需要更新」通知：静默更新的设备不该每 10 分钟提示用户去做
+	// 一件马上会自动完成的事。更新失败由更新流程自己通知。
+	OnNotAligned func()
 }
 
 // Notifier 是系统通知接口，便于在无桌面环境下降级为空实现。
@@ -251,7 +256,11 @@ func (s *Syncer) Run(ctx context.Context) error {
 		s.logSyncFailure(err)
 		// 版本不对齐与身份被拒都不该高频重试：它们需要人处理。
 		if errors.Is(err, ErrNotAligned) {
-			s.notifyVersionMismatch()
+			if s.opts.OnNotAligned != nil {
+				s.opts.OnNotAligned()
+			} else {
+				s.notifyVersionMismatch()
+			}
 			if !sleepCtx(ctx, s.opts.Heartbeat) {
 				return nil
 			}

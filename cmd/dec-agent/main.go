@@ -78,6 +78,10 @@ func main() {
 		err = cmdInstall(args)
 	case "uninstall":
 		err = cmdUninstall(args)
+	case "update":
+		err = cmdUpdate(args)
+	case "update-apply":
+		err = cmdUpdateApply(args)
 	case "version":
 		fmt.Printf("dec-agent %s (%s)\n", Version, BuildTime)
 	case "-h", "--help", "help":
@@ -108,6 +112,7 @@ func usage() {
   dec-agent acceptance   对运行中的代理跑一遍真实链路验收（会临时写入并清理）
   dec-agent install      注册为系统服务
   dec-agent uninstall    卸载并清理
+  dec-agent update       立即检查并自动更新到要求版本（平时由代理每小时自动检查）
   dec-agent version      打印版本
 
 状态目录默认 ~/.dec-agent，可用 DEC_AGENT_STATE 覆盖。
@@ -168,17 +173,37 @@ func cmdRun(args []string) error {
 	}
 
 	store := agent.NewIdentityStore(dir)
+	notifier := &agent.SystemNotifier{Logf: logf}
+
+	// 自动更新（ADR 0058）：只有以已注册服务身份运行的默认实例才启用。
+	var updater *agent.Updater
+	var onNotAligned func()
+	if ok, why := agent.AutoUpdateEligible(dir, Version); ok {
+		updater = &agent.Updater{
+			ServerURL:    cfg.ServerURL,
+			Version:      Version,
+			StateDir:     dir,
+			InitialDelay: time.Minute,
+			Logf:         logf,
+			Notifier:     notifier,
+		}
+		onNotAligned = updater.Kick
+	} else {
+		logf("自动更新未启用：%s", why)
+	}
+
 	syncer, err := agent.NewSyncer(agent.Options{
 		ServerURL:       cfg.ServerURL,
 		Version:         Version,
 		StateDir:        dir,
 		DeviceName:      deviceName,
-		Notifier:        &agent.SystemNotifier{Logf: logf},
+		Notifier:        notifier,
 		Logf:            logf,
 		Insecure:        *insecure,
 		LongPoll:        30 * time.Second,
 		Heartbeat:       10 * time.Minute,
 		DisconnectAlert: 30 * time.Minute,
+		OnNotAligned:    onNotAligned,
 	}, store)
 	if err != nil {
 		return err
@@ -269,7 +294,7 @@ func cmdRun(args []string) error {
 		},
 		Configure: func(url string) error { return configure(dir, store, cfg, url) },
 		Legacy: &agent.LegacyTools{
-			Scan:          func() (any, error) { return legacySvc.Scan() },
+			Scan:    func() (any, error) { return legacySvc.Scan() },
 			Execute: func(fp string) (any, error) { return legacySvc.Execute(fp) },
 			ExecuteStream: func(fp string, w agent.ProgressWriter) (any, error) {
 				return legacySvc.ExecuteWithProgress(fp, func(p legacy.Progress) {
@@ -318,6 +343,10 @@ func cmdRun(args []string) error {
 
 	// 旧版残留归档的保留期（.agent/legacy-cleanup 需求 6.1）：启动时清一次，之后每天一次。
 	go legacy.RunRetention(ctx, dir, 24*time.Hour, logf)
+
+	if updater != nil {
+		go updater.Run(ctx)
+	}
 
 	if err := syncer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
@@ -998,4 +1027,66 @@ func fallback(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// cmdUpdate 立即检查一次并在需要时自动更新（ADR 0058）。
+//
+// 与后台循环走同一段代码，只是不等定时器；资格检查也一样：只有已注册服务
+// 指向的那份可执行文件才能被自动替换。
+func cmdUpdate(args []string) error {
+	fs := flag.NewFlagSet("update", flag.ExitOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dir := mustState()
+	cfg, err := agent.LoadConfig(dir)
+	if err != nil {
+		return err
+	}
+	if cfg.ServerURL == "" {
+		return fmt.Errorf("还没有配置服务地址")
+	}
+	if ok, why := agent.AutoUpdateEligible(dir, Version); !ok {
+		return fmt.Errorf("本机不能自动更新：%s", why)
+	}
+	u := &agent.Updater{
+		ServerURL: cfg.ServerURL,
+		Version:   Version,
+		StateDir:  dir,
+		Logf:      func(f string, a ...any) { fmt.Printf(f+"\n", a...) },
+	}
+	started, err := u.CheckOnce(context.Background())
+	if err != nil {
+		return err
+	}
+	if !started {
+		fmt.Printf("当前版本 %s 已满足要求，无需更新。\n", Version)
+		return nil
+	}
+	fmt.Printf("更新已在后台进行，结果写入 %s。\n", agent.LogPath(dir))
+	return nil
+}
+
+// cmdUpdateApply 是更新进程的入口，由代理拉起，不面向用户。
+func cmdUpdateApply(args []string) error {
+	fs := flag.NewFlagSet("update-apply", flag.ExitOnError)
+	plan := fs.String("plan", "", "更新计划文件")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *plan == "" {
+		return fmt.Errorf("缺少 --plan")
+	}
+	// 更新进程没有终端，日志写进与代理同一个文件，排障时一处就能看全。
+	stateDir := filepath.Dir(filepath.Dir(*plan))
+	sink := agent.OpenLogFile(agent.LogFileOptions{Path: agent.LogPath(stateDir)})
+	defer sink.Close()
+	lf := func(f string, a ...any) { sink.Printf(f, a...) }
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := agent.ApplyUpdate(ctx, agent.ApplyOptions{PlanPath: *plan, Logf: lf}); err != nil {
+		lf("[更新] 结束：%v", err)
+		return err
+	}
+	return nil
 }

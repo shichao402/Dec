@@ -380,6 +380,20 @@ jobs:
           print(json.dumps(manifest, ensure_ascii=False, indent=2))
           PY
 
+      # 给发布清单签名（ADR 0058）：代理只接受用内置公钥验得过的清单，
+      # 自动更新的全部信任都从这一步出发。私钥只在仓库 Secret 里，
+      # 服务器上没有——攻破服务器也伪造不出代理肯装的版本。
+      #
+      # 签完立刻用代理内置的公钥回验：Secret 被换掉或贴错时签名照样生成，
+      # 但每台设备都会拒绝它，自动更新会静默失效。在这里失败比在设备上好。
+      - name: 签名发布清单
+        env:
+          DEC_RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DEC_RELEASE_SIGNING_KEY" || { echo "缺少 RELEASE_SIGNING_KEY，无法签名发布清单" >&2; exit 1; }
+          go run ./tools/release-sign dist/release.json
+          test -s dist/release.json.sig
       - name: 发布 GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -463,6 +477,11 @@ jobs:
           # 与二进制同源，装客户端不再依赖 GitHub 可达。
           cp dist/install.sh payload/download/install.sh
           cp dist/install.ps1 payload/download/install.ps1
+          # 签名的发布清单进下载目录（ADR 0058），代理据此自动更新。
+          # 原样复制：签名针对字节，任何重写都会让验签失败。
+          test -s dist/release.json.sig || { echo "缺少 release.json.sig" >&2; exit 1; }
+          cp dist/release.json payload/download/release.json
+          cp dist/release.json.sig payload/download/release.json.sig
 
           python3 - "$VERSION" "$REQUIRED" "$COMMIT" <<'PY'
           import json, os, sys

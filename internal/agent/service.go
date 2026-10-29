@@ -108,6 +108,7 @@ func UninstallService() error {
 		_ = runQuiet("systemctl", "--user", "daemon-reload")
 		return nil
 	case "windows":
+		_ = runQuiet("schtasks", "/Delete", "/TN", "DecAgentUpdate", "/F")
 		return runQuiet("schtasks", "/Delete", "/TN", windowsTask, "/F")
 	}
 	return fmt.Errorf("不支持的平台: %s", runtime.GOOS)
