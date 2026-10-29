@@ -76,10 +76,16 @@ func (w *Writer) writeCredential(full string, kind credentialKind, f proto.File,
 		return hashOf([]byte(content)), notes, nil
 
 	case credSSHPublic:
+		// 声明了 mode 就按声明走（config.d/dec.conf 常声明 0600）；
+		// 没声明时公钥与片段默认 0644。含密钥的一律 0600，声明更宽也不放开。
 		mode := os.FileMode(0o644)
+		if f.Mode != 0 {
+			mode = os.FileMode(f.Mode).Perm()
+		}
 		if f.Secret {
 			mode = 0o600
 		}
+		ownerOnly := mode&0o077 == 0
 		// ~/.ssh 与 ~/.ssh/config.d 都按 0700 建：OpenSSH 对目录权限同样挑剔。
 		if err := ensureDir(filepath.Join(w.home, sshDir), 0o700); err != nil {
 			return "", nil, err
@@ -94,7 +100,7 @@ func (w *Writer) writeCredential(full string, kind credentialKind, f proto.File,
 		if err := writeFileAtomic(full, []byte(f.Content), mode); err != nil {
 			return "", notes, err
 		}
-		if f.Secret {
+		if ownerOnly {
 			if err := restrictToOwner(full); err != nil {
 				return "", notes, fmt.Errorf("收紧 %q 的权限失败: %w", full, err)
 			}

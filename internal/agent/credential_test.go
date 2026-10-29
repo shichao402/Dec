@@ -178,6 +178,41 @@ func TestApplySSHPublicAndFragment(t *testing.T) {
 	}
 }
 
+func TestApplySSHFragmentHonorsDeclaredMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX 权限")
+	}
+	home, _, w := credEnv(t)
+	cases := []struct {
+		rel    string
+		mode   uint32
+		secret bool
+		want   os.FileMode
+	}{
+		{"config.d/dec.conf", 0o600, false, 0o600},
+		{"dec_y.pub", 0o640, false, 0o640},
+		{"dec_z.pub", 0o644, true, 0o600},
+	}
+	for _, c := range cases {
+		full := filepath.Join(home, ".ssh", filepath.FromSlash(c.rel))
+		// 先放一份同内容的 0644 文件，模拟「首次接管、内容一致」也得改权限。
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		f := proto.File{ID: c.rel, Targets: []proto.Target{sshTarget(c.rel)}, Content: "x\n", Format: proto.FormatWhole, Secret: c.secret}
+		f.Mode = c.mode
+		if _, err := w.Apply(f); err != nil {
+			t.Fatalf("%s: %v", c.rel, err)
+		}
+		if m := mode(t, full); m != c.want {
+			t.Fatalf("%s 权限 %o，期望 %o", c.rel, m, c.want)
+		}
+	}
+}
+
 func TestSSHConfigRequiresManagedBlock(t *testing.T) {
 	_, _, w := credEnv(t)
 	_, err := w.Apply(proto.File{
