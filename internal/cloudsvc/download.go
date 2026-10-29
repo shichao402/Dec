@@ -153,9 +153,8 @@ func (s *Server) handleDownloadIndex(w http.ResponseWriter, r *http.Request) {
 		b.WriteString("<p>在 PowerShell 里执行这一行。脚本会判定架构、下载并校验、登记设备、")
 		b.WriteString("注册计划任务，装到 <code>%LOCALAPPDATA%\\Programs\\dec</code>，不需要管理员权限：</p>")
 		b.WriteString("<pre>iwr -useb https://" + htmlEscape(host) + "/install.ps1 | iex</pre>")
-		b.WriteString("<p class=\"muted\">也可以手工安装：下载对应架构的 <code>dec-agent-windows-*.exe</code>，")
-		b.WriteString("重命名为 <code>dec-agent.exe</code>，然后依次执行 ")
-		b.WriteString("<code>dec-agent configure --url https://" + htmlEscape(host) + "</code>、<code>dec-agent enroll --name win-desktop</code>、<code>dec-agent install</code>。</p>")
+		b.WriteString("<p class=\"muted\">登记由脚本引导完成；首台设备先执行 ")
+		b.WriteString("<code>$env:DEC_INITIALIZE=1</code> 再运行上面的命令。</p>")
 	}
 
 	b.WriteString("<h2>登记</h2>")
