@@ -71,13 +71,17 @@ echo "一、服务"
 need "dec-cloud 正在运行" "active" "$(systemctl is-active dec-cloud 2>/dev/null || true)"
 need "dec-cloud 已设开机自启" "enabled" "$(systemctl is-enabled dec-cloud 2>/dev/null || true)"
 
-# 对外暴露面：除 22 与 443 外不该有别的公网监听。
+# 对外暴露面：只允许 22、80、443 三个公网监听。
+#
+# 80 是放行而非遗漏：这台是公共机器，同机还有 relkit 等站点，80 由 nginx
+# 统一接管（HTTP 跳 HTTPS、certbot HTTP-01 续期），后面不直通任何服务。
+# Dec 自身不依赖 80。
 ports=$(sudo -n ss -lnt 2>/dev/null | awk 'NR > 1 && $4 !~ /^127\./ && $4 !~ /^\[::1\]/ {print $4}' |
 	sed 's/.*://' | sort -un | tr '\n' ' ' | sed 's/ *$//')
 if [ -z "$ports" ]; then
 	info "公网监听端口" "跳过（读不到 socket 表，需要免密 sudo）"
 else
-	need "对外只开 22 与 443" "22 443" "$ports"
+	need "对外只开 22、80（公共机器，nginx 接管）与 443" "22 80 443" "$ports"
 fi
 
 # ---------------------------------------------------------------- 二、协议
