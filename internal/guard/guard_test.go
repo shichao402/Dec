@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/shichao402/Dec/internal/sysproc"
 	"gopkg.in/yaml.v3"
@@ -876,6 +877,43 @@ func TestInstallScriptMatchesCLI(t *testing.T) {
 		}
 		t.Errorf("安装脚本传了 --%s，但 dec-agent 从未注册这个 flag；"+
 			"用户会在下载完二进制之后才遇到「flag provided but not defined」", name)
+	}
+}
+
+// TestInstallScriptIsASCII 守住 Windows 安装脚本的编码。
+//
+// 它经 `iwr ... | iex` 投递：Invoke-WebRequest 先把响应解码成 .NET 字符串，
+// Invoke-Expression 才拿到文本。Windows PowerShell 5.1 的解码并不保证是
+// UTF-8（视版本与响应头会退回 ISO-8859-1 或控制台 ANSI 代码页），此时
+// UTF-8 BOM 变成三个乱码字符贴到首行 '#' 前面，注释不再是注释，整行会被
+// 当成命令名报「无法识别」；中文字符则全部渲染成 '?'。
+//
+// 2026-10-29 线上就是这么坏的：用户看到满屏 ????? 与一行 ???#: 被当命令执行。
+// 纯 ASCII 在任何代码页下解码都一致，所以只要不放非 ASCII 字符就必然安全。
+//
+// 只约束 Windows 版：install.sh 走 Unix 终端，默认 UTF-8，没有这个问题，
+// 保留中文文案对用户更好。
+func TestInstallScriptIsASCII(t *testing.T) {
+	root := repoRoot(t)
+
+	// 无 BOM 也要守：BOM 会以字符形式活下来，同样顶掉首行的 '#'。
+	if data, err := os.ReadFile(filepath.Join(root, "scripts", "install-agent.ps1")); err != nil {
+		t.Fatalf("读安装脚本失败: %v", err)
+	} else {
+		if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+			t.Error("install-agent.ps1 带 UTF-8 BOM；经 iwr | iex 投递时会在首行留下三个乱码字符，把注释变成命令")
+		}
+		if !utf8.Valid(data) {
+			t.Error("install-agent.ps1 不是合法 UTF-8")
+		}
+		for i, b := range data {
+			if b > 0x7F {
+				line := 1 + strings.Count(string(data[:i]), "\n")
+				t.Errorf("install-agent.ps1:%d 含非 ASCII 字节 0x%02X；"+
+					"该文件由 iwr | iex 投递，非 ASCII 会随控制台代码页渲染成乱码。请改用英文文案", line, b)
+				break
+			}
+		}
 	}
 }
 
