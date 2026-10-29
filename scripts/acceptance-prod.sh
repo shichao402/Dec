@@ -10,16 +10,53 @@
 # 它只更新「这台机器最后一次在线时间」。
 set -uo pipefail
 
+# 这份检查断言的是「生产服务器上的事实」：进程在不在、证书什么时候到期、
+# 资产目录里有没有残留。这些只有跑在服务器上才成立。
+#
+# 在本机直接跑不会连不上，而是把宿主的 OpenSSL 版本、BSD date、
+# 缺失的免密 sudo 逐条算成 FAIL——看起来像线上出了故障，实际只是跑错了
+# 地方。上一轮就因此得出过「生产有 6 项异常」的错误结论。
+#
+# 所以先确认脚下这台机器确实是服务器，不是就停下来。
+if [ "$(uname -s)" != "Linux" ]; then
+	echo "这份检查只能跑在生产服务器上（当前是 $(uname -s)，像是你的本机）。" >&2
+	echo >&2
+	echo "对生产做线上验收请用：" >&2
+	echo "  scripts/acceptance.sh --remote" >&2
+	echo >&2
+	echo "只想在本机代理上验 MCP 链路与落盘，用：scripts/acceptance.sh" >&2
+	exit 2
+fi
+
+# 远端必须是 GNU date：证书过期那条断言要用 `date -d` 解析 OpenSSL 的
+# notAfter，BSD date 没有 -d，会把「解析不了」静默算成 0，进而报成已过期。
+if ! date -d "2027-01-01" +%s >/dev/null 2>&1; then
+	echo "需要 GNU date（当前 date 不支持 -d），证书到期那条断言会误判。" >&2
+	exit 2
+fi
+
 DOMAIN="${1:-dec.firoyang.com}"
 BASE="https://${DOMAIN}"
 
 pass=0
 fail=0
+skipped=0
 failed_names=()
+skipped_names=()
 
 ok() { printf '  [PASS] %s — %s\n' "$1" "$2"; pass=$((pass + 1)); }
 bad() { printf '  [FAIL] %s — %s\n' "$1" "$2"; fail=$((fail + 1)); failed_names+=("$1"); }
+# info 是纯说明：这一项本就不需要结论（例如"当前 bundle 列表"），
+# 单独列出来是为了让人核对，不是没验到。
 info() { printf '  [····] %s — %s\n' "$1" "$2"; }
+# skip 是「本该有结论但没拿到」：权限、工具缺失之类。
+# 它必须单独计数——既不能算通过（那样验收会显得比实际覆盖得更全），
+# 也不能和 info 混在一起（那样真正的覆盖缺口会被一堆说明条目淹掉）。
+skip() {
+	printf '  [SKIP] %s — %s\n' "$1" "$2"
+	skipped=$((skipped + 1))
+	skipped_names+=("$1")
+}
 
 # 断言「期望值等于实际值」。空实际值单独提示，避免把「没取到」说成「不相等」。
 need() {
@@ -68,8 +105,20 @@ echo "主机：$(hostname)  时间：$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 # ---------------------------------------------------------------- 一、服务
 echo
 echo "一、服务"
-need "dec-cloud 正在运行" "active" "$(systemctl is-active dec-cloud 2>/dev/null || true)"
-need "dec-cloud 已设开机自启" "enabled" "$(systemctl is-enabled dec-cloud 2>/dev/null || true)"
+# systemctl 读不到时记跳过而不是失败：与这台机器的权限配置有关，
+# 与 Dec 服务是否健康无关。此前读不到会被算成 FAIL，看起来像服务挂了。
+svc_active=$(systemctl is-active dec-cloud 2>/dev/null || true)
+if [ -n "$svc_active" ]; then
+	need "dec-cloud 正在运行" "active" "$svc_active"
+else
+	skip "dec-cloud 正在运行" "跳过（读不到 systemctl 状态）"
+fi
+svc_enabled=$(systemctl is-enabled dec-cloud 2>/dev/null || true)
+if [ -n "$svc_enabled" ]; then
+	need "dec-cloud 已设开机自启" "enabled" "$svc_enabled"
+else
+	skip "dec-cloud 已设开机自启" "跳过（读不到 systemctl 状态）"
+fi
 
 # 对外暴露面：只允许 22、80、443 三个公网监听。
 #
@@ -79,7 +128,7 @@ need "dec-cloud 已设开机自启" "enabled" "$(systemctl is-enabled dec-cloud 
 ports=$(sudo -n ss -lnt 2>/dev/null | awk 'NR > 1 && $4 !~ /^127\./ && $4 !~ /^\[::1\]/ {print $4}' |
 	sed 's/.*://' | sort -un | tr '\n' ' ' | sed 's/ *$//')
 if [ -z "$ports" ]; then
-	info "公网监听端口" "跳过（读不到 socket 表，需要免密 sudo）"
+	skip "公网监听端口" "跳过（读不到 socket 表，需要免密 sudo）"
 else
 	need "对外只开 22、80（公共机器，nginx 接管）与 443" "22 80 443" "$ports"
 fi
@@ -137,7 +186,17 @@ echo
 echo "四、TLS"
 cert=$(echo | openssl s_client -connect "${DOMAIN}:443" -servername "${DOMAIN}" 2>/dev/null |
 	openssl x509 -noout -subject -issuer -enddate 2>/dev/null)
-need "证书主体是本站域名" "subject=CN = ${DOMAIN}" "$(printf '%s' "$cert" | grep '^subject=')"
+# subject 只核对域名本身，不比对整行：
+# OpenSSL 1.x/3.x 输出 `subject=CN = dec.firoyang.com`，
+# LibreSSL 输出 `subject= /CN=dec.firoyang.com`。
+# 写死前者的整行会让同一份脚本在另一类机器上必然误判为「证书主体不对」，
+# 而它真正要守的只是「这张证书属于本站」。
+subject=$(printf '%s' "$cert" | sed -n 's/^subject=//p')
+if printf '%s' "$subject" | grep -q "${DOMAIN}"; then
+	ok "证书主体是本站域名" "${subject}"
+else
+	bad "证书主体是本站域名" "${subject:-未取到 subject}"
+fi
 issuer=$(printf '%s' "$cert" | grep '^issuer=')
 if printf '%s' "$issuer" | grep -q "Let's Encrypt"; then
 	ok "证书由 Let's Encrypt 签发" "issuer 匹配"
@@ -156,7 +215,7 @@ echo
 echo "五、SSH 加固"
 sshd=$(sudo -n sshd -T 2>/dev/null)
 if [ -z "$sshd" ]; then
-	info "sshd 有效配置" "跳过（读不到，需要免密 sudo）"
+	skip "sshd 有效配置" "跳过（读不到，需要免密 sudo）"
 else
 	# 这台机器不专属 Dec，provision 默认不写 sshd 配置，也不该由部署脚本
 	# 决定谁能登录。所以这里不断言 root 与 AllowUsers，只确认两件与 Dec
@@ -189,7 +248,9 @@ if sudo -n test -d /var/lib/dec-cloud/ssot/assets 2>/dev/null; then
 		info "资产目录可读但为空" "空仓库不是缺陷"
 	fi
 else
-	bad "资产目录可读" "读不到 /var/lib/dec-cloud/ssot/assets"
+	# 读不到是权限问题，不是残留问题：此前会算成 FAIL，
+	# 把「没权限看」说成「线上有残留」。
+	skip "资产目录可读" "跳过（读不到，需要免密 sudo）"
 fi
 
 audit_head=$(sudo -n git -c safe.directory=/var/lib/dec-cloud/audit \
@@ -197,7 +258,8 @@ audit_head=$(sudo -n git -c safe.directory=/var/lib/dec-cloud/audit \
 if [ -n "$audit_head" ]; then
 	ok "审计仓库有提交" "$audit_head"
 else
-	bad "审计仓库有提交" "读不到提交历史"
+	# 同理：读不到提交历史 ≠ 仓库没提交，可能只是没权限。
+	skip "审计仓库有提交" "跳过（读不到，需要免密 sudo）"
 fi
 
 # 凭据明文（credential-landing 需求 8.4）：私钥与项目 secret 只能以密文进 SSOT。
@@ -210,18 +272,32 @@ plain_files=$(for d in ssot state audit; do
 	sudo -n test -d "$data/$d" 2>/dev/null || continue
 	sudo -n grep -rIlE --exclude-dir=.git "$plain_re" "$data/$d" 2>/dev/null
 done | sed "s#^$data/##" | tr '\n' ' ' | sed 's/ *$//')
-if [ -z "$plain_files" ]; then
-	ok "数据目录无明文凭据" "ssot、state、audit 工作树"
+# 扫描有可能一次都没跑起来（免密 sudo 缺失会把三个目录全部 continue 掉），
+# 此时结果空字符串并不代表"干净"，而是"什么都没查"。
+# 这条断言的结论是安全结论，宁可明确说没查到，也不能报成通过。
+scanned=$(for d in ssot state audit; do
+	sudo -n test -d "$data/$d" 2>/dev/null && echo "$d"
+done | tr '\n' ' ' | sed 's/ *$//')
+if [ -z "$scanned" ]; then
+	skip "数据目录无明文凭据" "跳过（ssot、state、audit 都读不到，扫描未执行）"
+elif [ -z "$plain_files" ]; then
+	ok "数据目录无明文凭据" "$scanned"
 else
 	bad "数据目录无明文凭据" "命中：$plain_files"
 fi
 plain_commits=""
+scanned_repos=""
 for d in ssot audit; do
+	# 目录都进不去时该仓库就没被扫过，不能算进"无命中"。
+	sudo -n test -d "$data/$d" 2>/dev/null || continue
+	scanned_repos="$scanned_repos $d"
 	hits=$(sudo -n git -c safe.directory="$data/$d" -C "$data/$d" log --all -E -G"$plain_re" --format=%h 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
 	[ -n "$hits" ] && plain_commits="$plain_commits $d:$hits"
 done
-if [ -z "$plain_commits" ]; then
-	ok "git 历史无明文凭据" "ssot、audit 全部提交"
+if [ -z "$scanned_repos" ]; then
+	skip "git 历史无明文凭据" "跳过（ssot、audit 都读不到，扫描未执行）"
+elif [ -z "$plain_commits" ]; then
+	ok "git 历史无明文凭据" "${scanned_repos# } 全部提交"
 else
 	bad "git 历史无明文凭据" "命中提交：${plain_commits# }"
 fi
@@ -254,12 +330,19 @@ except Exception:
 		bad "下载的代理与发布清单一致" "清单 ${want:-未取到}，实际 ${actual:-未取到}"
 	fi
 else
-	info "发布清单" "跳过（读不到 release.json）"
+	skip "发布清单" "跳过（读不到 release.json）"
 fi
 
 # ---------------------------------------------------------------- 汇总
 echo
-echo "结果：通过 ${pass} 项，失败 ${fail} 项"
+# 跳过项必须显式报出来：此前它们不出现在「通过 N 项，失败 0 项」里，
+# 于是「有几项因为权限没验到」和「全部验过且没问题」看起来一模一样。
+echo "结果：通过 ${pass} 项，失败 ${fail} 项，跳过 ${skipped} 项"
+if [ "$skipped" -gt 0 ]; then
+	printf '未覆盖：%s\n' "${skipped_names[*]}"
+	echo
+	echo "跳过的项没有给出结论，不算通过。需要它们时补上免密 sudo 再跑一次。"
+fi
 if [ "$fail" -gt 0 ]; then
 	printf '未通过：%s\n' "${failed_names[*]}"
 	exit 1
