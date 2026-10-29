@@ -58,6 +58,22 @@ die()  { fail "$1"; exit 1; }
 # 提示信息一律走 stderr：stdout 可能被重定向，而且 stdout 参与不了交互。
 note() { printf '%s%s%s\n' "$C_DIM" "$1" "$C_RESET" >&2; }
 
+# 平台判定走 uname，但 Windows 上的 bash（WSL、Git Bash、MSYS2、Cygwin）
+# 的 uname 同样报 Linux。此时按 linux 装会把 Linux 二进制装进 Windows，
+# 后面注册服务、登记全都不会对。这里提前拦住并给出该用的命令。
+detect_windows_bash() {
+  local rel
+  rel="$(uname -r 2>/dev/null || echo "")"
+  case "$rel" in
+    *Microsoft*|*microsoft*|*WSL*|*wsl*) return 0 ;;
+  esac
+  case "${MSYSTEM:-}${OSTYPE:-}" in
+    *MINGW*|*MSYS*|*CYGWIN*|*msys*|*cygwin*|*mingw*) return 0 ;;
+  esac
+  [ -n "${WSL_DISTRO_NAME:-}" ] && return 0
+  return 1
+}
+
 # platform 形如 darwin-arm64 / linux-amd64，与发布产物名后缀一致。
 detect_platform() {
   local os arch
@@ -216,6 +232,17 @@ shell_rc() {
 
 main() {
   command -v curl >/dev/null 2>&1 || die "需要 curl，请先安装"
+
+  if detect_windows_bash; then
+    fail "检测到 Windows 运行环境，本脚本仅适用于 macOS 与 Linux"
+    note ""
+    note "请在 PowerShell 里改用 Windows 安装脚本："
+    note "  iwr -useb $BASE_URL/install.ps1 | iex"
+    note ""
+    note "（若你确实要在 WSL 里安装 Linux 版代理，设 DEC_ALLOW_WSL=1 再重跑。）"
+    [ "${DEC_ALLOW_WSL:-}" = "1" ] || exit 1
+    warn "DEC_ALLOW_WSL=1，继续按 Linux 安装"
+  fi
 
   local platform required current
   platform="$(detect_platform)"

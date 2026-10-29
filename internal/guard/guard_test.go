@@ -971,6 +971,122 @@ func TestInstallScriptDownloadsRealArtifacts(t *testing.T) {
 	}
 }
 
+// TestInstallScriptRejectsWindowsBash 守住 install.sh 不把 Windows 上的
+// bash 当成 Linux。
+//
+// WSL、Git Bash、MSYS2、Cygwin 的 uname 一律报 Linux，脚本按 uname 判定平台，
+// 于是会把 dec-agent-linux-amd64 装进 Windows（2026-10-29 用户实测：脚本打印
+// 「平台 linux-amd64」，然后下载失败，因为此后继所有步骤都不适用）。
+// 这条测试盯住脚本里存在针对这些环境的提前拦截。
+func TestInstallScriptRejectsWindowsBash(t *testing.T) {
+	root := repoRoot(t)
+	bash := testBash(t)
+	script := filepath.Join(root, "scripts", "install.sh")
+
+	// 跑真实脚本，用伪造的 uname 把自己伪装成各类 Windows-bash 环境。
+	// 只校验字符串抓不住「识别还在但拦截被删」这种回退（实测过），
+	// 所以这里必须真的执行，并断言它在下载之前就退出。
+	cases := []struct {
+		name string
+		env  []string
+	}{
+		{"WSL2", []string{"FAKE_UNAME_R=5.15.90.1-microsoft-standard-WSL2"}},
+		{"WSL1", []string{"FAKE_UNAME_R=4.4.0-19041-Microsoft"}},
+		{"GitBash", []string{"FAKE_UNAME_R=5.15.133", "MSYSTEM=MINGW64"}},
+		{"Cygwin", []string{"FAKE_UNAME_R=5.15.133", "MSYSTEM=CYGWIN"}},
+		{"WSL_DISTRO_NAME", []string{"FAKE_UNAME_R=5.15.0", "WSL_DISTRO_NAME=Ubuntu"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeBin := t.TempDir()
+			writeFakeUname(t, fakeBin)
+
+			cmd := sysproc.Command(bash, script)
+			cmd.Env = append(os.Environ(),
+				"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"DEC_AGENT_DIR="+t.TempDir(),
+			)
+			cmd.Env = append(cmd.Env, tc.env...)
+			out, err := cmd.CombinedOutput()
+
+			if err == nil {
+				t.Fatalf("伪装成 %s 时脚本竟然装完了；Windows 上会装进 Linux 二进制。输出:\n%s", tc.name, out)
+			}
+			if !strings.Contains(string(out), "检测到 Windows 运行环境") {
+				t.Errorf("%s 没有给出 Windows 拦截提示，输出:\n%s", tc.name, out)
+			}
+			// 必须指路：只说失败不说该跑什么，用户会卡住。
+			if !strings.Contains(string(out), "/install.ps1") {
+				t.Errorf("%s 的拦截提示里没有 Windows 安装命令，输出:\n%s", tc.name, out)
+			}
+			// 关键：拦截点在下载之前。走到下载就说明拦晚了。
+			if strings.Contains(string(out), "下载并校验") {
+				t.Errorf("%s 是在开始下载之后才失败的，拦截点太晚，输出:\n%s", tc.name, out)
+			}
+		})
+	}
+}
+
+// TestInstallScriptAllowsRealLinux 确认上面的拦截没有误伤真正的 Linux。
+//
+// 拦截条件写宽（比如只匹配 Microsoft 却写成匹配 Linux）会把所有 Linux 机器
+// 一起挡掉，比装错平台更糟，所以反向也要守住。这里不期望装成功——没有服务
+// 端，下载必然失败——只要求脚本没把自己当成 Windows。
+func TestInstallScriptAllowsRealLinux(t *testing.T) {
+	root := repoRoot(t)
+	bash := testBash(t)
+	script := filepath.Join(root, "scripts", "install.sh")
+
+	fakeBin := t.TempDir()
+	writeFakeUname(t, fakeBin)
+
+	cmd := sysproc.Command(bash, script)
+	cmd.Env = append(os.Environ(),
+		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEC_AGENT_DIR="+t.TempDir(),
+		// 指向必然连不上的地址，避免真的去下载；本例只关心判定分支。
+		"DEC_URL=http://127.0.0.1:1",
+		"FAKE_UNAME_R=6.8.0-45-generic",
+	)
+	out, _ := cmd.CombinedOutput()
+
+	if strings.Contains(string(out), "检测到 Windows 运行环境") {
+		t.Errorf("普通 Linux 被误判成 Windows，所有 Linux 用户都会被挡在门外。输出:\n%s", out)
+	}
+	if !strings.Contains(string(out), "下载并校验") {
+		t.Errorf("普通 Linux 没有走到下载阶段，可能提前退出了。输出:\n%s", out)
+	}
+}
+
+func testBash(t *testing.T) string {
+	t.Helper()
+	p, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("本机没有 bash，跳过脚本运行时验证")
+	}
+	return p
+}
+
+// writeFakeUname 放一个可被 FAKE_UNAME_R 控制的 uname 到 dir。
+//
+// 脚本的平台判定只读 uname，所以在 PATH 前置一个假 uname 就能复现
+// WSL 的判定结果，不必真的有台 Windows。
+func writeFakeUname(t *testing.T, dir string) {
+	t.Helper()
+	content := `#!/bin/sh
+case "$1" in
+  -r) echo "${FAKE_UNAME_R:-6.8.0-45-generic}" ;;
+  -s) echo Linux ;;
+  -m) echo x86_64 ;;
+  *)  echo Linux ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "uname"), []byte(content), 0o755); err != nil {
+		t.Fatalf("写假 uname 失败: %v", err)
+	}
+}
+
 // TestWindowsAgentHasNoConsole 守住 Windows 代理不弹控制台窗口。
 //
 // 常驻进程由计划任务在登录时拉起。Go 默认构建是 console 子系统，谁把它拉起来
