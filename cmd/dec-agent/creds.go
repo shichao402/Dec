@@ -1,3 +1,9 @@
+//go:build !windows
+
+// 交互式收集 Bitwarden 凭据。
+//
+// Windows 版见 creds_windows.go：那里的构建是 GUI 子系统，交互前需要先
+// 附加控制台，其余逻辑与本文件一致。
 package main
 
 import (

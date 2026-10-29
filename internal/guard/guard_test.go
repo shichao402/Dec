@@ -971,6 +971,55 @@ func TestInstallScriptDownloadsRealArtifacts(t *testing.T) {
 	}
 }
 
+// TestWindowsAgentHasNoConsole 守住 Windows 代理不弹控制台窗口。
+//
+// 常驻进程由计划任务在登录时拉起。Go 默认构建是 console 子系统，谁把它拉起来
+// 都会带一个黑框（2026-10-29 用户反馈「启动后还能看到 console 窗口，这不行」）。
+// 控制台子系统是链接期决定的，代码里看不出来，所以只能在这里盯住构建参数。
+//
+// 单靠 -H windowsgui 会把 enroll 这类交互命令一起弄坏：GUI 子系统启动时没有
+// 控制台，os.Stdin 读到的是 EOF，用户看到的是「邮箱不能为空」这种误导性报错。
+// 因此两个条件必须同时成立，缺一个就宁可失败：
+//  1. release.yml 给 Windows 构建加 -H windowsgui；
+//  2. cmd/dec-agent 里存在 Windows 侧的控制台附加实现，交互前拿回输入能力。
+func TestWindowsAgentHasNoConsole(t *testing.T) {
+	root := repoRoot(t)
+
+	wfData, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatalf("读 release.yml 失败: %v", err)
+	}
+	if !strings.Contains(string(wfData), "-H windowsgui") {
+		t.Error("release.yml 没有给 Windows 构建加 -H windowsgui，计划任务拉起代理时会弹出控制台窗口")
+	}
+
+	// 交互命令要能拿回控制台。文件不存在说明有人删了它，
+	// 此时 enroll 会在 GUI 子系统下静默失去输入能力。
+	credPath := filepath.Join(root, "cmd", "dec-agent", "creds_windows.go")
+	credData, err := os.ReadFile(credPath)
+	if err != nil {
+		t.Fatalf("读 creds_windows.go 失败: %v（GUI 子系统下 enroll 将无法读取输入）", err)
+	}
+	credSrc := string(credData)
+	if !strings.Contains(credSrc, "//go:build windows") {
+		t.Error("creds_windows.go 缺少 //go:build windows 约束，会与其他平台重复定义")
+	}
+	for _, fn := range []string{"AttachConsole", "AllocConsole", "ensureConsole"} {
+		if !strings.Contains(credSrc, fn) {
+			t.Errorf("creds_windows.go 里没有 %s；GUI 子系统下交互命令读不到输入", fn)
+		}
+	}
+
+	// 非 Windows 平台必须还在用原来的实现，否则 creds.go 的构建约束写错了。
+	unixData, err := os.ReadFile(filepath.Join(root, "cmd", "dec-agent", "creds.go"))
+	if err != nil {
+		t.Fatalf("读 creds.go 失败: %v", err)
+	}
+	if !strings.Contains(string(unixData), "//go:build !windows") {
+		t.Error("creds.go 缺少 //go:build !windows 约束，会与 creds_windows.go 重复定义 collectCreds")
+	}
+}
+
 // TestInstallGuideMatchesCLI 守住公网安装指引页与 CLI 的一致性。
 //
 // 页面上可被直接照抄的命令只有「手工安装」那一块（一键脚本不在这里展开

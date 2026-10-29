@@ -257,10 +257,19 @@ jobs:
             os="${target%%/*}"
             arch="${target##*/}"
             out="dist/dec-agent-$os-$arch"
+            # Windows 用 GUI 子系统：常驻进程由计划任务拉起，console 子系统会
+            # 每次闪一个黑框（用户 2026-10-29 反馈）。代价是 GUI 子系统启动
+            # 时不带控制台、标准句柄无效，交互命令（enroll 等）会在
+            # cmd/dec-agent/creds_windows.go 里按需 AttachConsole/AllocConsole
+            # 拿回一个，输入体验与 console 版一致。
+            #
+            # 只加在 Windows 上：Unix 没有子系统这个概念，加了反而报错。
+            gui_flag=""
             if [ "$os" = "windows" ]; then
               out="$out.exe"
+              gui_flag="-H windowsgui"
             fi
-            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "$ldflags" \
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "$ldflags $gui_flag" \
               -o "$out" ./cmd/dec-agent
           done
 
