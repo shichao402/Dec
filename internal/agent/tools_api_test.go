@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeLegacy struct {
@@ -143,4 +145,66 @@ func TestLegacyToolsDisabled(t *testing.T) {
 			t.Fatalf("%s 未装配应 501，得到 %d", c.p, rec.Code)
 		}
 	}
+}
+
+// TestSSEStreamsIncrementally 锁住进度是「边跑边推」而不是跑完一起发。
+//
+// 缓冲起来的话页面要等整个清理结束才一次性收到，进度条等于没有，
+// 用户还是会以为卡住而重复点击——这正是 2026-10-29 反馈的问题。
+//
+// 关键是让服务端在发完第一帧后故意卡住：如果实现把响应攒着不发，
+// 客户端在服务端返回前就一帧也读不到，测试会失败。
+func TestSSEStreamsIncrementally(t *testing.T) {
+	release := make(chan struct{})
+	l := NewLoopback(LoopbackOptions{Legacy: &LegacyTools{
+		ExecuteStream: func(fp string, w ProgressWriter) (any, error) {
+			if err := w.Send(ProgressEvent{Step: "清理", Done: 1, Total: 3}); err != nil {
+				return nil, err
+			}
+			<-release // 卡住，模拟清理还在跑；第一帧此时必须已经到达客户端。
+			_ = w.Send(ProgressEvent{Step: "清理", Done: 3, Total: 3})
+			return map[string]any{"ok": true}, nil
+		},
+	}})
+	mux := http.NewServeMux()
+	l.mountExecuteStream(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST", srv.URL+toolLegacyExecuteStream, strings.NewReader(`{"fingerprint":"fp"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("Content-Type 应为 SSE，实际 %q", ct)
+	}
+
+	// 单独起一个 goroutine 读：读不到就一直阻塞，由下面的超时判定失败，
+	// 这样不会把整个测试挂死。
+	type first struct {
+		line string
+		err  error
+	}
+	got := make(chan first, 1)
+	go func() {
+		br := bufio.NewReader(resp.Body)
+		line, err := br.ReadString('\n')
+		got <- first{line, err}
+	}()
+
+	select {
+	case f := <-got:
+		if f.err != nil {
+			t.Fatalf("服务端还在执行时就该读到第一帧进度：%v", f.err)
+		}
+		if !strings.HasPrefix(f.line, "data: ") || !strings.Contains(f.line, `"done":1`) {
+			t.Fatalf("第一帧应是 done=1 的进度，实际 %q", f.line)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("服务端还在执行，客户端却一帧进度都没收到：响应被缓冲了，进度条不会有变化")
+	}
+	close(release)
 }

@@ -104,3 +104,94 @@ func TestFingerprint(t *testing.T) {
 		}
 	}
 }
+
+// TestExecuteRejectsConcurrent 锁住「执行中直接拒绝」而不是排队。
+//
+// 2026-10-29 用户反馈清理时重复点击。后端原本用 mu.Lock() 排队：
+// 第二次不会并发破坏数据，但会静静等到第一次结束后照样执行，
+// 用的是它自己重扫的结果，于是同一批文件被处理两遍，界面还只报一句
+// 「残留与上次扫描不一致」，看不出发生了什么。清理会删文件，宁可明确拒绝。
+func TestExecuteRejectsConcurrent(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := filepath.Join(root, ".dec", "cache")
+	put(t, filepath.Join(item, "x"), "x", 0o644)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	s := &Service{
+		StateDir: state,
+		ScanFn: func() (*Report, error) {
+			return &Report{Items: []Item{{Rule: RuleDecHome, Action: ActionDelete, Path: item, IsDir: true}}}, nil
+		},
+		Procs: &fakeProcs{},
+		Now:   func() time.Time { return fixedNow },
+	}
+	// 用 ScanFn 里的钩子卡住第一次执行，制造「正在清理」的状态。
+	s.ScanFn = func() (*Report, error) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		return &Report{Items: []Item{{Rule: RuleDecHome, Action: ActionDelete, Path: item, IsDir: true}}}, nil
+	}
+
+	fp := Fingerprint(&Report{Items: []Item{{Rule: RuleDecHome, Action: ActionDelete, Path: item, IsDir: true}}})
+	done := make(chan error, 1)
+	go func() { _, err := s.Execute(fp); done <- err }()
+	<-started
+
+	// 第一次还在跑：第二次必须立刻被拒，而不是挂在那里等。
+	_, err := s.Execute(fp)
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("执行中的重复请求应返回 ErrBusy，实际: %v", err)
+	}
+	// 流式版本同样要拒绝。
+	_, err = s.ExecuteWithProgress(fp, func(Progress) {})
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("执行中的重复流式请求应返回 ErrBusy，实际: %v", err)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("第一次执行不应失败: %v", err)
+	}
+	// 锁必须真的释放了，否则之后再也清理不了。
+	if _, err := s.Execute(fp); errors.Is(err, ErrBusy) {
+		t.Fatal("第一次执行结束后锁没释放，后续清理会被永久拒绝")
+	}
+}
+
+// TestExecuteWithProgressForwards 保证带进度的执行把帧传出去。
+func TestExecuteWithProgressForwards(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	item := filepath.Join(root, ".dec", "cache")
+	put(t, filepath.Join(item, "x"), "x", 0o644)
+	rep := &Report{Items: []Item{{Rule: RuleDecHome, Action: ActionDelete, Path: item, IsDir: true}}}
+	s := &Service{StateDir: state, ScanFn: func() (*Report, error) { return rep, nil },
+		Procs: &fakeProcs{}, Now: func() time.Time { return fixedNow }}
+
+	var steps []string
+	res, err := s.ExecuteWithProgress(Fingerprint(rep), func(p Progress) { steps = append(steps, p.Step) })
+	if err != nil {
+		t.Fatalf("执行失败: %v", err)
+	}
+	if res.Empty {
+		t.Fatal("不应为空")
+	}
+	if len(steps) == 0 {
+		t.Fatal("没有收到任何进度帧")
+	}
+	if steps[0] != StepArchive {
+		t.Errorf("第一帧应是归档，实际 %q", steps[0])
+	}
+}

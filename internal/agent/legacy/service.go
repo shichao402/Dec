@@ -18,6 +18,11 @@ import (
 // 页面也没有机会让代理删一个扫描之外的路径。
 var ErrStale = errors.New("残留与上次扫描时不一致，请重新扫描后再确认")
 
+// ErrBusy 表示已经有一轮清理在跑。
+//
+// 页面据此把按钮保持在禁用态并提示「清理进行中」，而不是让用户再点一次。
+var ErrBusy = errors.New("清理正在进行中，请等它结束")
+
 // View 是工具页拿到的扫描结果。
 type View struct {
 	*Report
@@ -134,11 +139,21 @@ func (s *Service) Scan() (*View, error) {
 }
 
 // Execute 在指纹与重扫结果一致时执行清理（需求 3.2、7.1）。
+//
+// 已经有清理在跑时直接返回 ErrBusy，而不是排队等它结束。排队是错的：
+// 用户等了几分钟没反应就会再点一次，等着的那次随后照样执行，用的是它自己
+// 重扫的结果——于是同一批文件被处理两遍，界面还只报一句「残留与上次扫描
+// 不一致」，看不出发生了什么。清理会删文件，宁可明确拒绝也不要悄悄多跑一遍。
 func (s *Service) Execute(fingerprint string) (*Result, error) {
 	if fingerprint == "" {
 		return nil, errors.New("缺少扫描指纹，请先扫描")
 	}
-	s.mu.Lock()
+	// TryLock 而不是 Lock：拿不到就立刻告诉调用方「正在清理」，
+	// 让它把这句话显示给用户，而不是把请求挂在那儿假装还在处理。
+	if !s.mu.TryLock() {
+		s.logf("旧版残留清理未执行：已有清理正在运行")
+		return nil, ErrBusy
+	}
 	defer s.mu.Unlock()
 	v, err := s.scan()
 	if err != nil {
@@ -150,6 +165,64 @@ func (s *Service) Execute(fingerprint string) (*Result, error) {
 		return nil, ErrStale
 	}
 	res, err := Execute(s.StateDir, v.Report, ExecOptions{Now: s.now, Procs: s.Procs, Git: s.Git})
+	if err != nil {
+		s.logf("旧版残留清理中止：%v", err)
+		return nil, err
+	}
+	if res.Empty {
+		s.logf("旧版残留清理：未发现旧版残留，未产生归档")
+		return res, nil
+	}
+	counts := map[Status]int{}
+	for _, it := range res.Items {
+		counts[it.Status]++
+		if it.Status == StatusFailed || it.Status == StatusSkipped {
+			s.logf("旧版残留清理 %s：%s %s：%s", res.Archive.ID, it.Status, it.Item.Path, it.Reason)
+		}
+	}
+	s.logf("旧版残留清理 %s：%d 项，删除 %d，改写 %d，跳过 %d，失败 %d",
+		res.Archive.ID, len(res.Items), counts[StatusDeleted], counts[StatusStripped], counts[StatusSkipped], counts[StatusFailed])
+	for _, rr := range res.Repos {
+		msg := fmt.Sprintf("旧版残留清理 %s：仓库 %s %s", res.Archive.ID, rr.Repo, rr.Status)
+		if rr.Commit != "" {
+			msg += " " + rr.Commit[:min(12, len(rr.Commit))]
+		}
+		if rr.Reason != "" {
+			msg += "：" + rr.Reason
+		}
+		s.logf("%s", msg)
+	}
+	return res, nil
+}
+
+// ExecuteWithProgress 与 Execute 相同，但把每个阶段的进度同步回调给调用方。
+//
+// 清理动辄几分钟（归档要读完并压缩整个旧版目录），期间界面必须能显示做到哪一步，
+// 否则用户只能靠猜，重复点击就是这么来的。
+//
+// fn 在持有锁的 goroutine 里被调用：它可能执行几秒，回调里不要做阻塞操作。
+// 返回 ErrBusy 的语义与 Execute 相同——已经有清理在跑。
+func (s *Service) ExecuteWithProgress(fingerprint string, fn func(Progress)) (*Result, error) {
+	if fingerprint == "" {
+		return nil, errors.New("缺少扫描指纹，请先扫描")
+	}
+	if !s.mu.TryLock() {
+		s.logf("旧版残留清理未执行：已有清理正在运行")
+		return nil, ErrBusy
+	}
+	defer s.mu.Unlock()
+	v, err := s.scan()
+	if err != nil {
+		s.logf("旧版残留清理未执行：重扫失败：%v", err)
+		return nil, err
+	}
+	if v.Fingerprint != fingerprint {
+		s.logf("旧版残留清理未执行：残留在确认后发生了变化")
+		return nil, ErrStale
+	}
+	res, err := Execute(s.StateDir, v.Report, ExecOptions{
+		Now: s.now, Procs: s.Procs, Git: s.Git, Progress: fn,
+	})
 	if err != nil {
 		s.logf("旧版残留清理中止：%v", err)
 		return nil, err

@@ -64,7 +64,30 @@ type ExecOptions struct {
 	Now   func() time.Time
 	Procs Processes
 	Git   GitOptions
+	// Progress 在每个阶段开始与每项处理完后被调用，用于向调用方报告进度。
+	// 清理可能持续几分钟（归档要压缩整个旧版目录），没有它界面只能干等。
+	// 允许为 nil。回调必须快速返回，不要在里面做阻塞操作。
+	Progress func(Progress)
 }
+
+// Progress 是一次进度上报。
+//
+// Step 是阶段名，取值见下面的常量；Done 是这一阶段已处理的条目数，
+// Total 是这一阶段的总条目数（总数未知时为 0，此时调用方不应显示百分比）。
+type Progress struct {
+	Step  string
+	Done  int
+	Total int
+	// Detail 是可选的补充说明，例如正在处理的路径。
+	Detail string
+}
+
+// 进度阶段。界面按出现顺序展示，命名与用户看到的文案一致。
+const (
+	StepArchive = "归档"
+	StepClean   = "清理"
+	StepCommit  = "提交"
+)
 
 // Execute 按扫描结果执行清理：先归档并校验，再逐项删除（需求 3.2、4.2、4.5、5.1–5.3）。
 //
@@ -80,6 +103,13 @@ func Execute(stateDir string, report *Report, opts ExecOptions) (*Result, error)
 	if opts.Procs == nil {
 		opts.Procs = SystemProcesses()
 	}
+	// 进度回调统一从这里走：opts.Progress 可能是 nil，各调用点不必各自判空。
+	// 不叫 report：这个名字已经给了扫描报告参数。
+	emit := func(step string, done, total int, detail string) {
+		if opts.Progress != nil {
+			opts.Progress(Progress{Step: step, Done: done, Total: total, Detail: detail})
+		}
+	}
 	res := &Result{Items: []ItemResult{}}
 	for _, it := range report.Items {
 		if it.Action == ActionList {
@@ -91,6 +121,8 @@ func Execute(stateDir string, report *Report, opts ExecOptions) (*Result, error)
 		return res, nil
 	}
 
+	// 归档往往是最慢的一步：要把所有残留读一遍再压缩。先告诉调用方进了哪一步。
+	emit(StepArchive, 0, toDelete(report.Items), "正在打包…")
 	a, err := WriteArchive(stateDir, report.Items, opts.Now())
 	if err != nil {
 		return nil, fmt.Errorf("归档失败，未删除任何内容：%w", err)
@@ -102,6 +134,7 @@ func Execute(stateDir string, report *Report, opts ExecOptions) (*Result, error)
 		byItem[e.Item] = append(byItem[e.Item], e)
 	}
 	for i, it := range a.Manifest.Items {
+		emit(StepClean, i, len(a.Manifest.Items), it.Path)
 		var r ItemResult
 		if it.Action == ActionStrip {
 			r = stripItem(it, byItem[i])
@@ -110,8 +143,24 @@ func Execute(stateDir string, report *Report, opts ExecOptions) (*Result, error)
 		}
 		res.Items = append(res.Items, r)
 	}
+	emit(StepClean, len(a.Manifest.Items), len(a.Manifest.Items), "")
+	emit(StepCommit, 0, 0, "正在提交项目改动…")
 	res.Repos = commitProjects(res, opts.Git)
 	return res, nil
+}
+
+// toDelete 数出这次真正要动（非仅列出）的条目数，用于归档阶段的进度分母。
+//
+// 归档只打包会删除或改写的条目，用 report.Items 的总数做分母会让进度条
+// 走到一半就跳完——列出来的那些根本不进归档。
+func toDelete(items []Item) int {
+	n := 0
+	for _, it := range items {
+		if it.Action != ActionList {
+			n++
+		}
+	}
+	return n
 }
 
 // processRules 是删除前要先结束其中进程的规则（rules.md H01、H04、H06）。

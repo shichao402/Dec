@@ -297,9 +297,33 @@ func TestAdminConfirmReenables(t *testing.T) {
 // TestAdminLegacyToolsSafety 锁住工具页旧版残留清理的三条页面约束。
 func TestAdminLegacyToolsSafety(t *testing.T) {
 	// 执行只回传指纹，不把任何路径交给代理：删什么只由代理重扫决定（需求 3.2）。
+	// 改成流式之后仍是只回传指纹，只是换成 postProgress 以便显示进度。
 	run := funcBody(t, adminJS, "runLegacyCleanup")
-	if !strings.Contains(run, "postJSON('/api/tools/legacy/execute', { fingerprint: v.fingerprint })") {
+	if !strings.Contains(run, "fingerprint: v.fingerprint") {
 		t.Fatal("执行请求应只带扫描指纹")
+	}
+	// 除指纹外不能再带路径之类的字段，否则页面就参与了「删什么」的决定。
+	if strings.Contains(run, "v.items") && strings.Contains(run, "fingerprint: v.fingerprint, ") {
+		t.Fatal("执行请求除指纹外还带了别的内容")
+	}
+	// 清理会跑几分钟。没有防重入，用户等不及就会连点，后端虽有锁保护不会
+	// 并发破坏，但排队的请求随后照样执行，等于同一批文件处理两遍。
+	if !strings.Contains(run, "if (!v || legacyBusy) return;") {
+		t.Fatal("runLegacyCleanup 应在执行期间挡住重复点击")
+	}
+	// 失败也要解锁：否则一次失败之后按钮就永远点不动了。
+	fi := strings.Index(run, "finally")
+	if fi < 0 || !strings.Contains(run[fi:], "legacyBusy = false") {
+		t.Fatal("runLegacyCleanup 应在 finally 里解除执行中标志，避免一次失败后永远点不动")
+	}
+	// 执行期间必须占住扫描区，那里还留着按钮就会被再点一次。
+	busy := funcBody(t, adminJS, "renderLegacyBusy")
+	if !strings.Contains(busy, "$('legacyScan').innerHTML") {
+		t.Fatal("执行进行中应改写扫描区，避免残留的按钮被再次点击")
+	}
+	// 进度条引用的 CSS 变量必须真的存在，否则进度条没有颜色。
+	if strings.Contains(busy, "var(--acc)") {
+		t.Fatal("admin.css 里没有 --acc 变量，进度条会没有颜色")
 	}
 	// 概览只提示、不执行，也不放进 10 秒轮询（需求 3.4）。
 	hint := funcBody(t, adminJS, "loadLegacyHint") + funcBody(t, adminJS, "renderLegacyHint")

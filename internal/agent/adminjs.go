@@ -1022,6 +1022,54 @@ async function postJSON(path, body) {
   return data;
 }
 
+// postProgress 发一个会持续回传进度的请求，逐帧交给 onProgress。
+//
+// 用 fetch 读 SSE 而不是 EventSource：执行会删文件，必须是 POST + JSON 体，
+// EventSource 只能发 GET。这里手工拆流，只认 data: 行。
+//
+// 返回 result 事件的负载，即最终执行结果。
+async function postProgress(path, body, onProgress) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  if (!r.ok) {
+    let msg = 'HTTP ' + r.status;
+    try { msg = (await r.json()).error || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let event = 'message';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    // SSE 用空行分帧，逐帧处理而不是等整个流结束。
+    let i;
+    while ((i = buf.indexOf('\n\n')) !== -1) {
+      const frame = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      let data = '';
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += line.slice(5).trim();
+      }
+      if (event === 'result') return JSON.parse(data);
+      if (data && onProgress) {
+        const ev = JSON.parse(data);
+        // 服务端把失败作为一帧发来（流已开始，改不了状态码）。
+        if (ev.step === 'error') throw new Error(ev.detail || '清理失败');
+        onProgress(ev);
+      }
+      event = 'message';
+    }
+  }
+  throw new Error('连接中断，未收到执行结果');
+}
+
 // ---------- 工具：旧版残留清理 ----------
 
 // legacyView 是最近一次扫描结果。执行时只回传它的指纹，代理自己重扫并比对，
@@ -1074,6 +1122,10 @@ function renderLegacyHint(v) {
 }
 
 async function scanLegacy() {
+  // 扫描要遍历家目录与所有项目，同样能跑很久；清理进行中更不该再扫，
+  // 否则扫出来的是删到一半的中间状态，指纹对不上会让清理被拒。
+  if (legacyBusy) return;
+  legacyBusy = true;
   $('legacyResult').innerHTML = '';
   $('legacyScan').innerHTML = empty('正在扫描…');
   try {
@@ -1084,6 +1136,8 @@ async function scanLegacy() {
   } catch (e) {
     legacyView = null;
     $('legacyScan').innerHTML = err('扫描失败：' + e.message);
+  } finally {
+    legacyBusy = false;
   }
 }
 
@@ -1154,22 +1208,65 @@ function renderLegacyScan(v) {
   $('legacyScan').innerHTML = html;
 }
 
+// legacyBusy 是清理进行中的标志。
+//
+// 后端会拒绝并发的清理，但那要等一个请求往返；页面必须先自己挡住，
+// 否则用户在几秒钟的等待里能点出好几次，每次都弹一次确认框。
+let legacyBusy = false;
+
 // runLegacyCleanup 一次确认后执行（需求 3.2）。
 function runLegacyCleanup() {
   const v = legacyView;
-  if (!v) return;
+  if (!v || legacyBusy) return;
   const n = (v.items || []).filter((x) => x.action !== 'list').length;
   confirmDo('归档并清理旧版残留',
     '将清理上面列出的 ' + n + ' 项（约 ' + sizeText(v.archive_bytes) + '）。先整体压缩归档并校验，校验通过才删除；归档保留 365 天，可还原。' +
-    '项目里被 git 跟踪的文件会自动提交，能快进时推送。如果确认前残留有变化，会要求重新扫描。',
+    '项目里被 git 跟踪的文件会自动提交，能快进时推送。如果确认前残留有变化，会要求重新扫描。' +
+    '清理可能需要几分钟，期间页面会显示进度，请不要关闭。',
     async () => {
-      const res = await postJSON('/api/tools/legacy/execute', { fingerprint: v.fingerprint });
-      legacyView = null;
-      $('legacyScan').innerHTML = '';
-      renderLegacyResult(res);
-      $('legacyHint').innerHTML = '';
-      loadLegacyArchives();
+      legacyBusy = true;
+      // 立刻把按钮换掉：confirmDo 的确认框要等用户点，关闭后到请求返回之间
+      // 还有一段空档，这段时间内按钮必须已经是禁用态。
+      renderLegacyBusy(0, 0, '正在开始…');
+      try {
+        const res = await postProgress('/api/tools/legacy/execute/stream', { fingerprint: v.fingerprint },
+          (ev) => renderLegacyBusy(ev.done, ev.total, legacyProgressText(ev)));
+        legacyView = null;
+        $('legacyScan').innerHTML = '';
+        renderLegacyResult(res);
+        $('legacyHint').innerHTML = '';
+        loadLegacyArchives();
+      } finally {
+        // 失败也要解除：不解锁的话一次失败之后就再也点不动了。
+        legacyBusy = false;
+      }
     }, { danger: true, okText: '归档并清理' });
+}
+
+// legacyProgressText 把一帧进度写成人话。
+function legacyProgressText(ev) {
+  const step = ev.step || '处理';
+  // total 为 0 表示服务端也不知道有多少项（例如提交阶段），
+  // 这时硬凑百分比只会显示「0%」或「NaN%」，不如只说在做什么。
+  if (!ev.total) return step + (ev.detail ? '：' + ev.detail : '') + '…';
+  return step + ' ' + ev.done + '/' + ev.total + (ev.detail ? '：' + ev.detail : '');
+}
+
+// renderLegacyBusy 显示进行中的进度条。
+//
+// 占住扫描区：结果出来前那里还留着「归档并清理」按钮，用户会以为没点上又点一次。
+function renderLegacyBusy(done, total, text) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const bar = total > 0
+    ? '<div style="height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:8px 0">' +
+      '<div style="height:100%;width:' + pct + '%;background:var(--ok);transition:width .2s"></div></div>' +
+      '<p class="sub" style="margin:0">' + esc(text) + '（' + pct + '%）</p>'
+    : '<p class="sub" style="margin:0">' + esc(text) + '</p>';
+  $('legacyScan').innerHTML =
+    '<div class="card" style="margin:0">' +
+    '<p style="margin:0 0 4px"><b>正在归档并清理…</b></p>' +
+    bar +
+    '<p class="sub" style="margin:8px 0 0">正在删除文件，请勿关闭页面或让电脑休眠。</p></div>';
 }
 
 const LEGACY_STATUS = { deleted: ['已删除', 'ok'], stripped: ['已删条目', 'ok'], skipped: ['已跳过', 'warn'], failed: ['失败', 'bad'] };

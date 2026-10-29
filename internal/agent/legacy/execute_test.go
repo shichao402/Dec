@@ -429,3 +429,113 @@ func TestStopWithinRealProcess(t *testing.T) {
 		t.Fatal("目录外进程不应受影响")
 	}
 }
+
+
+// TestExecuteReportsProgress 锁住进度回调的阶段与递增（2026-10-29 用户反馈：
+// 清理跑很久没有任何进度提示，于是重复点击，而排队的那次随后照样执行）。
+func TestExecuteReportsProgress(t *testing.T) {
+	state, root := archiveFixture(t)
+	decDir := filepath.Join(root, ".dec", "cache")
+	put(t, filepath.Join(decDir, "x"), "x", 0o644)
+	rcReal := put(t, filepath.Join(root, "dotfiles/zshrc"), "export A=1\r\n# Dec\r\nexport B=2\r\n", 0o640)
+	rc := filepath.Join(root, ".zshrc")
+	if err := os.Symlink(rcReal, rc); err != nil {
+		t.Fatal(err)
+	}
+	key := put(t, filepath.Join(root, ".ssh/dec_key"), "KEY", 0o600)
+
+	report := &Report{Items: []Item{
+		{Rule: RuleDecHome, Action: ActionDelete, Path: decDir, IsDir: true},
+		{Rule: RuleShellRC, Action: ActionStrip, Path: rc, Entries: []string{"stale line numbers"}},
+		{Rule: RuleSSH, Action: ActionList, Path: key},
+	}}
+
+	var got []Progress
+	res, err := Execute(state, report, ExecOptions{
+		Now:   func() time.Time { return fixedNow },
+		Procs: &fakeProcs{},
+		Progress: func(p Progress) {
+			got = append(got, p)
+		},
+	})
+	if err != nil {
+		t.Fatalf("执行失败: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("没有上报任何进度：长时间运行的清理在界面上会没有任何反馈")
+	}
+
+	// 三个阶段都要出现，且顺序是归档 → 清理 → 提交。
+	idx := func(step string) int {
+		for i, p := range got {
+			if p.Step == step {
+				return i
+			}
+		}
+		return -1
+	}
+	for _, s := range []string{StepArchive, StepClean, StepCommit} {
+		if idx(s) < 0 {
+			t.Errorf("缺少 %s 阶段的进度，实际收到：%+v", s, got)
+		}
+	}
+	if !(idx(StepArchive) < idx(StepClean) && idx(StepClean) < idx(StepCommit)) {
+		t.Errorf("阶段顺序应为 归档→清理→提交，实际：%+v", got)
+	}
+	// 第一帧就是归档：用户一开始就知道进了哪一步，而不是面对无反馈的等待。
+	if got[0].Step != StepArchive {
+		t.Errorf("第一帧应是归档阶段，实际是 %+v", got[0])
+	}
+
+	// 清理阶段的计数必须单调递增并走到总数，否则进度条会倒退或走不满。
+	var clean []Progress
+	for _, p := range got {
+		if p.Step == StepClean {
+			clean = append(clean, p)
+		}
+	}
+	if len(clean) == 0 {
+		t.Fatal("没有清理阶段的进度")
+	}
+	last := clean[len(clean)-1]
+	if last.Total == 0 {
+		t.Errorf("清理阶段总数为 0，界面算不出百分比：%+v", clean)
+	}
+	if last.Done != last.Total {
+		t.Errorf("清理阶段结束时 done=%d total=%d，进度条走不满", last.Done, last.Total)
+	}
+	for i := 1; i < len(clean); i++ {
+		if clean[i].Done < clean[i-1].Done {
+			t.Errorf("清理进度回退：%+v", clean)
+			break
+		}
+	}
+
+	// 归档分母不应把「仅列出」的项算进去：它们不进归档，
+	// 算进去会让进度条走一半就跳完。
+	var archiveTotal int
+	for _, p := range got {
+		if p.Step == StepArchive {
+			archiveTotal = p.Total
+		}
+	}
+	if archiveTotal != 2 {
+		t.Errorf("归档分母应为 2（不含仅列出的 SSH 项），实际 %d", archiveTotal)
+	}
+	_ = res
+}
+
+// TestExecuteProgressNilSafe 保证不传进度回调时行为完全不变。
+func TestExecuteProgressNilSafe(t *testing.T) {
+	state, root := archiveFixture(t)
+	dir := filepath.Join(root, ".dec", "cache")
+	put(t, filepath.Join(dir, "x"), "x", 0o644)
+	report := &Report{Items: []Item{{Rule: RuleDecHome, Action: ActionDelete, Path: dir, IsDir: true}}}
+	res, err := Execute(state, report, execOpts(&fakeProcs{}))
+	if err != nil {
+		t.Fatalf("未传进度回调时执行失败: %v", err)
+	}
+	if len(res.Items) != 1 || res.Items[0].Status != StatusDeleted {
+		t.Fatalf("未传进度回调时结果应不变：%+v", res.Items)
+	}
+}

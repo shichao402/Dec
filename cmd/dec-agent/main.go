@@ -270,7 +270,16 @@ func cmdRun(args []string) error {
 		Configure: func(url string) error { return configure(dir, store, cfg, url) },
 		Legacy: &agent.LegacyTools{
 			Scan:          func() (any, error) { return legacySvc.Scan() },
-			Execute:       func(fp string) (any, error) { return legacySvc.Execute(fp) },
+			Execute: func(fp string) (any, error) { return legacySvc.Execute(fp) },
+			ExecuteStream: func(fp string, w agent.ProgressWriter) (any, error) {
+				return legacySvc.ExecuteWithProgress(fp, func(p legacy.Progress) {
+					// 回调里的错误只可能是写失败（页面关了），没有补救办法，
+					// 也不该因此中断清理——清理已经删到一半，停下来更糟。
+					_ = w.Send(agent.ProgressEvent{
+						Step: p.Step, Done: p.Done, Total: p.Total, Detail: p.Detail,
+					})
+				})
+			},
 			Archives:      func() (any, error) { return legacySvc.Archives() },
 			Archive:       func(id string) (any, error) { return legacySvc.Archive(id) },
 			Restore:       func(id string, idx []int) (any, error) { return legacySvc.Restore(id, idx) },
