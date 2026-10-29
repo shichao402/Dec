@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -130,59 +131,49 @@ func (s *Server) handleDownloadIndex(w http.ResponseWriter, r *http.Request) {
 	for _, f := range rel.Files {
 		have[f.OS+"/"+f.Arch] = true
 	}
-	find := func(prefix, osName, arch string) string {
-		for _, f := range rel.Files {
-			if f.OS == osName && f.Arch == arch && strings.HasPrefix(f.Name, prefix) {
-				return f.Name
-			}
-		}
-		return ""
-	}
-
 	fmt.Fprintf(&b, "<p>当前要求版本：<code>%s</code>", htmlEscape(rel.RequiredClient))
 	fmt.Fprintf(&b, "<span class=\"muted\">（服务端 %s，协议 %d，构建于 %s）</span></p>",
 		htmlEscape(rel.Version), rel.Protocol, htmlEscape(rel.BuiltAt))
 	b.WriteString("<p>代理必须与服务端要求版本一致，不一致时会被拦住并提示更新。")
 	b.WriteString("下载二进制后直接运行，不需要签名文件，也不需要安装包。</p>")
 
-	// 安装路径写用户目录：不需要 sudo，与代理自己的状态目录同属当前用户，
-	// 卸载和升级都不会留下需要提权才能删的残留。
-	binDir := "~/.local/bin"
-	agentName := "dec-agent"
-
 	b.WriteString("<h2>macOS 与 Linux</h2>")
-	if arm := find("dec-agent-", "darwin", "arm64"); arm != "" {
-		b.WriteString("<h3>macOS（Apple Silicon）</h3>")
-		writeUnixSteps(&b, host, arm, binDir, agentName)
-	}
-	if amd := find("dec-agent-", "darwin", "amd64"); amd != "" {
-		b.WriteString("<h3>macOS（Intel）</h3>")
-		writeUnixSteps(&b, host, amd, binDir, agentName)
-	}
-	if arm := find("dec-agent-", "linux", "arm64"); arm != "" {
-		b.WriteString("<h3>Linux（arm64）</h3>")
-		writeUnixSteps(&b, host, arm, binDir, agentName)
-	}
-	if amd := find("dec-agent-", "linux", "amd64"); amd != "" {
-		b.WriteString("<h3>Linux（amd64）</h3>")
-		writeUnixSteps(&b, host, amd, binDir, agentName)
+	if have["darwin/arm64"] || have["darwin/amd64"] || have["linux/arm64"] || have["linux/amd64"] {
+		b.WriteString("<p>在终端里执行这一行。脚本会判定系统与架构、下载并校验、")
+		b.WriteString("引导登记、注册服务，装到 <code>~/.local/bin</code>，不需要 <code>sudo</code>：</p>")
+		b.WriteString("<pre>curl -fsSL https://" + htmlEscape(host) + "/install.sh | bash</pre>")
+		b.WriteString("<p class=\"muted\">登记需要 Bitwarden 邮箱、主密码与两步验证码，")
+		b.WriteString("由 <code>dec-agent</code> 直接向终端读取，不经过脚本，也不进命令行参数。")
+		b.WriteString("如果这台设备是本服务的第一台设备，先执行 ")
+		b.WriteString("<code>export DEC_INITIALIZE=1</code> 再运行上面的命令。</p>")
 	}
 
 	b.WriteString("<h2>Windows</h2>")
 	if have["windows/amd64"] || have["windows/arm64"] {
-		b.WriteString("<p>在 PowerShell 里执行。脚本会判定架构、下载并校验、登记设备、注册计划任务，")
-		b.WriteString("装到 <code>%LOCALAPPDATA%\\Programs\\dec</code>，不需要管理员权限：</p>")
-		b.WriteString("<pre>iwr -useb https://raw.githubusercontent.com/shichao402/Dec/main/scripts/install-agent.ps1 | iex</pre>")
+		b.WriteString("<p>在 PowerShell 里执行这一行。脚本会判定架构、下载并校验、登记设备、")
+		b.WriteString("注册计划任务，装到 <code>%LOCALAPPDATA%\\Programs\\dec</code>，不需要管理员权限：</p>")
+		b.WriteString("<pre>iwr -useb https://" + htmlEscape(host) + "/install.ps1 | iex</pre>")
 		b.WriteString("<p class=\"muted\">也可以手工安装：下载对应架构的 <code>dec-agent-windows-*.exe</code>，")
 		b.WriteString("重命名为 <code>dec-agent.exe</code>，然后依次执行 ")
 		b.WriteString("<code>dec-agent configure --url https://" + htmlEscape(host) + "</code>、<code>dec-agent enroll --name win-desktop</code>、<code>dec-agent install</code>。</p>")
 	}
 
 	b.WriteString("<h2>登记</h2>")
-	b.WriteString("<p>第一台设备用 <code>initialize</code>，会生成根密钥并写入 Bitwarden 冷备；")
-	b.WriteString("此后新增设备一律用 <code>enroll</code>。两者都需要 Bitwarden 邮箱、主密码与两步验证码。</p>")
-	b.WriteString("<p class=\"muted\">上面的 macOS 与 Linux 命令块已包含 <code>enroll</code>。")
-	b.WriteString("如果这台设备是本服务的第一台设备，把 <code>enroll</code> 换成 <code>initialize</code>。</p>")
+	b.WriteString("<p>每个平台的一行命令都会走到登记这一步。第一台设备走 ")
+	b.WriteString("<code>initialize</code>，会生成根密钥并写入 Bitwarden 冷备；此后新增设备一律走 ")
+	b.WriteString("<code>enroll</code>。两者都需要 Bitwarden 邮箱、主密码与两步验证码，")
+	b.WriteString("由 <code>dec-agent</code> 直接向终端读取。</p>")
+	b.WriteString("<p class=\"muted\">脚本默认按「已有一台设备」处理。只有当这台是本服务的第一台设备时，")
+	b.WriteString("才需要先执行 <code>export DEC_INITIALIZE=1</code>（Windows 用 ")
+	b.WriteString("<code>$env:DEC_INITIALIZE=1</code>）再运行安装命令。</p>")
+	b.WriteString("<details><summary>手工安装（不想用脚本时）</summary>")
+	b.WriteString("<p class=\"muted\">下载下面「全部产物」里对应平台的 ")
+	b.WriteString("<code>dec-agent-&lt;os&gt;-&lt;arch&gt;</code>，改名为 <code>dec-agent</code>，</p>")
+	b.WriteString("<pre>chmod +x ./dec-agent\n")
+	b.WriteString("./dec-agent configure --url https://" + htmlEscape(host) + "\n")
+	b.WriteString("./dec-agent enroll --name \"$(hostname)\"\n")
+	b.WriteString("./dec-agent install</pre>")
+	b.WriteString("</details>")
 
 	b.WriteString("<h2>确认装好了</h2>")
 	b.WriteString("<pre>curl -s http://127.0.0.1:43679/api/status</pre>")
@@ -212,7 +203,7 @@ func (s *Server) handleDownloadIndex(w http.ResponseWriter, r *http.Request) {
 
 	b.WriteString("<h2>被系统拦截时</h2>")
 	b.WriteString("<p>客户端二进制不做代码签名（本项目只有一个使用者，签名与公证的成本远大于收益）。</p>")
-	b.WriteString("<p>macOS Gatekeeper：用 <code>curl</code> 下载后，在 Finder 里右键 → 打开，")
+	b.WriteString("<p>macOS：脚本在下载后会自动清掉隔离标记。手工安装时在 Finder 里右键 → 打开，")
 	b.WriteString("或执行 <code>xattr -d com.apple.quarantine 文件名</code>。</p>")
 	b.WriteString("<p>Windows SmartScreen：点击“更多信息”→“仍要运行”。</p>")
 
@@ -225,22 +216,61 @@ func (s *Server) handleDownloadIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(b.String()))
 }
 
-// writeUnixSteps 写出一段 macOS/Linux 的安装命令。
+// handleDownload 提供单个文件（需求 20.1）。
 //
-// 每行都用 \n 单独拼，而不是塞进一个长模板串：这些命令是要被照抄的，
-// 一旦被 HTML 折成一行就不可读了。
-func writeUnixSteps(b *strings.Builder, host, file, binDir, agentName string) {
-	dl := "https://" + host + "/download/" + file
-	fmt.Fprintf(b, "<pre>mkdir -p %s\n", binDir)
-	fmt.Fprintf(b, "curl -fLo %s/%s %s\n", binDir, agentName, dl)
-	fmt.Fprintf(b, "chmod +x %s/%s\n", binDir, agentName)
-	// 用绝对路径调用，避免用户 PATH 里还没有 binDir 时下一步就失败。
-	fmt.Fprintf(b, "%s/%s configure --url https://%s\n", binDir, agentName, host)
-	fmt.Fprintf(b, "%s/%s enroll --name \"$(hostname)\"\n", binDir, agentName)
-	fmt.Fprintf(b, "%s/%s install</pre>\n", binDir, agentName)
-	b.WriteString("<p class=\"muted\">不需要 <code>sudo</code>：代理和它的状态目录都归当前用户。")
-	b.WriteString("如果 <code>" + binDir + "</code> 不在 <code>PATH</code> 里，把这一行加到 shell 配置文件：")
-	b.WriteString("<code>export PATH=\"$HOME/.local/bin:$PATH\"</code>。</p>")
+// 它们和二进制一起由 CI 放进下载目录，服务端不做任何模板渲染：
+// 脚本里唯一的变量（服务地址）默认就是本域名，需要改的人自己设
+// DEC_URL 环境变量。服务端一旦参与拼字符串，就等于让公网请求能
+// 往一份即将被 `| bash` 执行的内容里注入东西。
+var installScripts = map[string]struct {
+	name        string // 磁盘上的文件名
+	contentType string
+}{
+	"/install.sh":  {"install.sh", "text/x-shellscript; charset=utf-8"},
+	"/install.ps1": {"install.ps1", "text/plain; charset=utf-8"},
+}
+
+// handleInstallScript 提供一键安装脚本（无证书可访问）。
+//
+// 为什么要自托管：装客户端这件事不该依赖第二个站点可达。此前 Windows
+// 走 GitHub raw，等于 dec.firoyang.com 可用而 GitHub 不可用时，新设备
+// 依然装不上。与二进制同源就没有这个耦合。
+func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
+	entry, ok := installScripts[r.URL.Path]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "只接受 GET", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.limiter.allow(clientIP(r)) {
+		http.Error(w, "请求过于频繁", http.StatusTooManyRequests)
+		return
+	}
+
+	// 只认下载目录里的直接文件，且路径来自上面的固定映射：
+	// 请求方无法影响文件名，所以不存在穿越。
+	data, err := os.ReadFile(filepath.Join(s.downloadDir, entry.name))
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "读取文件失败", http.StatusInternalServerError)
+		return
+	}
+
+	// 必须是 text/*：浏览器与 curl 都不该把它当成要保存的附件，
+	// 否则 `curl | bash` 拿到的是 HTTP 头以外的二进制也没人发现。
+	w.Header().Set("Content-Type", entry.contentType)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	if _, err := w.Write(data); err != nil {
+		s.logf("写安装脚本失败: %v", err)
+	}
 }
 
 // handleDownload 提供单个文件（需求 20.1）。

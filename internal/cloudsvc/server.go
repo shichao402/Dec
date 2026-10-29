@@ -432,6 +432,9 @@ func (s *Server) Handler() http.Handler {
 	// 客户端下载：无证书可访问（需求 20）。
 	mux.HandleFunc("/download/", s.handleDownload)
 	mux.HandleFunc("/download", s.handleDownloadIndex)
+	// 一键安装脚本：与二进制同源自托管，不依赖 GitHub 可达。
+	mux.HandleFunc("/install.sh", s.handleInstallScript)
+	mux.HandleFunc("/install.ps1", s.handleInstallScript)
 	// 根路径就是安装指引：新设备接入的第一站，不该是 404。
 	// 它和 /download 是同一个页面，只是让人直接敲域名也能到。
 	mux.HandleFunc("/", s.handleRoot)

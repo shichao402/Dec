@@ -20,15 +20,23 @@
 
 ### 安装代理
 
-任何一台新设备，浏览器直接打开 `https://dec.firoyang.com` 就是安装指引：当前要求版本、各平台可直接照抄的命令块、登记方式、装完怎么确认。`/download` 是同一个页面。
+任何一台新设备，浏览器直接打开 `https://dec.firoyang.com` 就是安装指引：当前要求版本、每个平台的一行安装命令、登记方式、装完怎么确认。`/download` 是同一个页面。
 
-macOS 与 Linux 按页面给出的命令逐条执行 `curl` 取二进制、`configure` 填服务地址、`install` 注册自启、`initialize` 或 `enroll` 登记身份。Windows 的 PowerShell 脚本随仓库分发，页面也给出入口：
+macOS 与 Linux：
 
-```powershell
-iwr -useb https://raw.githubusercontent.com/shichao402/Dec/main/scripts/install-agent.ps1 | iex
+```bash
+curl -fsSL https://dec.firoyang.com/install.sh | bash
 ```
 
-Windows 脚本把这几步串成一次执行：判定架构、比对本机与服务端要求的版本、下载代理与托盘并校验 sha256、写入用户级 PATH、登记设备、注册计划任务、最后确认代理在线。登记那一步需要 Bitwarden 邮箱、主密码和两步验证码。
+Windows（PowerShell）：
+
+```powershell
+iwr -useb https://dec.firoyang.com/install.ps1 | iex
+```
+
+两个脚本都由服务端自托管，与二进制同源，装客户端不依赖 GitHub 可达。它们做同样几件事：判定系统与架构、比对本机与服务端要求的版本、下载代理与托盘并校验 sha256、配置服务地址、引导登记、注册服务与自启、最后确认代理在线。装到 `~/.local/bin` 或 `%LOCALAPPDATA%\Programs\dec`，全程不需要 sudo 或管理员权限。
+
+登记需要 Bitwarden 邮箱、主密码和两步验证码，由 `dec-agent` 直接向终端读取，不经过脚本，也不进命令行参数。脚本默认按「已有一台设备」处理；只有当这台是本服务的第一台设备时，先执行 `export DEC_INITIALIZE=1`（Windows 用 `$env:DEC_INITIALIZE=1`）再运行安装命令。
 
 代理装在用户级位置，不需要管理员权限：
 

@@ -769,25 +769,38 @@ func TestServerCAPrivateKeyStaysOutOfSnapshots(t *testing.T) {
 	}
 }
 
-// TestInstallScriptMatchesCLI 守住 Windows 一键安装脚本与 CLI 的一致性。
+// TestInstallScriptMatchesCLI 守住一键安装脚本与 CLI 的一致性。
 //
-// scripts/install-agent.ps1 是 windows 上唯一的安装入口，但它是一份独立的
-// 文本：CLI 改子命令名或 flag 之后，脚本不会跟着报错，只会在用户机器上
-// 跑到一半才失败（例如 `--tray` 改名后，用户看到「flag provided but not
-// defined」，二进制已经下载完了）。这条测试把脚本里引用的每个子命令和
-// flag 都拿去 cmd/dec-agent/main.go 里核对。
+// scripts/install.sh 与 scripts/install-agent.ps1 是各平台唯一的安装入口，
+// 但它们是一份独立的文本：CLI 改子命令名或 flag 之后，脚本不会跟着报错，
+// 只会在用户机器上跑到一半才失败（例如 `--tray` 改名后，用户看到
+// 「flag provided but not defined」，二进制已经下载完了）。这条测试把两个
+// 脚本里引用的每个子命令和 flag 都拿去 cmd/dec-agent/main.go 里核对。
 //
-// 只静态比对字符串，不执行脚本：本机是 macOS，CI 也不在 Windows 上跑
-// PowerShell，能守住的范围就是「名字对得上」。
+// 只静态比对字符串，不执行脚本：CI 不在 Windows 上跑 PowerShell，
+// 能守住的范围就是「名字对得上」。
 func TestInstallScriptMatchesCLI(t *testing.T) {
 	root := repoRoot(t)
 
-	scriptPath := filepath.Join(root, "scripts", "install-agent.ps1")
-	scriptData, err := os.ReadFile(scriptPath)
-	if err != nil {
-		t.Fatalf("读安装脚本失败: %v", err)
+	// 两个平台的脚本都要核：此前只守 Windows，Unix 侧的命令块在指引页里，
+	// 收敛成 install.sh 之后同样需要与 CLI 对齐。
+	scripts := []struct {
+		path string
+		// callRe 匹配这个脚本里调用 dec-agent 的写法。
+		callRe *regexp.Regexp
+	}{
+		{filepath.Join(root, "scripts", "install.sh"), regexp.MustCompile(`(?m)"\$AGENT_BIN"\s+([a-z][a-z-]*)`)},
+		{filepath.Join(root, "scripts", "install-agent.ps1"), regexp.MustCompile(`&\s*\$agentExe\s+([a-z][a-z-]*)`)},
 	}
-	script := string(scriptData)
+
+	var script string
+	for _, s := range scripts {
+		data, err := os.ReadFile(s.path)
+		if err != nil {
+			t.Fatalf("读安装脚本失败: %v", err)
+		}
+		script += string(data)
+	}
 
 	mainData, err := os.ReadFile(filepath.Join(root, "cmd", "dec-agent", "main.go"))
 	if err != nil {
@@ -795,20 +808,49 @@ func TestInstallScriptMatchesCLI(t *testing.T) {
 	}
 	mainGo := string(mainData)
 
-	// 脚本里所有 `& $agentExe <sub> ...` 形式的调用。
-	subRe := regexp.MustCompile(`&\s*\$agentExe\s+([a-z][a-z-]*)`)
+	// subs 记 dec-agent 子命令；agentFlags 记出现在 dec-agent 命令行上的长 flag。
+	//
+	// flag 必须只从 dec-agent 那一行里取：脚本里还有 curl --max-time、
+	// systemctl --user、xattr -d 之类，它们不是 CLI flag，混进来会直接误报。
 	subs := map[string]bool{}
-	for _, m := range subRe.FindAllStringSubmatch(script, -1) {
-		subs[m[1]] = true
+	agentFlags := map[string]bool{}
+	for _, s := range scripts {
+		data, err := os.ReadFile(s.path)
+		if err != nil {
+			t.Fatalf("读安装脚本失败: %v", err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			m := s.callRe.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			subs[m[1]] = true
+			for _, f := range regexp.MustCompile(`--([a-z][a-z-]+)`).FindAllStringSubmatch(line, -1) {
+				agentFlags[f[1]] = true
+			}
+		}
 	}
 	if len(subs) == 0 {
-		t.Fatal("安装脚本里没有找到任何 $agentExe 调用，正则可能已经与脚本写法脱节")
+		t.Fatal("安装脚本里没有解析到任何 dec-agent 调用，正则可能已经与脚本写法脱节")
 	}
 
 	// main.go 里 switch 分派的子命令集合。
 	dispatched := map[string]bool{}
 	for _, m := range regexp.MustCompile(`case "([a-z][a-z-]*)":`).FindAllStringSubmatch(mainGo, -1) {
 		dispatched[m[1]] = true
+	}
+
+	// 各平台脚本里还有把子命令放进变量的写法（Unix 版按首台设备选
+	// enroll/initialize，Windows 版同样），正则取不到变量的值。
+	// 这里显式点名：这两个是本服务的登记入口，改名必须同步改脚本。
+	for _, sub := range []string{"enroll", "initialize"} {
+		if !dispatched[sub] {
+			t.Errorf("安装脚本会调用 dec-agent %s，但 main.go 里已无此子命令", sub)
+			continue
+		}
+		if !strings.Contains(script, `"`+sub+`"`) {
+			t.Errorf("安装脚本里找不到 %q 子命令：登记入口缺失会让装完的设备无法接入", sub)
+		}
 	}
 
 	for sub := range subs {
@@ -818,20 +860,17 @@ func TestInstallScriptMatchesCLI(t *testing.T) {
 		}
 	}
 
-	// 脚本里每个 `--flag` 都必须在 main.go 的 flag 注册里出现过。
-	// 只查长 flag：单横线的短选项本项目没有用。
-	flagRe := regexp.MustCompile(`--([a-z][a-z-]+)`)
+	// flag 已在上面按 dec-agent 调用行提取，这里只核对它。
 	registered := map[string]bool{}
 	for _, m := range regexp.MustCompile(`fs\.(?:String|Bool|Int)\("([a-z][a-z-]*)"`).FindAllStringSubmatch(mainGo, -1) {
 		registered[m[1]] = true
 	}
-	// PowerShell 自身的参数与脚本自定义的说明性短横线不算 CLI flag。
+	// PowerShell 自身的参数不算 CLI flag；它们出现在同一行上，只能按名字排除。
 	systemFlags := map[string]bool{
-		"NoProfile": true, "UseBasicParsing": true, "OutFile": true,
-		"AsSecureString": true, "Algorithm": true, "Force": true,
+		"noprofile": true, "usebasicparsing": true, "outfile": true,
+		"assecurestring": true, "algorithm": true, "force": true,
 	}
-	for _, m := range flagRe.FindAllStringSubmatch(script, -1) {
-		name := m[1]
+	for name := range agentFlags {
 		if systemFlags[name] || registered[name] {
 			continue
 		}
@@ -896,10 +935,13 @@ func TestInstallScriptDownloadsRealArtifacts(t *testing.T) {
 
 // TestInstallGuideMatchesCLI 守住公网安装指引页与 CLI 的一致性。
 //
-// download.go 里的安装指引是唯一一处会被人"照着敲"的命令集合，而它
-// 只是拼字符串：CLI 改了子命令名或 flag 之后，页面照样渲染 200，只是
-// 用户抄下来的命令全部报「未知命令」。这条测试把页面里出现的每个
+// 页面上可被直接照抄的命令只有「手工安装」那一块（一键脚本不在这里展开
+// 命令），而它只是拼字符串：CLI 改了子命令名或 flag 之后，页面照样渲染
+// 200，只是用户抄下来的命令全部报「未知命令」。这条测试把页面里出现的每个
 // dec-agent 子命令与 --flag 都拿去 main.go 核对。
+//
+// 一键脚本里那些命令由 TestInstallScriptMatchesCLI 守，
+// 两边合起来覆盖「页面上出现过的每一条 dec-agent 命令」。
 func TestInstallGuideMatchesCLI(t *testing.T) {
 	root := repoRoot(t)
 	pageData, err := os.ReadFile(filepath.Join(root, "internal", "cloudsvc", "download.go"))
@@ -917,9 +959,8 @@ func TestInstallGuideMatchesCLI(t *testing.T) {
 	for _, m := range regexp.MustCompile(`case "([a-z][a-z-]*)":`).FindAllStringSubmatch(mainGo, -1) {
 		dispatched[m[1]] = true
 	}
-	// 页面里形如 `dec-agent <sub>` 或 `<agentName> <sub>` 的调用。
-	// 变量形式用于按平台拼命令的那两行。
-	subRe := regexp.MustCompile(`(?:dec-agent|%s) ([a-z][a-z-]+)`)
+	// 页面里形如 `./dec-agent <sub>` 的调用。
+	subRe := regexp.MustCompile(`(?:\./)?dec-agent ([a-z][a-z-]+)`)
 	seen := map[string]bool{}
 	for _, m := range subRe.FindAllStringSubmatch(page, -1) {
 		// format verb 与普通单词混在一起，只认真正注册过的子命令名；

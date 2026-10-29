@@ -322,13 +322,22 @@ jobs:
           PROTOCOL: ${{ steps.meta.outputs.protocol }}
         run: |
           set -euo pipefail
+          # 一键安装脚本随产物一起发布：托管位置是服务端下载目录，
+          # 同时挂进 Release 便于人工取用与核对。
+          cp scripts/install.sh dist/install.sh
+          cp scripts/install-agent.ps1 dist/install.ps1
           python3 - <<'PY'
           import hashlib, json, os, pathlib
+          dist = pathlib.Path("dist")
 
           dist = pathlib.Path("dist")
           files = []
           for p in sorted(dist.iterdir()):
               if not p.is_file() or p.name == "release.json":
+                  continue
+              # 一键安装脚本不是二进制产物：它们有独立的 /install.* 端点，
+              # 不该出现在"全部产物"表里，也解析不出 os/arch。
+              if p.name in ("install.sh", "install.ps1"):
                   continue
               stem = p.name
               if stem.endswith(".exe"):
@@ -355,6 +364,7 @@ jobs:
               ).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "files": files,
           }
+
           pathlib.Path("dist/release.json").write_text(
               json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
           )
@@ -440,6 +450,10 @@ jobs:
           mkdir -p payload/download
           cp dist/dec-agent-* payload/download/
           cp dist/dec-tray-* payload/download/ 2>/dev/null || echo "本次发布没有托盘产物"
+          # 一键安装脚本由服务端在 /install.sh 与 /install.ps1 提供，
+          # 与二进制同源，装客户端不再依赖 GitHub 可达。
+          cp dist/install.sh payload/download/install.sh
+          cp dist/install.ps1 payload/download/install.ps1
 
           python3 - "$VERSION" "$REQUIRED" "$COMMIT" <<'PY'
           import json, os, sys

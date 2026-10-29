@@ -556,6 +556,58 @@ func TestDownloadWhitelist(t *testing.T) {
 	}
 }
 
+// TestInstallScriptSelfHosted 验证一键安装脚本由本服务端提供且无需证书。
+//
+// 装客户端这件事不该依赖第二个站点可达：此前 Windows 走 GitHub raw，
+// 等于本站可用而 GitHub 不可用时新设备依然装不上。这条测试守住
+// 「脚本与二进制同源」这个性质，以及它仍然是公开端点。
+func TestInstallScriptSelfHosted(t *testing.T) {
+	h := newHarness(t, "1.0.0")
+
+	// 与发布时一致：脚本和二进制一起落在下载目录里。
+	dl := downloadDir(h.dir)
+	if err := os.MkdirAll(dl, 0o755); err != nil {
+		t.Fatalf("建下载目录失败: %v", err)
+	}
+	const body = "#!/usr/bin/env bash\necho dec\n"
+	if err := os.WriteFile(filepath.Join(dl, "install.sh"), []byte(body), 0o644); err != nil {
+		t.Fatalf("写脚本失败: %v", err)
+	}
+
+	ts := httptest.NewUnstartedServer(h.handler)
+	ts.TLS = &tls.Config{MinVersion: tls.VersionTLS12, ClientAuth: tls.RequestClientCert}
+	ts.StartTLS()
+	defer ts.Close()
+
+	// 不带客户端证书：新设备正是靠这个端点完成安装的。
+	resp, err := ts.Client().Get(ts.URL + "/install.sh")
+	if err != nil {
+		t.Fatalf("请求安装脚本失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("状态码 %d，期望 200", resp.StatusCode)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	if string(got) != body {
+		t.Errorf("脚本内容不符：\n拿到 %q\n期望 %q", got, body)
+	}
+	// 必须是 text/*：`curl | bash` 拿到 attachment 会静默变成存文件。
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/") {
+		t.Errorf("Content-Type %q 不是 text/*，curl 会把它当附件保存", ct)
+	}
+
+	// 未部署的脚本必须 404，而不是回落到别的内容。
+	miss, err := ts.Client().Get(ts.URL + "/install.ps1")
+	if err != nil {
+		t.Fatalf("请求未部署脚本失败: %v", err)
+	}
+	defer miss.Body.Close()
+	if miss.StatusCode != http.StatusNotFound {
+		t.Errorf("未部署的脚本状态码 %d，期望 404", miss.StatusCode)
+	}
+}
+
 // TestDownloadIndex 验证安装指引页可访问并包含版本与各平台安装命令。
 func TestDownloadIndex(t *testing.T) {
 	h := newHarness(t, "1.0.0")
@@ -590,26 +642,18 @@ func TestDownloadIndex(t *testing.T) {
 	if !strings.Contains(page, "3.1.4") {
 		t.Fatalf("索引页应包含版本 3.1.4")
 	}
-	// 每个平台都要给出可照抄的命令块，而不是只列文件名。
-	if !strings.Contains(page, "/download/dec-agent-darwin-arm64") {
-		t.Fatalf("应给出 macOS arm64 的下载地址")
+	// 一键安装入口：每个平台都只该有一行，架构判定交给脚本。
+	if !strings.Contains(page, "/install.sh") {
+		t.Fatalf("macOS/Linux 应给出一键安装脚本入口")
 	}
-	if !strings.Contains(page, "/download/dec-agent-linux-amd64") {
-		t.Fatalf("应给出 Linux amd64 的下载地址")
+	if !strings.Contains(page, "/install.ps1") {
+		t.Fatalf("Windows 应给出一键安装脚本入口")
 	}
-	// 命令块必须走到登记那一步，否则用户下载完不知道下一步做什么。
-	if !strings.Contains(page, "configure --url") || !strings.Contains(page, "enroll --name") {
-		t.Fatalf("安装命令应包含 configure 与 enroll")
-	}
-	// 托盘不能出现在可照抄的命令里，否则会教用户把托盘当成代理安装。
-	if strings.Contains(page, "curl -fLo ~/.local/bin/dec-agent https://") &&
-		strings.Contains(page, "dec-tray") {
-		if strings.Contains(page, "/download/dec-tray-") {
-			t.Fatalf("安装命令不应把托盘当成代理")
+	// 不再逐平台列命令块：四个平台的命令块正是这次要消除的复杂度。
+	for _, gone := range []string{"/download/dec-agent-darwin-arm64", "/download/dec-agent-linux-amd64"} {
+		if strings.Contains(page, gone) {
+			t.Errorf("指引页不应再逐平台拼下载地址 %s，应由 /install.sh 内部判定", gone)
 		}
-	}
-	if !strings.Contains(page, "install-agent.ps1") {
-		t.Fatalf("Windows 应给出安装脚本入口")
 	}
 
 	// 根路径是同一个页面：新设备接入的第一站不该是 404。

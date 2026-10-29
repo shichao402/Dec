@@ -1,14 +1,14 @@
 ﻿# Dec 代理一键安装（Windows）
 #
 # 用法：
-#   iwr -useb https://raw.githubusercontent.com/shichao402/Dec/main/scripts/install-agent.ps1 | iex
-#   iwr -useb https://cnb.cool/shichao402/Dec/-/git/raw/main/scripts/install-agent.ps1 | iex
+#   iwr -useb https://dec.firoyang.com/install.ps1 | iex
 #
 # 可覆盖的环境变量：
-#   DEC_URL             服务地址，默认 https://dec.firoyang.com
-#   DEC_AGENT_DIR       安装目录，默认 %LOCALAPPDATA%\Programs\dec
-#   DEC_AGENT_NAME      设备名，默认本机计算机名
-#   DEC_NONINTERACTIVE  设为 1 时跳过登记（无 TTY 的场合）
+#   DEC_URL               服务地址，默认 https://dec.firoyang.com
+#   DEC_AGENT_DIR         安装目录，默认 %LOCALAPPDATA%\Programs\dec
+#   DEC_AGENT_NAME        设备名，默认本机计算机名
+#   DEC_NONINTERACTIVE    设为 1 时跳过登记（无 TTY 的场合）
+#   DEC_INITIALIZE        设为 1 时走 initialize 而不是 enroll（仅首台设备）
 #
 # 脚本做五件事：下载并校验代理与托盘、停掉旧实例、替换二进制、
 # 配置服务地址并登记、注册计划任务与托盘登录自启动。
@@ -336,9 +336,12 @@ function Invoke-Install {
         Write-Step "登记这台设备"
         Write-Host "  需要 Bitwarden 邮箱、主密码和两步验证码。" -ForegroundColor DarkGray
 
-        # 凭据必须在这里收集再经环境变量传下去：iex 场景下脚本自身占着 stdin，
+        # 凭据在这里收集再经环境变量传下去：iex 场景下脚本自身占着 stdin，
         # dec-agent 从标准输入读会直接读到 EOF。主密码走环境变量而不是命令行
         # 参数，避免留在进程参数里。
+        #
+        # 控制台本身是可交互的，所以 Read-Host 拿得到输入；密码用
+        # SecureString 承接，转明文只为了传给子进程，用完立即清掉。
         $bwEmail = Read-Host "  Bitwarden 邮箱"
         $bwPassword = Read-Host "  Bitwarden 主密码" -AsSecureString
         $bwTotp = Read-Host "  两步验证码（未配置可留空）"
@@ -346,11 +349,13 @@ function Invoke-Install {
         $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
             [Runtime.InteropServices.Marshal]::SecureStringToBSTR($bwPassword))
 
+        # 首台设备走 initialize：全新服务还没有根密钥，enroll 必然失败。
+        $sub = if ($env:DEC_INITIALIZE -eq "1") { "initialize" } else { "enroll" }
         try {
             $env:DEC_BW_PASSWORD = $plain
-            & $agentExe enroll --email $bwEmail --totp $bwTotp --name $deviceName
+            & $agentExe $sub --email $bwEmail --totp $bwTotp --name $deviceName
             if ($LASTEXITCODE -ne 0) {
-                Write-Warn "登记未完成。可稍后重跑：dec-agent enroll --name $deviceName"
+                Write-Warn "登记未完成。可稍后重跑：dec-agent $sub --name $deviceName"
             } else {
                 $enrolled = $true
             }
