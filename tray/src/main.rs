@@ -16,6 +16,8 @@ mod actions;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod icons;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
+mod logo_polygons;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 mod window;
 
 fn version() -> &'static str {
@@ -46,7 +48,7 @@ mod app {
     use tao::event::{Event, StartCause, WindowEvent};
     use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
     use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
-    use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+    use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
     use crate::actions;
     use crate::icons;
@@ -55,11 +57,17 @@ mod app {
 
     const POLL: Duration = Duration::from_secs(3);
 
+    /// 「重启中」图标的旋转节拍。24 帧一圈，每帧 60ms 约 1.44 秒转一圈：
+    /// 慢于这个速度显得卡顿，快于它又像卡死重连的转圈提示。
+    const SPIN_TICK: Duration = Duration::from_millis(60);
+
     enum UserEvent {
         Tray(TrayIconEvent),
         Menu(MenuEvent),
         Polled(Option<Status>),
         RestartFailed(String),
+        /// 后台线程预渲染好的一整圈旋转帧（按帧序）。
+        Spun(Vec<Icon>),
     }
 
     struct Items {
@@ -128,12 +136,44 @@ mod app {
         /// 应用菜单承载「编辑」快捷键，否则 WebView 里的复制粘贴失效。
         #[cfg(target_os = "macos")]
         app_menu: Option<Menu>,
+        /// 「重启中」的当前旋转帧；其它状态为 None，图标静止。
+        spin: Option<u32>,
+        /// 预渲染好的整圈旋转帧，按帧序。
+        spin_cache: Option<Vec<tray_icon::Icon>>,
+        /// 下一次旋转帧的唤醒时刻。
+        spin_at: Option<Instant>,
+        /// 是否正在后台算旋转帧，避免重复起线程。
+        spin_loading: bool,
     }
 
     impl App {
         fn render(&mut self, v: View) {
             if self.shown.as_ref() == Some(&v) {
                 return;
+            }
+            let spinning = v.icon == IconState::Restarting;
+            // 已经在转就不要重来：轮询每 3 秒会 render 一次，若每次都重置
+            // 计时，动画会周期性被打断，看起来一卡一卡。
+            let already_spinning = self.spin.is_some();
+            if spinning {
+                if !already_spinning {
+                    // 有缓存就立刻转起来；没有就先让后台算，算好再开始。
+                    if self.spin_cache.is_some() {
+                        self.spin = Some(0);
+                        self.spin_at = Some(Instant::now() + SPIN_TICK);
+                    } else if !self.spin_loading {
+                        self.spin_loading = true;
+                        let proxy = self.proxy.clone();
+                        // 整圈 24 帧、每帧 20 毫秒以上，放主线程会卡住托盘。
+                        thread::spawn(move || {
+                            let frames = icons::spin_frames_ready();
+                            let _ = proxy.send_event(UserEvent::Spun(frames));
+                        });
+                    }
+                }
+            } else {
+                self.spin = None;
+                self.spin_at = None;
             }
             if let Some(tray) = &self.tray {
                 if self.shown.as_ref().map(|s| s.icon) != Some(v.icon) {
@@ -143,6 +183,54 @@ mod app {
             }
             self.items.apply(&v);
             self.shown = Some(v);
+        }
+
+        /// 收到预渲染的旋转帧：缓存起来，若当前正需要旋转就立刻开始。
+        fn on_spun(&mut self, frames: Vec<tray_icon::Icon>) {
+            self.spin_loading = false;
+            if frames.is_empty() || self.spin_cache.is_some() {
+                return;
+            }
+            self.spin_cache = Some(frames);
+            if self.shown.as_ref().is_some_and(|v| v.icon == IconState::Restarting) {
+                self.spin = Some(0);
+                self.spin_at = Some(Instant::now() + SPIN_TICK);
+            }
+        }
+
+        /// 推进一帧旋转；只在「重启中」生效，否则什么都不做。
+        fn advance_spin(&mut self) {
+            let (Some(frame), Some(cache)) = (self.spin, self.spin_cache.as_ref()) else {
+                return;
+            };
+            let next = ((frame as usize) + 1) % cache.len();
+            self.spin = Some(next as u32);
+            if let Some(tray) = &self.tray {
+                let _ = tray.set_icon(Some(cache[next].clone()));
+            }
+            self.spin_at = Some(Instant::now() + SPIN_TICK);
+        }
+
+        /// 到点就推进一帧，返回事件循环下次该在何时醒来。
+        fn tick_spin(&mut self) -> ControlFlow {
+            if let Some(at) = self.spin_at {
+                if Instant::now() >= at {
+                    self.advance_spin();
+                }
+            }
+            self.next_control_flow()
+        }
+
+        /// 事件循环的等待策略：有待办时间点时精确定时唤醒，否则纯等待。
+        fn next_control_flow(&self) -> ControlFlow {
+            let mut deadline = self.pending_click;
+            if let Some(d) = self.spin_at {
+                deadline = Some(deadline.map_or(d, |p| p.min(d)));
+            }
+            match deadline {
+                Some(d) => ControlFlow::WaitUntil(d),
+                None => ControlFlow::Wait,
+            }
         }
 
         fn on_polled(&mut self, st: Option<Status>) {
@@ -174,6 +262,12 @@ mod app {
                 mac::activate(target);
                 return;
             }
+            // 先把进程激活成前台应用，再建窗口。
+            // 顺序反过来的话，窗口虽然建在可见状态、也调了 set_focus，
+            // 但进程本身还不是活跃应用，窗口会落在别的应用窗口后面，
+            // 用户以为没打开。Accessory 模式（不进 Dock）尤其明显。
+            mac::stay_in_menu_bar(target);
+            mac::activate(target);
             match window::open(target, &v.admin_url) {
                 Ok(w) => {
                     #[cfg(target_os = "macos")]
@@ -183,7 +277,7 @@ mod app {
                         }
                     }
                     self.admin = Some(w);
-                    mac::show_in_dock(target, true);
+                    // 窗口建好后应用激活才真正落到这个窗口上，再拉一次。
                     mac::activate(target);
                 }
                 Err(e) => {
@@ -196,10 +290,9 @@ mod app {
             }
         }
 
-        fn close_admin(&mut self, target: &EventLoopWindowTarget<UserEvent>) {
-            if self.admin.take().is_some() {
-                mac::show_in_dock(target, false);
-            }
+        fn close_admin(&mut self, _target: &EventLoopWindowTarget<UserEvent>) {
+            // 窗口只是销毁；进程始终留在菜单栏，激活策略无需切换。
+            self.admin = None;
         }
 
         fn show_status(&self) {
@@ -291,25 +384,35 @@ mod app {
 
     #[cfg(target_os = "macos")]
     mod mac {
-        use objc2_app_kit::{NSEvent, NSEventModifierFlags};
+        use objc2_app_kit::{NSApplication, NSEvent, NSEventModifierFlags};
+        use objc2_foundation::MainThreadMarker;
         use std::time::Duration;
         use tao::event_loop::EventLoopWindowTarget;
         use tao::platform::macos::{ActivationPolicy, EventLoopWindowTargetExtMacOS};
         use tray_icon::menu::{Menu, PredefinedMenuItem, Submenu};
 
-        /// 窗口打开时临时进入 Dock 与 Cmd+Tab，关掉后退回只在菜单栏。
-        /// 一直是 Accessory 的话，窗口会被别的应用盖住且切不回来。
-        pub fn show_in_dock<T>(target: &EventLoopWindowTarget<T>, show: bool) {
-            target.set_activation_policy_at_runtime(if show {
-                ActivationPolicy::Regular
-            } else {
-                ActivationPolicy::Accessory
-            });
+        /// 全程留在菜单栏，绝不进 Dock。
+        ///
+        /// 托盘进程是裸二进制、没有 .app bundle，macOS 找不到任何图标资源，
+        /// 进 Dock 只能显示通用的可执行文件占位图。运行期用
+        /// `setApplicationIconImage` 虽然能设置成功（读回来确实是品牌图），
+        /// 但 Dock 渲染时不认，仍然显示占位图——这条路走不通。
+        ///
+        /// 所以干脆不进 Dock：窗口照样能开、能交互、能拉前，只是不出现在
+        /// Dock 和 Cmd+Tab 里。入口全在菜单栏图标上。
+        pub fn stay_in_menu_bar<T>(target: &EventLoopWindowTarget<T>) {
+            target.set_activation_policy_at_runtime(ActivationPolicy::Accessory);
         }
 
-        /// 把应用切到前台：从菜单栏图标唤起时 macOS 不会自动激活。
-        pub fn activate<T>(target: &EventLoopWindowTarget<T>) {
-            target.show_application();
+        /// 把窗口提到最前。
+        ///
+        /// Accessory 应用不是「活跃应用」，光 unhide 不足以让窗口拿到焦点，
+        /// 必须显式 activate 一次，否则窗口会开在别的应用后面。
+        pub fn activate<T>(_target: &EventLoopWindowTarget<T>) {
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
+            NSApplication::sharedApplication(mtm).activate();
         }
 
         /// 应用菜单：Cmd+C/V/X/A/Z 与 Cmd+W/Q 都靠它生效。
@@ -358,7 +461,7 @@ mod app {
     mod mac {
         use std::time::Duration;
         use tao::event_loop::EventLoopWindowTarget;
-        pub fn show_in_dock<T>(_: &EventLoopWindowTarget<T>, _: bool) {}
+        pub fn stay_in_menu_bar<T>(_: &EventLoopWindowTarget<T>) {}
         pub fn activate<T>(_: &EventLoopWindowTarget<T>) {}
         pub fn double_click_interval() -> Duration {
             Duration::from_millis(250)
@@ -419,6 +522,10 @@ mod app {
             admin: None,
             #[cfg(target_os = "macos")]
             app_menu: None,
+            spin: None,
+            spin_cache: None,
+            spin_at: None,
+            spin_loading: false,
         };
 
         event_loop.run(move |event, target, control_flow| {
@@ -459,13 +566,12 @@ mod app {
                 Event::UserEvent(UserEvent::RestartFailed(e)) => {
                     actions::notify("重启失败", &e);
                 }
+                Event::UserEvent(UserEvent::Spun(frames)) => app.on_spun(frames),
                 _ => {}
             }
             app.flush_pending_click(target);
-            *control_flow = match app.pending_click {
-                Some(deadline) => ControlFlow::WaitUntil(deadline),
-                None => ControlFlow::Wait,
-            };
+            app.tick_spin();
+            *control_flow = app.next_control_flow();
         });
     }
 }

@@ -32,8 +32,9 @@ impl AdminWindow {
         if self.url != url && self.webview.load_url(url).is_ok() {
             self.url = url.to_string();
         }
-        self.window.set_visible(true);
+        // set_focus 在窗口不可见时是空操作，所以顺序必须是先露出再聚焦。
         self.window.set_minimized(false);
+        self.window.set_visible(true);
         self.window.set_focus();
     }
 }
@@ -64,6 +65,8 @@ pub fn open<T: 'static>(target: &EventLoopWindowTarget<T>, url: &str) -> Result<
         .build(&window)
         .map_err(|e| format!("创建页面失败：{e}"))?;
 
+    // 先确保窗口可见再聚焦：set_focus 遇到不可见窗口会直接返回。
+    window.set_visible(true);
     window.set_focus();
     Ok(AdminWindow { window, webview, url: url.to_string() })
 }

@@ -28,8 +28,9 @@ ureq = { version = "2", default-features = false }
 open = "5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent", "NSApplication", "NSResponder"] }
 objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 notify-rust = "4"
