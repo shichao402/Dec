@@ -165,6 +165,7 @@ func (u *Updater) Run(ctx context.Context) {
 	if delay < 0 {
 		delay = 0
 	}
+	u.logf("自动更新已启用：%s 后首次检查，之后每 %s 检查一次", delay, interval)
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	for {
