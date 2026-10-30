@@ -181,6 +181,9 @@ func (u *Updater) Run(ctx context.Context) {
 				}
 			}
 		}
+		// 更新进程是在新代理通过健康检查之后才写结果的，新代理启动时
+		// 通常还读不到；所以每轮检查前都再看一次，首轮（1 分钟后）就能报出。
+		u.reportLast()
 		started, err := u.CheckOnce(ctx)
 		if err != nil {
 			u.logf("自动更新检查失败: %v", err)

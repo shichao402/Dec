@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -324,5 +325,41 @@ func TestApplyUpdateBusyLock(t *testing.T) {
 		Health: func(context.Context, *UpdatePlan) error { return nil },
 	}); err != nil {
 		t.Fatalf("过期锁应被接管: %v", err)
+	}
+}
+
+// TestUpdaterReportsResultWrittenAfterStart 覆盖真机上遇到的时序：更新进程在新代理
+// 通过健康检查之后才写结果，新代理启动那一刻读不到，必须在随后的检查里报出，且只报一次。
+func TestUpdaterReportsResultWrittenAfterStart(t *testing.T) {
+	f := newUpdateFixture(t, "v2.1.50", "v2.1.50", []byte("new"))
+	u := f.updater("v2.1.50")
+	var logs []string
+	u.Logf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
+	u.InitialDelay = time.Hour
+	u.Interval = time.Hour
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { u.Run(ctx); close(done) }()
+
+	time.Sleep(50 * time.Millisecond)
+	res, _ := json.Marshal(UpdateResult{From: "v2.1.49", Version: "v2.1.50", OK: true, At: time.Now()})
+	os.MkdirAll(UpdateDir(f.stateDir), 0o700)
+	os.WriteFile(updateResultPath(f.stateDir), res, 0o600)
+	u.Kick()
+	time.Sleep(200 * time.Millisecond)
+	u.Kick()
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	n := 0
+	for _, l := range logs {
+		if strings.Contains(l, "自动更新完成") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("应恰好报一次完成，实际 %d 次：%v", n, logs)
 	}
 }
