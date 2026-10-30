@@ -32,15 +32,32 @@ func (s *Server) mHello(req *proto.Request, payload any, dev ssot.Device) *proto
 
 	ca := s.boot.CAStatus()
 	return okPayload(req.ID, &proto.HelloResponse{
-		ServerVersion:   s.cfg.ServerVersion,
-		RequiredVersion: s.cfg.RequiredVersion,
-		ProtocolVersion: proto.Version,
-		Maintenance:     s.maintenance.Load(),
-		Aligned:         aligned,
-		DeviceID:        dev.ID,
-		CAState:         string(ca.State),
-		CABackupPending: ca.BackupPending,
+		ServerVersion:          s.cfg.ServerVersion,
+		RequiredVersion:        s.cfg.RequiredVersion,
+		ProtocolVersion:        proto.Version,
+		Maintenance:            s.maintenance.Load(),
+		Aligned:                aligned,
+		DeviceID:               dev.ID,
+		CAState:                string(ca.State),
+		CABackupPending:        ca.BackupPending,
+		UpdateCheckIntervalSec: s.updateCheckIntervalSec(),
 	})
+}
+
+// updateCheckIntervalSec 返回当前生效的自动更新检查间隔（秒）。
+//
+// 每次握手都读一次 settings.json，不做进程内缓存：这个值是人偶尔改一次的
+// 配置，一次文件读相对于一次 TLS 握手可以忽略；而缓存会引入"改完要重启
+// 服务才生效"这类只有部署时才会暴露的坑。
+//
+// 读取失败时返回 0，让代理用默认值：设置文件坏了不该让设备停止检查更新，
+// 那等于把一个配置问题放大成"全部设备停在旧版本"。
+func (s *Server) updateCheckIntervalSec() int {
+	settings, err := ssot.ReadSettings(s.store)
+	if err != nil {
+		return 0
+	}
+	return settings.UpdateCheckIntervalSec
 }
 
 // mSync 处理对账（需求 4.2、4.3、5.2、6.2）。

@@ -54,7 +54,7 @@ func (e Event) Tier() Tier {
 		EventOverride:
 		return TierSecurity
 	// B 类：业务事实。
-	case EventAssetWrite, EventAssetDelete, EventProject, EventBackup:
+	case EventAssetWrite, EventAssetDelete, EventProject, EventBackup, EventSettings:
 		return TierFact
 	// C 类：传输与访问。
 	case EventSync, EventDownload:

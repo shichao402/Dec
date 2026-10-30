@@ -106,6 +106,9 @@ type Updater struct {
 	// StateDir 是状态目录。
 	StateDir string
 	// Interval 是定时检查间隔，<=0 用 1 小时。
+	//
+	// 它只是起始值：服务端在握手里下发了新的间隔就调 SetInterval 覆盖它，
+	// 所以这里不需要（也不应该）由调用方去读云端配置。
 	Interval time.Duration
 	// InitialDelay 是启动后第一次检查前的等待，<0 表示不等。
 	InitialDelay time.Duration
@@ -125,10 +128,64 @@ type Updater struct {
 
 	kickOnce sync.Once
 	kick     chan struct{}
+
+	// intervalMu 保护 interval 与 intervalDirty。
+	//
+	// 间隔来自服务端握手（同步协程写）、被更新循环读，两者在不同协程里，
+	// 所以必须加锁。用原子 int64 也可以，但这里还要表达"值变过、该重算
+	// 定时器"这件事，一把小锁比两个原子变量更容易读对。
+	intervalMu sync.Mutex
+	interval   time.Duration
+	// retuned 是"间隔被改过"的信号，让 Run 从长睡眠里立刻醒来重排。
+	retuned chan struct{}
 }
 
 func (u *Updater) init() {
-	u.kickOnce.Do(func() { u.kick = make(chan struct{}, 1) })
+	u.kickOnce.Do(func() {
+		u.kick = make(chan struct{}, 1)
+		u.retuned = make(chan struct{}, 1)
+		u.interval = u.Interval
+		if u.interval <= 0 {
+			u.interval = time.Hour
+		}
+	})
+}
+
+// SetInterval 更新检查间隔，<=0 忽略。
+//
+// 由握手路径调用：服务端每次 hello 都下发当前生效的间隔，所以这里必须
+// 幂等——值没变就什么都不做，否则每一轮握手都会把定时器重置一次，
+// 间隔就变成了"上一轮握手到下一次检查"的实际节奏，永远等不满。
+//
+// 值变了就唤醒 Run 立刻重排：正在等 24 小时的循环不该因为一次配置调小
+// 而继续睡下去。已经睡下的时间不折算，直接按新间隔重新计时。
+func (u *Updater) SetInterval(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	u.init()
+	u.intervalMu.Lock()
+	changed := u.interval != d
+	u.interval = d
+	u.intervalMu.Unlock()
+	if !changed {
+		return
+	}
+	select {
+	case u.retuned <- struct{}{}:
+	default:
+	}
+}
+
+// currentInterval 返回当前生效的间隔。
+func (u *Updater) currentInterval() time.Duration {
+	u.init()
+	u.intervalMu.Lock()
+	defer u.intervalMu.Unlock()
+	if u.interval <= 0 {
+		return time.Hour
+	}
+	return u.interval
 }
 
 func (u *Updater) logf(format string, args ...any) {
@@ -157,15 +214,11 @@ func (u *Updater) Kick() {
 func (u *Updater) Run(ctx context.Context) {
 	u.init()
 	u.reportLast()
-	interval := u.Interval
-	if interval <= 0 {
-		interval = time.Hour
-	}
 	delay := u.InitialDelay
 	if delay < 0 {
 		delay = 0
 	}
-	u.logf("自动更新已启用：%s 后首次检查，之后每 %s 检查一次", delay, interval)
+	u.logf("自动更新已启用：%s 后首次检查，之后每 %s 检查一次", delay, u.currentInterval())
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	for {
@@ -174,12 +227,14 @@ func (u *Updater) Run(ctx context.Context) {
 			return
 		case <-timer.C:
 		case <-u.kick:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+			stopTimer(timer)
+		case <-u.retuned:
+			// 间隔被服务端改了：按新值从现在起重新计时。
+			// 不在这里立刻检查一次——配置下发本身不代表"该更新了"，
+			// 真要立刻查的是 Kick（版本不对齐时）。
+			stopTimer(timer)
+			timer.Reset(u.currentInterval())
+			continue
 		}
 		// 更新进程是在新代理通过健康检查之后才写结果的，新代理启动时
 		// 通常还读不到；所以每轮检查前都再看一次，首轮（1 分钟后）就能报出。
@@ -192,7 +247,18 @@ func (u *Updater) Run(ctx context.Context) {
 			// 更新进程马上会停掉本进程；在此之前不再发起第二次。
 			return
 		}
-		timer.Reset(interval)
+		// 每轮都读一次：检查可能耗时几十秒，这期间服务端可能刚把间隔改了。
+		timer.Reset(u.currentInterval())
+	}
+}
+
+// stopTimer 停止定时器并排空已触发的值，避免下一次 Reset 立刻返回旧信号。
+func stopTimer(t *time.Timer) {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
 	}
 }
 

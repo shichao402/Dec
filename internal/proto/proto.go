@@ -98,6 +98,12 @@ const (
 	MethodRotateRootKey Method = "rotate_root_key"
 	// MethodStatus 服务状态：要求版本、冷备校验时间、维护状态等。
 	MethodStatus Method = "status"
+	// MethodSettings 服务端全局设置（自动更新的检查间隔等）。
+	//
+	// 读对所有来源开放：代理每次握手都要拿到当前间隔，管理面也要显示它。
+	// 写只给管理面与 CLI —— 这个值决定"多久检查一次更新"，
+	// 让 MCP 来源能改它，等于让一次提示注入去动全部设备的更新节奏。
+	MethodSettings Method = "settings"
 )
 
 // Source 是请求来源，用于权限判定和审计（需求 13.2、已定决策 12）。
@@ -225,6 +231,14 @@ type HelloResponse struct {
 	CAState string `json:"ca_state,omitempty"`
 	// CABackupPending 表示服务端 CA 还没写进 Bitwarden。
 	CABackupPending bool `json:"ca_backup_pending,omitempty"`
+	// UpdateCheckIntervalSec 是自动更新的定时检查间隔（秒）。
+	//
+	// 挂在 hello 上而不是让代理单独去查：代理本来就在握手，多一次往返只为
+	// 一个整数不值得；而且握手是所有代理必经的路径，放在这里不存在"某种
+	// 状态下的代理拿不到间隔"这种分支。追加字段，旧代理忽略。
+	//
+	// 0 表示服务端没有给出有效值，代理按自己的默认值（1 小时）走。
+	UpdateCheckIntervalSec int `json:"update_check_interval_sec,omitempty"`
 }
 
 // Op 是下发操作的类型。代理只有这两种原语（需求 2.2）。

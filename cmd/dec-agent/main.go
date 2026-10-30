@@ -178,6 +178,7 @@ func cmdRun(args []string) error {
 	// 自动更新（ADR 0058）：只有以已注册服务身份运行的默认实例才启用。
 	var updater *agent.Updater
 	var onNotAligned func()
+	var onUpdateInterval func(int)
 	if ok, why := agent.AutoUpdateEligible(dir, Version); ok {
 		updater = &agent.Updater{
 			ServerURL:    cfg.ServerURL,
@@ -188,22 +189,29 @@ func cmdRun(args []string) error {
 			Notifier:     notifier,
 		}
 		onNotAligned = updater.Kick
+		// 检查间隔以服务端为准：握手拿到的值直接覆盖本地起始值。
+		// 本地不落盘——重启后第一轮握手就会重新拿到，中间不存在
+		// "用了旧缓存"的窗口。
+		onUpdateInterval = func(sec int) {
+			updater.SetInterval(time.Duration(sec) * time.Second)
+		}
 	} else {
 		logf("自动更新未启用：%s", why)
 	}
 
 	syncer, err := agent.NewSyncer(agent.Options{
-		ServerURL:       cfg.ServerURL,
-		Version:         Version,
-		StateDir:        dir,
-		DeviceName:      deviceName,
-		Notifier:        notifier,
-		Logf:            logf,
-		Insecure:        *insecure,
-		LongPoll:        30 * time.Second,
-		Heartbeat:       10 * time.Minute,
-		DisconnectAlert: 30 * time.Minute,
-		OnNotAligned:    onNotAligned,
+		ServerURL:        cfg.ServerURL,
+		Version:          Version,
+		StateDir:         dir,
+		DeviceName:       deviceName,
+		Notifier:         notifier,
+		Logf:             logf,
+		Insecure:         *insecure,
+		LongPoll:         30 * time.Second,
+		Heartbeat:        10 * time.Minute,
+		DisconnectAlert:  30 * time.Minute,
+		OnNotAligned:     onNotAligned,
+		OnUpdateInterval: onUpdateInterval,
 	}, store)
 	if err != nil {
 		return err

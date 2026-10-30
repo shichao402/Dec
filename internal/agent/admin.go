@@ -86,6 +86,7 @@ dialog::backdrop { background:rgba(0,0,0,.4); }
       <button data-page="history">历史</button>
       <button data-page="projects">项目</button>
       <button data-page="tools">工具</button>
+      <button data-page="settings">设置</button>
     </nav>
     <span id="conn" class="tag" title="正在读取本机状态">检查中</span>
   </div>
@@ -202,6 +203,27 @@ dialog::backdrop { background:rgba(0,0,0,.4); }
       <h3>清理归档</h3>
       <div id="legacyArchives"></div>
       <div id="legacyArchive"></div>
+    </div>
+  </section>
+
+  <section id="page-settings">
+    <h2>设置</h2>
+    <p class="sub">这里改的是云端全局设置，写入即对全部设备生效。权威值只存在云端，本机不缓存。</p>
+    <div class="card">
+      <h3>自动更新</h3>
+      <p class="sub" style="margin:0 0 12px">代理定时检查新版本、下载并静默替换。版本一旦不对齐，握手会立刻叫醒它检查一次，所以这里的间隔只是兜底节奏。</p>
+      <div id="settingsUpdate"></div>
+      <label for="updateInterval">检查间隔</label>
+      <div class="toolbar" style="margin:0">
+        <select id="updateInterval" style="flex:0 0 auto;width:auto"></select>
+        <button class="pri" onclick="saveUpdateInterval()">保存</button>
+      </div>
+      <div id="updateIntervalHint" class="sub" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <h3>本机</h3>
+      <p class="sub" style="margin:0 0 12px">这里显示本机代理最近一次握手拿到的间隔。它与上面的云端值不一致时，通常是还没走到下一轮握手。</p>
+      <div id="settingsLocal"></div>
     </div>
   </section>
 </main>

@@ -34,6 +34,12 @@ const (
 	// Bitwarden 的 _dec-cloud/server-ca/<指纹> 两处。这个文件存在的意义是
 	// 服务器重建后能回答"原来的 CA 是哪一份"，恢复时据此精确取条目并校验。
 	FileServerCA = DirConfig + "/server-ca.json"
+	// FileSettings 是服务端全局运行参数。
+	//
+	// 单独一个文件而不是塞进 devices.json：它是"所有设备共用的一份"，
+	// 与按设备登记的表不是同一类数据；分开也让它的提交历史干净，
+	// 一眼能看出"什么时候把检查间隔调成了多少"。
+	FileSettings = DirConfig + "/settings.json"
 
 	// NamespaceCloud 是 Dec Cloud 服务端自己占用的 bundle 命名空间，
 	// 用户资产不得使用，以免与冷备、审计等内置内容冲突。
@@ -264,3 +270,52 @@ type RootKeyCheck struct {
 
 // SchemaVersion 是当前配置文件的结构版本。
 const SchemaVersion = 1
+
+// 更新检查间隔的取值边界（秒）。
+//
+// 下限 15 分钟：代理的定时检查只是兜底通道，握手发现版本不对齐会立刻叫醒它
+// （OnNotAligned）。比这更密只是在重复一次签名验签与清单拉取，收益为零。
+//
+// 上限 24 小时：间隔再长，一台长期不握手（例如关机再开机）的设备可能在
+// 一整天里都停在旧版本。放宽到一天已经足够宽松，再放就没有兜底意义了。
+const (
+	MinUpdateCheckIntervalSec = 900
+	MaxUpdateCheckIntervalSec = 86400
+	// DefaultUpdateCheckIntervalSec 是一小时的默认值（ADR 0058）。
+	DefaultUpdateCheckIntervalSec = 3600
+)
+
+// Settings 是 config/settings.json 的结构：服务端全局运行参数。
+//
+// 它是"所有设备共用的一份"，权威副本只在服务端。代理每次握手读到的间隔
+// 就是这里存的值，本地不落盘、也不接受本地覆盖——这样调整一次就作用于
+// 全部设备，不需要逐台改。
+//
+// 刻意只放这一项：设置文件每加一个字段，就多一个"改完要重启服务"的坑，
+// 也多一处与 cfg（命令行/EnvironmentFile）语义重叠的地方。确实需要新增时，
+// 先确认它必须是"运行时可改"的，否则留在 cfg 里更清楚。
+type Settings struct {
+	SchemaVersion int `json:"schema_version"`
+	// UpdateCheckIntervalSec 是代理自动更新的定时检查间隔（秒）。
+	UpdateCheckIntervalSec int `json:"update_check_interval_sec"`
+	// UpdatedAt 是最后修改时间。
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// NormalizeUpdateCheckInterval 把间隔夹到合法区间，0 表示取默认值。
+//
+// 夹而不是报错：这里的目标是"服务端永远给出一个能用的值"。旧代理不认
+// 这个字段、新代理拿到手就能用，都不该因为一个越界数字而停在检查不了的
+// 状态上。真正的越界错误在写入路径（SetSettings）上报。
+func NormalizeUpdateCheckInterval(sec int) int {
+	if sec <= 0 {
+		return DefaultUpdateCheckIntervalSec
+	}
+	if sec < MinUpdateCheckIntervalSec {
+		return MinUpdateCheckIntervalSec
+	}
+	if sec > MaxUpdateCheckIntervalSec {
+		return MaxUpdateCheckIntervalSec
+	}
+	return sec
+}

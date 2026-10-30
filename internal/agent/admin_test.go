@@ -102,6 +102,7 @@ func TestAdminJSConfirmsEveryWrite(t *testing.T) {
 		"addCloudProject":     "put_project",
 		"removeCloudProject":  "delete_project",
 		"editSubscriptions":   "set_subscriptions",
+		"saveUpdateInterval":  "settings",
 		"runLegacyCleanup":    "/api/tools/legacy/execute",
 		"restoreLegacy":       "/api/tools/legacy/restore",
 		"deleteLegacyArchive": "/api/tools/legacy/delete",

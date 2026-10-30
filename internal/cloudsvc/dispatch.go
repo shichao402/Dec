@@ -230,6 +230,9 @@ func (s *Server) run(r *http.Request, req *proto.Request, payload any, dev ssot.
 
 	case proto.MethodStatus:
 		return s.mStatus(req, dev)
+
+	case proto.MethodSettings:
+		return s.mSettings(req, payload, dev)
 	}
 	return proto.Fail(id, proto.ErrInvalid, "方法未实现: "+string(req.Method))
 }

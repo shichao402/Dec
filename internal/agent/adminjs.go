@@ -129,6 +129,7 @@ function show(page) {
   if (page === 'history') loadHistory();
   if (page === 'projects') loadProjects();
   if (page === 'tools') loadTools();
+  if (page === 'settings') loadSettings();
   // 残留提示只在打开概览时扫一次，不随 10 秒轮询（legacy-cleanup 需求 3.4）。
   if (page === 'overview') loadLegacyHint();
 }
@@ -1366,6 +1367,95 @@ function deleteLegacyArchive(id) {
       $('legacyArchive').innerHTML = '';
       await loadLegacyArchives();
     }, { danger: true, okText: '删除' });
+}
+
+// ---------- 设置 ----------
+
+// 间隔的候选值。边界由服务端在响应里给出，这里只是"给人选"的预设，
+// 真正的合法区间仍以服务端返回的 min/max 为准（见 renderUpdateInterval）。
+const INTERVAL_CHOICES = [
+  [900, '每 15 分钟'],
+  [1800, '每 30 分钟'],
+  [3600, '每 1 小时'],
+  [10800, '每 3 小时'],
+  [21600, '每 6 小时'],
+  [43200, '每 12 小时'],
+  [86400, '每 24 小时']
+];
+
+// settingsCache 记住上一次读到的设置，保存时用来判断有没有真的改动。
+let settingsCache = null;
+
+async function loadSettings() {
+  try {
+    const s = await api('settings', {});
+    settingsCache = s;
+    renderUpdateInterval(s);
+  } catch (e) {
+    // 离线时也要看得懂这一页：说清谁能改、改在哪，而不是只留一个空下拉框。
+    $('settingsUpdate').innerHTML = err('读取云端设置失败：' + e.message);
+    $('updateIntervalHint').textContent = '';
+    $('updateInterval').innerHTML = '';
+  }
+  // 本机视角：代理实际拿到的间隔只能来自握手，与云端是否一致值得看一眼。
+  try {
+    const r = await fetch('/api/status', { headers: { 'Accept': 'application/json' } });
+    const st = await r.json();
+    let html = '';
+    html += row('代理版本', st.version);
+    html += row('当前间隔', st.update_interval_sec ?
+      (st.update_interval_sec + ' 秒（约 ' + Math.round(st.update_interval_sec / 60) + ' 分钟）') :
+      '尚未握手，按默认 1 小时');
+    $('settingsLocal').innerHTML = html;
+  } catch (e) {
+    $('settingsLocal').innerHTML = err('读取本机状态失败：' + e.message);
+  }
+}
+
+// renderUpdateInterval 按服务端给出的边界渲染选项。
+//
+// 不把 15 分钟到 24 小时写死在前端：边界改了以后，写死的选项会让页面
+// 提交一个服务端会拒绝的值，用户看到的是"保存失败"而不是"这项不支持"。
+function renderUpdateInterval(s) {
+  const min = s.min_update_check_interval_sec || 900;
+  const max = s.max_update_check_interval_sec || 86400;
+  const cur = s.update_check_interval_sec;
+  const sel = $('updateInterval');
+  let html = '';
+  let matched = false;
+  for (const [sec, label] of INTERVAL_CHOICES) {
+    if (sec < min || sec > max) continue;
+    if (sec === cur) matched = true;
+    html += '<option value="' + sec + '">' + esc(label) + '（' + sec + ' 秒）</option>';
+  }
+  // 云端存的是一个不在预设里的数（例如别人用 CLI 设的），也要能显示出来，
+  // 否则页面会默默跳到另一个值上，用户一保存就把它改掉了。
+  if (!matched) {
+    html = '<option value="' + cur + '">当前值：' + cur + ' 秒</option>' + html;
+  }
+  sel.innerHTML = html;
+  sel.value = String(cur);
+
+  const at = s.updated_at ? ('最后修改：' + when(s.updated_at)) : '还没改过，用的是默认值';
+  $('updateIntervalHint').textContent = at + '；允许范围 ' + min + ' 到 ' + max + ' 秒。';
+}
+
+function saveUpdateInterval() {
+  const sec = parseInt($('updateInterval').value, 10);
+  if (!sec || isNaN(sec)) return;
+  const cur = settingsCache ? settingsCache.update_check_interval_sec : null;
+  if (cur === sec) {
+    $('updateIntervalHint').textContent = '间隔没有变化。';
+    return;
+  }
+  confirmDo('修改自动更新检查间隔',
+    '改成 ' + sec + ' 秒（约 ' + Math.round(sec / 60) + ' 分钟）后，全部设备都会按新节奏检查更新。已经开始的等待不会重算，下一次检查起生效。',
+    async () => {
+      const s = await api('settings', { update_check_interval_sec: sec });
+      settingsCache = s;
+      renderUpdateInterval(s);
+      await loadSettings();
+    }, { okText: '保存' });
 }
 
 // ---------- 启动 ----------

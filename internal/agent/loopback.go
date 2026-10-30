@@ -282,6 +282,9 @@ func (l *Loopback) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"ca_state":          st.CAState,
 		"ca_backup_pending": st.CABackupPending,
 		"error_code":        st.ErrorCode,
+		// 自动更新检查间隔的权威值在云端，这里是代理最近一次握手拿到的值。
+		// 展示它是为了让人能回答"这台机器实际按什么节奏在查更新"。
+		"update_interval_sec": st.UpdateIntervalSec,
 	} {
 		out[k] = v
 	}

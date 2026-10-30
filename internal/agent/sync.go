@@ -50,6 +50,14 @@ type Options struct {
 	// 不再弹「需要更新」通知：静默更新的设备不该每 10 分钟提示用户去做
 	// 一件马上会自动完成的事。更新失败由更新流程自己通知。
 	OnNotAligned func()
+	// OnUpdateInterval 非空时，把服务端在 hello 里下发的检查间隔交给它（秒）。
+	//
+	// 检查间隔的权威值只在服务端（config/settings.json）：代理不落盘、
+	// 不接受本地覆盖，重启后第一轮握手就会重新拿到。传回调而不是直接
+	// 引用 Updater，是为了让同步器不认识更新器——两者本来是独立的循环。
+	//
+	// 服务端下发 0 表示它没有给出有效值，此时不调用本回调，代理继续用默认值。
+	OnUpdateInterval func(sec int)
 }
 
 // Notifier 是系统通知接口，便于在无桌面环境下降级为空实现。
@@ -83,6 +91,9 @@ type Syncer struct {
 	requiredVer     string
 	maintenance     bool
 	syncedRev       string
+	// updateIntervalSec 是服务端最近一次在 hello 里下发的检查间隔（秒），
+	// 只用于本机页面展示"当前生效的间隔"。0 表示还没握手成功过。
+	updateIntervalSec int
 	// lastLoggedErr 是上一次写入日志的同步失败原因，用于去重。
 	lastLoggedErr string
 }
@@ -200,6 +211,9 @@ type Status struct {
 	// CAState 与 CABackupPending 来自最近一次 hello（ADR 0052）。
 	CAState         string
 	CABackupPending bool
+	// UpdateIntervalSec 是服务端下发的自动更新检查间隔（秒）。
+	// 0 表示还没握手成功过，代理此时按默认的 1 小时走。
+	UpdateIntervalSec int
 	// ErrorCode 是最近一次错误的协议错误码，本机页面据此决定显示哪个恢复入口。
 	ErrorCode string
 }
@@ -209,17 +223,18 @@ func (s *Syncer) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := Status{
-		ServerURL:       s.client.BaseURL(),
-		Version:         s.opts.Version,
-		Aligned:         s.aligned,
-		ServerVersion:   s.serverVer,
-		RequiredVer:     s.requiredVer,
-		Maintenance:     s.maintenance,
-		LastSync:        s.lastSync,
-		Revision:        s.syncedRev,
-		DownloadURL:     s.client.DownloadURL(),
-		CAState:         s.caState,
-		CABackupPending: s.caBackupPending,
+		ServerURL:         s.client.BaseURL(),
+		Version:           s.opts.Version,
+		Aligned:           s.aligned,
+		ServerVersion:     s.serverVer,
+		RequiredVer:       s.requiredVer,
+		Maintenance:       s.maintenance,
+		LastSync:          s.lastSync,
+		Revision:          s.syncedRev,
+		DownloadURL:       s.client.DownloadURL(),
+		CAState:           s.caState,
+		CABackupPending:   s.caBackupPending,
+		UpdateIntervalSec: s.updateIntervalSec,
 	}
 	if s.lastErr != nil {
 		st.LastError = s.lastErr.Error()
@@ -342,7 +357,14 @@ func (s *Syncer) hello(ctx context.Context) (*proto.HelloResponse, error) {
 	s.caState = out.CAState
 	s.caBackupPending = out.CABackupPending
 	s.maintenance = out.Maintenance
+	s.updateIntervalSec = out.UpdateCheckIntervalSec
 	s.mu.Unlock()
+
+	// 间隔的权威值在服务端：每轮握手都同步一次，值没变时下游自己会短路，
+	// 所以这里不需要额外判断"和上次一样就跳过"。
+	if out.UpdateCheckIntervalSec > 0 && s.opts.OnUpdateInterval != nil {
+		s.opts.OnUpdateInterval(out.UpdateCheckIntervalSec)
+	}
 	return out, nil
 }
 

@@ -73,6 +73,7 @@ var methods = map[Method]func() any{
 	MethodOverrides:        func() any { return &OverridesRequest{} },
 	MethodRotateRootKey:    func() any { return &RotateRequest{} },
 	MethodStatus:           func() any { return &struct{}{} },
+	MethodSettings:         func() any { return &SettingsRequest{} },
 }
 
 // Known 报告方法是否受支持。
@@ -255,4 +256,27 @@ type RotateResponse struct {
 	NewKeyID string `json:"new_key_id"`
 	// BackupCheckedAt 是完成冷备读回校验的时间，管理面据此展示（需求 10.5）。
 	BackupCheckedAt string `json:"backup_checked_at"`
+}
+
+// SettingsRequest 读写服务端全局设置。
+//
+// 一个方法兼读写：字段都是指针，缺省即"不修改这一项"。这样加一项设置
+// 不需要再加一个协议方法，也不会出现"读到了但写不回去"的两套结构。
+type SettingsRequest struct {
+	// UpdateCheckIntervalSec 非空时表示要改自动更新的检查间隔（秒）。
+	UpdateCheckIntervalSec *int `json:"update_check_interval_sec,omitempty"`
+}
+
+// SettingsResponse 是当前生效的设置。
+//
+// 无论请求是读还是写，响应都返回写入后的完整取值，管理面据此刷新显示，
+// 不必再发一次读请求。
+type SettingsResponse struct {
+	UpdateCheckIntervalSec int `json:"update_check_interval_sec"`
+	// MinUpdateCheckIntervalSec 与 MaxUpdateCheckIntervalSec 是允许区间，
+	// 由服务端下发而不是在页面里硬编码：页面只是显示器，边界只能有一个来源。
+	MinUpdateCheckIntervalSec int `json:"min_update_check_interval_sec"`
+	MaxUpdateCheckIntervalSec int `json:"max_update_check_interval_sec"`
+	// UpdatedAt 是最后一次修改时间，零值表示从未改过（用的是默认值）。
+	UpdatedAt string `json:"updated_at,omitempty"`
 }

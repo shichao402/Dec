@@ -74,6 +74,8 @@ const (
 	EventBackup Event = "backup"
 	// EventRollback 回滚。
 	EventRollback Event = "rollback"
+	// EventSettings 全局设置变更。
+	EventSettings Event = "settings.change"
 )
 
 // Entry 是一条审计记录。
