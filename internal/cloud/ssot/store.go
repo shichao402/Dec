@@ -54,12 +54,21 @@ type UpdateFunc func(tx *Tx) (message string, err error)
 
 // Store 是云端 SSOT 仓库。
 type Store struct {
-	dir  string
-	repo *git.Repository
+	dir string
+
+	// repo 是仓库句柄。历史回收（Gc）会删旧 pack 并换句柄，所以所有经由它的
+	// 读写都要持 repoMu：读持读锁，Gc 换句柄时持写锁。不换句柄会读到已删除的
+	// pack（见审计仓库 reopenRepo 的同一个坑，ADR 0043 第六节）。
+	// 锁序：先 mu 后 repoMu。
+	repoMu sync.RWMutex
+	repo   *git.Repository
 
 	// mu 让资产写入和密钥写入串行执行（需求 7.6）。
 	// 单人使用，一把全局锁足够，而且比不变量更容易推理。
 	mu sync.Mutex
+
+	// clock 是提交时间来源，只为测试保留期回收而可替换；生产恒为 time.Now。
+	clock func() time.Time
 
 	// head 是最近一次提交的 revision，读路径用它做快速判断。
 	headMu sync.RWMutex
@@ -95,7 +104,7 @@ func Open(dir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("打开 SSOT 仓库失败: %w", err)
 	}
-	s := &Store{dir: dir, repo: repo}
+	s := &Store{dir: dir, repo: repo, clock: time.Now}
 	if err := s.ensureInitialCommit(); err != nil {
 		return nil, err
 	}
@@ -116,7 +125,9 @@ func (s *Store) Head() string {
 }
 
 func (s *Store) refreshHead() error {
+	s.repoMu.RLock()
 	ref, err := s.repo.Head()
+	s.repoMu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("读取 HEAD 失败: %w", err)
 	}
@@ -448,6 +459,8 @@ func (t *Tx) rollback() error {
 
 // commitStaged 把暂存的文件提交进仓库。
 func (s *Store) commitStaged(author Author, message string, staged map[string]bool) error {
+	s.repoMu.RLock()
+	defer s.repoMu.RUnlock()
 	wt, err := s.repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("获取工作树失败: %w", err)
@@ -472,7 +485,7 @@ func (s *Store) commitStaged(author Author, message string, staged map[string]bo
 		Author: &object.Signature{
 			Name:  author.Name,
 			Email: author.Email,
-			When:  time.Now().UTC(),
+			When:  s.clock().UTC(),
 		},
 	}); err != nil {
 		if errors.Is(err, git.ErrEmptyCommit) {
@@ -519,40 +532,51 @@ type Commit struct {
 	Author  string
 	Source  string
 	When    time.Time
+	// Baseline 表示这是本机保留历史的起点：更早的提交已回收，只在冷备里。
+	// 它的内容是保留期开始时的完整快照，仍可作为回滚目标。
+	Baseline bool
 }
 
-// History 返回仓库的提交历史，最多 limit 条（0 表示不限）。
+// History 返回仓库的提交历史，新的在前，最多 limit 条（0 表示不限）。
+//
+// 不用 repo.Log：它遇到 shallow 边界缺失的父提交会直接报 object not found。
+// SSOT 只由本进程提交、永远是线性历史，所以沿第一父提交走到边界即可。
 func (s *Store) History(ctx context.Context, limit int) ([]Commit, error) {
-	iter, err := s.repo.Log(&git.LogOptions{})
+	s.repoMu.RLock()
+	defer s.repoMu.RUnlock()
+
+	ref, err := s.repo.Head()
 	if err != nil {
 		return nil, fmt.Errorf("读取历史失败: %w", err)
 	}
-	defer iter.Close()
+	shallow := s.shallowSetLocked()
 
 	var out []Commit
-	err = iter.ForEach(func(c *object.Commit) error {
+	h := ref.Hash()
+	for {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
+		c, err := s.repo.CommitObject(h)
+		if err != nil {
+			return nil, fmt.Errorf("读取提交 %s 失败: %w", h, err)
+		}
+		boundary := shallow[h] || c.NumParents() == 0
 		out = append(out, Commit{
-			Hash:    c.Hash.String(),
-			Message: stripTrailer(c.Message),
-			Author:  c.Author.Name,
-			Source:  parseTrailer(c.Message),
-			When:    c.Author.When,
+			Hash:     c.Hash.String(),
+			Message:  stripTrailer(c.Message),
+			Author:   c.Author.Name,
+			Source:   parseTrailer(c.Message),
+			When:     c.Author.When,
+			Baseline: shallow[h],
 		})
-		if limit > 0 && len(out) >= limit {
-			return errStopIter
+		if boundary || (limit > 0 && len(out) >= limit) {
+			break
 		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, errStopIter) {
-		return nil, err
+		h = c.ParentHashes[0]
 	}
 	return out, nil
 }
-
-var errStopIter = errors.New("stop")
 
 func parseTrailer(message string) string {
 	const prefix = "Source: "
@@ -577,6 +601,8 @@ func (s *Store) FileAt(commit, rel string) ([]byte, error) {
 	if err := SafeRelPath(rel); err != nil {
 		return nil, err
 	}
+	s.repoMu.RLock()
+	defer s.repoMu.RUnlock()
 	c, err := s.repo.CommitObject(plumbing.NewHash(commit))
 	if err != nil {
 		return nil, fmt.Errorf("%w: commit %s", ErrNotFound, commit)

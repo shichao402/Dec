@@ -14,6 +14,8 @@ import (
 // 用于历史查询：一个提交算“改动过某个对象”，当且仅当它改过的路径落在该对象的路径前缀下。
 // 对根提交（没有父提交）返回整棵树的所有文件，否则返回与第一父提交的差异。
 func (s *Store) CommitPaths(commit string) ([]string, error) {
+	s.repoMu.RLock()
+	defer s.repoMu.RUnlock()
 	c, err := s.repo.CommitObject(plumbing.NewHash(commit))
 	if err != nil {
 		return nil, fmt.Errorf("%w: commit %s", ErrNotFound, commit)
@@ -25,7 +27,7 @@ func (s *Store) CommitPaths(commit string) ([]string, error) {
 
 	parent, parentErr := c.Parent(0)
 	if parentErr != nil {
-		// 根提交：整棵树新增。
+		// 根提交或保留期起点（shallow 边界，父提交已回收）：整棵树视为新增。
 		var paths []string
 		walker := object.NewTreeWalker(tree, true, nil)
 		defer walker.Close()
@@ -67,6 +69,8 @@ func (s *Store) CommitPaths(commit string) ([]string, error) {
 
 // TreeFiles 返回某个提交里的全部文件路径。
 func (s *Store) TreeFiles(commit string) ([]string, error) {
+	s.repoMu.RLock()
+	defer s.repoMu.RUnlock()
 	c, err := s.repo.CommitObject(plumbing.NewHash(commit))
 	if err != nil {
 		return nil, fmt.Errorf("%w: commit %s", ErrNotFound, commit)
@@ -96,6 +100,8 @@ func (s *Store) HasCommit(commit string) bool {
 	if len(commit) != 40 || strings.Trim(commit, "0123456789abcdef") != "" {
 		return false
 	}
+	s.repoMu.RLock()
+	defer s.repoMu.RUnlock()
 	_, err := s.repo.CommitObject(plumbing.NewHash(commit))
 	return err == nil
 }

@@ -269,6 +269,13 @@ func New(cfg Config) (*Server, error) {
 		Reporter:   s,
 		FlushAudit: al.Flush,
 		GcAudit:    al.Gc,
+		GcStore: func() error {
+			res, err := store.Gc()
+			if err == nil && res.Truncated {
+				s.logf("SSOT 历史已按 %d 天保留期回收，本机起点 %s，更早的历史在冷备", ssot.HistoryRetentionDays, res.Baseline)
+			}
+			return err
+		},
 	})
 	s.backup.Start(ctx)
 	// 部署协作文件由脚本跨进程写入，只能轮询跟进（需求 21.2、21.8）。

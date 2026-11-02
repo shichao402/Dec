@@ -71,6 +71,8 @@ type Service struct {
 	flushAudit func() error
 	// gcAudit 回收审计仓库的松散对象，见 Options.GcAudit。
 	gcAudit func() error
+	// gcStore 按保留期回收 SSOT 历史，见 Options.GcStore。
+	gcStore func() error
 
 	wake chan struct{}
 	done chan struct{}
@@ -104,6 +106,11 @@ type Options struct {
 	// 5.7G .git 就是这么来的）。改成我们按天主动做一次，代价可预期。
 	// 同样是回调，理由同 FlushAudit：不让 backup 反向依赖 audit。
 	GcAudit func() error
+	// GcStore 在每日兜底周期里、冷备推送之后调用，按保留期回收 SSOT 本机历史（ADR 0061）。
+	//
+	// 必须排在推送之后：回收只截掉冷备里确定已有的提交，先推再收，
+	// 当天的推送才能让边界前移；顺序反了只会白跑一次。
+	GcStore func() error
 }
 
 // NewService 构造冷备服务。
@@ -127,6 +134,7 @@ func NewService(opts Options) *Service {
 		debounce:   opts.Debounce,
 		flushAudit: opts.FlushAudit,
 		gcAudit:    opts.GcAudit,
+		gcStore:    opts.GcStore,
 		wake:       make(chan struct{}, 1),
 		done:       make(chan struct{}),
 	}
@@ -270,36 +278,44 @@ func (s *Service) loop(ctx context.Context) {
 				// 单独一个分支而不是塞进 flushBoth：冷备与审计推一次就跑、
 				// 回收要重打包整个对象库，混在一起会让"推送失败"和
 				// "回收失败"在错误信息上纠缠不清。
-				s.runGcAudit()
+				s.runGc()
 			}
 		}
 	}
 }
 
-// runGcAudit 在后台回收审计仓库的松散对象。
+// runGc 在后台依次回收 SSOT 历史与审计仓库的松散对象。
 //
 // 用 goroutine 而不是同步跑：git gc 的耗时随仓库大小增长，同步跑会让整个
 // 推送循环在这段时间里停下来（连冷备的兜底推送也一起拖住）。回收是维护动作，
 // 晚几分钟完成没有影响，但让它卡住别人的推送有影响。
 //
-// 失败只上报、不影响后续周期：这次没收成，明天还会再试。
-func (s *Service) runGcAudit() {
-	if s.gcAudit == nil {
+// 两个仓库独立失败、各自上报；失败不影响后续周期：这次没收成，明天还会再试。
+func (s *Service) runGc() {
+	if s.gcAudit == nil && s.gcStore == nil {
 		return
 	}
 	go func() {
-		err := s.gcAudit()
-		if err == nil {
-			return
-		}
-		err = fmt.Errorf("审计仓库回收失败: %w", err)
-		if s.report != nil {
-			s.report.BackupFailed("audit", err)
-		}
-		s.mu.Lock()
-		s.lastErr = err
-		s.mu.Unlock()
+		s.runOneGc("backup", "SSOT 历史回收失败", s.gcStore)
+		s.runOneGc("audit", "审计仓库回收失败", s.gcAudit)
 	}()
+}
+
+func (s *Service) runOneGc(kind, label string, fn func() error) {
+	if fn == nil {
+		return
+	}
+	err := fn()
+	if err == nil {
+		return
+	}
+	err = fmt.Errorf("%s: %w", label, err)
+	if s.report != nil {
+		s.report.BackupFailed(kind, err)
+	}
+	s.mu.Lock()
+	s.lastErr = err
+	s.mu.Unlock()
 }
 
 // flush 依次推送冷备与审计。

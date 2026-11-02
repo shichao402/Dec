@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/shichao402/Dec/internal/cloud/assets"
 	"github.com/shichao402/Dec/internal/cloud/audit"
@@ -409,7 +410,12 @@ func (s *Server) mHistory(req *proto.Request, payload any, dev ssot.Device) *pro
 	if err != nil {
 		return failFromError(req.ID, err)
 	}
-	return okPayload(req.ID, &proto.HistoryResponse{Entries: entries})
+	resp := &proto.HistoryResponse{Entries: entries, RetentionDays: ssot.HistoryRetentionDays}
+	if since, truncated, err := s.assets.RetainedSince(); err == nil {
+		resp.RetainedSince = since.UTC().Format(time.RFC3339)
+		resp.Truncated = truncated
+	}
+	return okPayload(req.ID, resp)
 }
 
 // mRollback 回滚到某个历史 revision。

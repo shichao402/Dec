@@ -79,6 +79,7 @@ func (w *Writer) History(ctx context.Context, kind HistoryKind, id string, limit
 			Author:    c.Author,
 			Source:    proto.Source(c.Source),
 			CreatedAt: c.When.UTC().Format(time.RFC3339),
+			Baseline:  c.Baseline,
 		})
 		if len(out) >= limit {
 			break
@@ -108,11 +109,29 @@ func (w *Writer) commitTouched(commit, prefix string) (bool, error) {
 	return false, nil
 }
 
+// RetainedSince 返回本机保留历史的起点，以及更早的历史是否已回收。
+func (w *Writer) RetainedSince() (time.Time, bool, error) { return w.store.RetainedSince() }
+
+// ensureRetained 在回滚前确认目标提交仍在本机保留的历史里。
+//
+// 保留期之前的提交已回收（ADR 0061），直接报 not found 会让人以为数据丢了，
+// 所以这里说清楚它在哪：冷备仓库里有完整历史。
+func (w *Writer) ensureRetained(commit string) error {
+	if w.store.HasCommit(commit) {
+		return nil
+	}
+	return fmt.Errorf("%w: 提交 %s 不在本机保留的历史里（保留 %d 天）；更早的版本在冷备仓库 dec-cloud-backup 中完整保存",
+		ssot.ErrNotFound, shortHash(commit), ssot.HistoryRetentionDays)
+}
+
 // RollbackAsset 把某个 bundle 回滚到历史 revision。
 //
 // 回滚后该 bundle 的内容与目标提交时完全一致，包括 manifest。
 func (w *Writer) RollbackAsset(in RollbackInput) (*WriteAssetOutput, error) {
 	if err := ssot.ValidateBundle(in.ID); err != nil {
+		return nil, err
+	}
+	if err := w.ensureRetained(in.Commit); err != nil {
 		return nil, err
 	}
 	target, err := w.loadBundleAt(in.ID, in.Commit)
@@ -149,6 +168,9 @@ func (w *Writer) RollbackAsset(in RollbackInput) (*WriteAssetOutput, error) {
 // 前提是旧根密钥还在冷备里（需求 9.3）。
 func (w *Writer) RollbackSecret(in RollbackInput) (string, error) {
 	if err := ssot.ValidateItemName(in.ID); err != nil {
+		return "", err
+	}
+	if err := w.ensureRetained(in.Commit); err != nil {
 		return "", err
 	}
 	rel := ssot.SecretFile(in.ID)

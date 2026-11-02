@@ -150,11 +150,20 @@ type Revision struct {
 	Author    string `json:"author"`
 	Source    Source `json:"source"`
 	CreatedAt string `json:"created_at"`
+	// Baseline 表示这是本机保留历史的起点：内容是保留期开始时的完整快照，
+	// 可以回滚到它；更早的历史已回收，只在冷备仓库里（ADR 0061）。
+	Baseline bool `json:"baseline,omitempty"`
 }
 
 // HistoryResponse 是历史列表。
 type HistoryResponse struct {
 	Entries []Revision `json:"entries"`
+	// RetentionDays 是本机保留历史的天数。
+	RetentionDays int `json:"retention_days"`
+	// RetainedSince 是本机保留历史的起点时间（RFC3339）。
+	RetainedSince string `json:"retained_since,omitempty"`
+	// Truncated 表示更早的历史已回收，只能从冷备仓库取。
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // RollbackRequest 回滚到某个历史 revision。

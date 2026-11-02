@@ -774,14 +774,21 @@ async function loadHistory() {
   try {
     const d = await api('history', { kind: kind, id: id, limit: 50 });
     const list = d.entries || [];
+    // 本机只保留一段历史（ADR 0061），说清楚更早的在哪，免得以为数据丢了。
+    let note = '';
+    if (d.retention_days) {
+      note = '<p class="sub">本机保留最近 ' + d.retention_days + ' 天的历史' +
+        (d.truncated ? '（起点 ' + esc(when(d.retained_since)) + '）；更早的版本在冷备仓库 dec-cloud-backup 中完整保存。' : '。') + '</p>';
+    }
     if (!list.length) {
-      $('history').innerHTML = empty('没有历史记录。');
+      $('history').innerHTML = note + empty('没有历史记录。');
       return;
     }
-    let html = '<table><thead><tr><th>时间</th><th>提交</th><th>说明</th><th>来源</th><th></th></tr></thead><tbody>';
+    let html = note + '<table><thead><tr><th>时间</th><th>提交</th><th>说明</th><th>来源</th><th></th></tr></thead><tbody>';
     for (const e of list) {
       html += '<tr><td>' + esc(when(e.created_at)) + '</td><td class="mono">' +
-        esc((e.commit || '').slice(0, 8)) + '</td><td>' + esc(e.message) + '</td><td>' +
+        esc((e.commit || '').slice(0, 8)) + '</td><td>' + esc(e.message) +
+        (e.baseline ? ' <span class="sub">（保留期起点快照）</span>' : '') + '</td><td>' +
         esc(e.source || e.author) + '</td><td><button class="act" onclick="rollback(&quot;' +
         esc(e.commit) + '&quot;,&quot;' + esc(e.message || '') + '&quot;)">回滚到此</button>' +
         '</td></tr>';

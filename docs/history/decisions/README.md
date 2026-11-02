@@ -80,3 +80,4 @@
 | [0058](0058-agent-auto-update.md) | 代理静默自动更新：ed25519 签名清单、防降级、两段式替换（推翻需求 19.3） | 已接受（待发版） |
 | [0059](0059-update-interval-from-server.md) | 自动更新检查间隔由服务端 SSOT 决定，代理不落盘 | 已接受（待发版） |
 | [0060](0060-windows-admin-window-off-taskbar.md) | Windows 管理面窗口不占任务栏位置，仍留在 Alt+Tab | 已接受（待发版） |
+| [0061](0061-ssot-history-retention.md) | SSOT 本机历史保留 180 天（shallow 回收，不改写提交），更早的由冷备存档 | 已接受（待发版） |

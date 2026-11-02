@@ -532,7 +532,9 @@ func toolHistory() toolSpec {
 		tool: &mcp.Tool{
 			Name: "dec_history",
 			Description: "查询资产或密钥的改动历史：commit、说明、作者、来源与时间。" +
-				"只读，无副作用。注意这里只读历史，回滚对 MCP 来源是被禁止的操作。",
+				"只读，无副作用。注意这里只读历史，回滚对 MCP 来源是被禁止的操作，需由用户在管理面「历史」页执行。" +
+				"本机只保留最近 180 天（retention_days）；baseline=true 的条目是保留期起点快照，" +
+				"truncated=true 表示更早的版本只在冷备仓库里。",
 			InputSchema: objectSchema(map[string]any{
 				"kind":  strProp("查询对象类型：asset 或 secret"),
 				"id":    strProp("对象标识：kind=asset 时是 bundle 名称，kind=secret 时是密钥名称"),
