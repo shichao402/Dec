@@ -177,6 +177,54 @@ func TestReadAssetRevisionWorksAsBase(t *testing.T) {
 	}
 }
 
+// TestReadAssetReturnsDescription 验证条目带出正文元数据块里的 description。
+//
+// 描述只存在 SKILL.md / .mdc 的元数据块里（Agent Skills 规范的必填字段），
+// 管理面靠这里显示「这个 skill 是做什么的」。
+func TestReadAssetReturnsDescription(t *testing.T) {
+	h := newHarness(t, "1.0.0")
+	cert := h.registerDevice("dev-a", "MacBook")
+
+	write := &proto.Request{ID: "w1", Protocol: proto.Version, Method: proto.MethodWriteAsset, Source: proto.SourceAdmin}
+	if err := write.EncodePayload(&proto.AssetPayload{
+		Bundle: "woa",
+		Items: []proto.AssetItem{
+			{Path: "demo/SKILL.md", Content: []byte("---\nname: demo\ndescription: >\n  演示 skill。\n  用于测试。\n---\n# demo\n")},
+			{Path: "style.mdc", Content: []byte("---\ndescription: 风格规则\nglobs: ['*']\n---\nbody\n")},
+			{Path: "plain.md", Content: []byte("# 没有元数据块\n")},
+		},
+		Message: "带描述",
+	}); err != nil {
+		t.Fatalf("构造载荷失败: %v", err)
+	}
+	if resp := h.postTLS(write, cert); !resp.OK {
+		t.Fatalf("写入失败: %s", resp.Error)
+	}
+
+	read := &proto.Request{ID: "r1", Protocol: proto.Version, Method: proto.MethodReadAsset, Source: proto.SourceAdmin}
+	if err := read.EncodePayload(&proto.ReadAssetRequest{Bundle: "woa"}); err != nil {
+		t.Fatalf("构造载荷失败: %v", err)
+	}
+	resp := h.postTLS(read, cert)
+	if !resp.OK {
+		t.Fatalf("读取失败: %s", resp.Error)
+	}
+	var out proto.ReadAssetResponse
+	if err := json.Unmarshal(resp.Payload, &out); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	got := map[string]string{}
+	for _, it := range out.Items {
+		got[it.Path] = it.Description
+	}
+	want := map[string]string{"demo": "演示 skill。 用于测试。", "style.mdc": "风格规则", "plain.md": ""}
+	for p, w := range want {
+		if got[p] != w {
+			t.Errorf("%s 的描述为 %q，期望 %q", p, got[p], w)
+		}
+	}
+}
+
 // TestReadAssetRejectsEmptyBundle 验证空 bundle 名被拒绝。
 func TestReadAssetRejectsEmptyBundle(t *testing.T) {
 	h := newHarness(t, "1.0.0")

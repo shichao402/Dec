@@ -588,6 +588,9 @@ type AssetEntry struct {
 	Name   string   `json:"name"`
 	Planes []string `json:"planes,omitempty"`
 	Host   []string `json:"host,omitempty"`
+	// Description 取自正文元数据块的 description（skill 读 SKILL.md，
+	// .md/.mdc 规则读自身），不在 manifest 里另存。没有时为空。
+	Description string `json:"description,omitempty"`
 }
 
 // ReadAssetResponse 是一个 bundle 的完整内容与声明。//

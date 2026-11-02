@@ -311,6 +311,7 @@ func toolReadAsset() toolSpec {
 		tool: &mcp.Tool{
 			Name: "dec_read_asset",
 			Description: "读取一个资产 bundle 的完整内容：manifest 原文、条目声明与全部文件正文。" +
+				"条目里的 description 取自 SKILL.md 或 .md/.mdc 规则开头元数据块的 description，没有则省略。" +
 				"返回的正文里密钥仍然是 {{secret:...}} 占位符，不会出现明文。" +
 				"manifest 与文本文件直接返回原文；二进制文件的 content 是 base64，并带 base64=true，" +
 				"与 dec_write_asset 的入参格式一致，可以原样回传。只读，无副作用。",

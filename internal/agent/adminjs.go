@@ -448,9 +448,10 @@ async function openBundle(name) {
 
     let html = '';
     if ((a.items || []).length) {
-      html += '<table><thead><tr><th>条目</th><th>类型</th><th>路径</th><th>平面</th><th>落点</th></tr></thead><tbody>';
+      html += '<table><thead><tr><th>条目</th><th>类型</th><th>说明</th><th>路径</th><th>平面</th><th>落点</th></tr></thead><tbody>';
       for (const it of a.items) {
         html += '<tr><td class="mono">' + esc(it.name) + '</td><td>' + esc(it.kind) +
+          '</td><td>' + esc(it.description || '—') +
           '</td><td class="mono">' + esc(it.path) + '</td><td>' +
           esc((it.planes || []).join('、')) + '</td><td>' + fileSlotCell(it, a.files || []) + '</td></tr>';
       }

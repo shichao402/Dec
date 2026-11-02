@@ -2,6 +2,7 @@ package cloudsvc
 
 import (
 	"context"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/shichao402/Dec/internal/cloud/audit"
 	"github.com/shichao402/Dec/internal/cloud/identity"
 	"github.com/shichao402/Dec/internal/cloud/ssot"
+	"github.com/shichao402/Dec/internal/frontmatter"
 	"github.com/shichao402/Dec/internal/proto"
 )
 
@@ -218,6 +220,28 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
+// itemDescription 从条目正文的元数据块读出 description。
+//
+// skill 按 Agent Skills 规范读目录下的 SKILL.md；rule 只认 .md/.mdc，
+// 其余类型（mcp、env、file）没有这种约定，返回空。
+func itemDescription(item ssot.ManifestItem, contents map[string][]byte) string {
+	switch item.Kind {
+	case ssot.KindSkill:
+		dir := strings.TrimSuffix(item.Path, "/")
+		for _, name := range []string{"SKILL.md", "skill.md"} {
+			if c, ok := contents[dir+"/"+name]; ok {
+				return frontmatter.Description(c)
+			}
+		}
+	case ssot.KindRule:
+		switch strings.ToLower(path.Ext(item.Path)) {
+		case ".md", ".mdc":
+			return frontmatter.Description(contents[item.Path])
+		}
+	}
+	return ""
+}
+
 // mReadAsset 返回一个 bundle 的完整内容（需求 14.1 的“资产浏览”）。
 //
 // 内容原样返回，`{{secret:...}}` 保持占位符：浏览资产不该把密钥明文
@@ -250,12 +274,17 @@ func (s *Server) mReadAsset(req *proto.Request, payload any, dev ssot.Device) *p
 		Items:    make([]proto.AssetEntry, 0, len(manifest.Items)),
 		Files:    make([]proto.AssetItem, 0, len(files)),
 	}
+	contents := make(map[string][]byte, len(files))
+	for _, f := range files {
+		contents[f.Path] = f.Content
+	}
 	for _, item := range manifest.Items {
 		entry := proto.AssetEntry{
-			Kind: string(item.Kind),
-			Path: item.Path,
-			Name: item.Name,
-			Host: item.Host,
+			Kind:        string(item.Kind),
+			Path:        item.Path,
+			Name:        item.Name,
+			Host:        item.Host,
+			Description: itemDescription(item, contents),
 		}
 		for _, p := range item.Planes {
 			entry.Planes = append(entry.Planes, string(p))
