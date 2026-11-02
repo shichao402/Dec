@@ -532,6 +532,8 @@ mod app {
             match event {
                 // macOS 要求托盘在事件循环启动后再创建。
                 Event::NewEvents(StartCause::Init) => {
+                    // 窗口图标的像素在后台算好，别等双击托盘时才现算（要几百毫秒）。
+                    window::warm_up();
                     let first = app.tracker.last();
                     let menu = app.menu.take().expect("菜单只创建一次");
                     app.tray = TrayIconBuilder::new()
