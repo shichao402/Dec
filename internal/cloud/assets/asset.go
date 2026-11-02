@@ -23,6 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/shichao402/Dec/internal/cloud/ssot"
+	"github.com/shichao402/Dec/internal/frontmatter"
 )
 
 var (
@@ -115,6 +116,9 @@ func (w *Writer) WriteAsset(in WriteAssetInput) (*WriteAssetOutput, error) {
 		return nil, err
 	}
 	if err := scanForPlaintextSecrets(files); err != nil {
+		return nil, err
+	}
+	if err := checkDescriptions(files); err != nil {
 		return nil, err
 	}
 
@@ -341,6 +345,9 @@ func (w *Writer) EditFile(in EditFileInput) (*EditFileOutput, error) {
 		// 与 WriteAsset 相同的内容校验：不允许写进明文密钥，引用的密钥必须存在。
 		files := []AssetFile{{Path: rel, Content: updated}}
 		if err := scanForPlaintextSecrets(files); err != nil {
+			return "", err
+		}
+		if err := checkDescriptions(files); err != nil {
 			return "", err
 		}
 		live, err := secretNamesTx(tx)
@@ -772,6 +779,26 @@ func notASecretValue(v string) bool {
 		return false
 	}
 	return true
+}
+
+// checkDescriptions 要求 .md / .mdc 元数据块里的 description 写在同一行。
+//
+// 只拦新写入：回滚不过这一道，历史快照是用户显式要恢复的内容，
+// 不能因为后来收紧了规则就再也回不去。
+func checkDescriptions(files []AssetFile) error {
+	for _, f := range files {
+		switch strings.ToLower(path.Ext(f.Path)) {
+		case ".md", ".mdc":
+		default:
+			continue
+		}
+		if err := frontmatter.CheckDescription(f.Content); err != nil {
+			return fmt.Errorf("%w: %s 的 description 必须写在 \"description:\" 同一行，"+
+				"不能用 \">\"、\"|\" 块写法或跨行续写（部分宿主读不出多行描述）；"+
+				"太长或含特殊字符时用双引号包起来写成一行", ErrSchema, f.Path)
+		}
+	}
+	return nil
 }
 
 // scanForPlaintextSecrets 扫描资产内容里的疑似明文密钥（需求 7.3）。

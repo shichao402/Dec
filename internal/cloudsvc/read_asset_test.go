@@ -189,7 +189,7 @@ func TestReadAssetReturnsDescription(t *testing.T) {
 	if err := write.EncodePayload(&proto.AssetPayload{
 		Bundle: "woa",
 		Items: []proto.AssetItem{
-			{Path: "demo/SKILL.md", Content: []byte("---\nname: demo\ndescription: >\n  演示 skill。\n  用于测试。\n---\n# demo\n")},
+			{Path: "demo/SKILL.md", Content: []byte("---\nname: demo\ndescription: 演示 skill。 用于测试。\n---\n# demo\n")},
 			{Path: "style.mdc", Content: []byte("---\ndescription: 风格规则\nglobs: ['*']\n---\nbody\n")},
 			{Path: "plain.md", Content: []byte("# 没有元数据块\n")},
 		},

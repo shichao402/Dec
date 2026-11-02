@@ -8,6 +8,7 @@ package frontmatter
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -36,6 +37,54 @@ func Description(content []byte) string {
 		return ""
 	}
 	return strings.Join(strings.Fields(s), " ")
+}
+
+// ErrMultilineDescription 表示 description 没有写在 "description:" 同一行。
+var ErrMultilineDescription = errors.New("description 必须写在同一行")
+
+// CheckDescription 要求 description 写在 "description:" 同一行。
+//
+// YAML 的 ">"、"|" 块写法和跨行续写都是合法 YAML，Agent Skills 规范也允许，
+// 但有宿主（With）只认单行写法，遇到块写法就读不出描述，skill 列表里显示
+// 为空。Dec 的资产要下发给所有宿主，所以写入时统一收紧到单行。
+// 太长或含 ": " 等特殊字符时用双引号包起来，仍写在一行。
+//
+// 没有元数据块、没有 description 或 YAML 本身写坏时不在这里报错：
+// 前两种不是格式问题，最后一种交给读取方按“没有描述”处理。
+func CheckDescription(content []byte) error {
+	block, ok := extract(content)
+	if !ok {
+		return nil
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(block, &doc); err != nil {
+		return nil
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil
+	}
+	m := doc.Content[0]
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		key, val := m.Content[i], m.Content[i+1]
+		if key.Value != "description" {
+			continue
+		}
+		if val.Kind != yaml.ScalarNode {
+			return nil
+		}
+		if val.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 || val.Line != key.Line {
+			return ErrMultilineDescription
+		}
+		// 普通或带引号的标量也能跨行续写：下一行缩进即属于这个值。
+		lines := strings.Split(strings.ReplaceAll(string(block), "\r\n", "\n"), "\n")
+		if next := key.Line; next < len(lines) {
+			if l := lines[next]; strings.TrimSpace(l) != "" && (l[0] == ' ' || l[0] == '\t') {
+				return ErrMultilineDescription
+			}
+		}
+		return nil
+	}
+	return nil
 }
 
 // extract 取出文件开头 "---" 行与下一处 "---" 或 "..." 行之间的内容。
