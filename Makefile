@@ -12,7 +12,7 @@ VERSION=$(shell cat version.json 2>/dev/null | grep -o '"version"[[:space:]]*:[[
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
-.PHONY: all build test vet clean fmt lint install help
+.PHONY: all build test vet clean fmt lint help
 
 all: build
 
@@ -31,12 +31,6 @@ test:
 vet:
 	@echo "🔍 代码检查..."
 	$(GOENV) go vet ./...
-
-install: build
-	@echo "📦 安装 dec-agent..."
-	@install -d "$$HOME/.local/bin"
-	@install -m 0755 $(DIST_DIR)/dec-agent "$$HOME/.local/bin/dec-agent"
-	@echo "✅ 已安装到 ~/.local/bin/dec-agent"
 
 clean:
 	@echo "🧹 清理构建产物..."
@@ -57,8 +51,9 @@ help:
 	@echo "Dec Makefile"
 	@echo ""
 	@echo "构建目标："
-	@echo "  make build           - 构建当前平台的 dec-cloud 与 dec-agent"
-	@echo "  make install         - 构建并安装 dec-agent 到 ~/.local/bin"
+	@echo "  make build           - 构建当前平台的 dec-cloud 与 dec-agent（只用于编译检查）"
+	@echo ""
+	@echo "没有本机安装目标：本机代理只通过发版（打 tag 走 CI）加自动更新换版本。"
 	@echo ""
 	@echo "测试目标："
 	@echo "  make test            - 运行 Go 单元测试"

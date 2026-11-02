@@ -570,6 +570,34 @@ func TestLegacyFinalTagExists(t *testing.T) {
 	t.Fatalf("缺少 legacy-final 标签，旧代码没有存档点；应执行 git tag legacy-final <断代前提交>")
 }
 
+// TestNoLocalInstallEntry 守住「没有本机部署」这件事。
+//
+// 改成远端 SSOT 之后，本机代理只通过发版（打 tag 走 CI）加自动更新换版本，
+// 开发期验证靠测试。断代前留下的 scripts/build.sh、release-yolo.sh、
+// `make install` 和对应规则都已删除：它们构建的是不存在的旧入口，跑完
+// 显示成功却什么都没产出，留着只会把人引到一条走不通的路上。
+func TestNoLocalInstallEntry(t *testing.T) {
+	root := repoRoot(t)
+	for _, rel := range []string{
+		"scripts/build.sh",
+		"scripts/release-yolo.sh",
+		"scripts/install-dev.sh",
+		"scripts/redeploy.ps1",
+		".cursor/rules/local-redeploy.mdc",
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+			t.Errorf("%s 又出现了；本机不做部署，代理只通过发版加自动更新换版本", rel)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("读 Makefile 失败: %v", err)
+	}
+	if regexp.MustCompile(`(?m)^install\s*:`).Match(data) {
+		t.Error("Makefile 不应再有 install 目标；本机代理只通过发版加自动更新换版本")
+	}
+}
+
 // TestMakefileOnlyBuildsNewGeneration 守住 Makefile 只面向新一代二进制（需求 3.4）。
 //
 // 断代后 Makefile 里如果还留着 `go build ./cmd/dec-server`，`make build`
