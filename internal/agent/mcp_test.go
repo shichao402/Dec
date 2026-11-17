@@ -353,7 +353,7 @@ func TestMCPBannedToolNotCallable(t *testing.T) {
 	session := newTestSession(t, MCPServer{Call: cloud.call})
 
 	_, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "dec_read_secret", Arguments: map[string]any{"name": "my-skills/github-token"},
+		Name: "dec_read_secret", Arguments: map[string]any{"name": "github-token"},
 	})
 	if err == nil {
 		t.Fatal("调用被禁的工具应当失败")

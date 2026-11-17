@@ -493,7 +493,7 @@ func toolPutSecret() toolSpec {
 				"并进入审计与历史；随后推送给所有在线设备。写入后无法读回明文，只能覆盖。" +
 				"如果只是改说明而不改值，请改用其它方式，不要用占位值覆盖真实密钥。",
 			InputSchema: objectSchema(map[string]any{
-				"name":  strProp("密钥名称，例如 my-skills/github-token"),
+				"name":  strProp("密钥名称，小写字母、数字和 . _ -，最长 64 字符，例如 github-token、tencent-cloud-secret-id"),
 				"value": strProp("明文值。写入后不可读回"),
 				"notes": strProp("给人看的说明，不要包含明文"),
 				"refs": objProp("这条密钥被哪些 bundle 条目引用，用于下发时替换 {{secret:...}} 占位符。留空表示暂不被引用。",
