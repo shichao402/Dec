@@ -132,6 +132,24 @@ func TestInferManifestAlwaysValid(t *testing.T) {
 	}
 }
 
+func TestInferManifestRejectsNonRuleFiles(t *testing.T) {
+	w, _ := newTestWriter(t)
+	// 曾经的行为：env 文件被推断成 rule，内联后的密钥铺进每个 IDE 的 rules 目录，且不报错。
+	for _, p := range []string{"env/codebuddy.env", "mcp/server.json", "id_ed25519"} {
+		_, err := w.WriteAsset(WriteAssetInput{
+			Bundle: "novoard",
+			Files:  []AssetFile{{Path: p, Content: []byte("X=1\n")}},
+			Author: author(),
+		})
+		if !errors.Is(err, ErrSchema) {
+			t.Fatalf("%s: 未给 manifest 时应拒绝推断，实际 err=%v", p, err)
+		}
+		if !strings.Contains(err.Error(), "kind: env") {
+			t.Fatalf("%s: 报错应附带 manifest 写法，实际 %q", p, err.Error())
+		}
+	}
+}
+
 func TestWriteAssetReplacesWholeBundle(t *testing.T) {
 	w, _ := newTestWriter(t)
 	if _, err := w.WriteAsset(WriteAssetInput{Bundle: "woa", Files: skillFiles(), Author: author()}); err != nil {

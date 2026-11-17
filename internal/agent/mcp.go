@@ -417,7 +417,8 @@ func toolWriteAsset() toolSpec {
 						"executable": boolProp("是否保留可执行位，默认 false"),
 						"base64":     boolProp("content 是否为 base64 编码，默认 false"),
 					}, "path", "content"),
-				"manifest": strProp("manifest.yaml 原文。留空时服务端按 items 推断，会丢掉原有的 plane/host 声明"),
+				"manifest": strProp("manifest.yaml 原文。留空时服务端按 items 推断，会丢掉原有的 plane/host 声明；" +
+					"推断只识别带 SKILL.md 的目录和 .md/.mdc 规则，env、mcp、file 条目必须显式给出"),
 				"base_revision": strProp("期望的当前 revision，用于乐观并发控制：与服务端不一致时写入被拒绝并返回最新 revision。" +
 					"留空表示允许覆盖，可能覆盖别人刚做的改动"),
 				"message": strProp("提交说明，写进 git commit，例如「补充 my-skills 的 release 流程」"),

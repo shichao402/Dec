@@ -532,17 +532,42 @@ func parseManifest(bundle string, raw []byte, files []AssetFile) (ssot.BundleMan
 			m.Name = bundle
 		}
 	} else {
-		m = inferManifest(bundle, files)
+		var err error
+		if m, err = inferManifest(bundle, files); err != nil {
+			return m, err
+		}
 	}
 	return m, nil
 }
 
+// inferManifestExample 是推断失败时附在报错里的最小 manifest 写法。
+// 调用方（多半是 AI）只在出错时看到它，平时不占工具描述的篇幅。
+const inferManifestExample = "例如 env 条目：\n" +
+	"items:\n" +
+	"  - kind: env\n" +
+	"    path: env/codebuddy.env\n" +
+	"    name: novoard-agent.codebuddy.env   # 落地文件名，全局唯一，只能用 [a-z0-9._-]\n" +
+	"    planes: [user]"
+
+// inferredRuleExt 报告文件能否被推断成 rule。
+//
+// 只认 IDE 规则目录真正识别的扩展名。其余文件（.env、.json、私钥等）若被当成 rule，
+// 会连同内联后的密钥一起铺到每个 IDE 的 rules 目录，消费方拿不到，系统也不报错。
+func inferredRuleExt(p string) bool {
+	switch strings.ToLower(path.Ext(p)) {
+	case ".md", ".mdc":
+		return true
+	}
+	return false
+}
+
 // inferManifest 在调用方没给 manifest 时，按文件树推断条目。
 //
-// 约定：带 SKILL.md 的一级目录是一个 skill 条目；其余文件各自成为一条 rule，
+// 约定：带 SKILL.md 的一级目录是一个 skill 条目；.md / .mdc 文件各自成为一条 rule，
 // 名称取文件名主干。刻意不把“无 SKILL.md 的目录”当成一条 rule：
 // rule 是单文件资产，那样推断出来的路径找不到对应文件，只会给出难懂的报错。
-func inferManifest(bundle string, files []AssetFile) ssot.BundleManifest {
+// 其余文件无法可靠判断类型（env、mcp、file），直接拒绝，要求显式给出 manifest。
+func inferManifest(bundle string, files []AssetFile) (ssot.BundleManifest, error) {
 	m := ssot.BundleManifest{Name: bundle}
 	seen := map[string]bool{}
 	for _, f := range files {
@@ -566,6 +591,10 @@ func inferManifest(bundle string, files []AssetFile) ssot.BundleManifest {
 		if seen[f.Path] {
 			continue
 		}
+		if !inferredRuleExt(f.Path) {
+			return m, fmt.Errorf("%w: 未提供 manifest，无法推断 %q 的条目类型（推断只识别带 SKILL.md 的目录和 .md/.mdc 规则）；"+
+				"env、mcp、file 条目请显式给出 manifest。%s", ErrSchema, f.Path, inferManifestExample)
+		}
 		seen[f.Path] = true
 		m.Items = append(m.Items, ssot.ManifestItem{
 			Kind:   ssot.KindRule,
@@ -575,7 +604,7 @@ func inferManifest(bundle string, files []AssetFile) ssot.BundleManifest {
 		})
 	}
 	sort.Slice(m.Items, func(i, j int) bool { return m.Items[i].Path < m.Items[j].Path })
-	return m
+	return m, nil
 }
 
 func hasSkillManifest(files []AssetFile, dir string) bool {

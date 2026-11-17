@@ -135,7 +135,8 @@ func TestReadAssetKeepsExecutable(t *testing.T) {
 	if err := write.EncodePayload(&proto.AssetPayload{
 		Bundle: "woa",
 		Items: []proto.AssetItem{
-			{Path: "run.sh", Content: []byte("#!/bin/sh\n"), Executable: true},
+			{Path: "demo/SKILL.md", Content: []byte("# demo")},
+			{Path: "demo/run.sh", Content: []byte("#!/bin/sh\n"), Executable: true},
 			{Path: "a.md", Content: []byte("x")},
 		},
 		Message: "带一个脚本",
@@ -162,8 +163,8 @@ func TestReadAssetKeepsExecutable(t *testing.T) {
 	for _, f := range out.Files {
 		got[f.Path] = f.Executable
 	}
-	if !got["run.sh"] {
-		t.Fatal("run.sh 的可执行位丢失")
+	if !got["demo/run.sh"] {
+		t.Fatal("demo/run.sh 的可执行位丢失")
 	}
 	if got["a.md"] {
 		t.Fatal("a.md 不该是可执行")
